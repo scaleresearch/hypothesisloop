@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"context"
 	"fmt"
 	"time"
 )
@@ -18,6 +19,16 @@ type Change struct {
 	Detail               string
 	PlatformExperimentID string
 	AgentID              string
+}
+
+// Announcer is the write a change is announced in: the change commits with the write or not at
+// all.
+type Announcer interface {
+	Change(c Change)
+	// ChangeUnlessAnnounced announces c unless the newest change of its kind, subject and detail
+	// already says its value: a retry of a write whose first attempt may have committed elsewhere
+	// and lost its change.
+	ChangeUnlessAnnounced(ctx context.Context, c Change) error
 }
 
 // Validate refuses a change of no kind EventKinds has, or of no platform experiment.

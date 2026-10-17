@@ -171,32 +171,11 @@ type fakeGraph struct {
 	// in is the links into each hypothesis, by its id.
 	in    map[string][]domain.Link
 	clock time.Time
-	// positions is the watch stream position each write was stamped with, by hypothesis id.
-	positions map[string][]int64
-	// stamps is the position each announced fact holds now, by fact.
-	stamps map[string]int64
 }
 
 func newFakeGraph() *fakeGraph {
 	return &fakeGraph{rows: map[string]*domain.Hypothesis{}, links: map[string]bool{}, in: map[string][]domain.Link{},
-		clock: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), positions: map[string][]int64{}, stamps: map[string]int64{}}
-}
-
-// stamp records the position of a fact a write announced.
-func (g *fakeGraph) stamp(id, fact string, position int64) {
-	g.stamps[fact] = position
-	g.positions[id] = append(g.positions[id], position)
-}
-
-// restamp mirrors graphdb's: a repeated write over a fact whose transaction aborted takes the
-// repeat's position and announces it again.
-func (g *fakeGraph) restamp(id, fact string, stamp domain.Stamp) (bool, error) {
-	aborted, err := stamp.Aborted(g.stamps[fact])
-	if err != nil || !aborted {
-		return false, err
-	}
-	g.stamp(id, fact, stamp.Position)
-	return true, nil
+		clock: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
 }
 
 func (g *fakeGraph) tick() time.Time {
@@ -204,26 +183,24 @@ func (g *fakeGraph) tick() time.Time {
 	return g.clock
 }
 
-func (g *fakeGraph) Register(_ context.Context, n graphdb.NewHypothesis) (*domain.Hypothesis, []domain.Link, bool, bool, []domain.SimilarHypothesis, error) {
+func (g *fakeGraph) Register(_ context.Context, n graphdb.NewHypothesis) (*domain.Hypothesis, []domain.Link, bool, []domain.SimilarHypothesis, error) {
 	id := n.PlatformExperimentID + "\x00" + domain.NormalizeHypothesisText(n.Text)
 	if existing, ok := g.rows[id]; ok {
-		announce, err := g.restamp(id, "new"+id, n.Stamp)
-		return existing, []domain.Link{}, true, announce, nil, err
+		return existing, []domain.Link{}, true, nil, nil
 	}
 	h := &domain.Hypothesis{
 		ID: id, AgentID: n.AgentID, Actor: n.Actor,
 		PlatformExperimentID: n.PlatformExperimentID, Text: n.Text, Status: domain.HypothesisOpen, CreatedAt: g.tick(),
 	}
 	g.rows[id] = h
-	g.stamp(id, "new"+id, n.Stamp.Position)
-	return h, []domain.Link{}, false, true, nil, nil
+	return h, []domain.Link{}, false, nil, nil
 }
 
 func (g *fakeGraph) GetHypothesis(_ context.Context, id string) (*domain.Hypothesis, error) {
 	return g.rows[id], nil
 }
 
-func (g *fakeGraph) UpdateStatus(_ context.Context, id, callerAgentID string, actor domain.Actor, status domain.HypothesisStatus, stamp domain.Stamp) (*domain.Hypothesis, bool, error) {
+func (g *fakeGraph) UpdateStatus(_ context.Context, id, callerAgentID string, actor domain.Actor, status domain.HypothesisStatus) (*domain.Hypothesis, bool, error) {
 	h, ok := g.rows[id]
 	if !ok {
 		return nil, false, graphdb.ErrNotFound
@@ -232,16 +209,14 @@ func (g *fakeGraph) UpdateStatus(_ context.Context, id, callerAgentID string, ac
 		return nil, false, graphdb.ErrNotOwner
 	}
 	if h.Status == status {
-		announce, err := g.restamp(id, "status"+id, stamp)
-		return h, announce, err
+		return h, false, nil
 	}
 	at := g.tick()
 	h.Status, h.StatusChangedAt, h.StatusActor = status, &at, &actor
-	g.stamp(id, "status"+id, stamp.Position)
 	return h, true, nil
 }
 
-func (g *fakeGraph) AddLink(_ context.Context, fromID, agentID string, actor domain.Actor, spec domain.LinkSpec, stamp domain.Stamp) (*graphdb.LinkResult, error) {
+func (g *fakeGraph) AddLink(_ context.Context, fromID, agentID string, actor domain.Actor, spec domain.LinkSpec) (*graphdb.LinkResult, error) {
 	h, ok := g.rows[fromID]
 	if !ok {
 		return nil, graphdb.ErrNotFound
@@ -250,16 +225,13 @@ func (g *fakeGraph) AddLink(_ context.Context, fromID, agentID string, actor dom
 		return nil, graphdb.ErrNotOwner
 	}
 	key := fromID + string(spec.Type) + spec.To
-	result := &graphdb.LinkResult{From: h, Created: !g.links[key], Announce: !g.links[key],
+	result := &graphdb.LinkResult{From: h, Created: !g.links[key], Later: true,
 		Out: []domain.Link{{Type: spec.Type, HypothesisID: spec.To, AgentID: agentID, Actor: actor}}}
 	g.links[key] = true
 	if !result.Created {
-		var err error
-		result.Announce, err = g.restamp(fromID, "link"+key, stamp)
-		return result, err
+		return result, nil
 	}
 	result.CreatedAt = g.tick()
-	g.stamp(fromID, "link"+key, stamp.Position)
 	g.in[spec.To] = append(g.in[spec.To], domain.Link{Type: spec.Type, HypothesisID: fromID, AgentID: agentID, Actor: actor})
 	return result, nil
 }
@@ -292,47 +264,52 @@ func (g *fakeGraph) Remove(_ context.Context, id string) error {
 	return nil
 }
 
-// recordedEvents is the watch stream as the registry sees it. Emit hands out positions 1, 2, ...
-// and stamps them on the events, as Postgres would.
+// recordedEvents is the change stream as the registry sees it: the changes of each write that
+// committed, with ids 1, 2, ... as Postgres gives them.
 type recordedEvents struct {
-	events   []domain.Event
-	position int64
-	// failNext fails the next Emit after its write, as a Postgres commit failing after the graph
-	// write committed; its position is then aborted.
+	events []domain.Event
+	// failNext fails the next write after its graph write, as a Postgres commit failing after the
+	// graph write committed.
 	failNext bool
-	aborted  map[int64]bool
 	// closed holds the platform experiments that are closed.
 	closed map[string]bool
 }
 
-func (r *recordedEvents) NotifyEvent(_ context.Context, e domain.Event) error {
-	r.events = append(r.events, e)
+type pendingChanges struct {
+	r       *recordedEvents
+	changes []domain.Change
+}
+
+func (p *pendingChanges) Change(c domain.Change) { p.changes = append(p.changes, c) }
+
+func (p *pendingChanges) ChangeUnlessAnnounced(_ context.Context, c domain.Change) error {
+	for _, e := range slices.Backward(p.r.events) {
+		if e.Kind == c.Kind && e.Subject == c.Subject && e.Detail == c.Detail && e.PlatformExperimentID == c.PlatformExperimentID {
+			if e.Value == c.Value {
+				return nil
+			}
+			break
+		}
+	}
+	p.Change(c)
 	return nil
 }
 
-func (r *recordedEvents) Emit(_ context.Context, write func(stamp domain.Stamp) ([]domain.Event, error)) error {
-	r.position++
-	events, err := write(domain.Stamp{Position: r.position, Aborted: func(p int64) (bool, error) { return r.aborted[p], nil },
-		RequireOpen: func(pe string) error {
-			if r.closed[pe] {
-				return fmt.Errorf("%w: %s", domain.ErrPlatformExperimentClosed, pe)
-			}
-			return nil
-		}})
-	if err != nil {
+func (r *recordedEvents) Around(_ context.Context, pe string, fn func(domain.Announcer) error) error {
+	if r.closed[pe] {
+		return fmt.Errorf("%w: %s", domain.ErrPlatformExperimentClosed, pe)
+	}
+	pending := &pendingChanges{r: r}
+	if err := fn(pending); err != nil {
 		return err
 	}
 	if r.failNext {
 		r.failNext = false
-		if r.aborted == nil {
-			r.aborted = map[int64]bool{}
-		}
-		r.aborted[r.position] = true
 		return errors.New("commit failed")
 	}
-	for _, e := range events {
-		e.Position = r.position
-		r.events = append(r.events, e)
+	for _, c := range pending.changes {
+		r.events = append(r.events, domain.Event{ID: int64(len(r.events) + 1), Kind: c.Kind, Subject: c.Subject, Value: c.Value, Detail: c.Detail,
+			PlatformExperimentID: c.PlatformExperimentID, AgentID: c.AgentID})
 	}
 	return nil
 }

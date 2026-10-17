@@ -75,7 +75,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	// connections are open. Nothing is persisted for it and nothing is held between connections
 	// — see httpapi/watch/watch.go.
 	events := db.NewEventsStore(pool, graph)
-	registrySvc := registry.New(store, graph, events, logger, metrics, dataStore)
+	registrySvc := registry.New(store, graph, store, logger, metrics, dataStore)
 	watchHandler := watch.NewHandler(events, store, gate.access, logger)
 	watchHandler.Start(runCtx)
 

@@ -60,21 +60,17 @@ func (s *Service) RegisterHypothesis(ctx context.Context, agentID string, actor 
 		}
 	}
 
-	err = s.events.Emit(ctx, func(stamp domain.Stamp) ([]domain.Event, error) {
-		if err := stamp.RequireOpen(platformExperimentID); err != nil {
-			return nil, err
-		}
-		var announce bool
-		h, out, alreadyExisted, announce, similar, err = s.graph.Register(ctx, graphdb.NewHypothesis{
+	err = s.changes.Around(ctx, platformExperimentID, func(a domain.Announcer) error {
+		var err error
+		h, out, alreadyExisted, similar, err = s.graph.Register(ctx, graphdb.NewHypothesis{
 			AgentID: agentID, Actor: actor,
 			PlatformExperimentID: platformExperimentID, Text: text, Links: links, DistinctFrom: distinctFrom,
-			Stamp: stamp,
 		})
-		if err != nil || !announce {
-			return nil, err
+		if err != nil {
+			return err
 		}
-		return []domain.Event{{Kind: domain.EventHypothesisNew, Subject: h.ID, Value: string(h.Actor.Kind),
-			PlatformExperimentID: h.PlatformExperimentID, AgentID: h.AgentID}}, nil
+		return announce(ctx, a, !alreadyExisted, domain.Change{Kind: domain.EventHypothesisNew, Subject: h.ID, Value: string(h.Actor.Kind),
+			PlatformExperimentID: h.PlatformExperimentID, AgentID: h.AgentID})
 	})
 	var held *graphdb.SimilarError
 	if errors.As(err, &held) {
@@ -97,6 +93,17 @@ func (s *Service) RegisterHypothesis(ctx context.Context, agentID string, actor 
 		zap.String("id", h.ID), zap.String("agent", agentID), zap.String("actor_kind", string(actor.Kind)), zap.String("actor_id", actor.ID),
 		zap.String("platform_experiment_id", platformExperimentID), zap.Bool("already_existed", alreadyExisted))
 	return h, out, alreadyExisted, similar, nil
+}
+
+// announce announces c of a graph write, which wrote what c says when it is new. One that found
+// it written already may be the retry of a write whose Postgres transaction lost its change after
+// the graph committed, so it is announced unless it already was.
+func announce(ctx context.Context, a domain.Announcer, isNew bool, c domain.Change) error {
+	if isNew {
+		a.Change(c)
+		return nil
+	}
+	return a.ChangeUnlessAnnounced(ctx, c)
 }
 
 // hypothesisActors and linkActors are the actors a hypothesis and its links carry, for naming.
@@ -141,17 +148,14 @@ func (s *Service) AddHypothesisLink(ctx context.Context, id, agentID string, act
 		return nil, fmt.Errorf("registry.AddHypothesisLink: %w: %s", ErrHypothesisNotFound, id)
 	}
 	var result *graphdb.LinkResult
-	err = s.events.Emit(ctx, func(stamp domain.Stamp) ([]domain.Event, error) {
-		if err := stamp.RequireOpen(from.PlatformExperimentID); err != nil {
-			return nil, err
-		}
+	err = s.changes.Around(ctx, from.PlatformExperimentID, func(a domain.Announcer) error {
 		var err error
-		result, err = s.graph.AddLink(ctx, id, agentID, actor, spec, stamp)
-		if err != nil || !result.Announce {
-			return nil, err
+		result, err = s.graph.AddLink(ctx, id, agentID, actor, spec)
+		if err != nil || !result.Later {
+			return err
 		}
-		return []domain.Event{{Kind: domain.EventHypothesisLink, Subject: id, Value: string(spec.Type), Detail: spec.To,
-			PlatformExperimentID: result.From.PlatformExperimentID, AgentID: agentID}}, nil
+		return announce(ctx, a, result.Created, domain.Change{Kind: domain.EventHypothesisLink, Subject: id, Value: string(spec.Type), Detail: spec.To,
+			PlatformExperimentID: result.From.PlatformExperimentID, AgentID: agentID})
 	})
 	if err != nil {
 		return nil, fmt.Errorf("registry.AddHypothesisLink: %w", err)
@@ -347,38 +351,35 @@ func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID str
 	// stands without it lost the note to a failed write, and this call writes it.
 	note := mayJudge && (status == domain.HypothesisConfirmed || status == domain.HypothesisRefuted)
 	var h *domain.Hypothesis
-	var announced bool
 	var basis string
-	err = s.events.Emit(ctx, func(stamp domain.Stamp) ([]domain.Event, error) {
-		if err := stamp.RequireOpen(current.PlatformExperimentID); err != nil {
-			return nil, err
-		}
+	var changed bool
+	err = s.changes.Around(ctx, current.PlatformExperimentID, func(a domain.Announcer) error {
 		if note && current.Status == status {
 			noted, err := s.basisNoted(ctx, current)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			note = !noted
 		}
 		if mayJudge && (current.Status != status || note) {
 			var err error
 			if basis, err = s.supported(ctx, current, verdict); err != nil {
-				return nil, err
+				return err
 			}
 		}
 		var err error
-		h, announced, err = s.graph.UpdateStatus(ctx, id, callerAgentID, actor, status, stamp)
-		if err != nil || !announced {
-			return nil, err
+		h, changed, err = s.graph.UpdateStatus(ctx, id, callerAgentID, actor, status)
+		if err != nil {
+			return err
 		}
-		return []domain.Event{{Kind: domain.EventHypothesisStatus, Subject: h.ID, Value: string(h.Status),
-			PlatformExperimentID: h.PlatformExperimentID, AgentID: h.AgentID}}, nil
+		return announce(ctx, a, changed, domain.Change{Kind: domain.EventHypothesisStatus, Subject: h.ID, Value: string(h.Status),
+			PlatformExperimentID: h.PlatformExperimentID, AgentID: h.AgentID})
 	})
 	if err != nil {
 		return nil, fmt.Errorf("registry.SetHypothesisStatus: %w", err)
 	}
 	s.logger.Info("hypothesis status updated",
-		zap.String("id", id), zap.String("agent", callerAgentID), zap.String("status", string(status)), zap.Bool("announced", announced))
+		zap.String("id", id), zap.String("agent", callerAgentID), zap.String("status", string(status)), zap.Bool("changed", changed))
 	if note {
 		if _, err := s.AddHypothesisComment(ctx, h.ID, callerAgentID, actor, basis); err != nil {
 			return nil, fmt.Errorf("registry.SetHypothesisStatus: the verdict is set and its basis could not be noted: %w", err)
@@ -503,16 +504,13 @@ func (s *Service) EditHypothesis(ctx context.Context, id, text string) (*domain.
 		return nil, fmt.Errorf("registry.EditHypothesis: %w: %s", ErrHypothesisNotFound, id)
 	}
 	var h *domain.Hypothesis
-	err = s.events.Emit(ctx, func(stamp domain.Stamp) ([]domain.Event, error) {
-		if err := stamp.RequireOpen(current.PlatformExperimentID); err != nil {
-			return nil, err
-		}
+	err = s.changes.Around(ctx, current.PlatformExperimentID, func(domain.Announcer) error {
 		if err := s.untouched(ctx, current, "edited"); err != nil {
-			return nil, err
+			return err
 		}
 		var err error
 		h, err = s.graph.EditText(ctx, id, text)
-		return nil, inRecord(err, "edited")
+		return inRecord(err, "edited")
 	})
 	if err != nil {
 		return nil, fmt.Errorf("registry.EditHypothesis: %w", err)
@@ -534,14 +532,11 @@ func (s *Service) RemoveHypothesis(ctx context.Context, id string) error {
 	if current == nil {
 		return fmt.Errorf("registry.RemoveHypothesis: %w: %s", ErrHypothesisNotFound, id)
 	}
-	err = s.events.Emit(ctx, func(stamp domain.Stamp) ([]domain.Event, error) {
-		if err := stamp.RequireOpen(current.PlatformExperimentID); err != nil {
-			return nil, err
-		}
+	err = s.changes.Around(ctx, current.PlatformExperimentID, func(domain.Announcer) error {
 		if err := s.untouched(ctx, current, "removed"); err != nil {
-			return nil, err
+			return err
 		}
-		return nil, inRecord(s.graph.Remove(ctx, id), "removed")
+		return inRecord(s.graph.Remove(ctx, id), "removed")
 	})
 	if err != nil {
 		return fmt.Errorf("registry.RemoveHypothesis: %w", err)

@@ -19,7 +19,6 @@ func TestAHypothesisWriteHoldsOffACloseAndNoneIsTakenAfterIt(t *testing.T) {
 	pe := "closedwrites-pe-" + uuid.New().String()[:8]
 	hypothesis := "closedwrites-hyp-" + uuid.New().String()[:8]
 	createTestPE(t, pool, pe, 10)
-	events := NewEventsStore(pool, noHypothesisEvents{})
 	hypotheses := NewStore(pool, 3)
 	person := domain.Actor{Kind: domain.ActorUser, ID: "user-ada"}
 
@@ -32,10 +31,7 @@ func TestAHypothesisWriteHoldsOffACloseAndNoneIsTakenAfterIt(t *testing.T) {
 		<-passed
 		closed <- NewStore(pool, 3).ClosePlatformExperiment(ctx, pe, &person, "")
 	}()
-	err := events.Emit(ctx, func(stamp domain.Stamp) ([]domain.Event, error) {
-		if err := stamp.RequireOpen(pe); err != nil {
-			return nil, err
-		}
+	err := hypotheses.Around(ctx, pe, func(domain.Announcer) error {
 		close(passed)
 		select {
 		case err := <-closed:
@@ -43,7 +39,7 @@ func TestAHypothesisWriteHoldsOffACloseAndNoneIsTakenAfterIt(t *testing.T) {
 			closed <- err
 		case <-time.After(300 * time.Millisecond):
 		}
-		return nil, nil
+		return nil
 	})
 	if err != nil {
 		t.Fatalf("a write while open: got = %v, want nil", err)
@@ -52,7 +48,7 @@ func TestAHypothesisWriteHoldsOffACloseAndNoneIsTakenAfterIt(t *testing.T) {
 		t.Fatalf("close: got = %v, want nil", err)
 	}
 
-	err = events.Emit(ctx, func(stamp domain.Stamp) ([]domain.Event, error) { return nil, stamp.RequireOpen(pe) })
+	err = hypotheses.Around(ctx, pe, func(domain.Announcer) error { return nil })
 	if !errors.Is(err, domain.ErrPlatformExperimentClosed) {
 		t.Errorf("a graph write after the close: got = %v, want %v", err, domain.ErrPlatformExperimentClosed)
 	}

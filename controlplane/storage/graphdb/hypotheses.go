@@ -42,33 +42,29 @@ type NewHypothesis struct {
 	// DistinctFrom names hypotheses the caller has read and judged a different claim, so they no
 	// longer hold the registration back (see untoldSimilar).
 	DistinctFrom []string
-	// Stamp is the watch stream position of this write and its check for an earlier aborted one
-	// (see db.EventsStore.Emit).
-	Stamp domain.Stamp
 }
 
 // Register creates a hypothesis and its outgoing links in one transaction, or returns the existing
 // hypothesis with equivalent normalized text in the same platform experiment (alreadyExisted=true)
 // without applying the supplied links. links are the hypothesis's outgoing links either way.
-// announce is true when the caller emits hypothesis.new: the hypothesis is new, or its earlier
-// registration's event was never sent (see restamp). It creates nothing and returns a
+// It creates nothing and returns a
 // *SimilarError while other hypotheses read close to the new one and the caller has not told it
 // apart from them. A signed-in person is never held back: their hypothesis is created and the
 // ones it reads close to come back as similar.
-func (s *Store) Register(ctx context.Context, n NewHypothesis) (h *domain.Hypothesis, links []domain.Link, alreadyExisted, announce bool, similar []domain.SimilarHypothesis, err error) {
+func (s *Store) Register(ctx context.Context, n NewHypothesis) (h *domain.Hypothesis, links []domain.Link, alreadyExisted bool, similar []domain.SimilarHypothesis, err error) {
 	normalized := domain.NormalizeHypothesisText(n.Text)
 	if normalized == "" {
-		return nil, nil, false, false, nil, fmt.Errorf("graphdb.Register: text is empty")
+		return nil, nil, false, nil, fmt.Errorf("graphdb.Register: text is empty")
 	}
 	if err := validateLinks(n.PlatformExperimentID, n.Links, true); err != nil {
-		return nil, nil, false, false, nil, err
+		return nil, nil, false, nil, err
 	}
 	if err := s.ensureObjective(ctx, n.PlatformExperimentID); err != nil {
-		return nil, nil, false, false, nil, err
+		return nil, nil, false, nil, err
 	}
 	id, err := uuid.NewV7()
 	if err != nil {
-		return nil, nil, false, false, nil, fmt.Errorf("graphdb.Register: %w", err)
+		return nil, nil, false, nil, fmt.Errorf("graphdb.Register: %w", err)
 	}
 	at := now()
 
@@ -79,9 +75,6 @@ func (s *Store) Register(ctx context.Context, n NewHypothesis) (h *domain.Hypoth
 		}
 		existing, err := findByNormalizedText(ctx, tx, n.PlatformExperimentID, normalized)
 		if err != nil || existing != nil {
-			if err == nil {
-				announce, err = restamp(ctx, tx, n.Stamp, "MATCH (h:Hypothesis {id: $id})", "h.created_xid", map[string]any{"id": existing.ID})
-			}
 			return existing, err
 		}
 		if err := checkTargets(ctx, tx, n.PlatformExperimentID, "", n.Links); err != nil {
@@ -95,51 +88,48 @@ func (s *Store) Register(ctx context.Context, n NewHypothesis) (h *domain.Hypoth
 			return nil, &SimilarError{Similar: similar}
 		}
 		records, err := collect(ctx, tx, `CREATE (h:Hypothesis {id: $id, platform_experiment_id: $pe, agent_id: $agent_id,
-  actor_kind: $actor_kind, actor_id: $actor_id, text: $text, normalized_text: $normalized, status: $status, created_at: $at, created_xid: $position})
+  actor_kind: $actor_kind, actor_id: $actor_id, text: $text, normalized_text: $normalized, status: $status, created_at: $at})
 RETURN h`, map[string]any{
 			"id": id.String(), "pe": n.PlatformExperimentID, "agent_id": n.AgentID,
 			"actor_kind": string(n.Actor.Kind), "actor_id": n.Actor.ID, "text": n.Text, "normalized": normalized, "status": string(domain.HypothesisOpen), "at": at,
-			"position": n.Stamp.Position,
 		})
 		if err != nil {
 			return nil, err
 		}
 		for i, spec := range n.Links {
-			if _, err := createLink(ctx, tx, id.String(), n.PlatformExperimentID, spec, i, n.AgentID, n.Actor, at, n.Stamp.Position); err != nil {
+			if _, err := createLink(ctx, tx, id.String(), n.PlatformExperimentID, spec, i, n.AgentID, n.Actor, at); err != nil {
 				return nil, err
 			}
 		}
-		announce = true
 		return hypothesisFromNode(records[0].Values[0].(neo4j.Node))
 	})
 	if err != nil {
-		return nil, nil, false, false, nil, wrap("graphdb.Register", err)
+		return nil, nil, false, nil, wrap("graphdb.Register", err)
 	}
 	h = out.(*domain.Hypothesis)
 	alreadyExisted = h.ID != id.String()
 	links, err = s.outLinks(ctx, h.ID)
 	if err != nil {
-		return nil, nil, false, false, nil, err
+		return nil, nil, false, nil, err
 	}
-	return h, links, alreadyExisted, announce, similar, nil
+	return h, links, alreadyExisted, similar, nil
 }
 
 // LinkResult is the outcome of AddLink. Created is false when the link already existed, which is a
-// no-op; CreatedAt is then zero. Announce is true when the caller emits hypothesis.link: the link
-// is new, or its earlier addition's event was never sent (see restamp).
+// no-op; CreatedAt is then zero. Later is true for a link added after its hypothesis was
+// registered, which hypothesis.link announces: one given at registration rides on hypothesis.new.
 type LinkResult struct {
 	From      *domain.Hypothesis
 	Created   bool
-	Announce  bool
+	Later     bool
 	CreatedAt time.Time
 	Out       []domain.Link
 }
 
-// AddLink adds one outgoing link from an existing hypothesis at watch stream position
-// stamp.Position. Only its registering agent may, or anyone when it was submitted by a human.
-// Links are append-only. agentID is the agent whose link it is, empty when no agent owns it, and
-// actor whose credential adds it.
-func (s *Store) AddLink(ctx context.Context, fromID, agentID string, actor domain.Actor, spec domain.LinkSpec, stamp domain.Stamp) (*LinkResult, error) {
+// AddLink adds one outgoing link from an existing hypothesis. Only its registering agent may, or
+// anyone when it was submitted by a human. Links are append-only. agentID is the agent whose link
+// it is, empty when no agent owns it, and actor whose credential adds it.
+func (s *Store) AddLink(ctx context.Context, fromID, agentID string, actor domain.Actor, spec domain.LinkSpec) (*LinkResult, error) {
 	at := now()
 	out, err := s.write(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		from, err := getHypothesis(ctx, tx, fromID)
@@ -166,20 +156,22 @@ func (s *Store) AddLink(ctx context.Context, fromID, agentID string, actor domai
 				return nil, err
 			}
 		}
-		created, err := createLink(ctx, tx, fromID, from.PlatformExperimentID, spec, 0, agentID, actor, at, stamp.Position)
+		created, err := createLink(ctx, tx, fromID, from.PlatformExperimentID, spec, 0, agentID, actor, at)
 		if err != nil {
 			return nil, err
 		}
-		result := &LinkResult{From: from, Created: created, Announce: created}
+		result := &LinkResult{From: from, Created: created, Later: created}
 		if created {
 			result.CreatedAt = at
 			return result, nil
 		}
-		// A link given at registration is announced by hypothesis.new, so only a later one is re-sent.
-		result.Announce, err = restamp(ctx, tx, stamp,
-			linkMatch(from.PlatformExperimentID, spec)+" MATCH (h)-[r:"+relTypes[spec.Type]+"]->(t) WHERE r.created_at <> h.created_at",
-			"r.created_xid", map[string]any{"from": fromID, "to": spec.To})
-		return result, err
+		records, err := collect(ctx, tx, linkMatch(from.PlatformExperimentID, spec)+" MATCH (h)-[r:"+relTypes[spec.Type]+"]->(t) RETURN r.created_at <> h.created_at",
+			map[string]any{"from": fromID, "to": spec.To})
+		if err != nil {
+			return nil, err
+		}
+		result.Later = len(records) > 0 && records[0].Values[0] == true
+		return result, nil
 	})
 	if err != nil {
 		return nil, wrap("graphdb.AddLink", err)
@@ -191,11 +183,10 @@ func (s *Store) AddLink(ctx context.Context, fromID, agentID string, actor domai
 	return result, nil
 }
 
-// UpdateStatus sets a hypothesis's status on behalf of callerAgentID, at watch stream position
-// stamp.Position: the owning agent's verdict on its own claim, or anyone's on one no agent owns.
-// actor is whose credential gives the verdict, kept with the status it set. announce is true when the caller emits hypothesis.status: the status changed, or it already
-// held that value and the event of the write that set it was never sent (see restamp).
-func (s *Store) UpdateStatus(ctx context.Context, id, callerAgentID string, actor domain.Actor, status domain.HypothesisStatus, stamp domain.Stamp) (h *domain.Hypothesis, announce bool, err error) {
+// UpdateStatus sets a hypothesis's status on behalf of callerAgentID: the owning agent's verdict
+// on its own claim, or anyone's on one no agent owns. actor is whose credential gives the verdict,
+// kept with the status it set. changed is false when it already held status.
+func (s *Store) UpdateStatus(ctx context.Context, id, callerAgentID string, actor domain.Actor, status domain.HypothesisStatus) (h *domain.Hypothesis, changed bool, err error) {
 	at := now()
 	out, err := s.write(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		h, err := getHypothesis(ctx, tx, id)
@@ -209,26 +200,25 @@ func (s *Store) UpdateStatus(ctx context.Context, id, callerAgentID string, acto
 			return nil, fmt.Errorf("%w: hypothesis %s belongs to agent %s", ErrNotOwner, id, h.AgentID)
 		}
 		if h.Status == status {
-			announce, err = restamp(ctx, tx, stamp, "MATCH (h:Hypothesis {id: $id})", "h.status_changed_xid", map[string]any{"id": id})
-			return h, err
+			return h, nil
 		}
 		if err := lockExperiment(ctx, tx, h.PlatformExperimentID); err != nil {
 			return nil, err
 		}
-		records, err := collect(ctx, tx, `MATCH (h:Hypothesis {id: $id}) SET h.status = $status, h.status_changed_at = $at, h.status_changed_xid = $position,
+		records, err := collect(ctx, tx, `MATCH (h:Hypothesis {id: $id}) SET h.status = $status, h.status_changed_at = $at,
   h.status_actor_kind = $actor_kind, h.status_actor_id = $actor_id RETURN h`,
-			map[string]any{"id": id, "status": string(status), "at": at, "position": stamp.Position,
+			map[string]any{"id": id, "status": string(status), "at": at,
 				"actor_kind": string(actor.Kind), "actor_id": actor.ID})
 		if err != nil {
 			return nil, err
 		}
-		announce = true
+		changed = true
 		return hypothesisFromNode(records[0].Values[0].(neo4j.Node))
 	})
 	if err != nil {
 		return nil, false, wrap("graphdb.UpdateStatus", err)
 	}
-	return out.(*domain.Hypothesis), announce, nil
+	return out.(*domain.Hypothesis), changed, nil
 }
 
 // EditText replaces a hypothesis's text while no other hypothesis links to it. Who may edit is
@@ -424,12 +414,12 @@ MATCH p = (t)-[:BUILDS_ON *BFS]->(f) RETURN count(p)`, map[string]any{"from": fr
 // spliced into the statement because Cypher cannot parameterise it; it only ever comes from
 // relTypes, after validateLinks. ordinal is the link's place among those one write states, which
 // share a created_at: it keeps them in the order stated (linkOrder).
-func createLink(ctx context.Context, tx neo4j.ManagedTransaction, fromID, platformExperimentID string, spec domain.LinkSpec, ordinal int, agentID string, actor domain.Actor, at time.Time, position int64) (bool, error) {
+func createLink(ctx context.Context, tx neo4j.ManagedTransaction, fromID, platformExperimentID string, spec domain.LinkSpec, ordinal int, agentID string, actor domain.Actor, at time.Time) (bool, error) {
 	records, err := collect(ctx, tx, linkMatch(platformExperimentID, spec)+`
 MERGE (h)-[r:`+relTypes[spec.Type]+`]->(t)
-ON CREATE SET r.agent_id = $agent_id, r.actor_kind = $actor_kind, r.actor_id = $actor_id, r.created_at = $at, r.created_xid = $position, r.ordinal = $ordinal
+ON CREATE SET r.agent_id = $agent_id, r.actor_kind = $actor_kind, r.actor_id = $actor_id, r.created_at = $at, r.ordinal = $ordinal
 RETURN r.created_at = $at`, map[string]any{"from": fromID, "to": spec.To, "agent_id": agentID,
-		"actor_kind": string(actor.Kind), "actor_id": actor.ID, "at": at, "position": position, "ordinal": ordinal})
+		"actor_kind": string(actor.Kind), "actor_id": actor.ID, "at": at, "ordinal": ordinal})
 	if err != nil {
 		return false, err
 	}
@@ -472,31 +462,6 @@ func linkMatch(platformExperimentID string, spec domain.LinkSpec) string {
 		return "MATCH (h:Hypothesis {id: $from}), (t:Objective {id: $to})"
 	}
 	return "MATCH (h:Hypothesis {id: $from}), (t:Hypothesis {id: $to})"
-}
-
-// restamp re-sends an event whose write committed here while its Postgres transaction aborted:
-// when the position at prop, read through match, is an aborted transaction's, it records
-// stamp.Position there instead and reports true, so the caller emits the event again from a
-// transaction that has to commit for the write to count. A position the stamping transaction is
-// still running on is left to that transaction's own caller, which retries if it aborts.
-func restamp(ctx context.Context, tx neo4j.ManagedTransaction, stamp domain.Stamp, match, prop string, params map[string]any) (bool, error) {
-	records, err := collect(ctx, tx, match+" RETURN "+prop, params)
-	if err != nil || len(records) == 0 {
-		return false, err
-	}
-	position, _ := records[0].Values[0].(int64)
-	if position == 0 {
-		return false, nil
-	}
-	aborted, err := stamp.Aborted(position)
-	if err != nil || !aborted {
-		return false, err
-	}
-	params["position"] = stamp.Position
-	if _, err := collect(ctx, tx, match+" SET "+prop+" = $position", params); err != nil {
-		return false, err
-	}
-	return true, nil
 }
 
 func hypothesisFromNode(n neo4j.Node) (*domain.Hypothesis, error) {

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strconv"
 	"time"
 	"unicode"
 
@@ -90,7 +89,6 @@ func (s *Service) RecordMetric(ctx context.Context, experimentID, metricName, ba
 	if err := s.metrics.WriteGaugesAt(ctx, samples); err != nil {
 		return fmt.Errorf("registry.RecordMetric: %w", err)
 	}
-	s.notifyMetricArrived(ctx, experimentID, exp.PlatformExperimentID, exp.AgentID, metricName, fractionComplete)
 	s.checkUnderperformance(ctx, exp, metricName, fractionComplete, value, at)
 	return nil
 }
@@ -283,29 +281,6 @@ func (s *Service) checkUnderperformance(ctx context.Context, exp *domain.Experim
 	}
 	if err := s.store.MarkUnderperforming(ctx, exp.ID, metricName); err != nil {
 		s.logger.Warn("registry: mark underperformance", zap.String("experiment_id", exp.ID), zap.Error(err))
-	}
-}
-
-// notifyMetricArrived tells subscribers that a sample landed, and tells them nothing about it
-// beyond where to find it: experiment, metric name, how far through the run it was. The value
-// itself stays in the metrics store, which is the only place it is ever kept — a subscriber that
-// wants the number reads it from there. Emitted after the write, never before: an event for a
-// sample the store rejected would report a state nothing holds.
-//
-// A failure to notify is logged and not returned. The metric is already durably stored, and
-// refusing an accepted push because a transient stream could not be told about it would turn a
-// notification outage into lost measurements.
-func (s *Service) notifyMetricArrived(ctx context.Context, experimentID, platformExperimentID, agentID, metricName string, fractionComplete float64) {
-	err := s.events.NotifyEvent(ctx, domain.Event{
-		Kind:                 domain.EventMetricPoint,
-		Subject:              experimentID,
-		Value:                metricName,
-		Detail:               strconv.FormatFloat(fractionComplete, 'g', -1, 64),
-		PlatformExperimentID: platformExperimentID,
-		AgentID:              agentID,
-	})
-	if err != nil {
-		s.logger.Warn("registry: notify metric arrival", zap.String("experiment_id", experimentID), zap.Error(err))
 	}
 }
 

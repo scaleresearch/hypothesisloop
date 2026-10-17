@@ -10,7 +10,7 @@ import (
 
 func registerAs(t *testing.T, s *Store, pe, text string, links []domain.LinkSpec) *domain.Hypothesis {
 	t.Helper()
-	h, _, _, _, _, err := s.Register(context.Background(), NewHypothesis{Actor: userActor("user-ada"), PlatformExperimentID: pe, Text: text, Links: links})
+	h, _, _, _, err := s.Register(context.Background(), NewHypothesis{Actor: userActor("user-ada"), PlatformExperimentID: pe, Text: text, Links: links})
 	if err != nil {
 		t.Fatalf("Register %q: got = %v, want nil", text, err)
 	}
@@ -31,7 +31,7 @@ func TestEditTextReplacesTheTextOfAnIdeaNothingLinksTo(t *testing.T) {
 	if edited.Text != "a longer warmup helps" || edited.Actor != userActor("user-ada") || !edited.CreatedAt.Equal(h.CreatedAt) {
 		t.Errorf("edited: got = %+v, want the new text and everything else as it was", edited)
 	}
-	again, _, existed, _, _, err := s.Register(ctx, NewHypothesis{Actor: userActor("user-bob"), PlatformExperimentID: pe, Text: "A longer  warmup helps", Links: onRoot(pe)})
+	again, _, existed, _, err := s.Register(ctx, NewHypothesis{Actor: userActor("user-bob"), PlatformExperimentID: pe, Text: "A longer  warmup helps", Links: onRoot(pe)})
 	if err != nil || !existed || again.ID != h.ID {
 		t.Errorf("registering the new text: got = (%+v, existed=%v, %v), want the edited hypothesis", again, existed, err)
 	}
@@ -89,12 +89,12 @@ func TestRegisterTakesAPersonsCloseIdeaAndListsWhatItReadsCloseTo(t *testing.T) 
 	register(t, s, pe, "agent-1", "label noise caps validation accuracy", onRoot(pe))
 	text := "batch size 8 does not beat batch size 32 at the same epoch budget"
 
-	_, _, _, _, _, err := s.Register(ctx, NewHypothesis{AgentID: "agent-2", Actor: agentActor("agent-2"), PlatformExperimentID: pe, Text: text, Links: onRoot(pe)})
+	_, _, _, _, err := s.Register(ctx, NewHypothesis{AgentID: "agent-2", Actor: agentActor("agent-2"), PlatformExperimentID: pe, Text: text, Links: onRoot(pe)})
 	if got := similarIDs(t, err); len(got) != 1 || got[bs8.ID] != "close_text" {
 		t.Fatalf("an agent's close claim: got = %v, want refused naming %s", got, bs8.ID)
 	}
 
-	h, _, existed, _, similar, err := s.Register(ctx, NewHypothesis{Actor: userActor("user-ada"), PlatformExperimentID: pe, Text: text, Links: onRoot(pe)})
+	h, _, existed, similar, err := s.Register(ctx, NewHypothesis{Actor: userActor("user-ada"), PlatformExperimentID: pe, Text: text, Links: onRoot(pe)})
 	if err != nil || existed || h == nil {
 		t.Fatalf("a person's close idea: got = (%+v, existed=%v, %v), want it registered", h, existed, err)
 	}
@@ -102,7 +102,7 @@ func TestRegisterTakesAPersonsCloseIdeaAndListsWhatItReadsCloseTo(t *testing.T) 
 		t.Errorf("similar beside a person's idea: got = %+v, want %s as close_text", similar, bs8.ID)
 	}
 
-	_, _, _, _, similar, err = s.Register(ctx, NewHypothesis{Actor: userActor("user-ada"), PlatformExperimentID: pe, Text: "dropout helps", Links: onRoot(pe)})
+	_, _, _, similar, err = s.Register(ctx, NewHypothesis{Actor: userActor("user-ada"), PlatformExperimentID: pe, Text: "dropout helps", Links: onRoot(pe)})
 	if err != nil || len(similar) != 0 {
 		t.Errorf("a person's idea close to nothing: got = (%+v, %v), want no similar", similar, err)
 	}
@@ -116,17 +116,17 @@ func TestARefutedParentNamedInDistinctFromStaysTheParent(t *testing.T) {
 	ctx := context.Background()
 	parent := register(t, s, pe, "agent-1", "learning rate 0.2 overshoots", onRoot(pe))
 	other := register(t, s, pe, "agent-2", "gradient clipping steadies training", onRoot(pe))
-	if _, _, err := s.UpdateStatus(ctx, parent.ID, "agent-1", agentActor("agent-1"), domain.HypothesisRefuted, stampAt(1)); err != nil {
+	if _, _, err := s.UpdateStatus(ctx, parent.ID, "agent-1", agentActor("agent-1"), domain.HypothesisRefuted); err != nil {
 		t.Fatal(err)
 	}
 	combo := NewHypothesis{AgentID: "agent-1", Actor: agentActor("agent-1"), PlatformExperimentID: pe,
 		Text:  "with clipping at norm 1, a step of 0.2 converges within forty epochs",
 		Links: []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: parent.ID}, {Type: domain.LinkBuildsOn, To: other.ID}}}
-	if _, _, _, _, _, err := s.Register(ctx, combo); similarIDs(t, err)[parent.ID] != "refuted_parent" {
+	if _, _, _, _, err := s.Register(ctx, combo); similarIDs(t, err)[parent.ID] != "refuted_parent" {
 		t.Fatalf("building on a refuted parent unnamed: got = %v, want it held for %s", err, parent.ID)
 	}
 	combo.DistinctFrom = []string{parent.ID}
-	h, links, existed, _, _, err := s.Register(ctx, combo)
+	h, links, existed, _, err := s.Register(ctx, combo)
 	if err != nil || existed {
 		t.Fatalf("with the refuted parent in distinct_from: got = (%v, existed=%v), want it registered", err, existed)
 	}

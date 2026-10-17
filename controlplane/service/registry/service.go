@@ -60,9 +60,9 @@ type Store interface {
 // Graph is the hypothesis graph: every hypothesis and link, and the native read query over them.
 // Implemented by graphdb.Store.
 type Graph interface {
-	Register(ctx context.Context, n graphdb.NewHypothesis) (*domain.Hypothesis, []domain.Link, bool, bool, []domain.SimilarHypothesis, error)
-	AddLink(ctx context.Context, fromID, agentID string, actor domain.Actor, spec domain.LinkSpec, stamp domain.Stamp) (*graphdb.LinkResult, error)
-	UpdateStatus(ctx context.Context, id, callerAgentID string, actor domain.Actor, status domain.HypothesisStatus, stamp domain.Stamp) (*domain.Hypothesis, bool, error)
+	Register(ctx context.Context, n graphdb.NewHypothesis) (*domain.Hypothesis, []domain.Link, bool, []domain.SimilarHypothesis, error)
+	AddLink(ctx context.Context, fromID, agentID string, actor domain.Actor, spec domain.LinkSpec) (*graphdb.LinkResult, error)
+	UpdateStatus(ctx context.Context, id, callerAgentID string, actor domain.Actor, status domain.HypothesisStatus) (*domain.Hypothesis, bool, error)
 	EditText(ctx context.Context, id, text string) (*domain.Hypothesis, error)
 	Remove(ctx context.Context, id string) error
 	GetHypothesis(ctx context.Context, id string) (*domain.Hypothesis, error)
@@ -83,25 +83,22 @@ type Service struct {
 	// dataStore is the only way this service learns what a job wrote — listed live, never
 	// mirrored into PostgreSQL.
 	dataStore *objectstore.Client
-	// events carries to /watch subscribers the events no Postgres trigger emits: the
-	// metric-arrival pointer and every hypothesis event (the graph store has no NOTIFY).
-	events EventNotifier
+	// changes holds every graph write inside the Postgres write that announces it.
+	changes Changes
 }
 
-// EventNotifier emits the events no Postgres trigger emits: the metric pointer, and the hypothesis
-// events, emitted around the graph write they describe (see db.EventsStore.Emit).
-type EventNotifier interface {
-	NotifyEvent(ctx context.Context, e domain.Event) error
-	Emit(ctx context.Context, write func(stamp domain.Stamp) ([]domain.Event, error)) error
+// Changes runs a write to another store inside a Postgres write that holds its platform
+// experiment open and announces the write's changes (db.Store.Around).
+type Changes interface {
+	Around(ctx context.Context, platformExperimentID string, fn func(domain.Announcer) error) error
 }
 
-// New returns a new registry Service, which announces metric arrivals and hypothesis changes on
-// events.
-func New(store Store, graph Graph, events EventNotifier, logger *zap.Logger, metrics *metricsdb.Store, dataStore *objectstore.Client) *Service {
+// New returns a new registry Service, which announces hypothesis changes through changes.
+func New(store Store, graph Graph, changes Changes, logger *zap.Logger, metrics *metricsdb.Store, dataStore *objectstore.Client) *Service {
 	return &Service{
 		store:     store,
 		graph:     graph,
-		events:    events,
+		changes:   changes,
 		logger:    logger,
 		metrics:   metrics,
 		dataStore: dataStore,

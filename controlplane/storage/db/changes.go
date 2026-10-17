@@ -86,7 +86,7 @@ SELECT * FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[],
 
 // Around runs a write to another store inside a Postgres write that holds platformExperimentID
 // open until it commits, so fn's changes commit with it or not at all.
-func (s *Store) Around(ctx context.Context, platformExperimentID string, fn func(*Write) error) error {
+func (s *Store) Around(ctx context.Context, platformExperimentID string, fn func(domain.Announcer) error) error {
 	return s.write(ctx, func(w *Write) error {
 		if err := holdOpenPlatformExperiment(ctx, w, platformExperimentID); err != nil {
 			return err

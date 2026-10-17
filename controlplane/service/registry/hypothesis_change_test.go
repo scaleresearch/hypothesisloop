@@ -82,7 +82,7 @@ func requireInRecord(t *testing.T, what string, err error, names ...string) {
 func TestAnUntouchedIdeaIsEditedAndAnnouncesNothing(t *testing.T) {
 	svc := poolService(newPoolStore())
 	h := registerAdas(t, svc, "warmup helps")
-	before := len(svc.events.(*recordedEvents).events)
+	before := len(svc.changes.(*recordedEvents).events)
 
 	edited, err := svc.EditHypothesis(context.Background(), h.ID, "a longer warmup helps")
 	if err != nil {
@@ -91,7 +91,7 @@ func TestAnUntouchedIdeaIsEditedAndAnnouncesNothing(t *testing.T) {
 	if edited.Text != "a longer warmup helps" || edited.Actor.Name != "user-ada" {
 		t.Errorf("edited: got = %+v, want the new text by user-ada, named", edited)
 	}
-	if got := len(svc.events.(*recordedEvents).events); got != before {
+	if got := len(svc.changes.(*recordedEvents).events); got != before {
 		t.Errorf("events after an edit: got = %d, want %d", got, before)
 	}
 }
@@ -152,7 +152,7 @@ func TestRemovingAnUntouchedIdeaTakesItsCommentsWithIt(t *testing.T) {
 func TestAClosedExperimentKeepsItsIdeas(t *testing.T) {
 	svc := poolService(newPoolStore())
 	h := registerAdas(t, svc, "warmup helps")
-	svc.events.(*recordedEvents).closed = map[string]bool{"pe-1": true}
+	svc.changes.(*recordedEvents).closed = map[string]bool{"pe-1": true}
 
 	if _, err := svc.EditHypothesis(context.Background(), h.ID, "warmup hurts"); !errors.Is(err, domain.ErrPlatformExperimentClosed) {
 		t.Errorf("EditHypothesis on a closed experiment: got = %v, want %v", err, domain.ErrPlatformExperimentClosed)
@@ -166,13 +166,13 @@ func TestAClosedExperimentKeepsItsIdeas(t *testing.T) {
 // it back as the graph does for anyone but a signed-in person.
 type similarGraph struct{ *fakeGraph }
 
-func (g similarGraph) Register(ctx context.Context, n graphdb.NewHypothesis) (*domain.Hypothesis, []domain.Link, bool, bool, []domain.SimilarHypothesis, error) {
+func (g similarGraph) Register(ctx context.Context, n graphdb.NewHypothesis) (*domain.Hypothesis, []domain.Link, bool, []domain.SimilarHypothesis, error) {
 	similar := []domain.SimilarHypothesis{{ID: "h-close", AgentID: "agent-1", Actor: agentActor("agent-1"), Status: domain.HypothesisOpen, Text: "warmup helps", Reason: "close_text"}}
 	if n.Actor.Kind != domain.ActorUser {
-		return nil, nil, false, false, similar, &graphdb.SimilarError{Similar: similar}
+		return nil, nil, false, similar, &graphdb.SimilarError{Similar: similar}
 	}
-	h, links, existed, announce, _, err := g.fakeGraph.Register(ctx, n)
-	return h, links, existed, announce, similar, err
+	h, links, existed, _, err := g.fakeGraph.Register(ctx, n)
+	return h, links, existed, similar, err
 }
 
 func TestAPersonsCloseIdeaIsRegisteredWithItsSimilarOnesAsAHint(t *testing.T) {

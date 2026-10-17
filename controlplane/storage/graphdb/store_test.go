@@ -65,14 +65,10 @@ func onRoot(pe string) []domain.LinkSpec {
 	return []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: pe}}
 }
 
-// stampAt stamps a write at position, as an Emit that finds every earlier write's events sent.
-func stampAt(position int64) domain.Stamp {
-	return domain.Stamp{Position: position, Aborted: func(int64) (bool, error) { return false, nil }}
-}
 
 func register(t *testing.T, s *Store, pe, agentID, text string, links []domain.LinkSpec) *domain.Hypothesis {
 	t.Helper()
-	h, _, existed, _, _, err := s.Register(context.Background(), NewHypothesis{
+	h, _, existed, _, err := s.Register(context.Background(), NewHypothesis{
 		AgentID: agentID, Actor: agentActor(agentID), PlatformExperimentID: pe, Text: text, Links: links,
 	})
 	if err != nil {
@@ -90,7 +86,7 @@ func TestRegisterCreatesTheHypothesisWithItsLinksInOneStep(t *testing.T) {
 	a := register(t, s, pe, "agent-1", "warmup helps", onRoot(pe))
 	b := register(t, s, pe, "agent-1", "cosine decay helps", onRoot(pe))
 
-	h, links, existed, _, _, err := s.Register(context.Background(), NewHypothesis{
+	h, links, existed, _, err := s.Register(context.Background(), NewHypothesis{
 		AgentID: "agent-2", PlatformExperimentID: pe, Text: "warmup with cosine decay",
 		Links:        []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: a.ID}, {Type: domain.LinkBuildsOn, To: b.ID}, {Type: domain.LinkRelated, To: a.ID}},
 		DistinctFrom: []string{b.ID},
@@ -143,7 +139,7 @@ func TestRegisterHoldsBackAClaimUntilItIsToldApartFromCloseOnes(t *testing.T) {
 	register(t, s, pe, "agent-1", "label noise caps validation accuracy", onRoot(pe))
 
 	// A refinement reads close to the parent it names, and that is no reason to hold it.
-	bs4, _, existed, _, _, err := s.Register(ctx, NewHypothesis{AgentID: "agent-2", PlatformExperimentID: pe,
+	bs4, _, existed, _, err := s.Register(ctx, NewHypothesis{AgentID: "agent-2", PlatformExperimentID: pe,
 		Text: "batch size 4 beats batch size 8 at the same epoch budget", Links: []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: bs8.ID}}})
 	if err != nil || existed {
 		t.Fatalf("Register on a close parent: got = (%v, existed=%v), want (nil, false)", err, existed)
@@ -151,7 +147,7 @@ func TestRegisterHoldsBackAClaimUntilItIsToldApartFromCloseOnes(t *testing.T) {
 
 	contra := NewHypothesis{AgentID: "agent-3", PlatformExperimentID: pe,
 		Text: "batch size 8 does not beat batch size 32 at the same epoch budget", Links: onRoot(pe)}
-	_, _, _, _, _, err = s.Register(ctx, contra)
+	_, _, _, _, err = s.Register(ctx, contra)
 	if got := similarIDs(t, err); len(got) != 2 || got[bs8.ID] != "close_text" || got[bs4.ID] != "close_text" {
 		t.Fatalf("similar: got = %v, want %s and %s as close_text", got, bs8.ID, bs4.ID)
 	}
@@ -160,7 +156,7 @@ func TestRegisterHoldsBackAClaimUntilItIsToldApartFromCloseOnes(t *testing.T) {
 	}
 	contra.Links = append(contra.Links, domain.LinkSpec{Type: domain.LinkContradicts, To: bs8.ID})
 	contra.DistinctFrom = []string{bs4.ID}
-	if _, _, existed, _, _, err := s.Register(ctx, contra); err != nil || existed {
+	if _, _, existed, _, err := s.Register(ctx, contra); err != nil || existed {
 		t.Fatalf("Register with a contradicts link: got = (%v, existed=%v), want (nil, false)", err, existed)
 	}
 }
@@ -171,7 +167,7 @@ func TestRegisterTakesTheSecondClaimOfAnExperimentWhenItMovesAnotherLever(t *tes
 	workers := register(t, s, pe, "agent-1", "Holding chunk size fixed at the baseline, raising num_workers from 1 to 8 raises throughput.", onRoot(pe))
 	register(t, s, pe, "agent-2", "Holding num_workers fixed, a larger chunk size raises throughput.", onRoot(pe))
 
-	_, _, _, _, _, err := s.Register(context.Background(), NewHypothesis{AgentID: "agent-2", PlatformExperimentID: pe,
+	_, _, _, _, err := s.Register(context.Background(), NewHypothesis{AgentID: "agent-2", PlatformExperimentID: pe,
 		Text: "With chunk size held at the baseline, raising num_workers from 1 to 8 raises throughput.", Links: onRoot(pe)})
 	if got := similarIDs(t, err); len(got) != 1 || got[workers.ID] != "close_text" {
 		t.Fatalf("similar: got = %v, want %s as close_text", got, workers.ID)
@@ -192,11 +188,11 @@ func TestRegisterHoldsANewLineAtTheLowerBar(t *testing.T) {
 	}
 	line := register(t, s, pe, "agent-1", other, onRoot(pe))
 	parent := register(t, s, pe, "agent-1", sibling, onRoot(pe))
-	_, _, _, _, _, err := s.Register(ctx, NewHypothesis{AgentID: "agent-2", PlatformExperimentID: pe, Text: text, Links: onRoot(pe)})
+	_, _, _, _, err := s.Register(ctx, NewHypothesis{AgentID: "agent-2", PlatformExperimentID: pe, Text: text, Links: onRoot(pe)})
 	if got := similarIDs(t, err); len(got) != 1 || got[line.ID] != "close_text" {
 		t.Fatalf("new line: got = %v, want %s as close_text", got, line.ID)
 	}
-	if _, _, _, _, _, err := s.Register(ctx, NewHypothesis{AgentID: "agent-2", PlatformExperimentID: pe, Text: text,
+	if _, _, _, _, err := s.Register(ctx, NewHypothesis{AgentID: "agent-2", PlatformExperimentID: pe, Text: text,
 		Links: []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: parent.ID}}}); err != nil {
 		t.Fatalf("refinement: got %v, want it registered", err)
 	}
@@ -207,17 +203,17 @@ func TestRegisterHoldsBackAClaimBuildingOnARefutedOne(t *testing.T) {
 	pe := testExperiment(t, s)
 	ctx := context.Background()
 	parent := register(t, s, pe, "agent-1", "learning rate 0.2 overshoots", onRoot(pe))
-	if _, _, err := s.UpdateStatus(ctx, parent.ID, "agent-1", agentActor("agent-1"), domain.HypothesisRefuted, stampAt(1)); err != nil {
+	if _, _, err := s.UpdateStatus(ctx, parent.ID, "agent-1", agentActor("agent-1"), domain.HypothesisRefuted); err != nil {
 		t.Fatal(err)
 	}
 	child := NewHypothesis{AgentID: "agent-1", PlatformExperimentID: pe,
 		Text: "a larger step wins within forty epochs", Links: []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: parent.ID}}}
-	_, _, _, _, _, err := s.Register(ctx, child)
+	_, _, _, _, err := s.Register(ctx, child)
 	if got := similarIDs(t, err); len(got) != 1 || got[parent.ID] != "refuted_parent" {
 		t.Fatalf("similar: got = %v, want %s as refuted_parent", got, parent.ID)
 	}
 	child.Links = append(child.Links, domain.LinkSpec{Type: domain.LinkContradicts, To: parent.ID})
-	if _, _, existed, _, _, err := s.Register(ctx, child); err != nil || existed {
+	if _, _, existed, _, err := s.Register(ctx, child); err != nil || existed {
 		t.Fatalf("Register with a contradicts link: got = (%v, existed=%v), want (nil, false)", err, existed)
 	}
 }
@@ -230,7 +226,7 @@ func TestRegisteringAnEquivalentClaimReturnsTheExistingHypothesisWithoutApplying
 	a := register(t, s, pe, "agent-1", "Warmup helps", onRoot(pe))
 	other := register(t, s, pe, "agent-1", "something else", onRoot(pe))
 
-	h, links, existed, _, _, err := s.Register(context.Background(), NewHypothesis{
+	h, links, existed, _, err := s.Register(context.Background(), NewHypothesis{
 		Actor: userActor("user-ada"), PlatformExperimentID: pe, Text: "  warmup   HELPS ",
 		Links: []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: other.ID}},
 	})
@@ -259,7 +255,7 @@ func TestConcurrentRegistrationsOfTheSameClaimYieldOneHypothesis(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			h, _, existed, _, _, err := s.Register(context.Background(), NewHypothesis{
+			h, _, existed, _, err := s.Register(context.Background(), NewHypothesis{
 				AgentID: fmt.Sprintf("agent-%d", i), PlatformExperimentID: pe,
 				Text: "the same idea", Links: onRoot(pe),
 			})
@@ -305,7 +301,7 @@ func TestRegisterRefusesAHypothesisWithNoPlaceInTheGraph(t *testing.T) {
 		"root as related":         {{Type: domain.LinkBuildsOn, To: pe}, {Type: domain.LinkRelated, To: pe}},
 		"bad type":                {{Type: "extends", To: pe}},
 	} {
-		_, _, _, _, _, err := s.Register(context.Background(), NewHypothesis{
+		_, _, _, _, err := s.Register(context.Background(), NewHypothesis{
 			AgentID: "agent-1", PlatformExperimentID: pe, Text: "new idea " + name, Links: links,
 		})
 		if !errors.Is(err, ErrInvalidLink) {
@@ -337,21 +333,21 @@ func TestAddLinkRefusesCyclesSelfLinksAndOtherExperiments(t *testing.T) {
 		"other experiment": {a.ID, domain.LinkSpec{Type: domain.LinkRelated, To: foreign.ID}},
 		"unknown target":   {a.ID, domain.LinkSpec{Type: domain.LinkContradicts, To: "nope"}},
 	} {
-		if _, err := s.AddLink(ctx, spec.from, "agent-1", agentActor("agent-1"), spec.link, stampAt(1)); !errors.Is(err, ErrInvalidLink) {
+		if _, err := s.AddLink(ctx, spec.from, "agent-1", agentActor("agent-1"), spec.link); !errors.Is(err, ErrInvalidLink) {
 			t.Errorf("%s: got = %v, want %v", name, err, ErrInvalidLink)
 		}
 	}
-	if _, err := s.AddLink(ctx, "nope", "agent-1", agentActor("agent-1"), domain.LinkSpec{Type: domain.LinkRelated, To: a.ID}, stampAt(1)); !errors.Is(err, ErrNotFound) {
+	if _, err := s.AddLink(ctx, "nope", "agent-1", agentActor("agent-1"), domain.LinkSpec{Type: domain.LinkRelated, To: a.ID}); !errors.Is(err, ErrNotFound) {
 		t.Errorf("link from an unknown hypothesis: got = %v, want %v", err, ErrNotFound)
 	}
 
 	// The reverse direction of a cycle is fine as a non-builds_on link, and a second builds_on parent
 	// that closes no loop is a combination.
-	if _, err := s.AddLink(ctx, a.ID, "agent-1", agentActor("agent-1"), domain.LinkSpec{Type: domain.LinkContradicts, To: c.ID}, stampAt(1)); err != nil {
+	if _, err := s.AddLink(ctx, a.ID, "agent-1", agentActor("agent-1"), domain.LinkSpec{Type: domain.LinkContradicts, To: c.ID}); err != nil {
 		t.Errorf("contradicts back up the chain: got = %v, want nil", err)
 	}
 	d := register(t, s, pe, "agent-1", "d", onRoot(pe))
-	if _, err := s.AddLink(ctx, c.ID, "agent-1", agentActor("agent-1"), domain.LinkSpec{Type: domain.LinkBuildsOn, To: d.ID}, stampAt(1)); err != nil {
+	if _, err := s.AddLink(ctx, c.ID, "agent-1", agentActor("agent-1"), domain.LinkSpec{Type: domain.LinkBuildsOn, To: d.ID}); err != nil {
 		t.Errorf("second builds_on parent: got = %v, want nil", err)
 	}
 }
@@ -364,23 +360,23 @@ func TestAddLinkFollowsTheOwnershipRuleAndIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	owned := register(t, s, pe, "agent-1", "owned", onRoot(pe))
 	target := register(t, s, pe, "agent-2", "target", onRoot(pe))
-	human, _, _, _, _, err := s.Register(ctx, NewHypothesis{Actor: userActor("user-ada"), PlatformExperimentID: pe, Text: "human idea", Links: onRoot(pe)})
+	human, _, _, _, err := s.Register(ctx, NewHypothesis{Actor: userActor("user-ada"), PlatformExperimentID: pe, Text: "human idea", Links: onRoot(pe)})
 	if err != nil {
 		t.Fatalf("Register human: got = %v, want nil", err)
 	}
 	link := domain.LinkSpec{Type: domain.LinkRelated, To: target.ID}
 
-	if _, err := s.AddLink(ctx, owned.ID, "agent-2", agentActor("agent-2"), link, stampAt(1)); !errors.Is(err, ErrNotOwner) {
+	if _, err := s.AddLink(ctx, owned.ID, "agent-2", agentActor("agent-2"), link); !errors.Is(err, ErrNotOwner) {
 		t.Errorf("link from another agent's hypothesis: got = %v, want %v", err, ErrNotOwner)
 	}
-	if _, err := s.AddLink(ctx, owned.ID, "", userActor("user-ada"), link, stampAt(1)); !errors.Is(err, ErrNotOwner) {
+	if _, err := s.AddLink(ctx, owned.ID, "", userActor("user-ada"), link); !errors.Is(err, ErrNotOwner) {
 		t.Errorf("human linking an agent's hypothesis: got = %v, want %v", err, ErrNotOwner)
 	}
-	first, err := s.AddLink(ctx, human.ID, "agent-2", agentActor("agent-2"), link, stampAt(1))
+	first, err := s.AddLink(ctx, human.ID, "agent-2", agentActor("agent-2"), link)
 	if err != nil || !first.Created || first.CreatedAt.IsZero() {
 		t.Fatalf("link from a human hypothesis: got = (%+v, %v), want a new link", first, err)
 	}
-	again, err := s.AddLink(ctx, human.ID, "agent-1", agentActor("agent-1"), link, stampAt(1))
+	again, err := s.AddLink(ctx, human.ID, "agent-1", agentActor("agent-1"), link)
 	if err != nil || again.Created {
 		t.Fatalf("repeated link: got = (%+v, %v), want an unchanged no-op", again, err)
 	}
@@ -461,12 +457,12 @@ func TestLinksAndGraphEdgesCarryWhoMadeThemAndWhen(t *testing.T) {
 	pe := testExperiment(t, s)
 	ctx := context.Background()
 	a := register(t, s, pe, "agent-1", "a", onRoot(pe))
-	human, _, _, _, _, err := s.Register(ctx, NewHypothesis{Actor: userActor("user-dana"),
+	human, _, _, _, err := s.Register(ctx, NewHypothesis{Actor: userActor("user-dana"),
 		PlatformExperimentID: pe, Text: "human idea", Links: onRoot(pe)})
 	if err != nil {
 		t.Fatalf("Register human: got = %v, want nil", err)
 	}
-	linked, err := s.AddLink(ctx, human.ID, "", userActor("user-dana"), domain.LinkSpec{Type: domain.LinkRelated, To: a.ID}, stampAt(1))
+	linked, err := s.AddLink(ctx, human.ID, "", userActor("user-dana"), domain.LinkSpec{Type: domain.LinkRelated, To: a.ID})
 	if err != nil {
 		t.Fatalf("AddLink: got = %v, want nil", err)
 	}
@@ -480,7 +476,7 @@ func TestLinksAndGraphEdgesCarryWhoMadeThemAndWhen(t *testing.T) {
 	}
 	// A key registers and links for an agent: the agent owns both, and the key is kept as who did it.
 	key := domain.Actor{Kind: domain.ActorKey, ID: "key-1"}
-	forAgent, out, _, _, _, err := s.Register(ctx, NewHypothesis{AgentID: "agent-2", Actor: key, PlatformExperimentID: pe, Text: "for the agent", Links: onRoot(pe)})
+	forAgent, out, _, _, err := s.Register(ctx, NewHypothesis{AgentID: "agent-2", Actor: key, PlatformExperimentID: pe, Text: "for the agent", Links: onRoot(pe)})
 	if err != nil || forAgent.AgentID != "agent-2" || forAgent.Actor != key || len(out) != 1 || out[0].Actor != key {
 		t.Fatalf("a key registering for an agent: got = %+v with links %+v, %v, want agent-2's by key-1", forAgent, out, err)
 	}
@@ -521,11 +517,11 @@ func TestAHypothesisFromBeforeActorsWereKeptReadsAsUnverified(t *testing.T) {
 	_, err := s.write(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		return collect(ctx, tx, `MATCH (o:Objective {id: $pe})
 CREATE (a:Hypothesis {id: $pe + '-agent', platform_experiment_id: $pe, agent_id: 'agent-1', source: 'agent',
-  text: 'an old agent idea', normalized_text: 'an old agent idea', status: 'open', created_at: $at, created_xid: 1})
+  text: 'an old agent idea', normalized_text: 'an old agent idea', status: 'open', created_at: $at})
 CREATE (p:Hypothesis {id: $pe + '-person', platform_experiment_id: $pe, agent_id: '', source: 'human', author: 'Grace',
-  text: 'an old human idea', normalized_text: 'an old human idea', status: 'open', created_at: $at, created_xid: 1})
-CREATE (a)-[:BUILDS_ON {agent_id: 'agent-1', created_at: $at, created_xid: 1}]->(o)
-CREATE (p)-[:BUILDS_ON {agent_id: '', author: 'Grace', created_at: $at, created_xid: 1}]->(o)`, map[string]any{"pe": pe, "at": now()})
+  text: 'an old human idea', normalized_text: 'an old human idea', status: 'open', created_at: $at})
+CREATE (a)-[:BUILDS_ON {agent_id: 'agent-1', created_at: $at}]->(o)
+CREATE (p)-[:BUILDS_ON {agent_id: '', author: 'Grace', created_at: $at}]->(o)`, map[string]any{"pe": pe, "at": now()})
 	})
 	if err != nil {
 		t.Fatalf("write old rows: %v", err)
@@ -565,7 +561,7 @@ CREATE (p)-[:BUILDS_ON {agent_id: '', author: 'Grace', created_at: $at, created_
 			t.Errorf("edge from %s: got actor %+v, want %+v", e.From, e.Actor, want[e.From])
 		}
 	}
-	_, _, _, _, _, err = s.Register(ctx, NewHypothesis{AgentID: "agent-2", Actor: agentActor("agent-2"), PlatformExperimentID: pe,
+	_, _, _, _, err = s.Register(ctx, NewHypothesis{AgentID: "agent-2", Actor: agentActor("agent-2"), PlatformExperimentID: pe,
 		Text: "an old human idea, restated", Links: onRoot(pe)})
 	var similar *SimilarError
 	if !errors.As(err, &similar) || len(similar.Similar) == 0 {
@@ -586,13 +582,13 @@ func TestUpdateStatusFollowsTheOwnershipRuleAndReportsChange(t *testing.T) {
 	ctx := context.Background()
 	h := register(t, s, pe, "agent-1", "a", onRoot(pe))
 
-	if _, _, err := s.UpdateStatus(ctx, h.ID, "agent-2", agentActor("agent-2"), domain.HypothesisRefuted, stampAt(1)); !errors.Is(err, ErrNotOwner) {
+	if _, _, err := s.UpdateStatus(ctx, h.ID, "agent-2", agentActor("agent-2"), domain.HypothesisRefuted); !errors.Is(err, ErrNotOwner) {
 		t.Errorf("non-owner: got = %v, want %v", err, ErrNotOwner)
 	}
-	if _, _, err := s.UpdateStatus(ctx, "nope", "agent-1", agentActor("agent-1"), domain.HypothesisRefuted, stampAt(1)); !errors.Is(err, ErrNotFound) {
+	if _, _, err := s.UpdateStatus(ctx, "nope", "agent-1", agentActor("agent-1"), domain.HypothesisRefuted); !errors.Is(err, ErrNotFound) {
 		t.Errorf("unknown: got = %v, want %v", err, ErrNotFound)
 	}
-	got, changed, err := s.UpdateStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), domain.HypothesisRefuted, stampAt(1))
+	got, changed, err := s.UpdateStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), domain.HypothesisRefuted)
 	if err != nil || !changed || got.Status != domain.HypothesisRefuted || got.StatusChangedAt == nil {
 		t.Fatalf("owner: got = (%+v, %v, %v), want refuted with status_changed_at", got, changed, err)
 	}
@@ -600,12 +596,12 @@ func TestUpdateStatusFollowsTheOwnershipRuleAndReportsChange(t *testing.T) {
 		t.Fatalf("who gave the verdict: got = %+v before and %+v after, want nobody and then agent-1", h.StatusActor, got.StatusActor)
 	}
 	// Saying again what it already is changes nothing, whoever says it.
-	again, changed, err := s.UpdateStatus(ctx, h.ID, "agent-1", userActor("user-ada"), domain.HypothesisRefuted, stampAt(1))
+	again, changed, err := s.UpdateStatus(ctx, h.ID, "agent-1", userActor("user-ada"), domain.HypothesisRefuted)
 	if err != nil || changed || *again.StatusActor != agentActor("agent-1") {
 		t.Errorf("same status again: got = (%+v, %v, %v), want it unchanged and still agent-1's verdict", again.StatusActor, changed, err)
 	}
 	// A person rules for the owning agent: the verdict is the agent's and the person gave it.
-	reopened, _, err := s.UpdateStatus(ctx, h.ID, "agent-1", userActor("user-ada"), domain.HypothesisInconclusive, stampAt(1))
+	reopened, _, err := s.UpdateStatus(ctx, h.ID, "agent-1", userActor("user-ada"), domain.HypothesisInconclusive)
 	if err != nil || reopened.AgentID != "agent-1" || *reopened.StatusActor != userActor("user-ada") {
 		t.Errorf("a person ruling for the agent: got = %+v, %v, want agent-1's hypothesis with user-ada as status actor", reopened, err)
 	}
@@ -613,15 +609,15 @@ func TestUpdateStatusFollowsTheOwnershipRuleAndReportsChange(t *testing.T) {
 		t.Errorf("read back: got = %+v, %v, want registered by agent-1 and ruled by user-ada", read, err)
 	}
 	// Nobody owns this one, so anyone settles it, naming no agent.
-	unowned, _, _, _, _, err := s.Register(ctx, NewHypothesis{Actor: userActor("user-ada"), PlatformExperimentID: pe, Text: "nobody's", Links: onRoot(pe)})
+	unowned, _, _, _, err := s.Register(ctx, NewHypothesis{Actor: userActor("user-ada"), PlatformExperimentID: pe, Text: "nobody's", Links: onRoot(pe)})
 	if err != nil {
 		t.Fatalf("Register unowned: %v", err)
 	}
 	key := domain.Actor{Kind: domain.ActorKey, ID: "key-1"}
-	if settled, _, err := s.UpdateStatus(ctx, unowned.ID, "", key, domain.HypothesisInconclusive, stampAt(1)); err != nil || *settled.StatusActor != key {
+	if settled, _, err := s.UpdateStatus(ctx, unowned.ID, "", key, domain.HypothesisInconclusive); err != nil || *settled.StatusActor != key {
 		t.Errorf("settling an unowned hypothesis as nobody: got = %+v, %v, want key-1 as status actor", settled, err)
 	}
-	if _, _, err := s.UpdateStatus(ctx, h.ID, "", key, domain.HypothesisOpen, stampAt(1)); !errors.Is(err, ErrNotOwner) {
+	if _, _, err := s.UpdateStatus(ctx, h.ID, "", key, domain.HypothesisOpen); !errors.Is(err, ErrNotOwner) {
 		t.Errorf("settling an agent's hypothesis as nobody: got = %v, want %v", err, ErrNotOwner)
 	}
 
@@ -832,135 +828,19 @@ func TestAPropertyOfTheWrongTypeFailsTheRead(t *testing.T) {
 	}
 }
 
-// Replay is what turns a dropped /watch connection into a delay rather than a gap. Hypothesis
-// events are derived from the positions each graph write was stamped with, and links given at
-// registration ride on hypothesis.new, so replay must not invent a hypothesis.link for them. A
-// hypothesis.new says what kind of caller registered it.
-func TestReplayDerivesHypothesisEventsFromThePositionsTheGraphStores(t *testing.T) {
-	s := testStore(t)
-	pe := testExperiment(t, s)
-	ctx := context.Background()
-	registerAt := func(agentID string, actor domain.Actor, text string, links []domain.LinkSpec, position int64) *domain.Hypothesis {
-		h, _, _, _, _, err := s.Register(ctx, NewHypothesis{AgentID: agentID, Actor: actor,
-			PlatformExperimentID: pe, Text: text, Links: links, Stamp: stampAt(position)})
-		if err != nil {
-			t.Fatalf("Register %q: got = %v, want nil", text, err)
-		}
-		return h
-	}
-	a := registerAt("agent-1", domain.Actor{Kind: domain.ActorStaff}, "a", onRoot(pe), 11)
-	b := registerAt("agent-2", agentActor("agent-2"), "b", []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: a.ID}}, 10)
-	if _, err := s.AddLink(ctx, b.ID, "agent-2", agentActor("agent-2"), domain.LinkSpec{Type: domain.LinkContradicts, To: a.ID}, stampAt(12)); err != nil {
-		t.Fatalf("AddLink: got = %v, want nil", err)
-	}
-	if _, _, err := s.UpdateStatus(ctx, a.ID, "agent-1", agentActor("agent-1"), domain.HypothesisConfirmed, stampAt(13)); err != nil {
-		t.Fatalf("UpdateStatus: got = %v, want nil", err)
-	}
-
-	events, err := s.ReplayEvents(ctx, pe, 10)
-	if err != nil {
-		t.Fatalf("ReplayEvents: got = %v, want nil", err)
-	}
-	want := map[domain.Event]bool{
-		{Kind: domain.EventHypothesisNew, Subject: a.ID, Value: "staff", PlatformExperimentID: pe, AgentID: "agent-1", Position: 11}:                      true,
-		{Kind: domain.EventHypothesisNew, Subject: b.ID, Value: "agent", PlatformExperimentID: pe, AgentID: "agent-2", Position: 10}:                      true,
-		{Kind: domain.EventHypothesisLink, Subject: b.ID, Value: "contradicts", Detail: a.ID, PlatformExperimentID: pe, AgentID: "agent-2", Position: 12}: true,
-		{Kind: domain.EventHypothesisStatus, Subject: a.ID, Value: "confirmed", PlatformExperimentID: pe, AgentID: "agent-1", Position: 13}:               true,
-	}
-	if len(events) != len(want) {
-		t.Errorf("replayed events: got %d (%+v), want %d", len(events), events, len(want))
-	}
-	for _, e := range events {
-		if !want[e] {
-			t.Errorf("unexpected replayed event %+v", e)
-		}
-	}
-
-	at, err := s.ReplayEvents(ctx, pe, 13)
-	if err != nil || len(at) != 1 || at[0].Kind != domain.EventHypothesisStatus {
-		t.Errorf("replay from the last write's position: got = (%v, %v), want that write's hypothesis.status", at, err)
-	}
-	later, err := s.ReplayEvents(ctx, pe, 14)
-	if err != nil || len(later) != 0 {
-		t.Errorf("replay after the last write: got = (%v, %v), want nothing", later, err)
-	}
-}
-
-// A write commits in the graph before its Postgres transaction does, so that transaction can still
-// abort and its events go unsent. Repeating the write then announces again, at the repeat's
-// position, which is also where replay finds it; repeating a write whose events were sent
-// announces nothing.
-func TestRepeatingAWriteWhoseTransactionAbortedAnnouncesItAgain(t *testing.T) {
-	s := testStore(t)
-	pe := testExperiment(t, s)
-	ctx := context.Background()
-	aborted := map[int64]bool{20: true}
-	stamp := func(position int64) domain.Stamp {
-		return domain.Stamp{Position: position, Aborted: func(p int64) (bool, error) { return aborted[p], nil }}
-	}
-	parent := register(t, s, pe, "agent-1", "warmup helps", onRoot(pe))
-	n := NewHypothesis{AgentID: "agent-1", PlatformExperimentID: pe,
-		Text: "batch size 512 beats 128 on the small model", Links: []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: parent.ID}}}
-	link := domain.LinkSpec{Type: domain.LinkRelated, To: parent.ID}
-
-	n.Stamp = stamp(20)
-	h, _, _, announce, _, err := s.Register(ctx, n)
-	if err != nil || !announce {
-		t.Fatalf("Register: got = (announce=%v, %v), want (true, nil)", announce, err)
-	}
-	if _, announce, err := s.UpdateStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), domain.HypothesisConfirmed, stamp(20)); err != nil || !announce {
-		t.Fatalf("UpdateStatus: got = (announce=%v, %v), want (true, nil)", announce, err)
-	}
-	if result, err := s.AddLink(ctx, h.ID, "agent-1", agentActor("agent-1"), link, stamp(20)); err != nil || !result.Announce {
-		t.Fatalf("AddLink: got = (%+v, %v), want an announced link", result, err)
-	}
-
-	n.Stamp = stamp(21)
-	if _, _, existed, announce, _, err := s.Register(ctx, n); err != nil || !existed || !announce {
-		t.Errorf("Register again after an abort: got = (existed=%v, announce=%v, %v), want (true, true, nil)", existed, announce, err)
-	}
-	if _, announce, err := s.UpdateStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), domain.HypothesisConfirmed, stamp(21)); err != nil || !announce {
-		t.Errorf("UpdateStatus again after an abort: got = (announce=%v, %v), want (true, nil)", announce, err)
-	}
-	if result, err := s.AddLink(ctx, h.ID, "agent-1", agentActor("agent-1"), link, stamp(21)); err != nil || result.Created || !result.Announce {
-		t.Errorf("AddLink again after an abort: got = (%+v, %v), want an announced existing link", result, err)
-	}
-	events, err := s.ReplayEvents(ctx, pe, 20)
-	if err != nil || len(events) != 3 {
-		t.Fatalf("ReplayEvents: got = (%+v, %v), want hypothesis.new, hypothesis.status and hypothesis.link", events, err)
-	}
-	for _, e := range events {
-		if e.Position != 21 {
-			t.Errorf("replayed %s: got = position %d, want 21, the repeat's", e.Kind, e.Position)
-		}
-	}
-
-	n.Stamp = stamp(22)
-	if _, _, _, announce, _, err := s.Register(ctx, n); err != nil || announce {
-		t.Errorf("Register again after a commit: got = (announce=%v, %v), want (false, nil)", announce, err)
-	}
-	if _, announce, err := s.UpdateStatus(ctx, h.ID, "agent-1", agentActor("agent-1"), domain.HypothesisConfirmed, stamp(22)); err != nil || announce {
-		t.Errorf("UpdateStatus again after a commit: got = (announce=%v, %v), want (false, nil)", announce, err)
-	}
-	if result, err := s.AddLink(ctx, h.ID, "agent-1", agentActor("agent-1"), link, stamp(22)); err != nil || result.Announce {
-		t.Errorf("AddLink again after a commit: got = (%+v, %v), want nothing announced", result, err)
-	}
-}
-
-// A link given at registration rides on hypothesis.new, so re-adding it never announces a link,
-// even when the registration's transaction aborted.
+// A link given at registration rides on hypothesis.new, so re-adding it is no later link to
+// announce.
 func TestReAddingARegistrationLinkAnnouncesNothing(t *testing.T) {
 	s := testStore(t)
 	pe := testExperiment(t, s)
 	ctx := context.Background()
-	h, _, _, _, _, err := s.Register(ctx, NewHypothesis{AgentID: "agent-1",
-		PlatformExperimentID: pe, Text: "warmup helps", Links: onRoot(pe), Stamp: stampAt(30)})
+	h, _, _, _, err := s.Register(ctx, NewHypothesis{AgentID: "agent-1",
+		PlatformExperimentID: pe, Text: "warmup helps", Links: onRoot(pe)})
 	if err != nil {
 		t.Fatalf("Register: got = %v, want nil", err)
 	}
-	abortedAll := domain.Stamp{Position: 31, Aborted: func(int64) (bool, error) { return true, nil }}
-	if result, err := s.AddLink(ctx, h.ID, "agent-1", agentActor("agent-1"), onRoot(pe)[0], abortedAll); err != nil || result.Announce {
-		t.Errorf("AddLink of the registration link: got = (%+v, %v), want nothing announced", result, err)
+	if result, err := s.AddLink(ctx, h.ID, "agent-1", agentActor("agent-1"), onRoot(pe)[0]); err != nil || result.Created || result.Later {
+		t.Errorf("AddLink of the registration link: got = (%+v, %v), want an existing registration link", result, err)
 	}
 }
 
@@ -1136,7 +1016,7 @@ func TestConcernsAgentFindsActivityOnTheAgentsOwnHypotheses(t *testing.T) {
 	theirs := register(t, s, pe, "agent-2", "gradient clipping stabilises training", onRoot(pe))
 	child := register(t, s, pe, "agent-2", "a smoothing factor of 0.2 beats 0.1",
 		[]domain.LinkSpec{{Type: domain.LinkBuildsOn, To: mine.ID}})
-	if _, err := s.AddLink(context.Background(), theirs.ID, "agent-2", agentActor("agent-2"), domain.LinkSpec{Type: domain.LinkRelated, To: mine.ID}, stampAt(1)); err != nil {
+	if _, err := s.AddLink(context.Background(), theirs.ID, "agent-2", agentActor("agent-2"), domain.LinkSpec{Type: domain.LinkRelated, To: mine.ID}); err != nil {
 		t.Fatalf("AddLink: %v", err)
 	}
 
@@ -1202,7 +1082,7 @@ func TestOpenPersonIdeasListFirstAndAreCounted(t *testing.T) {
 	ctx := context.Background()
 	registerAs := func(agentID string, actor domain.Actor, text string, links []domain.LinkSpec) *domain.Hypothesis {
 		t.Helper()
-		h, _, _, _, _, err := s.Register(ctx, NewHypothesis{AgentID: agentID, Actor: actor, PlatformExperimentID: pe, Text: text, Links: links})
+		h, _, _, _, err := s.Register(ctx, NewHypothesis{AgentID: agentID, Actor: actor, PlatformExperimentID: pe, Text: text, Links: links})
 		if err != nil {
 			t.Fatalf("Register %q: got = %v, want nil", text, err)
 		}
@@ -1214,7 +1094,7 @@ func TestOpenPersonIdeasListFirstAndAreCounted(t *testing.T) {
 	byPerson := registerAs("", userActor("u2"), "try a smaller dictionary", []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: open.ID}})
 	child := registerAs("agent-1", agentActor("agent-1"), "arithmetic coding with a static model",
 		[]domain.LinkSpec{{Type: domain.LinkBuildsOn, To: refined.ID}})
-	if _, _, err := s.UpdateStatus(ctx, settled.ID, "", userActor("u1"), domain.HypothesisRefuted, stampAt(1)); err != nil {
+	if _, _, err := s.UpdateStatus(ctx, settled.ID, "", userActor("u1"), domain.HypothesisRefuted); err != nil {
 		t.Fatalf("UpdateStatus: got = %v, want nil", err)
 	}
 	agents := registerAs("agent-1", agentActor("agent-1"), "a bigger batch helps", onRoot(pe))
