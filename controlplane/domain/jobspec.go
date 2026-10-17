@@ -5,7 +5,6 @@ import (
 	"regexp"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
-	"github.com/scaleresearch/hypothesisloop/contract/jobenv"
 )
 
 // The job vocabulary is the cluster contract's own (clusterapi).
@@ -110,9 +109,6 @@ func ValidateSecretEnv(j JobSpec, secret map[string]string) error {
 		if value == "" {
 			return fmt.Errorf("job.secret_env[%q] is empty", name)
 		}
-		if jobenv.Reserved(name) {
-			return reservedEnvError("job.secret_env", name)
-		}
 		if _, open := j.Env[name]; open {
 			return fmt.Errorf("%q is in both job.env and job.secret_env: state it in one", name)
 		}
@@ -125,38 +121,6 @@ func ValidateSecretEnv(j JobSpec, secret map[string]string) error {
 	}
 	if size > MaxSecretEnvBytes {
 		return fmt.Errorf("job.secret_env is %d bytes of names and values, more than the %d allowed", size, MaxSecretEnvBytes)
-	}
-	return nil
-}
-
-// ValidateEnv refuses a job whose env or a group's env names a variable the platform sets, which
-// the launch script and the platform's own tools read.
-func ValidateEnv(j JobSpec) error {
-	for name := range j.Env {
-		if jobenv.Reserved(name) {
-			return reservedEnvError("job.env", name)
-		}
-	}
-	for _, g := range j.Groups {
-		for name := range g.Env {
-			if jobenv.Reserved(name) {
-				return reservedEnvError(fmt.Sprintf("job.groups[%q].env", g.Name), name)
-			}
-		}
-	}
-	return nil
-}
-
-func reservedEnvError(field, name string) error {
-	return fmt.Errorf("%s may not set %s: the platform sets it on every job", field, name)
-}
-
-// ValidateCommand refuses a job one of whose nodes has no command to run in its code.
-func ValidateCommand(j JobSpec) error {
-	for _, group := range j.NodeGroups() {
-		if len(group.Command) == 0 && len(j.Command) == 0 {
-			return fmt.Errorf("job.command is required: the command every node runs in the job's code, checked out in %s, as [\"python\", \"train.py\"]", JobCodeDir)
-		}
 	}
 	return nil
 }

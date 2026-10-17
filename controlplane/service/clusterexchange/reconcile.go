@@ -105,23 +105,21 @@ func (s *Service) Reconcile(ctx context.Context, clusterName, agentVersion strin
 	}
 
 	// The scheduler knows a connected cluster by the id its runtime reports, so an id is one cluster's and
-	// a cluster has one. A runtime stating another is refused before anything it reports is
+	// a cluster has one. A runtime stating none or another is refused before anything it reports is
 	// recorded.
-	if report.ClusterID != "" {
-		if err := domain.ValidateClusterID(report.ClusterID); err != nil {
-			return clusterapi.ReconcileAnswer{}, refusal.Invalid(refusal.ReasonInvalidRequest, err.Error()).On("cluster_id")
-		}
-		switch err := s.store.BindReportedID(ctx, clusterName, report.ClusterID); {
-		case errors.Is(err, db.ErrClusterNotFound):
-			return clusterapi.ReconcileAnswer{}, auth.NotFound("cluster")
-		case errors.Is(err, db.ErrClusterIDBound):
-			return clusterapi.ReconcileAnswer{}, refusal.Refuse(http.StatusConflict, "cluster_identity_conflict", "cluster_id "+report.ClusterID+" is the identity of another registered cluster")
-		case errors.Is(err, db.ErrClusterIDChanged):
-			return clusterapi.ReconcileAnswer{}, refusal.Refuse(http.StatusConflict, "cluster_identity_conflict", "cluster "+clusterName+" is bound to another cluster_id than the "+report.ClusterID+
-				" this runtime reports: if its machines were rebuilt, its owner forgets the old identity (hl cluster forget-identity "+clusterName+")")
-		case err != nil:
-			return clusterapi.ReconcileAnswer{}, auth.Internal(s.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
-		}
+	if err := domain.ValidateClusterID(report.ClusterID); err != nil {
+		return clusterapi.ReconcileAnswer{}, refusal.Invalid(refusal.ReasonInvalidRequest, err.Error()).On("cluster_id")
+	}
+	switch err := s.store.BindReportedID(ctx, clusterName, report.ClusterID); {
+	case errors.Is(err, db.ErrClusterNotFound):
+		return clusterapi.ReconcileAnswer{}, auth.NotFound("cluster")
+	case errors.Is(err, db.ErrClusterIDBound):
+		return clusterapi.ReconcileAnswer{}, refusal.Refuse(http.StatusConflict, "cluster_identity_conflict", "cluster_id "+report.ClusterID+" is the identity of another registered cluster")
+	case errors.Is(err, db.ErrClusterIDChanged):
+		return clusterapi.ReconcileAnswer{}, refusal.Refuse(http.StatusConflict, "cluster_identity_conflict", "cluster "+clusterName+" is bound to another cluster_id than the "+report.ClusterID+
+			" this runtime reports: if its machines were rebuilt, its owner forgets the old identity (hl cluster forget-identity "+clusterName+")")
+	case err != nil:
+		return clusterapi.ReconcileAnswer{}, auth.Internal(s.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
 	}
 
 	if err := s.metrics.RecordClusterCapacitySnapshot(ctx, metricsdb.ClusterCapacitySnapshot{

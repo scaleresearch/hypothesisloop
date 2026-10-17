@@ -34,7 +34,6 @@ func validSubmission() *domain.Experiment {
 		AcceleratorType:        h100,
 		EstimatedDurationHours: 1,
 		Job: domain.JobSpec{
-			Command:          []string{"python", "train.py"},
 			AcceleratorCount: 1,
 			AcceleratorType:  h100,
 			CPU:              "2",
@@ -367,47 +366,5 @@ func TestASecretEnvNameAlsoSetInTheOpenIsRejected(t *testing.T) {
 	exp.SecretEnv = map[string]string{"HF_TOKEN": "secret"}
 	if err := validate(t, exp); err != nil {
 		t.Fatalf("a job with a secret_env of its own names: got = %v, want accepted", err)
-	}
-}
-
-// Every node runs the job's command in its code, so each states one: the job's, or its group's.
-func TestAJobWithNoCommandIsRefused(t *testing.T) {
-	exp := validSubmission()
-	exp.Job.Command = nil
-	var refused *AdmissionError
-	if !errors.As(validate(t, exp), &refused) || refused.Reason != ReasonRequired || refused.Field != "job.command" {
-		t.Fatalf("a job with no command: %+v", refused)
-	}
-	grouped := validSubmission()
-	grouped.Job.Command, grouped.Job.CPU, grouped.Job.Memory, grouped.Job.Storage, grouped.Job.AcceleratorCount = nil, "", "", "", 0
-	grouped.Job.Groups = []domain.JobGroup{{Name: "learner", Replicas: 1, CPU: "2", Memory: "8Gi", Storage: "10Gi", AcceleratorCount: 1, Command: []string{"python", "learn.py"}}}
-	if err := validate(t, grouped); err != nil {
-		t.Fatalf("a grouped job whose groups each state a command: %v", err)
-	}
-}
-
-// The launch script fetches the job's code with the token and repository the platform sets, and
-// keeps the command for the stop grace it sets, so a job may set none of the names the platform
-// does, in the open or as a secret.
-func TestAJobThatSetsAVariableThePlatformSetsIsRefused(t *testing.T) {
-	for _, name := range []string{"HYPOTHESISLOOP_TOKEN", "HYPOTHESISLOOP_GIT_URL", "HYPOTHESISLOOP_CODE_REF", "HYPOTHESISLOOP_STOP_GRACE", "AWS_SECRET_ACCESS_KEY", "MASTER_ADDR"} {
-		open := validSubmission()
-		open.Job.Env = map[string]string{name: "x"}
-		mustReject(t, open, "job.env may not set "+name)
-
-		secret := validSubmission()
-		secret.SecretEnv = map[string]string{name: "x"}
-		mustReject(t, secret, "job.secret_env may not set "+name)
-	}
-	grouped := validSubmission()
-	grouped.Job.CPU, grouped.Job.Memory, grouped.Job.Storage, grouped.Job.AcceleratorCount = "", "", "", 0
-	grouped.Job.Groups = []domain.JobGroup{{Name: "learner", Replicas: 1, CPU: "2", Memory: "8Gi", Storage: "10Gi", AcceleratorCount: 1, Env: map[string]string{"HYPOTHESISLOOP_TOKEN": "x"}}}
-	mustReject(t, grouped, `job.groups["learner"].env may not set HYPOTHESISLOOP_TOKEN`)
-
-	fine := validSubmission()
-	fine.Job.Env = map[string]string{"LR": "0.1"}
-	fine.SecretEnv = map[string]string{"HF_TOKEN": "x"}
-	if err := validate(t, fine); err != nil {
-		t.Fatalf("a job with its own variables: %v", err)
 	}
 }

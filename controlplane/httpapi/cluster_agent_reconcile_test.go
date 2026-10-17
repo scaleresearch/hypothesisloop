@@ -229,7 +229,7 @@ func TestReconcileBindsTheReportedIdentityBeforeItRecordsAnything(t *testing.T) 
 
 	w.store.bindErr = nil
 	binds := len(w.store.binds)
-	for _, invalid := range []string{"has/slash", "has space", strings.Repeat("a", domain.MaxClusterIDLength+1)} {
+	for _, invalid := range []string{"", "has/slash", "has space", strings.Repeat("a", domain.MaxClusterIDLength+1)} {
 		rec := w.reconcile(t, "of-a", idleReport(invalid))
 		if rec.Code != http.StatusUnprocessableEntity || len(w.store.binds) != binds || w.metricsWrites.Load() != written {
 			t.Errorf("cluster_id %q: got = %d %s with %d binds, want 422 before anything is stored", invalid, rec.Code, rec.Body, len(w.store.binds)-binds)

@@ -255,13 +255,22 @@ func (c *JobWorkloadClient) compileJob(exp *clusterapi.DesiredJob, placement Acc
 		resources.Limits[corev1.ResourceName(name)] = q
 	}
 
-	vars, err := workloadenv.Vars(exp, spec, group, c.apiURL, func(url string) string { return url })
+	platform, err := workloadenv.Platform(exp, group, c.apiURL, func(url string) string { return url })
 	if err != nil {
 		return nil, fmt.Errorf("workload: %w", err)
 	}
-	env := make([]corev1.EnvVar, 0, len(vars))
-	for _, v := range vars {
+	env := make([]corev1.EnvVar, 0, len(platform))
+	for _, v := range platform {
 		env = append(env, corev1.EnvVar{Name: v.Name, Value: v.Value})
+	}
+	merged := workloadenv.Job(spec, group)
+	envNames := make([]string, 0, len(merged))
+	for name := range merged {
+		envNames = append(envNames, name)
+	}
+	sort.Strings(envNames)
+	for _, k := range envNames {
+		env = append(env, corev1.EnvVar{Name: k, Value: merged[k]})
 	}
 	if distributed {
 		// HYPOTHESISLOOP_MASTER_ADDR is node 0 of the job's FIRST group — its stable DNS name,
@@ -287,10 +296,10 @@ func (c *JobWorkloadClient) compileJob(exp *clusterapi.DesiredJob, placement Acc
 			// Standard unprefixed names torch.distributed.init_process_group(env://) and
 			// torchrun read directly, alongside the HYPOTHESISLOOP_-prefixed vars above. One
 			// process per pod, so LOCAL_RANK is always 0.
-			corev1.EnvVar{Name: jobenv.TorchLocalRank, Value: "0"},
-			corev1.EnvVar{Name: jobenv.TorchWorldSize, Value: worldSize},
-			corev1.EnvVar{Name: jobenv.TorchMasterAddr, Value: masterAddr},
-			corev1.EnvVar{Name: jobenv.TorchMasterPort, Value: masterPort},
+			corev1.EnvVar{Name: "LOCAL_RANK", Value: "0"},
+			corev1.EnvVar{Name: "WORLD_SIZE", Value: worldSize},
+			corev1.EnvVar{Name: "MASTER_ADDR", Value: masterAddr},
+			corev1.EnvVar{Name: "MASTER_PORT", Value: masterPort},
 		)
 		if plan.grouped {
 			// A grouped job's global rank is this group's offset plus the pod's index within the
@@ -312,7 +321,7 @@ func (c *JobWorkloadClient) compileJob(exp *clusterapi.DesiredJob, placement Acc
 		} else {
 			env = append(env,
 				corev1.EnvVar{Name: jobenv.Rank, ValueFrom: rankFieldRef},
-				corev1.EnvVar{Name: jobenv.TorchRank, ValueFrom: rankFieldRef},
+				corev1.EnvVar{Name: "RANK", ValueFrom: rankFieldRef},
 			)
 		}
 	}

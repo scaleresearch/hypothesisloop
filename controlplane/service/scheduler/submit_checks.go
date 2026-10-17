@@ -75,10 +75,15 @@ func shareOutlook(pe *domain.PlatformExperiment) string {
 
 // takeImage runs exp in the image its platform experiment records now, on nodes of that image's
 // architecture, which its node selector states from here on: a job runs only where its image
-// does.
+// does. Every node runs the job's command in its code, so each states one.
 func takeImage(pe *domain.PlatformExperiment, exp *domain.Experiment) error {
 	if pe.Image == nil {
 		return &AdmissionError{Reason: domain.ReasonNoExperimentImage, Message: fmt.Sprintf("platform experiment %s records no image for its jobs to run in: record one with hl image set REF, a base image that has what the code needs or one built from .hypothesisloop/Dockerfile and pushed (hl image credentials)", pe.ID)}
+	}
+	for _, group := range exp.Job.NodeGroups() {
+		if len(group.Command) == 0 && len(exp.Job.Command) == 0 {
+			return &AdmissionError{Reason: ReasonRequired, Field: "job.command", Message: "job.command is required: the command every node runs in the job's code, checked out in " + domain.JobCodeDir + ", as [\"python\", \"train.py\"]"}
+		}
 	}
 	if stated, ok := exp.Job.NodeSelector[domain.NodeArchitectureLabel]; ok && stated != pe.Image.Architecture {
 		return &AdmissionError{Reason: ReasonMalformed, Field: "job.node_selector", Message: fmt.Sprintf("job.node_selector states %s %s, and the image of platform experiment %s, %s, runs on %s", domain.NodeArchitectureLabel, stated, pe.ID, pe.Image.Image, pe.Image.Architecture)}

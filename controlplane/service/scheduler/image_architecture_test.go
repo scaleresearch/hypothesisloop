@@ -69,6 +69,11 @@ func TestAJobOfAPlatformExperimentWithoutAnImageIsRefused(t *testing.T) {
 	if refused.Reason != domain.ReasonNoExperimentImage || !strings.Contains(refused.Message, "hl image set") {
 		t.Fatalf("refused %+v, want %s naming hl image set", refused, domain.ReasonNoExperimentImage)
 	}
+	noCommand := humanIdeaSubmission()
+	noCommand.Job.Command = nil
+	if refused := admissionReason(t, takeImage(imagePE(testExperimentImage), noCommand)); refused.Reason != ReasonRequired || refused.Field != "job.command" {
+		t.Fatalf("a job with no command: %+v", refused)
+	}
 }
 
 // archWorkload is orgWorkload whose nodes carry the architecture label each runtime reports: a
