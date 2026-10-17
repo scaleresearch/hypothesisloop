@@ -178,10 +178,10 @@ runtimes:
 #   repository  an image this deployment builds and pushes: its name under runtimes.registry,
 #               at runtimes.image_tag. `make images` builds the bare one, `make job-images` the
 #               others, each the upstream image named below with hl, hl-clone, git and uv added
-#               (infra/images/job/Dockerfile).
+#               (runtime/job/build/Dockerfile.job).
 #   image       a whole reference instead, for an image built elsewhere. One of the two.
 #   environment_base  beside repository, the same image without hl and hl-clone, under
-#               runtimes.registry at runtimes.image_tag (infra/images/job/Dockerfile.base). An
+#               runtimes.registry at runtimes.image_tag (runtime/job/build/Dockerfile.job-base). An
 #               environment of a job on the image is built on it and gets hl and hl-clone from
 #               the image last, so what its file installs stays cached while only they change.
 #               Left out, an environment is built on the image itself.

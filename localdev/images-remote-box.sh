@@ -41,8 +41,8 @@ spec() {
   args=() context=. dockerfile=""
   case "$1" in
     experimentator-base) dockerfile=agents/experimentator/Dockerfile.base ;;
-    job-base) dockerfile=images/job/Dockerfile.base ;;
-    job) dockerfile=images/job/Dockerfile; args=(--build-arg "BASE=$(image job-base)") ;;
+    job-base) dockerfile=runtime/job/build/Dockerfile.job-base ;;
+    job) dockerfile=runtime/job/build/Dockerfile.job; args=(--build-arg "BASE=$(image job-base)") ;;
     control-service | metrics-service) dockerfile="controlplane/build/Dockerfile.$1" ;;
     cluster-agent | node-agent) dockerfile="runtime/k8s/build/Dockerfile.$1"; args=(--build-arg "VERSION=${tag}") ;;
     bare-agent) dockerfile=runtime/bare-metal/build/Dockerfile.bare-agent; args=(--build-arg "VERSION=${tag}") ;;
@@ -52,9 +52,9 @@ spec() {
       for entry in ${job_bases}; do
         IFS='=' read -r base_name base torch <<<"${entry}"
         if [[ "$1" == "${base_name}-base" ]]; then
-          dockerfile=images/job/Dockerfile.base; args=(--build-arg "BASE=${base}" --build-arg "TORCH_CPU=${torch}")
+          dockerfile=runtime/job/build/Dockerfile.job-base; args=(--build-arg "BASE=${base}" --build-arg "TORCH_CPU=${torch}")
         elif [[ "$1" == "${base_name}" ]]; then
-          dockerfile=images/job/Dockerfile; args=(--build-arg "BASE=$(image "${base_name}-base")")
+          dockerfile=runtime/job/build/Dockerfile.job; args=(--build-arg "BASE=$(image "${base_name}-base")")
         fi
       done
       ;;

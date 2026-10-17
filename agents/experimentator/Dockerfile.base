@@ -77,7 +77,7 @@ COPY examples $WORKLOAD_SAMPLES
 COPY controlplane/settings/examples/experiment-submission.yaml $WORKLOAD_SAMPLES/
 # An agent reads the code a job ran with `hl-clone <code_ref> <dir>`, so it is a command here as
 # it is in the job image.
-COPY images/job/hl-clone /usr/local/bin/hl-clone
+COPY runtime/job/hl-clone /usr/local/bin/hl-clone
 
 # The `hl` CLI, built in the hl-builder stage above: the one way the agent acts on the platform.
 COPY --from=hl-builder /out/hl /usr/local/bin/hl

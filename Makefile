@@ -371,8 +371,8 @@ IMAGE_TARGETS := control-service:controlplane/build/Dockerfile.control-service:.
 	node-agent:runtime/k8s/build/Dockerfile.node-agent:. \
 	cluster-agent:runtime/k8s/build/Dockerfile.cluster-agent:. \
 	bare-agent:runtime/bare-metal/build/Dockerfile.bare-agent:. \
-	job-base:images/job/Dockerfile.base:. \
-	job:images/job/Dockerfile:. \
+	job-base:runtime/job/build/Dockerfile.job-base:. \
+	job:runtime/job/build/Dockerfile.job:. \
 	workload:tests/workloads/generic/Dockerfile.train:tests/workloads/generic
 
 # The Go images build with -mod=vendor from a vendor/ that is not tracked, so it is made here
@@ -401,15 +401,15 @@ locked-images: check-tag $(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),registry-u
 # The job images that carry a framework, built and pushed to $(REGISTRY), which a local cluster
 # pulls them from. Apart from `images` because each pulls gigabytes. The deployment's registry
 # gets them from the maintainers' deployment tooling.
-include images/job/bases.mk
+include runtime/job/build/bases.mk
 
 job-images: check-tag
 	@for entry in $(JOB_IMAGE_BASES); do \
 		name="$${entry%%=*}"; rest="$${entry#*=}"; base="$${rest%%=*}"; torch=""; \
 		case "$$rest" in *=*) torch="$${rest#*=}";; esac; \
 		echo "==> building hypothesisloop-$$name:$(TAG) from $$base$${torch:+ with CPU torch $$torch}"; \
-		podman build --platform $(IMAGE_PLATFORM) --build-arg BASE="$$base" --build-arg TORCH_CPU="$$torch" -f images/job/Dockerfile.base -t "$(REGISTRY)/hypothesisloop-$$name-base:$(TAG)" . || exit 1; \
-		podman build --platform $(IMAGE_PLATFORM) --build-arg BASE="$(REGISTRY)/hypothesisloop-$$name-base:$(TAG)" -f images/job/Dockerfile -t "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" . || exit 1; \
+		podman build --platform $(IMAGE_PLATFORM) --build-arg BASE="$$base" --build-arg TORCH_CPU="$$torch" -f runtime/job/build/Dockerfile.job-base -t "$(REGISTRY)/hypothesisloop-$$name-base:$(TAG)" . || exit 1; \
+		podman build --platform $(IMAGE_PLATFORM) --build-arg BASE="$(REGISTRY)/hypothesisloop-$$name-base:$(TAG)" -f runtime/job/build/Dockerfile.job -t "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" . || exit 1; \
 		$(REGISTRY_LOGIN) || exit 1; \
 		podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-$$name-base:$(TAG)" || exit 1; \
 		podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-$$name:$(TAG)" || exit 1; \

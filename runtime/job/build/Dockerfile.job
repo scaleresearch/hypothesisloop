@@ -1,4 +1,4 @@
-# BASE is the job image without the platform's tools (Dockerfile.base), built first.
+# BASE is the job image without the platform's tools (Dockerfile.job-base), built first.
 ARG BASE
 
 # The image a job's command runs in on rented compute. It carries the platform's client and git
@@ -17,4 +17,4 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/hl ./cli
 
 FROM ${BASE}
 COPY --from=hl-builder /out/hl /usr/local/bin/hl
-COPY images/job/hl-clone /usr/local/bin/hl-clone
+COPY runtime/job/hl-clone /usr/local/bin/hl-clone
