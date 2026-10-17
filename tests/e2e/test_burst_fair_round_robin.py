@@ -122,7 +122,7 @@ def test_burst_fair_round_robin(api, run_id, deadline):
     finally:
         # Whichever of A2/A3 lost the race is left QUEUED forever -- closing the platform
         # experiment (the fixture's own teardown) flips its own status but does not cancel jobs
-        # still queued under it (PlatformExperimentsService.Close), so a losing job here would
+        # still queued under it (platformexperiments.Service.Close), so a losing job here would
         # otherwise sit QUEUED past this test and contend for real A100 capacity in every later
         # exclusive("a100") run. Cancel every non-admitted contender regardless of outcome.
         for j in (a2, a3, b1):
