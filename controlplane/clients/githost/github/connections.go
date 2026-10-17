@@ -8,7 +8,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
 )
 
 // ConnectionsClient is what Connections asks of the platform's GitHub App. *Client satisfies it.
@@ -24,20 +23,18 @@ type Connections struct {
 	logger *zap.Logger
 }
 
-var _ accounts.GitHubApp = (*Connections)(nil)
-
 func NewConnections(app ConnectionsClient, logger *zap.Logger) *Connections {
 	return &Connections{app: app, logger: logger}
 }
 
-func (c *Connections) Addresses() accounts.GitHubAddresses {
+func (c *Connections) Addresses() domain.GitHubAddresses {
 	app := c.app.App()
-	return accounts.GitHubAddresses{Slug: app.Slug, InstallURL: app.InstallURL, NewRepositoryURL: app.NewRepositoryURL}
+	return domain.GitHubAddresses{Slug: app.Slug, InstallURL: app.InstallURL, NewRepositoryURL: app.NewRepositoryURL}
 }
 
 // Installation names no account in what it refuses for one removed or suspended: the account is
 // what GitHub would have said.
-func (c *Connections) Installation(ctx context.Context, installationID int64) (*accounts.GitHubInstallation, error) {
+func (c *Connections) Installation(ctx context.Context, installationID int64) (*domain.GitHubInstallation, error) {
 	live, err := c.app.Installation(ctx, installationID)
 	if errors.Is(err, ErrInstallationGone) {
 		return nil, &InstallationGoneError{Account: "the GitHub account", Installation: installationID, Suspended: errors.Is(err, ErrInstallationSuspended)}
@@ -45,20 +42,20 @@ func (c *Connections) Installation(ctx context.Context, installationID int64) (*
 	if err != nil {
 		return nil, err
 	}
-	return &accounts.GitHubInstallation{ID: live.ID, AccountLogin: live.AccountLogin, AccountType: live.AccountType, ChangedAt: live.ChangedAt}, nil
+	return &domain.GitHubInstallation{ID: live.ID, AccountLogin: live.AccountLogin, AccountType: live.AccountType, ChangedAt: live.ChangedAt}, nil
 }
 
-func (c *Connections) Repositories(ctx context.Context, installationID int64) ([]accounts.GitHubRepository, error) {
+func (c *Connections) Repositories(ctx context.Context, installationID int64) ([]domain.GitHubRepository, error) {
 	covered, err := c.app.Repositories(ctx, installationID)
 	if errors.Is(err, ErrInstallationGone) {
-		return nil, fmt.Errorf("%w: %w", accounts.ErrInstallationGone, err)
+		return nil, fmt.Errorf("%w: %w", domain.ErrGitHubInstallationGone, err)
 	}
 	if err != nil {
 		return nil, err
 	}
-	out := make([]accounts.GitHubRepository, len(covered))
+	out := make([]domain.GitHubRepository, len(covered))
 	for i, one := range covered {
-		out[i] = accounts.GitHubRepository{FullName: one.FullName, Private: one.Private}
+		out[i] = domain.GitHubRepository{FullName: one.FullName, Private: one.Private}
 	}
 	return out, nil
 }

@@ -71,9 +71,7 @@ var layers = []layer{
 	{path: "controlplane/storage/objectstore", may: []string{"controlplane/config", "controlplane/domain"}, own: true},
 	{path: "controlplane/clients", may: []string{"controlplane/config", "controlplane/auth", "controlplane/domain", "controlplane/refusal"}},
 	{path: "controlplane/clients/githost", may: []string{"controlplane/config", "controlplane/auth", "controlplane/domain", "controlplane/refusal"}, own: true},
-	// The GitHub client adapts itself to the App the accounts service declares (NewConnections),
-	// so the service never imports a provider.
-	{path: "controlplane/clients/githost/github", may: []string{"controlplane/config", "controlplane/auth", "controlplane/domain", "controlplane/refusal", "controlplane/clients/githost", "controlplane/service/accounts"}},
+	{path: "controlplane/clients/githost/github", may: []string{"controlplane/config", "controlplane/auth", "controlplane/domain", "controlplane/refusal", "controlplane/clients/githost"}},
 	{path: "controlplane/clients/registrycred", may: []string{"controlplane/config", "controlplane/auth", "controlplane/domain", "controlplane/refusal"}, own: true},
 	// A service reaches another service only through an interface wired in cmd.
 	{path: "controlplane/service", may: services},

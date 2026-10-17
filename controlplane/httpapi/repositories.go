@@ -96,12 +96,12 @@ func registerRepositories(doc *Doc, repositories *accounts.Repositories) {
 	}, a.repositoriesOf)
 }
 
-func (a repositoriesAPI) app(ctx context.Context, _ *struct{}) (*struct{ Body accounts.GitHubAddresses }, error) {
+func (a repositoriesAPI) app(ctx context.Context, _ *struct{}) (*struct{ Body domain.GitHubAddresses }, error) {
 	app, err := a.repositories.App(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return &struct{ Body accounts.GitHubAddresses }{Body: app}, nil
+	return &struct{ Body domain.GitHubAddresses }{Body: app}, nil
 }
 
 type beginInstallRequest struct {

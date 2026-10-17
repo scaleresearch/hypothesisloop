@@ -18,46 +18,20 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
-// GitHubApp is what the platform asks of its GitHub App, adapted to it by the github package.
+// GitHubApp is what the platform asks of its GitHub App. *github.Connections satisfies it.
 type GitHubApp interface {
-	Addresses() GitHubAddresses
+	Addresses() domain.GitHubAddresses
 	// Installation is one installation as GitHub states it to the App now.
-	Installation(ctx context.Context, installationID int64) (*GitHubInstallation, error)
-	// Repositories lists what an installation covers: ErrInstallationGone for one GitHub removed
+	Installation(ctx context.Context, installationID int64) (*domain.GitHubInstallation, error)
+	// Repositories lists what an installation covers: domain.ErrGitHubInstallationGone for one GitHub removed
 	// or suspended.
-	Repositories(ctx context.Context, installationID int64) ([]GitHubRepository, error)
+	Repositories(ctx context.Context, installationID int64) ([]domain.GitHubRepository, error)
 	// Check says whether a connected installation still works: installed, not suspended, and
 	// granted every permission the App asks for.
 	Check(ctx context.Context, connected *domain.OrgGitHubInstallation) error
 	// Refusal turns what the App returned refused into what the caller is told, gone the status
 	// of a repository the org's installations do not reach.
 	Refusal(op string, err error, gone int) error
-}
-
-// ErrInstallationGone reports an installation GitHub removed or suspended.
-var ErrInstallationGone = errors.New("the GitHub App installation was removed or suspended")
-
-// GitHubAddresses is what a browser needs to send a person to GitHub.
-type GitHubAddresses struct {
-	Slug       string `json:"slug"`
-	InstallURL string `json:"install_url" doc:"Where a person installs the App on a GitHub account and chooses its repositories. Connecting goes through POST /orgs/{id}/github-install-states, whose install_url carries the state GitHub hands back."`
-	// NewRepositoryURL is GitHub's own form for a new repository.
-	NewRepositoryURL string `json:"new_repository_url" doc:"Where a person creates a repository on GitHub themselves. owner and visibility may be added as query parameters."`
-}
-
-// GitHubInstallation is one installation of the App, on the GitHub account AccountLogin.
-// ChangedAt is when GitHub last made it or changed its repositories or permissions.
-type GitHubInstallation struct {
-	ID           int64
-	AccountLogin string
-	AccountType  string
-	ChangedAt    time.Time
-}
-
-// GitHubRepository is a repository an installation covers, named owner/name.
-type GitHubRepository struct {
-	FullName string
-	Private  bool
 }
 
 // InstallationStore is the persistence of the installations orgs connected and of the installs
@@ -271,7 +245,7 @@ func (r *Repositories) repositories(ctx context.Context, orgID, q string) ([]Rep
 	out := []Repository{}
 	for _, installation := range installations {
 		covered, err := app.Repositories(ctx, installation.InstallationID)
-		if errors.Is(err, ErrInstallationGone) {
+		if errors.Is(err, domain.ErrGitHubInstallationGone) {
 			r.logger.Warn("a connected github installation is gone", zap.String("orgID", orgID), zap.Int64("installationID", installation.InstallationID))
 			continue
 		}
@@ -289,13 +263,13 @@ func (r *Repositories) repositories(ctx context.Context, orgID, q string) ([]Rep
 }
 
 // App is the platform's GitHub App, as a browser needs its addresses.
-func (r *Repositories) App(ctx context.Context) (GitHubAddresses, error) {
+func (r *Repositories) App(ctx context.Context) (domain.GitHubAddresses, error) {
 	if _, err := r.access.Account(ctx); err != nil {
-		return GitHubAddresses{}, err
+		return domain.GitHubAddresses{}, err
 	}
 	app, err := r.app()
 	if err != nil {
-		return GitHubAddresses{}, err
+		return domain.GitHubAddresses{}, err
 	}
 	return app.Addresses(), nil
 }

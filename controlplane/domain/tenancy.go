@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -128,6 +129,32 @@ type OrgGitHubInstallation struct {
 	ConnectedActor Actor     `json:"connected_actor" doc:"Who connected it: a user, the API key it was connected with, or staff."`
 	ConnectedAt    time.Time `json:"connected_at"`
 	Default        bool      `json:"default" doc:"A new repository is created on this account when a request names no repository_account. At most one of an org's installations is the default. With one installation connected, that one is used whether or not it is the default."`
+}
+
+// ErrGitHubInstallationGone reports an installation GitHub removed or suspended.
+var ErrGitHubInstallationGone = errors.New("the GitHub App installation was removed or suspended")
+
+// GitHubAddresses is what a browser needs to send a person to GitHub.
+type GitHubAddresses struct {
+	Slug       string `json:"slug"`
+	InstallURL string `json:"install_url" doc:"Where a person installs the App on a GitHub account and chooses its repositories. Connecting goes through POST /orgs/{id}/github-install-states, whose install_url carries the state GitHub hands back."`
+	// NewRepositoryURL is GitHub's own form for a new repository.
+	NewRepositoryURL string `json:"new_repository_url" doc:"Where a person creates a repository on GitHub themselves. owner and visibility may be added as query parameters."`
+}
+
+// GitHubInstallation is one installation of the App, on the GitHub account AccountLogin.
+// ChangedAt is when GitHub last made it or changed its repositories or permissions.
+type GitHubInstallation struct {
+	ID           int64
+	AccountLogin string
+	AccountType  string
+	ChangedAt    time.Time
+}
+
+// GitHubRepository is a repository an installation covers, named owner/name.
+type GitHubRepository struct {
+	FullName string
+	Private  bool
 }
 
 // DefaultOrgName is the org a person starts with at their first sign-in, and DefaultProjectName
