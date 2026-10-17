@@ -228,7 +228,7 @@ start_control_plane() {
   (cd controlplane && go build -o "${repo}/${bin}/" ./cmd/control-service ./cmd/metrics-service)
   # hl beside them, built from the same tree, so localdev/.bin/hl never lags the API it calls.
   # go build relinks only what changed.
-  go build -o "${repo}/${bin}/hl" ./cli
+  go build -o "${repo}/${bin}/hl" ./cli/cmd/hl
   # Each process is started with the keys these settings call for.
   lib_env_files "${settings}"
   # Checked before anything is stopped too: settings rendered before this tree made a key
