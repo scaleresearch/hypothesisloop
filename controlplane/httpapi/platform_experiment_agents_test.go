@@ -462,6 +462,8 @@ func TestARegisteredAgentJoinsByIDAndJoiningAgainReturnsTheSameTokenAndChangesNo
 }
 
 func TestJoiningIsRefusedWithAReasonTheCallerCanActOn(t *testing.T) {
+	refusedValue := map[string]string{"unknown role": "judge", "unknown tier": "gold", "agent type not an id": "../x",
+		"unknown agent type": "prompt-search", "unknown agent type, sandboxed": "prompt-search", "model with a space": "a b"}
 	for name, tc := range map[string]struct {
 		status     domain.PlatformExperimentStatus
 		path, body string
@@ -498,8 +500,12 @@ func TestJoiningIsRefusedWithAReasonTheCallerCanActOn(t *testing.T) {
 			if code != tc.wantCode || out["reason"] != tc.wantReason {
 				t.Fatalf("got = %d %v, want = %d with reason %s", code, out, tc.wantCode, tc.wantReason)
 			}
-			if !strings.HasPrefix(out["message"].(string), tc.wantReason) {
-				t.Errorf("message %q does not lead with its reason", out["message"])
+			message, _ := out["message"].(string)
+			if message == "" || strings.HasPrefix(message, tc.wantReason) {
+				t.Errorf("message %q: want one that says what is wrong without repeating its reason", message)
+			}
+			if sent := refusedValue[name]; sent != "" && strings.Contains(message, sent) {
+				t.Errorf("message %q repeats the value sent, %q", message, sent)
 			}
 			if len(store.signups) != had {
 				t.Errorf("a refused join left %d signups behind", len(store.signups)-had)

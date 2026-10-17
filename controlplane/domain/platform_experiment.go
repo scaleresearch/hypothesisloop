@@ -479,5 +479,5 @@ func ParseSignupRole(s string) (SignupRole, error) {
 	case SignupRoleCompetitor, SignupRoleBaseline, SignupRoleReviewer:
 		return SignupRole(s), nil
 	}
-	return "", fmt.Errorf("unknown role %q: must be one of competitor, baseline, reviewer", s)
+	return "", fmt.Errorf("role must be one of competitor, baseline, reviewer")
 }

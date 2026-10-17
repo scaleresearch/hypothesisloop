@@ -33,6 +33,9 @@ func init() {
 	// caller sent is never repeated in it: a detail's location names the field, and its message
 	// says what is wrong with it.
 	huma.NewError = func(status int, msg string, errs ...error) huma.StatusError {
+		if status == http.StatusBadRequest && msg == humaBodyRequired {
+			return invalid("body", humaBodyRequired)
+		}
 		problems := make([]platformapi.Problem, 0, len(errs))
 		parts := make([]string, 0, len(errs))
 		for _, e := range errs {
@@ -81,6 +84,10 @@ func init() {
 		return refused
 	}
 }
+
+// humaBodyRequired is huma's message for an operation with a required body sent none, which it
+// answers 400 although the request reads: a value missing is 422.
+const humaBodyRequired = "request body is required"
 
 // loggerKey holds the logger of the Doc an operation is registered on, which logs a failure huma
 // answers.

@@ -203,7 +203,7 @@ func (s AgentTypeSettings) Validate() error {
 // ValidateModel refuses a model name no agent can be started on.
 func ValidateModel(model string) error {
 	if len(model) > maxModelLength || !modelPattern.MatchString(model) {
-		return fmt.Errorf("model %q must be at most %d characters of letters, digits and . _ : - [ ]", model, maxModelLength)
+		return fmt.Errorf("a model must be at most %d characters of letters, digits and . _ : - [ ]", maxModelLength)
 	}
 	return nil
 }
@@ -492,7 +492,7 @@ func LookupAgentType(catalog AgentTypeCatalog, id string, role AgentRole) (Curre
 		}
 		names = append(names, t.ID)
 	}
-	return CurrentAgentType{}, fmt.Errorf("agent_type %q is not a %s agent type of this org: %s", id, role, strings.Join(names, ", "))
+	return CurrentAgentType{}, fmt.Errorf("agent_type names no %s agent type of this org: %s", role, strings.Join(names, ", "))
 }
 
 // AgentLaunchChoice is what a new agent is started with once ResolveAgentLaunch checked it. An
