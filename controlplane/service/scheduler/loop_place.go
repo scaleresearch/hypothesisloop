@@ -211,31 +211,47 @@ type installed struct {
 	nodeTotals map[string]map[string]map[string]int64
 	scalesUp   map[string]bool
 	multiNode  map[string]bool
+	nodeLabels map[string]map[string]map[string]string
 }
 
 // neverFitsReason is the not_admitted_reason of a job that no wait admits as it is stated, and ""
 // for one that may yet run. Such a job asks for more than every cluster that takes its jobs and
 // reports what it has installed holds when idle (placement.FitsWhenIdle), on each accelerator
-// type the job accepts. A cluster that scales up may yet hold it. A cluster that reports nothing
-// is away or not whole: it is named and not judged, and with none judged the job waits. It says
-// what each cluster judged has.
+// type the job accepts, or runs in an image of an architecture none of their nodes has. A cluster
+// that scales up may yet hold it. A cluster that reports nothing is away or not whole: it is
+// named and not judged, and with none judged the job waits. It says what each cluster judged has.
 func (in installed) neverFitsReason(exp *domain.Experiment) string {
 	runs := hostingClusters(in.registered, exp)
 	spansNodes := exp.Job.Nodes() > 1
+	arch := exp.Job.NodeSelector[domain.NodeArchitectureLabel]
 	var judged []string
 	lacking := 0
+	otherArchitectures := map[string]bool{}
 	for _, c := range runs {
 		total, reported := in.totals[c.Name]
+		has := nodeArchitectures(in.nodeLabels[c.Name])
 		switch {
 		case !reported:
 			judged = append(judged, c.Name+" reports nothing now")
 		case spansNodes && !in.multiNode[c.Name]:
-		case in.scalesUp[c.Name] || placement.FitsWhenIdle(total, in.nodeTotals[c.Name], exp):
+		case in.scalesUp[c.Name]:
+			return ""
+		case arch != "" && len(has) > 0 && !slices.Contains(has, arch):
+			for _, a := range has {
+				otherArchitectures[a] = true
+			}
+			judged = append(judged, c.Name+" has nodes of "+strings.Join(has, ", ")+" only")
+		case placement.FitsWhenIdle(total, in.nodeTotals[c.Name], exp):
 			return ""
 		default:
 			lacking++
 			judged = append(judged, c.Name+" has "+describeOffer(total, in.nodeTotals[c.Name], exp))
 		}
+	}
+	if lacking == 0 && len(otherArchitectures) > 0 {
+		has := strings.Join(slices.Sorted(maps.Keys(otherArchitectures)), ", ")
+		return fmt.Sprintf("%s: the job's image %s runs on %s, and the connected clusters that run this org's jobs have nodes of %s only: %s. Record an image built for %s (hl image set)",
+			domain.NotAdmittedNoClusterForArchitecture, exp.Image, arch, has, strings.Join(judged, "; "), has)
 	}
 	if lacking == 0 {
 		return ""
@@ -246,6 +262,17 @@ func (in installed) neverFitsReason(exp *domain.Experiment) string {
 	}
 	return fmt.Sprintf("%s: the job asks for %s, more than any connected cluster that runs it has when idle: %s. Ask for less (hl capacity lists what each cluster has)",
 		domain.NotAdmittedExceedsClusterCapacity, asks, strings.Join(judged, "; "))
+}
+
+// nodeArchitectures is the architectures the nodes of one cluster name, sorted.
+func nodeArchitectures(nodes map[string]map[string]string) []string {
+	has := map[string]bool{}
+	for _, labels := range nodes {
+		if arch := labels[domain.NodeArchitectureLabel]; arch != "" {
+			has[arch] = true
+		}
+	}
+	return slices.Sorted(maps.Keys(has))
 }
 
 // couldHold narrows candidates to the clusters that hold exp when idle, so a job that fits nowhere

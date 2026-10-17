@@ -104,6 +104,10 @@ const (
 	// that can run it has installed, on every accelerator type it accepts, and none of them
 	// scales up. Waiting does not help; a smaller request does.
 	NotAdmittedExceedsClusterCapacity = "exceeds_cluster_capacity"
+	// NotAdmittedNoClusterForArchitecture means every connected cluster that runs the job and
+	// does not scale up has nodes of other architectures than its image's only. Waiting does not
+	// help; an image built for one of theirs does.
+	NotAdmittedNoClusterForArchitecture = "no_cluster_for_architecture"
 )
 
 // QueueReasonAwaitingAdmission is the stored reason of a job the admission loop has not looked at

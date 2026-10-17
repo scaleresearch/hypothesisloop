@@ -103,6 +103,9 @@ type InstalledCapacity interface {
 	// GetMultiNodeCapability reports which clusters can run a job spanning more than one node;
 	// one absent runs single-node only.
 	GetMultiNodeCapability(ctx context.Context) (map[string]bool, error)
+	// GetNodeLabels reports each node's labels, keyed cluster -> node; every node a runtime
+	// reports names its architecture (domain.NodeArchitectureLabel).
+	GetNodeLabels(ctx context.Context) (map[string]map[string]map[string]string, error)
 }
 
 // Service is the Scheduler Service that gates, scores, and queues experiments.

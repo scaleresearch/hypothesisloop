@@ -168,7 +168,7 @@ func (l *Loop) readTickState(ctx context.Context, start time.Time) (*tickState, 
 			// Amortizes the running-experiment node-attribution lookups the per-accelerator share
 			// needs (see loop_resolve.go) across every queued job this tick considers, in both passes.
 			resolveCache: newResolutionCache(l),
-			whenIdle:     installed{registered: registeredClusters, totals: totalCapacity, nodeTotals: nodeResourcesTotal, scalesUp: autoscalerEnabled, multiNode: multiNodeCapable},
+			whenIdle:     installed{registered: registeredClusters, totals: totalCapacity, nodeTotals: nodeResourcesTotal, scalesUp: autoscalerEnabled, multiNode: multiNodeCapable, nodeLabels: nodeLabels},
 		},
 		gAvail: gAvail, bAvail: placement.CloneAvail(gAvail), desiredFree: desiredFree,
 		totalCapacity:     totalCapacity,

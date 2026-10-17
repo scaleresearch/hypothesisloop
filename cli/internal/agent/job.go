@@ -58,6 +58,8 @@ the branch itself. What a job ran is its code_ref. Every node fetches that commi
 Refusals: required (job.cpu, job.memory, job.storage or metadata.estimated_duration_hours left
 out, the field named in problems); malformed (no job.command); no_experiment_image (none recorded:
 hl image set); exceeds_cluster_capacity (more than any cluster has idle, with both figures);
+no_cluster_for_architecture (no cluster has nodes of the image's architecture: hl image set one
+built for theirs);
 experiment_not_started (before the start only a baseline agent's job is taken; see status_reason
 of hl platform-experiments get); experiment_closed.
 

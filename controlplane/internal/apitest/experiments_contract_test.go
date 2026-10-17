@@ -262,6 +262,9 @@ func (contractCapacity) GetNodeTotalCapacity(context.Context) (map[string]map[st
 func (contractCapacity) GetMultiNodeCapability(context.Context) (map[string]bool, error) {
 	return nil, nil
 }
+func (contractCapacity) GetNodeLabels(context.Context) (map[string]map[string]map[string]string, error) {
+	return nil, nil
+}
 
 type contractSettler struct{}
 

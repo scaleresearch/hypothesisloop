@@ -98,8 +98,8 @@ func takeImage(pe *domain.PlatformExperiment, exp *domain.Experiment) error {
 	return nil
 }
 
-// runsAsStated refuses a job that no wait admits as it is stated, for its image or its
-// size, with the reason the admission loop would give it for as long as it queued
+// runsAsStated refuses a job that no wait admits as it is stated, for its image's architecture
+// or its size, with the reason the admission loop would give it for as long as it queued
 // (installed.neverFitsReason).
 func (s *Service) runsAsStated(ctx context.Context, exp *domain.Experiment) error {
 	var whenIdle installed
@@ -118,6 +118,9 @@ func (s *Service) runsAsStated(ctx context.Context, exp *domain.Experiment) erro
 	}
 	if whenIdle.multiNode, err = s.clusters.GetMultiNodeCapability(ctx); err != nil {
 		return fmt.Errorf("scheduler: multi-node capability: %w", err)
+	}
+	if whenIdle.nodeLabels, err = s.clusters.GetNodeLabels(ctx); err != nil {
+		return fmt.Errorf("scheduler: node labels: %w", err)
 	}
 	if reason, message := domain.SplitQueueReason(whenIdle.neverFitsReason(exp)); reason != "" {
 		return &AdmissionError{Reason: reason, Message: message}

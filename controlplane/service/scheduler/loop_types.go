@@ -93,7 +93,6 @@ type ClusterCapacity interface {
 	// GetNodeResourceCapacity reports free CPU/memory/storage per node — see
 	// placement.Reserve, which must prove a job fits one node in every dimension.
 	GetNodeResourceCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error)
-	GetNodeLabels(ctx context.Context) (map[string]map[string]map[string]string, error)
 }
 
 // ExperimentEvictor terminates a RUNNING experiment through the platform's one canonical

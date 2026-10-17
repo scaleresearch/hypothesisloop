@@ -60,6 +60,8 @@ func TestEveryNotAdmittedReasonIsStoredWithASentence(t *testing.T) {
 	exp := holdJob("job", domain.CapacityGuaranteed, h100, 1, "1")
 	exp.RanOnAcceleratorType = h100
 	imageChoice := map[string]domain.Cluster{"rented": {Name: "rented"}, "metal": {Name: "metal"}}
+	amd64Job := *exp
+	amd64Job.Job.NodeSelector = map[string]string{domain.NodeArchitectureLabel: "amd64"}
 	short := domain.NewFootprint()
 	short.Add(domain.ResourceKey{Kind: domain.ResourceKindMemory}, 1<<30)
 	produced := map[string][]string{
@@ -86,6 +88,8 @@ func TestEveryNotAdmittedReasonIsStoredWithASentence(t *testing.T) {
 		domain.NotAdmittedConcurrencyCap:          {concurrencyCapReason(), notAdmittedReasonForSubmitError(capExceeded{errors.New("cap")})},
 		domain.NotAdmittedExceedsAcceleratorShare: {shareMisfit("cpu", "9", "2", 1, "accelerator", "cluster-a")},
 		domain.NotAdmittedExceedsClusterCapacity:  {installed{registered: imageChoice, totals: map[string]domain.Footprint{"metal": {}}}.neverFitsReason(exp)},
+		domain.NotAdmittedNoClusterForArchitecture: {installed{registered: imageChoice, totals: map[string]domain.Footprint{"metal": {}},
+			nodeLabels: map[string]map[string]map[string]string{"metal": {"box": {domain.NodeArchitectureLabel: "arm64"}}}}.neverFitsReason(&amd64Job)},
 	}
 	for code, name := range notAdmittedCodes(t) {
 		if len(produced[code]) == 0 {

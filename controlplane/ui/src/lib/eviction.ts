@@ -41,6 +41,7 @@ const NOT_ADMITTED_REASON_LABELS: Record<string, string> = {
   concurrency_cap: 'At its experiment’s max concurrent accelerators',
   exceeds_accelerator_share: 'Requests more cpu/memory/storage than its accelerators’ share of a node',
   exceeds_cluster_capacity: 'Asks for more than any connected cluster has when idle',
+  no_cluster_for_architecture: 'No connected cluster has nodes of its image’s architecture',
 }
 
 // notAdmittedLabel is the label of a job's not_admitted_reason, followed by the scheduler's own

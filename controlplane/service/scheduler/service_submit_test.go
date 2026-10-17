@@ -574,6 +574,11 @@ type installedCapacity struct {
 	installed map[string]domain.Footprint
 	scales    map[string]bool
 	nodes     map[string]map[string]map[string]int64
+	labels    map[string]map[string]map[string]string
+}
+
+func (c installedCapacity) GetNodeLabels(context.Context) (map[string]map[string]map[string]string, error) {
+	return c.labels, nil
 }
 
 func (c installedCapacity) GetNodeTotalCapacity(context.Context) (map[string]map[string]map[string]int64, error) {
@@ -654,6 +659,49 @@ func TestAJobNoIdleClusterHoldsIsRefusedAtSubmit(t *testing.T) {
 		if _, err := submit(capacity, "4000Gi", 1); !errors.Is(err, errReachedScoring) {
 			t.Errorf("a cluster that %s: got = %v, want the job queued", name, err)
 		}
+	}
+}
+
+// A job whose image runs on an architecture no node of the clusters that run it has queued for
+// good. It is refused at submit naming the image's architecture and the ones the org has. A
+// cluster that scales up may yet add a node of it.
+func TestAJobOfAnArchitectureNoClusterHasIsRefusedAtSubmit(t *testing.T) {
+	registered := map[string]domain.Cluster{"box-b": {Name: "box-b", OrgID: "org-a"}, "theirs": {Name: "theirs", OrgID: "org-b"}}
+	installed := map[string]domain.Footprint{
+		"box-b":  domain.CapacityFootprint(32, map[string]int64{h100: 8}, 1<<40, 1<<42),
+		"theirs": domain.CapacityFootprint(32, map[string]int64{h100: 8}, 1<<40, 1<<42),
+	}
+	nodesOf := func(arch string) map[string]map[string]map[string]string {
+		return map[string]map[string]map[string]string{
+			"box-b":  {"box": {domain.NodeArchitectureLabel: arch}},
+			"theirs": {"node": {domain.NodeArchitectureLabel: testExperimentImage.Architecture}},
+		}
+	}
+	submit := func(capacity installedCapacity) (*AdmissionError, error) {
+		s := &Service{credits: testCaps, codeHost: testCodeHost{}, store: clustersStore{registered: registered}, clusters: capacity, hypotheses: humanHypothesis("pe-1")}
+		var refused *AdmissionError
+		err := s.Submit(context.Background(), humanIdeaSubmission())
+		errors.As(err, &refused)
+		return refused, err
+	}
+
+	if _, err := submit(installedCapacity{installed: installed, labels: nodesOf("amd64")}); !errors.Is(err, errReachedScoring) {
+		t.Fatalf("an amd64 image on amd64 nodes: got = %v, want it accepted", err)
+	}
+	refused, err := submit(installedCapacity{installed: installed, labels: nodesOf("arm64")})
+	if refused == nil || refused.Reason != domain.NotAdmittedNoClusterForArchitecture || AdmissionStatus(refused.Reason) != http.StatusUnprocessableEntity {
+		t.Fatalf("an amd64 image on arm64 nodes: got = %v, want a 422 %s", err, domain.NotAdmittedNoClusterForArchitecture)
+	}
+	for _, said := range []string{"runs on amd64", "nodes of arm64 only", "box-b"} {
+		if !strings.Contains(refused.Message, said) {
+			t.Errorf("the refusal does not say %q: %s", said, refused.Message)
+		}
+	}
+	if strings.Contains(refused.Message, "theirs") {
+		t.Errorf("the refusal names another org's cluster: %s", refused.Message)
+	}
+	if _, err := submit(installedCapacity{installed: installed, labels: nodesOf("arm64"), scales: map[string]bool{"box-b": true}}); !errors.Is(err, errReachedScoring) {
+		t.Errorf("a cluster that scales up: got = %v, want the job queued", err)
 	}
 }
 
