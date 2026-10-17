@@ -129,14 +129,12 @@ function StaffStatistics() {
   const { data: stats, error } = useSWR(
     keys.projectJobStats(project.id),
     () => fetchExperimentStats({ project_id: project.id }),
-    { refreshInterval: POLL.standing },
   )
 
   // The audit log below is the one place that needs actual rows, the newest handful of them.
   const { data: recentEvictions, error: evictionsError } = useSWR(
     keys.recentEvictions(project.id),
     () => fetchExperiments({ project_id: project.id, status: 'EVICTED', sort: '-updated_at', limit: RECENT_EVICTIONS }),
-    { refreshInterval: POLL.standing },
   )
 
   return (

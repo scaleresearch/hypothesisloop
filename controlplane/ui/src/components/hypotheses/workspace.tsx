@@ -37,7 +37,6 @@ import { isReadOnly, ReadOnlyProvider } from '@/lib/read-only'
 import { HUMAN_OWNER, extendLayout, graphHref, layoutGraph, matchesFilters, shareUnchanged } from '@/lib/hypothesis-graph'
 import type { GraphFilters, Position } from '@/lib/hypothesis-graph'
 import { keys } from '@/lib/keys'
-import { POLL } from '@/lib/poll'
 
 /** The view a hypotheses page opens in, which the URL leaves out. */
 export const HYPOTHESES_VIEW = 'outline'
@@ -101,7 +100,6 @@ export function ExperimentHypotheses({ peID, embedded = false }: { peID: string;
   const { data: graph, error, mutate } = useSWR(
     keys.hypothesisGraph(peID),
     async () => shareUnchanged(shown.current, await fetchHypothesisGraph(peID)),
-    { refreshInterval: POLL.standing },
   )
   shown.current = graph
   const search = useHypothesisSearch(peID, q)

@@ -117,7 +117,6 @@ function JobsListContent({ peFilter }: { peFilter: string }) {
       offset: page * PAGE_SIZE,
       sort,
     }),
-    { refreshInterval: POLL.activity },
   )
 
   async function cancel(id: string) {
@@ -138,7 +137,6 @@ function JobsListContent({ peFilter }: { peFilter: string }) {
       agent_id: agentFilter || undefined,
       platform_experiment_id: peFilter || undefined,
     }),
-    { refreshInterval: POLL.activity },
   )
 
   const evictionReasons = Object.entries(stats?.evictions_by_reason ?? {}).sort((a, b) => b[1] - a[1])

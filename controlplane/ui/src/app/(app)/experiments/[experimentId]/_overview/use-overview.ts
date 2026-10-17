@@ -7,7 +7,6 @@ import type { AgentMetricSeries, PlatformExperiment, StagesStatus } from '@/type
 import type { AgentQuota } from '@/types/quotas'
 import { keys } from '@/lib/keys'
 import { POLL } from '@/lib/poll'
-import { pollEvery } from '@/lib/roster'
 
 // How many of the newest jobs the page reads, for the jobs table and the metrics picker.
 const RECENT_JOBS = 20
@@ -17,7 +16,6 @@ export function useOverview(id: string) {
   const experiment = useSWR<PlatformExperiment>(
     keys.experiment(id),
     () => fetchPlatformExperiment(id),
-    { refreshInterval: pollEvery },
   )
   const pe = experiment.data
 
@@ -32,14 +30,12 @@ export function useOverview(id: string) {
   const { data: experimentsPage, error: experimentsError } = useSWR(
     pe ? keys.experimentJobs(id) : null,
     () => fetchExperimentsPage({ project_id: pe!.project_id, platform_experiment_id: id, sort: '-created_at', limit: RECENT_JOBS }),
-    { refreshInterval: POLL.standing },
   )
 
   // Asked for by status: a job that outlived the newest page of jobs is still running.
   const { data: runningPage, error: runningError } = useSWR(
     pe ? keys.runningJobs(id) : null,
     () => fetchExperimentsPage({ project_id: pe!.project_id, platform_experiment_id: id, status: 'RUNNING', sort: '-created_at' }),
-    { refreshInterval: POLL.standing },
   )
 
   // Whole-experiment job counts, grouped server-side. The job list above is one bounded page,
@@ -47,30 +43,25 @@ export function useOverview(id: string) {
   const { data: stats, error: statsError } = useSWR(
     pe ? keys.jobStatsByAgent(id) : null,
     () => fetchExperimentStats({ project_id: pe!.project_id, platform_experiment_id: id, group_by: 'agent' }),
-    { refreshInterval: POLL.standing },
   )
   const { data: hypothesisStats, error: hypothesisStatsError } = useSWR(
     pe ? keys.jobStatsByHypothesis(id) : null,
     () => fetchExperimentStats({ project_id: pe!.project_id, platform_experiment_id: id, group_by: 'hypothesis' }),
-    { refreshInterval: POLL.standing },
   )
 
   const { data: stages, error: stagesError } = useSWR<StagesStatus>(
     keys.stages(id),
     () => fetchStages(id),
-    { refreshInterval: POLL.standing },
   )
 
   const { data: verdicts, error: hypothesesError } = useSWR(
     keys.hypothesisStats(id),
     () => fetchHypothesisStats(id),
-    { refreshInterval: POLL.standing },
   )
 
   const { data: findings, error: findingsError } = useSWR(
     keys.findings(id),
     () => fetchFindings(id),
-    { refreshInterval: POLL.standing },
   )
 
   const { data: results, error: resultsError } = useSWR(

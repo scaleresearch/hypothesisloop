@@ -99,16 +99,13 @@ describe('a draft being planned', () => {
     afterEach(() => { vi.useRealTimers() })
     const reads = () => vi.mocked(fetchPlatformExperimentAgents).mock.calls.length
 
-    it('every 3 s while the planner works and the page is visible, and not while it is hidden', async () => {
+    it('once while the planner works, and on no timer: the change stream reads it again', async () => {
       vi.mocked(fetchPlatformExperimentAgents).mockClear()
       show(draft('planning'))
       await vi.advanceTimersByTimeAsync(100)
       expect(reads()).toBe(1)
-      await vi.advanceTimersByTimeAsync(3_000)
-      expect(reads()).toBe(2)
-      vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
-      await vi.advanceTimersByTimeAsync(9_000)
-      expect(reads()).toBe(2)
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(reads()).toBe(1)
     })
   })
 })

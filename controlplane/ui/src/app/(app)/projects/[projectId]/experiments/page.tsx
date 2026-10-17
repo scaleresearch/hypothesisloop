@@ -52,8 +52,8 @@ function useLiveCounts(): ReactNode {
   const { project } = useTenant()
   // Both counts are server-side totals, not the length of a fetched page: see
   // fetchExperimentStats. The agent read asks for a single row purely to carry X-Total-Count.
-  const { data: stats, error: statsError } = useSWR(keys.projectJobStats(project.id), () => fetchExperimentStats({ project_id: project.id }), { refreshInterval: POLL.standing })
-  const { data: agents, error: agentsError } = useSWR(keys.agentCount(project.id), () => fetchAgentsPage({ project_id: project.id, limit: 1 }), { refreshInterval: POLL.slow })
+  const { data: stats, error: statsError } = useSWR(keys.projectJobStats(project.id), () => fetchExperimentStats({ project_id: project.id }))
+  const { data: agents, error: agentsError } = useSWR(keys.agentCount(project.id), () => fetchAgentsPage({ project_id: project.id, limit: 1 }))
 
   // A status no job holds is absent from the answer.
   const running = stats?.by_status?.RUNNING ?? 0
@@ -132,7 +132,6 @@ function PlatformExperimentsPageContent() {
       limit: PAGE_SIZE,
       offset: page * PAGE_SIZE,
     }),
-    { refreshInterval: POLL.reports },
   )
   // The sidebar reads the same key, so this is one request for both.
   const { data: clusters } = useSWR(keys.orgClusters(org.id), () => fetchOrgClusters(org.id), { refreshInterval: POLL.reports })

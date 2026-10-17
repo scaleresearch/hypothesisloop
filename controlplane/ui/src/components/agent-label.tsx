@@ -5,14 +5,13 @@ import type { ReactNode } from 'react'
 import useSWR from 'swr'
 import { fetchPlatformExperimentAgents } from '@/lib/api/agents'
 import { keys } from '@/lib/keys'
-import { POLL } from '@/lib/poll'
 
 const Names = createContext<{ names: Map<string, string>; error?: Error }>({ names: new Map() })
 
 /** The names of a platform experiment's agents, for everything under it that shows an agent. */
 export function AgentNames({ platformExperimentID, children }: { platformExperimentID: string; children: ReactNode }) {
   // The agents card reads the same key, so this is no request of its own.
-  const { data, error } = useSWR(keys.roster(platformExperimentID), () => fetchPlatformExperimentAgents(platformExperimentID), { refreshInterval: POLL.standing })
+  const { data, error } = useSWR(keys.roster(platformExperimentID), () => fetchPlatformExperimentAgents(platformExperimentID))
   const value = useMemo(() => ({ names: new Map((data ?? []).map(a => [a.agent_id, a.name])), error }), [data, error])
   return <Names.Provider value={value}>{children}</Names.Provider>
 }

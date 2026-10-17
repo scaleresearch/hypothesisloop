@@ -43,7 +43,7 @@ const LAST_ATTEMPT: Record<string, string> = {
 export default function JobDetailPage({ params }: { params: { experimentId: string; jobId: string } }) {
   const { experimentId, jobId: id } = params
 
-  const { data: job, error } = useSWR(keys.job(id), () => fetchExperiment(id), { refreshInterval: POLL.live })
+  const { data: job, error } = useSWR(keys.job(id), () => fetchExperiment(id), { refreshInterval: POLL.reports })
   const { data: logs, error: logsError } = useSWR(
     job ? keys.jobLogs(id) : null,
     () => fetchExperimentLogs(id),

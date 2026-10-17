@@ -32,7 +32,7 @@ const END_REASON: Record<NonNullable<AgentInstance['end_reason']>, string> = {
 
 /**
  * The health of the machine the platform runs for a hosted agent or a coordinator: what it is
- * doing now, when it last made progress, how often it was restarted, and what became of the last
+ * doing now, since when, how often it was restarted, and what became of the last
  * machine that ended, with the end of its log folded away.
  */
 export function InstanceHealth({ instance }: { instance: AgentInstance }) {
@@ -48,7 +48,7 @@ export function InstanceHealth({ instance }: { instance: AgentInstance }) {
         <Badge tone={released && instance.state === 'stopped' ? 'neutral' : STATE_TONE[instance.state]}>{instance.state}</Badge>
         {instance.state !== 'stopped' && instance.state !== 'waiting' && (
           <Text as="span" variant="note">
-            {instance.progress_at ? `last progress ${relTime(instance.progress_at)}` : 'no progress seen yet'}
+            {instance.seen_at ? `first reported ${relTime(instance.seen_at)}` : `asked for ${relTime(instance.asked_at)}`}
           </Text>
         )}
         {instance.restarts > 0 && (

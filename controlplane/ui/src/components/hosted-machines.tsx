@@ -1,6 +1,5 @@
 'use client'
 
-import { relTime } from '@/lib/format'
 import { useRoster } from '@/lib/roster'
 import type { AgentInstance } from '@/types/agents'
 import { PlatformExperimentStatus } from '@/types/platform-experiments'
@@ -14,7 +13,7 @@ const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`
  * first minutes after an experiment starts show no hypothesis, no job and no metric, and this
  * is what says that something is happening.
  */
-function machinesStatus(instances: AgentInstance[], jobs: number): { now: string; next: string } | null {
+function machinesStatus(instances: AgentInstance[], jobs: number): string | null {
   if (instances.length === 0) return null
   const count = (state: AgentInstance['state']) => instances.filter(i => i.state === state).length
   const parts = [
@@ -24,12 +23,10 @@ function machinesStatus(instances: AgentInstance[], jobs: number): { now: string
     count('stopped') && `${count('stopped')} stopped`,
   ].filter(Boolean)
   const now = `The platform runs ${plural(instances.length, 'machine')} for this experiment: ${parts.join(', ')}.`
-  const latest = instances.map(i => i.progress_at).filter((at): at is string => !!at).sort().pop()
-  if (count('stopped') === instances.length) return { now, next: 'None is asked for again. Agents, below, says why each ended.' }
-  if (!latest) return { now, next: 'A machine boots and clones the repository in about a minute.' }
-  const progress = `Last progress ${relTime(latest)}.`
-  if (jobs === 0) return { now, next: `${progress} The agents are reading the brief and the code. Their first hypotheses and jobs follow within a few minutes.` }
-  return { now, next: progress }
+  if (count('stopped') === instances.length) return `${now} None is asked for again. Agents, below, says why each ended.`
+  if (count('running') === 0) return `${now} A machine boots and clones the repository in about a minute.`
+  if (jobs === 0) return `${now} The agents are reading the brief and the code. Their first hypotheses and jobs follow within a few minutes.`
+  return now
 }
 
 /** The status of the machines of a running experiment, under its title. Nothing for an experiment with none. */
@@ -41,7 +38,7 @@ export function HostedMachines({ pe, jobs }: { pe: PlatformExperiment; jobs: num
   if (!status) return null
   return (
     <Text variant="note" role="status">
-      {status.now} {status.next}
+      {status}
     </Text>
   )
 }

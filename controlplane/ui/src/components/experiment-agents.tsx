@@ -10,7 +10,7 @@ import type { AgentType } from '@/types/agent-types'
 import type { AgentMessage, AgentSignup, JoinedAgent } from '@/types/agents'
 import { PlatformExperimentStatus } from '@/types/platform-experiments'
 import type { PlatformExperiment } from '@/types/platform-experiments'
-import { pollEvery, useRoster } from '@/lib/roster'
+import { useRoster } from '@/lib/roster'
 import { StatusLabel } from '@/components/ui/badge'
 import { Button, Chip } from '@/components/ui/button'
 import { InsetCard } from '@/components/ui/card'
@@ -235,7 +235,6 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
   const { data: messages, mutate: mutateMessages } = useSWR(
     pe.status === PlatformExperimentStatus.DRAFT ? null : keys.messages(pe.id),
     () => fetchPlatformExperimentMessages(pe.id),
-    { refreshInterval: pollEvery(pe) },
   )
   const at = pe.status === PlatformExperimentStatus.OPEN || pe.status === PlatformExperimentStatus.RUNNING
   const messagesTo = (agent: AgentSignup) => messages?.filter(m => m.agent_id === agent.agent_id) ?? []

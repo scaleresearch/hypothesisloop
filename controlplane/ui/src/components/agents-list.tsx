@@ -106,7 +106,6 @@ function AgentsListContent({ experimentFilter }: { experimentFilter: string }) {
   const { data, error } = useSWR(
     keys.agents(project.id, experimentFilter, page),
     () => fetchAgentsPage({ project_id: project.id, platform_experiment_id: experimentFilter, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
-    { refreshInterval: POLL.standing },
   )
   const agents = data?.items
   const total = data?.total ?? 0
@@ -114,14 +113,12 @@ function AgentsListContent({ experimentFilter }: { experimentFilter: string }) {
   const { data: stats, error: statsError } = useSWR(
     keys.agentStats(project.id, experimentFilter),
     () => fetchAgentStats({ project_id: project.id, platform_experiment_id: experimentFilter }),
-    { refreshInterval: POLL.standing },
   )
 
   // Quota exists from an experiment's start, so only running ones have a row to show.
   const { data: running, error: runningError } = useSWR<PlatformExperiment[]>(
     experimentFilter ? null : keys.runningExperiments(project.id),
     () => fetchPlatformExperimentsPage({ project_id: project.id, status: 'running', limit: MAX_LIST_PAGE_SIZE }).then(p => p.items),
-    { refreshInterval: POLL.slow },
   )
 
   const { data: selectedPE, error: selectedPEError } = useSWR(
@@ -139,7 +136,6 @@ function AgentsListContent({ experimentFilter }: { experimentFilter: string }) {
   const { data: jobStats, error: jobStatsError } = useSWR(
     experimentFilter ? keys.jobStatsByAgent(experimentFilter) : null,
     () => fetchExperimentStats({ project_id: project.id, platform_experiment_id: experimentFilter, group_by: 'agent' }),
-    { refreshInterval: POLL.standing },
   )
   const { data: results, error: resultsError } = useSWR(
     experimentFilter ? keys.results(experimentFilter) : null,

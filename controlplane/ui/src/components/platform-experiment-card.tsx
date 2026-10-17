@@ -54,7 +54,6 @@ export function PlatformExperimentCard({
   const { data: verdicts, error: verdictsError } = useSWR(
     started ? keys.hypothesisStats(pe.id) : null,
     () => fetchHypothesisStats(pe.id),
-    { refreshInterval: POLL.standing },
   )
 
   const unit = budgetUnit(budgetKind((pe as Draft).proposal?.accelerator_type, []))

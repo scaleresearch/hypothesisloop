@@ -60,7 +60,7 @@ function useStanding(pe: PlatformExperiment | undefined): Standing | undefined {
 }
 
 function useStats(pe: PlatformExperiment) {
-  return useSWR(keys.hypothesisStats(pe.id), () => fetchHypothesisStats(pe.id), { refreshInterval: POLL.standing })
+  return useSWR(keys.hypothesisStats(pe.id), () => fetchHypothesisStats(pe.id))
 }
 
 /** How far value is from the baseline, signed so that better reads as positive in the metric's direction. */
@@ -140,7 +140,7 @@ function ProjectHypotheses() {
   const { data, error } = useSWR(
     keys.experiments(project.id, 'hypotheses-scope'),
     () => fetchPlatformExperimentsPage({ project_id: project.id, sort: '-starts_at', limit: EXPERIMENTS_LISTED }),
-    { refreshInterval: POLL.standing, keepPreviousData: true },
+    { keepPreviousData: true },
   )
   const experiments = (data?.items ?? []).filter(pe => pe.status !== PlatformExperimentStatus.DRAFT)
   const selected = experiments.length === 0 ? undefined : chosen ? experiments.find(pe => pe.id === chosen) : mostRecentlyActive(experiments)

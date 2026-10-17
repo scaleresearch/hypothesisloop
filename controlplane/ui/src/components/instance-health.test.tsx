@@ -20,20 +20,20 @@ afterEach(() => {
 })
 
 describe('the health of a hosted machine', () => {
-  it('keeps the age of the last progress up with the clock between reads', () => {
-    render(<InstanceHealth instance={instance({ progress_at: ago(30) })} />)
-    expect(screen.getByText('last progress 30s ago')).toBeTruthy()
+  it('keeps the age of the machine up with the clock between reads', () => {
+    render(<InstanceHealth instance={instance({ asked_at: ago(120), seen_at: ago(30) })} />)
+    expect(screen.getByText('first reported 30s ago')).toBeTruthy()
     act(() => { vi.advanceTimersByTime(90_000) })
-    expect(screen.getByText('last progress 2m ago')).toBeTruthy()
+    expect(screen.getByText('first reported 2m ago')).toBeTruthy()
   })
 
-  it('says a machine with no restart left is stopped for good, and shows no progress age', () => {
+  it('says a machine with no restart left is stopped for good, and shows no age of its machine', () => {
     render(<InstanceHealth instance={instance({
       state: 'stopped', stopped: true, restarts: 3, progress_at: ago(4000), end_reason: 'exited', exited_at: ago(3600), exit_log: 'exit 1',
     })} />)
     expect(screen.getByText('stopped')).toBeTruthy()
     expect(screen.getByText('restarted 3 times')).toBeTruthy()
     expect(screen.getByText('Stopped for good: its last machine ended 1h ago, its command ended.')).toBeTruthy()
-    expect(screen.queryByText(/last progress/)).toBeNull()
+    expect(screen.queryByText(/first reported/)).toBeNull()
   })
 })

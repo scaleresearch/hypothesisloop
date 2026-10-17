@@ -198,7 +198,6 @@ export function AgentJobsPanel({ projectId, platformExperimentId, agentId, track
   const { data, error } = useSWR(
     keys.agentJobs(platformExperimentId, agentId),
     () => fetchExperimentsPage({ project_id: projectId, platform_experiment_id: platformExperimentId, agent_id: agentId, sort: '-created_at' }),
-    { refreshInterval: POLL.standing },
   )
   if (error) return <ErrorMessage>Could not load jobs from <AgentLabel id={agentId} />.</ErrorMessage>
   if (!data) return <Loading />
