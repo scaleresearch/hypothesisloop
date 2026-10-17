@@ -7,6 +7,9 @@ import "time"
 // a position and a cursor. Never a copy of the row — a client that wants detail follows with a normal GET,
 // so this stream duplicates no read path and no state.
 type Event struct {
+	// ID is the change's place in the stream: every change of a platform experiment with a smaller
+	// id committed before it.
+	ID                   int64  `json:"id"`
 	Kind                 string `json:"kind"`
 	Subject              string `json:"subject"`
 	Value                string `json:"value"`
