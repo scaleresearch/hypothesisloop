@@ -19,6 +19,7 @@ coverage.html
 /metrics-service
 /node-agent
 /cluster-agent
+/cli/cli
 
 # Go workspace
 go.work
