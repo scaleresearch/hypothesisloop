@@ -47,7 +47,6 @@ cloud_cluster="${cloud_provider:+hypothesisloop-${cloud_provider}}"
 
 mkdir -p "${bin}" "${run}"
 export HYPOTHESISLOOP_CONFIG="${repo}/${settings}"
-export DATABASE_URL="postgres://hypothesisloop:hypothesisloop@localhost:5433/hypothesisloop?sslmode=disable"
 
 running() {
   [[ -f "${run}/$1.pid" ]] && kill -0 "$(cat "${run}/$1.pid")" 2>/dev/null
@@ -70,12 +69,13 @@ stop() {
   rm -f "${run}/${name}.pid"
 }
 
-# start NAME COMMAND...: the command detached, in the environment of the caller.
+# start NAME COMMAND...: the command detached, in the environment of the caller. COMMAND may be
+# lib_run (localdev/lib/env.sh).
 start() {
   local name="$1"
   shift
   stop "${name}"
-  nohup "$@" >"${run}/${name}.log" 2>&1 &
+  nohup bash -c '. "$0" && "$@"' "${repo}/localdev/lib/env.sh" "$@" >"${run}/${name}.log" 2>&1 &
   echo $! >"${run}/${name}.pid"
 }
 
@@ -115,13 +115,13 @@ must_stay_up() {
 # images they boot. Rendered for the local cluster these are the host's address and a
 # placeholder image, so hosted mode writes the tunnels' addresses and the published images.
 render_settings() {
-  local hosted=() values=("http://localhost:4010" "bolt://localhost:7687" "  control_plane_endpoint: http://localhost:9000") value host
+  local hosted=() values=("  control_plane_endpoint: http://localhost:9000") value host
   if [[ "${1:-}" == "hosted" ]]; then
     host="$(lib_advertised_address "$(cat localdev/.host-address)")"
     hosted=(-e "s|http://${host}:8081|${public_api}|"
             -e "s|http://${host}:8084|${public_metrics}|"
             -e "s|http://${host}:9000|${public_store}|"
-            -e "s|^  image: registry.example.invalid/hypothesisloop-experimentator-base:latest$|  image: ${registry}/hypothesisloop-experimentator-base:${tag}|"
+            -e "s|^  image: ${host}:5000/hypothesisloop-experimentator-base:.*$|  image: ${registry}/hypothesisloop-experimentator-base:${tag}|"
             -e "s|^  registry: ${host}:5000$|  registry: ${registry}|"
             -e "s|^  registry_plain_http: true$|  registry_plain_http: false|"
             -e "s|^  image_tag: .*$|  image_tag: ${tag}|")
@@ -129,12 +129,10 @@ render_settings() {
       hosted+=(-e "s|^    base_url: http://${host}:${HL_GIT_PORT}$|    base_url: ${public_git}|")
       values+=("    base_url: ${public_git}")
     fi
-    values+=("  public_api_url: ${public_api}" "  proxy_url: ${public_api}/git" "  metrics_url: ${public_metrics}" "  endpoint: ${public_store}" "  image: ${registry}/hypothesisloop-experimentator-base:${tag}"
+    values+=("  public_api_url: ${public_api}" "  metrics_url: ${public_metrics}" "  endpoint: ${public_store}" "  image: ${registry}/hypothesisloop-experimentator-base:${tag}"
              "  registry: ${registry}" "  image_tag: ${tag}" "  registry_plain_http: false")
   fi
-  sed -e 's|http://greptimedb:4000|http://localhost:4010|' \
-      -e 's|bolt://memgraph:7687|bolt://localhost:7687|' \
-      -e 's|http://minio:9000|http://localhost:9000|' ${hosted[@]+"${hosted[@]}"} "${rendered}" > "${settings}"
+  sed -e 's|http://minio:9000|http://localhost:9000|' ${hosted[@]+"${hosted[@]}"} "${rendered}" > "${settings}"
   for value in "${values[@]}"; do
     grep -qF -- "${value}" "${settings}" || { echo "dev: the settings file changed shape, '${value}' was not rendered" >&2; exit 1; }
   done
@@ -146,13 +144,13 @@ rents() {
 }
 
 # The sandbox and cloud_compute sections are the examples the core ships, with this deployment's
-# provider, images and account in them, appended to the settings. A secret is named there and
-# handed to control-service in its environment.
+# provider, images and account in them, appended to the settings. The provider's key reaches
+# control-service through its environment file.
 render_rented() {
   local value sandbox_settings rented="${bin}/rented.yaml"
   case "${sandbox_provider}" in
-    fly) sandbox_settings="{api_token_env: FLY_API_TOKEN, app: $(lib_env_value SANDBOX_FLY_APP), region: ams, cpu_kind: performance}" ;;
-    e2b) sandbox_settings="{api_key_env: E2B_API_KEY, lifetime_seconds: 3600}" ;;
+    fly) sandbox_settings="{app: $(lib_env_value SANDBOX_FLY_APP), region: ams, cpu_kind: performance}" ;;
+    e2b) sandbox_settings="{lifetime_seconds: 3600}" ;;
   esac
   {
     sed -e "s|^    name: example$|    name: ${sandbox_provider}|" \
@@ -176,7 +174,7 @@ hosted_inputs() {
   local missing=() key tunnels provider_keys
   sandbox_provider="$(lib_env_value SANDBOX_PROVIDER)"
   case "${sandbox_provider}" in
-    fly) provider_keys="SANDBOX_FLY_APP SANDBOX_FLY_DEPLOY_TOKEN" ;;
+    fly) provider_keys="SANDBOX_FLY_APP SANDBOX_FLY_API_TOKEN" ;;
     e2b) provider_keys="SANDBOX_E2B_API_KEY" ;;
     *)
       echo "dev: .env sets SANDBOX_PROVIDER to '${sandbox_provider}', and hosted agents run on fly or e2b" >&2
@@ -227,6 +225,8 @@ start_control_plane() {
   # hl beside them, built from the same tree, so localdev/.bin/hl never lags the API it calls.
   # go build relinks only what changed.
   go build -o "${repo}/${bin}/hl" ./cli
+  # Each process is started with the keys these settings call for.
+  lib_env_files "${settings}"
   # Checked before anything is stopped too: settings rendered before this tree made a key
   # required do not load, and the API would be stopped with nothing to start in its place.
   if ! lib_hl_admin token staff >/dev/null; then
@@ -237,14 +237,8 @@ start_control_plane() {
   stop metrics-service
   require_port 8081
   require_port 8084
-  # The provider keys the rented sections name, read from .env by the one process that rents.
-  local provider_env=()
-  if rents; then
-    provider_env=(FLY_API_TOKEN="$(lib_env_value SANDBOX_FLY_DEPLOY_TOKEN)" E2B_API_KEY="$(lib_env_value SANDBOX_E2B_API_KEY)"
-                  VAST_API_KEY="$(lib_env_value CLOUD_COMPUTE_VAST_API_KEY)")
-  fi
-  start control-service env ${provider_env[@]+"${provider_env[@]}"} "${bin}/control-service"
-  start metrics-service "${bin}/metrics-service"
+  start control-service lib_run control-service "${bin}/control-service"
+  start metrics-service lib_run metrics-service "${bin}/metrics-service"
   wait_for control-service http://localhost:8081/health
   wait_for metrics-service http://localhost:8084/health
   lib_register_clusters
@@ -275,7 +269,7 @@ start_git_server() {
   stop git-server
   require_port "${HL_GIT_PORT}"
   GIT_SERVER_ADDRESS=":${HL_GIT_PORT}" GIT_SERVER_ROOT="${HL_GIT_ROOT}" GIT_SERVER_USERNAME="${HL_GIT_USERNAME}" \
-    GIT_SERVER_PASSWORD="${HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD}" start git-server "${bin}/git-server"
+    GIT_SERVER_PASSWORD="$(<"${HL_GIT_PASSWORD_FILE}")" start git-server "${bin}/git-server"
   wait_for git-server "http://localhost:${HL_GIT_PORT}/health"
 }
 
@@ -302,7 +296,7 @@ start_ui() {
   # Node 22.18+ can load tailwind.config.ts natively as ESM, a module Tailwind cannot evict to
   # reload it, and then config edits stop reaching the served CSS until a restart. Without type
   # stripping Tailwind always loads it through jiti, which it does reload.
-  start ui env NODE_OPTIONS=--no-experimental-strip-types npm --prefix controlplane/ui run dev
+  start ui lib_run ui env NODE_OPTIONS=--no-experimental-strip-types npm --prefix controlplane/ui run dev
 }
 
 status() {

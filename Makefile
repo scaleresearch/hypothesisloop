@@ -42,13 +42,6 @@ ifndef TAG
 TAG := $(shell bash localdev/lib/image-tag.sh)
 endif
 export HOST_ADDRESS REGISTRY_PUBLISH_IP REGISTRY_REACHABLE_IP REGISTRY TAG
-# The settings file names this variable and never holds the secret. Local development's value is
-# made by the first render in localdev/.run/signing-secret (localdev/lib/auth.sh reads it) and
-# reaches compose, the scripts and the tests from here.
-export HYPOTHESISLOOP_SIGNING_SECRET ?= $(shell bash -c '. localdev/lib/auth.sh && printf %s "$$HYPOTHESISLOOP_SIGNING_SECRET"')
-# The model credential the settings name, from .env (localdev/lib/auth.sh), for compose's control plane.
-export MODEL_ANTHROPIC_OAUTH_TOKEN ?= $(shell bash -c '. localdev/lib/auth.sh && printf %s "$$MODEL_ANTHROPIC_OAUTH_TOKEN"')
-export DATA_STORE_SECRET_ACCESS_KEY ?= $(shell bash -c '. localdev/lib/auth.sh && printf %s "$$DATA_STORE_SECRET_ACCESS_KEY"')
 REGISTRY_TLS_VERIFY ?= false
 # Run before every push. A registry whose login expires logs in here (set by the deployment tooling); the
 # dev registry takes none.
@@ -71,11 +64,12 @@ check-tag:
 # loopback endpoint outright, so a wrong address fails here, not hours into a run with nothing saved.
 # HOST_ADDRESS_FILE hands the same address to the scripts and tests that run outside make.
 # Everything that runs hl-admin depends on this: it reads the rendered settings, since the
-# committed file is refused at load for its placeholders. The recipe prints nothing, so a
-# target whose output is a token stays just the token.
+# committed file is refused at load for its placeholders. It also writes each program's
+# environment file from .env (localdev/lib/env.sh). The recipe prints nothing, so a target whose
+# output is a token stays just the token.
 render-settings:
 	@test -n "$(HOST_ADDRESS)" || { echo "make: could not detect this host's address" >&2; exit 1; }
-	@bash -c '. localdev/lib/auth.sh && lib_render_settings "$(HOST_ADDRESS)" $(RENDERED_SETTINGS) && lib_registry_reachable_ip >/dev/null'
+	@bash -c '. localdev/lib/auth.sh && lib_render_settings "$(HOST_ADDRESS)" $(RENDERED_SETTINGS) && lib_env_files $(RENDERED_SETTINGS) && lib_registry_reachable_ip >/dev/null'
 	@echo "$(HOST_ADDRESS)" > $(HOST_ADDRESS_FILE)
 
 # await WHAT,COMMAND runs COMMAND every second until it succeeds, and fails once AWAIT_SECONDS
@@ -106,10 +100,9 @@ BUILDS := images ui-image tt-hardware-image
 $(BUILDS):
 	@python3 localdev/images-lock.py $(MAKE) locked-$@ TAG="$(TAG)"
 
-# compose is started under auth.sh, which exports the git host's secrets GIT_HOST_PROVIDER names:
-# a PEM does not survive being a make variable.
+# Each compose service reads its keys from the environment file render-settings writes.
 controlplane-up: registry-up render-settings images
-	bash -c '. localdev/lib/auth.sh && $(COMPOSE) up -d'
+	$(COMPOSE) up -d
 	$(call await,the control service,curl -fsS -o /dev/null http://localhost:$${API_HOST_PORT:-8081}/health)
 	$(call await,the metrics service,curl -fsS -o /dev/null http://localhost:8084/health)
 	bash -c '. localdev/lib/auth.sh && lib_register_clusters && lib_register_local_cluster'
@@ -515,7 +508,7 @@ test-github-live:
 	    test -n "$$(lib_env_value "TEST_GIT_HOST_GITHUB_$$key")" || { echo "make test-github-live: .env does not set TEST_GIT_HOST_GITHUB_$$key" >&2; exit 1; }; \
 	  done; \
 	  key_file="$$(umask 077 && mktemp)"; trap "rm -f \"$$key_file\"" EXIT; \
-	  printf "%s\n" "$$HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY" > "$$key_file"; \
+	  printf "%s\n" "$$(lib_env_value GIT_HOST_GITHUB_APP_PRIVATE_KEY)" > "$$key_file"; \
 	  TEST_GIT_HOST_GITHUB_APP_ID="$$HL_GIT_HOST_GITHUB_APP_ID" TEST_GIT_HOST_GITHUB_KEY_FILE="$$key_file" \
 	  TEST_GIT_HOST_GITHUB_INSTALLATION="$$(lib_env_value TEST_GIT_HOST_GITHUB_INSTALLATION)" \
 	  TEST_GIT_HOST_GITHUB_REPOSITORY="$$(lib_env_value TEST_GIT_HOST_GITHUB_REPOSITORY)" \

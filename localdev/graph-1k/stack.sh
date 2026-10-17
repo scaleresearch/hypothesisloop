@@ -122,16 +122,15 @@ render_settings() {
       -e "s|http://REPLACE-WITH-HOST-ADDRESS:8081|http://${HOST}:${API_PORT}|g" \
       -e "s|http://REPLACE-WITH-HOST-ADDRESS:8084|http://${HOST}:${METRICS_PORT}|g" \
       -e "s|http://REPLACE-WITH-HOST-ADDRESS:9000|http://${HOST}:${STORE_PORT}|g" \
+      -e "s|REPLACE-WITH-AGENT-IMAGE|${HOST}:5000/hypothesisloop-experimentator-base:graph-1k|g" \
       -e "s|REPLACE-WITH-HOST-ADDRESS|${HOST}|g" \
       -e "s|REPLACE-WITH-IMAGE-TAG|graph-1k|g" \
       -e "s|REPLACE-WITH-UI-ORIGIN|http://localhost:${UI_PORT}|g" \
-      -e "s|http://greptimedb:4000|http://localhost:${GREPTIME_PORT}|" \
-      -e "s|bolt://memgraph:7687|bolt://localhost:${MEMGRAPH_PORT}|" \
       -e "s|http://minio:9000|http://localhost:${STORE_PORT}|" \
       -e "s|^  identity_providers: \[\]$|  identity_providers: [{issuer: \"http://localhost/hypothesisloop-dev\", audience: hypothesisloop-dev, jwt_keys: [{kid: local-dev, kty: EC, alg: ES256, crv: P-256, x: \"${x}\", y: \"${y}\"}]}]|" \
       "${repo}/controlplane/settings/hypothesisloop.yaml" >"${STATE}/hypothesisloop.yaml"
-  printf '\ngit_host:\n  proxy_url: http://%s:%s/git\n  provider: plain\n  plain:\n    base_url: http://%s:%s\n    allow_http: true\n    username: hypothesisloop\n    password: ${HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD}\n' \
-    "${HOST}" "${API_PORT}" "${HOST}" "${GIT_PORT}" >>"${STATE}/hypothesisloop.yaml"
+  printf '\ngit_host:\n  provider: plain\n  plain:\n    base_url: http://%s:%s\n    allow_http: true\n    username: hypothesisloop\n' \
+    "${HOST}" "${GIT_PORT}" >>"${STATE}/hypothesisloop.yaml"
   if grep -q 'REPLACE-WITH\|:8081\|:8084\|greptimedb:\|memgraph:\|minio:' "${STATE}/hypothesisloop.yaml"; then
     echo "stack: the settings file changed shape; these lines still name the dev stack or a placeholder:" >&2
     grep -n 'REPLACE-WITH\|:8081\|:8084\|greptimedb:\|memgraph:\|minio:' "${STATE}/hypothesisloop.yaml" >&2
@@ -158,13 +157,17 @@ start_ui() {
   wait_for ui "http://localhost:${UI_PORT}/login"
 }
 
+# Both services and hl-admin run with these, each reading its own.
 service_env() {
   export DATABASE_URL HYPOTHESISLOOP_CONFIG="${STATE}/hypothesisloop.yaml"
-  HYPOTHESISLOOP_SIGNING_SECRET="$(<"${STATE}/signing-secret")"
-  HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD="$(<"${STATE}/git-password")"
+  AUTH_SIGNING_SECRET="$(<"${STATE}/signing-secret")"
+  GIT_HOST_PLAIN_PASSWORD="$(<"${STATE}/git-password")"
+  METRICS_DB_URL="http://localhost:${GREPTIME_PORT}"
+  GRAPH_DB_URL="bolt://localhost:${MEMGRAPH_PORT}"
+  DATA_STORE_MINIO_SECRET_ACCESS_KEY=hypothesisloop
   # The model proxy's credential is never used here: no agent is hosted.
   MODEL_ANTHROPIC_OAUTH_TOKEN=unused-by-graph-1k
-  export HYPOTHESISLOOP_SIGNING_SECRET HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD MODEL_ANTHROPIC_OAUTH_TOKEN
+  export AUTH_SIGNING_SECRET GIT_HOST_PLAIN_PASSWORD METRICS_DB_URL GRAPH_DB_URL DATA_STORE_MINIO_SECRET_ACCESS_KEY MODEL_ANTHROPIC_OAUTH_TOKEN
 }
 
 # Built before anything is stopped, so a tree that does not compile leaves the running ones be.
@@ -187,7 +190,7 @@ case "${action}" in
     containers_up
     service_env
     GIT_SERVER_ADDRESS=":${GIT_PORT}" GIT_SERVER_ROOT="${STATE}/git" GIT_SERVER_USERNAME=hypothesisloop \
-      GIT_SERVER_PASSWORD="${HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD}" start git-server "${STATE}/bin/git-server"
+      GIT_SERVER_PASSWORD="${GIT_HOST_PLAIN_PASSWORD}" start git-server "${STATE}/bin/git-server"
     wait_for git-server "http://localhost:${GIT_PORT}/health"
     start_services
     start identity-provider node "${repo}/localdev/graph-1k/identity-provider.mjs" "${IDP_PORT}" "${STATE}/jwt-key.pem" "http://localhost:${UI_PORT}"

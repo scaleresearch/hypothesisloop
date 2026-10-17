@@ -7,11 +7,13 @@
 # reach this stack the same way production would reach a real deployment — by one HTTP base URL,
 # configured externally (API_URL / NEXT_PUBLIC_API_URL / HYPOTHESISLOOP_CONTROL_PLANE_URL), never
 # hardcoded. Change a published port here and every one of those needs the same change. Do not
-# rename a service either: controlplane/settings/hypothesisloop.yaml's metrics_db_url and
-# graph_db_url are the literal DNS names "greptimedb" and "memgraph" (compose's own per-service DNS
-# resolves them — no /etc/hosts hack
-# needed, unlike the single-pod model this replaces), so a service rename breaks config that is
-# otherwise identical between this stack and a real cluster's.
+# rename a service either: the control plane's services below reach the others by their names
+# (compose's own per-service DNS resolves them), and controlplane/settings/hypothesisloop.yaml's
+# data_store.control_plane_endpoint names "minio".
+#
+# Each program reads its keys from its own file, which make render-settings writes from .env
+# (localdev/lib/env.sh). A file not written yet leaves the program to refuse to start, naming the
+# key it misses.
 
 services:
   registry:
@@ -87,7 +89,9 @@ services:
     command: ["server", "/data", "--address", "0.0.0.0:9000"]
     environment:
       MINIO_ROOT_USER: hypothesisloop
-      MINIO_ROOT_PASSWORD: ${DATA_STORE_SECRET_ACCESS_KEY:?run through make, which reads it from .env}
+    env_file:
+      - path: ../.run/env/object-store.env
+        required: false
     ports:
       - "9000:9000"
     volumes:
@@ -101,10 +105,11 @@ services:
   minio-init:
     image: docker.io/pgsty/silo:RELEASE.2026-09-16T00-00-00Z
     entrypoint: ["sh", "-c"]
-    environment:
-      DATA_STORE_SECRET_ACCESS_KEY: ${DATA_STORE_SECRET_ACCESS_KEY:?run through make, which reads it from .env}
+    env_file:
+      - path: ../.run/env/object-store.env
+        required: false
     command:
-      - "mcli alias set hl http://minio:9000 hypothesisloop \"$${DATA_STORE_SECRET_ACCESS_KEY}\" && mcli mb --ignore-existing hl/hypothesisloop-data"
+      - "mcli alias set hl http://minio:9000 hypothesisloop \"$${MINIO_ROOT_PASSWORD}\" && mcli mb --ignore-existing hl/hypothesisloop-data"
     depends_on:
       minio:
         condition: service_healthy
@@ -115,16 +120,15 @@ services:
     # The mounted Google credentials file is readable by its owner alone, who is root here.
     user: "0"
     restart: unless-stopped
+    env_file:
+      - path: ../.run/env/control-service.env
+        required: false
+    # The stores at their names on the compose network, in place of the file's, which processes on
+    # this machine use.
     environment:
       DATABASE_URL: postgres://hypothesisloop:hypothesisloop@postgres:5432/hypothesisloop?sslmode=disable
-      HYPOTHESISLOOP_SIGNING_SECRET: ${HYPOTHESISLOOP_SIGNING_SECRET:?run through make, which supplies local development's signing secret}
-      MODEL_ANTHROPIC_OAUTH_TOKEN: ${MODEL_ANTHROPIC_OAUTH_TOKEN:?run through make, which reads it from .env}
-      DATA_STORE_SECRET_ACCESS_KEY: ${DATA_STORE_SECRET_ACCESS_KEY:?run through make, which reads it from .env}
-      # The git host's secrets, which the rendered settings name (localdev/lib/auth.sh): the
-      # GitHub App's two with GIT_HOST_PROVIDER=github, the local git server's password with local.
-      # Empty and unread otherwise.
-      HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY: ${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY:-}
-      HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD: ${HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD:-}
+      METRICS_DB_URL: http://greptimedb:4000
+      GRAPH_DB_URL: bolt://memgraph:7687
       # With CONTAINER_REGISTRY_PROVIDER=gcp in .env, the control service's own Google identity,
       # which mints the environment registry's tokens: the application default credentials
       # `gcloud auth application-default login` writes to its well-known path, or
@@ -149,16 +153,12 @@ services:
   metrics-service:
     image: ${REGISTRY:?run through make, which names the registry}/hypothesisloop-metrics-service:${TAG:?TAG must name the image tag make images pushed}
     restart: unless-stopped
+    env_file:
+      - path: ../.run/env/metrics-service.env
+        required: false
     environment:
       DATABASE_URL: postgres://hypothesisloop:hypothesisloop@postgres:5432/hypothesisloop?sslmode=disable
-      HYPOTHESISLOOP_SIGNING_SECRET: ${HYPOTHESISLOOP_SIGNING_SECRET:?run through make, which supplies local development's signing secret}
-      MODEL_ANTHROPIC_OAUTH_TOKEN: ${MODEL_ANTHROPIC_OAUTH_TOKEN:?run through make, which reads it from .env}
-      DATA_STORE_SECRET_ACCESS_KEY: ${DATA_STORE_SECRET_ACCESS_KEY:?run through make, which reads it from .env}
-      # The git host's secrets, which the rendered settings name (localdev/lib/auth.sh): the
-      # GitHub App's two with GIT_HOST_PROVIDER=github, the local git server's password with local.
-      # Empty and unread otherwise.
-      HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY: ${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY:-}
-      HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD: ${HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD:-}
+      METRICS_DB_URL: http://greptimedb:4000
     ports:
       - "8084:8084"
     volumes:

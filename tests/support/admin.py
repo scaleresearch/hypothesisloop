@@ -1,7 +1,7 @@
 """hl-admin, the operator's hand on tenancy: registers a person as their first sign-in would,
 hands out their first API key, registers clusters, decides who is staff and which clusters are
-shared, and mints derived tokens. It reads HYPOTHESISLOOP_CONFIG and
-DATABASE_URL from the environment, which the make e2e targets set for the local stack.
+shared, and mints derived tokens. It reads the settings HYPOTHESISLOOP_CONFIG names, which the
+make e2e targets set for the local stack, and runs with its own keys alone (localdev/lib/env.sh).
 """
 from __future__ import annotations
 
@@ -22,7 +22,8 @@ def _binary() -> Path:
 
 
 def _run(*args: str) -> str:
-    proc = subprocess.run([str(_binary()), *args], capture_output=True, text=True, timeout=60)
+    proc = subprocess.run(["bash", "-c", '. localdev/lib/env.sh && lib_run hl-admin "$@"', "hl-admin", str(_binary()), *args],
+                          cwd=REPO_ROOT, capture_output=True, text=True, timeout=60)
     if proc.returncode != 0:
         raise RuntimeError(f"hl-admin {' '.join(args)} exited {proc.returncode}: {proc.stderr}")
     return proc.stdout.strip()

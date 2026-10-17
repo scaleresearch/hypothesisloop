@@ -5,29 +5,14 @@
 LIB_AUTH_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 . "${LIB_AUTH_REPO}/localdev/lib/clusters.sh"
 . "${LIB_AUTH_REPO}/localdev/lib/node.sh"
+. "${LIB_AUTH_REPO}/localdev/lib/env.sh"
 
-# The signing secret every local process is started with is made on this machine by the first
-# render and never leaves it. It has one source, the file: a value from the caller's environment
-# is not used. A new one ends every hls_ token derived so far (agents', jobs', runtimes', staff).
-# A second machine that mints tokens for this one's control plane (a node's install.sh) needs a
-# copy of this file, mode 600.
+# The signing secret every local process is started with (AUTH_SIGNING_SECRET of its environment
+# file) is made on this machine by the first render and never leaves it. It has one source, the
+# file. A new one ends every hls_ token derived so far (agents', jobs', runtimes', staff). A second
+# machine that mints tokens for this one's control plane (a node's install.sh) needs a copy of
+# this file, mode 600.
 HL_SIGNING_SECRET_FILE="${LIB_AUTH_REPO}/localdev/.run/signing-secret"
-lib_signing_secret() {
-  if [[ ! -r "${HL_SIGNING_SECRET_FILE}" ]]; then
-    echo "auth: cannot read the signing secret at ${HL_SIGNING_SECRET_FILE}: make render-settings makes it when it is missing" >&2
-    return 1
-  fi
-  HYPOTHESISLOOP_SIGNING_SECRET="$(<"${HL_SIGNING_SECRET_FILE}")"
-  if (( ${#HYPOTHESISLOOP_SIGNING_SECRET} < 32 )); then
-    echo "auth: the signing secret at ${HL_SIGNING_SECRET_FILE} is shorter than 32 characters: delete it and run make render-settings" >&2
-    return 1
-  fi
-  export HYPOTHESISLOOP_SIGNING_SECRET
-}
-unset HYPOTHESISLOOP_SIGNING_SECRET
-if [[ -e "${HL_SIGNING_SECRET_FILE}" ]]; then
-  lib_signing_secret || return 1 2>/dev/null || exit 1
-fi
 
 # Who signs people in on the local stack. The first is always a key made on this machine by the
 # first render, which never leaves it: the e2e suite and the browser run sign their users with it.
@@ -59,12 +44,12 @@ fi
 # it (.env.example): github, the GitHub App of the GIT_HOST_GITHUB_APP_* keys, or local, the git
 # server `make dev` runs on this machine (localdev/local-git). That one serves the bare
 # repositories under HL_GIT_ROOT (make git-repository) to its one credential, whose password is
-# made on this machine by the first use and never leaves it. The secrets of either reach every
-# process that loads the rendered settings (the compose services, hl-admin) through the
-# variables exported here.
+# made on this machine by the first use and never leaves it. The secret of either reaches the
+# processes that read it through their environment files (lib_env_files).
 HL_GIT_PORT=8085
 HL_GIT_ROOT="${LIB_AUTH_REPO}/localdev/.run/git"
 HL_GIT_USERNAME=hypothesisloop
+HL_GIT_PASSWORD_FILE="${LIB_AUTH_REPO}/localdev/.run/git-password"
 HL_GIT_HOST_PROVIDER=""
 if [[ -f "${LIB_AUTH_REPO}/.env" ]]; then
   HL_GIT_HOST_PROVIDER="$(lib_env_value GIT_HOST_PROVIDER)"
@@ -87,37 +72,16 @@ case "${HL_GIT_HOST_PROVIDER}" in
     unset lib_auth_key
     HL_GIT_HOST_GITHUB_APP_ID="$(lib_env_value GIT_HOST_GITHUB_APP_ID)"
     HL_GIT_HOST_GITHUB_APP_SLUG="$(lib_env_value GIT_HOST_GITHUB_APP_SLUG)"
-    HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY="$(lib_env_value GIT_HOST_GITHUB_APP_PRIVATE_KEY)"
-    export HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY
     ;;
   local)
-    if [[ ! -s "${LIB_AUTH_REPO}/localdev/.run/git-password" ]]; then
-      mkdir -p "${LIB_AUTH_REPO}/localdev/.run"
-      (umask 077 && openssl rand -hex 24 > "${LIB_AUTH_REPO}/localdev/.run/git-password")
+    if [[ ! -s "${HL_GIT_PASSWORD_FILE}" ]]; then
+      mkdir -p "$(dirname "${HL_GIT_PASSWORD_FILE}")"
+      (umask 077 && openssl rand -hex 24 > "${HL_GIT_PASSWORD_FILE}")
     fi
-    HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD="$(cat "${LIB_AUTH_REPO}/localdev/.run/git-password")"
-    export HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD
     ;;
   "") ;;
   *) lib_git_host_provider || return 1 2>/dev/null || exit 1 ;;
 esac
-
-# The Claude subscription token the local control plane makes every hosted agent's model calls
-# with (models in the settings), MODEL_ANTHROPIC_OAUTH_TOKEN in .env. It reaches the processes
-# that load the rendered settings (the control plane, hl-admin) through the variable exported
-# here, and no agent's machine. The control plane does not start without it.
-MODEL_ANTHROPIC_OAUTH_TOKEN=""
-if [[ -f "${LIB_AUTH_REPO}/.env" ]]; then
-  MODEL_ANTHROPIC_OAUTH_TOKEN="$(lib_env_value MODEL_ANTHROPIC_OAUTH_TOKEN)"
-fi
-export MODEL_ANTHROPIC_OAUTH_TOKEN
-
-# The object store's secret key the settings name (data_store.secret_access_key), from .env.
-DATA_STORE_SECRET_ACCESS_KEY=""
-if [[ -f "${LIB_AUTH_REPO}/.env" ]]; then
-  DATA_STORE_SECRET_ACCESS_KEY="$(lib_env_value DATA_STORE_SECRET_ACCESS_KEY)"
-fi
-export DATA_STORE_SECRET_ACCESS_KEY
 
 # The container registry CONTAINER_REGISTRY_PROVIDER in .env names, read from that provider's own
 # keys. lib_container_registry sets HL_REGISTRY, the address the deployment's images are pushed
@@ -176,7 +140,6 @@ lib_render_settings() {
     mkdir -p "$(dirname "${HL_SIGNING_SECRET_FILE}")"
     (umask 077 && openssl rand -hex 32 > "${HL_SIGNING_SECRET_FILE}")
   fi
-  lib_signing_secret || return 1
   if [[ ! -f "${HL_DEV_JWT_KEY}" ]]; then
     (umask 077 && openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt -out "${HL_DEV_JWT_KEY}")
   fi
@@ -243,7 +206,6 @@ lib_render_settings() {
 # hl-admin reads the settings the local control plane runs with. The committed file holds
 # placeholders and is refused at load, so `make render-settings` comes first.
 export HYPOTHESISLOOP_CONFIG="${HYPOTHESISLOOP_CONFIG:-${LIB_AUTH_REPO}/controlplane/settings/.hypothesisloop.rendered.yaml}"
-export DATABASE_URL="${DATABASE_URL:-postgres://hypothesisloop:hypothesisloop@localhost:5433/hypothesisloop?sslmode=disable}"
 
 # lib_fresh_settings: renders the local settings again when the committed file is newer than
 # them. A caller outside make (a test runner, a script) otherwise loads settings rendered before
@@ -262,13 +224,12 @@ lib_fresh_settings() {
     echo "auth: the local settings are not rendered from the current controlplane/settings/hypothesisloop.yaml: run make render-settings" >&2
     return 1
   fi
-  lib_render_settings "$(cat "${address_file}")" "${rendered}"
+  lib_render_settings "$(cat "${address_file}")" "${rendered}" && lib_env_files "${rendered}"
 }
 
 lib_hl_admin() {
-  lib_signing_secret || return 1
   lib_fresh_settings || return 1
-  (cd "${LIB_AUTH_REPO}" && go run ./controlplane/cmd/hl-admin "$@")
+  (cd "${LIB_AUTH_REPO}" && lib_run hl-admin go run ./controlplane/cmd/hl-admin "$@")
 }
 
 # lib_runtime_token <cluster>: the token a cluster's agents present. It is accepted once the
