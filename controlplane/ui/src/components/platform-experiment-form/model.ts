@@ -26,6 +26,10 @@ export interface FormState {
   stages: StageDraft[] | null
   repository: string
   agent_image: string
+  // Empty is the platform's coordinator default.
+  coordinator_model: string
+  // Empty is the platform's default: guaranteed or burst_only.
+  default_quota_tier: string
 }
 
 export type SetField = <K extends keyof FormState>(field: K, value: FormState[K]) => void
@@ -46,14 +50,30 @@ export interface StepProps {
 export type StageDraft = { length_pct: string; evict_pct: string; max_job_hours: string }
 
 // One row of the starting agents, held as typed, for the reason StageDraft gives.
-export type StartingAgentDraft = { agent_type: string; count: string; model: string }
+// Hyperparameters come only from a repository's experiment file, and are sent as it states them.
+export type StartingAgentDraft = { agent_type: string; count: string; model: string; hyperparameters?: Record<string, unknown> }
 
 export const ONE_STARTING_AGENT: StartingAgentDraft = { agent_type: DEFAULT_AGENT_TYPE, count: '1', model: '' }
 
 /** The researchers a new experiment is sent with: the rows given, or max_agents generalists. */
 export function toResearchers(rows: StartingAgentDraft[] | null, maxAgents: number): ResearcherPoolEntry[] {
   if (!rows) return [{ agent_type: DEFAULT_AGENT_TYPE, count: maxAgents }]
-  return rows.map(r => ({ agent_type: r.agent_type, count: Number(r.count), ...(r.model.trim() ? { model: r.model.trim() } : {}) }))
+  return rows.map(r => ({
+    agent_type: r.agent_type,
+    count: Number(r.count),
+    ...(r.model.trim() ? { model: r.model.trim() } : {}),
+    ...(r.hyperparameters ? { hyperparameters: r.hyperparameters } : {}),
+  }))
+}
+
+/** The rows of the researchers a spec states. */
+export function toStartingAgents(researchers: ResearcherPoolEntry[]): StartingAgentDraft[] {
+  return researchers.map(r => ({
+    agent_type: r.agent_type || DEFAULT_AGENT_TYPE,
+    count: String(r.count),
+    model: r.model ?? '',
+    ...(r.hyperparameters ? { hyperparameters: r.hyperparameters } : {}),
+  }))
 }
 
 /** Mirrors what the API holds starting agents to, so the form says it before the API does. */

@@ -123,6 +123,8 @@ export interface PlatformExperiment {
   agent_image?: string
   // Absent when the platform runs no coordinator for it.
   coordinator?: HostedCoordinator
+  // guaranteed or burst_only, for signups that state none. Fixed at creation.
+  default_quota_tier?: string
   // The baseline no experiment starts without: the completed job that measured it, absent until
   // one is declared.
   baseline_job_id?: string
@@ -219,13 +221,37 @@ export interface MetricReference {
 }
 
 /** What a repository's .hypothesisloop/experiment.yaml states of a platform experiment. */
-export interface ExperimentFile {
-  repository: string
-  name?: string
-  description?: string
-  metrics?: MetricDefinition[]
+/** The experiment spec (contract/experimentspec.Spec): what a platform experiment is, keyed as the create body. */
+export interface ExperimentSpec {
+  name: string
+  description: string
+  metrics: MetricDefinition[]
+  budget_accelerator_hours: number
+  /** How many researchers may be at work at once. */
+  max_agents: number
+  /** How long the run lasts from its start, once the baseline is declared. */
+  duration_hours: number
+  /** Who the platform starts and keeps at work, at most max_agents in all. Omitted, nobody. */
+  researchers?: ResearcherPoolEntry[]
+  /** true has the platform run the coordinator. */
+  coordinator_hosted?: boolean
+  /** The hosted coordinator's model. Omitted, the platform's coordinator default. */
+  coordinator_model?: string
+  /** Omitted is the platform's default. */
   report_interval_seconds?: number
+  /** Elimination ladder; omitted means the platform default. */
   stages?: Stage[]
+  /** guaranteed or burst_only, for signups that state none. Omitted is the platform's default. */
+  default_quota_tier?: string
+  /** Accelerators-in-flight this experiment may hold at once. Omitted is the platform's default. */
+  max_concurrent_accelerators?: number
+  /** The image hosted agents and the coordinator run; omitted means the platform's. */
+  agent_image?: string
+}
+
+/** The spec a repository keeps at .hypothesisloop/experiment.yaml, and the repository as the git host names it. */
+export interface ExperimentFile extends ExperimentSpec {
+  repository: string
 }
 
 /** Where a create with these repository fields would keep its code. */

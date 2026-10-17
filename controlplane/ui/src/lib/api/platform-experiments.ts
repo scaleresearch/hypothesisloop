@@ -1,6 +1,6 @@
 import { apiCall, apiFetch, apiFetchPage, apiSend, withQuery } from '@/lib/api/request'
 import type { Page } from '@/lib/api/request'
-import type { AgentMetricSeries, ExperimentFile, MetricDefinition, PlatformExperiment, PlatformExperimentResults, RepositoryCheck, ResearcherPoolEntry, Stage, StagesStatus } from '@/types/platform-experiments'
+import type { AgentMetricSeries, ExperimentFile, ExperimentSpec, MetricDefinition, PlatformExperiment, PlatformExperimentResults, RepositoryCheck, ResearcherPoolEntry, Stage, StagesStatus } from '@/types/platform-experiments'
 
 // Metric history of every job in a platform experiment over its own run, one series per job. The
 // window reaches from the run's start to its end, or to now while it runs: each series comes back as
@@ -20,32 +20,15 @@ export function fetchPlatformExperimentTimeseries(
   return apiFetch<{ series: AgentMetricSeries[] }>(`/platform-experiments/${pe.id}/metrics-timeseries?${query}`)
 }
 
-export interface CreatePlatformExperimentRequest {
-  name: string
-  description: string
-  budget_accelerator_hours: number
-  /** How many researchers may be at work at once. */
-  max_agents: number
-  /** Who the platform starts and keeps at work, at most max_agents in all. Optional. */
-  researchers?: ResearcherPoolEntry[]
-  /** Accelerators-in-flight (SUBMITTED+RUNNING) this experiment may hold at once. Omitted uses
-   *  the platform default (quota.default_max_concurrent_accelerators). */
-  max_concurrent_accelerators?: number
-  metrics: MetricDefinition[]
-  /** Omitted is the platform's default. */
-  report_interval_seconds?: number
-  /** Elimination ladder; omitted means the platform default. */
-  stages?: Stage[]
+export interface CreatePlatformExperimentRequest extends ExperimentSpec {
+  /** owner/name of the repository it works on. */
+  repository?: string
+  /** The connected account a new repository is created on, without repository. */
+  repository_account?: string
+  /** A closed platform experiment of the project this one carries on. */
+  continues?: string
   /** When its baseline begins to be measured. Omitted, the create. */
   starts_at?: string
-  /** How long the run lasts from its start, once the baseline is declared. */
-  duration_hours: number
-  /** owner/name of a repository a connected GitHub account covers. Read at creation only. */
-  repository?: string
-  /** The image hosted agents and the coordinator run; omitted means the platform's. Read at creation only. */
-  agent_image?: string
-  /** true has the platform run the coordinator. It needs `repository`. Read at creation only. */
-  coordinator_hosted?: boolean
 }
 
 /** The reason the API gives for a repository that brings no experiment file. */

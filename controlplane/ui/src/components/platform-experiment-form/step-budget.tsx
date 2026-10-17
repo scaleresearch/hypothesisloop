@@ -93,6 +93,22 @@ export function StepBudget({ form, set, isEdit, locked, budgetKind }: StepProps 
               <Input value={form.agent_image} onChange={e => set('agent_image', e.target.value)} placeholder="registry.example.com/team/agent:tag" />
             </FormField>
           )}
+          {!isEdit && (
+            <FormField label="Coordinator model" hint="The model the platform runs the coordinator on. Empty is the platform's default.">
+              <Input value={form.coordinator_model} onChange={e => set('coordinator_model', e.target.value)} placeholder="platform default" />
+            </FormField>
+          )}
+          {!isEdit && (
+            <FieldGroup label="Default quota tier" hint="For agents that join without stating one.">
+              <Segmented
+                label="Default quota tier"
+                size="sm"
+                options={[{ value: '', label: 'Platform default' }, { value: 'guaranteed', label: 'Guaranteed' }, { value: 'burst_only', label: 'Burst only' }]}
+                value={form.default_quota_tier}
+                onChange={v => set('default_quota_tier', v)}
+              />
+            </FieldGroup>
+          )}
           {isEdit && (
             <FormField label="Starts at" hint={locked ? LOCKED : 'When its baseline begins to be measured. Its baseline deadline moves with it.'}>
               <Input type="datetime-local" value={form.starts_at} disabled={locked} onChange={e => set('starts_at', e.target.value)} />

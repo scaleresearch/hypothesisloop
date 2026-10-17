@@ -245,10 +245,11 @@ describe('a new platform experiment', () => {
 
 describe('a repository that brings its own experiment', () => {
   // A person who picked such a repository in the form started agents with an empty brief: the
-  // form knew nothing of the file the API reads for a create with from_repo.
+  // form knew nothing of the spec the repository keeps.
   it('fills the form from its experiment file, and what is created carries it', async () => {
     vi.mocked(fetchExperimentFile).mockResolvedValue({
       repository: 'acme/widgets', name: 'Widget compression', description: 'Make widgets smaller.', report_interval_seconds: 10,
+      budget_accelerator_hours: 3, max_agents: 4, duration_hours: 6,
       metrics: [{ key: 'compression_ratio', direction: 'maximize', role: 'ranking' }], stages: [{ length_pct: 100, evict_pct: 0, max_job_hours: 0 }],
     })
     show()
@@ -261,6 +262,7 @@ describe('a repository that brings its own experiment', () => {
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
     expect(sent()).toMatchObject({
       name: 'Widget compression', description: 'Make widgets smaller.', report_interval_seconds: 10, repository: 'acme/widgets',
+      budget_accelerator_hours: 3, max_agents: 4, duration_hours: 6,
       metrics: [{ key: 'compression_ratio', direction: 'maximize', role: 'ranking' }], stages: [{ length_pct: 100, evict_pct: 0, max_job_hours: 0 }],
     })
   })

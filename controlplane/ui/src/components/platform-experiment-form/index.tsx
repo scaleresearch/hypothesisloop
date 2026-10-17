@@ -19,7 +19,7 @@ import { Inline, Stack } from '@/components/ui/stack'
 import { ErrorMessage } from '@/components/ui/status-message'
 import { Tabs } from '@/components/ui/tabs'
 import { Text } from '@/components/ui/text'
-import { NEW_EXPERIMENT, STEPS, refusedStep, toDrafts, toResearchers, toStages } from '@/components/platform-experiment-form/model'
+import { NEW_EXPERIMENT, STEPS, refusedStep, toDrafts, toResearchers, toStages, toStartingAgents } from '@/components/platform-experiment-form/model'
 import type { FormState, Problem, StepID } from '@/components/platform-experiment-form/model'
 import { StepWhat } from '@/components/platform-experiment-form/step-what'
 import type { FileNote } from '@/components/platform-experiment-form/step-what'
@@ -44,8 +44,13 @@ interface FormHandle {
   leave: () => void
 }
 
-// The fields the repository's experiment file can fill, by the words the form names them with.
-const FILE_FIELDS = [['name', 'the name'], ['description', 'the brief'], ['metrics', 'the metrics'], ['report_interval_seconds', 'the report interval'], ['stages', 'the stage ladder']] as const
+// Every field of the form the repository's experiment file fills, by the words the form names it with.
+const FILE_FIELDS = [
+  ['name', 'the name'], ['description', 'the brief'], ['metrics', 'the metrics'], ['budget_accelerator_hours', 'the budget'],
+  ['max_agents', 'the max researchers'], ['duration_hours', 'the duration'], ['starting_agents', 'the starting agents'],
+  ['report_interval_seconds', 'the report interval'], ['stages', 'the stage ladder'], ['max_concurrent_accelerators', 'the max concurrent accelerators'],
+  ['agent_image', 'the agent image'], ['coordinator_model', 'the coordinator model'], ['default_quota_tier', 'the default quota tier'],
+] as const
 
 /**
  * The one form a platform experiment is created and edited with, in three steps. A new one is
@@ -76,6 +81,8 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
     stages: initial?.stages?.length ? toDrafts(initial.stages) : null,
     repository: initial?.repository ?? '',
     agent_image: initial?.agent_image ?? '',
+    coordinator_model: initial?.coordinator?.model ?? '',
+    default_quota_tier: initial?.default_quota_tier ?? '',
     ...draft?.form as Partial<FormState> | undefined,
   }))
   // The form as it opened. An edit sends the fields that differ from it, and a new one left
@@ -166,22 +173,31 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
     setStep(next)
   }
 
-  // A repository may bring its own experiment: the brief, the metrics and the ladder its code
-  // is written for. Choosing it fills them in, for the person to read and change before anything
-  // is created. A name or a brief already typed stays.
+  // A repository may bring its own experiment spec, the one hl platform-experiments start reads.
+  // Choosing it fills in every field it states, for the person to read and change before the
+  // whole body is sent. A name or a brief already typed stays.
   async function chooseRepository(repository: string) {
     set('repository', repository)
     if (!repository) return setFromFile(null)
     setFromFile({ repository, state: 'reading' })
     try {
       const file = await fetchExperimentFile(project.id, repository)
+      const stated = (value: number | string | undefined, held: string) => value ? String(value) : held
       const next = (f: FormState): FormState => ({
         ...f,
         name: f.name.trim() || file.name || '',
         description: f.description.trim() || file.description || '',
         metrics: file.metrics?.length ? file.metrics : f.metrics,
-        report_interval_seconds: file.report_interval_seconds ? String(file.report_interval_seconds) : f.report_interval_seconds,
+        budget_accelerator_hours: stated(file.budget_accelerator_hours, f.budget_accelerator_hours),
+        max_agents: stated(file.max_agents, f.max_agents),
+        duration_hours: stated(file.duration_hours, f.duration_hours),
+        starting_agents: file.researchers?.length ? toStartingAgents(file.researchers) : f.starting_agents,
+        report_interval_seconds: stated(file.report_interval_seconds, f.report_interval_seconds),
         stages: file.stages?.length ? toDrafts(file.stages) : f.stages,
+        max_concurrent_accelerators: stated(file.max_concurrent_accelerators, f.max_concurrent_accelerators),
+        agent_image: stated(file.agent_image, f.agent_image),
+        coordinator_model: stated(file.coordinator_model, f.coordinator_model),
+        default_quota_tier: stated(file.default_quota_tier, f.default_quota_tier),
       })
       const filled = FILE_FIELDS.filter(([field]) => JSON.stringify(next(form)[field]) !== JSON.stringify(form[field])).map(([, words]) => words)
       setForm(f => f.repository !== repository ? f : next(f))
@@ -244,6 +260,8 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
         ...(form.stages ? { stages: toStages(form.stages) } : {}),
         ...repositoryFields(form.repository),
         ...(form.agent_image.trim() ? { agent_image: form.agent_image.trim() } : {}),
+        ...(form.coordinator_model.trim() ? { coordinator_model: form.coordinator_model.trim() } : {}),
+        ...(form.default_quota_tier ? { default_quota_tier: form.default_quota_tier } : {}),
         duration_hours: Number(form.duration_hours),
       }
       setRefused(null)
