@@ -24,6 +24,9 @@ controlplane/ui/
 # Charts, install scripts and the local stack (not needed at runtime)
 deploy/
 localdev/
+# control-service names the cluster-agent chart by the version this file gives it.
+!deploy/charts/hypothesisloop-cluster-agent/Chart.yaml
+!deploy/charts/hypothesisloop-cluster-agent/chart.go
 tests/
 
 # Go test artifacts

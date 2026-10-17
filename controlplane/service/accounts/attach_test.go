@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	clusteragent "github.com/scaleresearch/hypothesisloop/deploy/charts/hypothesisloop-cluster-agent"
 )
 
 // The command is run as printed: a shell splits it into helm's own arguments, and the token piped
@@ -28,7 +30,7 @@ func TestTheKubernetesCommandRunsHelmWithTheTokenOnStdin(t *testing.T) {
 	}
 	args, _ := os.ReadFile(argsFile)
 	want := strings.Join([]string{"upgrade", "--install", "hypothesisloop-cluster-agent", "oci://registry.example/images/charts/hypothesisloop-cluster-agent",
-		"--version", "0.1.0+abc1234", "--namespace", "hypothesisloop", "--create-namespace", "--take-ownership", "--set-file", "runtimeToken=/dev/stdin",
+		"--version", clusteragent.Version("abc1234"), "--namespace", "hypothesisloop", "--create-namespace", "--take-ownership", "--set-file", "runtimeToken=/dev/stdin",
 		"--set-string", "clusterName=gpu-east", "--set-string", `apiURL=https://api.example/a?ids=1\,2`, "--set-string", "metricsURL=https://metrics.example/it's",
 		"--set-string", "images.registry=registry.example/images", "--set-string", "images.tag=abc1234"}, "\n") + "\n"
 	if string(args) != want {

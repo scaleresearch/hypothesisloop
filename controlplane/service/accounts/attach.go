@@ -3,6 +3,8 @@ package accounts
 import (
 	"fmt"
 	"strings"
+
+	clusteragent "github.com/scaleresearch/hypothesisloop/deploy/charts/hypothesisloop-cluster-agent"
 )
 
 // AttachCommands are the commands that attach a registered cluster, one for each kind of runtime.
@@ -27,8 +29,8 @@ func lines(groups ...string) string {
 	return strings.Join(groups, " \\\n  ")
 }
 
-// kubernetesCommand installs or upgrades the runtime chart that make images pushed beside the
-// images. --take-ownership takes over the jobs namespace an install from before the chart
+// kubernetesCommand installs or upgrades the runtime chart that make publish pushed beside the
+// images of the release's tag. --take-ownership takes over the jobs namespace an install from before the chart
 // created. The values set are the cluster's one config file; the token comes on stdin. A
 // registry of plain HTTP is read so by helm, and by every node through the chart's
 // insecureRegistry.
@@ -43,7 +45,7 @@ func kubernetesCommand(registered RegisteredCluster) string {
 	groups := []string{
 		askToken,
 		chart,
-		"--version " + shellQuote("0.1.0+"+registered.ImageTag),
+		"--version " + shellQuote(clusteragent.Version(registered.ImageTag)),
 		"--namespace hypothesisloop --create-namespace --take-ownership",
 		"--set-file runtimeToken=/dev/stdin",
 		set("clusterName", registered.Name),
