@@ -11,7 +11,7 @@ import (
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 
-	"github.com/scaleresearch/hypothesisloop/runtime/shared/acceleratorname"
+	"github.com/scaleresearch/hypothesisloop/contract/acceleratorname"
 )
 
 // probeNVIDIA discovers local NVIDIA accelerator hardware via NVML (libnvidia-ml.so), the same

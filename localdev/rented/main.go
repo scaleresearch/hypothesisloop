@@ -13,8 +13,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider/providers"
 	"github.com/scaleresearch/hypothesisloop/controlplane/config"
-	"github.com/scaleresearch/hypothesisloop/runtime/cloud/provider/providers"
 )
 
 func main() {

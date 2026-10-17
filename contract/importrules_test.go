@@ -12,23 +12,23 @@ import (
 
 const module = "github.com/scaleresearch/hypothesisloop/"
 
-// testOnlyExceptions are the test files of the runtime and the CLI that import the control
-// plane, each because it runs the control plane's own code against the other side.
+// testOnlyExceptions are the test files of the CLI that import the control plane, each because it
+// runs the control plane's own code against the other side.
 var testOnlyExceptions = map[string]string{
 	"cli/cmd/hl/platformgate_test.go":       "runs the CLI against the real control plane services",
 	"cli/internal/apiclient/caller_test.go": "reads tokens the control plane mints",
 }
 
-// The runtime and the CLI share only the contract with the control plane, so either side can
-// change everything else without the other.
-func TestTheRuntimeAndTheCLIDoNotImportTheControlPlane(t *testing.T) {
-	for _, path := range goList(t, "-deps", "-f", "{{.ImportPath}}", module+"runtime/...", module+"cli/...") {
+// The CLI shares only the contract with the control plane, so either side can change everything
+// else without the other.
+func TestTheCLIDoesNotImportTheControlPlane(t *testing.T) {
+	for _, path := range goList(t, "-deps", "-f", "{{.ImportPath}}", module+"cli/...") {
 		if strings.HasPrefix(path, module+"controlplane/") {
-			t.Errorf("the runtime or the CLI imports %s", path)
+			t.Errorf("the CLI imports %s", path)
 		}
 	}
 	root := repoRoot(t)
-	for _, dir := range goList(t, "-f", "{{.Dir}}", module+"runtime/...", module+"cli/...") {
+	for _, dir := range goList(t, "-f", "{{.Dir}}", module+"cli/...") {
 		files, err := filepath.Glob(filepath.Join(dir, "*_test.go"))
 		if err != nil {
 			t.Fatal(err)
@@ -42,6 +42,21 @@ func TestTheRuntimeAndTheCLIDoNotImportTheControlPlane(t *testing.T) {
 				if strings.HasPrefix(path, module+"controlplane/") && testOnlyExceptions[filepath.ToSlash(rel)] == "" {
 					t.Errorf("%s imports %s", rel, path)
 				}
+			}
+		}
+	}
+}
+
+// The runtime is the software deployed onto machines, so it imports only the contract and its own
+// packages: never the control plane, and never the CLI. The control plane reaches into runtime/
+// only where controlplane/internal/layers admits it.
+func TestTheRuntimeImportsOnlyTheContractAndItself(t *testing.T) {
+	lines := goListLines(t, "-f", `{{.ImportPath}} {{join .Imports " "}} {{join .TestImports " "}} {{join .XTestImports " "}}`, module+"runtime/...")
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		for _, path := range fields[1:] {
+			if strings.HasPrefix(path, module) && !strings.HasPrefix(path, module+"runtime/") && !strings.HasPrefix(path, module+"contract/") {
+				t.Errorf("%s imports %s", strings.TrimPrefix(fields[0], module), path)
 			}
 		}
 	}
@@ -93,6 +108,15 @@ func repoRoot(t *testing.T) string {
 		t.Fatalf("go list -m = %v, want the one module", dirs)
 	}
 	return dirs[0]
+}
+
+func goListLines(t *testing.T, args ...string) []string {
+	t.Helper()
+	out, err := exec.Command("go", append([]string{"list"}, args...)...).Output()
+	if err != nil {
+		t.Fatalf("go list %v: %v", args, err)
+	}
+	return strings.Split(strings.TrimSpace(string(out)), "\n")
 }
 
 func goList(t *testing.T, args ...string) []string {

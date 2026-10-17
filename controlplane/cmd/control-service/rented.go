@@ -7,15 +7,15 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider"
+	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider/providers"
 	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/agentsandbox"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/agentsandbox/launcher"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/compute"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
-	cloudagentsandbox "github.com/scaleresearch/hypothesisloop/runtime/cloud/agentsandbox"
-	"github.com/scaleresearch/hypothesisloop/runtime/cloud/compute"
-	"github.com/scaleresearch/hypothesisloop/runtime/cloud/provider"
-	"github.com/scaleresearch/hypothesisloop/runtime/cloud/provider/providers"
 )
 
 // newRented builds what rents machines elsewhere, each a loop the leader runs: the launcher of
@@ -24,11 +24,11 @@ import (
 func newRented(pcfg *hypothesisloopcfg.ControlService, store *db.Store, clusters *clusterexchange.Service, metrics *metricsdb.Store, logger *zap.Logger) ([]func(context.Context), error) {
 	var loops []func(context.Context)
 	if s := pcfg.Sandbox; s != nil {
-		launcher, err := newLauncher(pcfg, s, store, metrics, logger)
+		sandboxes, err := newLauncher(pcfg, s, store, metrics, logger)
 		if err != nil {
 			return nil, err
 		}
-		loops = append(loops, func(ctx context.Context) { _ = launcher.Run(ctx) })
+		loops = append(loops, func(ctx context.Context) { _ = sandboxes.Run(ctx) })
 	}
 	environments := ""
 	if pcfg.ContainerRegistry != nil {
@@ -44,7 +44,7 @@ func newRented(pcfg *hypothesisloopcfg.ControlService, store *db.Store, clusters
 	return loops, nil
 }
 
-func newLauncher(pcfg *hypothesisloopcfg.ControlService, s *hypothesisloopcfg.SandboxConfig, store *db.Store, metrics *metricsdb.Store, logger *zap.Logger) (*cloudagentsandbox.Launcher, error) {
+func newLauncher(pcfg *hypothesisloopcfg.ControlService, s *hypothesisloopcfg.SandboxConfig, store *db.Store, metrics *metricsdb.Store, logger *zap.Logger) (*launcher.Launcher, error) {
 	log := logger.Named("agentsandbox")
 	// An agent instance has no accelerator, so the provider is asked for no accelerator type.
 	rented, err := providers.New(s.Provider, s.Sections[s.Provider], pcfg.SandboxSecret, nil, log.Named(s.Provider).Sugar().Infof)
@@ -58,10 +58,10 @@ func newLauncher(pcfg *hypothesisloopcfg.ControlService, s *hypothesisloopcfg.Sa
 		ProgressLimit:   time.Duration(pcfg.Agents.ProgressLimitSeconds) * time.Second,
 		MaxNewPerAnswer: pcfg.Agents.MaxNewInstancesPerAnswer,
 	}, log)
-	launcher, err := cloudagentsandbox.New(cloudagentsandbox.Config{
+	sandboxes, err := launcher.New(launcher.Config{
 		Name:     s.Name,
 		Command:  s.Instance.Command,
-		Size:     cloudagentsandbox.Size{CPUMillis: s.Instance.CPUMillis, MemoryBytes: s.Instance.MemoryBytes, DiskBytes: s.Instance.DiskBytes},
+		Size:     launcher.Size{CPUMillis: s.Instance.CPUMillis, MemoryBytes: s.Instance.MemoryBytes, DiskBytes: s.Instance.DiskBytes},
 		Provider: rented, Platform: decider,
 		Interval: s.Interval(), CreatePause: s.CreatePause(), WarmPool: warmPool,
 		Log: log.Sugar().Infof,
@@ -71,7 +71,7 @@ func newLauncher(pcfg *hypothesisloopcfg.ControlService, s *hypothesisloopcfg.Sa
 	}
 	log.Info("sandboxed agents run on the sandbox provider", zap.String("provider", s.Provider), zap.String("name", s.Name),
 		zap.Strings("capabilities", provider.Capabilities(rented)), zap.Int("warm_pool", warmPool))
-	return launcher, nil
+	return sandboxes, nil
 }
 
 func newCloudCluster(pcfg *hypothesisloopcfg.ControlService, cc hypothesisloopcfg.CloudComputeConfig, environments string, store *db.Store, clusters *clusterexchange.Service, logger *zap.Logger) (*compute.Cluster, error) {

@@ -73,9 +73,15 @@ var layers = []layer{
 	{path: "controlplane/clients/githost", may: []string{"controlplane/config", "controlplane/auth", "controlplane/domain", "controlplane/refusal"}, own: true},
 	{path: "controlplane/clients/githost/github", may: []string{"controlplane/config", "controlplane/auth", "controlplane/domain", "controlplane/refusal", "controlplane/clients/githost"}},
 	{path: "controlplane/clients/registrycred", may: []string{"controlplane/config", "controlplane/auth", "controlplane/domain", "controlplane/refusal"}, own: true},
+	{path: "controlplane/clients/provider", may: []string{"controlplane/config", "controlplane/auth", "controlplane/domain", "controlplane/refusal"}, own: true},
 	// A service reaches another service only through an interface wired in cmd.
 	{path: "controlplane/service", may: services},
 	{path: "controlplane/service/scheduler", may: services, own: true},
+	// The cloud compute runtime runs in process the loop every cluster runtime runs, driving an
+	// agentexec.Executor and handing workloads workloadenv's environment, so a rented machine runs
+	// a job as a cluster's node does. These are the only packages of runtime/ the control plane
+	// imports.
+	{path: "controlplane/service/compute", may: append([]string{"runtime/shared/agentloop", "runtime/shared/agentexec", "runtime/shared/workloadenv"}, services...)},
 	// Attach names the cluster-agent chart by the version its Chart.yaml gives.
 	{path: "controlplane/service/accounts", may: append([]string{"deploy/charts/hypothesisloop-cluster-agent"}, services...)},
 	{path: "controlplane/service/platformexperiments/platformexperimentstest", may: []string{"controlplane/domain", "controlplane/storage/db"}},
@@ -90,9 +96,7 @@ var layers = []layer{
 	{path: "controlplane/httpapi/metricsingest", may: []string{"controlplane/auth", "controlplane/domain", "controlplane/refusal", "controlplane/storage/metricsdb"}},
 	{path: "controlplane/httpapi/middleware", may: []string{"controlplane/auth"}},
 	{path: "controlplane/cmd", may: []string{"controlplane"}, own: true, web: true},
-	// What rents machines elsewhere reaches the control plane only through interfaces wired here.
-	{path: "controlplane/cmd/control-service", may: []string{"controlplane", "runtime/cloud"}, web: true},
-	{path: "controlplane/cmd/e2b-template", may: []string{"controlplane/config", "runtime/cloud/provider/e2b"}},
+	{path: "controlplane/cmd/e2b-template", may: []string{"controlplane/config", "controlplane/clients/provider/e2b"}},
 	// metrics-service serves node-agent pushes only, so it never mounts the API.
 	{path: "controlplane/cmd/metrics-service", may: []string{"controlplane"}, never: []string{"controlplane/httpapi"}, web: true},
 	{path: "controlplane/cmd/hl-admin", may: []string{"controlplane/auth", "controlplane/config", "controlplane/domain",
