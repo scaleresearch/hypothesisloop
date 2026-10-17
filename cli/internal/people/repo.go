@@ -14,8 +14,9 @@ import (
 	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
 )
 
-// experimentTemplateURL is the public repository every experiment's repository starts from.
-const experimentTemplateURL = "https://github.com/scaleresearch/hypothesisloop-experiment-template.git"
+// experimentTemplateURL is the public repository every experiment's repository starts from. A
+// variable so that a test clones a local repository in its place.
+var experimentTemplateURL = "https://github.com/scaleresearch/hypothesisloop-experiment-template.git"
 
 func RepoInit(_ *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := command.NewFlags("repo init", `usage: hl repo init DIR
