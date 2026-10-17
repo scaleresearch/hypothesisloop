@@ -10,6 +10,7 @@ import (
 // of the rules fails this until it is shipped under the next release, with its digest added here.
 var releases = map[int]string{
 	1: "e23db9a0d4928e952b5aa754c9626f5343202b8f82e2a53c45a0b7c4cdaa3177",
+	2: "f72f2a37fd20ab4461fa45e04101e93060db4025b5ea06bac6382ad18347c73d",
 }
 
 func TestReleaseNamesWhatItSeeds(t *testing.T) {
