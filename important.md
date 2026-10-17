@@ -1,7 +1,7 @@
 - robust, simple, easy to refactor and read code, no fallbacks - one path or error, fail fast
 - is there a simpler structural solution with the same guarantees and less retained machinery? if so, use it
 - metrics only in the metrics store, no duplicates between the relational db and metrics storage. when metrics are needed, the metrics store is assumed to answer in real time
-- no caches / in-ram state. we trust that our storage is performant and we care about simplicity, so we do not introduce duplicates or eventual consistency, except between clusters and the scheduler
+- no caches / in-ram state. we trust that our storage is performant and we care about simplicity, so we do not introduce duplicates or eventual consistency, except between clusters and the scheduler. the one exception is a short-lived in-memory cache for a third-party integration (for example an external provider's market or rate-limited API), and only there
 - cluster software fetches desired state and reconciles it; commands go one way only. cluster software sends metrics and other important information about jobs to the control plane; the control plane makes all decisions and produces final state
 - the control plane decides, and every decision is written as desired state. no push, no "kill" command, no second path to the same effect, no remote functions or procedural style
 - the control plane shall not be coupled with k8s; runtime software receives state from the control plane and decides how to run it within its own ecosystem
@@ -18,3 +18,4 @@
 - admission decides on reserved budget, eviction and billing only on observed consumption - one figure serving both evicts jobs for budget nobody spent
 - a loop over many must survive any one of them failing - skip it and finish the pass
 - every datastore is queried only through its own package, never ad-hoc from a service
+- every datastore's core schema (tables, columns, indexes, constraints, buckets) is defined in the repo and created by its own package, so a fresh stack reproduces it exactly from code. nothing relies on a store creating schema on first write, and no schema change is made by hand
