@@ -1,4 +1,4 @@
-package leaderelection
+package db
 
 import (
 	"context"
@@ -6,8 +6,6 @@ import (
 	"time"
 
 	"go.uber.org/zap"
-
-	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
 // SchedulerLockKey is the advisory-lock key control-service's leader holds. Changing a key lets
@@ -17,13 +15,13 @@ const SchedulerLockKey = 72901
 // ControllerLockKey is the advisory-lock key metrics-service's leader holds.
 const ControllerLockKey = 72902
 
-// Run blocks until ctx is cancelled, alternating between standby, trying the advisory lock key
+// RunAsLeader blocks until ctx is cancelled, alternating between standby, trying the advisory lock key
 // every interval, and leading: holding the lock on one dedicated connection and running every
 // loop in a context cancelled the moment leadership is lost. Each loop must return once its
 // context is cancelled. The lock is released only after every loop has returned, so no two
 // replicas ever run them at once. A ping of the lock's connection that does not answer within
 // interval is leadership lost: Postgres may have dropped the session, and its lock with it.
-func Run(ctx context.Context, pool *db.Pool, key int64, interval time.Duration, logger *zap.Logger, loops ...func(context.Context)) {
+func RunAsLeader(ctx context.Context, pool *Pool, key int64, interval time.Duration, logger *zap.Logger, loops ...func(context.Context)) {
 	logger = logger.With(zap.Int64("lockKey", key))
 	for ctx.Err() == nil {
 		lock, err := pool.TryAdvisoryLock(ctx, key)
@@ -53,7 +51,7 @@ func Run(ctx context.Context, pool *db.Pool, key int64, interval time.Duration, 
 	}
 }
 
-func holdUntilLost(ctx context.Context, lock *db.AdvisoryLock, interval time.Duration, logger *zap.Logger) {
+func holdUntilLost(ctx context.Context, lock *AdvisoryLock, interval time.Duration, logger *zap.Logger) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {

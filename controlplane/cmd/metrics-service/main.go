@@ -22,7 +22,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/settlement"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/leaderelection"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
@@ -138,7 +137,7 @@ func newControllerServer(authenticator *auth.Authenticator, pool *db.Pool, store
 	}
 	runCtx, runCancel := context.WithCancel(context.Background())
 	pass := pcfg.Scheduler.PassTimeout()
-	go leaderelection.Run(runCtx, pool, leaderelection.ControllerLockKey, 5*time.Second, logger,
+	go db.RunAsLeader(runCtx, pool, db.ControllerLockKey, 5*time.Second, logger,
 		func(ctx context.Context) { settlementReconciler.Start(ctx, pass) },
 		func(ctx context.Context) { ctrl.Run(ctx, pass) },
 	)

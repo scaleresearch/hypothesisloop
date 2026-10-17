@@ -33,7 +33,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost/github"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/imagedigest"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/leaderelection"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/registrycred"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/graphdb"
@@ -447,7 +446,7 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environ
 	watcher.WithCapacityFreed(schedulerLoop.Trigger)
 
 	// Admission (read-decide-write, not a CAS) and JobWatcher's per-experiment pollers must run
-	// on exactly one replica. leaderelection.Run holds a Postgres advisory lock to pick that
+	// on exactly one replica. db.RunAsLeader holds a Postgres advisory lock to pick that
 	// replica; others stand by and take over if the leader dies. Only these loops are
 	// leader-gated — the HTTP API stays multi-replica.
 	// The settlement reconciler and the platform-experiment expiry sweep join the leader-gated
@@ -469,7 +468,7 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environ
 	}
 
 	pass := pcfg.Scheduler.PassTimeout()
-	go leaderelection.Run(runCtx, pool, leaderelection.SchedulerLockKey, 5*time.Second, logger, append([]func(context.Context){
+	go db.RunAsLeader(runCtx, pool, db.SchedulerLockKey, 5*time.Second, logger, append([]func(context.Context){
 		func(ctx context.Context) { settlementReconciler.Start(ctx, pass) },
 		// Auto-close platform experiments past their ends_at deadline.
 		func(ctx context.Context) { expQuotaSvc.StartExpirySweep(ctx, 60*time.Second, pass) },
