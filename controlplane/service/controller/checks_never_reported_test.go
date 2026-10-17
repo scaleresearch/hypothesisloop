@@ -22,6 +22,7 @@ func silenceController(observed ObservedState) *Controller {
 		logger:                zap.NewNop(),
 		silenceMultiplier:     3,
 		defaultReportInterval: 10 * time.Second,
+		observationCadence:    30 * time.Second,
 		minSilenceWindow:      10 * time.Second,
 		startTimeout:          30 * time.Minute,
 		clusterSilenceCeiling: 5 * time.Minute,

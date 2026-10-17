@@ -79,7 +79,9 @@ type Controller struct {
 
 	silenceMultiplier     float64
 	defaultReportInterval time.Duration
-	minSilenceWindow      time.Duration
+	// observationCadence is the deployment's gap cap (config.SchedulerConfig.ObservationCadence).
+	observationCadence time.Duration
+	minSilenceWindow   time.Duration
 	// startTimeout is how long a job that ran may read pending with no sign of life.
 	startTimeout time.Duration
 	// clusterSilenceCeiling bounds how long a job may be held by a cluster that has stopped
@@ -127,6 +129,13 @@ func (c *Controller) WithSilenceMultiplier(m float64) *Controller {
 
 func (c *Controller) WithDefaultReportInterval(d time.Duration) *Controller {
 	c.defaultReportInterval = d
+	return c
+}
+
+// WithObservationCadence sets the longest gap between two observations that still counts as
+// continuous presence, config.SchedulerConfig.ObservationCadence.
+func (c *Controller) WithObservationCadence(d time.Duration) *Controller {
+	c.observationCadence = d
 	return c
 }
 
@@ -181,7 +190,7 @@ func (c *Controller) Check() error {
 		return fmt.Errorf("controller: the metrics store is required")
 	}
 	if c.reconcileInterval <= 0 ||
-		c.defaultReportInterval <= 0 || c.minSilenceWindow <= 0 || c.startTimeout <= 0 ||
+		c.defaultReportInterval <= 0 || c.observationCadence <= 0 || c.minSilenceWindow <= 0 || c.startTimeout <= 0 ||
 		c.silenceMultiplier <= 0 || c.clusterSilenceCeiling <= 0 {
 		return fmt.Errorf("controller: all timing and multiplier values must be explicitly valid")
 	}

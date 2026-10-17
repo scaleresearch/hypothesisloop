@@ -108,6 +108,7 @@ func newControllerServer(authenticator *auth.Authenticator, pool *db.Pool, store
 		WithSilenceMultiplier(pcfg.Scheduler.SilenceMultiplier).
 		WithDefaultReportInterval(time.Duration(pcfg.Scheduler.DefaultReportIntervalSeconds) * time.Second).
 		WithMinSilenceWindow(time.Duration(pcfg.Scheduler.MinSilenceWindowSeconds) * time.Second).
+		WithObservationCadence(observedGapCap).
 		WithStartTimeout(time.Duration(pcfg.Scheduler.StartTimeoutSeconds) * time.Second).
 		WithClusterSilenceCeiling(time.Duration(pcfg.Scheduler.ClusterStatusSilenceCeilingSeconds) * time.Second).
 		WithReconcileInterval(time.Duration(pcfg.Scheduler.ReconcileIntervalSeconds) * time.Second)

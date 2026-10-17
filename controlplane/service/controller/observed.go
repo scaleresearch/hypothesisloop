@@ -21,9 +21,8 @@ import (
 // one way per query, which is why the branches below it — an unreachable cluster, a workload the
 // runtime confirms is gone, an absence not yet confirmed — had no tests at all.
 //
-// gapCap stays a parameter rather than moving into the implementation: unlike the scheduler's, the
-// controller's is derived from its own silence policy (observedGapCap), and the caller already has
-// it in hand at the point of the call.
+// gapCap stays a parameter: the controller is handed the deployment's one
+// (config.SchedulerConfig.ObservationCadence) and passes it at each call.
 type ObservedState interface {
 	IsAlive(ctx context.Context, experimentID string, window time.Duration) (bool, error)
 	ObservedElapsedHours(ctx context.Context, experimentID string, createdAt, now time.Time, gapCap time.Duration) (float64, error)
@@ -40,12 +39,6 @@ type ObservedState interface {
 	RecordRunHealth(ctx context.Context, at time.Time, agents []domain.AgentHealth) error
 }
 
-// observedGapCap is the longest gap between two real observations that still counts as
-// continuous presence, so silence detection and observed-cost accounting agree.
-func (c *Controller) observedGapCap() time.Duration {
-	return time.Duration(c.silenceMultiplier * float64(c.defaultReportInterval))
-}
-
 // isAlive reports whether experimentID has a real observation (heartbeat or job-reported
 // metric) within `window` of now — a stateless GreptimeDB query, not an in-memory last-seen
 // map, so every process gets the same answer with no warm-up after a restart.
@@ -58,7 +51,7 @@ func (c *Controller) isAlive(ctx context.Context, experimentID string, window ti
 // gap-capping; no stored StartedAt needed). GreptimeDB is the sole source of truth: a query
 // error is returned so the caller retries next reconcile, never papered over with a guess.
 func (c *Controller) observedElapsedHours(ctx context.Context, exp *domain.Experiment, now time.Time) (float64, error) {
-	return c.observed.ObservedElapsedHours(ctx, exp.ID, exp.CreatedAt, now, c.observedGapCap())
+	return c.observed.ObservedElapsedHours(ctx, exp.ID, exp.CreatedAt, now, c.observationCadence)
 }
 
 // tickObservations is one reconcile pass's observed-elapsed reading, taken once per job and

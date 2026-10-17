@@ -28,7 +28,7 @@ import (
 // silence window, since a legitimately coarse eval cadence (metrics only every few report
 // intervals) must not be mistaken for a stuck process.
 func (c *Controller) checkSilence(ctx context.Context, exp *domain.Experiment, now time.Time, reportIntervalByPE map[string]time.Duration, declaredMetricKeys []string) (bool, domain.EvictionReason, error) {
-	startedAt, observed, err := c.observed.FirstObserved(ctx, exp.ID, exp.CreatedAt, now, c.observedGapCap())
+	startedAt, observed, err := c.observed.FirstObserved(ctx, exp.ID, exp.CreatedAt, now, c.observationCadence)
 	if err != nil {
 		return false, "", fmt.Errorf("silence first observation: %w", err)
 	}
