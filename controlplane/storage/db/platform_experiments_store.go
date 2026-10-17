@@ -630,11 +630,12 @@ func writePlatformExperiment(ctx context.Context, tx *Write, pe *domain.Platform
 SET name=$2, description=$3, budget_accelerator_hours=$4, max_agents=$5, metrics=$6,
     report_interval_seconds=$7, starts_at=$8, ends_at=$9, updated_at=NOW(),
     max_concurrent_accelerators=$11, baseline_job_id=$12, job_estimated_duration_hours=$13, duration_hours=$14
-FROM (SELECT description, duration_hours, metrics, budget_accelerator_hours, max_agents, max_concurrent_accelerators, report_interval_seconds, starts_at
+FROM (SELECT name, description, duration_hours, metrics, budget_accelerator_hours, max_agents, max_concurrent_accelerators, report_interval_seconds, starts_at
       FROM platform_experiments WHERE id = $1 FOR UPDATE) old
 WHERE pe.id=$1 AND pe.status=$10 AND ($15 = '' OR pe.baseline_job_id = $15)
 RETURNING pe.description IS DISTINCT FROM old.description OR pe.duration_hours IS DISTINCT FROM old.duration_hours,
   array_remove(ARRAY[
+    CASE WHEN pe.name IS DISTINCT FROM old.name THEN 'name' END,
     CASE WHEN pe.metrics IS DISTINCT FROM old.metrics THEN 'metrics' END,
     CASE WHEN pe.budget_accelerator_hours IS DISTINCT FROM old.budget_accelerator_hours THEN 'budget_accelerator_hours' END,
     CASE WHEN pe.max_agents IS DISTINCT FROM old.max_agents THEN 'max_agents' END,
