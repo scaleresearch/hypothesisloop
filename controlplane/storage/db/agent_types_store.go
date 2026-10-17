@@ -533,10 +533,7 @@ ORDER BY pe.id`, id)
 		if len(using) > 0 {
 			return &AgentTypeInUse{PlatformExperimentIDs: using}
 		}
-		if _, err := tx.Exec(ctx, `UPDATE agent_types SET archived_at = now() WHERE id = $1`, id); err != nil {
-			return fmt.Errorf("agent_types_store.Archive: %w", err)
-		}
-		if err := recordEventTx(ctx, tx, id, domain.AgentTypeArchived, current.CurrentVersion, "", by); err != nil {
+		if err := archiveTx(ctx, tx, current, "", by); err != nil {
 			return fmt.Errorf("agent_types_store.Archive: %w", err)
 		}
 		archived, err = getAgentType(ctx, tx, orgID, id, false)
@@ -548,6 +545,14 @@ ORDER BY pe.id`, id)
 		return nil, err
 	}
 	return archived, nil
+}
+
+// archiveTx archives current, whose row the transaction locked, kept as an archive with detail.
+func archiveTx(ctx context.Context, tx *Write, current *domain.CurrentAgentType, detail string, by domain.Actor) error {
+	if _, err := tx.Exec(ctx, `UPDATE agent_types SET archived_at = now() WHERE id = $1`, current.ID); err != nil {
+		return fmt.Errorf("archive %s: %w", current.ID, err)
+	}
+	return recordEventTx(ctx, tx, current.ID, domain.AgentTypeArchived, current.CurrentVersion, detail, by)
 }
 
 // agentTypeTx is the agent type a new agent of role in platform experiment platformExpID runs:

@@ -27,6 +27,9 @@ func seedBuiltins(store *db.Store, logger *zap.Logger) {
 		logger.Info("built-in agent type has a new version", zap.String("agent_type", s.ID), zap.Int("version", s.Propagation.Version),
 			zap.Int("agents_told", s.Propagation.Told))
 	}
+	if len(seeded.Archived) > 0 {
+		logger.Info("archived the built-in agent types this release no longer has", zap.Int("release", agenttypes.Release), zap.Strings("archived", seeded.Archived))
+	}
 	if seeded.RulesVersion > 0 {
 		logger.Info("the platform's rules have a new version", zap.Int("version", seeded.RulesVersion), zap.Int("agents_told", seeded.RulesTold))
 	}
