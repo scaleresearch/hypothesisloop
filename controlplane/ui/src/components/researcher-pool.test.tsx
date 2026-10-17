@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchAgentTypes } from '@/lib/api/agent-types'
 import { fetchPlatformExperimentAgents } from '@/lib/api/agents'
 import { updatePlatformExperiment } from '@/lib/api/platform-experiments'
+import { ApiError } from '@/lib/api/request'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { ResearcherPool } from '@/components/researcher-pool'
 import { CATALOG } from '@/test-agent-types'
@@ -103,14 +104,22 @@ describe('the researchers of an experiment', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
-  it('refuses a pool entry below its researchers at work before the API does', async () => {
+  it('sends a pool entry below its researchers at work and shows the API\'s refusal of it, staying open', async () => {
+    const refusal = '2 Generalist researchers on m are at work: keep at least 2. Lower max researchers to cut the newest.'
+    vi.mocked(updatePlatformExperiment).mockRejectedValue(new ApiError(422, refusal, 'pool_below_at_work', {
+      reason: 'pool_below_at_work', message: refusal, problems: [{ reason: 'pool_below_at_work', message: refusal, field: 'researchers' }],
+    }))
     show()
     await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
     const count = screen.getByRole('spinbutton', { name: 'Pool entry 1 count' })
     await userEvent.clear(count)
     await userEvent.type(count, '1')
-    expect(screen.getByText('2 Generalist researchers on m are at work: keep at least 2. Lower max researchers to cut the newest.')).toBeTruthy()
-    expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true)
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(await screen.findByText(refusal)).toBeTruthy()
+    expect(updatePlatformExperiment).toHaveBeenCalledExactlyOnceWith('pe-1', {
+      researchers: [{ agent_type: 'generalist', model: 'm', count: 1 }, { agent_type: 'at-lr', model: 'm', count: 1 }],
+    })
+    expect(screen.getByRole('spinbutton', { name: 'Pool entry 1 count' })).toBeTruthy()
   })
 
   it('offers no edit where the API lists no researchers in editable: to a reader, or on a closed one', async () => {

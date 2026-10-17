@@ -166,11 +166,11 @@ describe('the repository of a new platform experiment', () => {
     vi.mocked(checkRepository).mockRejectedValue(new ApiError(422, gone, 'installation_gone'))
     show()
     const chip = (await screen.findByText('Not installed')).closest('[title]')!
-    expect(chip.getAttribute('title')).toBe('The GitHub App was removed on acme, so experiments cannot use its repositories. Reinstall it to connect again.')
+    expect(chip.getAttribute('title')).toBe('The GitHub App was removed on acme, so experiments cannot use its repositories. An owner of the org reinstalls it to connect again.')
     expect(document.body.textContent).not.toContain(gone)
     expect(checkRepository).toHaveBeenCalledWith('prj_1', {})
     vi.mocked(checkRepository).mockResolvedValue({ repository_account: 'acme' })
-  vi.mocked(checkGitHubInstallation).mockResolvedValue({ working: true })
+    vi.mocked(checkGitHubInstallation).mockResolvedValue({ working: true })
     await userEvent.click(screen.getByRole('button', { name: 'Check again' }))
     await waitFor(() => expect(screen.queryByText('Not installed')).toBeNull())
   })

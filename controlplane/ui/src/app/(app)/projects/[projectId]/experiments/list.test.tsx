@@ -26,7 +26,7 @@ vi.mock('@/lib/api/request', async importActual => ({
   ...(await importActual<typeof import('@/lib/api/request')>()),
   apiSend: vi.fn(),
 }))
-vi.mock('@/components/repository-select', () => ({ RepositorySelect: () => null }))
+vi.mock('@/components/repository-select', async original => ({ ...await original(), RepositorySelect: () => null }))
 vi.mock('@/components/connect-github-step', () => ({ useNeedsGitHub: () => false, useGitHub: () => undefined, ConnectGitHubStep: () => null }))
 
 const at = '2026-01-01T00:00:00Z'

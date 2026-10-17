@@ -1,5 +1,4 @@
 import { render, screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchAgentsPage } from '@/lib/api/agents'
@@ -83,9 +82,8 @@ describe('the jobs of a shared platform experiment of another org', () => {
 
   it('cannot be cancelled, and open under their experiment', async () => {
     show('', { project_id: 'prj_platform', shared: true }, 'pe-x')
-    await userEvent.click(await screen.findByText('job-0000…'))
+    expect((await screen.findByRole('link', { name: 'job-0000…' })).getAttribute('href')).toBe('/experiments/pe-x/jobs/job-00001')
     expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
-    expect(navigation.push).toHaveBeenCalledExactlyOnceWith('/experiments/pe-x/jobs/job-00001')
   })
 })
 
@@ -102,12 +100,13 @@ describe('the jobs of a platform experiment of the caller\'s own', () => {
 })
 
 describe('the jobs of the whole project', () => {
-  it('read no platform experiment and can be cancelled', async () => {
-    show('', {})
-    await screen.findByText('job-0000…')
-    expect(fetchPlatformExperiment).not.toHaveBeenCalled()
+  it('are asked for by the project alone, name the experiment of each job, and can be cancelled', async () => {
+    show('', { project_id: 'prj_1' })
+    expect(await screen.findByRole('link', { name: 'Vision benchmark' })).toBeTruthy()
+    expect(vi.mocked(fetchPlatformExperiment).mock.calls.every(([id]) => id === 'pe-x')).toBe(true)
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeTruthy()
     expect(asked()[0]).toMatchObject({ project_id: 'prj_1' })
+    expect(asked()[0].platform_experiment_id).toBeUndefined()
   })
 
   it('are counted per status whatever status is listed, and each count leads to its jobs', async () => {

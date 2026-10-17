@@ -62,7 +62,7 @@ beforeEach(() => {
 
 describe('the hypothesis graph', () => {
   it('of a shared platform experiment of another org is read by its id and takes no idea', async () => {
-    show('focus=hyp-1', { project_id: 'prj_platform', shared: true })
+    show('view=graph&focus=hyp-1', { project_id: 'prj_platform', shared: true })
     expect(await screen.findByText('graph canvas')).toBeTruthy()
     expect(fetchHypothesisGraph).toHaveBeenCalledWith('pe-x')
     expect(screen.queryByRole('button', { name: /Add idea/ })).toBeNull()
@@ -81,7 +81,6 @@ describe('the hypothesis graph', () => {
     ['a reader of a shared experiment of another org', { project_id: 'prj_platform', shared: true, status: 'running' as const }],
     ['a closed experiment of the caller\'s own', { project_id: 'prj_1', shared: false, status: 'closed' as const }],
   ])('shows %s no control that adds or links', async (_, pe) => {
-    Element.prototype.scrollIntoView = vi.fn()
     const own = show('view=outline&focus=hyp-1', { project_id: 'prj_1', shared: false, status: 'running' })
     await screen.findByRole('button', { name: 'Link to…' })
     expect(screen.getAllByRole('button', { name: /Add idea/ }).length).toBeGreaterThan(0)

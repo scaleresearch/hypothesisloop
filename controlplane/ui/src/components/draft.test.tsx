@@ -62,7 +62,7 @@ const tenant = resolved.tenant
 function draft(reason: 'planning' | 'revising' | 'accepting' | 'proposed' | 'declined', more: Partial<PlatformExperiment> = {}): PlatformExperiment {
   return {
     id: 'pe-1', project_id: 'prj_1', name: 'Does a cosine schedule beat…', status: 'draft',
-    status_reason: { reason, message: '', waits_for: reason === 'proposed' || reason === 'declined' ? 'owner' : 'platform' },
+    status_reason: { reason, message: '', summary: `the API's summary for ${reason}`, waits_for: reason === 'proposed' || reason === 'declined' ? 'owner' : 'platform' },
     goal: 'Does a cosine schedule beat a constant one?', goal_version: 1, editable: ['goal'],
     actions: ['remove', 'abandon', ...(reason === 'proposed' || reason === 'accepting' ? ['accept' as const] : [])],
     planning_ends_at: '2026-10-05T12:30:00Z', ...more,
@@ -84,7 +84,7 @@ beforeEach(() => {
 })
 
 const phase = () => within(screen.getByRole('list', { name: 'Phase' })).getAllByRole('listitem').filter(li => li.getAttribute('aria-current') === 'step').map(li => li.textContent).join()
-const machineStep = () => within(screen.getByRole('list', { name: 'Machine' })).queryAllByRole('listitem').find(li => li.getAttribute('aria-current') === 'step')?.textContent
+const planningStep = () => within(screen.getByRole('list', { name: 'Planning' })).queryAllByRole('listitem').find(li => li.getAttribute('aria-current') === 'step')?.textContent
 
 // The page said one sentence for as long as planning took, and the same one whether the
 // planner's machine was still being rented or the planner was reading the repository.
@@ -92,11 +92,11 @@ describe('a draft being planned', () => {
   it('says the phase and where the planner\'s machine stands, and offers nothing to accept', async () => {
     show(draft('planning'))
     expect(screen.getByText('Does a cosine schedule beat a constant one?')).toBeTruthy()
-    expect(screen.getByRole('status').textContent).toBe('Planning your experiment.')
     expect(screen.queryByText(/Nothing is needed from you/)).toBeNull()
     expect(phase()).toBe('Planning')
-    expect(await screen.findByText('Starting the planner, usually about a minute.')).toBeTruthy()
-    expect(machineStep()).toBe('Starting the planner')
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Starting the planner…'))
+    expect(screen.getByText(/so far\./)).toBeTruthy()
+    expect(planningStep()).toBe('Starting the planner')
     expect(screen.queryByRole('button', { name: 'Accept and run' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Edit what you asked' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Abandon this draft' })).toBeTruthy()
@@ -146,7 +146,6 @@ describe('a proposed draft', () => {
     show(proposed())
     const name = screen.getByLabelText('Name')
     await userEvent.clear(name)
-    expect(screen.getByRole('button', { name: 'Accept and run' })).toHaveProperty('disabled', true)
     await userEvent.type(name, 'Schedules on tiny transformers')
     const researchers = screen.getByLabelText('Researchers')
     await userEvent.clear(researchers)
@@ -197,6 +196,8 @@ describe('a proposed draft', () => {
   it('is abandoned by closing it', async () => {
     show(proposed())
     await userEvent.click(screen.getByRole('button', { name: 'Abandon this draft' }))
+    expect(apiSend).not.toHaveBeenCalled()
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Abandon draft' }))
     expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/pe-1/close')
   })
 })
@@ -277,7 +278,6 @@ describe('a proposal with questions', () => {
     expect(screen.getByLabelText('How big a win counts?')).toHaveProperty('value', 'A 20% lower val_loss.')
     const batch = screen.getByLabelText('Which batch size is held equal?')
     await userEvent.clear(batch)
-    expect(screen.getByRole('button', { name: 'Accept and run' })).toHaveProperty('disabled', true)
     await userEvent.type(batch, '64, the size the control ships with. ')
     await userEvent.click(screen.getByRole('button', { name: 'Accept and run' }))
     expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/pe-1/accept', {
@@ -304,7 +304,7 @@ describe('a draft the planner declined', () => {
     expect(screen.getByText(/Draft, waiting for you/)).toBeTruthy()
     expect(screen.getByText(new RegExp(`^Edit what you asked and the planner tries again\\. Otherwise the draft closes on ${formatDate('2026-10-12T12:10:00Z')}\\.$`))).toBeTruthy()
     expect(phase()).toBe('Proposal')
-    expect(screen.getByRole('status').textContent).toBe('The planner needs more from you. Its reason is below.')
+    expect(screen.getByRole('status').textContent).toBe('the API\'s summary for declined')
     expect(screen.queryByRole('button', { name: 'Accept and run' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Abandon this draft' })).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Edit what you asked' }))

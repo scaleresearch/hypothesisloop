@@ -78,14 +78,14 @@ describe('the job of a baseline agent', () => {
     )
     const row = within((await screen.findByText('base-000…')).closest('tr')!)
     expect(row.getByRole('link', { name: 'Baseline of the objective' }).getAttribute('href')).toBe('/experiments/pe-1/hypotheses')
-    expect(row.getByRole('link', { name: 'baseline' }).getAttribute('href')).toBe('https://github.com/acme/widgets/tree/hl/pe-1/baseline')
+    expect(row.getByRole('link', { name: 'Baseline of the objective' }).closest('td')!.getAttribute('title')).toBe('Baseline of the objective\nbranch hl/pe-1/baseline')
     expect(row.queryAllByRole('link').some(a => a.getAttribute('href')!.includes('/hypotheses/'))).toBe(false)
     expect(screen.getByRole('link', { name: 'a claim' }).getAttribute('href')).toBe('/experiments/pe-1/hypotheses/h1')
   })
 })
 
 describe('the branch of a job', () => {
-  it('is named without its experiment\'s prefix and opens in the repository its commit is in', async () => {
+  it('is said in full where the row says what its job tests', async () => {
     vi.mocked(fetchExperimentsPage).mockResolvedValue({ items: [job('own-0001', 'lab'), { ...job('old-0001', 'lab'), branch: '' }], total: 2 })
     const resolved = resolveTenant(me, '')
     if (resolved.state !== 'selected') throw new Error('no tenant')
@@ -94,10 +94,10 @@ describe('the branch of a job', () => {
         <TenantContext.Provider value={resolved.tenant}><JobsList /></TenantContext.Provider>
       </SWRConfig>,
     )
-    const branch = await screen.findByRole('link', { name: 'warmup-ag-1' })
-    expect(branch.getAttribute('href')).toBe('https://github.com/acme/widgets/tree/hl/pe-1/warmup-ag-1')
-    expect(branch.getAttribute('title')).toBe('hl/pe-1/warmup-ag-1')
+    const tested = (id: string) => within(screen.getByText(id).closest('tr')!).getByRole('link', { name: 'a claim' }).closest('td')!.getAttribute('title')
+    await screen.findByText('own-0001…')
+    expect(tested('own-0001…')).toBe('a claim\nbranch hl/pe-1/warmup-ag-1')
     // A job from before branches were kept names none.
-    expect(screen.getAllByRole('link', { name: 'warmup-ag-1' })).toHaveLength(1)
+    expect(tested('old-0001…')).toBe('a claim')
   })
 })

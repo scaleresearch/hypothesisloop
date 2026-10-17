@@ -24,7 +24,7 @@ function experiment(status: `${PlatformExperimentStatus}`, reason: string, more:
   return {
     id: 'pe-1', project_id: 'prj_1', name: 'Cosine or constant', status,
     editable: [], actions: status === 'closed' ? ['remove'] : ['remove', status === 'draft' ? 'abandon' : 'close'],
-    status_reason: { reason, message: `the API's sentence for ${reason}`, ...(status === 'closed' ? {} : { waits_for: 'platform' as const }), ...said }, ...more,
+    status_reason: { reason, message: `the API's message for ${reason}`, summary: `the API's summary for ${reason}`, ...(status === 'closed' ? {} : { waits_for: 'platform' as const }), ...said }, ...more,
   } as PlatformExperiment
 }
 
@@ -49,40 +49,36 @@ beforeEach(() => {
 
 describe('the phase strip', () => {
   it.each([
-    ['draft', 'planning', 'Planning'],
-    ['draft', 'revising', 'Planning'],
-    ['draft', 'proposed', 'Proposal'],
-    ['draft', 'declined', 'Proposal'],
-    ['open', 'baseline_measuring', 'Preparing baseline'],
-    ['open', 'baseline_required', 'Preparing baseline'],
-    ['open', 'budget_below_baseline', 'Preparing baseline'],
-    ['open', 'starts_at_ahead', 'Preparing baseline'],
-    ['open', 'starting', 'Preparing baseline'],
-    ['running', 'agents_starting', 'Running'],
-    ['running', 'running', 'Running'],
-    ['closed', 'end_time_reached', 'Closed'],
-    ['closed', 'agents_not_started', 'Closed'],
-    ['closed', 'planner_stopped', 'Closed'],
-  ] as const)('stands at one phase, from the status and its reason alone: %s, %s', (status, reason, phase) => {
-    show(experiment(status, reason))
+    ['draft', 'planning', {}, 'Planning'],
+    ['draft', 'revising', {}, 'Planning'],
+    ['draft', 'proposed', { proposed_at: at }, 'Proposal'],
+    ['draft', 'declined', {}, 'Proposal'],
+    ['open', 'baseline_measuring', {}, 'Preparing baseline'],
+    ['open', 'baseline_required', {}, 'Preparing baseline'],
+    ['open', 'budget_below_baseline', {}, 'Preparing baseline'],
+    ['open', 'starts_at_ahead', {}, 'Preparing baseline'],
+    ['open', 'starting', {}, 'Preparing baseline'],
+    ['running', 'agents_starting', {}, 'Running'],
+    ['running', 'running', {}, 'Running'],
+    ['closed', 'end_time_reached', {}, 'Closed'],
+    ['closed', 'agents_not_started', {}, 'Closed'],
+    ['closed', 'planner_stopped', {}, 'Closed'],
+  ] as const)('stands at one phase, from the status, its reason and whether a proposal stands: %s, %s', (status, reason, more, phase) => {
+    show(experiment(status, reason, more))
     expect(current()).toEqual([phase])
   })
 
-  it('says who closed it early and the reason they gave', () => {
-    const closer = { kind: 'user' as const, id: 'u-1', name: 'Ada' }
-    const one = show(experiment('closed', 'closed_by_request', { closed_by: closer }))
-    expect(sentence()).toBe('It was closed early by Ada.')
-    one.unmount()
-    show(experiment('closed', 'closed_by_request', { closed_by: closer, close_message: 'the baseline measured the old split' }))
-    expect(sentence()).toBe('It was closed early by Ada, who said: the baseline measured the old split')
+  it('says why it closed in the API\'s summary, after when it closed', () => {
+    const said = 'It was closed early by Ada, who said: the baseline measured the old split'
+    show(experiment('closed', 'closed_by_request', { closed_at: at }, { summary: said }))
+    expect(sentence()).toBe(`Closed ${formatDate(at)}. ${said}`)
   })
 
-  it('words the baseline wait for a person: capitalised, the agent by name, no ids', async () => {
+  it('says the baseline wait in the API\'s summary, after what it prepares', async () => {
     vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([agent('baseline')])
-    show(experiment('open', 'baseline_measuring', {}, { message: 'baseline agent Baseline 1 is measuring the baseline of platform experiment pe-1: when it finishes' }))
-    await screen.findByText(/Baseline 1 is measuring the baseline/)
-    expect(sentence()).toMatch(/^Preparing the baseline\..*Baseline 1 is measuring the baseline\. The run starts by itself when it finishes\.$/)
-    expect(sentence()).not.toMatch(/pe-1|platform experiment/)
+    show(experiment('open', 'baseline_measuring', {}, { summary: 'Baseline 1 is measuring the baseline. The run starts by itself when it finishes.' }))
+    expect(sentence()).toBe('Preparing the baseline. Baseline 1 is measuring the baseline. The run starts by itself when it finishes.')
+    expect(await screen.findByRole('group', { name: 'Baseline agent' })).toBeTruthy()
   })
 
   it('refuses an experiment that came without the reason every read of one carries', () => {
@@ -93,7 +89,7 @@ describe('the phase strip', () => {
 
 describe('whose move it is', () => {
   const waits = (reason: string, who: StatusReason['waits_for'], more: Partial<PlatformExperiment> = {}) =>
-    experiment('open', reason, { baseline_job_id: 'job-base', ...more }, { waits_for: who, message: `It waits: ${reason}.` })
+    experiment('open', reason, { baseline_job_id: 'job-base', ...more }, { waits_for: who, summary: `It waits: ${reason}.` })
   const strip = () => within(screen.getByRole('region', { name: 'Where this experiment stands' }))
 
   it('says so prominently when it is the owner\'s, in the API\'s words, with the way to add a researcher', () => {

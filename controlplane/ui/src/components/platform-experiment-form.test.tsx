@@ -1,7 +1,7 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchAgentTypes } from '@/lib/api/agent-types'
 import { addPlatformExperimentAgents } from '@/lib/api/agents'
 import { createExperimentDraft, deleteExperimentDraft, updateExperimentDraft } from '@/lib/api/drafts'
@@ -44,18 +44,29 @@ const me: Me = {
 const created = { id: 'pe-new', project_id: 'prj_1', name: 'Run' } as PlatformExperiment
 const onSaved = vi.fn()
 
+let rendered: ReturnType<typeof render> | null = null
+
 function show(initial?: PlatformExperiment, draft?: ExperimentDraft) {
   const resolved = resolveTenant(me, '')
   if (resolved.state !== 'selected') throw new Error('no tenant')
-  return render(
+  rendered = render(
     <SWRConfig value={{ provider: () => new Map() }}>
       <TenantContext.Provider value={resolved.tenant}><PlatformExperimentForm initial={initial} draft={draft} onSaved={onSaved} /></TenantContext.Provider>
     </SWRConfig>,
   )
+  return rendered
 }
 
+// A form taken off the page keeps what was typed as a draft and reads the drafts again through
+// SWR. The page's SWR cache outlives the form, so the form leaves first and its save settles.
+afterEach(async () => {
+  rendered?.rerender(<SWRConfig value={{ provider: () => new Map() }}>{null}</SWRConfig>)
+  rendered = null
+  await act(() => new Promise(resolve => setTimeout(resolve, 0)))
+})
+
 const name = () => screen.getByPlaceholderText('e.g. Q3 Vision Benchmark')
-const next = () => userEvent.click(screen.getByRole('button', { name: 'Next' }))
+const next = () => userEvent.click(screen.getByRole('button', { name: /^Next: / }))
 const create = () => userEvent.click(screen.getByRole('button', { name: 'Create experiment' }))
 const sent = (call = 0) => vi.mocked(createPlatformExperiment).mock.calls[call][1]
 
@@ -138,7 +149,8 @@ describe('a new platform experiment', () => {
     await userEvent.type(screen.getByLabelText('Starting agent 2 model'), 'model-2')
     await create()
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
-    expect(sent()).toMatchObject({ max_agents: 4, researchers: [{ agent_type: 'generalist', count: 2 }, { agent_type: 'generalist', count: 1, model: 'model-2' }] })
+    // A row added takes a type no row has yet.
+    expect(sent()).toMatchObject({ max_agents: 4, researchers: [{ agent_type: 'generalist', count: 2 }, { agent_type: 'hyperparameter-search', count: 1, model: 'model-2' }] })
   })
 
   it('offers the org\'s researcher types from the API, each with what it does, and links to manage them', async () => {
@@ -177,6 +189,10 @@ describe('a new platform experiment', () => {
   })
 
   it('states a gate with its bound, a tracked metric and the target of the ranked one, signed in its direction', async () => {
+    const unbound = 'metrics: diverged is a constraint and states no bound'
+    vi.mocked(createPlatformExperiment).mockRejectedValueOnce(new ApiError(422, unbound, 'invalid_metrics', {
+      reason: 'invalid_metrics', message: unbound, problems: [{ reason: 'invalid_metrics', message: unbound, field: 'metrics' }],
+    }))
     show()
     await userEvent.type(name(), 'Run')
     await userEvent.type(screen.getByLabelText('Experiment goal'), 'The brief')
@@ -193,13 +209,14 @@ describe('a new platform experiment', () => {
     await userEvent.click(await screen.findByRole('option', { name: 'Tracked' }))
     await next()
     await create()
-    expect(await screen.findByText('Every gate needs a bound.')).toBeTruthy()
-    await userEvent.click(screen.getByRole('tab', { name: '2. Measure' }))
+    // The API refuses the gate with no bound, and the form shows why at the step of metrics.
+    expect(await screen.findByText(unbound)).toBeTruthy()
+    expect(screen.getByRole('tab', { name: '2. Measure', selected: true })).toBeTruthy()
+    expect(sent().metrics).toContainEqual({ key: 'diverged', direction: 'maximize', role: 'constraint' })
     await userEvent.type(screen.getByLabelText('Bound of diverged'), '0')
-    await next()
-    await create()
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
-    expect(sent().metrics).toEqual([
+    expect(sent(1).metrics).toEqual([
       { key: 'val_loss', direction: 'minimize', role: 'ranking', target_vs_baseline: -0.02 },
       { key: 'diverged', direction: 'maximize', role: 'constraint', bound: 0 },
       { key: 'step', direction: 'maximize', role: 'attribute' },
@@ -325,9 +342,12 @@ describe('a draft of a new platform experiment', () => {
     await userEvent.type(name(), 'Run')
     await next()
     await userEvent.click(screen.getByRole('button', { name: 'Save draft' }))
-    expect(await screen.findByText('Draft saved.')).toBeTruthy()
+    expect(await screen.findByRole('button', { name: 'Draft saved' })).toBeTruthy()
     expect(vi.mocked(createExperimentDraft).mock.calls[0]).toEqual(['prj_1', { form: expect.objectContaining({ name: 'Run', budget_accelerator_hours: '10' }), step: '2', failure: '' }])
     await next()
+    // Nothing changed since it was saved, so there is nothing to save.
+    expect(screen.getByRole('button', { name: 'Draft saved' })).toHaveProperty('disabled', true)
+    await userEvent.type(screen.getByLabelText('Max researchers'), '0')
     await userEvent.click(screen.getByRole('button', { name: 'Save draft' }))
     await waitFor(() => expect(updateExperimentDraft).toHaveBeenCalledWith('prj_1', 'draft-1', expect.objectContaining({ step: '3' })))
     expect(createExperimentDraft).toHaveBeenCalledTimes(1)

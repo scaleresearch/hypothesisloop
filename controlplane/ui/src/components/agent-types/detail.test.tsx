@@ -116,8 +116,13 @@ describe('editing an org\'s agent type', () => {
     expect(await screen.findByText('Saved. A new name or description makes no new version.')).toBeTruthy()
   })
 
-  it('saves a new description without a new version, and refuses one over 200 characters', async () => {
-    vi.mocked(editAgentType).mockImplementation(async (_org, _id, req) => { type = { ...type, description: req.description ?? '' }; return edited(type, 0) })
+  it('saves a new description without a new version, and shows the API\'s refusal of one over 200 characters', async () => {
+    const refusal = 'description is at most 200 characters'
+    vi.mocked(editAgentType).mockImplementation(async (_org, _id, req) => {
+      if ((req.description ?? '').length > 200) throw new ApiError(422, refusal, 'invalid_request', { reason: 'invalid_request', message: refusal, problems: [{ reason: 'invalid_request', message: refusal, field: 'description' }] })
+      type = { ...type, description: req.description ?? '' }
+      return edited(type, 0)
+    })
     show()
     const description = await screen.findByLabelText('Description')
     await userEvent.type(description, 'Sweeps the learning rate.')
@@ -128,8 +133,10 @@ describe('editing an org\'s agent type', () => {
     await userEvent.clear(screen.getByLabelText('Description'))
     await userEvent.click(screen.getByLabelText('Description'))
     await userEvent.paste('x'.repeat(201))
-    expect(screen.getByText('A description is at most 200 characters.')).toBeTruthy()
-    expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true)
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(editAgentType).toHaveBeenLastCalledWith('org_a', 'at-lr', expect.objectContaining({ description: 'x'.repeat(201) }))
+    expect(await screen.findByText(refusal)).toBeTruthy()
+    expect((screen.getByLabelText('Description') as HTMLTextAreaElement).value).toBe('x'.repeat(201))
   })
 
   it('says another save came first, and offers to reload', async () => {
