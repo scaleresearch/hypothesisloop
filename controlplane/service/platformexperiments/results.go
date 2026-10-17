@@ -94,13 +94,13 @@ type MetricBests struct {
 // read rather than frozen into PostgreSQL at close — one source of truth for a number, and a
 // result stays correct if a late metric lands or a metric is re-queried over a different window.
 type PlatformExperimentResults struct {
-	PlatformExperimentID string            `json:"platform_experiment_id"`
-	Name                 string            `json:"name"`
-	Status               string            `json:"status"`
-	Summary              string            `json:"summary,omitempty"`
-	Metrics              []MetricStandings `json:"metrics"`
-	References           []MetricReference `json:"references" doc:"Each reference metric with the value of every completed job that reported it, whether that job met the constraints, and the machine it ran on, never ranked."`
-	Bests                []MetricBests     `json:"bests"`
+	PlatformExperimentID string                          `json:"platform_experiment_id"`
+	Name                 string                          `json:"name"`
+	Status               domain.PlatformExperimentStatus `json:"status"`
+	Summary              string                          `json:"summary,omitempty"`
+	Metrics              []MetricStandings               `json:"metrics"`
+	References           []MetricReference               `json:"references" doc:"Each reference metric with the value of every completed job that reported it, whether that job met the constraints, and the machine it ran on, never ranked."`
+	Bests                []MetricBests                   `json:"bests"`
 }
 
 // Results derives the standings for a platform experiment from the metrics store.
@@ -116,7 +116,7 @@ func (s *Service) Results(ctx context.Context, id string) (*PlatformExperimentRe
 	out := &PlatformExperimentResults{
 		PlatformExperimentID: pe.ID,
 		Name:                 pe.Name,
-		Status:               string(pe.Status),
+		Status:               pe.Status,
 		Summary:              pe.Summary,
 		Metrics:              make([]MetricStandings, 0, len(pe.Metrics)),
 		References:           []MetricReference{},
