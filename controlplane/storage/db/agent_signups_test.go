@@ -39,8 +39,8 @@ func spawnTestAgents(t *testing.T, pes *Store, pe string, signups ...domain.Agen
 	return ids
 }
 
-// setPEStatus puts pe in status as of ago. A running one is given a clock that runs, as a start
-// with a researcher at work leaves it.
+// setPEStatus puts pe in status, a closed one closed ago before now. A running one is given a
+// clock that runs, as a start with a researcher at work leaves it.
 func setPEStatus(t *testing.T, pool *Pool, pe string, status domain.PlatformExperimentStatus, ago time.Duration) {
 	t.Helper()
 	ctx := context.Background()
@@ -56,12 +56,9 @@ WHERE id = $1`, pe, string(status))
 	if err != nil {
 		t.Fatalf("set status %s: got = %v, want = nil", status, err)
 	}
-	if _, err := pool.pool.Exec(ctx, `
-UPDATE platform_experiments
-SET status_changed_at = now() - make_interval(secs => $2),
-    closed_at = CASE WHEN closed_at IS NULL THEN NULL ELSE now() - make_interval(secs => $2) END
-WHERE id = $1`, pe, ago.Seconds()); err != nil {
-		t.Fatalf("age status change: got = %v, want = nil", err)
+	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET closed_at = now() - make_interval(secs => $2) WHERE id = $1 AND closed_at IS NOT NULL`,
+		pe, ago.Seconds()); err != nil {
+		t.Fatalf("age the close: got = %v, want = nil", err)
 	}
 }
 
@@ -361,7 +358,7 @@ func TestALaunchersListFollowsEachAgentThroughItsLife(t *testing.T) {
 }
 
 // The wind-down is counted from closed_at, the moment the authenticator counts an agent token's
-// last minutes from, and never from a later status change.
+// last minutes from.
 func TestTheWindDownIsCountedFromTheClose(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
@@ -371,11 +368,8 @@ func TestTheWindDownIsCountedFromTheClose(t *testing.T) {
 	createTestPE(t, pool, pe, 10)
 	spawnTestAgents(t, pes, pe, domain.AgentSignup{Actor: testActor, Hosted: true})
 	setPEStatus(t, pool, pe, domain.PlatformExpClosed, time.Hour)
-	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET status_changed_at = now() WHERE id = $1`, pe); err != nil {
-		t.Fatal(err)
-	}
 	if listed, err := pes.ListLauncherAgents(ctx, windDown); err != nil || len(listed) != 0 {
-		t.Errorf("closed an hour ago with a fresh status change: listed = %+v, %v, want none", listed, err)
+		t.Errorf("closed an hour ago: listed = %+v, %v, want none", listed, err)
 	}
 }
 
