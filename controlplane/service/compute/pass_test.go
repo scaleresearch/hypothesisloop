@@ -256,21 +256,38 @@ func TestOneUnreadableExitedInstanceDoesNotWithholdTheClustersPush(t *testing.T)
 
 // Through the real loop: a job preempted from h100-0 is desired again under the same attempt on
 // h100-1 while its old instance, stopped for the preemption, has exited with 143. The loop rents
-// the job on its new slot and no push ever reports the old exit as the job having failed.
+// the job on its new slot. A status read has no desired state, so one that lands before the pass
+// destroys the old instance reports its exit; that report names h100-0, which the control plane
+// drops as a slot the job is no longer placed on (clusterexchange.rejectReport). No push reports
+// an ending on h100-1 or one that names no slot.
 func TestTheLoopNeverReportsAPreemptedRunsExitAsTheReadmittedJobsResult(t *testing.T) {
 	e, p := newTestExecutor(t)
 	const old, placed = "hl-job-t1-exp-1-a3-h100-0", "hl-job-t1-exp-1-a3-h100-1"
 	mustCreate(t, e, job(t, "exp-1", 3, 1))
 	p.Start(old)
 	p.Exit(old, "Terminated", exitLine(143))
-	cp := newControlPlane(t, p, on(job(t, "exp-1", 3, 1), "h100-1"))
 
+	window, err := e.ForPass(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := window.PollJobStatus(context.Background(), "exp-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, node, _, err := window.ResolveAdmittedAcceleratorType(context.Background(), "exp-1")
+	if err != nil || status.Phase != clusterapi.JobPhaseFailed || node != "h100-0" {
+		t.Fatalf("a read before the readmission reported %s on %q (%v)", status.Phase, node, err)
+	}
+
+	cp := newControlPlane(t, p, on(job(t, "exp-1", 3, 1), "h100-1"))
 	run(t, e, cp, 5*time.Millisecond, 5*time.Millisecond, func() bool {
 		return reflect.DeepEqual(p.Names(), []string{placed}) && len(cp.reported()) >= 3
 	})
 
 	for _, report := range cp.reported() {
-		if report.Phase == clusterapi.JobPhaseFailed.String() || report.Phase == clusterapi.JobPhaseSucceeded.String() {
+		ended := report.Phase == clusterapi.JobPhaseFailed.String() || report.Phase == clusterapi.JobPhaseSucceeded.String()
+		if ended && report.AdmittedNode != "h100-0" {
 			t.Fatalf("pushed %+v", report)
 		}
 	}

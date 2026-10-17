@@ -21,6 +21,7 @@ type pushedReport struct {
 	LogTail      []string `json:"log_tail"`
 	Message      string   `json:"message"`
 	Attempt      *int     `json:"attempt"`
+	AdmittedNode string   `json:"admitted_node"`
 }
 
 // Destroying an instance destroys the only copy of why its job ended. An exited instance stays
