@@ -51,7 +51,7 @@ func Slug(text string, limit int) string {
 		case b.Len() > 0 && !strings.HasSuffix(b.String(), "-"):
 			b.WriteByte('-')
 		}
-		if b.Len() == limit {
+		if limit > 0 && b.Len() == limit {
 			break
 		}
 	}
