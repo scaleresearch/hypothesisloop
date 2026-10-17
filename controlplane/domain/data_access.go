@@ -8,7 +8,8 @@ import "github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 // shape, with URI its agent prefix.
 type DataAccess = clusterapi.DataAccess
 
-// DataKey is one job's permanent object-store key, never shared with another job.
+// DataKey is one job's or one agent's object-store key, never shared with another, and taken out
+// of the store once its holder ended (platformexperiments.DataKeySweep).
 type DataKey struct {
 	AccessKeyID     string
 	SecretAccessKey string

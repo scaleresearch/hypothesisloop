@@ -263,8 +263,8 @@ func (s *Service) Signup(ctx context.Context, platformExpID string, signup domai
 }
 
 // RequireActive refuses a request that starts work or spends for an agent that has no further
-// part in the platform experiment: it closed, or the agent was cut. A token that is still alive
-// to file summaries does not reopen either.
+// part in the platform experiment: it closed, or the agent's run is over for any other reason. A
+// token that is still alive in its wind-down to file summaries does not reopen either.
 func (s *Service) RequireActive(ctx context.Context, platformExpID, agentID string) error {
 	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
 	if err != nil {
@@ -273,14 +273,22 @@ func (s *Service) RequireActive(ctx context.Context, platformExpID, agentID stri
 	if pe == nil || pe.Status == domain.PlatformExpClosed {
 		return refusal.Refuse(http.StatusConflict, platformapi.ReasonExperimentClosed, "platform experiment "+platformExpID+" is closed")
 	}
-	cut, err := s.store.IsAgentCut(ctx, platformExpID, agentID)
+	signup, err := s.store.GetAgentSignup(ctx, platformExpID, agentID)
 	if err != nil {
 		return fmt.Errorf("platform_experiments.RequireActive: %w", err)
 	}
-	if cut {
+	if signup == nil {
+		return nil
+	}
+	switch signup.Ended {
+	case "":
+		return nil
+	case domain.RunEndClosed:
+		return refusal.Refuse(http.StatusConflict, platformapi.ReasonExperimentClosed, "platform experiment "+platformExpID+" is closed")
+	case domain.RunEndCut:
 		return refusal.Refuse(http.StatusConflict, "stage_cut", "agent "+agentID+" was cut from platform experiment "+platformExpID)
 	}
-	return nil
+	return refusal.Refuse(http.StatusConflict, "run_over", "agent "+agentID+"'s run in platform experiment "+platformExpID+" is over ("+string(signup.Ended)+"): in its wind-down it files summaries and starts or spends nothing")
 }
 
 // notStartable says why the open platform experiment pe, whose roster is signups, is not started

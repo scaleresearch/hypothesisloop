@@ -11,8 +11,8 @@ import (
 
 // NewDataKey draws a fresh key for a job or an agent. A job's is created in the store once at
 // submission, an agent's on its first request; either is stored and never rotated, so a
-// restarted pod or agent starts with the same working key. An agent's is deleted when the agent is
-// removed from its platform experiment. The store bounds access keys to 3..20 characters and secrets to
+// restarted pod or agent starts with the same working key. It is deleted when the agent is
+// removed before the start, and otherwise once its holder ended (platformexperiments.DataKeySweep). The store bounds access keys to 3..20 characters and secrets to
 // 8..40; 12 and 25 random bytes encode to exactly 20 and 40.
 func NewDataKey() (domain.DataKey, error) {
 	access := make([]byte, 12)

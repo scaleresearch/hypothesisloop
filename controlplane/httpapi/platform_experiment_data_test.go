@@ -40,12 +40,14 @@ func (s *signupKeys) AgentDataKey(ctx context.Context, _, agentID string, create
 	return key, nil
 }
 
-// GetPlatformExperiment and IsAgentCut hold every agent active in a running platform experiment.
+// GetPlatformExperiment and GetAgentSignup hold every agent active in a running platform experiment.
 func (s *signupKeys) GetPlatformExperiment(_ context.Context, id string) (*domain.PlatformExperiment, error) {
 	return &domain.PlatformExperiment{ID: id, Status: domain.PlatformExpRunning}, nil
 }
 
-func (s *signupKeys) IsAgentCut(context.Context, string, string) (bool, error) { return false, nil }
+func (s *signupKeys) GetAgentSignup(_ context.Context, _, agentID string) (*domain.AgentSignup, error) {
+	return &domain.AgentSignup{AgentID: agentID}, nil
+}
 
 func experimentsWithData(store platformexperiments.Store, client *objectstore.Client) *platformexperiments.Service {
 	return testExperiments(store).WithDataStore(client, 0)
@@ -133,12 +135,12 @@ func TestDataKeyTheStoreRefusedIsNotKept(t *testing.T) {
 	}
 }
 
-// windDownStore holds one platform experiment in a given status with one agent cut, and records
-// what a request went on to write.
+// windDownStore holds one platform experiment in a given status with the runs of some agents
+// ended, and records what a request went on to write.
 type windDownStore struct {
 	platformexperiments.Store
 	status    domain.PlatformExperimentStatus
-	cut       string
+	ended     map[string]domain.RunEnd
 	keysAsked int
 }
 
@@ -146,8 +148,8 @@ func (s *windDownStore) GetPlatformExperiment(_ context.Context, id string) (*do
 	return &domain.PlatformExperiment{ID: id, Status: s.status}, nil
 }
 
-func (s *windDownStore) IsAgentCut(_ context.Context, _, agentID string) (bool, error) {
-	return agentID == s.cut, nil
+func (s *windDownStore) GetAgentSignup(_ context.Context, _, agentID string) (*domain.AgentSignup, error) {
+	return &domain.AgentSignup{AgentID: agentID, Ended: s.ended[agentID]}, nil
 }
 
 func (s *windDownStore) AgentDataKey(context.Context, string, string, func(context.Context) (domain.DataKey, error)) (domain.DataKey, error) {
@@ -160,7 +162,7 @@ func (s *windDownStore) AgentDataKey(context.Context, string, string, func(conte
 func TestACutAgentOrAClosedPlatformExperimentGetsNoDataKey(t *testing.T) {
 	placement := authtest.Placement{
 		PlatformExperiments: map[string]domain.Tenancy{"pe-1": {PlatformExperimentID: "pe-1", ProjectID: "prj", OrgID: "org"}},
-		Agents:              map[string]string{"agent-1": "org", "agent-cut": "org"},
+		Agents:              map[string]string{"agent-1": "org", "agent-cut": "org", "agent-done": "org"},
 	}
 	for name, tc := range map[string]struct {
 		status domain.PlatformExperimentStatus
@@ -168,13 +170,18 @@ func TestACutAgentOrAClosedPlatformExperimentGetsNoDataKey(t *testing.T) {
 		want   int
 		reason string
 	}{
-		"running, agent in":      {domain.PlatformExpRunning, "agent-1", 0, ""},
-		"open, agent in":         {domain.PlatformExpOpen, "agent-1", 0, ""},
-		"closed":                 {domain.PlatformExpClosed, "agent-1", http.StatusConflict, "experiment_closed"},
-		"running, agent cut":     {domain.PlatformExpRunning, "agent-cut", http.StatusConflict, "stage_cut"},
-		"closed, agent also cut": {domain.PlatformExpClosed, "agent-cut", http.StatusConflict, "experiment_closed"},
+		"running, agent in":       {domain.PlatformExpRunning, "agent-1", 0, ""},
+		"open, agent in":          {domain.PlatformExpOpen, "agent-1", 0, ""},
+		"closed":                  {domain.PlatformExpClosed, "agent-1", http.StatusConflict, "experiment_closed"},
+		"running, agent cut":      {domain.PlatformExpRunning, "agent-cut", http.StatusConflict, "stage_cut"},
+		"running, agent finished": {domain.PlatformExpRunning, "agent-done", http.StatusConflict, "run_over"},
+		"closed, agent also cut":  {domain.PlatformExpClosed, "agent-cut", http.StatusConflict, "experiment_closed"},
 	} {
-		store := &windDownStore{status: tc.status, cut: "agent-cut"}
+		ended := map[string]domain.RunEnd{"agent-cut": domain.RunEndCut, "agent-done": domain.RunEndFinished}
+		if tc.status == domain.PlatformExpClosed {
+			ended = map[string]domain.RunEnd{"agent-1": domain.RunEndClosed, "agent-cut": domain.RunEndClosed, "agent-done": domain.RunEndClosed}
+		}
+		store := &windDownStore{status: tc.status, ended: ended}
 		client, err := objectstore.New("http://127.0.0.1:1", "http://127.0.0.1:1", "us-east-1", "hl-data", "root", "root-secret", func(c *objectstore.Client) objectstore.KeyIssuer { return minio.New(c, c.SecretAccessKey) })
 		if err != nil {
 			t.Fatal(err)
