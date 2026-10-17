@@ -329,7 +329,7 @@ func repoAPI(t *testing.T, caller authtest.As, repos *fakeRepositories) (*create
 	}
 	router := authtest.Router(caller)
 	doc := apidocs.New(router, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
-	registerHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(svc, repos, testPlanning, zap.NewNop()).WithGitProxy("https://api.test/git"))
+	registerHuma(doc, NewPlatformExperimentsHandler(svc, repos, testPlanning, zap.NewNop()).WithGitProxy("https://api.test/git"))
 	return store, func(method, path string, body any) *httptest.ResponseRecorder {
 		var payload bytes.Buffer
 		if body != nil {

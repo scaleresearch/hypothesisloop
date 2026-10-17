@@ -33,7 +33,7 @@ func TestQuotasOfAnUnknownPlatformExperimentAreNotFound(t *testing.T) {
 	r := authtest.Router(authtest.Staff)
 	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	svc := newSignupTestService(t, noExperimentStore{})
-	registerHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(svc, &fakeRepositories{}, testPlanning, zap.NewNop()))
+	registerHuma(doc, NewPlatformExperimentsHandler(svc, &fakeRepositories{}, testPlanning, zap.NewNop()))
 
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, authtest.Authorize(httptest.NewRequest(http.MethodGet, "/platform-experiments/unknown/quotas", nil)))
@@ -42,53 +42,7 @@ func TestQuotasOfAnUnknownPlatformExperimentAreNotFound(t *testing.T) {
 	}
 }
 
-// takenAgents is an agent store in which every id in it is taken.
-type takenAgents struct {
-	Store
-	taken map[string]bool
-}
-
-func (s takenAgents) CreateAgent(_ context.Context, agent *domain.Agent) error {
-	if s.taken[agent.ID] {
-		return fmt.Errorf("%w: %s", db.ErrAgentExists, agent.ID)
-	}
-	return nil
-}
-
-// A taken id was told from the database's error text, and an agent registered without a name was
-// silently named after its id.
-func TestRegisteringAnAgentRefusesATakenIDAndRequiresAName(t *testing.T) {
-	r := authtest.Router(authtest.As(waitingPerson))
-	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	agents := NewHandler(NewService(takenAgents{taken: map[string]bool{"veteran": true}}, zap.NewNop()), zap.NewNop())
-	registerHuma(doc, agents, NewPlatformExperimentsHandler(newSignupTestService(t, noExperimentStore{}), &fakeRepositories{}, testPlanning, zap.NewNop()))
-
-	if code, out := call(t, r, "POST", "/agents", `{"id":"veteran","name":"Veteran"}`); code != http.StatusConflict || out["reason"] != "agent_exists" {
-		t.Errorf("a taken id: got = %d %v, want 409 agent_exists", code, out)
-	}
-	if code, out := call(t, r, "POST", "/agents", `{"id":"rookie","name":"Rookie"}`); code != http.StatusCreated || out["name"] != "Rookie" {
-		t.Errorf("a free id: got = %d %v, want 201 with its name", code, out)
-	}
-	if code, out := call(t, r, "POST", "/agents", `{"id":"nameless"}`); code != http.StatusUnprocessableEntity {
-		t.Errorf("no name: got = %d %v, want 422", code, out)
-	}
-}
-
-// pagedAgents and pagedExperiments record the limit each list was read with.
-type pagedAgents struct {
-	Store
-	limits *[]int
-}
-
-func (s pagedAgents) ListAgents(_ context.Context, filter db.AgentsFilter) ([]*domain.Agent, error) {
-	*s.limits = append(*s.limits, filter.Limit)
-	return nil, nil
-}
-
-func (pagedAgents) AgentStats(context.Context, db.AgentsFilter) (*domain.AgentStats, error) {
-	return &domain.AgentStats{}, nil
-}
-
+// pagedExperiments records the limit each list was read with.
 type pagedExperiments struct {
 	fakeStore
 	limits *[]int
@@ -103,15 +57,14 @@ func (pagedExperiments) CountPlatformExperiments(context.Context, db.PlatformExp
 	return 0, nil
 }
 
-// Both lists shortened a limit over the maximum to it, so a short page read as the whole set.
-func TestTheAgentAndPlatformExperimentListsRefuseAPageOverTheMaximum(t *testing.T) {
+// The list shortened a limit over the maximum to it, so a short page read as the whole set.
+func TestThePlatformExperimentListRefusesAPageOverTheMaximum(t *testing.T) {
 	var read []int
 	r := authtest.Router(authtest.Staff)
 	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	registerHuma(doc, NewHandler(NewService(pagedAgents{limits: &read}, zap.NewNop()), zap.NewNop()),
-		NewPlatformExperimentsHandler(newSignupTestService(t, pagedExperiments{limits: &read}), &fakeRepositories{}, testPlanning, zap.NewNop()))
+	registerHuma(doc, NewPlatformExperimentsHandler(newSignupTestService(t, pagedExperiments{limits: &read}), &fakeRepositories{}, testPlanning, zap.NewNop()))
 
-	for _, list := range []string{"/agents", "/platform-experiments"} {
+	for _, list := range []string{"/platform-experiments"} {
 		for _, query := range []string{"limit=201", "limit=100000", "limit=-1", "offset=-1"} {
 			if code, out := call(t, r, "GET", list+"?"+query, ""); code != http.StatusUnprocessableEntity || out["reason"] != "invalid_page" {
 				t.Errorf("GET %s?%s: got = %d %v, want 422 invalid_page", list, query, code, out)
@@ -164,7 +117,7 @@ func TestCloseAndSummaryAnswerThePlatformExperimentAndRefuseByReason(t *testing.
 	placement := authtest.Placement{PlatformExperiments: map[string]domain.Tenancy{"pe-1": {PlatformExperimentID: "pe-1", ProjectID: "prj-a", OrgID: "org-a"}}}
 	r := authtest.Router(authtest.As(waitingPerson))
 	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
-	registerHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(svc, &fakeRepositories{}, testPlanning, zap.NewNop()))
+	registerHuma(doc, NewPlatformExperimentsHandler(svc, &fakeRepositories{}, testPlanning, zap.NewNop()))
 
 	if code, out := call(t, r, "PUT", "/platform-experiments/pe-1/summary", `{"summary":"what was found"}`); code != http.StatusOK || out["id"] != "pe-1" || out["summary"] != "what was found" {
 		t.Errorf("a summary: got = %d %v, want 200 and the platform experiment with it", code, out)
@@ -225,7 +178,7 @@ func TestResultsTheMetricsStoreRefusesAreAnInternalErrorAndNotNotFound(t *testin
 	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	svc := newSignupTestService(t, constraintResultsStore{})
 	svc.metricsDBURL = metricsDB.URL
-	registerHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(svc, &fakeRepositories{}, testPlanning, zap.NewNop()))
+	registerHuma(doc, NewPlatformExperimentsHandler(svc, &fakeRepositories{}, testPlanning, zap.NewNop()))
 
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, authtest.Authorize(httptest.NewRequest(http.MethodGet, "/platform-experiments/pe-1/results", nil)))

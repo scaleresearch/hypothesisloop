@@ -54,7 +54,6 @@ func testRouter(t *testing.T) chi.Router {
 		t.Fatal(err)
 	}
 	return newRouter(apiGate{tokens: unreachable, access: auth.NewAccess(authtest.Placement{})}, "http://ui.test", routes{
-		quota:               &platformexperiments.Handler{},
 		platformExperiments: platformExperiments,
 		hypotheses:          noHypotheses{},
 		accounts:            &accounts.Handler{},

@@ -65,7 +65,7 @@ func jobsAPI(t *testing.T, pe *domain.PlatformExperiment, jobs []*Baseline, call
 	}
 	router := authtest.Router(authtest.As(caller))
 	doc := apidocs.New(router, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
-	registerHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(svc, &fakeRepositories{}, testPlanning, zap.NewNop()))
+	registerHuma(doc, NewPlatformExperimentsHandler(svc, &fakeRepositories{}, testPlanning, zap.NewNop()))
 	return store, func(body map[string]any) (int, map[string]any) {
 		t.Helper()
 		var payload bytes.Buffer

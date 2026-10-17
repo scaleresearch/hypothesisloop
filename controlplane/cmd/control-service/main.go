@@ -204,8 +204,6 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		logger.Fatal("control-service: configure durable data store", zap.Error(err))
 	}
 	connectedWithin := time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds) * time.Second
-	svc := platformexperiments.NewService(store, logger)
-	handler := platformexperiments.NewHandler(svc, logger)
 
 	// One observation cadence for the whole process: the quota service, the settler, the
 	// controller and the scheduler loop must all measure "how long did this run" the same way,
@@ -265,7 +263,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	}
 
 	r := newRouter(gate, pcfg.Auth.UIOrigin, routes{
-		quota:               handler,
+		agents:              accounts.NewAgents(store, logger),
 		platformExperiments: peHandler,
 		hypotheses:          graph,
 		sharing:             platformexperiments.NewSharing(db.NewPlatformExperimentsStore(pool), logger),
@@ -299,7 +297,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 
 // routes is everything the API serves.
 type routes struct {
-	quota               *platformexperiments.Handler
+	agents              *accounts.Agents
 	platformExperiments *platformexperiments.PlatformExperimentsHandler
 	hypotheses          platformexperiments.Hypotheses
 	sharing             *platformexperiments.Sharing
@@ -363,7 +361,8 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 	// One doc for the whole public API: every operation an agent or the UI can call is
 	// registered here, so /openapi.json and /explore describe all of it in one place.
 	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", agenttypes.PlatformRules, gate.access, logger)
-	platformexperiments.RegisterHuma(doc, h.quota, h.platformExperiments)
+	httpapi.RegisterAgents(doc, h.agents)
+	platformexperiments.RegisterHuma(doc, h.platformExperiments)
 	httpapi.RegisterSituation(doc, h.experiments, logger)
 	platformexperiments.RegisterBudgetHuma(doc, h.platformExperiments)
 	httpapi.RegisterMessages(doc, h.experiments, logger)

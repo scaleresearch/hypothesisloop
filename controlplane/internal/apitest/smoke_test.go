@@ -36,7 +36,8 @@ func TestSmoke(t *testing.T) {
 	r := authtest.Router(authtest.Staff)
 	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", agenttypes.PlatformRules, auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	peHandler := platformexperiments.NewPlatformExperimentsHandler(nil, worldRepositories{}, worldPlanning, nil)
-	platformexperiments.RegisterHuma(doc, platformexperiments.NewHandler(nil, nil), peHandler)
+	httpapi.RegisterAgents(doc, nil)
+	platformexperiments.RegisterHuma(doc, peHandler)
 	httpapi.RegisterSituation(doc, nil, nil)
 	platformexperiments.RegisterBudgetHuma(doc, peHandler)
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(

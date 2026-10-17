@@ -22,7 +22,7 @@ func (fakeStore) ProjectAgentTypeCatalog(context.Context, string) (domain.AgentT
 }
 
 // registerHuma registers the platform experiment operations this package still holds.
-func registerHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler) {
-	RegisterHuma(doc, h, peh)
+func registerHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
+	RegisterHuma(doc, peh)
 	RegisterBudgetHuma(doc, peh)
 }
