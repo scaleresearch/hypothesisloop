@@ -1,9 +1,9 @@
 // rented <example> <provider> [<cluster_name>] writes the sandbox or cloud_compute example of
 // controlplane/settings as local development rents with it: each section names provider and keeps
-// that provider's section alone, and each value there that .env holds as
-// <SECTION>_<PROVIDER>_<FIELD> is set from it. The cloud_compute example takes the cluster_name
-// its entry is renamed to. It refuses a provider this build has no adapter for, a placeholder left
-// in the chosen section, and an account key .env does not hold.
+// that provider's section alone, and each value there that .env holds as <SECTION>_<NAME>_<FIELD>
+// (config.ProviderKey) is set from it, NAME the sandbox's provider or the cluster_name the
+// cloud_compute entry is renamed to. It refuses a provider this build has no adapter for, a
+// placeholder left in the chosen section, and an account key .env does not hold.
 package main
 
 import (
@@ -40,22 +40,22 @@ func main() {
 	}
 	name, value := top.Content[0].Value, top.Content[1]
 	section := strings.ToUpper(name)
-	sections, account := []*yaml.Node{value}, provider
+	sections, keyName := []*yaml.Node{value}, provider
 	switch {
 	case value.Kind == yaml.SequenceNode && (len(os.Args) != 4 || len(value.Content) != 1):
 		fail(fmt.Sprintf("rented: %s takes one entry and the cluster_name to give it", path))
 	case value.Kind == yaml.SequenceNode:
-		sections, account = value.Content, os.Args[3]
+		sections, keyName = value.Content, os.Args[3]
 	case len(os.Args) == 4:
 		fail(fmt.Sprintf("rented: %s lists no clusters to name", path))
 	}
 	for _, s := range sections {
-		choose(s, name, section, provider)
+		choose(s, name, section, provider, keyName)
 	}
 	if value.Kind == yaml.SequenceNode {
-		rename(value.Content[0], name, account)
+		rename(value.Content[0], name, keyName)
 	}
-	if key := config.AccountKey(section, account); os.Getenv(key.Name) == "" {
+	if key := config.AccountKey(section, keyName); os.Getenv(key.Name) == "" {
 		fail(fmt.Sprintf("rented: .env does not set %s, %s", key.Name, key.For))
 	}
 	encoder := yaml.NewEncoder(os.Stdout)
@@ -67,7 +67,7 @@ func main() {
 
 // choose makes s the section of provider: its provider key names it, the sections of the other
 // providers are dropped, and the values of provider's own are set from the environment.
-func choose(s *yaml.Node, name, section, provider string) {
+func choose(s *yaml.Node, name, section, provider, keyName string) {
 	if s.Kind != yaml.MappingNode {
 		fail(fmt.Sprintf("rented: %s is not a mapping", name))
 	}
@@ -78,7 +78,7 @@ func choose(s *yaml.Node, name, section, provider string) {
 		case key.Value == "provider":
 			value.Value, value.Style, named = provider, 0, true
 		case key.Value == provider:
-			fill(value, name, section, provider)
+			fill(value, name, section, provider, keyName)
 			found = true
 		case slices.Contains(providers.Names(), key.Value):
 			continue
@@ -104,13 +104,13 @@ func rename(entry *yaml.Node, name, clusterName string) {
 
 // fill sets each scalar value of a provider's section that the environment holds, and refuses one
 // left a placeholder.
-func fill(block *yaml.Node, name, section, provider string) {
+func fill(block *yaml.Node, name, section, provider, keyName string) {
 	for i := 0; i+1 < len(block.Content); i += 2 {
 		field, value := block.Content[i].Value, block.Content[i+1]
 		if value.Kind != yaml.ScalarNode {
 			continue
 		}
-		key := config.ProviderKey(section, provider, strings.ToUpper(field), "")
+		key := config.ProviderKey(section, keyName, strings.ToUpper(field), "")
 		// The example's own tag is kept, so a value .env sets is read as the example's value is.
 		if set := os.Getenv(key.Name); set != "" {
 			value.Value, value.Style = set, 0
