@@ -503,7 +503,7 @@ func TestInternalLogsTheCauseAndAnswersWithoutIt(t *testing.T) {
 }
 
 // A runtime branches on one refusal: its cluster is gone, so it stops what it runs and exits.
-// A token that fails for any other cause carries no reason, and the runtime keeps its jobs.
+// A token that fails for any other cause is unauthenticated, and the runtime keeps its jobs.
 func TestOnlyARemovedClustersRuntimeIsToldItsClusterIsNotRegistered(t *testing.T) {
 	a, _ := newTestAuthenticator(t)
 	handler := Gate(a, zap.NewNop(), nil)(RequireRuntime(zap.NewNop(), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {})))
@@ -512,7 +512,7 @@ func TestOnlyARemovedClustersRuntimeIsToldItsClusterIsNotRegistered(t *testing.T
 		reason string
 	}{
 		"removed cluster": {mustMint(t, testSecret, scope.Runtime("cluster-typo")), domain.ReasonClusterNotRegistered},
-		"forged token":    {mustMint(t, "another-signing-secret-of-enough-length", scope.Runtime("cluster-a")), ""},
+		"forged token":    {mustMint(t, "another-signing-secret-of-enough-length", scope.Runtime("cluster-a")), refusal.ReasonUnauthenticated},
 	} {
 		request := httptest.NewRequest(http.MethodPost, "/internal/node-metrics", strings.NewReader("{}"))
 		request.Header.Set("Authorization", "Bearer "+tc.token)

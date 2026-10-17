@@ -26,8 +26,8 @@ func asking(answers map[string]string) (*Resolver, *[]string) {
 	return r, &asked
 }
 
-// A tag is pinned to the digest its registry answers, asked once while it is fresh, and named by
-// repository and digest alone: the same image under another tag is the same pin.
+// A tag is pinned to the digest its registry answers, asked every time since nothing is cached, and
+// named by repository and digest alone: the same image under another tag is the same pin.
 func TestATagIsPinnedToTheDigestItsRegistryAnswers(t *testing.T) {
 	r, asked := asking(map[string]string{"registry.test/job-base:abc": sum, "registry.test/job-base:def": sum})
 	for range 2 {
@@ -40,8 +40,8 @@ func TestATagIsPinnedToTheDigestItsRegistryAnswers(t *testing.T) {
 	if err != nil || other != "registry.test/job-base@"+sum {
 		t.Fatalf("another tag: %q, %v", other, err)
 	}
-	if !slices.Equal(*asked, []string{"registry.test/job-base:abc", "registry.test/job-base:def"}) {
-		t.Errorf("asked %v, want each tag once", *asked)
+	if !slices.Equal(*asked, []string{"registry.test/job-base:abc", "registry.test/job-base:abc", "registry.test/job-base:def"}) {
+		t.Errorf("asked %v, want each pin asked of the registry", *asked)
 	}
 }
 
@@ -53,8 +53,8 @@ func TestADigestIsKeptAndNothingIsAsked(t *testing.T) {
 	}
 }
 
-// A registry on a port is a local one that may serve plain HTTP; any other is asked over TLS alone.
-func TestOnlyARegistryOnAPortIsAskedOverPlainHTTP(t *testing.T) {
+// Only the registries New names are asked over plain HTTP, and every other over TLS alone.
+func TestOnlyANamedRegistryIsAskedOverPlainHTTP(t *testing.T) {
 	r, asked := asking(map[string]string{"http 10.0.0.2:5000/hypothesisloop-job-base:abc": sum})
 	if got, err := r.Pinned(context.Background(), "10.0.0.2:5000/hypothesisloop-job-base:abc"); err != nil || got != "10.0.0.2:5000/hypothesisloop-job-base@"+sum {
 		t.Errorf("local registry: %q, %v", got, err)
@@ -62,7 +62,10 @@ func TestOnlyARegistryOnAPortIsAskedOverPlainHTTP(t *testing.T) {
 	if _, err := r.Pinned(context.Background(), "registry.test/job:1"); err == nil {
 		t.Error("an unanswered registry pinned an image")
 	}
-	if !slices.Equal(*asked, []string{"10.0.0.2:5000/hypothesisloop-job-base:abc", "http 10.0.0.2:5000/hypothesisloop-job-base:abc", "registry.test/job:1"}) {
+	if _, err := r.Pinned(context.Background(), "10.0.0.3:5000/job:1"); err == nil {
+		t.Error("a registry on a port New does not name pinned an image over plain HTTP")
+	}
+	if !slices.Equal(*asked, []string{"http 10.0.0.2:5000/hypothesisloop-job-base:abc", "registry.test/job:1", "10.0.0.3:5000/job:1"}) {
 		t.Errorf("asked %v", *asked)
 	}
 }
