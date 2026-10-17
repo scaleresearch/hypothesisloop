@@ -36,6 +36,7 @@ from pathlib import Path
 import pytest
 
 from conftest import make_agent
+from support.api import ENDED
 from support.wait import DeadlineExceeded, Deadline, eventually
 
 # H100, not the suite default (L40). This module is about the event stream, so it wants its jobs
@@ -216,7 +217,7 @@ def test_watch_before_submit_sees_ordered_sequence_and_until_exits_on_terminal(a
     final = eventually(
         f"{job} to complete",
         lambda: api.experiment(job),
-        accept=lambda e: e["status"] in ("COMPLETED", "FAILED", "EVICTED"),
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     assert final["status"] == "COMPLETED", f"job ended as {final['status']}; the terminal-state assertions below describe a completed run"
@@ -259,7 +260,7 @@ def test_watch_kinds_scoping(api, watch_pe, watch, deadline):
     eventually(
         f"{job} to complete",
         lambda: api.experiment(job),
-        accept=lambda e: e["status"] in ("COMPLETED", "FAILED", "EVICTED"),
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     api.file_finding(job)

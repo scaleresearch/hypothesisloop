@@ -19,6 +19,7 @@ from __future__ import annotations
 import pytest
 
 from conftest import TEST_ACCELERATOR_TYPE, make_agent
+from support.api import ENDED
 from support.cluster import disbalance_node_shape, set_node_accelerators
 from support.wait import eventually
 
@@ -82,7 +83,7 @@ def test_resource_disbalance_evicts_and_explains_itself(api, run_id, deadline):
     hog_final = eventually(
         f"{hog} (hog) to be evicted while stranding idle accelerators",
         lambda: api.experiment(hog),
-        accept=lambda e: e["status"] in ("EVICTED", "COMPLETED", "FAILED"),
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     reason = hog_final.get("eviction_reason") or ""

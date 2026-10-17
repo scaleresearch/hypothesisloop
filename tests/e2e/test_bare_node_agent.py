@@ -31,7 +31,7 @@ import pytest
 
 from conftest import API_URL, REPO_ROOT, TEST_CPU_TYPE
 from support import admin
-from support.api import BASELINE_COMMAND
+from support.api import BASELINE_COMMAND, ENDED
 from support.wait import eventually
 
 pytestmark = pytest.mark.parallel
@@ -258,7 +258,7 @@ def _run_bare_node_flow(api, pe_id, agent, cluster_name, engine, deadline, submi
     exp = eventually(
         f"{job} to COMPLETE end-to-end via the bare-node agent",
         lambda: api.experiment(job),
-        accept=lambda e: e["status"] in ("COMPLETED", "FAILED", "EVICTED"),
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     assert exp["status"] == "COMPLETED", f"expected job to COMPLETE, got {exp['status']}"
@@ -288,7 +288,7 @@ def _run_bare_node_flow(api, pe_id, agent, cluster_name, engine, deadline, submi
     exp2 = eventually(
         f"{job2} to reach CANCELLED after cancel",
         lambda: api.experiment(job2),
-        accept=lambda e: e["status"] in ("CANCELLED", "EVICTED", "COMPLETED", "FAILED"),
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     assert exp2["status"] == "CANCELLED", f"expected CANCELLED after cancelling a RUNNING job, got {exp2['status']}"

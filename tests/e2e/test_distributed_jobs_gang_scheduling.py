@@ -14,6 +14,7 @@ import time
 import pytest
 
 from conftest import make_agent
+from support.api import ENDED
 from support.cluster import (
     corrupt_service_desired_hash,
     job_distinct_node_count,
@@ -136,7 +137,7 @@ def test_distributed_job_gang_admission_pod_spec_and_billing(api, experiment, ru
     final = eventually(
         f"{job_id} to complete",
         lambda: api.experiment(job_id),
-        accept=lambda e: e["status"] in ("COMPLETED", "FAILED", "EVICTED"),
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     assert final["status"] == "COMPLETED", f"did not complete cleanly (status={final['status']})"
@@ -224,7 +225,7 @@ def test_gang_forms_single_process_group(api, experiment, run_id, deadline):
     final = eventually(
         f"3-rank gang {job_id} to complete",
         lambda: api.experiment(job_id),
-        accept=lambda e: e["status"] in ("COMPLETED", "FAILED", "EVICTED"),
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     assert final["status"] == "COMPLETED", (
@@ -269,7 +270,7 @@ def test_gang_per_node_accelerator_count(api, experiment, run_id, deadline):
     final = eventually(
         f"accelerator_count=2 num_nodes=2 gang {job_id} to complete",
         lambda: api.experiment(job_id),
-        accept=lambda e: e["status"] in ("COMPLETED", "FAILED", "EVICTED"),
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     assert final["status"] == "COMPLETED", f"accelerator_count=2 num_nodes=2 gang did not complete (status={final['status']})"

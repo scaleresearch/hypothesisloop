@@ -27,6 +27,7 @@ from __future__ import annotations
 import pytest
 
 from conftest import make_agent
+from support.api import ENDED
 from support.wait import eventually
 
 pytestmark = pytest.mark.exclusive("a100")
@@ -35,7 +36,6 @@ ACCELERATOR_TYPE = "nvidia.com/gpu.product=NVIDIA-A100-80GB-PCIe"
 HOURS = 0.02
 
 STARTED = ("RUNNING",)
-TERMINAL = ("COMPLETED", "FAILED", "EVICTED", "REJECTED")
 
 
 def _is_admitted(api, job_id: str) -> bool:
@@ -86,7 +86,7 @@ def test_burst_fair_round_robin(api, run_id, deadline):
     filler_final = eventually(
         f"{filler} (filler) to reach a terminal state",
         lambda: api.experiment(filler),
-        accept=lambda e: e["status"] in TERMINAL,
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     assert filler_final["status"] == "COMPLETED", (
@@ -126,7 +126,7 @@ def test_burst_fair_round_robin(api, run_id, deadline):
         # otherwise sit QUEUED past this test and contend for real A100 capacity in every later
         # exclusive("a100") run. Cancel every non-admitted contender regardless of outcome.
         for j in (a2, a3, b1):
-            if not _is_admitted(api, j) and api.experiment(j)["status"] not in TERMINAL:
+            if not _is_admitted(api, j) and api.experiment(j)["status"] not in ENDED:
                 api.cancel_job(j)
 
     if b1_admitted and (a2_admitted + a3_admitted) <= 1:

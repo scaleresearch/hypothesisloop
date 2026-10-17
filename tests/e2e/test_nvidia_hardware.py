@@ -23,6 +23,7 @@ import pytest
 
 from conftest import API_URL, DEFAULT_ORG, REPO_ROOT
 from support import admin
+from support.api import ENDED
 from support.wait import eventually
 
 pytestmark = [pytest.mark.hardware, pytest.mark.exclusive("nvidia")]
@@ -158,7 +159,7 @@ def _run(api, pe_id, agent, cluster_name, engine, acc_type, deadline, submitted:
     final = eventually(
         f"{job} to reach a terminal status",
         lambda: api.experiment(job),
-        accept=lambda e: e["status"] in ("COMPLETED", "FAILED", "EVICTED"),
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     assert final["status"] == "COMPLETED", (
@@ -235,7 +236,7 @@ def _run(api, pe_id, agent, cluster_name, engine, acc_type, deadline, submitted:
     final4 = eventually(
         f"{job4} to reach a terminal status after eviction",
         lambda: api.experiment(job4),
-        accept=lambda e: e["status"] in ("COMPLETED", "FAILED", "EVICTED"),
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     assert final4["status"] == "COMPLETED", f"post-eviction job did not COMPLETE (status={final4['status']})"
@@ -281,7 +282,7 @@ def _run(api, pe_id, agent, cluster_name, engine, acc_type, deadline, submitted:
     final5 = eventually(
         f"{job5} to reach a terminal status via k3s/device-plugin",
         lambda: api.experiment(job5),
-        accept=lambda e: e["status"] in ("COMPLETED", "FAILED", "EVICTED"),
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     assert final5["status"] == "COMPLETED", f"k3s leg: job did not reach COMPLETED (status={final5['status']})"

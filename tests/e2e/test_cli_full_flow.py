@@ -20,7 +20,7 @@ import pytest
 import yaml
 
 from conftest import TEST_ACCELERATOR_TYPE, make_agent
-from support.api import branch, workload_image
+from support.api import branch, ENDED, workload_image
 from support.wait import eventually
 
 pytestmark = pytest.mark.parallel
@@ -224,7 +224,7 @@ def test_watch_finding_new_delivered_live_after_job_completion(api, cli_watch_pe
     final = eventually(
         f"{job_id} to reach a terminal status",
         lambda: api.experiment(job_id),
-        accept=lambda e: e["status"] in ("COMPLETED", "FAILED", "EVICTED"),
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     if final["status"] != "COMPLETED":

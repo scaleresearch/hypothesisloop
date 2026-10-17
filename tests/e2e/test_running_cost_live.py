@@ -14,6 +14,7 @@ import time
 import pytest
 
 from conftest import make_agent
+from support.api import ENDED
 from support.wait import eventually
 
 pytestmark = pytest.mark.parallel
@@ -35,7 +36,7 @@ def test_running_cost_corrects_below_estimate_then_grows(api, experiment, run_id
         f"{job} to run",
         lambda: api.experiment(job),
         accept=lambda e: e["status"] == "RUNNING",
-        reject=lambda e: e["status"] in ("COMPLETED", "FAILED", "EVICTED", "REJECTED"),
+        reject=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     estimated = running["estimated_cost_acch"]

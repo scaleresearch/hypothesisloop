@@ -23,6 +23,7 @@ import math
 import pytest
 
 from conftest import TEST_ACCH_RATE, make_agent
+from support.api import ENDED
 from support.wait import assert_stable, eventually
 
 pytestmark = pytest.mark.parallel
@@ -102,7 +103,7 @@ def test_reservation_alone_never_evicts_then_overrun_evicts(api, experiment, run
     final = eventually(
         f"{job} to leave RUNNING once observed consumption passes its budget",
         lambda: api.experiment(job),
-        accept=lambda e: e["status"] in ("EVICTED", "COMPLETED", "FAILED"),
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     assert final["status"] == "EVICTED", (
@@ -130,7 +131,7 @@ def test_reservation_alone_never_evicts_then_overrun_evicts(api, experiment, run
     q_final = eventually(
         f"{queued_job} to settle after its agent's budget was exhausted",
         lambda: api.experiment(queued_job),
-        accept=lambda e: e["status"] in ("REJECTED", "EVICTED", "COMPLETED", "FAILED"),
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     if q_final["status"] in ("REJECTED", "EVICTED"):

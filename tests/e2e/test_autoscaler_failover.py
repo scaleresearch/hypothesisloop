@@ -15,6 +15,7 @@ from __future__ import annotations
 import pytest
 
 from conftest import make_agent
+from support.api import ENDED
 from support.cluster import (
     all_cordoned_nodes,
     cluster_agent_name,
@@ -336,7 +337,7 @@ def test_concurrency_cap_gates_third_job_until_one_finishes(api, run_id, deadlin
         eventually(
             f"{j1} to reach a terminal state",
             lambda: api.experiment(j1)["status"],
-            accept=lambda s: s in ("COMPLETED", "FAILED", "EVICTED"),
+            accept=lambda s: s in ENDED,
             deadline=deadline,
         )
         # The concurrency cap is all that stands between j3 and admission.
@@ -349,7 +350,7 @@ def test_concurrency_cap_gates_third_job_until_one_finishes(api, run_id, deadlin
         # A short job (hours=0.02) can already be COMPLETED by the time cleanup runs here --
         # cancel_job 409s on a terminal experiment, and that race is not what this test is about.
         for j in (j2, j3):
-            if api.experiment(j)["status"] not in ("COMPLETED", "FAILED", "EVICTED"):
+            if api.experiment(j)["status"] not in ENDED:
                 api.cancel_job(j)
     finally:
         api.close_platform_experiment(pe_id)

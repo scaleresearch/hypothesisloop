@@ -16,6 +16,7 @@ from __future__ import annotations
 import pytest
 
 from conftest import make_agent
+from support.api import ENDED
 from support.wait import eventually
 
 pytestmark = pytest.mark.parallel
@@ -41,7 +42,7 @@ def test_stage_boundary_advances_and_terminal_jobs_settle(api, experiment, run_i
     ended = eventually(
         "all jobs to reach a terminal state",
         lambda: [api.experiment(j) for j in jobs],
-        accept=lambda exps: all(e["status"] in ("COMPLETED", "FAILED", "EVICTED", "REJECTED") for e in exps),
+        accept=lambda exps: all(e["status"] in ENDED for e in exps),
         deadline=deadline,
     )
     endings = [(e["status"], e.get("eviction_reason")) for e in ended]

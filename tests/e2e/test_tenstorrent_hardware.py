@@ -22,6 +22,8 @@ import pytest
 
 from conftest import API_URL, DEFAULT_ORG, REPO_ROOT, make_agent
 from support import admin
+from support.api import ENDED
+from support.cluster import JOB_NS
 from support.wait import eventually
 
 pytestmark = [pytest.mark.hardware, pytest.mark.exclusive("tenstorrent")]
@@ -44,7 +46,6 @@ def _server_node() -> str:
 
 TT_NODE = os.environ.get("TT_NODE") or _server_node()
 TT_CLUSTER = os.environ.get("TT_CLUSTER") or TT_NODE
-JOB_NS = "hypothesisloop-jobs"
 ACCEL_TYPE = "tenstorrent.com/chipArch=blackhole"
 
 # Overrides tests/workloads/tenstorrent/job.yaml's own fields on top of the generic base spec
@@ -230,7 +231,7 @@ def _run(api, pe_id: str, agent: str, run_id: str, deadline, tmp_path: Path) -> 
     final = eventually(
         f"{job} to reach a terminal status",
         lambda: api.experiment(job),
-        accept=lambda e: e["status"] in ("COMPLETED", "FAILED", "EVICTED"),
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     assert final["status"] == "COMPLETED", (
@@ -298,7 +299,7 @@ def _run(api, pe_id: str, agent: str, run_id: str, deadline, tmp_path: Path) -> 
         bare_final = eventually(
             f"{bare_job} to reach a terminal status on the bare-node agent",
             lambda: api.experiment(bare_job),
-            accept=lambda e: e["status"] in ("COMPLETED", "FAILED", "EVICTED"),
+            accept=lambda e: e["status"] in ENDED,
             deadline=deadline,
         )
         assert bare_final.get("cluster_name") == bare_cluster, (

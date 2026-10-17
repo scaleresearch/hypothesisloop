@@ -16,6 +16,7 @@ import time
 import pytest
 
 from conftest import make_agent
+from support.api import ENDED
 from support.cluster import job_pod_count
 from support.wait import eventually
 
@@ -116,7 +117,7 @@ def test_heterogeneous_group_gang_forms_one_process_group_and_bills_by_shape(api
     final = eventually(
         f"grouped gang {job_id} to complete",
         lambda: api.experiment(job_id),
-        accept=lambda e: e["status"] in ("COMPLETED", "FAILED", "EVICTED"),
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     group_elapsed = time.monotonic() - group_start

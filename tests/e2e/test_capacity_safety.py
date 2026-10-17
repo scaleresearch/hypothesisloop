@@ -15,6 +15,7 @@ from __future__ import annotations
 import pytest
 
 from conftest import TEST_ACCELERATOR_TYPE, TEST_ACCH_RATE, make_agent
+from support.api import ENDED
 from support.wait import eventually
 
 pytestmark = pytest.mark.parallel
@@ -51,7 +52,7 @@ def test_desired_usage_stable_across_scheduler_ticks(api, experiment, run_id, de
         final = eventually(
             f"{j} to reach a terminal state",
             lambda j=j: api.experiment(j),
-            accept=lambda e: e["status"] in ("COMPLETED", "FAILED", "EVICTED"),
+            accept=lambda e: e["status"] in ENDED,
             deadline=deadline,
         )
         if final["status"] == "COMPLETED":

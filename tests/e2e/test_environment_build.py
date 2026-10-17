@@ -25,7 +25,7 @@ import requests
 import yaml
 
 from conftest import cpu_job
-from support.api import API, JobRequest, baseline_reporter
+from support.api import API, ENDED, JobRequest, baseline_reporter, branch
 from support.wait import eventually
 
 pytestmark = pytest.mark.parallel
@@ -34,7 +34,6 @@ METRICS = [{"key": "val_accuracy", "direction": "maximize"}]
 # The standard job image of hl capacity, which every cluster that builds runs.
 JOB = cpu_job(1) | {"image": "python", "memory": "512Mi", "storage": "1Gi", "max_retries": 0, "accelerator_tolerations": None}
 MARKER_PATH = "/opt/hl-e2e-environment"
-ENDED = ("COMPLETED", "FAILED", "EVICTED", "REJECTED", "CANCELLED")
 
 
 class Run:
@@ -46,7 +45,7 @@ class Run:
         self.agent = api.as_caller(token, api.org_id, api.project_id)
         self.read = self.agent.get_json(f"/platform-experiments/{pe_id}")
         self.repository_url = self.read["repository_url"]
-        self.branch = f"hl/{pe_id}/baseline"
+        self.branch = branch(pe_id, agent_id, "")
         self.pushed = False
 
     def git(self, *args: str, cwd: Path | None = None) -> str:

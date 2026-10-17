@@ -33,6 +33,7 @@ from pathlib import Path
 import pytest
 
 from conftest import make_agent
+from support.api import ENDED
 from support.cluster import A100, job_pod_count, pod_grace_seconds
 from support.wait import eventually
 
@@ -53,7 +54,6 @@ pytestmark = pytest.mark.exclusive("a100")
 ACCELERATOR_TYPE = A100
 
 STARTED = ("RUNNING",)
-TERMINAL = ("COMPLETED", "FAILED", "EVICTED", "REJECTED")
 
 PREEMPT_METRICS = [
     {"key": "val_accuracy", "direction": "maximize"},
@@ -163,7 +163,7 @@ def test_single_node_burst_job_preempted_and_readmitted(api, run_id, deadline):
 
     api.close_platform_experiment(pe_id)
     for j in burst_jobs + [job4]:
-        eventually(f"{j} to be terminal", lambda j=j: api.experiment(j), accept=lambda e: e["status"] in TERMINAL, deadline=deadline)
+        eventually(f"{j} to be terminal", lambda j=j: api.experiment(j), accept=lambda e: e["status"] in ENDED, deadline=deadline)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -232,7 +232,7 @@ def test_concurrent_burst_saturation_and_guaranteed_arrival(api, run_id, deadlin
 
     api.close_platform_experiment(pe_id)
     for j in (burst_a, burst_b, guaranteed):
-        eventually(f"{j} to be terminal", lambda j=j: api.experiment(j), accept=lambda e: e["status"] in TERMINAL, deadline=deadline)
+        eventually(f"{j} to be terminal", lambda j=j: api.experiment(j), accept=lambda e: e["status"] in ENDED, deadline=deadline)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -356,7 +356,7 @@ def test_distributed_gang_preempted_leaves_no_surviving_rank(api, pe3, deadline)
     pre_final = eventually(
         f"{job_gang_pre} (guaranteed preemptor) to complete",
         lambda: api.experiment(job_gang_pre),
-        accept=lambda e: e["status"] in TERMINAL,
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     assert pre_final["status"] == "COMPLETED", f"the guaranteed preemptor ended {pre_final['status']} -- the capacity it took was never used"
@@ -365,7 +365,7 @@ def test_distributed_gang_preempted_leaves_no_surviving_rank(api, pe3, deadline)
     gang_final = eventually(
         f"the preempted gang {job_gang} to be re-admitted and complete",
         lambda: api.experiment(job_gang),
-        accept=lambda e: e["status"] in TERMINAL,
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     assert gang_final["status"] == "COMPLETED", (
@@ -449,7 +449,7 @@ def test_grouped_job_preempted_with_every_group_intact(api, pe3, deadline):
     pre_final = eventually(
         f"{job_groups_pre} (guaranteed preemptor) to complete",
         lambda: api.experiment(job_groups_pre),
-        accept=lambda e: e["status"] in TERMINAL,
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     assert pre_final["status"] == "COMPLETED", f"the guaranteed preemptor ended {pre_final['status']} -- the capacity it took was never used"
@@ -458,7 +458,7 @@ def test_grouped_job_preempted_with_every_group_intact(api, pe3, deadline):
     groups_final = eventually(
         f"the preempted grouped job {job_groups} to be re-admitted and complete",
         lambda: api.experiment(job_groups),
-        accept=lambda e: e["status"] in TERMINAL,
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     assert groups_final["status"] == "COMPLETED", (
@@ -567,7 +567,7 @@ def test_checkpoint_resume_and_window_cap(api, pe3, deadline):
     pre_final = eventually(
         f"{job_ckpt_pre} (guaranteed preemptor) to complete",
         lambda: api.experiment(job_ckpt_pre),
-        accept=lambda e: e["status"] in TERMINAL,
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     assert pre_final["status"] == "COMPLETED", f"the guaranteed preemptor ended {pre_final['status']} -- the capacity it took was never used"
@@ -583,7 +583,7 @@ def test_checkpoint_resume_and_window_cap(api, pe3, deadline):
     final = eventually(
         f"the preempted job {job_ckpt} to be re-admitted and complete",
         lambda: api.experiment(job_ckpt),
-        accept=lambda e: e["status"] in TERMINAL,
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     stint2_elapsed = time.monotonic() - stint2_start
@@ -671,7 +671,7 @@ def test_checkpoint_grace_seconds_capped_by_configuration(api, pe3, deadline):
     final = eventually(
         f"{job_cap} to complete",
         lambda: api.experiment(job_cap),
-        accept=lambda e: e["status"] in TERMINAL,
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     if final["status"] == "COMPLETED":

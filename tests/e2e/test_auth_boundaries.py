@@ -21,7 +21,7 @@ import pytest
 import requests
 
 from support import admin
-from support.api import API
+from support.api import API, WATCH_SUBPROTOCOL
 from support.wait import eventually
 
 # Exclusive: an org made here owns no cluster that runs anything, so its platform experiment is
@@ -29,7 +29,6 @@ from support.wait import eventually
 # (API.clusters_shared).
 pytestmark = pytest.mark.exclusive
 
-WATCH_SUBPROTOCOL = "hypothesisloop.watch"
 # Priced in controlplane/settings/hypothesisloop.yaml and on none of the dev nodes. A job asking
 # for it, submitted while its org has no cluster a submit could be judged against, stays QUEUED:
 # its token stays valid and it holds nothing.

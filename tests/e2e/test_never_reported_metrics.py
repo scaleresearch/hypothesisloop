@@ -17,6 +17,7 @@ from __future__ import annotations
 import pytest
 
 from conftest import make_agent
+from support.api import ENDED
 from support.wait import assert_stable, eventually
 
 pytestmark = [pytest.mark.parallel, pytest.mark.slow]
@@ -50,7 +51,7 @@ def test_mute_job_evicted_while_reporting_job_survives(api, experiment, run_id, 
         f"{mute_job} to run (it is alive, just silent)",
         lambda: api.experiment(mute_job),
         accept=lambda e: e["status"] == "RUNNING",
-        reject=lambda e: e["status"] in ("COMPLETED", "FAILED", "EVICTED", "REJECTED"),
+        reject=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     assert running["status"] == "RUNNING"
@@ -92,7 +93,7 @@ def test_mute_job_evicted_while_reporting_job_survives(api, experiment, run_id, 
         f"{healthy_job} (the reporting control) to run",
         lambda: api.experiment(healthy_job),
         accept=lambda e: e["status"] == "RUNNING",
-        reject=lambda e: e["status"] in ("COMPLETED", "FAILED", "EVICTED", "REJECTED"),
+        reject=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     assert healthy_running["status"] == "RUNNING"

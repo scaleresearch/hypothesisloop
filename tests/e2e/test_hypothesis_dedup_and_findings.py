@@ -25,7 +25,7 @@ from datetime import datetime
 import pytest
 
 from conftest import make_agent
-from support.api import link
+from support.api import ENDED, link
 from support.wait import eventually
 
 pytestmark = pytest.mark.parallel
@@ -35,7 +35,7 @@ def _completed(api, job, deadline):
     final = eventually(
         f"{job} to finish",
         lambda: api.experiment(job),
-        accept=lambda e: e["status"] in ("COMPLETED", "FAILED", "EVICTED"),
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     assert final["status"] == "COMPLETED", f"{job} ended as {final['status']!r}, expected COMPLETED"

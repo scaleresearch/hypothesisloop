@@ -16,6 +16,7 @@ from __future__ import annotations
 import pytest
 
 from conftest import TEST_ACCELERATOR_TYPE, TEST_ACCH_RATE, make_agent
+from support.api import ENDED
 from support.wait import assert_stable, eventually
 
 pytestmark = pytest.mark.parallel
@@ -124,7 +125,7 @@ def test_cancel_while_running_is_evicted_and_terminal(api, experiment, run_id, d
     final = eventually(
         f"{runner} to terminate",
         lambda: api.experiment(runner),
-        accept=lambda e: e["status"] in ("CANCELLED", "EVICTED", "COMPLETED", "FAILED"),
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     assert final["status"] == "CANCELLED", f"expected CANCELLED after cancelling a RUNNING job, got {final['status']}"
@@ -146,7 +147,7 @@ def test_closing_experiment_evicts_running_job_and_blocks_submission(api, experi
         f"{live} to run before close",
         lambda: api.experiment(live),
         accept=lambda e: e["status"] == "RUNNING",
-        reject=lambda e: e["status"] in ("COMPLETED", "FAILED", "EVICTED"),
+        reject=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     assert running["status"] == "RUNNING"
@@ -162,7 +163,7 @@ def test_closing_experiment_evicts_running_job_and_blocks_submission(api, experi
     final = eventually(
         f"{live} to settle after its platform experiment closed",
         lambda: api.experiment(live),
-        accept=lambda e: e["status"] in ("EVICTED", "COMPLETED", "FAILED"),
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     if final["status"] == "COMPLETED":

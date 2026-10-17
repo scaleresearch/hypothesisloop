@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from conftest import make_agent
+from support.api import ENDED
 from support.wait import eventually
 
 pytestmark = [pytest.mark.parallel, pytest.mark.accelerator]
@@ -72,7 +73,7 @@ def test_underestimated_job_evicted_job_too_long_and_settles_usage(api, joblen_p
     final = eventually(
         f"{job_id} to settle",
         lambda: api.experiment(job_id),
-        accept=lambda e: e["status"] in ("EVICTED", "COMPLETED", "FAILED"),
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     assert final["status"] == "EVICTED" and final.get("eviction_reason") == "job_too_long", (

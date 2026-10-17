@@ -19,6 +19,7 @@ from __future__ import annotations
 import pytest
 
 from conftest import make_agent
+from support.api import ENDED
 from support.stages import BUDGET, BURN_JOB_HOURS, REPORT_INTERVAL_SECONDS, ROSTER_SIZE, STAGES, cross_first_boundary_ranked
 from support.wait import eventually
 
@@ -103,7 +104,7 @@ def test_stage_boundary_cuts_field_and_reallocates_budget(api, experiment, run_i
     ended = eventually(
         "every cut agent's job to end",
         lambda: {a: api.experiment(j) for a, j in cut_jobs.items()},
-        accept=lambda exps: all(e["status"] in ("COMPLETED", "FAILED", "EVICTED", "REJECTED") for e in exps.values()),
+        accept=lambda exps: all(e["status"] in ENDED for e in exps.values()),
         deadline=deadline,
     )
     found = next(

@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from conftest import TEST_CPU_ACCH_RATE, TEST_CPU_TYPE, cpu_job, make_agent
+from support.api import ENDED
 from support.cluster import pod_resource
 from support.wait import eventually
 
@@ -29,7 +30,7 @@ def _finish_if_completed(api, job_id, deadline):
     final = eventually(
         f"{job_id} to reach a terminal status",
         lambda: api.experiment(job_id),
-        accept=lambda e: e["status"] in ("COMPLETED", "FAILED", "EVICTED"),
+        accept=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     if final["status"] == "COMPLETED":
