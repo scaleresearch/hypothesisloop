@@ -28,7 +28,7 @@ _OPENING = (
     "Read for you before this turn, as you would have read them yourself: the draft, the capacity, "
     "and the repository, cloned into {workdir} (its default branch, depth 1) unless said below, "
     "with its file list, README and .hypothesisloop/. Start from them, and read again only what a "
-    "revision changes or a file not shown here.")
+    "change of the goal changes or a file not shown here.")
 
 
 def _run(command: list[str], cwd: str | None = None) -> str:

@@ -47,27 +47,28 @@ def _new_machine_note(cfg) -> str:
     return _NEW_MACHINE_NOTE + (_NEW_MACHINE_BASELINE if config.measures_baseline(cfg) else _NEW_MACHINE_RESEARCHER)
 
 
-# A planner's machine is released some minutes after its answer and a revision asked later
-# starts another. Told only that its machine was replaced and to continue, a planner had to find
-# the revision by itself, and with the file of its proposal gone it wrote the whole proposal again.
-_REVISION_PROMPT = (
-    "The person read your answer and asks for this revision:\n\n{revision}\n\n"
-    "Read the draft and the capacity again and answer with a new proposal.")
-_REVISION_NEW_MACHINE = " Your machine was released with your answer: a file you wrote on it is gone."
-_REVISION_PROPOSAL = " Your last proposal, as the platform stores it, is in {path}: edit that file and propose it."
+# A planner's machine is released some minutes after its answer and a goal changed later starts
+# another. Told only that its machine was replaced and to continue, a planner had to find the
+# change by itself, and with the file of its proposal gone it wrote the whole proposal again.
+_GOAL_PROMPT = (
+    "The owner changed the goal to:\n\n{goal}\n\n"
+    "Plan from it, keep what it does not change, and propose with goal_version: {version}. "
+    "Read the draft and the capacity again where the change asks it.")
+_GOAL_NEW_MACHINE = " Your machine was released with your answer: a file you wrote on it is gone."
+_GOAL_PROPOSAL = " Your last proposal, as the platform stores it with the goal_version to propose for, is in {path}: edit that file and propose it."
 _PROPOSAL_FILE = "proposal.yaml"
 
 
-def _revision_prompt(setup: core.RunSetup, store: Store, draft: dict) -> str:
-    """What a planner is told of the revision it has to answer, with the proposal the draft holds
-    put back as a file. A draft it declined holds none."""
-    prompt = _REVISION_PROMPT.format(revision=draft["revisions"][-1]["message"]) + (_REVISION_NEW_MACHINE if store.on_new_machine else "")
+def _goal_prompt(setup: core.RunSetup, store: Store, draft: dict) -> str:
+    """What a planner is told of the goal it has to plan again from, with the proposal the draft
+    holds put back as a file for the goal it has now. A draft it declined holds none."""
+    prompt = _GOAL_PROMPT.format(goal=draft["goal"], version=draft["goal_version"]) + (_GOAL_NEW_MACHINE if store.on_new_machine else "")
     if not draft.get("proposal"):
         return prompt
     path = os.path.join(os.path.abspath(setup.statedir), _PROPOSAL_FILE)
     with open(path, "w") as f:
-        f.write(proposal.render(draft["proposal"]))
-    return prompt + _REVISION_PROPOSAL.format(path=path)
+        f.write(proposal.render({**draft["proposal"], "goal_version": draft["goal_version"]}))
+    return prompt + _GOAL_PROPOSAL.format(path=path)
 
 
 async def turn_start(setup: core.RunSetup, watch_env: dict[str, str], prompt: str) -> str:
@@ -81,27 +82,29 @@ async def turn_start(setup: core.RunSetup, watch_env: dict[str, str], prompt: st
 
 
 async def told(setup: core.RunSetup, store: Store, running: Running, events: list[dict]) -> str:
-    """What the agent is told of a batch of updates, "" for nothing. A revision asked of a planner
-    is an event that points at the draft: it is told as the revision itself, and one that the
-    planner has answered since, which a restored cursor replays, is told as nothing. That its own
-    instructions changed is told to no one: the harness applies them at the turn boundary."""
+    """What the agent is told of a batch of updates, "" for nothing. A changed goal told to a
+    planner is an event that points at the draft: it is told as the goal itself, and one that the
+    planner has answered since, which a restored cursor replays, is told as nothing. A coordinator
+    is told it as an event line. That its own instructions changed is told to no one: the harness
+    applies them at the turn boundary."""
     events = running.not_own(events)
-    rest = [e for e in events if e["kind"] != updates.REVISION]
+    plans = config.plans(setup.cfg)
+    rest = [e for e in events if not (plans and e["kind"] == updates.GOAL)]
     parts = [updates.message(rest, setup.cfg.agent_id)] if rest else []
     if len(rest) < len(events):
         draft = await core.revising(setup)
         if draft:
-            parts.insert(0, _revision_prompt(setup, store, draft))
+            parts.insert(0, _goal_prompt(setup, store, draft))
     return "\n\n".join(parts)
 
 
 async def opening(setup: core.RunSetup, store: Store, resume_id: str | None, initial_prompt: str | None) -> str:
-    """What opens a connection: for a resumed session the revision that brought a planner back,
+    """What opens a connection: for a resumed session the changed goal that brought a planner back,
     else a handoff, that it goes on, or for a session that starts fresh what its role reads first:
     a planner's opening reads, a baseline agent's goal with the planner's map of the repository.
     A wait for the model provider's limit and a new machine are said before it."""
     if resume_id and not initial_prompt and (draft := await core.revising(setup)):
-        return _revision_prompt(setup, store, draft)
+        return _goal_prompt(setup, store, draft)
     if initial_prompt:
         body = initial_prompt
     elif resume_id:

@@ -47,7 +47,11 @@ _DRAIN_S = 5
 # sent it (agent.message), which wakes no coordinator: its stream echoes the ones it sent. An agent
 # that built an environment ahead of its job learns its build was loaded on a cluster, where its
 # jobs run before the upload ends, or ended (environment.status) the same way: told to end its
-# turn while it built, nothing else would wake it. A coordinator learns at once of an idea a person
+# turn while it built, nothing else would wake it. The owner changing the goal
+# (platform_experiment.goal) wakes whoever acts on it: a draft's planner, which plans again, or the
+# coordinator, which brings the brief in line; one addressed to a planner is its own and reaches no
+# researcher. A coordinator is woken too by the owner changing fields of the plan
+# (platform_experiment.plan). A coordinator learns at once of an idea a person
 # posted (hypothesis.new of a user, a key or staff): every one is to be assigned or answered. A
 # message of the owner (agent.message=owner) wakes it whether sent to it or to a researcher: either
 # is direction the steering has to take in; its own messages come back as coordinator.
@@ -63,19 +67,19 @@ _DRAIN_S = 5
 WAKES = {
     "coordinator": ("agent.finished", "agent.idle=new", "capacity.idle=new", "experiment.blocked", "job.held", "stage.boundary", "comment.new",
                     "platform_experiment.status", "platform_experiment.description", "platform_experiment.baseline",
-                    "hypothesis.new=user", "hypothesis.new=key", "hypothesis.new=staff", "agent.message=owner",
+                    "platform_experiment.goal", "platform_experiment.plan", "hypothesis.new=user", "hypothesis.new=key", "hypothesis.new=staff", "agent.message=owner",
                     "job.duplicate", "agent.replaced", "agent.instructions@coordinator"),
     "agent": ("experiment.status", "experiment.blocked", "job.held", "job.underperforming", "agent.cut", "agent.idle",
               "agent.message", "stage.boundary", "comment.new", "platform_experiment.status", "platform_experiment.description",
-              "platform_experiment.baseline", "platform_experiment.revision", "environment.status", "agent.instructions"),
+              "platform_experiment.baseline", "platform_experiment.goal", "environment.status", "agent.instructions"),
 }
 # A message to one agent from the coordinator or the owner, told as what it says.
 MESSAGE = "agent.message"
 # What hl prints, in place of the changes, when the platform no longer holds those after its cursor.
 RESET = "watch.reset"
-# A person asked a draft's planner to change its answer. The event is a pointer: what was asked is
-# read from the draft (core.revising), and whoever hands a batch over says it in place of the event.
-REVISION = "platform_experiment.revision"
+# The owner changed the goal. The event is a pointer whose value is the new goal_version: a planner
+# is told the goal itself, read from the draft (core.revising), in place of the event.
+GOAL = "platform_experiment.goal"
 # A build an agent asked for, loaded on a cluster or ended. Its subject is the environment's key,
 # which says nothing to the agent: the detail names the commit and image it asked with.
 ENVIRONMENT = "environment.status"
@@ -397,6 +401,8 @@ def event_line(event: dict, agent_id: str) -> str:
         return f"environment {event.get('value', '')}: {event.get('detail', '')}"
     if event.get("kind") == RESET:
         return f"updates were reset, {event.get('detail', '')}"
+    if event.get("kind") == GOAL:
+        return f"the owner changed the goal (version {event.get('value', '')}): read it with `hl platform-experiments get`"
     parts = [event.get("kind", ""), event.get("subject", ""), event.get("value", ""), event.get("detail", "")]
     if event.get("machine"):
         parts.append(f"on {event['machine']}")

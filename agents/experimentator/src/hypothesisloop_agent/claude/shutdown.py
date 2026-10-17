@@ -39,7 +39,7 @@ _COORDINATOR_SHUTDOWN_PROMPT = (
     "what is stated above. The platform adds its own record of the close after it. Then end your turn."
 )
 # A planner has no job and no hypothesis, and what it owes is its proposal, which it proposes only
-# finished. The session outlives the machine and resumes with a revision; a file does not.
+# finished. The session outlives the machine and resumes with a changed goal; a file does not.
 _PLANNER_SHUTDOWN_PROMPT = (
     "This is your last turn, about a minute long. Start nothing new and propose nothing you have not finished. "
     "End your turn with where your proposal stands and what is left to do on it: a file you wrote on this "

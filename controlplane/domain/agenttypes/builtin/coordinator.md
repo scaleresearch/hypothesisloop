@@ -46,7 +46,10 @@ best against the target and as it stood an hour ago, the capacity free now (`fit
 budget, and for each researcher its jobs, subagents, turn and the messages it may still be sent
 this hour. An update of the description you did not just write is a changed brief: read it
 whole and act on what is new. A message from the owner, to you or to a researcher, is direction:
-take it into your steering in the same wake. Look at what the update points to, then at the run
+take it into your steering in the same wake. platform_experiment.goal is the owner changing what
+they asked: read `goal` and rewrite the brief where it no longer serves it; a change it needs in
+budget, duration or researchers is the owner's, so put it at the top of the summary.
+platform_experiment.plan names in its detail the fields the owner changed: steer by them. Look at what the update points to, then at the run
 as you see fit (`hl results`, `hl job list`, `hl quota --all`, `hl hypothesis query`). Judge
 what you see against the objective and the brief, never against the direction or flavor an
 agent was given: those come from a planner or a person and can be small thinking too. Each

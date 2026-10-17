@@ -160,9 +160,9 @@ async def prepare() -> RunSetup:
 
 
 async def revising(setup: RunSetup) -> dict | None:
-    """The draft of a planner that has a revision to answer, None for anyone else and for a draft
-    with none: the platform reads such a draft as revising, and as proposed or declined once the
-    last revision is answered."""
+    """The draft of a planner that has a changed goal to answer, None for anyone else and for a
+    draft with none: the platform reads such a draft as revising, and as proposed or declined once
+    the planner answered the goal it has."""
     if not config.plans(setup.cfg):
         return None
     draft = await setup.client.get_platform_experiment(setup.cfg.platform_experiment_id)
@@ -320,7 +320,8 @@ async def run_over(setup: RunSetup) -> str | None:
     platform ended the run, or it refuses the token, which it does once the wind-down after the
     end has passed. A platform that does not answer is waited out."""
     try:
-        # A planner's run ends with its answer and a revision starts it again with its session.
+        # A planner's run ends with its answer and a change of the goal starts it again with its
+        # session.
         ended = await run_ended(setup)
     except api_client.APIError as e:
         if e.status == 401:

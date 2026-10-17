@@ -201,7 +201,7 @@ async def run(setup: core.RunSetup, store: Store, running: Running, resume_id: s
 async def _next_told(setup: core.RunSetup, store: Store, running: Running, watch_env: dict[str, str], ended,
                      idle_s: float, handing: asyncio.Lock) -> tuple[list[dict], str, dict[str, str]]:
     """The next batch of updates, what the agent is told of it, "" once ended(), and the env that
-    took it, for updates.delivered. A batch that tells nothing held a revision answered since,
+    took it, for updates.delivered. A batch that tells nothing held a changed goal answered since,
     which is passed and the wait goes on, or said that the agent's own instructions changed,
     which the session applies."""
     while True:
