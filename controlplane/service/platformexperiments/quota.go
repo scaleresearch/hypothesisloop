@@ -302,6 +302,9 @@ var ErrNoQuota = errors.New("no quota")
 // none is refused with why: a planner has none, and an agent of an open platform experiment is
 // granted one when it starts.
 func (s *Service) AgentQuota(ctx context.Context, agentID, id string, reader auth.Principal) (*AgentQuotaView, error) {
+	if !domain.IdentifierShaped(agentID) {
+		return nil, auth.NotFound("agent")
+	}
 	aq, err := s.QuotaView(ctx, agentID, id)
 	if err != nil {
 		return nil, auth.Internal(s.logger, "get agent quota", err, zap.String("id", id))
