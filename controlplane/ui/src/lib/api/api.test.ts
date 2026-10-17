@@ -100,7 +100,7 @@ describe('an answer that is not what was asked for is an error', () => {
   })
 
   it('for a call made with no API address configured', async () => {
-    vi.stubEnv('NEXT_PUBLIC_API_URL', '')
+    vi.stubEnv('UI_API_URL', '')
     await expect(fetchMe()).rejects.toThrow('NEXT_PUBLIC_API_URL is not set')
     expect(fetchMock()).not.toHaveBeenCalled()
     vi.unstubAllEnvs()

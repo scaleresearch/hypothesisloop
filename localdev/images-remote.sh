@@ -7,7 +7,6 @@
 # a clean tree, so the tree must be clean.
 #
 #   --import     also import every image into the k3s containerd of BUILDER, so its jobs pull nothing
-#   NEXT_PUBLIC_*  the UI image's build arguments, from the environment (make publish's)
 #   SSH_OPTIONS  more options for ssh, such as -F <config> for a host reached through a proxy
 #
 # The registry token is minted here (gcloud, as GCP_ACCOUNT of .env), lives an hour, and reaches
@@ -32,12 +31,6 @@ if [[ "${tag}" != "$(git rev-parse --short HEAD)" ]]; then
   exit 1
 fi
 
-ui_args=""
-for arg in NEXT_PUBLIC_API_URL NEXT_PUBLIC_IDENTITY_PROVIDER NEXT_PUBLIC_IDENTITY_SUPABASE_URL NEXT_PUBLIC_IDENTITY_SUPABASE_PUBLISHABLE_KEY NEXT_PUBLIC_SIGN_IN_PROVIDERS; do
-  [[ -n "${!arg:-}" ]] || { echo "images-remote: ${arg} is required to build the UI image (controlplane/ui/.env.example says what it is)" >&2; exit 1; }
-  ui_args+=" $(printf '%q' "${arg}=${!arg}")"
-done
-
 remote_dir="hl-build/$(id -un)"
 read -r -a ssh <<<"ssh -o BatchMode=yes ${SSH_OPTIONS:-}"
 
@@ -50,6 +43,6 @@ COPYFILE_DISABLE=1 tar -cz --no-xattrs -C "${work}" . | "${ssh[@]}" "${builder}"
 
 echo "==> make publish on ${builder}"
 gcloud auth print-access-token --account "${account}" \
-  | "${ssh[@]}" "${builder}" "env${ui_args} bash ${remote_dir}/src/localdev/images-remote-box.sh $(printf '%q' "${HL_REGISTRY}") ${tag} ${import}"
+  | "${ssh[@]}" "${builder}" "bash ${remote_dir}/src/localdev/images-remote-box.sh $(printf '%q' "${HL_REGISTRY}") ${tag} ${import}"
 
 echo "images-remote: published ${HL_REGISTRY}/hypothesisloop-*:${tag} and its charts in $((SECONDS - started))s. To run on it, set IMAGE_TAG='${tag}' in .env"

@@ -26,3 +26,4 @@ ui:
     supabase:
       url: https://project.supabase.example.invalid
       publishableKey: sb_publishable_made-up
+    signInProviders: [github]

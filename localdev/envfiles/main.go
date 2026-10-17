@@ -68,19 +68,19 @@ func valueOf(key config.Key) (string, error) {
 	return from()
 }
 
-// uiKeys is what the UI is built with, from the UI_ and IDENTITY_ keys of .env.
+// uiKeys is what the UI serves with (controlplane/ui/.env.example), from the UI_ and IDENTITY_ keys of .env.
 func uiKeys() [][2]string {
 	apiURL := os.Getenv("UI_API_URL")
 	if apiURL == "" {
 		fail("envfiles: .env does not set UI_API_URL, the API's address as the UI's browser reaches it")
 	}
-	keys := [][2]string{{"NEXT_PUBLIC_API_URL", apiURL}, {"NEXT_PUBLIC_IDENTITY_PROVIDER", os.Getenv("IDENTITY_PROVIDER")}}
+	keys := [][2]string{{"UI_API_URL", apiURL}, {"IDENTITY_PROVIDER", os.Getenv("IDENTITY_PROVIDER")}}
 	if project := os.Getenv("IDENTITY_SUPABASE_PROJECT_REF"); project != "" {
-		keys = append(keys, [2]string{"NEXT_PUBLIC_IDENTITY_SUPABASE_URL", "https://" + project + ".supabase.co"})
+		keys = append(keys, [2]string{"IDENTITY_SUPABASE_URL", "https://" + project + ".supabase.co"})
 	}
 	return append(keys,
-		[2]string{"NEXT_PUBLIC_IDENTITY_SUPABASE_PUBLISHABLE_KEY", os.Getenv("IDENTITY_SUPABASE_PUBLISHABLE_KEY")},
-		[2]string{"NEXT_PUBLIC_SIGN_IN_PROVIDERS", os.Getenv("IDENTITY_SIGN_IN_PROVIDERS")})
+		[2]string{"IDENTITY_SUPABASE_PUBLISHABLE_KEY", os.Getenv("IDENTITY_SUPABASE_PUBLISHABLE_KEY")},
+		[2]string{"IDENTITY_SIGN_IN_PROVIDERS", os.Getenv("IDENTITY_SIGN_IN_PROVIDERS")})
 }
 
 // write replaces path with keys as a shell reads them, KEY='value', each value whole over as many

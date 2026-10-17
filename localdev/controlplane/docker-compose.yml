@@ -5,7 +5,7 @@
 # Host ports published below are load-bearing, not cosmetic: a k3s job pod (runtime/k8s), the
 # cluster-agent/node-agent bundle, `hl` (cli/), the UI dev server, and every test scenario all
 # reach this stack the same way production would reach a real deployment — by one HTTP base URL,
-# configured externally (API_URL / NEXT_PUBLIC_API_URL / HYPOTHESISLOOP_CONTROL_PLANE_URL), never
+# configured externally (API_URL / UI_API_URL / HYPOTHESISLOOP_CONTROL_PLANE_URL), never
 # hardcoded. Change a published port here and every one of those needs the same change. Do not
 # rename a service either: the control plane's services below reach the others by their names
 # (compose's own per-service DNS resolves them), and controlplane/settings/hypothesisloop.yaml's

@@ -142,9 +142,9 @@ render_settings() {
 start_ui() {
   local ui="${repo}/controlplane/ui" next="${repo}/controlplane/ui/node_modules/.bin/next"
   export NEXT_DIST_DIR=".next-graph-1k" NODE_OPTIONS=--no-experimental-strip-types \
-    NEXT_PUBLIC_API_URL="http://localhost:${API_PORT}" NEXT_PUBLIC_IDENTITY_PROVIDER=supabase \
-    NEXT_PUBLIC_IDENTITY_SUPABASE_URL="http://127.0.0.1:${IDP_PORT}" NEXT_PUBLIC_IDENTITY_SUPABASE_PUBLISHABLE_KEY=sb_publishable_graph-1k \
-    NEXT_PUBLIC_SIGN_IN_PROVIDERS=github
+    UI_API_URL="http://localhost:${API_PORT}" IDENTITY_PROVIDER=supabase \
+    IDENTITY_SUPABASE_URL="http://127.0.0.1:${IDP_PORT}" IDENTITY_SUPABASE_PUBLISHABLE_KEY=sb_publishable_graph-1k \
+    IDENTITY_SIGN_IN_PROVIDERS=github
   stop ui
   require_free "${UI_PORT}"
   if [[ "${UI_MODE:-dev}" == "prod" ]]; then

@@ -19,7 +19,6 @@ const config = {
   plugins: [react()],
   resolve: { alias: { '@': `${ui}src` } },
   css: { postcss: ui },
-  define: { 'process.env.NEXT_PUBLIC_API_URL': '"http://api.test"' },
   build: { outDir: '/tmp/hypothesis-graph-bench', emptyOutDir: true },
   server: { port: 0 },
   preview: { port: 0 },

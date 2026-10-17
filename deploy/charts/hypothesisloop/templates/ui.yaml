@@ -37,16 +37,23 @@ spec:
           env:
             - name: PORT
               value: {{ .Values.ui.port | quote }}
-            - name: NEXT_PUBLIC_IDENTITY_PROVIDER
+            - name: UI_API_URL
+              value: {{ required "publicAPIURL is required: the address hosted agents and every cluster's runtime reach the API at" .Values.publicAPIURL | quote }}
+            - name: IDENTITY_PROVIDER
               value: {{ .Values.ui.identity.provider | quote }}
             {{- if eq .Values.ui.identity.provider "supabase" }}
-            - name: NEXT_PUBLIC_IDENTITY_SUPABASE_URL
+            - name: IDENTITY_SUPABASE_URL
               value: {{ required "ui.identity.supabase.url is required with ui.identity.provider supabase: the address of the Supabase project that signs people in" .Values.ui.identity.supabase.url | quote }}
-            - name: NEXT_PUBLIC_IDENTITY_SUPABASE_PUBLISHABLE_KEY
+            - name: IDENTITY_SUPABASE_PUBLISHABLE_KEY
               value: {{ required "ui.identity.supabase.publishableKey is required with ui.identity.provider supabase: the project's publishable key, a public value" .Values.ui.identity.supabase.publishableKey | quote }}
             {{- else }}
             {{- fail (printf "ui.identity.provider is %q, and with ui.enabled it is supabase" .Values.ui.identity.provider) }}
             {{- end }}
+            {{- if not .Values.ui.identity.signInProviders }}
+            {{- fail "ui.identity.signInProviders is required with ui.enabled: the sign-in providers the sign-in page offers, in order" }}
+            {{- end }}
+            - name: IDENTITY_SIGN_IN_PROVIDERS
+              value: {{ join "," .Values.ui.identity.signInProviders | quote }}
           ports:
             - containerPort: {{ .Values.ui.port }}
           resources:

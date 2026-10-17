@@ -29,14 +29,14 @@ describe('the client', () => {
   })
 
   it('refuses to start without its configuration', async () => {
-    vi.stubEnv('NEXT_PUBLIC_IDENTITY_PROVIDER', 'elsewhere')
-    await expect(accessToken()).rejects.toThrow("NEXT_PUBLIC_IDENTITY_PROVIDER is 'elsewhere'")
-    vi.stubEnv('NEXT_PUBLIC_IDENTITY_PROVIDER', 'supabase')
-    vi.stubEnv('NEXT_PUBLIC_IDENTITY_SUPABASE_URL', '')
-    await expect(accessToken()).rejects.toThrow('NEXT_PUBLIC_IDENTITY_SUPABASE_URL is not set')
-    vi.stubEnv('NEXT_PUBLIC_IDENTITY_SUPABASE_URL', 'http://identity.test')
-    vi.stubEnv('NEXT_PUBLIC_IDENTITY_SUPABASE_PUBLISHABLE_KEY', '')
-    await expect(accessToken()).rejects.toThrow('NEXT_PUBLIC_IDENTITY_SUPABASE_PUBLISHABLE_KEY is not set')
+    vi.stubEnv('IDENTITY_PROVIDER', 'elsewhere')
+    await expect(accessToken()).rejects.toThrow("IDENTITY_PROVIDER is 'elsewhere'")
+    vi.stubEnv('IDENTITY_PROVIDER', 'supabase')
+    vi.stubEnv('IDENTITY_SUPABASE_URL', '')
+    await expect(accessToken()).rejects.toThrow('IDENTITY_SUPABASE_URL is not set')
+    vi.stubEnv('IDENTITY_SUPABASE_URL', 'http://identity.test')
+    vi.stubEnv('IDENTITY_SUPABASE_PUBLISHABLE_KEY', '')
+    await expect(accessToken()).rejects.toThrow('IDENTITY_SUPABASE_PUBLISHABLE_KEY is not set')
     vi.unstubAllEnvs()
   })
 })
@@ -53,16 +53,16 @@ describe('signing in', () => {
 
   it('offers the providers the configuration lists, in its order', () => {
     expect(signInProviders()).toEqual(['github', 'google', 'apple'])
-    vi.stubEnv('NEXT_PUBLIC_SIGN_IN_PROVIDERS', ' Apple, github ,apple,')
+    vi.stubEnv('IDENTITY_SIGN_IN_PROVIDERS', ' Apple, github ,apple,')
     expect(signInProviders()).toEqual(['apple', 'github'])
     vi.unstubAllEnvs()
   })
 
   it('refuses a configuration that lists no provider, or one it does not know', () => {
-    vi.stubEnv('NEXT_PUBLIC_SIGN_IN_PROVIDERS', '')
-    expect(() => signInProviders()).toThrow('NEXT_PUBLIC_SIGN_IN_PROVIDERS is not set')
-    vi.stubEnv('NEXT_PUBLIC_SIGN_IN_PROVIDERS', 'github,gitlab')
-    expect(() => signInProviders()).toThrow('NEXT_PUBLIC_SIGN_IN_PROVIDERS names gitlab, and the providers are github, google, apple')
+    vi.stubEnv('IDENTITY_SIGN_IN_PROVIDERS', '')
+    expect(() => signInProviders()).toThrow('IDENTITY_SIGN_IN_PROVIDERS is not set')
+    vi.stubEnv('IDENTITY_SIGN_IN_PROVIDERS', 'github,gitlab')
+    expect(() => signInProviders()).toThrow('IDENTITY_SIGN_IN_PROVIDERS names gitlab, and the providers are github, google, apple')
     vi.unstubAllEnvs()
   })
 

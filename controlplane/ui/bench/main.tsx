@@ -8,6 +8,8 @@ import type { GraphFilters, Position } from '@/lib/hypothesis-graph'
 import type { HypothesisGraph } from '@/types/api'
 import { fixtureGraph } from './fixture'
 
+window.__hypothesisloopConfig = { UI_API_URL: 'http://api.test' }
+
 // The hypotheses page's layout without its tidy step: laid out whole once, extended on each poll.
 function useStableLayout(graph: HypothesisGraph) {
   const last = useRef<{ positions: Map<string, Position> } | null>(null)

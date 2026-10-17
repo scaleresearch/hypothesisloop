@@ -1,4 +1,4 @@
-.PHONY: cluster-agent-up cluster-agent-down check-ui-build-args locked-publish product-images \
+.PHONY: cluster-agent-up cluster-agent-down locked-publish product-images \
 	helm-prepare helm-lint
 
 # ---- Cluster agent: one per target Kubernetes cluster running jobs ----------
@@ -66,20 +66,12 @@ IMAGE_ARGS_bare-agent = --build-arg VERSION=$(TAG)
 IMAGE_DOCKERFILE_job-base := runtime/job/build/Dockerfile.job-base
 IMAGE_DOCKERFILE_job := runtime/job/build/Dockerfile.job
 IMAGE_ARGS_job = --build-arg BASE=$(REGISTRY)/hypothesisloop-job-base:$(TAG)
-# Next.js compiles into the browser bundle the API address as a browser reaches it, the service
-# that signs people in and the sign-in providers it offers (controlplane/build/Dockerfile.ui), so
-# each is required and has no default. All are public values.
-UI_BUILD_ARGS := NEXT_PUBLIC_API_URL NEXT_PUBLIC_IDENTITY_PROVIDER NEXT_PUBLIC_IDENTITY_SUPABASE_URL NEXT_PUBLIC_IDENTITY_SUPABASE_PUBLISHABLE_KEY NEXT_PUBLIC_SIGN_IN_PROVIDERS
 IMAGE_DOCKERFILE_ui := controlplane/build/Dockerfile.ui
 IMAGE_CONTEXT_ui := controlplane/ui
-IMAGE_ARGS_ui = $(foreach arg,$(UI_BUILD_ARGS),--build-arg $(arg)="$($(arg))")
 
 .PHONY: $(addprefix image-,$(PRODUCT_IMAGES))
 $(addprefix image-,$(PRODUCT_IMAGES)): image-%: check-tag
 	$(call push_image,$*)
-
-check-ui-build-args:
-	@$(foreach arg,$(UI_BUILD_ARGS),test -n "$($(arg))" || { echo "make: $(arg) is required to build the UI image (controlplane/ui/.env.example says what it is)" >&2; exit 1; };)
 
 # The Go images build with -mod=vendor from a vendor/ that is not tracked, so it is made here
 # and removed when the builds end: left behind, it goes stale with the next change to go.mod and
@@ -91,9 +83,9 @@ GO_VENDOR ?= go mod vendor
 # installs unless told another, so the chart names the images it was published with. Charts go
 # to $(REGISTRY)/charts as OCI artifacts. The charts are linted first, so a chart that does not
 # render fails the publish before any image is built.
-# Usage: make publish REGISTRY=... TAG=... NEXT_PUBLIC_API_URL=... NEXT_PUBLIC_IDENTITY_PROVIDER=supabase NEXT_PUBLIC_IDENTITY_SUPABASE_URL=... NEXT_PUBLIC_IDENTITY_SUPABASE_PUBLISHABLE_KEY=... NEXT_PUBLIC_SIGN_IN_PROVIDERS=...
+# Usage: make publish REGISTRY=... TAG=...
 CHARTS := deploy/charts/hypothesisloop deploy/charts/hypothesisloop-cluster-agent
-locked-publish: check-tag check-ui-build-args helm-lint
+locked-publish: check-tag helm-lint
 	$(GO_VENDOR)
 	$(MAKE) -j1 --no-print-directory $(addprefix image-,$(PRODUCT_IMAGES)) || { rm -rf vendor; exit 1; }
 	rm -rf vendor

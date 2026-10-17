@@ -200,7 +200,7 @@ git-repository:
 # make publish run on BUILDER (an ssh host with docker buildx, linux/amd64), pushing to the
 # registry of .env, so no image is uploaded from this machine (localdev/images-remote.sh). Publishes
 # HEAD and prints the IMAGE_TAG to set. IMPORT=true also loads every image into BUILDER's k3s.
-# Usage: make images-remote BUILDER=<ssh host> [IMPORT=true] [SSH_OPTIONS=...] NEXT_PUBLIC_...=... (as make publish)
-images-remote: check-ui-build-args
-	@test -n "$(BUILDER)" || { echo "usage: make images-remote BUILDER=<ssh host> [IMPORT=true] [SSH_OPTIONS=...] NEXT_PUBLIC_...=..." >&2; exit 1; }
-	@SSH_OPTIONS="$(SSH_OPTIONS)" $(foreach arg,$(UI_BUILD_ARGS),$(arg)="$($(arg))") bash localdev/images-remote.sh "$(BUILDER)" $(if $(filter true,$(IMPORT)),--import)
+# Usage: make images-remote BUILDER=<ssh host> [IMPORT=true] [SSH_OPTIONS=...]
+images-remote:
+	@test -n "$(BUILDER)" || { echo "usage: make images-remote BUILDER=<ssh host> [IMPORT=true] [SSH_OPTIONS=...]" >&2; exit 1; }
+	@SSH_OPTIONS="$(SSH_OPTIONS)" bash localdev/images-remote.sh "$(BUILDER)" $(if $(filter true,$(IMPORT)),--import)

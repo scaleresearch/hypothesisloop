@@ -203,20 +203,20 @@ metricsService:
     type: ClusterIP
     nodePort: 30084
 
-# Image hypothesisloop-ui. Next.js compiles NEXT_PUBLIC_* values into the image when it is built
-# (controlplane/build/Dockerfile.ui): the API address and the sign-in service. The Deployment sets
-# the sign-in service's values as environment too, and they must be the ones the image was built
-# with.
+# Image hypothesisloop-ui. It reads its values from the environment the Deployment sets when it
+# starts (controlplane/ui/.env.example): the API at publicAPIURL and the sign-in service below.
 ui:
   enabled: true
-  # Required with enabled: the service that signs people in, and that provider's section. All are
-  # public values.
+  # Required with enabled: the service that signs people in, that provider's section, and the
+  # sign-in providers the sign-in page offers, in order, of github, google and apple, each switched
+  # on in that service. All are public values.
   #   supabase  a Supabase project: url, https://<project>.supabase.co, and its publishableKey.
   identity:
     provider: ""
     supabase:
       url: ""
       publishableKey: ""
+    signInProviders: []
   replicas: 1
   port: 3000
   resources:

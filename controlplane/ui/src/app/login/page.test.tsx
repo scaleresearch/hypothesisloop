@@ -19,16 +19,16 @@ beforeEach(() => {
 
 describe('the sign-in page', () => {
   it('offers only what the configuration lists', () => {
-    vi.stubEnv('NEXT_PUBLIC_SIGN_IN_PROVIDERS', 'github')
+    vi.stubEnv('IDENTITY_SIGN_IN_PROVIDERS', 'github')
     render(<LoginPage />)
     expect(screen.getAllByRole('button').map(b => b.textContent)).toEqual(['Continue with GitHub'])
     vi.unstubAllEnvs()
   })
 
   it('says what is missing, and offers nothing, when no provider is configured', () => {
-    vi.stubEnv('NEXT_PUBLIC_SIGN_IN_PROVIDERS', '')
+    vi.stubEnv('IDENTITY_SIGN_IN_PROVIDERS', '')
     render(<LoginPage />)
-    expect(screen.getByRole('alert').textContent).toContain('Sign-in is not configured. NEXT_PUBLIC_SIGN_IN_PROVIDERS is not set')
+    expect(screen.getByRole('alert').textContent).toContain('Sign-in is not configured. IDENTITY_SIGN_IN_PROVIDERS is not set')
     expect(screen.queryByRole('button')).toBeNull()
     vi.unstubAllEnvs()
   })

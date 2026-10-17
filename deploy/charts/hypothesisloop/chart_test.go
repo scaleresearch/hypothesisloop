@@ -231,6 +231,8 @@ func TestValuesTheChartCannotUseAreRefusedWithTheirName(t *testing.T) {
 		"no sign-in service":          {InCluster, `ui.identity.provider=""`, "with ui.enabled it is supabase"},
 		"no Supabase address":         {InCluster, `ui.identity.supabase.url=""`, "ui.identity.supabase.url is required"},
 		"no publishable key":          {InCluster, `ui.identity.supabase.publishableKey=""`, "ui.identity.supabase.publishableKey is required"},
+		"no sign-in providers":        {InCluster, `ui.identity.signInProviders=[]`, "ui.identity.signInProviders is required"},
+		"a sign-in provider unknown":  {InCluster, `ui.identity.signInProviders=["gitlab"]`, "/ui/identity/signInProviders/0"},
 		"an App with no slug":         {External, `gitHost.github.appSlug=""`, "gitHost.github.appSlug is required"},
 		"an App with no id":           {External, `gitHost.github.appId=0`, "gitHost.github.appId is required"},
 		"no git host":                 {External, `gitHost.provider=""`, "gitHost/provider"},

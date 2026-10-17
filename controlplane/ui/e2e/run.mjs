@@ -344,11 +344,11 @@ async function play(closers) {
     env: {
       ...process.env,
       NEXT_DIST_DIR: UI_BUILD,
-      NEXT_PUBLIC_API_URL: API,
-      NEXT_PUBLIC_IDENTITY_PROVIDER: 'supabase',
-      NEXT_PUBLIC_IDENTITY_SUPABASE_URL: IDP,
-      NEXT_PUBLIC_IDENTITY_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_browser-run',
-      NEXT_PUBLIC_SIGN_IN_PROVIDERS: 'github,google,apple',
+      UI_API_URL: API,
+      IDENTITY_PROVIDER: 'supabase',
+      IDENTITY_SUPABASE_URL: IDP,
+      IDENTITY_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_browser-run',
+      IDENTITY_SIGN_IN_PROVIDERS: 'github,google,apple',
     },
     stdio: ['ignore', 'ignore', 'inherit'],
   })
