@@ -5,7 +5,7 @@ import type { ErrorModel } from '@/types/api'
 // One API, one base URL: quota, scheduler and registry operations are all served together.
 export function apiURL(): string {
   const url = publicConfig.apiURL()
-  if (!url) throw new Error('NEXT_PUBLIC_API_URL is not set, as .env.example shows')
+  if (!url) throw new Error('UI_API_URL is not set, as .env.example shows')
   return url
 }
 
