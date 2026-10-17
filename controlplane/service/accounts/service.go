@@ -125,7 +125,7 @@ func (h *Service) limit(ctx context.Context, bound int) (int, error) {
 
 // Me is the caller and what it reaches.
 type Me struct {
-	Kind auth.Kind `json:"kind" doc:"user, key or staff"`
+	Kind auth.Kind `json:"kind" enum:"user,key,staff"`
 	// UserID and Name are set for a signed-in person, KeyID and ProjectID for an API key.
 	UserID    string            `json:"user_id,omitempty"`
 	Name      string            `json:"name,omitempty"`
