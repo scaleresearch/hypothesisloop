@@ -40,42 +40,34 @@ func (s *Service) CancelExperiment(ctx context.Context, id string) error {
 			return &AdmissionError{Reason: "not_found", Message: "experiment not found"}
 		}
 
-		switch exp.Status {
-		case domain.StatusQueued, domain.StatusSubmitted:
-			outcome, err := s.store.ResolveTermination(ctx, id, exp.Status, domain.StatusRejected, string(domain.EvictionCancelled))
-			if err != nil {
-				return fmt.Errorf("cancel: update status: %w", err)
-			}
-			if outcome != domain.TerminationWritten {
-				// Lost the CAS: either a concurrent cancel already terminalized it, or admission
-				// moved it forward (e.g. QUEUED->SUBMITTED) between our read and this write.
-				// Re-read and retry rather than assuming the former — otherwise a cancel racing
-				// admission can report success while the job goes on to run to completion.
-				continue
-			}
-			exp.Status = domain.StatusRejected
-			s.settle(ctx, "cancel", exp)
-			return nil
-
-		case domain.StatusRunning:
-			outcome, err := s.store.ResolveTermination(ctx, id, exp.Status, domain.StatusEvicted, string(domain.EvictionCancelled))
-			if err != nil {
-				return fmt.Errorf("cancel: update status: %w", err)
-			}
-			if outcome != domain.TerminationWritten {
-				continue
-			}
-			exp.Status = domain.StatusEvicted
-			s.loop.Trigger()
-			s.settle(ctx, "cancel", exp)
-			return nil
-
-		default:
+		if !cancels(exp.Status) {
 			return &AdmissionError{
 				Reason:  ReasonInvalidTransition,
 				Message: fmt.Sprintf("job %s is %s: only a QUEUED, SUBMITTED or RUNNING job is cancelled", id, domain.AnsweredStatus(exp.Status, exp.EvictionReason)),
 			}
 		}
+		ran := exp.Status == domain.StatusRunning
+		ended := domain.StatusRejected
+		if ran {
+			ended = domain.StatusEvicted
+		}
+		outcome, err := s.store.ResolveTermination(ctx, id, exp.Status, ended, string(domain.EvictionCancelled))
+		if err != nil {
+			return fmt.Errorf("cancel: update status: %w", err)
+		}
+		if outcome != domain.TerminationWritten {
+			// Lost the CAS: either a concurrent cancel already terminalized it, or admission
+			// moved it forward (e.g. QUEUED->SUBMITTED) between our read and this write.
+			// Re-read and retry rather than assuming the former — otherwise a cancel racing
+			// admission can report success while the job goes on to run to completion.
+			continue
+		}
+		exp.Status = ended
+		if ran {
+			s.loop.Trigger()
+		}
+		s.settle(ctx, "cancel", exp)
+		return nil
 	}
 	return fmt.Errorf("cancel: experiment %s status kept changing underneath the cancel; give up after %d attempts", id, cancelMaxAttempts)
 }

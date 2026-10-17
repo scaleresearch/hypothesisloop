@@ -659,6 +659,9 @@ func (a hypothesesAPI) get(ctx context.Context, in *struct {
 	if err != nil {
 		return nil, auth.Internal(a.logger, "get hypothesis", err, zap.String("id", in.ID))
 	}
+	if err := permitJobs(ctx, a.access, a.logger, jobs); err != nil {
+		return nil, err
+	}
 	findings, findingCount, err := a.registry.ListHypothesisFindings(ctx, in.ID, in.Limit, in.Offset)
 	if err != nil {
 		return nil, auth.Internal(a.logger, "get hypothesis", err, zap.String("id", in.ID))

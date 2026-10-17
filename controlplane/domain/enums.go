@@ -24,6 +24,9 @@ func enumSchema[T ~string](r huma.Registry, values []T) *huma.Schema {
 func (ExperimentStatus) Schema(r huma.Registry) *huma.Schema {
 	return enumSchema(r, ExperimentStatuses)
 }
+func (ExperimentAction) Schema(r huma.Registry) *huma.Schema {
+	return enumSchema(r, ExperimentActions)
+}
 func (PlatformExperimentStatus) Schema(r huma.Registry) *huma.Schema {
 	return enumSchema(r, PlatformExperimentStatuses)
 }

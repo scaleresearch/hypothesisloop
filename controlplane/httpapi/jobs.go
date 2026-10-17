@@ -204,7 +204,31 @@ func (a jobsAPI) submit(ctx context.Context, in *struct{ Body submitRequest }) (
 	if err := a.jobs.NameJobs(ctx, exp); err != nil {
 		return nil, auth.Internal(a.logger, "submit experiment", err)
 	}
+	if err := permitJobs(ctx, a.access, a.logger, []*domain.Experiment{exp}); err != nil {
+		return nil, err
+	}
 	return &struct{ Body *domain.Experiment }{Body: exp}, nil
+}
+
+// permitJobs sets on each job what the caller may do to it, by whether it writes the job's
+// platform experiment.
+func permitJobs(ctx context.Context, access *auth.Access, logger *zap.Logger, jobs []*domain.Experiment) error {
+	reader, err := caller(ctx, logger)
+	if err != nil {
+		return err
+	}
+	writes := map[string]bool{}
+	for _, job := range jobs {
+		w, read := writes[job.PlatformExperimentID]
+		if !read {
+			if w, err = access.Writes(ctx, job.PlatformExperimentID); err != nil {
+				return auth.Internal(logger, "read what the caller writes", err, zap.String("platform_experiment_id", job.PlatformExperimentID))
+			}
+			writes[job.PlatformExperimentID] = w
+		}
+		job.Actions = scheduler.JobActions(job, reader, w)
+	}
+	return nil
 }
 
 func (a jobsAPI) list(ctx context.Context, in *struct {
@@ -263,6 +287,9 @@ func (a jobsAPI) list(ctx context.Context, in *struct {
 	}
 	exps, total, err := a.jobs.List(ctx, filter)
 	if err != nil {
+		return nil, err
+	}
+	if err := permitJobs(ctx, a.access, a.logger, exps); err != nil {
 		return nil, err
 	}
 	return &struct {
@@ -327,6 +354,9 @@ func (a jobsAPI) get(ctx context.Context, in *struct {
 	if exp == nil {
 		return nil, huma.Error404NotFound("experiment not found")
 	}
+	if err := permitJobs(ctx, a.access, a.logger, []*domain.Experiment{exp}); err != nil {
+		return nil, err
+	}
 	return &struct{ Body *domain.Experiment }{Body: exp}, nil
 }
 
@@ -348,6 +378,9 @@ func (a jobsAPI) cancel(ctx context.Context, in *struct {
 	}
 	if exp == nil {
 		return nil, huma.Error404NotFound("experiment not found")
+	}
+	if err := permitJobs(ctx, a.access, a.logger, []*domain.Experiment{exp}); err != nil {
+		return nil, err
 	}
 	return &struct{ Body *domain.Experiment }{Body: exp}, nil
 }

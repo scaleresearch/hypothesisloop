@@ -30,6 +30,13 @@ const (
 // ExperimentStatuses is every status a job is answered with.
 var ExperimentStatuses = []ExperimentStatus{StatusSubmitted, StatusQueued, StatusRunning, StatusCompleted, StatusFailed, StatusEvicted, StatusRejected, StatusCancelled}
 
+// ExperimentAction is something the reader of a job may do to it now.
+type ExperimentAction string
+
+const ExperimentActionCancel ExperimentAction = "cancel"
+
+var ExperimentActions = []ExperimentAction{ExperimentActionCancel}
+
 // AnsweredStatus is the status the API answers for a job stored with this status and eviction
 // reason, on a job, in a count, as a filter and in a watch event. It is the one place a cancel
 // is told apart.

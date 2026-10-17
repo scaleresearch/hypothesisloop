@@ -82,8 +82,11 @@ type Experiment struct {
 	RunBest                *RunBest         `json:"run_best,omitempty" doc:"In a submit's answer only: the run's best job on its first ranking metric, where it ran another commit than this job. Whether this job's commit contains it is git's to say: hl job submit asks the submitter's checkout and warns when it does not."`
 	PriorityScore          float64          `json:"priority_score"`
 	Status                 ExperimentStatus `json:"status"`
-	QueuedAt               *time.Time       `json:"queued_at,omitempty"`
-	SubmittedAt            *time.Time       `json:"submitted_at,omitempty"`
+	// Actions is what the reader may do to the job now, set on an answer to a person or a key
+	// (scheduler.JobActions).
+	Actions     []ExperimentAction `json:"actions" doc:"What the reader may do to the job now, each a write the API accepts from them: cancel (POST /experiments/{id}/cancel of one queued, submitted or running). Empty for a reader who writes nothing of its platform experiment."`
+	QueuedAt    *time.Time         `json:"queued_at,omitempty"`
+	SubmittedAt *time.Time         `json:"submitted_at,omitempty"`
 	// EvictionReason says why the job's last attempt ended, as "code" or "code: detail": an
 	// EvictionReason for a job the platform evicted, rejected or requeued, PhaseDetail.FailureCause
 	// for one that FAILED. Empty on a job that is placed or completed.

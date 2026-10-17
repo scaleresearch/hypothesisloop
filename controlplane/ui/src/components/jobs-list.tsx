@@ -40,7 +40,8 @@ import { keys } from '@/lib/keys'
 import { POLL } from '@/lib/poll'
 import type { Experiment } from '@/types/api'
 
-const CANCELABLE = new Set(['SUBMITTED', 'QUEUED', 'RUNNING'])
+// The statuses of a job that has not ended, which burst compute may still preempt.
+const LIVE = new Set(['SUBMITTED', 'QUEUED', 'RUNNING'])
 const PAGE_SIZE = 25
 
 type SortKey = 'created_at' | 'status'
@@ -71,12 +72,11 @@ function JobsListContent({ peFilter }: { peFilter: string }) {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [agentFilter, setAgentFilter] = useState('')
-  // The jobs of a shared platform experiment of another org are asked for by it alone and
-  // cannot be cancelled. Which it is is known once the experiment has been read.
+  // The jobs of a platform experiment of another project are asked for by it alone, which is
+  // known once the experiment has been read.
   const access = useExperimentAccess(peFilter || undefined)
   const scope = listProject(project, access)
   const scopeKey = scope.project_id ?? 'shared'
-  const readOnly = peFilter !== '' && !access.pe?.actions.length
   const statusFilter = searchParams.get('status') ?? ''
   const [confirming, setConfirming] = useState<string | null>(null)
   const [page, setPage] = useState(0)
@@ -126,6 +126,7 @@ function JobsListContent({ peFilter }: { peFilter: string }) {
   }
 
   const visible = data?.items ?? []
+  const cancels = visible.some(job => job.actions.includes('cancel'))
   const total = data?.total ?? 0
   const variedByHypothesis = variedEnvByHypothesis(visible)
 
@@ -219,7 +220,7 @@ function JobsListContent({ peFilter }: { peFilter: string }) {
                 <th className="w-24 text-right" title="The last value the job reported on the ranking metric, which it is ranked by">Last metric</th>
                 <th className="hidden w-32 text-right xl:table-cell">Est. cost</th>
                 <SortableTh className="hidden w-28 xl:table-cell" sorted={sortKey === 'created_at' && sortDir} onSort={() => toggleSort('created_at')}>Submitted</SortableTh>
-                {!readOnly && <th className="w-[5.5rem]"><span className="sr-only">Actions</span></th>}
+                {cancels && <th className="w-[5.5rem]"><span className="sr-only">Actions</span></th>}
               </tr>
             </thead>
             <tbody>
@@ -239,7 +240,7 @@ function JobsListContent({ peFilter }: { peFilter: string }) {
                   showExperiment={!peFilter}
                   varied={variedEnvSettings(job, variedByHypothesis)}
                   connected={job.cluster_name ? connectedByCluster.get(job.cluster_name) : undefined}
-                  onCancel={readOnly ? undefined : () => setConfirming(job.id)}
+                  onCancel={cancels ? () => setConfirming(job.id) : undefined}
                 />
               ))}
             </tbody>
@@ -279,7 +280,7 @@ function JobRow({ job, showExperiment, varied, connected, onCancel }: JobRowProp
   const about = [
     status === 'QUEUED' && job.not_admitted_reason && notAdmittedLabel(job.not_admitted_reason, job.not_admitted_message),
     job.eviction_reason && [evictionCodeLabel(evictionCode(job.eviction_reason)), evictionDetailLines(job.eviction_reason)[0]].filter(Boolean).join(': '),
-    job.capacity_tier === 'burst' && CANCELABLE.has(status) && 'Burst compute, can be preempted',
+    job.capacity_tier === 'burst' && LIVE.has(status) && 'Burst compute, can be preempted',
     job.cluster_name && `On ${job.cluster_name}${connected === undefined ? '' : connected ? ', connected' : ', disconnected'}`,
   ].filter(Boolean).join('\n')
   const tested = [measuresBaseline(job) ? BASELINE_JOB : job.hypothesis, job.branch && `branch ${job.branch}`, varied].filter(Boolean).join('\n')
@@ -313,7 +314,7 @@ function JobRow({ job, showExperiment, varied, connected, onCancel }: JobRowProp
       <td className={clsx(quiet, 'hidden xl:table-cell')} title={new Date(job.created_at).toLocaleString()}>{relTime(job.created_at)}</td>
       {onCancel && (
         <td className="text-right">
-          {CANCELABLE.has(status) && <Button variant="danger" size="sm" onClick={onCancel}>Cancel</Button>}
+          {job.actions.includes('cancel') && <Button variant="danger" size="sm" onClick={onCancel}>Cancel</Button>}
         </td>
       )}
     </LinkTr>

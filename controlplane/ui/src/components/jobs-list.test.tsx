@@ -31,7 +31,7 @@ function job(id: string, cluster: string): Experiment {
     id, agent_id: 'ag-1', agent_name: 'Researcher 1', actor: { kind: 'agent', id: 'ag-1', name: 'ag-1' }, platform_experiment_id: 'pe-1', project_id: 'prj_1', hypothesis_id: 'h1',
     status: 'RUNNING', capacity_tier: 'guaranteed', cluster_name: cluster, created_at: at, updated_at: at,
     accelerator_type: 'nvidia.com/gpu.product=NVIDIA-L40', accelerator_count: 1, hypothesis: 'a claim', env: {}, priority_score: 0,
-    code_ref: 'https://github.com/acme/widgets@0123456789abcdef', branch: 'hl/pe-1/warmup-ag-1',
+    code_ref: 'https://github.com/acme/widgets@0123456789abcdef', branch: 'hl/pe-1/warmup-ag-1', actions: ['cancel'],
   } as unknown as Experiment
 }
 

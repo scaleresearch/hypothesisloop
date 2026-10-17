@@ -43,6 +43,8 @@ function show(search: string, pe: Partial<PlatformExperiment>, experimentID?: st
   // As the API answers it: its own org acts on it, and a reader from another does nothing.
   const actions: PlatformExperimentAction[] = pe.project_id !== 'prj_1' ? [] : pe.status === 'closed' ? ['remove'] : ['remove', 'close', 'add_agent', 'add_idea']
   vi.mocked(fetchPlatformExperiment).mockResolvedValue({ id: 'pe-x', name: 'Vision benchmark', editable: [], actions, ...pe } as PlatformExperiment)
+  // A job of another org's experiment is the reader's to cancel no more than the experiment is.
+  vi.mocked(fetchExperimentsPage).mockResolvedValue({ items: [{ ...running, actions: pe.project_id === 'prj_platform' ? [] : ['cancel'] }], total: 1 })
   const resolved = resolveTenant(me, '')
   if (resolved.state !== 'selected') throw new Error('no tenant')
   return render(
@@ -60,7 +62,6 @@ function asked() {
 }
 
 beforeEach(() => {
-  vi.mocked(fetchExperimentsPage).mockResolvedValue({ items: [running], total: 1 })
   vi.mocked(fetchExperimentStats).mockResolvedValue({ total: 1, by_status: { RUNNING: 1 } } as never)
   vi.mocked(fetchOrgClusters).mockResolvedValue([])
   vi.mocked(fetchAgentsPage).mockResolvedValue({ items: [], total: 0 })

@@ -2796,6 +2796,8 @@ export interface components {
             /** Format: int64 */
             accelerator_count: number;
             accelerator_type: string;
+            /** @description What the reader may do to the job now, each a write the API accepts from them: cancel (POST /experiments/{id}/cancel of one queued, submitted or running). Empty for a reader who writes nothing of its platform experiment. */
+            actions: components["schemas"]["ExperimentAction"][];
             actor: components["schemas"]["Actor"];
             agent_id: string;
             agent_name?: string;
@@ -2866,6 +2868,8 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        /** @enum {string} */
+        ExperimentAction: "cancel";
         ExperimentDraft: {
             /** Format: date-time */
             created_at: string;
@@ -4663,6 +4667,7 @@ export type EnvironmentRequest = components['schemas']['EnvironmentRequest'];
 export type ErrorModel = components['schemas']['ErrorModel'];
 export type EventKindDoc = components['schemas']['EventKindDoc'];
 export type Experiment = components['schemas']['Experiment'];
+export type ExperimentAction = components['schemas']['ExperimentAction'];
 export type ExperimentDraft = components['schemas']['ExperimentDraft'];
 export type ExperimentDraftRequest = components['schemas']['ExperimentDraftRequest'];
 export type ExperimentFile = components['schemas']['ExperimentFile'];
@@ -8856,6 +8861,7 @@ export const agentTypeActionValues: ReadonlyArray<FlattenedDeepRequired<componen
 export const agentTypeSettingsEffortValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["AgentTypeSettings"]["effort"]> = ["low", "medium", "high", "xhigh", "max"];
 export const capacityTierValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CapacityTier"]> = ["guaranteed", "burst"];
 export const closeReasonValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CloseReason"]> = ["end_time_reached", "closed_by_request", "planning_limit_reached", "proposal_expired", "baseline_limit_reached", "agents_not_started", "planner_stopped", "repository_not_created"];
+export const experimentActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ExperimentAction"]> = ["cancel"];
 export const experimentStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ExperimentStatus"]> = ["SUBMITTED", "QUEUED", "RUNNING", "COMPLETED", "FAILED", "EVICTED", "REJECTED", "CANCELLED"];
 export const hypothesisStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["HypothesisStatus"]> = ["open", "confirmed", "refuted", "inconclusive"];
 export const joinedAgentEnded_reasonValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["JoinedAgent"]["ended_reason"]> = ["finished", "cut", "replaced", "stopped"];
