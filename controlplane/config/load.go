@@ -13,6 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/api/resource"
 
+	"github.com/scaleresearch/hypothesisloop/contract/acceleratorname"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -87,6 +88,9 @@ func (c *Settings) build() error {
 	for _, g := range c.AcceleratorTypes {
 		if domain.CPUType.Is(domain.AcceleratorType(g.Name)) {
 			return fmt.Errorf("accelerator_types lists %s, which is built in at %g and priced nowhere else", domain.CPUType, cpuCoreAccHRate)
+		}
+		if err := acceleratorname.Validate(g.Name); err != nil {
+			return fmt.Errorf("accelerator_types: %w", err)
 		}
 	}
 	c.AcceleratorTypes = append([]AcceleratorTypeConfig{{Name: string(domain.CPUType), AccHRate: cpuCoreAccHRate}}, c.AcceleratorTypes...)

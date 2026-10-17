@@ -6,6 +6,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/api/resource"
+
+	"github.com/scaleresearch/hypothesisloop/contract/acceleratorname"
 )
 
 // SandboxConfig is the provider account sandboxed agents and coordinators run on. Left out, the
@@ -188,6 +190,15 @@ func (c *Settings) buildRented() error {
 			var err error
 			if shape.CPUMillis, shape.MemoryBytes, shape.StorageBytes, err = quantities(shape.CPU, shape.Memory, shape.Storage); err != nil {
 				return fmt.Errorf("cloud_compute %s shape %q: %w", cc.ClusterName, shape.Name, err)
+			}
+			if shape.AcceleratorType == "" {
+				continue
+			}
+			if err := acceleratorname.Validate(shape.AcceleratorType); err != nil {
+				return fmt.Errorf("cloud_compute %s shape %q: %w", cc.ClusterName, shape.Name, err)
+			}
+			if _, priced := c.RateByName[shape.AcceleratorType]; !priced {
+				return fmt.Errorf("cloud_compute %s shape %q: accelerator_type %q is not priced in accelerator_types, so no job could be admitted to it", cc.ClusterName, shape.Name, shape.AcceleratorType)
 			}
 		}
 	}

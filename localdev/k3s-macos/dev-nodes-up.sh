@@ -28,7 +28,7 @@ K3S_VERSION="$(kubectl --context "${CONTEXT_NAME}" version -o json | python3 -c 
 IMAGE="docker.io/rancher/k3s:${K3S_VERSION}"
 # H100 x2: distributed-jobs.sh needs two distinct hosts of the same accelerator type (anti-affinity).
 # H200 dropped to keep 4 node slots total. Kept in sync with k3s-tenstorrent's dev-nodes-up.sh.
-ACCELERATOR_TYPES=(H100:NVIDIA-H100-80GB-HBM3 H100:NVIDIA-H100-80GB-HBM3 L40:NVIDIA-L40 A100:NVIDIA-A100-80GB-PCIe)
+ACCELERATOR_TYPES=(H100:NVIDIA-H100-80GB-HBM3 H100:NVIDIA-H100-80GB-HBM3 L40:NVIDIA-L40 A100:NVIDIA-A100-80GB-PCIE)
 
 if [[ "$(uname)" == "Darwin" ]]; then
   # host.containers.internal resolves to the Mac under rootful podman machine, not the VM the
