@@ -72,7 +72,13 @@ start() {
   local name="$1"
   shift
   stop "${name}"
-  nohup bash -c '. "$0" && "$@"' "${repo}/localdev/lib/env.sh" "$@" >"${run}/${name}.log" 2>&1 &
+  local log="${run}/${name}.log"
+  # Restarts append; a log past 50 MB moves to .log.1, replacing the previous one.
+  if [[ -f "${log}" ]] && (( $(wc -c <"${log}") > 50 * 1024 * 1024 )); then
+    mv -f "${log}" "${log}.1"
+  fi
+  echo "=== dev: ${name} starting $(date -u +%Y-%m-%dT%H:%M:%SZ) ===" >>"${log}"
+  nohup bash -c '. "$0" && "$@"' "${repo}/localdev/lib/env.sh" "$@" >>"${log}" 2>&1 &
   echo $! >"${run}/${name}.pid"
 }
 
