@@ -41,7 +41,7 @@ if [[ -f "${LIB_AUTH_REPO}/.env" ]]; then
 fi
 
 # The git host local platform experiments keep their code on, as GIT_HOST_PROVIDER in .env names
-# it (.env.example): github, the GitHub App of the GIT_HOST_GITHUB_APP_* keys, or plain, the git
+# it (.env.example): github, the GitHub App of the GIT_HOST_GITHUB_* keys, or plain, the git
 # server `make dev` runs on this machine (localdev/local-git). That one serves the bare
 # repositories under HL_GIT_ROOT to its one credential, whose password is made on this machine by
 # the first use and never leaves it, and holds a copy of the experiment template,
@@ -68,7 +68,7 @@ lib_git_host_provider() {
 }
 case "${HL_GIT_HOST_PROVIDER}" in
   github)
-    for lib_auth_key in GIT_HOST_GITHUB_APP_ID GIT_HOST_GITHUB_APP_SLUG GIT_HOST_GITHUB_APP_PRIVATE_KEY; do
+    for lib_auth_key in GIT_HOST_GITHUB_APP_ID GIT_HOST_GITHUB_APP_SLUG GIT_HOST_GITHUB_APP_PRIVATE_KEY GIT_HOST_GITHUB_CLIENT_ID GIT_HOST_GITHUB_CLIENT_SECRET; do
       if [[ -z "$(lib_env_value "${lib_auth_key}")" ]]; then
         echo "auth: .env sets GIT_HOST_PROVIDER=github and not ${lib_auth_key} (.env.example says what it is)" >&2
         return 1 2>/dev/null || exit 1
@@ -77,6 +77,7 @@ case "${HL_GIT_HOST_PROVIDER}" in
     unset lib_auth_key
     HL_GIT_HOST_GITHUB_APP_ID="$(lib_env_value GIT_HOST_GITHUB_APP_ID)"
     HL_GIT_HOST_GITHUB_APP_SLUG="$(lib_env_value GIT_HOST_GITHUB_APP_SLUG)"
+    HL_GIT_HOST_GITHUB_CLIENT_ID="$(lib_env_value GIT_HOST_GITHUB_CLIENT_ID)"
     ;;
   plain)
     if [[ ! -s "${HL_GIT_PASSWORD_FILE}" ]]; then
@@ -202,8 +203,8 @@ lib_render_settings() {
   case "$(lib_git_host_provider)" in
     github)
       # The values are JSON strings, which YAML reads as they are.
-      printf '\ngit_host:\n  provider: github\n  experiment_template_repository: %s\n  github:\n    app_id: %d\n    app_slug: "%s"\n' \
-        "${HL_EXPERIMENT_TEMPLATE_REPOSITORY}" "${HL_GIT_HOST_GITHUB_APP_ID}" "${HL_GIT_HOST_GITHUB_APP_SLUG}" >> "${output}"
+      printf '\ngit_host:\n  provider: github\n  experiment_template_repository: %s\n  github:\n    app_id: %d\n    app_slug: "%s"\n    client_id: "%s"\n' \
+        "${HL_EXPERIMENT_TEMPLATE_REPOSITORY}" "${HL_GIT_HOST_GITHUB_APP_ID}" "${HL_GIT_HOST_GITHUB_APP_SLUG}" "${HL_GIT_HOST_GITHUB_CLIENT_ID}" >> "${output}"
       ;;
     plain)
       printf '\ngit_host:\n  provider: plain\n  experiment_template_repository: %s\n  plain:\n    base_url: http://%s:%s\n    allow_http: true\n    username: %s\n' \

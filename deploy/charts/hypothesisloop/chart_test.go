@@ -194,12 +194,15 @@ func TestTheGitHostOfTheValuesReachesTheConfig(t *testing.T) {
 			t.Errorf("%s: in-cluster git host is %s, want the values' plain host", deployment, plain.GitHost.Provider)
 		}
 		cfg := loadRendered(t, release, External, deployment)
-		if got := cfg.GitHost; got.Provider != config.GitHostProviderGitHub || got.Plain != nil || got.GitHub == nil || *got.GitHub != (config.GitHubConfig{AppID: 4242, AppSlug: "made-up-app"}) {
+		if got := cfg.GitHost; got.Provider != config.GitHostProviderGitHub || got.Plain != nil || got.GitHub == nil || *got.GitHub != (config.GitHubConfig{AppID: 4242, AppSlug: "made-up-app", ClientID: "Iv23made-up"}) {
 			t.Errorf("%s: the git host is %q, or its App is not the values'", deployment, got.Provider)
 		}
 	}
 	if got := release.Env(t, "hypothesisloop-control-service", secretNames[External])[config.GitHostGitHubAppPrivateKey.Name]; got != Secret["GIT_HOST_GITHUB_APP_PRIVATE_KEY"] {
 		t.Errorf("control-service's App key = %q, want the Secret's", got)
+	}
+	if got := release.Env(t, "hypothesisloop-control-service", secretNames[External])[config.GitHostGitHubClientSecret.Name]; got != Secret["GIT_HOST_GITHUB_CLIENT_SECRET"] {
+		t.Errorf("control-service's App client secret = %q, want the Secret's", got)
 	}
 	if got := inCluster.Env(t, "hypothesisloop-control-service", secretNames[InCluster])[config.GitHostPlainPassword.Name]; got != Secret["GIT_HOST_PLAIN_PASSWORD"] {
 		t.Errorf("control-service's git password = %q, want the Secret's", got)
@@ -230,6 +233,7 @@ func TestValuesTheChartCannotUseAreRefusedWithTheirName(t *testing.T) {
 		"a sign-in provider unknown":  {InCluster, `ui.identity.signInProviders=["gitlab"]`, "/ui/identity/signInProviders/0"},
 		"an App with no slug":         {External, `gitHost.github.appSlug=""`, "gitHost.github.appSlug is required"},
 		"an App with no id":           {External, `gitHost.github.appId=0`, "gitHost.github.appId is required"},
+		"an App with no client id":    {External, `gitHost.github.clientId=""`, "gitHost.github.clientId is required"},
 		"no git host":                 {External, `gitHost.provider=""`, "gitHost/provider"},
 		"a git host nobody wrote":     {External, `gitHost.provider="gitlab"`, "gitHost/provider"},
 		"plain with no root":          {InCluster, `gitHost.plain.baseURL=""`, "gitHost.plain.baseURL is required"},

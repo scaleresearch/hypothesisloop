@@ -13,7 +13,7 @@ var madeUp = map[Key]string{
 	DatabaseURL: "postgres://test.example.invalid/hypothesisloop", MetricsDBURL: "http://metrics.example.invalid:4000",
 	GraphDBURL: "bolt://graph.example.invalid:7687", AuthSigningSecret: "a-signing-secret-only-this-test-knows",
 	ModelAnthropicOAuthToken: "a-model-credential", ObjectStoreMinIOSecretAccessKey: "a-store-secret",
-	GitHostGitHubAppPrivateKey: "a-pem", GitHostPlainPassword: "a-git-password", AccountKey(SectionSandbox, "fly"): "FlyV1 a-token",
+	GitHostGitHubAppPrivateKey: "a-pem", GitHostGitHubClientSecret: "a-client-secret", GitHostPlainPassword: "a-git-password", AccountKey(SectionSandbox, "fly"): "FlyV1 a-token",
 	SandboxE2BAPIKey: "an-e2b-key", AccountKey(SectionCloudCompute, "a"): "a-vast-key",
 }
 
@@ -31,7 +31,7 @@ func inEnvironment(t *testing.T, text string) {
 }
 
 const (
-	githubHost   = "\ngit_host:\n  provider: github\n  experiment_template_repository: scaleresearch/hypothesisloop-experiment-template\n  github:\n    app_id: 4242\n    app_slug: hypothesisloop\n"
+	githubHost   = "\ngit_host:\n  provider: github\n  experiment_template_repository: scaleresearch/hypothesisloop-experiment-template\n  github:\n    app_id: 4242\n    app_slug: hypothesisloop\n    client_id: Iv23made-up\n"
 	plainAccount = "\ngit_host:\n  provider: plain\n  experiment_template_repository: experiment-template.git\n  plain:\n    base_url: https://git.example.invalid\n    username: platform\n"
 	rents        = "\nsandbox:\n  provider: fly\n  name: main\n  reconcile_interval_seconds: 5\n  create_pause_milliseconds: 0\n  warm_pool_size: 0\n  fly: {}\n" +
 		"  instance:\n    command: [run]\n    cpu: \"1\"\n    memory: 1Gi\n    storage: 1Gi\n" +
@@ -66,7 +66,7 @@ func TestEachProgramNeedsItsOwnKeysAndAProvidersKeyOnlyWithThatProvider(t *testi
 		}},
 		"the GitHub App and rented machines": {withoutGitHost(t) + githubHost + rents, map[Program][]Key{
 			ProgramControlService: {DatabaseURL, MetricsDBURL, GraphDBURL, AuthSigningSecret, ModelAnthropicOAuthToken, ObjectStoreMinIOSecretAccessKey,
-				GitHostGitHubAppPrivateKey, AccountKey(SectionSandbox, "fly"), AccountKey(SectionCloudCompute, "a")},
+				GitHostGitHubAppPrivateKey, GitHostGitHubClientSecret, AccountKey(SectionSandbox, "fly"), AccountKey(SectionCloudCompute, "a")},
 			ProgramMetricsService: {DatabaseURL, MetricsDBURL, AuthSigningSecret},
 			ProgramAdmin:          {DatabaseURL, AuthSigningSecret, GitHostGitHubAppPrivateKey},
 		}},
@@ -123,7 +123,7 @@ func TestALoaderReadsItsOwnKeysAndIgnoresTheOthers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.SigningSecret != madeUp[AuthSigningSecret] || c.GitHubKey != madeUp[GitHostGitHubAppPrivateKey] || c.SandboxSecret != madeUp[AccountKey(SectionSandbox, "fly")] ||
+	if c.SigningSecret != madeUp[AuthSigningSecret] || c.GitHubKey != madeUp[GitHostGitHubAppPrivateKey] || c.GitHubClientSecret != madeUp[GitHostGitHubClientSecret] || c.SandboxSecret != madeUp[AccountKey(SectionSandbox, "fly")] ||
 		c.ModelToken != madeUp[ModelAnthropicOAuthToken] || c.ObjectStoreSecret != madeUp[ObjectStoreMinIOSecretAccessKey] || c.GraphDBURL != madeUp[GraphDBURL] ||
 		c.CloudComputeSecrets["a"] != madeUp[AccountKey(SectionCloudCompute, "a")] {
 		t.Errorf("control-service = %+v, want the environment's keys", c)
@@ -147,6 +147,7 @@ func TestAProvidersKeyIsItsSectionItsNameAndItsField(t *testing.T) {
 		ProviderKey(SectionGitHost, "plain", "PASSWORD", ""): "GIT_HOST_PLAIN_PASSWORD",
 		ObjectStoreMinIOSecretAccessKey:                      "OBJECT_STORE_MINIO_SECRET_ACCESS_KEY",
 		GitHostGitHubAppPrivateKey:                           "GIT_HOST_GITHUB_APP_PRIVATE_KEY",
+		GitHostGitHubClientSecret:                            "GIT_HOST_GITHUB_CLIENT_SECRET",
 		SandboxE2BAPIKey:                                     "SANDBOX_E2B_API_KEY",
 	} {
 		if key.Name != want {

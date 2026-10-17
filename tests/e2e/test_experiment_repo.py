@@ -70,7 +70,7 @@ def _call(api: API, method: str, path: str, body: dict | None = None) -> request
 
 
 START = {"return_to": "/settings"}
-FINISH = {"state": "a-state-never-issued", "installation_id": 1}
+FINISH = {"state": "a-state-never-issued", "code": "a-code-github-never-issued", "installation_id": 1}
 
 
 def _installations(org: Org) -> list[dict]:
@@ -118,10 +118,11 @@ def test_connect_is_refused_without_proof_from_github(orgs):
         assert started.status_code == 201, started.text
         state = started.json()["state"]
         assert started.json()["install_url"].endswith("?state=" + state), started.text
-        # GitHub never made installation 1 for this App: the state is spent on it all the same.
-        first = _call(a.api, "POST", "/github/installations", {"state": state, "installation_id": 1})
+        # GitHub never issued this code nor made installation 1 for this App: the state is spent on
+        # it all the same.
+        first = _call(a.api, "POST", "/github/installations", {**FINISH, "state": state})
         assert first.status_code in (422, 502), first.text
-        again = _call(a.api, "POST", "/github/installations", {"state": state, "installation_id": 1})
+        again = _call(a.api, "POST", "/github/installations", {**FINISH, "state": state})
         assert again.status_code == 422 and again.json()["reason"] == "install_state_invalid", again.text
         for bad in ({**START, "return_to": "//elsewhere.example"}, {**START, "return_to": ""}):
             assert _call(a.api, "POST", f"/orgs/{a.org_id}/github-install-states", bad).status_code == 422, bad

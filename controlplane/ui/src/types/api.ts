@@ -307,7 +307,7 @@ export interface paths {
         put?: never;
         /**
          * Connect the GitHub App installation an install made or changed
-         * @description For the user or API key that started the install, while still an owner of its org. state and installation_id are what GitHub handed back to the setup URL. The state is taken once whatever the outcome. The installation is asked of GitHub as the App: it must exist, not be suspended, have granted every permission the App asks for, and have been made or changed after the state was issued. An installation the org connected before is answered as it is; a new one is connected, and is the org's default for new repositories when it is the org's first. account_type says whether the account is a person's own (User) or an organisation. 422 install_state_invalid (made up, used, expired or another person's), installation_not_new (last changed before the install started), installation_gone, installation_suspended, git_host_permission_missing naming each permission missing as name:level. 502 git_host_failed, 503 github_not_configured.
+         * @description For the user or API key that started the install, while still an owner of its org. state, code and installation_id are what GitHub handed back to the callback URL. The state is taken once whatever the outcome. code is exchanged with GitHub for the token of the GitHub user who finished the install, and the installation must be one GitHub lists for that user; the token is used for nothing else and kept nowhere. The installation is then asked of GitHub as the App: it must exist, not be suspended and have granted every permission the App asks for. An installation the org connected before is answered as it is; a new one is connected, and is the org's default for new repositories when it is the org's first. account_type says whether the account is a person's own (User) or an organisation. 422 install_state_invalid (made up, used, expired or another person's), github_authorization_invalid (code used or expired), installation_not_authorized (not one the GitHub user may reach), installation_gone, installation_suspended, git_host_permission_missing naming each permission missing as name:level. 502 git_host_failed, 503 github_not_configured.
          */
         post: operations["create-github-installation"];
         delete?: never;
@@ -920,7 +920,7 @@ export interface paths {
         put?: never;
         /**
          * Start installing the platform's GitHub App for an org
-         * @description For an owner of the org, as a user or an API key. Answers a state good once, for the caller, for 15 minutes, and install_url, GitHub's install page of the App carrying it. The person installs the App there on their own GitHub account or an organisation, or changes the repositories of an installation they made before. GitHub then sends them to the App's setup URL with state, installation_id and setup_action, and POST /github/installations connects the installation. return_to is the page of the UI the install starts from, handed back when it finishes. 422 invalid_request when it is not a path of the UI. 503 github_not_configured.
+         * @description For an owner of the org, as a user or an API key. Answers a state good once, for the caller, for 15 minutes, and install_url, GitHub's install page of the App carrying it. The person installs the App there on their own GitHub account or an organisation, or changes the repositories of an installation they made before. GitHub has them authorize the App and sends them to the App's callback URL with state, code, installation_id and setup_action, and POST /github/installations connects the installation. return_to is the page of the UI the install starts from, handed back when it finishes. 422 invalid_request when it is not a path of the UI. 503 github_not_configured.
          */
         post: operations["create-github-install-state"];
         delete?: never;
@@ -2993,6 +2993,8 @@ export interface components {
             reason: string;
         };
         FinishInstallRequest: {
+            /** @description The code GitHub handed back for the GitHub user who authorized the App during the install. */
+            code: string;
             /**
              * Format: int64
              * @description The installation GitHub handed back.
@@ -3201,7 +3203,7 @@ export interface components {
             expires_at: string;
             /** @description GitHub's install page of the App, carrying state. Open it for the person. */
             install_url: string;
-            /** @description Good once, for the caller, until expires_at. GitHub hands it back to the App's setup URL with installation_id. */
+            /** @description Good once, for the caller, until expires_at. GitHub hands it back to the App's callback URL with installation_id and code. */
             state: string;
         };
         InstallationCheck: {

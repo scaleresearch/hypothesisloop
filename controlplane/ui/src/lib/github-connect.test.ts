@@ -76,15 +76,15 @@ describe('opening the install', () => {
 describe('the tab GitHub returns to', () => {
   it('connects in one pass with the state and the installation, and tells the tab the install started in', async () => {
     const other = overheard()
-    await expect(lib.takeReturn('installation_id=7&setup_action=install&state=s-1', finish)).resolves.toEqual({ view: 'connected', account: 'acme', returnTo: RETURN })
-    expect(finish).toHaveBeenCalledExactlyOnceWith('s-1', 7)
+    await expect(lib.takeReturn('installation_id=7&setup_action=install&state=s-1&code=c-1', finish)).resolves.toEqual({ view: 'connected', account: 'acme', returnTo: RETURN })
+    expect(finish).toHaveBeenCalledExactlyOnceWith('s-1', 'c-1', 7)
     await waitFor(() => expect(other.heard).toEqual([{ state: 's-1', outcome: { ok: true, installation } }]))
     other.close()
   })
 
   it('connects once when the page asks twice, as React does in development', async () => {
-    const first = lib.takeReturn('installation_id=7&setup_action=install&state=s-1', finish)
-    const second = lib.takeReturn('installation_id=7&setup_action=install&state=s-1', finish)
+    const first = lib.takeReturn('installation_id=7&setup_action=install&state=s-1&code=c-1', finish)
+    const second = lib.takeReturn('installation_id=7&setup_action=install&state=s-1&code=c-1', finish)
     expect(await second).toEqual(await first)
     expect(finish).toHaveBeenCalledTimes(1)
   })
@@ -145,12 +145,12 @@ describe('the tab the install started in', () => {
   })
 
   it('shows the precise refusal the other tab was given', async () => {
-    finish.mockRejectedValue(new ApiError(422, 'GitHub says the App on acme was last changed before this install started.', 'installation_not_new'))
+    finish.mockRejectedValue(new ApiError(422, 'GitHub does not list this installation among those the GitHub account that finished the install may reach.', 'installation_not_authorized'))
     const { result } = hook()
     act(() => result.current.start())
     await waitFor(() => expect(result.current.install.phase).toBe('waiting'))
     await lib.takeReturn('installation_id=7&state=s-9', finish)
-    await waitFor(() => expect(result.current.install).toEqual({ phase: 'failed', message: 'GitHub says the App on acme was last changed before this install started.', reason: 'installation_not_new' }))
+    await waitFor(() => expect(result.current.install).toEqual({ phase: 'failed', message: 'GitHub does not list this installation among those the GitHub account that finished the install may reach.', reason: 'installation_not_authorized' }))
   })
 
   it('stops waiting when the person cancels, and ignores a late outcome', async () => {

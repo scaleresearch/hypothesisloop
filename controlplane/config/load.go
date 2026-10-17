@@ -322,8 +322,8 @@ func (c *Settings) build() error {
 		if g.GitHub == nil || g.Plain != nil {
 			return fmt.Errorf("git_host provider github takes the git_host github section and no other")
 		}
-		if a := g.GitHub; a.AppID <= 0 || a.AppSlug == "" {
-			return fmt.Errorf("git_host github app_id and app_slug are both required")
+		if a := g.GitHub; a.AppID <= 0 || a.AppSlug == "" || a.ClientID == "" {
+			return fmt.Errorf("git_host github app_id, app_slug and client_id are all required")
 		}
 	case GitHostProviderPlain:
 		if g.Plain == nil || g.GitHub != nil {

@@ -47,6 +47,7 @@ var (
 	ModelAnthropicOAuthToken        = Key{"MODEL_ANTHROPIC_OAUTH_TOKEN", "the Claude subscription token every model call of a sandboxed agent is made with"}
 	ObjectStoreMinIOSecretAccessKey = ProviderKey(SectionObjectStore, ObjectStoreProviderMinIO, "SECRET_ACCESS_KEY", "the secret key of object_store.minio.access_key_id")
 	GitHostGitHubAppPrivateKey      = ProviderKey(SectionGitHost, GitHostProviderGitHub, "APP_PRIVATE_KEY", "the PEM GitHub issued for the App of git_host.github")
+	GitHostGitHubClientSecret       = ProviderKey(SectionGitHost, GitHostProviderGitHub, "CLIENT_SECRET", "the client secret of git_host.github.client_id")
 	GitHostPlainPassword            = ProviderKey(SectionGitHost, GitHostProviderPlain, "PASSWORD", "the password of git_host.plain.username")
 	SandboxE2BAPIKey                = AccountKey(SectionSandbox, "e2b")
 )
@@ -118,7 +119,7 @@ func (s *Settings) Needs(p Program) []Key {
 func (s *Settings) gitHostKeys() []Key {
 	switch {
 	case s.GitHost.Provider == GitHostProviderGitHub:
-		return []Key{GitHostGitHubAppPrivateKey}
+		return []Key{GitHostGitHubAppPrivateKey, GitHostGitHubClientSecret}
 	case s.GitHost.Provider == GitHostProviderPlain && s.GitHost.Plain.Username != "":
 		return []Key{GitHostPlainPassword}
 	}

@@ -143,12 +143,10 @@ type GitHubAddresses struct {
 }
 
 // GitHubInstallation is one installation of the App, on the GitHub account AccountLogin.
-// ChangedAt is when GitHub last made it or changed its repositories or permissions.
 type GitHubInstallation struct {
 	ID           int64
 	AccountLogin string
 	AccountType  string
-	ChangedAt    time.Time
 }
 
 // GitHubRepository is a repository an installation covers, named owner/name.

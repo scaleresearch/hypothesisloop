@@ -121,12 +121,13 @@ type minted struct {
 
 // fakeApp is the GitHub App as the service sees it. Installation 100 is on the organisation Acme
 // and covers Acme/Model and acme/other; installation 200 is on the organisation rival and covers
-// rival/secret; installation 300 is on carol's own account and covers carol/notes. Each was last
-// changed when changed says, or with none said at the moment GitHub is asked.
+// rival/secret; installation 300 is on carol's own account and covers carol/notes. reaches is
+// the installations the GitHub user who authorized the App with a code may reach, by the code.
 type fakeApp struct {
-	now     func() time.Time
-	changed map[int64]time.Time
 	covers  map[int64][]github.Repository
+	reaches map[string][]int64
+	// secrets holds the client secret each code was exchanged with.
+	secrets []string
 	listed  []int64
 	// looked holds each installation GitHub was asked about by its id, and installationErr fails
 	// every such question.
@@ -171,8 +172,7 @@ func (a *fakeApp) HasBranch(context.Context, *github.Token, string) (bool, error
 
 func newFakeApp() *fakeApp {
 	return &fakeApp{
-		now:     time.Now,
-		changed: map[int64]time.Time{},
+		reaches: map[string][]int64{"code-owner": {100, 200, 300}, "code-carol": {300}},
 		covers: map[int64][]github.Repository{
 			100: {{FullName: "acme/other"}, {FullName: "Acme/Model", Private: true}},
 			200: {{FullName: "rival/secret", Private: true}},
@@ -197,14 +197,19 @@ func (a *fakeApp) Installation(_ context.Context, installationID int64) (*github
 			if missing := a.notGranted[installationID]; len(missing) > 0 {
 				return nil, &github.PermissionMissingError{Installation: installationID, Missing: missing}
 			}
-			one.ChangedAt = a.now()
-			if changed, ok := a.changed[installationID]; ok {
-				one.ChangedAt = changed
-			}
 			return &one, nil
 		}
 	}
 	return nil, github.ErrInstallationGone
+}
+
+func (a *fakeApp) UserInstallations(_ context.Context, clientSecret, code string) ([]int64, error) {
+	a.secrets = append(a.secrets, clientSecret)
+	reaches, ok := a.reaches[code]
+	if !ok {
+		return nil, github.ErrAuthorizationInvalid
+	}
+	return reaches, nil
 }
 
 func (a *fakeApp) Repositories(_ context.Context, installationID int64) ([]github.Repository, error) {
@@ -263,10 +268,9 @@ func newGitHubWorld(t *testing.T, withApp bool) *githubWorld {
 	t.Helper()
 	w := &githubWorld{world: newAccountsWorld(t), app: newFakeApp()}
 	w.installations = &memInstallations{memStore: w.store, connected: map[string][]*domain.OrgGitHubInstallation{}, states: map[string]memState{}}
-	w.app.now = w.store.now
 	access := auth.NewAccess(placement{memStore: w.store})
 	w.host = github.NewHost(w.installations, w.app, experimentTemplate, zap.NewNop())
-	var app accounts.GitHubApp = github.NewConnections(w.app, zap.NewNop())
+	var app accounts.GitHubApp = github.NewConnections(w.app, testClientSecret, zap.NewNop())
 	if !withApp {
 		app = nil
 	}
@@ -297,8 +301,12 @@ func (w *githubWorld) begin(caller, orgID string) string {
 	return started.State
 }
 
+const testClientSecret = "a-client-secret"
+
+// finishBody is GitHub's return from an install finished by a GitHub user who may reach every
+// installation of the fake.
 func finishBody(state string, installation int64) map[string]any {
-	return map[string]any{"state": state, "installation_id": installation}
+	return map[string]any{"state": state, "code": "code-owner", "installation_id": installation}
 }
 
 // refusalOf is the reason and message of a refusal, which must be all its envelope holds
@@ -387,8 +395,8 @@ func TestAnInstallConnectsTheInstallationGitHubHandsBack(t *testing.T) {
 	if finished.OrgID != w.orgA || finished.ReturnTo != "/projects/p-1/experiments?new=1" || finished.Installation == nil || *finished.Installation != want || want.ConnectedAt.IsZero() {
 		t.Fatalf("finished = %+v %+v, want the org, the page left and %+v", finished, finished.Installation, want)
 	}
-	if !slices.Equal(w.app.looked, []int64{rival.ID}) {
-		t.Fatalf("GitHub was asked about %v, want the installation handed back", w.app.looked)
+	if !slices.Equal(w.app.looked, []int64{rival.ID}) || !slices.Equal(w.app.secrets, []string{testClientSecret}) {
+		t.Fatalf("GitHub was asked about %v with the secrets %v, want the installation handed back after the code was exchanged with the App's secret", w.app.looked, w.app.secrets)
 	}
 
 	// A second account, as an API key: connected, not the default.
@@ -398,8 +406,7 @@ func TestAnInstallConnectsTheInstallationGitHubHandsBack(t *testing.T) {
 	}
 
 	// Repositories added on GitHub to an installation the org connected come back the same way,
-	// however long ago GitHub last changed it, and leave it as it is.
-	w.app.changed[acme.ID] = w.store.now().Add(-24 * time.Hour)
+	// and leave it as it is.
 	w.store.clock = w.store.clock.Add(time.Hour)
 	w.ok("owner", "POST", "/github/installations", finishBody(w.begin("owner", w.orgA), acme.ID), http.StatusCreated, &finished)
 	if finished.Installation.ConnectedActor.Kind != domain.ActorKey || len(w.installations.connected[w.orgA]) != 2 {
@@ -410,8 +417,9 @@ func TestAnInstallConnectsTheInstallationGitHubHandsBack(t *testing.T) {
 	}
 }
 
-// What would let someone other than the person who pressed the button, or an installation they
-// did not just make, be connected is refused, and nothing is connected.
+// What would let someone other than the person who pressed the button, or an installation the
+// GitHub user who finished the install may not reach, be connected is refused, and nothing is
+// connected. A refusal before GitHub vouches for the user names no account of the installation.
 func TestAnInstallIsRefusedUnlessItsStateAndItsInstallationProveIt(t *testing.T) {
 	for name, tc := range map[string]struct {
 		arrange func(w *githubWorld) map[string]any
@@ -432,11 +440,26 @@ func TestAnInstallIsRefusedUnlessItsStateAndItsInstallationProveIt(t *testing.T)
 			return finishBody(state, acme.ID)
 		}, "owner", 422, accounts.ReasonInstallStateInvalid, ""},
 		"another person's state": {func(w *githubWorld) map[string]any { return finishBody(w.begin("owner", w.orgA), acme.ID) }, "org-key", 422, accounts.ReasonInstallStateInvalid, ""},
-		"an installation last changed before the state was issued": {func(w *githubWorld) map[string]any {
-			w.app.changed[acme.ID] = w.store.now().Add(-2 * time.Minute)
+		"an installation the GitHub user may not reach": {func(w *githubWorld) map[string]any {
+			body := finishBody(w.begin("owner", w.orgA), acme.ID)
+			body["code"] = "code-carol"
+			return body
+		}, "owner", 422, accounts.ReasonInstallationNotAuthorized, "Sign in on GitHub"},
+		"a code GitHub does not take": {func(w *githubWorld) map[string]any {
+			body := finishBody(w.begin("owner", w.orgA), acme.ID)
+			body["code"] = "code-forged"
+			return body
+		}, "owner", 422, github.ReasonAuthorizationInvalid, "Install GitHub App again"},
+		"no code": {func(w *githubWorld) map[string]any {
+			body := finishBody(w.begin("owner", w.orgA), acme.ID)
+			delete(body, "code")
+			return body
+		}, "owner", 422, accounts.ReasonInvalidRequest, ""},
+		"an installation that does not exist": {func(w *githubWorld) map[string]any { return finishBody(w.begin("owner", w.orgA), 999) }, "owner", 422, accounts.ReasonInstallationNotAuthorized, ""},
+		"an installation removed since": {func(w *githubWorld) map[string]any {
+			w.app.installationErr = github.ErrInstallationGone
 			return finishBody(w.begin("owner", w.orgA), acme.ID)
-		}, "owner", 422, accounts.ReasonInstallationNotNew, "Acme"},
-		"an installation that does not exist": {func(w *githubWorld) map[string]any { return finishBody(w.begin("owner", w.orgA), 999) }, "owner", 422, github.ReasonInstallationGone, "install"},
+		}, "owner", 422, github.ReasonInstallationGone, "install"},
 		"a suspended installation": {func(w *githubWorld) map[string]any {
 			w.app.installationErr = github.ErrInstallationSuspended
 			return finishBody(w.begin("owner", w.orgA), acme.ID)
@@ -461,8 +484,11 @@ func TestAnInstallIsRefusedUnlessItsStateAndItsInstallationProveIt(t *testing.T)
 			if rec.Code != tc.status || reason != tc.reason || !strings.Contains(message, tc.says) {
 				t.Fatalf("got = %d %s, want = %d %s saying %q", rec.Code, rec.Body, tc.status, tc.reason, tc.says)
 			}
-			if len(w.installations.connected[w.orgA]) != before || strings.Contains(rec.Body.String(), leak) {
-				t.Fatalf("a refused install connected something or repeated GitHub's text: %s", rec.Body)
+			if len(w.installations.connected[w.orgA]) != before || strings.Contains(rec.Body.String(), leak) || strings.Contains(strings.ToLower(rec.Body.String()), "acme") {
+				t.Fatalf("a refused install connected something, repeated GitHub's text or named the installation's account: %s", rec.Body)
+			}
+			if tc.reason == accounts.ReasonInstallationNotAuthorized && len(w.app.looked) != 0 {
+				t.Fatalf("GitHub was asked about %v for a GitHub user who may not reach it", w.app.looked)
 			}
 		})
 	}

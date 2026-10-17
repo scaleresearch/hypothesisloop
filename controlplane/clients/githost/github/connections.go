@@ -15,16 +15,22 @@ type ConnectionsClient interface {
 	App() App
 	Installation(ctx context.Context, installationID int64) (*Installation, error)
 	Repositories(ctx context.Context, installationID int64) ([]Repository, error)
+	UserInstallations(ctx context.Context, clientSecret, code string) ([]int64, error)
 }
 
-// Connections is the App as the orgs connecting its installations ask of it.
+// Connections is the App as the orgs connecting its installations ask of it. clientSecret is the
+// App's OAuth client secret.
 type Connections struct {
-	app    ConnectionsClient
-	logger *zap.Logger
+	app          ConnectionsClient
+	clientSecret string
+	logger       *zap.Logger
 }
 
-func NewConnections(app ConnectionsClient, logger *zap.Logger) *Connections {
-	return &Connections{app: app, logger: logger}
+func NewConnections(app ConnectionsClient, clientSecret string, logger *zap.Logger) *Connections {
+	if app == nil || clientSecret == "" || logger == nil {
+		panic("github.NewConnections: the App's client, its client secret and a logger are required")
+	}
+	return &Connections{app: app, clientSecret: clientSecret, logger: logger}
 }
 
 func (c *Connections) Addresses() domain.GitHubAddresses {
@@ -42,7 +48,11 @@ func (c *Connections) Installation(ctx context.Context, installationID int64) (*
 	if err != nil {
 		return nil, err
 	}
-	return &domain.GitHubInstallation{ID: live.ID, AccountLogin: live.AccountLogin, AccountType: live.AccountType, ChangedAt: live.ChangedAt}, nil
+	return &domain.GitHubInstallation{ID: live.ID, AccountLogin: live.AccountLogin, AccountType: live.AccountType}, nil
+}
+
+func (c *Connections) UserInstallations(ctx context.Context, code string) ([]int64, error) {
+	return c.app.UserInstallations(ctx, c.clientSecret, code)
 }
 
 func (c *Connections) Repositories(ctx context.Context, installationID int64) ([]domain.GitHubRepository, error) {

@@ -45,8 +45,10 @@ registry's providers each declare, and API_KEY, the account key, of the sandbox 
 {{- define "hypothesisloop.controlServiceEnv" -}}
 {{- $keys := list "DATABASE_URL" "AUTH_SIGNING_SECRET" "MODEL_ANTHROPIC_OAUTH_TOKEN" (include "hypothesisloop.objectStoreSecretKey" .) -}}
 {{- $gitHost := .Values.gitHost -}}
-{{- if or (eq $gitHost.provider "github") (and (eq $gitHost.provider "plain") $gitHost.plain.username) -}}
-{{- $keys = append $keys (printf "GIT_HOST_%s_%s" (upper $gitHost.provider) (get (dict "github" "APP_PRIVATE_KEY" "plain" "PASSWORD") $gitHost.provider)) -}}
+{{- if eq $gitHost.provider "github" -}}
+{{- $keys = concat $keys (list "GIT_HOST_GITHUB_APP_PRIVATE_KEY" "GIT_HOST_GITHUB_CLIENT_SECRET") -}}
+{{- else if and (eq $gitHost.provider "plain") $gitHost.plain.username -}}
+{{- $keys = append $keys "GIT_HOST_PLAIN_PASSWORD" -}}
 {{- end -}}
 {{- with .Values.sandbox -}}
 {{- $keys = append $keys (printf "SANDBOX_%s_API_KEY" (upper .provider)) -}}

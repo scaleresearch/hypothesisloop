@@ -36,10 +36,11 @@ The git host gitHost.provider names, with its section.
 {{- if not $gitHost.github.appId }}
 {{- fail "gitHost.github.appId is required with gitHost.provider github: the App's number" }}
 {{- end }}
-{{- $raw = printf "%s\ngit_host:\n  provider: github\n  experiment_template_repository: %s\n  github:\n    app_id: %s\n    app_slug: %s\n" (trimSuffix "\n" $raw)
+{{- $raw = printf "%s\ngit_host:\n  provider: github\n  experiment_template_repository: %s\n  github:\n    app_id: %s\n    app_slug: %s\n    client_id: %s\n" (trimSuffix "\n" $raw)
   (toJson (required "gitHost.experimentTemplateRepository is required: the repository every repository the platform creates starts from" $gitHost.experimentTemplateRepository))
   (toJson (int64 $gitHost.github.appId))
-  (toJson (required "gitHost.github.appSlug is required with gitHost.provider github: the name in the App's URL" $gitHost.github.appSlug)) }}
+  (toJson (required "gitHost.github.appSlug is required with gitHost.provider github: the name in the App's URL" $gitHost.github.appSlug))
+  (toJson (required "gitHost.github.clientId is required with gitHost.provider github: the App's client ID" $gitHost.github.clientId)) }}
 {{- else if eq $gitHost.provider "plain" }}
 {{- $raw = printf "%s\ngit_host:\n  provider: plain\n  experiment_template_repository: %s\n  plain:\n    base_url: %s\n    allow_http: %s\n" (trimSuffix "\n" $raw)
   (toJson (required "gitHost.experimentTemplateRepository is required: the repository every repository the platform creates starts from" $gitHost.experimentTemplateRepository))

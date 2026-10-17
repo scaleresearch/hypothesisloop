@@ -22,8 +22,8 @@ export function beginGitHubInstall(orgID: string, returnTo: string): Promise<Ins
 }
 
 // What GitHub handed back to the setup URL: the state is taken once, whatever the outcome.
-export function finishGitHubInstall(state: string, installationID: number): Promise<InstallFinished> {
-  return apiSend<InstallFinished>('POST', '/github/installations', { state, installation_id: installationID })
+export function finishGitHubInstall(state: string, code: string, installationID: number): Promise<InstallFinished> {
+  return apiSend<InstallFinished>('POST', '/github/installations', { state, code, installation_id: installationID })
 }
 
 export async function disconnectGitHubInstallation(orgID: string, installationID: number): Promise<void> {

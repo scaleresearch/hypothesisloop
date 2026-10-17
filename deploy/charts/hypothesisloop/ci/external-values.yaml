@@ -47,6 +47,7 @@ gitHost:
   github:
     appId: 4242
     appSlug: made-up-app
+    clientId: Iv23made-up
 cloudCompute:
   - cluster_name: vast
     provider: vast

@@ -36,6 +36,7 @@ images:
 #                                    with objectStore.enabled the two are the store's root user
 #   GIT_HOST_GITHUB_APP_PRIVATE_KEY  only with gitHost.provider github: the PEM GitHub issued for
 #                                    the App
+#   GIT_HOST_GITHUB_CLIENT_SECRET    only with gitHost.provider github: the App's client secret
 #   GIT_HOST_PLAIN_PASSWORD          only with gitHost.plain.username: that account's password
 #   CONTAINER_REGISTRY_GCP_CREDENTIALS  only with containerRegistry.provider gcp: control-service's
 #                                    own Google identity, as an application default credentials
@@ -81,10 +82,12 @@ gitHost:
   # on GitHub the platform's public template, on a plain host a name under baseURL holding a copy
   # of it.
   experimentTemplateRepository: ""
-  # The GitHub App a project's repository is reached through. Its private key comes from the Secret.
+  # The GitHub App a project's repository is reached through. Its private key and client secret
+  # come from the Secret.
   github:
     appId: 0
     appSlug: ""
+    clientId: ""
   # Any git host that serves repositories under one root.
   plain:
     # The https root repositories are cloned from.

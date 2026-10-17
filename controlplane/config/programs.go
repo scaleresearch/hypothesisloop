@@ -5,8 +5,9 @@ type ControlService struct {
 	*Settings
 	DatabaseURL, MetricsDBURL, GraphDBURL, SigningSecret string
 	ModelToken, ObjectStoreSecret                        string
-	// GitHubKey is set on a github git host, and GitPassword on a plain one with a username.
-	GitHubKey, GitPassword string
+	// GitHubKey and GitHubClientSecret are set on a github git host, and GitPassword on a plain
+	// one with a username.
+	GitHubKey, GitHubClientSecret, GitPassword string
 	// SandboxSecret is the sandbox provider's key, empty with no sandbox.
 	SandboxSecret string
 	// CloudComputeSecrets is the account key of each cloud_compute entry, by cluster name.
@@ -21,7 +22,7 @@ func LoadControlService() (*ControlService, error) {
 	c := &ControlService{
 		Settings: s, DatabaseURL: env[DatabaseURL], MetricsDBURL: env[MetricsDBURL], GraphDBURL: env[GraphDBURL], SigningSecret: env[AuthSigningSecret],
 		ModelToken: env[modelKeys[s.Models.Provider]], ObjectStoreSecret: env[objectStoreKeys[s.ObjectStore.Provider]],
-		GitHubKey: env[GitHostGitHubAppPrivateKey], GitPassword: env[GitHostPlainPassword],
+		GitHubKey: env[GitHostGitHubAppPrivateKey], GitHubClientSecret: env[GitHostGitHubClientSecret], GitPassword: env[GitHostPlainPassword],
 		CloudComputeSecrets: map[string]string{},
 	}
 	if s.Sandbox != nil {

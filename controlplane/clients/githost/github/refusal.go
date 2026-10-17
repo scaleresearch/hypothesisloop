@@ -28,6 +28,7 @@ const (
 	ReasonRepositoryAccountRequired      = "repository_account_required"
 	ReasonUnreadableFile                 = "unreadable_file"
 	ReasonUnavailable                    = "unavailable"
+	ReasonAuthorizationInvalid           = "github_authorization_invalid"
 )
 
 // ErrNotConnected reports a repository whose owner is no GitHub account the org connected.
@@ -113,6 +114,8 @@ func Refusal(logger *zap.Logger, op string, err error, gone int) error {
 		return refusal.Refuse(gone, githost.ReasonPermissionMissing, "permissions not granted: "+strings.Join(missing.Missing, ", ")+". The GitHub App installation has not granted that, which the platform needs: its owner accepts the App's permissions on GitHub (the account's Settings, Applications, Configure)")
 	case errors.Is(err, ErrPermissionNotGranted):
 		return refusal.Refuse(gone, githost.ReasonPermissionMissing, "the GitHub App installation has not granted the access the App asks for: its owner accepts the App's permissions on GitHub (the account's Settings, Applications, Configure)")
+	case errors.Is(err, ErrAuthorizationInvalid):
+		return refusal.Invalid(ReasonAuthorizationInvalid, "GitHub did not take the authorization this return from GitHub carries: it was used already or ran out. Press Install GitHub App again")
 	case errors.Is(err, ErrRateLimited):
 		logger.Warn("github is rate limiting the platform", zap.String("operation", op))
 		return refusal.Refuse(http.StatusServiceUnavailable, ReasonUnavailable, "GitHub is rate limiting the platform: try again shortly")

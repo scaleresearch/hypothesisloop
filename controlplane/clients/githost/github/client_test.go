@@ -90,7 +90,16 @@ type fakeGitHub struct {
 	// leaves a repository created out of its installation.
 	createRefusal *createRefusal
 	uncovered     bool
+	// codes is the person's token each authorization code is exchanged for, once, and reaches the
+	// installations each such token lists.
+	codes   map[string]string
+	reaches map[string][]int64
 }
+
+const (
+	testClientID     = "Iv23testclient"
+	testClientSecret = "a-client-secret"
+)
 
 const testTemplate = "scaleresearch/hypothesisloop-experiment-template"
 
@@ -121,12 +130,14 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *Client) {
 			"rival/secret":  {id: 3, fullName: "rival/secret", defaultBranch: "main"},
 			"acme/unlisted": {id: 4, fullName: "acme/unlisted", defaultBranch: "main"},
 		},
-		tokens: map[string]mintedToken{},
-		kinds:  map[string]string{"link": "symlink", "vendored": "submodule"},
+		tokens:  map[string]mintedToken{},
+		kinds:   map[string]string{"link": "symlink", "vendored": "submodule"},
+		codes:   map[string]string{"code-alice": "gho_alice", "code-mallory": "gho_mallory"},
+		reaches: map[string][]int64{"gho_alice": {100, 300}, "gho_mallory": {200}},
 	}
 	f.server = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.server.Close)
-	client, err := New(config.GitHubConfig{AppID: testAppID, AppSlug: "hypothesisloop"},
+	client, err := New(config.GitHubConfig{AppID: testAppID, AppSlug: "hypothesisloop", ClientID: testClientID},
 		string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})))
 	if err != nil {
 		t.Fatal(err)
@@ -224,6 +235,19 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 	bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	segments := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 	switch {
+	case r.URL.Path == "/login/oauth/access_token" && r.Method == http.MethodPost:
+		f.exchange(w, r)
+	case r.URL.Path == "/user/installations" && r.Method == http.MethodGet:
+		reaches, ok := f.reaches[bearer]
+		if !ok {
+			f.refuse(w, http.StatusUnauthorized, "Bad credentials")
+			return
+		}
+		all := []map[string]any{}
+		for _, id := range reaches {
+			all = append(all, map[string]any{"id": id, "account": f.accountOf(id)})
+		}
+		f.answer(w, http.StatusOK, map[string]any{"total_count": len(all), "installations": paged(r, all)})
 	case len(segments) == 4 && segments[0] == "app" && segments[1] == "installations" && segments[3] == "access_tokens" && r.Method == http.MethodPost:
 		f.mint(w, r, bearer, segments[2])
 	case len(segments) == 3 && segments[0] == "app" && segments[1] == "installations" && r.Method == http.MethodGet:
@@ -374,6 +398,25 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// exchange answers as GitHub's OAuth endpoint does: 200 for a code it refuses too, with an error.
+func (f *fakeGitHub) exchange(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Accept") != "application/json" || r.ParseForm() != nil {
+		f.refuse(w, http.StatusBadRequest, "not a form asking for JSON")
+		return
+	}
+	if r.PostForm.Get("client_id") != testClientID || r.PostForm.Get("client_secret") != testClientSecret {
+		f.answer(w, http.StatusOK, map[string]string{"error": "incorrect_client_credentials"})
+		return
+	}
+	token, ok := f.codes[r.PostForm.Get("code")]
+	if !ok {
+		f.answer(w, http.StatusOK, map[string]string{"error": "bad_verification_code"})
+		return
+	}
+	delete(f.codes, r.PostForm.Get("code"))
+	f.answer(w, http.StatusOK, map[string]string{"access_token": token, "token_type": "bearer"})
+}
+
 func (f *fakeGitHub) mint(w http.ResponseWriter, r *http.Request, bearer, installationID string) {
 	if !f.appAuthenticated(bearer) {
 		f.refuse(w, http.StatusUnauthorized, "'Expiration time' claim ('exp') must be a numeric value representing the future time at which the assertion expires")
@@ -454,7 +497,7 @@ var ctx = context.Background()
 func TestInstallationIsReadAsTheApp(t *testing.T) {
 	f, client := newFakeGitHub(t)
 	found, err := client.Installation(ctx, 200)
-	if err != nil || *found != (Installation{ID: 200, AccountLogin: "rival", AccountType: AccountOrganization, SelectedRepositories: true, ChangedAt: testChanged}) {
+	if err != nil || *found != (Installation{ID: 200, AccountLogin: "rival", AccountType: AccountOrganization, SelectedRepositories: true}) {
 		t.Fatalf("Installation = %+v, %v", found, err)
 	}
 	f.installations[300].all = true
@@ -966,7 +1009,9 @@ func TestNoErrorHoldsASecret(t *testing.T) {
 			failures = append(failures, err)
 			_, err = client.CreateFromTemplate(ctx, 100, testTemplate, "fresh", "")
 			failures = append(failures, err)
-			secrets := []string{"ghs_", jwt[:40], "PRIVATE KEY", "Bearer"}
+			_, err = client.UserInstallations(ctx, testClientSecret, "code-alice")
+			failures = append(failures, err)
+			secrets := []string{"ghs_", "gho_", testClientSecret, "code-alice", jwt[:40], "PRIVATE KEY", "Bearer"}
 			for _, failure := range failures {
 				if failure == nil {
 					continue
@@ -1038,4 +1083,33 @@ func wrapped(encoded string) string {
 	}
 	b.WriteString(encoded + "\n")
 	return b.String()
+}
+
+// An authorization code is exchanged with the App's client for the person's token, once, and the
+// installations listed are those GitHub lists for that person, every page of them.
+func TestUserInstallationsAreThoseGitHubListsForThePersonTheCodeWasIssuedTo(t *testing.T) {
+	f, client := newFakeGitHub(t)
+	if got, err := client.UserInstallations(ctx, testClientSecret, "code-alice"); err != nil || !slices.Equal(got, []int64{100, 300}) {
+		t.Fatalf("alice reaches %v, %v, want 100 and 300", got, err)
+	}
+	if _, err := client.UserInstallations(ctx, testClientSecret, "code-alice"); !errors.Is(err, ErrAuthorizationInvalid) {
+		t.Fatalf("a code used twice: %v, want ErrAuthorizationInvalid", err)
+	}
+	if _, err := client.UserInstallations(ctx, testClientSecret, "code-made-up"); !errors.Is(err, ErrAuthorizationInvalid) {
+		t.Fatalf("a made-up code: %v, want ErrAuthorizationInvalid", err)
+	}
+	if _, err := client.UserInstallations(ctx, "a-wrong-secret", "code-mallory"); !errors.Is(err, ErrAppCredentials) {
+		t.Fatalf("a wrong client secret: %v, want ErrAppCredentials", err)
+	}
+	many := make([]int64, pageSize+5)
+	for i := range many {
+		many[i] = int64(1000 + i)
+	}
+	f.codes["code-many"], f.reaches["gho_many"] = "gho_many", many
+	for _, id := range many {
+		f.installations[id] = &fakeInstallation{account: "org" + strconv.FormatInt(id, 10)}
+	}
+	if got, err := client.UserInstallations(ctx, testClientSecret, "code-many"); err != nil || !slices.Equal(got, many) {
+		t.Fatalf("got %d installations, %v, want all %d across pages", len(got), err, len(many))
+	}
 }

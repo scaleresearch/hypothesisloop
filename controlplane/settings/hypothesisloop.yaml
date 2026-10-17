@@ -215,6 +215,7 @@ runtimes:
 #     github:
 #       app_id: 123456
 #       app_slug: hypothesisloop
+#       client_id: Iv23liExample
 #
 #   experiment_template_repository  the repository on the host every repository the platform
 #                      creates starts from, one commit of its files with no history. On GitHub the
@@ -222,6 +223,9 @@ runtimes:
 #                      repository from; on a plain host a name under base_url holding a copy of it.
 #   app_id, app_slug   the App's number and the name in its URL. The PEM GitHub issued for the App,
 #                      which signs the request for every token, is GIT_HOST_GITHUB_APP_PRIVATE_KEY.
+#   client_id          the App's client ID. The App asks the person installing it to authorize it,
+#                      and the platform connects an installation only when GitHub lists it for that
+#                      person; the App's client secret is GIT_HOST_GITHUB_CLIENT_SECRET.
 #
 # Agents and jobs reach the host through this API's git proxy, at
 # services.public_api_url with /git after it. Every clone, fetch and push of theirs goes through it

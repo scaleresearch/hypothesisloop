@@ -40,18 +40,19 @@ func registerRepositories(doc *Doc, repositories *accounts.Repositories) {
 		Summary: "Start installing the platform's GitHub App for an org", Tags: []string{"github"},
 		Description: "For an owner of the org, as a user or an API key. Answers a state good once, for the caller, for 15 minutes, and install_url, GitHub's install page of the App carrying it. " +
 			"The person installs the App there on their own GitHub account or an organisation, or changes the repositories of an installation they made before. " +
-			"GitHub then sends them to the App's setup URL with state, installation_id and setup_action, and POST /github/installations connects the installation. " +
+			"GitHub has them authorize the App and sends them to the App's callback URL with state, code, installation_id and setup_action, and POST /github/installations connects the installation. " +
 			"return_to is the page of the UI the install starts from, handed back when it finishes. 422 invalid_request when it is not a path of the UI. 503 github_not_configured.",
 	}, a.beginInstall)
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "create-github-installation", Method: "POST", Path: "/github/installations", DefaultStatus: http.StatusCreated,
 		Summary: "Connect the GitHub App installation an install made or changed", Tags: []string{"github"},
-		Description: "For the user or API key that started the install, while still an owner of its org. state and installation_id are what GitHub handed back to the setup URL. " +
-			"The state is taken once whatever the outcome. The installation is asked of GitHub as the App: it must exist, not be suspended, have granted every permission the App asks for, " +
-			"and have been made or changed after the state was issued. An installation the org connected before is answered as it is; a new one is connected, and is the org's default for new repositories when it is the org's first. " +
+		Description: "For the user or API key that started the install, while still an owner of its org. state, code and installation_id are what GitHub handed back to the callback URL. " +
+			"The state is taken once whatever the outcome. code is exchanged with GitHub for the token of the GitHub user who finished the install, and the installation must be one GitHub lists for that user; " +
+			"the token is used for nothing else and kept nowhere. The installation is then asked of GitHub as the App: it must exist, not be suspended and have granted every permission the App asks for. " +
+			"An installation the org connected before is answered as it is; a new one is connected, and is the org's default for new repositories when it is the org's first. " +
 			"account_type says whether the account is a person's own (User) or an organisation. " +
-			"422 install_state_invalid (made up, used, expired or another person's), installation_not_new (last changed before the install started), installation_gone, installation_suspended, " +
-			"git_host_permission_missing naming each permission missing as name:level. 502 git_host_failed, 503 github_not_configured.",
+			"422 install_state_invalid (made up, used, expired or another person's), github_authorization_invalid (code used or expired), installation_not_authorized (not one the GitHub user may reach), " +
+			"installation_gone, installation_suspended, git_host_permission_missing naming each permission missing as name:level. 502 git_host_failed, 503 github_not_configured.",
 	}, a.finishInstall)
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "list-github-installations", Method: "GET", Path: "/orgs/{id}/github-installations",
@@ -121,13 +122,14 @@ func (a repositoriesAPI) beginInstall(ctx context.Context, in *struct {
 
 type finishInstallRequest struct {
 	State          string `json:"state" doc:"The state of POST /orgs/{id}/github-install-states, as GitHub handed it back."`
+	Code           string `json:"code" doc:"The code GitHub handed back for the GitHub user who authorized the App during the install."`
 	InstallationID int64  `json:"installation_id" doc:"The installation GitHub handed back."`
 }
 
 func (a repositoriesAPI) finishInstall(ctx context.Context, in *struct {
 	Body finishInstallRequest
 }) (*struct{ Body *accounts.InstallFinished }, error) {
-	finished, err := a.repositories.FinishInstall(ctx, in.Body.State, in.Body.InstallationID)
+	finished, err := a.repositories.FinishInstall(ctx, in.Body.State, in.Body.Code, in.Body.InstallationID)
 	if err != nil {
 		return nil, err
 	}

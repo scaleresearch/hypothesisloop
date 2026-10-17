@@ -11,7 +11,7 @@ import { ErrorMessage, Loading } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
 
 /**
- * The App's setup URL: where GitHub returns the tab the install was opened in. The return is
+ * The App's callback URL: where GitHub returns the tab the install was opened in. The return is
  * taken once, the installation connected, the tab the install started from told, and this tab
  * closes. A tab the browser does not let close, as one opened by hand, says how it went and leads
  * back.

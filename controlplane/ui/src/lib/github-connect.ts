@@ -136,12 +136,13 @@ const REQUESTED = 'GitHub asked an owner of that organization to approve the ins
 const NO_INSTALLATION = 'GitHub returned without an installation, so nothing was connected. Press Install GitHub App again.'
 
 /**
- * Takes GitHub's return to the setup URL in the install tab: with the state and the installation
- * GitHub handed back, the installation is connected through `finish`, once, and the outcome is
+ * Takes GitHub's return to the callback URL in the install tab: with the state, the authorization
+ * code and the installation GitHub handed back, the installation is connected through `finish`,
+ * once, and the outcome is
  * told to the tab the install started in. A return with no state, from a change made on GitHub,
  * has every tab read again and connects nothing.
  */
-export function takeReturn(query: string, finish: (state: string, installationID: number) => Promise<InstallFinished>): Promise<ReturnView> {
+export function takeReturn(query: string, finish: (state: string, code: string, installationID: number) => Promise<InstallFinished>): Promise<ReturnView> {
   // React runs an effect twice in development, and a state works once: the second run is
   // answered what the first was.
   if (taken?.query !== query) taken = { query, view: take(new URLSearchParams(query), finish) }
@@ -150,7 +151,7 @@ export function takeReturn(query: string, finish: (state: string, installationID
 
 let taken: { query: string; view: Promise<ReturnView> } | null = null
 
-async function take(params: URLSearchParams, finish: (state: string, installationID: number) => Promise<InstallFinished>): Promise<ReturnView> {
+async function take(params: URLSearchParams, finish: (state: string, code: string, installationID: number) => Promise<InstallFinished>): Promise<ReturnView> {
   const state = params.get('state')
   const installed = Number(params.get('installation_id'))
   const hasInstallation = Number.isSafeInteger(installed) && installed > 0
@@ -165,7 +166,7 @@ async function take(params: URLSearchParams, finish: (state: string, installatio
   }
   if (!hasInstallation) return failed(params.get('setup_action') === 'request' ? REQUESTED : NO_INSTALLATION)
   try {
-    const finished = await finish(state, installed)
+    const finished = await finish(state, params.get('code') ?? '', installed)
     post({ state, outcome: { ok: true, installation: finished.installation } })
     return { view: 'connected', account: finished.installation.account_login, returnTo: inApp(finished.return_to) ? finished.return_to : null }
   } catch (error) {

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"time"
 )
 
 // The types of account GitHub installs an App on.
@@ -25,9 +24,6 @@ type Installation struct {
 	// SelectedRepositories says the installation covers the repositories its owner selected and
 	// no other.
 	SelectedRepositories bool `json:"-"`
-	// ChangedAt is when GitHub last changed the installation: made it, or changed its
-	// repositories or permissions.
-	ChangedAt time.Time `json:"-"`
 }
 
 func accountType(kind string) bool {
@@ -46,7 +42,6 @@ func (c *Client) Installation(ctx context.Context, installationID int64) (*Insta
 	var out struct {
 		ID                  int64             `json:"id"`
 		SuspendedAt         *string           `json:"suspended_at"`
-		UpdatedAt           time.Time         `json:"updated_at"`
 		RepositorySelection string            `json:"repository_selection"`
 		Permissions         map[string]string `json:"permissions"`
 		Account             struct {
@@ -66,13 +61,13 @@ func (c *Client) Installation(ctx context.Context, installationID int64) (*Insta
 	if out.SuspendedAt != nil {
 		return nil, ErrInstallationSuspended
 	}
-	if out.ID != installationID || out.UpdatedAt.IsZero() || out.Account.Login == "" || !accountType(out.Account.Type) || (out.RepositorySelection != "all" && out.RepositorySelection != "selected") {
-		return nil, fmt.Errorf("github: GET /app/installations/{id} answered without the installation asked for, when it last changed, its account, a user or an organisation, or whether it covers all repositories or selected ones")
+	if out.ID != installationID || out.Account.Login == "" || !accountType(out.Account.Type) || (out.RepositorySelection != "all" && out.RepositorySelection != "selected") {
+		return nil, fmt.Errorf("github: GET /app/installations/{id} answered without the installation asked for, its account, a user or an organisation, or whether it covers all repositories or selected ones")
 	}
 	if missing := missingPermissions(out.Permissions); len(missing) > 0 {
 		return nil, &PermissionMissingError{Installation: installationID, Missing: missing}
 	}
-	return &Installation{ID: out.ID, AccountLogin: out.Account.Login, AccountType: out.Account.Type, SelectedRepositories: out.RepositorySelection == "selected", ChangedAt: out.UpdatedAt}, nil
+	return &Installation{ID: out.ID, AccountLogin: out.Account.Login, AccountType: out.Account.Type, SelectedRepositories: out.RepositorySelection == "selected"}, nil
 }
 
 const pageSize = 100

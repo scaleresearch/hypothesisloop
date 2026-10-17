@@ -33,6 +33,7 @@ var Secret = map[string]string{
 	"AUTH_SIGNING_SECRET":                  "made-up-signing-secret-of-forty-characters",
 	"OBJECT_STORE_MINIO_SECRET_ACCESS_KEY": "made-up-object-store-secret-key",
 	"GIT_HOST_GITHUB_APP_PRIVATE_KEY":      "-----BEGIN RSA PRIVATE KEY-----\nmade-up: key # one string\n-----END RSA PRIVATE KEY-----\n",
+	"GIT_HOST_GITHUB_CLIENT_SECRET":        "made-up-client-secret",
 	"GIT_HOST_PLAIN_PASSWORD":              "made-up-git-password",
 	"CONTAINER_REGISTRY_GCP_CREDENTIALS":   `{"type": "made-up-google-credentials"}`,
 	"CLOUD_COMPUTE_VAST_API_KEY":           "made-up-vast-api-key",

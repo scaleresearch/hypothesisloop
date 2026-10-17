@@ -207,13 +207,14 @@ type App struct {
 // Client is the only code that talks to GitHub. It acts as the platform's GitHub App and keeps
 // no token: each is minted for the call that needs it and handed on or dropped.
 type Client struct {
-	appID  int64
-	slug   string
-	key    *rsa.PrivateKey
-	apiURL string
-	webURL string
-	http   *http.Client
-	now    func() time.Time
+	appID    int64
+	slug     string
+	clientID string
+	key      *rsa.PrivateKey
+	apiURL   string
+	webURL   string
+	http     *http.Client
+	now      func() time.Time
 	// mintRetries is the wait before each retry of a mint GitHub answered 5xx.
 	mintRetries []time.Duration
 }
@@ -229,7 +230,7 @@ func New(cfg config.GitHubConfig, privateKey string) (*Client, error) {
 		return nil, errors.New("github: the App's private key is not the RSA key GitHub issues for an App (PKCS#1 PEM)")
 	}
 	return &Client{
-		appID: cfg.AppID, slug: cfg.AppSlug, key: key,
+		appID: cfg.AppID, slug: cfg.AppSlug, clientID: cfg.ClientID, key: key,
 		apiURL: apiURL, webURL: webURL, http: &http.Client{Timeout: 20 * time.Second}, now: time.Now,
 		mintRetries: []time.Duration{time.Second, 3 * time.Second},
 	}, nil

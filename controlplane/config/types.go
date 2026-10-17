@@ -421,10 +421,12 @@ type GitHostConfig struct {
 }
 
 // GitHubConfig is the GitHub App a project's repository is reached through, whose private key
-// comes from the environment. All of it is required.
+// and client secret come from the environment. All of it is required. ClientID is the App's OAuth
+// client, with which an install proves the person finishing it may reach the installation.
 type GitHubConfig struct {
-	AppID   int64  `yaml:"app_id"`
-	AppSlug string `yaml:"app_slug"`
+	AppID    int64  `yaml:"app_id"`
+	AppSlug  string `yaml:"app_slug"`
+	ClientID string `yaml:"client_id"`
 }
 
 // PlainGitConfig is any host that serves repositories under BaseURL over https, reached with

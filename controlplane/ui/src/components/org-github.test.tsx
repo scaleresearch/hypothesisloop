@@ -90,8 +90,8 @@ describe('installing the GitHub App', () => {
     show()
     await userEvent.click(await screen.findByRole('button', { name: 'Install GitHub App' }))
     await screen.findByRole('status')
-    await takeReturn('installation_id=9&state=s-1', () => Promise.reject(new ApiError(422, 'GitHub says the App on lab was last changed before this install started.', 'installation_not_new')))
-    expect((await screen.findByRole('alert')).textContent).toBe('GitHub says the App on lab was last changed before this install started.')
+    await takeReturn('installation_id=9&state=s-1', () => Promise.reject(new ApiError(422, 'GitHub does not list this installation among those the GitHub account that finished the install may reach.', 'installation_not_authorized')))
+    expect((await screen.findByRole('alert')).textContent).toBe('GitHub does not list this installation among those the GitHub account that finished the install may reach.')
     expect(screen.queryByRole('cell', { name: 'lab' })).toBeNull()
   })
 

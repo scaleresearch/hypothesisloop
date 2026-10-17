@@ -4,9 +4,10 @@
   "description": "Clones, creates and pushes to the repositories of HypothesisLoop experiments.",
   "public": true,
   "redirect_url": "REPLACE-WITH-UI-ORIGIN/settings/repository",
+  "callback_urls": ["REPLACE-WITH-UI-ORIGIN/settings/repository"],
   "setup_url": "REPLACE-WITH-UI-ORIGIN/settings/repository",
   "setup_on_update": true,
-  "request_oauth_on_install": false,
+  "request_oauth_on_install": true,
   "default_permissions": {
     "administration": "write",
     "contents": "write",

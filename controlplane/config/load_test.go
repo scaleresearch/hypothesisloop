@@ -315,6 +315,7 @@ git_host:
   github:
     app_id: 4242
     app_slug: hypothesisloop
+    client_id: Iv23made-up
 `
 
 func TestLoadTakesOneGitHostAndRefusesAHalfStatedOne(t *testing.T) {
@@ -354,6 +355,7 @@ func TestLoadTakesOneGitHostAndRefusesAHalfStatedOne(t *testing.T) {
 		"the old github section":      "\ngithub:\n  app_id: 4242\ngit:\n  provider: github\n",
 		"a proxy_url":                 strings.Replace(plain, "git_host:\n", "git_host:\n  proxy_url: https://api.example.invalid/git\n", 1),
 		"a GitHub App's private key":  githubSection + "    private_key: pem\n",
+		"the App's client secret":     githubSection + "    client_secret: secret\n",
 	} {
 		if err := loadText(t, withoutGitHost(t)+section); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -362,7 +364,7 @@ func TestLoadTakesOneGitHostAndRefusesAHalfStatedOne(t *testing.T) {
 }
 
 func TestLoadRejectsAHalfConfiguredGitHubApp(t *testing.T) {
-	for _, line := range []string{"    app_id: 4242\n", "    app_slug: hypothesisloop\n"} {
+	for _, line := range []string{"    app_id: 4242\n", "    app_slug: hypothesisloop\n", "    client_id: Iv23made-up\n"} {
 		section := strings.Replace(githubSection, line, "", 1)
 		if section == githubSection {
 			t.Fatalf("the test section has no line %q", line)
