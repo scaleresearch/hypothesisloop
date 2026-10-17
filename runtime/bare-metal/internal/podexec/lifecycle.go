@@ -349,7 +349,7 @@ func (e *Executor) ResolveAdmittedAcceleratorType(ctx context.Context, experimen
 		if c.Labels[LabelExperimentID] != experimentID {
 			continue
 		}
-		if c.State != "running" && c.State != "created" {
+		if !live(c.State) {
 			return "", "", true, nil
 		}
 		return clusterapi.AcceleratorType(c.Labels[LabelAcceleratorType]), e.nodeName, true, nil
