@@ -541,7 +541,7 @@ func printLine(stdout io.Writer, raw json.RawMessage, drop ...string) error {
 	return err
 }
 
-// compactJSON re-encodes raw on one line in its own key order, leaving out $schema, every null,
+// compactJSON re-encodes raw on one line in its own key order, leaving out every null,
 // "" and {} value, and the named keys of the top-level object.
 func compactJSON(raw []byte, drop ...string) ([]byte, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
@@ -584,7 +584,7 @@ func writeValue(dec *json.Decoder, b *bytes.Buffer, drop []string) error {
 				if err := writeValue(dec, &v, nil); err != nil {
 					return err
 				}
-				if s := v.String(); key == "$schema" || slices.Contains(drop, key) || s == "null" || s == `""` || s == "{}" {
+				if s := v.String(); slices.Contains(drop, key) || s == "null" || s == `""` || s == "{}" {
 					continue
 				}
 				if n > 0 {
@@ -1153,7 +1153,6 @@ and nothing is written beside the JSON, so the output parses whole.`, stderr)
 	if err := c.Do("GET", "/platform-experiments/"+url.PathEscape(id), nil, &out); err != nil {
 		return fail(stderr, err)
 	}
-	delete(out, "$schema")
 	if job, _ := out["baseline_job_id"].(string); job != "" {
 		var baseline struct {
 			Branch  string `json:"branch"`

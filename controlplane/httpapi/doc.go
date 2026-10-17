@@ -100,6 +100,8 @@ func NewDoc(r chi.Router, title, version, preamble string, access *auth.Access, 
 	// A client reads an array the document requires as never null, so no answer may send a nil slice in one.
 	huma.DefaultArrayNullable = false
 	cfg := huma.DefaultConfig(title, version)
+	// No $schema property and Link header on each answer: a client's types come from this document.
+	cfg.CreateHooks = nil
 	cfg.Components.SecuritySchemes = map[string]*huma.SecurityScheme{
 		bearerScheme: {Type: "http", Scheme: "bearer"},
 	}

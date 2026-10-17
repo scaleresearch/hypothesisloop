@@ -320,7 +320,7 @@ func TestMisuseIsAnsweredWithTheErrorAndTheSynopsis(t *testing.T) {
 func TestJobStatusPrintsOneCompactLinePerJob(t *testing.T) {
 	got := recordingServer(t, func(_ int, r recorded) any {
 		id := strings.TrimPrefix(r.Path, "/experiments/")
-		return map[string]any{"$schema": "s", "id": id, "status": "EVICTED",
+		return map[string]any{"id": id, "status": "EVICTED",
 			"eviction_reason": "silent", "not_admitted_reason": "", "phase_detail": map[string]any{},
 			"hypothesis": "long text", "resolved_job": map[string]any{"image": "i"}, "job": map[string]any{"image": "i"}, "attempt_count": 0}
 	})
@@ -336,7 +336,7 @@ func TestJobStatusPrintsOneCompactLinePerJob(t *testing.T) {
 }
 
 func TestCompactJSONKeepsKeyOrder(t *testing.T) {
-	got, err := compactJSON([]byte(`{"z": 1, "a": {"y": "", "b": [], "c": null, "d": "<x>"}, "m": 0.10, "$schema": "s"}`))
+	got, err := compactJSON([]byte(`{"z": 1, "a": {"y": "", "b": [], "c": null, "d": "<x>"}, "m": 0.10}`))
 	if err != nil {
 		t.Fatal(err)
 	}

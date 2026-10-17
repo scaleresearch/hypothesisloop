@@ -329,7 +329,6 @@ func TestListExperimentsAnswersABaselineJobAsOnTheObjective(t *testing.T) {
 	}
 }
 
-// One job is answered as an object, which gets a $schema field the list's items do not.
 func TestGetExperimentAnswersABaselineJobAsOnTheObjective(t *testing.T) {
 	spy := &filterSpyStore{items: []*domain.Experiment{job("job-base", "pe-1", "pe-1")}}
 	code, body := get(t, schedulerRouter(t, spy), "/experiments/job-base")
@@ -337,8 +336,8 @@ func TestGetExperimentAnswersABaselineJobAsOnTheObjective(t *testing.T) {
 	if err := json.Unmarshal([]byte(body), &job); code != 200 || err != nil {
 		t.Fatalf("get: got = %d %s (%v), want 200", code, body, err)
 	}
-	if _, stated := job["hypothesis_id"]; stated || job["objective"] != true || job["$schema"] == nil {
-		t.Errorf("the baseline job: got = %v, want $schema, objective true and no hypothesis_id", job)
+	if _, stated := job["hypothesis_id"]; stated || job["objective"] != true {
+		t.Errorf("the baseline job: got = %v, want objective true and no hypothesis_id", job)
 	}
 	if spy.items[0].HypothesisID != "pe-1" {
 		t.Errorf("answering changed the stored job: hypothesis_id = %q, want pe-1", spy.items[0].HypothesisID)

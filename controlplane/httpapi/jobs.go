@@ -204,7 +204,7 @@ func (a jobsAPI) submit(ctx context.Context, in *struct{ Body submitRequest }) (
 	if err := a.jobs.NameJobs(ctx, exp); err != nil {
 		return nil, auth.Internal(a.logger, "submit experiment", err)
 	}
-	return answerJob(exp), nil
+	return &struct{ Body *domain.Experiment }{Body: exp}, nil
 }
 
 func (a jobsAPI) list(ctx context.Context, in *struct {
@@ -327,7 +327,7 @@ func (a jobsAPI) get(ctx context.Context, in *struct {
 	if exp == nil {
 		return nil, huma.Error404NotFound("experiment not found")
 	}
-	return answerJob(exp), nil
+	return &struct{ Body *domain.Experiment }{Body: exp}, nil
 }
 
 func (a jobsAPI) cancel(ctx context.Context, in *struct {
@@ -349,7 +349,7 @@ func (a jobsAPI) cancel(ctx context.Context, in *struct {
 	if exp == nil {
 		return nil, huma.Error404NotFound("experiment not found")
 	}
-	return answerJob(exp), nil
+	return &struct{ Body *domain.Experiment }{Body: exp}, nil
 }
 
 func (a jobsAPI) writeSummary(ctx context.Context, in *struct {
@@ -384,10 +384,4 @@ func (a jobsAPI) writeSummary(ctx context.Context, in *struct {
 
 func primaryAcceleratorType(job domain.JobSpec) domain.AcceleratorType {
 	return job.AcceleratorType
-}
-
-// answerJob answers one job. huma adds $schema to an object body by copying its fields into a
-// type of its own, so Experiment.MarshalJSON never runs on it and the answer is made here.
-func answerJob(exp *domain.Experiment) *struct{ Body *domain.Experiment } {
-	return &struct{ Body *domain.Experiment }{Body: exp.Answer()}
 }
