@@ -52,7 +52,7 @@ func registerExperimentAgents(doc *Doc, experiments *platformexperiments.Service
 			"409 max_agentsandboxes_reached beyond max_agentsandboxes machines at once, of which one is kept for an agent of role baseline: when one finished without a baseline that can be declared, or its machine stopped with no restart left, the next is added in its place. " +
 			"agent_type and model are resolved here and stored: the answer shows what the agent runs. " +
 			"in_agentsandbox=false returns the agent's token: run the agent yourself with it as HL_TOKEN and the API's address as API_URL, which is all it is started with. " +
-			"The token acts as that agent in that platform experiment and nowhere else, and asking again with agent_id returns it again. " +
+			"The token acts as that agent in that platform experiment and nowhere else, and asking again with agent_id returns it again. A coordinator's token is returned none: a person or an API key of the org asks for it. " +
 			"role decides ranking: \"competitor\" (default) is a researcher, whatever its agent type: ranked, cut-eligible and counted against max_agents; \"baseline\" and " +
 			"\"reviewer\" are none of the three, though their jobs are billed and gated identically. " +
 			"409 max_agents_reached for a researcher past max_agents, which counts the researchers at work, none that finished, was cut, was replaced or lost its machine with no restart left, and no agent of another role and no coordinator. 409 signup_closed for any role but researcher once the run started, and for every one once it closed. " +
@@ -123,7 +123,8 @@ func (a experimentAgentsAPI) add(ctx context.Context, in *struct {
 		return nil, refused(a.logger, "add agent", err)
 	}
 	for i, agent := range out.Body.Agents {
-		if agent.InAgentSandbox {
+		// A coordinator does not act as an agent (auth.Access.ActAs), so it is handed no agent's token.
+		if agent.InAgentSandbox || !caller.HoldsAccount() {
 			continue
 		}
 		token, err := auth.Mint(a.launch.SigningSecret, scope.Agent(in.ID, agent.AgentID))

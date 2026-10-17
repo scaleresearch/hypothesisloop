@@ -431,6 +431,25 @@ func TestASelfRunAgentIsHandedTheTokenThatActsAsItAndNoLauncher(t *testing.T) {
 	}
 }
 
+func TestACoordinatorIsHandedNoAgentsToken(t *testing.T) {
+	coordinator := auth.Principal{Kind: auth.KindCoordinator, OrgIDs: []string{"org-a"}, ProjectID: "project-a", PlatformExperimentID: "pe-1"}
+	store := newRosterStore(domain.PlatformExpOpen, 5)
+	store.agents["veteran"] = &domain.Agent{ID: "veteran", Name: "Veteran", OrgID: "org-a"}
+	if code, body := call(t, agentsRouter(t, store, staff), "POST", "/platform-experiments/pe-1/agents", `{"agent_id":"veteran"}`); code != http.StatusCreated || joined(t, body)[0]["token"] == nil {
+		t.Fatalf("staff joining a self-run agent: got = %d %v, want 201 with its token", code, body)
+	}
+	r := agentsRouter(t, store, coordinator)
+	for _, request := range []string{`{"agent_id":"veteran"}`, `{}`} {
+		code, body := call(t, r, "POST", "/platform-experiments/pe-1/agents", request)
+		if code != http.StatusCreated {
+			t.Fatalf("%s: status = %d: %v", request, code, body)
+		}
+		if a := joined(t, body)[0]; a["token"] != nil {
+			t.Errorf("%s: the coordinator was handed %v's token", request, a["agent_id"])
+		}
+	}
+}
+
 func TestARegisteredAgentJoinsByIDAndJoiningAgainReturnsTheSameTokenAndChangesNothing(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 5)
 	store.agents["veteran"] = &domain.Agent{ID: "veteran", Name: "Veteran", OrgID: "org-a"}
