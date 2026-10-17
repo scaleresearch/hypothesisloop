@@ -131,11 +131,12 @@ DIR; any other agent gets it with the baseline's commit (hl hypothesis checkout 
 	return 0
 }
 
-// declaredExperiment is what a clone's files are held to: the platform experiment's spec, and
-// the image of the proposal it was accepted from, when it has one.
+// declaredExperiment is what a clone's files are held to: the platform experiment's name and
+// metrics, and the image of the proposal it was accepted from, when it has one.
 type declaredExperiment struct {
-	experimentspec.Spec
-	ID string `json:"id"`
+	ID      string                            `json:"id"`
+	Name    string                            `json:"name"`
+	Metrics []experimentspec.MetricDefinition `json:"metrics"`
 	// Continues is the run this one carries on, whose files a clone of its baseline holds.
 	Continues string `json:"continues"`
 	Proposal  struct {

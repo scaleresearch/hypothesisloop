@@ -302,7 +302,11 @@ func jsonTypes(typ reflect.Type) []string {
 }
 
 // cliOwn are the fields the CLI prints of its own reckoning, decoded from nothing.
-var cliOwn = map[string]bool{"submitted.not_on_best": true}
+var cliOwn = map[string]bool{"submitted.not_on_best": true, "hypothesisBrief.comments[].cut": true}
+
+// storedAs are the fields an answer gives untyped, as a request took them, by the schema of that
+// request's body, which the CLI's read is checked against.
+var storedAs = map[string]string{"declaredExperiment.proposal": "Proposal"}
 
 // Project checks that every json field of typ exists in s with a JSON type that decodes into it.
 func (d *Document) Project(t *testing.T, at string, typ reflect.Type, s *Schema) {
@@ -338,6 +342,9 @@ func (d *Document) Project(t *testing.T, at string, typ reflect.Type, s *Schema)
 				name = f.Name
 			}
 			p := s.Properties[name]
+			if body, ok := storedAs[at+"."+name]; ok && p != nil {
+				p = &Schema{Ref: "#/components/schemas/" + body}
+			}
 			if p == nil {
 				t.Errorf("%s.%s: the CLI reads it, and the answer has no such field", at, name)
 				continue

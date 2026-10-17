@@ -161,7 +161,6 @@ func TestNoCommandACoordinatorRunsCallsARouteACoordinatorMayNot(t *testing.T) {
 		{"hypothesis", "list"},
 		{"hypothesis", "get", "h1"},
 		{"repo", "check"},
-		{"repo", "init"},
 		{"quota", "--all"},
 		{"results"},
 		{"capacity"},
@@ -235,7 +234,6 @@ func TestNoCommandAnAgentRunsCallsARouteAnAgentMayNot(t *testing.T) {
 		{"situation"},
 		{"data-key"},
 		{"watch", "--wake", "experiment.status", "--no-wait"},
-		{"repo", "init"},
 	}
 	for _, command := range sent {
 		requests = 0

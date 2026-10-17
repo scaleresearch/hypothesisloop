@@ -196,7 +196,7 @@ func TestJobSubmitWithNoOriginSaysToWorkInTheClone(t *testing.T) {
 }
 
 func TestHLCloneGivesUpNamingTheCauseAfterItsTries(t *testing.T) {
-	script, err := filepath.Abs(filepath.Join("..", "images", "job", "hl-clone"))
+	script, err := filepath.Abs(filepath.Join("..", "..", "..", "runtime", "job", "hl-clone"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func TestHLCloneGivesUpNamingTheCauseAfterItsTries(t *testing.T) {
 
 // hl-clone is what a job and an agent take a code_ref's commit back with.
 func TestHLCloneChecksOutTheCommitOfACodeRef(t *testing.T) {
-	script, err := filepath.Abs(filepath.Join("..", "images", "job", "hl-clone"))
+	script, err := filepath.Abs(filepath.Join("..", "..", "..", "runtime", "job", "hl-clone"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -41,7 +41,7 @@ func TestHLCloneExitsWithTheCodeUnreachableCodeOnlyWhereTheRepositoryDoesNotAnsw
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not installed")
 	}
-	script, err := filepath.Abs(filepath.Join("..", "..", "images", "job", "hl-clone"))
+	script, err := filepath.Abs(filepath.Join("..", "..", "runtime", "job", "hl-clone"))
 	if err != nil {
 		t.Fatal(err)
 	}
