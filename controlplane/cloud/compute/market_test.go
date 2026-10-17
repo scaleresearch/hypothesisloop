@@ -12,6 +12,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/cloud/provider"
+	"github.com/scaleresearch/hypothesisloop/controlplane/cloud/provider/fake"
 )
 
 // The configuration allows two H100 instances and the vendor has one machine on offer: one slot
@@ -172,5 +173,32 @@ func TestAProviderWithoutAMarketReportsEverySlotNoInstanceHoldsFree(t *testing.T
 	available, _, _, labels, err := e.GetLiveAcceleratorCapacitySnapshot(context.Background())
 	if err != nil || available[h100] != 2 || labels["h100-1"][clusterapi.NodeSlotNoOfferLabel] != "" || p.Calls("Rentable") != 0 {
 		t.Fatalf("available %v, labels %v, market calls %d, %v", available, labels, p.Calls("Rentable"), err)
+	}
+}
+
+// A shape allowed more instances than one read used to ask for counts every slot the vendor has
+// a machine for, up to its max_instances.
+func TestAShapeCountsAsManyRentableSlotsAsItsMaxInstances(t *testing.T) {
+	p := fake.New()
+	cfg := testConfig(p)
+	cfg.Shapes = []Shape{testShapes[0]}
+	cfg.Shapes[0].MaxInstances = 12
+	e, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Market = func(provider.Spec) provider.Supply { return supplyOf(15) }
+	ctx := context.Background()
+
+	available, total, _, labels, err := e.GetLiveAcceleratorCapacitySnapshot(ctx)
+	if err != nil || available[h100] != 12 || total[h100] != 12 || labels["h100-11"][clusterapi.NodeSlotNoOfferLabel] != "" {
+		t.Fatalf("available %v of %v, h100-11 labels %v, %v, want all 12 slots free", available, total, labels["h100-11"], err)
+	}
+	mustCreate(t, e, job(t, "exp-1", 0, 1))
+	if available, _, _, _, err = e.GetLiveAcceleratorCapacitySnapshot(ctx); err != nil || available[h100] != 11 {
+		t.Fatalf("one rented: available %v, %v, want 11", available, err)
+	}
+	if calls := p.Calls("Rentable"); calls != 1 {
+		t.Fatalf("%d market calls, want the one read standing", calls)
 	}
 }

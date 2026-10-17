@@ -47,30 +47,36 @@ type onOffer struct {
 	why  string
 }
 
-// marketInterval is how long one read of a shape's market stands, and marketBatch the most
-// offers one read asks for. A vendor counts its searches against a quota (vast.ai allows 20000
-// offer rows a day), so each pass asking for every slot's offer spent it within the hour.
-const (
-	marketInterval = 5 * time.Minute
-	marketBatch    = 10
-)
+// marketInterval is how long one read of a shape's market stands. A vendor counts its searches
+// against a quota (vast.ai allows 20000 offer rows a day), so a read asks for no more offers than
+// the shape has slots no instance holds: a shape of max_instances N spends up to N rows a read,
+// 288N a day.
+const marketInterval = 5 * time.Minute
 
-// marketReads is the last read of each shape's market, shared by every pass. Only a read that
-// answered is kept: one that failed is asked again on the next pass.
-type marketReads struct {
-	mu    sync.Mutex
-	reads map[string]marketRead
-	// said is the reason last logged for each shape having nothing to rent, empty while it has.
-	said map[string]string
+// marketReads is the last read of each configured shape's market, shared by every pass. Each
+// shape has its own lock, so a pass waits on the vendor only for a shape another pass is reading.
+type marketReads map[string]*shapeMarket
+
+type shapeMarket struct {
+	mu sync.Mutex
+	// read is the last read that answered: one that failed is asked again on the next pass.
+	read marketRead
+	// said is the reason last logged for the shape having nothing to rent, empty while it has.
+	said string
 }
 
 type marketRead struct {
 	at    time.Time
+	asked int
 	offer onOffer
 }
 
-func newMarketReads() *marketReads {
-	return &marketReads{reads: map[string]marketRead{}, said: map[string]string{}}
+func newMarketReads(shapes []Shape) marketReads {
+	reads := make(marketReads, len(shapes))
+	for _, s := range shapes {
+		reads[s.Name] = &shapeMarket{}
+	}
+	return reads
 }
 
 // rentable is what the vendor has to rent of each shape, at the size Create rents a slot at, as
@@ -81,63 +87,80 @@ func (e *Executor) rentable(ctx context.Context, v *view) map[string]onOffer {
 	if e.market == nil || v.rentable != nil {
 		return v.rentable
 	}
-	e.reads.mu.Lock()
-	defer e.reads.mu.Unlock()
+	taken := takenSlots(v)
 	rentable := make(map[string]onOffer, len(e.shapes))
 	for _, shape := range e.shapes {
-		rentable[shape.Name] = e.onOffer(ctx, shape)
+		open := 0
+		for n := 0; n < shape.MaxInstances; n++ {
+			if !taken[slotName(shape.Name, n)] {
+				open++
+			}
+		}
+		rentable[shape.Name] = e.onOffer(ctx, shape, open)
 	}
 	v.rentable = rentable
 	return rentable
 }
 
-// onOffer reads the market of one shape, unless a read of it still stands. e.reads is locked.
-func (e *Executor) onOffer(ctx context.Context, shape Shape) onOffer {
-	if read, ok := e.reads.reads[shape.Name]; ok && time.Since(read.at) < marketInterval {
-		return read.offer
+// onOffer reads the market of one shape for up to open machines, unless a read of it still
+// stands: one within marketInterval that asked for as many, or found fewer than it asked for.
+func (e *Executor) onOffer(ctx context.Context, shape Shape, open int) onOffer {
+	if open == 0 {
+		return onOffer{}
+	}
+	m := e.reads[shape.Name]
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if r := m.read; time.Since(r.at) < marketInterval && (open <= r.asked || r.offer.left < r.asked) {
+		return r.offer
 	}
 	supply, err := e.market.Rentable(ctx, provider.Spec{
 		AcceleratorType: shape.AcceleratorType, AcceleratorCount: shape.Accelerators,
 		CPUMillis: shape.CPUMillis, MemoryBytes: shape.MemoryBytes, DiskBytes: shape.StorageBytes,
-	}, min(shape.MaxInstances, marketBatch))
+	}, open)
 	if err != nil {
 		reason := "the provider's market could not be read: " + err.Error()
-		e.sayEmpty(shape.Name, reason, "")
+		e.sayEmpty(m, shape.Name, reason, "")
 		return onOffer{why: "shape " + shape.Name + ": " + reason}
 	}
 	offer := onOffer{left: supply.Count, why: "shape " + shape.Name + ": " + supply.Why}
 	if supply.Count == 0 {
-		e.sayEmpty(shape.Name, supply.Why, supply.Detail)
+		e.sayEmpty(m, shape.Name, supply.Why, supply.Detail)
 	} else {
 		offer.why = "shape " + shape.Name + ": the shape's lower slots take the machines its market was last read to have"
-		if e.reads.said[shape.Name] != "" {
+		if m.said != "" {
 			e.log("shape %s has machines to rent again", shape.Name)
-			delete(e.reads.said, shape.Name)
+			m.said = ""
 		}
 	}
-	e.reads.reads[shape.Name] = marketRead{at: time.Now(), offer: offer}
+	m.read = marketRead{at: time.Now(), asked: open, offer: offer}
 	return offer
 }
 
-// sayEmpty logs why a shape has nothing to rent when that reason is new. e.reads is locked.
-func (e *Executor) sayEmpty(shape, reason, detail string) {
-	if e.reads.said[shape] == reason {
+// sayEmpty logs why a shape has nothing to rent when that reason is new. m is locked.
+func (e *Executor) sayEmpty(m *shapeMarket, shape, reason, detail string) {
+	if m.said == reason {
 		return
 	}
-	e.reads.said[shape] = reason
+	m.said = reason
 	if detail != "" {
 		reason += " (" + detail + ")"
 	}
 	e.log("shape %s has nothing to rent: %s", shape, reason)
 }
 
-// slotsAgainst marks the slots of v. rentable bounds how many of a shape's slots that no
-// instance holds are free, lowest index first, and nil bounds none.
-func (e *Executor) slotsAgainst(v *view, rentable map[string]onOffer) []slot {
+func takenSlots(v *view) map[string]bool {
 	taken := make(map[string]bool, len(v.instances))
 	for _, i := range v.instances {
 		taken[i.slot()] = true
 	}
+	return taken
+}
+
+// slotsAgainst marks the slots of v. rentable bounds how many of a shape's slots that no
+// instance holds are free, lowest index first, and nil bounds none.
+func (e *Executor) slotsAgainst(v *view, rentable map[string]onOffer) []slot {
+	taken := takenSlots(v)
 	var slots []slot
 	for _, shape := range e.shapes {
 		supply := rentable[shape.Name]

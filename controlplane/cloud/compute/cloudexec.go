@@ -73,7 +73,7 @@ type Executor struct {
 	provider     provider.Provider
 	// market is the provider's Market capability, nil for a vendor that has none.
 	market    provider.Market
-	reads     *marketReads
+	reads     marketReads
 	offerWait time.Duration
 	startup   time.Duration
 	log       func(format string, args ...any)
@@ -104,7 +104,7 @@ func New(cfg Config) (*Executor, error) {
 	market, _ := rented.(provider.Market)
 	return &Executor{
 		market:       market,
-		reads:        newMarketReads(),
+		reads:        newMarketReads(cfg.Shapes),
 		clusterID:    cfg.ClusterID,
 		prefix:       cfg.prefix(),
 		apiURL:       cfg.APIURL,
