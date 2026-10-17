@@ -225,6 +225,16 @@ func (v *vocabulary) section(comment string) {
 
 func (v *vocabulary) number(name string, value int) { fmt.Fprintf(v, "%s = %d\n", name, value) }
 
+// numbers writes values as the frozenset name, sorted.
+func (v *vocabulary) numbers(name string, values []int) {
+	sorted := slices.Sorted(slices.Values(values))
+	written := make([]string, len(sorted))
+	for i, value := range sorted {
+		written[i] = strconv.Itoa(value)
+	}
+	fmt.Fprintf(v, "%s = frozenset({%s})\n", name, strings.Join(written, ", "))
+}
+
 func (v *vocabulary) text(name, value string) {
 	fmt.Fprintf(v, "%s = %s\n", name, strconv.Quote(value))
 }
@@ -293,6 +303,9 @@ TestTheHarnessVocabularyIsUnchanged -update). Change those definitions, never th
 	v.set("EVENT_KINDS", kinds)
 	v.each("EVENT_", kinds)
 	v.text("WATCH_RESET", platformapi.ResetKind)
+
+	v.section("What a proxy answers in the platform's place when it cannot reach it, with no JSON (platformapi.GatewayStatuses).")
+	v.numbers("GATEWAY_STATUSES", platformapi.GatewayStatuses)
 
 	v.section("A token the platform derives, and the kinds of scope it names that run a harness (scope).")
 	v.text("DERIVED_TOKEN_PREFIX", scope.Prefix)

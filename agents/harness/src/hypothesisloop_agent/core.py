@@ -321,7 +321,8 @@ async def run_over(setup: RunSetup) -> str | None:
     """Why this process has no run on the platform to work in, None while it has one: the one
     place the harness asks, and so what starts and ends the outage clock (outage.py). The
     platform ended the run, or it refuses the token, which it does once the wind-down after the
-    end has passed. A platform that does not answer is waited out."""
+    end has passed. A platform that does not answer is waited out, and one that answers with
+    any other refusal is asked again at the next read."""
     try:
         # A planner's run ends with its answer and a change of the goal starts it again with its
         # session.
@@ -329,6 +330,10 @@ async def run_over(setup: RunSetup) -> str | None:
     except api_client.APIError as e:
         if e.status == 401:
             return f"the platform refuses this token, so its run is over ({e.body.strip()[:200]})"
+        if not e.unreachable:
+            outage.answered()
+            log.warning("the platform did not say whether the run goes on (%s): asking again", e)
+            return None
         if not outage.under_way():
             log.warning("the platform did not say whether the run goes on (%s): waiting", e)
         outage.unanswered()

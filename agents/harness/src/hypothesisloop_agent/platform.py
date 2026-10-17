@@ -60,6 +60,9 @@ EVENT_QUOTA_CHANGED = "quota.changed"
 EVENT_STAGE_BOUNDARY = "stage.boundary"
 WATCH_RESET = "watch.reset"
 
+# What a proxy answers in the platform's place when it cannot reach it, with no JSON (platformapi.GatewayStatuses).
+GATEWAY_STATUSES = frozenset({502, 503, 504})
+
 # A token the platform derives, and the kinds of scope it names that run a harness (scope).
 DERIVED_TOKEN_PREFIX = "hls_"
 SCOPE_AGENT = "agent"

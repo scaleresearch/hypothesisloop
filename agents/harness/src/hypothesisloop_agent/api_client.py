@@ -10,6 +10,8 @@ from typing import Any
 
 import httpx
 
+from hypothesisloop_agent import platform
+
 
 class APIError(Exception):
     """status 0 when no HTTP answer came back: unreachable, reset or timed out."""
@@ -18,6 +20,20 @@ class APIError(Exception):
         super().__init__(f"{method} {path} -> HTTP {status}: {body[:500]}")
         self.status = status
         self.body = body
+
+    @property
+    def unreachable(self) -> bool:
+        """Whether the platform gave no answer: none came back, or a proxy answered one of
+        GATEWAY_STATUSES in its place, with no JSON. hl reads an outage by the same rule."""
+        if self.status == 0:
+            return True
+        if self.status not in platform.GATEWAY_STATUSES:
+            return False
+        try:
+            json.loads(self.body)
+        except ValueError:
+            return True
+        return False
 
 
 _TIMEOUT_S = 15.0

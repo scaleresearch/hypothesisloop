@@ -9,8 +9,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
+
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 )
 
 // Client talks to the controlplane HTTP API at BaseURL, as whoever Token names.
@@ -47,8 +50,7 @@ func unreachable(method string) string {
 // notThePlatforms is the Body of an answer that is no JSON, which the platform's API never sends,
 // said in one line in place of what may be a whole HTML page.
 func notThePlatforms(method string, status int) string {
-	switch status {
-	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+	if slices.Contains(platformapi.GatewayStatuses, status) {
 		return unreachable(method)
 	}
 	return "the answer is no JSON, so it is none of the platform's API: something in front of the platform answered in its place"
