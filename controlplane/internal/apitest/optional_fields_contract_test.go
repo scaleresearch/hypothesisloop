@@ -62,6 +62,8 @@ func openAPISpec(t *testing.T) map[string]any {
 	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", agenttypes.PlatformRules, auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	platformExperiments := platformexperiments.NewPlatformExperimentsHandler(nil, worldRepositories{}, worldPlanning, nil).WithAgentLaunch(platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: "contract-test-signing-secret", MaxHosted: 20})
 	platformexperiments.RegisterHuma(doc, platformexperiments.NewHandler(nil, nil), platformExperiments)
+	httpapi.RegisterSituation(doc, nil, zap.NewNop())
+	platformexperiments.RegisterBudgetHuma(doc, platformExperiments)
 	httpapi.RegisterMessages(doc, nil, zap.NewNop())
 	platformexperiments.RegisterAgentsHuma(doc, platformExperiments, struct{ platformexperiments.Hypotheses }{})
 	platformexperiments.RegisterPlanningHuma(doc, platformExperiments)

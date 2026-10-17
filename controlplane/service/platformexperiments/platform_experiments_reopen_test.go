@@ -55,7 +55,7 @@ func reopenRouter(t *testing.T, store *reopenStore, caller auth.Principal) http.
 	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{PlatformExperiments: tenancy}), zap.NewNop())
 	handler := NewPlatformExperimentsHandler(newSignupTestService(t, store), &fakeRepositories{}, testPlanning, zap.NewNop()).
 		WithAgentLaunch(AgentLaunch{Hosting: true, DefaultModel: "model-default", CoordinatorModel: "coordinator-default", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted})
-	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), handler)
+	registerHuma(doc, NewHandler(nil, zap.NewNop()), handler)
 	return r
 }
 

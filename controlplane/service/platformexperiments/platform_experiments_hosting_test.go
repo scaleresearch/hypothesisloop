@@ -45,7 +45,7 @@ func hostingAPI(t *testing.T, repos *fakeRepositories) (*hostingStore, func(body
 	router := authtest.Router(ownerOfA)
 	doc := apidocs.New(router, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
 	handler := NewPlatformExperimentsHandler(svc, repos, testPlanning, zap.NewNop()).WithGitProxy("https://api.test/git").WithAgentLaunch(AgentLaunch{Hosting: true, DefaultModel: "model-default", CoordinatorModel: "coordinator-default", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted})
-	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), handler)
+	registerHuma(doc, NewHandler(nil, zap.NewNop()), handler)
 	return store, func(body map[string]any) (int, map[string]any) {
 		t.Helper()
 		var payload bytes.Buffer
@@ -185,7 +185,7 @@ func TestACoordinatorsTokenChangesTheDescriptionAndNothingARunsCostFollowsFrom(t
 		}
 		router := authtest.Router(authtest.As(caller))
 		doc := apidocs.New(router, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
-		RegisterHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(svc, &fakeRepositories{}, testPlanning, zap.NewNop()).WithGitProxy("https://api.test/git").WithAgentLaunch(AgentLaunch{Hosting: true, DefaultModel: "m", CoordinatorModel: "c", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted}))
+		registerHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(svc, &fakeRepositories{}, testPlanning, zap.NewNop()).WithGitProxy("https://api.test/git").WithAgentLaunch(AgentLaunch{Hosting: true, DefaultModel: "m", CoordinatorModel: "c", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted}))
 		var payload bytes.Buffer
 		if err := json.NewEncoder(&payload).Encode(body); err != nil {
 			t.Fatal(err)

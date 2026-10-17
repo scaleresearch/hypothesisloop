@@ -253,6 +253,8 @@ func newWorldAPI(t *testing.T) *worldAPI {
 	api.docs[""] = doc
 	peHandler := platformexperiments.NewPlatformExperimentsHandler(nil, worldRepositories{}, worldPlanning, logger).WithAgentLaunch(platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: worldSecret, MaxHosted: 20})
 	platformexperiments.RegisterHuma(doc, platformexperiments.NewHandler(nil, logger), peHandler)
+	httpapi.RegisterSituation(doc, nil, logger)
+	platformexperiments.RegisterBudgetHuma(doc, peHandler)
 	httpapi.RegisterMessages(doc, nil, logger)
 	platformexperiments.RegisterAgentsHuma(doc, peHandler, worldGraph{world: w})
 	platformexperiments.RegisterPlanningHuma(doc, peHandler)

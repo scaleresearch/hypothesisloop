@@ -35,7 +35,10 @@ func TestSmoke(t *testing.T) {
 	// every operation a caller can reach at the single base URL.
 	r := authtest.Router(authtest.Staff)
 	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", agenttypes.PlatformRules, auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	platformexperiments.RegisterHuma(doc, platformexperiments.NewHandler(nil, nil), platformexperiments.NewPlatformExperimentsHandler(nil, worldRepositories{}, worldPlanning, nil))
+	peHandler := platformexperiments.NewPlatformExperimentsHandler(nil, worldRepositories{}, worldPlanning, nil)
+	platformexperiments.RegisterHuma(doc, platformexperiments.NewHandler(nil, nil), peHandler)
+	httpapi.RegisterSituation(doc, nil, nil)
+	platformexperiments.RegisterBudgetHuma(doc, peHandler)
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(
 		scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{})))
 	registry.RegisterHuma(doc, registry.NewHandler(nil, nil))

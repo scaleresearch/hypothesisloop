@@ -225,7 +225,7 @@ func TestAQuotaAskedForBeforeTheStartIsRefusedWithTheReadersNextStep(t *testing.
 	store.signups = []domain.AgentSignup{{AgentID: "dana", Name: "Researcher 1", Role: domain.SignupRoleCompetitor}}
 	r := authtest.Router(authtest.As(waitingAgent("dana")))
 	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(agentsTestPlacement), zap.NewNop())
-	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(newSignupTestService(t, store), store, testPlanning, zap.NewNop()))
+	registerHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(newSignupTestService(t, store), store, testPlanning, zap.NewNop()))
 
 	code, out := call(t, r, "GET", "/platform-experiments/pe-1/quotas/dana", "")
 	message, _ := out["message"].(string)
@@ -245,7 +245,7 @@ func TestAPlannersQuotaIsRefusedSayingItNeedsNone(t *testing.T) {
 	store.signups = []domain.AgentSignup{{AgentID: "pat", Name: "Planner", Role: domain.SignupRolePlanner}}
 	r := authtest.Router(authtest.As(waitingAgent("pat")))
 	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(agentsTestPlacement), zap.NewNop())
-	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(newSignupTestService(t, store), store, testPlanning, zap.NewNop()))
+	registerHuma(doc, NewHandler(nil, zap.NewNop()), NewPlatformExperimentsHandler(newSignupTestService(t, store), store, testPlanning, zap.NewNop()))
 
 	code, out := call(t, r, "GET", "/platform-experiments/pe-1/quotas/pat", "")
 	message, _ := out["message"].(string)

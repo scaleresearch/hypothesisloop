@@ -648,7 +648,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		return &struct{ Body *PlatformExperimentResults }{Body: results}, nil
 	})
 
-	registerSituationHuma(doc, peh)
+}
+
+// RegisterBudgetHuma registers the reads of a platform experiment's health, quotas, stages and
+// capacity, and its summary.
+func RegisterBudgetHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
+	access := doc.Access
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-platform-experiment-health", Method: "GET", Path: "/platform-experiments/{id}/health",

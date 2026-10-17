@@ -47,7 +47,7 @@ func planningAPI(t *testing.T, store PlatformExperimentsStore, caller auth.Princ
 	if drafts, ok := store.(*draftStore); ok {
 		svc.reachable = func(context.Context, string) (map[string][]domain.Cluster, error) { return drafts.reachable, nil }
 	}
-	RegisterHuma(doc, NewHandler(nil, zap.NewNop()), handler)
+	registerHuma(doc, NewHandler(nil, zap.NewNop()), handler)
 	RegisterPlanningHuma(doc, handler)
 	return svc, func(method, path string, body any) (int, map[string]any) {
 		t.Helper()
