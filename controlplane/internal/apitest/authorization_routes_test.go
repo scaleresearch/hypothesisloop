@@ -499,7 +499,7 @@ var cases = []struct {
 	{"a member creating a key of the whole org", member, "POST", "/orgs/org-a/api-keys", `{"name":"n"}`, 403},
 	{"an owner sharing the org's cluster with every org", "user", "PATCH", "/orgs/org-a/clusters/cluster-a", `{"shared":true}`, 403},
 	{"an org key sharing the org's cluster", "org key", "PATCH", "/orgs/org-a/clusters/cluster-a", `{"shared":true,"stuck_pending_timeout_seconds":5}`, 403},
-	{"staff sharing a cluster", "staff", "PATCH", "/orgs/org-a/clusters/cluster-a", `{"shared":true}`, reached},
+	{"staff sharing an org's own cluster", "staff", "PATCH", "/orgs/org-a/clusters/cluster-a", `{"shared":true}`, http.StatusUnprocessableEntity},
 	{"a member changing a cluster's settings", member, "PATCH", "/orgs/org-a/clusters/cluster-a", `{"stuck_pending_timeout_seconds":5}`, 403},
 	{"an owner changing the settings of another org's cluster", "user", "PATCH", "/orgs/org-a/clusters/cluster-b", `{"stuck_pending_timeout_seconds":5}`, 404},
 	{"an owner ordering the clusters of an org that is not theirs", "user", "PUT", "/orgs/org-b/clusters/order", `{"names":["cluster-b"]}`, 404},
