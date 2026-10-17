@@ -10,7 +10,6 @@ set -euo pipefail
 CONTEXT_NAME="k3s-local"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/node.sh"
-source "${SCRIPT_DIR}/../lib/auth.sh"
 
 # k3s pulls images from the local registry (docker-compose.yml) over this address, not
 # localhost, since the VM/native k3s process is not in the host's network namespace.
@@ -204,21 +203,3 @@ echo "${HOST_ADDRESS}" > "${SCRIPT_DIR}/../.host-address"
 echo "==> Cluster ready. Context: ${CONTEXT_NAME}"
 kubectl --context "${CONTEXT_NAME}" get nodes
 
-# Install the cluster-agent bundle (node-agent DaemonSet + cluster-agent Deployment — no
-# external queueing operator) onto the freshly bootstrapped local cluster, so `make k3s-up`
-# produces a fully working local dev environment in one command.
-echo "==> Installing cluster-agent bundle onto local cluster..."
-STAGE_T0=$(date +%s)
-CLUSTER_NAME="local" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
-  API_URL="http://host.containers.internal:8081" METRICS_URL="http://host.containers.internal:8084" \
-  REGISTRY_URL="${HOST_ADDRESS}:5000" RUNTIME_TOKEN="$(lib_runtime_token local)" \
-  bash "${SCRIPT_DIR}/../../deploy/charts/hypothesisloop-cluster-agent/install.sh"
-echo "==> cluster-agent stage: $(( $(date +%s) - STAGE_T0 ))s"
-
-# Provision the schedulable dev/test nodes (see dev-nodes-up.sh) — on macOS/laptop dev they're the
-# only worker capacity there is, since the control-plane node above stays tainted no-workload.
-# Set NODE_COUNT=0 to leave the cluster control-plane-only. Idempotent — safe on every
-# `make k3s-up`, including re-runs against an already-provisioned cluster.
-STAGE_T0=$(date +%s)
-bash "${SCRIPT_DIR}/dev-nodes-up.sh"
-echo "==> dev-nodes-up stage: $(( $(date +%s) - STAGE_T0 ))s"

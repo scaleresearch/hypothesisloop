@@ -15,33 +15,18 @@
 #     labels to a local file for real Node Feature Discovery to merge in — NFD isn't installed
 #     here, so this script applies GFD's output to the Node object directly instead of pulling
 #     in all of NFD for one label.
-#   - helm, then the cluster-agent chart (deploy/charts/hypothesisloop-cluster-agent/install.sh).
+#
+# The cluster agent is not part of this: register the cluster on the control plane and attach it
+# with make cluster-agent-up.
 #
 # Confirmed working end-to-end against a real RTX 4090 (see tests/e2e/test_nvidia_hardware.py's
 # k3s leg): 164+ TFLOPS fp16 matmul via a real k8s-scheduled pod, real device-plugin GPU
 # passthrough, real metrics.
 #
-# Required env vars (no defaults — this platform always runs the control plane on a different
-# host than the GPU node itself, so there's no "just use localhost" fallback):
-#   API_URL, METRICS_URL — reachable from this host (see
-#   localdev/local-tunnels/ if the control plane is local and this is a remote rented box).
-#   RUNTIME_TOKEN — the token for cluster k3s-nvidia: `make runtime-token CLUSTER=k3s-nvidia` on
-#   the control-plane host prints it once the cluster is registered there (OWNED_COMPUTE_CLUSTERS in
-#   its .env, or hl cluster add).
-#   TAG — image tag the cluster-agent/node-agent images are built and deployed under.
-#
 # Idempotent: safe to re-run.
 set -euo pipefail
 
 CONTEXT_NAME="k3s-nvidia"
-CLUSTER_NAME="k3s-nvidia"
-
-: "${API_URL:?set API_URL (e.g. a localdev/local-tunnels/ URL reaching :8081)}"
-: "${METRICS_URL:?set METRICS_URL (e.g. a localdev/local-tunnels/ URL reaching :8084)}"
-: "${RUNTIME_TOKEN:?set RUNTIME_TOKEN (make runtime-token CLUSTER=k3s-nvidia on the control-plane host)}"
-: "${TAG:?set TAG (e.g. the git SHA of this checkout)}"
-export TAG
-REGISTRY="localhost:5000"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/node.sh"
@@ -142,17 +127,5 @@ echo "    node labeled nvidia.com/gpu.product=${GPU_PRODUCT}"
 grep -qFi "nvidia.com/gpu.product=${GPU_PRODUCT}" "${ROOT}/controlplane/settings/hypothesisloop.yaml" \
   || echo "    WARNING: ${GPU_PRODUCT} has no acch_rate in controlplane/settings/hypothesisloop.yaml — add one or jobs of this type can never be admitted (matching is case-insensitive, see domain.AcceleratorType.MatchesLabels, so exact casing here doesn't matter)."
 
-echo "==> Building cluster-agent/node-agent images (this host, --docker)..."
-for img in cluster-agent node-agent; do
-  docker build -f "${ROOT}/runtime/k8s/build/Dockerfile.${img}" -t "${REGISTRY}/hypothesisloop-${img}:${TAG}" "${ROOT}" >/dev/null
-done
-
-lib_ensure_helm
-echo "==> Installing cluster-agent bundle (API: ${API_URL})..."
-CLUSTER_NAME="${CLUSTER_NAME}" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
-  API_URL="${API_URL}" METRICS_URL="${METRICS_URL}" RUNTIME_TOKEN="${RUNTIME_TOKEN}" REGISTRY_URL="${REGISTRY}" \
-  bash "${ROOT}/deploy/charts/hypothesisloop-cluster-agent/install.sh"
-
-echo "==> Cluster ready. Context: ${CONTEXT_NAME}  Cluster name: ${CLUSTER_NAME}"
-echo
-bash "${SCRIPT_DIR}/status.sh"
+echo "==> Cluster ready. Context: ${CONTEXT_NAME}"
+echo "    Register it there (OWNED_COMPUTE_CLUSTERS in .env, or hl cluster add) and attach it with make cluster-agent-up CLUSTER=k3s-nvidia."

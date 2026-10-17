@@ -191,5 +191,3 @@ fi
 
 echo "==> Cluster ready. Context: ${CONTEXT_NAME}"
 echo "    Register it there (OWNED_COMPUTE_CLUSTERS in .env, or hl cluster add) and attach it with make cluster-agent-up CLUSTER=<name>."
-echo
-bash "${SCRIPT_DIR}/status.sh"

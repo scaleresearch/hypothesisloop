@@ -1,4 +1,4 @@
-.PHONY: e2e tt-e2e test agent-test test-github-live
+.PHONY: e2e tt-e2e nvidia-e2e test agent-test test-github-live
 
 # The e2e suite against the stack `make dev` runs and the local k3s cluster, in one command
 # (localdev/e2e.sh). It refuses a stack that rents compute (make dev-hosted) and one somebody
@@ -9,7 +9,7 @@
 e2e:
 	bash localdev/e2e.sh $(E2E_ARGS)
 
-# What a suite run on another host's stack (tt-e2e) is started with: the API's address, a staff
+# What a suite run on another host's stack (tt-e2e, nvidia-e2e) is started with: the API's address, a staff
 # token, and what the suite's hl-admin calls read. Refused on a stack that rents, as make e2e is.
 E2E_API_URL = $${API_URL:-http://localhost:$${API_HOST_PORT:-8081}}
 E2E_ENV = bash $(CURDIR)/localdev/dev.sh require-local && . $(CURDIR)/localdev/lib/auth.sh && export API_URL="$(E2E_API_URL)" && export HL_TOKEN="$${HL_TOKEN:-$$(lib_hl_admin token staff)}" &&
@@ -28,6 +28,10 @@ $(addprefix image-,$(TEST_IMAGES)): image-%: check-tag
 # Run on the box with the REGISTRY and TAG it was attached with, so its nodes pull the image just pushed.
 tt-e2e: render-settings image-tenstorrent-workload
 	bash -c '$(E2E_ENV) TT_WORKLOAD_IMAGE="$(REGISTRY)/hypothesisloop-tenstorrent-workload:$(TAG)" bash localdev/k3s-tenstorrent/run-e2e.sh'
+
+# tests/e2e/test_nvidia_hardware.py on the box make nvidia-up bootstrapped, with its bare-node leg.
+nvidia-e2e: render-settings
+	bash -c '$(E2E_ENV) cd tests && NVIDIA_K3S_CONTEXT=$(NVIDIA_CONTEXT) uv run pytest e2e/test_nvidia_hardware.py -m hardware -v $(E2E_ARGS)'
 
 # The graph tests get a throwaway Memgraph: community has one database, so they would otherwise
 # write next to the stack's own graph.
