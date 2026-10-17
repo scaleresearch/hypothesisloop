@@ -3,9 +3,9 @@
 Keeps one build of this project's images on this machine: in podman's image store and in the dev
 registry, every tag of a hypothesisloop image is removed except the ones in use.
 
-In use are: the tag `make images` last pushed to the dev registry (localdev/.image-tag), the tag
+In use are: the tag `make local-images` last pushed to the dev registry (localdev/.image-tag), the tag
 the local cluster's runtime is installed with, the deployed tag (IMAGE_TAG of .env), every TAG
-named here (a publish names the one it just pushed), and `latest`. The chart is tagged
+named here (a build names the one it just pushed). The chart is tagged
 <version>_<tag> and follows its tag.
 
 Nothing else is touched: an image that is not this project's, an image a container was created
@@ -50,7 +50,7 @@ def tags_in_use(named: list[str]) -> set[str]:
 
 
 def kept(tag: str, in_use: set[str]) -> bool:
-    return tag == "latest" or tag in in_use or any(tag.endswith("_" + t) for t in in_use)
+    return tag in in_use or any(tag.endswith("_" + t) for t in in_use)
 
 
 def prune_store(in_use: set[str], dry_run: bool) -> None:
@@ -63,7 +63,7 @@ def prune_store(in_use: set[str], dry_run: bool) -> None:
                 by_repository.setdefault(repository, set()).add((tag, image["Id"].removeprefix("sha256:")))
     removed = 0
     for repository, tags in sorted(by_repository.items()):
-        if not any(tag != "latest" and kept(tag, in_use) for tag, _ in tags):
+        if not any(kept(tag, in_use) for tag, _ in tags):
             continue
         for tag, image_id in sorted(tags):
             if kept(tag, in_use) or image_id in held:
@@ -98,7 +98,7 @@ def prune_registry(in_use: set[str], dry_run: bool) -> None:
         for tag in json.loads(listed).get("tags") or []:
             headers, _ = registry("HEAD", address, f"{repository}/manifests/{tag}")
             digests[tag] = headers["Docker-Content-Digest"]
-        if not any(tag != "latest" and kept(tag, in_use) for tag in digests):
+        if not any(kept(tag, in_use) for tag in digests):
             continue
         # A manifest is deleted by its digest, with every tag on it, so one a kept tag names stays.
         keep = {digest for tag, digest in digests.items() if kept(tag, in_use)}

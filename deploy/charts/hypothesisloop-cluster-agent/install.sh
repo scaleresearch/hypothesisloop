@@ -17,7 +17,7 @@
 #   RUNTIME_TOKEN       -> runtimeToken (required). Handed to helm on stdin, so it is never in a
 #                          process's arguments.
 #   REGISTRY_URL        -> images.registry (required), reachable from every node
-#   TAG                 -> images.tag (required), the TAG `make images` pushed
+#   TAG                 -> images.tag (required), the TAG `make publish` or `make local-images` pushed
 #   AUTOSCALER_ENABLED  -> autoscalerEnabled (default: false)
 #   BUILDER             -> builder.enabled (default: false). true also builds environments in this
 #                          cluster, on a rootless BuildKit beside the cluster-agent
@@ -49,7 +49,7 @@ API_URL="${API_URL:?API_URL must be the control-plane API base URL, reachable fr
 METRICS_URL="${METRICS_URL:?METRICS_URL must be the metrics-service base URL, reachable from every node in this cluster}"
 RUNTIME_TOKEN="${RUNTIME_TOKEN:?RUNTIME_TOKEN must be the runtime token this cluster was given when it was registered}"
 REGISTRY_URL="${REGISTRY_URL:?REGISTRY_URL must be the registry the agent images are pulled from, as every node reaches it}"
-TAG="${TAG:?TAG must name the image tag make images pushed}"
+TAG="${TAG:?TAG must name the image tag make publish or make local-images pushed}"
 AUTOSCALER_ENABLED="${AUTOSCALER_ENABLED:-false}"
 KUBECONFIG_PATH="${KUBECONFIG_PATH:-${HOME}/.kube/config}"
 KUBE_CONTEXT="${KUBE_CONTEXT:-}"

@@ -103,7 +103,7 @@ services:
       retries: 30
 
   control-service:
-    image: ${REGISTRY:?run through make, which names the registry}/hypothesisloop-control-service:${TAG:?TAG must name the image tag make images pushed}
+    image: ${REGISTRY:?run through make, which names the registry}/hypothesisloop-control-service:${TAG:?TAG must name the image tag make local-images pushed}
     # The mounted Google credentials file is readable by its owner alone, who is root here.
     user: "0"
     restart: unless-stopped
@@ -138,7 +138,7 @@ services:
         condition: service_healthy
 
   metrics-service:
-    image: ${REGISTRY:?run through make, which names the registry}/hypothesisloop-metrics-service:${TAG:?TAG must name the image tag make images pushed}
+    image: ${REGISTRY:?run through make, which names the registry}/hypothesisloop-metrics-service:${TAG:?TAG must name the image tag make local-images pushed}
     restart: unless-stopped
     env_file:
       - path: ../.run/env/metrics-service.env

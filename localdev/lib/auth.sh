@@ -169,7 +169,7 @@ lib_render_settings() {
     echo "render-settings: .env does not set UI_ORIGIN, the one browser origin allowed to call the API (.env.example says what it is)" >&2
     return 1
   fi
-  # The local runtimes install the images `make images` pushes to the dev registry, under the
+  # The local runtimes install the images `make local-images` pushes to the dev registry, under the
   # tag of this tree (make's own TAG when make runs this).
   local image_tag="${TAG:-}"
   if [[ -z "${image_tag}" ]]; then

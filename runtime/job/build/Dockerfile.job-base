@@ -1,5 +1,5 @@
 # BASE is the image the job's own tools are added to: Python alone for the bare job image, or an
-# upstream framework image (Debian or Ubuntu) for one of the others `make job-images` builds.
+# upstream framework image (Debian or Ubuntu) for one of the others `make publish` builds.
 ARG BASE=python:3.13-slim
 
 # A job image without the platform's tools, hl and hl-clone: what an environment, a repository's

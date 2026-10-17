@@ -157,7 +157,7 @@ accounts:
 #
 #   metrics_url   the metrics service.
 #   registry      the registry the runtime's images are pulled from (host[:port][/path], no
-#                 scheme): where `make images REGISTRY=...` pushed.
+#                 scheme): where `make publish REGISTRY=...` pushed.
 #   image_tag     the tag of those images. One deployment runs one tag: the control plane's own.
 #                 A cluster whose agent reports another is shown with version_skew.
 #   registry_plain_http  true when the registry serves plain HTTP with no TLS, as the local dev
@@ -176,8 +176,8 @@ runtimes:
 #
 #   name        what the image is called in `hl capacity`.
 #   repository  an image this deployment builds and pushes: its name under runtimes.registry,
-#               at runtimes.image_tag. `make images` builds the bare one, `make job-images` the
-#               others, each the upstream image named below with hl, hl-clone, git and uv added
+#               at runtimes.image_tag. `make publish` builds the bare one and the others,
+#               each the upstream image named below with hl, hl-clone, git and uv added
 #               (runtime/job/build/Dockerfile.job).
 #   image       a whole reference instead, for an image built elsewhere. One of the two.
 #   environment_base  beside repository, the same image without hl and hl-clone, under

@@ -14,8 +14,19 @@ e2e:
 E2E_API_URL = $${API_URL:-http://localhost:$${API_HOST_PORT:-8081}}
 E2E_ENV = bash $(CURDIR)/localdev/dev.sh require-local && . $(CURDIR)/localdev/lib/auth.sh && export API_URL="$(E2E_API_URL)" && export HL_TOKEN="$${HL_TOKEN:-$$(lib_hl_admin token staff)}" &&
 
+# The workloads the tests' jobs run, built and pushed as the product's images are (push_image in
+# deploy/deploy.mk) and never part of a publish. make local-images builds workload for make e2e.
+TEST_IMAGES := workload tenstorrent-workload
+IMAGE_DOCKERFILE_workload := tests/workloads/generic/Dockerfile.train
+IMAGE_CONTEXT_workload := tests/workloads/generic
+IMAGE_DOCKERFILE_tenstorrent-workload := tests/workloads/tenstorrent/Dockerfile.train
+IMAGE_CONTEXT_tenstorrent-workload := tests/workloads/tenstorrent
+.PHONY: $(addprefix image-,$(TEST_IMAGES))
+$(addprefix image-,$(TEST_IMAGES)): image-%: check-tag
+	$(call push_image,$*)
+
 # Run on the box with the REGISTRY and TAG it was attached with, so its nodes pull the image just pushed.
-tt-e2e: render-settings tt-hardware-image
+tt-e2e: render-settings image-tenstorrent-workload
 	bash -c '$(E2E_ENV) TT_WORKLOAD_IMAGE="$(REGISTRY)/hypothesisloop-tenstorrent-workload:$(TAG)" bash localdev/k3s-tenstorrent/run-e2e.sh'
 
 # The graph tests get a throwaway Memgraph: community has one database, so they would otherwise

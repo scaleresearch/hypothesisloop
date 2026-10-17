@@ -9,6 +9,21 @@ registry-up:
 	$(COMPOSE) up -d registry
 	$(call await,the dev registry,curl -fsS -o /dev/null http://$(REGISTRY_PUBLISH_IP):5000/v2/)
 
+# The local stack's own build, apart from publish: the images the compose control plane and the
+# local cluster run, and the workload the e2e tests' jobs run, pushed to the dev registry under
+# TAG. publish cannot serve here: its UI image needs a sign-in service the local stack does not
+# build against (local development serves the UI with `npm run dev`), its framework job images
+# pull gigabytes, and nothing local installs a published chart.
+# IMAGE_TAG_FILE hands TAG to the e2e tests, whose jobs must pin it. It is written only by a push
+# to the dev registry: the tests pull from there.
+LOCAL_IMAGES := control-service metrics-service node-agent cluster-agent bare-agent job-base job workload
+locked-local-images: check-tag $(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),registry-up)
+	$(GO_VENDOR)
+	$(MAKE) -j1 --no-print-directory $(addprefix image-,$(LOCAL_IMAGES)) || { rm -rf vendor; exit 1; }
+	rm -rf vendor
+	$(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),echo "$(TAG)" > $(IMAGE_TAG_FILE))
+	$(MAKE) prune-images TAGS="$(TAG)"
+
 # One build of this project's images stays on this machine: every other tag leaves podman's
 # image store and the dev registry (localdev/prune-images.py says what counts as in use). Each
 # target that builds ends here. TAGS names tags to keep besides those.
@@ -16,7 +31,7 @@ prune-images:
 	python3 localdev/images-lock.py python3 localdev/prune-images.py $(TAGS)
 
 # Each compose service reads its keys from the environment file render-settings writes.
-controlplane-up: registry-up render-settings images
+controlplane-up: registry-up render-settings local-images
 	$(COMPOSE) up -d
 	$(call await,the control service,curl -fsS -o /dev/null http://localhost:$${API_HOST_PORT:-8081}/health)
 	$(call await,the metrics service,curl -fsS -o /dev/null http://localhost:8084/health)
@@ -96,7 +111,7 @@ controlplane-destroy:
 # deploy/charts/hypothesisloop-cluster-agent/install.sh itself) and provisions the dev nodes (see k3s-dev-nodes-up below),
 # so this target alone produces a fully working local dev cluster. Set NODE_COUNT=0 to stay
 # control-plane only.
-k3s-up: render-settings images
+k3s-up: render-settings local-images
 	bash localdev/k3s-macos/install.sh
 
 # Unlike controlplane-down, this one IS destructive: the k3s cluster's own state (etcd/sqlite,
@@ -131,7 +146,7 @@ full-start:
 # registry and installs the runtime on the local cluster under the new TAG. Needed after a change
 # under runtime/k8s, tests/workloads/generic or a package those binaries compile in, and before
 # the first `make e2e`. A control plane change needs `make dev-api` and no image.
-reload: stack-not-held render-settings images
+reload: stack-not-held render-settings local-images
 	bash localdev/k3s-macos/reload.sh
 	$(MAKE) prune-images
 
@@ -159,15 +174,6 @@ tt-down:
 tt-dev-nodes-up:
 	bash localdev/k3s-tenstorrent/dev-nodes-up.sh
 
-# Builds and pushes the Tenstorrent hardware workload image to $(REGISTRY) -- the Tenstorrent
-# host's k3s node pulls it normally (registries.yaml, see localdev/lib/node.sh), same as every other
-# image; no more local save/import.
-locked-tt-hardware-image: check-tag
-	podman build --platform $(IMAGE_PLATFORM) -f tests/workloads/tenstorrent/Dockerfile.train -t $(REGISTRY)/hypothesisloop-tenstorrent-workload:$(TAG) tests/workloads/tenstorrent/
-	podman tag $(REGISTRY)/hypothesisloop-tenstorrent-workload:$(TAG) $(REGISTRY)/hypothesisloop-tenstorrent-workload:latest
-	podman push --tls-verify=$(REGISTRY_TLS_VERIFY) $(REGISTRY)/hypothesisloop-tenstorrent-workload:$(TAG)
-	podman push --tls-verify=$(REGISTRY_TLS_VERIFY) $(REGISTRY)/hypothesisloop-tenstorrent-workload:latest
-
 # Removes the fake nodes; the host's own node is left as it is.
 tt-dev-nodes-down:
 	bash localdev/k3s-tenstorrent/dev-nodes-down.sh
@@ -191,10 +197,10 @@ git-repository:
 	  { test "$$git_host" = local || { echo "make git-repository: this stack keeps its code on GitHub (GIT_HOST_PROVIDER=$$git_host in .env)" >&2; exit 1; }; } && \
 	  git init -q --bare "$$HL_GIT_ROOT/$(NAME).git" && echo "$(NAME).git"'
 
-# The images a hosted run uses, built on BUILDER (an ssh host with docker buildx, linux/amd64) and
-# pushed from there to the registry of .env, so none is uploaded from this machine
-# (localdev/images-remote.sh). Builds HEAD and prints the IMAGE_TAG to set.
-# Usage: make images-remote BUILDER=<ssh host> [IMPORT=true] [FRAMEWORK_JOBS=true] [IMAGES="<name>..."] [SSH_OPTIONS=...]
-images-remote:
-	@test -n "$(BUILDER)" || { echo "usage: make images-remote BUILDER=<ssh host> [IMPORT=true] [FRAMEWORK_JOBS=true] [IMAGES=...]" >&2; exit 1; }
-	@IMAGES="$(IMAGES)" SSH_OPTIONS="$(SSH_OPTIONS)" bash localdev/images-remote.sh "$(BUILDER)" $(if $(filter true,$(IMPORT)),--import) $(if $(filter true,$(FRAMEWORK_JOBS)),$(JOB_IMAGE_BASES))
+# make publish run on BUILDER (an ssh host with docker buildx, linux/amd64), pushing to the
+# registry of .env, so no image is uploaded from this machine (localdev/images-remote.sh). Publishes
+# HEAD and prints the IMAGE_TAG to set. IMPORT=true also loads every image into BUILDER's k3s.
+# Usage: make images-remote BUILDER=<ssh host> [IMPORT=true] [SSH_OPTIONS=...] NEXT_PUBLIC_...=... (as make publish)
+images-remote: check-ui-build-args
+	@test -n "$(BUILDER)" || { echo "usage: make images-remote BUILDER=<ssh host> [IMPORT=true] [SSH_OPTIONS=...] NEXT_PUBLIC_...=..." >&2; exit 1; }
+	@SSH_OPTIONS="$(SSH_OPTIONS)" $(foreach arg,$(UI_BUILD_ARGS),$(arg)="$($(arg))") bash localdev/images-remote.sh "$(BUILDER)" $(if $(filter true,$(IMPORT)),--import)

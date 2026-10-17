@@ -1,4 +1,4 @@
-.PHONY: check-tag render-settings build lint check images ui-image tt-hardware-image $(addprefix locked-,images ui-image tt-hardware-image)
+.PHONY: check-tag render-settings build lint check publish local-images $(addprefix locked-,publish local-images)
 
 # Shared by every area's targets: where the images go and under which tag, the local stack's
 # address and settings, and the build lock. Each area's targets live in its own .mk file.
@@ -26,15 +26,15 @@ COMPOSE := podman compose -f $(COMPOSE_FILE) $(if $(REGISTRY_REACHABLE_IP),-f lo
 # this default is the local dev registry. TAG names the tree content that was built (localdev/lib/image-tag.sh),
 # so a manifest that pins one tag can never silently start running different bytes under
 # imagePullPolicy: IfNotPresent. Computed once here and exported: every script that deploys an
-# image reads it from make. REGISTRY_TLS_VERIFY=false only because the dev registry
-# in docker-compose.yml serves plain HTTP; a prod REGISTRY with real TLS overrides it to true.
+# image reads it from make. REGISTRY_TLS_VERIFY is false only for the dev registry, which
+# docker-compose.yml serves over plain HTTP.
 LOCAL_REGISTRY := $(HOST_ADDRESS):5000
 REGISTRY ?= $(LOCAL_REGISTRY)
 ifndef TAG
 TAG := $(shell bash localdev/lib/image-tag.sh)
 endif
 export HOST_ADDRESS REGISTRY_PUBLISH_IP REGISTRY_REACHABLE_IP REGISTRY TAG
-REGISTRY_TLS_VERIFY ?= false
+REGISTRY_TLS_VERIFY ?= $(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),false,true)
 # Run before every push. A registry whose login expires sets the command that logs in to it; the
 # dev registry takes none.
 REGISTRY_LOGIN ?= true
@@ -43,6 +43,9 @@ REGISTRY_LOGIN ?= true
 # the engine already holds for another platform is used as it is, and the image built on it
 # starts nowhere on this machine's nodes (exec format error).
 IMAGE_PLATFORM ?= $(shell podman info --format '{{.Host.OS}}/{{.Host.Arch}}')
+# What builds and pushes the images. A builder with docker alone sets CONTAINER_ENGINE=docker and
+# IMAGE_PLATFORM.
+CONTAINER_ENGINE ?= podman
 
 check-tag:
 	@test -n "$(IMAGE_PLATFORM)" || { echo "make: could not ask podman for its platform; set IMAGE_PLATFORM" >&2; exit 1; }
@@ -78,7 +81,7 @@ endef
 # A build's tag is not in use until it is pushed and installed, so a prune running beside it
 # would take it away. Every target that builds therefore runs its recipe (locked-<target>) under
 # the one lock the prune takes too (localdev/images-lock.py).
-BUILDS := images ui-image tt-hardware-image
+BUILDS := publish local-images
 $(BUILDS):
 	@python3 localdev/images-lock.py $(MAKE) locked-$@ TAG="$(TAG)"
 
