@@ -95,5 +95,5 @@ insecureRegistry:
   image: docker.io/library/busybox:1.37.0
 
 # The kube context the install was run against. Only the notes read it, to print kubectl commands
-# that reach this cluster from where helm ran. install.sh sets it.
+# that reach this cluster from where helm ran. make cluster-agent-up sets it.
 kubeContext: ""

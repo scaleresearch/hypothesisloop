@@ -1,35 +1,50 @@
-.PHONY: cluster-agent-up cluster-agent-down locked-publish product-images \
+.PHONY: cluster-agent-up cluster-agent-check cluster-agent-down locked-publish product-images \
 	helm-prepare helm-lint
 
 # ---- Cluster agent: one per target Kubernetes cluster running jobs ----------
-# Installs/removes the deploy/charts/hypothesisloop-cluster-agent helm release (node-agent DaemonSet + cluster-agent
-# Deployment, the only component with real k8s credentials) on the cluster KUBE_CONTEXT/
-# KUBECONFIG_PATH point at (left empty: the current context of ~/.kube/config), pulling the images
-# make publish or make local-images pushed to REGISTRY under TAG.
-# RUNTIME_TOKEN comes from the environment and is passed on by name, so neither this recipe's
+# Installs, checks and removes the deploy/charts/hypothesisloop-cluster-agent helm release on the
+# cluster KUBE_CONTEXT/KUBECONFIG_PATH point at (left empty: helm's current context), pulling the
+# images make publish or make local-images pushed to REGISTRY under TAG.
+# RUNTIME_TOKEN comes from the environment and reaches helm on stdin, so neither this recipe's
 # echo nor a process list shows it.
-# BUILDER=true also builds environments there (install.sh's BUILDER).
-# BUILDER_NODE_IMAGES, the builder node's containerd socket, also loads each build into that node.
-# INSECURE_REGISTRY=true has every node pull from REGISTRY over plain HTTP (install.sh's), the
-# default while REGISTRY_TLS_VERIFY=false, as with the dev registry. For a cluster on another
-# machine, name the dev registry as that machine reaches it and say it serves plain HTTP:
-# REGISTRY=<LOCAL_REACHABLE_ADDRESS>:5000 INSECURE_REGISTRY=true.
-# INSTALL_FLAGS=--dry-run runs install.sh --dry-run: the plan and the checks from inside the
-# cluster, changing nothing.
-# Usage: RUNTIME_TOKEN="$$(make -s runtime-token CLUSTER=<name>)" make cluster-agent-up CLUSTER=<name> API_URL=... METRICS_URL=... [REGISTRY=...] [TAG=...] [KUBECONFIG_PATH=...] [KUBE_CONTEXT=...] [BUILDER=true [BUILDER_NODE_IMAGES=<containerd socket>]] [INSECURE_REGISTRY=true|false] [INSTALL_FLAGS=--dry-run]
+# BUILDER=true also builds environments there. BUILDER_NODE_IMAGES, the builder node's containerd
+# socket, also loads each build into that node.
+# INSECURE_REGISTRY=true has every node pull from REGISTRY over plain HTTP, the default while
+# REGISTRY_TLS_VERIFY=false, as with the dev registry. For a cluster on another machine, name the
+# dev registry as that machine reaches it: REGISTRY=<LOCAL_REACHABLE_ADDRESS>:5000.
+# HELM_FLAGS=--dry-run=server has the API server check every object and installs nothing.
+# cluster-agent-check runs the chart's test: from a pod of the cluster, a node pulls both images,
+# the API and the metrics service answer and the API takes the token.
+# Usage: RUNTIME_TOKEN="$$(make -s runtime-token CLUSTER=<name>)" make cluster-agent-up CLUSTER=<name> API_URL=... METRICS_URL=... [REGISTRY=...] [TAG=...] [KUBECONFIG_PATH=...] [KUBE_CONTEXT=...] [BUILDER=true [BUILDER_NODE_IMAGES=<containerd socket>]] [INSECURE_REGISTRY=true|false] [HELM_FLAGS=--dry-run=server]
+#        make cluster-agent-check [KUBECONFIG_PATH=...] [KUBE_CONTEXT=...]
+#        make cluster-agent-down [KUBECONFIG_PATH=...] [KUBE_CONTEXT=...]
 INSECURE_REGISTRY ?= $(if $(filter false,$(REGISTRY_TLS_VERIFY)),true,false)
+KUBE_FLAGS = $(if $(KUBECONFIG_PATH),--kubeconfig $(KUBECONFIG_PATH)) $(if $(KUBE_CONTEXT),--kube-context $(KUBE_CONTEXT))
+
+# $(1)=cluster $(2)=api $(3)=metrics $(4)=registry $(5)=insecure
+# --take-ownership adopts a jobs namespace that an agent from before the chart created.
+define cluster_agent_install
+printf 'runtimeToken: "%s"\n' "$$RUNTIME_TOKEN" | helm upgrade --install hypothesisloop-cluster-agent deploy/charts/hypothesisloop-cluster-agent \
+  $(KUBE_FLAGS) -n hypothesisloop --create-namespace --take-ownership --wait --timeout 5m \
+  --set-string clusterName=$(1),apiURL=$(2),metricsURL=$(3),images.registry=$(4),images.tag=$(TAG),kubeContext=$(KUBE_CONTEXT),builder.nodeImages.containerdSocket=$(BUILDER_NODE_IMAGES) \
+  --set builder.enabled=$(or $(BUILDER),false),insecureRegistry.enabled=$(5) --values - $(HELM_FLAGS)
+endef
+
 cluster-agent-up:
 	@test -n "$(CLUSTER)" || { echo "make cluster-agent-up: CLUSTER=<name> is required, the name the cluster was registered under" >&2; exit 1; }
 	@test -n "$(API_URL)" || { echo "make cluster-agent-up: API_URL is required, the control-plane API as a pod in that cluster reaches it" >&2; exit 1; }
 	@test -n "$(METRICS_URL)" || { echo "make cluster-agent-up: METRICS_URL is required, the metrics service as every node in that cluster reaches it" >&2; exit 1; }
 	@test -n "$(TAG)" || { echo "make cluster-agent-up: TAG is required, the image tag make publish or make local-images pushed" >&2; exit 1; }
 	@test -n "$$RUNTIME_TOKEN" || { echo "make cluster-agent-up: RUNTIME_TOKEN must be in the environment, the token make -s runtime-token CLUSTER=$(CLUSTER) printed" >&2; exit 1; }
-	CLUSTER_NAME="$(CLUSTER)" API_URL="$(API_URL)" METRICS_URL="$(METRICS_URL)" REGISTRY_URL="$(REGISTRY)" TAG="$(TAG)" \
-	  RUNTIME_TOKEN="$$RUNTIME_TOKEN" KUBECONFIG_PATH="$(KUBECONFIG_PATH)" KUBE_CONTEXT="$(KUBE_CONTEXT)" \
-	  BUILDER="$(BUILDER)" BUILDER_NODE_IMAGES="$(BUILDER_NODE_IMAGES)" INSECURE_REGISTRY="$(INSECURE_REGISTRY)" bash deploy/charts/hypothesisloop-cluster-agent/install.sh $(INSTALL_FLAGS)
+	$(call cluster_agent_install,$(CLUSTER),$(API_URL),$(METRICS_URL),$(REGISTRY),$(INSECURE_REGISTRY))
 
+cluster-agent-check:
+	helm test hypothesisloop-cluster-agent -n hypothesisloop --logs $(KUBE_FLAGS)
+
+# A hook first detaches the cluster from the control plane, where its jobs go back to the queue;
+# the namespace hypothesisloop stays.
 cluster-agent-down:
-	bash deploy/charts/hypothesisloop-cluster-agent/destroy.sh
+	helm uninstall hypothesisloop-cluster-agent -n hypothesisloop --ignore-not-found $(KUBE_FLAGS)
 
 # One image: hypothesisloop-NAME built from IMAGE_DOCKERFILE_NAME in IMAGE_CONTEXT_NAME (the
 # root when unset) with IMAGE_ARGS_NAME, and pushed to $(REGISTRY) under $(TAG) alone, the tree

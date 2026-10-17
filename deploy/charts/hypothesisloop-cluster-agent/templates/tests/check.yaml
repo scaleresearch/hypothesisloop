@@ -1,0 +1,63 @@
+# helm test: a node pulls both images, and from a pod of this cluster the API and the metrics
+# service answer and the API takes the runtime token.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hypothesisloop-cluster-agent-check
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  initContainers:
+    - name: node-agent-image
+      image: {{ .Values.images.registry }}/hypothesisloop-node-agent:{{ .Values.images.tag | default .Chart.AppVersion }}
+      imagePullPolicy: IfNotPresent
+      command: ["true"]
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        readOnlyRootFilesystem: true
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+  containers:
+    - name: check
+      image: {{ .Values.images.registry }}/hypothesisloop-cluster-agent:{{ .Values.images.tag | default .Chart.AppVersion }}
+      imagePullPolicy: IfNotPresent
+      command: ["/cluster-agent", "check"]
+      env:
+        - name: CLUSTER_NAME
+          value: {{ .Values.clusterName | quote }}
+        - name: API_URL
+          value: {{ .Values.apiURL | quote }}
+        - name: METRICS_URL
+          value: {{ .Values.metricsURL | quote }}
+        - name: RUNTIME_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hypothesisloop-runtime-token
+              key: token
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        readOnlyRootFilesystem: true
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+      resources:
+        requests:
+          cpu: "10m"
+          memory: "32Mi"
+        limits:
+          cpu: "300m"
+          memory: "64Mi"
+  tolerations:
+    - key: hypothesisloop.io/no-workload
+      operator: Exists
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
