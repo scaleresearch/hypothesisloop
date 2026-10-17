@@ -16,9 +16,9 @@ type memStore struct {
 	clock    time.Time
 	sequence int
 	// orgIDs are the ids CreateOrg hands out before it makes its own.
-	orgIDs   []string
-	users    map[string]bool
-	staff    map[string]bool
+	orgIDs []string
+	users  map[string]bool
+	staff  map[string]bool
 	// placed is the jobs on each cluster, job id -> org; clearedIDs the identities forgotten.
 	placed     map[string]map[string]string
 	clearedIDs []string

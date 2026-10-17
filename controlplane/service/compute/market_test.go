@@ -63,7 +63,9 @@ func (w waitingFor) Waiting(context.Context) ([]Waiting, error) { return w, nil 
 
 type demandDown struct{}
 
-func (demandDown) Waiting(context.Context) ([]Waiting, error) { return nil, errors.New("queue unreadable") }
+func (demandDown) Waiting(context.Context) ([]Waiting, error) {
+	return nil, errors.New("queue unreadable")
+}
 
 func waitingJob(acceleratorType clusterapi.AcceleratorType, count int, cpu, memory, storage, arch string) Waiting {
 	return Waiting{AcceleratorType: acceleratorType, Architecture: arch, Job: clusterapi.JobSpec{

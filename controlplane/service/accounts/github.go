@@ -76,8 +76,8 @@ type Repository struct {
 // The reasons a client tells a refusal of a connect or a credential apart by. The others are
 // the App's (GitHubApp.Refusal).
 const (
-	ReasonGitHubNotConfigured = "github_not_configured"
-	ReasonInvalidRequest      = "invalid_request"
+	ReasonGitHubNotConfigured       = "github_not_configured"
+	ReasonInvalidRequest            = "invalid_request"
 	ReasonInstallStateInvalid       = "install_state_invalid"
 	ReasonInstallationNotAuthorized = "installation_not_authorized"
 	ReasonForbidden                 = "forbidden"
