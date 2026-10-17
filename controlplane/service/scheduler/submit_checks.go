@@ -52,7 +52,7 @@ func branchOfExperiment(exp *domain.Experiment, measuresBaseline bool) error {
 	if gitrefs.IsExperimentBranch(exp.PlatformExperimentID, exp.Branch) {
 		return nil
 	}
-	return &AdmissionError{Reason: ReasonBranchNotOfExperiment, Message: fmt.Sprintf("branch %q is no branch of platform experiment %s: a job runs a commit pushed on a branch under %s, which hl hypothesis checkout HYPOTHESIS_ID makes and hl job submit pushes and states", exp.Branch, exp.PlatformExperimentID, prefix)}
+	return &AdmissionError{Reason: ReasonBranchNotOfExperiment, Message: fmt.Sprintf("branch %q is no branch of platform experiment %s: a job runs a commit pushed on a branch under %s, which hl hypothesis checkout HYPOTHESIS_ID makes and hl job submit pushes and states", exp.Branch, exp.PlatformExperimentID, gitrefs.BranchPrefix(exp.PlatformExperimentID))}
 }
 
 // shareOutlook tells an agent refused for quota whether waiting can raise its share. A share
