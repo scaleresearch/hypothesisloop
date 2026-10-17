@@ -40,14 +40,13 @@ func TestIntegrationLifecycle(t *testing.T) {
 	defer cancel()
 
 	exp := &clusterapi.DesiredJob{
-		Image: testImage, Launch: "true",
+		Image: "docker.io/library/busybox", Launch: "true",
 		Data: testDataAccess(), Token: "test-job-token", GitURL: "https://api.test/git/pe-1.git",
 		ID:           "it-" + filepath.Base(t.TempDir()),
 		AgentID:      "agent-1",
 		ProjectID:    "proj-1",
 		CapacityTier: clusterapi.CapacityGuaranteed,
 		Job: clusterapi.JobSpec{
-			Image:      "busybox",
 			Command:    []string{"sh", "-c"},
 			Args:       []string{"echo hello && sleep 1"},
 			CPU:        "0.5",
@@ -160,7 +159,7 @@ func TestIntegrationCapacityReporting(t *testing.T) {
 func TestIntegrationRejectsMultiNode(t *testing.T) {
 	e := newTestExecutor(t)
 	spec := clusterapi.JobSpec{
-		Image: "busybox", CPU: "0.5", Memory: "64Mi", Storage: "128Mi",
+		CPU: "0.5", Memory: "64Mi", Storage: "128Mi",
 		MaxRetries: maxRetries(0), TerminationGracePeriodSeconds: int64Ptr(5), NumNodes: 2,
 	}
 	exp := &clusterapi.DesiredJob{Image: testImage, Launch: "true", ID: "reject-num-nodes", Job: spec, Data: testDataAccess(), Token: "test-job-token", GitURL: "https://api.test/git/pe-1.git"}

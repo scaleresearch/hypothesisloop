@@ -381,7 +381,7 @@ var routes = []route{
 	// configured behind this router, which an admitted caller is told with 503.
 	{method: "GET", path: "/github/app", rule: only(people, http.StatusServiceUnavailable)},
 	{method: "POST", path: "/orgs/{id}/github-install-states", request: "/orgs/<org>/github-install-states", body: `{"return_to":"/settings"}`, rule: orgLevel(people, http.StatusForbidden, http.StatusServiceUnavailable)},
-	{method: "POST", path: "/github/installations", body: `{"state":"s","installation_id":100}`, rule: only(people, http.StatusServiceUnavailable)},
+	{method: "POST", path: "/github/installations", body: `{"state":"s","code":"c","installation_id":100}`, rule: only(people, http.StatusServiceUnavailable)},
 	{method: "GET", path: "/orgs/{id}/github-installations", request: "/orgs/<org>/github-installations", rule: inOrg(reached)},
 	{method: "DELETE", path: "/orgs/{id}/github-installations/{installation_id}", request: "/orgs/<org>/github-installations/100", rule: orgLevel(people, http.StatusForbidden, reached)},
 	{method: "PUT", path: "/orgs/{id}/github-installations/{installation_id}/default", request: "/orgs/<org>/github-installations/100/default", rule: orgLevel(people, http.StatusForbidden, reached)},

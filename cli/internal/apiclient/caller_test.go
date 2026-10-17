@@ -2,6 +2,7 @@ package apiclient_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
@@ -31,9 +32,9 @@ func TestTheKindOfCallerIsReadFromADerivedTokenAndNothingElse(t *testing.T) {
 func TestTheKindOfCallerIsReadFromTheTokensThePlatformMints(t *testing.T) {
 	const secret = "a-signing-secret-only-this-test-knows"
 	for scope, want := range map[string]apiclient.CallerKind{
-		scope.Agent("pe-1", "ag-1"): apiclient.CallerAgent,
-		scope.Coordinator("pe-1"):   apiclient.CallerCoordinator,
-		"staff":                     apiclient.CallerOther,
+		scope.Agent("pe-1", "ag-1"):            apiclient.CallerAgent,
+		scope.Coordinator("pe-1"):              apiclient.CallerCoordinator,
+		scope.Staff(time.Now().Add(time.Hour)): apiclient.CallerOther,
 	} {
 		token, err := auth.Mint(secret, scope)
 		if err != nil {
