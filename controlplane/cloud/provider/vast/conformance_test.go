@@ -13,9 +13,9 @@ import (
 )
 
 // The conformance tests rent real instances and cost real money, a few cents a run. They run
-// when VAST_API_KEY is set:
+// when CLOUD_COMPUTE_VAST_API_KEY is set:
 //
-//	VAST_API_KEY=... go test ./controlplane/cloud/provider/vast -run Conformance -v -timeout 45m
+//	CLOUD_COMPUTE_VAST_API_KEY=... go test ./controlplane/cloud/provider/vast -run Conformance -v -timeout 45m
 //
 // VAST_CONFORMANCE_GPU="<driver product name>=<vendor gpu name>", for example
 // "NVIDIA GeForce RTX 3060=RTX 3060", adds the run on that GPU, and VAST_CONFORMANCE_HOLD=1 the
@@ -39,17 +39,16 @@ func conformanceOptions() providertest.Options {
 
 func conformanceProvider(t *testing.T, accelerators []Accelerator) *Provider {
 	t.Helper()
-	if os.Getenv("VAST_API_KEY") == "" {
-		t.Skip("VAST_API_KEY is not set")
+	if os.Getenv("CLOUD_COMPUTE_VAST_API_KEY") == "" {
+		t.Skip("CLOUD_COMPUTE_VAST_API_KEY is not set")
 	}
 	p, err := New(Settings{
-		APIKeyEnv:        "VAST_API_KEY",
 		MaxPricePerHour:  0.15,
 		MinReliability:   0.99,
 		VerifiedOnly:     true,
 		Accelerators:     accelerators,
 		ExcludedMachines: excludedMachines(t),
-	}, nil, t.Logf)
+	}, os.Getenv("CLOUD_COMPUTE_VAST_API_KEY"), nil, t.Logf)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

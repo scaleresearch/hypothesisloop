@@ -6,37 +6,34 @@ import (
 )
 
 func TestNewRefusesIncompleteSettings(t *testing.T) {
-	t.Setenv("E2B_TEST_KEY", testKey)
-	t.Setenv("E2B_TEST_EMPTY", "")
-	valid := Settings{APIKeyEnv: "E2B_TEST_KEY", LifetimeSeconds: 3600}
+	valid := Settings{LifetimeSeconds: 3600}
+	if _, err := New(valid, "", nil, t.Logf); err == nil || !strings.Contains(err.Error(), "API key is required") {
+		t.Errorf("no key: err = %v, want it refused", err)
+	}
 	cases := map[string]struct {
 		mutate func(*Settings)
 		want   string
 	}{
-		"no key reference":   {func(c *Settings) { c.APIKeyEnv = "" }, "api_key_env"},
-		"key variable unset": {func(c *Settings) { c.APIKeyEnv = "E2B_TEST_EMPTY" }, "E2B_TEST_EMPTY is not set"},
-		"no lifetime":        {func(c *Settings) { c.LifetimeSeconds = 0 }, "lifetime_seconds"},
-		"negative lifetime":  {func(c *Settings) { c.LifetimeSeconds = -1 }, "lifetime_seconds"},
+		"no lifetime":       {func(c *Settings) { c.LifetimeSeconds = 0 }, "lifetime_seconds"},
+		"negative lifetime": {func(c *Settings) { c.LifetimeSeconds = -1 }, "lifetime_seconds"},
 		"a lifetime no longer than the notice of its end": {func(c *Settings) { c.LifetimeSeconds = 300 }, "lifetime_seconds must be above 300"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			cfg := valid
 			tc.mutate(&cfg)
-			if _, err := New(cfg, nil, t.Logf); err == nil || !strings.Contains(err.Error(), tc.want) {
+			if _, err := New(cfg, testKey, nil, t.Logf); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v, want one about %q", err, tc.want)
 			}
 		})
 	}
-	if _, err := New(valid, nil, t.Logf); err != nil {
+	if _, err := New(valid, testKey, nil, t.Logf); err != nil {
 		t.Fatalf("New(valid): %v", err)
 	}
 }
 
 func TestNewRefusesAnyAcceleratorType(t *testing.T) {
-	t.Setenv("E2B_TEST_KEY", testKey)
-
-	_, err := New(Settings{APIKeyEnv: "E2B_TEST_KEY", LifetimeSeconds: 3600}, []string{"nvidia.com/gpu.product=NVIDIA-H200"}, t.Logf)
+	_, err := New(Settings{LifetimeSeconds: 3600}, testKey, []string{"nvidia.com/gpu.product=NVIDIA-H200"}, t.Logf)
 	if err == nil || !strings.Contains(err.Error(), "NVIDIA-H200") {
 		t.Fatalf("err = %v, want one naming the accelerator type a shape asks for", err)
 	}

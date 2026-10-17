@@ -3,7 +3,6 @@ package vast
 import (
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/acceleratorname"
@@ -11,9 +10,6 @@ import (
 
 // Settings is the adapter's own section of a cloud_compute entry, provider.settings.
 type Settings struct {
-	// APIKeyEnv names the environment variable holding the account's API key.
-	APIKeyEnv string `yaml:"api_key_env"`
-
 	MaxPricePerHour float64 `yaml:"max_price_per_hour"`
 	MinReliability  float64 `yaml:"min_reliability"`
 	// Regions are two-letter country codes. Empty allows any.
@@ -38,9 +34,6 @@ type Accelerator struct {
 }
 
 func (c Settings) validate() error {
-	if c.APIKeyEnv == "" {
-		return errors.New("vast: api_key_env is required")
-	}
 	if c.MaxPricePerHour <= 0 {
 		return errors.New("vast: max_price_per_hour must be positive")
 	}
@@ -63,12 +56,4 @@ func (c Settings) accelerator(catalogType string) (Accelerator, error) {
 		}
 	}
 	return Accelerator{}, fmt.Errorf("vast: accelerator type %q has no entry in accelerators", catalogType)
-}
-
-func (c Settings) apiKey() (string, error) {
-	key := os.Getenv(c.APIKeyEnv)
-	if key == "" {
-		return "", fmt.Errorf("vast: environment variable %s is not set", c.APIKeyEnv)
-	}
-	return key, nil
 }

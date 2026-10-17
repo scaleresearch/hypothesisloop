@@ -123,10 +123,8 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *Client) {
 	}
 	f.server = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.server.Close)
-	client, err := New(config.GitHubConfig{
-		AppID: testAppID, AppSlug: "hypothesisloop",
-		PrivateKey: string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})),
-	})
+	client, err := New(config.GitHubConfig{AppID: testAppID, AppSlug: "hypothesisloop"},
+		string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1135,7 +1133,7 @@ func TestNewRefusesAKeyItCannotSignWith(t *testing.T) {
 	for name, key := range map[string]string{
 		"empty": "", "not pem": "ssh-rsa AAAA", "pem of something else": "-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n",
 	} {
-		_, err := New(config.GitHubConfig{AppID: 1, AppSlug: "s", PrivateKey: key})
+		_, err := New(config.GitHubConfig{AppID: 1, AppSlug: "s"}, key)
 		if err == nil {
 			t.Errorf("%s: New accepted the key", name)
 		} else if key != "" && strings.Contains(err.Error(), "AAAA") {

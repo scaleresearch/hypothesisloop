@@ -16,7 +16,8 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
-func settingsPath(t *testing.T) string {
+// inSettings starts hl-admin with the committed settings as a deployment renders them.
+func inSettings(t *testing.T) {
 	t.Helper()
 	committed, err := os.ReadFile(filepath.Join("..", "..", "settings", "hypothesisloop.yaml"))
 	if err != nil {
@@ -30,25 +31,21 @@ func settingsPath(t *testing.T) string {
 	if err := os.WriteFile(path, []byte(rendered), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HYPOTHESISLOOP_CONFIG", path)
-	t.Setenv("HYPOTHESISLOOP_SIGNING_SECRET", "a-signing-secret-only-this-test-knows")
-	t.Setenv("DATABASE_URL", "postgres://test.example.invalid/hypothesisloop")
-	t.Setenv("DATA_STORE_SECRET_ACCESS_KEY", "a-store-secret-only-this-test-knows")
-	t.Setenv("MODEL_ANTHROPIC_OAUTH_TOKEN", "a-model-credential-only-this-test-knows")
-	return path
+	t.Setenv(config.SettingsPath.Name, path)
+	t.Setenv(config.AuthSigningSecret.Name, signingSecret)
+	t.Setenv(config.DatabaseURL.Name, "postgres://test.example.invalid/hypothesisloop")
 }
 
+const signingSecret = "a-signing-secret-only-this-test-knows"
+
 func TestTokenPrintsTheTokenTheControlPlaneOfThatConfigAccepts(t *testing.T) {
-	cfg, err := config.Load(settingsPath(t))
-	if err != nil {
-		t.Fatal(err)
-	}
+	inSettings(t)
 	for _, scope := range []string{auth.StaffScope, auth.RuntimeScope("local"), auth.AgentScope("pe-1", "agent-1"), auth.JobScope("job-1")} {
 		var stdout bytes.Buffer
 		if err := run([]string{"token", scope}, &stdout); err != nil {
 			t.Fatalf("token %s: %v", scope, err)
 		}
-		want, _ := auth.Mint(cfg.Auth.SigningSecret, scope)
+		want, _ := auth.Mint(signingSecret, scope)
 		if got := strings.TrimSpace(stdout.String()); got != want {
 			t.Errorf("token %s: got = %q, want = %q", scope, got, want)
 		}
@@ -56,7 +53,7 @@ func TestTokenPrintsTheTokenTheControlPlaneOfThatConfigAccepts(t *testing.T) {
 }
 
 func TestAMalformedScopeOrCommandIsAnError(t *testing.T) {
-	settingsPath(t)
+	inSettings(t)
 	for _, args := range [][]string{
 		{"token", "root"}, {"token", "agent:pe-only"}, {"token"}, {"cluster", "add", "name"}, {"user", "add", "subject"}, {},
 		{"user", "staff", "subject"}, {"user", "staff", "subject", "yes"}, {"cluster", "share", "name"}, {"cluster", "share", "name", "true"},
@@ -72,8 +69,8 @@ func TestAMalformedScopeOrCommandIsAnError(t *testing.T) {
 }
 
 func TestDatabaseCommandsNeedADatabase(t *testing.T) {
-	settingsPath(t)
-	t.Setenv("DATABASE_URL", "")
+	inSettings(t)
+	t.Setenv(config.DatabaseURL.Name, "")
 	var stdout bytes.Buffer
 	for _, args := range [][]string{
 		{"cluster", "add", "name", "default"}, {"cluster", "share", "name", "on"}, {"user", "staff", "subject", "off"},
@@ -172,7 +169,7 @@ func TestGitHubConnectRecordsOnlyWhatGitHubConfirms(t *testing.T) {
 }
 
 func TestGitHubConnectNeedsItsNumberAndAnApp(t *testing.T) {
-	settingsPath(t)
+	inSettings(t)
 	var stdout bytes.Buffer
 	for name, tc := range map[string]struct {
 		args []string

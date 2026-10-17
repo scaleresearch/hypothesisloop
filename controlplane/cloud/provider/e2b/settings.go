@@ -1,16 +1,12 @@
 package e2b
 
 import (
-	"errors"
 	"fmt"
-	"os"
 	"time"
 )
 
 // Settings is the adapter's own section of the config file, provider.settings.
 type Settings struct {
-	// APIKeyEnv names the environment variable holding the team's API key.
-	APIKeyEnv string `yaml:"api_key_env"`
 	// LifetimeSeconds is the longest a sandbox lives before the vendor kills it. Nothing extends
 	// it. The plan caps it, and a value above the cap fails every Create with the vendor's own
 	// message. It is above expiryNotice.
@@ -30,19 +26,8 @@ func (c Settings) commandLifetime() time.Duration {
 }
 
 func (c Settings) validate() error {
-	if c.APIKeyEnv == "" {
-		return errors.New("e2b: api_key_env is required")
-	}
 	if notice := int(expiryNotice / time.Second); c.LifetimeSeconds <= notice {
 		return fmt.Errorf("e2b: lifetime_seconds must be above %d: a sandbox's command is ended that long before the sandbox, so its end can be read", notice)
 	}
 	return nil
-}
-
-func (c Settings) apiKey() (string, error) {
-	key := os.Getenv(c.APIKeyEnv)
-	if key == "" {
-		return "", fmt.Errorf("e2b: environment variable %s is not set", c.APIKeyEnv)
-	}
-	return key, nil
 }

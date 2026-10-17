@@ -45,7 +45,7 @@ func liveClient(t *testing.T) *Client {
 	if err != nil {
 		t.Fatalf("read the key file: %v", err)
 	}
-	client, err := New(config.GitHubConfig{AppID: id, AppSlug: "live", PrivateKey: string(key)})
+	client, err := New(config.GitHubConfig{AppID: id, AppSlug: "live"}, string(key))
 	if err != nil {
 		t.Fatal(err)
 	}

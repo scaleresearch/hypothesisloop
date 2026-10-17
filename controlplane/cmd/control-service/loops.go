@@ -23,7 +23,7 @@ import (
 // newSchedulerParts builds the scheduler's handler and starts its background loops, returning
 // the handlers httpapi.NewRouter serves: the scheduler's on the shared API doc, the cluster-agents' under
 // its own prefix.
-func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environmentsSvc *environments.Service, pool *db.Pool, store *db.Store, graph *graphdb.Store, expQuotaSvc *platformexperiments.Service, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Settings, metrics *metricsdb.Store, dataStore *objectstore.Client, logger *zap.Logger) (*scheduler.Service, *clusterexchange.Service) {
+func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environmentsSvc *environments.Service, pool *db.Pool, store *db.Store, graph *graphdb.Store, expQuotaSvc *platformexperiments.Service, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.ControlService, metrics *metricsdb.Store, dataStore *objectstore.Client, logger *zap.Logger) (*scheduler.Service, *clusterexchange.Service) {
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
 
 	clusterReports, err := scheduler.NewClusterReports(store, metrics,
@@ -85,7 +85,7 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environ
 	clusterExchange := clusterexchange.NewService(store,
 		time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds)*time.Second, metrics, pcfg.Scheduler.ObservationCadence(), dataStore,
 		time.Duration(pcfg.Scheduler.MaxCheckpointGraceSeconds)*time.Second,
-		pcfg.AcceleratorTypeNames(), pcfg.Scheduler.MaxLogTailLineChars, pcfg.Auth.SigningSecret, pcfg.GitHost.ProxyURL, environmentRegistry, logger).
+		pcfg.AcceleratorTypeNames(), pcfg.Scheduler.MaxLogTailLineChars, pcfg.SigningSecret, pcfg.GitHost.ProxyURL, environmentRegistry, logger).
 		WithBuildReported(schedulerLoop.Trigger)
 
 	// The sandbox launcher and the cloud compute clusters rent machines, so one replica runs them.

@@ -151,7 +151,7 @@ func (b TemplateBuilder) registryAuthorization(ref imageReference) (string, erro
 	basic := ""
 	if b.RegistryUsername != "" {
 		if b.RegistryPassword == "" {
-			return "", fmt.Errorf("E2B_REGISTRY_PASSWORD must be set with E2B_REGISTRY_USERNAME")
+			return "", fmt.Errorf("SANDBOX_E2B_REGISTRY_PASSWORD must be set with SANDBOX_E2B_REGISTRY_USERNAME")
 		}
 		basic = "Basic " + base64.StdEncoding.EncodeToString([]byte(b.RegistryUsername+":"+b.RegistryPassword))
 	}
@@ -280,7 +280,7 @@ func (b TemplateBuilder) e2b(method, path string, body, into any) error {
 func (b TemplateBuilder) Build(image string, cores, memoryMiB int64) error {
 	b = b.withDefaults()
 	if b.APIKey == "" {
-		return fmt.Errorf("E2B_API_KEY must hold the team API key")
+		return fmt.Errorf("SANDBOX_E2B_API_KEY must hold the team API key")
 	}
 	config, err := b.imageConfigOf(image)
 	if err != nil {
@@ -361,7 +361,7 @@ var ConformanceTemplate = TemplateOf{Image: "alpine/curl:8.14.1", Cores: 1, Memo
 func (b TemplateBuilder) Prune(keep []TemplateOf) error {
 	b = b.withDefaults()
 	if b.APIKey == "" {
-		return fmt.Errorf("E2B_API_KEY must hold the team API key")
+		return fmt.Errorf("SANDBOX_E2B_API_KEY must hold the team API key")
 	}
 	if len(keep) == 0 {
 		return fmt.Errorf("no template to keep was named, and the one agents start from is never deleted")

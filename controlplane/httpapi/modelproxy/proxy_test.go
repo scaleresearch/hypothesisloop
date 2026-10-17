@@ -136,7 +136,7 @@ func newFixture(t *testing.T, provider http.HandlerFunc) *fixture {
 
 func newAPI(t *testing.T, upstream string, usage Usage) *httptest.Server {
 	t.Helper()
-	authenticator, err := auth.NewAuthenticator(config.AuthConfig{SigningSecret: signingSecret}, directory{
+	authenticator, err := auth.NewAuthenticator(config.AuthConfig{}, signingSecret, directory{
 		signedUp: map[string]bool{"pe-1/agent-a": true, "pe-1/agent-self": true, "pe-1/agent-cut": true, "pe-1/agent-ending": true, "pe-2/agent-b": true},
 		cutAt:    map[string]time.Time{"pe-1/agent-cut": time.Now().Add(-domain.AgentWindDown - time.Minute), "pe-1/agent-ending": time.Now().Add(-30 * time.Second)},
 	})

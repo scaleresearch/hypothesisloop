@@ -12,10 +12,10 @@ import (
 )
 
 // The conformance tests rent real Machines and cost real money, under a cent a run. They run
-// when FLY_API_TOKEN holds a token for the organization, in an app of their own that they
-// create and delete, and rent with a deploy token they make for that app:
+// when FLY_CONFORMANCE_ORG_TOKEN holds a token for the organization, in an app of their own that
+// they create and delete, and rent with a deploy token they make for that app:
 //
-//	FLY_API_TOKEN=... FLY_CONFORMANCE_ORG=<org slug> FLY_CONFORMANCE_APP=<app name> FLY_CONFORMANCE_REGION=ams \
+//	FLY_CONFORMANCE_ORG_TOKEN=... FLY_CONFORMANCE_ORG=<org slug> FLY_CONFORMANCE_APP=<app name> FLY_CONFORMANCE_REGION=ams \
 //	  go test ./controlplane/cloud/provider/fly -run Conformance -v -timeout 45m
 //
 // FLY_CONFORMANCE_HOLD=1 adds the thirty minute hold. One run per app at a time: a run starts by
@@ -38,15 +38,15 @@ func conformanceOptions() providertest.Options {
 
 func conformanceProvider(t *testing.T) *Provider {
 	t.Helper()
-	if os.Getenv("FLY_API_TOKEN") == "" {
-		t.Skip("FLY_API_TOKEN is not set")
+	if os.Getenv("FLY_CONFORMANCE_ORG_TOKEN") == "" {
+		t.Skip("FLY_CONFORMANCE_ORG_TOKEN is not set")
 	}
 	org, app, region := os.Getenv("FLY_CONFORMANCE_ORG"), os.Getenv("FLY_CONFORMANCE_APP"), os.Getenv("FLY_CONFORMANCE_REGION")
 	if org == "" || app == "" || region == "" {
 		t.Fatal("FLY_CONFORMANCE_ORG, FLY_CONFORMANCE_APP and FLY_CONFORMANCE_REGION must be set")
 	}
-	settings := Settings{APITokenEnv: "FLY_API_TOKEN", App: app, Region: region, CPUKind: "shared"}
-	owner, err := New(settings, nil, t.Logf)
+	settings := Settings{App: app, Region: region, CPUKind: "shared"}
+	owner, err := New(settings, os.Getenv("FLY_CONFORMANCE_ORG_TOKEN"), nil, t.Logf)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -60,9 +60,7 @@ func conformanceProvider(t *testing.T) *Provider {
 	if _, err := owner.call(t.Context(), http.MethodPost, owner.machinesURL+"/v1/apps/"+app+"/deploy_token", map[string]string{"expiry": "2h"}, &deploy); err != nil {
 		t.Fatalf("create a deploy token for app %s: %v", app, err)
 	}
-	t.Setenv("FLY_CONFORMANCE_DEPLOY_TOKEN", deploy.Token)
-	settings.APITokenEnv = "FLY_CONFORMANCE_DEPLOY_TOKEN"
-	p, err := New(settings, nil, t.Logf)
+	p, err := New(settings, deploy.Token, nil, t.Logf)
 	if err != nil {
 		t.Fatalf("New with the app's deploy token: %v", err)
 	}

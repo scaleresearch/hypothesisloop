@@ -42,16 +42,16 @@ func main() {
 	}
 	defer logger.Sync() //nolint:errcheck
 
-	pcfg, err := hypothesisloopcfg.LoadFromEnv()
+	pcfg, err := hypothesisloopcfg.LoadMetricsService()
 	if err != nil {
 		logger.Fatal("metrics-service: settings", zap.Error(err))
 	}
 	controllerPort := strconv.Itoa(pcfg.Services.MetricControllerPort)
 
-	metrics := metricsdb.New(pcfg.Services.MetricsDBURL)
+	metrics := metricsdb.New(pcfg.MetricsDBURL)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	pool, err := db.NewPool(ctx, db.ConfigOf(pcfg.Database, db.ServiceMaxConns))
+	pool, err := db.NewPool(ctx, db.ConfigOf(pcfg.Database, pcfg.DatabaseURL, db.ServiceMaxConns))
 	cancel()
 	if err != nil {
 		logger.Fatal("metrics-service: connect db", zap.Error(err))
@@ -68,7 +68,7 @@ func main() {
 		DefaultMaxConcurrentAccelerators: pcfg.Quota.DefaultMaxConcurrentAccelerators,
 	}
 
-	authenticator, err := auth.NewAuthenticator(pcfg.Auth, store)
+	authenticator, err := auth.NewAuthenticator(pcfg.Auth, pcfg.SigningSecret, store)
 	if err != nil {
 		logger.Fatal("metrics-service: configure auth", zap.Error(err))
 	}
@@ -97,7 +97,7 @@ func main() {
 	logger.Info("metrics-service: stopped")
 }
 
-func newControllerServer(authenticator *auth.Authenticator, pool *db.Pool, store *db.Store, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Settings, metrics *metricsdb.Store, port string, logger *zap.Logger) (*http.Server, context.CancelFunc) {
+func newControllerServer(authenticator *auth.Authenticator, pool *db.Pool, store *db.Store, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.MetricsService, metrics *metricsdb.Store, port string, logger *zap.Logger) (*http.Server, context.CancelFunc) {
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
 	peSvc := platformexperiments.NewService(store, quotaCfg, logger, metrics, observedGapCap)
 

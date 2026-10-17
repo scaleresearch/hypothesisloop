@@ -6,15 +6,14 @@ import (
 )
 
 func TestNewRefusesIncompleteSettings(t *testing.T) {
-	t.Setenv("VAST_TEST_KEY", testKey)
-	t.Setenv("VAST_TEST_EMPTY", "")
-	valid := Settings{APIKeyEnv: "VAST_TEST_KEY", MaxPricePerHour: 0.5, MinReliability: 0.9}
+	valid := Settings{MaxPricePerHour: 0.5, MinReliability: 0.9}
+	if _, err := New(valid, "", nil, t.Logf); err == nil || !strings.Contains(err.Error(), "API key is required") {
+		t.Errorf("no key: err = %v, want it refused", err)
+	}
 	cases := map[string]struct {
 		mutate func(*Settings)
 		want   string
 	}{
-		"no key reference":     {func(c *Settings) { c.APIKeyEnv = "" }, "api_key_env"},
-		"key variable unset":   {func(c *Settings) { c.APIKeyEnv = "VAST_TEST_EMPTY" }, "VAST_TEST_EMPTY is not set"},
 		"no price ceiling":     {func(c *Settings) { c.MaxPricePerHour = 0 }, "max_price_per_hour"},
 		"reliability above 1":  {func(c *Settings) { c.MinReliability = 1.5 }, "min_reliability"},
 		"accelerator unnamed":  {func(c *Settings) { c.Accelerators = []Accelerator{{Product: "NVIDIA H200"}} }, "gpu_name"},
@@ -25,12 +24,12 @@ func TestNewRefusesIncompleteSettings(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			cfg := valid
 			tc.mutate(&cfg)
-			if _, err := New(cfg, nil, t.Logf); err == nil || !strings.Contains(err.Error(), tc.want) {
+			if _, err := New(cfg, testKey, nil, t.Logf); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v, want one about %q", err, tc.want)
 			}
 		})
 	}
-	if _, err := New(valid, nil, t.Logf); err != nil {
+	if _, err := New(valid, testKey, nil, t.Logf); err != nil {
 		t.Fatalf("New(valid): %v", err)
 	}
 }
@@ -50,17 +49,15 @@ func TestErrorsNeverCarryTheAPIKey(t *testing.T) {
 }
 
 func TestNewRefusesAnAcceleratorTypeTheSettingsCannotRent(t *testing.T) {
-	t.Setenv("VAST_TEST_KEY", testKey)
 	settings := Settings{
-		APIKeyEnv:       "VAST_TEST_KEY",
 		MaxPricePerHour: 0.5,
 		Accelerators:    []Accelerator{{Product: "NVIDIA GeForce RTX 4090", GPUName: "RTX 4090"}},
 	}
 
-	if _, err := New(settings, []string{"nvidia.com/gpu.product=NVIDIA-GEFORCE-RTX-4090"}, t.Logf); err != nil {
+	if _, err := New(settings, testKey, []string{"nvidia.com/gpu.product=NVIDIA-GEFORCE-RTX-4090"}, t.Logf); err != nil {
 		t.Fatalf("a type with an entry: %v", err)
 	}
-	_, err := New(settings, []string{"nvidia.com/gpu.product=NVIDIA-GEFORCE-RTX-4090", "nvidia.com/gpu.product=NVIDIA-H200"}, t.Logf)
+	_, err := New(settings, testKey, []string{"nvidia.com/gpu.product=NVIDIA-GEFORCE-RTX-4090", "nvidia.com/gpu.product=NVIDIA-H200"}, t.Logf)
 	if err == nil || !strings.Contains(err.Error(), "NVIDIA-H200") {
 		t.Fatalf("err = %v, want one naming the type with no entry", err)
 	}

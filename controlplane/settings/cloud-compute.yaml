@@ -4,7 +4,9 @@
 # (hl-admin cluster add <cluster_name> <org>, and hl-admin cluster share for every org's jobs): the
 # control plane runs its runtime itself, and rents nothing for a cluster that is not registered.
 # Jobs boot with services.public_api_url, which a rented machine must reach, and environments
-# named by digest come from environments.repository. This one is a vast.ai account.
+# named by digest come from environments.repository. This one is a vast.ai account, whose API key
+# control-service reads as CLOUD_COMPUTE_VAST_API_KEY from its environment. A provider has one
+# account, so no two entries name the same provider.
 cloud_compute:
   - cluster_name: vast
 
@@ -41,9 +43,6 @@ cloud_compute:
       # id, which per-cluster settings are keyed on.
       account_id: "000000"
       settings:
-        # The environment variable that holds the account's API key. The key itself is never in
-        # a file.
-        api_key_env: VAST_API_KEY
         # Offers above this price for the whole instance are never rented. Each rent takes the
         # cheapest offer that passes the filters, so this is a ceiling and not what is paid. In
         # October 2026 a verified RTX 4090 of the shape below with reliability 0.98 cost $0.55 to

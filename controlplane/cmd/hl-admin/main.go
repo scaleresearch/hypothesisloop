@@ -54,13 +54,13 @@ func main() {
 }
 
 func run(args []string, stdout io.Writer) error {
-	cfg, err := config.LoadFromEnv()
+	cfg, err := config.LoadAdmin()
 	if err != nil {
 		return err
 	}
 	switch {
 	case len(args) == 2 && args[0] == "token":
-		token, err := auth.Mint(cfg.Auth.SigningSecret, args[1])
+		token, err := auth.Mint(cfg.SigningSecret, args[1])
 		if err != nil {
 			return err
 		}
@@ -124,7 +124,7 @@ func run(args []string, stdout io.Writer) error {
 			if _, err := store.RegisterCluster(ctx, args[2], args[3]); err != nil {
 				return err
 			}
-			token, err := auth.Mint(cfg.Auth.SigningSecret, auth.RuntimeScope(args[2]))
+			token, err := auth.Mint(cfg.SigningSecret, auth.RuntimeScope(args[2]))
 			if err != nil {
 				return err
 			}
@@ -139,7 +139,7 @@ func run(args []string, stdout io.Writer) error {
 		if cfg.GitHost.GitHub == nil {
 			return errors.New("the config's git host is not github, so there is no App to ask about the installation")
 		}
-		app, err := github.New(*cfg.GitHost.GitHub)
+		app, err := github.New(*cfg.GitHost.GitHub, cfg.GitHubKey)
 		if err != nil {
 			return err
 		}
@@ -184,10 +184,10 @@ func connectGitHub(ctx context.Context, store installationStore, app installatio
 	return json.NewEncoder(stdout).Encode(connected)
 }
 
-func withStore(cfg *config.Settings, do func(context.Context, *db.Store) error) error {
+func withStore(cfg *config.Admin, do func(context.Context, *db.Store) error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	pool, err := db.NewPool(ctx, db.ConfigOf(cfg.Database, 2))
+	pool, err := db.NewPool(ctx, db.ConfigOf(cfg.Database, cfg.DatabaseURL, 2))
 	if err != nil {
 		return err
 	}

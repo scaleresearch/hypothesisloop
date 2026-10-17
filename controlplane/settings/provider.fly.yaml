@@ -1,13 +1,13 @@
 # The provider section of the sandbox settings (sandbox.yaml) for one Fly.io organization.
+#
+# control-service rents with SANDBOX_FLY_API_TOKEN from its environment: a deploy token for the app
+# below, as `fly tokens create deploy -a <app>` prints it, "FlyV1 " and the token. Use a deploy
+# token and no wider one: it is all the adapter needs, and a token for the organization can create
+# and destroy machines in every app of it.
 
 provider:
   name: fly
   settings:
-    # The environment variable that holds a deploy token for the app below, as
-    # `fly tokens create deploy -a <app>` prints it: "FlyV1 " and the token. The token is never
-    # in a file. Use a deploy token and no wider one: it is all the adapter needs, and a token
-    # for the organization can create and destroy machines in every app of it.
-    api_token_env: FLY_API_TOKEN
     # The one Fly app that holds every machine. It must exist: `fly apps create <name> -o <org>`.
     # The adapter does not create it, and every pass fails with the app's name until it does.
     # Give it a network of its own (`--network <name>`): machines on one network reach each

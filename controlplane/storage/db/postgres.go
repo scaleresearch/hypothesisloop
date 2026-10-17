@@ -14,9 +14,10 @@ import (
 // ServiceMaxConns is the pool size every control-plane service runs with.
 const ServiceMaxConns = 20
 
-// ConfigOf is the pool of maxConns connections the database section of the settings describes.
-func ConfigOf(d config.DatabaseConfig, maxConns int32) Config {
-	return Config{DSN: d.URL, MaxConns: maxConns, Timeouts: Timeouts{
+// ConfigOf is a pool of maxConns connections to the database at url, with the timeouts of the
+// database section of the settings.
+func ConfigOf(d config.DatabaseConfig, url string, maxConns int32) Config {
+	return Config{DSN: url, MaxConns: maxConns, Timeouts: Timeouts{
 		Statement:         time.Duration(d.StatementTimeoutSeconds) * time.Second,
 		Lock:              time.Duration(d.LockTimeoutSeconds) * time.Second,
 		IdleInTransaction: time.Duration(d.IdleInTransactionSessionTimeoutSeconds) * time.Second,

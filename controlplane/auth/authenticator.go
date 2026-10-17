@@ -58,12 +58,12 @@ type Authenticator struct {
 	now           func() time.Time
 }
 
-func NewAuthenticator(cfg config.AuthConfig, directory Directory) (*Authenticator, error) {
+func NewAuthenticator(cfg config.AuthConfig, signingSecret string, directory Directory) (*Authenticator, error) {
 	providers, err := parseIdentityProviders(cfg.IdentityProviders)
 	if err != nil {
 		return nil, fmt.Errorf("auth: %w", err)
 	}
-	return &Authenticator{signingSecret: cfg.SigningSecret, providers: providers, directory: directory, now: time.Now}, nil
+	return &Authenticator{signingSecret: signingSecret, providers: providers, directory: directory, now: time.Now}, nil
 }
 
 // Authenticate resolves a token. A refusal is an *Error with status 401; any other error is the

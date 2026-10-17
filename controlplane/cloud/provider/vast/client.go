@@ -88,7 +88,7 @@ func (r refusal) Unwrap() error { return r.err }
 
 // New refuses settings that cannot rent one of acceleratorTypes, the catalog strings the caller
 // will ask for, so that a missing entry stops the process at startup instead of a job at Create.
-func New(cfg Settings, acceleratorTypes []string, log func(format string, args ...any)) (*Provider, error) {
+func New(cfg Settings, key string, acceleratorTypes []string, log func(format string, args ...any)) (*Provider, error) {
 	if log == nil {
 		return nil, errors.New("vast: a log is required")
 	}
@@ -100,9 +100,8 @@ func New(cfg Settings, acceleratorTypes []string, log func(format string, args .
 			return nil, err
 		}
 	}
-	key, err := cfg.apiKey()
-	if err != nil {
-		return nil, err
+	if key == "" {
+		return nil, errors.New("vast: an API key is required")
 	}
 	return &Provider{
 		log:     log,

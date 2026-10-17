@@ -192,7 +192,7 @@ func TestAFailedBuildAndAnImageWithoutAmd64AreErrors(t *testing.T) {
 		t.Errorf("a failed build: err = %v", err)
 	}
 	b.APIKey = ""
-	if err := b.Build(host+"/job:ok", 1, 512); err == nil || !strings.Contains(err.Error(), "E2B_API_KEY") {
+	if err := b.Build(host+"/job:ok", 1, 512); err == nil || !strings.Contains(err.Error(), "SANDBOX_E2B_API_KEY") {
 		t.Errorf("no API key: err = %v", err)
 	}
 }

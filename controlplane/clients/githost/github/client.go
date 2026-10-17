@@ -236,14 +236,14 @@ type Client struct {
 }
 
 // New builds the client of the configured App. The private key is the PEM GitHub issued.
-func New(cfg config.GitHubConfig) (*Client, error) {
-	block, _ := pem.Decode([]byte(cfg.PrivateKey))
+func New(cfg config.GitHubConfig, privateKey string) (*Client, error) {
+	block, _ := pem.Decode([]byte(privateKey))
 	if block == nil {
-		return nil, errors.New("github: private_key is not PEM")
+		return nil, errors.New("github: the App's private key is not PEM")
 	}
 	key, err := x509.ParsePKCS1PrivateKey(block.Bytes)
 	if err != nil {
-		return nil, errors.New("github: private_key is not the RSA key GitHub issues for an App (PKCS#1 PEM)")
+		return nil, errors.New("github: the App's private key is not the RSA key GitHub issues for an App (PKCS#1 PEM)")
 	}
 	return &Client{
 		appID: cfg.AppID, slug: cfg.AppSlug, key: key,

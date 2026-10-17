@@ -34,11 +34,11 @@ type apiGate struct {
 	access *auth.Access
 }
 
-func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Repositories, gitHost githost.Provider, pool *db.Pool, store *db.Store, graph *graphdb.Store, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Settings, metrics *metricsdb.Store, port string, logger *zap.Logger) *http.Server {
+func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Repositories, gitHost githost.Provider, pool *db.Pool, store *db.Store, graph *graphdb.Store, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.ControlService, metrics *metricsdb.Store, port string, logger *zap.Logger) *http.Server {
 	// One client for the durable-data store, shared by everything that reads it: the listing
 	// endpoint, the usage report, admission's ceiling, and the addressing handed to runtimes.
 	dataStore, err := objectstore.New(pcfg.DataStore.Provider, pcfg.DataStore.ControlPlaneEndpoint, pcfg.DataStore.Endpoint, pcfg.DataStore.Region, pcfg.DataStore.Bucket,
-		pcfg.DataStore.AccessKeyID, pcfg.DataStore.SecretAccessKey)
+		pcfg.DataStore.AccessKeyID, pcfg.DataStoreSecret)
 	if err != nil {
 		logger.Fatal("control-service: configure durable data store", zap.Error(err))
 	}
@@ -57,7 +57,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		WithEnvironments(environmentsSvc).WithModelDefaults(modelDefaults(pcfg)).WithIdleNotice(store, time.Duration(pcfg.Agents.IdleNoticeMinutes)*time.Minute).WithPersonIdeas(graph)
 	launch := platformexperiments.AgentLaunch{
 		Hosting: pcfg.Sandbox != nil, DefaultModel: pcfg.Agents.DefaultModel, CoordinatorModel: pcfg.Agents.CoordinatorModel,
-		SigningSecret: pcfg.Auth.SigningSecret, MaxHosted: pcfg.Agents.MaxHostedPerPlatformExperiment,
+		SigningSecret: pcfg.SigningSecret, MaxHosted: pcfg.Agents.MaxHostedPerPlatformExperiment,
 	}
 	peSvc = peSvc.WithPlanning(platformexperiments.Planning{
 		Limit:       time.Duration(pcfg.Planning.LimitMinutes) * time.Minute,
@@ -78,7 +78,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	watchHandler.Start(runCtx)
 
 	modelProxy, err := modelproxy.New(store, metrics,
-		modelproxy.AnthropicUpstream, pcfg.Models.Anthropic.OAuthToken, logger)
+		modelproxy.AnthropicUpstream, pcfg.ModelToken, logger)
 	if err != nil {
 		logger.Fatal("control-service: configure the model proxy", zap.Error(err))
 	}
@@ -96,7 +96,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		Sessions:            platformexperiments.NewSessions(dataStore),
 		Instructions:        platformexperiments.NewComposer(store, modelDefaults(pcfg), logger),
 		Drafts:              platformexperiments.NewDrafts(store, logger),
-		Accounts: accounts.NewService(store, store, metrics, connectedWithin, pcfg.Auth.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Services.PublicAPIURL, MetricsURL: pcfg.Runtimes.MetricsURL, Registry: pcfg.Runtimes.Registry, ImageTag: pcfg.Runtimes.ImageTag, RegistryPlainHTTP: pcfg.Runtimes.RegistryPlainHTTP},
+		Accounts: accounts.NewService(store, store, metrics, connectedWithin, pcfg.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Services.PublicAPIURL, MetricsURL: pcfg.Runtimes.MetricsURL, Registry: pcfg.Runtimes.Registry, ImageTag: pcfg.Runtimes.ImageTag, RegistryPlainHTTP: pcfg.Runtimes.RegistryPlainHTTP},
 			accounts.Limits{MaxOrgsPerUser: pcfg.Accounts.MaxOrgsPerUser, MaxProjectsPerOrg: pcfg.Accounts.MaxProjectsPerOrg}, gate.access, logger),
 		AgentTypes:      accounts.NewAgentTypes(store, gate.access, logger),
 		Repositories:    repos,
@@ -120,7 +120,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 // newEnvironmentRegistry is where assigned environment builds push to and the logins to it, and
 // the git host their files' repositories are read from, nil on a deployment whose settings have no
 // environments section.
-func newEnvironmentRegistry(ctx context.Context, pcfg *hypothesisloopcfg.Settings, gitHost githost.Provider, logger *zap.Logger) *clusterexchange.EnvironmentRegistry {
+func newEnvironmentRegistry(ctx context.Context, pcfg *hypothesisloopcfg.ControlService, gitHost githost.Provider, logger *zap.Logger) *clusterexchange.EnvironmentRegistry {
 	e := pcfg.Environments
 	if e == nil {
 		return nil
@@ -146,16 +146,16 @@ func openGraph(ctx context.Context, url string) (*graphdb.Store, error) {
 }
 
 // modelDefaults is the platform's model for an agent and for a coordinator that names none.
-func modelDefaults(pcfg *hypothesisloopcfg.Settings) domain.ModelDefaults {
+func modelDefaults(pcfg *hypothesisloopcfg.ControlService) domain.ModelDefaults {
 	return domain.ModelDefaults{Agent: pcfg.Agents.DefaultModel, Coordinator: pcfg.Agents.CoordinatorModel}
 }
 
 // newGitHost is the git host the settings name, one of two. On a plain one there is no GitHub App
 // and no client for it: connecting GitHub answers that there is none.
-func newGitHost(pcfg *hypothesisloopcfg.Settings, store *db.Store, logger *zap.Logger) (githubApp accounts.GitHubApp, gitHost githost.Provider) {
+func newGitHost(pcfg *hypothesisloopcfg.ControlService, store *db.Store, logger *zap.Logger) (githubApp accounts.GitHubApp, gitHost githost.Provider) {
 	switch pcfg.GitHost.Provider {
 	case hypothesisloopcfg.GitHostProviderGitHub:
-		client, err := github.New(*pcfg.GitHost.GitHub)
+		client, err := github.New(*pcfg.GitHost.GitHub, pcfg.GitHubKey)
 		if err != nil {
 			logger.Fatal("control-service: configure the GitHub App", zap.Error(err))
 		}
@@ -163,7 +163,7 @@ func newGitHost(pcfg *hypothesisloopcfg.Settings, store *db.Store, logger *zap.L
 	case hypothesisloopcfg.GitHostProviderPlain:
 		plain := pcfg.GitHost.Plain
 		var err error
-		gitHost, err = githost.NewPlain(plain.BaseURL, plain.Username, plain.Password)
+		gitHost, err = githost.NewPlain(plain.BaseURL, plain.Username, pcfg.GitPassword)
 		if err != nil {
 			logger.Fatal("control-service: configure the git host", zap.Error(err))
 		}

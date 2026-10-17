@@ -1,4 +1,5 @@
-# The provider section of the sandbox settings (sandbox.yaml) for one E2B team.
+# The provider section of the sandbox settings (sandbox.yaml) for one E2B team, whose API key
+# control-service reads as SANDBOX_E2B_API_KEY from its environment.
 #
 # E2B boots a sandbox from a template. Before an image can be rented at a size, build its
 # template: `go run ./controlplane/cmd/e2b-template <image> <cores> <memory-mib>`. A Create whose
@@ -7,8 +8,6 @@
 provider:
   name: e2b
   settings:
-    # The environment variable that holds the team's API key. The key itself is never in a file.
-    api_key_env: E2B_API_KEY
     # The longest a sandbox lives. E2B kills it then, with its output. The plan caps it: 3600 on
     # the free plan, 86400 on Pro. A value above the cap fails every Create with the vendor's own
     # message. An instance rented with a shorter lifetime of its own (an agent's, which the

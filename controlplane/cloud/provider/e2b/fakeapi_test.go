@@ -201,8 +201,7 @@ const (
 
 func newTestProvider(t *testing.T, api *fakeAPI) *Provider {
 	t.Helper()
-	t.Setenv("E2B_TEST_KEY", testKey)
-	p, err := New(Settings{APIKeyEnv: "E2B_TEST_KEY", LifetimeSeconds: 3600}, nil, t.Logf)
+	p, err := New(Settings{LifetimeSeconds: 3600}, testKey, nil, t.Logf)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

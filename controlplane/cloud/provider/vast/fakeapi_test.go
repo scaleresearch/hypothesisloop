@@ -140,12 +140,10 @@ func upload(deliveredAt time.Time, body string) http.HandlerFunc {
 
 func newTestProvider(t *testing.T, api *fakeAPI, cfg Settings) *Provider {
 	t.Helper()
-	t.Setenv("VAST_TEST_KEY", testKey)
-	cfg.APIKeyEnv = "VAST_TEST_KEY"
 	if cfg.MaxPricePerHour == 0 {
 		cfg.MaxPricePerHour = 0.5
 	}
-	p, err := New(cfg, nil, t.Logf)
+	p, err := New(cfg, testKey, nil, t.Logf)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

@@ -18,7 +18,7 @@ func TestAReopenedRunsTokensAreAcceptedByTheRowsAlone(t *testing.T) {
 	ctx := context.Background()
 	run := db.ClosedRunWithAgents(t, pool)
 	const secret = "a-signing-secret-only-this-test-knows"
-	authenticator, err := auth.NewAuthenticator(config.AuthConfig{SigningSecret: secret}, db.NewStore(pool, 1))
+	authenticator, err := auth.NewAuthenticator(config.AuthConfig{}, secret, db.NewStore(pool, 1))
 	if err != nil {
 		t.Fatal(err)
 	}

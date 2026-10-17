@@ -114,7 +114,7 @@ func newTestAuthenticator(t *testing.T, signers ...testSigner) (*Authenticator, 
 		homes:      map[string][]string{},
 		names:      map[string]string{},
 	}
-	cfg := config.AuthConfig{SigningSecret: testSecret}
+	cfg := config.AuthConfig{}
 	if len(signers) > 0 {
 		provider := config.IdentityProvider{Issuer: testIssuer, Audience: testAudience}
 		for _, s := range signers {
@@ -122,7 +122,7 @@ func newTestAuthenticator(t *testing.T, signers ...testSigner) (*Authenticator, 
 		}
 		cfg.IdentityProviders = []config.IdentityProvider{provider}
 	}
-	a, err := NewAuthenticator(cfg, directory)
+	a, err := NewAuthenticator(cfg, testSecret, directory)
 	if err != nil {
 		t.Fatalf("new authenticator: %v", err)
 	}
@@ -387,7 +387,7 @@ func TestADirectoryFailureIsNotARefusal(t *testing.T) {
 func TestAuthenticatorRefusesAMisconfiguredIdentityProvider(t *testing.T) {
 	ec := newECSigner(t, "ec-1")
 	provider := config.IdentityProvider{Issuer: testIssuer, Audience: testAudience, JWTKeys: []config.JWTKey{ec.jwk, ec.jwk}}
-	if _, err := NewAuthenticator(config.AuthConfig{SigningSecret: testSecret, IdentityProviders: []config.IdentityProvider{provider}}, &fakeDirectory{}); err == nil {
+	if _, err := NewAuthenticator(config.AuthConfig{IdentityProviders: []config.IdentityProvider{provider}}, testSecret, &fakeDirectory{}); err == nil {
 		t.Error("the same kid listed twice: got = nil, want an error")
 	}
 }

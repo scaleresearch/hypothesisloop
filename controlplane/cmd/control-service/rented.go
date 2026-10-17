@@ -25,7 +25,7 @@ const defaultWarmPool = 2
 // newRented builds what rents machines elsewhere, each a loop the leader runs: the launcher of
 // hosted agents on the sandbox provider, and one runtime per cloud compute account. A provider
 // that cannot be built from its settings stops the process here.
-func newRented(pcfg *hypothesisloopcfg.Settings, store *db.Store, clusters *clusterexchange.Service, metrics *metricsdb.Store, logger *zap.Logger) ([]func(context.Context), error) {
+func newRented(pcfg *hypothesisloopcfg.ControlService, store *db.Store, clusters *clusterexchange.Service, metrics *metricsdb.Store, logger *zap.Logger) ([]func(context.Context), error) {
 	var loops []func(context.Context)
 	if s := pcfg.Sandbox; s != nil {
 		launcher, err := newLauncher(pcfg, s, store, metrics, logger)
@@ -48,10 +48,10 @@ func newRented(pcfg *hypothesisloopcfg.Settings, store *db.Store, clusters *clus
 	return loops, nil
 }
 
-func newLauncher(pcfg *hypothesisloopcfg.Settings, s *hypothesisloopcfg.SandboxConfig, store *db.Store, metrics *metricsdb.Store, logger *zap.Logger) (*cloudhosting.Launcher, error) {
+func newLauncher(pcfg *hypothesisloopcfg.ControlService, s *hypothesisloopcfg.SandboxConfig, store *db.Store, metrics *metricsdb.Store, logger *zap.Logger) (*cloudhosting.Launcher, error) {
 	log := logger.Named("hosting")
 	// An agent instance has no accelerator, so the provider is asked for no accelerator type.
-	rented, err := providers.New(s.Provider.Name, s.Provider.Settings, nil, log.Named(s.Provider.Name).Sugar().Infof)
+	rented, err := providers.New(s.Provider.Name, s.Provider.Settings, pcfg.SandboxSecret, nil, log.Named(s.Provider.Name).Sugar().Infof)
 	if err != nil {
 		return nil, fmt.Errorf("sandbox: %w", err)
 	}
@@ -63,7 +63,7 @@ func newLauncher(pcfg *hypothesisloopcfg.Settings, s *hypothesisloopcfg.SandboxC
 		warmPool = *s.WarmPoolSize
 	}
 	decider := hosting.NewDecider(store, metrics, hosting.Settings{
-		Image: pcfg.Agents.Image, APIURL: pcfg.Services.PublicAPIURL, SigningSecret: pcfg.Auth.SigningSecret,
+		Image: pcfg.Agents.Image, APIURL: pcfg.Services.PublicAPIURL, SigningSecret: pcfg.SigningSecret,
 		BootLimit:       time.Duration(pcfg.Agents.BootLimitSeconds) * time.Second,
 		ProgressLimit:   time.Duration(pcfg.Agents.ProgressLimitSeconds) * time.Second,
 		MaxNewPerAnswer: pcfg.Agents.MaxNewInstancesPerAnswer,
@@ -84,7 +84,7 @@ func newLauncher(pcfg *hypothesisloopcfg.Settings, s *hypothesisloopcfg.SandboxC
 	return launcher, nil
 }
 
-func newCloudCluster(pcfg *hypothesisloopcfg.Settings, cc hypothesisloopcfg.CloudComputeConfig, environments string, store *db.Store, clusters *clusterexchange.Service, logger *zap.Logger) (*compute.Cluster, error) {
+func newCloudCluster(pcfg *hypothesisloopcfg.ControlService, cc hypothesisloopcfg.CloudComputeConfig, environments string, store *db.Store, clusters *clusterexchange.Service, logger *zap.Logger) (*compute.Cluster, error) {
 	shapes := make([]compute.Shape, 0, len(cc.Shapes))
 	var acceleratorTypes []string
 	for _, s := range cc.Shapes {
@@ -97,7 +97,7 @@ func newCloudCluster(pcfg *hypothesisloopcfg.Settings, cc hypothesisloopcfg.Clou
 		}
 	}
 	log := logger.Named("cloudcompute").With(zap.String("cluster", cc.ClusterName))
-	rented, err := providers.New(cc.Provider.Name, cc.Provider.Settings, acceleratorTypes, log.Named(cc.Provider.Name).Sugar().Infof)
+	rented, err := providers.New(cc.Provider.Name, cc.Provider.Settings, pcfg.CloudComputeSecrets[cc.ClusterName], acceleratorTypes, log.Named(cc.Provider.Name).Sugar().Infof)
 	if err != nil {
 		return nil, fmt.Errorf("cloud_compute %s: %w", cc.ClusterName, err)
 	}

@@ -36,16 +36,16 @@ func main() {
 	}
 	defer logger.Sync() //nolint:errcheck
 
-	pcfg, err := hypothesisloopcfg.LoadFromEnv()
+	pcfg, err := hypothesisloopcfg.LoadControlService()
 	if err != nil {
 		logger.Fatal("control-service: settings", zap.Error(err))
 	}
 	apiPort := strconv.Itoa(pcfg.Services.APIPort)
 
-	metrics := metricsdb.New(pcfg.Services.MetricsDBURL)
+	metrics := metricsdb.New(pcfg.MetricsDBURL)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	pool, err := db.NewPool(ctx, db.ConfigOf(pcfg.Database, db.ServiceMaxConns))
+	pool, err := db.NewPool(ctx, db.ConfigOf(pcfg.Database, pcfg.DatabaseURL, db.ServiceMaxConns))
 	cancel()
 	if err != nil {
 		logger.Fatal("control-service: connect db", zap.Error(err))
@@ -64,7 +64,7 @@ func main() {
 	}
 
 	graphCtx, graphCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	graph, err := openGraph(graphCtx, pcfg.Services.GraphDBURL)
+	graph, err := openGraph(graphCtx, pcfg.GraphDBURL)
 	graphCancel()
 	if err != nil {
 		logger.Fatal("control-service: graph store", zap.Error(err))
@@ -97,7 +97,7 @@ func main() {
 	runCtx, runCancel := context.WithCancel(context.Background())
 	defer runCancel()
 
-	authenticator, err := auth.NewAuthenticator(pcfg.Auth, store)
+	authenticator, err := auth.NewAuthenticator(pcfg.Auth, pcfg.SigningSecret, store)
 	if err != nil {
 		logger.Fatal("control-service: configure auth", zap.Error(err))
 	}

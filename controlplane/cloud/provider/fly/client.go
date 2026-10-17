@@ -62,7 +62,7 @@ type Provider struct {
 
 // New refuses any accelerator type: the adapter rents CPU-only Machines, so a shape that asks
 // for an accelerator stops the process at startup instead of a job at Create.
-func New(cfg Settings, acceleratorTypes []string, log func(format string, args ...any)) (*Provider, error) {
+func New(cfg Settings, token string, acceleratorTypes []string, log func(format string, args ...any)) (*Provider, error) {
 	if log == nil {
 		return nil, errors.New("fly: a log is required")
 	}
@@ -72,8 +72,7 @@ func New(cfg Settings, acceleratorTypes []string, log func(format string, args .
 	if len(acceleratorTypes) > 0 {
 		return nil, fmt.Errorf("fly: this adapter rents no accelerators, and a shape asks for %q", acceleratorTypes[0])
 	}
-	token, err := cfg.apiToken()
-	if err != nil {
+	if err := checkToken(token); err != nil {
 		return nil, err
 	}
 	return &Provider{
