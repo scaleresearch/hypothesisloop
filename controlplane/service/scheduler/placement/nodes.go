@@ -367,7 +367,7 @@ func NodeHasRoom(available, needed map[string]int64) bool {
 		return true
 	}
 	// A node the cluster did not report resources for cannot be proven to have room for a job
-	// that needs some. Reporting them is required (see clusteragentapi), so an absent entry is a
+	// that needs some. Reporting them is required (see clusterexchange), so an absent entry is a
 	// malformed report, not a default.
 	if available == nil {
 		return false

@@ -231,9 +231,9 @@ def _run_bare_node_flow(api, pe_id, agent, cluster_name, engine, deadline, submi
 
     # The bare-agent's own FetchLogTail (runtime/bare-metal/internal/podexec) reads this same
     # container's stdout live and reports it alongside job phase on its next status push (see
-    # runtime/shared/agentloop.reportChangedStatuses + controlplane/services/clusteragentapi) --
+    # runtime/shared/agentloop.reportChangedStatuses + controlplane/service/clusterexchange) --
     # the control plane never reaches into the container engine itself. Confirms the whole chain:
-    # real container -> bare-agent -> clusteragentapi -> GreptimeDB -> registry GET, no job-side
+    # real container -> bare-agent -> clusterexchange -> GreptimeDB -> registry GET, no job-side
     # involvement at all (the job here is a bare `sh -c echo ...`, nothing pushes its own logs).
     eventually(
         "registry's log-tail endpoint reports this container's own stdout",

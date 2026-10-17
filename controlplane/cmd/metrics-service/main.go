@@ -20,8 +20,8 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/metricsingest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/controller"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/settlement"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
@@ -100,7 +100,7 @@ func main() {
 
 func newControllerServer(authenticator *auth.Authenticator, pool *db.Pool, store *db.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) (*http.Server, context.CancelFunc) {
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
-	peSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap)
+	peSvc := platformexperiments.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap)
 
 	// metric-controller never connects to a cluster directly, and needs no cluster/workload
 	// wiring at all: eviction is purely a status update (service/controller) — the
@@ -117,7 +117,7 @@ func newControllerServer(authenticator *auth.Authenticator, pool *db.Pool, store
 	ctrl = ctrl.WithStagesStore(peFullStore, metricsDBURL)
 	// Each pass keeps the researchers of every running platform experiment at work as its pool
 	// says, launched as the control service launches the researchers it creates.
-	ctrl = ctrl.WithResearcherKeeper(quota.NewResearcherKeeper(peSvc, quota.AgentLaunch{
+	ctrl = ctrl.WithResearcherKeeper(platformexperiments.NewResearcherKeeper(peSvc, platformexperiments.AgentLaunch{
 		Hosting: pcfg.Sandbox != nil, DefaultModel: pcfg.Agents.DefaultModel,
 	}))
 

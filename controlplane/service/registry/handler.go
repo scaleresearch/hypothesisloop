@@ -317,7 +317,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 
 	// No POST here: log tails are never pushed by the job/research-agent side of the API --
 	// only a cluster-agent may report a job's log tail (via /internal/clusters/{name}/status,
-	// see clusteragentapi), same as job phase. This is read-only.
+	// see clusterexchange), same as job phase. This is read-only.
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-log-tail", Method: "GET", Path: "/experiments/{id}/logs",
 		Summary: "Get the job's most recently reported log tail", Tags: []string{"metrics"},

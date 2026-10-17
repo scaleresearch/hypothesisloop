@@ -12,10 +12,10 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/clusteragentapi"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
@@ -34,19 +34,19 @@ func TestSmoke(t *testing.T) {
 	// every operation a caller can reach at the single base URL.
 	r := authtest.Router(authtest.Staff)
 	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", agenttypes.PlatformRules, auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	quota.RegisterHuma(doc, quota.NewHandler(nil, nil), quota.NewPlatformExperimentsHandler(nil, worldRepositories{}, worldPlanning, nil))
+	platformexperiments.RegisterHuma(doc, platformexperiments.NewHandler(nil, nil), platformexperiments.NewPlatformExperimentsHandler(nil, worldRepositories{}, worldPlanning, nil))
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(
 		scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{})))
 	registry.RegisterHuma(doc, registry.NewHandler(nil, nil))
-	quota.RegisterDataUsageHuma(doc, quota.NewDataUsageHandler(nil, nil, nil, 0, zap.NewNop()))
-	quota.RegisterSessionsHuma(doc, nil, zap.NewNop())
-	quota.RegisterExperimentDraftsHuma(doc, nil, zap.NewNop())
+	platformexperiments.RegisterDataUsageHuma(doc, platformexperiments.NewDataUsageHandler(nil, nil, nil, 0, zap.NewNop()))
+	platformexperiments.RegisterSessionsHuma(doc, nil, zap.NewNop())
+	platformexperiments.RegisterExperimentDraftsHuma(doc, nil, zap.NewNop())
 	doc.MountExplore(r)
 
 	// Cluster-agent traffic is a separate audience on its own prefix, so it keeps its own doc.
 	rc := authtest.Router(authtest.Staff)
 	dc := apidocs.New(rc, "cluster-agent", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	clusteragentapi.RegisterHuma(dc, clusteragentapi.NewHandler(nil, 0, "", 0, nil, 0, nil, 0, "", "https://api.test/git", nil, nil))
+	clusterexchange.RegisterHuma(dc, clusterexchange.NewHandler(nil, 0, "", 0, nil, 0, nil, 0, "", "https://api.test/git", nil, nil))
 	dc.MountExplore(rc)
 
 	for _, tc := range []struct {

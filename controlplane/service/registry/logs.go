@@ -9,7 +9,7 @@ import (
 
 // GetLogTail returns the last n lines of an experiment's most recently reported log tail
 // (n <= 0 returns everything reported). Reported by the owning cluster-agent, not the job
-// itself — see clusteragentapi and agentloop.reportChangedStatuses. Empty, not an error, if
+// itself — see clusterexchange and agentloop.reportChangedStatuses. Empty, not an error, if
 // nothing has been reported yet.
 func (s *Service) GetLogTail(ctx context.Context, experimentID string, n int) ([]string, error) {
 	exp, err := s.store.GetExperiment(ctx, experimentID)

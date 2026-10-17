@@ -17,9 +17,9 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
@@ -42,13 +42,13 @@ func platformRoutes(caller auth.Principal) http.Handler {
 	r := chi.NewRouter()
 	r.Use(auth.Gate(authtest.As(caller), logger, map[string]string{"/watch": registry.WatchSubprotocol}))
 	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", "", auth.NewAccess(authtest.Placement{}), logger)
-	experiments := quota.NewPlatformExperimentsHandler(nil, struct{ githost.Provider }{}, quota.Planning{Limit: time.Minute, ProposedFor: time.Minute, PlannerKept: time.Minute}, logger).
-		WithAgentLaunch(quota.AgentLaunch{Hosting: true, DefaultModel: "model", SigningSecret: "secret", MaxHosted: 1})
-	quota.RegisterHuma(doc, quota.NewHandler(nil, logger), experiments)
-	quota.RegisterAgentsHuma(doc, experiments, struct{ quota.Hypotheses }{})
-	quota.RegisterPlanningHuma(doc, experiments)
-	quota.RegisterDataUsageHuma(doc, quota.NewDataUsageHandler(nil, nil, nil, 0, logger))
-	quota.RegisterSessionsHuma(doc, nil, logger)
+	experiments := platformexperiments.NewPlatformExperimentsHandler(nil, struct{ githost.Provider }{}, platformexperiments.Planning{Limit: time.Minute, ProposedFor: time.Minute, PlannerKept: time.Minute}, logger).
+		WithAgentLaunch(platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model", SigningSecret: "secret", MaxHosted: 1})
+	platformexperiments.RegisterHuma(doc, platformexperiments.NewHandler(nil, logger), experiments)
+	platformexperiments.RegisterAgentsHuma(doc, experiments, struct{ platformexperiments.Hypotheses }{})
+	platformexperiments.RegisterPlanningHuma(doc, experiments)
+	platformexperiments.RegisterDataUsageHuma(doc, platformexperiments.NewDataUsageHandler(nil, nil, nil, 0, logger))
+	platformexperiments.RegisterSessionsHuma(doc, nil, logger)
 	accounts.RegisterHuma(doc, accounts.NewHandler(nil, nil, nil, nil, nil, "secret", accounts.RuntimeAddresses{}, accounts.Limits{MaxOrgsPerUser: 1, MaxProjectsPerOrg: 1}, logger))
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(scheduler.NewService(nil, nil, nil,
 		struct{ scheduler.CodeHost }{}, struct{ scheduler.InstalledCapacity }{}, struct{ scheduler.QuotaSettler }{}, "http://metrics.invalid", logger).

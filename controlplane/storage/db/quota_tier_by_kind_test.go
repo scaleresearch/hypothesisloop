@@ -49,7 +49,7 @@ func createTestPE(t *testing.T, pool *Pool, id string, budget float64) {
 // oneStage is the ladder these starts store: none of them is about the ladder.
 var oneStage = []domain.Stage{{LengthPct: 100}}
 
-// allocateStartQuotas mirrors services/quota.PlatformExperimentsService.Start's per-dimension
+// allocateStartQuotas mirrors platformexperiments.PlatformExperimentsService.Start's per-dimension
 // allocation, without pulling in the whole service (no metrics dependency needed for this path)
 // — the same domain.AllocateQuota + domain.ResolveQuotaTier/ApplyQuotaTier sequence production runs.
 func allocateStartQuotas(peID string, budget float64, participants []StartParticipant) []*domain.AgentQuota {

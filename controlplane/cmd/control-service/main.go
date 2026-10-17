@@ -26,12 +26,12 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/gitproxy"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/modelproxy"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/environments"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/settlement"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/clusteragentapi"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
@@ -203,8 +203,8 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		logger.Fatal("control-service: configure durable data store", zap.Error(err))
 	}
 	connectedWithin := time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds) * time.Second
-	svc := quota.NewService(store, logger)
-	handler := quota.NewHandler(svc, logger)
+	svc := platformexperiments.NewService(store, logger)
+	handler := platformexperiments.NewHandler(svc, logger)
 
 	// One observation cadence for the whole process: the quota service, the settler, the
 	// controller and the scheduler loop must all measure "how long did this run" the same way,
@@ -215,9 +215,9 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	// registry at most once a minute per tag.
 	environmentsSvc := environments.NewService(store.EnvironmentsStore, gitHost).WithJobImages(pcfg.OfferedJobImages(), imagedigest.New(pcfg.PlainHTTPRegistries()...))
 
-	peSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap).WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent).WithRepositories(gitHost).
+	peSvc := platformexperiments.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap).WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent).WithRepositories(gitHost).
 		WithEnvironments(environmentsSvc).WithModelDefaults(modelDefaults(pcfg)).WithIdleNotice(peFullStore, time.Duration(pcfg.Agents.IdleNoticeMinutes)*time.Minute).WithPersonIdeas(graph)
-	peHandler := quota.NewPlatformExperimentsHandler(peSvc, gitHost, quota.Planning{
+	peHandler := platformexperiments.NewPlatformExperimentsHandler(peSvc, gitHost, platformexperiments.Planning{
 		Limit:       time.Duration(pcfg.Planning.LimitMinutes) * time.Minute,
 		ProposedFor: time.Duration(pcfg.Planning.ProposedForDays) * 24 * time.Hour,
 		PlannerKept: time.Duration(pcfg.Planning.PlannerKeptMinutes) * time.Minute,
@@ -226,7 +226,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		WithJobImages(pcfg.OfferedJobImages()).
 		WithGitProxy(pcfg.GitHost.ProxyURL).
 		WithLiveCapacity(metricsDBURL, connectedWithin, store, domain.NewPodResources(pcfg.PodResourcesByName)).
-		WithAgentLaunch(quota.AgentLaunch{
+		WithAgentLaunch(platformexperiments.AgentLaunch{
 			Hosting: pcfg.Sandbox != nil, DefaultModel: pcfg.Agents.DefaultModel, CoordinatorModel: pcfg.Agents.CoordinatorModel,
 			SigningSecret: pcfg.Auth.SigningSecret, MaxHosted: pcfg.Agents.MaxHostedPerPlatformExperiment,
 		})
@@ -271,7 +271,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		instructions:        db.NewPlatformExperimentsStore(pool),
 		agentTypes:          accounts.NewAgentTypesHandler(db.NewAgentTypesStore(pool), logger),
 		models:              modelDefaults(pcfg),
-		dataUsage:           quota.NewDataUsageHandler(dataStore, store, peSvc, pcfg.DataStore.MaxBytesPerAgent, logger),
+		dataUsage:           platformexperiments.NewDataUsageHandler(dataStore, store, peSvc, pcfg.DataStore.MaxBytesPerAgent, logger),
 		sessions:            dataStore,
 		drafts:              db.NewExperimentDraftsStore(pool),
 		accounts: accounts.NewHandler(db.NewAccountsStore(pool), store, connectedClusters, autoscaledClusters, clusterContacts, pcfg.Auth.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Services.PublicAPIURL, MetricsURL: pcfg.Runtimes.MetricsURL, Registry: pcfg.Runtimes.Registry, ImageTag: pcfg.Runtimes.ImageTag, RegistryPlainHTTP: pcfg.Runtimes.RegistryPlainHTTP},
@@ -300,22 +300,22 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 
 // routes is everything the API serves.
 type routes struct {
-	quota               *quota.Handler
-	platformExperiments *quota.PlatformExperimentsHandler
-	hypotheses          quota.Hypotheses
-	sharing             quota.Sharing
-	dataUsage           *quota.DataUsageHandler
-	sessions            quota.SessionStore
-	instructions        quota.InstructionsStore
+	quota               *platformexperiments.Handler
+	platformExperiments *platformexperiments.PlatformExperimentsHandler
+	hypotheses          platformexperiments.Hypotheses
+	sharing             platformexperiments.Sharing
+	dataUsage           *platformexperiments.DataUsageHandler
+	sessions            platformexperiments.SessionStore
+	instructions        platformexperiments.InstructionsStore
 	models              domain.ModelDefaults
-	drafts              quota.ExperimentDraftStore
+	drafts              platformexperiments.ExperimentDraftStore
 	accounts            *accounts.Handler
 	agentTypes          *accounts.AgentTypesHandler
 	repositories        *accounts.Repositories
 	scheduler           *scheduler.Handler
 	registry            *registry.Handler
 	watch               *registry.WatchHandler
-	clusterAgent        *clusteragentapi.Handler
+	clusterAgent        *clusterexchange.Handler
 	gitProxy            *gitproxy.Proxy
 	modelProxy          *modelproxy.Proxy
 	modelUsage          modelproxy.UsageReader
@@ -359,21 +359,21 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 	// registration and its own docs under a distinct prefix — a different audience entirely.
 	clusterAgentRouter := chi.NewRouter()
 	clusterAgentDoc := apidocs.New(clusterAgentRouter, "hypothesisloop cluster-agent API", "1.0.0", "", gate.access, logger)
-	clusteragentapi.RegisterHuma(clusterAgentDoc, h.clusterAgent)
+	clusterexchange.RegisterHuma(clusterAgentDoc, h.clusterAgent)
 	clusterAgentDoc.MountExplore(clusterAgentRouter)
 	r.Mount("/internal/clusters", clusterAgentRouter)
 
 	// One doc for the whole public API: every operation an agent or the UI can call is
 	// registered here, so /openapi.json and /explore describe all of it in one place.
 	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", agenttypes.PlatformRules, gate.access, logger)
-	quota.RegisterHuma(doc, h.quota, h.platformExperiments)
-	quota.RegisterAgentsHuma(doc, h.platformExperiments, h.hypotheses)
-	quota.RegisterPlanningHuma(doc, h.platformExperiments)
-	quota.RegisterShareHuma(doc, h.sharing, h.platformExperiments.Answer, logger)
-	quota.RegisterDataUsageHuma(doc, h.dataUsage)
-	quota.RegisterSessionsHuma(doc, h.sessions, logger)
-	quota.RegisterInstructionsHuma(doc, h.instructions, h.models, logger)
-	quota.RegisterExperimentDraftsHuma(doc, h.drafts, logger)
+	platformexperiments.RegisterHuma(doc, h.quota, h.platformExperiments)
+	platformexperiments.RegisterAgentsHuma(doc, h.platformExperiments, h.hypotheses)
+	platformexperiments.RegisterPlanningHuma(doc, h.platformExperiments)
+	platformexperiments.RegisterShareHuma(doc, h.sharing, h.platformExperiments.Answer, logger)
+	platformexperiments.RegisterDataUsageHuma(doc, h.dataUsage)
+	platformexperiments.RegisterSessionsHuma(doc, h.sessions, logger)
+	platformexperiments.RegisterInstructionsHuma(doc, h.instructions, h.models, logger)
+	platformexperiments.RegisterExperimentDraftsHuma(doc, h.drafts, logger)
 	accounts.RegisterHuma(doc, h.accounts)
 	accounts.RegisterAgentTypesHuma(doc, h.agentTypes)
 	accounts.RegisterRepositoriesHuma(doc, h.repositories)
@@ -395,7 +395,7 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 // newSchedulerParts builds the scheduler's handler and starts its background loops, returning
 // the handlers newRouter serves: the scheduler's on the shared API doc, the cluster-agents' under
 // its own prefix.
-func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environmentsSvc *environments.Service, pool *db.Pool, store *db.Store, graph *graphdb.Store, expQuotaSvc *quota.PlatformExperimentsService, peHandler *quota.PlatformExperimentsHandler, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL string, dataStore *objectstore.Client, logger *zap.Logger) (*scheduler.Handler, *clusteragentapi.Handler) {
+func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environmentsSvc *environments.Service, pool *db.Pool, store *db.Store, graph *graphdb.Store, expQuotaSvc *platformexperiments.PlatformExperimentsService, peHandler *platformexperiments.PlatformExperimentsHandler, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL string, dataStore *objectstore.Client, logger *zap.Logger) (*scheduler.Handler, *clusterexchange.Handler) {
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
 
 	clusterReports, err := scheduler.NewClusterReports(store, metricsDBURL,
@@ -454,7 +454,7 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environ
 	// incorrect, just N redundant sweeps racing over the same row. One owner.
 	// Cluster-agent-facing surface (Go cluster-agent binaries, not the research agent) gets its
 	// own Huma registration with its own openapi/explore docs, mounted under its own prefix.
-	clusterAgentHandler := clusteragentapi.NewHandler(store,
+	clusterAgentHandler := clusterexchange.NewHandler(store,
 		time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds)*time.Second, metricsDBURL, pcfg.Scheduler.ObservationCadence(), dataStore,
 		time.Duration(pcfg.Scheduler.MaxCheckpointGraceSeconds)*time.Second,
 		pcfg.AcceleratorTypeNames(), pcfg.Scheduler.MaxLogTailLineChars, pcfg.Auth.SigningSecret, pcfg.GitHost.ProxyURL, environmentRegistry, logger).
@@ -488,7 +488,7 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environ
 // newEnvironmentRegistry is where assigned environment builds push to and the logins to it, and
 // the git host their files' repositories are read from, nil on a deployment whose settings have no
 // environments section.
-func newEnvironmentRegistry(ctx context.Context, pcfg *hypothesisloopcfg.Config, gitHost githost.Provider, logger *zap.Logger) *clusteragentapi.EnvironmentRegistry {
+func newEnvironmentRegistry(ctx context.Context, pcfg *hypothesisloopcfg.Config, gitHost githost.Provider, logger *zap.Logger) *clusterexchange.EnvironmentRegistry {
 	e := pcfg.Environments
 	if e == nil {
 		return nil
@@ -497,7 +497,7 @@ func newEnvironmentRegistry(ctx context.Context, pcfg *hypothesisloopcfg.Config,
 	if err != nil {
 		logger.Fatal("control-service: the registry logins of environment builds", zap.Error(err))
 	}
-	return &clusteragentapi.EnvironmentRegistry{Repository: e.Repository, Logins: logins, Git: gitHost}
+	return &clusterexchange.EnvironmentRegistry{Repository: e.Repository, Logins: logins, Git: gitHost}
 }
 
 // openGraph connects to the hypothesis graph and makes sure its schema exists.

@@ -20,10 +20,10 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/clusteragentapi"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
@@ -195,7 +195,7 @@ func (g worldGraph) GetHypothesis(_ context.Context, id string) (*domain.Hypothe
 	return &domain.Hypothesis{ID: id, PlatformExperimentID: t.PlatformExperimentID, AgentID: t.AgentID}, nil
 }
 
-var worldPlanning = quota.Planning{Limit: 30 * time.Minute, ProposedFor: 7 * 24 * time.Hour, PlannerKept: 10 * time.Minute}
+var worldPlanning = platformexperiments.Planning{Limit: 30 * time.Minute, ProposedFor: 7 * 24 * time.Hour, PlannerKept: 10 * time.Minute}
 
 // reached is what a request answers once every check let it through and the handler asked a
 // service for something: the services here hold no store, so that first ask panics.
@@ -245,19 +245,19 @@ func newWorldAPI(t *testing.T) *worldAPI {
 
 	clusters := chi.NewRouter()
 	api.docs["/internal/clusters"] = apidocs.New(clusters, "cluster-agent", "1.0.0", "", access, logger)
-	clusteragentapi.RegisterHuma(api.docs["/internal/clusters"], clusteragentapi.NewHandler(nil, 0, "", 0, nil, 0, nil, 0, worldSecret, "https://api.test/git", &clusteragentapi.EnvironmentRegistry{Repository: "registry.test/environments/environment"}, logger))
+	clusterexchange.RegisterHuma(api.docs["/internal/clusters"], clusterexchange.NewHandler(nil, 0, "", 0, nil, 0, nil, 0, worldSecret, "https://api.test/git", &clusterexchange.EnvironmentRegistry{Repository: "registry.test/environments/environment"}, logger))
 	api.router.Mount("/internal/clusters", clusters)
 
 	doc := apidocs.New(api.router, "hypothesisloop API", "1.0.0", "", access, logger)
 	api.docs[""] = doc
-	peHandler := quota.NewPlatformExperimentsHandler(nil, worldRepositories{}, worldPlanning, logger).WithAgentLaunch(quota.AgentLaunch{Hosting: true, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: worldSecret, MaxHosted: 20})
-	quota.RegisterHuma(doc, quota.NewHandler(nil, logger), peHandler)
-	quota.RegisterAgentsHuma(doc, peHandler, worldGraph{world: w})
-	quota.RegisterPlanningHuma(doc, peHandler)
-	quota.RegisterShareHuma(doc, nil, peHandler.Answer, logger)
-	quota.RegisterDataUsageHuma(doc, quota.NewDataUsageHandler(nil, nil, nil, 0, zap.NewNop()))
-	quota.RegisterSessionsHuma(doc, nil, logger)
-	quota.RegisterExperimentDraftsHuma(doc, nil, logger)
+	peHandler := platformexperiments.NewPlatformExperimentsHandler(nil, worldRepositories{}, worldPlanning, logger).WithAgentLaunch(platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: worldSecret, MaxHosted: 20})
+	platformexperiments.RegisterHuma(doc, platformexperiments.NewHandler(nil, logger), peHandler)
+	platformexperiments.RegisterAgentsHuma(doc, peHandler, worldGraph{world: w})
+	platformexperiments.RegisterPlanningHuma(doc, peHandler)
+	platformexperiments.RegisterShareHuma(doc, nil, peHandler.Answer, logger)
+	platformexperiments.RegisterDataUsageHuma(doc, platformexperiments.NewDataUsageHandler(nil, nil, nil, 0, zap.NewNop()))
+	platformexperiments.RegisterSessionsHuma(doc, nil, logger)
+	platformexperiments.RegisterExperimentDraftsHuma(doc, nil, logger)
 	accounts.RegisterHuma(doc, accounts.NewHandler(nil, nil, nil, nil, nil, worldSecret, accounts.RuntimeAddresses{}, accounts.Limits{MaxOrgsPerUser: 3, MaxProjectsPerOrg: 10}, logger))
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(
 		scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", logger).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{})))

@@ -255,7 +255,7 @@ func Register[I, O any](d *Doc, audience Audience, op huma.Operation, handler fu
 
 // MountExplore registers GET /explore on r. It renders one fixed compact Markdown digest of
 // every registered operation regardless of audience, grouped by tag — for a Doc whose
-// registrations are already all one audience (e.g. clusteragentapi's cluster-agent-only Doc),
+// registrations are already all one audience (e.g. clusterexchange's cluster-agent-only Doc),
 // where there is nothing to filter.
 func (d *Doc) MountExplore(r chi.Router) {
 	d.MountExploreAudience(r, "/explore", "")

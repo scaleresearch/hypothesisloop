@@ -25,7 +25,7 @@ type ClusterReports struct {
 	// metricsDBURL is where cluster-agents' live capacity and job reports live: metric data,
 	// read live, never duplicated into Postgres.
 	metricsDBURL string
-	// connectedWithin mirrors clusteragentapi.Handler's staleness window
+	// connectedWithin mirrors clusterexchange.Handler's staleness window
 	// (scheduler.cluster_unreachable_after_seconds): a cluster whose heartbeat is older than
 	// this contributes zero capacity instead of a possibly-stale number. This also freezes new
 	// admission to an Unreachable cluster, since its capacity just drops out of the sum below.

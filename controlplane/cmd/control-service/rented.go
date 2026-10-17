@@ -11,8 +11,8 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/cloud/provider"
 	"github.com/scaleresearch/hypothesisloop/controlplane/cloud/provider/providers"
 	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/config"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/hosting"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/clusteragentapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
@@ -23,7 +23,7 @@ const defaultWarmPool = 2
 // newRented builds what rents machines elsewhere, each a loop the leader runs: the launcher of
 // hosted agents on the sandbox provider, and one runtime per cloud compute account. A provider
 // that cannot be built from its settings stops the process here.
-func newRented(pcfg *hypothesisloopcfg.Config, pool *db.Pool, store *db.Store, clusters *clusteragentapi.Handler, metricsDBURL string, logger *zap.Logger) ([]func(context.Context), error) {
+func newRented(pcfg *hypothesisloopcfg.Config, pool *db.Pool, store *db.Store, clusters *clusterexchange.Handler, metricsDBURL string, logger *zap.Logger) ([]func(context.Context), error) {
 	var loops []func(context.Context)
 	if s := pcfg.Sandbox; s != nil {
 		launcher, err := newLauncher(pcfg, s, pool, metricsDBURL, logger)
@@ -82,7 +82,7 @@ func newLauncher(pcfg *hypothesisloopcfg.Config, s *hypothesisloopcfg.SandboxCon
 	return launcher, nil
 }
 
-func newCloudCluster(pcfg *hypothesisloopcfg.Config, cc hypothesisloopcfg.CloudComputeConfig, environments string, store *db.Store, clusters *clusteragentapi.Handler, logger *zap.Logger) (*compute.Cluster, error) {
+func newCloudCluster(pcfg *hypothesisloopcfg.Config, cc hypothesisloopcfg.CloudComputeConfig, environments string, store *db.Store, clusters *clusterexchange.Handler, logger *zap.Logger) (*compute.Cluster, error) {
 	shapes := make([]compute.Shape, 0, len(cc.Shapes))
 	var acceleratorTypes []string
 	for _, s := range cc.Shapes {

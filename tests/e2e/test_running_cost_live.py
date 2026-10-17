@@ -1,4 +1,4 @@
-"""Live running-cost correction (controlplane/services/quota/running_cost.go), ported 1:1 from
+"""Live running-cost correction (controlplane/service/platformexperiments/running_cost.go), ported 1:1 from
 tests/scenarios/running-cost-live.sh: a RUNNING job's contribution to used_guaranteed_acch must
 track its actual observed-elapsed cost, not stay pinned at the static admission-time estimate for
 the job's whole lifetime. Right after admission the estimate is debited in full (budget is never

@@ -143,7 +143,7 @@ type SchedulerConfig struct {
 	// keeps ending it, rather than loop silently forever.
 	MaxInfrastructureRequeues int `yaml:"max_infrastructure_requeues"`
 	// MaxLogTailLineChars bounds one stored line of a job's reported log tail, applied on ingest
-	// (see clusteragentapi.splitLongLines): large enough to keep a real compiler error or stack
+	// (see clusterexchange.splitLongLines): large enough to keep a real compiler error or stack
 	// frame intact, small enough that one pathological line can't blow up a stored tail.
 	// Lines over this are split, never truncated/dropped.
 	MaxLogTailLineChars int `yaml:"max_log_tail_line_chars"`

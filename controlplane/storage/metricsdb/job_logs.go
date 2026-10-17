@@ -15,7 +15,7 @@ import (
 // (values there are float64) — this talks to GreptimeDB's own SQL HTTP endpoint instead. Same
 // database, same package, still the only place log content lives: no Postgres duplicate.
 //
-// One row per (experiment_id, ts): each report from a cluster-agent (see clusteragentapi) is a
+// One row per (experiment_id, ts): each report from a cluster-agent (see clusterexchange) is a
 // full replacement snapshot of "this job's current tail", not an appended line — reading back
 // always takes the single latest row for an experiment_id, same "latest snapshot" idiom as
 // LatestJobPhase/LatestExperimentNode elsewhere in this package.

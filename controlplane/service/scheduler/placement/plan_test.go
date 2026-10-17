@@ -106,7 +106,7 @@ func TestReservePlacementFailureLeavesInputUntouched(t *testing.T) {
 // device each satisfy the cluster total of 2 while no node can run the rank that needs 2.
 //
 // Known gap, not fixable in the scheduler alone: cluster agents report only CPU/memory/storage
-// per node (see clusteragentapi), so there is no per-node figure to check against. Skipped until
+// per node (see clusterexchange), so there is no per-node figure to check against. Skipped until
 // the agent protocol carries extended resources per node; the assertion below is the contract.
 func TestTopologyFitsIgnoresExtraResourcesPerNode(t *testing.T) {
 	t.Skip("per-node extended resources are not reported by cluster agents yet")

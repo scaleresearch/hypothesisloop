@@ -21,10 +21,10 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/modelproxy"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/clusteragentapi"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
 )
 
 // public is every route control-service answers without a token.
@@ -41,30 +41,30 @@ var public = map[string]bool{
 // The routes are registered and never served, so what stands behind them is empty.
 type (
 	noRepositories struct{ githost.Provider }
-	noHypotheses   struct{ quota.Hypotheses }
+	noHypotheses   struct{ platformexperiments.Hypotheses }
 )
 
 func testRouter(t *testing.T) chi.Router {
 	t.Helper()
 	unreachable := authtest.As{Kind: auth.KindStaff}
-	platformExperiments := quota.NewPlatformExperimentsHandler(nil, noRepositories{}, quota.Planning{Limit: time.Minute, ProposedFor: time.Minute, PlannerKept: time.Minute}, zap.NewNop()).
-		WithAgentLaunch(quota.AgentLaunch{Hosting: true, DefaultModel: "model", CoordinatorModel: "model", SigningSecret: "secret", MaxHosted: 1})
+	platformExperiments := platformexperiments.NewPlatformExperimentsHandler(nil, noRepositories{}, platformexperiments.Planning{Limit: time.Minute, ProposedFor: time.Minute, PlannerKept: time.Minute}, zap.NewNop()).
+		WithAgentLaunch(platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model", CoordinatorModel: "model", SigningSecret: "secret", MaxHosted: 1})
 	modelProxy, err := modelproxy.New(noOneHosted{}, modelproxy.MetricsDB{}, "https://model.example.invalid", "credential", zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
 	return newRouter(apiGate{tokens: unreachable, access: auth.NewAccess(authtest.Placement{})}, "http://ui.test", routes{
-		quota:               &quota.Handler{},
+		quota:               &platformexperiments.Handler{},
 		platformExperiments: platformExperiments,
 		hypotheses:          noHypotheses{},
-		dataUsage:           &quota.DataUsageHandler{},
+		dataUsage:           &platformexperiments.DataUsageHandler{},
 		accounts:            &accounts.Handler{},
 		agentTypes:          &accounts.AgentTypesHandler{},
 		repositories:        &accounts.Repositories{},
 		scheduler:           &scheduler.Handler{},
 		registry:            &registry.Handler{},
 		watch:               &registry.WatchHandler{},
-		clusterAgent:        &clusteragentapi.Handler{},
+		clusterAgent:        &clusterexchange.Handler{},
 		modelProxy:          modelProxy,
 		modelUsage:          modelproxy.MetricsDB{},
 	}, zap.NewNop())

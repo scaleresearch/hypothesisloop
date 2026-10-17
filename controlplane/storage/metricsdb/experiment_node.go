@@ -11,7 +11,7 @@ import (
 )
 
 // experimentNodeMetric marks "experimentID's job is running on physical node X" — written once
-// per status report by the control plane (clusteragentapi.Handler.PushStatus), straight from
+// per status report by the control plane (clusterexchange.Handler.PushStatus), straight from
 // what cluster-agent observed (workload.JobWorkloadClient.ResolveAdmittedAcceleratorType). This
 // is the sole record of job→physical-node attribution anywhere in the system: it is not also
 // stored in Postgres — per this repo's "metrics only in the metrics store, no duplicates between
