@@ -8,13 +8,13 @@ import (
 
 // The first ask for an org's repository records it as wanted and unprovisioned, asking again
 // changes nothing, a failed provisioning leaves it wanted, and a done one is provisioned for good
-// and no longer to provision.
+// and no longer to provision, unless every wanted one is asked for.
 func TestAnOrgsRepositoryIsWantedOnceAndProvisionedForGood(t *testing.T) {
 	w := newTwoOrgs(t)
 	ctx := context.Background()
 	toProvision := func() []string {
 		t.Helper()
-		orgs, err := w.exps.OrgRegistriesToProvision(ctx)
+		orgs, err := w.exps.OrgRegistriesToProvision(ctx, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -39,5 +39,9 @@ func TestAnOrgsRepositoryIsWantedOnceAndProvisionedForGood(t *testing.T) {
 	}
 	if provisioned, err := w.exps.AskOrgRegistry(ctx, w.orgA); err != nil || !provisioned || slices.Contains(toProvision(), w.orgA) {
 		t.Fatalf("after provisioning: provisioned %v, %v, want it done", provisioned, err)
+	}
+	every, err := w.exps.OrgRegistriesToProvision(ctx, true)
+	if err != nil || !slices.Contains(every, w.orgA) || slices.Contains(every, w.orgB) {
+		t.Fatalf("every wanted: %v, %v, want org A, provisioned, and not org B", every, err)
 	}
 }

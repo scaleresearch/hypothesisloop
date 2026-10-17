@@ -129,7 +129,10 @@ func newImageRegistry(ctx context.Context, pcfg *hypothesisloopcfg.ControlServic
 	if r == nil {
 		return nil
 	}
-	registry, err := registrycred.New(ctx, *r)
+	// A run ends at most max_platform_experiment_days after it starts, which is at most
+	// baseline_limit_minutes after the platform experiment's start.
+	keepFor := time.Duration(pcfg.Quota.MaxPlatformExperimentDays)*24*time.Hour + time.Duration(pcfg.Planning.BaselineLimitMinutes)*time.Minute
+	registry, err := registrycred.New(ctx, *r, keepFor)
 	if err != nil {
 		logger.Fatal("control-service: the image registry", zap.Error(err))
 	}

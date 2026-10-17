@@ -111,10 +111,10 @@ func (o *orgRegistries) AskOrgRegistry(_ context.Context, orgID string) (bool, e
 	}
 	return o.provisioned[orgID], nil
 }
-func (o *orgRegistries) OrgRegistriesToProvision(context.Context) ([]string, error) {
+func (o *orgRegistries) OrgRegistriesToProvision(_ context.Context, every bool) ([]string, error) {
 	var pending []string
 	for _, orgID := range o.wanted {
-		if !o.provisioned[orgID] {
+		if every || !o.provisioned[orgID] {
 			pending = append(pending, orgID)
 		}
 	}
@@ -297,7 +297,7 @@ func TestAnOrgsRepositoryIsProvisionedOnceByThePassOffTheRequest(t *testing.T) {
 		t.Fatal("the request did not wake the registry pass")
 	}
 
-	if err := f.svc.ProvideRegistries(ctx); err != nil {
+	if err := f.svc.ProvideRegistries(ctx, false); err != nil {
 		t.Fatal(err)
 	}
 	if f.orgs.provisioned["org-a"] || f.orgs.failures["org-a"] == "" {
@@ -307,7 +307,7 @@ func TestAnOrgsRepositoryIsProvisionedOnceByThePassOffTheRequest(t *testing.T) {
 	refusedWith(t, err, http.StatusServiceUnavailable, ReasonRegistryPreparing)
 
 	registry.failing["org-a"] = false
-	if err := f.svc.ProvideRegistries(ctx); err != nil {
+	if err := f.svc.ProvideRegistries(ctx, false); err != nil {
 		t.Fatal(err)
 	}
 	if !f.orgs.provisioned["org-a"] {
@@ -317,11 +317,19 @@ func TestAnOrgsRepositoryIsProvisionedOnceByThePassOffTheRequest(t *testing.T) {
 	if err != nil || got.Username != "pusher-org-a" {
 		t.Fatalf("credential = %+v, %v, want org-a's push login", got, err)
 	}
-	if err := f.svc.ProvideRegistries(ctx); err != nil {
+	if err := f.svc.ProvideRegistries(ctx, false); err != nil {
 		t.Fatal(err)
 	}
 	if len(registry.provisions) != 2 {
 		t.Fatalf("provisioned %v, want org-a twice and never again once done", registry.provisions)
+	}
+	// The first pass after a start provisions every org again, which brings a repository an
+	// earlier release provisioned to what this one provisions, and leaves it provisioned.
+	if err := f.svc.ProvideRegistries(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	if len(registry.provisions) != 3 || !f.orgs.provisioned["org-a"] {
+		t.Fatalf("provisioned %v, provisioned %v, want org-a once more and still provisioned", registry.provisions, f.orgs.provisioned["org-a"])
 	}
 }
 

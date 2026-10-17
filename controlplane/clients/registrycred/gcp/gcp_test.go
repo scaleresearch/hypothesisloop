@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -20,10 +21,12 @@ import (
 )
 
 // fakeGoogle is the Artifact Registry and IAM APIs of one project, as far as provisioning reads
-// and writes them: repositories, service accounts and repository policies.
+// and writes them: repositories and their cleanup policies, service accounts and repository
+// policies.
 type fakeGoogle struct {
 	mu           sync.Mutex
 	repositories map[string]bool
+	cleanup      map[string]artifactregistry.Repository
 	accounts     map[string]bool
 	policies     map[string]*artifactregistry.Policy
 	writes       []string
@@ -85,7 +88,10 @@ func (f *fakeGoogle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			refuse(http.StatusConflict, "already exists")
 			return
 		}
+		var req artifactregistry.Repository
+		_ = json.Unmarshal(body, &req)
 		f.repositories[name] = true
+		f.cleanup[name] = artifactregistry.Repository{CleanupPolicies: req.CleanupPolicies, CleanupPolicyDryRun: req.CleanupPolicyDryRun}
 		f.writes = append(f.writes, "repository "+name)
 		reply(http.StatusOK, artifactregistry.Operation{Name: "operations/1", Done: true})
 	case strings.Contains(path, "/repositories/") && r.Method == http.MethodGet:
@@ -93,7 +99,19 @@ func (f *fakeGoogle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			refuse(http.StatusNotFound, "not found")
 			return
 		}
-		reply(http.StatusOK, artifactregistry.Repository{Name: path})
+		repository := f.cleanup[path]
+		repository.Name = path
+		reply(http.StatusOK, repository)
+	case strings.Contains(path, "/repositories/") && r.Method == http.MethodPatch:
+		if r.URL.Query().Get("updateMask") != "cleanup_policies,cleanup_policy_dry_run" {
+			refuse(http.StatusBadRequest, "update mask "+r.URL.Query().Get("updateMask"))
+			return
+		}
+		var req artifactregistry.Repository
+		_ = json.Unmarshal(body, &req)
+		f.cleanup[path] = artifactregistry.Repository{CleanupPolicies: req.CleanupPolicies, CleanupPolicyDryRun: req.CleanupPolicyDryRun}
+		f.writes = append(f.writes, "cleanup "+path)
+		reply(http.StatusOK, req)
 	default:
 		refuse(http.StatusNotImplemented, r.Method+" "+path)
 	}
@@ -132,11 +150,11 @@ func testRegistry(t *testing.T, google *fakeGoogle, m *minted) *Registry {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &Registry{project: "proj", location: "europe-west4", ar: ar, iam: accounts, mint: m.mint, now: func() time.Time { return *m.clock }, tokens: map[string]*oauth2.Token{}}
+	return &Registry{project: "proj", location: "europe-west4", keepFor: 30*24*time.Hour + 90*time.Minute, ar: ar, iam: accounts, mint: m.mint, now: func() time.Time { return *m.clock }, tokens: map[string]*oauth2.Token{}}
 }
 
 func newGoogle() *fakeGoogle {
-	return &fakeGoogle{repositories: map[string]bool{}, accounts: map[string]bool{}, policies: map[string]*artifactregistry.Policy{}}
+	return &fakeGoogle{repositories: map[string]bool{}, cleanup: map[string]artifactregistry.Repository{}, accounts: map[string]bool{}, policies: map[string]*artifactregistry.Policy{}}
 }
 
 // Provisioning an org creates its repository, its pusher and puller, and binds them as writer and
@@ -206,6 +224,54 @@ func TestProvisioningAnOrgCreatesItsRepositoryAndAccountsOnce(t *testing.T) {
 	}
 	if r.repositoryName("org-b") == repository || r.pusher("org-b") == pusher || !google.repositories[r.repositoryName("org-b")] {
 		t.Fatalf("org-b shares org-a's repository or accounts")
+	}
+}
+
+// A repository is created keeping the newest version of each experiment's image and deleting every
+// other once no job can pull it. One provisioned without them, or with them only reported, gets
+// them on the next provisioning, and one that has them is left as it is.
+func TestProvisioningGivesAnOrgsRepositoryItsCleanupPolicies(t *testing.T) {
+	now := time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)
+	google, m := newGoogle(), &minted{clock: &now, lifetime: time.Hour}
+	r := testRegistry(t, google, m)
+	ctx := context.Background()
+	want := map[string]artifactregistry.CleanupPolicy{
+		"keep-newest": {Id: "keep-newest", Action: "KEEP", MostRecentVersions: &artifactregistry.CleanupPolicyMostRecentVersions{KeepCount: 1}},
+		"delete-unpullable": {Id: "delete-unpullable", Action: "DELETE",
+			Condition: &artifactregistry.CleanupPolicyCondition{TagState: "ANY", OlderThan: "2597400s"}},
+	}
+	enforced := func(name string) bool {
+		got := google.cleanup[name]
+		return !got.CleanupPolicyDryRun && reflect.DeepEqual(got.CleanupPolicies, want)
+	}
+
+	if err := r.Provision(ctx, "org-a"); err != nil {
+		t.Fatal(err)
+	}
+	created := r.repositoryName("org-a")
+	if !enforced(created) {
+		t.Fatalf("created with %+v, want %+v enforced", google.cleanup[created], want)
+	}
+
+	existing := r.repositoryName("org-b")
+	for _, before := range []artifactregistry.Repository{{}, {CleanupPolicies: want, CleanupPolicyDryRun: true}} {
+		google.repositories[existing], google.cleanup[existing] = true, before
+		if err := r.Provision(ctx, "org-b"); err != nil {
+			t.Fatal(err)
+		}
+		if !enforced(existing) {
+			t.Fatalf("an existing repository with %+v has %+v after provisioning, want %+v enforced", before, google.cleanup[existing], want)
+		}
+	}
+
+	before := len(google.written())
+	for _, orgID := range []string{"org-a", "org-b"} {
+		if err := r.Provision(ctx, orgID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := google.written()[before:]; len(got) != 0 {
+		t.Fatalf("provisioning repositories that have their policies wrote %v", got)
 	}
 }
 

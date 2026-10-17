@@ -23,9 +23,9 @@ UNION ALL SELECT * FROM asked`, orgID).Scan(&provisioned)
 }
 
 // OrgRegistriesToProvision returns the orgs whose repository is wanted and not provisioned, the
-// longest waiting first.
-func (s *Store) OrgRegistriesToProvision(ctx context.Context) ([]string, error) {
-	rows, err := s.pool.pool.Query(ctx, `SELECT org_id FROM org_registries WHERE provisioned_at IS NULL ORDER BY requested_at`)
+// longest waiting first, and with every the provisioned ones too.
+func (s *Store) OrgRegistriesToProvision(ctx context.Context, every bool) ([]string, error) {
+	rows, err := s.pool.pool.Query(ctx, `SELECT org_id FROM org_registries WHERE provisioned_at IS NULL OR $1 ORDER BY requested_at`, every)
 	if err != nil {
 		return nil, fmt.Errorf("org_registries_store.OrgRegistriesToProvision: %w", err)
 	}

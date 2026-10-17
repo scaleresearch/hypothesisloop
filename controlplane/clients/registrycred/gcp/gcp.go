@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -61,6 +62,7 @@ type minter func(ctx context.Context, serviceAccount string, lifetime time.Durat
 // Registry is the Artifact Registry repositories of orgs in one project and location.
 type Registry struct {
 	project, location string
+	keepFor           time.Duration
 	ar                *artifactregistry.Service
 	iam               *iam.Service
 	mint              minter
@@ -72,8 +74,9 @@ type Registry struct {
 
 // New reaches project's Artifact Registry in location as the process's Google application
 // default credentials, which create each org's repository and service accounts and mint their
-// tokens. It fails when there are no such credentials.
-func New(ctx context.Context, project, location string) (*Registry, error) {
+// tokens. It fails when there are no such credentials. keepFor is how long after its push a
+// version of an image may still be pulled by a job (cleanupPolicies).
+func New(ctx context.Context, project, location string, keepFor time.Duration) (*Registry, error) {
 	credentials, err := google.FindDefaultCredentials(ctx, cloudPlatformScope)
 	if err != nil {
 		return nil, fmt.Errorf("registrycred gcp: Google application default credentials: %w", err)
@@ -86,7 +89,7 @@ func New(ctx context.Context, project, location string) (*Registry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("registrycred gcp: iam client: %w", err)
 	}
-	return &Registry{project: project, location: location, ar: ar, iam: accounts, mint: impersonated(credentials.TokenSource), now: time.Now, tokens: map[string]*oauth2.Token{}}, nil
+	return &Registry{project: project, location: location, keepFor: keepFor, ar: ar, iam: accounts, mint: impersonated(credentials.TokenSource), now: time.Now, tokens: map[string]*oauth2.Token{}}, nil
 }
 
 // impersonated mints a token of a service account as base, a new one on each call.
@@ -198,9 +201,9 @@ func (r *Registry) fresh(ctx context.Context, account string, lifetime time.Dura
 	return token, nil
 }
 
-// Provision makes the repository of orgID and its two service accounts exist, the pusher a writer
-// of it and the puller a reader. Each step leaves what is there as it is, so a provisioning that
-// failed part way is finished by the next. IAM learns of a service account just created
+// Provision makes the repository of orgID, with its cleanup policies, and its two service accounts
+// exist, the pusher a writer of it and the puller a reader. Each step leaves what is there as it
+// is, so a provisioning that failed part way is finished by the next. IAM learns of a service account just created
 // eventually, so the binding of one may fail until it has.
 func (r *Registry) Provision(ctx context.Context, orgID string) error {
 	if err := r.ensureRepository(ctx, orgID); err != nil {
@@ -214,18 +217,32 @@ func (r *Registry) Provision(ctx context.Context, orgID string) error {
 	return r.ensureBindings(ctx, orgID)
 }
 
+// cleanupPolicies keep the newest version of each package and delete every other once it is
+// keepFor old. A package is one platform experiment's (Repository), pushed to only from its
+// start, and no job of it runs past keepFor after that start, so every version a live job can
+// pull, the digest it was submitted with whether or not a newer one was pushed since, is younger
+// than keepFor.
+func (r *Registry) cleanupPolicies() map[string]artifactregistry.CleanupPolicy {
+	return map[string]artifactregistry.CleanupPolicy{
+		"keep-newest": {Id: "keep-newest", Action: "KEEP", MostRecentVersions: &artifactregistry.CleanupPolicyMostRecentVersions{KeepCount: 1}},
+		"delete-unpullable": {Id: "delete-unpullable", Action: "DELETE",
+			Condition: &artifactregistry.CleanupPolicyCondition{TagState: "ANY", OlderThan: fmt.Sprintf("%ds", int64(r.keepFor/time.Second))}},
+	}
+}
+
 func (r *Registry) ensureRepository(ctx context.Context, orgID string) error {
 	name := r.repositoryName(orgID)
-	_, err := r.ar.Projects.Locations.Repositories.Get(name).Context(ctx).Do()
+	repository, err := r.ar.Projects.Locations.Repositories.Get(name).Context(ctx).Do()
 	if err == nil {
-		return nil
+		return r.ensureCleanup(ctx, repository)
 	}
 	if !hasStatus(err, http.StatusNotFound) {
 		return fmt.Errorf("registrycred gcp: read repository %s: %w", name, err)
 	}
 	op, err := r.ar.Projects.Locations.Repositories.Create("projects/"+r.project+"/locations/"+r.location, &artifactregistry.Repository{
-		Format:      "DOCKER",
-		Description: "HypothesisLoop images of org " + orgID,
+		Format:          "DOCKER",
+		Description:     "HypothesisLoop images of org " + orgID,
+		CleanupPolicies: r.cleanupPolicies(),
 	}).RepositoryId(r.repositoryID(orgID)).Context(ctx).Do()
 	if hasStatus(err, http.StatusConflict) {
 		return nil
@@ -245,6 +262,21 @@ func (r *Registry) ensureRepository(ctx context.Context, orgID string) error {
 	}
 	if op.Error != nil {
 		return fmt.Errorf("registrycred gcp: create repository %s: %s", name, op.Error.Message)
+	}
+	return nil
+}
+
+// ensureCleanup gives repository the cleanup policies, enforced, unless it has them.
+func (r *Registry) ensureCleanup(ctx context.Context, repository *artifactregistry.Repository) error {
+	want := r.cleanupPolicies()
+	if !repository.CleanupPolicyDryRun && reflect.DeepEqual(repository.CleanupPolicies, want) {
+		return nil
+	}
+	_, err := r.ar.Projects.Locations.Repositories.Patch(repository.Name, &artifactregistry.Repository{
+		CleanupPolicies: want, ForceSendFields: []string{"CleanupPolicyDryRun"},
+	}).UpdateMask("cleanup_policies,cleanup_policy_dry_run").Context(ctx).Do()
+	if err != nil {
+		return fmt.Errorf("registrycred gcp: write the cleanup policies of %s: %w", repository.Name, err)
 	}
 	return nil
 }

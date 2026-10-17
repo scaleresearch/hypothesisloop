@@ -41,8 +41,9 @@ type OrgRegistries interface {
 	// AskOrgRegistry records that orgID's repository is wanted, and says whether it is
 	// provisioned.
 	AskOrgRegistry(ctx context.Context, orgID string) (provisioned bool, err error)
-	// OrgRegistriesToProvision are the orgs whose repository is wanted and not provisioned.
-	OrgRegistriesToProvision(ctx context.Context) ([]string, error)
+	// OrgRegistriesToProvision are the orgs whose repository is wanted and not provisioned, and
+	// with every the provisioned ones too.
+	OrgRegistriesToProvision(ctx context.Context, every bool) ([]string, error)
 	// RecordOrgRegistry records the provisioning of orgID's repository: done, or failed with
 	// failure.
 	RecordOrgRegistry(ctx context.Context, orgID, failure string) error
@@ -163,9 +164,11 @@ func (s *Service) RegistryCredential(ctx context.Context, id string) (*platforma
 }
 
 // ProvideRegistries provisions the repository of every org whose push login was asked for and
-// that has none yet, and records it. One that fails is logged and tried again by the next pass.
-func (s *Service) ProvideRegistries(ctx context.Context) error {
-	pending, err := s.orgRegistries.OrgRegistriesToProvision(ctx)
+// that has none yet, and with every the provisioned ones again, which brings them to what this
+// release provisions. It records each. One that fails is logged and tried again by the next pass,
+// or for a provisioned one by the next with every.
+func (s *Service) ProvideRegistries(ctx context.Context, every bool) error {
+	pending, err := s.orgRegistries.OrgRegistriesToProvision(ctx, every)
 	if err != nil {
 		return fmt.Errorf("platform_experiments.ProvideRegistries: %w", err)
 	}
@@ -191,13 +194,16 @@ func (s *Service) ProvideRegistries(ctx context.Context) error {
 }
 
 // StartRegistryPass runs ProvideRegistries when a push login wakes it and every interval, until
-// ctx is cancelled, each pass bounded by passTimeout.
+// ctx is cancelled, each pass bounded by passTimeout. Until one pass has read the orgs, each
+// provisions every org, so a repository provisioned by an earlier release gets what this one
+// provisions.
 func (s *Service) StartRegistryPass(ctx context.Context, interval, passTimeout time.Duration) {
 	if s.registry == nil || s.orgRegistries == nil {
 		panic("quota: StartRegistryPass without WithImages: no org would get its repository")
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	every := true
 	for {
 		select {
 		case <-ctx.Done():
@@ -206,8 +212,10 @@ func (s *Service) StartRegistryPass(ctx context.Context, interval, passTimeout t
 		case <-ticker.C:
 		}
 		passCtx, cancel := context.WithTimeout(ctx, passTimeout)
-		if err := s.ProvideRegistries(passCtx); err != nil {
+		if err := s.ProvideRegistries(passCtx, every); err != nil {
 			s.logger.Error("provide_registries: scan", zap.Error(err))
+		} else {
+			every = false
 		}
 		cancel()
 	}
