@@ -276,7 +276,8 @@ func register[I, O any](d *Doc, audience auth.Audience, op huma.Operation, handl
 		out, err := handler(ctx, in)
 		var answered huma.StatusError
 		if err != nil && !errors.As(err, &answered) {
-			return nil, auth.Internal(d.logger, "handler failed", err, zap.String("operation", op.OperationID))
+			return nil, auth.Internal(d.logger, "handler failed", err, zap.String("operation", op.OperationID),
+				zap.String("method", op.Method), zap.String("route", chi.RouteContext(ctx).RoutePattern()))
 		}
 		return out, err
 	})

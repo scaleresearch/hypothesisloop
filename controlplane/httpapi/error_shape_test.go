@@ -128,7 +128,7 @@ func TestABodyOfAnotherContentTypeIsNotRead(t *testing.T) {
 }
 
 // A failure of the platform's own is answered with the generic body alone and logged once, with
-// its operation and the cause.
+// its operation, method, route and the cause.
 func TestAFailureIsAnsweredGenericallyAndLoggedOnce(t *testing.T) {
 	r, logs := shapeRouter(t)
 	status, answer, raw := shapeCall(t, r, "application/json", `{"name":"ok","fail":"internal"}`)
@@ -143,7 +143,7 @@ func TestAFailureIsAnsweredGenericallyAndLoggedOnce(t *testing.T) {
 		t.Fatalf("logged %+v, want the failure once", logs.All())
 	}
 	fields := entries[0].ContextMap()
-	if fields["operation"] != "shape" || !strings.Contains(fmt.Sprint(fields["error"]), "connection refused") {
-		t.Errorf("logged %+v, want the operation and the cause", fields)
+	if fields["operation"] != "shape" || fields["method"] != "POST" || fields["route"] != "/shape" || !strings.Contains(fmt.Sprint(fields["error"]), "connection refused") {
+		t.Errorf("logged %+v, want the operation, method, route and the cause", fields)
 	}
 }
