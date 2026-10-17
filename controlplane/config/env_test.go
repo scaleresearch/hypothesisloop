@@ -136,23 +136,6 @@ func TestALoaderReadsItsOwnKeysAndIgnoresTheOthers(t *testing.T) {
 	}
 }
 
-func TestE2BTemplateTakesTheRegistryLoginWholeOrNotAtAll(t *testing.T) {
-	t.Setenv(SandboxE2BAPIKey.Name, "an-e2b-key")
-	t.Setenv(SandboxE2BRegistryUsername.Name, "")
-	t.Setenv(SandboxE2BRegistryPassword.Name, "")
-	if e, err := LoadE2BTemplate(); err != nil || e.APIKey != "an-e2b-key" || e.RegistryUsername != "" {
-		t.Errorf("no login: %+v, %v", e, err)
-	}
-	t.Setenv(SandboxE2BRegistryUsername.Name, "someone")
-	if _, err := LoadE2BTemplate(); err == nil || !strings.Contains(err.Error(), SandboxE2BRegistryPassword.Name) {
-		t.Errorf("half a login: %v, want the password named", err)
-	}
-	t.Setenv(SandboxE2BAPIKey.Name, "")
-	if _, err := LoadE2BTemplate(); err == nil || !strings.Contains(err.Error(), SandboxE2BAPIKey.Name) {
-		t.Errorf("no key: %v, want it named", err)
-	}
-}
-
 // A provider's secret is <SECTION>_<NAME>_<FIELD>, NAME the section's provider or a cloud_compute
 // entry's cluster_name, and IsKey knows every key some program reads by that rule and the
 // platform's own few, so a key a test or a chart sets is never mistaken for anything else.
@@ -164,7 +147,7 @@ func TestAProvidersKeyIsItsSectionItsNameAndItsField(t *testing.T) {
 		ProviderKey(SectionGitHost, "plain", "PASSWORD", ""): "GIT_HOST_PLAIN_PASSWORD",
 		ObjectStoreMinIOSecretAccessKey:                      "OBJECT_STORE_MINIO_SECRET_ACCESS_KEY",
 		GitHostGitHubAppPrivateKey:                           "GIT_HOST_GITHUB_APP_PRIVATE_KEY",
-		SandboxE2BRegistryPassword:                           "SANDBOX_E2B_REGISTRY_PASSWORD",
+		SandboxE2BAPIKey:                                     "SANDBOX_E2B_API_KEY",
 	} {
 		if key.Name != want {
 			t.Errorf("key = %s, want %s", key.Name, want)

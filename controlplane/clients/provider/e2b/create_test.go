@@ -15,12 +15,12 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider"
 )
 
-const agentTemplate = "hl-70f52c6a3a422ba0352a-2c-4096m"
+const agentTemplate = "hl-9f447b1b473d359884f2-2c-4096m"
 
 func agentSpec() provider.Spec {
 	return provider.Spec{
 		Name:         "hl-agent-pe1-a2",
-		Image:        "registry.example/agent:1",
+		Image:        "registry.example/agent@sha256:" + strings.Repeat("a", 64),
 		Architecture: "amd64",
 		Command:      []string{"uv", "run", "agent", "--note", `it's "quoted" $HOME`, ""},
 		Env:          map[string]string{"HL_TOKEN": "t = 'x' \"y\" $Z", "API_URL": "https://api.example"},
@@ -147,7 +147,7 @@ func TestCreateSeesTheSandboxListedBeforeAnythingOfTheSpecEntersIt(t *testing.T)
 		t.Fatalf("Create: %v", err)
 	}
 	want := []string{
-		"POST " + sandboxesPath, "GET " + sandboxesPath,
+		"GET /templates", "POST " + sandboxesPath, "GET " + sandboxesPath,
 		"POST " + envdStart, "POST " + envdFiles, "POST " + envdStart, "GET " + envdFiles,
 	}
 	if got := api.order(); !slices.Equal(got, want) {
@@ -212,8 +212,8 @@ func TestCreateReportsARefusalAndLeavesNothing(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tc.body) {
 				t.Fatalf("err = %v, want one carrying the vendor's answer", err)
 			}
-			if api.total() != 1 {
-				t.Errorf("requests = %d, want the one create and no retry", api.total())
+			if api.total() != 2 {
+				t.Errorf("requests = %d, want the template's lookup and the one create, and no retry", api.total())
 			}
 		})
 	}
@@ -259,7 +259,7 @@ func TestCreateStartsNothingInASandboxSmallerThanTheSpec(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "it was destroyed") {
 				t.Fatalf("err = %v, want one about %q that says the sandbox was destroyed", err, tc.want)
 			}
-			want := []string{"POST " + sandboxesPath, "GET " + sandboxesPath, "DELETE " + sandboxPath}
+			want := []string{"GET /templates", "POST " + sandboxesPath, "GET " + sandboxesPath, "DELETE " + sandboxPath}
 			if got := api.order(); !slices.Equal(got, want) {
 				t.Errorf("requests = %q, want %q: nothing may be written or started in the sandbox", got, want)
 			}

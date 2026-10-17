@@ -1,6 +1,8 @@
 package e2b
 
 import (
+	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -10,9 +12,9 @@ import (
 )
 
 // The conformance tests rent real sandboxes and cost real money, a few cents a run. They run
-// when SANDBOX_E2B_API_KEY is set, and need the template of the image below built first:
+// when SANDBOX_E2B_API_KEY is set, and first wait for the template of the image below, building
+// it on the first run:
 //
-//	SANDBOX_E2B_API_KEY=... go run ./controlplane/cmd/e2b-template alpine/curl:8.14.1 1 1024
 //	SANDBOX_E2B_API_KEY=... go test ./controlplane/clients/provider/e2b -run Conformance -v -timeout 45m
 //
 // E2B_CONFORMANCE_HOLD=1 adds the thirty minute hold. One run per team at a time: a run starts by
@@ -42,7 +44,23 @@ func conformanceProvider(t *testing.T) *Provider {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	return p
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+	for {
+		_, err := p.readyTemplate(ctx, conformanceOptions().Template)
+		if !errors.Is(err, errBuilding) {
+			if err != nil {
+				t.Fatalf("the conformance template: %v", err)
+			}
+			return p
+		}
+		t.Log(err)
+		select {
+		case <-ctx.Done():
+			t.Fatalf("the conformance template was not built in time: %v", err)
+		case <-time.After(10 * time.Second):
+		}
+	}
 }
 
 func TestConformance(t *testing.T) {

@@ -86,10 +86,11 @@ sandbox:
     # is refused at start.
     cpu_kind: performance
 
-  # One E2B team, whose API key is SANDBOX_E2B_API_KEY. E2B boots a sandbox from a template. Before
-  # an image can be rented at a size, build its template:
-  # `go run ./controlplane/cmd/e2b-template <image> <cores> <memory-mib>`. A Create whose template
-  # is missing fails with that command.
+  # One E2B team, whose API key is SANDBOX_E2B_API_KEY. E2B boots a sandbox from a template, one
+  # per image digest and size. The first create of an image at a size builds its template, and the
+  # agent starts on a later pass once the build is ready, within agents.boot_limit_seconds for an
+  # image that builds in time. A failed build is reported on every create of it until the template
+  # is deleted at E2B. The image is public and runs on amd64.
   #
   # What the plan allows, which no setting here changes: up to 8 cores and 8 GiB, fixed by the
   # template; a disk the same for every sandbox of a plan, 10 GiB on the free plan (a sandbox there

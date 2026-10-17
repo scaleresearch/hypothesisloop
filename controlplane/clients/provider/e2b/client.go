@@ -3,8 +3,8 @@
 //   - A sandbox boots from a template and runs no command of its own. The adapter starts the
 //     command through envd, the vendor's process inside every sandbox, under the supervisor in
 //     supervise.go, which keeps the output and the state in files that envd serves.
-//   - A template fixes the cores and the memory of its sandboxes, so there is one per image and
-//     size, under a name made from both (template.go).
+//   - A template fixes the cores and the memory of its sandboxes, so there is one per image digest
+//     and size, under a name made from both (template.go), built by the first Create that needs it.
 //   - envd logs every process start with its arguments and environment, and the vendor keeps
 //     that log. The command and its environment therefore travel as an uploaded file, whose
 //     content is not logged.
@@ -31,6 +31,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/clients/imagedigest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider/vendorapi"
 )
@@ -63,6 +64,7 @@ type Provider struct {
 	window  time.Duration
 	// stateRead bounds the reading of one sandbox's state in List.
 	stateRead time.Duration
+	images    images
 }
 
 // New refuses any accelerator type: the vendor rents CPU-only sandboxes, so a shape that asks
@@ -90,6 +92,7 @@ func New(cfg Settings, key string, acceleratorTypes []string, log func(format st
 		poll:      pollInterval,
 		window:    launchWindow,
 		stateRead: stateReadWindow,
+		images:    imagedigest.New(),
 	}, nil
 }
 

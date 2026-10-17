@@ -30,26 +30,24 @@ type network struct {
 	AllowPublicTraffic bool `json:"allowPublicTraffic"`
 }
 
-// Create starts a sandbox from the spec's template and then the command inside it. A sandbox
+// Create starts a sandbox from the template of the spec's image and size, building the template
+// first when there is none (readyTemplate), and then the command inside it. A sandbox
 // that is smaller than the spec is killed before anything is started in it, and so is one whose
 // command could not be started.
 func (p *Provider) Create(ctx context.Context, spec provider.Spec) (string, error) {
 	if err := validateSpec(spec); err != nil {
 		return "", err
 	}
-	asked := sizeOf(spec)
-	template := templateName(spec.Image, asked)
+	template, err := p.readyTemplate(ctx, spec)
+	if err != nil {
+		return "", err
+	}
 	var created struct {
 		SandboxID       string `json:"sandboxID"`
 		EnvdAccessToken string `json:"envdAccessToken"`
 	}
 	req := createRequest{TemplateID: template, Timeout: p.cfg.LifetimeSeconds, Metadata: map[string]string{nameKey: spec.Name}}
-	_, err := p.call(ctx, http.MethodPost, "/v2/sandboxes", req, &created)
-	if hasStatus(err, http.StatusNotFound) {
-		return "", fmt.Errorf("e2b: template %s for image %q with %d cores and %d MiB of memory is not built; build it with `%s %s %d %d`: %w",
-			template, spec.Image, asked.CPUs, asked.MemoryMB, templateCommand, spec.Image, asked.CPUs, asked.MemoryMB, err)
-	}
-	if err != nil {
+	if _, err := p.call(ctx, http.MethodPost, "/v2/sandboxes", req, &created); err != nil {
 		return "", err
 	}
 	if created.SandboxID == "" || created.EnvdAccessToken == "" {
@@ -108,8 +106,8 @@ func (p *Provider) awaitSupervisor(ctx context.Context, inside envd, id, name, t
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("e2b: sandbox %s was created for %q and its supervisor did not start; it needs sh and %s as %s writes it into template %s: %w",
-				id, name, imageEnvPath, templateCommand, template, ctx.Err())
+			return fmt.Errorf("e2b: sandbox %s was created for %q and its supervisor did not start; it needs sh and %s as the build writes it into template %s: %w",
+				id, name, imageEnvPath, template, ctx.Err())
 		case <-ticker.C:
 		}
 	}

@@ -1,8 +1,10 @@
 package e2b
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +12,11 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/clients/imagedigest"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 const (
@@ -209,5 +216,35 @@ func newTestProvider(t *testing.T, api *fakeAPI) *Provider {
 	p.envdURL = func(sandboxID string) string { return api.server.URL + "/envd/" + sandboxID }
 	p.poll = 5 * time.Millisecond
 	p.window = 300 * time.Millisecond
+	p.images = &fakeImages{}
+	api.on(http.MethodGet, "/templates", answer(200, `[{"templateID":"tpl1","buildID":"bld1","buildStatus":"ready","aliases":["`+agentTemplate+`"]}]`))
 	return p
+}
+
+// fakeImages answers for the registries: a tag in pinned is pinned to its value, and every
+// image's config is config.
+type fakeImages struct {
+	pinned             map[string]string
+	err                error
+	config             ocispec.ImageConfig
+	configErr          error
+	configs            int
+	configArchitecture string
+}
+
+func (f *fakeImages) Resolve(_ context.Context, ref string, _ *domain.RegistryLogin) (imagedigest.Image, error) {
+	if f.err != nil {
+		return imagedigest.Image{}, f.err
+	}
+	pinned, ok := f.pinned[ref]
+	if !ok {
+		return imagedigest.Image{}, fmt.Errorf("%s is not in the fake registry", ref)
+	}
+	return imagedigest.Image{Pinned: pinned, Architectures: []string{"amd64"}}, nil
+}
+
+func (f *fakeImages) Config(_ context.Context, _, architecture string, _ *domain.RegistryLogin) (ocispec.ImageConfig, error) {
+	f.configs++
+	f.configArchitecture = architecture
+	return f.config, f.configErr
 }

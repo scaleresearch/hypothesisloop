@@ -1,41 +1,21 @@
 package e2b
 
 import (
-	"bytes"
+	"context"
 	"encoding/base64"
-	"encoding/json"
-	"fmt"
-	"io"
+	"errors"
 	"net/http"
-	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
-	"time"
+
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
-func TestAnImageReferenceIsTakenApartAsARuntimeDoes(t *testing.T) {
-	for image, want := range map[string]imageReference{
-		"python":                                 {"registry-1.docker.io", "library/python", "latest"},
-		"python:3.13-slim":                       {"registry-1.docker.io", "library/python", "3.13-slim"},
-		"astral/uv:0.5":                          {"registry-1.docker.io", "astral/uv", "0.5"},
-		"ghcr.io/owner/image":                    {"ghcr.io", "owner/image", "latest"},
-		"europe-docker.pkg.dev/p/r/job:abc":      {"europe-docker.pkg.dev", "p/r/job", "abc"},
-		"localhost:5000/job:abc":                 {"localhost:5000", "job", "abc"},
-		"registry.example/a/b@sha256:0123abcd":   {"registry.example", "a/b", "sha256:0123abcd"},
-		"localhost/hypothesisloop-job":           {"localhost", "hypothesisloop-job", "latest"},
-		"registry.example:5000/a/b:tag@sha256:f": {"registry.example:5000", "a/b:tag", "sha256:f"},
-	} {
-		if got := parseReference(image); got != want {
-			t.Errorf("parseReference(%q) = %+v, want %+v", image, got, want)
-		}
-	}
-}
-
 func TestTheImagesConfigBecomesBuildSteps(t *testing.T) {
-	var config imageConfig
-	config.Config.Env = []string{"PATH=/usr/bin", `QUOTED=it's "a"=b $HOME`, "EMPTY="}
-	config.Config.WorkingDir, config.Config.User = "/workspace", "agent"
+	var config ocispec.ImageConfig
+	config.Env = []string{"PATH=/usr/bin", `QUOTED=it's "a"=b $HOME`, "EMPTY="}
+	config.WorkingDir, config.User = "/workspace", "agent"
 	built, err := buildSteps("image", config)
 	if err != nil {
 		t.Fatal(err)
@@ -63,176 +43,143 @@ func TestTheImagesConfigBecomesBuildSteps(t *testing.T) {
 		"no name":         "=1",
 		"a leading digit": "1A=1",
 	} {
-		config.Config.Env = []string{"PATH=/usr/bin", entry}
+		config.Env = []string{"PATH=/usr/bin", entry}
 		if _, err := buildSteps("image", config); err == nil || !strings.Contains(err.Error(), "not an environment variable name") {
 			t.Errorf("%s: err = %v, want a refusal of the name", name, err)
 		}
 	}
-	built, err = buildSteps("image", imageConfig{})
+	built, err = buildSteps("image", ocispec.ImageConfig{})
 	if err != nil || len(built) != 1 {
 		t.Errorf("an image with no config: %+v, %v; want the env file alone", built, err)
 	}
 }
 
-// One server stands in for the registry, its token service and E2B.
-func TestATemplateIsBuiltFromTheAmd64ImageWithTheSecretsInHeadersOnly(t *testing.T) {
-	var calls []string
-	var image string
-	var started map[string]any
-	polls := 0
-	var server *httptest.Server
-	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls = append(calls, r.Method+" "+r.URL.Path)
-		body, _ := io.ReadAll(r.Body)
-		registryCall := strings.HasPrefix(r.URL.Path, "/v2/team/")
-		if registryCall && r.Header.Get("Authorization") != "Bearer pull-token" {
-			t.Errorf("%s was asked without the pull token", r.URL.Path)
-		}
-		if strings.HasPrefix(r.URL.Path, "/v3/") || strings.Contains(r.URL.Path, "/builds/") {
-			if r.Header.Get("X-API-Key") != "made-up-e2b-key" {
-				t.Errorf("%s was asked without the API key", r.URL.Path)
-			}
-		}
-		switch r.Method + " " + r.URL.Path {
-		case "GET /v2/":
-			w.Header().Set("WWW-Authenticate", `Bearer realm="`+server.URL+`/token",service="registry.example"`)
-			w.WriteHeader(http.StatusUnauthorized)
-		case "GET /token":
-			if r.URL.Query().Get("scope") != "repository:team/job:pull" || r.URL.Query().Get("service") != "registry.example" {
-				t.Errorf("the token was asked for %s", r.URL.RawQuery)
-			}
-			if user, password, ok := r.BasicAuth(); !ok || user != "puller" || password != "made-up-registry-password" {
-				t.Error("the token service was asked without the registry credentials")
-			}
-			io.WriteString(w, `{"token":"pull-token"}`)
-		case "GET /v2/team/job/manifests/abc":
-			io.WriteString(w, `{"manifests":[{"digest":"sha256:arm","platform":{"os":"linux","architecture":"arm64"}},{"digest":"sha256:amd","platform":{"os":"linux","architecture":"amd64"}}]}`)
-		case "GET /v2/team/job/manifests/sha256:amd":
-			io.WriteString(w, `{"config":{"digest":"sha256:config"}}`)
-		case "GET /v2/team/job/blobs/sha256:config":
-			io.WriteString(w, `{"config":{"Env":["PATH=/usr/bin"],"WorkingDir":"/workspace"}}`)
-		case "POST /v3/templates":
-			var request map[string]any
-			json.Unmarshal(body, &request)
-			if request["cpuCount"] != float64(2) || request["memoryMB"] != float64(4096) || request["name"] != templateName(image, size{CPUs: 2, MemoryMB: 4096}) {
-				t.Errorf("the template was created as %v", request)
-			}
-			io.WriteString(w, `{"templateID":"tpl","buildID":"bld"}`)
-		case "POST /v2/templates/tpl/builds/bld":
-			json.Unmarshal(body, &started)
-			w.WriteHeader(http.StatusAccepted)
-		case "GET /templates/tpl/builds/bld/status":
-			polls++
-			if polls == 1 {
-				if r.URL.Query().Get("logsOffset") != "0" {
-					t.Errorf("the first poll asked from %s", r.URL.Query().Get("logsOffset"))
-				}
-				io.WriteString(w, `{"status":"building","logEntries":[{"message":"pulling\r"}]}`)
-				return
-			}
-			if r.URL.Query().Get("logsOffset") != "1" {
-				t.Errorf("the second poll asked from %s, want the lines already printed skipped", r.URL.Query().Get("logsOffset"))
-			}
-			io.WriteString(w, `{"status":"ready","logEntries":[{"message":"done"}]}`)
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
+const (
+	templatesPath = "/templates"
+	buildStart    = "/v2/templates/tpl1/builds/bld1"
+	buildStatus   = "/templates/tpl1/builds/bld1/status"
+)
 
-	var out bytes.Buffer
-	b := TemplateBuilder{APIKey: "made-up-e2b-key", RegistryUsername: "puller", RegistryPassword: "made-up-registry-password", Out: &out,
-		e2bURL: server.URL, registryScheme: "http", client: server.Client(), pollEvery: time.Millisecond}
-	image = strings.TrimPrefix(server.URL, "http://") + "/team/job:abc"
-	if err := b.Build(image, 2, 4096); err != nil {
-		t.Fatalf("%v\ncalls: %v", err, calls)
-	}
-	if started["fromImage"] != image || !reflect.DeepEqual(started["fromImageRegistry"], map[string]any{"type": "registry", "username": "puller", "password": "made-up-registry-password"}) {
-		t.Errorf("the build was started as %v", started)
-	}
-	if kinds := started["steps"].([]any); len(kinds) != 2 || kinds[1].(map[string]any)["type"] != "WORKDIR" {
-		t.Errorf("steps = %v, want the env file and the working directory", started["steps"])
-	}
-	said := out.String()
-	for _, want := range []string{"2 cores, 4096 MiB", "steps taken from the image: RUN, WORKDIR", "    pulling\n", "    done\n", "is ready (template tpl)"} {
-		if !strings.Contains(said, want) {
-			t.Errorf("the output has no %q:\n%s", want, said)
+func templatesJSON(status string) string {
+	return `[{"templateID":"other","buildID":"x","buildStatus":"ready","aliases":["notebook"]},` +
+		`{"templateID":"tpl1","buildID":"bld1","buildStatus":"` + status + `","aliases":["` + agentTemplate + `"]}]`
+}
+
+// The first Create of an image and size starts the build of its template and fails while it runs;
+// the next one finds the build and starts no other; once it is ready a Create starts the sandbox.
+func TestCreateBuildsAMissingTemplateOnceAndStartsTheSandboxOnceItIsReady(t *testing.T) {
+	api := newFakeAPI(t)
+	p := newTestProvider(t, api)
+	creatable(api, "hl-agent-pe1-a2")
+	api.on(http.MethodGet, templatesPath, inSequence(answer(200, `[]`), answer(200, templatesJSON("building")), answer(200, templatesJSON("ready"))))
+	api.on(http.MethodPost, "/v3/templates", answer(202, `{"templateID":"tpl1","buildID":"bld1"}`))
+	api.on(http.MethodPost, buildStart, answer(202, ``))
+	images := p.images.(*fakeImages)
+	images.config = ocispec.ImageConfig{Env: []string{"PATH=/usr/bin"}, WorkingDir: "/workspace"}
+
+	for i := range 2 {
+		if _, err := p.Create(context.Background(), agentSpec()); !errors.Is(err, errBuilding) || !strings.Contains(err.Error(), agentTemplate) {
+			t.Fatalf("Create %d: err = %v, want the template named as being built", i+1, err)
 		}
 	}
-	for _, secret := range []string{"made-up-e2b-key", "made-up-registry-password", "pull-token"} {
-		if strings.Contains(said, secret) || strings.Contains(strings.Join(calls, " "), secret) {
-			t.Errorf("%s is in the output or in an address", secret)
-		}
+	created := api.sent(http.MethodPost, "/v3/templates")
+	if len(created) != 1 || created[0].APIKey != testKey {
+		t.Fatalf("templates created = %+v, want one, with the API key", created)
+	}
+	if body, want := created[0].json(t), map[string]any{"name": agentTemplate, "cpuCount": 2.0, "memoryMB": 4096.0}; !reflect.DeepEqual(body, want) {
+		t.Errorf("template body = %v, want %v", body, want)
+	}
+	started := api.sent(http.MethodPost, buildStart)
+	if len(started) != 1 {
+		t.Fatalf("builds started = %d, want one", len(started))
+	}
+	body := started[0].json(t)
+	if body["fromImage"] != agentSpec().Image {
+		t.Errorf("the build is from %v, want the pinned image", body["fromImage"])
+	}
+	if steps := body["steps"].([]any); len(steps) != 2 || steps[1].(map[string]any)["type"] != "WORKDIR" {
+		t.Errorf("steps = %v, want the env file and the working directory", body["steps"])
+	}
+	if images.configs != 1 || images.configArchitecture != "amd64" {
+		t.Errorf("the image's config was read %d times for %q, want once for amd64", images.configs, images.configArchitecture)
+	}
+	if len(api.sent(http.MethodPost, sandboxesPath)) != 0 {
+		t.Fatal("a sandbox was asked for before its template was ready")
+	}
+
+	if id, err := p.Create(context.Background(), agentSpec()); err != nil || id != "sb1" {
+		t.Fatalf("Create once the template is ready: %q, %v", id, err)
+	}
+	if made := api.sent(http.MethodPost, sandboxesPath); len(made) != 1 || made[0].json(t)["templateID"] != agentTemplate {
+		t.Errorf("creates = %+v, want one of the built template", made)
+	}
+	if len(api.sent(http.MethodPost, "/v3/templates")) != 1 {
+		t.Error("a ready template was built again")
 	}
 }
 
-func TestAFailedBuildAndAnImageWithoutAmd64AreErrors(t *testing.T) {
-	answers := map[string]string{
-		"GET /v2/job/manifests/abc":            `{"manifests":[{"digest":"sha256:arm","platform":{"os":"linux","architecture":"arm64"}}]}`,
-		"GET /v2/job/manifests/ok":             `{"config":{"digest":"sha256:config"}}`,
-		"GET /v2/job/blobs/sha256:config":      `{"config":{}}`,
-		"POST /v3/templates":                   `{"templateID":"tpl","buildID":"bld"}`,
-		"POST /v2/templates/tpl/builds/bld":    `{}`,
-		"GET /templates/tpl/builds/bld/status": `{"status":"error","logEntries":[],"reason":{"message":"base64: not found"}}`,
+// A tag is pinned to the digest its registry answers now, and the template is named and built
+// from that digest.
+func TestATaggedImageIsBuiltFromItsDigest(t *testing.T) {
+	api := newFakeAPI(t)
+	p := newTestProvider(t, api)
+	api.on(http.MethodGet, templatesPath, answer(200, `[]`))
+	api.on(http.MethodPost, "/v3/templates", answer(202, `{"templateID":"tpl1","buildID":"bld1"}`))
+	api.on(http.MethodPost, buildStart, answer(202, ``))
+	images := p.images.(*fakeImages)
+	images.pinned = map[string]string{"registry.example/agent:1": agentSpec().Image}
+	spec := agentSpec()
+	spec.Image = "registry.example/agent:1"
+
+	if _, err := p.Create(context.Background(), spec); !errors.Is(err, errBuilding) {
+		t.Fatalf("err = %v, want the build started", err)
 	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if answer, known := answers[r.Method+" "+r.URL.Path]; known {
-			io.WriteString(w, answer)
-			return
-		}
-		io.WriteString(w, `{}`)
-	}))
-	defer server.Close()
-	b := TemplateBuilder{APIKey: "made-up-e2b-key", Out: io.Discard, e2bURL: server.URL, registryScheme: "http", client: server.Client(), pollEvery: time.Millisecond}
-	host := strings.TrimPrefix(server.URL, "http://")
-	if err := b.Build(host+"/job:abc", 1, 512); err == nil || !strings.Contains(err.Error(), "no linux/amd64 image") {
-		t.Errorf("an arm64-only image: err = %v", err)
+	if name := api.sent(http.MethodPost, "/v3/templates")[0].json(t)["name"]; name != agentTemplate {
+		t.Errorf("template name = %v, want %s, the one of the digest", name, agentTemplate)
 	}
-	if err := b.Build(host+"/job:ok", 1, 512); err == nil || !strings.Contains(err.Error(), "failed: base64: not found") {
-		t.Errorf("a failed build: err = %v", err)
+	if from := api.sent(http.MethodPost, buildStart)[0].json(t)["fromImage"]; from != agentSpec().Image {
+		t.Errorf("the build is from %v, want the pinned image", from)
 	}
-	b.APIKey = ""
-	if err := b.Build(host+"/job:ok", 1, 512); err == nil || !strings.Contains(err.Error(), "SANDBOX_E2B_API_KEY") {
-		t.Errorf("no API key: err = %v", err)
+
+	images.err = errors.New("manifest unknown")
+	if _, err := p.Create(context.Background(), spec); err == nil || !strings.Contains(err.Error(), "manifest unknown") || errors.Is(err, errBuilding) {
+		t.Errorf("an image the registry does not answer for: err = %v", err)
 	}
 }
 
-func TestPruneDeletesTheTemplatesOfOtherTagsAndNothingElse(t *testing.T) {
-	deployed := TemplateOf{Image: "registry.example/agent:2", Cores: 2, MemoryMiB: 4096}
-	name := func(of TemplateOf) string {
-		return templateName(of.Image, size{CPUs: of.Cores, MemoryMB: of.MemoryMiB})
-	}
-	listed := fmt.Sprintf(`[{"templateID":"deployed","aliases":[%q]},{"templateID":"old","aliases":[%q]},
-		{"templateID":"other-size","aliases":[%q]},{"templateID":"conformance","aliases":[%q]},{"templateID":"by-hand","aliases":["notebook"]}]`,
-		name(deployed), name(TemplateOf{Image: "registry.example/agent:1", Cores: 2, MemoryMiB: 4096}),
-		name(TemplateOf{Image: deployed.Image, Cores: 1, MemoryMiB: 4096}), name(ConformanceTemplate))
-	var deleted []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("X-API-Key") != "made-up-e2b-key" {
-			t.Errorf("%s %s came without the key", r.Method, r.URL.Path)
+// A failed build is reported with the vendor's reason, on every Create, and not started again.
+func TestAFailedBuildIsReportedWithItsReasonAndNotRepeated(t *testing.T) {
+	api := newFakeAPI(t)
+	p := newTestProvider(t, api)
+	api.on(http.MethodGet, templatesPath, answer(200, templatesJSON("error")))
+	api.on(http.MethodGet, buildStatus, answer(200, `{"status":"error","logEntries":[],"reason":{"message":"base64: not found"}}`))
+
+	for range 2 {
+		_, err := p.Create(context.Background(), agentSpec())
+		if err == nil || errors.Is(err, errBuilding) || !strings.Contains(err.Error(), "failed: base64: not found") || !strings.Contains(err.Error(), "tpl1") {
+			t.Fatalf("err = %v, want the failure with its reason and the template", err)
 		}
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/templates":
-			io.WriteString(w, listed)
-		case r.Method == http.MethodDelete:
-			deleted = append(deleted, r.URL.Path)
-			w.WriteHeader(http.StatusNoContent)
-		default:
-			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
-		}
-	}))
-	defer server.Close()
-	b := TemplateBuilder{APIKey: "made-up-e2b-key", Out: io.Discard, e2bURL: server.URL, client: server.Client()}
-	if err := b.Prune([]TemplateOf{deployed}); err != nil {
-		t.Fatal(err)
 	}
-	if want := []string{"/templates/old", "/templates/other-size"}; !reflect.DeepEqual(deleted, want) {
-		t.Errorf("deleted %v, want %v", deleted, want)
+	if api.total() != 4 {
+		t.Errorf("requests = %v, want the list and the reason twice and nothing built", api.order())
 	}
-	if err := b.Prune(nil); err == nil || !strings.Contains(err.Error(), "no template to keep") {
-		t.Errorf("nothing to keep: err = %v", err)
+}
+
+// A build that cannot start is reported as that, and so is an image whose config cannot be read.
+func TestABuildThatCannotStartIsAnError(t *testing.T) {
+	api := newFakeAPI(t)
+	p := newTestProvider(t, api)
+	api.on(http.MethodGet, templatesPath, answer(200, `[]`))
+	api.on(http.MethodPost, "/v3/templates", answer(400, `{"code":400,"message":"cpuCount too high"}`))
+
+	if _, err := p.Create(context.Background(), agentSpec()); err == nil || errors.Is(err, errBuilding) || !strings.Contains(err.Error(), "cpuCount too high") {
+		t.Fatalf("a refused template: err = %v", err)
 	}
-	if len(deleted) != 2 {
-		t.Errorf("a prune that names nothing to keep deleted: %v", deleted)
+	p.images.(*fakeImages).configErr = errors.New("has no linux/amd64 image")
+	if _, err := p.Create(context.Background(), agentSpec()); err == nil || !strings.Contains(err.Error(), "has no linux/amd64 image") {
+		t.Fatalf("an image without amd64: err = %v", err)
+	}
+	if len(api.sent(http.MethodPost, "/v3/templates")) != 1 {
+		t.Error("a template was created for an image whose config could not be read")
 	}
 }

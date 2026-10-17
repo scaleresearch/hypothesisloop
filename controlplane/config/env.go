@@ -49,8 +49,6 @@ var (
 	GitHostGitHubAppPrivateKey      = ProviderKey(SectionGitHost, GitHostProviderGitHub, "APP_PRIVATE_KEY", "the PEM GitHub issued for the App of git_host.github")
 	GitHostPlainPassword            = ProviderKey(SectionGitHost, GitHostProviderPlain, "PASSWORD", "the password of git_host.plain.username")
 	SandboxE2BAPIKey                = AccountKey(SectionSandbox, "e2b")
-	SandboxE2BRegistryUsername      = ProviderKey(SectionSandbox, "e2b", "REGISTRY_USERNAME", "the login to the private registry of the image a template is built from")
-	SandboxE2BRegistryPassword      = ProviderKey(SectionSandbox, "e2b", "REGISTRY_PASSWORD", "the password of SANDBOX_E2B_REGISTRY_USERNAME")
 )
 
 // providerField is <PROVIDER>_<FIELD> of a provider's key, each of capitals and digits.

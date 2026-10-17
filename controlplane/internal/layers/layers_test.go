@@ -74,6 +74,8 @@ var layers = []layer{
 	{path: "controlplane/clients/githost/github", may: []string{"controlplane/config", "controlplane/auth", "controlplane/domain", "controlplane/refusal", "controlplane/clients/githost"}},
 	{path: "controlplane/clients/registrycred", may: []string{"controlplane/config", "controlplane/auth", "controlplane/domain", "controlplane/refusal"}, own: true},
 	{path: "controlplane/clients/provider", may: []string{"controlplane/config", "controlplane/auth", "controlplane/domain", "controlplane/refusal"}, own: true},
+	// The e2b adapter builds a template from what an image's registry says of it.
+	{path: "controlplane/clients/provider/e2b", may: []string{"controlplane/clients/provider", "controlplane/clients/imagedigest", "controlplane/domain"}},
 	// A service reaches another service only through an interface wired in cmd.
 	{path: "controlplane/service", may: services},
 	{path: "controlplane/service/scheduler", may: services, own: true},
@@ -96,7 +98,6 @@ var layers = []layer{
 	{path: "controlplane/httpapi/metricsingest", may: []string{"controlplane/auth", "controlplane/domain", "controlplane/refusal", "controlplane/storage/metricsdb"}},
 	{path: "controlplane/httpapi/middleware", may: []string{"controlplane/auth"}},
 	{path: "controlplane/cmd", may: []string{"controlplane"}, own: true, web: true},
-	{path: "controlplane/cmd/e2b-template", may: []string{"controlplane/config", "controlplane/clients/provider/e2b"}},
 	// metrics-service serves node-agent pushes only, so it never mounts the API.
 	{path: "controlplane/cmd/metrics-service", may: []string{"controlplane"}, never: []string{"controlplane/httpapi"}, web: true},
 	{path: "controlplane/cmd/hl-admin", may: []string{"controlplane/auth", "controlplane/config", "controlplane/domain",

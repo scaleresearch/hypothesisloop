@@ -1,7 +1,5 @@
 package config
 
-import "fmt"
-
 // ControlService is what control-service runs with: the settings and the secrets they call for.
 type ControlService struct {
 	*Settings
@@ -61,28 +59,4 @@ func LoadAdmin() (*Admin, error) {
 		return nil, err
 	}
 	return &Admin{Settings: s, DatabaseURL: env[DatabaseURL], SigningSecret: env[AuthSigningSecret], GitHubKey: env[GitHostGitHubAppPrivateKey]}, nil
-}
-
-// E2BTemplate is what e2b-template runs with. It loads no settings. The registry login is for an
-// image in a private registry.
-type E2BTemplate struct {
-	APIKey, RegistryUsername, RegistryPassword string
-}
-
-func LoadE2BTemplate() (*E2BTemplate, error) {
-	const program = "e2b-template"
-	env, err := read(program, SandboxE2BAPIKey)
-	if err != nil {
-		return nil, err
-	}
-	t := &E2BTemplate{APIKey: env[SandboxE2BAPIKey]}
-	if lookup(SandboxE2BRegistryUsername) == "" && lookup(SandboxE2BRegistryPassword) == "" {
-		return t, nil
-	}
-	login, err := read(program, SandboxE2BRegistryUsername, SandboxE2BRegistryPassword)
-	if err != nil {
-		return nil, fmt.Errorf("%w; the registry login is set whole or not at all", err)
-	}
-	t.RegistryUsername, t.RegistryPassword = login[SandboxE2BRegistryUsername], login[SandboxE2BRegistryPassword]
-	return t, nil
 }
