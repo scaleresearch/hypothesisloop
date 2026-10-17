@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
@@ -18,6 +19,10 @@ import (
 )
 
 func main() {
+	if filepath.Base(os.Args[0]) == agent.CredentialHelperName {
+		client := apiclient.New(os.Getenv(agentsandbox.EnvAPIURL), os.Getenv(agentsandbox.EnvToken))
+		os.Exit(agent.CredentialHelper(client, os.Args[1:], os.Stdin, os.Stdout))
+	}
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
@@ -102,7 +107,7 @@ func init() {
 		{Name: "image", About: "the image the platform experiment's jobs run in", Subs: []command.Command{
 			{Name: "show", About: "the image recorded for the jobs, by digest, and their architecture", Run: agent.ImageShow},
 			{Name: "set", About: "record the image every job submitted from now on runs in", Run: agent.ImageSet},
-			{Name: "credentials", About: `a login that pushes the experiment's images: eval "$(hl image credentials)"`, Run: agent.ImageCredentials},
+			{Name: "repository", About: "where the experiment's images are pushed; podman gets its login from hl", Run: agent.ImageRepository},
 		}},
 		{Name: "repo", About: "the files every experiment's repository holds", Subs: []command.Command{
 			{Name: "init", About: "put the experiment template in a new directory", Run: people.RepoInit},

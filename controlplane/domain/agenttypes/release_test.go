@@ -21,6 +21,7 @@ var releases = map[int]string{
 	6: "e5c1b2971bf5f721acf949af66a22d8abaaf1102b984bf625cf5ce9d87ec1467",
 	7: "39eee57d7ee86129ac029c0496eba4f04191a5aae0338a6d959d2564c8a8e349",
 	8: "ac8f83b7f0afd9edba25b5c1ff57e5c26f95c781c12c6597a5a4853f93013218",
+	9: "0842706b0693a34570d4831ff9874d68579454f99b4e3afe7e1c1370bccbf66d",
 }
 
 func TestReleaseNamesWhatItSeeds(t *testing.T) {

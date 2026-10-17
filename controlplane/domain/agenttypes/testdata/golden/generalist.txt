@@ -98,7 +98,7 @@ How you work is yours. What the run expects of you:
     machine has sudo and none of a job's hardware. `sudo podman run` runs a command here in
     that image, to build code and check that it runs. A change of dependencies goes into
     `.hypothesisloop/Dockerfile` and a new image, built, pushed and recorded as `README.md`
-    says (`hl image credentials`, `hl image set`), before the jobs that need it; every job
+    says (`hl image repository`, `hl image set`), before the jobs that need it; every job
     submitted after runs in it. `post_metric` refuses outside a job.
   - A job reports the declared metrics on the baseline's keys. What one job produces that
     another needs goes to the object store: $HYPOTHESISLOOP_DATA_URI is the job's own prefix,

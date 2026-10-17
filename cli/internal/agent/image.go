@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
@@ -43,7 +42,7 @@ func ImageSet(c *apiclient.Client, args []string, stdout, stderr io.Writer) int 
 	fs := command.NewFlags("image set", `usage: hl image set REF [--architecture A] [--platform-experiment PE]
 
 Records REF as the image every job submitted from now on runs in: a public image, or one pushed
-to the repository hl image credentials names. The platform reads it from its registry and records
+to the repository hl image repository names. The platform reads it from its registry and records
 it by digest, with the architecture its jobs run on; --architecture chooses one of an image that
 runs on several. The image needs sh and git: each job's commit is fetched into /workspace/code at
 start and its command runs there. Prints what was recorded.`, stderr)
@@ -61,36 +60,5 @@ start and its command runs there. Prints what was recorded.`, stderr)
 		return command.Fail(stderr, err)
 	}
 	fmt.Fprintf(stdout, "%s %s\n", out.Image, out.Architecture)
-	return 0
-}
-
-func ImageCredentials(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := command.NewFlags("image credentials", `usage: hl image credentials [--platform-experiment PE]
-
-A login that pushes the platform experiment's images, as export lines: eval "$(hl image credentials)".
-HL_IMAGE_REPOSITORY is where they go; tag an image $HL_IMAGE_REPOSITORY:<short commit>-<label>.
-The login lasts about half an hour (HL_REGISTRY_EXPIRES_AT); ask again for a new one. The first in an
-org is answered registry_preparing while its repository is created: ask again a minute later.
-  printf %s "$HL_REGISTRY_PASSWORD" | sudo podman login -u "$HL_REGISTRY_USERNAME" --password-stdin "$HL_REGISTRY"`, stderr)
-	pe := command.ExperimentFlag(fs)
-	if err := fs.Parse(args); err != nil {
-		return command.ParseExit(err)
-	}
-	if *pe = c.Experiment(*pe); *pe == "" || fs.NArg() > 0 {
-		return command.ParseExit(command.Misuse(fs, "--platform-experiment is required, and nothing else"))
-	}
-	var out platformapi.RegistryCredential
-	if err := c.Do("POST", "/platform-experiments/"+url.PathEscape(*pe)+"/registry-credentials", nil, &out); err != nil {
-		return command.Fail(stderr, err)
-	}
-	for _, v := range [][2]string{
-		{"HL_REGISTRY", out.Registry},
-		{"HL_REGISTRY_USERNAME", out.Username},
-		{"HL_REGISTRY_PASSWORD", out.Password},
-		{"HL_REGISTRY_EXPIRES_AT", out.ExpiresAt.UTC().Format(time.RFC3339)},
-		{"HL_IMAGE_REPOSITORY", out.Repository},
-	} {
-		fmt.Fprintf(stdout, "export %s='%s'\n", v[0], strings.ReplaceAll(v[1], "'", `'\''`))
-	}
 	return 0
 }

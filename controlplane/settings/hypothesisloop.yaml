@@ -198,9 +198,9 @@ runtimes:
 
 # The registry experiments push the images their jobs run in to. Each org gets its own private
 # repository, which the control service creates with the two service accounts that reach it, one
-# that writes and one that only reads, the first time the org needs them. An agent asks for a
-# short-lived push login (POST /platform-experiments/{id}/registry-credentials, hl image
-# credentials), pushes its image directly and records it (hl image set); each reconcile answer
+# that writes and one that only reads, the first time the org needs them. An agent's podman gets a
+# short-lived push login on every push (POST /platform-experiments/{id}/registry-credentials, with
+# hl as its credential helper), pushes its image directly and records it (hl image set); each reconcile answer
 # carries a read-only login for a job whose image is in its org's repository. A job may run in any
 # public image without one.
 #

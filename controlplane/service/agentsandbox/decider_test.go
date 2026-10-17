@@ -1276,3 +1276,37 @@ func TestProgressIsWrittenDownAFewTimesALimitHoweverOftenItIsReported(t *testing
 		t.Fatal("an agent that kept making progress was ended")
 	}
 }
+
+// Every machine of an agent starts with all it needs: the first, each one that replaces a machine
+// that exited, was lost or expired, and one asked for by a control plane that restarted. Its token
+// is the agent's own, which lives as long as the agent's run, so no machine ever fetches or
+// refreshes a credential of its own.
+func TestEveryMachineOfAnAgentStartsWithItsOwnToken(t *testing.T) {
+	store := &launcherStore{ByLauncher: map[string][]db.LauncherAgent{"main": {{AgentSignup: sandboxed("pe-1", "ag-1")}}}}
+	token, err := auth.Mint(testSecret, scope.Agent("pe-1", "ag-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"API_URL": testAPIURL, "HL_TOKEN": token}
+	machine := mustReconcile(t, store, observed()).Instances[0]
+	names := map[string]bool{}
+	for _, end := range []sandboxapi.ObservedInstance{{State: "running"}, {State: "exited", Log: "crashed"}, {State: "exited", Expired: true}, {State: "running"}} {
+		if !reflect.DeepEqual(machine.Env, want) {
+			t.Fatalf("machine %s starts with %v, want %v", machine.Name, machine.Env, want)
+		}
+		names[machine.Name] = true
+		var report []sandboxapi.ObservedInstance
+		if end.State == "running" {
+			// Running, then gone: its provider lost it.
+			mustReconcile(t, store, observed(sandboxapi.ObservedInstance{Name: machine.Name, State: "running"}))
+		} else {
+			end.Name = machine.Name
+			report = append(report, end)
+		}
+		// A new decider each time, as after a restart of the control plane.
+		machine = mustReconcile(t, store, observed(report...)).Instances[0]
+	}
+	if !reflect.DeepEqual(machine.Env, want) || len(names) != 4 || names[machine.Name] {
+		t.Fatalf("last machine %+v after %d others, want a new one with %v", machine, len(names), want)
+	}
+}

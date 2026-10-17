@@ -31,8 +31,10 @@ FROM python:3.13-slim
 # build-essential, pkg-config, cmake: an agent compiles and tests a harness here before a job runs
 # it. Twice a baseline agent found no C compiler or linker.
 # sudo: what else the experiment's image installs, the agent installs here itself.
-# podman: the agent builds the image its jobs run in and pushes it (hl image credentials), as
-# root through sudo. A sandbox's root filesystem is itself an overlay, which the kernel's overlay
+# podman: the agent builds the image its jobs run in and pushes it, as root through sudo. hl is
+# its credential helper (credential-helpers, docker-credential-hl): every push to the platform's
+# registry gets a fresh login from the API with the sandbox's token, which sudo keeps, so the agent
+# never logs in. A sandbox's root filesystem is itself an overlay, which the kernel's overlay
 # does not stack on, so image layers are mounted with fuse-overlayfs; containers share the
 # machine's network, since a sandbox gives no namespace a bridge of its own. fusermount3 unmounts
 # through /etc/mtab, which the base image lacks.
@@ -42,7 +44,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
     && ln -sf /proc/self/mounts /etc/mtab
 RUN mkdir -p /etc/containers \
  && printf '[containers]\nnetns = "host"\n\n[engine]\ncgroup_manager = "cgroupfs"\nevents_logger = "file"\n' > /etc/containers/containers.conf \
- && printf 'unqualified-search-registries = ["docker.io"]\nshort-name-mode = "permissive"\n' > /etc/containers/registries.conf \
+ && printf 'unqualified-search-registries = ["docker.io"]\nshort-name-mode = "permissive"\ncredential-helpers = ["containers-auth.json", "hl"]\n' > /etc/containers/registries.conf \
  && printf '[storage]\ndriver = "overlay"\nrunroot = "/run/containers/storage"\ngraphroot = "/var/lib/containers/storage"\n\n[storage.options.overlay]\nmount_program = "/usr/bin/fuse-overlayfs"\n' > /etc/containers/storage.conf
 COPY --from=uv /uv /uvx /usr/local/bin/
 
@@ -65,7 +67,7 @@ RUN git config --system user.name  "hypothesisloop-agent" \
 # Passwordless sudo for all of it: apt-get or dpkg alone already run any script as root, so a
 # narrower rule keeps nothing safe in a VM that holds one agent and is thrown away after it.
 RUN useradd --home-dir /agent --shell /bin/bash agent \
- && echo 'agent ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/agent \
+ && printf 'Defaults env_keep += "API_URL HL_TOKEN"\nagent ALL=(ALL) NOPASSWD: ALL\n' > /etc/sudoers.d/agent \
  && chmod 0440 /etc/sudoers.d/agent
 
 # The fully commented job and hypothesis files that hl job submit --help and hl hypothesis submit --help name.
@@ -74,6 +76,7 @@ COPY cli/reference $HL_REFERENCE
 
 # The `hl` CLI, built in the hl-builder stage above: the one way the agent acts on the platform.
 COPY --from=hl-builder /out/hl /usr/local/bin/hl
+RUN ln -s hl /usr/local/bin/docker-credential-hl
 
 # The harness lives outside the agent's home: a home with src/ and pyproject.toml in it looks
 # like the place to work.
