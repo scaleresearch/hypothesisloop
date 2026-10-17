@@ -13,8 +13,9 @@ import (
 // maxPktLine is the longest pkt-line git writes, its four length digits included.
 const maxPktLine = 65520
 
-// maxCommands bounds the ref updates one push may name, so reading them holds a bounded amount.
-const maxCommands = 10000
+// maxCommandBytes bounds the lines before a push's pack, its ref updates and shallow lines, so
+// reading them holds a bounded amount.
+const maxCommandBytes = 1 << 20
 
 // command is one ref update of a git-receive-pack request: the value the client saw and the one
 // it asks for, each all zeros for a ref that has none.
@@ -67,6 +68,9 @@ func readCommands(r io.Reader) (commands []command, capabilities []string, raw [
 		if flush {
 			return commands, capabilities, buf.Bytes(), nil
 		}
+		if buf.Len() > maxCommandBytes {
+			return nil, nil, nil, fmt.Errorf("a push's ref updates are over %d bytes", maxCommandBytes)
+		}
 		line := strings.TrimSuffix(string(payload), "\n")
 		if strings.HasPrefix(line, "shallow ") && len(commands) == 0 {
 			continue
@@ -82,9 +86,6 @@ func readCommands(r io.Reader) (commands []command, capabilities []string, raw [
 		parts := strings.Split(line, " ")
 		if len(parts) != 3 || !objectID(parts[0]) || len(parts[1]) != len(parts[0]) || !objectID(parts[1]) || parts[2] == "" {
 			return nil, nil, nil, fmt.Errorf("%q is no ref update", line)
-		}
-		if len(commands) == maxCommands {
-			return nil, nil, nil, fmt.Errorf("a push names more than %d refs", maxCommands)
 		}
 		commands = append(commands, command{Old: parts[0], New: parts[1], Ref: parts[2]})
 	}

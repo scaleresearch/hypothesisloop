@@ -144,3 +144,31 @@ func TestARefusedPushIsReportedRefByRefAsGitReadsIt(t *testing.T) {
 		}
 	}
 }
+
+// endless repeats line without end.
+type endless struct {
+	line []byte
+	read int
+}
+
+func (e *endless) Read(p []byte) (int, error) {
+	n := 0
+	for n < len(p) {
+		c := copy(p[n:], e.line[e.read%len(e.line):])
+		n += c
+		e.read += c
+	}
+	return n, nil
+}
+
+func TestAPushOpensWithABoundedAmountBeforeItsPack(t *testing.T) {
+	for name, line := range map[string]string{
+		"shallow lines": "shallow " + oldID,
+		"ref updates":   oldID + " " + newID + " refs/heads/hl/pe-1/researcher-2/" + strings.Repeat("x", 60000),
+	} {
+		r := &endless{line: pktLine(line)}
+		if _, _, _, err := readCommands(r); err == nil || r.read > 2*maxCommandBytes {
+			t.Errorf("%s: err = %v after %d bytes, want refused within %d", name, err, r.read, 2*maxCommandBytes)
+		}
+	}
+}
