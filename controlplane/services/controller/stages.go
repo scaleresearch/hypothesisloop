@@ -9,7 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
 // StagesStore is the persistence interface for the stage ladder.
@@ -109,7 +109,7 @@ func (c *Controller) advanceStages(ctx context.Context, pe *domain.PlatformExper
 
 // stageProgress evaluates domain.StageProgress for a platform experiment: settled observed
 // usage plus the live in-flight cost of its running jobs, against budget and wall clock.
-// Reservations never contribute — see shared/metricsdb/usage.go for why a large queued job
+// Reservations never contribute — see storage/metricsdb/usage.go for why a large queued job
 // must not be able to trip a boundary.
 func (c *Controller) stageProgress(ctx context.Context, pe *domain.PlatformExperiment, runningExps []*domain.Experiment, obs *tickObservations, now time.Time) (float64, error) {
 	settled, err := c.observed.SettledAccHByJob(ctx, pe.CreatedAt, pe.ID)

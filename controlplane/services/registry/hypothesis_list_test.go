@@ -17,8 +17,8 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/graphdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/graphdb"
 )
 
 // listGraph holds hyp-1 to hyp-N and pages them as the graph store does, dropping ExcludeIDs first.

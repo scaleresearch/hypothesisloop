@@ -30,15 +30,15 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost/github"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/graphdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/imagedigest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/leaderelection"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/registrycred"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/graphdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
 )
 
 // control-service serves the entire agent- and UI-facing API from one listener: quota,

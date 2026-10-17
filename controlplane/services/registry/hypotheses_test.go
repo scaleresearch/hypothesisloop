@@ -20,8 +20,8 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/graphdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/graphdb"
 )
 
 // poolStore is the Postgres side of the registry reduced to what hypothesis writes consult: every
@@ -200,7 +200,7 @@ var adaActor = domain.Actor{Kind: domain.ActorUser, ID: "user-ada"}
 
 // fakeGraph is the hypothesis graph reduced to the rules the registry relies on it for: dedup on
 // (platform_experiment_id, normalized text), and the owner rule on status and links. Link
-// validation itself is the graph store's and is tested against Memgraph in shared/graphdb.
+// validation itself is the graph store's and is tested against Memgraph in storage/graphdb.
 type fakeGraph struct {
 	Graph
 	rows  map[string]*domain.Hypothesis

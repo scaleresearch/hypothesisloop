@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
 )
 
 // GetAgentQuota returns an agent's allocation and current usage for a platform experiment, merging

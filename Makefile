@@ -539,7 +539,7 @@ check: build test agent-test helm-lint
 	cd controlplane/ui && npm test && npm run build
 
 # Creates the next numbered, empty migration: make db-migration NAME=add_widget_color
-MIGRATIONS := controlplane/shared/db/migrations
+MIGRATIONS := controlplane/storage/db/migrations
 db-migration:
 	@echo "$(NAME)" | grep -Eq '^[a-z0-9_]+$$' || { echo "NAME must be lower_snake_case, e.g. make db-migration NAME=add_widget_color" >&2; exit 1; }
 	@last=$$(ls $(MIGRATIONS) | sed -n 's/^\([0-9]\{4\}\)_.*\.sql$$/\1/p' | sort | tail -1); \

@@ -6,7 +6,7 @@ import (
 )
 
 // Hypothesis is a registered research claim an agent intends to test, scoped to a single
-// platform experiment. Hypotheses live in the graph store (shared/graphdb): each one builds on the
+// platform experiment. Hypotheses live in the graph store (storage/graphdb): each one builds on the
 // experiment's objective or on earlier hypotheses, so the pool is a graph rooted at the objective.
 // ExperimentMeta.HypothesisID is required and must reference a hypothesis whose
 // PlatformExperimentID matches the job's own. A uniqueness constraint on

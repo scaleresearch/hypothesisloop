@@ -7,7 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // ObservedState is everything the controller reads back from the metrics store: what has actually

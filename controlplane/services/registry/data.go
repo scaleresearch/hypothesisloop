@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
 )
 
 // ListData returns what a job actually wrote to its durable-data prefix, read live from the

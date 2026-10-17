@@ -8,7 +8,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // UsageReader sums the model calls made for a platform experiment.

@@ -15,7 +15,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
 // fakeDirectory is the rows a token is checked against.

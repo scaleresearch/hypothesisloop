@@ -11,9 +11,9 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/cloudcompute"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/clusteragentapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/hosting"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/provider"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/provider/providers"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
 // defaultWarmPool is the warm pool on a sandbox provider that can warm instances when the

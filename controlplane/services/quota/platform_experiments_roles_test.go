@@ -15,8 +15,8 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // signupStore fakes only the reads and the write Signup makes; every other

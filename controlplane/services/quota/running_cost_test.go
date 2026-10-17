@@ -14,7 +14,7 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
 )
 
 // aliveServer answers ObserveSpan with a job observed continuously from `ago` ago until now —

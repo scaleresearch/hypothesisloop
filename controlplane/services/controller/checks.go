@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // checkSilence returns true when no real observation (node-agent heartbeat or job-reported

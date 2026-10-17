@@ -23,10 +23,10 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
 )
 
 // Store is the desired-state persistence interface the handler needs.

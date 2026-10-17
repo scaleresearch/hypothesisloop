@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // AddDesiredQuotaUsage (see db.PlatformExperimentsStore) debits every non-terminal experiment's

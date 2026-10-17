@@ -18,8 +18,8 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost/github"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
 const usage = `usage: hl-admin <command>

@@ -143,7 +143,7 @@ greptimedb:
     url: ""
 
 # The hypothesis graph, read and written only by control-service. One shared instance. Pinned: the
-# schema bootstrap and the read-only query guard (controlplane/shared/graphdb) were verified
+# schema bootstrap and the read-only query guard (controlplane/storage/graphdb) were verified
 # against exactly this version.
 memgraph:
   image: memgraph/memgraph:3.13.1

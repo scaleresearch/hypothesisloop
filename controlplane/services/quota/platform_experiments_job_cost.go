@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // JobCost is what one job actually cost, as opposed to what it reserved. Every field is derived

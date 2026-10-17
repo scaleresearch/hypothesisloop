@@ -201,7 +201,7 @@ type ServicesConfig struct {
 	// MetricControllerPort serves the internal controller only; nothing agent-facing.
 	MetricControllerPort int    `yaml:"metric_controller_port"`
 	MetricsDBURL         string `yaml:"metrics_db_url"`
-	// GraphDBURL is the Memgraph bolt address holding the hypothesis graph (shared/graphdb).
+	// GraphDBURL is the Memgraph bolt address holding the hypothesis graph (storage/graphdb).
 	// Only control-service connects to it.
 	GraphDBURL string `yaml:"graph_db_url"`
 }

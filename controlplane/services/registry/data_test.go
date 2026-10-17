@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
 )
 
 // emptyBucketStore answers every listing the way a real store answers a prefix nothing was ever

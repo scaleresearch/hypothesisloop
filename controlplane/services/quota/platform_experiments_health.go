@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // RunHealth is where each agent of a platform experiment, and its hosted coordinator, last stood,

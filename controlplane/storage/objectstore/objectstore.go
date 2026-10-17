@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/config"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore/minio"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore/minio"
 )
 
 const unreachableAfter = 5 * time.Second

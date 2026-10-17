@@ -18,7 +18,7 @@ linters:
       # SQL clause builders end each branch with n++ so the next one added is correct by default.
       # The last increment is dead by construction; dropping it makes the next edit a silent bug.
       - linters: [ineffassign]
-        path: 'shared/db/.*_store\.go'
+        path: 'storage/db/.*_store\.go'
         text: 'ineffectual assignment to n'
       # govet's inline analyzer only suggests inlining a vendored constructor; nothing to fix.
       - linters: [govet]

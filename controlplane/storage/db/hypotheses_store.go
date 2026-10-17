@@ -39,7 +39,7 @@ type HypothesisActivity struct {
 }
 
 // HypothesesStore persists the evidence filed against hypotheses: findings and comments. The
-// hypotheses themselves live in the graph store (shared/graphdb).
+// hypotheses themselves live in the graph store (storage/graphdb).
 type HypothesesStore struct {
 	pool *Pool
 }
@@ -75,7 +75,7 @@ func newHypothesisID() (string, error) {
 var ErrFindingExists = errors.New("the job already has a summary")
 
 // CreateHypothesisFinding records the agent's post-run write-up for a job, attached to the
-// hypothesis it tested. A job has one finding (UNIQUE on experiment_id in shared/db/migrations)
+// hypothesis it tested. A job has one finding (UNIQUE on experiment_id in storage/db/migrations)
 // and it is never replaced: a second one is refused with ErrFindingExists. agentID is the job's
 // agent, whose finding it is, and actor whose credential files it.
 func (s *HypothesesStore) CreateHypothesisFinding(ctx context.Context, hypothesisID, platformExperimentID, experimentID, agentID string, actor domain.Actor, summary string) (*domain.HypothesisFinding, error) {

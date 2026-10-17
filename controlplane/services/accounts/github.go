@@ -17,8 +17,8 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost/github"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
 // GitHubApp is what the platform asks of its GitHub App. *github.Client satisfies it.

@@ -22,8 +22,8 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/settlement"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/leaderelection"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
 // metrics-service hosts the metric-controller: the node-agent metric push endpoint and the

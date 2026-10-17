@@ -12,7 +12,7 @@ Two modes, one file, because the pair only means anything together:
                     job's credentials may and may not do — see the four status metrics below.
 
 S3 is spoken directly over stdlib HTTP with a hand-rolled SigV4 signer, for the same reason
-controlplane/shared/objectstore does it: the workload image is python:3.13-slim with no SDK in it
+controlplane/storage/objectstore does it: the workload image is python:3.13-slim with no SDK in it
 (and no `aws`/`mc` binary either), and two request shapes do not justify one. Every request is
 signed with the job's own key, the one the platform created for this job alone and the store
 scopes to its prefixes. Read mode reports, from the one client with the one key:
