@@ -258,7 +258,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 	platformexperiments.RegisterShareHuma(doc, nil, peHandler.Answer, logger)
 	platformexperiments.RegisterDataUsageHuma(doc, platformexperiments.NewDataUsageHandler(nil, nil, nil, 0, zap.NewNop()))
 	httpapi.RegisterSessions(doc, nil, logger)
-	platformexperiments.RegisterExperimentDraftsHuma(doc, nil, logger)
+	httpapi.RegisterExperimentDrafts(doc, nil)
 	accounts.RegisterHuma(doc, accounts.NewHandler(nil, nil, nil, nil, nil, worldSecret, accounts.RuntimeAddresses{}, accounts.Limits{MaxOrgsPerUser: 3, MaxProjectsPerOrg: 10}, logger))
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(
 		scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", logger).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{})))

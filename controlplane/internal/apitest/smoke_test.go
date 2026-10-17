@@ -41,7 +41,7 @@ func TestSmoke(t *testing.T) {
 	registry.RegisterHuma(doc, registry.NewHandler(nil, nil))
 	platformexperiments.RegisterDataUsageHuma(doc, platformexperiments.NewDataUsageHandler(nil, nil, nil, 0, zap.NewNop()))
 	httpapi.RegisterSessions(doc, nil, zap.NewNop())
-	platformexperiments.RegisterExperimentDraftsHuma(doc, nil, zap.NewNop())
+	httpapi.RegisterExperimentDrafts(doc, nil)
 	doc.MountExplore(r)
 
 	// Cluster-agent traffic is a separate audience on its own prefix, so it keeps its own doc.

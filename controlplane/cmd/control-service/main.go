@@ -273,7 +273,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		agentTypes:          accounts.NewAgentTypesHandler(db.NewAgentTypesStore(pool), logger),
 		dataUsage:           platformexperiments.NewDataUsageHandler(dataStore, store, peSvc, pcfg.DataStore.MaxBytesPerAgent, logger),
 		sessions:            platformexperiments.NewSessions(dataStore),
-		drafts:              db.NewExperimentDraftsStore(pool),
+		drafts:              platformexperiments.NewDrafts(db.NewExperimentDraftsStore(pool), logger),
 		accounts: accounts.NewHandler(db.NewAccountsStore(pool), store, connectedClusters, autoscaledClusters, clusterContacts, pcfg.Auth.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Services.PublicAPIURL, MetricsURL: pcfg.Runtimes.MetricsURL, Registry: pcfg.Runtimes.Registry, ImageTag: pcfg.Runtimes.ImageTag, RegistryPlainHTTP: pcfg.Runtimes.RegistryPlainHTTP},
 			accounts.Limits{MaxOrgsPerUser: pcfg.Accounts.MaxOrgsPerUser, MaxProjectsPerOrg: pcfg.Accounts.MaxProjectsPerOrg}, logger),
 		repositories: repos,
@@ -307,7 +307,7 @@ type routes struct {
 	dataUsage           *platformexperiments.DataUsageHandler
 	sessions            *platformexperiments.Sessions
 	instructions        *platformexperiments.InstructionsService
-	drafts              platformexperiments.ExperimentDraftStore
+	drafts              *platformexperiments.Drafts
 	accounts            *accounts.Handler
 	agentTypes          *accounts.AgentTypesHandler
 	repositories        *accounts.Repositories
@@ -372,7 +372,7 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 	platformexperiments.RegisterDataUsageHuma(doc, h.dataUsage)
 	httpapi.RegisterSessions(doc, h.sessions, logger)
 	httpapi.RegisterInstructions(doc, h.instructions)
-	platformexperiments.RegisterExperimentDraftsHuma(doc, h.drafts, logger)
+	httpapi.RegisterExperimentDrafts(doc, h.drafts)
 	accounts.RegisterHuma(doc, h.accounts)
 	accounts.RegisterAgentTypesHuma(doc, h.agentTypes)
 	accounts.RegisterRepositoriesHuma(doc, h.repositories)
