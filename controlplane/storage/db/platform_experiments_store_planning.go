@@ -170,7 +170,7 @@ func signUpDraftBaseline(ctx context.Context, tx *Write, id string, agent *domai
 	if agent.Name == "" {
 		agent.Name = domain.AgentName(signup.Role, func(name string) bool { _, taken := names[name]; return taken })
 	}
-	if err := tx.QueryRow(ctx, `SELECT p.org_id FROM platform_experiments pe JOIN projects p ON p.id = pe.project_id WHERE pe.id = $1`, id).Scan(&agent.OrgID); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT `+orgOfSQL("$1"), id).Scan(&agent.OrgID); err != nil {
 		return fmt.Errorf("read the draft's org: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
@@ -356,12 +356,12 @@ func (s *Store) AgentStanding(ctx context.Context, platformExpID, agentID string
 	t := &domain.Tenancy{PlatformExperimentID: platformExpID}
 	var out domain.AgentStanding
 	err := s.pool.pool.QueryRow(ctx, `
-SELECT pe.project_id, p.org_id, pe.shared, ARRAY(`+priorRuns+`), `+runClosedAtSQL+`,
+SELECT `+tenancyColumns+`, `+runClosedAtSQL+`,
        s.agent_id IS NOT NULL, `+runCutAtSQL+`, `+runPlannedAtSQL+`, `+runFinishedAtSQL+`
-FROM platform_experiments pe JOIN projects p ON p.id = pe.project_id
+FROM `+tenancyFrom+`
 LEFT JOIN experiment_signups s ON s.platform_experiment_id = pe.id AND s.agent_id = $2
-WHERE pe.id = $1 AND pe.removed_at IS NULL`, platformExpID, agentID).Scan(&t.ProjectID, &t.OrgID, &t.Shared, &t.PriorRuns, &out.ClosedAt,
-		&out.SignedUp, &out.CutAt, &out.PlannerAnsweredAt, &out.FinishedAt)
+WHERE pe.id = $1 AND pe.removed_at IS NULL`, platformExpID, agentID).Scan(append(tenancyDest(t), &out.ClosedAt,
+		&out.SignedUp, &out.CutAt, &out.PlannerAnsweredAt, &out.FinishedAt)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.AgentStanding{}, nil
 	}

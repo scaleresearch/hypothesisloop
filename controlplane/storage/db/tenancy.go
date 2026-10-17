@@ -20,8 +20,30 @@ func tenantClause(scope domain.TenantScope, peColumn string, args []any) (string
 		return "", args
 	}
 	conds, args := tenantConds(scope, args)
-	return peColumn + ` IN (SELECT tpe.id FROM platform_experiments tpe JOIN projects tp ON tp.id = tpe.project_id WHERE tpe.removed_at IS NULL AND ` +
-		strings.Join(conds, " AND ") + `)`, args
+	return peColumn + ` IN ` + tenantPlatformExperiments(`tpe.removed_at IS NULL AND `+strings.Join(conds, " AND ")), args
+}
+
+// tenantPlatformExperiments is the ids of the platform experiments tpe, joined to their project
+// as tp, where where holds, as an SQL list.
+func tenantPlatformExperiments(where string) string {
+	return `(SELECT tpe.id FROM platform_experiments tpe JOIN projects tp ON tp.id = tpe.project_id WHERE ` + where + `)`
+}
+
+// orgOfSQL is the org of the platform experiment peRef names, a column or a parameter, read off
+// its project, where it is stored.
+func orgOfSQL(peRef string) string {
+	return `(SELECT op.org_id FROM platform_experiments ope JOIN projects op ON op.id = ope.project_id WHERE ope.id = ` + peRef + `)`
+}
+
+// tenancyColumns are, for a platform experiment pe read from tenancyFrom, domain.Tenancy's
+// ProjectID, OrgID, Shared and PriorRuns, which tenancyDest scans.
+const (
+	tenancyColumns = `pe.project_id, p.org_id, pe.shared, ARRAY(` + priorRuns + `)`
+	tenancyFrom    = `platform_experiments pe JOIN projects p ON p.id = pe.project_id`
+)
+
+func tenancyDest(t *domain.Tenancy) []any {
+	return []any{&t.ProjectID, &t.OrgID, &t.Shared, &t.PriorRuns}
 }
 
 // tenantConds are the conditions on a platform experiment tpe, joined to its project as tp, that
@@ -49,9 +71,9 @@ func (s *Store) PlatformExperimentTenancy(ctx context.Context, platformExperimen
 	t := &domain.Tenancy{PlatformExperimentID: platformExperimentID}
 	var closedAt *time.Time
 	err := s.pool.pool.QueryRow(ctx, `
-SELECT pe.project_id, p.org_id, pe.shared, ARRAY(`+priorRuns+`), pe.closed_at
-FROM platform_experiments pe JOIN projects p ON p.id = pe.project_id
-WHERE pe.id = $1 AND pe.removed_at IS NULL`, platformExperimentID).Scan(&t.ProjectID, &t.OrgID, &t.Shared, &t.PriorRuns, &closedAt)
+SELECT `+tenancyColumns+`, pe.closed_at
+FROM `+tenancyFrom+`
+WHERE pe.id = $1 AND pe.removed_at IS NULL`, platformExperimentID).Scan(append(tenancyDest(t), &closedAt)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil, nil
 	}

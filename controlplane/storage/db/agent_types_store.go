@@ -563,7 +563,7 @@ func agentTypeTx(ctx context.Context, q queryer, platformExpID, typeID string, r
 	err := q.QueryRow(ctx, `
 SELECT t.id FROM agent_types t
 WHERE t.id = $1 AND t.role = $2 AND t.archived_at IS NULL
-  AND (t.org_id IS NULL OR t.org_id = (SELECT p.org_id FROM platform_experiments pe JOIN projects p ON p.id = pe.project_id WHERE pe.id = $3))
+  AND (t.org_id IS NULL OR t.org_id = `+orgOfSQL("$3")+`)
 FOR SHARE OF t`,
 		typeID, string(role), platformExpID).Scan(&found)
 	if errors.Is(err, pgx.ErrNoRows) {

@@ -14,7 +14,7 @@ import (
 // AgentTypeCatalog is the agent types the agents of platform experiment platformExpID may run as.
 func (s *Store) AgentTypeCatalog(ctx context.Context, platformExpID string) (domain.AgentTypeCatalog, error) {
 	var orgID string
-	err := s.pool.pool.QueryRow(ctx, `SELECT p.org_id FROM platform_experiments pe JOIN projects p ON p.id = pe.project_id WHERE pe.id = $1`, platformExpID).Scan(&orgID)
+	err := s.pool.pool.QueryRow(ctx, `SELECT `+orgOfSQL("$1"), platformExpID).Scan(&orgID)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.AgentTypeCatalog: org of %s: %w", platformExpID, err)
 	}

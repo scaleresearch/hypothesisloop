@@ -117,7 +117,7 @@ func (s *Store) ProjectAfter(ctx context.Context, scope domain.TenantScope, with
 		within = "(" + within + ") OR tpe.shared"
 	}
 	return s.changesAfter(ctx, "changes.ProjectAfter",
-		`platform_experiment_id IN (SELECT tpe.id FROM platform_experiments tpe JOIN projects tp ON tp.id = tpe.project_id WHERE `+within+`)`, args, after, limit)
+		`platform_experiment_id IN `+tenantPlatformExperiments(within), args, after, limit)
 }
 
 // changesAfter reads the changes where admits, a predicate on changes numbered from $1 by args,

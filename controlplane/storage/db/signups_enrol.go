@@ -178,8 +178,8 @@ func enrolTx(ctx context.Context, tx *Write, platformExpID string, create []*dom
 	var budget float64
 	var defaultTier domain.QuotaTier
 	if err := tx.QueryRow(ctx, `
-SELECT pe.status, pe.max_agents, pe.max_agentsandboxes, pe.coordinator_in_agentsandbox, p.org_id, pe.budget_accelerator_hours, pe.default_quota_tier
-FROM platform_experiments pe JOIN projects p ON p.id = pe.project_id
+SELECT pe.status, pe.max_agents, pe.max_agentsandboxes, pe.coordinator_in_agentsandbox, `+orgOfSQL("pe.id")+`, pe.budget_accelerator_hours, pe.default_quota_tier
+FROM platform_experiments pe
 WHERE pe.id=$1 FOR UPDATE OF pe`, platformExpID).Scan(&status, &maxAgents, &maxAgentSandboxes, &coordinatorInAgentSandbox, &orgID, &budget, &defaultTier); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, ErrSignupClosed

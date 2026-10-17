@@ -30,10 +30,10 @@ const clusterAdmissionLock = `SELECT pg_advisory_xact_lock(hashtextextended('clu
 // and a cluster named $2: the cluster is registered, is shared or belongs to the job's org, that
 // org has not turned it off, and it runs the image the job names: a cluster with one image a job
 // that names it, any other cluster a job that names one.
-const clusterHostsJob = `EXISTS (
-	SELECT 1 FROM clusters c, platform_experiments pe JOIN projects p ON p.id = pe.project_id
-	WHERE c.name = $2 AND pe.id = e.platform_experiment_id AND (c.shared OR c.org_id = p.org_id)
-	  AND NOT EXISTS (SELECT 1 FROM org_disabled_clusters d WHERE d.cluster_name = c.name AND d.org_id = p.org_id)
+var clusterHostsJob = `EXISTS (
+	SELECT 1 FROM clusters c, (SELECT ` + orgOfSQL("e.platform_experiment_id") + ` AS org_id) o
+	WHERE c.name = $2 AND (c.shared OR c.org_id = o.org_id)
+	  AND NOT EXISTS (SELECT 1 FROM org_disabled_clusters d WHERE d.cluster_name = c.name AND d.org_id = o.org_id)
 	  AND CASE WHEN c.job_image = '' THEN COALESCE(e.job_spec ->> 'image', '') <> ''
 	           ELSE COALESCE(e.job_spec ->> 'image', '') = c.job_image END)`
 
@@ -57,9 +57,7 @@ UPDATE experiments e SET
 	quota_settled_at = NULL,
 	updated_at = NOW()
 WHERE e.cluster_name = $1 AND e.status IN ` + placedSQL + `
-  AND ($2 = '' OR $2 <> (
-	SELECT p.org_id FROM platform_experiments pe JOIN projects p ON p.id = pe.project_id
-	WHERE pe.id = e.platform_experiment_id))` + jobReturning
+  AND ($2 = '' OR $2 <> ` + orgOfSQL("e.platform_experiment_id") + `)` + jobReturning
 
 const clusterColumns = `name, org_id, shared, priority, COALESCE(reported_id, ''), job_image, created_at,
 	scale_up_timeout_seconds, max_speculative_accelerators, stuck_pending_timeout_seconds, status_silence_ceiling_seconds,

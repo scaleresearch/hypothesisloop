@@ -119,7 +119,7 @@ ORDER BY submitted_at ASC, id ASC`, clusterName)
 		// built on the image the cluster runs. Before, it is placed only in the image a cluster that
 		// built it holds on one node and has not pushed, which resolvedJob names and pins it to (see
 		// domain.Experiment.EnvironmentImage).
-		const q = `UPDATE experiments e
+		q := `UPDATE experiments e
 SET status = 'SUBMITTED', submitted_at = NOW(), cluster_name = $2, last_cluster = $2, eviction_reason = NULL, not_admitted_reason = NULL, updated_at = NOW(),
 	resolved_job_spec = $3::jsonb || jsonb_build_object('image', CASE
 		WHEN e.environment_key IS NULL THEN (SELECT CASE WHEN c.job_image = '' THEN e.job_spec ->> 'image' ELSE c.job_image END FROM clusters c WHERE c.name = $2)

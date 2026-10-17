@@ -16,9 +16,9 @@ import (
 
 // experimentColumns is the canonical column list for SELECT queries: the stored columns, then
 // the job's project and org, which are read off its platform experiment where they are stored.
-const experimentColumns = experimentStoredColumns + `,
+var experimentColumns = experimentStoredColumns + `,
 	(SELECT tpe.project_id FROM platform_experiments tpe WHERE tpe.id = platform_experiment_id) AS project_id,
-	(SELECT tp.org_id FROM platform_experiments tpe JOIN projects tp ON tp.id = tpe.project_id WHERE tpe.id = platform_experiment_id) AS org_id
+	` + orgOfSQL("platform_experiment_id") + ` AS org_id
 `
 
 const experimentStoredColumns = `
