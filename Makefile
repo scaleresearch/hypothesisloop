@@ -522,8 +522,8 @@ check: build test agent-test helm-lint
 	go vet ./...
 	cd controlplane/ui && npm test && npm run build
 
-# Regenerates the UI's API types from the OpenAPI document the server publishes
-# (controlplane/cmd/control-service/testdata/openapi.json): run it after that golden changes.
+# Regenerates the UI's API types from the OpenAPI documents the server publishes
+# (controlplane/cmd/control-service/testdata/*openapi.json): run it after those goldens change.
 ui-types:
 	npm --prefix controlplane/ui run types
 

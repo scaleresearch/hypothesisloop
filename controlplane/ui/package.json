@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "e2e": "node e2e/run.mjs",
-    "types": "openapi-typescript ../cmd/control-service/testdata/openapi.json -o src/types/api.ts --root-types --root-types-no-schema-prefix --root-types-keep-casing --enum-values"
+    "types": "npm run types:api && npm run types:cluster-agent",
+    "types:api": "openapi-typescript ../cmd/control-service/testdata/openapi.json -o src/types/api.ts --root-types --root-types-no-schema-prefix --root-types-keep-casing --enum-values",
+    "types:cluster-agent": "openapi-typescript ../cmd/control-service/testdata/clusters-openapi.json -o src/types/cluster-agent-api.ts --root-types --root-types-no-schema-prefix --root-types-keep-casing --enum-values"
   },
   "dependencies": {
     "@headlessui/react": "^2.2.10",
