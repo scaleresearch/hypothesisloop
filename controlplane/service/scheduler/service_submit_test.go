@@ -692,8 +692,13 @@ func TestAJobOfAnArchitectureNoClusterHasIsRefusedAtSubmit(t *testing.T) {
 		return refused, err
 	}
 
-	if _, err := submit(installedCapacity{installed: installed, labels: nodesOf("amd64")}); !errors.Is(err, errReachedScoring) {
+	accepted := humanIdeaSubmission()
+	s := &Service{credits: testCaps, codeHost: testCodeHost{}, store: clustersStore{registered: registered}, clusters: installedCapacity{installed: installed, labels: nodesOf("amd64")}, hypotheses: humanHypothesis("pe-1")}
+	if err := s.Submit(context.Background(), accepted); !errors.Is(err, errReachedScoring) {
 		t.Fatalf("an amd64 image on amd64 nodes: got = %v, want it accepted", err)
+	}
+	if accepted.ImageArchitecture != "amd64" || len(accepted.Job.NodeSelector) != 0 {
+		t.Errorf("accepted on %q with node selector %v, want amd64 kept beside the image and the selector as submitted", accepted.ImageArchitecture, accepted.Job.NodeSelector)
 	}
 	refused, err := submit(installedCapacity{installed: installed, labels: nodesOf("arm64")})
 	if refused == nil || refused.Reason != domain.NotAdmittedNoClusterForArchitecture || AdmissionStatus(refused.Reason) != http.StatusUnprocessableEntity {

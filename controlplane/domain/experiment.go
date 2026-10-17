@@ -61,6 +61,9 @@ type Experiment struct {
 	// Image is the image the job runs in, repository@digest: its platform experiment's image at
 	// its submit.
 	Image string `json:"image" doc:"The image the job runs in, repository@digest: the image its platform experiment recorded when it was submitted (PUT /platform-experiments/{id}/image)."`
+	// ImageArchitecture is the architecture Image is recorded for, the one every node that runs
+	// the job has. Admission states it in ResolvedJob's node selector; Job keeps what was submitted.
+	ImageArchitecture string `json:"-"`
 	// HypothesisID is the hypothesis the job tests, registered via POST /hypotheses. The job of a
 	// baseline agent tests none and is kept on the objective, which the platform experiment's id
 	// names here as it does in a builds_on link. That id is no hypothesis a reader can fetch, so
@@ -220,6 +223,11 @@ func (e *Experiment) EffectiveJob() JobSpec {
 		return *e.ResolvedJob
 	}
 	return e.Job
+}
+
+// OnImageArchitecture says whether a node of these labels has the architecture of e's image.
+func (e *Experiment) OnImageArchitecture(labels map[string]string) bool {
+	return e.ImageArchitecture == "" || labels[NodeArchitectureLabel] == e.ImageArchitecture
 }
 
 // NodeShapes is the placement view of e's EffectiveJob — see JobSpec.NodeShapes. It is on

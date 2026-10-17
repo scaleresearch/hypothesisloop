@@ -238,11 +238,8 @@ func withResources(clusters []ClusterCapacity, cpuAvailable, cpuTotal map[string
 // architectures of their nodes and what their nodes need in a job's image.
 func withOnDemand(clusters []ClusterCapacity, nodeLabels map[string]map[string]map[string]string) {
 	for i := range clusters {
-		noOffer, architectures, imageNeeds := map[string]bool{}, map[string]bool{}, map[string]bool{}
+		noOffer, imageNeeds := map[string]bool{}, map[string]bool{}
 		for _, labels := range nodeLabels[clusters[i].ClusterName] {
-			if arch := labels[domain.NodeArchitectureLabel]; arch != "" {
-				architectures[arch] = true
-			}
 			if needs := labels[domain.NodeImageNeedsLabel]; needs != "" {
 				for _, program := range strings.Split(needs, ",") {
 					imageNeeds[program] = true
@@ -256,7 +253,7 @@ func withOnDemand(clusters []ClusterCapacity, nodeLabels map[string]map[string]m
 			}
 		}
 		clusters[i].NoOffer = slices.Sorted(maps.Keys(noOffer))
-		clusters[i].Architectures = slices.Sorted(maps.Keys(architectures))
+		clusters[i].Architectures = domain.NodeArchitectures(nodeLabels[clusters[i].ClusterName])
 		clusters[i].ImageNeeds = slices.Sorted(maps.Keys(imageNeeds))
 	}
 }

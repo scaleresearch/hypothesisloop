@@ -114,7 +114,7 @@ func SlotFor(exp *domain.Experiment, cluster string, sizes, free map[string]map[
 	var slots []slot
 	for node, labels := range labelsByNode {
 		size := sizes[node]
-		if !isSlot(labels) || !LabelsMatch(labels, exp.Job.NodeSelector) || SlotAccelerators(labels) != devices {
+		if !isSlot(labels) || !RunsOn(labels, exp) || SlotAccelerators(labels) != devices {
 			continue
 		}
 		if devices > 0 && !exp.AcceleratorType.MatchesLabels(labels) {

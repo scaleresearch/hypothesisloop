@@ -3,7 +3,6 @@ package scheduler
 import (
 	"context"
 	"fmt"
-	"maps"
 	"net/url"
 	"strings"
 	"time"
@@ -74,8 +73,7 @@ func shareOutlook(pe *domain.PlatformExperiment) string {
 }
 
 // takeImage runs exp in the image its platform experiment records now, on nodes of that image's
-// architecture, which its node selector states from here on: a job runs only where its image
-// does.
+// architecture: a job runs only where its image does.
 func takeImage(pe *domain.PlatformExperiment, exp *domain.Experiment) error {
 	if pe.Image == nil {
 		return &AdmissionError{Reason: domain.ReasonNoExperimentImage, Message: fmt.Sprintf("platform experiment %s records no image for its jobs to run in: record one with hl image set REF, a base image that has what the code needs or one built from .hypothesisloop/Dockerfile and pushed (hl image repository)", pe.ID)}
@@ -83,13 +81,8 @@ func takeImage(pe *domain.PlatformExperiment, exp *domain.Experiment) error {
 	if stated, ok := exp.Job.NodeSelector[domain.NodeArchitectureLabel]; ok && stated != pe.Image.Architecture {
 		return &AdmissionError{Reason: ReasonMalformed, Field: "job.node_selector", Message: fmt.Sprintf("job.node_selector states %s %s, and the image of platform experiment %s, %s, runs on %s", domain.NodeArchitectureLabel, stated, pe.ID, pe.Image.Image, pe.Image.Architecture)}
 	}
-	selector := maps.Clone(exp.Job.NodeSelector)
-	if selector == nil {
-		selector = map[string]string{}
-	}
-	selector[domain.NodeArchitectureLabel] = pe.Image.Architecture
-	exp.Job.NodeSelector = selector
 	exp.Image = pe.Image.Image
+	exp.ImageArchitecture = pe.Image.Architecture
 	return nil
 }
 

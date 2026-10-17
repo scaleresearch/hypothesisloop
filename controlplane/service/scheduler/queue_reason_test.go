@@ -61,7 +61,7 @@ func TestEveryNotAdmittedReasonIsStoredWithASentence(t *testing.T) {
 	exp.RanOnAcceleratorType = h100
 	imageChoice := map[string]domain.Cluster{"rented": {Name: "rented"}, "metal": {Name: "metal"}}
 	amd64Job := *exp
-	amd64Job.Job.NodeSelector = map[string]string{domain.NodeArchitectureLabel: "amd64"}
+	amd64Job.ImageArchitecture = "amd64"
 	short := domain.NewFootprint()
 	short.Add(domain.ResourceKey{Kind: domain.ResourceKindMemory}, 1<<30)
 	produced := map[string][]string{

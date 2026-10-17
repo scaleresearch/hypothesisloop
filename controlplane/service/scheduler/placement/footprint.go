@@ -107,7 +107,7 @@ func PreemptionShortfall(clusterAvail domain.Footprint, byNode, nodeResources ma
 	key := AcceleratorKey(exp.AcceleratorType)
 	capacities := make([]int64, 0, len(byNode))
 	for node, capacity := range byNode {
-		if LabelsMatch(labelsByNode[node], exp.Job.NodeSelector) {
+		if RunsOn(labelsByNode[node], exp) {
 			capacities = append(capacities, capacity[key])
 		}
 	}
@@ -253,7 +253,7 @@ func addNodeResourceShortfall(out domain.Footprint, byNode, nodeResources map[st
 		placed := ""
 
 		for _, node := range nodes {
-			if !LabelsMatch(labelsByNode[node], exp.Job.NodeSelector) {
+			if !RunsOn(labelsByNode[node], exp) {
 				continue
 			}
 			if distinct && occupied[node] {

@@ -53,6 +53,9 @@ func TestTheStatusListsAreThePredicatesOfThePartialIndexes(t *testing.T) {
 	if got := schemaList(t, "CREATE INDEX idx_experiments_unsettled ", "status"); got != endedSQL {
 		t.Errorf("idx_experiments_unsettled holds %s, endedSQL is %s", got, endedSQL)
 	}
+	if got := schemaList(t, "CREATE INDEX idx_experiments_data_key ", "status"); got != endedSQL {
+		t.Errorf("idx_experiments_data_key holds %s, endedSQL is %s", got, endedSQL)
+	}
 	if got := schemaList(t, "CREATE INDEX idx_platform_experiments_in_progress ", "status"); !slices.Equal(quoted(got), asStrings(slices.DeleteFunc(slices.Clone(domain.PlatformExperimentStatuses), func(s domain.PlatformExperimentStatus) bool {
 		return s == domain.PlatformExpClosed
 	}))) {

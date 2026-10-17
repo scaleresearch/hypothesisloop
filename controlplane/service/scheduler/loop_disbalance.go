@@ -321,7 +321,7 @@ func disbalancePremises(
 	// the disproportion, and the agent is told it verbatim (see disbalanceVictim.explain).
 	strandedNodes := make(map[string]int64, len(nodeAvail))
 	for node, capacity := range nodeAvail {
-		if !placement.LabelsMatch(nodeLabels[node], blocked.Job.NodeSelector) {
+		if !placement.RunsOn(nodeLabels[node], blocked) {
 			continue
 		}
 		if free := capacity[acceleratorType]; free >= perRank {

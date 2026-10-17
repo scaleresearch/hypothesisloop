@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"time"
 
 	"go.uber.org/zap"
@@ -201,6 +202,14 @@ func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterN
 	resolved, err := l.grace.Resolve(exp.EffectiveJob())
 	if err != nil {
 		return err
+	}
+	if exp.ImageArchitecture != "" {
+		selector := maps.Clone(resolved.NodeSelector)
+		if selector == nil {
+			selector = map[string]string{}
+		}
+		selector[domain.NodeArchitectureLabel] = exp.ImageArchitecture
+		resolved.NodeSelector = selector
 	}
 	exp.ResolvedJob = &resolved
 	if err := l.observed.RecordAdmission(ctx, exp.ID, time.Now().UTC()); err != nil {

@@ -140,7 +140,7 @@ func (q queuedFor) Waiting(ctx context.Context) ([]compute.Waiting, error) {
 	var waiting []compute.Waiting
 	for _, exp := range queued {
 		if cluster.Hosts(exp.OrgID) {
-			waiting = append(waiting, compute.Waiting{AcceleratorType: exp.AcceleratorType, Job: exp.Job})
+			waiting = append(waiting, compute.Waiting{AcceleratorType: exp.AcceleratorType, Architecture: exp.ImageArchitecture, Job: exp.Job})
 		}
 	}
 	return waiting, nil

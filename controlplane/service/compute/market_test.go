@@ -66,9 +66,8 @@ type demandDown struct{}
 func (demandDown) Waiting(context.Context) ([]Waiting, error) { return nil, errors.New("queue unreadable") }
 
 func waitingJob(acceleratorType clusterapi.AcceleratorType, count int, cpu, memory, storage, arch string) Waiting {
-	return Waiting{AcceleratorType: acceleratorType, Job: clusterapi.JobSpec{
+	return Waiting{AcceleratorType: acceleratorType, Architecture: arch, Job: clusterapi.JobSpec{
 		AcceleratorCount: count, CPU: cpu, Memory: memory, Storage: storage,
-		NodeSelector: map[string]string{clusterapi.NodeArchitectureLabel: arch},
 	}}
 }
 

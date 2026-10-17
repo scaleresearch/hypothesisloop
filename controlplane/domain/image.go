@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -46,3 +47,14 @@ func ImageArchitecture(ref string, runsOn []string, asked string) (string, error
 
 // NodeArchitectureLabel is on every node a runtime reports, naming its architecture.
 const NodeArchitectureLabel = clusterapi.NodeArchitectureLabel
+
+// NodeArchitectures is the architectures the nodes of one cluster name, sorted.
+func NodeArchitectures(labelsByNode map[string]map[string]string) []string {
+	has := map[string]bool{}
+	for _, labels := range labelsByNode {
+		if arch := labels[NodeArchitectureLabel]; arch != "" {
+			has[arch] = true
+		}
+	}
+	return slices.Sorted(maps.Keys(has))
+}

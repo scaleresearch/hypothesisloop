@@ -227,7 +227,7 @@ type installed struct {
 func (in installed) neverFitsReason(exp *domain.Experiment) string {
 	runs := hostingClusters(in.registered, exp)
 	spansNodes := exp.Job.Nodes() > 1
-	arch := exp.Job.NodeSelector[domain.NodeArchitectureLabel]
+	arch := exp.ImageArchitecture
 	limit, limited := in.limits[exp.OrgID]
 	rate, err := domain.AccHPerHour(exp.AcceleratorType, exp.AcceleratorCount)
 	limited = limited && err == nil && domain.ExceedsLimit(rate, limit.Project)
@@ -236,7 +236,7 @@ func (in installed) neverFitsReason(exp *domain.Experiment) string {
 	otherArchitectures := map[string]bool{}
 	for _, c := range runs {
 		total, reported := in.totals[c.Name]
-		has := nodeArchitectures(in.nodeLabels[c.Name])
+		has := domain.NodeArchitectures(in.nodeLabels[c.Name])
 		switch {
 		case limited && c.Shared:
 			overLimit++
@@ -276,17 +276,6 @@ func (in installed) neverFitsReason(exp *domain.Experiment) string {
 	}
 	return fmt.Sprintf("%s: the job asks for %s, more than any connected cluster that runs it has when idle: %s. Ask for less (hl capacity lists what each cluster has)",
 		domain.NotAdmittedExceedsClusterCapacity, asks, strings.Join(judged, "; "))
-}
-
-// nodeArchitectures is the architectures the nodes of one cluster name, sorted.
-func nodeArchitectures(nodes map[string]map[string]string) []string {
-	has := map[string]bool{}
-	for _, labels := range nodes {
-		if arch := labels[domain.NodeArchitectureLabel]; arch != "" {
-			has[arch] = true
-		}
-	}
-	return slices.Sorted(maps.Keys(has))
 }
 
 // couldHold narrows candidates to the clusters that hold exp when idle, so a job that fits nowhere

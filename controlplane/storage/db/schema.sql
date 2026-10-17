@@ -528,7 +528,8 @@ CREATE TABLE agentsandbox_pool (
 -- runs it, written at admission and cleared on requeue. eviction_reason explains only the attempt
 -- the status is about. cluster_name is '' while placed on none; last_cluster keeps the last
 -- placement. data_access_key_id is '' only on terminal rows from before per-job keys. image is
--- the platform experiment's image at the submit, repository@digest.
+-- the platform experiment's image at the submit, repository@digest, and image_architecture the
+-- architecture it was recorded for, which admission states in resolved_job_spec's node selector.
 CREATE TABLE experiments (
     id                       TEXT             PRIMARY KEY,
     parent_id                TEXT             REFERENCES experiments(id),
@@ -585,6 +586,7 @@ CREATE TABLE experiments (
     -- acch_per_hour is what the job reserves while placed (domain.AccHPerHour), written by the
     -- placing write.
     acch_per_hour            DOUBLE PRECISION NOT NULL DEFAULT 0,
+    image_architecture       TEXT             NOT NULL DEFAULT '',
 
     CONSTRAINT experiments_status
         CHECK (status IN ('SUBMITTED', 'QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'EVICTED', 'REJECTED')),
@@ -610,6 +612,8 @@ CREATE INDEX idx_experiments_recently_undesired ON experiments(last_cluster, upd
     WHERE eviction_reason IS NOT NULL;
 CREATE INDEX idx_experiments_tried_clusters ON experiments(updated_at)
     WHERE tried_clusters <> '[]'::jsonb;
+CREATE INDEX idx_experiments_data_key ON experiments((COALESCE(ended_at, updated_at)))
+    WHERE data_access_key_id <> '' AND status IN ('COMPLETED', 'FAILED', 'EVICTED', 'REJECTED');
 CREATE UNIQUE INDEX idx_experiments_submission_key
     ON experiments(platform_experiment_id, agent_id, submission_key) WHERE submission_key <> '';
 

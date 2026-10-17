@@ -39,6 +39,12 @@ func LabelsMatch(actual, required map[string]string) bool {
 	return true
 }
 
+// RunsOn says whether a node of labels may run exp as submitted: it carries every label exp's job
+// selects and the architecture of exp's image.
+func RunsOn(labels map[string]string, exp *domain.Experiment) bool {
+	return LabelsMatch(labels, exp.Job.NodeSelector) && exp.OnImageArchitecture(labels)
+}
+
 // DesiredFits proves candidate fits the cluster beside the jobs already desired there.
 // resolved is the candidate's job as the runtime will be handed it: when the candidate lands on a
 // slot (domain.NodeSlotLabel), resolved is pinned to that slot.
@@ -327,13 +333,14 @@ func AddNodeResources(available, used map[string]int64) {
 	}
 }
 
-// qualifyingNodes is the sorted set of nodes from capacity that carry exp's required node labels.
+// qualifyingNodes is the sorted set of nodes from capacity that carry exp's required node labels
+// and its image's architecture.
 // The selector is the effective job's: admission may have pinned an admitted job to a slot, and
 // for every other job the resolved selector is the submitted one.
 func qualifyingNodes(capacity map[string]map[string]int64, labelsByNode map[string]map[string]string, exp *domain.Experiment) []string {
 	nodes := make([]string, 0, len(capacity))
 	for node := range capacity {
-		if LabelsMatch(labelsByNode[node], exp.EffectiveJob().NodeSelector) {
+		if LabelsMatch(labelsByNode[node], exp.EffectiveJob().NodeSelector) && exp.OnImageArchitecture(labelsByNode[node]) {
 			nodes = append(nodes, node)
 		}
 	}

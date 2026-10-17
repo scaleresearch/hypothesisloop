@@ -167,7 +167,7 @@ func installedCoresByNode(nodeAvail, nodeResourcesTotal map[string]map[string]in
 // accelerator type are decided for this attempt. A job states its cpu, memory and storage, so
 // on a cluster of nodes that is the job as submitted, with each quantity checked against the
 // job's cluster-local share: the MINIMUM domain.FairShare across every node in cluster that
-// reports exp's accelerator type and carries exp.Job's node_selector.
+// reports exp's accelerator type, carries exp.Job's node_selector and has exp's image architecture.
 //
 // The check is PER GROUP: each group's share is computed against that group's own per-node
 // accelerator count, never the job's TotalAccelerators. A group that holds no accelerator has no
@@ -210,7 +210,7 @@ func (l *Loop) resolveClusterLocalResources(ctx context.Context, cache *resoluti
 		} {
 			share, bounded := int64(0), false
 			for node, total := range nodeResourcesTotal {
-				if !placement.LabelsMatch(nodeLabels[node], exp.Job.NodeSelector) || installed[node] <= 0 {
+				if !placement.RunsOn(nodeLabels[node], exp) || installed[node] <= 0 {
 					continue
 				}
 				ofNode, err := domain.FairShare(total[dimension.key], int64(g.AcceleratorCount), installed[node])

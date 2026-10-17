@@ -15,9 +15,11 @@ type Demand interface {
 	Waiting(ctx context.Context) ([]Waiting, error)
 }
 
-// Waiting is one queued job: its accelerator type and the job as submitted.
+// Waiting is one queued job: its accelerator type, the architecture of its image and the job as
+// submitted.
 type Waiting struct {
 	AcceleratorType clusterapi.AcceleratorType
+	Architecture    string
 	Job             clusterapi.JobSpec
 }
 
@@ -34,10 +36,9 @@ func (e *Executor) wanted(ctx context.Context) (map[string]int, error) {
 	}
 	wanted := map[string]int{}
 	for _, w := range waiting {
-		arch := w.Job.NodeSelector[clusterapi.NodeArchitectureLabel]
 		for _, shape := range e.shapes {
-			if e.takes(shape, arch, w) {
-				wanted[marketKey(shape.Name, arch)]++
+			if e.takes(shape, w.Architecture, w) {
+				wanted[marketKey(shape.Name, w.Architecture)]++
 			}
 		}
 	}

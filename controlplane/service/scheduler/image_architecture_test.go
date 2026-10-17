@@ -24,29 +24,25 @@ func admissionReason(t *testing.T, err error) *AdmissionError {
 }
 
 // A job runs in the image its platform experiment records when it is submitted, and on nodes of
-// that image's architecture, which its node selector says from then on beside what it stated.
+// that image's architecture, which is kept beside the image: its node selector stays as submitted.
 func TestAJobTakesItsPlatformExperimentsImageAndArchitecture(t *testing.T) {
 	exp := humanIdeaSubmission()
-	stated := map[string]string{"zone": "b"}
-	exp.Job.NodeSelector = stated
+	exp.Job.NodeSelector = map[string]string{"zone": "b"}
 	if err := takeImage(imagePE(testExperimentImage), exp); err != nil {
 		t.Fatal(err)
 	}
-	if exp.Image != testExperimentImage.Image {
-		t.Errorf("image = %q, want %q", exp.Image, testExperimentImage.Image)
+	if exp.Image != testExperimentImage.Image || exp.ImageArchitecture != "amd64" {
+		t.Errorf("image = %q on %q, want %q on amd64", exp.Image, exp.ImageArchitecture, testExperimentImage.Image)
 	}
-	if got := exp.Job.NodeSelector; len(got) != 2 || got["zone"] != "b" || got[domain.NodeArchitectureLabel] != "amd64" {
-		t.Errorf("node selector = %v, want zone b and %s amd64", got, domain.NodeArchitectureLabel)
-	}
-	if len(stated) != 1 {
-		t.Errorf("the submitted selector was written to: %v", stated)
+	if got := exp.Job.NodeSelector; len(got) != 1 || got["zone"] != "b" {
+		t.Errorf("the submitted node selector was rewritten: %v", got)
 	}
 
 	// One that states the image's own architecture is taken as it is.
 	same := humanIdeaSubmission()
 	same.Job.NodeSelector = map[string]string{domain.NodeArchitectureLabel: "amd64"}
-	if err := takeImage(imagePE(testExperimentImage), same); err != nil || same.Job.NodeSelector[domain.NodeArchitectureLabel] != "amd64" {
-		t.Fatalf("a selector stating the image's architecture: %v, %v", same.Job.NodeSelector, err)
+	if err := takeImage(imagePE(testExperimentImage), same); err != nil || same.ImageArchitecture != "amd64" {
+		t.Fatalf("a selector stating the image's architecture: %q, %v", same.ImageArchitecture, err)
 	}
 }
 
@@ -88,12 +84,12 @@ func (w archWorkload) GetNodeLabels(context.Context) (map[string]map[string]map[
 
 func archJob(id string, tier domain.CapacityTier, arch string) *domain.Experiment {
 	exp := orgJob(id, "org-a", tier, 1)
-	exp.Job.NodeSelector = map[string]string{domain.NodeArchitectureLabel: arch}
+	exp.ImageArchitecture = arch
 	return exp
 }
 
 // A job is placed only on a cluster whose nodes are of its image's architecture, and waits for
-// one beside an idle cluster of another.
+// one beside an idle cluster of another. Admission states the architecture in the resolved job.
 func TestTickNeverPlacesAJobOnANodeOfAnotherArchitecture(t *testing.T) {
 	for _, tier := range []domain.CapacityTier{domain.CapacityGuaranteed, domain.CapacityBurst} {
 		t.Run(string(tier), func(t *testing.T) {
@@ -127,6 +123,17 @@ func TestTickNeverPlacesAJobOnANodeOfAnotherArchitecture(t *testing.T) {
 			if placed != 1 {
 				t.Errorf("amd64 jobs placed on %v, want exactly one on amd-box's one free accelerator", amd)
 			}
+			for _, exp := range store.queued {
+				if store.submitted[exp.ID] == "" {
+					continue
+				}
+				if exp.ResolvedJob == nil || exp.ResolvedJob.NodeSelector[domain.NodeArchitectureLabel] != exp.ImageArchitecture {
+					t.Errorf("%s was admitted with resolved job %+v, want its node selector to state %s", exp.ID, exp.ResolvedJob, exp.ImageArchitecture)
+				}
+				if len(exp.Job.NodeSelector) != 0 {
+					t.Errorf("%s: admission rewrote the submitted node selector: %v", exp.ID, exp.Job.NodeSelector)
+				}
+			}
 		})
 	}
 }
@@ -139,8 +146,7 @@ func TestARentedSlotTakesOnlyAnAmd64Job(t *testing.T) {
 		c.labels[node][domain.NodeArchitectureLabel] = "amd64"
 	}
 	amd, arm := h100Job("amd", "2"), h100Job("arm", "2")
-	amd.Job.NodeSelector = map[string]string{domain.NodeArchitectureLabel: "amd64"}
-	arm.Job.NodeSelector = map[string]string{domain.NodeArchitectureLabel: "arm64"}
+	amd.ImageArchitecture, arm.ImageArchitecture = "amd64", "arm64"
 
 	if _, misfit := placement.ResolveOntoSlot(amd, rented, c.sizes, c.free, c.labels); misfit != "" {
 		t.Fatalf("an amd64 job: %s", misfit)

@@ -247,7 +247,7 @@ func fitsLargestNode(exp *domain.Experiment, accelByNode, resourcesByNode map[st
 	for _, shape := range exp.NodeShapes() {
 		fitsSomeNode := false
 		for node, resources := range resourcesByNode {
-			if !placement.LabelsMatch(labelsByNode[node], exp.Job.NodeSelector) {
+			if !placement.RunsOn(labelsByNode[node], exp) {
 				continue
 			}
 			sawLabelMatch = true
