@@ -21,7 +21,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: detach
-          image: {{ .Values.images.registry }}/hypothesisloop-cluster-agent:{{ .Values.images.tag }}
+          image: {{ .Values.images.registry }}/hypothesisloop-cluster-agent:{{ .Values.images.tag | default .Chart.AppVersion }}
           imagePullPolicy: IfNotPresent
           command: ["/cluster-agent", "detach"]
           securityContext:

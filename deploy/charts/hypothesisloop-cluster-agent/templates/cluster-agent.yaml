@@ -168,7 +168,7 @@ spec:
       {{- end }}
       containers:
         - name: cluster-agent
-          image: {{ required "images.registry is required" .Values.images.registry }}/hypothesisloop-cluster-agent:{{ required "images.tag is required" .Values.images.tag }}
+          image: {{ required "images.registry is required" .Values.images.registry }}/hypothesisloop-cluster-agent:{{ .Values.images.tag | default .Chart.AppVersion }}
           imagePullPolicy: IfNotPresent
           env:
             - name: CLUSTER_NAME

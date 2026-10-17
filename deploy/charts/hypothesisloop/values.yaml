@@ -10,12 +10,13 @@ namespace:
   name: hypothesisloop
 
 images:
-  # The registry `make images REGISTRY=...` pushed to. Required: every node must be able to pull
+  # The registry `make publish REGISTRY=...` pushed to. Required: every node must be able to pull
   # from it, and no address is a safe guess.
   registry: ""
   pullPolicy: IfNotPresent
-  # The TAG `make images` printed. Required. It names the tree content that was built, so
-  # IfNotPresent never runs stale bytes under a reused tag.
+  # The TAG the images were published under. Left empty, the chart's appVersion, which is the TAG
+  # it was published with. It names the tree content that was built, so IfNotPresent never runs
+  # stale bytes under a reused tag.
   tag: ""
 
 # Every secret comes from this one Secret, which must exist in the namespace before the chart is

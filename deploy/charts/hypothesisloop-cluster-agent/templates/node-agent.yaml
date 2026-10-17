@@ -52,7 +52,7 @@ spec:
       {{- end }}
       containers:
         - name: node-agent
-          image: {{ required "images.registry is required" .Values.images.registry }}/hypothesisloop-node-agent:{{ required "images.tag is required" .Values.images.tag }}
+          image: {{ required "images.registry is required" .Values.images.registry }}/hypothesisloop-node-agent:{{ .Values.images.tag | default .Chart.AppVersion }}
           imagePullPolicy: IfNotPresent
           env:
             - name: NODE_NAME

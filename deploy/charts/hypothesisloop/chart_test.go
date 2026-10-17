@@ -1,6 +1,7 @@
 package hypothesisloop
 
 import (
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -214,7 +215,6 @@ func TestValuesTheChartCannotUseAreRefusedWithTheirName(t *testing.T) {
 	for name, refused := range map[string]struct{ values, set, complaint string }{
 		"no secret name":              {InCluster, `secretName=""`, "secretName is required"},
 		"no image registry":           {InCluster, `images.registry=""`, "images.registry is required"},
-		"no image tag":                {InCluster, `images.tag=""`, "images.tag is required"},
 		"no UI origin":                {InCluster, `auth.uiOrigin=""`, "auth.uiOrigin is required"},
 		"no agent image":              {InCluster, `agents.image=""`, "agents.image is required"},
 		"no API address":              {InCluster, `publicAPIURL=""`, "publicAPIURL is required"},
@@ -250,6 +250,32 @@ func TestValuesTheChartCannotUseAreRefusedWithTheirName(t *testing.T) {
 		if complaint := RenderError(t, refused.values, refused.set); !strings.Contains(complaint, refused.complaint) {
 			t.Errorf("%s: helm said %q, want it to name %q", name, complaint, refused.complaint)
 		}
+	}
+}
+
+// A release given no image tag runs the images the chart was published with, its appVersion,
+// and hands the same tag to every cluster's runtime.
+func TestTheImageTagDefaultsToTheChartsAppVersion(t *testing.T) {
+	chart, err := os.ReadFile("Chart.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var appVersion string
+	for _, line := range strings.Split(string(chart), "\n") {
+		if value, ok := strings.CutPrefix(line, "appVersion: "); ok {
+			appVersion = strings.Trim(value, `"`)
+		}
+	}
+	release := Render(t, InCluster, `images.tag=""`)
+	for name, deployment := range release.Deployments {
+		for _, container := range deployment.Spec.Template.Spec.Containers {
+			if strings.HasPrefix(container.Image, "registry.example.invalid/hypothesisloop-") && !strings.HasSuffix(container.Image, ":"+appVersion) {
+				t.Errorf("%s runs %s, want the tag %s", name, container.Image, appVersion)
+			}
+		}
+	}
+	if got := loadRendered(t, release, InCluster, "hypothesisloop-control-service").Runtimes.ImageTag; got != appVersion {
+		t.Errorf("runtimes image_tag = %q, want %q", got, appVersion)
 	}
 }
 

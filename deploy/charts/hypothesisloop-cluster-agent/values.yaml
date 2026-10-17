@@ -2,8 +2,8 @@
 # file: `helm get values hypothesisloop-cluster-agent -n hypothesisloop` prints them.
 #
 # Required, and shown pre-filled by the UI (Compute Resources > Add cluster) or `hl cluster add`:
-# clusterName, apiURL, metricsURL, runtimeToken, images.registry and images.tag. None has a
-# default, so an install that misses one fails before anything is created.
+# clusterName, apiURL, metricsURL, runtimeToken and images.registry. None has a default, so an
+# install that misses one fails before anything is created. images.tag is shown too.
 
 # Name this cluster was registered under.
 clusterName: ""
@@ -76,7 +76,8 @@ images:
   # (host[:port][/path]). It holds hypothesisloop-cluster-agent and hypothesisloop-node-agent.
   registry: ""
   # Tag of those images. The control plane names the one it runs with. The cluster-agent reports
-  # it, and the control plane shows a cluster whose tag differs from its own.
+  # it, and the control plane shows a cluster whose tag differs from its own. Left empty, the
+  # chart's appVersion, which is the tag it was published with.
   tag: ""
 
 # For a registry that serves plain HTTP with no TLS, such as the local development registry: true
