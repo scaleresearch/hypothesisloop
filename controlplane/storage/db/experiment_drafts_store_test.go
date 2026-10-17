@@ -9,8 +9,8 @@ import (
 
 func TestExperimentDraftsAreKeptPerProjectAsTyped(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
-	drafts := NewExperimentDraftsStore(pool)
+	accounts := NewStore(pool, 3)
+	drafts := NewStore(pool, 3)
 	ctx := context.Background()
 	_, org := newTestUserHome(t, accounts)
 	project := defaultProjectOf(t, accounts, org).ID

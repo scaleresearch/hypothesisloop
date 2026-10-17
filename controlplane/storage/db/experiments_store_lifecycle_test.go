@@ -12,7 +12,7 @@ import (
 
 func TestAJobTheAdmissionLoopHasNotSeenIsAwaitingAdmission(t *testing.T) {
 	pool, _, agentID, peID := setupCapTestPool(t, 4)
-	exps := NewExperimentsStore(pool)
+	exps := NewStore(pool, 3)
 	ctx := context.Background()
 	reason := func(id string) string {
 		t.Helper()
@@ -42,7 +42,7 @@ func TestAJobTheAdmissionLoopHasNotSeenIsAwaitingAdmission(t *testing.T) {
 // transaction, and replayed at the same position to a watcher that was away, until the job ends.
 func TestUnderperformingIsSentOnceAndReplayed(t *testing.T) {
 	pool, _, agentID, peID := setupCapTestPool(t, 4)
-	exps := NewExperimentsStore(pool)
+	exps := NewStore(pool, 3)
 	events := NewEventsStore(pool, noHypothesisEvents{})
 	ctx := context.Background()
 	id := "underperforming-" + peID
@@ -109,7 +109,7 @@ func TestUnderperformingIsSentOnceAndReplayed(t *testing.T) {
 // agent.
 func TestAFinishedJobCarriesItsFinishTimeAndItsFiledSummary(t *testing.T) {
 	pool, _, agentID, peID := setupCapTestPool(t, 4)
-	exps, hyps := NewExperimentsStore(pool), NewHypothesesStore(pool)
+	exps, hyps := NewStore(pool, 3), NewStore(pool, 3)
 	ctx := context.Background()
 	id := "finished-" + peID
 	seedExperimentForCapTest(t, pool, id, agentID, peID, 1, domain.StatusRunning)
@@ -158,7 +158,7 @@ func TestAFinishedJobCarriesItsFinishTimeAndItsFiledSummary(t *testing.T) {
 
 func TestFindingsReadsCoverManyHypothesesInOneQueryEach(t *testing.T) {
 	pool, _, agentID, peID := setupCapTestPool(t, 4)
-	exps, hyps := NewExperimentsStore(pool), NewHypothesesStore(pool)
+	exps, hyps := NewStore(pool, 3), NewStore(pool, 3)
 	ctx := context.Background()
 	first, second, other := "many-first-"+peID, "many-second-"+peID, "many-other-"+peID
 	for _, id := range []string{first, second, other} {
@@ -194,7 +194,7 @@ func TestFindingsReadsCoverManyHypothesesInOneQueryEach(t *testing.T) {
 func TestEvidenceCountsJobsByStatusFindingsAndCommentsOfOnePlatformExperiment(t *testing.T) {
 	pool, _, agentID, peID := setupCapTestPool(t, 4)
 	_, _, otherAgent, otherPE := setupCapTestPool(t, 4)
-	hyps := NewHypothesesStore(pool)
+	hyps := NewStore(pool, 3)
 	ctx := context.Background()
 	busy, discussed, refused := "busy-"+peID, "discussed-"+peID, "refused-"+peID
 	seed := func(id, agent, pe, hypothesisID string, status domain.ExperimentStatus) {
@@ -244,7 +244,7 @@ func TestEvidenceCountsJobsByStatusFindingsAndCommentsOfOnePlatformExperiment(t 
 
 func TestAGangRetryGoesFromRunningToQueuedAndATerminalRowStays(t *testing.T) {
 	pool, _, agentID, peID := setupCapTestPool(t, 4)
-	exps := NewExperimentsStore(pool)
+	exps := NewStore(pool, 3)
 	ctx := context.Background()
 	running, failed := "retry-running-"+peID, "retry-failed-"+peID
 	seedExperimentForCapTest(t, pool, running, agentID, peID, 1, domain.StatusRunning)
@@ -270,7 +270,7 @@ func TestAGangRetryGoesFromRunningToQueuedAndATerminalRowStays(t *testing.T) {
 // behind its own old slot with another one free, and unable to move to an acceptable type.
 func TestEveryRequeueClearsWhatTheLastAdmissionResolved(t *testing.T) {
 	pool, _, agentID, peID := setupCapTestPool(t, 8)
-	exps := NewExperimentsStore(pool)
+	exps := NewStore(pool, 3)
 	ctx := context.Background()
 	for name, requeue := range map[string]struct {
 		from domain.ExperimentStatus
@@ -315,7 +315,7 @@ func TestEveryRequeueClearsWhatTheLastAdmissionResolved(t *testing.T) {
 // and attempt in one row read.
 func TestPlacementCarriesTheSlotAJobWasAdmittedTo(t *testing.T) {
 	pool, _, agentID, peID := setupCapTestPool(t, 4)
-	exps := NewExperimentsStore(pool)
+	exps := NewStore(pool, 3)
 	ctx := context.Background()
 	onSlot, plain := "placement-slot-"+peID, "placement-plain-"+peID
 	seedExperimentForCapTest(t, pool, onSlot, agentID, peID, 1, domain.StatusSubmitted)
@@ -344,7 +344,7 @@ func TestPlacementCarriesTheSlotAJobWasAdmittedTo(t *testing.T) {
 // every later report of the same admission, and an admission after it starts over.
 func TestTheFirstReportOfARunIsKeptUntilTheJobIsAdmittedAgain(t *testing.T) {
 	pool, _, agentID, peID := setupCapTestPool(t, 4)
-	exps := NewExperimentsStore(pool)
+	exps := NewStore(pool, 3)
 	ctx := context.Background()
 	placed, queued := "run-placed-"+peID, "run-queued-"+peID
 	seedExperimentForCapTest(t, pool, placed, agentID, peID, 1, domain.StatusSubmitted)

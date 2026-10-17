@@ -15,7 +15,7 @@ import (
 // baseline declared, out by the time its baseline waits on the platform: held says it waits now.
 // The time since the last call that saw it waiting is credited, up to most in all, so a wait is
 // counted from the first call that sees it and is short by at most the interval between calls.
-func (s *PlatformExperimentsStore) HoldBaselineClock(ctx context.Context, id string, held bool, most time.Duration) error {
+func (s *Store) HoldBaselineClock(ctx context.Context, id string, held bool, most time.Duration) error {
 	const q = `
 UPDATE platform_experiments pe
 SET ends_at = pe.ends_at + make_interval(secs => c.credit),
@@ -36,7 +36,7 @@ WHERE pe.id = c.id AND pe.status = 'open' AND pe.baseline_job_id = '' AND ($2::b
 // RaiseBaseline writes the running pe as patched, its baseline raised from raise.From to
 // raise.To, and records the raise, or does neither: one whose status or baseline moved since it
 // was read is an error.
-func (s *PlatformExperimentsStore) RaiseBaseline(ctx context.Context, pe *domain.PlatformExperiment, raise domain.BaselineRaise) error {
+func (s *Store) RaiseBaseline(ctx context.Context, pe *domain.PlatformExperiment, raise domain.BaselineRaise) error {
 	metrics, err := json.Marshal(pe.Metrics)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.RaiseBaseline: marshal metrics: %w", err)
@@ -60,7 +60,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, pg_current_xact_id()::text::bigint)`,
 	return nil
 }
 
-func (s *PlatformExperimentsStore) baselineRaises(ctx context.Context, id string) ([]domain.BaselineRaise, error) {
+func (s *Store) baselineRaises(ctx context.Context, id string) ([]domain.BaselineRaise, error) {
 	rows, err := s.pool.pool.Query(ctx, `SELECT from_job_id, to_job_id, reason, detail, actor_kind, actor_id, created_at FROM baseline_raises WHERE platform_experiment_id = $1 ORDER BY id`, id)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.baselineRaises: %w", err)

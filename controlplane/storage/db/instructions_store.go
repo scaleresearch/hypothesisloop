@@ -12,7 +12,7 @@ import (
 )
 
 // AgentTypeCatalog is the agent types the agents of platform experiment platformExpID may run as.
-func (s *PlatformExperimentsStore) AgentTypeCatalog(ctx context.Context, platformExpID string) (domain.AgentTypeCatalog, error) {
+func (s *Store) AgentTypeCatalog(ctx context.Context, platformExpID string) (domain.AgentTypeCatalog, error) {
 	var orgID string
 	err := s.pool.pool.QueryRow(ctx, `SELECT p.org_id FROM platform_experiments pe JOIN projects p ON p.id = pe.project_id WHERE pe.id = $1`, platformExpID).Scan(&orgID)
 	if err != nil {
@@ -27,7 +27,7 @@ func (s *PlatformExperimentsStore) AgentTypeCatalog(ctx context.Context, platfor
 
 // ProjectAgentTypeCatalog is the agent types the agents of a platform experiment of project
 // projectID may run as.
-func (s *PlatformExperimentsStore) ProjectAgentTypeCatalog(ctx context.Context, projectID string) (domain.AgentTypeCatalog, error) {
+func (s *Store) ProjectAgentTypeCatalog(ctx context.Context, projectID string) (domain.AgentTypeCatalog, error) {
 	var orgID string
 	if err := s.pool.pool.QueryRow(ctx, `SELECT org_id FROM projects WHERE id = $1`, projectID).Scan(&orgID); err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.ProjectAgentTypeCatalog: org of %s: %w", projectID, err)
@@ -57,7 +57,7 @@ LEFT JOIN LATERAL (SELECT version, rules FROM platform_rules ORDER BY version DE
 
 // AgentInstructions is what the instructions of agent agentID of platform experiment platformExpID
 // are composed from, nil for an agent that is not in it.
-func (s *PlatformExperimentsStore) AgentInstructions(ctx context.Context, platformExpID, agentID string) (*InstructionsSource, error) {
+func (s *Store) AgentInstructions(ctx context.Context, platformExpID, agentID string) (*InstructionsSource, error) {
 	src, err := readInstructions(s.pool.pool.QueryRow(ctx, `
 SELECT t.role, `+agentTypeVersionColumnsOnly+`, COALESCE(s.model, ''), s.hyperparameters, pe.repository_url, r.version, r.rules
 FROM experiment_signups s
@@ -73,7 +73,7 @@ WHERE s.platform_experiment_id = $1 AND s.agent_id = $2`, platformExpID, agentID
 
 // CoordinatorInstructions is what the instructions of the coordinator of platform experiment
 // platformExpID are composed from, nil for no such platform experiment.
-func (s *PlatformExperimentsStore) CoordinatorInstructions(ctx context.Context, platformExpID string) (*InstructionsSource, error) {
+func (s *Store) CoordinatorInstructions(ctx context.Context, platformExpID string) (*InstructionsSource, error) {
 	src, err := readInstructions(s.pool.pool.QueryRow(ctx, `
 SELECT t.role, `+agentTypeVersionColumnsOnly+`, COALESCE(pe.coordinator_model, ''), NULL::jsonb, pe.repository_url, r.version, r.rules
 FROM platform_experiments pe

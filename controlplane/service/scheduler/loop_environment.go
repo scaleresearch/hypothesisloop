@@ -26,7 +26,7 @@ func newEnvironmentPass() *environmentPass {
 }
 
 // assignBuild assigns the build of the environment of key to one of the live clusters the pass
-// read, reading them first if it has not (db.EnvironmentsStore.AssignEnvironment).
+// read, reading them first if it has not (db.Store.AssignEnvironment).
 func (l *Loop) assignBuild(ctx context.Context, pass *environmentPass, key string) (*domain.Environment, error) {
 	if !pass.read {
 		live, err := l.clusters.GetLiveClusters(ctx)
@@ -52,7 +52,7 @@ func (l *Loop) AssignBuild(ctx context.Context, key string) (*domain.Environment
 }
 
 // heldForEnvironment says whether exp waits for the environment its commit declares, whose build
-// it assigns to a live cluster first (db.EnvironmentsStore.AssignEnvironment): while it is built
+// it assigns to a live cluster first (db.Store.AssignEnvironment): while it is built
 // it says so, once the file failed exp ends with the end of the build's output, so its agent fixes
 // the file and submits again, and once the platform failed it on every attempt exp ends as the
 // platform's fault at no cost, and the next submit builds it again. A build its cluster already

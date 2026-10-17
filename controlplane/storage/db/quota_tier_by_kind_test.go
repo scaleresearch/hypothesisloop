@@ -18,7 +18,7 @@ func quotaTierTestDB(t *testing.T) *Pool {
 
 func createTestAgent(t *testing.T, pool *Pool, id string) {
 	t.Helper()
-	agents := NewAgentsStore(pool)
+	agents := NewStore(pool, 3)
 	if err := agents.CreateAgent(context.Background(), &domain.Agent{
 		ID: id, Name: id, OrgID: "default", CreatedAt: time.Now().UTC(),
 	}); err != nil {
@@ -28,7 +28,7 @@ func createTestAgent(t *testing.T, pool *Pool, id string) {
 
 func createTestPE(t *testing.T, pool *Pool, id string, budget float64) {
 	t.Helper()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	now := time.Now().UTC()
 	pe := &domain.PlatformExperiment{
 		ID: id, ProjectID: "default", Name: id, Description: "quota tier test", BudgetAcceleratorHours: budget,
@@ -79,7 +79,7 @@ func TestSignupQuotaTierOverrideWinsRegardlessOfKind(t *testing.T) {
 	createTestAgent(t, pool, humanBurstOnly)
 	createTestPE(t, pool, pe, 10)
 
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	if _, err := pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: agentBurstOnly, Role: domain.SignupRoleCompetitor, QuotaTier: domain.QuotaTierBurstOnly}); err != nil {
 		t.Fatalf("signup agent with burst_only override: got = %v, want = nil", err)
 	}
@@ -121,7 +121,7 @@ func TestAdvanceStageCreditsEverySurvivorIntoTheSameTierRegardlessOfKind(t *test
 	createTestAgent(t, pool, cutAgent)
 	createTestPE(t, pool, pe, 10)
 
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	for _, id := range []string{humanSurvivor, agentSurvivor, cutAgent} {
 		if _, err := pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: id, Role: domain.SignupRoleCompetitor}); err != nil {
 			t.Fatalf("signup %s: got = %v, want = nil", id, err)
@@ -170,7 +170,7 @@ func TestAdvanceStageReleasesACutBurstOnlyAgentsUnspentHours(t *testing.T) {
 	survivorA, survivorB, cutAgent, pe := "a-"+suffix, "b-"+suffix, "cut-"+suffix, "pe-"+suffix
 	ids := []string{survivorA, survivorB, cutAgent}
 	createTestPE(t, pool, pe, 10)
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	for _, id := range ids {
 		createTestAgent(t, pool, id)
 		if _, err := pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: id, Role: domain.SignupRoleCompetitor, QuotaTier: domain.QuotaTierBurstOnly}); err != nil {

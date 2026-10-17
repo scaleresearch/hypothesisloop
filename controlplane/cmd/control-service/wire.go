@@ -34,7 +34,7 @@ type apiGate struct {
 	access *auth.Access
 }
 
-func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Repositories, gitHost githost.Provider, pool *db.Pool, store *db.Store, graph *graphdb.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) *http.Server {
+func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Repositories, gitHost githost.Provider, pool *db.Pool, store *db.Store, graph *graphdb.Store, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) *http.Server {
 	// One client for the durable-data store, shared by everything that reads it: the listing
 	// endpoint, the usage report, admission's ceiling, and the addressing handed to runtimes.
 	dataStore, err := objectstore.New(pcfg.DataStore.Provider, pcfg.DataStore.ControlPlaneEndpoint, pcfg.DataStore.Endpoint, pcfg.DataStore.Region, pcfg.DataStore.Bucket,
@@ -51,10 +51,10 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 
 	// An environment is keyed on the digests of the images it is built from, asked of their
 	// registry at most once a minute per tag.
-	environmentsSvc := environments.NewService(store.EnvironmentsStore, gitHost).WithJobImages(pcfg.OfferedJobImages(), imagedigest.New(pcfg.PlainHTTPRegistries()...))
+	environmentsSvc := environments.NewService(store, gitHost).WithJobImages(pcfg.OfferedJobImages(), imagedigest.New(pcfg.PlainHTTPRegistries()...))
 
-	peSvc := platformexperiments.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap).WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent).WithRepositories(gitHost).
-		WithEnvironments(environmentsSvc).WithModelDefaults(modelDefaults(pcfg)).WithIdleNotice(peFullStore, time.Duration(pcfg.Agents.IdleNoticeMinutes)*time.Minute).WithPersonIdeas(graph)
+	peSvc := platformexperiments.NewPlatformExperimentsService(store, quotaCfg, logger, metricsDBURL, observedGapCap).WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent).WithRepositories(gitHost).
+		WithEnvironments(environmentsSvc).WithModelDefaults(modelDefaults(pcfg)).WithIdleNotice(store, time.Duration(pcfg.Agents.IdleNoticeMinutes)*time.Minute).WithPersonIdeas(graph)
 	launch := platformexperiments.AgentLaunch{
 		Hosting: pcfg.Sandbox != nil, DefaultModel: pcfg.Agents.DefaultModel, CoordinatorModel: pcfg.Agents.CoordinatorModel,
 		SigningSecret: pcfg.Auth.SigningSecret, MaxHosted: pcfg.Agents.MaxHostedPerPlatformExperiment,
@@ -96,7 +96,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		return out, nil
 	}
 
-	modelProxy, err := modelproxy.New(db.NewPlatformExperimentsStore(pool), modelproxy.MetricsDB{URL: metricsDBURL},
+	modelProxy, err := modelproxy.New(store, modelproxy.MetricsDB{URL: metricsDBURL},
 		modelproxy.AnthropicUpstream, pcfg.Models.Anthropic.OAuthToken, logger)
 	if err != nil {
 		logger.Fatal("control-service: configure the model proxy", zap.Error(err))
@@ -111,23 +111,20 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		PlatformExperiments: peSvc,
 		Hypotheses:          graph,
 		Launch:              launch,
-		Sharing:             platformexperiments.NewSharing(db.NewPlatformExperimentsStore(pool), logger),
+		Sharing:             platformexperiments.NewSharing(store, logger),
 		Sessions:            platformexperiments.NewSessions(dataStore),
-		Instructions:        platformexperiments.NewInstructionsService(db.NewPlatformExperimentsStore(pool), modelDefaults(pcfg), logger),
-		Drafts:              platformexperiments.NewDrafts(db.NewExperimentDraftsStore(pool), logger),
-		Accounts: accounts.NewService(db.NewAccountsStore(pool), store, connectedClusters, autoscaledClusters, clusterContacts, pcfg.Auth.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Services.PublicAPIURL, MetricsURL: pcfg.Runtimes.MetricsURL, Registry: pcfg.Runtimes.Registry, ImageTag: pcfg.Runtimes.ImageTag, RegistryPlainHTTP: pcfg.Runtimes.RegistryPlainHTTP},
+		Instructions:        platformexperiments.NewInstructionsService(store, modelDefaults(pcfg), logger),
+		Drafts:              platformexperiments.NewDrafts(store, logger),
+		Accounts: accounts.NewService(store, store, connectedClusters, autoscaledClusters, clusterContacts, pcfg.Auth.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Services.PublicAPIURL, MetricsURL: pcfg.Runtimes.MetricsURL, Registry: pcfg.Runtimes.Registry, ImageTag: pcfg.Runtimes.ImageTag, RegistryPlainHTTP: pcfg.Runtimes.RegistryPlainHTTP},
 			accounts.Limits{MaxOrgsPerUser: pcfg.Accounts.MaxOrgsPerUser, MaxProjectsPerOrg: pcfg.Accounts.MaxProjectsPerOrg}, gate.access, logger),
-		AgentTypes:      accounts.NewAgentTypes(db.NewAgentTypesStore(pool), gate.access, logger),
+		AgentTypes:      accounts.NewAgentTypes(store, gate.access, logger),
 		Repositories:    repos,
 		Scheduler:       jobs,
 		Registry:        registrySvc,
 		ClusterExchange: clusterExchange,
 		Watch:           watchHandler,
-		GitProxy: gitproxy.New(struct {
-			*db.PlatformExperimentsStore
-			*db.EnvironmentsStore
-		}{db.NewPlatformExperimentsStore(pool), store.EnvironmentsStore}, gitHost, logger),
-		ModelProxy: modelProxy,
+		GitProxy:        gitproxy.New(store, gitHost, logger),
+		ModelProxy:      modelProxy,
 	})
 
 	return &http.Server{
@@ -178,14 +175,14 @@ func modelDefaults(pcfg *hypothesisloopcfg.Config) domain.ModelDefaults {
 
 // newGitHost is the git host the settings name, one of two. On a plain one there is no GitHub App
 // and no client for it: connecting GitHub answers that there is none.
-func newGitHost(pcfg *hypothesisloopcfg.Config, accountsStore *db.AccountsStore, logger *zap.Logger) (githubApp accounts.GitHubApp, gitHost githost.Provider) {
+func newGitHost(pcfg *hypothesisloopcfg.Config, store *db.Store, logger *zap.Logger) (githubApp accounts.GitHubApp, gitHost githost.Provider) {
 	switch pcfg.GitHost.Provider {
 	case hypothesisloopcfg.GitHostProviderGitHub:
 		client, err := github.New(*pcfg.GitHost.GitHub)
 		if err != nil {
 			logger.Fatal("control-service: configure the GitHub App", zap.Error(err))
 		}
-		githubApp, gitHost = client, github.NewHost(accountsStore, client, logger)
+		githubApp, gitHost = client, github.NewHost(store, client, logger)
 	case hypothesisloopcfg.GitHostProviderPlain:
 		plain := pcfg.GitHost.Plain
 		var err error

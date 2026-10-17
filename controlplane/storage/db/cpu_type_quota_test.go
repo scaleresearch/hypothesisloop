@@ -76,7 +76,7 @@ func TestInFlightUnitsAreCountedPerKind(t *testing.T) {
 	seedPricedExperiment(t, pool, agentID, peID, quotaCPUClass, 8, 0.48, domain.StatusSubmitted)
 	seedPricedExperiment(t, pool, agentID, peID, quotaCPUClass, 32, 0.96, domain.StatusCompleted)
 
-	store := NewExperimentsStore(pool)
+	store := NewStore(pool, 3)
 	filter := domain.ExperimentFilter{Scope: domain.AllTenants, PlatformExperimentID: peID}
 	stats, err := store.ExperimentStats(context.Background(), filter, "agent")
 	if err != nil {

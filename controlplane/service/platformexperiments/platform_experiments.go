@@ -246,7 +246,7 @@ type PlatformExperimentsService struct {
 }
 
 // IdleNotices reads the researchers of running platform experiments due an idle notice, and
-// tells each (db.PlatformExperimentsStore.IdleResearchers, NoticeIdle). It records whether a
+// tells each (db.Store.IdleResearchers, NoticeIdle). It records whether a
 // run's capacity holds places free and tells whoever steers it once that lasted
 // (MarkCapacityFree, NoticeCapacityIdle).
 type IdleNotices interface {

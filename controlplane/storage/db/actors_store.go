@@ -11,7 +11,7 @@ import (
 // name, an agent's name. One that has none, or is no longer there, is named by its id. A
 // coordinator and a staff token are named by what they are, and an unverified actor keeps the
 // name its record stated. It is one read however many actors are given.
-func (s *AgentsStore) NameActors(ctx context.Context, actors []*domain.Actor) error {
+func (s *Store) NameActors(ctx context.Context, actors []*domain.Actor) error {
 	ids := map[domain.ActorKind][]string{}
 	for _, a := range actors {
 		switch a.Kind {

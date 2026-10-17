@@ -92,8 +92,6 @@ func main() {
 		DefaultMaxConcurrentAccelerators: pcfg.Quota.DefaultMaxConcurrentAccelerators,
 	}
 
-	peFullStore := db.NewPlatformExperimentsFullStore(store)
-
 	// One root context for every background loop, cancelled before the HTTP server drains.
 	// They used to run on context.Background(), so SIGTERM tore the process down mid-admission
 	// pass while the connection pool was closing underneath them.
@@ -106,11 +104,10 @@ func main() {
 	}
 	gate := apiGate{tokens: authenticator, access: auth.NewAccess(store)}
 
-	accountsStore := db.NewAccountsStore(pool)
-	githubApp, gitHost := newGitHost(pcfg, accountsStore, logger)
-	repos := accounts.NewRepositories(accountsStore, githubApp, gate.access, logger)
+	githubApp, gitHost := newGitHost(pcfg, store, logger)
+	repos := accounts.NewRepositories(store, githubApp, gate.access, logger)
 
-	apiServer := newAPIServer(runCtx, gate, repos, gitHost, pool, store, graph, peFullStore, quotaCfg, pcfg, metricsDBURL, apiPort, logger)
+	apiServer := newAPIServer(runCtx, gate, repos, gitHost, pool, store, graph, quotaCfg, pcfg, metricsDBURL, apiPort, logger)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)

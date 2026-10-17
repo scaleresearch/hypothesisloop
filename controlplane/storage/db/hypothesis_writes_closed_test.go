@@ -20,7 +20,7 @@ func TestAHypothesisWriteHoldsOffACloseAndNoneIsTakenAfterIt(t *testing.T) {
 	hypothesis := "closedwrites-hyp-" + uuid.New().String()[:8]
 	createTestPE(t, pool, pe, 10)
 	events := NewEventsStore(pool, noHypothesisEvents{})
-	hypotheses := NewHypothesesStore(pool)
+	hypotheses := NewStore(pool, 3)
 	person := domain.Actor{Kind: domain.ActorUser, ID: "user-ada"}
 
 	if _, err := hypotheses.CreateHypothesisComment(ctx, hypothesis, pe, "", person, "while open"); err != nil {
@@ -30,7 +30,7 @@ func TestAHypothesisWriteHoldsOffACloseAndNoneIsTakenAfterIt(t *testing.T) {
 	passed, closed := make(chan struct{}), make(chan error, 1)
 	go func() {
 		<-passed
-		closed <- NewPlatformExperimentsStore(pool).ClosePlatformExperiment(ctx, pe, &person, "")
+		closed <- NewStore(pool, 3).ClosePlatformExperiment(ctx, pe, &person, "")
 	}()
 	err := events.Emit(ctx, func(stamp domain.Stamp) ([]domain.Event, error) {
 		if err := stamp.RequireOpen(pe); err != nil {

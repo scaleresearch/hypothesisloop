@@ -14,8 +14,8 @@ import (
 // twoOrgs is two orgs, each with a cluster and a platform experiment, and an agent to submit.
 type twoOrgs struct {
 	pool             *Pool
-	clusters         *ClustersStore
-	exps             *ExperimentsStore
+	clusters         *Store
+	exps             *Store
 	orgA, orgB       string
 	ofA, ofB         string
 	peA, peB, agent  string
@@ -26,8 +26,8 @@ type twoOrgs struct {
 func newTwoOrgs(t *testing.T) *twoOrgs {
 	t.Helper()
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
-	w := &twoOrgs{pool: pool, clusters: NewClustersStore(pool), exps: NewExperimentsStore(pool), suffix: uuid.New().String()[:8]}
+	accounts := NewStore(pool, 3)
+	w := &twoOrgs{pool: pool, clusters: NewStore(pool, 3), exps: NewStore(pool, 3), suffix: uuid.New().String()[:8]}
 	_, w.orgA = newTestUserHome(t, accounts)
 	_, w.orgB = newTestUserHome(t, accounts)
 	w.ofA, w.ofB, w.unregisteredName = "of-a-"+w.suffix, "of-b-"+w.suffix, "nobodys-"+w.suffix
@@ -127,7 +127,7 @@ func TestAClaimPlacesAJobOnlyOnARegisteredClusterThatTakesItsOrg(t *testing.T) {
 // tick makes lands.
 func TestAClaimInASingleOrgDeploymentLandsOnEveryRegisteredCluster(t *testing.T) {
 	pool := eventsTestDB(t)
-	clusters, exps := NewClustersStore(pool), NewExperimentsStore(pool)
+	clusters, exps := NewStore(pool, 3), NewStore(pool, 3)
 	suffix := uuid.New().String()[:8]
 	agent, pe := "agent-"+suffix, "pe-"+suffix
 	createTestAgent(t, pool, agent)
@@ -148,7 +148,7 @@ func TestAClaimInASingleOrgDeploymentLandsOnEveryRegisteredCluster(t *testing.T)
 func TestEndingTheSharingOfAClusterRequeuesTheOtherOrgsJobsPlacedOnIt(t *testing.T) {
 	w := newTwoOrgs(t)
 	ctx := context.Background()
-	queue := NewClusterQueueStore(w.pool)
+	queue := NewStore(w.pool, 3)
 	if _, _, err := w.clusters.UpdateCluster(ctx, w.ofA, sharedAs(true), domain.ClusterSettings{}); err != nil {
 		t.Fatal(err)
 	}

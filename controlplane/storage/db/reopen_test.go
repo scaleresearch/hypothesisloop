@@ -22,7 +22,7 @@ type ClosedRun struct {
 func closedRunWithAgents(t *testing.T, pool *Pool) ClosedRun {
 	t.Helper()
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	pe := createTestPEWithCoordinator(t, pool)
 	hosted := domain.AgentSignup{Actor: testActor, Hosted: true, AgentType: "generalist", Model: "model-1"}
 	baseline := hosted
@@ -78,7 +78,7 @@ const closeRecordHeading = "Recorded by the platform:"
 func TestAReopenedRunReadsRunningAndWantsTheAgentsTheCloseEnded(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	run := closedRunWithAgents(t, pool)
 
 	if agents, err := pes.ListLauncherAgents(ctx, domain.AgentWindDown); err != nil || len(agents) != 0 {
@@ -112,7 +112,7 @@ func TestAReopenedRunReadsRunningAndWantsTheAgentsTheCloseEnded(t *testing.T) {
 	if err := pool.pool.QueryRow(ctx, `SELECT count(*) FROM experiment_top3 WHERE platform_experiment_id = $1`, run.ID).Scan(&placements); err != nil || placements != 0 {
 		t.Fatalf("placements = %d, %v, want none", placements, err)
 	}
-	_, closedAt, err := NewAccountsStore(pool).PlatformExperimentTenancy(ctx, run.ID)
+	_, closedAt, err := NewStore(pool, 3).PlatformExperimentTenancy(ctx, run.ID)
 	if err != nil || closedAt != nil {
 		t.Fatalf("closed_at the token check reads = %v, %v, want none", closedAt, err)
 	}
@@ -159,7 +159,7 @@ func TestAReopenedRunReadsRunningAndWantsTheAgentsTheCloseEnded(t *testing.T) {
 func TestOnlyAClosedRunThatStartedAndNobodyContinuesIsReopened(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	endsAt := time.Now().UTC().Add(5 * time.Hour)
 
 	neverStarted := "pe-" + uuid.New().String()[:8]

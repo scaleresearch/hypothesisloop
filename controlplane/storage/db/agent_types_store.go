@@ -57,17 +57,6 @@ func (e *AgentTypeLimit) Error() string {
 	return fmt.Sprintf("the agent type had %d versions made in the last hour, the most it may: edit it again later", e.Limit)
 }
 
-// AgentTypesStore holds the agent types: the built-in ones and those each org made, every version
-// of each, and every change of each (agent_type_events).
-type AgentTypesStore struct {
-	pool *Pool
-}
-
-// NewAgentTypesStore returns an AgentTypesStore backed by pool.
-func NewAgentTypesStore(pool *Pool) *AgentTypesStore {
-	return &AgentTypesStore{pool: pool}
-}
-
 type rowsQuerier interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
@@ -136,7 +125,7 @@ WHERE t.org_id IS NULL OR t.org_id = $1 ORDER BY t.org_id NULLS FIRST, t.created
 }
 
 // List is the agent types of org orgID: the built-in ones and its own.
-func (s *AgentTypesStore) List(ctx context.Context, orgID string) (domain.AgentTypeCatalog, error) {
+func (s *Store) List(ctx context.Context, orgID string) (domain.AgentTypeCatalog, error) {
 	catalog, err := readCatalog(ctx, s.pool.pool, orgID)
 	if err != nil {
 		return nil, fmt.Errorf("agent_types_store.List: %w", err)
@@ -146,7 +135,7 @@ func (s *AgentTypesStore) List(ctx context.Context, orgID string) (domain.AgentT
 
 // Get is agent type id as org orgID reads it: a built-in one or its own. ErrAgentTypeNotFound for
 // any other.
-func (s *AgentTypesStore) Get(ctx context.Context, orgID, id string) (*domain.CurrentAgentType, error) {
+func (s *Store) Get(ctx context.Context, orgID, id string) (*domain.CurrentAgentType, error) {
 	t, err := getAgentType(ctx, s.pool.pool, orgID, id, false)
 	if err != nil {
 		return nil, fmt.Errorf("agent_types_store.Get: %w", err)
@@ -182,7 +171,7 @@ func scanAgentTypeVersion(row pgx.Row) (domain.AgentTypeVersion, error) {
 }
 
 // Versions is every version of agent type id as org orgID reads it, the newest first.
-func (s *AgentTypesStore) Versions(ctx context.Context, orgID, id string) ([]domain.AgentTypeVersion, error) {
+func (s *Store) Versions(ctx context.Context, orgID, id string) ([]domain.AgentTypeVersion, error) {
 	rows, err := s.pool.pool.Query(ctx, `SELECT `+agentTypeVersionColumns+`
 WHERE v.type_id = $1 AND (t.org_id IS NULL OR t.org_id = $2) ORDER BY v.version DESC`, id, orgID)
 	if err != nil {
@@ -199,7 +188,7 @@ WHERE v.type_id = $1 AND (t.org_id IS NULL OR t.org_id = $2) ORDER BY v.version 
 }
 
 // Version is version n of agent type id as org orgID reads it.
-func (s *AgentTypesStore) Version(ctx context.Context, orgID, id string, n int) (*domain.AgentTypeVersion, error) {
+func (s *Store) Version(ctx context.Context, orgID, id string, n int) (*domain.AgentTypeVersion, error) {
 	v, err := readVersion(ctx, s.pool.pool, orgID, id, n)
 	if err != nil {
 		return nil, fmt.Errorf("agent_types_store.Version: %w", err)
@@ -220,7 +209,7 @@ WHERE v.type_id = $1 AND v.version = $2 AND (t.org_id IS NULL OR t.org_id = $3)`
 }
 
 // Events is every change of agent type id as org orgID reads it, the newest first.
-func (s *AgentTypesStore) Events(ctx context.Context, orgID, id string) ([]domain.AgentTypeEvent, error) {
+func (s *Store) Events(ctx context.Context, orgID, id string) ([]domain.AgentTypeEvent, error) {
 	if _, err := getAgentType(ctx, s.pool.pool, orgID, id, false); err != nil {
 		return nil, fmt.Errorf("agent_types_store.Events: %w", err)
 	}
@@ -272,7 +261,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, typeID, version, prompt, encoded, dige
 // caller (domain.ValidatePrompt, AgentTypeSettings.Validate), and so is its role
 // (domain.CheckOrgAgentRole). An *AgentTypeLimit when the org has domain.MaxOrgAgentTypes that
 // are not archived.
-func (s *AgentTypesStore) Create(ctx context.Context, orgID, name, description string, role domain.AgentRole, prompt string, settings domain.AgentTypeSettings, by domain.Actor) (*domain.CurrentAgentType, error) {
+func (s *Store) Create(ctx context.Context, orgID, name, description string, role domain.AgentRole, prompt string, settings domain.AgentTypeSettings, by domain.Actor) (*domain.CurrentAgentType, error) {
 	id, err := domain.NewID(domain.AgentTypeIDPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("agent_types_store.Create: %w", err)
@@ -344,7 +333,7 @@ func lockOrgTypeTx(ctx context.Context, tx pgx.Tx, orgID, id string) (*domain.Cu
 // version already has make no version and tell nobody; a new version tells every live agent of the
 // type (tellTypeTx). The errors are lockOrgTypeTx's, an *AgentTypeVersionConflict when IfVersion
 // is not current, and an *AgentTypeLimit above domain.MaxAgentTypeEditsAnHour.
-func (s *AgentTypesStore) Edit(ctx context.Context, e AgentTypeEdit) (*domain.CurrentAgentType, *domain.Propagation, error) {
+func (s *Store) Edit(ctx context.Context, e AgentTypeEdit) (*domain.CurrentAgentType, *domain.Propagation, error) {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("agent_types_store.Edit: begin: %w", err)
@@ -386,7 +375,7 @@ func (s *AgentTypesStore) Edit(ctx context.Context, e AgentTypeEdit) (*domain.Cu
 // Restore makes a new version of agent type id of org orgID equal to its version n, and current,
 // as an edit does. Restoring what the current version already holds makes none. The errors are
 // Edit's, and ErrAgentTypeNotFound for a version the type does not have.
-func (s *AgentTypesStore) Restore(ctx context.Context, orgID, id string, n int, by domain.Actor) (*domain.CurrentAgentType, *domain.Propagation, error) {
+func (s *Store) Restore(ctx context.Context, orgID, id string, n int, by domain.Actor) (*domain.CurrentAgentType, *domain.Propagation, error) {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("agent_types_store.Restore: begin: %w", err)
@@ -496,7 +485,7 @@ WHERE `+coordinatorWhere+` AND status <> 'closed'`, args...)
 // running. Archiving one archived changes nothing. ErrAgentTypeBuiltin for a built-in type, and an
 // *AgentTypeInUse while a platform experiment that is not closed names it in its researchers, for
 // its coordinator or for one of its agents.
-func (s *AgentTypesStore) Archive(ctx context.Context, orgID, id string, by domain.Actor) (*domain.CurrentAgentType, error) {
+func (s *Store) Archive(ctx context.Context, orgID, id string, by domain.Actor) (*domain.CurrentAgentType, error) {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("agent_types_store.Archive: begin: %w", err)

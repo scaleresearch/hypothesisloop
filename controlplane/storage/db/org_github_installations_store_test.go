@@ -15,7 +15,7 @@ import (
 
 func TestAnOrgConnectsSeveralInstallationsAndFindsOneByItsAccount(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
+	accounts := NewStore(pool, 3)
 	ctx := context.Background()
 	_, orgA := newTestUserHome(t, accounts)
 	_, orgB := newTestUserHome(t, accounts)
@@ -106,7 +106,7 @@ func TestAnOrgConnectsSeveralInstallationsAndFindsOneByItsAccount(t *testing.T) 
 // connected replaces the one GitHub removed there, default and all.
 func TestOneInstallationIsTheOrgsDefaultAndANewOneOnItsAccountReplacesIt(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
+	accounts := NewStore(pool, 3)
 	ctx := context.Background()
 	_, org := newTestUserHome(t, accounts)
 	by := domain.Actor{Kind: domain.ActorUser, ID: "user-1"}
@@ -158,7 +158,7 @@ func TestOneInstallationIsTheOrgsDefaultAndANewOneOnItsAccountReplacesIt(t *test
 // org and the page the install was started from.
 func TestAnInstallStateIsTakenOnceByThePersonItWasIssuedToWhileItHolds(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
+	accounts := NewStore(pool, 3)
 	ctx := context.Background()
 	_, org := newTestUserHome(t, accounts)
 	alice := domain.Actor{Kind: domain.ActorUser, ID: "user-alice"}
@@ -216,7 +216,7 @@ func TestAnInstallStateIsTakenOnceByThePersonItWasIssuedToWhileItHolds(t *testin
 func TestARepositorysAddressIsStoredAtCreation(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	now := time.Now().UTC()
 	create := func(repository, address string) string {
 		t.Helper()

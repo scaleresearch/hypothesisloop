@@ -9,7 +9,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// Store keeps the environments (db.EnvironmentsStore).
+// Store keeps the environments (db.Store).
 type Store interface {
 	OrgHasEnvironmentBuilder(ctx context.Context, orgID string) (bool, error)
 	EnsureEnvironment(ctx context.Context, env *domain.Environment) (*domain.Environment, error)

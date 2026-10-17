@@ -31,7 +31,7 @@ func TestConcurrentCompetitorSignupsNeverExceedMaxAgents(t *testing.T) {
 	baseline := "baseline-" + suffix
 	createTestAgent(t, pool, baseline)
 
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	results := make([]error, contenders)
 	var wg sync.WaitGroup
 	for i, agentID := range agents {

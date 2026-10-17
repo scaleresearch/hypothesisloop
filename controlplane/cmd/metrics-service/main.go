@@ -67,14 +67,12 @@ func main() {
 		DefaultMaxConcurrentAccelerators: pcfg.Quota.DefaultMaxConcurrentAccelerators,
 	}
 
-	peFullStore := db.NewPlatformExperimentsFullStore(store)
-
 	authenticator, err := auth.NewAuthenticator(pcfg.Auth, store)
 	if err != nil {
 		logger.Fatal("metrics-service: configure auth", zap.Error(err))
 	}
 
-	controllerServer, runCancel := newControllerServer(authenticator, pool, store, peFullStore, quotaCfg, pcfg, metricsDBURL, controllerPort, logger)
+	controllerServer, runCancel := newControllerServer(authenticator, pool, store, quotaCfg, pcfg, metricsDBURL, controllerPort, logger)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
@@ -98,9 +96,9 @@ func main() {
 	logger.Info("metrics-service: stopped")
 }
 
-func newControllerServer(authenticator *auth.Authenticator, pool *db.Pool, store *db.Store, peFullStore *db.PlatformExperimentsFullStore, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) (*http.Server, context.CancelFunc) {
+func newControllerServer(authenticator *auth.Authenticator, pool *db.Pool, store *db.Store, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) (*http.Server, context.CancelFunc) {
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
-	peSvc := platformexperiments.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap)
+	peSvc := platformexperiments.NewPlatformExperimentsService(store, quotaCfg, logger, metricsDBURL, observedGapCap)
 
 	// metric-controller never connects to a cluster directly, and needs no cluster/workload
 	// wiring at all: eviction is purely a status update (service/controller) — the
@@ -114,7 +112,7 @@ func newControllerServer(authenticator *auth.Authenticator, pool *db.Pool, store
 		WithReconcileInterval(time.Duration(pcfg.Scheduler.ReconcileIntervalSeconds) * time.Second)
 	// Wire the stage-ladder store and GreptimeDB (Prometheus-compatible) URL. The ladder itself
 	// is per-platform-experiment config, not a controller-wide setting.
-	ctrl = ctrl.WithStagesStore(peFullStore, metricsDBURL)
+	ctrl = ctrl.WithStagesStore(store, metricsDBURL)
 	// Each pass keeps the researchers of every running platform experiment at work as its pool
 	// says, launched as the control service launches the researchers it creates.
 	ctrl = ctrl.WithResearcherKeeper(peSvc.WithAgentLaunch(platformexperiments.AgentLaunch{

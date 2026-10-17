@@ -88,7 +88,7 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environ
 		WithBuildReported(schedulerLoop.Trigger)
 
 	// The sandbox launcher and the cloud compute clusters rent machines, so one replica runs them.
-	rented, err := newRented(pcfg, pool, store, clusterExchange, metricsDBURL, logger)
+	rented, err := newRented(pcfg, store, clusterExchange, metricsDBURL, logger)
 	if err != nil {
 		logger.Fatal("control-service: rented machines", zap.Error(err))
 	}

@@ -17,7 +17,7 @@ func TestImplementationsAndTheLastCompletedCommitAreReadOffTheJobs(t *testing.T)
 	store, first := admitDataKeyFixture(t)
 	ctx := context.Background()
 	other := "impl-agent-" + uuid.New().String()[:8]
-	createTestAgent(t, store.ExperimentsStore.pool, other)
+	createTestAgent(t, store.pool, other)
 	hypothesis := "hyp-" + uuid.New().String()[:8]
 	base := time.Now().UTC().Add(-time.Hour)
 	ref := func(c string) string { return "repo@" + c + fortyHexChars()[1:] }
@@ -35,7 +35,7 @@ func TestImplementationsAndTheLastCompletedCommitAreReadOffTheJobs(t *testing.T)
 		exp.ID, exp.AgentID, exp.Actor.ID = first.ID+"-"+job.commit, job.agent, job.agent
 		exp.HypothesisID, exp.Branch, exp.CodeRef, exp.Status = hypothesis, job.branch, ref(job.commit), job.status
 		exp.CreatedAt = base.Add(time.Duration(i) * time.Minute)
-		if err := createExperiment(ctx, store.ExperimentsStore.pool.pool, &exp); err != nil {
+		if err := createExperiment(ctx, store.pool.pool, &exp); err != nil {
 			t.Fatalf("create job %s: %v", job.commit, err)
 		}
 	}
@@ -61,7 +61,7 @@ func TestImplementationsAndTheLastCompletedCommitAreReadOffTheJobs(t *testing.T)
 	if declared, err := store.BaselineCodeRef(ctx, first.PlatformExperimentID); err != nil || declared != "" {
 		t.Errorf("BaselineCodeRef before a baseline is declared = %q, %v, want none", declared, err)
 	}
-	if _, err := store.ExperimentsStore.pool.pool.Exec(ctx, `UPDATE platform_experiments SET baseline_job_id = $2 WHERE id = $1`, first.PlatformExperimentID, first.ID+"-a"); err != nil {
+	if _, err := store.pool.pool.Exec(ctx, `UPDATE platform_experiments SET baseline_job_id = $2 WHERE id = $1`, first.PlatformExperimentID, first.ID+"-a"); err != nil {
 		t.Fatal(err)
 	}
 	if declared, err := store.BaselineCodeRef(ctx, first.PlatformExperimentID); err != nil || declared != ref("a") {

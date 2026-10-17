@@ -38,17 +38,6 @@ type HypothesisActivity struct {
 	Comments int
 }
 
-// HypothesesStore persists the evidence filed against hypotheses: findings and comments. The
-// hypotheses themselves live in the graph store (storage/graphdb).
-type HypothesesStore struct {
-	pool *Pool
-}
-
-// NewHypothesesStore creates a HypothesesStore backed by pool.
-func NewHypothesesStore(pool *Pool) *HypothesesStore {
-	return &HypothesesStore{pool: pool}
-}
-
 // newHypothesisID generates a UUIDv7-formatted string, matching the ID scheme used
 // elsewhere for agent-visible entities.
 func newHypothesisID() (string, error) {
@@ -78,7 +67,7 @@ var ErrFindingExists = errors.New("the job already has a summary")
 // hypothesis it tested. A job has one finding (UNIQUE on experiment_id in storage/db/migrations)
 // and it is never replaced: a second one is refused with ErrFindingExists. agentID is the job's
 // agent, whose finding it is, and actor whose credential files it.
-func (s *HypothesesStore) CreateHypothesisFinding(ctx context.Context, hypothesisID, platformExperimentID, experimentID, agentID string, actor domain.Actor, summary string) (*domain.HypothesisFinding, error) {
+func (s *Store) CreateHypothesisFinding(ctx context.Context, hypothesisID, platformExperimentID, experimentID, agentID string, actor domain.Actor, summary string) (*domain.HypothesisFinding, error) {
 	id, err := newHypothesisID()
 	if err != nil {
 		return nil, fmt.Errorf("hypotheses_store.CreateHypothesisFinding: %w", err)
@@ -107,7 +96,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
 }
 
 // FindingSummary returns the summary filed for a job, empty when none was.
-func (s *HypothesesStore) FindingSummary(ctx context.Context, experimentID string) (string, error) {
+func (s *Store) FindingSummary(ctx context.Context, experimentID string) (string, error) {
 	var summary string
 	err := s.pool.pool.QueryRow(ctx, `SELECT summary FROM hypothesis_findings WHERE experiment_id = $1`, experimentID).Scan(&summary)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -117,7 +106,7 @@ func (s *HypothesesStore) FindingSummary(ctx context.Context, experimentID strin
 }
 
 // FindingSummaries returns the summary filed for each job in experimentIDs that has one.
-func (s *HypothesesStore) FindingSummaries(ctx context.Context, experimentIDs []string) (map[string]string, error) {
+func (s *Store) FindingSummaries(ctx context.Context, experimentIDs []string) (map[string]string, error) {
 	rows, err := s.pool.pool.Query(ctx, `SELECT experiment_id, summary FROM hypothesis_findings WHERE experiment_id = ANY($1)`, experimentIDs)
 	if err != nil {
 		return nil, fmt.Errorf("hypotheses_store.FindingSummaries: %w", err)
@@ -136,7 +125,7 @@ func (s *HypothesesStore) FindingSummaries(ctx context.Context, experimentIDs []
 
 // NewestFindings returns the newest finding filed against each hypothesis in ids, in one query. A
 // hypothesis with no finding is absent.
-func (s *HypothesesStore) NewestFindings(ctx context.Context, ids []string) (map[string]*domain.HypothesisFinding, error) {
+func (s *Store) NewestFindings(ctx context.Context, ids []string) (map[string]*domain.HypothesisFinding, error) {
 	const q = `SELECT DISTINCT ON (hypothesis_id) id, hypothesis_id, platform_experiment_id, experiment_id, agent_id, actor_kind, actor_id, summary, created_at
 FROM hypothesis_findings WHERE hypothesis_id = ANY($1) ORDER BY hypothesis_id, created_at DESC`
 	rows, err := s.pool.pool.Query(ctx, q, ids)
@@ -162,7 +151,7 @@ FROM hypothesis_findings WHERE hypothesis_id = ANY($1) ORDER BY hypothesis_id, c
 // first — the accumulated evidence trail for that claim across every job that tested it. The
 // trail only ever grows, so limit is defaulted and clamped exactly like every other list read
 // here; CountFindingsByHypothesis reports how much of it a page left behind.
-func (s *HypothesesStore) ListFindingsByHypothesis(ctx context.Context, hypothesisID string, limit, offset int) ([]*domain.HypothesisFinding, error) {
+func (s *Store) ListFindingsByHypothesis(ctx context.Context, hypothesisID string, limit, offset int) ([]*domain.HypothesisFinding, error) {
 	limit, offset = clampHypothesisPage(limit, offset)
 	const q = `SELECT id, hypothesis_id, platform_experiment_id, experiment_id, agent_id, actor_kind, actor_id, summary, created_at
 FROM hypothesis_findings WHERE hypothesis_id = $1 ORDER BY created_at ASC LIMIT $2 OFFSET $3`
@@ -189,7 +178,7 @@ FROM hypothesis_findings WHERE hypothesis_id = $1 ORDER BY created_at ASC LIMIT 
 // CreateHypothesisComment records a freeform, job-independent note against a hypothesis — see
 // domain.HypothesisComment for how this differs from a finding.
 // agentID is whose note it is, empty when no agent owns it, and actor whose credential wrote it.
-func (s *HypothesesStore) CreateHypothesisComment(ctx context.Context, hypothesisID, platformExperimentID, agentID string, actor domain.Actor, text string) (*domain.HypothesisComment, error) {
+func (s *Store) CreateHypothesisComment(ctx context.Context, hypothesisID, platformExperimentID, agentID string, actor domain.Actor, text string) (*domain.HypothesisComment, error) {
 	id, err := newHypothesisID()
 	if err != nil {
 		return nil, fmt.Errorf("hypotheses_store.CreateHypothesisComment: %w", err)
@@ -247,7 +236,7 @@ func holdOpenPlatformExperiment(ctx context.Context, tx pgx.Tx, platformExperime
 
 // ListCommentsByHypothesis returns one page of the comments filed against a hypothesis, oldest
 // first — bounded like ListFindingsByHypothesis, for the same reason.
-func (s *HypothesesStore) ListCommentsByHypothesis(ctx context.Context, hypothesisID string, limit, offset int) ([]*domain.HypothesisComment, error) {
+func (s *Store) ListCommentsByHypothesis(ctx context.Context, hypothesisID string, limit, offset int) ([]*domain.HypothesisComment, error) {
 	limit, offset = clampHypothesisPage(limit, offset)
 	const q = `SELECT id, hypothesis_id, platform_experiment_id, COALESCE(agent_id, ''), actor_kind, actor_id, author, text, created_at
 FROM hypothesis_comments WHERE hypothesis_id = $1 ORDER BY created_at ASC LIMIT $2 OFFSET $3`
@@ -286,7 +275,7 @@ func clampHypothesisPage(limit, offset int) (int, int) {
 
 // CountFindingsByHypothesis returns the full number of findings filed against a hypothesis,
 // ignoring limit/offset.
-func (s *HypothesesStore) CountFindingsByHypothesis(ctx context.Context, hypothesisID string) (int, error) {
+func (s *Store) CountFindingsByHypothesis(ctx context.Context, hypothesisID string) (int, error) {
 	var n int
 	if err := s.pool.pool.QueryRow(ctx,
 		`SELECT COUNT(*) FROM hypothesis_findings WHERE hypothesis_id = $1`, hypothesisID).Scan(&n); err != nil {
@@ -297,7 +286,7 @@ func (s *HypothesesStore) CountFindingsByHypothesis(ctx context.Context, hypothe
 
 // CountCommentsByHypothesis returns the full number of comments filed against a hypothesis,
 // ignoring limit/offset.
-func (s *HypothesesStore) CountCommentsByHypothesis(ctx context.Context, hypothesisID string) (int, error) {
+func (s *Store) CountCommentsByHypothesis(ctx context.Context, hypothesisID string) (int, error) {
 	var n int
 	if err := s.pool.pool.QueryRow(ctx,
 		`SELECT COUNT(*) FROM hypothesis_comments WHERE hypothesis_id = $1`, hypothesisID).Scan(&n); err != nil {
@@ -308,7 +297,7 @@ func (s *HypothesesStore) CountCommentsByHypothesis(ctx context.Context, hypothe
 
 // DeleteHypothesisComments removes the comments filed against a hypothesis that was removed, and
 // its checkouts.
-func (s *HypothesesStore) DeleteHypothesisComments(ctx context.Context, hypothesisID string) error {
+func (s *Store) DeleteHypothesisComments(ctx context.Context, hypothesisID string) error {
 	if _, err := s.pool.pool.Exec(ctx, `DELETE FROM hypothesis_comments WHERE hypothesis_id = $1`, hypothesisID); err != nil {
 		return fmt.Errorf("hypotheses_store.DeleteHypothesisComments: %w", err)
 	}
@@ -320,7 +309,7 @@ func (s *HypothesesStore) DeleteHypothesisComments(ctx context.Context, hypothes
 
 // CountHypothesisActivity returns the finding and comment counts of every hypothesis in ids, in
 // one query. A hypothesis with neither is present with zero counts.
-func (s *HypothesesStore) CountHypothesisActivity(ctx context.Context, ids []string) (map[string]HypothesisActivity, error) {
+func (s *Store) CountHypothesisActivity(ctx context.Context, ids []string) (map[string]HypothesisActivity, error) {
 	out := make(map[string]HypothesisActivity, len(ids))
 	if len(ids) == 0 {
 		return out, nil
@@ -357,7 +346,7 @@ var evidenceStatuses = []domain.ExperimentStatus{
 // ones), one count per lowercase job status, findings, comments, and last_finding_at when there
 // is a finding. Every count is present, zero included. A hypothesis with no job, finding or
 // comment has no entry.
-func (s *HypothesesStore) Evidence(ctx context.Context, platformExperimentID string) (map[string]any, error) {
+func (s *Store) Evidence(ctx context.Context, platformExperimentID string) (map[string]any, error) {
 	const q = `
 SELECT hypothesis_id, lower(status::text), COUNT(*), NULL::timestamptz FROM experiments
 WHERE platform_experiment_id = $1 GROUP BY 1, 2
@@ -421,7 +410,7 @@ var jobOnIt = `e.status IN ('QUEUED', 'SUBMITTED', 'RUNNING') AND ` + agentAtWor
 
 // CheckOutHypothesis records that agentID checked hypothesisID of platformExpID out on branch
 // now, and answers the other agents working on it.
-func (s *HypothesesStore) CheckOutHypothesis(ctx context.Context, platformExpID, hypothesisID, agentID, branch string) ([]domain.HypothesisWorker, error) {
+func (s *Store) CheckOutHypothesis(ctx context.Context, platformExpID, hypothesisID, agentID, branch string) ([]domain.HypothesisWorker, error) {
 	if _, err := s.pool.pool.Exec(ctx, `
 INSERT INTO hypothesis_checkouts (hypothesis_id, agent_id, platform_experiment_id, branch) VALUES ($1, $2, $3, $4)
 ON CONFLICT (hypothesis_id, agent_id) DO UPDATE SET branch = EXCLUDED.branch, checked_out_at = now()`,
@@ -443,7 +432,7 @@ ON CONFLICT (hypothesis_id, agent_id) DO UPDATE SET branch = EXCLUDED.branch, ch
 
 // TakenHypotheses are the ids of the hypotheses some agent works on now, as Working counts it,
 // within platformExpID or, empty, in every platform experiment.
-func (s *HypothesesStore) TakenHypotheses(ctx context.Context, platformExpID string) ([]string, error) {
+func (s *Store) TakenHypotheses(ctx context.Context, platformExpID string) ([]string, error) {
 	rows, err := s.pool.pool.Query(ctx, `
 SELECT e.hypothesis_id FROM experiments e
 WHERE e.hypothesis_id <> '' AND `+jobOnIt+` AND ($1 = '' OR e.platform_experiment_id = $1)
@@ -467,7 +456,7 @@ WHERE ($1 = '' OR c.platform_experiment_id = $1) AND `+checkoutClaims, platformE
 
 // Working is, for each of ids with any, the agents working on it now (domain.HypothesisWorker),
 // by agent id.
-func (s *HypothesesStore) Working(ctx context.Context, ids []string) (map[string][]domain.HypothesisWorker, error) {
+func (s *Store) Working(ctx context.Context, ids []string) (map[string][]domain.HypothesisWorker, error) {
 	out := map[string][]domain.HypothesisWorker{}
 	if len(ids) == 0 {
 		return out, nil

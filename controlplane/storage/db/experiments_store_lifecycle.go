@@ -15,7 +15,7 @@ import (
 // TransitionStatus ends a job that ran: it sets `to` (COMPLETED or FAILED) only if the status is
 // still `from`, and returns whether it did, so a completion racing an eviction lands once. reason
 // is what the status is stored and announced with: why it failed, or nothing.
-func (s *ExperimentsStore) TransitionStatus(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (bool, error) {
+func (s *Store) TransitionStatus(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (bool, error) {
 	if to == domain.StatusQueued {
 		return false, fmt.Errorf("experiments_store.TransitionStatus: QUEUED is set by the requeue that says why")
 	}
@@ -28,13 +28,13 @@ func (s *ExperimentsStore) TransitionStatus(ctx context.Context, id string, from
 }
 
 // ListExperimentsWithStatus returns all experiments in the given status.
-func (s *ExperimentsStore) ListExperimentsWithStatus(ctx context.Context, status domain.ExperimentStatus) ([]*domain.Experiment, error) {
+func (s *Store) ListExperimentsWithStatus(ctx context.Context, status domain.ExperimentStatus) ([]*domain.Experiment, error) {
 	return s.ListExperiments(ctx, domain.ExperimentFilter{Scope: domain.AllTenants, Status: status})
 }
 
 // UpdateExperimentPriority writes a changed priority_score. updated_at stays: it is the time of
 // the row's last status transition, which ListRecentlyUndesiredWorkloads and finished_at read.
-func (s *ExperimentsStore) UpdateExperimentPriority(ctx context.Context, id string, score float64) error {
+func (s *Store) UpdateExperimentPriority(ctx context.Context, id string, score float64) error {
 	const q = `UPDATE experiments SET priority_score = $2 WHERE id = $1 AND priority_score IS DISTINCT FROM $2`
 	_, err := s.pool.pool.Exec(ctx, q, id, score)
 	if err != nil {
@@ -49,7 +49,7 @@ func (s *ExperimentsStore) UpdateExperimentPriority(ctx context.Context, id stri
 // resolved_job_spec in the SAME transaction as the SUBMITTED status transition — see
 // domain.Experiment.ResolvedJob's doc comment. Its image is decided here and set on resolvedJob:
 // the one image the cluster runs, or on a cluster that runs any, the image the job names.
-func (s *ExperimentsStore) ClaimSubmitted(ctx context.Context, id, clusterName string, resolvedJob *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
+func (s *Store) ClaimSubmitted(ctx context.Context, id, clusterName string, resolvedJob *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
 	if resolvedJob == nil {
 		return false, fmt.Errorf("experiments_store.ClaimSubmitted: resolved job spec is required")
 	}
@@ -132,7 +132,7 @@ RETURNING e.resolved_job_spec ->> 'image'`
 //
 // The same write records the accelerator type the job runs on (ran_on_accelerator_type), which
 // is the type it was admitted at: from here on the job has run, whatever ends this attempt.
-func (s *ExperimentsStore) MarkStarted(ctx context.Context, id string) (bool, error) {
+func (s *Store) MarkStarted(ctx context.Context, id string) (bool, error) {
 	const q = `UPDATE experiments SET status = 'RUNNING', ran_on_accelerator_type = accelerator_type, updated_at = NOW()
 WHERE id = $1 AND status = 'SUBMITTED'`
 	tag, err := s.pool.pool.Exec(ctx, q, id)
@@ -145,7 +145,7 @@ WHERE id = $1 AND status = 'SUBMITTED'`
 // MarkUnderperforming records the ranking metric the job trails its cohort on. Only the first
 // call for a job writes, and that write is what emits job.underperforming (see the migrations), so
 // the advisory is sent once per job and replays like every other row-backed event.
-func (s *ExperimentsStore) MarkUnderperforming(ctx context.Context, id, metricName string) error {
+func (s *Store) MarkUnderperforming(ctx context.Context, id, metricName string) error {
 	const q = `UPDATE experiments SET underperforming_metric = $2
 WHERE id = $1 AND underperforming_metric IS NULL`
 	if _, err := s.pool.pool.Exec(ctx, q, id, metricName); err != nil {
@@ -167,7 +167,7 @@ func sentenced(reason string) error {
 // emits job.held (see the migrations): once, when the job has waited since it was queued for longer
 // than its estimated duration and longer than minimum. A job the scheduler has not judged yet has
 // no reason to tell.
-func (s *ExperimentsStore) MarkHeldJobs(ctx context.Context, minimum time.Duration) error {
+func (s *Store) MarkHeldJobs(ctx context.Context, minimum time.Duration) error {
 	const q = `UPDATE experiments SET held_reason = not_admitted_reason
 WHERE status = 'QUEUED' AND held_reason IS NULL AND split_part(not_admitted_reason, ': ', 1) <> 'awaiting_admission'
   AND NOW() - queued_at > GREATEST($1 * INTERVAL '1 second', estimated_duration_hours * INTERVAL '1 hour')`
@@ -180,7 +180,7 @@ WHERE status = 'QUEUED' AND held_reason IS NULL AND split_part(not_admitted_reas
 // MarkBaselineLate records reason, domain.HeldBaselineLate and its sentence, on the job id while
 // it is queued or placed and not running, and that write emits job.held to its owner. A job is
 // told so once.
-func (s *ExperimentsStore) MarkBaselineLate(ctx context.Context, id, reason string) error {
+func (s *Store) MarkBaselineLate(ctx context.Context, id, reason string) error {
 	if err := sentenced(reason); err != nil {
 		return fmt.Errorf("experiments_store.MarkBaselineLate: %w", err)
 	}
@@ -195,7 +195,7 @@ WHERE id = $1 AND status IN ('QUEUED', 'SUBMITTED') AND split_part(COALESCE(held
 // UpdateNotAdmittedReason replaces the explanation only while the job is still QUEUED.
 // ClaimSubmitted clears it in the same statement that changes the lifecycle, so a stale
 // scheduler decision can never attach a queue reason to an admitted job.
-func (s *ExperimentsStore) UpdateNotAdmittedReason(ctx context.Context, id, reason string) error {
+func (s *Store) UpdateNotAdmittedReason(ctx context.Context, id, reason string) error {
 	if err := sentenced(reason); err != nil {
 		return fmt.Errorf("experiments_store.UpdateNotAdmittedReason: %w", err)
 	}
@@ -216,7 +216,7 @@ func (s *ExperimentsStore) UpdateNotAdmittedReason(ctx context.Context, id, reas
 // be cancelled, be stage-cut or be evicted inside that window. Without the guard this UPDATE
 // would drag a terminal job back to QUEUED and re-run work that had already finished — or that a
 // human had explicitly cancelled.
-func (s *ExperimentsStore) RequeuePreempted(ctx context.Context, id string, remainingHours, newCostAccH float64) (bool, error) {
+func (s *Store) RequeuePreempted(ctx context.Context, id string, remainingHours, newCostAccH float64) (bool, error) {
 	const q = `UPDATE experiments SET
 		status = 'QUEUED',
 		eviction_reason = $4,
@@ -254,7 +254,7 @@ func (s *ExperimentsStore) RequeuePreempted(ctx context.Context, id string, rema
 // Unlike RequeuePreempted this does NOT rescale the estimate. A preempted job is assumed to
 // resume where it stopped, so only its remaining hours are re-reserved; a retried gang starts
 // from step zero, so the full original estimate is exactly what the next attempt needs.
-func (s *ExperimentsStore) RequeueForRetry(ctx context.Context, id string, maxAttemptsBefore int) (bool, error) {
+func (s *Store) RequeueForRetry(ctx context.Context, id string, maxAttemptsBefore int) (bool, error) {
 	const q = `UPDATE experiments SET
 		status = 'QUEUED',
 		attempt_count = attempt_count + 1,
@@ -304,7 +304,7 @@ func (s *ExperimentsStore) RequeueForRetry(ctx context.Context, id string, maxAt
 //
 // Returns false when the ceiling is reached or another writer got there first — both mean the
 // caller must terminate instead.
-func (s *ExperimentsStore) RequeueInfrastructureFault(ctx context.Context, id string, from domain.ExperimentStatus, reason string, maxInfraRequeues int) (bool, error) {
+func (s *Store) RequeueInfrastructureFault(ctx context.Context, id string, from domain.ExperimentStatus, reason string, maxInfraRequeues int) (bool, error) {
 	const q = `UPDATE experiments e SET
 		status = 'QUEUED',
 		eviction_reason = $3,
@@ -334,7 +334,7 @@ func (s *ExperimentsStore) RequeueInfrastructureFault(ctx context.Context, id st
 
 // MarkQuotaSettled records that exp's final usage was durably written to the metrics DB, so the
 // settlement reconciler stops retrying it. Only called after that write succeeds.
-func (s *ExperimentsStore) MarkQuotaSettled(ctx context.Context, id string) error {
+func (s *Store) MarkQuotaSettled(ctx context.Context, id string) error {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("experiments_store.MarkQuotaSettled: begin: %w", err)

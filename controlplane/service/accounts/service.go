@@ -19,7 +19,7 @@ import (
 )
 
 // Accounts is the persistence the handler needs for orgs, members, invites, projects and API keys.
-// *db.AccountsStore satisfies it.
+// *db.Store satisfies it.
 type Accounts interface {
 	CreateOrg(ctx context.Context, name, ownerUserID string, maxOwned int) (*domain.Org, error)
 	RenameOrg(ctx context.Context, id, name string) error
@@ -45,7 +45,7 @@ type Accounts interface {
 	AcceptOrgInvite(ctx context.Context, tokenHash, userID string) (*domain.OrgMember, error)
 }
 
-// Clusters is the persistence the handler needs for clusters. *db.ClustersStore satisfies it.
+// Clusters is the persistence the handler needs for clusters. *db.Store satisfies it.
 type Clusters interface {
 	RegisterCluster(ctx context.Context, name, orgID string) (*domain.Cluster, error)
 	ClustersHosting(ctx context.Context, orgID string) ([]*domain.Cluster, error)

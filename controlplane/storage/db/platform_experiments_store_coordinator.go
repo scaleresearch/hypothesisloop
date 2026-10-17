@@ -37,7 +37,7 @@ WHERE pe.coordinator_hosted AND NOT (` + awaitsRepository + `)
 
 // ListLauncherCoordinators returns the hosted coordinators the launcher's desired state is
 // decided from.
-func (s *PlatformExperimentsStore) ListLauncherCoordinators(ctx context.Context, windDown time.Duration) ([]LauncherCoordinator, error) {
+func (s *Store) ListLauncherCoordinators(ctx context.Context, windDown time.Duration) ([]LauncherCoordinator, error) {
 	rows, err := s.pool.pool.Query(ctx, `
 SELECT pe.id, `+coordinatorColumns+`, pe.agent_image, pe.status = 'closed'`+launcherCoordinatorsWhere+`
 ORDER BY pe.id`, windDown.Seconds())

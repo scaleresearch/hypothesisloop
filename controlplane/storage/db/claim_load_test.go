@@ -28,7 +28,7 @@ func TestClaimsRacingForTwoClustersNeverOvercommitOrPlaceAJobTwice(t *testing.T)
 		t.Skipf("no database at %s: %v", testDSN(), err)
 	}
 	t.Cleanup(pool.Close)
-	w.exps = NewExperimentsStore(pool)
+	w.exps = NewStore(pool, 3)
 	second := "of-a2-" + w.suffix
 	if _, err := w.clusters.RegisterCluster(ctx, second, w.orgA); err != nil {
 		t.Fatal(err)
@@ -110,7 +110,7 @@ func TestClaimsRacingForTwoClustersNeverOvercommitOrPlaceAJobTwice(t *testing.T)
 func TestTheReadsOfAPassOverHundredsOfQueuedRowsAreQuick(t *testing.T) {
 	w := newTwoOrgs(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(w.pool)
+	pes := NewStore(w.pool, 3)
 	agents := []string{w.agent}
 	for i := range 5 {
 		agent := fmt.Sprintf("agent-%d-%s", i, w.suffix)

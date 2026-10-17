@@ -11,16 +11,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// EnvironmentsStore keeps the environments the platform builds (domain.Environment) and decides
-// which cluster builds each.
-type EnvironmentsStore struct {
-	pool *Pool
-}
-
-func NewEnvironmentsStore(pool *Pool) *EnvironmentsStore {
-	return &EnvironmentsStore{pool: pool}
-}
-
 const environmentColumns = ` key, org_id, project_id, git_repository, base, tools, dockerfile, image, loaded_image, loaded_node, loaded_cluster, state, fault, log_tail, failed_log, cluster_name, attempt, assigned_at, progress, progress_at, created_at, updated_at `
 
 func scanEnvironment(row rowScanner) (*domain.Environment, error) {
@@ -43,7 +33,7 @@ func clusterBuildsFor(orgID string) string {
 }
 
 // OrgHasEnvironmentBuilder says whether a registered cluster builds environments for orgID.
-func (s *EnvironmentsStore) OrgHasEnvironmentBuilder(ctx context.Context, orgID string) (bool, error) {
+func (s *Store) OrgHasEnvironmentBuilder(ctx context.Context, orgID string) (bool, error) {
 	var has bool
 	if err := s.pool.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM clusters c WHERE `+clusterBuildsFor(`$1`)+`)`, orgID).Scan(&has); err != nil {
 		return false, fmt.Errorf("environments_store.OrgHasEnvironmentBuilder: %w", err)
@@ -55,7 +45,7 @@ func (s *EnvironmentsStore) OrgHasEnvironmentBuilder(ctx context.Context, orgID 
 // when there is none and making a failed one building again from its first attempt. One the file
 // failed keeps the end of that build's output as FailedLog, which a fetch that failed by chance
 // lets the agent tell from an error of the file.
-func (s *EnvironmentsStore) EnsureEnvironment(ctx context.Context, env *domain.Environment) (*domain.Environment, error) {
+func (s *Store) EnsureEnvironment(ctx context.Context, env *domain.Environment) (*domain.Environment, error) {
 	const q = `WITH made AS (
 	INSERT INTO environments (key, org_id, project_id, git_repository, base, tools, dockerfile, image, state) VALUES ($1, $2, $6, $7, $3, $5, $4, '', 'building')
 	ON CONFLICT (key) DO UPDATE SET state = 'building', fault = '', log_tail = '', image = '', cluster_name = '', attempt = 0, assigned_at = NULL, updated_at = now(),
@@ -74,7 +64,7 @@ SELECT` + environmentColumns + `FROM environments WHERE key = $1 AND NOT EXISTS 
 }
 
 // GetEnvironment returns the environment of key, nil when there is none.
-func (s *EnvironmentsStore) GetEnvironment(ctx context.Context, key string) (*domain.Environment, error) {
+func (s *Store) GetEnvironment(ctx context.Context, key string) (*domain.Environment, error) {
 	env, err := scanEnvironment(s.pool.pool.QueryRow(ctx, `SELECT`+environmentColumns+`FROM environments WHERE key = $1`, key))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -90,7 +80,7 @@ func (s *EnvironmentsStore) GetEnvironment(ctx context.Context, key string) (*do
 // with while it builds, so asking again writes nothing until the build ended. The
 // environment's row is held while it is read, so a build that ends at once tells the agent or was
 // over before it asked.
-func (s *EnvironmentsStore) AwaitEnvironmentBuild(ctx context.Context, key, peID, agentID, codeRef, image string) error {
+func (s *Store) AwaitEnvironmentBuild(ctx context.Context, key, peID, agentID, codeRef, image string) error {
 	if _, err := s.pool.pool.Exec(ctx, `INSERT INTO environment_waiters (environment_key, platform_experiment_id, agent_id, code_ref, image)
 SELECT key, $2, $3, $4, $5 FROM environments WHERE key = $1 AND state = 'building' FOR SHARE
 ON CONFLICT (environment_key, platform_experiment_id, agent_id) DO UPDATE SET code_ref = EXCLUDED.code_ref, image = EXCLUDED.image,
@@ -109,7 +99,7 @@ WHERE environment_waiters.ended_xid IS NOT NULL`, key, peID, agentID, codeRef, i
 // cluster takes waits assigned to none. Anything else is returned unchanged. holding holds live
 // and the clusters heard from within domain.EnvironmentBuildHold, which keep their builds. The
 // image an earlier attempt loaded into a node is kept until the build ends: that node runs it.
-func (s *EnvironmentsStore) AssignEnvironment(ctx context.Context, key string, live, holding []string, lease time.Duration) (*domain.Environment, error) {
+func (s *Store) AssignEnvironment(ctx context.Context, key string, live, holding []string, lease time.Duration) (*domain.Environment, error) {
 	q := `WITH pick AS (
 	SELECT c.name FROM clusters c, environments v
 	WHERE v.key = $1 AND c.name = ANY(COALESCE($2::text[], '{}')) AND ` + clusterBuildsFor(`v.org_id`) + `
@@ -147,7 +137,7 @@ SELECT` + environmentColumns + `FROM environments WHERE key = $1 AND NOT EXISTS 
 }
 
 // AssignedEnvironmentBuilds returns the builds assigned to cluster now, oldest first.
-func (s *EnvironmentsStore) AssignedEnvironmentBuilds(ctx context.Context, cluster string) ([]*domain.Environment, error) {
+func (s *Store) AssignedEnvironmentBuilds(ctx context.Context, cluster string) ([]*domain.Environment, error) {
 	rows, err := s.pool.pool.Query(ctx, `SELECT`+environmentColumns+`FROM environments WHERE state = 'building' AND cluster_name = $1 ORDER BY created_at, key`, cluster)
 	if err != nil {
 		return nil, fmt.Errorf("environments_store.AssignedBuilds: %w", err)
@@ -166,7 +156,7 @@ func (s *EnvironmentsStore) AssignedEnvironmentBuilds(ctx context.Context, clust
 
 // AssignedEnvironmentBuild returns the environment of key while its build is assigned to cluster
 // at attempt and is building, nil otherwise.
-func (s *EnvironmentsStore) AssignedEnvironmentBuild(ctx context.Context, cluster, key string, attempt int) (*domain.Environment, error) {
+func (s *Store) AssignedEnvironmentBuild(ctx context.Context, cluster, key string, attempt int) (*domain.Environment, error) {
 	env, err := scanEnvironment(s.pool.pool.QueryRow(ctx, `SELECT`+environmentColumns+`FROM environments
 WHERE key = $1 AND attempt = $2 AND cluster_name = $3 AND state = 'building'`, key, attempt, cluster))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -185,7 +175,7 @@ WHERE key = $1 AND attempt = $2 AND cluster_name = $3 AND state = 'building'`, k
 // it meanwhile: a push that failed leaves that node's image whole. The file is the key's, so its fault fails the build
 // whatever attempt, on whatever cluster, it is at now: an attempt taken from a cluster that went
 // silent and then reported the file failing ends the build there, and is never run again.
-func (s *EnvironmentsStore) FinishEnvironmentBuild(ctx context.Context, cluster, key string, attempt int, outcome domain.EnvironmentBuildOutcome) (bool, error) {
+func (s *Store) FinishEnvironmentBuild(ctx context.Context, cluster, key string, attempt int, outcome domain.EnvironmentBuildOutcome) (bool, error) {
 	var set string
 	const held = `, loaded_image = '', loaded_node = '', loaded_cluster = ''`
 	fence := `key = $1 AND attempt = $2 AND cluster_name = $3 AND state = 'building'`
@@ -213,7 +203,7 @@ func (s *EnvironmentsStore) FinishEnvironmentBuild(ctx context.Context, cluster,
 // RecordEnvironmentLoaded keeps image, repository@digest, as the image of the build of key that
 // cluster runs at attempt, held on its node node while it is pushed, in place of any an earlier
 // attempt loaded, and says whether it was still that build's to report.
-func (s *EnvironmentsStore) RecordEnvironmentLoaded(ctx context.Context, cluster, key string, attempt int, node, image string) (bool, error) {
+func (s *Store) RecordEnvironmentLoaded(ctx context.Context, cluster, key string, attempt int, node, image string) (bool, error) {
 	if node == "" || image == "" {
 		return false, errors.New("environments_store.RecordLoaded: a loaded build names its node and its image")
 	}
@@ -227,7 +217,7 @@ WHERE key = $1 AND attempt = $2 AND cluster_name = $3 AND state = 'building'`, k
 
 // RecordEnvironmentProgress keeps step as the progress of the build of key that cluster runs at
 // attempt, and says whether it was still that build's to report.
-func (s *EnvironmentsStore) RecordEnvironmentProgress(ctx context.Context, cluster, key string, attempt int, step string) (bool, error) {
+func (s *Store) RecordEnvironmentProgress(ctx context.Context, cluster, key string, attempt int, step string) (bool, error) {
 	tag, err := s.pool.pool.Exec(ctx, `UPDATE environments SET progress = $4, progress_at = now()
 WHERE key = $1 AND attempt = $2 AND cluster_name = $3 AND state = 'building'`, key, attempt, cluster, step)
 	if err != nil {

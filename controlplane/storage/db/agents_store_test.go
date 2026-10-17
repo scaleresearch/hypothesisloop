@@ -21,11 +21,11 @@ func TestListAgentsFiltersBySignupAndSearch(t *testing.T) {
 	createTestAgent(t, pool, in)
 	createTestAgent(t, pool, out)
 	createTestPE(t, pool, pe, 10)
-	if _, err := NewPlatformExperimentsStore(pool).Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: in, Role: domain.SignupRoleCompetitor}); err != nil {
+	if _, err := NewStore(pool, 3).Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: in, Role: domain.SignupRoleCompetitor}); err != nil {
 		t.Fatalf("signup: %v", err)
 	}
 
-	agents := NewAgentsStore(pool)
+	agents := NewStore(pool, 3)
 	for _, tc := range []struct {
 		name   string
 		filter AgentsFilter
@@ -66,19 +66,19 @@ func TestTheAgentAndPlatformExperimentListsReadThePageAsked(t *testing.T) {
 		createTestPE(t, pool, fmt.Sprintf("pe-paged-%s-%d", suffix, i), 10)
 	}
 
-	agents, err := NewAgentsStore(pool).ListAgents(ctx, AgentsFilter{Scope: domain.AllTenants, Search: "paged-" + suffix, Limit: rows})
+	agents, err := NewStore(pool, 3).ListAgents(ctx, AgentsFilter{Scope: domain.AllTenants, Search: "paged-" + suffix, Limit: rows})
 	if err != nil || len(agents) != rows {
 		t.Errorf("agents with limit %d: got = %d (%v), want = %d", rows, len(agents), err, rows)
 	}
-	pes, err := NewPlatformExperimentsStore(pool).ListPlatformExperiments(ctx, PlatformExperimentsFilter{Scope: domain.AllTenants, Search: "pe-paged-" + suffix, Limit: rows})
+	pes, err := NewStore(pool, 3).ListPlatformExperiments(ctx, PlatformExperimentsFilter{Scope: domain.AllTenants, Search: "pe-paged-" + suffix, Limit: rows})
 	if err != nil || len(pes) != rows {
 		t.Errorf("platform experiments with limit %d: got = %d (%v), want = %d", rows, len(pes), err, rows)
 	}
-	agents, err = NewAgentsStore(pool).ListAgents(ctx, AgentsFilter{Scope: domain.AllTenants, Search: "paged-" + suffix})
+	agents, err = NewStore(pool, 3).ListAgents(ctx, AgentsFilter{Scope: domain.AllTenants, Search: "paged-" + suffix})
 	if err != nil || len(agents) != defaultAgentListLimit {
 		t.Errorf("agents with no limit: got = %d (%v), want = %d", len(agents), err, defaultAgentListLimit)
 	}
-	pes, err = NewPlatformExperimentsStore(pool).ListPlatformExperiments(ctx, PlatformExperimentsFilter{Scope: domain.AllTenants, Search: "pe-paged-" + suffix})
+	pes, err = NewStore(pool, 3).ListPlatformExperiments(ctx, PlatformExperimentsFilter{Scope: domain.AllTenants, Search: "pe-paged-" + suffix})
 	if err != nil || len(pes) != defaultPlatformExperimentListLimit {
 		t.Errorf("platform experiments with no limit: got = %d (%v), want = %d", len(pes), err, defaultPlatformExperimentListLimit)
 	}
@@ -89,7 +89,7 @@ func TestAnAgentIDThatIsTakenIsRefusedAsExisting(t *testing.T) {
 	pool := eventsTestDB(t)
 	id := "veteran-" + uuid.New().String()[:8]
 	createTestAgent(t, pool, id)
-	err := NewAgentsStore(pool).CreateAgent(context.Background(), &domain.Agent{ID: id, Name: "again", OrgID: "default", CreatedAt: time.Now().UTC()})
+	err := NewStore(pool, 3).CreateAgent(context.Background(), &domain.Agent{ID: id, Name: "again", OrgID: "default", CreatedAt: time.Now().UTC()})
 	if !errors.Is(err, ErrAgentExists) {
 		t.Fatalf("a second agent of id %s: %v, want ErrAgentExists", id, err)
 	}
@@ -110,7 +110,7 @@ func TestAgentStatsCountsTop3OverTheWholeSet(t *testing.T) {
 		_, _ = pool.pool.Exec(context.Background(), `DELETE FROM experiment_top3 WHERE platform_experiment_id = $1`, pe)
 	})
 
-	got, err := NewAgentsStore(pool).AgentStats(ctx, AgentsFilter{Scope: domain.AllTenants, Search: suffix})
+	got, err := NewStore(pool, 3).AgentStats(ctx, AgentsFilter{Scope: domain.AllTenants, Search: suffix})
 	want := domain.AgentStats{Total: 2, Top3Eligible: 1}
 	if err != nil || *got != want {
 		t.Fatalf("stats = (%+v, %v), want %+v", got, err, want)

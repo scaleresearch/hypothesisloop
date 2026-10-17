@@ -38,7 +38,7 @@ func tenantClause(scope domain.TenantScope, peColumn string, args []any) (string
 
 // PlatformExperimentTenancy places a platform experiment and reports when it closed, nil while
 // it has not. A nil tenancy means there is no such platform experiment, or it was removed.
-func (s *AccountsStore) PlatformExperimentTenancy(ctx context.Context, platformExperimentID string) (*domain.Tenancy, *time.Time, error) {
+func (s *Store) PlatformExperimentTenancy(ctx context.Context, platformExperimentID string) (*domain.Tenancy, *time.Time, error) {
 	t := &domain.Tenancy{PlatformExperimentID: platformExperimentID}
 	var closedAt *time.Time
 	err := s.pool.pool.QueryRow(ctx, `
@@ -57,7 +57,7 @@ WHERE pe.id = $1 AND pe.removed_at IS NULL`, platformExperimentID).Scan(&t.Proje
 // ExperimentTenancy places a job through its platform experiment, names the agent it belongs to
 // and reports whether the job has ended. nil when there is no such job, or its platform
 // experiment was removed.
-func (s *AccountsStore) ExperimentTenancy(ctx context.Context, experimentID string) (*domain.Tenancy, bool, error) {
+func (s *Store) ExperimentTenancy(ctx context.Context, experimentID string) (*domain.Tenancy, bool, error) {
 	t := &domain.Tenancy{}
 	var terminal bool
 	err := s.pool.pool.QueryRow(ctx, `
@@ -76,7 +76,7 @@ WHERE e.id = $1 AND pe.removed_at IS NULL`, experimentID).Scan(&t.PlatformExperi
 }
 
 // AgentOrg returns the org an agent was registered in; found is false for an unknown agent.
-func (s *AccountsStore) AgentOrg(ctx context.Context, agentID string) (orgID string, found bool, err error) {
+func (s *Store) AgentOrg(ctx context.Context, agentID string) (orgID string, found bool, err error) {
 	err = s.pool.pool.QueryRow(ctx, `SELECT org_id FROM agents WHERE id = $1`, agentID).Scan(&orgID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", false, nil
@@ -89,7 +89,7 @@ func (s *AccountsStore) AgentOrg(ctx context.Context, agentID string) (orgID str
 
 // PlatformExperimentIDs lists every platform experiment inside scope, for stores that hold only
 // the platform experiment id and cannot join to it.
-func (s *AccountsStore) PlatformExperimentIDs(ctx context.Context, scope domain.TenantScope) ([]string, error) {
+func (s *Store) PlatformExperimentIDs(ctx context.Context, scope domain.TenantScope) ([]string, error) {
 	q := `SELECT pe.id FROM platform_experiments pe`
 	clause, args := tenantClause(scope, "pe.id", nil)
 	if clause != "" {

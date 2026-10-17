@@ -14,7 +14,7 @@ import (
 )
 
 // newTestInvite stores an invite made by createdBy and returns it with the hash it is accepted under.
-func newTestInvite(t *testing.T, accounts *AccountsStore, orgID, createdBy string, role domain.OrgRole, lifetime time.Duration) (*domain.OrgInvite, string) {
+func newTestInvite(t *testing.T, accounts *Store, orgID, createdBy string, role domain.OrgRole, lifetime time.Duration) (*domain.OrgInvite, string) {
 	t.Helper()
 	suffix := uuid.New().String()
 	invite := &domain.OrgInvite{ID: "inv-" + suffix, OrgID: orgID, Role: role, Actor: domain.Actor{Kind: domain.ActorUser, ID: createdBy}, ExpiresAt: time.Now().Add(lifetime)}
@@ -25,7 +25,7 @@ func newTestInvite(t *testing.T, accounts *AccountsStore, orgID, createdBy strin
 }
 
 // addTestMember brings userID into the org the way a person joins one: by an invite of an owner.
-func addTestMember(t *testing.T, accounts *AccountsStore, orgID, ownerID, userID string, role domain.OrgRole) {
+func addTestMember(t *testing.T, accounts *Store, orgID, ownerID, userID string, role domain.OrgRole) {
 	t.Helper()
 	_, hash := newTestInvite(t, accounts, orgID, ownerID, role, domain.InviteLifetime)
 	if _, err := accounts.AcceptOrgInvite(context.Background(), hash, userID); err != nil {
@@ -33,7 +33,7 @@ func addTestMember(t *testing.T, accounts *AccountsStore, orgID, ownerID, userID
 	}
 }
 
-func pendingInviteIDs(t *testing.T, accounts *AccountsStore, orgID string) []string {
+func pendingInviteIDs(t *testing.T, accounts *Store, orgID string) []string {
 	t.Helper()
 	pending, total, err := accounts.ListPendingOrgInvites(context.Background(), orgID, 200, 0)
 	if err == nil && total != len(pending) {
@@ -49,7 +49,7 @@ func pendingInviteIDs(t *testing.T, accounts *AccountsStore, orgID string) []str
 	return ids
 }
 
-func memberRoles(t *testing.T, accounts *AccountsStore, orgID string) map[string]domain.OrgRole {
+func memberRoles(t *testing.T, accounts *Store, orgID string) map[string]domain.OrgRole {
 	t.Helper()
 	members, total, err := accounts.ListOrgMembers(context.Background(), orgID, 200, 0)
 	if err == nil && total != len(members) {
@@ -67,7 +67,7 @@ func memberRoles(t *testing.T, accounts *AccountsStore, orgID string) map[string
 
 func TestAnInviteMakesOneMemberWithItsRole(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
+	accounts := NewStore(pool, 3)
 	ctx := context.Background()
 	owner, orgID := newTestUserHome(t, accounts)
 	guest, guestOrg := newTestUserHome(t, accounts)
@@ -106,7 +106,7 @@ func TestAnInviteMakesOneMemberWithItsRole(t *testing.T) {
 
 func TestOfTwoAcceptsOfOneInviteAtOnceExactlyOneWins(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
+	accounts := NewStore(pool, 3)
 	owner, orgID := newTestUserHome(t, accounts)
 	const callers = 8
 	users := make([]string, callers)
@@ -141,7 +141,7 @@ func TestOfTwoAcceptsOfOneInviteAtOnceExactlyOneWins(t *testing.T) {
 
 func TestAnInviteAcceptedByAMemberIsRefusedAndStaysUnused(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
+	accounts := NewStore(pool, 3)
 	ctx := context.Background()
 	owner, orgID := newTestUserHome(t, accounts)
 	guest, _ := newTestUserHome(t, accounts)
@@ -163,7 +163,7 @@ func TestAnInviteAcceptedByAMemberIsRefusedAndStaysUnused(t *testing.T) {
 
 func TestAnInviteThatExpiredWasRevokedOrNeverExistedAdmitsNobody(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
+	accounts := NewStore(pool, 3)
 	ctx := context.Background()
 	owner, orgID := newTestUserHome(t, accounts)
 	guest, _ := newTestUserHome(t, accounts)
@@ -206,7 +206,7 @@ func TestAnInviteThatExpiredWasRevokedOrNeverExistedAdmitsNobody(t *testing.T) {
 
 func TestAnOrgKeepsItsLastOwner(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
+	accounts := NewStore(pool, 3)
 	ctx := context.Background()
 	owner, orgID := newTestUserHome(t, accounts)
 	guest, _ := newTestUserHome(t, accounts)
@@ -254,7 +254,7 @@ func TestAnOrgKeepsItsLastOwner(t *testing.T) {
 // both through, each seeing the other as the owner that stays.
 func TestTwoOwnersSteppingDownAtOnceLeaveOne(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
+	accounts := NewStore(pool, 3)
 	ctx := context.Background()
 	stepDown := map[string]func(orgID, userID string) error{
 		"demoted": func(orgID, userID string) error {
@@ -306,7 +306,7 @@ func TestTwoOwnersSteppingDownAtOnceLeaveOne(t *testing.T) {
 // and what they wrote.
 func TestWhatAPersonHeldInAnOrgEndsWhenTheyLeaveIt(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
+	accounts := NewStore(pool, 3)
 	ctx := context.Background()
 	owner, orgID := newTestUserHome(t, accounts)
 	second, secondHome := newTestUserHome(t, accounts)
@@ -355,7 +355,7 @@ func TestWhatAPersonHeldInAnOrgEndsWhenTheyLeaveIt(t *testing.T) {
 	bySecond, _ := newTestInvite(t, accounts, orgID, second, domain.OrgRoleOwner, domain.InviteLifetime)
 	byOwner, _ := newTestInvite(t, accounts, orgID, owner, domain.OrgRoleMember, domain.InviteLifetime)
 	createTestPEIn(t, pool, "pe-leaving-"+suffix, project.ID)
-	if _, err := NewHypothesesStore(pool).CreateHypothesisComment(ctx, "hyp-leaving-"+suffix, "pe-leaving-"+suffix, "",
+	if _, err := NewStore(pool, 3).CreateHypothesisComment(ctx, "hyp-leaving-"+suffix, "pe-leaving-"+suffix, "",
 		domain.Actor{Kind: domain.ActorUser, ID: member}, "a note"); err != nil {
 		t.Fatal(err)
 	}

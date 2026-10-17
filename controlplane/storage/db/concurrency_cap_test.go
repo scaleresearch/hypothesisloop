@@ -42,7 +42,7 @@ func noopObserve(context.Context, string, string, time.Time) (*domain.AgentQuota
 	return &domain.AgentQuota{}, nil
 }
 
-func setupCapTestPool(t *testing.T, cap int) (*Pool, *PlatformExperimentsFullStore, string, string) {
+func setupCapTestPool(t *testing.T, cap int) (*Pool, *Store, string, string) {
 	t.Helper()
 	pool := quotaTierTestDB(t)
 	ctx := context.Background()
@@ -54,7 +54,7 @@ func setupCapTestPool(t *testing.T, cap int) (*Pool, *PlatformExperimentsFullSto
 	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET max_concurrent_accelerators=$2 WHERE id=$1`, peID, cap); err != nil {
 		t.Fatalf("set cap: got = %v, want = nil", err)
 	}
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	if _, err := pes.Signup(ctx, peID, domain.AgentSignup{Actor: testActor, AgentID: agentID, Role: domain.SignupRoleCompetitor}); err != nil {
 		t.Fatalf("signup: got = %v, want = nil", err)
 	}
@@ -63,7 +63,7 @@ func setupCapTestPool(t *testing.T, cap int) (*Pool, *PlatformExperimentsFullSto
 	}); err != nil {
 		t.Fatalf("start: got = %v, want = nil", err)
 	}
-	return pool, NewPlatformExperimentsFullStore(NewStore(pool, 3)), agentID, peID
+	return pool, NewStore(pool, 3), agentID, peID
 }
 
 // TestReserveAdmittedFlavorTxRejectsOverCap covers autoscaler.md's concurrency cap logic: a submit
@@ -106,7 +106,7 @@ func TestReserveAdmittedFlavorTxCapIsAcrossAllAgents(t *testing.T) {
 	suffix := uuid.New().String()[:8]
 	agentB := "agent-cap-b-" + suffix
 	createTestAgent(t, pool, agentB)
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	if _, err := pes.Signup(ctx, peID, domain.AgentSignup{Actor: testActor, AgentID: agentB, Role: domain.SignupRoleCompetitor}); err != nil {
 		t.Fatalf("signup agent B: got = %v, want = nil", err)
 	}

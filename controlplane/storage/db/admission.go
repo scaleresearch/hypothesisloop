@@ -13,57 +13,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// Store embeds all store types providing unified access to all
-// persistence operations.
-type Store struct {
-	*ExperimentsStore
-	*AgentsStore
-	*PlatformExperimentsStore
-	*ClusterQueueStore
-	*HypothesesStore
-	*ClustersStore
-	*EnvironmentsStore
-	*AccountsStore
-
-	// maxInfraRequeues bounds how many times one experiment may be returned to the queue for
-	// free after an infrastructure fault, before ResolveTermination gives up and terminates it
-	// with the reason that keeps ending it. Without a ceiling a job landing repeatedly on broken
-	// hardware loops forever, saying nothing.
-	maxInfraRequeues int
-}
-
-// NewStore creates a Store backed by the given pool. maxInfraRequeues must be positive: there is no "unbounded" and no "off" —
-// a zero would silently turn every infrastructure fault back into a terminal eviction.
-func NewStore(pool *Pool, maxInfraRequeues int) *Store {
-	if maxInfraRequeues <= 0 {
-		panic("db.NewStore: max_infrastructure_requeues must be positive")
-	}
-	return &Store{
-		maxInfraRequeues:         maxInfraRequeues,
-		ExperimentsStore:         NewExperimentsStore(pool),
-		AgentsStore:              NewAgentsStore(pool),
-		PlatformExperimentsStore: NewPlatformExperimentsStore(pool),
-		ClusterQueueStore:        NewClusterQueueStore(pool),
-		HypothesesStore:          NewHypothesesStore(pool),
-		ClustersStore:            NewClustersStore(pool),
-		EnvironmentsStore:        NewEnvironmentsStore(pool),
-		AccountsStore:            NewAccountsStore(pool),
-	}
-}
-
-// ---- Platform Experiments adapter ----
-
-// PlatformExperimentsFullStore embeds Store and satisfies quota.PlatformExperimentsStore
-// by providing both platform experiment and agent methods from a single composite.
-type PlatformExperimentsFullStore struct {
-	*Store
-}
-
-// NewPlatformExperimentsFullStore returns a store satisfying quota.PlatformExperimentsStore.
-func NewPlatformExperimentsFullStore(s *Store) *PlatformExperimentsFullStore {
-	return &PlatformExperimentsFullStore{Store: s}
-}
-
 // AdmitExperimentTx serializes, validates, and inserts one desired experiment in a single
 // PostgreSQL transaction. observed contains only the metrics-store snapshot taken immediately
 // before this call. A submission it refuses is answered with an *AdmitRefusal. Database failures
@@ -122,8 +71,8 @@ type SubmissionRateLimit struct {
 // createDataKey registers the job's key with the object store after the row is written and
 // before commit: a store failure rolls the submission back, and no key is created for an id that
 // was rejected or already queued.
-func (s *PlatformExperimentsFullStore) AdmitExperimentTx(ctx context.Context, exp *domain.Experiment, observe func(context.Context) (*domain.AgentQuota, error), rateLimit SubmissionRateLimit, createDataKey func(context.Context) error) (AdmitDecision, error) {
-	tx, err := s.PlatformExperimentsStore.pool.pool.Begin(ctx)
+func (s *Store) AdmitExperimentTx(ctx context.Context, exp *domain.Experiment, observe func(context.Context) (*domain.AgentQuota, error), rateLimit SubmissionRateLimit, createDataKey func(context.Context) error) (AdmitDecision, error) {
+	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return AdmitRejected, fmt.Errorf("admit experiment: begin: %w", err)
 	}
@@ -325,8 +274,8 @@ func heldByEstimates(jobs int, reserved float64) string {
 // the cap), and persists the flavor — all under the same cross-replica quota lock used by initial
 // admission. defaultMaxConcurrent is quota.default_max_concurrent_accelerators, used when the
 // platform experiment has no override.
-func (s *PlatformExperimentsFullStore) ReserveAdmittedFlavorTx(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, acceleratorCount, defaultMaxConcurrent int, observe func(ctx context.Context, agentID, platformExpID string, platformExpStart time.Time) (*domain.AgentQuota, error)) (string, error) {
-	tx, err := s.PlatformExperimentsStore.pool.pool.Begin(ctx)
+func (s *Store) ReserveAdmittedFlavorTx(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, acceleratorCount, defaultMaxConcurrent int, observe func(ctx context.Context, agentID, platformExpID string, platformExpStart time.Time) (*domain.AgentQuota, error)) (string, error) {
+	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return "", fmt.Errorf("reserve admitted flavor: begin: %w", err)
 	}

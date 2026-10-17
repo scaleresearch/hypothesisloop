@@ -12,10 +12,10 @@ import (
 )
 
 // poolRun is a platform experiment the platform runs the researchers of, with its pool written.
-func poolRun(t *testing.T, pool *Pool, maxAgents int, researchers domain.ResearcherPool) (string, *PlatformExperimentsStore) {
+func poolRun(t *testing.T, pool *Pool, maxAgents int, researchers domain.ResearcherPool) (string, *Store) {
 	t.Helper()
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	pe := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, pe, 10)
 	encoded, err := poolJSON(researchers)
@@ -28,7 +28,7 @@ func poolRun(t *testing.T, pool *Pool, maxAgents int, researchers domain.Researc
 	return pe, pes
 }
 
-func spawnResearcher(t *testing.T, pes *PlatformExperimentsStore, pe, flavor string) string {
+func spawnResearcher(t *testing.T, pes *Store, pe, flavor string) string {
 	t.Helper()
 	id, _ := domain.NewID(domain.AgentIDPrefix)
 	agent := &domain.Agent{ID: id, Name: "r-" + id, CreatedAt: time.Now().UTC()}
@@ -279,7 +279,7 @@ func TestALoweredMaxAgentsCutsTheNewestResearchersAndNobodyReplacesThem(t *testi
 func TestAPlatformExperimentIsCreatedWithItsResearchersOrNotAtAll(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	create := func(maxHosted, researchers int) (string, error) {
 		now := time.Now().UTC()
 		pe := &domain.PlatformExperiment{Actor: testActor, DefaultQuotaTier: domain.QuotaTierGuaranteed,

@@ -13,18 +13,8 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// ExperimentsStore provides persistence for domain.Experiment.
-type ExperimentsStore struct {
-	pool *Pool
-}
-
 type sqlExecutor interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
-}
-
-// NewExperimentsStore creates an ExperimentsStore backed by pool.
-func NewExperimentsStore(pool *Pool) *ExperimentsStore {
-	return &ExperimentsStore{pool: pool}
 }
 
 // experimentColumns is the canonical column list for SELECT queries: the stored columns, then
@@ -134,7 +124,7 @@ INSERT INTO experiments (
 }
 
 // GetExperiment fetches a single experiment by ID.
-func (s *ExperimentsStore) GetExperiment(ctx context.Context, id string) (*domain.Experiment, error) {
+func (s *Store) GetExperiment(ctx context.Context, id string) (*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments WHERE id = $1`
 
 	row := s.pool.pool.QueryRow(ctx, q, id)
@@ -150,7 +140,7 @@ func (s *ExperimentsStore) GetExperiment(ctx context.Context, id string) (*domai
 
 // ListExperiments returns experiments matching the given filter.
 // All filter fields are optional; zero values are ignored.
-func (s *ExperimentsStore) ListExperiments(ctx context.Context, filter domain.ExperimentFilter) ([]*domain.Experiment, error) {
+func (s *Store) ListExperiments(ctx context.Context, filter domain.ExperimentFilter) ([]*domain.Experiment, error) {
 	clauses, args := experimentFilterClauses(filter)
 	n := len(args) + 1
 
@@ -178,7 +168,7 @@ ORDER BY ` + experimentOrderBy(filter.Sort)
 }
 
 // ListExperimentsTesting returns every experiment that tests one of the hypotheses, oldest first.
-func (s *ExperimentsStore) ListExperimentsTesting(ctx context.Context, hypothesisIDs []string) ([]*domain.Experiment, error) {
+func (s *Store) ListExperimentsTesting(ctx context.Context, hypothesisIDs []string) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments WHERE hypothesis_id = ANY($1) ORDER BY created_at, id`
 	rows, err := s.pool.pool.Query(ctx, q, hypothesisIDs)
 	if err != nil {
@@ -191,7 +181,7 @@ func (s *ExperimentsStore) ListExperimentsTesting(ctx context.Context, hypothesi
 
 // CountExperiments returns the number of experiments matching the given filter, ignoring
 // Limit/Offset/Sort — the total a caller paginating with ListExperiments should show.
-func (s *ExperimentsStore) CountExperiments(ctx context.Context, filter domain.ExperimentFilter) (int, error) {
+func (s *Store) CountExperiments(ctx context.Context, filter domain.ExperimentFilter) (int, error) {
 	clauses, args := experimentFilterClauses(filter)
 	q := `SELECT COUNT(*) FROM experiments WHERE ` + strings.Join(clauses, " AND ")
 	var total int
@@ -205,7 +195,7 @@ func (s *ExperimentsStore) CountExperiments(ctx context.Context, filter domain.E
 // Sort are ignored: this is the whole matching set by construction, which is the point — a
 // caller reading pages of rows can only ever count the page it holds. A non-empty groupBy (a key
 // of domain.ExperimentStatsGroupFields) also fills Groups with the same counts per value.
-func (s *ExperimentsStore) ExperimentStats(ctx context.Context, filter domain.ExperimentFilter, groupBy string) (*domain.ExperimentStats, error) {
+func (s *Store) ExperimentStats(ctx context.Context, filter domain.ExperimentFilter, groupBy string) (*domain.ExperimentStats, error) {
 	groupColumn := "''"
 	if groupBy != "" {
 		column, ok := domain.ExperimentStatsGroupFields[groupBy]

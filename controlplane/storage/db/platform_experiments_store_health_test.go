@@ -16,7 +16,7 @@ import (
 func TestRunHealthCountsEveryRestartOfAnAgentAndTheCoordinatorAcrossLaunches(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	pe := createTestPEWithCoordinator(t, pool)
 	agent := spawnTestAgents(t, pes, pe, domain.AgentSignup{Actor: testActor, Hosted: true, AgentType: "generalist"})[0]
 	for i, launch := range []string{"launch-1", "launch-1", "launch-2"} {

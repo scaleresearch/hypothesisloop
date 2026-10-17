@@ -20,7 +20,7 @@ import (
 // Prefix is where the proxy is served, the provider's name after it.
 const Prefix = "/model/"
 
-// Store says whom the platform runs. *db.PlatformExperimentsStore satisfies it.
+// Store says whom the platform runs. *db.Store satisfies it.
 type Store interface {
 	Hosted(ctx context.Context, platformExpID, agentID string) (bool, error)
 }

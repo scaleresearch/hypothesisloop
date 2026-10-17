@@ -13,13 +13,13 @@ import (
 // environments is a world of two orgs whose clusters build, and a way to make environments in it.
 type environments struct {
 	*twoOrgs
-	envs *EnvironmentsStore
+	envs *Store
 }
 
 func newEnvironments(t *testing.T) *environments {
 	t.Helper()
 	w := &environments{twoOrgs: newTwoOrgs(t)}
-	w.envs = NewEnvironmentsStore(w.pool)
+	w.envs = NewStore(w.pool, 3)
 	for _, name := range []string{w.ofA, w.ofB} {
 		if err := w.clusters.RecordBuilds(context.Background(), name, true); err != nil {
 			t.Fatal(err)

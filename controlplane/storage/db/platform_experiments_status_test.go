@@ -23,7 +23,7 @@ import (
 // passing, which is a long way from naming the cause.
 func TestClosingAPlatformExperimentExecutesAgainstARealDatabase(t *testing.T) {
 	pool := eventsTestDB(t)
-	store := &PlatformExperimentsStore{pool: pool}
+	store := &Store{pool: pool}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -57,7 +57,7 @@ func TestClosingAPlatformExperimentExecutesAgainstARealDatabase(t *testing.T) {
 func TestTheRunLastsItsDurationFromItsStart(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	created := time.Now().UTC().Add(-10 * time.Minute).Truncate(time.Microsecond)
 	pe := &domain.PlatformExperiment{Actor: testActor, DefaultQuotaTier: domain.QuotaTierGuaranteed,
 		ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "an hour's run", BudgetAcceleratorHours: 10, MaxAgents: 2,
@@ -107,7 +107,7 @@ func TestTheRunLastsItsDurationFromItsStart(t *testing.T) {
 func TestARunWaitsForItsFirstResearchersMachineWithinItsRun(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	const agentsDue, windDown = 20 * time.Minute, 2 * time.Minute
 	start := func() (pe, researcher, baseline string) {
 		t.Helper()
@@ -180,7 +180,7 @@ func TestARunWaitsForItsFirstResearchersMachineWithinItsRun(t *testing.T) {
 func TestTheRecordOfACloseIsKeptBesideTheSummary(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	pe := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, pe, 10)
 	summary := func() string {
@@ -232,7 +232,7 @@ func TestTheRecordOfACloseIsKeptBesideTheSummary(t *testing.T) {
 func TestAListSaysWhyAPlatformExperimentClosed(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	pe := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, pe, 10)
 	if err := pes.ClosePlatformExperiment(ctx, pe, &domain.Actor{Kind: domain.ActorUser, ID: "u-1"}, ""); err != nil {
@@ -259,7 +259,7 @@ func TestAListSaysWhyAPlatformExperimentClosed(t *testing.T) {
 func TestTheTimeABaselineWaitsOnThePlatformMovesItsDeadline(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	created := time.Now().UTC().Add(-10 * time.Minute).Truncate(time.Microsecond)
 	due := created.Add(25 * time.Minute)
 	pe := &domain.PlatformExperiment{Actor: testActor, DefaultQuotaTier: domain.QuotaTierGuaranteed,
@@ -328,7 +328,7 @@ func TestTheTimeABaselineWaitsOnThePlatformMovesItsDeadline(t *testing.T) {
 func TestACloseIsToRecordOnceEveryJobOfItIsSettled(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	agentID, peID, hypothesisID := seedRun(t, pool, "record", true)
 	exec(t, pool, `UPDATE platform_experiments SET status = 'open' WHERE id = $1`, peID)
 	exec(t, pool, `INSERT INTO experiments

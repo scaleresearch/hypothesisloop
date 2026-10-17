@@ -8,7 +8,7 @@ import (
 // ---- top-3 history (Domain 6) ----
 
 // RecordTop3 records that agentID placed in the top 3 for a platform experiment.
-func (s *PlatformExperimentsStore) RecordTop3(ctx context.Context, platformExpID, agentID string, finalMetric float64) error {
+func (s *Store) RecordTop3(ctx context.Context, platformExpID, agentID string, finalMetric float64) error {
 	const q = `
 INSERT INTO experiment_top3 (platform_experiment_id, agent_id, final_metric, recorded_at)
 VALUES ($1, $2, $3, NOW())

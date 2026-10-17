@@ -24,7 +24,7 @@ var (
 )
 
 // ListOrgMembers returns one page of an org's members, oldest first, and how many it has.
-func (s *AccountsStore) ListOrgMembers(ctx context.Context, orgID string, limit, offset int) ([]*domain.OrgMember, int, error) {
+func (s *Store) ListOrgMembers(ctx context.Context, orgID string, limit, offset int) ([]*domain.OrgMember, int, error) {
 	var total int
 	if err := s.pool.pool.QueryRow(ctx, `SELECT count(*) FROM org_members WHERE org_id = $1`, orgID).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("accounts_store.ListOrgMembers: count: %w", err)
@@ -50,7 +50,7 @@ ORDER BY created_at, user_id LIMIT $2 OFFSET $3`, orgID, limit, offset)
 // SetOrgMemberRole changes a member's role. ErrOrgMemberNotFound when the user is not in the
 // org, ErrLastOwner when the change would leave the org with no owner. A member who stops being
 // an owner takes the invites they made with them.
-func (s *AccountsStore) SetOrgMemberRole(ctx context.Context, orgID, userID string, role domain.OrgRole) (*domain.OrgMember, error) {
+func (s *Store) SetOrgMemberRole(ctx context.Context, orgID, userID string, role domain.OrgRole) (*domain.OrgMember, error) {
 	if !domain.ValidOrgRole(role) {
 		return nil, fmt.Errorf("accounts_store.SetOrgMemberRole: unknown role %q", role)
 	}
@@ -67,7 +67,7 @@ func (s *AccountsStore) SetOrgMemberRole(ctx context.Context, orgID, userID stri
 
 // RemoveOrgMember ends a membership, under the same refusals as SetOrgMemberRole. The API keys
 // the person created stop working with it: a key is read as orphaned from then on (apiKeySelect).
-func (s *AccountsStore) RemoveOrgMember(ctx context.Context, orgID, userID string) error {
+func (s *Store) RemoveOrgMember(ctx context.Context, orgID, userID string) error {
 	err := s.changeMembership(ctx, orgID, userID, func(tx pgx.Tx) error {
 		var removed bool
 		return tx.QueryRow(ctx, `DELETE FROM org_members WHERE org_id = $1 AND user_id = $2 RETURNING true`, orgID, userID).Scan(&removed)
@@ -79,7 +79,7 @@ func (s *AccountsStore) RemoveOrgMember(ctx context.Context, orgID, userID strin
 // changes to one org's members run one after the other and the owner that remains is counted
 // after the change, inside its transaction: no two of them can each see the other as the owner
 // that stays. With losesOwnership the pending invites the member made are revoked in the same step.
-func (s *AccountsStore) changeMembership(ctx context.Context, orgID, userID string, change func(pgx.Tx) error, losesOwnership bool) error {
+func (s *Store) changeMembership(ctx context.Context, orgID, userID string, change func(pgx.Tx) error, losesOwnership bool) error {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
@@ -144,7 +144,7 @@ func scanOrgInvite(row rowScanner) (*domain.OrgInvite, error) {
 
 // CreateOrgInvite stores an invite under the hash of its token. invite.ID, OrgID, Role,
 // Actor.ID and ExpiresAt are required.
-func (s *AccountsStore) CreateOrgInvite(ctx context.Context, invite *domain.OrgInvite, tokenHash string) error {
+func (s *Store) CreateOrgInvite(ctx context.Context, invite *domain.OrgInvite, tokenHash string) error {
 	if !domain.ValidOrgRole(invite.Role) {
 		return fmt.Errorf("accounts_store.CreateOrgInvite: unknown role %q", invite.Role)
 	}
@@ -162,7 +162,7 @@ const orgInvitePending = `accepted_at IS NULL AND revoked_at IS NULL AND expires
 
 // ListPendingOrgInvites returns one page of the invites of an org that can still be accepted,
 // newest first, and how many there are.
-func (s *AccountsStore) ListPendingOrgInvites(ctx context.Context, orgID string, limit, offset int) ([]*domain.OrgInvite, int, error) {
+func (s *Store) ListPendingOrgInvites(ctx context.Context, orgID string, limit, offset int) ([]*domain.OrgInvite, int, error) {
 	var total int
 	if err := s.pool.pool.QueryRow(ctx, `SELECT count(*) FROM org_invites WHERE org_id = $1 AND `+orgInvitePending, orgID).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("accounts_store.ListPendingOrgInvites: count: %w", err)
@@ -186,7 +186,7 @@ ORDER BY created_at DESC, id LIMIT $2 OFFSET $3`, orgID, limit, offset)
 }
 
 // GetOrgInvite returns an invite by id, or nil when there is none.
-func (s *AccountsStore) GetOrgInvite(ctx context.Context, id string) (*domain.OrgInvite, error) {
+func (s *Store) GetOrgInvite(ctx context.Context, id string) (*domain.OrgInvite, error) {
 	invite, err := scanOrgInvite(s.pool.pool.QueryRow(ctx, `SELECT `+orgInviteColumns+` FROM org_invites WHERE id = $1`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -200,7 +200,7 @@ func (s *AccountsStore) GetOrgInvite(ctx context.Context, id string) (*domain.Or
 // RevokeOrgInvite ends an invite. One already revoked keeps its first revocation time.
 // ErrOrgInviteNotFound when there is no such invite, ErrOrgInviteUsed when it was accepted: the
 // membership it made is ended as a membership.
-func (s *AccountsStore) RevokeOrgInvite(ctx context.Context, inviteID string) error {
+func (s *Store) RevokeOrgInvite(ctx context.Context, inviteID string) error {
 	tag, err := s.pool.pool.Exec(ctx, `
 UPDATE org_invites SET revoked_at = COALESCE(revoked_at, $2) WHERE id = $1 AND accepted_at IS NULL`, inviteID, time.Now().UTC())
 	if err != nil {
@@ -224,7 +224,7 @@ UPDATE org_invites SET revoked_at = COALESCE(revoked_at, $2) WHERE id = $1 AND a
 // transaction that marks the invite and inserts the member row. The update takes the invite's
 // row, so of two accepts at once the second waits and then finds it used. An invite accepted by
 // someone already in the org is refused and stays unused.
-func (s *AccountsStore) AcceptOrgInvite(ctx context.Context, tokenHash, userID string) (*domain.OrgMember, error) {
+func (s *Store) AcceptOrgInvite(ctx context.Context, tokenHash, userID string) (*domain.OrgMember, error) {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("accounts_store.AcceptOrgInvite: begin: %w", err)

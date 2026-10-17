@@ -11,21 +11,11 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// AgentsStore provides persistence for domain.Agent.
-type AgentsStore struct {
-	pool *Pool
-}
-
-// NewAgentsStore creates an AgentsStore backed by pool.
-func NewAgentsStore(pool *Pool) *AgentsStore {
-	return &AgentsStore{pool: pool}
-}
-
 // ErrAgentExists reports that an agent with this id already exists.
 var ErrAgentExists = errors.New("agent already exists")
 
 // CreateAgent inserts a new agent row: ErrAgentExists for an id an agent already has.
-func (s *AgentsStore) CreateAgent(ctx context.Context, agent *domain.Agent) error {
+func (s *Store) CreateAgent(ctx context.Context, agent *domain.Agent) error {
 	const q = `
 INSERT INTO agents (id, name, org_id, created_at)
 VALUES ($1, $2, $3, $4)`
@@ -45,7 +35,7 @@ VALUES ($1, $2, $3, $4)`
 }
 
 // GetAgent retrieves an agent by ID.
-func (s *AgentsStore) GetAgent(ctx context.Context, id string) (*domain.Agent, error) {
+func (s *Store) GetAgent(ctx context.Context, id string) (*domain.Agent, error) {
 	const q = `
 SELECT id, name, org_id, created_at
 FROM agents
@@ -115,7 +105,7 @@ func agentFilterClauses(filter AgentsFilter) (string, []any) {
 
 // ListAgents returns the agents matching filter newest first, including top3_count from
 // experiment_top3. A Limit of 0 or less is the default page.
-func (s *AgentsStore) ListAgents(ctx context.Context, filter AgentsFilter) ([]*domain.Agent, error) {
+func (s *Store) ListAgents(ctx context.Context, filter AgentsFilter) ([]*domain.Agent, error) {
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = defaultAgentListLimit
@@ -156,7 +146,7 @@ LIMIT $%d OFFSET $%d`, where, len(args)-1, len(args))
 
 // AgentStats aggregates every agent matching filter, ignoring limit/offset. Total is the
 // X-Total-Count a paginating caller shows.
-func (s *AgentsStore) AgentStats(ctx context.Context, filter AgentsFilter) (*domain.AgentStats, error) {
+func (s *Store) AgentStats(ctx context.Context, filter AgentsFilter) (*domain.AgentStats, error) {
 	where, args := agentFilterClauses(filter)
 	stats := &domain.AgentStats{}
 	if err := s.pool.pool.QueryRow(ctx, `

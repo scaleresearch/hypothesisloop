@@ -25,7 +25,7 @@ func createTestDraft(t *testing.T, pool *Pool) (peID, plannerID string) {
 	planner := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Name: "Planner", CreatedAt: now}
 	signup := domain.AgentSignup{Actor: testActor, AgentID: planner.ID, Role: domain.SignupRolePlanner, QuotaTier: domain.QuotaTierGuaranteed,
 		Hosted: true, AgentType: domain.PlannerFlavor, Model: "model-1"}
-	if err := NewPlatformExperimentsStore(pool).CreateDraft(context.Background(), pe, planner, signup); err != nil {
+	if err := NewStore(pool, 3).CreateDraft(context.Background(), pe, planner, signup); err != nil {
 		t.Fatalf("create draft: %v", err)
 	}
 	if planner.OrgID != "default" {
@@ -37,7 +37,7 @@ func createTestDraft(t *testing.T, pool *Pool) (peID, plannerID string) {
 func TestADraftIsStoredWithItsGoalItsCreatorAndItsPlanner(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	pe, planner := createTestDraft(t, pool)
 
 	got, err := pes.GetPlatformExperiment(ctx, pe)
@@ -110,7 +110,7 @@ func TestADraftIsStoredWithItsGoalItsCreatorAndItsPlanner(t *testing.T) {
 func TestNoMachineIsWantedBeforeTheRepositoryIsRecorded(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	draft := func() (*domain.PlatformExperiment, string) {
 		now := time.Now().UTC()
 		pe := &domain.PlatformExperiment{Actor: testActor, DefaultQuotaTier: domain.QuotaTierGuaranteed, ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "a goal", Goal: "a goal",
@@ -197,7 +197,7 @@ func TestNoMachineIsWantedBeforeTheRepositoryIsRecorded(t *testing.T) {
 func TestALauncherKeepsAPlannerOnlyWhileItsDraftIsBeingPlanned(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	pe, planner := createTestDraft(t, pool)
 	const windDown = 2 * time.Minute
 
@@ -353,7 +353,7 @@ func TestALauncherKeepsAPlannerOnlyWhileItsDraftIsBeingPlanned(t *testing.T) {
 func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	id, planner := createTestDraft(t, pool)
 
 	accepted := func(researchers int) (*domain.PlatformExperiment, []*domain.Agent, []domain.AgentSignup) {
@@ -547,7 +547,7 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 func TestABaselineAgentHoldsItsQuotaFromSignupUntilItIsRemoved(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	id := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, id, 10)
 	agents := spawnTestAgents(t, pes, id,
@@ -592,7 +592,7 @@ func TestABaselineAgentHoldsItsQuotaFromSignupUntilItIsRemoved(t *testing.T) {
 func TestABaselineAgentsQuotaIsHalfTheBudgetOfAnOpenExperiment(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	id := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, id, 10)
 	agents := spawnTestAgents(t, pes, id,
@@ -646,7 +646,7 @@ func TestABaselineAgentsQuotaIsHalfTheBudgetOfAnOpenExperiment(t *testing.T) {
 func TestAnAgentsFinishIsReadWithItsMoment(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	id := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, id, 10)
 	agents := spawnTestAgents(t, pes, id,
@@ -670,7 +670,7 @@ func TestAnAgentsFinishIsReadWithItsMoment(t *testing.T) {
 func TestAnOpenExperimentClosedWithoutABaselineSaysTheBaselineLimitEndedIt(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	closed := func(prepare string, by *domain.Actor) domain.CloseReason {
 		t.Helper()
 		id := "pe-" + uuid.New().String()[:8]
@@ -712,7 +712,7 @@ func TestAnOpenExperimentClosedWithoutABaselineSaysTheBaselineLimitEndedIt(t *te
 func TestADeclaredBaselineIsStoredWithTheUpdateThatDeclaresIt(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	id := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, id, 10)
 	pe, err := pes.GetPlatformExperiment(ctx, id)
@@ -746,7 +746,7 @@ func TestADeclaredBaselineIsStoredWithTheUpdateThatDeclaresIt(t *testing.T) {
 func TestADeclinedDraftSaysSoAndExpiresAsAProposalDoes(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	id, _ := createTestDraft(t, pool)
 	if err := pes.Decline(ctx, id, "nothing here can be measured", time.Now().Add(time.Hour), 0); err != nil {
 		t.Fatal(err)
@@ -789,7 +789,7 @@ func TestADeclinedDraftSaysSoAndExpiresAsAProposalDoes(t *testing.T) {
 func TestARevisionIsAnEventOnThePlannersStreamLiveAndReplayed(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	draft, planner := createTestDraft(t, pool)
 	if err := pes.SetProposal(ctx, draft, []byte(`{}`), Proposed{WaitUntil: time.Now().UTC().Add(time.Hour), KeepPlanner: 10 * time.Minute}); err != nil {
 		t.Fatal(err)
@@ -831,7 +831,7 @@ func TestARevisionIsAnEventOnThePlannersStreamLiveAndReplayed(t *testing.T) {
 func TestAProposalSignsUpTheBaselineAgentWhoseMachineRunsUntilTheDraftIsHeld(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	id, planner := createTestDraft(t, pool)
 	by := domain.Actor{Kind: domain.ActorUser, ID: "u-planning"}
 	baselineAgent := func() (*domain.Agent, domain.AgentSignup) {
@@ -951,12 +951,12 @@ func TestAProposalSignsUpTheBaselineAgentWhoseMachineRunsUntilTheDraftIsHeld(t *
 	}
 }
 
-func plannerAnsweredAt(ctx context.Context, pes *PlatformExperimentsStore, pe, agent string) (*time.Time, error) {
+func plannerAnsweredAt(ctx context.Context, pes *Store, pe, agent string) (*time.Time, error) {
 	standing, err := pes.AgentStanding(ctx, pe, agent)
 	return standing.PlannerAnsweredAt, err
 }
 
-func agentFinishedAt(ctx context.Context, pes *PlatformExperimentsStore, pe, agent string) (*time.Time, error) {
+func agentFinishedAt(ctx context.Context, pes *Store, pe, agent string) (*time.Time, error) {
 	standing, err := pes.AgentStanding(ctx, pe, agent)
 	return standing.FinishedAt, err
 }

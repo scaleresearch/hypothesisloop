@@ -17,7 +17,7 @@ type Exchange interface {
 	PushStatus(ctx context.Context, clusterName string, push clusterapi.StatusPush) error
 }
 
-// Registry says whether a cluster is registered (db.ClustersStore).
+// Registry says whether a cluster is registered (db.Store).
 type Registry interface {
 	ClusterOrg(ctx context.Context, name string) (orgID string, found bool, err error)
 }

@@ -12,7 +12,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
-// memAgentTypes holds the built-in types and those orgs make, as db.AgentTypesStore scopes them.
+// memAgentTypes holds the built-in types and those orgs make, as db.Store scopes them.
 type memAgentTypes struct {
 	types    map[string]*domain.CurrentAgentType
 	versions map[string][]domain.AgentTypeVersion

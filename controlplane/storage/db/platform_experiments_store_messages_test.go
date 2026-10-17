@@ -14,7 +14,7 @@ import (
 func TestAMessageIsToldToItsAgentAloneAndKept(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	agentID, peID, _ := seedRun(t, pool, "message", true)
 	exec(t, pool, `UPDATE platform_experiments SET status = 'running' WHERE id = $1`, peID)
 	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist')`, peID, agentID)
@@ -103,7 +103,7 @@ func TestAMessageIsToldToItsAgentAloneAndKept(t *testing.T) {
 func TestTheMessageAllowanceCountsTheLastHour(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	agentID, peID, _ := seedRun(t, pool, "allowance", true)
 	exec(t, pool, `UPDATE platform_experiments SET status = 'running' WHERE id = $1`, peID)
 	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist')`, peID, agentID)
@@ -148,7 +148,7 @@ func TestTheMessageAllowanceCountsTheLastHour(t *testing.T) {
 func TestAMessageToTheCoordinatorIsToldToItsStreamAlone(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	agentID, peID, _ := seedRun(t, pool, "to-coordinator", true)
 	exec(t, pool, `UPDATE platform_experiments SET status = 'running' WHERE id = $1`, peID)
 	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist')`, peID, agentID)
@@ -218,7 +218,7 @@ func TestAMessageToTheCoordinatorIsToldToItsStreamAlone(t *testing.T) {
 func TestCloseAgentsAreKeptAsTakenBeforeTheClose(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	_, peID, _ := seedRun(t, pool, "close-agents", true)
 	if lines, err := pes.CloseAgents(ctx, peID); err != nil || lines != "" {
 		t.Fatalf("none taken: %q, %v", lines, err)
@@ -249,7 +249,7 @@ func TestCloseAgentsAreKeptAsTakenBeforeTheClose(t *testing.T) {
 // baseline's job and ended jobs are left out.
 func TestHypothesesInFlightCountsEachHypothesisAndItsAgents(t *testing.T) {
 	pool := eventsTestDB(t)
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	other, _, _ := seedRun(t, pool, "in-flight-b", true)
 	agentID, peID, hypothesisID := seedRun(t, pool, "in-flight", true)
 	job := func(id, agent, hypothesis, status string) {
@@ -284,7 +284,7 @@ VALUES ('agent', $1, $2, $3, 'r@0', 'h', 'd', $4, 'claim', 'test-accelerator', $
 func TestAMessageToEveryResearcherSkipsThoseRateLimited(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	limitedAgent, peID, _ := seedRun(t, pool, "partial", true)
 	freeAgent, _, _ := seedRun(t, pool, "partial-b", true)
 	exec(t, pool, `UPDATE platform_experiments SET status = 'running' WHERE id = $1`, peID)

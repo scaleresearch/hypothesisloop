@@ -12,14 +12,14 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-func admitDataKeyFixture(t *testing.T) (*PlatformExperimentsFullStore, *domain.Experiment) {
+func admitDataKeyFixture(t *testing.T) (*Store, *domain.Experiment) {
 	t.Helper()
 	pool := eventsTestDB(t)
 	suffix := uuid.New().String()[:8]
 	agent, pe := "datakey-agent-"+suffix, "datakey-pe-"+suffix
 	createTestAgent(t, pool, agent)
 	createTestPE(t, pool, pe, 10)
-	store := NewPlatformExperimentsFullStore(NewStore(pool, 1))
+	store := NewStore(pool, 1)
 	if _, err := pool.pool.Exec(context.Background(), upsertAgentQuotaSQL, agentQuotaUpsertArgs(&domain.AgentQuota{
 		ID: uuid.New().String(), AgentID: agent, PlatformExperimentID: pe,
 		GuaranteedAcceleratorHours: 10, BurstAcceleratorHours: 5, CreatedAt: time.Now().UTC(),
@@ -109,7 +109,7 @@ func TestAdmitExperimentTxStoresTheDataKeyWithTheRow(t *testing.T) {
 
 	// Each refusal carries its own reason: a cut agent and one with no quota were answered as
 	// short of credits, with a stage outlook that was not theirs.
-	if _, err := store.ExperimentsStore.pool.pool.Exec(ctx, `DELETE FROM agent_quotas WHERE agent_id = $1 AND platform_experiment_id = $2`, exp.AgentID, exp.PlatformExperimentID); err != nil {
+	if _, err := store.pool.pool.Exec(ctx, `DELETE FROM agent_quotas WHERE agent_id = $1 AND platform_experiment_id = $2`, exp.AgentID, exp.PlatformExperimentID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = store.AdmitExperimentTx(ctx, &burst, noUsage, SubmissionRateLimit{}, func(context.Context) error { return nil }); !errors.As(err, &refusal) || refusal.Reason != RefusedNoQuota {
@@ -118,7 +118,7 @@ func TestAdmitExperimentTxStoresTheDataKeyWithTheRow(t *testing.T) {
 	if _, err = store.AdmitExperimentTx(ctx, &burst, noUsage, SubmissionRateLimit{MaxPerHour: 1, Window: time.Hour}, func(context.Context) error { return nil }); !errors.As(err, &refusal) || refusal.Reason != RefusedRateLimited {
 		t.Fatalf("an agent at its hourly limit = %v, want %s", err, RefusedRateLimited)
 	}
-	if _, err := store.ExperimentsStore.pool.pool.Exec(ctx, `INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index) VALUES ($1, $2, 1)`, exp.PlatformExperimentID, exp.AgentID); err != nil {
+	if _, err := store.pool.pool.Exec(ctx, `INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index) VALUES ($1, $2, 1)`, exp.PlatformExperimentID, exp.AgentID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = store.AdmitExperimentTx(ctx, &burst, noUsage, SubmissionRateLimit{}, func(context.Context) error { return nil }); !errors.As(err, &refusal) || refusal.Reason != RefusedAgentCut {
@@ -147,7 +147,7 @@ func TestASubmissionKeySeenFromTheAgentAnswersItsJobAndCreatesNothing(t *testing
 		t.Fatalf("repeat = %v %v naming %s with %d keys created, want repeated, naming %s, with 1", decision, err, again.ID, created, exp.ID)
 	}
 	var jobs int
-	if err := store.ExperimentsStore.pool.pool.QueryRow(ctx, `SELECT COUNT(*) FROM experiments WHERE agent_id = $1`, exp.AgentID).Scan(&jobs); err != nil || jobs != 1 {
+	if err := store.pool.pool.QueryRow(ctx, `SELECT COUNT(*) FROM experiments WHERE agent_id = $1`, exp.AgentID).Scan(&jobs); err != nil || jobs != 1 {
 		t.Fatalf("the agent has %d jobs (%v), want 1", jobs, err)
 	}
 
@@ -158,8 +158,8 @@ func TestASubmissionKeySeenFromTheAgentAnswersItsJobAndCreatesNothing(t *testing
 	}
 
 	second := exp.AgentID + "-b"
-	createTestAgent(t, store.ExperimentsStore.pool, second)
-	if _, err := store.ExperimentsStore.pool.pool.Exec(ctx, upsertAgentQuotaSQL, agentQuotaUpsertArgs(&domain.AgentQuota{
+	createTestAgent(t, store.pool, second)
+	if _, err := store.pool.pool.Exec(ctx, upsertAgentQuotaSQL, agentQuotaUpsertArgs(&domain.AgentQuota{
 		ID: uuid.New().String(), AgentID: second, PlatformExperimentID: exp.PlatformExperimentID, GuaranteedAcceleratorHours: 10, CreatedAt: time.Now().UTC(),
 	})...); err != nil {
 		t.Fatal(err)
@@ -193,7 +193,7 @@ func TestAJobWithNoEstimateTakesTheLargestTheAdmissionsOwnFigureHolds(t *testing
 	if _, err := store.AdmitExperimentTx(ctx, &running, noUsage, SubmissionRateLimit{}, noKey); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.ExperimentsStore.pool.pool.Exec(ctx, `UPDATE experiments SET status = 'RUNNING', not_admitted_reason = NULL WHERE id = $1`, running.ID); err != nil {
+	if _, err := store.pool.pool.Exec(ctx, `UPDATE experiments SET status = 'RUNNING', not_admitted_reason = NULL WHERE id = $1`, running.ID); err != nil {
 		t.Fatal(err)
 	}
 	spent := func(context.Context) (*domain.AgentQuota, error) {
@@ -258,7 +258,7 @@ func TestSecretEnvIsStoredApartFromTheJobSpec(t *testing.T) {
 		t.Fatalf("read back secret_env = %v, on the spec = %v, want it on the experiment only", got.SecretEnv, got.Job.SecretEnv)
 	}
 	var inSpec bool
-	if err := store.ExperimentsStore.pool.pool.QueryRow(ctx, `SELECT job_spec::text LIKE '%the-secret-value%' OR job_spec ? 'secret_env' FROM experiments WHERE id = $1`, exp.ID).Scan(&inSpec); err != nil {
+	if err := store.pool.pool.QueryRow(ctx, `SELECT job_spec::text LIKE '%the-secret-value%' OR job_spec ? 'secret_env' FROM experiments WHERE id = $1`, exp.ID).Scan(&inSpec); err != nil {
 		t.Fatal(err)
 	}
 	if inSpec {

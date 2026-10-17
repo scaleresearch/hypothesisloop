@@ -12,8 +12,8 @@ import (
 func TestActorsAreNamedByWhatTheyCarryNow(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	accounts := NewAccountsStore(pool)
-	agents := NewAgentsStore(pool)
+	accounts := NewStore(pool, 3)
+	agents := NewStore(pool, 3)
 	userID, orgID := newTestUserHome(t, accounts)
 	quiet, _ := newTestUserHome(t, accounts)
 	if _, err := pool.pool.Exec(ctx, `UPDATE users SET name = '' WHERE id = $1`, quiet); err != nil {
@@ -67,7 +67,7 @@ func TestActorsAreNamedByWhatTheyCarryNow(t *testing.T) {
 func TestACommentKeepsWhoseItIsAndWhoWroteIt(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	hyps := NewHypothesesStore(pool)
+	hyps := NewStore(pool, 3)
 	peID, agentID := "pe-"+uuid.New().String(), "agent-"+uuid.New().String()
 	createTestPE(t, pool, peID, 10)
 	createTestAgent(t, pool, agentID)
@@ -117,7 +117,7 @@ VALUES ($1, $2, NULLIF($3, ''), $4, 'unverified', 'old', now() + interval '1 min
 func TestAJobAndItsFindingKeepWhoseTheyAreAndWhoMadeThem(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	experiments, hyps := NewExperimentsStore(pool), NewHypothesesStore(pool)
+	experiments, hyps := NewStore(pool, 3), NewStore(pool, 3)
 	peID, agentID := "pe-"+uuid.New().String(), "agent-"+uuid.New().String()
 	createTestPE(t, pool, peID, 10)
 	createTestAgent(t, pool, agentID)

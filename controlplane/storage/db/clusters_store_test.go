@@ -68,8 +68,8 @@ END $$`,
 
 func TestAClusterBelongsToTheOrgThatRegisteredIt(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
-	clusters := NewClustersStore(pool)
+	accounts := NewStore(pool, 3)
+	clusters := NewStore(pool, 3)
 	ctx := context.Background()
 	_, orgA := newTestUserHome(t, accounts)
 	_, orgB := newTestUserHome(t, accounts)
@@ -126,8 +126,8 @@ func TestAClusterBelongsToTheOrgThatRegisteredIt(t *testing.T) {
 
 func TestSharingAClusterIsStoredAndSurvivesRegisteringAgain(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
-	clusters := NewClustersStore(pool)
+	accounts := NewStore(pool, 3)
+	clusters := NewStore(pool, 3)
 	ctx := context.Background()
 	_, orgA := newTestUserHome(t, accounts)
 	name := "cluster-" + uuid.New().String()[:8]
@@ -157,8 +157,8 @@ func TestSharingAClusterIsStoredAndSurvivesRegisteringAgain(t *testing.T) {
 
 func TestAReportedClusterIDIsBoundToOneRegisteredName(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
-	clusters := NewClustersStore(pool)
+	accounts := NewStore(pool, 3)
+	clusters := NewStore(pool, 3)
 	ctx := context.Background()
 	_, orgA := newTestUserHome(t, accounts)
 	_, orgB := newTestUserHome(t, accounts)

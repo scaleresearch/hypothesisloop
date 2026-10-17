@@ -294,7 +294,7 @@ func (s *memStore) ClustersHosting(_ context.Context, orgID string) ([]*domain.C
 }
 
 // placed is what the store finds on a cluster: job id -> org. Withdrawing a cluster requeues
-// them as db.ClustersStore does, which the fake records in requeued.
+// them as db.Store does, which the fake records in requeued.
 func (s *memStore) withdraw(name, keepOrg string) []string {
 	ids := []string{}
 	for id, org := range s.placed[name] {

@@ -31,7 +31,7 @@ type GitHubApp interface {
 }
 
 // InstallationStore is the persistence of the installations orgs connected and of the installs
-// people started. *db.AccountsStore satisfies it.
+// people started. *db.Store satisfies it.
 type InstallationStore interface {
 	GetProject(ctx context.Context, id string) (*domain.Project, error)
 	ConnectGitHubInstallation(ctx context.Context, installation *domain.OrgGitHubInstallation) error

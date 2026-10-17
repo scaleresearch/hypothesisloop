@@ -9,7 +9,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
-// AddDesiredQuotaUsage (see db.PlatformExperimentsStore) debits every non-terminal experiment's
+// AddDesiredQuotaUsage (see db.Store) debits every non-terminal experiment's
 // static, admission-time EstimatedCostAccH into "used". That's the right number for a QUEUED or
 // SUBMITTED job — nothing has run yet, so the estimate is the only number there is. But once a job
 // is RUNNING, the estimate stops tracking reality: a job that overruns its estimate (this

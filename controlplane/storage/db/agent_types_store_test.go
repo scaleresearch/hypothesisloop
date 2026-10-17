@@ -23,18 +23,18 @@ func testTypeSettings() domain.AgentTypeSettings {
 // researcher type.
 func orgWithExperiment(t *testing.T, pool *Pool) (orgID, peID string, custom *domain.CurrentAgentType) {
 	t.Helper()
-	accounts := NewAccountsStore(pool)
+	accounts := NewStore(pool, 3)
 	_, orgID = newTestUserHome(t, accounts)
 	peID = "pe-" + uuid.New().String()[:8]
 	createTestPEIn(t, pool, peID, defaultProjectOf(t, accounts, orgID).ID)
-	custom, err := NewAgentTypesStore(pool).Create(context.Background(), orgID, "Tuner", "Tunes the knobs.", domain.AgentRoleResearcher, testPrompt, testTypeSettings(), domain.Actor{Kind: domain.ActorUser, ID: "u"})
+	custom, err := NewStore(pool, 3).Create(context.Background(), orgID, "Tuner", "Tunes the knobs.", domain.AgentRoleResearcher, testPrompt, testTypeSettings(), domain.Actor{Kind: domain.ActorUser, ID: "u"})
 	if err != nil {
 		t.Fatalf("create: got = %v, want = nil", err)
 	}
 	return orgID, peID, custom
 }
 
-func signupOf(t *testing.T, pes *PlatformExperimentsStore, peID, agentID string) *domain.AgentSignup {
+func signupOf(t *testing.T, pes *Store, peID, agentID string) *domain.AgentSignup {
 	t.Helper()
 	signup, err := pes.GetAgentSignup(context.Background(), peID, agentID)
 	if err != nil || signup == nil {
@@ -43,7 +43,7 @@ func signupOf(t *testing.T, pes *PlatformExperimentsStore, peID, agentID string)
 	return signup
 }
 
-func actions(t *testing.T, store *AgentTypesStore, orgID, id string) []string {
+func actions(t *testing.T, store *Store, orgID, id string) []string {
 	t.Helper()
 	events, err := store.Events(context.Background(), orgID, id)
 	if err != nil {
@@ -59,7 +59,7 @@ func actions(t *testing.T, store *AgentTypesStore, orgID, id string) []string {
 func TestAVersionIsNeverChangedOrDeleted(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	store := NewAgentTypesStore(pool)
+	store := NewStore(pool, 3)
 	orgID, _, custom := orgWithExperiment(t, pool)
 
 	if _, err := pool.pool.Exec(ctx, `UPDATE agent_type_versions SET prompt = 'x' WHERE type_id = $1`, custom.ID); err == nil {
@@ -97,7 +97,7 @@ func TestAVersionIsNeverChangedOrDeleted(t *testing.T) {
 func TestSeedingWritesWhatDiffersFromTheCurrentVersionUnlessAnOlderReleaseHasIt(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	store := NewAgentTypesStore(pool)
+	store := NewStore(pool, 3)
 	builtin := domain.BuiltinAgentType{ID: "test-" + uuid.New().String()[:8], Name: "Test", Role: domain.AgentRoleResearcher, Prompt: testPrompt, Settings: testTypeSettings()}
 	seed := func(release int, b domain.BuiltinAgentType) Seeded {
 		t.Helper()
@@ -150,7 +150,7 @@ func TestSeedingWritesWhatDiffersFromTheCurrentVersionUnlessAnOlderReleaseHasIt(
 func TestNewRulesAreAVersionEveryLiveAgentIsToldOf(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	_, peID, custom := orgWithExperiment(t, pool)
 	ids := spawnTestAgents(t, pes, peID, domain.AgentSignup{Actor: testActor, AgentType: custom.ID})
 	before, err := pes.AgentInstructions(ctx, peID, ids[0])
@@ -194,9 +194,9 @@ func TestNewRulesAreAVersionEveryLiveAgentIsToldOf(t *testing.T) {
 func TestAnOrgsTypeIsItsAloneAndABuiltinIsNobodys(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	store := NewAgentTypesStore(pool)
+	store := NewStore(pool, 3)
 	orgID, _, custom := orgWithExperiment(t, pool)
-	_, other := newTestUserHome(t, NewAccountsStore(pool))
+	_, other := newTestUserHome(t, NewStore(pool, 3))
 
 	if _, err := store.Get(ctx, other, custom.ID); !errors.Is(err, ErrAgentTypeNotFound) {
 		t.Errorf("another org reads it: got = %v, want ErrAgentTypeNotFound", err)
@@ -238,7 +238,7 @@ func TestAnOrgsTypeIsItsAloneAndABuiltinIsNobodys(t *testing.T) {
 func TestARestoreMakesAnEarlierVersionCurrentAgain(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	store := NewAgentTypesStore(pool)
+	store := NewStore(pool, 3)
 	orgID, _, custom := orgWithExperiment(t, pool)
 	if _, _, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: 1, Name: custom.Name, Description: custom.Description, Prompt: testPrompt + " Two.", Settings: testTypeSettings()}); err != nil {
 		t.Fatal(err)
@@ -262,7 +262,7 @@ func TestARestoreMakesAnEarlierVersionCurrentAgain(t *testing.T) {
 func TestAnOrgsTypesAndTheirEditsAreBounded(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	store := NewAgentTypesStore(pool)
+	store := NewStore(pool, 3)
 	orgID, _, custom := orgWithExperiment(t, pool)
 	var limit *AgentTypeLimit
 	for n := 1; n < domain.MaxOrgAgentTypes; n++ {
@@ -289,8 +289,8 @@ func TestAnOrgsTypesAndTheirEditsAreBounded(t *testing.T) {
 func TestATypeInUseIsNotArchivedAndAnArchivedOneTakesNoAgent(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	store := NewAgentTypesStore(pool)
-	pes := NewPlatformExperimentsStore(pool)
+	store := NewStore(pool, 3)
+	pes := NewStore(pool, 3)
 	orgID, peID, custom := orgWithExperiment(t, pool)
 	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET researchers = jsonb_build_array(jsonb_build_object('agent_type', $2::text, 'model', 'm', 'count', 1)) WHERE id = $1`, peID, custom.ID); err != nil {
 		t.Fatal(err)
@@ -314,7 +314,7 @@ func TestATypeInUseIsNotArchivedAndAnArchivedOneTakesNoAgent(t *testing.T) {
 		t.Errorf("edit an archived type: got = %v, want ErrAgentTypeArchived", err)
 	}
 	open := "pe-" + uuid.New().String()[:8]
-	createTestPEIn(t, pool, open, defaultProjectOf(t, NewAccountsStore(pool), orgID).ID)
+	createTestPEIn(t, pool, open, defaultProjectOf(t, NewStore(pool, 3), orgID).ID)
 	agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:8], CreatedAt: time.Now()}
 	if err := pes.SpawnAgent(ctx, open, agent, domain.AgentSignup{Actor: testActor, AgentID: agent.ID, Role: domain.SignupRoleCompetitor, AgentType: custom.ID, Model: "m"}); !errors.Is(err, ErrUnknownAgentType) {
 		t.Errorf("an agent of an archived type: got = %v, want ErrUnknownAgentType", err)
@@ -351,7 +351,7 @@ func TestAWriteNamingATypeHoldsItAgainstAnArchive(t *testing.T) {
 func TestAnAgentRunsAnAgentTypeOfItsOrgAndItsRole(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	_, peID, custom := orgWithExperiment(t, pool)
 	_, _, foreign := orgWithExperiment(t, pool)
 
@@ -398,8 +398,8 @@ func TestAnAgentRunsAnAgentTypeOfItsOrgAndItsRole(t *testing.T) {
 func TestAnEditIsWhatEveryAgentOfTheTypeRunsAndEachLiveOneIsTold(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	store := NewAgentTypesStore(pool)
-	pes := NewPlatformExperimentsStore(pool)
+	store := NewStore(pool, 3)
+	pes := NewStore(pool, 3)
 	events := NewEventsStore(pool, noHypothesisEvents{})
 	orgID, peID, custom := orgWithExperiment(t, pool)
 	ids := spawnTestAgents(t, pes, peID,
@@ -469,8 +469,8 @@ func TestAnEditIsWhatEveryAgentOfTheTypeRunsAndEachLiveOneIsTold(t *testing.T) {
 func TestAnEditOfACoordinatorTypeTellsTheCoordinatorsOfRunsThatGoOn(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	store := NewAgentTypesStore(pool)
-	pes := NewPlatformExperimentsStore(pool)
+	store := NewStore(pool, 3)
+	pes := NewStore(pool, 3)
 	orgID, peID, _ := orgWithExperiment(t, pool)
 	coordinatorPrompt := "{{rules}}\n{{hl_commands}}\nCoordinate {{platform_experiment_id}}."
 	custom, err := store.Create(ctx, orgID, "Strict coordinator", "", domain.AgentRoleCoordinator, coordinatorPrompt, testTypeSettings(), domain.Actor{Kind: domain.ActorUser, ID: "u"})

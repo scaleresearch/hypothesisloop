@@ -45,11 +45,11 @@ func TestRecentlyUndesiredWorkloadsIsBoundedByStatusAndTime(t *testing.T) {
 // checkpoint grant never expires.
 func TestAPreemptedJobStopsBeingRecentlyUndesiredWhileItWaitsInTheQueue(t *testing.T) {
 	pool, _, agentID, peID := setupCapTestPool(t, 4)
-	exps, queue := NewExperimentsStore(pool), NewClusterQueueStore(pool)
+	exps, queue := NewStore(pool, 3), NewStore(pool, 3)
 	ctx := context.Background()
 	preempted, fresh := "undesired-preempted-"+peID, "undesired-fresh-"+peID
 	const cluster = "cluster-undesired"
-	if _, err := NewClustersStore(pool).RegisterCluster(ctx, cluster, "default"); err != nil {
+	if _, err := NewStore(pool, 3).RegisterCluster(ctx, cluster, "default"); err != nil {
 		t.Fatal(err)
 	}
 	seedExperimentForCapTest(t, pool, preempted, agentID, peID, 1, domain.StatusQueued)

@@ -16,7 +16,7 @@ import (
 // testActor is whose credential the agents of these tests are added with.
 var testActor = &domain.Actor{Kind: domain.ActorStaff}
 
-func spawnTestAgents(t *testing.T, pes *PlatformExperimentsStore, pe string, signups ...domain.AgentSignup) []string {
+func spawnTestAgents(t *testing.T, pes *Store, pe string, signups ...domain.AgentSignup) []string {
 	t.Helper()
 	ids := make([]string, len(signups))
 	for i := range signups {
@@ -46,7 +46,7 @@ func setPEStatus(t *testing.T, pool *Pool, pe string, status domain.PlatformExpe
 	ctx := context.Background()
 	var err error
 	if status == domain.PlatformExpClosed {
-		err = NewPlatformExperimentsStore(pool).ClosePlatformExperiment(ctx, pe, nil, "")
+		err = NewStore(pool, 3).ClosePlatformExperiment(ctx, pe, nil, "")
 	} else {
 		_, err = pool.pool.Exec(ctx, `
 UPDATE platform_experiments
@@ -77,11 +77,11 @@ VALUES ($1, $2, 1, now() - make_interval(secs => $3))`, pe, agent, ago.Seconds()
 func TestSpawnedAgentsAreCreatedInTheExperimentsOrgWithWhatTheyWereLaunchedWith(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	accounts := NewAccountsStore(pool)
+	accounts := NewStore(pool, 3)
 	_, orgID := newTestUserHome(t, accounts)
 	pe := "pe-" + uuid.New().String()[:8]
 	createTestPEIn(t, pool, pe, defaultProjectOf(t, accounts, orgID).ID)
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 
 	ids := spawnTestAgents(t, pes, pe,
 		domain.AgentSignup{Actor: testActor, Hosted: true, AgentType: "data-search", Model: "model-x", Hyperparameters: map[string]any{"batch_size": float64(64)}},
@@ -127,7 +127,7 @@ func TestSpawnedAgentsAreCreatedInTheExperimentsOrgWithWhatTheyWereLaunchedWith(
 func TestASpawnThatDoesNotFitOrComesTooLateLeavesNothingBehind(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	agentCount := func() int {
 		var n int
 		if err := pool.pool.QueryRow(ctx, `SELECT COUNT(*) FROM agents WHERE name LIKE 'spawn-rollback-%'`).Scan(&n); err != nil {
@@ -178,7 +178,7 @@ func TestASpawnThatDoesNotFitOrComesTooLateLeavesNothingBehind(t *testing.T) {
 func TestAnAgentIsRemovedOnlyBeforeTheExperimentStarts(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	pe := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, pe, 10)
 	ids := spawnTestAgents(t, pes, pe, domain.AgentSignup{}, domain.AgentSignup{})
@@ -209,8 +209,8 @@ func TestAnAgentIsRemovedOnlyBeforeTheExperimentStarts(t *testing.T) {
 func TestALaunchersListFollowsEachAgentThroughItsLife(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
-	accounts := NewAccountsStore(pool)
+	pes := NewStore(pool, 3)
+	accounts := NewStore(pool, 3)
 	const windDown = 120 * time.Second
 	hosted := domain.AgentSignup{Actor: testActor, Hosted: true, AgentType: "generalist"}
 
@@ -259,7 +259,7 @@ func TestALaunchersListFollowsEachAgentThroughItsLife(t *testing.T) {
 	// A submission and a finish are decided under one lock. The finished agent's submission is
 	// refused inside the admission itself, and a finish that meets a submission in flight waits
 	// for it and then counts its job.
-	admission := NewPlatformExperimentsFullStore(NewStore(pool, 1))
+	admission := NewStore(pool, 1)
 	late := &domain.Experiment{ID: "job-" + uuid.New().String()[:8], AgentID: runningAgents[3], PlatformExperimentID: running,
 		Actor: domain.Actor{Kind: domain.ActorAgent, ID: runningAgents[3]}, Status: domain.StatusQueued}
 	var refusal *AdmitRefusal
@@ -365,7 +365,7 @@ func TestALaunchersListFollowsEachAgentThroughItsLife(t *testing.T) {
 func TestTheWindDownIsCountedFromTheClose(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	const windDown = 120 * time.Second
 	pe := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, pe, 10)
@@ -386,7 +386,7 @@ func TestTheWindDownIsCountedFromTheClose(t *testing.T) {
 func TestAMachineOfARunThatEndedIsShownAsStoppedOnceItsWindDownPassed(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	pe := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, pe, 10)
 	agents := spawnTestAgents(t, pes, pe, domain.AgentSignup{Actor: testActor, Hosted: true}, domain.AgentSignup{Actor: testActor, Hosted: true})
@@ -436,8 +436,8 @@ SELECT platform_experiment_id, agent_id, 'm', 'running' FROM experiment_signups 
 func TestARegisteredAgentJoinsOnlyAnExperimentOfItsOwnOrg(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	accounts := NewAccountsStore(pool)
-	pes := NewPlatformExperimentsStore(pool)
+	accounts := NewStore(pool, 3)
+	pes := NewStore(pool, 3)
 	_, orgA := newTestUserHome(t, accounts)
 	_, orgB := newTestUserHome(t, accounts)
 	peA, peB := "pe-"+uuid.New().String()[:8], "pe-"+uuid.New().String()[:8]
@@ -462,8 +462,8 @@ func TestARegisteredAgentJoinsOnlyAnExperimentOfItsOwnOrg(t *testing.T) {
 func TestARemovedAgentStaysInItsOrgAndJoinsAgainByItsID(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	accounts := NewAccountsStore(pool)
-	pes := NewPlatformExperimentsStore(pool)
+	accounts := NewStore(pool, 3)
+	pes := NewStore(pool, 3)
 	_, orgID := newTestUserHome(t, accounts)
 	pe := "pe-" + uuid.New().String()[:8]
 	createTestPEIn(t, pool, pe, defaultProjectOf(t, accounts, orgID).ID)
@@ -484,7 +484,7 @@ func TestASignupKeepsWhoseCredentialAddedTheAgent(t *testing.T) {
 	ctx := context.Background()
 	pe := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, pe, 10)
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	coordinator := domain.Actor{Kind: domain.ActorCoordinator, ID: pe}
 	ids := spawnTestAgents(t, pes, pe, domain.AgentSignup{Role: domain.SignupRoleBaseline, Actor: &coordinator}, domain.AgentSignup{})
 
@@ -504,7 +504,7 @@ func TestAgentsOfAPlatformExperimentAreNamedByRoleAndNoTwoAlike(t *testing.T) {
 	ctx := context.Background()
 	pe := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, pe, 10)
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	add := func(role domain.SignupRole, name string) (*domain.Agent, error) {
 		t.Helper()
 		id, err := domain.NewID(domain.AgentIDPrefix)
@@ -549,8 +549,8 @@ func TestAgentsOfAPlatformExperimentAreNamedByRoleAndNoTwoAlike(t *testing.T) {
 func TestFinishedBaselineJobsAreTheCompletedObjectiveJobsOfBaselineAgentsThatFinished(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
-	jobs := NewExperimentsStore(pool)
+	pes := NewStore(pool, 3)
+	jobs := NewStore(pool, 3)
 	pe := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, pe, 10)
 	measuring := domain.AgentSignup{Actor: testActor, Role: domain.SignupRoleBaseline, AgentType: "baseline"}
@@ -587,7 +587,7 @@ func TestFinishedBaselineJobsAreTheCompletedObjectiveJobsOfBaselineAgentsThatFin
 func TestABaselineAgentHoldsItsQuotaForAsLongAsAJobOfItIsInFlight(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	pe := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, pe, 10)
 	baseline := spawnTestAgents(t, pes, pe, domain.AgentSignup{Actor: testActor, Role: domain.SignupRoleBaseline, AgentType: "baseline"})[0]
@@ -611,7 +611,7 @@ func TestABaselineAgentHoldsItsQuotaForAsLongAsAJobOfItIsInFlight(t *testing.T) 
 		}
 		holds("with a job " + string(status))
 	}
-	if running, err := NewExperimentsStore(pool).GetAgentRunningExperiments(ctx, baseline, pe); err != nil || len(running) != 1 {
+	if running, err := NewStore(pool, 3).GetAgentRunningExperiments(ctx, baseline, pe); err != nil || len(running) != 1 {
 		t.Fatalf("its running jobs: %+v, %v, want the one", running, err)
 	}
 

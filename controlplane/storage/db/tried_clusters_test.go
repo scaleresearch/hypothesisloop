@@ -112,7 +112,7 @@ func TestAScaleUpTimeoutPastTheAllowanceEndsTheJob(t *testing.T) {
 	w := newTwoOrgs(t)
 	ctx := context.Background()
 	w.bound(t, w.ofA)
-	store := &Store{ExperimentsStore: w.exps, maxInfraRequeues: 1}
+	store := &Store{pool: w.exps.pool, maxInfraRequeues: 1}
 	id := w.placed(t, "tried-ended", w.peA, w.ofA, domain.StatusSubmitted)
 
 	first, err := store.ResolveTermination(ctx, id, domain.StatusSubmitted, domain.StatusEvicted, string(domain.EvictionScaleUpTimeout))

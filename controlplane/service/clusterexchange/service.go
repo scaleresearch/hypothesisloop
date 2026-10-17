@@ -39,14 +39,14 @@ type Store interface {
 	// RecordJobImage keeps the one image the cluster's runtime says it runs.
 	RecordJobImage(ctx context.Context, name, image string) error
 	// RecordContactRefusal keeps what a reconcile of the cluster was refused with, and clears it
-	// with an empty refusal (db.ClustersStore).
+	// with an empty refusal (db.Store).
 	RecordContactRefusal(ctx context.Context, name, refusal string) error
-	// RemoveCluster ends a cluster and returns its jobs to the queue (db.ClustersStore).
+	// RemoveCluster ends a cluster and returns its jobs to the queue (db.Store).
 	RemoveCluster(ctx context.Context, name string) (requeued []string, err error)
 	// RecordBuilds keeps whether the cluster's runtime builds environments.
 	RecordBuilds(ctx context.Context, name string, builds bool) error
 	// AssignedEnvironmentBuilds, AssignedEnvironmentBuild and FinishEnvironmentBuild are the
-	// builds the scheduler assigned to a cluster (db.EnvironmentsStore).
+	// builds the scheduler assigned to a cluster (db.Store).
 	AssignedEnvironmentBuilds(ctx context.Context, cluster string) ([]*domain.Environment, error)
 	AssignedEnvironmentBuild(ctx context.Context, cluster, key string, attempt int) (*domain.Environment, error)
 	FinishEnvironmentBuild(ctx context.Context, cluster, key string, attempt int, outcome domain.EnvironmentBuildOutcome) (bool, error)

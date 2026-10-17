@@ -12,7 +12,7 @@ import (
 
 func TestSharingAPlatformExperimentIsReadWhereverItIsPlacedAndListed(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts, pes := NewAccountsStore(pool), NewPlatformExperimentsStore(pool)
+	accounts, pes := NewStore(pool, 3), NewStore(pool, 3)
 	ctx := context.Background()
 	_, orgID := newTestUserHome(t, accounts)
 	_, otherOrg := newTestUserHome(t, accounts)

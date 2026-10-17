@@ -14,7 +14,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-func newTestUserHome(t *testing.T, accounts *AccountsStore) (userID, orgID string) {
+func newTestUserHome(t *testing.T, accounts *Store) (userID, orgID string) {
 	t.Helper()
 	userID = "user-" + uuid.New().String()
 	_, orgIDs, err := accounts.EnsureUserHome(context.Background(), userID, "name of "+userID, "home of "+userID)
@@ -35,7 +35,7 @@ func createTestPEIn(t *testing.T, pool *Pool, id, projectID string) {
 	}
 }
 
-func defaultProjectOf(t *testing.T, accounts *AccountsStore, orgID string) *domain.Project {
+func defaultProjectOf(t *testing.T, accounts *Store, orgID string) *domain.Project {
 	t.Helper()
 	projects, err := accounts.ListProjects(context.Background(), []string{orgID})
 	if err != nil || len(projects) != 1 || projects[0].Name != domain.DefaultProjectName {
@@ -46,7 +46,7 @@ func defaultProjectOf(t *testing.T, accounts *AccountsStore, orgID string) *doma
 
 func TestFirstRequestCreatesAUsersHomeOnce(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
+	accounts := NewStore(pool, 3)
 	ctx := context.Background()
 	userID, orgID := newTestUserHome(t, accounts)
 
@@ -66,7 +66,7 @@ func TestFirstRequestCreatesAUsersHomeOnce(t *testing.T) {
 
 func TestAUserCarriesTheNameLastStatedForThem(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
+	accounts := NewStore(pool, 3)
 	ctx := context.Background()
 	userID, orgID := newTestUserHome(t, accounts)
 
@@ -120,7 +120,7 @@ func TestAUserCarriesTheNameLastStatedForThem(t *testing.T) {
 
 func TestConcurrentFirstRequestsEndWithOneOrg(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
+	accounts := NewStore(pool, 3)
 	userID := "user-" + uuid.New().String()
 
 	const callers = 8
@@ -156,7 +156,7 @@ SELECT (SELECT COUNT(*) FROM org_members WHERE user_id = $1),
 
 func TestOrgsAndProjectsCanBeCreatedAndRenamed(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
+	accounts := NewStore(pool, 3)
 	ctx := context.Background()
 	userID, homeOrg := newTestUserHome(t, accounts)
 
@@ -209,7 +209,7 @@ func TestOrgsAndProjectsCanBeCreatedAndRenamed(t *testing.T) {
 
 func TestMembershipIsPerOrg(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
+	accounts := NewStore(pool, 3)
 	ctx := context.Background()
 	owner, orgID := newTestUserHome(t, accounts)
 	guest, guestOrg := newTestUserHome(t, accounts)
@@ -235,7 +235,7 @@ func TestMembershipIsPerOrg(t *testing.T) {
 
 func TestAPIKeyIsFoundByHashUntilRevoked(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
+	accounts := NewStore(pool, 3)
 	ctx := context.Background()
 	userID, orgID := newTestUserHome(t, accounts)
 	_, otherOrg := newTestUserHome(t, accounts)
@@ -297,7 +297,7 @@ func TestAPIKeyIsFoundByHashUntilRevoked(t *testing.T) {
 
 func TestTenancyIsDerivedThroughTheProject(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
+	accounts := NewStore(pool, 3)
 	ctx := context.Background()
 	_, orgID := newTestUserHome(t, accounts)
 	project := defaultProjectOf(t, accounts, orgID)
@@ -325,7 +325,7 @@ func TestTenancyIsDerivedThroughTheProject(t *testing.T) {
 	if _, ended, _ := accounts.ExperimentTenancy(ctx, jobID); !ended {
 		t.Fatal("tenancy of an evicted job: got ended = false, want true")
 	}
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET status = 'running' WHERE id = $1`, peID); err != nil {
 		t.Fatalf("start platform experiment: %v", err)
 	}
@@ -381,8 +381,8 @@ func TestTenancyIsDerivedThroughTheProject(t *testing.T) {
 // chain is, a run that only measured its baseline is one, and a draft closed before it ran is none.
 func TestPriorRunsAreTheClosedRunsOfTheProjectOnTheSameRepository(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
-	pes := NewPlatformExperimentsStore(pool)
+	accounts := NewStore(pool, 3)
+	pes := NewStore(pool, 3)
 	ctx := context.Background()
 	_, orgID := newTestUserHome(t, accounts)
 	project := defaultProjectOf(t, accounts, orgID)
@@ -444,7 +444,7 @@ func TestPriorRunsAreTheClosedRunsOfTheProjectOnTheSameRepository(t *testing.T) 
 // the order asked, with its completed jobs and its researchers.
 func TestRunsToRankAreReadInTheOrderAsked(t *testing.T) {
 	pool := eventsTestDB(t)
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	ctx := context.Background()
 	suffix := uuid.New().String()[:8]
 	first, second := "pe-rank-first-"+suffix, "pe-rank-second-"+suffix
@@ -477,7 +477,7 @@ func TestRunsToRankAreReadInTheOrderAsked(t *testing.T) {
 // listing as each of them, as a key bound to one project, and as an agent token.
 func TestListingsKeepToTheCallersScope(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
+	accounts := NewStore(pool, 3)
 	ctx := context.Background()
 	_, orgA := newTestUserHome(t, accounts)
 	_, orgB := newTestUserHome(t, accounts)
@@ -492,14 +492,14 @@ func TestListingsKeepToTheCallersScope(t *testing.T) {
 	createTestPEIn(t, pool, peA2, secondA.ID)
 	createTestPEIn(t, pool, peB, projectB.ID)
 
-	agents := NewAgentsStore(pool)
+	agents := NewStore(pool, 3)
 	agentA, agentB := "agent-a-"+suffix, "agent-b-"+suffix
 	for id, org := range map[string]string{agentA: orgA, agentB: orgB} {
 		if err := agents.CreateAgent(ctx, &domain.Agent{ID: id, Name: id, OrgID: org}); err != nil {
 			t.Fatalf("create agent: %v", err)
 		}
 	}
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	for pe, agent := range map[string]string{peA: agentA, peB: agentB} {
 		if _, err := pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: agent, Role: domain.SignupRoleCompetitor}); err != nil {
 			t.Fatalf("signup: %v", err)
@@ -541,7 +541,7 @@ func TestListingsKeepToTheCallersScope(t *testing.T) {
 		}
 		assertSameSet(t, tc.name+": platform experiment ids", visible, tc.pes)
 
-		experiments := NewExperimentsStore(pool)
+		experiments := NewStore(pool, 3)
 		jobs, err := experiments.ListExperiments(ctx, domain.ExperimentFilter{Scope: tc.scope})
 		if err != nil {
 			t.Fatalf("%s: list jobs: %v", tc.name, err)
@@ -588,12 +588,12 @@ func assertSameSet(t *testing.T, what string, got, want []string) {
 func TestAJobReadsItsProjectAndOrgOffItsPlatformExperiment(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	accounts := NewAccountsStore(pool)
+	accounts := NewStore(pool, 3)
 	_, orgID := newTestUserHome(t, accounts)
 	projectID := defaultProjectOf(t, accounts, orgID).ID
 	suffix := uuid.New().String()
 	agentID, peID := "agent-jp-"+suffix, "pe-jp-"+suffix
-	if err := NewAgentsStore(pool).CreateAgent(ctx, &domain.Agent{ID: agentID, Name: agentID, OrgID: orgID}); err != nil {
+	if err := NewStore(pool, 3).CreateAgent(ctx, &domain.Agent{ID: agentID, Name: agentID, OrgID: orgID}); err != nil {
 		t.Fatalf("create agent: got = %v, want = nil", err)
 	}
 	createTestPEIn(t, pool, peID, projectID)
@@ -603,7 +603,7 @@ func TestAJobReadsItsProjectAndOrgOffItsPlatformExperiment(t *testing.T) {
 	seedExperimentForCapTest(t, pool, childID, agentID, peID, 1, domain.StatusQueued)
 	exec(t, pool, `UPDATE experiments SET parent_id = $2 WHERE id = $1`, childID, parentID)
 
-	store := NewExperimentsStore(pool)
+	store := NewStore(pool, 3)
 	got, err := store.GetExperiment(ctx, childID)
 	if err != nil || got.ProjectID != projectID || got.OrgID != orgID {
 		t.Fatalf("get: got = %+v, %v, want project %q of org %q", got, err, projectID, orgID)

@@ -21,7 +21,7 @@ func createTestPEWithCoordinator(t *testing.T, pool *Pool) string {
 		CreatedAt: now, UpdatedAt: now,
 		CoordinatorHosted: true, Coordinator: &domain.HostedCoordinator{Model: "model-1"}, MaxHosted: 50,
 	}
-	if err := NewPlatformExperimentsStore(pool).CreatePlatformExperiment(context.Background(), pe, nil, nil); err != nil {
+	if err := NewStore(pool, 3).CreatePlatformExperiment(context.Background(), pe, nil, nil); err != nil {
 		t.Fatalf("create: got = %v, want = nil", err)
 	}
 	return pe.ID
@@ -30,7 +30,7 @@ func createTestPEWithCoordinator(t *testing.T, pool *Pool) string {
 func TestHostedSaysWhoThePlatformRuns(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	coordinated := createTestPEWithCoordinator(t, pool)
 	plain := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, plain, 10)
@@ -56,7 +56,7 @@ func TestHostedSaysWhoThePlatformRuns(t *testing.T) {
 func TestAHostedCoordinatorIsStoredReadAndListedOnlyWhereItIsOne(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	pe := createTestPEWithCoordinator(t, pool)
 	plain := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, plain, 10)
@@ -125,7 +125,7 @@ func TestAHostedCoordinatorIsStoredReadAndListedOnlyWhereItIsOne(t *testing.T) {
 func TestAPlatformExperimentIsCreatedWithItsAgentsOrNotAtAll(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	now := time.Now().UTC()
 	experiment := func(maxHosted int) *domain.PlatformExperiment {
 		return &domain.PlatformExperiment{Actor: testActor,

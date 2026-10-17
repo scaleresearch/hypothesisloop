@@ -10,7 +10,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-func ownedOrgs(t *testing.T, accounts *AccountsStore, userID string) int {
+func ownedOrgs(t *testing.T, accounts *Store, userID string) int {
 	t.Helper()
 	orgs, err := accounts.ListUserOrgs(context.Background(), userID)
 	if err != nil {
@@ -28,7 +28,7 @@ func ownedOrgs(t *testing.T, accounts *AccountsStore, userID string) int {
 // The home org of a first sign-in is the first of the orgs a person may own.
 func TestAPersonOwnsAtMostTheOrgsTheyMay(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
+	accounts := NewStore(pool, 3)
 	ctx := context.Background()
 	userID, _ := newTestUserHome(t, accounts)
 
@@ -63,7 +63,7 @@ func TestAPersonOwnsAtMostTheOrgsTheyMay(t *testing.T) {
 
 func TestCreatesAtOnceCannotBothTakeTheLastPlace(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
+	accounts := NewStore(pool, 3)
 	ctx := context.Background()
 	const callers = 6
 	race := func(create func(i int) error, reached error) (won int) {
@@ -111,7 +111,7 @@ func TestCreatesAtOnceCannotBothTakeTheLastPlace(t *testing.T) {
 
 func TestAnOrgHoldsAtMostTheProjectsItMay(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
+	accounts := NewStore(pool, 3)
 	ctx := context.Background()
 	_, orgID := newTestUserHome(t, accounts)
 

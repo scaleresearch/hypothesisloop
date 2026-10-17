@@ -46,7 +46,7 @@ type (
 	PodSample   = clusterapi.PodSample
 )
 
-// Placements resolves where each named job is placed. Implemented by db.ExperimentsStore.
+// Placements resolves where each named job is placed. Implemented by db.Store.
 type Placements interface {
 	PlacementByID(ctx context.Context, ids []string) (map[string]domain.Placement, error)
 }

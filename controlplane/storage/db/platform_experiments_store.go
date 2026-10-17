@@ -21,17 +21,6 @@ import (
 // where hanging on the lock is not.
 const InTxObservationTimeout = 5 * time.Second
 
-// PlatformExperimentsStore provides persistence for platform experiments,
-// agent signups, and per-agent quotas.
-type PlatformExperimentsStore struct {
-	pool *Pool
-}
-
-// NewPlatformExperimentsStore creates a PlatformExperimentsStore backed by pool.
-func NewPlatformExperimentsStore(pool *Pool) *PlatformExperimentsStore {
-	return &PlatformExperimentsStore{pool: pool}
-}
-
 // ---- platform_experiments ----
 
 // coordinatorColumns are what a platform experiment says of the coordinator the platform runs
@@ -44,7 +33,7 @@ var coordinatorColumns = `pe.coordinator_hosted, COALESCE(pe.coordinator_model, 
 // CreatePlatformExperiment stores pe and signs up the agents it is created with, the ones of
 // create made first, or stores nothing. The limits a signup holds are held here too
 // (ErrMaxAgentsReached, ErrMaxHostedReached).
-func (s *PlatformExperimentsStore) CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error {
+func (s *Store) CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.Create: begin tx: %w", err)
@@ -65,7 +54,7 @@ func (s *PlatformExperimentsStore) CreatePlatformExperiment(ctx context.Context,
 }
 
 // ProjectOrg is the org a project belongs to: ErrProjectNotFound for no such project.
-func (s *PlatformExperimentsStore) ProjectOrg(ctx context.Context, projectID string) (string, error) {
+func (s *Store) ProjectOrg(ctx context.Context, projectID string) (string, error) {
 	var orgID string
 	err := s.pool.pool.QueryRow(ctx, `SELECT org_id FROM projects WHERE id = $1`, projectID).Scan(&orgID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -169,7 +158,7 @@ WHERE run.id = $1 AND run.repository <> '' AND prior.id <> run.id AND prior.stat
 ORDER BY prior.closed_at DESC, prior.id`
 
 // PriorRuns is the ids of the prior runs of platform experiment id, empty when it has none.
-func (s *PlatformExperimentsStore) PriorRuns(ctx context.Context, id string) ([]string, error) {
+func (s *Store) PriorRuns(ctx context.Context, id string) ([]string, error) {
 	var ids []string
 	if err := s.pool.pool.QueryRow(ctx, `SELECT ARRAY(`+priorRuns+`)`, id).Scan(&ids); err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.PriorRuns: %w", err)
@@ -187,7 +176,7 @@ type RunToRank struct {
 
 // RunsToRank reads the platform experiments ids, in their order, in one query. One with no row
 // is left out.
-func (s *PlatformExperimentsStore) RunsToRank(ctx context.Context, ids []string) ([]RunToRank, error) {
+func (s *Store) RunsToRank(ctx context.Context, ids []string) ([]RunToRank, error) {
 	rows, err := s.pool.pool.Query(ctx, `
 SELECT pe.id, pe.name, pe.status, pe.closed_at, pe.close_reason, pe.metrics, pe.created_at,
        ARRAY(SELECT e.id FROM experiments e WHERE e.platform_experiment_id = pe.id AND e.status = 'COMPLETED'),
@@ -225,7 +214,7 @@ ORDER BY wanted.n`, ids, string(domain.SignupRoleCompetitor))
 }
 
 // GetPlatformExperiment fetches a single platform experiment by ID.
-func (s *PlatformExperimentsStore) GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
+func (s *Store) GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
 	q := `
 SELECT pe.id, pe.project_id, pe.name, pe.description, pe.budget_accelerator_hours, pe.max_agents, pe.researchers, pe.metrics, pe.report_interval_seconds, pe.starts_at, pe.ends_at, pe.status, pe.stages, pe.current_stage, ` + summarySQL + `, pe.created_at, pe.updated_at, pe.max_concurrent_accelerators, pe.default_quota_tier, pe.shared,
        ` + coordinatorColumns + `, pe.max_hosted, pe.repository, pe.repository_url, pe.agent_image, pe.goal, COALESCE(pe.continues, ''), pe.created_by_kind, pe.created_by_id, pe.proposal, pe.proposed_at, pe.declined_reason,
@@ -323,7 +312,7 @@ WHERE pe.id = $1`
 
 // PlatformExperimentExists says whether there is a platform experiment of that id, for a
 // service that needs no more of it.
-func (s *PlatformExperimentsStore) PlatformExperimentExists(ctx context.Context, id string) (bool, error) {
+func (s *Store) PlatformExperimentExists(ctx context.Context, id string) (bool, error) {
 	var found bool
 	if err := s.pool.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM platform_experiments WHERE id = $1)`, id).Scan(&found); err != nil {
 		return false, fmt.Errorf("platform_experiments_store.PlatformExperimentExists: %w", err)
@@ -334,7 +323,7 @@ func (s *PlatformExperimentsStore) PlatformExperimentExists(ctx context.Context,
 // GetPlatformExperimentMetrics is a narrow read of just the declared MetricDefinitions, used to
 // tell a ranking metric's direction apart from a constraint or attribute one (registry.Service's
 // underperformance check) without pulling the whole row through that service's Store interface.
-func (s *PlatformExperimentsStore) GetPlatformExperimentMetrics(ctx context.Context, id string) (metrics []domain.MetricDefinition, found bool, err error) {
+func (s *Store) GetPlatformExperimentMetrics(ctx context.Context, id string) (metrics []domain.MetricDefinition, found bool, err error) {
 	const q = `SELECT metrics FROM platform_experiments WHERE id = $1`
 	var raw []byte
 	if err := s.pool.pool.QueryRow(ctx, q, id).Scan(&raw); err != nil {
@@ -443,7 +432,7 @@ const (
 
 // ListPlatformExperiments returns platform experiments matching the given filter. A filter.Limit
 // of 0 or less is the default page.
-func (s *PlatformExperimentsStore) ListPlatformExperiments(ctx context.Context, filter PlatformExperimentsFilter) ([]*domain.PlatformExperiment, error) {
+func (s *Store) ListPlatformExperiments(ctx context.Context, filter PlatformExperimentsFilter) ([]*domain.PlatformExperiment, error) {
 	if filter.Limit <= 0 {
 		filter.Limit = defaultPlatformExperimentListLimit
 	}
@@ -471,7 +460,7 @@ func (s *PlatformExperimentsStore) ListPlatformExperiments(ctx context.Context, 
 // loop acts on all of its subjects or on none of them, so it must never read them through a
 // paginated query. A removed one is among them: its jobs are evicted and its spend settled as
 // any other's.
-func (s *PlatformExperimentsStore) ListPlatformExperimentsByStatus(ctx context.Context, status domain.PlatformExperimentStatus) ([]*domain.PlatformExperiment, error) {
+func (s *Store) ListPlatformExperimentsByStatus(ctx context.Context, status domain.PlatformExperimentStatus) ([]*domain.PlatformExperiment, error) {
 	return s.queryPlatformExperiments(ctx, platformExperimentSelect([]string{"pe.status = $1"}, ""), string(status))
 }
 
@@ -492,7 +481,7 @@ GROUP BY pe.id
 ORDER BY ` + platformExperimentOrderBy(sort)
 }
 
-func (s *PlatformExperimentsStore) queryPlatformExperiments(ctx context.Context, q string, args ...any) ([]*domain.PlatformExperiment, error) {
+func (s *Store) queryPlatformExperiments(ctx context.Context, q string, args ...any) ([]*domain.PlatformExperiment, error) {
 	rows, err := s.pool.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.List: %w", err)
@@ -541,7 +530,7 @@ func (s *PlatformExperimentsStore) queryPlatformExperiments(ctx context.Context,
 
 // CountPlatformExperiments returns the number of platform experiments matching the given
 // filter, ignoring Limit/Offset/Sort — the total a paginating caller should show.
-func (s *PlatformExperimentsStore) CountPlatformExperiments(ctx context.Context, filter PlatformExperimentsFilter) (int, error) {
+func (s *Store) CountPlatformExperiments(ctx context.Context, filter PlatformExperimentsFilter) (int, error) {
 	clauses, args := platformExperimentFilterClauses(filter)
 	q := `SELECT COUNT(*) FROM platform_experiments pe WHERE ` + strings.Join(clauses, " AND ")
 	var total int
@@ -554,7 +543,7 @@ func (s *PlatformExperimentsStore) CountPlatformExperiments(ctx context.Context,
 // SetPlatformExperimentSummary records the operator's narrative verdict on a run. Separate from
 // UpdatePlatformExperiment because it is the one field that is written *after* the experiment
 // closes, when everything else is frozen. ErrPlatformExperimentNotFound for an id none has.
-func (s *PlatformExperimentsStore) SetPlatformExperimentSummary(ctx context.Context, id, summary string) error {
+func (s *Store) SetPlatformExperimentSummary(ctx context.Context, id, summary string) error {
 	const q = `UPDATE platform_experiments SET summary = $2, updated_at = NOW() WHERE id = $1`
 	tag, err := s.pool.pool.Exec(ctx, q, id, summary)
 	if err != nil {
@@ -570,7 +559,7 @@ func (s *PlatformExperimentsStore) SetPlatformExperimentSummary(ctx context.Cont
 // coordinator with, "" when it waits for someone else. A reason that differs from the one
 // recorded is announced as platform_experiment.status with the reason as its detail, by the
 // trigger on the row, and one that is the same writes nothing. A closed one is told nothing.
-func (s *PlatformExperimentsStore) TellCoordinator(ctx context.Context, id, reason string) error {
+func (s *Store) TellCoordinator(ctx context.Context, id, reason string) error {
 	const q = `UPDATE platform_experiments SET coordinator_reason = NULLIF($2, '')
 WHERE id = $1 AND status <> 'closed' AND coordinator_reason IS DISTINCT FROM NULLIF($2, '')`
 	if _, err := s.pool.pool.Exec(ctx, q, id, reason); err != nil {
@@ -595,7 +584,7 @@ WHERE id = $1 AND status <> 'closed' AND coordinator_reason IS DISTINCT FROM NUL
 // max_agents, and otherwise a *PoolBelowAtWorkError refuses them and nothing is written.
 // researchers left nil stay as they are, capped to max_agents, so a patch that does not change
 // them never writes back a pool a cut lowered since it read.
-func (s *PlatformExperimentsStore) UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, expectedStatus domain.PlatformExperimentStatus, researchers domain.ResearcherPool) error {
+func (s *Store) UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, expectedStatus domain.PlatformExperimentStatus, researchers domain.ResearcherPool) error {
 	metrics, err := json.Marshal(pe.Metrics)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.Update: marshal metrics: %w", err)
@@ -651,7 +640,7 @@ var ErrPlatformExperimentNotFound = errors.New("platform experiment not found")
 // PlatformExperimentRepository returns the repository a platform experiment names, empty for
 // none, the project it is in, whether it is closed and whether it is still a draft.
 // ErrPlatformExperimentNotFound when there is no such one.
-func (s *PlatformExperimentsStore) PlatformExperimentRepository(ctx context.Context, id string) (projectID, repository string, closed, draft bool, err error) {
+func (s *Store) PlatformExperimentRepository(ctx context.Context, id string) (projectID, repository string, closed, draft bool, err error) {
 	err = s.pool.pool.QueryRow(ctx, `
 SELECT project_id, repository, closed_at IS NOT NULL, status = $2 FROM platform_experiments WHERE id = $1`, id, string(domain.PlatformExpDraft)).Scan(&projectID, &repository, &closed, &draft)
 	if errors.Is(err, pgx.ErrNoRows) {

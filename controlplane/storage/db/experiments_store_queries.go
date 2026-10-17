@@ -13,7 +13,7 @@ import (
 
 // GetRunningAndQueued returns the experiments of one platform experiment with status RUNNING,
 // QUEUED, or SUBMITTED.
-func (s *ExperimentsStore) GetRunningAndQueued(ctx context.Context, platformExpID string) ([]*domain.Experiment, error) {
+func (s *Store) GetRunningAndQueued(ctx context.Context, platformExpID string) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments
 WHERE platform_experiment_id = $1 AND status IN ('RUNNING', 'QUEUED', 'SUBMITTED')
 ORDER BY created_at ASC`
@@ -31,7 +31,7 @@ ORDER BY created_at ASC`
 // control plane's own desired state, updated immediately on each status transition, independent
 // of how long the cluster takes to converge. Available capacity is nominal total minus this sum,
 // never total minus a separately live-reported "actual usage" number.
-func (s *ExperimentsStore) SumDesiredFootprintByCluster(ctx context.Context) (map[string]domain.Footprint, error) {
+func (s *Store) SumDesiredFootprintByCluster(ctx context.Context) (map[string]domain.Footprint, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments
 WHERE status IN ('RUNNING', 'SUBMITTED') AND cluster_name != ''`
 
@@ -55,7 +55,7 @@ WHERE status IN ('RUNNING', 'SUBMITTED') AND cluster_name != ''`
 }
 
 // ListRunningExperiments returns all RUNNING experiments.
-func (s *ExperimentsStore) ListRunningExperiments(ctx context.Context) ([]*domain.Experiment, error) {
+func (s *Store) ListRunningExperiments(ctx context.Context) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments
 WHERE status = 'RUNNING'
 ORDER BY created_at ASC`
@@ -75,7 +75,7 @@ ORDER BY created_at ASC`
 // scheduler's tick-time node-attribution reconstruction (see loop_resolve.go's
 // installedAcceleratorsByNode), which must count SUBMITTED holds too — ListRunningExperiments
 // alone undercounts a node's already-claimed capacity whenever such jobs exist.
-func (s *ExperimentsStore) ListCapacityClaimedExperiments(ctx context.Context) ([]*domain.Experiment, error) {
+func (s *Store) ListCapacityClaimedExperiments(ctx context.Context) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments
 WHERE status IN ('RUNNING', 'SUBMITTED')
 ORDER BY created_at ASC`
@@ -90,7 +90,7 @@ ORDER BY created_at ASC`
 
 // CompletedJobIDs returns the jobs of a platform experiment that ran to a successful end. Only
 // their metrics count for an agent's best: a job that failed or was stopped proved nothing.
-func (s *ExperimentsStore) CompletedJobIDs(ctx context.Context, platformExpID string) (map[string]bool, error) {
+func (s *Store) CompletedJobIDs(ctx context.Context, platformExpID string) (map[string]bool, error) {
 	rows, err := s.pool.pool.Query(ctx, `SELECT id FROM experiments WHERE platform_experiment_id = $1 AND status = 'COMPLETED'`, platformExpID)
 	if err != nil {
 		return nil, fmt.Errorf("experiments_store.CompletedJobIDs: %w", err)
@@ -108,7 +108,7 @@ func (s *ExperimentsStore) CompletedJobIDs(ctx context.Context, platformExpID st
 
 // CompletedJobs returns every COMPLETED job of a platform experiment, whoever ran it on whichever
 // branch, oldest first.
-func (s *ExperimentsStore) CompletedJobs(ctx context.Context, platformExpID string) ([]*domain.Experiment, error) {
+func (s *Store) CompletedJobs(ctx context.Context, platformExpID string) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments WHERE platform_experiment_id = $1 AND status = 'COMPLETED' ORDER BY created_at, id`
 	rows, err := s.pool.pool.Query(ctx, q, platformExpID)
 	if err != nil {
@@ -121,7 +121,7 @@ func (s *ExperimentsStore) CompletedJobs(ctx context.Context, platformExpID stri
 // FinishedBaselineJobs returns the COMPLETED jobs on the objective of a platform experiment whose
 // agent is one of role baseline that finished, oldest first: what its baseline can be declared
 // from once nobody is measuring any more.
-func (s *ExperimentsStore) FinishedBaselineJobs(ctx context.Context, platformExpID string) ([]*domain.Experiment, error) {
+func (s *Store) FinishedBaselineJobs(ctx context.Context, platformExpID string) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments
 WHERE platform_experiment_id = $1 AND status = 'COMPLETED' AND hypothesis_id = platform_experiment_id
   AND EXISTS (SELECT 1 FROM experiment_signups s
@@ -149,7 +149,7 @@ type AgentJobs struct {
 // AgentJobsByAgent returns, for every agent with a job in a platform experiment, how many it
 // submitted, whether it has a completed job and whether it has one in flight. One statement, so
 // the answers describe the same moment.
-func (s *ExperimentsStore) AgentJobsByAgent(ctx context.Context, platformExpID string) (map[string]AgentJobs, error) {
+func (s *Store) AgentJobsByAgent(ctx context.Context, platformExpID string) (map[string]AgentJobs, error) {
 	rows, err := s.pool.pool.Query(ctx, `SELECT agent_id, COUNT(*),
        bool_or(status = 'COMPLETED'),
        bool_or(status IN ('SUBMITTED', 'RUNNING'))
@@ -175,7 +175,7 @@ FROM experiments WHERE platform_experiment_id = $1 GROUP BY agent_id`, platformE
 
 // ListActiveByPlatformExperiment returns all non-terminal jobs (QUEUED, SUBMITTED, RUNNING) for
 // a platform experiment. Used to evict jobs when an experiment is closed.
-func (s *ExperimentsStore) ListActiveByPlatformExperiment(ctx context.Context, platformExpID string) ([]*domain.Experiment, error) {
+func (s *Store) ListActiveByPlatformExperiment(ctx context.Context, platformExpID string) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments
 WHERE platform_experiment_id = $1
   AND status IN ('QUEUED', 'SUBMITTED', 'RUNNING')
@@ -190,7 +190,7 @@ ORDER BY created_at DESC`
 }
 
 // ListSubmittedExperiments returns all experiments in SUBMITTED state.
-func (s *ExperimentsStore) ListSubmittedExperiments(ctx context.Context) ([]*domain.Experiment, error) {
+func (s *Store) ListSubmittedExperiments(ctx context.Context) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments WHERE status = 'SUBMITTED' ORDER BY submitted_at ASC`
 	rows, err := s.pool.pool.Query(ctx, q)
 	if err != nil {
@@ -201,7 +201,7 @@ func (s *ExperimentsStore) ListSubmittedExperiments(ctx context.Context) ([]*dom
 }
 
 // ListQueuedExperiments returns all QUEUED experiments ordered by queued_at ASC (age_score).
-func (s *ExperimentsStore) ListQueuedExperiments(ctx context.Context) ([]*domain.Experiment, error) {
+func (s *Store) ListQueuedExperiments(ctx context.Context) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments WHERE status = 'QUEUED' ORDER BY queued_at ASC NULLS LAST, created_at ASC`
 	rows, err := s.pool.pool.Query(ctx, q)
 	if err != nil {
@@ -212,7 +212,7 @@ func (s *ExperimentsStore) ListQueuedExperiments(ctx context.Context) ([]*domain
 }
 
 // GetAgentRunningExperiments returns RUNNING experiments for an agent in a platform experiment.
-func (s *ExperimentsStore) GetAgentRunningExperiments(ctx context.Context, agentID, platformExpID string) ([]*domain.Experiment, error) {
+func (s *Store) GetAgentRunningExperiments(ctx context.Context, agentID, platformExpID string) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments
 WHERE agent_id = $1 AND platform_experiment_id = $2 AND status = 'RUNNING'
 ORDER BY updated_at ASC`
@@ -226,7 +226,7 @@ ORDER BY updated_at ASC`
 
 // GetAgentQueuedExperiments returns QUEUED and SUBMITTED experiments for an agent in a platform
 // experiment.
-func (s *ExperimentsStore) GetAgentQueuedExperiments(ctx context.Context, agentID, platformExpID string) ([]*domain.Experiment, error) {
+func (s *Store) GetAgentQueuedExperiments(ctx context.Context, agentID, platformExpID string) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments
 WHERE agent_id = $1 AND platform_experiment_id = $2 AND status IN ('QUEUED', 'SUBMITTED')
 ORDER BY queued_at ASC`
@@ -242,7 +242,7 @@ ORDER BY queued_at ASC`
 // the agent's id when it has none. It is one read however many
 // jobs are given. Every job an operation answers with passes here, so Status becomes the
 // answered one (domain.AnsweredStatus) and a described job is good for answering only.
-func (s *ExperimentsStore) DescribeJobs(ctx context.Context, jobs []*domain.Experiment) error {
+func (s *Store) DescribeJobs(ctx context.Context, jobs []*domain.Experiment) error {
 	if len(jobs) == 0 {
 		return nil
 	}
@@ -276,7 +276,7 @@ func (s *ExperimentsStore) DescribeJobs(ctx context.Context, jobs []*domain.Expe
 // ListUnsettledTerminalExperiments returns terminal experiments whose final usage has not yet
 // been durably written — candidates for the settlement reconciler to retry after a crash or
 // metrics-DB outage.
-func (s *ExperimentsStore) ListUnsettledTerminalExperiments(ctx context.Context) ([]*domain.Experiment, error) {
+func (s *Store) ListUnsettledTerminalExperiments(ctx context.Context) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments
 WHERE status IN ('COMPLETED', 'FAILED', 'EVICTED', 'REJECTED') AND quota_settled_at IS NULL
 ORDER BY updated_at ASC`
@@ -293,7 +293,7 @@ ORDER BY updated_at ASC`
 // every few seconds, and a per-report round trip made that cost scale with the number of jobs it
 // runs. Both columns come from the same row read, so a report can never be judged against one
 // experiment's cluster and another read's generation.
-func (s *ExperimentsStore) PlacementByID(ctx context.Context, ids []string) (map[string]domain.Placement, error) {
+func (s *Store) PlacementByID(ctx context.Context, ids []string) (map[string]domain.Placement, error) {
 	if len(ids) == 0 {
 		return map[string]domain.Placement{}, nil
 	}
@@ -327,7 +327,7 @@ func (s *ExperimentsStore) PlacementByID(ctx context.Context, ids []string) (map
 // first reported under its current admission. A job no report has named since it was admitted
 // gets now, and keeps it: the claim is one conditional write, so two reports arriving together
 // read the same time.
-func (s *ExperimentsStore) RunFirstReportedAt(ctx context.Context, ids []string) (map[string]time.Time, error) {
+func (s *Store) RunFirstReportedAt(ctx context.Context, ids []string) (map[string]time.Time, error) {
 	if len(ids) == 0 {
 		return map[string]time.Time{}, nil
 	}
@@ -367,7 +367,7 @@ WHERE id = ANY($1) AND run_reported_at >= submitted_at`, ids)
 //
 // An entry is written in the statement that sets its row's updated_at, which only grows, so
 // updated_at bounds the scan.
-func (s *ExperimentsStore) RecentlyTriedClusters(ctx context.Context, ttl time.Duration) (map[string]bool, error) {
+func (s *Store) RecentlyTriedClusters(ctx context.Context, ttl time.Duration) (map[string]bool, error) {
 	since := time.Now().UTC().Add(-ttl)
 	rows, err := s.pool.pool.Query(ctx, `
 		SELECT DISTINCT t.entry->>'cluster_id'
@@ -395,7 +395,7 @@ func (s *ExperimentsStore) RecentlyTriedClusters(ctx context.Context, ttl time.D
 
 // BaselineCodeRef returns the commit the declared baseline job of a platform experiment ran,
 // empty while none is declared.
-func (s *ExperimentsStore) BaselineCodeRef(ctx context.Context, platformExpID string) (string, error) {
+func (s *Store) BaselineCodeRef(ctx context.Context, platformExpID string) (string, error) {
 	var codeRef string
 	err := s.pool.pool.QueryRow(ctx,
 		`SELECT e.code_ref FROM platform_experiments pe JOIN experiments e ON e.id = pe.baseline_job_id WHERE pe.id = $1`, platformExpID).Scan(&codeRef)
@@ -407,7 +407,7 @@ func (s *ExperimentsStore) BaselineCodeRef(ctx context.Context, platformExpID st
 
 // LastCompletedCodeRef returns the commit the newest completed job testing a hypothesis ran,
 // whichever agent's, empty when none completed.
-func (s *ExperimentsStore) LastCompletedCodeRef(ctx context.Context, hypothesisID string) (string, error) {
+func (s *Store) LastCompletedCodeRef(ctx context.Context, hypothesisID string) (string, error) {
 	var codeRef string
 	err := s.pool.pool.QueryRow(ctx,
 		`SELECT code_ref FROM experiments WHERE hypothesis_id = $1 AND status = 'COMPLETED' ORDER BY created_at DESC, id DESC LIMIT 1`, hypothesisID).Scan(&codeRef)
@@ -420,7 +420,7 @@ func (s *ExperimentsStore) LastCompletedCodeRef(ctx context.Context, hypothesisI
 // Implementations returns the branches agents checked a hypothesis out on or its jobs ran on,
 // each with its agent, the commit its newest job ran and when it was last checked out, the
 // earliest begun first. A job from before branches were kept has none.
-func (s *ExperimentsStore) Implementations(ctx context.Context, hypothesisID string) ([]domain.Implementation, error) {
+func (s *Store) Implementations(ctx context.Context, hypothesisID string) ([]domain.Implementation, error) {
 	const q = `
 SELECT COALESCE(ran.agent_id, c.agent_id), COALESCE(ran.branch, c.branch), COALESCE(ran.code_ref, ''), c.checked_out_at
 FROM (

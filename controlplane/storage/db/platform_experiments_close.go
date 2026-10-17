@@ -14,7 +14,7 @@ import (
 // ClosePlatformExperiment closes a platform experiment and records why: by is whose credential
 // asked, nil when the platform closes it at its end time, and message what that caller said of
 // why. One already closed keeps what it has.
-func (s *PlatformExperimentsStore) ClosePlatformExperiment(ctx context.Context, id string, by *domain.Actor, message string) error {
+func (s *Store) ClosePlatformExperiment(ctx context.Context, id string, by *domain.Actor, message string) error {
 	reason, actor := "", domain.Actor{}
 	if by != nil {
 		reason, actor = string(domain.CloseByRequest), *by
@@ -44,7 +44,7 @@ WHERE id = $1 AND status <> 'closed'`
 // closed yet is closed in the same write, with close_reason removed. The trigger of the row
 // announces the close and the removal. ErrPlatformExperimentNotFound for an id none has, and for
 // one removed before.
-func (s *PlatformExperimentsStore) RemovePlatformExperiment(ctx context.Context, id string, by domain.Actor) error {
+func (s *Store) RemovePlatformExperiment(ctx context.Context, id string, by domain.Actor) error {
 	tag, err := s.pool.pool.Exec(ctx, `
 UPDATE platform_experiments
 SET removed_at = now(), removed_by_kind = $2, removed_by_id = $3, updated_at = now(),
@@ -64,7 +64,7 @@ WHERE id = $1 AND removed_at IS NULL`, id, string(by.Kind), by.ID, string(domain
 
 // RecordClose writes record as the platform's record of the close of the closed platform
 // experiment id, once: one written before stays. The coordinator's summary is kept beside it.
-func (s *PlatformExperimentsStore) RecordClose(ctx context.Context, id, record string) error {
+func (s *Store) RecordClose(ctx context.Context, id, record string) error {
 	const q = `UPDATE platform_experiments SET close_record = $2, updated_at = NOW() WHERE id = $1 AND status = 'closed' AND close_record = ''`
 	if _, err := s.pool.pool.Exec(ctx, q, id, record); err != nil {
 		return fmt.Errorf("platform_experiments_store.RecordClose: %w", err)
@@ -83,7 +83,7 @@ var ErrNotReopenable = errors.New("platform experiment is not a closed run that 
 // placements, so every reader takes it for the running run it was. The status change is announced
 // by the row's trigger. ErrNotReopenable, and ErrPlatformExperimentNotFound for an id none has
 // and a removed one.
-func (s *PlatformExperimentsStore) ReopenPlatformExperiment(ctx context.Context, id string, endsAt time.Time, durationHours float64, coordinatorModel string) error {
+func (s *Store) ReopenPlatformExperiment(ctx context.Context, id string, endsAt time.Time, durationHours float64, coordinatorModel string) error {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.Reopen: begin tx: %w", err)
@@ -126,7 +126,7 @@ const unsettledJobsSQL = `EXISTS (SELECT 1 FROM experiments e WHERE e.platform_e
 
 // JobsSettled says every job of the platform experiment id ended and its cost was written, so
 // what it spent is whole.
-func (s *PlatformExperimentsStore) JobsSettled(ctx context.Context, id string) (bool, error) {
+func (s *Store) JobsSettled(ctx context.Context, id string) (bool, error) {
 	var settled bool
 	if err := s.pool.pool.QueryRow(ctx, `SELECT NOT `+unsettledJobsSQL+` FROM platform_experiments pe WHERE pe.id = $1`, id).Scan(&settled); err != nil {
 		return false, fmt.Errorf("platform_experiments_store.JobsSettled: %w", err)
@@ -137,7 +137,7 @@ func (s *PlatformExperimentsStore) JobsSettled(ctx context.Context, id string) (
 // ClosesToRecord is the platform experiments closed in the last within, after they were open,
 // that have no record of the close yet and whose every job ended and was settled (JobsSettled): those whose
 // record of the close waited for what they spent to be whole.
-func (s *PlatformExperimentsStore) ClosesToRecord(ctx context.Context, within time.Duration) ([]string, error) {
+func (s *Store) ClosesToRecord(ctx context.Context, within time.Duration) ([]string, error) {
 	rows, err := s.pool.pool.Query(ctx, `SELECT pe.id FROM platform_experiments pe
 WHERE pe.status = 'closed' AND pe.close_record = '' AND pe.closed_at > now() - make_interval(secs => $1)
   AND pe.close_reason IN ($2, $3, $4, $5) AND (pe.goal = '' OR pe.starts_at IS NOT NULL)

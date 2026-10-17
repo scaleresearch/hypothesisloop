@@ -25,7 +25,7 @@ const (
 	ReasonEditRateLimited  = "edit_rate_limited"
 )
 
-// AgentTypeStore is the persistence of agent types. *db.AgentTypesStore satisfies it.
+// AgentTypeStore is the persistence of agent types. *db.Store satisfies it.
 type AgentTypeStore interface {
 	List(ctx context.Context, orgID string) (domain.AgentTypeCatalog, error)
 	Get(ctx context.Context, orgID, id string) (*domain.CurrentAgentType, error)

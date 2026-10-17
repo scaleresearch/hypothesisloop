@@ -19,7 +19,7 @@ import (
 //
 // A draft names its repository, or the account the platform creates one on after this returns
 // (RepositoriesToCreate).
-func (s *PlatformExperimentsStore) CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup) error {
+func (s *Store) CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup) error {
 	if pe.Status != domain.PlatformExpDraft || signup.AgentID != planner.ID || signup.Role != domain.SignupRolePlanner || !signup.Hosted {
 		return fmt.Errorf("platform_experiments_store.CreateDraft: a draft is created with status draft and its hosted planner, got status %s and signup %+v", pe.Status, signup)
 	}
@@ -77,7 +77,7 @@ var ErrPlanningOver = errors.New("the draft's planning limit has passed")
 
 // answerDraft runs a planner's answer, which a draft takes until its ends_at. The sweep closes a
 // draft past it within a minute; an answer in that minute is refused here.
-func (s *PlatformExperimentsStore) answerDraft(ctx context.Context, id, update string, args ...any) error {
+func (s *Store) answerDraft(ctx context.Context, id, update string, args ...any) error {
 	return answerDraftTx(ctx, s.pool.pool, id, update, args...)
 }
 
@@ -131,7 +131,7 @@ type Proposed struct {
 // draft's end to p.WaitUntil: from then on it waits for a person, or for p.AcceptsAt, and no
 // longer for the planner, whose machine is kept for p.KeepPlanner more (plannerKeptSQL). The
 // draft's baseline agent is signed up in the same write, once.
-func (s *PlatformExperimentsStore) SetProposal(ctx context.Context, id string, proposal []byte, p Proposed) error {
+func (s *Store) SetProposal(ctx context.Context, id string, proposal []byte, p Proposed) error {
 	if p.Baseline != nil && (p.BaselineSignup.AgentID != p.Baseline.ID || p.BaselineSignup.Role != domain.SignupRoleBaseline || !p.BaselineSignup.Hosted) {
 		return fmt.Errorf("platform_experiments_store.SetProposal: a proposal signs up a hosted agent of role baseline, got %+v", p.BaselineSignup)
 	}
@@ -215,7 +215,7 @@ var ErrNotProposed = errors.New("the draft has no proposal standing")
 // the proposal and accepts it, revises it or closes it. Its baseline agent's machine is released
 // with it, and is asked for again once the draft is accepted. Holding one held changes nothing.
 // ErrNotDraft, and ErrNotProposed for a draft that has no proposal standing.
-func (s *PlatformExperimentsStore) HoldAccept(ctx context.Context, id string) error {
+func (s *Store) HoldAccept(ctx context.Context, id string) error {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.HoldAccept: begin tx: %w", err)
@@ -242,7 +242,7 @@ func (s *PlatformExperimentsStore) HoldAccept(ctx context.Context, id string) er
 }
 
 // DraftsToAccept is the proposed drafts whose accepts_at has passed, oldest first.
-func (s *PlatformExperimentsStore) DraftsToAccept(ctx context.Context) ([]string, error) {
+func (s *Store) DraftsToAccept(ctx context.Context) ([]string, error) {
 	rows, err := s.pool.pool.Query(ctx, `
 SELECT id FROM platform_experiments
 WHERE accepts_at <= now() AND status = 'draft' AND proposed_at IS NOT NULL AND proposal IS NOT NULL
@@ -263,7 +263,7 @@ ORDER BY accepts_at`)
 // proposal. A proposal made before no longer stands, so it is cleared and there is nothing to
 // accept. proposed_at is the column of the planner's answer, whichever it was: with no proposal
 // beside it the draft is declined.
-func (s *PlatformExperimentsStore) Decline(ctx context.Context, id, reason string, waitUntil time.Time, keepPlanner time.Duration) error {
+func (s *Store) Decline(ctx context.Context, id, reason string, waitUntil time.Time, keepPlanner time.Duration) error {
 	err := s.answerDraft(ctx, id, `
 UPDATE platform_experiments SET declined_reason = $2, proposal = NULL, proposed_at = now(), planner_ends_at = `+plannerKeptSQL+`, ends_at = $3, accepts_at = NULL, updated_at = now()`,
 		reason, waitUntil, keepPlanner.Seconds())
@@ -284,7 +284,7 @@ var ErrNothingProposed = errors.New("nothing is proposed")
 // BaselineDueAt. Its planner has nothing left to answer, so the time its machine was kept for a
 // revision ends with the accept. The limits a signup holds are held here too
 // (ErrMaxAgentsReached, ErrMaxHostedReached).
-func (s *PlatformExperimentsStore) AcceptDraft(ctx context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error {
+func (s *Store) AcceptDraft(ctx context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error {
 	if pe.Coordinator == nil || !pe.CoordinatorHosted {
 		return errors.New("platform_experiments_store.AcceptDraft: an accepted draft is run by a coordinator the platform hosts")
 	}
@@ -361,7 +361,7 @@ WHERE id = $1`, pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.Ma
 }
 
 // AgentStanding reads the standing of agentID in platformExpID.
-func (s *PlatformExperimentsStore) AgentStanding(ctx context.Context, platformExpID, agentID string) (domain.AgentStanding, error) {
+func (s *Store) AgentStanding(ctx context.Context, platformExpID, agentID string) (domain.AgentStanding, error) {
 	t := &domain.Tenancy{PlatformExperimentID: platformExpID}
 	var out domain.AgentStanding
 	err := s.pool.pool.QueryRow(ctx, `
@@ -385,7 +385,7 @@ WHERE pe.id = $1 AND pe.removed_at IS NULL`, platformExpID, agentID).Scan(&t.Pro
 }
 
 // JobHasFinding says a finding was filed for the job.
-func (s *PlatformExperimentsStore) JobHasFinding(ctx context.Context, experimentID string) (bool, error) {
+func (s *Store) JobHasFinding(ctx context.Context, experimentID string) (bool, error) {
 	var found bool
 	if err := s.pool.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM hypothesis_findings WHERE experiment_id = $1)`, experimentID).Scan(&found); err != nil {
 		return false, fmt.Errorf("platform_experiments_store.JobHasFinding: %w", err)
@@ -400,7 +400,7 @@ func (s *PlatformExperimentsStore) JobHasFinding(ctx context.Context, experiment
 // (platform_experiment.revision): one whose machine is still there answers it at once, and one
 // whose machine was released is started again. ErrNotDraft, and ErrNothingProposed while the
 // planner still works.
-func (s *PlatformExperimentsStore) Revise(ctx context.Context, id, message string, by domain.Actor, planUntil time.Time) error {
+func (s *Store) Revise(ctx context.Context, id, message string, by domain.Actor, planUntil time.Time) error {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.Revise: begin tx: %w", err)
@@ -438,7 +438,7 @@ WHERE s.platform_experiment_id = i.platform_experiment_id AND s.agent_id = i.age
 	return nil
 }
 
-func (s *PlatformExperimentsStore) planningRequests(ctx context.Context, id string) ([]domain.PlanningRequest, error) {
+func (s *Store) planningRequests(ctx context.Context, id string) ([]domain.PlanningRequest, error) {
 	rows, err := s.pool.pool.Query(ctx, `SELECT message, actor_kind, actor_id, created_at FROM planning_requests WHERE platform_experiment_id = $1 ORDER BY id`, id)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.planningRequests: %w", err)

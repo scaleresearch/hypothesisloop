@@ -38,7 +38,7 @@ func TestAReopenedRunsTokensAreAcceptedByTheRowsAlone(t *testing.T) {
 		}
 	}
 
-	pes := db.NewPlatformExperimentsStore(pool)
+	pes := db.NewStore(pool, 3)
 	pe, err := pes.GetPlatformExperiment(ctx, run.ID)
 	if err != nil {
 		t.Fatal(err)

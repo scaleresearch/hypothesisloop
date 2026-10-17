@@ -24,7 +24,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// Store is what the proxy reads to decide. *db.PlatformExperimentsStore with *db.EnvironmentsStore
+// Store is what the proxy reads to decide. *db.Store with *db.Store
 // satisfies it.
 type Store interface {
 	PlatformExperimentRepository(ctx context.Context, id string) (projectID, repository string, closed, draft bool, err error)

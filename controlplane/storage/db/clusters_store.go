@@ -62,16 +62,6 @@ WHERE e.cluster_name = $1 AND e.status IN ('SUBMITTED', 'RUNNING')
 	WHERE pe.id = e.platform_experiment_id))
 RETURNING e.id`
 
-// ClustersStore holds which cluster names exist, the org each belongs to, whether the platform
-// shares it, the identity its runtime reported, and which orgs turned it off for their jobs.
-type ClustersStore struct {
-	pool *Pool
-}
-
-func NewClustersStore(pool *Pool) *ClustersStore {
-	return &ClustersStore{pool: pool}
-}
-
 const clusterColumns = `name, org_id, shared, priority, COALESCE(reported_id, ''), job_image, created_at,
 	scale_up_timeout_seconds, max_speculative_accelerators, stuck_pending_timeout_seconds, status_silence_ceiling_seconds,
 	last_error, last_error_at,
@@ -89,7 +79,7 @@ func scanCluster(row rowScanner) (*domain.Cluster, error) {
 
 // RegisterCluster records name as a cluster of orgID. Registering a name the org already owns
 // changes nothing.
-func (s *ClustersStore) RegisterCluster(ctx context.Context, name, orgID string) (*domain.Cluster, error) {
+func (s *Store) RegisterCluster(ctx context.Context, name, orgID string) (*domain.Cluster, error) {
 	if err := domain.ValidateIdentifier("cluster name", name); err != nil {
 		return nil, err
 	}
@@ -111,17 +101,17 @@ RETURNING `+clusterColumns, name, orgID))
 }
 
 // GetCluster returns a registered cluster, or nil when the name is not registered.
-func (s *ClustersStore) GetCluster(ctx context.Context, name string) (*domain.Cluster, error) {
+func (s *Store) GetCluster(ctx context.Context, name string) (*domain.Cluster, error) {
 	return s.clusterWhere(ctx, "GetCluster", `name = $1`, name)
 }
 
 // ClusterByReportedID returns the cluster bound to an identity a runtime reported, or nil when
 // none is.
-func (s *ClustersStore) ClusterByReportedID(ctx context.Context, reportedID string) (*domain.Cluster, error) {
+func (s *Store) ClusterByReportedID(ctx context.Context, reportedID string) (*domain.Cluster, error) {
 	return s.clusterWhere(ctx, "ClusterByReportedID", `reported_id = $1`, reportedID)
 }
 
-func (s *ClustersStore) clusterWhere(ctx context.Context, op, where, arg string) (*domain.Cluster, error) {
+func (s *Store) clusterWhere(ctx context.Context, op, where, arg string) (*domain.Cluster, error) {
 	c, err := scanCluster(s.pool.pool.QueryRow(ctx, `SELECT `+clusterColumns+` FROM clusters WHERE `+where, arg))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -133,7 +123,7 @@ func (s *ClustersStore) clusterWhere(ctx context.Context, op, where, arg string)
 }
 
 // ClusterOrg returns the org a cluster is registered to; found is false for an unregistered name.
-func (s *ClustersStore) ClusterOrg(ctx context.Context, name string) (orgID string, found bool, err error) {
+func (s *Store) ClusterOrg(ctx context.Context, name string) (orgID string, found bool, err error) {
 	err = s.pool.pool.QueryRow(ctx, `SELECT org_id FROM clusters WHERE name = $1`, name).Scan(&orgID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", false, nil
@@ -146,7 +136,7 @@ func (s *ClustersStore) ClusterOrg(ctx context.Context, name string) (orgID stri
 
 // RecordJobImage keeps the one image the cluster's runtime says it runs, empty for a runtime that
 // runs whatever image a job names. A report that changes nothing writes nothing.
-func (s *ClustersStore) RecordJobImage(ctx context.Context, name, image string) error {
+func (s *Store) RecordJobImage(ctx context.Context, name, image string) error {
 	if _, err := s.pool.pool.Exec(ctx, `UPDATE clusters SET job_image = $2 WHERE name = $1 AND job_image <> $2`, name, image); err != nil {
 		return fmt.Errorf("clusters_store.RecordJobImage: %w", err)
 	}
@@ -156,7 +146,7 @@ func (s *ClustersStore) RecordJobImage(ctx context.Context, name, image string) 
 // RecordContactRefusal keeps what the control plane refused a reconcile of the cluster's agent
 // with, and when. An empty refusal is a reconcile it accepted, which clears what was kept, and
 // writes nothing when nothing was.
-func (s *ClustersStore) RecordContactRefusal(ctx context.Context, name, refusal string) error {
+func (s *Store) RecordContactRefusal(ctx context.Context, name, refusal string) error {
 	query := `UPDATE clusters SET last_error = $2, last_error_at = now() WHERE name = $1`
 	if refusal == "" {
 		query = `UPDATE clusters SET last_error = '', last_error_at = NULL WHERE name = $1 AND last_error <> $2`
@@ -169,7 +159,7 @@ func (s *ClustersStore) RecordContactRefusal(ctx context.Context, name, refusal 
 
 // RecordBuilds keeps whether the cluster's runtime says it builds environments. A report that
 // changes nothing writes nothing.
-func (s *ClustersStore) RecordBuilds(ctx context.Context, name string, builds bool) error {
+func (s *Store) RecordBuilds(ctx context.Context, name string, builds bool) error {
 	if _, err := s.pool.pool.Exec(ctx, `UPDATE clusters SET builds = $2 WHERE name = $1 AND builds <> $2`, name, builds); err != nil {
 		return fmt.Errorf("clusters_store.RecordBuilds: %w", err)
 	}
@@ -177,7 +167,7 @@ func (s *ClustersStore) RecordBuilds(ctx context.Context, name string, builds bo
 }
 
 // RegisteredClusters returns every registered cluster by name.
-func (s *ClustersStore) RegisteredClusters(ctx context.Context) (map[string]domain.Cluster, error) {
+func (s *Store) RegisteredClusters(ctx context.Context) (map[string]domain.Cluster, error) {
 	rows, err := s.pool.pool.Query(ctx, `SELECT `+clusterColumns+` FROM clusters`)
 	if err != nil {
 		return nil, fmt.Errorf("clusters_store.RegisteredClusters: %w", err)
@@ -197,7 +187,7 @@ func (s *ClustersStore) RegisteredClusters(ctx context.Context) (map[string]doma
 // ClustersHosting returns the clusters orgID can use, its own and the shared ones, by name. The
 // ones it turned off are among them and say so. They come in the order placement tries them:
 // highest priority first, then by name.
-func (s *ClustersStore) ClustersHosting(ctx context.Context, orgID string) ([]*domain.Cluster, error) {
+func (s *Store) ClustersHosting(ctx context.Context, orgID string) ([]*domain.Cluster, error) {
 	rows, err := s.pool.pool.Query(ctx, `SELECT `+clusterColumns+` FROM clusters WHERE org_id = $1 OR shared ORDER BY priority DESC, name`, orgID)
 	if err != nil {
 		return nil, fmt.Errorf("clusters_store.ClustersHosting: %w", err)
@@ -220,7 +210,7 @@ func (s *ClustersStore) ClustersHosting(ctx context.Context, orgID string) ([]*d
 // written with them: they return to the queue, which is what makes the cluster's runtime stop
 // them and admission place them elsewhere. requeued names those jobs. Of the settings, a value
 // sets the field, 0 puts it back on the scheduler's default and nil leaves it as it is.
-func (s *ClustersStore) UpdateCluster(ctx context.Context, name string, shared *bool, change domain.ClusterSettings) (cluster *domain.Cluster, requeued []string, err error) {
+func (s *Store) UpdateCluster(ctx context.Context, name string, shared *bool, change domain.ClusterSettings) (cluster *domain.Cluster, requeued []string, err error) {
 	if err := domain.ValidateClusterSettings(change); err != nil {
 		return nil, nil, err
 	}
@@ -267,7 +257,7 @@ WHERE name = $1 RETURNING `+clusterColumns, name, shared, domain.SharedClusterPr
 // finish. It takes the admission lock, so a claim either committed before the cluster was turned
 // off or reads it as off. Repeating a decision changes nothing. A cluster that is not open to the
 // org is ErrClusterNotFound.
-func (s *ClustersStore) SetClusterEnabled(ctx context.Context, name, orgID string, by domain.Actor, enabled bool) (*domain.Cluster, error) {
+func (s *Store) SetClusterEnabled(ctx context.Context, name, orgID string, by domain.Actor, enabled bool) (*domain.Cluster, error) {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("clusters_store.SetClusterEnabled: begin: %w", err)
@@ -308,7 +298,7 @@ var ErrClusterOrder = errors.New("the order must name every cluster the org regi
 // them take their new priority or none does. names must be exactly the clusters the org ranks,
 // which leaves out one the platform shares. It orders placements from here on and moves no job.
 // A cluster registered later starts at DefaultClusterPriority, behind an order of up to 900.
-func (s *ClustersStore) SetClusterOrder(ctx context.Context, orgID string, names []string) error {
+func (s *Store) SetClusterOrder(ctx context.Context, orgID string, names []string) error {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("clusters_store.SetClusterOrder: begin: %w", err)
@@ -339,7 +329,7 @@ FROM unnest($1::text[]) WITH ORDINALITY AS o(name, place) WHERE c.name = o.name`
 // GetClusterSettings reads the settings of the cluster bound to the id its runtime reports, which
 // is how the scheduler knows a connected cluster. Nil for an id bound to no cluster and for a
 // cluster with nothing set: the scheduler's defaults apply.
-func (s *ClustersStore) GetClusterSettings(ctx context.Context, reportedID string) (*domain.ClusterSettings, error) {
+func (s *Store) GetClusterSettings(ctx context.Context, reportedID string) (*domain.ClusterSettings, error) {
 	cs := &domain.ClusterSettings{}
 	err := s.pool.pool.QueryRow(ctx, `
 SELECT scale_up_timeout_seconds, max_speculative_accelerators, stuck_pending_timeout_seconds, status_silence_ceiling_seconds FROM clusters WHERE reported_id = $1`, reportedID).
@@ -356,7 +346,7 @@ SELECT scale_up_timeout_seconds, max_speculative_accelerators, stuck_pending_tim
 // StatusSilenceCeiling is the status_silence_ceiling_seconds the cluster named name sets, nil
 // where it sets none or no cluster has the name. Read by name, since a cluster that stopped
 // reporting has no fresh reported id to look it up by.
-func (s *ClustersStore) StatusSilenceCeiling(ctx context.Context, name string) (*int, error) {
+func (s *Store) StatusSilenceCeiling(ctx context.Context, name string) (*int, error) {
 	var seconds *int
 	err := s.pool.pool.QueryRow(ctx, `SELECT status_silence_ceiling_seconds FROM clusters WHERE name = $1`, name).Scan(&seconds)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -383,7 +373,7 @@ func withdraw(ctx context.Context, tx pgx.Tx, name, keepOrg string) ([]string, e
 // RemoveCluster ends a cluster: every job placed on it returns to the queue, its settings and
 // the identity bound to it go with its row, and the name is registered to nobody, so its runtime token is
 // refused from here on. requeued names the jobs.
-func (s *ClustersStore) RemoveCluster(ctx context.Context, name string) (requeued []string, err error) {
+func (s *Store) RemoveCluster(ctx context.Context, name string) (requeued []string, err error) {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("clusters_store.RemoveCluster: begin: %w", err)
@@ -413,7 +403,7 @@ func (s *ClustersStore) RemoveCluster(ctx context.Context, name string) (requeue
 // an identity another cluster holds is refused with ErrClusterIDBound, and a cluster stating
 // another identity than its own with ErrClusterIDChanged until its owner clears the binding
 // (ClearReportedID).
-func (s *ClustersStore) BindReportedID(ctx context.Context, name, reportedID string) error {
+func (s *Store) BindReportedID(ctx context.Context, name, reportedID string) error {
 	if err := domain.ValidateClusterID(reportedID); err != nil {
 		return err
 	}
@@ -447,7 +437,7 @@ func (s *ClustersStore) BindReportedID(ctx context.Context, name, reportedID str
 
 // ClearReportedID forgets the identity bound to a cluster, which binds again on its runtime's
 // next report. Its settings are the named cluster's and stay.
-func (s *ClustersStore) ClearReportedID(ctx context.Context, name string) (*domain.Cluster, error) {
+func (s *Store) ClearReportedID(ctx context.Context, name string) (*domain.Cluster, error) {
 	c, err := scanCluster(s.pool.pool.QueryRow(ctx, `UPDATE clusters SET reported_id = NULL WHERE name = $1 RETURNING `+clusterColumns, name))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrClusterNotFound

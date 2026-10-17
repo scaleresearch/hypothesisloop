@@ -18,7 +18,7 @@ func TestAgentDataKeyIsCreatedOnceEvenByConcurrentFirstCalls(t *testing.T) {
 	agent, pe := "agentkey-agent-"+suffix, "agentkey-pe-"+suffix
 	createTestAgent(t, pool, agent)
 	createTestPE(t, pool, pe, 10)
-	store := NewPlatformExperimentsStore(pool)
+	store := NewStore(pool, 3)
 
 	var mu sync.Mutex
 	created := 0
@@ -79,7 +79,7 @@ func TestRemovingAnAgentDeletesItsDataKeyBeforeItsSignup(t *testing.T) {
 	agent, pe := "agentkey-agent-"+suffix, "agentkey-pe-"+suffix
 	createTestAgent(t, pool, agent)
 	createTestPE(t, pool, pe, 10)
-	store := NewPlatformExperimentsStore(pool)
+	store := NewStore(pool, 3)
 	if ok, err := store.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: agent, Role: domain.SignupRoleCompetitor}); err != nil || !ok {
 		t.Fatalf("signup = %v %v", ok, err)
 	}

@@ -26,7 +26,7 @@ var ErrRepositoryNotAwaited = errors.New("platform experiment awaits no reposito
 
 // RepositoriesToCreate returns the platform experiments not closed whose repository is still to
 // be created, oldest first.
-func (s *PlatformExperimentsStore) RepositoriesToCreate(ctx context.Context) ([]RepositoryToCreate, error) {
+func (s *Store) RepositoriesToCreate(ctx context.Context) ([]RepositoryToCreate, error) {
 	rows, err := s.pool.pool.Query(ctx, `
 SELECT pe.id, pe.project_id, pe.name, pe.repository_account FROM platform_experiments pe
 WHERE pe.status <> 'closed' AND `+awaitsRepository+`
@@ -43,7 +43,7 @@ ORDER BY pe.created_at`)
 
 // GiveRepository records the repository created for a platform experiment, from which its
 // machines are started. ErrRepositoryNotAwaited when it closed meanwhile.
-func (s *PlatformExperimentsStore) GiveRepository(ctx context.Context, id, repository, url string) error {
+func (s *Store) GiveRepository(ctx context.Context, id, repository, url string) error {
 	tag, err := s.pool.pool.Exec(ctx, `
 UPDATE platform_experiments pe SET repository = $2, repository_url = $3, updated_at = now()
 WHERE pe.id = $1 AND pe.status <> 'closed' AND `+awaitsRepository, id, repository, url)
@@ -58,7 +58,7 @@ WHERE pe.id = $1 AND pe.status <> 'closed' AND `+awaitsRepository, id, repositor
 
 // FailRepository closes a platform experiment whose repository the git host did not create, with
 // what it answered. One that closed meanwhile keeps what it has.
-func (s *PlatformExperimentsStore) FailRepository(ctx context.Context, id, answer string) error {
+func (s *Store) FailRepository(ctx context.Context, id, answer string) error {
 	if _, err := s.pool.pool.Exec(ctx, `
 UPDATE platform_experiments pe
 SET status = 'closed', updated_at = now(), closed_at = now(), close_reason = '`+string(domain.CloseRepositoryNotCreated)+`', repository_error = $2

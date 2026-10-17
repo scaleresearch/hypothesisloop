@@ -14,7 +14,7 @@ import (
 
 // SummaryWrittenAt is when the summary of the platform experiment id was last written, nil while
 // it never was.
-func (s *PlatformExperimentsStore) SummaryWrittenAt(ctx context.Context, id string) (*time.Time, error) {
+func (s *Store) SummaryWrittenAt(ctx context.Context, id string) (*time.Time, error) {
 	var at *time.Time
 	if err := s.pool.pool.QueryRow(ctx, `SELECT summary_at FROM platform_experiments WHERE id = $1`, id).Scan(&at); err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.SummaryWrittenAt: %w", err)
@@ -25,7 +25,7 @@ func (s *PlatformExperimentsStore) SummaryWrittenAt(ctx context.Context, id stri
 // HypothesesInFlight is each hypothesis of the platform experiment id with jobs queued or running
 // or a checkout that claims it (domain.CheckoutClaim), the baseline's left out, by hypothesis id,
 // with the agents on it.
-func (s *PlatformExperimentsStore) HypothesesInFlight(ctx context.Context, id string) ([]domain.HypothesisInFlight, error) {
+func (s *Store) HypothesesInFlight(ctx context.Context, id string) ([]domain.HypothesisInFlight, error) {
 	rows, err := s.pool.pool.Query(ctx, `
 SELECT hypothesis_id, count(*) FILTER (WHERE status <> 'RUNNING'), count(*) FILTER (WHERE status = 'RUNNING'),
        array_agg(DISTINCT agent_id ORDER BY agent_id)
@@ -52,7 +52,7 @@ GROUP BY hypothesis_id ORDER BY hypothesis_id`, id, domain.CheckoutClaim.Seconds
 }
 
 // IsAgentFinished says the agent finished in the platform experiment.
-func (s *PlatformExperimentsStore) IsAgentFinished(ctx context.Context, platformExpID, agentID string) (bool, error) {
+func (s *Store) IsAgentFinished(ctx context.Context, platformExpID, agentID string) (bool, error) {
 	var finished bool
 	if err := s.pool.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM experiment_signups
 WHERE platform_experiment_id = $1 AND agent_id = $2 AND finished_at IS NOT NULL)`, platformExpID, agentID).Scan(&finished); err != nil {
@@ -134,7 +134,7 @@ func scanAgentSignup(row pgx.Row, more ...any) (domain.AgentSignup, error) {
 
 // ListAgentSignups returns every agent's place in a platform experiment, in signup order, each
 // with what of its own is in flight.
-func (s *PlatformExperimentsStore) ListAgentSignups(ctx context.Context, platformExpID string) ([]domain.AgentSignup, error) {
+func (s *Store) ListAgentSignups(ctx context.Context, platformExpID string) ([]domain.AgentSignup, error) {
 	rows, err := s.pool.pool.Query(ctx, `
 SELECT `+agentSignupColumns+`, f.jobs, f.running,
        CASE WHEN pe.status = 'running' AND pe.started_at IS NOT NULL AND f.jobs = 0 THEN `+idleSinceSQL+` END
@@ -165,7 +165,7 @@ ORDER BY s.signed_up_at, s.agent_id`, platformExpID)
 }
 
 // GetAgentSignup returns one agent's place in a platform experiment, nil when it has none.
-func (s *PlatformExperimentsStore) GetAgentSignup(ctx context.Context, platformExpID, agentID string) (*domain.AgentSignup, error) {
+func (s *Store) GetAgentSignup(ctx context.Context, platformExpID, agentID string) (*domain.AgentSignup, error) {
 	signup, err := scanAgentSignup(s.pool.pool.QueryRow(ctx, `
 SELECT `+agentSignupColumns+`
 FROM experiment_signups s LEFT JOIN agents a ON a.id = s.agent_id`+signupInstanceJoin+`
@@ -226,7 +226,7 @@ WHERE s.hosted AND NOT (` + awaitsRepository + `)
   AND NOT ` + replacedSQL
 
 // ListLauncherAgents returns the hosted agents the launcher's desired state is decided from.
-func (s *PlatformExperimentsStore) ListLauncherAgents(ctx context.Context, windDown time.Duration) ([]LauncherAgent, error) {
+func (s *Store) ListLauncherAgents(ctx context.Context, windDown time.Duration) ([]LauncherAgent, error) {
 	rows, err := s.pool.pool.Query(ctx, `
 SELECT `+agentSignupColumns+`, pe.agent_image`+launcherAgentsFrom+`
 ORDER BY s.platform_experiment_id, s.agent_id`, windDown.Seconds())
@@ -247,7 +247,7 @@ ORDER BY s.platform_experiment_id, s.agent_id`, windDown.Seconds())
 }
 
 // ListSignups returns all agent IDs signed up for a platform experiment.
-func (s *PlatformExperimentsStore) ListSignups(ctx context.Context, platformExpID string) ([]string, error) {
+func (s *Store) ListSignups(ctx context.Context, platformExpID string) ([]string, error) {
 	const q = `
 SELECT agent_id FROM experiment_signups
 WHERE platform_experiment_id = $1
@@ -272,7 +272,7 @@ ORDER BY signed_up_at ASC`
 
 // ListParticipants returns the agents taking part in a platform experiment: every signup but
 // the planner of a draft that was accepted, whose work ended there.
-func (s *PlatformExperimentsStore) ListParticipants(ctx context.Context, platformExpID string) ([]string, error) {
+func (s *Store) ListParticipants(ctx context.Context, platformExpID string) ([]string, error) {
 	rows, err := s.pool.pool.Query(ctx, `
 SELECT s.agent_id FROM experiment_signups s JOIN platform_experiments pe ON pe.id = s.platform_experiment_id
 WHERE s.platform_experiment_id = $1 AND (pe.status = 'draft' OR s.role <> '`+string(domain.SignupRolePlanner)+`')
@@ -288,7 +288,7 @@ ORDER BY s.signed_up_at ASC`, platformExpID)
 }
 
 // ListSignupsByRole returns the agent IDs signed up for a platform experiment in one role.
-func (s *PlatformExperimentsStore) ListSignupsByRole(ctx context.Context, platformExpID string, role domain.SignupRole) ([]string, error) {
+func (s *Store) ListSignupsByRole(ctx context.Context, platformExpID string, role domain.SignupRole) ([]string, error) {
 	const q = `
 SELECT agent_id FROM experiment_signups
 WHERE platform_experiment_id = $1 AND role = $2
@@ -314,7 +314,7 @@ ORDER BY signed_up_at ASC`
 // AgentDataKey returns the agent's object-store key in a platform experiment. The first call
 // stores what create returns; the signup row is locked meanwhile, so a concurrent first call
 // waits and reads that same key. A failed create stores nothing.
-func (s *PlatformExperimentsStore) AgentDataKey(ctx context.Context, platformExpID, agentID string, create func(context.Context) (domain.DataKey, error)) (domain.DataKey, error) {
+func (s *Store) AgentDataKey(ctx context.Context, platformExpID, agentID string, create func(context.Context) (domain.DataKey, error)) (domain.DataKey, error) {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return domain.DataKey{}, fmt.Errorf("platform_experiments_store.AgentDataKey: begin tx: %w", err)
@@ -355,7 +355,7 @@ WHERE platform_experiment_id = $1 AND agent_id = $2`, platformExpID, agentID, ke
 }
 
 // IsSignedUp returns true if the agent is signed up for the platform experiment.
-func (s *PlatformExperimentsStore) IsSignedUp(ctx context.Context, platformExpID, agentID string) (bool, error) {
+func (s *Store) IsSignedUp(ctx context.Context, platformExpID, agentID string) (bool, error) {
 	const q = `
 SELECT 1 FROM experiment_signups
 WHERE platform_experiment_id = $1 AND agent_id = $2`

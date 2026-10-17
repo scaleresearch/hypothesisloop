@@ -26,7 +26,7 @@ type hostedThing struct {
 func hostedThings(t *testing.T, pool *Pool) map[string]hostedThing {
 	t.Helper()
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	age := func(pe, agentID string) func(string, time.Duration) {
 		return func(column string, by time.Duration) {
 			t.Helper()
@@ -63,7 +63,7 @@ func hostedThings(t *testing.T, pool *Pool) map[string]hostedThing {
 func TestAnExitedMachineIsRecordedRestartedAndFinallyStopsWhatItRan(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	const maxRestarts = 2
 	for kind, thing := range hostedThings(t, pool) {
 		if got := thing.instance(); got != (domain.AgentInstance{}) {
@@ -128,7 +128,7 @@ func TestAnExitedMachineIsRecordedRestartedAndFinallyStopsWhatItRan(t *testing.T
 func TestRestartsOlderThanTheWindowNoLongerCount(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	const maxRestarts = 2
 	for kind, thing := range hostedThings(t, pool) {
 		exit := func(name string) domain.AgentInstance {
@@ -166,7 +166,7 @@ WHERE platform_experiment_id = $2 AND agent_id = $3`, (domain.AgentInstanceResta
 func TestAnExpiredMachineSpendsNoRestartAndNeverStopsWhatItRan(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	const maxRestarts = 2
 	for kind, thing := range hostedThings(t, pool) {
 		end := func(name string, how InstanceEnd) domain.AgentInstance {
@@ -211,7 +211,7 @@ func TestAnExpiredMachineSpendsNoRestartAndNeverStopsWhatItRan(t *testing.T) {
 func TestAMachineIsGivenUpOnWhenItIsNeverSeenStaysStartingOrIsGone(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	const bootLimit, maxRestarts = 5 * time.Minute, 3
 	for kind, thing := range hostedThings(t, pool) {
 		ask := func(name string) {
@@ -290,7 +290,7 @@ func TestAMachineIsGivenUpOnWhenItIsNeverSeenStaysStartingOrIsGone(t *testing.T)
 func TestALauncherIsToldTheMachineOfEveryNameItHolds(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	for kind, thing := range hostedThings(t, pool) {
 		name := "held-" + uuid.New().String()[:8]
 		machineOf := func(names ...string) string {
@@ -352,7 +352,7 @@ func TestALauncherIsToldTheMachineOfEveryNameItHolds(t *testing.T) {
 func TestOneExitReportedByTwoReconcilesAtOnceSpendsOneRestart(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	for kind, thing := range hostedThings(t, pool) {
 		if err := pes.AskInstance(ctx, thing.pe, thing.agentID, "name-1", "launch-1"); err != nil {
 			t.Fatal(err)
@@ -389,7 +389,7 @@ func TestOneExitReportedByTwoReconcilesAtOnceSpendsOneRestart(t *testing.T) {
 func TestHostedAgentsOfEveryRoleAndTheCoordinatorCountAgainstTheMachinesOfOneExperiment(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	now := time.Now().UTC()
 	pe := &domain.PlatformExperiment{Actor: testActor, DefaultQuotaTier: domain.QuotaTierGuaranteed,
 		ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "bounded", BudgetAcceleratorHours: 10,
@@ -437,7 +437,7 @@ func TestHostedAgentsOfEveryRoleAndTheCoordinatorCountAgainstTheMachinesOfOneExp
 func TestOneMachineIsKeptForTheBaselineAndAFinishedAgentHoldsNone(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	now := time.Now().UTC()
 	pe := &domain.PlatformExperiment{Actor: testActor, DefaultQuotaTier: domain.QuotaTierGuaranteed,
 		ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "kept", BudgetAcceleratorHours: 10,
@@ -489,7 +489,7 @@ func TestOneMachineIsKeptForTheBaselineAndAFinishedAgentHoldsNone(t *testing.T) 
 func TestARunningMachinesProgressIsStampedOnThisClockAndItsSilenceEndsIt(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	const limit, maxRestarts = 8 * time.Minute, 3
 	marker := func(m string) *string { return &m }
 	for kind, thing := range hostedThings(t, pool) {
@@ -589,7 +589,7 @@ func TestARunningMachinesProgressIsStampedOnThisClockAndItsSilenceEndsIt(t *test
 func TestARunningMachineWhoseProgressIsUnreadableIsEndedByTheSilentClockAndSpendsNoRestart(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	const limit, maxRestarts = 8 * time.Minute, 1
 	marker := "7"
 	for kind, thing := range hostedThings(t, pool) {
@@ -672,7 +672,7 @@ func TestARunningMachineWhoseProgressIsUnreadableIsEndedByTheSilentClockAndSpend
 func TestAMachineThePlatformNoLongerAsksForIsRecordedAsReleasedAndNeverAsLost(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	const windDown, coordinatorWindDown = 2 * time.Minute, 5 * time.Minute
 	running := "running"
 	rent := func(pe, agent, name string) {
@@ -774,7 +774,7 @@ func TestAMachineThePlatformNoLongerAsksForIsRecordedAsReleasedAndNeverAsLost(t 
 func TestADraftWhosePlannerIsGivenUpOnIsClosedSayingSo(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	const maxRestarts = 2
 	die := func(draft, planner string, times int) (after domain.AgentInstance) {
 		t.Helper()
@@ -830,7 +830,7 @@ func TestADraftWhosePlannerIsGivenUpOnIsClosedSayingSo(t *testing.T) {
 func TestWhatAHostedAgentIsDoingIsKeptOnItsRowAndAnsweredWhereItIsRead(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	pe := createTestPEWithCoordinator(t, pool)
 	agent := spawnTestAgents(t, pes, pe, domain.AgentSignup{Actor: testActor, Role: domain.SignupRoleBaseline, Hosted: true, AgentType: "baseline"})[0]
 	draft, planner := createTestDraft(t, pool)

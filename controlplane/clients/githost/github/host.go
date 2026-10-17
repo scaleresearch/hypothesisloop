@@ -24,7 +24,7 @@ type AppClient interface {
 }
 
 // InstallationStore is what Host reads of the installations orgs connected.
-// *db.GitHubInstallationsStore satisfies it.
+// *db.Store satisfies it.
 type InstallationStore interface {
 	GetProject(ctx context.Context, id string) (*domain.Project, error)
 	ListGitHubInstallations(ctx context.Context, orgID string) ([]*domain.OrgGitHubInstallation, error)

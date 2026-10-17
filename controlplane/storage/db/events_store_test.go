@@ -363,7 +363,7 @@ VALUES ('agent', $1, $2, $3, 'r@0', 'h', 'd', $4, 'claim', 'test-accelerator',
 	if err != nil || len(replayed) != 1 || replayed[0].Value != "capacity_unavailable" || replayed[0].Detail != sentence {
 		t.Errorf("replayed blocked event: got = %+v, %v, want = the code and the sentence", replayed, err)
 	}
-	job, err := NewExperimentsStore(pool).GetExperiment(context.Background(), jobID)
+	job, err := NewStore(pool, 3).GetExperiment(context.Background(), jobID)
 	if err != nil || job.NotAdmittedReason != "capacity_unavailable" || job.NotAdmittedMessage != sentence {
 		t.Errorf("the job read: got = %q, %q, %v, want = the code and the sentence apart", job.NotAdmittedReason, job.NotAdmittedMessage, err)
 	}
@@ -492,7 +492,7 @@ func TestTheCloseEventCarriesTheReasonGiven(t *testing.T) {
 	before := cursorNow(t, pool)
 	events, stop := listenForEvents(t, pool)
 	defer stop()
-	store := NewPlatformExperimentsStore(pool)
+	store := NewStore(pool, 3)
 
 	if err := store.ClosePlatformExperiment(ctx, peID, &domain.Actor{Kind: domain.ActorUser, ID: "u-1"}, "the baseline measured the old split"); err != nil {
 		t.Fatal(err)
@@ -524,7 +524,7 @@ func TestAReasonThatWaitsForTheCoordinatorIsAnnouncedOnceAsAStatusEventAndReplay
 	before := cursorNow(t, pool)
 	events, stop := listenForEvents(t, pool)
 	defer stop()
-	store := NewPlatformExperimentsStore(pool)
+	store := NewStore(pool, 3)
 	filter := domain.EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{domain.EventPlatformExperimentStatus: true}}
 	replay := func() []domain.Event {
 		t.Helper()
@@ -616,7 +616,7 @@ func TestACutAnnouncesBothTheLadderBoundaryAndTheCutAgentsOwnStopCondition(t *te
 	// The agent's other way out is its own: it says it has nothing left to do.
 	exec(t, pool, `UPDATE platform_experiments SET status = 'running' WHERE id = $1`, peID)
 	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist')`, peID, agentID)
-	if err := NewPlatformExperimentsStore(pool).FinishAgent(context.Background(), peID, agentID, "quota spent"); err != nil {
+	if err := NewStore(pool, 3).FinishAgent(context.Background(), peID, agentID, "quota spent"); err != nil {
 		t.Fatalf("finish: got = %v, want = nil", err)
 	}
 	if got := awaitEvent(t, events, domain.EventAgentFinished, agentID); got.Detail != "quota spent" || got.PlatformExperimentID != peID {
@@ -687,7 +687,7 @@ func TestReplayReturnsEachOfTheNewKindsFromTheChangedRowsOwnColumns(t *testing.T
 
 	exec(t, pool, `UPDATE platform_experiments SET status = 'running' WHERE id = $1`, peID)
 	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist')`, peID, agentID)
-	if err := NewPlatformExperimentsStore(pool).FinishAgent(context.Background(), peID, agentID, "nothing left"); err != nil {
+	if err := NewStore(pool, 3).FinishAgent(context.Background(), peID, agentID, "nothing left"); err != nil {
 		t.Fatalf("finish: got = %v, want = nil", err)
 	}
 	exec(t, pool, `UPDATE platform_experiments SET status = 'closed', description = 'rewritten' WHERE id = $1`, peID)
@@ -1140,7 +1140,7 @@ func TestAFinishedJobIsAnnouncedWithItsCause(t *testing.T) {
 	events, stop := listenForEvents(t, pool)
 	defer stop()
 	agentID, peID, hypothesisID := seedRun(t, pool, "cause", true)
-	exps := NewExperimentsStore(pool)
+	exps := NewStore(pool, 3)
 	ctx := context.Background()
 	const cause = "container_failed: command exited with code 1"
 	for jobID, end := range map[string][2]string{
@@ -1269,7 +1269,7 @@ func TestAJobThatWaitsLongerThanItWasToRunIsAnnouncedAsHeldOnce(t *testing.T) {
 	events, stop := listenForEvents(t, pool)
 	defer stop()
 	agentID, peID, hypothesisID := seedRun(t, pool, "held", true)
-	experiments := NewExperimentsStore(pool)
+	experiments := NewStore(pool, 3)
 	store := NewEventsStore(pool, noHypothesisEvents{})
 	const sentence = "cluster box-b is short of 1 x tenstorrent.com/chiparch=blackhole, held by 1 job of other platform experiments"
 	queue := func(id, reason string, estimatedHours float64, waited time.Duration) {
@@ -1329,7 +1329,7 @@ func TestABaselineJobThatCannotEndByItsDeadlineIsAnnouncedOnce(t *testing.T) {
 	events, stop := listenForEvents(t, pool)
 	defer stop()
 	agentID, peID, hypothesisID := seedRun(t, pool, "late", true)
-	experiments := NewExperimentsStore(pool)
+	experiments := NewStore(pool, 3)
 	exec(t, pool, `INSERT INTO experiments
 (actor_kind, id, agent_id, platform_experiment_id, code_ref, config_hash, data_ref,
  hypothesis_id, hypothesis, accelerator_type, status, not_admitted_reason,
@@ -1356,7 +1356,7 @@ VALUES ('agent', 'late-job', $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-acceler
 }
 
 // dueOf is the researchers of peID due an idle notice: other tests leave runs of their own.
-func dueOf(t *testing.T, store *PlatformExperimentsStore, peID string, after time.Duration) ([]IdleResearcher, error) {
+func dueOf(t *testing.T, store *Store, peID string, after time.Duration) ([]IdleResearcher, error) {
 	t.Helper()
 	all, err := store.IdleResearchers(context.Background(), after)
 	var due []IdleResearcher
@@ -1370,7 +1370,7 @@ func dueOf(t *testing.T, store *PlatformExperimentsStore, peID string, after tim
 
 // noticeIdle tells every researcher of peID due an idle notice, as the service does, with a
 // detail that says the minutes of its stretch, and answers how many were told.
-func noticeIdle(t *testing.T, store *PlatformExperimentsStore, peID string, after time.Duration) int {
+func noticeIdle(t *testing.T, store *Store, peID string, after time.Duration) int {
 	t.Helper()
 	due, err := store.IdleResearchers(context.Background(), after)
 	if err != nil {
@@ -1396,7 +1396,7 @@ func TestAResearcherWithNoJobForTheNoticeIsToldAgainWhileTheStretchLasts(t *test
 	pool := eventsTestDB(t)
 	before := cursorNow(t, pool)
 	agentID, peID, hypothesisID := seedRun(t, pool, "idle", true)
-	store := NewPlatformExperimentsStore(pool)
+	store := NewStore(pool, 3)
 	ctx := context.Background()
 	exec(t, pool, `UPDATE platform_experiments SET status = 'running', started_at = now() - interval '20 minutes' WHERE id = $1`, peID)
 	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type, signed_up_at) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist', now() - interval '30 minutes')`, peID, agentID)
@@ -1482,7 +1482,7 @@ VALUES ('agent', $4, $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator', $
 func TestAnIdleNoticeToldSinceItWasReadStands(t *testing.T) {
 	pool := eventsTestDB(t)
 	agentID, peID, _ := seedRun(t, pool, "idle-race", true)
-	store := NewPlatformExperimentsStore(pool)
+	store := NewStore(pool, 3)
 	ctx := context.Background()
 	exec(t, pool, `UPDATE platform_experiments SET status = 'running', started_at = now() - interval '20 minutes' WHERE id = $1`, peID)
 	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type, signed_up_at) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist', now() - interval '30 minutes')`, peID, agentID)
@@ -1510,7 +1510,7 @@ func TestARunWithPlacesFreeForTheNoticeIsToldAgainWhileTheyStayFree(t *testing.T
 	pool := eventsTestDB(t)
 	before := cursorNow(t, pool)
 	agentID, peID, _ := seedRun(t, pool, "capacity-idle", true)
-	store := NewPlatformExperimentsStore(pool)
+	store := NewStore(pool, 3)
 	ctx := context.Background()
 	exec(t, pool, `UPDATE platform_experiments SET status = 'running', started_at = now() - interval '1 hour', ends_at = now() + interval '3 hours' WHERE id = $1`, peID)
 	mark := func(free bool, after time.Duration) *IdleCapacity {
@@ -1594,7 +1594,7 @@ capacity_noticed_at = capacity_noticed_at - $2::interval WHERE id = $1`, peID, a
 func TestAResearcherWithAJobRunningIsNotIdle(t *testing.T) {
 	pool := eventsTestDB(t)
 	agentID, peID, hypothesisID := seedRun(t, pool, "running", true)
-	store := NewPlatformExperimentsStore(pool)
+	store := NewStore(pool, 3)
 	ctx := context.Background()
 	exec(t, pool, `UPDATE platform_experiments SET status = 'running', started_at = now() - interval '40 minutes' WHERE id = $1`, peID)
 	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type, signed_up_at) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist', now() - interval '40 minutes')`, peID, agentID)
@@ -1669,7 +1669,7 @@ VALUES ('agent', 'duplicate-job', $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-ac
 	if (domain.EventFilter{PlatformExperimentID: peID, AgentID: "another-agent"}).Matches(live) {
 		t.Errorf("a duplicate is announced to another agent: %+v", live)
 	}
-	job, err := NewExperimentsStore(pool).GetExperiment(context.Background(), "duplicate-job")
+	job, err := NewStore(pool, 3).GetExperiment(context.Background(), "duplicate-job")
 	if err != nil || job == nil || job.SameHypothesis != sentence {
 		t.Fatalf("the job as read: %+v, %v, want same_hypothesis kept", job, err)
 	}

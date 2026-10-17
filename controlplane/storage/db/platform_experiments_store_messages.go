@@ -42,7 +42,7 @@ func (e *MessagesRateLimited) Error() string {
 // sender sent domain.MaxAgentMessagesPerHour in the last hour. To every researcher, those the
 // sender may not message yet are returned as refused and the rest are sent, and only when none is
 // is it *MessagesRateLimited, for the first of them. Each is told as agent.message.
-func (s *PlatformExperimentsStore) SendAgentMessages(ctx context.Context, platformExpID string, to []string, text string, sender domain.Actor) (sent []domain.AgentMessage, refused []MessagesRateLimited, err error) {
+func (s *Store) SendAgentMessages(ctx context.Context, platformExpID string, to []string, text string, sender domain.Actor) (sent []domain.AgentMessage, refused []MessagesRateLimited, err error) {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("platform_experiments_store.SendAgentMessages: begin tx: %w", err)
@@ -143,7 +143,7 @@ VALUES ($1, $2, $3, $4, $5, $6, pg_current_xact_id()::text::bigint) RETURNING cr
 // domain.CoordinatorRecipient, or stores none: domain.ErrPlatformExperimentClosed once it closed,
 // ErrNoCoordinator where the platform hosts none, and *MessagesRateLimited past
 // domain.MaxAgentMessagesPerHour of the sender's in the last hour.
-func (s *PlatformExperimentsStore) SendCoordinatorMessage(ctx context.Context, platformExpID, text string, sender domain.Actor) (*domain.AgentMessage, error) {
+func (s *Store) SendCoordinatorMessage(ctx context.Context, platformExpID, text string, sender domain.Actor) (*domain.AgentMessage, error) {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.SendCoordinatorMessage: begin tx: %w", err)
@@ -189,7 +189,7 @@ VALUES ($1, $2, $3, $4, $5, $6, pg_current_xact_id()::text::bigint) RETURNING cr
 // MessageAllowance is, for every agent of a platform experiment but its planner, how many more
 // messages sender may send it now and when that next grows, counted as SendAgentMessages
 // refuses: the messages of the other sender count apart.
-func (s *PlatformExperimentsStore) MessageAllowance(ctx context.Context, platformExpID string, sender domain.Actor) (map[string]domain.MessageAllowance, error) {
+func (s *Store) MessageAllowance(ctx context.Context, platformExpID string, sender domain.Actor) (map[string]domain.MessageAllowance, error) {
 	rows, err := s.pool.pool.Query(ctx, `
 SELECT s.agent_id, count(m.id), min(m.created_at)
 FROM experiment_signups s
@@ -221,7 +221,7 @@ GROUP BY s.agent_id`, platformExpID, string(domain.SignupRolePlanner), domain.Me
 
 // ListAgentMessages is every message sent in a platform experiment, to agentID alone when it is
 // not empty, oldest first.
-func (s *PlatformExperimentsStore) ListAgentMessages(ctx context.Context, platformExpID, agentID string) ([]domain.AgentMessage, error) {
+func (s *Store) ListAgentMessages(ctx context.Context, platformExpID, agentID string) ([]domain.AgentMessage, error) {
 	rows, err := s.pool.pool.Query(ctx, `SELECT agent_id, sender, text, actor_kind, actor_id, created_at FROM agent_messages
 WHERE platform_experiment_id = $1 AND ($2 = '' OR agent_id = $2) ORDER BY id`, platformExpID, agentID)
 	if err != nil {

@@ -20,7 +20,7 @@ import (
 // enrol, so a removal and a start cannot both believe they came first. The signup holds the only
 // record of the agent's object-store key, so deleteDataKey takes that key out of the store before
 // the row goes, and a key that could not be deleted keeps the signup.
-func (s *PlatformExperimentsStore) RemoveAgent(ctx context.Context, platformExpID, agentID string, deleteDataKey func(ctx context.Context, accessKeyID string) error) error {
+func (s *Store) RemoveAgent(ctx context.Context, platformExpID, agentID string, deleteDataKey func(ctx context.Context, accessKeyID string) error) error {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.RemoveAgent: begin tx: %w", err)
@@ -102,7 +102,7 @@ var ErrWorkUnfinished = errors.New("the agent has a job in flight")
 // that one that measures the baseline is done in an open one, where its work is. It answers
 // ErrSignupClosed anywhere else, domain.ErrNotSignedUp, and ErrWorkUnfinished. An agent that already
 // finished keeps the moment and the reason it has.
-func (s *PlatformExperimentsStore) FinishAgent(ctx context.Context, platformExpID, agentID, reason string) error {
+func (s *Store) FinishAgent(ctx context.Context, platformExpID, agentID, reason string) error {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.FinishAgent: begin tx: %w", err)
@@ -150,7 +150,7 @@ WHERE platform_experiment_id = $1 AND agent_id = $2`, platformExpID, agentID, re
 // SetCloseAgents keeps lines as how each agent's run of the platform experiment id stands at its
 // close, for its record of the close. It is taken just before the close is written, and one that
 // is closed keeps what it has.
-func (s *PlatformExperimentsStore) SetCloseAgents(ctx context.Context, id, lines string) error {
+func (s *Store) SetCloseAgents(ctx context.Context, id, lines string) error {
 	if _, err := s.pool.pool.Exec(ctx, `UPDATE platform_experiments SET close_agents = $2 WHERE id = $1 AND status <> 'closed'`, id, lines); err != nil {
 		return fmt.Errorf("platform_experiments_store.SetCloseAgents: %w", err)
 	}
@@ -158,7 +158,7 @@ func (s *PlatformExperimentsStore) SetCloseAgents(ctx context.Context, id, lines
 }
 
 // CloseAgents is what SetCloseAgents kept of the platform experiment id, empty when nothing was.
-func (s *PlatformExperimentsStore) CloseAgents(ctx context.Context, id string) (string, error) {
+func (s *Store) CloseAgents(ctx context.Context, id string) (string, error) {
 	var lines string
 	if err := s.pool.pool.QueryRow(ctx, `SELECT close_agents FROM platform_experiments WHERE id = $1`, id).Scan(&lines); err != nil {
 		return "", fmt.Errorf("platform_experiments_store.CloseAgents: %w", err)

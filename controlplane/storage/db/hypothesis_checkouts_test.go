@@ -14,7 +14,7 @@ import (
 func TestACheckoutClaimsTheHypothesisBeforeAJob(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	store, pes, experiments := NewHypothesesStore(pool), NewPlatformExperimentsStore(pool), NewExperimentsStore(pool)
+	store, pes, experiments := NewStore(pool, 3), NewStore(pool, 3), NewStore(pool, 3)
 	first, peID, hypothesisID := seedRun(t, pool, "checkout", true)
 	second, _, _ := seedRun(t, pool, "checkout-b", true)
 	stale, _, _ := seedRun(t, pool, "checkout-c", true)
@@ -92,7 +92,7 @@ VALUES ('agent', 'checkout-job', $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-acc
 func TestAnAgentThatEndedWorksOnNothing(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	store, pes := NewHypothesesStore(pool), NewPlatformExperimentsStore(pool)
+	store, pes := NewStore(pool, 3), NewStore(pool, 3)
 	worker, peID, hypothesisID := seedRun(t, pool, "ended", true)
 	cut, _, _ := seedRun(t, pool, "ended-b", true)
 	t.Cleanup(func() {

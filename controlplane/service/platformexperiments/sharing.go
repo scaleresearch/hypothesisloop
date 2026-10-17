@@ -12,7 +12,7 @@ import (
 )
 
 // SharingStore is the persistence of the platform's decision to show a platform experiment to
-// every account. *db.PlatformExperimentsStore satisfies it.
+// every account. *db.Store satisfies it.
 type SharingStore interface {
 	SetPlatformExperimentShared(ctx context.Context, id string, shared bool) (found bool, err error)
 	GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error)

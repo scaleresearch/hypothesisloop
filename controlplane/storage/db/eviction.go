@@ -25,7 +25,7 @@ import (
 // infrastructure fault into a refund; see its doc comment.
 func (s *Store) ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (domain.Termination, error) {
 	if domain.RequeuedOnFault(domain.EvictionReason(reason)) {
-		requeued, err := s.ExperimentsStore.RequeueInfrastructureFault(ctx, id, from, reason, s.maxInfraRequeues)
+		requeued, err := s.RequeueInfrastructureFault(ctx, id, from, reason, s.maxInfraRequeues)
 		if err != nil {
 			return domain.TerminationSkipped, err
 		}
@@ -35,7 +35,7 @@ func (s *Store) ResolveTermination(ctx context.Context, id string, from, to doma
 		// Ceiling reached (or another writer won the race): fall through and terminate, so a job
 		// that keeps landing on broken hardware stops and says so with the reason that ended it.
 	}
-	tag, err := s.ExperimentsStore.pool.pool.Exec(ctx, `
+	tag, err := s.pool.pool.Exec(ctx, `
 		UPDATE experiments SET status = $3, eviction_reason = $4, not_admitted_reason = NULL, updated_at = NOW()
 		WHERE id = $1 AND status = $2`, id, string(from), string(to), reason)
 	if err != nil {
@@ -52,7 +52,7 @@ func (s *Store) ResolveTermination(ctx context.Context, id string, from, to doma
 // caller writes its final usage first (settlement.Settler.Settle). It says whether the row was
 // still queued.
 func (s *Store) EndQueuedSettled(ctx context.Context, id string, to domain.ExperimentStatus, reason string) (bool, error) {
-	tag, err := s.ExperimentsStore.pool.pool.Exec(ctx, `
+	tag, err := s.pool.pool.Exec(ctx, `
 		UPDATE experiments SET status = $2, eviction_reason = $3, not_admitted_reason = NULL, quota_settled_at = NOW(), updated_at = NOW()
 		WHERE id = $1 AND status = 'QUEUED'`, id, string(to), reason)
 	if err != nil {

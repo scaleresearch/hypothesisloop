@@ -60,7 +60,7 @@ type LoopStore interface {
 	// 109): a job never speculates onto a node group another job just watched fail to deliver.
 	RecentlyTriedClusters(ctx context.Context, ttl time.Duration) (map[string]bool, error)
 	// AssignEnvironment is the environment a job's commit declares, which it waits for, with its
-	// build assigned to one of live and kept by one of holding (db.EnvironmentsStore.AssignEnvironment).
+	// build assigned to one of live and kept by one of holding (db.Store.AssignEnvironment).
 	AssignEnvironment(ctx context.Context, key string, live, holding []string, lease time.Duration) (*domain.Environment, error)
 	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (domain.Termination, error)
 	// EndQueuedSettled ends a queued job and releases its hold in one write (db.Store.EndQueuedSettled).

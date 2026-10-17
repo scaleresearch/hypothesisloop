@@ -36,7 +36,7 @@ func TestExperimentStatsGroupsByAgentAndHypothesis(t *testing.T) {
 			t.Fatalf("set hypothesis for %s: got = %v, want = nil", id, err)
 		}
 	}
-	store := NewExperimentsStore(pool)
+	store := NewStore(pool, 3)
 	filter := domain.ExperimentFilter{Scope: domain.AllTenants, PlatformExperimentID: peID}
 
 	plain, err := store.ExperimentStats(ctx, filter, "")

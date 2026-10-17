@@ -28,16 +28,6 @@ var (
 	ErrProjectNameTaken = errors.New("the org already has a project with that name")
 )
 
-// AccountsStore holds who exists and what they own: users, orgs, memberships, projects and API
-// keys, and the placement of a platform experiment, job or agent within them.
-type AccountsStore struct {
-	pool *Pool
-}
-
-func NewAccountsStore(pool *Pool) *AccountsStore {
-	return &AccountsStore{pool: pool}
-}
-
 func newAccountID(prefix string) (string, error) {
 	id, err := uuid.NewV7()
 	if err != nil {
@@ -53,7 +43,7 @@ func newAccountID(prefix string) (string, error) {
 //
 // name is what the identity provider states the person is called now. It replaces the name kept
 // when it differs, and an empty one, a provider that states none, leaves the kept name alone.
-func (s *AccountsStore) EnsureUserHome(ctx context.Context, userID, name, orgName string) (*domain.User, []string, error) {
+func (s *Store) EnsureUserHome(ctx context.Context, userID, name, orgName string) (*domain.User, []string, error) {
 	user, orgIDs, err := readUserHome(ctx, s.pool.pool, userID)
 	if err != nil {
 		return nil, nil, err
@@ -154,7 +144,7 @@ func createOrg(ctx context.Context, tx pgx.Tx, name, ownerUserID string) (*domai
 // included, and ErrMaxOrgsReached refuses the next; zero holds them to no limit. The owner's row
 // is locked first and the orgs they own are counted after the insert, inside its transaction, so
 // two creates at once cannot both take the last place.
-func (s *AccountsStore) CreateOrg(ctx context.Context, name, ownerUserID string, maxOwned int) (*domain.Org, error) {
+func (s *Store) CreateOrg(ctx context.Context, name, ownerUserID string, maxOwned int) (*domain.Org, error) {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("accounts_store.CreateOrg: begin: %w", err)
@@ -187,7 +177,7 @@ func (s *AccountsStore) CreateOrg(ctx context.Context, name, ownerUserID string,
 	return org, nil
 }
 
-func (s *AccountsStore) RenameOrg(ctx context.Context, id, name string) error {
+func (s *Store) RenameOrg(ctx context.Context, id, name string) error {
 	tag, err := s.pool.pool.Exec(ctx, `UPDATE orgs SET name = $2 WHERE id = $1`, id, name)
 	if err != nil {
 		return fmt.Errorf("accounts_store.RenameOrg: %w", err)
@@ -199,7 +189,7 @@ func (s *AccountsStore) RenameOrg(ctx context.Context, id, name string) error {
 }
 
 // GetOrg returns an org, or nil when there is none.
-func (s *AccountsStore) GetOrg(ctx context.Context, id string) (*domain.Org, error) {
+func (s *Store) GetOrg(ctx context.Context, id string) (*domain.Org, error) {
 	org := &domain.Org{}
 	err := s.pool.pool.QueryRow(ctx, `SELECT id, name, created_at FROM orgs WHERE id = $1`, id).Scan(&org.ID, &org.Name, &org.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -212,16 +202,16 @@ func (s *AccountsStore) GetOrg(ctx context.Context, id string) (*domain.Org, err
 }
 
 // ListOrgs returns the given orgs, oldest first, with no role set.
-func (s *AccountsStore) ListOrgs(ctx context.Context, orgIDs []string) ([]*domain.Org, error) {
+func (s *Store) ListOrgs(ctx context.Context, orgIDs []string) ([]*domain.Org, error) {
 	return s.listOrgs(ctx, `WHERE id = ANY($1)`, orgIDs)
 }
 
 // ListAllOrgs returns every org, oldest first, with no role set.
-func (s *AccountsStore) ListAllOrgs(ctx context.Context) ([]*domain.Org, error) {
+func (s *Store) ListAllOrgs(ctx context.Context) ([]*domain.Org, error) {
 	return s.listOrgs(ctx, ``)
 }
 
-func (s *AccountsStore) listOrgs(ctx context.Context, where string, args ...any) ([]*domain.Org, error) {
+func (s *Store) listOrgs(ctx context.Context, where string, args ...any) ([]*domain.Org, error) {
 	rows, err := s.pool.pool.Query(ctx, `SELECT id, name, created_at FROM orgs `+where+` ORDER BY created_at, id`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("accounts_store.ListOrgs: %w", err)
@@ -239,7 +229,7 @@ func (s *AccountsStore) listOrgs(ctx context.Context, where string, args ...any)
 }
 
 // SetUserStaff records whether a user is one of the platform's own operators.
-func (s *AccountsStore) SetUserStaff(ctx context.Context, userID string, staff bool) error {
+func (s *Store) SetUserStaff(ctx context.Context, userID string, staff bool) error {
 	tag, err := s.pool.pool.Exec(ctx, `UPDATE users SET staff = $2 WHERE id = $1`, userID, staff)
 	if err != nil {
 		return fmt.Errorf("accounts_store.SetUserStaff: %w", err)
@@ -251,7 +241,7 @@ func (s *AccountsStore) SetUserStaff(ctx context.Context, userID string, staff b
 }
 
 // ListUserOrgs returns the orgs a user belongs to, oldest first, each with the user's role.
-func (s *AccountsStore) ListUserOrgs(ctx context.Context, userID string) ([]*domain.Org, error) {
+func (s *Store) ListUserOrgs(ctx context.Context, userID string) ([]*domain.Org, error) {
 	rows, err := s.pool.pool.Query(ctx, `
 SELECT o.id, o.name, m.role, o.created_at
 FROM org_members m JOIN orgs o ON o.id = m.org_id
@@ -273,7 +263,7 @@ ORDER BY m.created_at, o.id`, userID)
 }
 
 // OrgRole returns a user's role in an org; found is false when they are not a member.
-func (s *AccountsStore) OrgRole(ctx context.Context, orgID, userID string) (role domain.OrgRole, found bool, err error) {
+func (s *Store) OrgRole(ctx context.Context, orgID, userID string) (role domain.OrgRole, found bool, err error) {
 	err = s.pool.pool.QueryRow(ctx, `SELECT role FROM org_members WHERE org_id = $1 AND user_id = $2`, orgID, userID).Scan(&role)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", false, nil
@@ -288,7 +278,7 @@ func (s *AccountsStore) OrgRole(ctx context.Context, orgID, userID string) (role
 // and no more, this one included, and ErrMaxProjectsReached refuses the next; zero holds it to no
 // limit. The org's row is locked first and its projects are counted after the insert, as
 // CreateOrg counts an owner's orgs.
-func (s *AccountsStore) CreateProject(ctx context.Context, orgID, name string, maxProjects int) (*domain.Project, error) {
+func (s *Store) CreateProject(ctx context.Context, orgID, name string, maxProjects int) (*domain.Project, error) {
 	id, err := newAccountID("prj")
 	if err != nil {
 		return nil, fmt.Errorf("accounts_store.CreateProject: %w", err)
@@ -327,7 +317,7 @@ func (s *AccountsStore) CreateProject(ctx context.Context, orgID, name string, m
 	return p, nil
 }
 
-func (s *AccountsStore) RenameProject(ctx context.Context, id, name string) error {
+func (s *Store) RenameProject(ctx context.Context, id, name string) error {
 	tag, err := s.pool.pool.Exec(ctx, `UPDATE projects SET name = $2 WHERE id = $1`, id, name)
 	if err != nil {
 		return projectWriteError("RenameProject", err)
@@ -352,7 +342,7 @@ func projectWriteError(op string, err error) error {
 }
 
 // GetProject returns a project, or nil when there is none.
-func (s *AccountsStore) GetProject(ctx context.Context, id string) (*domain.Project, error) {
+func (s *Store) GetProject(ctx context.Context, id string) (*domain.Project, error) {
 	p := &domain.Project{}
 	err := s.pool.pool.QueryRow(ctx, `SELECT id, org_id, name, created_at FROM projects WHERE id = $1`, id).
 		Scan(&p.ID, &p.OrgID, &p.Name, &p.CreatedAt)
@@ -366,7 +356,7 @@ func (s *AccountsStore) GetProject(ctx context.Context, id string) (*domain.Proj
 }
 
 // ListProjects returns the projects of the given orgs, oldest first within each org.
-func (s *AccountsStore) ListProjects(ctx context.Context, orgIDs []string) ([]*domain.Project, error) {
+func (s *Store) ListProjects(ctx context.Context, orgIDs []string) ([]*domain.Project, error) {
 	rows, err := s.pool.pool.Query(ctx, `
 SELECT id, org_id, name, created_at FROM projects WHERE org_id = ANY($1) ORDER BY org_id, created_at, id`, orgIDs)
 	if err != nil {
@@ -418,7 +408,7 @@ func scanAPIKey(row rowScanner) (*domain.APIKey, error) {
 // CreateAPIKey stores a key under the hash of its token. key.ID, OrgID, Actor.ID and Name are
 // required; the project, when set, must belong to the org, and the creator must be one who may
 // hold the key (apiKeyHeldBy), which is what the key is held to for as long as it lives.
-func (s *AccountsStore) CreateAPIKey(ctx context.Context, key *domain.APIKey, keyHash string) error {
+func (s *Store) CreateAPIKey(ctx context.Context, key *domain.APIKey, keyHash string) error {
 	var projectID, mintedBy *string
 	if key.MintedBy != "" {
 		mintedBy = &key.MintedBy
@@ -451,7 +441,7 @@ RETURNING created_at, `+userName("created_by"), key.ID, keyHash, key.OrgID, proj
 }
 
 // ListAPIKeys returns an org's keys, revoked ones included, newest first.
-func (s *AccountsStore) ListAPIKeys(ctx context.Context, orgID string) ([]*domain.APIKey, error) {
+func (s *Store) ListAPIKeys(ctx context.Context, orgID string) ([]*domain.APIKey, error) {
 	rows, err := s.pool.pool.Query(ctx, apiKeySelect+`WHERE k.org_id = $1 ORDER BY k.created_at DESC, k.id`, orgID)
 	if err != nil {
 		return nil, fmt.Errorf("accounts_store.ListAPIKeys: %w", err)
@@ -469,16 +459,16 @@ func (s *AccountsStore) ListAPIKeys(ctx context.Context, orgID string) ([]*domai
 }
 
 // GetAPIKey returns a key by id, or nil when there is none.
-func (s *AccountsStore) GetAPIKey(ctx context.Context, id string) (*domain.APIKey, error) {
+func (s *Store) GetAPIKey(ctx context.Context, id string) (*domain.APIKey, error) {
 	return s.apiKeyWhere(ctx, "GetAPIKey", `k.id = $1`, id)
 }
 
 // APIKeyByHash returns the key stored under a token hash, working or not, or nil when there is none.
-func (s *AccountsStore) APIKeyByHash(ctx context.Context, keyHash string) (*domain.APIKey, error) {
+func (s *Store) APIKeyByHash(ctx context.Context, keyHash string) (*domain.APIKey, error) {
 	return s.apiKeyWhere(ctx, "APIKeyByHash", `k.key_hash = $1`, keyHash)
 }
 
-func (s *AccountsStore) apiKeyWhere(ctx context.Context, op, where, arg string) (*domain.APIKey, error) {
+func (s *Store) apiKeyWhere(ctx context.Context, op, where, arg string) (*domain.APIKey, error) {
 	k, err := scanAPIKey(s.pool.pool.QueryRow(ctx, apiKeySelect+`WHERE `+where, arg))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -492,7 +482,7 @@ func (s *AccountsStore) apiKeyWhere(ctx context.Context, op, where, arg string) 
 // RevokeAPIKey ends a key. Every key minted from it, directly or through another, ends with it:
 // a key is read as revoked while any key it descends from is (apiKeySelect). One already revoked
 // keeps its first revocation time.
-func (s *AccountsStore) RevokeAPIKey(ctx context.Context, id string) error {
+func (s *Store) RevokeAPIKey(ctx context.Context, id string) error {
 	tag, err := s.pool.pool.Exec(ctx, `UPDATE api_keys SET revoked_at = COALESCE(revoked_at, $2) WHERE id = $1`, id, time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("accounts_store.RevokeAPIKey: %w", err)

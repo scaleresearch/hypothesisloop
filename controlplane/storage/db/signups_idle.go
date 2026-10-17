@@ -35,7 +35,7 @@ type IdleResearcher struct {
 // own created or running for after, since the run started or it joined, has none queued or
 // running, and was not told so in the last after of the stretch: due a notice. A researcher that
 // finished or was cut is never due one.
-func (s *PlatformExperimentsStore) IdleResearchers(ctx context.Context, after time.Duration) ([]IdleResearcher, error) {
+func (s *Store) IdleResearchers(ctx context.Context, after time.Duration) ([]IdleResearcher, error) {
 	rows, err := s.pool.pool.Query(ctx, `
 WITH idle AS (
     SELECT s.platform_experiment_id, s.agent_id, s.idle_noticed_at, s.idle_repeat, `+idleSinceSQL+` AS since
@@ -70,7 +70,7 @@ ORDER BY platform_experiment_id, agent_id`, after.Seconds(), string(domain.Signu
 
 // NoticeIdle tells r that it is idle, with detail: agent.idle, new for its first notice of the
 // stretch and continues after. A notice told since r was read stands, and this one writes nothing.
-func (s *PlatformExperimentsStore) NoticeIdle(ctx context.Context, r IdleResearcher, detail string) error {
+func (s *Store) NoticeIdle(ctx context.Context, r IdleResearcher, detail string) error {
 	if _, err := s.pool.pool.Exec(ctx, `
 UPDATE experiment_signups
 SET idle_noticed_at = now(), idle_xid = pg_current_xact_id()::text::bigint, idle_repeat = $3, idle_detail = $4
@@ -97,7 +97,7 @@ type IdleCapacity struct {
 // places beyond its queued jobs now: the first pass that sees some starts a stretch, and one that
 // sees none ends it. With free it answers the stretch when it lasted after and was not told so in
 // the last after of it: due a notice. Otherwise it answers nil.
-func (s *PlatformExperimentsStore) MarkCapacityFree(ctx context.Context, id string, free bool, after time.Duration) (*IdleCapacity, error) {
+func (s *Store) MarkCapacityFree(ctx context.Context, id string, free bool, after time.Duration) (*IdleCapacity, error) {
 	if !free {
 		if _, err := s.pool.pool.Exec(ctx, `UPDATE platform_experiments SET capacity_free_since = NULL WHERE id = $1 AND capacity_free_since IS NOT NULL`, id); err != nil {
 			return nil, fmt.Errorf("platform_experiments_store.MarkCapacityFree: %w", err)
@@ -128,7 +128,7 @@ WHERE id = $1 AND status = 'running' AND capacity_free_since <= now() - make_int
 // NoticeCapacityIdle tells whoever steers the platform experiment of r that its capacity holds
 // places beyond its queued jobs, with detail: capacity.idle, new for the first notice of the
 // stretch and continues after. A notice told since r was read stands, and this one writes nothing.
-func (s *PlatformExperimentsStore) NoticeCapacityIdle(ctx context.Context, r IdleCapacity, detail string) error {
+func (s *Store) NoticeCapacityIdle(ctx context.Context, r IdleCapacity, detail string) error {
 	if _, err := s.pool.pool.Exec(ctx, `
 UPDATE platform_experiments
 SET capacity_noticed_at = now(), capacity_xid = pg_current_xact_id()::text::bigint, capacity_repeat = $2, capacity_detail = $3

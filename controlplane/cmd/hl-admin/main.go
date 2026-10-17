@@ -67,32 +67,32 @@ func run(args []string, stdout io.Writer) error {
 		fmt.Fprintln(stdout, token)
 		return nil
 	case len(args) == 4 && args[0] == "user" && args[1] == "add":
-		return withPool(cfg.Database, func(ctx context.Context, pool *db.Pool) error {
-			return addUser(ctx, db.NewAccountsStore(pool), args[2], args[3], stdout)
+		return withStore(cfg, func(ctx context.Context, store *db.Store) error {
+			return addUser(ctx, store, args[2], args[3], stdout)
 		})
 	case (len(args) == 4 || len(args) == 5) && args[0] == "api-key" && args[1] == "add":
 		projectID := ""
 		if len(args) == 5 {
 			projectID = args[4]
 		}
-		return withPool(cfg.Database, func(ctx context.Context, pool *db.Pool) error {
-			return addAPIKey(ctx, db.NewAccountsStore(pool), args[2], args[3], projectID, stdout)
+		return withStore(cfg, func(ctx context.Context, store *db.Store) error {
+			return addAPIKey(ctx, store, args[2], args[3], projectID, stdout)
 		})
 	case len(args) == 4 && args[0] == "user" && args[1] == "staff":
 		staff, err := onOff(args[3])
 		if err != nil {
 			return err
 		}
-		return withPool(cfg.Database, func(ctx context.Context, pool *db.Pool) error {
-			return db.NewAccountsStore(pool).SetUserStaff(ctx, args[2], staff)
+		return withStore(cfg, func(ctx context.Context, store *db.Store) error {
+			return store.SetUserStaff(ctx, args[2], staff)
 		})
 	case len(args) == 4 && args[0] == "cluster" && args[1] == "share":
 		shared, err := onOff(args[3])
 		if err != nil {
 			return err
 		}
-		return withPool(cfg.Database, func(ctx context.Context, pool *db.Pool) error {
-			_, requeued, err := db.NewClustersStore(pool).UpdateCluster(ctx, args[2], &shared, domain.ClusterSettings{})
+		return withStore(cfg, func(ctx context.Context, store *db.Store) error {
+			_, requeued, err := store.UpdateCluster(ctx, args[2], &shared, domain.ClusterSettings{})
 			if err != nil {
 				return err
 			}
@@ -107,21 +107,21 @@ func run(args []string, stdout io.Writer) error {
 		if err := decoder.Decode(&change); err != nil || change.Empty() {
 			return fmt.Errorf("cluster settings: want a JSON object naming at least one setting: %v", err)
 		}
-		return withPool(cfg.Database, func(ctx context.Context, pool *db.Pool) error {
-			_, _, err := db.NewClustersStore(pool).UpdateCluster(ctx, args[2], nil, change)
+		return withStore(cfg, func(ctx context.Context, store *db.Store) error {
+			_, _, err := store.UpdateCluster(ctx, args[2], nil, change)
 			return err
 		})
 	case len(args) == 3 && args[0] == "platform-experiment" && (args[1] == "share" || args[1] == "unshare"):
-		return withPool(cfg.Database, func(ctx context.Context, pool *db.Pool) error {
-			found, err := db.NewPlatformExperimentsStore(pool).SetPlatformExperimentShared(ctx, args[2], args[1] == "share")
+		return withStore(cfg, func(ctx context.Context, store *db.Store) error {
+			found, err := store.SetPlatformExperimentShared(ctx, args[2], args[1] == "share")
 			if err == nil && !found {
 				err = fmt.Errorf("no platform experiment %s", args[2])
 			}
 			return err
 		})
 	case len(args) == 4 && args[0] == "cluster" && args[1] == "add":
-		return withPool(cfg.Database, func(ctx context.Context, pool *db.Pool) error {
-			if _, err := db.NewClustersStore(pool).RegisterCluster(ctx, args[2], args[3]); err != nil {
+		return withStore(cfg, func(ctx context.Context, store *db.Store) error {
+			if _, err := store.RegisterCluster(ctx, args[2], args[3]); err != nil {
 				return err
 			}
 			token, err := auth.Mint(cfg.Auth.SigningSecret, auth.RuntimeScope(args[2]))
@@ -143,8 +143,8 @@ func run(args []string, stdout io.Writer) error {
 		if err != nil {
 			return err
 		}
-		return withPool(cfg.Database, func(ctx context.Context, pool *db.Pool) error {
-			return connectGitHub(ctx, db.NewAccountsStore(pool), app, args[2], installation, stdout)
+		return withStore(cfg, func(ctx context.Context, store *db.Store) error {
+			return connectGitHub(ctx, store, app, args[2], installation, stdout)
 		})
 	default:
 		return errors.New(usage)
@@ -184,15 +184,15 @@ func connectGitHub(ctx context.Context, store installationStore, app installatio
 	return json.NewEncoder(stdout).Encode(connected)
 }
 
-func withPool(database config.DatabaseConfig, do func(context.Context, *db.Pool) error) error {
+func withStore(cfg *config.Config, do func(context.Context, *db.Store) error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	pool, err := db.NewPool(ctx, db.ConfigOf(database, 2))
+	pool, err := db.NewPool(ctx, db.ConfigOf(cfg.Database, 2))
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
-	return do(ctx, pool)
+	return do(ctx, db.NewStore(pool, cfg.Scheduler.MaxInfrastructureRequeues))
 }
 
 type userHomes interface {
@@ -222,7 +222,7 @@ func addUser(ctx context.Context, accounts userHomes, subject, name string, stdo
 	}{user.ID, orgIDs[0], projects[0].ID})
 }
 
-func addAPIKey(ctx context.Context, accounts *db.AccountsStore, subject, orgID, projectID string, stdout io.Writer) error {
+func addAPIKey(ctx context.Context, accounts *db.Store, subject, orgID, projectID string, stdout io.Writer) error {
 	id, token, err := auth.NewAPIKey()
 	if err != nil {
 		return err

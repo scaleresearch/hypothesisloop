@@ -12,7 +12,7 @@ import (
 
 func TestRevokingAKeyRevokesEveryKeyMintedFromIt(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
+	accounts := NewStore(pool, 3)
 	ctx := context.Background()
 	userID, orgID := newTestUserHome(t, accounts)
 	suffix := uuid.New().String()[:8]
@@ -72,7 +72,7 @@ func works(k *domain.APIKey) bool { return k.RevokedAt == nil && !k.Orphaned }
 
 func TestAKeyMintedWhileItsParentIsRevokedNeverWorks(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
+	accounts := NewStore(pool, 3)
 	ctx := context.Background()
 	userID, orgID := newTestUserHome(t, accounts)
 	suffix := uuid.New().String()[:8]
@@ -116,7 +116,7 @@ func TestAKeyMintedWhileItsParentIsRevokedNeverWorks(t *testing.T) {
 
 func TestAKeyEndsWhenItsCreatorNoLongerAdministersItsOrg(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
+	accounts := NewStore(pool, 3)
 	ctx := context.Background()
 	ownerID, orgID := newTestUserHome(t, accounts)
 	staffID, _ := newTestUserHome(t, accounts)
@@ -187,7 +187,7 @@ func TestAKeyEndsWhenItsCreatorNoLongerAdministersItsOrg(t *testing.T) {
 
 func TestStaffIsAFlagOnAUserThatExists(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
+	accounts := NewStore(pool, 3)
 	ctx := context.Background()
 	userID, _ := newTestUserHome(t, accounts)
 
@@ -207,7 +207,7 @@ func TestStaffIsAFlagOnAUserThatExists(t *testing.T) {
 
 func TestOrgsAreReadByIDAndAnOrgNeedsAnOwnerThatExists(t *testing.T) {
 	pool := eventsTestDB(t)
-	accounts := NewAccountsStore(pool)
+	accounts := NewStore(pool, 3)
 	ctx := context.Background()
 	userID, homeOrg := newTestUserHome(t, accounts)
 	_, otherOrg := newTestUserHome(t, accounts)

@@ -47,7 +47,7 @@ var ErrAgentOutsideOrg = errors.New("agent is not of the platform experiment's o
 // observes 'running' and refuses. It also serializes signups against each other, which is what
 // makes the max_agents count below exact: a count taken outside this lock let concurrent
 // competitors each see room and all commit.
-func (s *PlatformExperimentsStore) Signup(ctx context.Context, platformExpID string, signup domain.AgentSignup) (bool, error) {
+func (s *Store) Signup(ctx context.Context, platformExpID string, signup domain.AgentSignup) (bool, error) {
 	inserted, err := s.enrol(ctx, platformExpID, nil, []domain.AgentSignup{signup}, nil)
 	if errors.Is(err, ErrSignupClosed) {
 		return false, nil
@@ -59,7 +59,7 @@ func (s *PlatformExperimentsStore) Signup(ctx context.Context, platformExpID str
 // An agent without a name is given one (domain.AgentName), which agent then carries.
 // ErrAgentNameTaken when its name is another agent's in the experiment. ErrSignupClosed when the experiment is not open, ErrMaxAgentsReached when it is a competitor
 // with no place left, ErrMaxHostedReached when it is one machine too many.
-func (s *PlatformExperimentsStore) SpawnAgent(ctx context.Context, platformExpID string, agent *domain.Agent, signup domain.AgentSignup) error {
+func (s *Store) SpawnAgent(ctx context.Context, platformExpID string, agent *domain.Agent, signup domain.AgentSignup) error {
 	_, err := s.enrol(ctx, platformExpID, []*domain.Agent{agent}, []domain.AgentSignup{signup}, nil)
 	return err
 }
@@ -118,7 +118,7 @@ func poolWantsTx(ctx context.Context, tx pgx.Tx, platformExpID string, signup do
 // part of what the researchers left unspent, taken first from the ones that ended (domain.LateShare).
 // agent is created first when not nil. The errors are SpawnAgent's, ErrSignupClosed for any
 // other role or a platform experiment that is not running, and ErrNoShareLeft.
-func (s *PlatformExperimentsStore) JoinRunning(ctx context.Context, platformExpID string, agent *domain.Agent, signup domain.AgentSignup, late LateJoin) error {
+func (s *Store) JoinRunning(ctx context.Context, platformExpID string, agent *domain.Agent, signup domain.AgentSignup, late LateJoin) error {
 	var create []*domain.Agent
 	if agent != nil {
 		create = []*domain.Agent{agent}
@@ -132,7 +132,7 @@ func (s *PlatformExperimentsStore) JoinRunning(ctx context.Context, platformExpI
 
 // enrol is the one transaction a signup row is written in. create is inserted first, into the org
 // the platform experiment belongs to.
-func (s *PlatformExperimentsStore) enrol(ctx context.Context, platformExpID string, create []*domain.Agent, signups []domain.AgentSignup, late *LateJoin) (int, error) {
+func (s *Store) enrol(ctx context.Context, platformExpID string, create []*domain.Agent, signups []domain.AgentSignup, late *LateJoin) (int, error) {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("platform_experiments_store.Signup: begin tx: %w", err)
@@ -396,7 +396,7 @@ WHERE platform_experiment_id = $1 AND agent_id = $2`, platformExpID, agentID, ta
 
 // AgentNames returns the names carried in a platform experiment, each with its agent: of the
 // agents signed up to it and of those that have a job in it.
-func (s *PlatformExperimentsStore) AgentNames(ctx context.Context, platformExpID string) (map[string]string, error) {
+func (s *Store) AgentNames(ctx context.Context, platformExpID string) (map[string]string, error) {
 	names, err := agentNamesTx(ctx, s.pool.pool, platformExpID)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.AgentNames: %w", err)

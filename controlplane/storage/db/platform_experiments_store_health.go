@@ -13,7 +13,7 @@ import (
 // its own signup; any other agent from its signup. A job ended at the transaction that set its
 // status, whose time event_times holds. Restarts are the instance counters, which count every
 // machine asked for again over the run, whatever launch it was under.
-func (s *PlatformExperimentsStore) RunHealth(ctx context.Context) ([]domain.AgentHealth, error) {
+func (s *Store) RunHealth(ctx context.Context) ([]domain.AgentHealth, error) {
 	rows, err := s.pool.pool.Query(ctx, `
 SELECT s.platform_experiment_id, s.agent_id, s.role,
        EXTRACT(EPOCH FROM min(e.created_at) - st.start)::float8,

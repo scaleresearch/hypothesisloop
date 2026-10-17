@@ -12,7 +12,7 @@ import (
 )
 
 // ExperimentDraftStore keeps the forms of new platform experiments people left to finish later.
-// *db.ExperimentDraftsStore is the one in use.
+// *db.Store is the one in use.
 type ExperimentDraftStore interface {
 	CreateExperimentDraft(ctx context.Context, projectID string, form []byte, step, failure string) (*domain.ExperimentDraft, error)
 	ListExperimentDrafts(ctx context.Context, projectID string) ([]*domain.ExperimentDraft, error)

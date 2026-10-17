@@ -12,7 +12,7 @@ import (
 func TestARaisedBaselineIsKeptInTheHistoryAndToldToEveryAgent(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pes := NewPlatformExperimentsStore(pool)
+	pes := NewStore(pool, 3)
 	agentID, peID, _ := seedRun(t, pool, "raise", true)
 	j1, j2, j3 := peID+"-job-1", peID+"-job-2", peID+"-job-3"
 	for _, job := range []string{j1, j2, j3} {

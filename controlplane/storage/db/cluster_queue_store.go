@@ -8,8 +8,8 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// ClusterQueueStore backs the desired-state feed and job-status reports cluster-agents
-// push to. The control plane never writes an explicit "create"/"delete" instruction — the
+// The cluster queue backs the desired-state feed and job-status reports cluster-agents push
+// to. The control plane never writes an explicit "create"/"delete" instruction — the
 // experiment's own status (already updated by service/scheduler before Backend is called)
 // *is* the instruction, and it is the single source of truth: no parallel "desired" table.
 // A cluster-agent asks "what's the desired set of Jobs for my cluster?" and reconciles its
@@ -21,14 +21,6 @@ import (
 // waiting for deletion to be confirmed — see service/scheduler/loop.go's preempt() and
 // service/controller's eviction paths, all of which do the status update first specifically
 // so this table stays the only source of truth for "should a Job exist."
-type ClusterQueueStore struct {
-	pool *Pool
-}
-
-// NewClusterQueueStore creates a ClusterQueueStore backed by pool.
-func NewClusterQueueStore(pool *Pool) *ClusterQueueStore {
-	return &ClusterQueueStore{pool: pool}
-}
 
 // desiredStatuses are the experiment statuses that should have a running Job. Anything not
 // in this set (QUEUED, COMPLETED, FAILED, EVICTED, REJECTED) should not.
@@ -40,7 +32,7 @@ var desiredStatuses = []string{
 // ListDesiredWorkloads returns every experiment in clusterName that should currently have a
 // Job running — the cluster-agent's whole "what should exist" view. Read-only; needs no
 // locking, since it's not claiming anything, just reporting current truth.
-func (s *ClusterQueueStore) ListDesiredWorkloads(ctx context.Context, clusterName string) ([]*domain.Experiment, error) {
+func (s *Store) ListDesiredWorkloads(ctx context.Context, clusterName string) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments
 WHERE cluster_name = $1 AND status = ANY($2)
 ORDER BY id`
@@ -84,7 +76,7 @@ ORDER BY id`
 // A termination clears the row's cluster_name in the statement that records it, since the job
 // holds no capacity any more. last_cluster is where it ran, so a cluster is told of its own
 // terminations and learns nothing of jobs that ran anywhere else.
-func (s *ClusterQueueStore) ListRecentlyUndesiredWorkloads(ctx context.Context, clusterName string, within time.Duration) ([]*domain.Experiment, error) {
+func (s *Store) ListRecentlyUndesiredWorkloads(ctx context.Context, clusterName string, within time.Duration) ([]*domain.Experiment, error) {
 	rows, err := s.pool.pool.Query(ctx, recentlyUndesiredWorkloadsQuery, clusterName, desiredStatuses, within.String())
 	if err != nil {
 		return nil, fmt.Errorf("db.ListRecentlyUndesiredWorkloads: %w", err)

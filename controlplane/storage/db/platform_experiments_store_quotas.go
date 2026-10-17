@@ -53,7 +53,7 @@ func scanAgentQuota(row rowScanner) (*domain.AgentQuota, error) {
 }
 
 // GetAgentQuota returns the quota for an agent in a platform experiment.
-func (s *PlatformExperimentsStore) GetAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error) {
+func (s *Store) GetAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error) {
 	q := `SELECT` + agentQuotaColumns + `FROM agent_quotas WHERE agent_id = $1 AND platform_experiment_id = $2`
 
 	aq, err := scanAgentQuota(s.pool.pool.QueryRow(ctx, q, agentID, platformExpID))
@@ -67,7 +67,7 @@ func (s *PlatformExperimentsStore) GetAgentQuota(ctx context.Context, agentID, p
 }
 
 // ListAgentQuotas returns all quotas for a platform experiment.
-func (s *PlatformExperimentsStore) ListAgentQuotas(ctx context.Context, platformExpID string) ([]*domain.AgentQuota, error) {
+func (s *Store) ListAgentQuotas(ctx context.Context, platformExpID string) ([]*domain.AgentQuota, error) {
 	q := `SELECT` + agentQuotaColumns + `FROM agent_quotas WHERE platform_experiment_id = $1 ORDER BY guaranteed_accelerator_hours DESC`
 
 	rows, err := s.pool.pool.Query(ctx, q, platformExpID)
@@ -99,7 +99,7 @@ func (s *PlatformExperimentsStore) ListAgentQuotas(ctx context.Context, platform
 // transaction, so in between a job counts as both a reservation and an observation. That
 // over-counts, which for admission is the safe direction (it refuses work rather than
 // overspending), and the settlement reconciler closes the window on retry.
-func (s *PlatformExperimentsStore) AddDesiredQuotaUsage(ctx context.Context, platformExpID string, quotas []*domain.AgentQuota) error {
+func (s *Store) AddDesiredQuotaUsage(ctx context.Context, platformExpID string, quotas []*domain.AgentQuota) error {
 	if len(quotas) == 0 {
 		return nil
 	}
@@ -143,7 +143,7 @@ GROUP BY agent_id, capacity_tier`
 }
 
 // AddDesiredQuotaUsageOne is the single-agent counterpart to AddDesiredQuotaUsage.
-func (s *PlatformExperimentsStore) AddDesiredQuotaUsageOne(ctx context.Context, quota *domain.AgentQuota) error {
+func (s *Store) AddDesiredQuotaUsageOne(ctx context.Context, quota *domain.AgentQuota) error {
 	if quota == nil {
 		return nil
 	}

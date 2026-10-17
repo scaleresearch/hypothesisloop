@@ -57,7 +57,7 @@ const runOverAtSQL = `pe.starts_at + make_interval(secs => pe.duration_hours * 3
 // has one at work, once the machine asked for under name for agentID is reported running:
 // started_at is now, and it closes at the end of its run. It writes nothing for one that has a
 // researcher at work.
-func (s *PlatformExperimentsStore) startClock(ctx context.Context, platformExpID, agentID, name string) error {
+func (s *Store) startClock(ctx context.Context, platformExpID, agentID, name string) error {
 	if _, err := s.pool.pool.Exec(ctx, `
 UPDATE platform_experiments pe
 SET started_at = NOW(), ends_at = `+runOverAtSQL+`, updated_at = NOW()
@@ -89,7 +89,7 @@ WHERE pe.id = $1 AND pe.status = 'running' AND pe.started_at IS NULL
 // or fails.
 //
 // Returns started=false when the experiment was not open.
-func (s *PlatformExperimentsStore) StartPlatformExperimentTx(ctx context.Context, id string, agentsDue time.Duration, quotasFor func(participants []StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error)) (bool, []*domain.AgentQuota, error) {
+func (s *Store) StartPlatformExperimentTx(ctx context.Context, id string, agentsDue time.Duration, quotasFor func(participants []StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error)) (bool, []*domain.AgentQuota, error) {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: begin tx: %w", err)
@@ -182,7 +182,7 @@ ORDER BY s.agent_id`, id)
 //
 // Returns (false, nil) if this boundary was already committed by an earlier call — the caller
 // must skip straight to retrying job-stopping instead of re-applying ops.
-func (s *PlatformExperimentsStore) AdvanceStage(ctx context.Context, platformExpID string, stageIndex int, cutAgentIDs, survivorIDs []string, dims []StageRedistribution) (bool, error) {
+func (s *Store) AdvanceStage(ctx context.Context, platformExpID string, stageIndex int, cutAgentIDs, survivorIDs []string, dims []StageRedistribution) (bool, error) {
 	tx, err := s.pool.pool.Begin(ctx)
 	if err != nil {
 		return false, fmt.Errorf("platform_experiments_store.AdvanceStage: begin tx: %w", err)
@@ -297,7 +297,7 @@ func (s *PlatformExperimentsStore) AdvanceStage(ctx context.Context, platformExp
 
 // ListCutAgents returns agent IDs cut at any stage boundary of a platform experiment,
 // oldest cut first.
-func (s *PlatformExperimentsStore) ListCutAgents(ctx context.Context, platformExpID string) ([]domain.AgentCut, error) {
+func (s *Store) ListCutAgents(ctx context.Context, platformExpID string) ([]domain.AgentCut, error) {
 	const q = `SELECT agent_id, stage_index FROM platform_experiment_cuts WHERE platform_experiment_id=$1 ORDER BY cut_at ASC`
 	rows, err := s.pool.pool.Query(ctx, q, platformExpID)
 	if err != nil {
@@ -316,7 +316,7 @@ func (s *PlatformExperimentsStore) ListCutAgents(ctx context.Context, platformEx
 }
 
 // ListStageAdvances returns every boundary this platform experiment has crossed, in order.
-func (s *PlatformExperimentsStore) ListStageAdvances(ctx context.Context, platformExpID string) ([]domain.StageAdvance, error) {
+func (s *Store) ListStageAdvances(ctx context.Context, platformExpID string) ([]domain.StageAdvance, error) {
 	const q = `SELECT stage_index, advanced_at FROM platform_experiment_stage_advances WHERE platform_experiment_id=$1 ORDER BY stage_index ASC`
 	rows, err := s.pool.pool.Query(ctx, q, platformExpID)
 	if err != nil {
@@ -336,7 +336,7 @@ func (s *PlatformExperimentsStore) ListStageAdvances(ctx context.Context, platfo
 
 // IsAgentCut returns true if the agent was cut at a stage boundary of the given platform
 // experiment. A cut is terminal for the rest of the experiment.
-func (s *PlatformExperimentsStore) IsAgentCut(ctx context.Context, platformExpID, agentID string) (bool, error) {
+func (s *Store) IsAgentCut(ctx context.Context, platformExpID, agentID string) (bool, error) {
 	const q = `SELECT 1 FROM platform_experiment_cuts WHERE platform_experiment_id=$1 AND agent_id=$2`
 	var dummy int
 	err := s.pool.pool.QueryRow(ctx, q, platformExpID, agentID).Scan(&dummy)
@@ -350,7 +350,7 @@ func (s *PlatformExperimentsStore) IsAgentCut(ctx context.Context, platformExpID
 }
 
 // AgentCutAt returns when the agent was cut from the platform experiment, nil when it was not.
-func (s *PlatformExperimentsStore) AgentCutAt(ctx context.Context, platformExpID, agentID string) (*time.Time, error) {
+func (s *Store) AgentCutAt(ctx context.Context, platformExpID, agentID string) (*time.Time, error) {
 	var cutAt time.Time
 	err := s.pool.pool.QueryRow(ctx,
 		`SELECT cut_at FROM platform_experiment_cuts WHERE platform_experiment_id=$1 AND agent_id=$2`, platformExpID, agentID).Scan(&cutAt)

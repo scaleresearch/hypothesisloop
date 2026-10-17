@@ -81,7 +81,7 @@ const hostedSQL = `(EXISTS (SELECT 1 FROM experiment_signups s WHERE s.platform_
 
 // Hosted reports whether the platform runs the agent agentID of a platform experiment, or with no
 // agentID its coordinator.
-func (s *PlatformExperimentsStore) Hosted(ctx context.Context, platformExpID, agentID string) (bool, error) {
+func (s *Store) Hosted(ctx context.Context, platformExpID, agentID string) (bool, error) {
 	var hosted bool
 	if err := s.pool.pool.QueryRow(ctx, `SELECT `+hostedSQL, platformExpID, agentID).Scan(&hosted); err != nil {
 		return false, fmt.Errorf("platform_experiments_store.Hosted: %w", err)
@@ -94,7 +94,7 @@ func (s *PlatformExperimentsStore) Hosted(ctx context.Context, platformExpID, ag
 // with: under the launch the restart budget was spent under it stands, and under another the
 // budget is whole and a stopped one is asked for again. restarts counts every one, ever. It
 // records nothing for an agent or coordinator the platform does not run.
-func (s *PlatformExperimentsStore) AskInstance(ctx context.Context, platformExpID, agentID, name, launch string) error {
+func (s *Store) AskInstance(ctx context.Context, platformExpID, agentID, name, launch string) error {
 	_, err := s.pool.pool.Exec(ctx, `
 INSERT INTO hosted_instances AS i (platform_experiment_id, agent_id, name, launch, asked_at)
 SELECT $1, $2, $3, $4, now()
@@ -120,7 +120,7 @@ SET name = $3, asked_at = now(), seen_at = NULL, launch = $4, machine = '',
 // the latest only. machine is the provider's id of the machine the name was reported by, which
 // ListLauncherMachines answers. A report that changes nothing writes nothing. An agent's machine
 // reported running starts the clock of a run that waited for it (startClock).
-func (s *PlatformExperimentsStore) ObserveInstance(ctx context.Context, platformExpID, agentID, name, state string, progress *string, progressLimit time.Duration, activity, machine string) error {
+func (s *Store) ObserveInstance(ctx context.Context, platformExpID, agentID, name, state string, progress *string, progressLimit time.Duration, activity, machine string) error {
 	if machine == "" {
 		return fmt.Errorf("platform_experiments_store.ObserveInstance: %s is reported with no machine id", name)
 	}
@@ -154,7 +154,7 @@ WHERE platform_experiment_id = $1 AND agent_id = $2 AND name = $3 AND name <> ''
 // not the one asked for and for an end whose limit has not passed on the database's clock. limit
 // is the boot limit for a machine never seen or still starting, the progress limit for a silent
 // one or one whose progress could not be read, and unused otherwise. after is the instance as the write left it.
-func (s *PlatformExperimentsStore) EndInstance(ctx context.Context, platformExpID, agentID, name string, how InstanceEnd, exitLog string, limit time.Duration, maxRestarts int) (after domain.AgentInstance, recorded bool, err error) {
+func (s *Store) EndInstance(ctx context.Context, platformExpID, agentID, name string, how InstanceEnd, exitLog string, limit time.Duration, maxRestarts int) (after domain.AgentInstance, recorded bool, err error) {
 	// Every form names $6, so that one statement serves them all.
 	var when string
 	switch how {
@@ -222,7 +222,7 @@ WHERE pe.id = $1 AND pe.status = 'draft' AND pe.proposed_at IS NULL
 // a planner whose draft is revised, finds a machine that was seen and is gone and counts a
 // machine the provider lost. No restart is spent. A pass with nothing to release writes nothing.
 // An agent's machine is kept windDown after its run ended, a coordinator's coordinatorWindDown.
-func (s *PlatformExperimentsStore) ReleaseInstances(ctx context.Context, windDown, coordinatorWindDown time.Duration) error {
+func (s *Store) ReleaseInstances(ctx context.Context, windDown, coordinatorWindDown time.Duration) error {
 	sentences := map[string]string{}
 	for _, end := range []domain.RunEnd{"", domain.RunEndClosed, domain.RunEndCut, domain.RunEndFinished, domain.RunEndPlanned} {
 		sentences[string(end)] = end.ReleasedBecause()
@@ -265,7 +265,7 @@ type LauncherMachine struct {
 
 // ListLauncherMachines returns every hosted machine, an agent's or a coordinator's, whose name is
 // still held and was reported with a machine id, by name. It writes nothing.
-func (s *PlatformExperimentsStore) ListLauncherMachines(ctx context.Context) ([]LauncherMachine, error) {
+func (s *Store) ListLauncherMachines(ctx context.Context) ([]LauncherMachine, error) {
 	rows, err := s.pool.pool.Query(ctx, `
 SELECT i.name, i.machine FROM hosted_instances i
 LEFT JOIN experiment_signups s ON s.platform_experiment_id = i.platform_experiment_id AND s.agent_id = i.agent_id
