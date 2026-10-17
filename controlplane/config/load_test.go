@@ -185,7 +185,7 @@ func TestTheModelCredentialComesFromTheEnvironmentAndIsRequired(t *testing.T) {
 	}
 }
 
-func loadConfigText(t *testing.T, text string) (*Config, error) {
+func loadConfigText(t *testing.T, text string) (*Settings, error) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "hypothesisloop.yaml")
 	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
@@ -627,7 +627,7 @@ func TestEnvironmentsAreLeftOutOrStatedWhole(t *testing.T) {
 // An offered image this deployment builds names its environment base under the same registry and
 // tag, and one built elsewhere has none.
 func TestAnOfferedJobImageNamesItsEnvironmentBaseAtTheRuntimesTag(t *testing.T) {
-	c := &Config{Runtimes: RuntimesConfig{Registry: "registry.example.invalid/hl", ImageTag: "abc1234"}, JobImages: []JobImageConfig{
+	c := &Settings{Runtimes: RuntimesConfig{Registry: "registry.example.invalid/hl", ImageTag: "abc1234"}, JobImages: []JobImageConfig{
 		{Name: "python", Repository: "hypothesisloop-job", EnvironmentBase: "hypothesisloop-job-base"},
 		{Name: "theirs", Image: "registry.example.invalid/team/theirs:1"},
 	}}

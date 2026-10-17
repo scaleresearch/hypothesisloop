@@ -15,8 +15,8 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// Load reads the YAML file at path and returns a validated Config.
-func Load(path string) (*Config, error) {
+// Load reads the YAML file at path and returns a validated Settings.
+func Load(path string) (*Settings, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("config: read %s: %w", path, err)
@@ -25,10 +25,30 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: expand %s: %w", path, err)
 	}
+	cfg, err := parse(path, data)
+	if err != nil {
+		return nil, err
+	}
+	if err := cfg.checkSecrets(); err != nil {
+		return nil, fmt.Errorf("config: validate: %w", err)
+	}
+	return cfg, nil
+}
+
+// LoadSettings reads the settings file at path and returns it validated. It holds no secret.
+func LoadSettings(path string) (*Settings, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("config: read %s: %w", path, err)
+	}
+	return parse(path, data)
+}
+
+func parse(path string, data []byte) (*Settings, error) {
 	if err := refusePlaceholders(data); err != nil {
 		return nil, fmt.Errorf("config: %s: %w", path, err)
 	}
-	var cfg Config
+	var cfg Settings
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&cfg); err != nil {
@@ -137,7 +157,7 @@ func expandNode(node *yaml.Node) error {
 const PathEnv = "HYPOTHESISLOOP_CONFIG"
 
 // LoadFromEnv loads the settings file PathEnv names.
-func LoadFromEnv() (*Config, error) {
+func LoadFromEnv() (*Settings, error) {
 	path := os.Getenv(PathEnv)
 	if path == "" {
 		return nil, fmt.Errorf("config: the %s environment variable is required", PathEnv)
@@ -149,7 +169,7 @@ func LoadFromEnv() (*Config, error) {
 // experiment on cores reads as CPU core-hours.
 const cpuCoreAccHRate = 1.0
 
-func (c *Config) build() error {
+func (c *Settings) build() error {
 	if len(c.AcceleratorTypes) == 0 {
 		return fmt.Errorf("accelerator_types must not be empty")
 	}
@@ -227,17 +247,16 @@ func (c *Config) build() error {
 		s.PassTimeoutSeconds <= 0 {
 		return fmt.Errorf("all scheduler timing, retry, window, and multiplier settings must be positive")
 	}
-	if d := c.Database; d.URL == "" || d.StatementTimeoutSeconds <= 0 || d.LockTimeoutSeconds <= 0 || d.IdleInTransactionSessionTimeoutSeconds <= 0 {
-		return fmt.Errorf("database url and every database timeout are required, the timeouts positive")
+	if d := c.Database; d.StatementTimeoutSeconds <= 0 || d.LockTimeoutSeconds <= 0 || d.IdleInTransactionSessionTimeoutSeconds <= 0 {
+		return fmt.Errorf("every database timeout is required, the timeouts positive")
 	}
 	if s.ScaleUpTimeoutSeconds >= MaxScaleUpTimeoutSeconds {
 		return fmt.Errorf("scheduler scale_up_timeout_seconds must be less than %d (PyTorch's default rendezvous timeout)", MaxScaleUpTimeoutSeconds)
 	}
 	// Required, not optional: every job is handed a data address, so a deployment without a
 	// store would hand out an address that resolves to nothing.
-	if c.DataStore.Endpoint == "" || c.DataStore.Region == "" || c.DataStore.Bucket == "" ||
-		c.DataStore.AccessKeyID == "" || c.DataStore.SecretAccessKey == "" {
-		return fmt.Errorf("data_store endpoint, region, bucket, access_key_id and secret_access_key are all required")
+	if c.DataStore.Endpoint == "" || c.DataStore.Region == "" || c.DataStore.Bucket == "" || c.DataStore.AccessKeyID == "" {
+		return fmt.Errorf("data_store endpoint, region, bucket and access_key_id are all required")
 	}
 	// Neither address stands in for the other: the control plane's is often one no job reaches,
 	// and a job's is often one that is down while the control plane's own store is up.
@@ -270,12 +289,8 @@ func (c *Config) build() error {
 	}
 	services := c.Services
 	if services.APIPort <= 0 || services.APIPort > 65535 ||
-		services.MetricControllerPort <= 0 || services.MetricControllerPort > 65535 ||
-		services.MetricsDBURL == "" || services.GraphDBURL == "" {
-		return fmt.Errorf("service ports must be in 1-65535 and metrics_db_url and graph_db_url are required")
-	}
-	if len(c.Auth.SigningSecret) < MinSigningSecretLength {
-		return fmt.Errorf("auth signing_secret is required and must be at least %d characters", MinSigningSecretLength)
+		services.MetricControllerPort <= 0 || services.MetricControllerPort > 65535 {
+		return fmt.Errorf("service ports must be in 1-65535")
 	}
 	if c.Agents.Image == "" {
 		return fmt.Errorf("agents image is required: what a hosted agent's machine boots")
@@ -304,9 +319,6 @@ func (c *Config) build() error {
 	}
 	switch m := c.Models; m.Provider {
 	case ModelProviderAnthropic:
-		if m.Anthropic == nil || m.Anthropic.OAuthToken == "" {
-			return fmt.Errorf("models anthropic oauth_token is required: the Claude subscription token hosted agents' model calls are made with")
-		}
 	default:
 		return fmt.Errorf("models provider %q is not %s: the provider whose models hosted agents run on", m.Provider, ModelProviderAnthropic)
 	}
@@ -413,8 +425,8 @@ func (c *Config) build() error {
 		if g.GitHub == nil || g.Plain != nil {
 			return fmt.Errorf("git_host provider github takes the git_host github section and no other")
 		}
-		if a := g.GitHub; a.AppID <= 0 || a.AppSlug == "" || a.PrivateKey == "" {
-			return fmt.Errorf("git_host github app_id, app_slug and private_key are all required")
+		if a := g.GitHub; a.AppID <= 0 || a.AppSlug == "" {
+			return fmt.Errorf("git_host github app_id and app_slug are both required")
 		}
 	case GitHostProviderPlain:
 		if g.Plain == nil || g.GitHub != nil {
@@ -423,11 +435,27 @@ func (c *Config) build() error {
 		if p := g.Plain; !strings.HasPrefix(p.BaseURL, "https://") && !(p.AllowHTTP && strings.HasPrefix(p.BaseURL, "http://")) {
 			return fmt.Errorf("git_host plain base_url %q must be the https root the repositories of the deployment are cloned from, or an http one with allow_http: true", p.BaseURL)
 		}
-		if p := g.Plain; (p.Username == "") != (p.Password == "") {
-			return fmt.Errorf("git_host plain username and password are set together or not at all")
-		}
 	default:
 		return fmt.Errorf("git_host provider %q is neither %s nor %s", g.Provider, GitHostProviderGitHub, GitHostProviderPlain)
+	}
+	return nil
+}
+
+func (c *Settings) checkSecrets() error {
+	if c.Database.URL == "" || c.DataStore.SecretAccessKey == "" || c.Services.MetricsDBURL == "" || c.Services.GraphDBURL == "" {
+		return fmt.Errorf("database url, data_store secret_access_key, metrics_db_url and graph_db_url are required")
+	}
+	if len(c.Auth.SigningSecret) < MinSigningSecretLength {
+		return fmt.Errorf("auth signing_secret is required and must be at least %d characters", MinSigningSecretLength)
+	}
+	if c.Models.Anthropic == nil || c.Models.Anthropic.OAuthToken == "" {
+		return fmt.Errorf("models anthropic oauth_token is required: the Claude subscription token hosted agents' model calls are made with")
+	}
+	if g := c.GitHost.GitHub; g != nil && g.PrivateKey == "" {
+		return fmt.Errorf("git_host github private_key is required")
+	}
+	if p := c.GitHost.Plain; p != nil && (p.Username == "") != (p.Password == "") {
+		return fmt.Errorf("git_host plain username and password are set together or not at all")
 	}
 	return nil
 }

@@ -34,7 +34,7 @@ type apiGate struct {
 	access *auth.Access
 }
 
-func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Repositories, gitHost githost.Provider, pool *db.Pool, store *db.Store, graph *graphdb.Store, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metrics *metricsdb.Store, port string, logger *zap.Logger) *http.Server {
+func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Repositories, gitHost githost.Provider, pool *db.Pool, store *db.Store, graph *graphdb.Store, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Settings, metrics *metricsdb.Store, port string, logger *zap.Logger) *http.Server {
 	// One client for the durable-data store, shared by everything that reads it: the listing
 	// endpoint, the usage report, admission's ceiling, and the addressing handed to runtimes.
 	dataStore, err := objectstore.New(pcfg.DataStore.Provider, pcfg.DataStore.ControlPlaneEndpoint, pcfg.DataStore.Endpoint, pcfg.DataStore.Region, pcfg.DataStore.Bucket,
@@ -120,7 +120,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 // newEnvironmentRegistry is where assigned environment builds push to and the logins to it, and
 // the git host their files' repositories are read from, nil on a deployment whose settings have no
 // environments section.
-func newEnvironmentRegistry(ctx context.Context, pcfg *hypothesisloopcfg.Config, gitHost githost.Provider, logger *zap.Logger) *clusterexchange.EnvironmentRegistry {
+func newEnvironmentRegistry(ctx context.Context, pcfg *hypothesisloopcfg.Settings, gitHost githost.Provider, logger *zap.Logger) *clusterexchange.EnvironmentRegistry {
 	e := pcfg.Environments
 	if e == nil {
 		return nil
@@ -146,13 +146,13 @@ func openGraph(ctx context.Context, url string) (*graphdb.Store, error) {
 }
 
 // modelDefaults is the platform's model for an agent and for a coordinator that names none.
-func modelDefaults(pcfg *hypothesisloopcfg.Config) domain.ModelDefaults {
+func modelDefaults(pcfg *hypothesisloopcfg.Settings) domain.ModelDefaults {
 	return domain.ModelDefaults{Agent: pcfg.Agents.DefaultModel, Coordinator: pcfg.Agents.CoordinatorModel}
 }
 
 // newGitHost is the git host the settings name, one of two. On a plain one there is no GitHub App
 // and no client for it: connecting GitHub answers that there is none.
-func newGitHost(pcfg *hypothesisloopcfg.Config, store *db.Store, logger *zap.Logger) (githubApp accounts.GitHubApp, gitHost githost.Provider) {
+func newGitHost(pcfg *hypothesisloopcfg.Settings, store *db.Store, logger *zap.Logger) (githubApp accounts.GitHubApp, gitHost githost.Provider) {
 	switch pcfg.GitHost.Provider {
 	case hypothesisloopcfg.GitHostProviderGitHub:
 		client, err := github.New(*pcfg.GitHost.GitHub)

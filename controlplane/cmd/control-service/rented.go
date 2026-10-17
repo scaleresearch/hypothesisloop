@@ -25,7 +25,7 @@ const defaultWarmPool = 2
 // newRented builds what rents machines elsewhere, each a loop the leader runs: the launcher of
 // hosted agents on the sandbox provider, and one runtime per cloud compute account. A provider
 // that cannot be built from its settings stops the process here.
-func newRented(pcfg *hypothesisloopcfg.Config, store *db.Store, clusters *clusterexchange.Service, metrics *metricsdb.Store, logger *zap.Logger) ([]func(context.Context), error) {
+func newRented(pcfg *hypothesisloopcfg.Settings, store *db.Store, clusters *clusterexchange.Service, metrics *metricsdb.Store, logger *zap.Logger) ([]func(context.Context), error) {
 	var loops []func(context.Context)
 	if s := pcfg.Sandbox; s != nil {
 		launcher, err := newLauncher(pcfg, s, store, metrics, logger)
@@ -48,7 +48,7 @@ func newRented(pcfg *hypothesisloopcfg.Config, store *db.Store, clusters *cluste
 	return loops, nil
 }
 
-func newLauncher(pcfg *hypothesisloopcfg.Config, s *hypothesisloopcfg.SandboxConfig, store *db.Store, metrics *metricsdb.Store, logger *zap.Logger) (*cloudhosting.Launcher, error) {
+func newLauncher(pcfg *hypothesisloopcfg.Settings, s *hypothesisloopcfg.SandboxConfig, store *db.Store, metrics *metricsdb.Store, logger *zap.Logger) (*cloudhosting.Launcher, error) {
 	log := logger.Named("hosting")
 	// An agent instance has no accelerator, so the provider is asked for no accelerator type.
 	rented, err := providers.New(s.Provider.Name, s.Provider.Settings, nil, log.Named(s.Provider.Name).Sugar().Infof)
@@ -84,7 +84,7 @@ func newLauncher(pcfg *hypothesisloopcfg.Config, s *hypothesisloopcfg.SandboxCon
 	return launcher, nil
 }
 
-func newCloudCluster(pcfg *hypothesisloopcfg.Config, cc hypothesisloopcfg.CloudComputeConfig, environments string, store *db.Store, clusters *clusterexchange.Service, logger *zap.Logger) (*compute.Cluster, error) {
+func newCloudCluster(pcfg *hypothesisloopcfg.Settings, cc hypothesisloopcfg.CloudComputeConfig, environments string, store *db.Store, clusters *clusterexchange.Service, logger *zap.Logger) (*compute.Cluster, error) {
 	shapes := make([]compute.Shape, 0, len(cc.Shapes))
 	var acceleratorTypes []string
 	for _, s := range cc.Shapes {

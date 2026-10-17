@@ -118,7 +118,7 @@ func quantities(cpu, memory, storage string) (cpuMillis, memoryBytes, storageByt
 
 // buildRented checks the sandbox and cloud compute sections. Whether the vendor can rent what
 // they ask for is the provider's to say when it is built at startup.
-func (c *Config) buildRented() error {
+func (c *Settings) buildRented() error {
 	if s := c.Sandbox; s != nil {
 		if s.Provider.Name == "" {
 			return fmt.Errorf("sandbox provider name is required")

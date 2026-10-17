@@ -19,7 +19,7 @@ type AcceleratorTypeConfig struct {
 
 // AcceleratorTypeNames returns every accelerator type the catalog prices — the driver-published
 // "key=value" strings, which are also the only types capacity reports and admission accepts.
-func (c *Config) AcceleratorTypeNames() []string {
+func (c *Settings) AcceleratorTypeNames() []string {
 	names := make([]string, 0, len(c.AcceleratorTypes))
 	for _, t := range c.AcceleratorTypes {
 		names = append(names, t.Name)
@@ -406,7 +406,7 @@ type JobImageConfig struct {
 
 // PlainHTTPRegistries is the registries, by host[:port], that serve plain HTTP: runtimes.registry
 // when registry_plain_http says so, and none otherwise.
-func (c *Config) PlainHTTPRegistries() []string {
+func (c *Settings) PlainHTTPRegistries() []string {
 	if !c.Runtimes.RegistryPlainHTTP {
 		return nil
 	}
@@ -415,7 +415,7 @@ func (c *Config) PlainHTTPRegistries() []string {
 }
 
 // OfferedJobImages is the configured job images with their references resolved.
-func (c *Config) OfferedJobImages() []domain.JobImage {
+func (c *Settings) OfferedJobImages() []domain.JobImage {
 	images := make([]domain.JobImage, 0, len(c.JobImages))
 	for _, i := range c.JobImages {
 		reference, base := i.Image, ""
@@ -472,8 +472,8 @@ type PlainGitConfig struct {
 // MinSigningSecretLength keeps the HMAC key at least as long as its output.
 const MinSigningSecretLength = 32
 
-// Config is the top-level parsed config from hypothesisloop.yaml.
-type Config struct {
+// Settings is the top-level parsed config from hypothesisloop.yaml.
+type Settings struct {
 	AcceleratorTypes []AcceleratorTypeConfig `yaml:"accelerator_types"`
 	DataStore        DataStoreConfig         `yaml:"data_store"`
 	Quota            QuotaConfig             `yaml:"quota"`

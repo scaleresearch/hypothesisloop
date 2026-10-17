@@ -184,7 +184,7 @@ func connectGitHub(ctx context.Context, store installationStore, app installatio
 	return json.NewEncoder(stdout).Encode(connected)
 }
 
-func withStore(cfg *config.Config, do func(context.Context, *db.Store) error) error {
+func withStore(cfg *config.Settings, do func(context.Context, *db.Store) error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	pool, err := db.NewPool(ctx, db.ConfigOf(cfg.Database, 2))

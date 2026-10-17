@@ -14,7 +14,7 @@ var secretNames = map[string]string{charttest.InCluster: "hypothesisloop", chart
 
 var configLoaders = []string{"hypothesisloop-control-service", "hypothesisloop-metrics-service"}
 
-func loadRendered(t *testing.T, release *charttest.Release, values, deployment string) *config.Config {
+func loadRendered(t *testing.T, release *charttest.Release, values, deployment string) *config.Settings {
 	t.Helper()
 	env := release.Env(t, deployment, secretNames[values])
 	if env["HYPOTHESISLOOP_CONFIG"] != "/settings/hypothesisloop.yaml" {
