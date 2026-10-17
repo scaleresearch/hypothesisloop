@@ -50,12 +50,12 @@ services:
   greptimedb:
     image: docker.io/greptime/greptimedb:v1.2.1
     restart: unless-stopped
-    command: ["standalone", "start", "--http-addr=0.0.0.0:4000", "--rpc-bind-addr=0.0.0.0:4001"]
+    command: ["standalone", "start", "--http-addr=0.0.0.0:4000", "--rpc-bind-addr=0.0.0.0:4001", "--data-home=/greptimedb_data"]
     ports:
       - "4010:4000"
       - "4001:4001"
     volumes:
-      - greptimedb-data:/tmp/greptimedb-data
+      - greptimedb-data:/greptimedb_data
 
   # The hypothesis graph. Pinned: schema bootstrap and the read-only query guard
   # (controlplane/storage/graphdb) were verified against exactly this version. Memgraph holds the

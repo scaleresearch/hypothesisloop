@@ -95,7 +95,7 @@ containers_up() {
   podman run -d --name "${PREFIX}-memgraph" -p "${MEMGRAPH_PORT}:7687" \
     docker.io/memgraph/memgraph:3.13.1 --telemetry-enabled=false --storage-wal-enabled=true >/dev/null
   podman run -d --name "${PREFIX}-greptimedb" -p "${GREPTIME_PORT}:4000" \
-    docker.io/greptime/greptimedb:latest standalone start --http-addr=0.0.0.0:4000 --rpc-bind-addr=0.0.0.0:4001 >/dev/null
+    docker.io/greptime/greptimedb:v1.2.1 standalone start --http-addr=0.0.0.0:4000 --rpc-bind-addr=0.0.0.0:4001 >/dev/null
   podman run -d --name "${PREFIX}-store" -p "${STORE_PORT}:9000" \
     -e MINIO_ROOT_USER=hypothesisloop -e MINIO_ROOT_PASSWORD=hypothesisloop \
     docker.io/pgsty/silo:RELEASE.2026-09-16T00-00-00Z server /data --address 0.0.0.0:9000 >/dev/null

@@ -39,12 +39,13 @@ spec:
             - "start"
             - "--http-addr=0.0.0.0:4000"
             - "--rpc-bind-addr=0.0.0.0:4001"
+            - "--data-home=/greptimedb_data"
           ports:
             - containerPort: 4000
             - containerPort: 4001
           volumeMounts:
             - name: data
-              mountPath: /tmp/greptimedb-data
+              mountPath: /greptimedb_data
           resources:
             {{- toYaml .Values.greptimedb.resources | nindent 12 }}
   volumeClaimTemplates:
