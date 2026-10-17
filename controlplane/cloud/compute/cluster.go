@@ -11,7 +11,7 @@ import (
 )
 
 // Exchange is the control plane's side of a cluster's reconcile and status push
-// (clusterexchange.Handler).
+// (clusterexchange.Service).
 type Exchange interface {
 	Reconcile(ctx context.Context, clusterName, agentVersion string, report clusterapi.ReconcileRequest) (clusterapi.ReconcileAnswer, error)
 	PushStatus(ctx context.Context, clusterName string, push clusterapi.StatusPush) error

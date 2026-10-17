@@ -1,4 +1,4 @@
-package clusterexchange
+package httpapi
 
 import (
 	"bytes"
@@ -19,6 +19,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
@@ -27,7 +28,7 @@ import (
 // reconcileStore is what two clusters hold: the jobs placed on each, the jobs each just lost,
 // and the identity each is bound to.
 type reconcileStore struct {
-	Store
+	clusterexchange.Store
 	desired   map[string][]*domain.Experiment
 	undesired map[string][]*domain.Experiment
 	boundTo   map[string]string
@@ -95,8 +96,8 @@ func (s *reconcileStore) FinishEnvironmentBuild(ctx context.Context, cluster, ke
 	return true, nil
 }
 
-// testRepository is where the builds of the tests push to.
-const testRepository = "registry.test/environments/environment"
+// buildsRepository is where the builds of the tests push to.
+const buildsRepository = "registry.test/environments/environment"
 
 // logins hands out numbered logins and counts them.
 type logins struct {
@@ -158,27 +159,27 @@ type reconcileWorld struct {
 
 func newReconcileWorld(t *testing.T, cluster string) *reconcileWorld {
 	t.Helper()
-	return newReconcileWorldWith(t, cluster, func(base *reconcileStore) Store { return base })
+	return newReconcileWorldWith(t, cluster, func(base *reconcileStore) clusterexchange.Store { return base })
 }
 
 // newReconcileWorldWith serves the handler over the store wrap makes of the world's own.
-func newReconcileWorldWith(t *testing.T, cluster string, wrap func(*reconcileStore) Store) *reconcileWorld {
+func newReconcileWorldWith(t *testing.T, cluster string, wrap func(*reconcileStore) clusterexchange.Store) *reconcileWorld {
 	t.Helper()
 	return newWorld(t, cluster, wrap, true)
 }
 
 // newWorld is a world on a deployment that builds environments, or one that builds none.
-func newWorld(t *testing.T, cluster string, wrap func(*reconcileStore) Store, buildsEnvironments bool) *reconcileWorld {
+func newWorld(t *testing.T, cluster string, wrap func(*reconcileStore) clusterexchange.Store, buildsEnvironments bool) *reconcileWorld {
 	t.Helper()
 	w := &reconcileWorld{logins: &logins{}, store: &reconcileStore{desired: map[string][]*domain.Experiment{}, undesired: map[string][]*domain.Experiment{}, boundTo: map[string]string{},
 		builds: map[string]bool{}, assigned: map[string][]*domain.Environment{}}}
-	var environments *EnvironmentRegistry
+	var environments *clusterexchange.EnvironmentRegistry
 	if buildsEnvironments {
 		git, err := githost.NewPlain("https://git.test", "platform", "host-password")
 		if err != nil {
 			t.Fatal(err)
 		}
-		environments = &EnvironmentRegistry{Repository: testRepository, Logins: w.logins, Git: git}
+		environments = &clusterexchange.EnvironmentRegistry{Repository: buildsRepository, Logins: w.logins, Git: git}
 	}
 	metrics := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/sql" {
@@ -197,7 +198,7 @@ func newWorld(t *testing.T, cluster string, wrap func(*reconcileStore) Store, bu
 	caller := authtest.As{Kind: auth.KindRuntime, ClusterName: cluster, OrgIDs: []string{"org-a"}}
 	router := authtest.Router(caller)
 	doc := apidocs.New(router, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{Clusters: map[string]string{cluster: "org-a"}}), zap.NewNop())
-	RegisterHuma(doc, NewHandler(wrap(w.store), time.Minute, metrics.URL, 90*time.Second, data, time.Minute, nil, 100, "test-signing-secret-of-enough-length", "https://api.test/git", environments, zap.NewNop()).
+	RegisterClusterAgent(doc, clusterexchange.NewService(wrap(w.store), time.Minute, metrics.URL, 90*time.Second, data, time.Minute, nil, 100, "test-signing-secret-of-enough-length", "https://api.test/git", environments, zap.NewNop()).
 		WithBuildReported(func() { w.wakes.Add(1) }))
 	w.router = router
 	return w

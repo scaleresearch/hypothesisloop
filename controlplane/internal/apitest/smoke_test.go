@@ -51,7 +51,7 @@ func TestSmoke(t *testing.T) {
 	// Cluster-agent traffic is a separate audience on its own prefix, so it keeps its own doc.
 	rc := authtest.Router(authtest.Staff)
 	dc := apidocs.New(rc, "cluster-agent", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	clusterexchange.RegisterHuma(dc, clusterexchange.NewHandler(nil, 0, "", 0, nil, 0, nil, 0, "", "https://api.test/git", nil, nil))
+	httpapi.RegisterClusterAgent(dc, clusterexchange.NewService(nil, 0, "", 0, nil, 0, nil, 0, "", "https://api.test/git", nil, nil))
 	dc.MountExplore(rc)
 
 	for _, tc := range []struct {

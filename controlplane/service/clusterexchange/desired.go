@@ -20,12 +20,12 @@ import (
 // reading its platform experiment's, and nothing here calls the store. It is handed the token it
 // reports metrics and fetches its commit with, derived from its id, so every reconcile answers
 // with the same one, and its platform experiment's repository through the git proxy.
-func (h *Handler) desiredJob(exp *domain.Experiment) (*clusterapi.DesiredJob, error) {
-	token, err := auth.Mint(h.signingSecret, auth.JobScope(exp.ID))
+func (s *Service) desiredJob(exp *domain.Experiment) (*clusterapi.DesiredJob, error) {
+	token, err := auth.Mint(s.signingSecret, auth.JobScope(exp.ID))
 	if err != nil {
 		return nil, err
 	}
-	if h.proxyURL == "" {
+	if s.proxyURL == "" {
 		return nil, errors.New("no git proxy address to hand jobs their repository at")
 	}
 	job := &clusterapi.DesiredJob{
@@ -43,15 +43,15 @@ func (h *Handler) desiredJob(exp *domain.Experiment) (*clusterapi.DesiredJob, er
 		CapacityTier:           clusterapi.CapacityTier(exp.CapacityTier),
 		SubmittedAt:            exp.SubmittedAt,
 		Data: &clusterapi.DataAccess{
-			URI:             h.dataStore.URI(objectstore.JobPrefix(exp.PlatformExperimentID, exp.AgentID, exp.ID)),
-			Shared:          h.dataStore.URI(objectstore.PlatformExperimentPrefix(exp.PlatformExperimentID)),
-			Endpoint:        h.dataStore.Endpoint,
-			Region:          h.dataStore.Region,
+			URI:             s.dataStore.URI(objectstore.JobPrefix(exp.PlatformExperimentID, exp.AgentID, exp.ID)),
+			Shared:          s.dataStore.URI(objectstore.PlatformExperimentPrefix(exp.PlatformExperimentID)),
+			Endpoint:        s.dataStore.Endpoint,
+			Region:          s.dataStore.Region,
 			AccessKeyID:     exp.DataKey.AccessKeyID,
 			SecretAccessKey: exp.DataKey.SecretAccessKey,
 		},
 		Token:        token,
-		GitURL:       domain.GitProxyURL(h.proxyURL, exp.PlatformExperimentID),
+		GitURL:       domain.GitProxyURL(s.proxyURL, exp.PlatformExperimentID),
 		AttemptCount: exp.AttemptCount,
 	}
 	if exp.ResolvedJob != nil {

@@ -232,7 +232,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		WithLiveCapacity(metricsDBURL, connectedWithin, store, domain.NewPodResources(pcfg.PodResourcesByName)).
 		WithAgentLaunch(launch)
 
-	schedulerHandler, clusterAgentHandler := newSchedulerParts(runCtx, gitHost, environmentsSvc, pool, store, graph, peSvc, quotaCfg, pcfg, metricsDBURL, dataStore, logger)
+	jobs, clusterExchange := newSchedulerParts(runCtx, gitHost, environmentsSvc, pool, store, graph, peSvc, quotaCfg, pcfg, metricsDBURL, dataStore, logger)
 	// The change stream: one LISTEN connection for this process, fanned out to whatever /watch
 	// connections are open. Nothing is persisted for it and nothing is held between connections
 	// — see httpapi/watch/watch.go.
@@ -276,10 +276,10 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		accounts: accounts.NewHandler(db.NewAccountsStore(pool), store, connectedClusters, autoscaledClusters, clusterContacts, pcfg.Auth.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Services.PublicAPIURL, MetricsURL: pcfg.Runtimes.MetricsURL, Registry: pcfg.Runtimes.Registry, ImageTag: pcfg.Runtimes.ImageTag, RegistryPlainHTTP: pcfg.Runtimes.RegistryPlainHTTP},
 			accounts.Limits{MaxOrgsPerUser: pcfg.Accounts.MaxOrgsPerUser, MaxProjectsPerOrg: pcfg.Accounts.MaxProjectsPerOrg}, logger),
 		repositories: repos,
-		scheduler:    schedulerHandler,
+		scheduler:    jobs,
 		registry:     registrySvc,
 		watch:        watchHandler,
-		clusterAgent: clusterAgentHandler,
+		clusterAgent: clusterExchange,
 		gitProxy: gitproxy.New(struct {
 			*db.PlatformExperimentsStore
 			*db.EnvironmentsStore
@@ -313,7 +313,7 @@ type routes struct {
 	scheduler           *scheduler.Service
 	registry            *registry.Service
 	watch               *watch.Handler
-	clusterAgent        *clusterexchange.Handler
+	clusterAgent        *clusterexchange.Service
 	gitProxy            *gitproxy.Proxy
 	modelProxy          *modelproxy.Proxy
 	experiments         *platformexperiments.PlatformExperimentsService
@@ -358,7 +358,7 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 	// registration and its own docs under a distinct prefix — a different audience entirely.
 	clusterAgentRouter := chi.NewRouter()
 	clusterAgentDoc := apidocs.New(clusterAgentRouter, "hypothesisloop cluster-agent API", "1.0.0", "", gate.access, logger)
-	clusterexchange.RegisterHuma(clusterAgentDoc, h.clusterAgent)
+	httpapi.RegisterClusterAgent(clusterAgentDoc, h.clusterAgent)
 	clusterAgentDoc.MountExplore(clusterAgentRouter)
 	r.Mount("/internal/clusters", clusterAgentRouter)
 
@@ -398,7 +398,7 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 // newSchedulerParts builds the scheduler's handler and starts its background loops, returning
 // the handlers newRouter serves: the scheduler's on the shared API doc, the cluster-agents' under
 // its own prefix.
-func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environmentsSvc *environments.Service, pool *db.Pool, store *db.Store, graph *graphdb.Store, expQuotaSvc *platformexperiments.PlatformExperimentsService, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL string, dataStore *objectstore.Client, logger *zap.Logger) (*scheduler.Service, *clusterexchange.Handler) {
+func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environmentsSvc *environments.Service, pool *db.Pool, store *db.Store, graph *graphdb.Store, expQuotaSvc *platformexperiments.PlatformExperimentsService, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL string, dataStore *objectstore.Client, logger *zap.Logger) (*scheduler.Service, *clusterexchange.Service) {
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
 
 	clusterReports, err := scheduler.NewClusterReports(store, metricsDBURL,
@@ -457,14 +457,14 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environ
 	// incorrect, just N redundant sweeps racing over the same row. One owner.
 	// Cluster-agent-facing surface (Go cluster-agent binaries, not the research agent) gets its
 	// own Huma registration with its own openapi/explore docs, mounted under its own prefix.
-	clusterAgentHandler := clusterexchange.NewHandler(store,
+	clusterExchange := clusterexchange.NewService(store,
 		time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds)*time.Second, metricsDBURL, pcfg.Scheduler.ObservationCadence(), dataStore,
 		time.Duration(pcfg.Scheduler.MaxCheckpointGraceSeconds)*time.Second,
 		pcfg.AcceleratorTypeNames(), pcfg.Scheduler.MaxLogTailLineChars, pcfg.Auth.SigningSecret, pcfg.GitHost.ProxyURL, environmentRegistry, logger).
 		WithBuildReported(schedulerLoop.Trigger)
 
 	// The sandbox launcher and the cloud compute clusters rent machines, so one replica runs them.
-	rented, err := newRented(pcfg, pool, store, clusterAgentHandler, metricsDBURL, logger)
+	rented, err := newRented(pcfg, pool, store, clusterExchange, metricsDBURL, logger)
 	if err != nil {
 		logger.Fatal("control-service: rented machines", zap.Error(err))
 	}
@@ -485,7 +485,7 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environ
 		func(ctx context.Context) { watcher.Start(ctx, pass) },
 	}, rented...)...)
 
-	return schedulerSvc, clusterAgentHandler
+	return schedulerSvc, clusterExchange
 }
 
 // newEnvironmentRegistry is where assigned environment builds push to and the logins to it, and

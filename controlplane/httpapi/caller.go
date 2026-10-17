@@ -6,6 +6,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 )
@@ -26,4 +27,14 @@ func refused(logger *zap.Logger, op string, err error) error {
 		return r
 	}
 	return auth.Internal(logger, op+" failed", err)
+}
+
+// rejected answers a refusal.Rejection as huma answers its own errors, and any other error as it
+// is.
+func rejected(err error) error {
+	var r *refusal.Rejection
+	if errors.As(err, &r) {
+		return huma.NewError(r.Status, r.Error())
+	}
+	return err
 }

@@ -16,13 +16,13 @@ type wireCase struct {
 	registryPull     *domain.RegistryLogin
 }
 
-func wireHandler(t *testing.T) *Handler {
+func wireHandler(t *testing.T) *Service {
 	t.Helper()
 	store, err := objectstore.New("minio", "http://127.0.0.1:1", "http://minio.test:9000", "us-east-1", "hl-data", "root", "root-secret")
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &Handler{dataStore: store, signingSecret: "test-signing-secret-of-enough-length", proxyURL: "https://api.test/git"}
+	return &Service{dataStore: store, signingSecret: "test-signing-secret-of-enough-length", proxyURL: "https://api.test/git"}
 }
 
 func wireCases() map[string]wireCase {

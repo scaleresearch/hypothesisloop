@@ -800,12 +800,3 @@ func (a hypothesesAPI) setStatus(ctx context.Context, in *struct {
 	}
 	return &struct{ Body *domain.Hypothesis }{Body: hyp}, nil
 }
-
-// rejected answers a registry Rejection as huma answers its own errors.
-func rejected(err error) error {
-	var r *registry.Rejection
-	if errors.As(err, &r) {
-		return huma.NewError(r.Status, r.Error())
-	}
-	return err
-}

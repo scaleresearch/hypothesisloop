@@ -14,7 +14,7 @@ import (
 )
 
 // newAnswer is the reconcile answer the handler now gives for c.
-func newAnswer(t *testing.T, h *Handler, c wireCase) clusterapi.ReconcileAnswer {
+func newAnswer(t *testing.T, h *Service, c wireCase) clusterapi.ReconcileAnswer {
 	t.Helper()
 	answer := clusterapi.ReconcileAnswer{Jobs: make([]*clusterapi.DesiredJob, len(c.exps)), CheckpointWindow: c.checkpointWindow, Builds: c.builds, RegistryPull: c.registryPull}
 	for i, exp := range c.exps {

@@ -1,4 +1,4 @@
-package clusterexchange
+package httpapi
 
 import (
 	"bytes"
@@ -9,6 +9,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
 )
 
 type placedStore struct {
@@ -25,7 +26,7 @@ func (s placedStore) PlacementByID(context.Context, []string) (map[string]domain
 // runtime built before the field stays valid, and the field is taken only beside the node it
 // describes.
 func TestAStatusReportMayNameTheMachineBehindItsNodeAndNeedNot(t *testing.T) {
-	w := newReconcileWorldWith(t, "of-a", func(base *reconcileStore) Store {
+	w := newReconcileWorldWith(t, "of-a", func(base *reconcileStore) clusterexchange.Store {
 		return placedStore{base, map[string]domain.Placement{"job-1": {ClusterName: "of-a"}}}
 	})
 	push := func(report map[string]any) int {
@@ -63,7 +64,7 @@ func TestAStatusReportMayNameTheMachineBehindItsNodeAndNeedNot(t *testing.T) {
 // detail cannot be written records no phase and is refused, so the runtime pushes it again and
 // the reason the job ended is not lost.
 func TestAStatusPushWhoseLogTailOrPhaseDetailCannotBeWrittenIsRefused(t *testing.T) {
-	w := newReconcileWorldWith(t, "of-a", func(base *reconcileStore) Store {
+	w := newReconcileWorldWith(t, "of-a", func(base *reconcileStore) clusterexchange.Store {
 		return placedStore{base, map[string]domain.Placement{"job-1": {ClusterName: "of-a"}}}
 	})
 	push := func(extra map[string]any) int {

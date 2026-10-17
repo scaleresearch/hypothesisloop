@@ -247,7 +247,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 
 	clusters := chi.NewRouter()
 	api.docs["/internal/clusters"] = apidocs.New(clusters, "cluster-agent", "1.0.0", "", access, logger)
-	clusterexchange.RegisterHuma(api.docs["/internal/clusters"], clusterexchange.NewHandler(nil, 0, "", 0, nil, 0, nil, 0, worldSecret, "https://api.test/git", &clusterexchange.EnvironmentRegistry{Repository: "registry.test/environments/environment"}, logger))
+	httpapi.RegisterClusterAgent(api.docs["/internal/clusters"], clusterexchange.NewService(nil, 0, "", 0, nil, 0, nil, 0, worldSecret, "https://api.test/git", &clusterexchange.EnvironmentRegistry{Repository: "registry.test/environments/environment"}, logger))
 	api.router.Mount("/internal/clusters", clusters)
 
 	doc := apidocs.New(api.router, "hypothesisloop API", "1.0.0", "", access, logger)

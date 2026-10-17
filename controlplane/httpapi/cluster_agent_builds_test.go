@@ -1,4 +1,4 @@
-package clusterexchange
+package httpapi
 
 import (
 	"bytes"
@@ -13,6 +13,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
 )
 
 const pushedDigest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -69,8 +70,8 @@ func TestReconcileRecordsWhetherTheRuntimeBuildsAndAnswersItsAssignedBuilds(t *t
 		t.Error("a runtime that reports builds is not recorded as building")
 	}
 	want := []domain.EnvironmentBuild{
-		{Key: "key-1", Attempt: 1, Base: "registry.test/job:7", Dockerfile: "ARG BASE\nFROM ${BASE}\nRUN true\n", Repository: testRepository, CacheScope: domain.EnvironmentCacheScope("org-a", "")},
-		{Key: "key-2", Attempt: 3, Base: "registry.test/job:7", Dockerfile: "ARG BASE\nFROM ${BASE}\nRUN true\n", Repository: testRepository, CacheScope: domain.EnvironmentCacheScope("org-a", "")},
+		{Key: "key-1", Attempt: 1, Base: "registry.test/job:7", Dockerfile: "ARG BASE\nFROM ${BASE}\nRUN true\n", Repository: buildsRepository, CacheScope: domain.EnvironmentCacheScope("org-a", "")},
+		{Key: "key-2", Attempt: 3, Base: "registry.test/job:7", Dockerfile: "ARG BASE\nFROM ${BASE}\nRUN true\n", Repository: buildsRepository, CacheScope: domain.EnvironmentCacheScope("org-a", "")},
 	}
 	if !slices.Equal(answer.Builds, want) {
 		t.Errorf("builds = %+v, want %+v", answer.Builds, want)
@@ -129,7 +130,7 @@ func TestReconcileAnswersWithoutAPullLoginWhenNoneCanBeMinted(t *testing.T) {
 
 // A deployment with no environments section counts no cluster as building and hands out nothing.
 func TestADeploymentWithoutEnvironmentsCountsNoClusterAsBuilding(t *testing.T) {
-	w := newWorld(t, "of-a", func(base *reconcileStore) Store { return base }, false)
+	w := newWorld(t, "of-a", func(base *reconcileStore) clusterexchange.Store { return base }, false)
 	w.store.assigned["of-a"] = []*domain.Environment{assignedBuild("key-1", 1)}
 	inEnvironment := placedJob("job-env", "org-a")
 	inEnvironment.EnvironmentKey = "key-1"
@@ -228,7 +229,7 @@ func TestABuildReportIsRecordedFencedOnItsAttempt(t *testing.T) {
 		}
 	}
 	want := []string{
-		`key-1 fault="" image="` + testRepository + "@" + pushedDigest + `" log=""`,
+		`key-1 fault="" image="` + buildsRepository + "@" + pushedDigest + `" log=""`,
 		`key-2 fault="file" image="" log="RUN false: exit code 1"`,
 		`key-3 fault="platform" image="" log="pull base: timeout"`,
 	}
@@ -251,7 +252,7 @@ func TestABuildLoadedOnANodeIsRecordedFencedOnItsAttemptAndWakesAdmission(t *tes
 	if rec := w.post(t, "/of-a/builds/key-1/loaded", domain.EnvironmentBuildLoaded{Attempt: 1, Node: "node-1", Digest: pushedDigest}); rec.Code != http.StatusNoContent {
 		t.Fatalf("got = %d %s, want = 204", rec.Code, rec.Body)
 	}
-	if want := []string{"key-1 node-1 " + testRepository + "@" + pushedDigest}; !slices.Equal(w.store.loaded, want) {
+	if want := []string{"key-1 node-1 " + buildsRepository + "@" + pushedDigest}; !slices.Equal(w.store.loaded, want) {
 		t.Errorf("loaded = %q, want %q", w.store.loaded, want)
 	}
 	if w.wakes.Load() != 1 {

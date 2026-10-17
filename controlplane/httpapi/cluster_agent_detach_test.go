@@ -1,4 +1,4 @@
-package clusterexchange
+package httpapi
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
@@ -36,7 +37,7 @@ func detach(t *testing.T, w *reconcileWorld, cluster string) *httptest.ResponseR
 // to the queue. The token of one cluster ends no other.
 func TestARuntimeDetachesItsOwnClusterAndNoOther(t *testing.T) {
 	store := &detachStore{}
-	w := newReconcileWorldWith(t, "of-a", func(base *reconcileStore) Store {
+	w := newReconcileWorldWith(t, "of-a", func(base *reconcileStore) clusterexchange.Store {
 		store.reconcileStore = base
 		return store
 	})
@@ -63,7 +64,7 @@ func TestARuntimeDetachesItsOwnClusterAndNoOther(t *testing.T) {
 
 func TestDetachingAClusterThatIsGoneIsNotFound(t *testing.T) {
 	store := &detachStore{err: db.ErrClusterNotFound}
-	w := newReconcileWorldWith(t, "of-a", func(base *reconcileStore) Store {
+	w := newReconcileWorldWith(t, "of-a", func(base *reconcileStore) clusterexchange.Store {
 		store.reconcileStore = base
 		return store
 	})

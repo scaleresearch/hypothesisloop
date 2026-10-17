@@ -11,17 +11,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/graphdb"
 )
 
-// Rejection is a request the registry refuses with Status, answered in the API's {"error"}
-// envelope with the message of Err.
-type Rejection struct {
-	Status int
-	Err    error
-}
-
-func (r *Rejection) Error() string  { return r.Err.Error() }
-func (r *Rejection) Unwrap() error  { return r.Err }
-func (r *Rejection) GetStatus() int { return r.Status }
-
 // similarHypothesesError is the 409 a registration gets while it reads close to hypotheses it has
 // not been told apart from: the refusal with the hypotheses themselves beside it.
 type similarHypothesesError struct {
@@ -48,7 +37,7 @@ func (s *Service) WriteRefusal(err error) error {
 	}
 	var unsupported *UnsupportedVerdictError
 	if errors.As(err, &unsupported) {
-		return &Rejection{Status: http.StatusConflict, Err: errors.New(unsupported.Detail)}
+		return &refusal.Rejection{Status: http.StatusConflict, Err: errors.New(unsupported.Detail)}
 	}
 	var inRecord *InRecordError
 	if errors.As(err, &inRecord) {
@@ -60,7 +49,7 @@ func (s *Service) WriteRefusal(err error) error {
 			"nothing was changed. Test or comment on that one instead")
 	case errors.Is(err, graphdb.ErrInvalidLink),
 		errors.Is(err, ErrUnknownPlatformExperiment), errors.Is(err, db.ErrUnknownAgent):
-		return &Rejection{Status: http.StatusBadRequest, Err: err}
+		return &refusal.Rejection{Status: http.StatusBadRequest, Err: err}
 	case errors.Is(err, ErrBaselineRegistersNoHypothesis):
 		return refusal.Refuse(http.StatusForbidden, "baseline_registers_no_hypothesis", err.Error())
 	case errors.Is(err, domain.ErrPlatformExperimentClosed):
@@ -68,9 +57,9 @@ func (s *Service) WriteRefusal(err error) error {
 	case errors.Is(err, domain.ErrNotSignedUp):
 		return refusal.Refuse(http.StatusForbidden, "not_signed_up", err.Error())
 	case errors.Is(err, ErrHypothesisNotOwner):
-		return &Rejection{Status: http.StatusForbidden, Err: err}
+		return &refusal.Rejection{Status: http.StatusForbidden, Err: err}
 	case errors.Is(err, ErrHypothesisNotFound):
-		return &Rejection{Status: http.StatusNotFound, Err: err}
+		return &refusal.Rejection{Status: http.StatusNotFound, Err: err}
 	default:
 		return auth.Internal(s.logger, "write hypothesis", err)
 	}
