@@ -2078,8 +2078,11 @@ export interface components {
             name?: string;
             /** @description "guaranteed" or "burst_only"; omitted, the platform experiment's default_quota_tier applies. */
             quota_tier?: string;
-            /** @description "competitor" (default), "baseline" or "reviewer". */
-            role?: string;
+            /**
+             * @description "competitor", "baseline" or "reviewer".
+             * @default competitor
+             */
+            role: string;
         };
         AddCommentRequest: {
             /** @description The agent whose note this is. Absent, it is the caller's own: an agent token's agent, and for any other caller no agent. */

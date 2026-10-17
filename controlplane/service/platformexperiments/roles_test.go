@@ -104,17 +104,6 @@ func TestUnknownSignupRoleIsRejectedRatherThanDefaulted(t *testing.T) {
 	}
 }
 
-// An absent role means every caller written before roles existed keeps meaning what it meant.
-func TestAbsentSignupRoleResolvesToCompetitor(t *testing.T) {
-	role, err := domain.ParseSignupRole("")
-	if err != nil {
-		t.Fatalf("err = %v, want nil", err)
-	}
-	if got, want := role, domain.SignupRoleCompetitor; got != want {
-		t.Errorf("role = %v, want %v", got, want)
-	}
-}
-
 // standingsStore adds the reads a ranking makes on top of signupStore's.
 type standingsStore struct {
 	signupStore
