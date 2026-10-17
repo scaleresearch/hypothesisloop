@@ -10,9 +10,9 @@ import (
 // An update takes only the fields that change, so it requires none, and what is fixed at
 // creation is no field of it.
 //
-// A create is the experiment spec and its placement. The spec's own validation requires its name,
-// description, metrics and length and names every problem of a body in one answer, so the schema
-// requires only the budget and max_agents, and from_repo is no field of it.
+// A create is the experiment spec and its placement. CheckCreate requires every field the caller
+// alone can say, the budget and max_agents among them, and names every problem of a body in one
+// 422, so the schema requires none, and from_repo is no field of it.
 func TestPlatformExperimentBodiesRequireWhatEachMustCarry(t *testing.T) {
 	spec := openAPISpec(t)
 	for _, tc := range []struct {
@@ -20,7 +20,7 @@ func TestPlatformExperimentBodiesRequireWhatEachMustCarry(t *testing.T) {
 		want         []string
 		absent       []string
 	}{
-		{"post", "/platform-experiments", []string{"budget_accelerator_hours", "max_agents"}, []string{"from_repo"}},
+		{"post", "/platform-experiments", nil, []string{"from_repo"}},
 		{"patch", "/platform-experiments/{id}", nil, []string{"from_repo", "project_id", "repository", "branch", "agent_image", "stages", "default_quota_tier"}},
 	} {
 		schema := bodySchema(t, spec, tc.method, tc.path)

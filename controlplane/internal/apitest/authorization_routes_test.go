@@ -331,6 +331,10 @@ var routes = []route{
 	{method: "POST", path: "/platform-experiments/{id}/unshare", request: "/platform-experiments/<pe>/unshare", rule: staffOnly},
 	{method: "DELETE", path: "/platform-experiments/{id}/agents/{agent_id}", request: "/platform-experiments/<pe>/agents/<agent>", rule: scoped(coordinatorAudience, reached)},
 	{method: "POST", path: "/platform-experiments/{id}/agents/{agent_id}/finish", request: "/platform-experiments/<pe>/agents/<agent>/finish", body: `{"reason":"nothing left"}`, rule: ownSession(agentAudience, "agent")},
+	{method: "GET", path: "/agentsandbox", rule: only(people, http.StatusOK)},
+	{method: "GET", path: "/platform-experiments/{id}/model-usage", request: "/platform-experiments/<pe>/model-usage", rule: scoped(coordinatorAudience, reached), sharedRead: true},
+	{method: "GET", path: "/platform-experiments/{id}/agents/{agent_id}/instructions", request: "/platform-experiments/<pe>/agents/<agent>/instructions", rule: sessionRead(agentAudience, "agent")},
+	{method: "GET", path: "/platform-experiments/{id}/coordinator/instructions", request: "/platform-experiments/<pe>/coordinator/instructions", rule: sessionRead(coordinatorAudience, "coordinator")},
 	{method: "POST", path: "/platform-experiments/{id}/messages", request: "/platform-experiments/<pe>/messages", body: `{"agent_id":"<agent>","text":"try the untried mechanism"}`, rule: scoped(coordinatorAudience, reached)},
 	{method: "GET", path: "/platform-experiments/{id}/messages", request: "/platform-experiments/<pe>/messages", rule: scoped(agentAudience, reached), sharedRead: true},
 
@@ -362,6 +366,29 @@ var routes = []route{
 	{method: "POST", path: "/orgs/{id}/clusters/{name}/disable", request: "/orgs/<org>/clusters/<cluster>/disable", rule: orgLevel(people, http.StatusForbidden, reached)},
 	{method: "POST", path: "/orgs/{id}/clusters/{name}/enable", request: "/orgs/<org>/clusters/<cluster>/enable", rule: orgLevel(people, http.StatusForbidden, reached)},
 	{method: "DELETE", path: "/orgs/{id}/clusters/{name}/identity", request: "/orgs/<org>/clusters/<cluster>/identity", rule: orgLevel(people, http.StatusForbidden, reached)},
+
+	// Agent types: any account of the org reads them, its administrators change them.
+	{method: "GET", path: "/orgs/{id}/agent-types", request: "/orgs/<org>/agent-types", rule: inOrg(reached)},
+	{method: "POST", path: "/orgs/{id}/agent-types", request: "/orgs/<org>/agent-types", body: `{"from":"generalist"}`, rule: orgLevel(people, http.StatusForbidden, reached)},
+	{method: "GET", path: "/orgs/{id}/agent-types/{type_id}", request: "/orgs/<org>/agent-types/type-1", rule: inOrg(reached)},
+	{method: "PUT", path: "/orgs/{id}/agent-types/{type_id}", request: "/orgs/<org>/agent-types/type-1", body: `{"if_version":1,"name":"n","prompt":"p","settings":{"max_subagents":1,"effort":"high","hyperparameters":{}}}`, rule: orgLevel(people, http.StatusForbidden, reached)},
+	{method: "GET", path: "/orgs/{id}/agent-types/{type_id}/versions", request: "/orgs/<org>/agent-types/type-1/versions", rule: inOrg(reached)},
+	{method: "GET", path: "/orgs/{id}/agent-types/{type_id}/versions/{version}", request: "/orgs/<org>/agent-types/type-1/versions/1", rule: inOrg(reached)},
+	{method: "GET", path: "/orgs/{id}/agent-types/{type_id}/events", request: "/orgs/<org>/agent-types/type-1/events", rule: inOrg(reached)},
+	{method: "POST", path: "/orgs/{id}/agent-types/{type_id}/restore", request: "/orgs/<org>/agent-types/type-1/restore", body: `{"version":1}`, rule: orgLevel(people, http.StatusForbidden, reached)},
+	{method: "POST", path: "/orgs/{id}/agent-types/{type_id}/archive", request: "/orgs/<org>/agent-types/type-1/archive", rule: orgLevel(people, http.StatusForbidden, reached)},
+
+	// GitHub: any account reads the App's addresses, any account of the org reads its
+	// installations and repositories, and its administrators connect and change them. No App is
+	// configured behind this router, which an admitted caller is told with 503.
+	{method: "GET", path: "/github/app", rule: only(people, http.StatusServiceUnavailable)},
+	{method: "POST", path: "/orgs/{id}/github-install-states", request: "/orgs/<org>/github-install-states", body: `{"return_to":"/settings"}`, rule: orgLevel(people, http.StatusForbidden, http.StatusServiceUnavailable)},
+	{method: "POST", path: "/github/installations", body: `{"state":"s","installation_id":100}`, rule: only(people, http.StatusServiceUnavailable)},
+	{method: "GET", path: "/orgs/{id}/github-installations", request: "/orgs/<org>/github-installations", rule: inOrg(reached)},
+	{method: "DELETE", path: "/orgs/{id}/github-installations/{installation_id}", request: "/orgs/<org>/github-installations/100", rule: orgLevel(people, http.StatusForbidden, reached)},
+	{method: "PUT", path: "/orgs/{id}/github-installations/{installation_id}/default", request: "/orgs/<org>/github-installations/100/default", rule: orgLevel(people, http.StatusForbidden, reached)},
+	{method: "GET", path: "/orgs/{id}/github-installations/{installation_id}/check", request: "/orgs/<org>/github-installations/100/check", rule: inOrg(http.StatusServiceUnavailable)},
+	{method: "GET", path: "/orgs/{id}/github-repositories", request: "/orgs/<org>/github-repositories", rule: inOrg(http.StatusServiceUnavailable)},
 
 	// ---- runtimes ----
 	{method: "GET", path: "/internal/clusters", rule: staffOnly},

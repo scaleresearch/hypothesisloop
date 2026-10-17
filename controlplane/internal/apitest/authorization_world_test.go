@@ -216,6 +216,12 @@ func tripwire(next http.Handler) http.Handler {
 	})
 }
 
+// tripAgentTypes and tripInstallations are stores with nothing behind them: the first call trips
+// the wire, as the other services here do. No GitHub App is configured beside them.
+type tripAgentTypes struct{ accounts.AgentTypeStore }
+
+type tripInstallations struct{ accounts.InstallationStore }
+
 // worldAPI is control-service's routing over the world: the same registrations on the same
 // three documents, the raw /watch handler, and services with nothing behind them.
 type worldAPI struct {
@@ -262,6 +268,9 @@ func newWorldAPI(t *testing.T) *worldAPI {
 		Accounts:            accounts.NewService(nil, nil, nil, 0, worldSecret, accounts.RuntimeAddresses{}, accounts.Limits{MaxOrgsPerUser: 3, MaxProjectsPerOrg: 10}, doc.Access, logger),
 		Scheduler:           scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, metricsdb.New("http://metrics.invalid"), logger).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{}),
 		Registry:            registry.New(nil, worldGraph{world: w}, nil, logger, metricsdb.New("http://metrics.invalid"), nil),
+		AgentTypes:          accounts.NewAgentTypes(tripAgentTypes{}, doc.Access, logger),
+		Repositories:        accounts.NewRepositories(tripInstallations{}, nil, doc.Access, logger),
+		Instructions:        platformexperiments.NewComposer(nil, domain.ModelDefaults{}, logger),
 	})
 
 	mint := func(scope string) string {

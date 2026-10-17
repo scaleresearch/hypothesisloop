@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -121,6 +122,27 @@ func TestACreateRequiresWhatOnlyTheCallerCanSay(t *testing.T) {
 		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), field) {
 			t.Errorf("without %s: got = %d %s, want 422 naming it", field, rec.Code, rec.Body)
 		}
+	}
+	// Every problem is answered at once, each naming its field.
+	neither := whole()
+	delete(neither, "budget_accelerator_hours")
+	delete(neither, "max_agents")
+	refusedRec := call("POST", "/platform-experiments", neither)
+	var refused struct {
+		Reason   string `json:"reason"`
+		Problems []struct {
+			Field string `json:"field"`
+		} `json:"problems"`
+	}
+	if err := json.Unmarshal(refusedRec.Body.Bytes(), &refused); err != nil || refusedRec.Code != http.StatusUnprocessableEntity || refused.Reason == "" {
+		t.Fatalf("without a budget and max_agents: got = %d %s, want 422", refusedRec.Code, refusedRec.Body)
+	}
+	var fields []string
+	for _, p := range refused.Problems {
+		fields = append(fields, p.Field)
+	}
+	if !slices.Contains(fields, "budget_accelerator_hours") || !slices.Contains(fields, "max_agents") {
+		t.Errorf("without a budget and max_agents: problems name %v, want both", fields)
 	}
 	both := whole()
 	both["ends_at"] = "2030-01-01T00:00:00Z"
