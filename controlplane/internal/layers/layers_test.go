@@ -64,27 +64,32 @@ var layers = []layer{
 	{path: "controlplane/domain", own: true, web: true},
 	{path: "controlplane/refusal"},
 	{path: "controlplane/config", may: []string{"controlplane/domain"}},
-	{path: "controlplane/auth", may: []string{"controlplane/config", "controlplane/domain"}},
+	{path: "controlplane/auth", may: []string{"controlplane/config", "controlplane/domain", "controlplane/refusal"}},
 	// authtest serves a test router.
 	{path: "controlplane/auth/authtest", may: []string{"controlplane/auth", "controlplane/domain"}, web: true},
 	{path: "controlplane/storage", may: []string{"controlplane/config", "controlplane/domain"}},
 	{path: "controlplane/storage/objectstore", may: []string{"controlplane/config", "controlplane/domain"}, own: true},
 	{path: "controlplane/clients", may: []string{"controlplane/config", "controlplane/auth", "controlplane/domain", "controlplane/refusal"}},
 	{path: "controlplane/clients/githost", may: []string{"controlplane/config", "controlplane/auth", "controlplane/domain", "controlplane/refusal"}, own: true},
+	// The GitHub client adapts itself to the App the accounts service declares (NewConnections),
+	// so the service never imports a provider.
+	{path: "controlplane/clients/githost/github", may: []string{"controlplane/config", "controlplane/auth", "controlplane/domain", "controlplane/refusal", "controlplane/clients/githost", "controlplane/service/accounts"}},
 	{path: "controlplane/clients/registrycred", may: []string{"controlplane/config", "controlplane/auth", "controlplane/domain", "controlplane/refusal"}, own: true},
 	// A service reaches another service only through an interface wired in cmd.
 	{path: "controlplane/service", may: services},
 	{path: "controlplane/service/scheduler", may: services, own: true},
+	// Attach names the cluster-agent chart by the version its Chart.yaml gives.
+	{path: "controlplane/service/accounts", may: append([]string{"deploy/charts/hypothesisloop-cluster-agent"}, services...)},
 	{path: "controlplane/service/platformexperiments/platformexperimentstest", may: []string{"controlplane/domain", "controlplane/storage/db"}},
 	{path: "controlplane/httpapi", may: append([]string{"controlplane/service", "controlplane/auth", "controlplane/config"}, base...), own: true, web: true},
 	// The change stream reads the event store as it is written, the one HTTP package that does.
-	{path: "controlplane/httpapi/watch", may: []string{"controlplane/storage/db", "controlplane/auth", "controlplane/domain"}},
+	{path: "controlplane/httpapi/watch", may: []string{"controlplane/storage/db", "controlplane/auth", "controlplane/domain", "controlplane/refusal"}},
 	// The git proxy forwards git's smart HTTP to the git host.
-	{path: "controlplane/httpapi/gitproxy", may: []string{"controlplane/auth", "controlplane/clients/githost", "controlplane/domain"}, web: true},
+	{path: "controlplane/httpapi/gitproxy", may: []string{"controlplane/auth", "controlplane/clients/githost", "controlplane/domain", "controlplane/refusal"}, web: true},
 	// The model proxy records each model call it forwards in the metrics store.
 	{path: "controlplane/httpapi/modelproxy", may: []string{"controlplane/auth", "controlplane/domain", "controlplane/storage/metricsdb"}},
 	// Metrics ingest writes what node-agents push into the metrics store.
-	{path: "controlplane/httpapi/metricsingest", may: []string{"controlplane/auth", "controlplane/domain", "controlplane/storage/metricsdb"}},
+	{path: "controlplane/httpapi/metricsingest", may: []string{"controlplane/auth", "controlplane/domain", "controlplane/refusal", "controlplane/storage/metricsdb"}},
 	{path: "controlplane/httpapi/middleware", may: []string{"controlplane/auth"}},
 	{path: "controlplane/cmd", may: []string{"controlplane"}, own: true, web: true},
 	// What rents machines elsewhere reaches the control plane only through interfaces wired here.
