@@ -1,7 +1,3 @@
-// envfiles writes the environment file of each program local development runs, holding exactly
-// the keys that program reads under the settings it is given: from .env, which is its
-// environment, and from what local development makes on this machine. Run it from the repository
-// root as localdev/lib/env.sh's lib_env_files does.
 package main
 
 import (

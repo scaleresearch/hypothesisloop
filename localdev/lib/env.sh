@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Each program local development runs gets its own environment: the keys it reads and nothing else
-# of .env or of the caller's shell.
 LIB_ENV_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 LIB_ENV_DIR="${LIB_ENV_REPO}/localdev/.run/env"
 
