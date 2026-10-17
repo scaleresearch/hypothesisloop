@@ -44,7 +44,7 @@ for i in $(seq 1 "${NODE_COUNT}"); do
   fi
   lib_wait_node_ready "${CONTEXT}" "${name}"
 
-  bash "${DIR}/../lib/fake-gpu-node.sh" "${CONTEXT}" "${name}" 8 "${label}" "${CPU_ALLOC_MILLI}" "${MEM_ALLOC_KI}"
+  lib_fake_gpu "${CONTEXT}" "${name}" 8 "${label}" "${CPU_ALLOC_MILLI}" "${MEM_ALLOC_KI}"
 done
 
 echo "==> Nodes ready:"

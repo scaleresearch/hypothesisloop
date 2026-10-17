@@ -51,8 +51,7 @@ for i in $(seq 1 "${NODE_COUNT}"); do
   entry="${ACCELERATOR_TYPES[$(( (i - 1) % ${#ACCELERATOR_TYPES[@]} ))]}"
   # Suffixed by index (not just the type name) so NODE_COUNT beyond the 4 listed types never
   # collides two nodes onto the same container name.
-  # Lowercased via tr, not ${type,,} — that expansion needs bash 4, and macOS ships 3.2
-  # (same constraint reload.sh notes for mapfile/readarray).
+  # Lowercased via tr: ${type,,} needs bash 4, and macOS ships 3.2.
   type="${entry%%:*}" label="${entry#*:}"
   name="fake-$(printf '%s' "${type}" | tr '[:upper:]' '[:lower:]')-${i}"
 
@@ -69,10 +68,7 @@ for i in $(seq 1 "${NODE_COUNT}"); do
   fi
   lib_wait_node_ready "${CONTEXT_NAME}" "${name}"
 
-  # Real node capacity as reported by cAdvisor is the VM/host's full size, not this
-  # container's cgroup quota — cap it down to what it can truly deliver (same reasoning as
-  # localdev/lib/fake-gpu-node.sh's own doc comment) while also giving it fake GPU capacity.
-  bash "${DIR}/../lib/fake-gpu-node.sh" "${CONTEXT_NAME}" "${name}" 8 "${label}" "${CPU_ALLOC_MILLI}" "${MEM_ALLOC_KI}"
+  lib_fake_gpu "${CONTEXT_NAME}" "${name}" 8 "${label}" "${CPU_ALLOC_MILLI}" "${MEM_ALLOC_KI}"
 done
 
 echo "==> Nodes ready:"

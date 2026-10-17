@@ -4,6 +4,7 @@
 #
 #   - lib_create_node / lib_destroy_node: spin up a brand-new container node.
 #   - lib_attach_node / lib_detach_node: taint/untaint an already-existing node (a hardware host's).
+#   - lib_fake_gpu: advertise fake nvidia.com/gpu capacity on a registered node.
 
 LIB_NODE_TAINT_KEY="hypothesisloop.io/no-workload"
 LIB_NODE_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -205,6 +206,21 @@ lib_wait_node_ready() {
     sleep 2
   done
   kubectl --context "$context" wait "node/$name" --for=condition=Ready --timeout="${timeout}s" >/dev/null
+}
+
+# lib_fake_gpu <context> <node> <gpu-count> <product-label> [cpu-alloc-milli] [mem-alloc-ki]: patches
+# the nvidia.com/gpu extended resource onto an already-registered node's status and labels its
+# product. The last two cap allocatable cpu/memory to a container node's cgroup quota, since
+# cAdvisor reports the host's full size. "add" on an existing key replaces it, so a rerun is safe.
+lib_fake_gpu() {
+  local context="$1" node="$2" count="$3" label="$4" cpu="${5:-}" mem="${6:-}"
+  local patch="[{\"op\":\"add\",\"path\":\"/status/capacity/nvidia.com~1gpu\",\"value\":\"${count}\"},{\"op\":\"add\",\"path\":\"/status/allocatable/nvidia.com~1gpu\",\"value\":\"${count}\"}"
+  [[ -n "${cpu}" ]] && patch+=",{\"op\":\"add\",\"path\":\"/status/allocatable/cpu\",\"value\":\"${cpu}m\"}"
+  [[ -n "${mem}" ]] && patch+=",{\"op\":\"add\",\"path\":\"/status/allocatable/memory\",\"value\":\"${mem}Ki\"}"
+  patch+="]"
+  kubectl --context "${context}" patch node "${node}" --subresource=status --type=json -p "${patch}" >/dev/null
+  kubectl --context "${context}" label node "${node}" "nvidia.com/gpu.product=${label}" --overwrite >/dev/null
+  echo "    ${node}: nvidia.com/gpu=${count} (${label})"
 }
 
 # lib_attach_node makes an already-registered node (typically the control-plane's own host)
