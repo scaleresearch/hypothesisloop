@@ -19,10 +19,8 @@ cloud_compute:
     # be rented a second time.
     namespace: main
 
-    # One list call per pass and one or two offer searches per shape, so seven calls at most for
-    # the three shapes below, 42 a minute. The account's list answered two calls a second without a
-    # refusal and refused one in eighty at four a second, so ten seconds leaves room for the
-    # status pushes.
+    # One list call per pass. Each shape's market is read at most every five minutes and at most
+    # 10 offers at a time, under vast.ai's quota of 20000 offer rows a day.
     reconcile_interval_seconds: 10
     # A push reads the output of every started instance, one after another, and vast.ai takes two
     # to four seconds to deliver each read. Allow about three seconds per instance the shapes below
