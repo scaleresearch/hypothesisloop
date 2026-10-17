@@ -1,4 +1,4 @@
-package platformexperiments
+package httpapi
 
 import (
 	"context"
@@ -13,10 +13,11 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
-// sharedFlags is Sharing over a map of platform experiment id to whether it is shared.
+// sharedFlags is a SharingStore over a map of platform experiment id to whether it is shared.
 type sharedFlags struct {
 	shared map[string]bool
 	fail   error
@@ -41,14 +42,14 @@ func (s *sharedFlags) GetPlatformExperiment(_ context.Context, id string) (*doma
 	return &domain.PlatformExperiment{ID: id, Shared: shared}, nil
 }
 
-func shareAs(t *testing.T, store Sharing, caller auth.Principal, path string) (int, map[string]any) {
+func shareAs(t *testing.T, store platformexperiments.SharingStore, caller auth.Principal, path string) (int, map[string]any) {
 	t.Helper()
 	router := authtest.Router(authtest.As(caller))
 	doc := apidocs.New(router, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	answer := func(_ context.Context, pe *domain.PlatformExperiment) (*struct{ Body *domain.PlatformExperiment }, error) {
 		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
 	}
-	RegisterShareHuma(doc, store, answer, zap.NewNop())
+	RegisterSharing(doc, platformexperiments.NewSharing(store, zap.NewNop()), answer)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, authtest.Authorize(httptest.NewRequest("POST", path, nil)))
 	var body map[string]any

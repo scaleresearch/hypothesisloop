@@ -268,7 +268,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		quota:               handler,
 		platformExperiments: peHandler,
 		hypotheses:          graph,
-		sharing:             db.NewPlatformExperimentsStore(pool),
+		sharing:             platformexperiments.NewSharing(db.NewPlatformExperimentsStore(pool), logger),
 		instructions:        platformexperiments.NewInstructionsService(db.NewPlatformExperimentsStore(pool), modelDefaults(pcfg), logger),
 		agentTypes:          accounts.NewAgentTypesHandler(db.NewAgentTypesStore(pool), logger),
 		dataUsage:           platformexperiments.NewDataUsageHandler(dataStore, store, peSvc, pcfg.DataStore.MaxBytesPerAgent, logger),
@@ -303,7 +303,7 @@ type routes struct {
 	quota               *platformexperiments.Handler
 	platformExperiments *platformexperiments.PlatformExperimentsHandler
 	hypotheses          platformexperiments.Hypotheses
-	sharing             platformexperiments.Sharing
+	sharing             *platformexperiments.Sharing
 	dataUsage           *platformexperiments.DataUsageHandler
 	sessions            *platformexperiments.Sessions
 	instructions        *platformexperiments.InstructionsService
@@ -368,7 +368,7 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 	platformexperiments.RegisterHuma(doc, h.quota, h.platformExperiments)
 	platformexperiments.RegisterAgentsHuma(doc, h.platformExperiments, h.hypotheses)
 	platformexperiments.RegisterPlanningHuma(doc, h.platformExperiments)
-	platformexperiments.RegisterShareHuma(doc, h.sharing, h.platformExperiments.Answer, logger)
+	httpapi.RegisterSharing(doc, h.sharing, h.platformExperiments.Answer)
 	platformexperiments.RegisterDataUsageHuma(doc, h.dataUsage)
 	httpapi.RegisterSessions(doc, h.sessions, logger)
 	httpapi.RegisterInstructions(doc, h.instructions)
