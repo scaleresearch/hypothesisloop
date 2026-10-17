@@ -20,7 +20,7 @@ import shutil
 import time
 from collections.abc import Callable
 
-from hypothesisloop_agent import config, outage
+from hypothesisloop_agent import config, outage, platform
 
 log = logging.getLogger("llm_agent")
 
@@ -65,29 +65,36 @@ _DRAIN_S = 5
 # which is COORDINATOR for its own): it reads them in the situation and with its next batch.
 # Everything else is read when next acting. A kind wakes only for what its reader can act on.
 WAKES = {
-    "coordinator": ("agent.finished", "agent.idle=new", "capacity.idle=new", "experiment.blocked", "job.held", "stage.boundary", "comment.new",
-                    "platform_experiment.status", "platform_experiment.description", "platform_experiment.baseline",
-                    "platform_experiment.goal", "platform_experiment.plan", "hypothesis.new=user", "hypothesis.new=key", "hypothesis.new=staff", "agent.message=owner",
-                    "job.duplicate", "agent.replaced", "agent.instructions@coordinator"),
-    "agent": ("experiment.status", "experiment.blocked", "job.held", "job.underperforming", "agent.cut", "agent.idle",
-              "agent.message", "stage.boundary", "comment.new", "platform_experiment.status", "platform_experiment.description",
-              "platform_experiment.baseline", "platform_experiment.goal", "environment.status", "agent.instructions"),
+    config.COORDINATOR: (
+        platform.EVENT_AGENT_FINISHED, f"{platform.EVENT_AGENT_IDLE}=new", f"{platform.EVENT_CAPACITY_IDLE}=new",
+        platform.EVENT_EXPERIMENT_BLOCKED, platform.EVENT_JOB_HELD, platform.EVENT_STAGE_BOUNDARY, platform.EVENT_COMMENT_NEW,
+        platform.EVENT_PLATFORM_EXPERIMENT_STATUS, platform.EVENT_PLATFORM_EXPERIMENT_DESCRIPTION,
+        platform.EVENT_PLATFORM_EXPERIMENT_BASELINE, platform.EVENT_PLATFORM_EXPERIMENT_GOAL, platform.EVENT_PLATFORM_EXPERIMENT_PLAN,
+        f"{platform.EVENT_HYPOTHESIS_NEW}=user", f"{platform.EVENT_HYPOTHESIS_NEW}=key", f"{platform.EVENT_HYPOTHESIS_NEW}=staff",
+        f"{platform.EVENT_AGENT_MESSAGE}=owner", platform.EVENT_JOB_DUPLICATE, platform.EVENT_AGENT_REPLACED,
+        f"{platform.EVENT_AGENT_INSTRUCTIONS}@{config.COORDINATOR}"),
+    "agent": (
+        platform.EVENT_EXPERIMENT_STATUS, platform.EVENT_EXPERIMENT_BLOCKED, platform.EVENT_JOB_HELD,
+        platform.EVENT_JOB_UNDERPERFORMING, platform.EVENT_AGENT_CUT, platform.EVENT_AGENT_IDLE, platform.EVENT_AGENT_MESSAGE,
+        platform.EVENT_STAGE_BOUNDARY, platform.EVENT_COMMENT_NEW, platform.EVENT_PLATFORM_EXPERIMENT_STATUS,
+        platform.EVENT_PLATFORM_EXPERIMENT_DESCRIPTION, platform.EVENT_PLATFORM_EXPERIMENT_BASELINE,
+        platform.EVENT_PLATFORM_EXPERIMENT_GOAL, platform.EVENT_ENVIRONMENT_STATUS, platform.EVENT_AGENT_INSTRUCTIONS),
 }
 # A message to one agent from the coordinator or the owner, told as what it says.
-MESSAGE = "agent.message"
+MESSAGE = platform.EVENT_AGENT_MESSAGE
 # What hl prints, in place of the changes, when the platform no longer holds those after its cursor.
-RESET = "watch.reset"
+RESET = platform.WATCH_RESET
 # The owner changed the goal. The event is a pointer whose value is the new goal_version: a planner
 # is told the goal itself, read from the draft (core.revising), in place of the event.
-GOAL = "platform_experiment.goal"
+GOAL = platform.EVENT_PLATFORM_EXPERIMENT_GOAL
 # A build an agent asked for, loaded on a cluster or ended. Its subject is the environment's key,
 # which says nothing to the agent: the detail names the commit and image it asked with.
-ENVIRONMENT = "environment.status"
+ENVIRONMENT = platform.EVENT_ENVIRONMENT_STATUS
 # What wakes a coordinator besides, while its platform experiment is open: a job that failed then
 # is a baseline agent's, and one that failed for what the brief says is the coordinator's to
 # repair. Three failed in a row before a coordinator heard of any, from the agent giving up. One
 # that completed is acted on when its agent finishes, which wakes by itself.
-OPEN_WAKES = ("experiment.status=FAILED",)
+OPEN_WAKES = (f"{platform.EVENT_EXPERIMENT_STATUS}={platform.STATUS_FAILED}",)
 
 # An agent that ended its turn waits for an update with no limit: the platform's agent.idle, which
 # lives in its store and outlasts a restart, is the one timer for an agent with nothing in flight.
@@ -120,7 +127,7 @@ STATE_DIR = ".hl-state"
 def watch_env(cfg: config.Config, statedir: str) -> dict[str, str]:
     """The environment hl watch needs: the API, the token, which says to hl who is watching, and
     a state dir that outlives the process, with the agent the token is, "" for a coordinator."""
-    return {**os.environ, "API_URL": cfg.api_url, "HL_TOKEN": cfg.token,
+    return {**os.environ, platform.ENV_API_URL: cfg.api_url, platform.ENV_TOKEN: cfg.token,
             "HL_STATE_DIR": os.path.join(os.path.abspath(statedir), STATE_DIR),
             _AGENT_ID: "" if config.coordinates(cfg) else cfg.agent_id}
 
@@ -217,8 +224,7 @@ def _events(stdout: str) -> list[dict]:
     return [json.loads(line) for line in stdout.splitlines() if line.startswith("{")]
 
 
-_UNFINISHED = ("QUEUED", "SUBMITTED", "RUNNING")
-_ENDED = ("COMPLETED", "FAILED", "EVICTED", "REJECTED", "CANCELLED")
+_UNFINISHED = sorted(platform.EXPERIMENT_STATUSES - platform.ENDED_STATUSES)
 
 
 def _machine(job: dict) -> str:
@@ -246,7 +252,7 @@ async def _with_job_state(events: list[dict], env: dict[str, str], hl: str) -> l
     says what was not read and the command that reads it: told COMPLETED with no metric and
     nothing else, an agent took the job for one that reported none."""
     def ended(e: dict) -> bool:
-        return e["kind"] == "experiment.status" and e["value"] in _ENDED
+        return e["kind"] == platform.EVENT_EXPERIMENT_STATUS and e["value"] in platform.ENDED_STATUSES
 
     ids = list(dict.fromkeys(e["subject"] for e in events if ended(e)))
     if not ids:
@@ -262,7 +268,7 @@ async def _with_job_state(events: list[dict], env: dict[str, str], hl: str) -> l
         job = jobs.get(e["subject"]) if ended(e) else None
         if job is None:
             return e
-        return dict(e, machine=_machine(job), **({"detail": _result(job)} if e["value"] == "COMPLETED" else {}))
+        return dict(e, machine=_machine(job), **({"detail": _result(job)} if e["value"] == platform.STATUS_COMPLETED else {}))
 
     return [told(e) for e in events]
 
@@ -345,7 +351,7 @@ async def _wakes(env: dict[str, str], hl: str) -> tuple[str, ...] | None:
     code, stdout, _ = await _run_hl([hl, "platform-experiments", "get"], env, lambda: False)
     if code != 0:
         return None
-    return WAKES["coordinator"] + (OPEN_WAKES if json.loads(stdout)["status"] == "open" else ())
+    return WAKES[config.COORDINATOR] + (OPEN_WAKES if json.loads(stdout)["status"] == platform.PLATFORM_EXPERIMENT_OPEN else ())
 
 
 async def _poll(env: dict[str, str], command: list[str], stopped: Callable[[], bool]) -> tuple[int | None, str]:

@@ -5,6 +5,8 @@ import binascii
 import os
 from dataclasses import dataclass, field
 
+from hypothesisloop_agent import platform
+
 
 def required(name: str, what: str = "") -> str:
     value = os.environ.get(name)
@@ -13,14 +15,14 @@ def required(name: str, what: str = "") -> str:
     return value
 
 
-# The roles the platform serves instructions for (domain.AgentRoles). A coordinator is no agent of
-# the run: HL_TOKEN is the platform experiment's coordinator token, and its agent_id is this name,
-# which is also the subject of its own agent.instructions (domain.CoordinatorRecipient).
-COORDINATOR = "coordinator"
+# The roles the platform serves instructions for. A coordinator is no agent of the run: HL_TOKEN is
+# the platform experiment's coordinator token, and its agent_id is this name, which is also the
+# subject of its own agent.instructions (domain.CoordinatorRecipient).
+COORDINATOR = platform.ROLE_COORDINATOR
 # The agent of a draft: it plans the experiment the others will later run in.
-PLANNER = "planner"
-BASELINE = "baseline"
-RESEARCHER = "researcher"
+PLANNER = platform.ROLE_PLANNER
+BASELINE = platform.ROLE_BASELINE
+RESEARCHER = platform.ROLE_RESEARCHER
 _AGENT_ROLES = (RESEARCHER, BASELINE, PLANNER)
 
 
@@ -29,17 +31,17 @@ def token_scope(token: str) -> tuple[str, str, str]:
     or ("coordinator", platform experiment, ""). It is hls_<scope>.<mac>, the scope being
     base64url of agent:<pe>/<agent> or coordinator:<pe>. The platform alone verifies it."""
     scope = ""
-    if token.startswith("hls_") and "." in token:
-        part = token[len("hls_"):].split(".", 1)[0]
+    if token.startswith(platform.DERIVED_TOKEN_PREFIX) and "." in token:
+        part = token[len(platform.DERIVED_TOKEN_PREFIX):].split(".", 1)[0]
         try:
             scope = base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)).decode()
         except (binascii.Error, UnicodeDecodeError):
             scope = ""
     kind, _, rest = scope.partition(":")
     pe, _, agent = rest.partition("/")
-    if kind == "agent" and pe and agent:
+    if kind == platform.SCOPE_AGENT and pe and agent:
         return kind, pe, agent
-    if kind == "coordinator" and pe and not agent:
+    if kind == platform.SCOPE_COORDINATOR and pe and not agent:
         return kind, pe, ""
     raise SystemExit("agent: HL_TOKEN is neither an agent's token nor a coordinator's. An agent gets its token when "
                      "it is added with `hl platform-experiments agents add`.")
@@ -51,8 +53,8 @@ class Config:
     which platform experiment this is, or that it is the experiment's coordinator, and the rest is
     read from the platform: its instructions say what it runs as (instructions.py)."""
     # The agent's own `hl` reads API_URL and HL_TOKEN from this same environment.
-    api_url: str = field(default_factory=lambda: required("API_URL"))
-    token: str = field(default_factory=lambda: required("HL_TOKEN"))
+    api_url: str = field(default_factory=lambda: required(platform.ENV_API_URL))
+    token: str = field(default_factory=lambda: required(platform.ENV_TOKEN))
 
     # From the token. A coordinator has no agent id: agent_id is then COORDINATOR, which names it
     # in the activity log and its working directory and is never sent to the platform as an id.
@@ -65,7 +67,7 @@ class Config:
 
     def __post_init__(self):
         kind, self.platform_experiment_id, agent_id = token_scope(self.token)
-        if kind == "coordinator":
+        if kind == platform.SCOPE_COORDINATOR:
             self.agent_id = self.role = COORDINATOR
         else:
             self.agent_id = agent_id

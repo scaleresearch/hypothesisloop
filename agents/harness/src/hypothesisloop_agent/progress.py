@@ -3,26 +3,26 @@ from __future__ import annotations
 import asyncio
 import time
 
+from hypothesisloop_agent import platform
+
 # The line the platform reads this agent's health from. The launcher that runs the agent looks
 # for the newest one in its output and hands the marker after the word to the platform, which
 # ends a machine whose marker stops changing (agents.progress_limit_seconds in its config).
-PREFIX = "hl-progress"
-# domain.AgentProgressIntervalSeconds on the platform's side.
-INTERVAL_S = 15
+PREFIX = platform.PROGRESS_PREFIX
+INTERVAL_S = platform.PROGRESS_INTERVAL_S
 # The line that says what the agent is doing now. The launcher hands the newest to the platform
 # with the marker, and the platform shows it beside the agent: the latest sentence and nothing
 # before it. It is printed with every beat, so the newest is never far back in the output, and
 # when it changes, at most every ACTIVITY_INTERVAL_S.
-ACTIVITY_PREFIX = "hl-activity"
+ACTIVITY_PREFIX = platform.ACTIVITY_PREFIX
 ACTIVITY_INTERVAL_S = 3
-# maxLength of domain.AgentActivity.Text on the platform's side.
-MAX_ACTIVITY_LENGTH = 120
+MAX_ACTIVITY_LENGTH = platform.MAX_ACTIVITY_LENGTH
 # The line that carries what the harness observes of its agent, printed with every beat: how many
 # subagents are live, whether a turn is in flight (working) or the agent waits for an update, since
 # when (Unix seconds), and the model provider's rate limit as the CLI last said it, once there is a
 # reading, and the digest of the instructions it runs. The launcher hands the newest to the platform, which keeps it in the run's metrics
 # (launcherapi.parseHarnessState reads it).
-STATE_PREFIX = "hl-state"
+STATE_PREFIX = platform.STATE_PREFIX
 # Characters of the instructions digest the state line carries: the launcher keeps 200 characters
 # of it, and 12 hex characters are 48 bits, which the platform's metrics hold exactly.
 DIGEST_LENGTH = 12

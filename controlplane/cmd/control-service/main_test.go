@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"context"
 	"flag"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +20,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/hostingapi"
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
+	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
@@ -24,6 +31,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/modelproxy"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/watch"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
@@ -179,4 +187,140 @@ func TestThePublishedDocumentsAreUnchanged(t *testing.T) {
 			t.Errorf("%s differs from %s", path, golden)
 		}
 	}
+}
+
+// harnessVocabularyFile is the Python module the agent harness reads the platform's vocabulary
+// from, rendered from the control plane's own definitions.
+var harnessVocabularyFile = filepath.Join("..", "..", "..", "agents", "harness", "src", "hypothesisloop_agent", "platform.py")
+
+// The values the agent harness branches on are the control plane's own: a status, a kind or a
+// field renamed here renames it in the harness, and a harness that kept the old one fails here.
+func TestTheHarnessVocabularyIsUnchanged(t *testing.T) {
+	got := harnessVocabulary()
+	if *update {
+		if err := os.WriteFile(harnessVocabularyFile, got, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	want, err := os.ReadFile(harnessVocabularyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Errorf("%s differs from the vocabulary the control plane defines: run this test with -update", harnessVocabularyFile)
+	}
+}
+
+// vocabulary is a Python module of plain constants and frozensets, in the order written.
+type vocabulary struct{ strings.Builder }
+
+var nonIdentifier = regexp.MustCompile(`[^A-Z0-9]+`)
+
+func (v *vocabulary) section(comment string) {
+	fmt.Fprintf(v, "\n# %s\n", comment)
+}
+
+func (v *vocabulary) number(name string, value int) { fmt.Fprintf(v, "%s = %d\n", name, value) }
+
+func (v *vocabulary) text(name, value string) {
+	fmt.Fprintf(v, "%s = %s\n", name, strconv.Quote(value))
+}
+
+// set writes values as the frozenset name, sorted.
+func (v *vocabulary) set(name string, values []string) {
+	sorted := slices.Sorted(slices.Values(values))
+	quoted := make([]string, len(sorted))
+	for i, value := range sorted {
+		quoted[i] = strconv.Quote(value)
+	}
+	fmt.Fprintf(v, "%s = frozenset({%s})\n", name, strings.Join(quoted, ", "))
+}
+
+// each writes every value as a constant of its own, named prefix and the value, sorted.
+func (v *vocabulary) each(prefix string, values []string) {
+	for _, value := range slices.Sorted(slices.Values(values)) {
+		v.text(prefix+strings.Trim(nonIdentifier.ReplaceAllString(strings.ToUpper(value), "_"), "_"), value)
+	}
+}
+
+func strs[T ~string](values []T) []string {
+	out := make([]string, len(values))
+	for i, value := range values {
+		out[i] = string(value)
+	}
+	return out
+}
+
+// jsonFields is the json name of every field of T.
+func jsonFields[T any]() []string {
+	var out []string
+	typ := reflect.TypeFor[T]()
+	for i := range typ.NumField() {
+		field := typ.Field(i)
+		name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+		out = append(out, name)
+	}
+	return out
+}
+
+func harnessVocabulary() []byte {
+	var v vocabulary
+	v.WriteString(`"""The platform's vocabulary the agent harness reads, rendered from the control plane's own
+definitions by TestTheHarnessVocabularyIsUnchanged (controlplane/cmd/control-service, go test -run
+TestTheHarnessVocabularyIsUnchanged -update). Change those definitions, never this file."""
+`)
+	v.section("The statuses of a job (platformapi.ExperimentStatus), and those it ends in.")
+	v.set("EXPERIMENT_STATUSES", strs(platformapi.ExperimentStatuses))
+	v.set("ENDED_STATUSES", strs(platformapi.EndedStatuses))
+	v.each("STATUS_", strs(platformapi.ExperimentStatuses))
+
+	v.section("The statuses of a platform experiment (domain.PlatformExperimentStatus).")
+	v.set("PLATFORM_EXPERIMENT_STATUSES", strs(domain.PlatformExperimentStatuses))
+	v.each("PLATFORM_EXPERIMENT_", strs(domain.PlatformExperimentStatuses))
+
+	v.section("The roles the platform serves instructions for (domain.AgentRole).")
+	v.set("AGENT_ROLES", strs(domain.AgentRoles))
+	v.each("ROLE_", strs(domain.AgentRoles))
+
+	v.section("The kinds of change GET /watch carries (domain.EventKinds), and the line hl watch prints in place of changes no longer held.")
+	kinds := make([]string, len(domain.EventKinds))
+	for i, k := range domain.EventKinds {
+		kinds[i] = k.Kind
+	}
+	v.set("EVENT_KINDS", kinds)
+	v.each("EVENT_", kinds)
+	v.text("WATCH_RESET", platformapi.ResetKind)
+
+	v.section("A token the platform derives, and the kinds of scope it names that run a harness (scope).")
+	v.text("DERIVED_TOKEN_PREFIX", scope.Prefix)
+	v.text("SCOPE_AGENT", string(scope.KindAgent))
+	v.text("SCOPE_COORDINATOR", string(scope.KindCoordinator))
+
+	v.section("The lines the launcher reads from a hosted harness's output, and the environment it starts the harness with (hostingapi).")
+	v.text("PROGRESS_PREFIX", hostingapi.ProgressPrefix)
+	v.text("ACTIVITY_PREFIX", hostingapi.ActivityPrefix)
+	v.text("STATE_PREFIX", hostingapi.StatePrefix)
+	v.number("MAX_ACTIVITY_LENGTH", hostingapi.MaxActivityLength)
+	v.number("MAX_STATE_LENGTH", hostingapi.MaxStateLength)
+	v.number("PROGRESS_INTERVAL_S", hostingapi.ProgressIntervalSeconds)
+	v.text("ENV_API_URL", hostingapi.EnvAPIURL)
+	v.text("ENV_TOKEN", hostingapi.EnvToken)
+
+	v.section("How long a token works and a machine stays after its run ended (domain.AgentWindDown, domain.CoordinatorWindDown).")
+	v.number("AGENT_WIND_DOWN_S", int(domain.AgentWindDown/time.Second))
+	v.number("COORDINATOR_WIND_DOWN_S", int(domain.CoordinatorWindDown/time.Second))
+
+	v.section("Why a platform experiment closed (domain.AnsweredCloseReasons), why it waits (domain.StatusReasons), why an agent's run ended (domain.RunEnd) and why it was cut.")
+	v.set("CLOSE_REASONS", strs(domain.AnsweredCloseReasons))
+	v.each("CLOSE_", strs(domain.AnsweredCloseReasons))
+	v.set("STATUS_REASONS", domain.StatusReasons())
+	v.each("STATUS_REASON_", domain.StatusReasons())
+	v.each("RUN_END_", strs([]domain.RunEnd{domain.RunEndClosed, domain.RunEndCut, domain.RunEndFinished, domain.RunEndPlanned}))
+	v.text("CUT_MAX_AGENTS_LOWERED", db.CutMaxAgentsLowered)
+
+	v.section("The fields of an agent's instructions (platformexperiments.Instructions) and of their settings (domain.AgentTypeSettings).")
+	v.set("INSTRUCTIONS_FIELDS", jsonFields[platformexperiments.Instructions]())
+	v.set("AGENT_TYPE_SETTINGS_FIELDS", jsonFields[domain.AgentTypeSettings]())
+	return []byte(v.String())
 }

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from hypothesisloop_agent import api_client, config, instructions, outage, prompt
+from hypothesisloop_agent import api_client, config, instructions, outage, platform, prompt
 
 log = logging.getLogger("llm_agent")
 
@@ -166,7 +166,7 @@ async def revising(setup: RunSetup) -> dict | None:
     if not config.plans(setup.cfg):
         return None
     draft = await setup.client.get_platform_experiment(setup.cfg.platform_experiment_id)
-    if draft.get("status_reason", {}).get("reason") != "revising":
+    if draft.get("status_reason", {}).get("reason") != platform.STATUS_REASON_REVISING:
         return None
     return draft
 
@@ -206,7 +206,7 @@ async def until_accepted(setup: RunSetup, stop_flag: list, poll_s: float = ACCEP
         except api_client.APIError as e:
             log.warning("could not read whether the draft was accepted (%s)", e)
             status = None
-        if status is not None and status != "draft":
+        if status is not None and status != platform.PLATFORM_EXPERIMENT_DRAFT:
             return
         if not waiting:
             log.info("waiting for the draft to be accepted before measuring its baseline")
@@ -252,7 +252,7 @@ async def _run_end(setup: RunSetup) -> tuple[str, str]:
     cfg = setup.cfg
     if config.coordinates(cfg):
         pe = await setup.client.get_platform_experiment(cfg.platform_experiment_id)
-        return "closed" if pe["status"] == "closed" else "", ""
+        return platform.RUN_END_CLOSED if pe["status"] == platform.PLATFORM_EXPERIMENT_CLOSED else "", ""
     signup = await setup.client.get_signup(cfg.agent_id, cfg.platform_experiment_id)
     return signup.get("ended", ""), signup.get("cut_reason", "")
 
@@ -260,7 +260,7 @@ async def _run_end(setup: RunSetup) -> tuple[str, str]:
 def _cut_because(reason: str) -> str:
     if reason == "":
         return "You are being stopped because you were cut from the platform experiment at a stage boundary."
-    if reason == "max_agents_lowered":
+    if reason == platform.CUT_MAX_AGENTS_LOWERED:
         return ("You are being stopped because you were cut from the platform experiment: its max_agents was lowered "
                 "below the researchers at work, and the newest of them were cut.")
     return f"You are being stopped because you were cut from the platform experiment, for a reason the platform names {reason}."
@@ -270,15 +270,15 @@ async def _closed_because(setup: RunSetup) -> str | None:
     cfg = setup.cfg
     pe = await setup.client.get_platform_experiment(cfg.platform_experiment_id)
     closed_at = pe["closed_at"]
-    if pe.get("close_reason") == "end_time_reached":
+    if pe.get("close_reason") == platform.CLOSE_END_TIME_REACHED:
         return f"You are being stopped because the platform experiment reached its end time and the platform closed it at {closed_at}."
-    if pe.get("close_reason") == "planning_limit_reached":
+    if pe.get("close_reason") == platform.CLOSE_PLANNING_LIMIT_REACHED:
         return f"You are being stopped because the planning limit passed with nothing proposed, and the platform closed the draft at {closed_at}."
-    if pe.get("close_reason") == "baseline_limit_reached":
+    if pe.get("close_reason") == platform.CLOSE_BASELINE_LIMIT_REACHED:
         return f"You are being stopped because the platform experiment was not running by its baseline limit, and the platform closed it at {closed_at} before it started."
-    if pe.get("close_reason") == "proposal_expired":
+    if pe.get("close_reason") == platform.CLOSE_PROPOSAL_EXPIRED:
         return "You are being stopped because nobody took up your answer in time, and the platform closed the draft."
-    if pe.get("close_reason") == "closed_by_request":
+    if pe.get("close_reason") == platform.CLOSE_CLOSED_BY_REQUEST:
         closed_by = pe.get("closed_by")
         if config.coordinates(cfg) and (closed_by or {}).get("kind") == "coordinator":
             return None
@@ -296,13 +296,13 @@ async def stop_cause(setup: RunSetup) -> str | None:
     inferred."""
     try:
         ended, cut_reason = await _run_end(setup)
-        if ended == "closed":
+        if ended == platform.RUN_END_CLOSED:
             return await _closed_because(setup)
-        if ended == "cut":
+        if ended == platform.RUN_END_CUT:
             return _cut_because(cut_reason)
         return {
-            "finished": None,
-            "planned": None,
+            platform.RUN_END_FINISHED: None,
+            platform.RUN_END_PLANNED: None,
             "": ("You are being stopped while your run on the platform goes on: the platform ended nothing of yours. "
                  "Only this machine is being stopped, and the platform does not say why."),
         }[ended]

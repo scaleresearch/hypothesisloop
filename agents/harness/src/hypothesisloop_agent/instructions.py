@@ -10,13 +10,13 @@ import logging
 import os
 from dataclasses import dataclass
 
-from hypothesisloop_agent import api_client, config, progress, prompt
+from hypothesisloop_agent import api_client, config, platform, progress, prompt
 
 log = logging.getLogger("llm_agent")
 
 # The event that says what the agent is served changed. Its subject is the agent, or
 # config.COORDINATOR for the coordinator's own.
-EVENT = "agent.instructions"
+EVENT = platform.EVENT_AGENT_INSTRUCTIONS
 # Where the instructions the session in the state directory runs with are kept, so that a session
 # resumed on another machine is compared with what it was started with.
 FILE = ".instructions.json"
@@ -51,13 +51,12 @@ class Instructions:
         return self.prompt != other.prompt
 
 
-# The fields of the platform's answer (quota.Instructions) and of its settings
-# (domain.AgentTypeSettings) the harness knows. One missing is an incompatibility and ends the
+# The fields of the platform's answer and of its settings the harness knows. One missing is an incompatibility and ends the
 # harness; one it does not know is a feature it does not have yet, said once and passed over, so
 # that a control plane deployed before the harness image stops no agent. rules_version is not
 # kept: the digest holds it, and the digest is what the harness compares.
-_ANSWER = frozenset({"agent_type", "agent_type_version", "rules_version", "role", "prompt", "placeholders", "settings", "digest"})
-_SETTINGS = frozenset({"model", "max_subagents", "effort", "hyperparameters"})
+_ANSWER = platform.INSTRUCTIONS_FIELDS
+_SETTINGS = platform.AGENT_TYPE_SETTINGS_FIELDS
 _said_unknown: set[tuple[str, tuple[str, ...]]] = set()
 
 

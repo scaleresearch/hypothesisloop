@@ -10,12 +10,12 @@ from unittest import mock
 
 from claude_agent_sdk import ResultMessage
 
-from hypothesisloop_agent import config, core
+from hypothesisloop_agent import config, core, platform
 from hypothesisloop_agent.claude import run
 from test_require_joined import AGENT_TOKEN
 
 # What a launcher hands a machine, and all of it: where the platform is and the agent's token.
-LAUNCH_ENV = {"API_URL": "http://api.example.invalid", "HL_TOKEN": AGENT_TOKEN}
+LAUNCH_ENV = {platform.ENV_API_URL: "http://api.example.invalid", platform.ENV_TOKEN: AGENT_TOKEN}
 
 
 class LaunchEnvironmentTest(unittest.TestCase):
@@ -46,13 +46,13 @@ class StopSignalTest(unittest.TestCase):
                 signal.signal(signum, handler)
 
     def test_the_last_turn_fits_inside_the_wind_down_with_a_launcher_pass_to_spare(self):
-        # domain.AgentWindDown is 120 s: the token works and the machine stays that long after
-        # the close or the cut, and the signal arrives one launcher pass into it.
-        self.assertLessEqual(run._SHUTDOWN_TURN_S, 90)
+        # The token works and the machine stays the wind-down after the close or the cut, and the
+        # signal arrives one launcher pass, 30 s, into it.
+        self.assertLessEqual(run._SHUTDOWN_TURN_S, platform.AGENT_WIND_DOWN_S - 30)
 
     def test_the_coordinators_last_turn_fits_inside_its_own_wind_down(self):
-        # domain.CoordinatorWindDown is 300 s: the coordinator writes the final summary in it.
-        self.assertLessEqual(run._COORDINATOR_SHUTDOWN_TURN_S, 300 - 60)
+        # The coordinator writes the final summary in its wind-down.
+        self.assertLessEqual(run._COORDINATOR_SHUTDOWN_TURN_S, platform.COORDINATOR_WIND_DOWN_S - 60)
         self.assertGreater(run._COORDINATOR_SHUTDOWN_TURN_S, run._SHUTDOWN_TURN_S)
 
 

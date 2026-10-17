@@ -2,6 +2,8 @@ package domain
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 )
 
 // Waiter is whose move a platform experiment that is not closed waits for.
@@ -78,3 +80,7 @@ func WaitsFor(reason string, coordinatorHosted bool) (Waiter, error) {
 	}
 	return who, nil
 }
+
+// StatusReasons is every reason a platform experiment that is not closed answers as its
+// status_reason, sorted.
+func StatusReasons() []string { return slices.Sorted(maps.Keys(statusWaiters)) }
