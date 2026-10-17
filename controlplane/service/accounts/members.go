@@ -59,16 +59,56 @@ func validRole(role domain.OrgRole) error {
 	return nil
 }
 
+// ListedMember is a member of an org with what the caller may do to them.
+type ListedMember struct {
+	*domain.OrgMember
+	Actions []domain.OrgMemberAction `json:"actions" doc:"What the caller may do to the member now, each a write the API accepts from them: set_role (PATCH /orgs/{id}/members/{user_id}) and remove (DELETE /orgs/{id}/members/{user_id}, which for the caller's own membership is leaving). Neither is listed for the org's last owner."`
+}
+
 // Members is one page of the members of orgID, and how many it has.
-func (h *Service) Members(ctx context.Context, orgID string, page Page) ([]*domain.OrgMember, int, error) {
-	if _, err := h.policy.readOrg(ctx, orgID); err != nil {
+func (h *Service) Members(ctx context.Context, orgID string, page Page) ([]ListedMember, int, error) {
+	p, err := h.policy.readOrg(ctx, orgID)
+	if err != nil {
 		return nil, 0, err
 	}
 	limit, offset, err := page.bounds()
 	if err != nil {
 		return nil, 0, err
 	}
-	return h.accounts.ListOrgMembers(ctx, orgID, limit, offset)
+	role, err := h.access.Role(ctx, p, orgID)
+	if err != nil {
+		return nil, 0, err
+	}
+	members, total, err := h.accounts.ListOrgMembers(ctx, orgID, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	owners, err := h.accounts.CountOrgOwners(ctx, orgID)
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]ListedMember, len(members))
+	for i, m := range members {
+		out[i] = ListedMember{OrgMember: m, Actions: memberActions(p, role, m, owners)}
+	}
+	return out, total, nil
+}
+
+// memberActions is what p, holding role in the org, may do to its member m by the rules
+// SetMemberRole and RemoveMember refuse by, with owners the owners the org has: the store keeps
+// its last one an owner and in it.
+func memberActions(p auth.Principal, role domain.OrgRole, m *domain.OrgMember, owners int) []domain.OrgMemberAction {
+	actions := []domain.OrgMemberAction{}
+	if m.Role == domain.OrgRoleOwner && owners == 1 {
+		return actions
+	}
+	if auth.Administers(p, role) == nil {
+		actions = append(actions, domain.OrgMemberActionSetRole)
+	}
+	if auth.RemovesMember(p, role, m.UserID) == nil {
+		actions = append(actions, domain.OrgMemberActionRemove)
+	}
+	return actions
 }
 
 func (h *Service) SetMemberRole(ctx context.Context, orgID, userID string, role domain.OrgRole) (*domain.OrgMember, error) {

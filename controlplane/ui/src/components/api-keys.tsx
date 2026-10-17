@@ -123,7 +123,7 @@ export function APIKeys() {
                     : <StatusLabel tone="success">active</StatusLabel>}
                 </td>
                 <td className="text-right">
-                  {!key.revoked_at && <Button size="sm" variant="danger" onClick={() => setRevoking(key)}>Revoke</Button>}
+                  {key.actions.includes('revoke') && <Button size="sm" variant="danger" onClick={() => setRevoking(key)}>Revoke</Button>}
                 </td>
               </tr>
             ))}

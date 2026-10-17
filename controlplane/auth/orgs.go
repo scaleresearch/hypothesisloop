@@ -79,14 +79,21 @@ func (a *Access) OrgAdmin(ctx context.Context, orgID string) (Principal, error) 
 
 // administers is Administers for a principal already known to reach the org, its role read.
 func (a *Access) administers(ctx context.Context, p Principal, orgID string) error {
-	var role domain.OrgRole
-	if p.Kind == KindUser {
-		var err error
-		if role, _, err = a.placement.OrgRole(ctx, orgID, p.UserID); err != nil {
-			return err
-		}
+	role, err := a.Role(ctx, p, orgID)
+	if err != nil {
+		return err
 	}
 	return Administers(p, role)
+}
+
+// Role is the role p, already known to reach the org, holds in it: a person's own, none for any
+// other caller.
+func (a *Access) Role(ctx context.Context, p Principal, orgID string) (domain.OrgRole, error) {
+	if p.Kind != KindUser {
+		return "", nil
+	}
+	role, _, err := a.placement.OrgRole(ctx, orgID, p.UserID)
+	return role, err
 }
 
 // Administers is the rule itself: whether p, which reaches an org and holds role in it, empty for
@@ -188,10 +195,19 @@ func (a *Access) MemberRemoval(ctx context.Context, orgID, userID string) error 
 	if err != nil {
 		return err
 	}
+	role, err := a.Role(ctx, p, orgID)
+	if err != nil {
+		return err
+	}
+	return RemovesMember(p, role, userID)
+}
+
+// RemovesMember is MemberRemoval's rule, for p holding role in the org.
+func RemovesMember(p Principal, role domain.OrgRole, userID string) error {
 	if p.Kind == KindUser && p.UserID == userID {
 		return nil
 	}
-	return a.administers(ctx, p, orgID)
+	return Administers(p, role)
 }
 
 // KeyMinter admits a person to create an API key of the org, bound to projectID when set: an
@@ -215,10 +231,19 @@ func (a *Access) KeyEnd(ctx context.Context, key *domain.APIKey) error {
 	if err != nil {
 		return err
 	}
+	role, err := a.Role(ctx, p, key.OrgID)
+	if err != nil {
+		return err
+	}
+	return EndsKey(p, role, key)
+}
+
+// EndsKey is KeyEnd's rule, for a person p holding role in the org of key.
+func EndsKey(p Principal, role domain.OrgRole, key *domain.APIKey) error {
 	if p.Kind == KindUser && p.UserID == key.Actor.ID {
 		return nil
 	}
-	return a.administers(ctx, p, key.OrgID)
+	return Administers(p, role)
 }
 
 // ProjectAdmin admits the caller to change one project, and returns it. A project the caller

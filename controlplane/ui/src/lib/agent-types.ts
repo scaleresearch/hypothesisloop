@@ -2,7 +2,7 @@ import useSWR from 'swr'
 import { fetchAgentTypes } from '@/lib/api/agent-types'
 import { ApiError } from '@/lib/api/request'
 import { keys } from '@/lib/keys'
-import type { AgentRole, AgentTypeSettings, CurrentAgentType } from '@/types/api'
+import type { AgentRole, AgentTypeSettings, ListedAgentType } from '@/types/api'
 
 /** The built-in researcher type an agent runs as when it names none. */
 export const DEFAULT_AGENT_TYPE = 'generalist'
@@ -14,9 +14,6 @@ export const ROLES: { role: AgentRole; label: string; plural: string; builtin: s
   { role: 'coordinator', label: 'Coordinator', plural: 'Coordinators', builtin: 'coordinator', description: 'Supervises a run and writes its summary.' },
 ]
 
-/** The roles an org makes types of: a coordinator or a planner runs its built-in type only. */
-export const ORG_ROLES: AgentRole[] = ['researcher', 'baseline']
-
 /** The sentence every save and restore of a type says of the agents running it. */
 export const APPLIES_LIVE = 'Changes apply in real time to running agents.'
 
@@ -27,14 +24,14 @@ export function roleOf(role: AgentRole) {
 }
 
 /** One line on what agents of the type do: the one the type states, a built-in's always. */
-export function describeType(t: CurrentAgentType): string {
+export function describeType(t: ListedAgentType): string {
   if (t.builtin || t.description) return t.description
   const by = t.created_by?.name ? `, made by ${t.created_by.name}` : ''
   return `Your org's own ${roleOf(t.role).label.toLowerCase()} type${by}.`
 }
 
 /** The name an agent type id reads as, or the id itself when the catalog does not hold it. */
-export function typeName(id: string, catalog: CurrentAgentType[] | undefined): string {
+export function typeName(id: string, catalog: ListedAgentType[] | undefined): string {
   return catalog?.find(t => t.id === id)?.name ?? id
 }
 
@@ -44,7 +41,7 @@ export function useAgentTypes(orgID: string | undefined) {
 }
 
 /** The types a new researcher may be started as, built-in first. */
-export function researcherTypes(catalog: CurrentAgentType[] | undefined): CurrentAgentType[] {
+export function researcherTypes(catalog: ListedAgentType[] | undefined): ListedAgentType[] {
   return (catalog ?? []).filter(t => t.role === 'researcher' && !t.archived_at)
     .sort((a, b) => Number(b.builtin) - Number(a.builtin))
 }

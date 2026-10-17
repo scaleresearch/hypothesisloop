@@ -45,9 +45,13 @@ func (Waiter) Schema(r huma.Registry) *huma.Schema          { return enumSchema(
 func (SignupRole) Schema(r huma.Registry) *huma.Schema      { return enumSchema(r, SignupRoles) }
 func (SignupAction) Schema(r huma.Registry) *huma.Schema    { return enumSchema(r, SignupActions) }
 func (AgentRole) Schema(r huma.Registry) *huma.Schema       { return enumSchema(r, AgentRoles) }
+func (AgentTypeChange) Schema(r huma.Registry) *huma.Schema { return enumSchema(r, AgentTypeChanges) }
 func (AgentTypeAction) Schema(r huma.Registry) *huma.Schema { return enumSchema(r, AgentTypeActions) }
 func (OrgRole) Schema(r huma.Registry) *huma.Schema         { return enumSchema(r, OrgRoles) }
 func (OrgAction) Schema(r huma.Registry) *huma.Schema       { return enumSchema(r, OrgActions) }
+func (OrgMemberAction) Schema(r huma.Registry) *huma.Schema { return enumSchema(r, OrgMemberActions) }
+func (APIKeyAction) Schema(r huma.Registry) *huma.Schema    { return enumSchema(r, APIKeyActions) }
+func (ClusterAction) Schema(r huma.Registry) *huma.Schema   { return enumSchema(r, ClusterActions) }
 func (ActorKind) Schema(r huma.Registry) *huma.Schema       { return enumSchema(r, ActorKinds) }
 func (CapacityTier) Schema(r huma.Registry) *huma.Schema    { return enumSchema(r, CapacityTiers) }
 func (TypeKind) Schema(r huma.Registry) *huma.Schema        { return enumSchema(r, TypeKinds) }

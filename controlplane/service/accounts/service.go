@@ -37,6 +37,7 @@ type Accounts interface {
 	GetAPIKey(ctx context.Context, id string) (*domain.APIKey, error)
 	RevokeAPIKey(ctx context.Context, id string) error
 	ListOrgMembers(ctx context.Context, orgID string, limit, offset int) ([]*domain.OrgMember, int, error)
+	CountOrgOwners(ctx context.Context, orgID string) (int, error)
 	SetOrgMemberRole(ctx context.Context, orgID, userID string, role domain.OrgRole) (*domain.OrgMember, error)
 	RemoveOrgMember(ctx context.Context, orgID, userID string) error
 	CreateOrgInvite(ctx context.Context, invite *domain.OrgInvite, tokenHash string) error
@@ -191,21 +192,42 @@ type RegisteredCluster struct {
 // its agent is connected right now, and when it was last heard from.
 type ListedCluster struct {
 	ClusterView
-	Owned             bool       `json:"owned" doc:"The org registered the cluster and may change its settings. False for a cluster of another org that the platform shares: its org_id, cluster_id, settings, agent_version and last_error are left out."`
-	Connected         bool       `json:"connected"`
-	Place             int        `json:"place,omitempty" doc:"Where the cluster stands in the order a job of the org is tried on its clusters, 1 first. Clusters of one place are tried together, the one with the most room for the job first. The platform's shared clusters come after every cluster of the org's own. Absent while the org has the cluster turned off."`
-	AutoscalerEnabled bool       `json:"autoscaler_enabled" doc:"The cluster's connected agent reports an autoscaler that adds nodes for waiting jobs, which is what scale_up_timeout_seconds and max_speculative_accelerators act on."`
-	LastContactAt     *time.Time `json:"last_contact_at,omitempty" doc:"When the cluster's agent last reconciled with the platform, if within the last 30 days. Absent: not heard from in them, or never."`
-	AgentVersion      string     `json:"agent_version,omitempty" doc:"The version, an image tag, the cluster's agent said it runs at its last contact."`
-	VersionSkew       bool       `json:"version_skew,omitempty" doc:"The agent runs another version than the platform, whose own is the image_tag registering a cluster answers: run the attach command again to upgrade it."`
-	LastError         string     `json:"last_error,omitempty" doc:"What the platform last refused the agent's reconcile with, until it accepts one again."`
-	LastErrorAt       *time.Time `json:"last_error_at,omitempty"`
+	Owned             bool                   `json:"owned" doc:"The org registered the cluster and may change its settings. False for a cluster of another org that the platform shares: its org_id, cluster_id, settings, agent_version and last_error are left out."`
+	Connected         bool                   `json:"connected"`
+	Place             int                    `json:"place,omitempty" doc:"Where the cluster stands in the order a job of the org is tried on its clusters, 1 first. Clusters of one place are tried together, the one with the most room for the job first. The platform's shared clusters come after every cluster of the org's own. Absent while the org has the cluster turned off."`
+	AutoscalerEnabled bool                   `json:"autoscaler_enabled" doc:"The cluster's connected agent reports an autoscaler that adds nodes for waiting jobs, which is what scale_up_timeout_seconds and max_speculative_accelerators act on."`
+	LastContactAt     *time.Time             `json:"last_contact_at,omitempty" doc:"When the cluster's agent last reconciled with the platform, if within the last 30 days. Absent: not heard from in them, or never."`
+	AgentVersion      string                 `json:"agent_version,omitempty" doc:"The version, an image tag, the cluster's agent said it runs at its last contact."`
+	VersionSkew       bool                   `json:"version_skew,omitempty" doc:"The agent runs another version than the platform, whose own is the image_tag registering a cluster answers: run the attach command again to upgrade it."`
+	LastError         string                 `json:"last_error,omitempty" doc:"What the platform last refused the agent's reconcile with, until it accepts one again."`
+	LastErrorAt       *time.Time             `json:"last_error_at,omitempty"`
+	Actions           []domain.ClusterAction `json:"actions" doc:"What the caller may do to the cluster now, each a write the API accepts from them: enable (turn it on and off for the org's jobs, and order it), edit (PATCH its settings, and forget its identity), remove, and share (PATCH shared)."`
 }
 
-// listed shows a cluster to a caller listing the clusters of orgID. platformVersion is the image
-// tag the platform runs, which an agent's version is compared with.
-func listed(c *domain.Cluster, orgID string, caller auth.Principal, connected, autoscaler bool, contact *metricsdb.ClusterContact, platformVersion string) ListedCluster {
-	out := ListedCluster{ClusterView: viewFor(c, orgID, caller), Owned: c.OrgID == orgID, Connected: connected, AutoscalerEnabled: autoscaler}
+// clusterActions is what caller, holding role in orgID, may do to the cluster c its jobs may use,
+// by the rules auth.Access.ClusterUse and ClusterOf and UpdateCluster refuse by: an administrator
+// of the org turns any of them on and off for its jobs and changes and removes the org's own, and
+// staff share one.
+func clusterActions(c *domain.Cluster, orgID string, caller auth.Principal, role domain.OrgRole) []domain.ClusterAction {
+	actions := []domain.ClusterAction{}
+	if auth.Administers(caller, role) != nil {
+		return actions
+	}
+	actions = append(actions, domain.ClusterActionEnable)
+	if c.OrgID != orgID {
+		return actions
+	}
+	actions = append(actions, domain.ClusterActionEdit, domain.ClusterActionRemove)
+	if caller.Kind == auth.KindStaff {
+		actions = append(actions, domain.ClusterActionShare)
+	}
+	return actions
+}
+
+// listed shows a cluster to a caller, holding role in orgID, listing the clusters of orgID.
+// platformVersion is the image tag the platform runs, which an agent's version is compared with.
+func listed(c *domain.Cluster, orgID string, caller auth.Principal, role domain.OrgRole, connected, autoscaler bool, contact *metricsdb.ClusterContact, platformVersion string) ListedCluster {
+	out := ListedCluster{ClusterView: viewFor(c, orgID, caller), Owned: c.OrgID == orgID, Connected: connected, AutoscalerEnabled: autoscaler, Actions: clusterActions(c, orgID, caller, role)}
 	if contact != nil {
 		at := contact.At
 		out.LastContactAt = &at
@@ -223,6 +245,10 @@ func listed(c *domain.Cluster, orgID string, caller auth.Principal, connected, a
 
 // listClusters answers the clusters the jobs of orgID run on, in the order a job is placed.
 func (h *Service) listClusters(ctx context.Context, orgID string, caller auth.Principal) ([]ListedCluster, error) {
+	role, err := h.access.Role(ctx, caller, orgID)
+	if err != nil {
+		return nil, err
+	}
 	clusters, err := h.clusters.ClustersHosting(ctx, orgID)
 	if err != nil {
 		return nil, err
@@ -248,7 +274,7 @@ func (h *Service) listClusters(ctx context.Context, orgID string, caller auth.Pr
 		if seen, ok := contacts[c.Name]; ok {
 			contact = &seen
 		}
-		out[i] = listed(c, orgID, caller, connected[c.Name], connected[c.Name] && autoscalers[c.Name], contact, h.runtimes.ImageTag)
+		out[i] = listed(c, orgID, caller, role, connected[c.Name], connected[c.Name] && autoscalers[c.Name], contact, h.runtimes.ImageTag)
 		if !c.EnabledFor(orgID) {
 			continue
 		}
@@ -416,15 +442,31 @@ func (h *Service) createAPIKey(ctx context.Context, orgID, projectID, name strin
 	return &CreatedAPIKey{APIKey: *key, Token: token}, nil
 }
 
-func (h *Service) reachableKeys(ctx context.Context, orgID string) ([]*domain.APIKey, error) {
-	if _, err := h.access.OrgMember(ctx, orgID); err != nil {
+// ListedAPIKey is an API key with what the caller may do to it.
+type ListedAPIKey struct {
+	*domain.APIKey
+	Actions []domain.APIKeyAction `json:"actions" doc:"What the caller may do to the key now, a write the API accepts from them: revoke (DELETE /api-keys/{id}), until the key is revoked."`
+}
+
+func (h *Service) reachableKeys(ctx context.Context, orgID string) ([]ListedAPIKey, error) {
+	p, err := h.access.OrgMember(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	role, err := h.access.Role(ctx, p, orgID)
+	if err != nil {
 		return nil, err
 	}
 	keys, err := h.accounts.ListAPIKeys(ctx, orgID)
 	if err != nil {
 		return nil, err
 	}
-	return h.policy.reachableKeys(ctx, orgID, keys)
+	reached := reachableKeys(p, keys)
+	out := make([]ListedAPIKey, len(reached))
+	for i, k := range reached {
+		out[i] = ListedAPIKey{APIKey: k, Actions: keyActions(p, role, k, keys)}
+	}
+	return out, nil
 }
 
 // revokeAPIKey answers for a key the caller cannot reach exactly as for one that does not exist.
@@ -541,7 +583,7 @@ func (h *Service) CreateAPIKey(ctx context.Context, orgID, projectID, name strin
 }
 
 // APIKeys are the keys of orgID the caller reaches.
-func (h *Service) APIKeys(ctx context.Context, orgID string) ([]*domain.APIKey, error) {
+func (h *Service) APIKeys(ctx context.Context, orgID string) ([]ListedAPIKey, error) {
 	return h.reachableKeys(ctx, orgID)
 }
 

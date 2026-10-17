@@ -1,13 +1,13 @@
 import { apiFetch, apiSend } from '@/lib/api/request'
-import type { AgentTypeVersion, CreateAgentTypeRequest, CurrentAgentType, EditAgentTypeRequest, EditedAgentType } from '@/types/api'
+import type { AgentTypeVersion, CreateAgentTypeRequest, EditAgentTypeRequest, EditedAgentType, ListedAgentType } from '@/types/api'
 
 // The built-in types and the org's own, archived ones included.
-export function fetchAgentTypes(orgID: string): Promise<CurrentAgentType[]> {
-  return apiFetch<CurrentAgentType[]>(`/orgs/${orgID}/agent-types`)
+export function fetchAgentTypes(orgID: string): Promise<ListedAgentType[]> {
+  return apiFetch<ListedAgentType[]>(`/orgs/${orgID}/agent-types`)
 }
 
-export function fetchAgentType(orgID: string, typeID: string): Promise<CurrentAgentType> {
-  return apiFetch<CurrentAgentType>(`/orgs/${orgID}/agent-types/${encodeURIComponent(typeID)}`)
+export function fetchAgentType(orgID: string, typeID: string): Promise<ListedAgentType> {
+  return apiFetch<ListedAgentType>(`/orgs/${orgID}/agent-types/${encodeURIComponent(typeID)}`)
 }
 
 // Newest first.
@@ -16,8 +16,8 @@ export function fetchAgentTypeVersions(orgID: string, typeID: string): Promise<A
 }
 
 // For an owner. A copy (from) takes its role, prompt and settings from the type it copies.
-export function createAgentType(orgID: string, req: CreateAgentTypeRequest): Promise<CurrentAgentType> {
-  return apiSend<CurrentAgentType>('POST', `/orgs/${orgID}/agent-types`, req)
+export function createAgentType(orgID: string, req: CreateAgentTypeRequest): Promise<ListedAgentType> {
+  return apiSend<ListedAgentType>('POST', `/orgs/${orgID}/agent-types`, req)
 }
 
 // Makes the next version current: running agents of the type apply it at their next turn.
@@ -31,6 +31,6 @@ export function restoreAgentType(orgID: string, typeID: string, version: number)
 }
 
 // Refused 409 agent_type_in_use while an experiment that is not closed names it.
-export function archiveAgentType(orgID: string, typeID: string): Promise<CurrentAgentType> {
-  return apiSend<CurrentAgentType>('POST', `/orgs/${orgID}/agent-types/${encodeURIComponent(typeID)}/archive`)
+export function archiveAgentType(orgID: string, typeID: string): Promise<ListedAgentType> {
+  return apiSend<ListedAgentType>('POST', `/orgs/${orgID}/agent-types/${encodeURIComponent(typeID)}/archive`)
 }

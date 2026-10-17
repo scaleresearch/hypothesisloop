@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAPIKey, fetchAPIKeys, revokeAPIKey } from '@/lib/api/accounts'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { APIKeys } from '@/components/api-keys'
-import type { APIKey, Me } from '@/types/api'
+import type { APIKey, ListedAPIKey, Me } from '@/types/api'
 
 vi.mock('@/lib/api/accounts', () => ({ createAPIKey: vi.fn(), fetchAPIKeys: vi.fn(), revokeAPIKey: vi.fn() }))
 
@@ -26,7 +26,16 @@ const me: Me = {
 // What the API lists: the keys, never a token.
 let stored: APIKey[]
 
+// What the API lets the one reading the list do to k: an owner revokes any key, anyone else the
+// keys they made, until it is revoked.
+let viewer: Me
+function withActions(k: APIKey): ListedAPIKey {
+  const ends = viewer.orgs[0].actions.includes('edit') || k.actor.id === viewer.user_id
+  return { ...k, actions: !k.revoked_at && ends ? ['revoke'] : [] }
+}
+
 function show(as: Me = me) {
+  viewer = as
   const resolved = resolveTenant(as, '')
   if (resolved.state !== 'selected') throw new Error('no tenant')
   return render(
@@ -43,7 +52,7 @@ async function create(name: string) {
 
 beforeEach(() => {
   stored = [{ id: 'k1', org_id: 'org_a', actor: { kind: 'user', id: 'u1', name: 'Ada' }, name: 'ci', created_at: at }]
-  vi.mocked(fetchAPIKeys).mockImplementation(async () => [...stored])
+  vi.mocked(fetchAPIKeys).mockImplementation(async () => stored.map(withActions))
   vi.mocked(createAPIKey).mockImplementation(async (orgID, name, projectID) => {
     const key: APIKey = { id: 'k2', org_id: orgID, project_id: projectID, actor: { kind: 'user', id: 'u1', name: 'Ada' }, name, created_at: at }
     stored = [key, ...stored]

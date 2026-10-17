@@ -40,6 +40,35 @@ const (
 
 var OrgActions = []OrgAction{OrgActionEdit, OrgActionCreateAPIKey}
 
+// OrgMemberAction is something the caller may do to a member of an org now.
+type OrgMemberAction string
+
+const (
+	OrgMemberActionSetRole OrgMemberAction = "set_role"
+	OrgMemberActionRemove  OrgMemberAction = "remove"
+)
+
+var OrgMemberActions = []OrgMemberAction{OrgMemberActionSetRole, OrgMemberActionRemove}
+
+// APIKeyAction is something the caller may do to an API key now.
+type APIKeyAction string
+
+const APIKeyActionRevoke APIKeyAction = "revoke"
+
+var APIKeyActions = []APIKeyAction{APIKeyActionRevoke}
+
+// ClusterAction is something the caller may do to a cluster an org's jobs use now.
+type ClusterAction string
+
+const (
+	ClusterActionEnable ClusterAction = "enable"
+	ClusterActionEdit   ClusterAction = "edit"
+	ClusterActionRemove ClusterAction = "remove"
+	ClusterActionShare  ClusterAction = "share"
+)
+
+var ClusterActions = []ClusterAction{ClusterActionEnable, ClusterActionEdit, ClusterActionRemove, ClusterActionShare}
+
 // Org owns projects, agents, API keys and clusters. Role is the asking user's own role and is
 // set only on a per-user listing.
 type Org struct {

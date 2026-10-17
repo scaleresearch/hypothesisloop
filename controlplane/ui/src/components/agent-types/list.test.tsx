@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAgentType, fetchAgentTypes } from '@/lib/api/agent-types'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { AgentTypesList } from '@/components/agent-types/list'
-import { CATALOG, agentType } from '@/test-agent-types'
+import { CATALOG, agentType, seenBy } from '@/test-agent-types'
 import type { Me, OrgAction, OrgRole } from '@/types/api'
 
 const navigation = vi.hoisted(() => ({ push: vi.fn() }))
@@ -21,7 +21,10 @@ const me = (role: OrgRole): Me => ({
   projects: [{ id: 'prj_1', org_id: 'org_a', name: 'default', created_at: at }],
 })
 
-function show(role: 'owner' | 'member' = 'owner') {
+let viewer: OrgRole
+
+function show(role: OrgRole = 'owner') {
+  viewer = role
   const resolved = resolveTenant(me(role), '')
   if (resolved.state !== 'selected') throw new Error('no tenant')
   return render(
@@ -33,7 +36,7 @@ function show(role: 'owner' | 'member' = 'owner') {
 
 beforeEach(() => {
   navigation.push.mockReset()
-  vi.mocked(fetchAgentTypes).mockResolvedValue([...CATALOG, agentType('at-old', 'Old sweeper', 'researcher', { archived_at: at })])
+  vi.mocked(fetchAgentTypes).mockImplementation(async () => [...CATALOG, agentType('at-old', 'Old sweeper', 'researcher', { archived_at: at })].map(t => seenBy(viewer, t)))
   vi.mocked(createAgentType).mockResolvedValue(agentType('at-new', 'Copy', 'researcher'))
 })
 

@@ -23,13 +23,23 @@ const member: Me = { ...me, orgs: [{ ...me.orgs[0], role: 'member', actions: ['c
 const staff: Me = { ...me, kind: 'staff' }
 
 const owned = (name: string, over: Partial<ListedCluster> = {}): ListedCluster =>
-  ({ name, org_id: 'org_a', shared: false, enabled: true, created_at: at, owned: true, connected: false, autoscaler_enabled: false, ...over })
-const platform: ListedCluster = { name: 'platform-gpu', shared: true, enabled: true, created_at: at, owned: false, connected: true, autoscaler_enabled: false, place: 4 }
+  ({ name, org_id: 'org_a', shared: false, enabled: true, created_at: at, owned: true, connected: false, autoscaler_enabled: false, actions: [], ...over })
+const platform: ListedCluster = { name: 'platform-gpu', shared: true, enabled: true, created_at: at, owned: false, connected: true, autoscaler_enabled: false, place: 4, actions: [] }
+
+// What the API lets the one reading the list do to c: an owner turns any on and off and changes
+// the org's own, staff share one too, and a member does nothing.
+let viewer: Me
+function withActions(c: ListedCluster): ListedCluster {
+  const edits = viewer.orgs[0].actions.includes('edit')
+  const own: ListedCluster['actions'] = c.owned ? ['edit', 'remove', ...(viewer.kind === 'staff' ? ['share' as const] : [])] : []
+  return { ...c, actions: edits ? ['enable', ...own] : [] }
+}
 
 // In the order the API lists them: the org's own as it ordered them, then the platform's.
 let clusters: ListedCluster[]
 
 function show(as: Me = me) {
+  viewer = as
   const resolved = resolveTenant(as, '')
   if (resolved.state !== 'selected') throw new Error('no tenant')
   return render(
@@ -45,7 +55,7 @@ const names = () => screen.getAllByRole('row').map(r => r.getAttribute('data-clu
 beforeEach(() => {
   vi.resetAllMocks()
   clusters = [owned('lab', { connected: true, scale_up_timeout_seconds: 600, place: 1 }), owned('new', { place: 2 }), owned('spare', { place: 3 }), platform]
-  vi.mocked(fetchOrgClusters).mockImplementation(async () => [...clusters])
+  vi.mocked(fetchOrgClusters).mockImplementation(async () => clusters.map(withActions))
   vi.mocked(setClusterOrder).mockImplementation(async (_orgID, order) => {
     clusters = [...order.map((n, i) => ({ ...clusters.find(c => c.name === n)!, place: i + 1 })), platform]
     return clusters

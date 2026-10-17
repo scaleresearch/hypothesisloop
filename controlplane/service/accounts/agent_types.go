@@ -54,9 +54,55 @@ func NewAgentTypes(store AgentTypeStore, access *auth.Access, logger *zap.Logger
 	return &AgentTypes{store: store, logger: logger, access: access}
 }
 
+// ListedAgentType is an agent type with what the caller may do to it.
+type ListedAgentType struct {
+	domain.CurrentAgentType
+	Actions []domain.AgentTypeAction `json:"actions" doc:"What the caller may do to the agent type now, each a write the API accepts from them: edit, archive, duplicate (create one with from) and restore. Archive is listed while a platform experiment still names the type, and refused then as agent_type_in_use."`
+}
+
+// agentTypeActions is what caller, holding role in the org, may do to t by the rules the writes
+// refuse by: the org's administrators copy a type of a role an org makes, and edit, archive and
+// restore the org's own until it is archived. Archiving one archived changes nothing, so it is not
+// offered.
+func agentTypeActions(caller auth.Principal, role domain.OrgRole, t domain.CurrentAgentType) []domain.AgentTypeAction {
+	actions := []domain.AgentTypeAction{}
+	if auth.Administers(caller, role) != nil {
+		return actions
+	}
+	if !t.Builtin && t.ArchivedAt == nil {
+		actions = append(actions, domain.AgentTypeActionEdit, domain.AgentTypeActionArchive, domain.AgentTypeActionRestore)
+	}
+	if domain.CheckOrgAgentRole(t.Role) == nil {
+		actions = append(actions, domain.AgentTypeActionDuplicate)
+	}
+	return actions
+}
+
+// listed is types as caller reads them in orgID.
+func (h *AgentTypes) listed(ctx context.Context, caller auth.Principal, orgID string, types ...domain.CurrentAgentType) ([]ListedAgentType, error) {
+	role, err := h.access.Role(ctx, caller, orgID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ListedAgentType, len(types))
+	for i, t := range types {
+		out[i] = ListedAgentType{CurrentAgentType: t, Actions: agentTypeActions(caller, role, t)}
+	}
+	return out, nil
+}
+
+// one is t as caller reads it in orgID.
+func (h *AgentTypes) one(ctx context.Context, caller auth.Principal, orgID string, t *domain.CurrentAgentType) (*ListedAgentType, error) {
+	listed, err := h.listed(ctx, caller, orgID, *t)
+	if err != nil {
+		return nil, err
+	}
+	return &listed[0], nil
+}
+
 // EditedAgentType is an agent type after an edit or a restore, and whom its new version told.
 type EditedAgentType struct {
-	domain.CurrentAgentType
+	ListedAgentType
 	Propagation domain.Propagation `json:"propagation" doc:"The version now current and how many agents and coordinators whose run goes on were told with agent.instructions: each runs it from its next turn boundary. A change that leaves prompt and settings as they were makes no version and tells nobody."`
 }
 
@@ -85,26 +131,28 @@ type EditAgentTypeRequest struct {
 }
 
 // List is the agent types orgID's agents may run as.
-func (h *AgentTypes) List(ctx context.Context, orgID string) (domain.AgentTypeCatalog, error) {
-	if _, err := h.access.OrgMember(ctx, orgID); err != nil {
+func (h *AgentTypes) List(ctx context.Context, orgID string) ([]ListedAgentType, error) {
+	caller, err := h.access.OrgMember(ctx, orgID)
+	if err != nil {
 		return nil, err
 	}
 	catalog, err := h.store.List(ctx, orgID)
 	if err != nil {
 		return nil, h.answer("list-agent-types", err)
 	}
-	return catalog, nil
+	return h.listed(ctx, caller, orgID, catalog...)
 }
 
-func (h *AgentTypes) Get(ctx context.Context, orgID, id string) (*domain.CurrentAgentType, error) {
-	if _, err := h.access.OrgMember(ctx, orgID); err != nil {
+func (h *AgentTypes) Get(ctx context.Context, orgID, id string) (*ListedAgentType, error) {
+	caller, err := h.access.OrgMember(ctx, orgID)
+	if err != nil {
 		return nil, err
 	}
 	t, err := h.store.Get(ctx, orgID, id)
 	if err != nil {
 		return nil, h.answer("get-agent-type", err)
 	}
-	return t, nil
+	return h.one(ctx, caller, orgID, t)
 }
 
 func (h *AgentTypes) Versions(ctx context.Context, orgID, id string) ([]domain.AgentTypeVersion, error) {
@@ -129,7 +177,7 @@ func (h *AgentTypes) Version(ctx context.Context, orgID, id string, n int) (*dom
 	return version, nil
 }
 
-func (h *AgentTypes) Create(ctx context.Context, orgID string, body CreateAgentTypeRequest) (*domain.CurrentAgentType, error) {
+func (h *AgentTypes) Create(ctx context.Context, orgID string, body CreateAgentTypeRequest) (*ListedAgentType, error) {
 	caller, err := h.access.OrgAdmin(ctx, orgID)
 	if err != nil {
 		return nil, err
@@ -142,7 +190,7 @@ func (h *AgentTypes) Create(ctx context.Context, orgID string, body CreateAgentT
 	if err != nil {
 		return nil, h.answer("create-agent-type", err)
 	}
-	return created, nil
+	return h.one(ctx, caller, orgID, created)
 }
 
 func (h *AgentTypes) Edit(ctx context.Context, orgID, id string, body EditAgentTypeRequest) (*EditedAgentType, error) {
@@ -168,7 +216,11 @@ func (h *AgentTypes) Edit(ctx context.Context, orgID, id string, body EditAgentT
 	if err != nil {
 		return nil, h.answer("edit-agent-type", err)
 	}
-	return &EditedAgentType{CurrentAgentType: *edited, Propagation: *propagation}, nil
+	listed, err := h.one(ctx, caller, orgID, edited)
+	if err != nil {
+		return nil, err
+	}
+	return &EditedAgentType{ListedAgentType: *listed, Propagation: *propagation}, nil
 }
 
 func (h *AgentTypes) Restore(ctx context.Context, orgID, id string, version int) (*EditedAgentType, error) {
@@ -180,7 +232,11 @@ func (h *AgentTypes) Restore(ctx context.Context, orgID, id string, version int)
 	if err != nil {
 		return nil, h.answer("restore-agent-type", err)
 	}
-	return &EditedAgentType{CurrentAgentType: *restored, Propagation: *propagation}, nil
+	listed, err := h.one(ctx, caller, orgID, restored)
+	if err != nil {
+		return nil, err
+	}
+	return &EditedAgentType{ListedAgentType: *listed, Propagation: *propagation}, nil
 }
 
 func (h *AgentTypes) Events(ctx context.Context, orgID, id string) ([]domain.AgentTypeEvent, error) {
@@ -194,7 +250,7 @@ func (h *AgentTypes) Events(ctx context.Context, orgID, id string) ([]domain.Age
 	return events, nil
 }
 
-func (h *AgentTypes) Archive(ctx context.Context, orgID, id string) (*domain.CurrentAgentType, error) {
+func (h *AgentTypes) Archive(ctx context.Context, orgID, id string) (*ListedAgentType, error) {
 	caller, err := h.access.OrgAdmin(ctx, orgID)
 	if err != nil {
 		return nil, err
@@ -203,7 +259,7 @@ func (h *AgentTypes) Archive(ctx context.Context, orgID, id string) (*domain.Cur
 	if err != nil {
 		return nil, h.answer("archive-agent-type", err)
 	}
-	return archived, nil
+	return h.one(ctx, caller, orgID, archived)
 }
 
 // newType is what a create makes: body's own, or a copy of the type it names in from.

@@ -6,9 +6,9 @@ import { archiveAgentType, createAgentType, editAgentType, fetchAgentType, fetch
 import { ApiError } from '@/lib/api/request'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { AgentTypeDetail } from '@/components/agent-types/detail'
-import { CATALOG, RESEARCHER_PROMPT, agentType } from '@/test-agent-types'
+import { CATALOG, RESEARCHER_PROMPT, agentType, seenBy } from '@/test-agent-types'
 import { choose } from '@/test-select'
-import type { AgentTypeVersion, CurrentAgentType, EditedAgentType, Me, OrgAction, OrgRole } from '@/types/api'
+import type { AgentTypeVersion, EditedAgentType, ListedAgentType, Me, OrgAction, OrgRole } from '@/types/api'
 
 const navigation = vi.hoisted(() => ({ push: vi.fn() }))
 vi.mock('next/navigation', () => ({ useRouter: () => navigation }))
@@ -25,13 +25,16 @@ const me = (role: OrgRole): Me => ({
   projects: [{ id: 'prj_1', org_id: 'org_a', name: 'default', created_at: at }],
 })
 
-let type: CurrentAgentType
+let type: ListedAgentType
 
-function version(n: number, prompt: string, effort: CurrentAgentType['current']['settings']['effort'] = 'high'): AgentTypeVersion {
+function version(n: number, prompt: string, effort: ListedAgentType['current']['settings']['effort'] = 'high'): AgentTypeVersion {
   return { agent_type: type.id, version: n, prompt, digest: `d${n}0000000000000`, created_at: at, created_by: { kind: 'user', id: 'u1', name: 'Ada' }, settings: { model: '', max_subagents: 4, effort, hyperparameters: {} } }
 }
 
-function show(role: 'owner' | 'member' = 'owner') {
+let viewer: OrgRole
+
+function show(role: OrgRole = 'owner') {
+  viewer = role
   const resolved = resolveTenant(me(role), '')
   if (resolved.state !== 'selected') throw new Error('no tenant')
   return render(
@@ -47,14 +50,14 @@ function setPrompt(text: string) {
   fireEvent.change(prompt(), { target: { value: text } })
 }
 
-function edited(t: CurrentAgentType, told: number): EditedAgentType {
+function edited(t: ListedAgentType, told: number): EditedAgentType {
   return { ...t, propagation: { version: t.current_version, told } }
 }
 
 beforeEach(() => {
   navigation.push.mockReset()
   type = CATALOG.find(t => t.id === 'at-lr')!
-  vi.mocked(fetchAgentType).mockImplementation(async () => type)
+  vi.mocked(fetchAgentType).mockImplementation(async () => seenBy(viewer, type))
   vi.mocked(fetchAgentTypeVersions).mockImplementation(async () => [version(3, RESEARCHER_PROMPT, 'max'), version(2, RESEARCHER_PROMPT.replace('researcher', 'tuner')), version(1, 'Old.\n{{rules}}\n{{hl_commands}}')])
 })
 
@@ -187,7 +190,7 @@ describe('archiving', () => {
   })
 
   it('archives one nobody uses', async () => {
-    vi.mocked(archiveAgentType).mockImplementation(async () => { type = { ...type, archived_at: at }; return type })
+    vi.mocked(archiveAgentType).mockImplementation(async () => { type = { ...type, archived_at: at }; return seenBy(viewer, type) })
     show()
     await userEvent.click(await screen.findByRole('button', { name: 'Archive' }))
     await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Archive' }))

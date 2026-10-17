@@ -125,26 +125,38 @@ type AgentTypeVersion struct {
 	CreatedAt time.Time         `json:"created_at"`
 }
 
-// AgentTypeAction is what a change did to an agent type.
+// AgentTypeChange is what a change did to an agent type.
+type AgentTypeChange string
+
+const (
+	AgentTypeCreated   AgentTypeChange = "create"
+	AgentTypeEdited    AgentTypeChange = "edit"
+	AgentTypeRenamed   AgentTypeChange = "rename"
+	AgentTypeDescribed AgentTypeChange = "describe"
+	AgentTypeArchived  AgentTypeChange = "archive"
+	AgentTypeRestored  AgentTypeChange = "restore"
+)
+
+// AgentTypeChanges is everything a change can do to an agent type.
+var AgentTypeChanges = []AgentTypeChange{AgentTypeCreated, AgentTypeEdited, AgentTypeRenamed, AgentTypeDescribed, AgentTypeArchived, AgentTypeRestored}
+
+// AgentTypeAction is something the caller may do to an agent type now.
 type AgentTypeAction string
 
 const (
-	AgentTypeCreated   AgentTypeAction = "create"
-	AgentTypeEdited    AgentTypeAction = "edit"
-	AgentTypeRenamed   AgentTypeAction = "rename"
-	AgentTypeDescribed AgentTypeAction = "describe"
-	AgentTypeArchived  AgentTypeAction = "archive"
-	AgentTypeRestored  AgentTypeAction = "restore"
+	AgentTypeActionEdit      AgentTypeAction = "edit"
+	AgentTypeActionArchive   AgentTypeAction = "archive"
+	AgentTypeActionDuplicate AgentTypeAction = "duplicate"
+	AgentTypeActionRestore   AgentTypeAction = "restore"
 )
 
-// AgentTypeActions is everything a change can do to an agent type.
-var AgentTypeActions = []AgentTypeAction{AgentTypeCreated, AgentTypeEdited, AgentTypeRenamed, AgentTypeDescribed, AgentTypeArchived, AgentTypeRestored}
+var AgentTypeActions = []AgentTypeAction{AgentTypeActionEdit, AgentTypeActionArchive, AgentTypeActionDuplicate, AgentTypeActionRestore}
 
 // AgentTypeEvent is one change of an agent type, as it is kept: none is ever changed or deleted.
 type AgentTypeEvent struct {
 	ID      int64           `json:"id"`
 	TypeID  string          `json:"agent_type"`
-	Action  AgentTypeAction `json:"action"`
+	Action  AgentTypeChange `json:"action"`
 	Version int             `json:"version" doc:"The version the type was at after the change: the one an edit or a restore made."`
 	Detail  string          `json:"detail" doc:"The new name of a rename, the new description of a describe, the version a restore copied, the release that seeded a built-in edit; empty otherwise."`
 	By      *Actor          `json:"by,omitempty" doc:"Whose credential made the change: staff for the platform's seeding of a built-in type."`

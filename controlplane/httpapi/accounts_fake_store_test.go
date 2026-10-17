@@ -431,6 +431,16 @@ func (s *memStore) ListOrgMembers(_ context.Context, orgID string, limit, offset
 	return window(out, limit, offset), len(out), nil
 }
 
+func (s *memStore) CountOrgOwners(_ context.Context, orgID string) (int, error) {
+	owners := 0
+	for _, role := range s.roles[orgID] {
+		if role == domain.OrgRoleOwner {
+			owners++
+		}
+	}
+	return owners, nil
+}
+
 // leaveOwnership is what the database does when a member stops being an owner: it refuses to
 // leave the org with none, and revokes the invites the member made.
 func (s *memStore) leaveOwnership(orgID, userID string, change func()) error {

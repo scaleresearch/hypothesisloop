@@ -232,7 +232,7 @@ FROM agent_type_events e WHERE e.type_id = $1 ORDER BY e.id DESC`, id)
 	return events, nil
 }
 
-func recordEventTx(ctx context.Context, tx *Write, typeID string, action domain.AgentTypeAction, version int, detail string, by domain.Actor) error {
+func recordEventTx(ctx context.Context, tx *Write, typeID string, action domain.AgentTypeChange, version int, detail string, by domain.Actor) error {
 	_, err := tx.Exec(ctx, `
 INSERT INTO agent_type_events (type_id, action, version, detail, actor_kind, actor_id) VALUES ($1, $2, $3, $4, $5, $6)`,
 		typeID, string(action), version, detail, string(by.Kind), by.ID)
@@ -440,7 +440,7 @@ func withinEditLimitTx(ctx context.Context, tx *Write, id string) error {
 
 // newVersionTx inserts the version after current's, whose type row the transaction locked, makes it
 // current, keeps the change as action and tells the type's live agents.
-func newVersionTx(ctx context.Context, tx *Write, current *domain.CurrentAgentType, prompt string, settings domain.AgentTypeSettings, release *int, action domain.AgentTypeAction, detail string, by domain.Actor) (*domain.Propagation, error) {
+func newVersionTx(ctx context.Context, tx *Write, current *domain.CurrentAgentType, prompt string, settings domain.AgentTypeSettings, release *int, action domain.AgentTypeChange, detail string, by domain.Actor) (*domain.Propagation, error) {
 	next := current.CurrentVersion + 1
 	if err := insertAgentTypeVersion(ctx, tx, current.ID, next, prompt, settings, release, by); err != nil {
 		return nil, fmt.Errorf("insert version %d: %w", next, err)

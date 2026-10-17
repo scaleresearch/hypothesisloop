@@ -30,7 +30,7 @@ import type { ListedCluster } from '@/types/api'
  * Advanced changes a cluster's scheduler settings or removes it. Staff share one there too.
  */
 export function OrgClusters() {
-  const { org, staff } = useTenant()
+  const { org } = useTenant()
   const editsOrg = org.actions.includes('edit')
   const { data, error, mutate } = useSWR(keys.orgClusters(org.id), () => fetchOrgClusters(org.id), { refreshInterval: POLL.live })
   const [name, setName] = useState('')
@@ -52,7 +52,8 @@ export function OrgClusters() {
     : own
   const shown = [...shownOwn, ...others]
   const tied = (c: ListedCluster) => !!c.place && shown.filter(o => o.place === c.place).length > 1
-  const columns = editsOrg ? 6 : 5
+  const edits = shown.some(c => c.actions.includes('edit'))
+  const columns = edits ? 6 : 5
 
   async function change(cluster: string, act: () => Promise<unknown>) {
     setSwitching(cluster)
@@ -99,7 +100,7 @@ export function OrgClusters() {
   }
 
   function row(c: ListedCluster, index?: number) {
-    const orders = editsOrg && index !== undefined
+    const orders = c.actions.includes('enable') && index !== undefined
     return (
       <Fragment key={c.name}>
         <tr
@@ -126,14 +127,14 @@ export function OrgClusters() {
             <Switch
               label={`Use ${c.name} for the jobs of ${org.name}`}
               checked={c.enabled}
-              disabled={!editsOrg || switching !== ''}
+              disabled={!c.actions.includes('enable') || switching !== ''}
               onChange={enabled => change(c.name, () => setClusterEnabled(org.id, c.name, enabled))}
             />
             {!c.enabled && <Text as="div" variant="meta" className="whitespace-nowrap">Off: no new jobs go here.</Text>}
           </td>
-          {editsOrg && (
+          {edits && (
             <td>
-              {c.owned && (
+              {c.actions.includes('edit') && (
                 <Inline>
                   <Button size="sm" disabled={busy} onClick={() => register(c.name)}>Show start command</Button>
                   <Button size="sm" variant="ghost" aria-expanded={advanced === c.name} onClick={() => setAdvanced(advanced === c.name ? '' : c.name)}>Advanced</Button>
@@ -142,13 +143,13 @@ export function OrgClusters() {
             </td>
           )}
         </tr>
-        {editsOrg && c.owned && advanced === c.name && (
+        {c.actions.includes('edit') && advanced === c.name && (
           <tr>
             <td colSpan={columns} aria-label={`Advanced settings of ${c.name}`}>
               <Stack start className="py-1">
                 <ClusterSettingsEditor key={c.name} orgID={org.id} cluster={c} onSaved={mutate} />
                 <Inline gap="md">
-                  {staff && (
+                  {c.actions.includes('share') && (
                     <label className="flex items-center gap-2 text-xs">
                       <Switch
                         label={`Share ${c.name} with every org`}
@@ -159,7 +160,7 @@ export function OrgClusters() {
                       Shared with every org · staff only
                     </label>
                   )}
-                  <Button size="sm" variant="danger" disabled={switching !== ''} onClick={() => setRemoving(c.name)}>Remove cluster</Button>
+                  {c.actions.includes('remove') && <Button size="sm" variant="danger" disabled={switching !== ''} onClick={() => setRemoving(c.name)}>Remove cluster</Button>}
                 </Inline>
               </Stack>
             </td>
@@ -208,7 +209,7 @@ export function OrgClusters() {
                 <th>Status</th>
                 <th>Provided by</th>
                 <th title={`Whether jobs of ${org.name} are placed on the cluster`}>Use for jobs</th>
-                {editsOrg && <th />}
+                {edits && <th />}
               </tr>
             </thead>
             <tbody>

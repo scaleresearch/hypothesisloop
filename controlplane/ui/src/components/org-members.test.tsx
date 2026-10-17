@@ -7,7 +7,7 @@ import { createOrgInvite, fetchMe, fetchOrgInvites, fetchOrgMembers, removeOrgMe
 import { ApiError } from '@/lib/api/request'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { OrgMembers } from '@/components/org-members'
-import type { Me, OrgInvite, OrgMember } from '@/types/api'
+import type { ListedMember, Me, OrgInvite, OrgMember } from '@/types/api'
 
 const router = vi.hoisted(() => ({ replace: vi.fn() }))
 
@@ -32,7 +32,18 @@ const member: Me = { ...owner, user_id: 'u2', name: 'Bob', orgs: [{ ...owner.org
 let members: OrgMember[]
 let invites: OrgInvite[]
 
+// What the API lets the one reading the list do to m: an owner changes anyone's role and removes
+// anyone, a person leaves, and the org's last owner stays.
+let viewer: Me
+function withActions(m: OrgMember): ListedMember {
+  const lastOwner = m.role === 'owner' && members.filter(o => o.role === 'owner').length === 1
+  const edits = viewer.orgs[0].actions.includes('edit')
+  if (lastOwner) return { ...m, actions: [] }
+  return { ...m, actions: [...(edits ? ['set_role' as const] : []), ...(edits || m.user_id === viewer.user_id ? ['remove' as const] : [])] }
+}
+
 function show(as: Me = owner) {
+  viewer = as
   const resolved = resolveTenant(as, '')
   if (resolved.state !== 'selected') throw new Error('no tenant')
   return render(
@@ -63,7 +74,7 @@ beforeEach(() => {
   ]
   invites = [{ id: 'inv_1', org_id: 'org_a', role: 'member', actor: { kind: 'user', id: 'u1', name: 'Ada Lovelace' }, created_at: at, expires_at: expires }]
   vi.mocked(fetchMe).mockResolvedValue(owner)
-  vi.mocked(fetchOrgMembers).mockImplementation(async () => ({ items: [...members], total: members.length }))
+  vi.mocked(fetchOrgMembers).mockImplementation(async () => ({ items: members.map(withActions), total: members.length }))
   vi.mocked(fetchOrgInvites).mockImplementation(async () => ({ items: [...invites], total: invites.length }))
   vi.mocked(createOrgInvite).mockImplementation(async (orgID, role) => {
     const invite: OrgInvite = { id: 'inv_2', org_id: orgID, role, actor: { kind: 'user', id: 'u1', name: 'Ada Lovelace' }, created_at: at, expires_at: expires }
@@ -99,7 +110,14 @@ describe('an owner', () => {
     expect(screen.getByLabelText('Role of Bob Stone')).toHaveProperty('textContent', 'member')
   })
 
-  it('is told in the API\'s words that the last owner cannot be demoted', async () => {
+  it('is offered no role to change for the last owner', async () => {
+    show()
+    expect((await row('Ada Lovelace')).queryByLabelText('Role of Ada Lovelace')).toBeNull()
+    expect((await row('Bob Stone')).getByLabelText('Role of Bob Stone')).toBeTruthy()
+  })
+
+  it('is told in the API\'s words that the last owner cannot be demoted, when the other owner left since the list was read', async () => {
+    members = [...members, { org_id: 'org_a', user_id: 'u3', name: 'Cy', role: 'owner', joined_at: at }]
     vi.mocked(setOrgMemberRole).mockRejectedValue(new ApiError(409, LAST_OWNER, 'last_owner'))
     show()
     await choose((await row('Ada Lovelace')).getByLabelText('Role of Ada Lovelace'), 'member')
@@ -285,7 +303,7 @@ describe('the member list', () => {
   })
 
   it('says when the org has more members than one read returns', async () => {
-    vi.mocked(fetchOrgMembers).mockImplementation(async () => ({ items: [...members], total: 250 }))
+    vi.mocked(fetchOrgMembers).mockImplementation(async () => ({ items: members.map(withActions), total: 250 }))
     show()
     expect(await screen.findByText('Showing the first 2 of 250 members.')).toBeTruthy()
   })

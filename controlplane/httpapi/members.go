@@ -65,7 +65,7 @@ func (a accountsAPI) listMembers(ctx context.Context, in *struct {
 	accounts.Page
 }) (*struct {
 	TotalCount int `header:"X-Total-Count" doc:"The members of the org, ignoring limit and offset."`
-	Body       []*domain.OrgMember
+	Body       []accounts.ListedMember
 }, error) {
 	members, total, err := a.accounts.Members(ctx, in.ID, in.Page)
 	if err != nil {
@@ -73,7 +73,7 @@ func (a accountsAPI) listMembers(ctx context.Context, in *struct {
 	}
 	return &struct {
 		TotalCount int `header:"X-Total-Count" doc:"The members of the org, ignoring limit and offset."`
-		Body       []*domain.OrgMember
+		Body       []accounts.ListedMember
 	}{TotalCount: total, Body: members}, nil
 }
 

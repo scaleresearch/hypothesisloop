@@ -160,7 +160,6 @@ export function OrgMembers() {
   }
 
   const members = data?.items
-  const owners = members?.filter(m => m.role === 'owner').length
   return (
     <Stack>
       <Text tone="muted">
@@ -183,7 +182,7 @@ export function OrgMembers() {
                 <tr key={member.user_id}>
                   <td><Person id={member.user_id} name={member.name} self={self} /></td>
                   <td className="text-xs">
-                    {editsOrg
+                    {member.actions.includes('set_role')
                       ? (
                         <Select
                           fieldSize="sm"
@@ -197,16 +196,15 @@ export function OrgMembers() {
                   </td>
                   <td className="text-xs text-muted">{when(member.joined_at)}</td>
                   <td className="text-right">
-                    {self && member.role === 'owner' && owners === 1
-                      ? (
+                    {member.actions.includes('remove')
+                      ? <Button size="sm" variant="danger" onClick={() => setChange({ kind: 'remove', member })}>{self ? 'Leave' : 'Remove'}</Button>
+                      // A person leaves whenever they like, unless the org would be left with no owner.
+                      : self && (
                         <Inline className="justify-end">
                           <Text as="span" variant="hint">Make someone else an owner before you leave</Text>
                           <Button size="sm" variant="danger" disabled>Leave</Button>
                         </Inline>
-                      )
-                      : self
-                      ? <Button size="sm" variant="danger" onClick={() => setChange({ kind: 'remove', member })}>Leave</Button>
-                      : editsOrg && <Button size="sm" variant="danger" onClick={() => setChange({ kind: 'remove', member })}>Remove</Button>}
+                      )}
                   </td>
                 </tr>
               )

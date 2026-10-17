@@ -3,6 +3,7 @@ package accounts
 import (
 	"context"
 	"net/http"
+	"slices"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
@@ -113,22 +114,17 @@ func orgActions(p auth.Principal, org *domain.Org) []domain.OrgAction {
 	return actions
 }
 
-// reachableKeys narrows an org's keys to the ones the caller may see: all of them for a person
-// of the org and for staff, and for a key itself and its lineage.
-func (pol policy) reachableKeys(ctx context.Context, orgID string, keys []*domain.APIKey) ([]*domain.APIKey, error) {
-	p, err := pol.access.OrgMember(ctx, orgID)
-	if err != nil {
-		return nil, err
-	}
+// reachableKeys narrows an org's keys to the ones p may see: all of them for a person of the org
+// and for staff, and for a key itself and its lineage.
+func reachableKeys(p auth.Principal, keys []*domain.APIKey) []*domain.APIKey {
 	if p.Kind == auth.KindKey {
-		return lineage(keys, p.KeyID), nil
+		return lineage(keys, p.KeyID)
 	}
-	return keys, nil
+	return keys
 }
 
-// endKey admits the caller to end a key it was placed at. A key ends itself and the keys minted
-// from it, read from orgKeys, and any other is not found for it. A person is held to
-// auth.Access.KeyEnd.
+// endKey admits the caller to end a key it was placed at, by endsKey: a key it may not end is
+// not found for a key, and refused by auth.Access.KeyEnd for a person.
 func (pol policy) endKey(ctx context.Context, key *domain.APIKey, orgKeys func() ([]*domain.APIKey, error)) error {
 	p, err := pol.access.Account(ctx)
 	if err != nil {
@@ -141,12 +137,29 @@ func (pol policy) endKey(ctx context.Context, key *domain.APIKey, orgKeys func()
 	if err != nil {
 		return err
 	}
-	for _, k := range lineage(keys, p.KeyID) {
-		if k.ID == key.ID {
-			return nil
-		}
+	if !endsKey(p, "", key, keys) {
+		return auth.NotFound("api key")
 	}
-	return auth.NotFound("api key")
+	return nil
+}
+
+// endsKey says p, holding role in the org of key, ends it: a key ends itself and the keys minted
+// from it, of the org's keys orgKeys, and a person is held to auth.EndsKey.
+func endsKey(p auth.Principal, role domain.OrgRole, key *domain.APIKey, orgKeys []*domain.APIKey) bool {
+	if p.Kind != auth.KindKey {
+		return auth.EndsKey(p, role, key) == nil
+	}
+	return slices.ContainsFunc(lineage(orgKeys, p.KeyID), func(k *domain.APIKey) bool { return k.ID == key.ID })
+}
+
+// keyActions is what p, holding role in the org, may do to key, one of the org's keys orgKeys.
+// Revoking a revoked key changes nothing, so it is not offered.
+func keyActions(p auth.Principal, role domain.OrgRole, key *domain.APIKey, orgKeys []*domain.APIKey) []domain.APIKeyAction {
+	actions := []domain.APIKeyAction{}
+	if key.RevokedAt == nil && endsKey(p, role, key, orgKeys) {
+		actions = append(actions, domain.APIKeyActionRevoke)
+	}
+	return actions
 }
 
 // lineage returns root and every key minted from it, directly or through another, in the order

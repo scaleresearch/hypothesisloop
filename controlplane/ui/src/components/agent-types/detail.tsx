@@ -25,14 +25,14 @@ import { Inline, Stack } from '@/components/ui/stack'
 import { Callout, ErrorMessage, Loading } from '@/components/ui/status-message'
 import { Code, Text } from '@/components/ui/text'
 import { keys } from '@/lib/keys'
-import type { CurrentAgentType, EditedAgentType } from '@/types/api'
+import type { EditedAgentType, ListedAgentType } from '@/types/api'
 
-// Why the person cannot edit the type, or null when they can.
-function readOnlyReason(t: CurrentAgentType, editsOrg: boolean, orgName: string): string | null {
+// Why the API lets the person not edit the type, or null when it does.
+function readOnlyReason(t: ListedAgentType, orgName: string): string | null {
+  if (t.actions.includes('edit')) return null
   if (t.builtin) return 'Built-in types are read-only for everyone. Duplicate it to get a copy you can edit.'
   if (t.archived_at) return `Archived ${relTime(t.archived_at)}. It takes no new agents and can no longer be edited. Duplicate it to start a new type from it.`
-  if (!editsOrg) return `Only an owner of ${orgName} can edit agent types.`
-  return null
+  return `Only an owner of ${orgName} can edit agent types.`
 }
 
 // JSON with every object's keys sorted, so two equal values read the same whatever their key order.
@@ -60,7 +60,7 @@ function Saved({ edited, onDismiss }: { edited: EditedAgentType | 'renamed'; onD
   )
 }
 
-function ArchiveDialog({ type, onClose, onArchived }: { type: CurrentAgentType; onClose: () => void; onArchived: () => Promise<unknown> }) {
+function ArchiveDialog({ type, onClose, onArchived }: { type: ListedAgentType; onClose: () => void; onArchived: () => Promise<unknown> }) {
   const { org } = useTenant()
   const [busy, setBusy] = useState(false)
   const [refusal, setRefusal] = useState<{ inUse: boolean; message: string } | null>(null)
@@ -100,7 +100,7 @@ function ArchiveDialog({ type, onClose, onArchived }: { type: CurrentAgentType; 
 }
 
 function Editor({ type, editable, onSaved, onReload }: {
-  type: CurrentAgentType
+  type: ListedAgentType
   editable: boolean
   onSaved: (edited: EditedAgentType) => Promise<unknown>
   onReload: () => Promise<unknown>
@@ -219,14 +219,13 @@ function Editor({ type, editable, onSaved, onReload }: {
 export function AgentTypeDetail({ typeID }: { typeID: string }) {
   const router = useRouter()
   const { org } = useTenant()
-  const editsOrg = org.actions.includes('edit')
   const { mutate } = useSWRConfig()
   const { data: type, error, mutate: mutateType } = useSWR(keys.agentType(org.id, typeID), () => fetchAgentType(org.id, typeID))
   const { create, busy: duplicating, error: duplicateError } = useCreateAgentType(org.id)
   const [archiving, setArchiving] = useState(false)
   const [saved, setSaved] = useState<{ edited: EditedAgentType; renamed: boolean } | null>(null)
 
-  async function refresh(next?: CurrentAgentType) {
+  async function refresh(next?: ListedAgentType) {
     await mutateType(next)
     await mutate(keys.agentTypes(org.id))
   }
@@ -243,7 +242,7 @@ export function AgentTypeDetail({ typeID }: { typeID: string }) {
   }
   if (!type) return <Page title="Agent type" back={back}><Loading /></Page>
 
-  const reason = readOnlyReason(type, editsOrg, org.name)
+  const reason = readOnlyReason(type, org.name)
   return (
     <Page
       back={back}
@@ -260,10 +259,10 @@ export function AgentTypeDetail({ typeID }: { typeID: string }) {
           <span>{describeType(type)}</span>
         </Stack>
       }
-      actions={editsOrg && (
+      actions={(
         <Inline gap="sm">
-          <Button size="sm" loading={duplicating === type.id} onClick={() => void create({ from: type.id }, type.id)}>Duplicate</Button>
-          {!type.builtin && !type.archived_at && <Button size="sm" variant="danger" onClick={() => setArchiving(true)}>Archive</Button>}
+          {type.actions.includes('duplicate') && <Button size="sm" loading={duplicating === type.id} onClick={() => void create({ from: type.id }, type.id)}>Duplicate</Button>}
+          {type.actions.includes('archive') && <Button size="sm" variant="danger" onClick={() => setArchiving(true)}>Archive</Button>}
         </Inline>
       )}
     >
@@ -271,7 +270,7 @@ export function AgentTypeDetail({ typeID }: { typeID: string }) {
       {duplicateError && <ErrorMessage>{duplicateError}</ErrorMessage>}
       {saved && <Saved edited={saved.renamed ? 'renamed' : saved.edited} onDismiss={() => setSaved(null)} />}
       <Editor key={`${type.id}:${type.current_version}`} type={type} editable={reason === null} onSaved={edited} onReload={() => refresh()} />
-      <VersionHistory orgID={org.id} type={type} editable={reason === null} onRestored={edited} />
+      <VersionHistory orgID={org.id} type={type} editable={type.actions.includes('restore')} onRestored={edited} />
       {archiving && <ArchiveDialog type={type} onClose={() => setArchiving(false)} onArchived={() => refresh()} />}
     </Page>
   )

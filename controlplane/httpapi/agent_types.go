@@ -12,11 +12,11 @@ import (
 )
 
 type agentTypeList struct {
-	Body []domain.CurrentAgentType
+	Body []accounts.ListedAgentType
 }
 
 type agentTypeAnswer struct {
-	Body domain.CurrentAgentType
+	Body accounts.ListedAgentType
 }
 
 type agentTypesAPI struct {

@@ -47,6 +47,15 @@ ORDER BY created_at, user_id LIMIT $2 OFFSET $3`, orgID, limit, offset)
 	return out, total, rows.Err()
 }
 
+// CountOrgOwners is how many owners the org has.
+func (s *Store) CountOrgOwners(ctx context.Context, orgID string) (int, error) {
+	var owners int
+	if err := s.pool.pool.QueryRow(ctx, `SELECT count(*) FROM org_members WHERE org_id = $1 AND role = 'owner'`, orgID).Scan(&owners); err != nil {
+		return 0, fmt.Errorf("accounts_store.CountOrgOwners: %w", err)
+	}
+	return owners, nil
+}
+
 // SetOrgMemberRole changes a member's role. ErrOrgMemberNotFound when the user is not in the
 // org, ErrLastOwner when the change would leave the org with no owner. A member who stops being
 // an owner takes the invites they made with them.

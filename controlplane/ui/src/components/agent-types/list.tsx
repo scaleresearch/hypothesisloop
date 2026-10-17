@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { ORG_ROLES, ROLES, describeType, roleOf, useAgentTypes } from '@/lib/agent-types'
+import { ROLES, describeType, roleOf, useAgentTypes } from '@/lib/agent-types'
 import { agentTypesPath } from '@/lib/routes'
 import { useTenant } from '@/lib/tenant'
 import { useCreateAgentType } from '@/components/agent-types/duplicate'
@@ -18,19 +18,21 @@ import { Inline, Stack } from '@/components/ui/stack'
 import { ErrorMessage, Loading } from '@/components/ui/status-message'
 import { Table, num } from '@/components/ui/table'
 import { Text } from '@/components/ui/text'
-import type { AgentRole, CurrentAgentType } from '@/types/api'
+import type { AgentRole, ListedAgentType } from '@/types/api'
 
-function settingsLine(t: CurrentAgentType): string {
+function settingsLine(t: ListedAgentType): string {
   const s = t.current.settings
   return `${s.model || 'platform default'} · ${s.effort} effort · ${s.max_subagents} subagents`
 }
 
-function NewTypeDialog({ catalog, onClose }: { catalog: CurrentAgentType[]; onClose: () => void }) {
+function NewTypeDialog({ catalog, onClose }: { catalog: ListedAgentType[]; onClose: () => void }) {
   const { org } = useTenant()
   const { create, busy, error } = useCreateAgentType(org.id)
   const [role, setRole] = useState<AgentRole>('researcher')
   const [name, setName] = useState('')
   const start = catalog.find(t => t.builtin && t.id === roleOf(role).builtin)
+  // A new type starts as a copy of its role's built-in one, so the roles offered are those the API lets the caller copy.
+  const roles = ROLES.filter(r => catalog.some(t => t.builtin && t.id === r.builtin && t.actions.includes('duplicate')))
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -45,7 +47,7 @@ function NewTypeDialog({ catalog, onClose }: { catalog: CurrentAgentType[]; onCl
           <Segmented
             label="Role"
             size="sm"
-            options={ROLES.filter(r => ORG_ROLES.includes(r.role)).map(r => ({ value: r.role, label: r.label }))}
+            options={roles.map(r => ({ value: r.role, label: r.label }))}
             value={role}
             onChange={setRole}
           />
@@ -64,15 +66,15 @@ function NewTypeDialog({ catalog, onClose }: { catalog: CurrentAgentType[]; onCl
   )
 }
 
-function RoleGroup({ role, types, editsOrg, duplicate, busy }: {
+function RoleGroup({ role, types, duplicate, busy }: {
   role: AgentRole
-  types: CurrentAgentType[]
-  editsOrg: boolean
-  duplicate: (t: CurrentAgentType) => void
+  types: ListedAgentType[]
+  duplicate: (t: ListedAgentType) => void
   busy: string | null
 }) {
   const { org } = useTenant()
   const r = roleOf(role)
+  const duplicates = types.some(t => t.actions.includes('duplicate'))
   // Built-in first in the platform's order, then the org's own by name, archived last.
   const ordered = [...types].sort((a, b) =>
     Number(b.builtin) - Number(a.builtin) || Number(!!a.archived_at) - Number(!!b.archived_at) || (a.builtin ? 0 : a.name.localeCompare(b.name)))
@@ -82,7 +84,7 @@ function RoleGroup({ role, types, editsOrg, duplicate, busy }: {
         <thead>
           <tr>
             <th>Type</th><th className="w-64">Settings</th><th className="w-20 text-right">Version</th>
-            {editsOrg && <th className="w-28" />}
+            {duplicates && <th className="w-28" />}
           </tr>
         </thead>
         <tbody>
@@ -98,9 +100,9 @@ function RoleGroup({ role, types, editsOrg, duplicate, busy }: {
               </td>
               <td className="whitespace-nowrap text-xs text-muted">{settingsLine(t)}</td>
               <td className={num}>v{t.current_version}</td>
-              {editsOrg && (
+              {duplicates && (
                 <td className="text-right">
-                  {ORG_ROLES.includes(t.role) && <Button size="sm" loading={busy === t.id} onClick={() => duplicate(t)}>Duplicate</Button>}
+                  {t.actions.includes('duplicate') && <Button size="sm" loading={busy === t.id} onClick={() => duplicate(t)}>Duplicate</Button>}
                 </td>
               )}
             </tr>
@@ -139,7 +141,6 @@ export function AgentTypesList() {
             key={role}
             role={role}
             types={types}
-            editsOrg={editsOrg}
             busy={busy}
             duplicate={t => void create({ from: t.id }, t.id)}
           />

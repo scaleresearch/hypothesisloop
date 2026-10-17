@@ -30,7 +30,7 @@ import { relTime } from '@/lib/format'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import type { Tone } from '@/lib/colors'
 import { keys } from '@/lib/keys'
-import type { AgentMessage, CurrentAgentType, JoinedAgent, PlatformExperiment } from '@/types/api'
+import type { AgentMessage, JoinedAgent, ListedAgentType, PlatformExperiment } from '@/types/api'
 
 
 // What the operator's own `podman run --env-file` takes for one agent, and all an agent is
@@ -178,12 +178,12 @@ function Messages({ messages }: { messages: AgentMessage[] }) {
 
 /** Everything about one agent that its row has no room for. */
 /** The agent type an agent runs, by name. */
-function AgentTypeLabel({ agent, catalog }: { agent: JoinedAgent; catalog: CurrentAgentType[] | undefined }) {
+function AgentTypeLabel({ agent, catalog }: { agent: JoinedAgent; catalog: ListedAgentType[] | undefined }) {
   if (!agent.agent_type) return <span className="text-muted">default</span>
   return <span title={agent.agent_type}>{typeName(agent.agent_type, catalog)}</span>
 }
 
-function AgentDetails({ agent, messages, catalog }: { agent: JoinedAgent; messages: AgentMessage[]; catalog: CurrentAgentType[] | undefined }) {
+function AgentDetails({ agent, messages, catalog }: { agent: JoinedAgent; messages: AgentMessage[]; catalog: ListedAgentType[] | undefined }) {
   return (
     <Stack gap="sm">
       <Facts facts={[

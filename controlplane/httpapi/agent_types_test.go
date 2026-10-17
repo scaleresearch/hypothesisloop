@@ -74,7 +74,7 @@ func (m *memAgentTypes) Events(_ context.Context, orgID, id string) ([]domain.Ag
 	return m.events[id], nil
 }
 
-func (m *memAgentTypes) record(id string, action domain.AgentTypeAction, version int, by domain.Actor) {
+func (m *memAgentTypes) record(id string, action domain.AgentTypeChange, version int, by domain.Actor) {
 	m.events[id] = append([]domain.AgentTypeEvent{{TypeID: id, Action: action, Version: version, By: &by}}, m.events[id]...)
 }
 
@@ -104,7 +104,7 @@ func (m *memAgentTypes) changes(orgID, id string) (*domain.CurrentAgentType, err
 	return t, nil
 }
 
-func (m *memAgentTypes) newVersion(t *domain.CurrentAgentType, prompt string, settings domain.AgentTypeSettings, action domain.AgentTypeAction, by domain.Actor) *domain.Propagation {
+func (m *memAgentTypes) newVersion(t *domain.CurrentAgentType, prompt string, settings domain.AgentTypeSettings, action domain.AgentTypeChange, by domain.Actor) *domain.Propagation {
 	version := domain.AgentTypeVersion{TypeID: t.ID, Version: t.CurrentVersion + 1, Prompt: prompt, Settings: settings, CreatedBy: &by}
 	m.versions[t.ID] = append(m.versions[t.ID], version)
 	t.CurrentVersion, t.Current = version.Version, version

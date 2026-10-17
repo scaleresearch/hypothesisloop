@@ -50,7 +50,7 @@ func (a accountsAPI) createAPIKey(ctx context.Context, in *struct {
 }
 
 type orgAPIKeys struct {
-	APIKeys []*domain.APIKey `json:"api_keys"`
+	APIKeys []accounts.ListedAPIKey `json:"api_keys"`
 }
 
 func (a accountsAPI) listAPIKeys(ctx context.Context, in *struct {

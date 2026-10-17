@@ -2012,6 +2012,8 @@ export interface components {
             /** Format: date-time */
             revoked_at?: string;
         };
+        /** @enum {string} */
+        APIKeyAction: "revoke";
         AcceleratorCapacity: {
             accelerator_type: string;
             /** Format: double */
@@ -2374,9 +2376,11 @@ export interface components {
             state: "working" | "waiting";
         };
         /** @enum {string} */
-        AgentTypeAction: "create" | "edit" | "rename" | "describe" | "archive" | "restore";
+        AgentTypeAction: "edit" | "archive" | "duplicate" | "restore";
+        /** @enum {string} */
+        AgentTypeChange: "create" | "edit" | "rename" | "describe" | "archive" | "restore";
         AgentTypeEvent: {
-            action: components["schemas"]["AgentTypeAction"];
+            action: components["schemas"]["AgentTypeChange"];
             agent_type: string;
             /** Format: date-time */
             at: string;
@@ -2517,6 +2521,8 @@ export interface components {
             /** @description Best-first final standings (up to 3). Omit to derive standings from the metrics store. */
             top_results?: components["schemas"]["AgentResult"][];
         };
+        /** @enum {string} */
+        ClusterAction: "enable" | "edit" | "remove" | "share";
         ClusterCapacity: {
             accelerators: components["schemas"]["AcceleratorCapacity"][];
             cluster_name: string;
@@ -2669,31 +2675,6 @@ export interface components {
             /** @description The secret the invited person accepts with. Returned by this call only: the platform stores its hash. */
             token: string;
         };
-        CurrentAgentType: {
-            /**
-             * Format: date-time
-             * @description When it was archived. An archived type takes no new agent; agents that run it keep running.
-             */
-            archived_at?: string;
-            /** @description Seeded by the platform from its repository and read-only for everyone. Duplicate one to change it. */
-            builtin: boolean;
-            /** Format: date-time */
-            created_at: string;
-            created_by?: components["schemas"]["Actor"];
-            current: components["schemas"]["AgentTypeVersion"];
-            /**
-             * Format: int64
-             * @description The version every agent of the type runs: an edit or a restore makes the next one current, and each live agent is told with agent.instructions.
-             */
-            current_version: number;
-            /** @description One line on what agents of the type do, at most 200 characters. Empty when none was written. */
-            description: string;
-            id: string;
-            name: string;
-            /** @description The org that owns it, empty for a built-in type. */
-            org_id?: string;
-            role: components["schemas"]["AgentRole"];
-        };
         DataAccess: {
             access_key_id: string;
             endpoint: string;
@@ -2739,6 +2720,8 @@ export interface components {
             text: string;
         };
         EditedAgentType: {
+            /** @description What the caller may do to the agent type now, each a write the API accepts from them: edit, archive, duplicate (create one with from) and restore. Archive is listed while a platform experiment still names the type, and refused then as agent_type_in_use. */
+            actions: components["schemas"]["AgentTypeAction"][];
             /**
              * Format: date-time
              * @description When it was archived. An archived type takes no new agent; agents that run it keep running.
@@ -3420,7 +3403,51 @@ export interface components {
         };
         /** @enum {string} */
         LinkType: "builds_on" | "contradicts" | "related";
+        ListedAPIKey: {
+            /** @description What the caller may do to the key now, a write the API accepts from them: revoke (DELETE /api-keys/{id}), until the key is revoked. */
+            actions: components["schemas"]["APIKeyAction"][];
+            actor: components["schemas"]["Actor"];
+            /** Format: date-time */
+            created_at: string;
+            id: string;
+            minted_by?: string;
+            name: string;
+            org_id: string;
+            orphaned?: boolean;
+            project_id?: string;
+            /** Format: date-time */
+            revoked_at?: string;
+        };
+        ListedAgentType: {
+            /** @description What the caller may do to the agent type now, each a write the API accepts from them: edit, archive, duplicate (create one with from) and restore. Archive is listed while a platform experiment still names the type, and refused then as agent_type_in_use. */
+            actions: components["schemas"]["AgentTypeAction"][];
+            /**
+             * Format: date-time
+             * @description When it was archived. An archived type takes no new agent; agents that run it keep running.
+             */
+            archived_at?: string;
+            /** @description Seeded by the platform from its repository and read-only for everyone. Duplicate one to change it. */
+            builtin: boolean;
+            /** Format: date-time */
+            created_at: string;
+            created_by?: components["schemas"]["Actor"];
+            current: components["schemas"]["AgentTypeVersion"];
+            /**
+             * Format: int64
+             * @description The version every agent of the type runs: an edit or a restore makes the next one current, and each live agent is told with agent.instructions.
+             */
+            current_version: number;
+            /** @description One line on what agents of the type do, at most 200 characters. Empty when none was written. */
+            description: string;
+            id: string;
+            name: string;
+            /** @description The org that owns it, empty for a built-in type. */
+            org_id?: string;
+            role: components["schemas"]["AgentRole"];
+        };
         ListedCluster: {
+            /** @description What the caller may do to the cluster now, each a write the API accepts from them: enable (turn it on and off for the org's jobs, and order it), edit (PATCH its settings, and forget its identity), remove, and share (PATCH shared). */
+            actions: components["schemas"]["ClusterAction"][];
             /** @description The version, an image tag, the cluster's agent said it runs at its last contact. */
             agent_version?: string;
             /** @description The cluster's connected agent reports an autoscaler that adds nodes for waiting jobs, which is what scale_up_timeout_seconds and max_speculative_accelerators act on. */
@@ -3476,6 +3503,16 @@ export interface components {
         };
         ListedClusters: {
             clusters: components["schemas"]["ListedCluster"][];
+        };
+        ListedMember: {
+            /** @description What the caller may do to the member now, each a write the API accepts from them: set_role (PATCH /orgs/{id}/members/{user_id}) and remove (DELETE /orgs/{id}/members/{user_id}, which for the caller's own membership is leaving). Neither is listed for the org's last owner. */
+            actions: components["schemas"]["OrgMemberAction"][];
+            /** Format: date-time */
+            joined_at: string;
+            name: string;
+            org_id: string;
+            role: components["schemas"]["OrgRole"];
+            user_id: string;
         };
         LiveCapacity: {
             clusters: components["schemas"]["ClusterCapacity"][];
@@ -3650,7 +3687,7 @@ export interface components {
             role?: components["schemas"]["OrgRole"];
         };
         OrgAPIKeys: {
-            api_keys: components["schemas"]["APIKey"][];
+            api_keys: components["schemas"]["ListedAPIKey"][];
         };
         /** @enum {string} */
         OrgAction: "edit" | "create_api_key";
@@ -3694,6 +3731,8 @@ export interface components {
             role: components["schemas"]["OrgRole"];
             user_id: string;
         };
+        /** @enum {string} */
+        OrgMemberAction: "set_role" | "remove";
         /** @enum {string} */
         OrgRole: "owner" | "member";
         PhaseDetail: {
@@ -4620,6 +4659,7 @@ export interface components {
     pathItems: never;
 }
 export type APIKey = components['schemas']['APIKey'];
+export type APIKeyAction = components['schemas']['APIKeyAction'];
 export type AcceleratorCapacity = components['schemas']['AcceleratorCapacity'];
 export type AcceptInviteRequest = components['schemas']['AcceptInviteRequest'];
 export type AcceptRequest = components['schemas']['AcceptRequest'];
@@ -4647,6 +4687,7 @@ export type AgentStanding = components['schemas']['AgentStanding'];
 export type AgentStats = components['schemas']['AgentStats'];
 export type AgentTurn = components['schemas']['AgentTurn'];
 export type AgentTypeAction = components['schemas']['AgentTypeAction'];
+export type AgentTypeChange = components['schemas']['AgentTypeChange'];
 export type AgentTypeEvent = components['schemas']['AgentTypeEvent'];
 export type AgentTypeSettings = components['schemas']['AgentTypeSettings'];
 export type AgentTypeVersion = components['schemas']['AgentTypeVersion'];
@@ -4663,6 +4704,7 @@ export type CheckOutRequest = components['schemas']['CheckOutRequest'];
 export type Checkout = components['schemas']['Checkout'];
 export type CloseReason = components['schemas']['CloseReason'];
 export type CloseRequest = components['schemas']['CloseRequest'];
+export type ClusterAction = components['schemas']['ClusterAction'];
 export type ClusterCapacity = components['schemas']['ClusterCapacity'];
 export type ClusterView = components['schemas']['ClusterView'];
 export type CreateAPIKeyRequest = components['schemas']['CreateAPIKeyRequest'];
@@ -4672,7 +4714,6 @@ export type CreateOrgRequest = components['schemas']['CreateOrgRequest'];
 export type CreatePlatformExperimentRequest = components['schemas']['CreatePlatformExperimentRequest'];
 export type CreatedAPIKey = components['schemas']['CreatedAPIKey'];
 export type CreatedInvite = components['schemas']['CreatedInvite'];
-export type CurrentAgentType = components['schemas']['CurrentAgentType'];
 export type DataAccess = components['schemas']['DataAccess'];
 export type DataKeyRequest = components['schemas']['DataKeyRequest'];
 export type DataUsage = components['schemas']['DataUsage'];
@@ -4730,8 +4771,11 @@ export type Limits = components['schemas']['Limits'];
 export type Link = components['schemas']['Link'];
 export type LinkSpec = components['schemas']['LinkSpec'];
 export type LinkType = components['schemas']['LinkType'];
+export type ListedAPIKey = components['schemas']['ListedAPIKey'];
+export type ListedAgentType = components['schemas']['ListedAgentType'];
 export type ListedCluster = components['schemas']['ListedCluster'];
 export type ListedClusters = components['schemas']['ListedClusters'];
+export type ListedMember = components['schemas']['ListedMember'];
 export type LiveCapacity = components['schemas']['LiveCapacity'];
 export type Me = components['schemas']['Me'];
 export type MessageAllowance = components['schemas']['MessageAllowance'];
@@ -4756,6 +4800,7 @@ export type OrgAction = components['schemas']['OrgAction'];
 export type OrgGitHubInstallation = components['schemas']['OrgGitHubInstallation'];
 export type OrgInvite = components['schemas']['OrgInvite'];
 export type OrgMember = components['schemas']['OrgMember'];
+export type OrgMemberAction = components['schemas']['OrgMemberAction'];
 export type OrgRole = components['schemas']['OrgRole'];
 export type PhaseDetail = components['schemas']['PhaseDetail'];
 export type PlatformExperiment = components['schemas']['PlatformExperiment'];
@@ -6178,7 +6223,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CurrentAgentType"][];
+                    "application/json": components["schemas"]["ListedAgentType"][];
                 };
             };
             /** @description Error */
@@ -6213,7 +6258,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CurrentAgentType"];
+                    "application/json": components["schemas"]["ListedAgentType"];
                 };
             };
             /** @description Error */
@@ -6245,7 +6290,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CurrentAgentType"];
+                    "application/json": components["schemas"]["ListedAgentType"];
                 };
             };
             /** @description Error */
@@ -6313,7 +6358,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CurrentAgentType"];
+                    "application/json": components["schemas"]["ListedAgentType"];
                 };
             };
             /** @description Error */
@@ -7087,7 +7132,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OrgMember"][];
+                    "application/json": components["schemas"]["ListedMember"][];
                 };
             };
             /** @description Error */
@@ -8871,16 +8916,19 @@ type ReadonlyArray<T> = [
 ] ? Readonly<Exclude<T, undefined>> : Readonly<Exclude<T, undefined>[]>;
 export const pathsHypothesesGetParametersQueryByValues: ReadonlyArray<FlattenedDeepRequired<paths>["/hypotheses"]["get"]["parameters"]["query"]["by"]> = ["people"];
 export const pathsPlatformExperimentsGetParametersQuerySharedValues: ReadonlyArray<FlattenedDeepRequired<paths>["/platform-experiments"]["get"]["parameters"]["query"]["shared"]> = ["true", "false"];
+export const aPIKeyActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["APIKeyAction"]> = ["revoke"];
 export const actorKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ActorKind"]> = ["user", "key", "agent", "coordinator", "staff", "unverified"];
 export const agentInstanceEnd_reasonValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["AgentInstance"]["end_reason"]> = ["exited", "gone", "never_seen", "still_starting", "silent", "progress_unreadable", "expired", "released"];
 export const agentInstanceStateValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["AgentInstance"]["state"]> = ["waiting", "requested", "starting", "running", "stopped"];
 export const agentMessageFromValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["AgentMessage"]["from"]> = ["coordinator", "owner"];
 export const agentRoleValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["AgentRole"]> = ["researcher", "baseline", "coordinator", "planner"];
 export const agentTurnStateValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["AgentTurn"]["state"]> = ["working", "waiting"];
-export const agentTypeActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["AgentTypeAction"]> = ["create", "edit", "rename", "describe", "archive", "restore"];
+export const agentTypeActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["AgentTypeAction"]> = ["edit", "archive", "duplicate", "restore"];
+export const agentTypeChangeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["AgentTypeChange"]> = ["create", "edit", "rename", "describe", "archive", "restore"];
 export const agentTypeSettingsEffortValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["AgentTypeSettings"]["effort"]> = ["low", "medium", "high", "xhigh", "max"];
 export const capacityTierValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CapacityTier"]> = ["guaranteed", "burst"];
 export const closeReasonValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CloseReason"]> = ["end_time_reached", "closed_by_request", "planning_limit_reached", "proposal_expired", "baseline_limit_reached", "agents_not_started", "planner_stopped", "repository_not_created"];
+export const clusterActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ClusterAction"]> = ["enable", "edit", "remove", "share"];
 export const experimentActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ExperimentAction"]> = ["cancel"];
 export const experimentStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ExperimentStatus"]> = ["SUBMITTED", "QUEUED", "RUNNING", "COMPLETED", "FAILED", "EVICTED", "REJECTED", "CANCELLED"];
 export const hypothesisActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["HypothesisAction"]> = ["edit", "remove", "link", "comment"];
@@ -8894,6 +8942,7 @@ export const metricReferenceDirectionValues: ReadonlyArray<FlattenedDeepRequired
 export const metricStandingsDirectionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["MetricStandings"]["direction"]> = ["maximize", "minimize"];
 export const orgActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["OrgAction"]> = ["edit", "create_api_key"];
 export const orgGitHubInstallationAccount_typeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["OrgGitHubInstallation"]["account_type"]> = ["User", "Organization"];
+export const orgMemberActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["OrgMemberAction"]> = ["set_role", "remove"];
 export const orgRoleValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["OrgRole"]> = ["owner", "member"];
 export const platformExperimentActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["PlatformExperimentAction"]> = ["close", "abandon", "remove", "accept", "add_agent", "add_idea"];
 export const platformExperimentStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["PlatformExperimentStatus"]> = ["draft", "open", "running", "closed"];
