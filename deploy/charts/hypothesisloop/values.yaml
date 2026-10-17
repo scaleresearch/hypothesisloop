@@ -20,7 +20,8 @@ images:
   tag: ""
 
 # Every secret comes from this one Secret, which must exist in the namespace before the chart is
-# installed. The chart reads it and never creates it. Required. Its keys:
+# installed. The chart reads it and never creates it. Required. A provider's secret is named
+# <SECTION>_<PROVIDER>_<FIELD>, as the settings name the section and the provider. Its keys:
 #
 #   DATABASE_URL                     Postgres connection string. With postgres.enabled it is
 #                                    postgres://<postgres.user>:<POSTGRES_PASSWORD>@hypothesisloop-postgres:5432/<postgres.database>?sslmode=disable
@@ -30,19 +31,21 @@ images:
 #   MODEL_ANTHROPIC_OAUTH_TOKEN      the Claude subscription token control-service makes every
 #                                    sandboxed agent's model calls with (models in
 #                                    hypothesisloop.yaml). No agent's machine is given it.
-#   DATA_STORE_MINIO_SECRET_ACCESS_KEY  the secret key of data_store.access_key_id in
+#   OBJECT_STORE_MINIO_SECRET_ACCESS_KEY  the secret key of object_store.minio.access_key_id in
 #                                    hypothesisloop.yaml, a key that may create service accounts;
 #                                    with objectStore.enabled the two are the store's root user
 #   GIT_HOST_GITHUB_APP_PRIVATE_KEY  only with gitHost.provider github: the PEM GitHub issued for
 #                                    the App
 #   GIT_HOST_PLAIN_PASSWORD          only with gitHost.plain.username: that account's password
-#   ENVIRONMENTS_GCP_CREDENTIALS     only with environments.provider gcp: control-service's own
-#                                    Google identity, as an application default credentials file
-#                                    (a service account key or a workload identity federation
-#                                    config), which may mint the tokens of environments.gcp.pusher
-#                                    and environments.gcp.puller
-#   SANDBOX_FLY_API_KEY, SANDBOX_E2B_API_KEY, CLOUD_COMPUTE_VAST_API_KEY
-#                                    the key of each provider sandbox and cloudCompute name
+#   CONTAINER_REGISTRY_GCP_CREDENTIALS  only with containerRegistry.provider gcp: control-service's
+#                                    own Google identity, as an application default credentials
+#                                    file (a service account key or a workload identity
+#                                    federation config), which may mint the tokens of
+#                                    containerRegistry.gcp.pusher and containerRegistry.gcp.puller
+#   SANDBOX_<PROVIDER>_API_KEY, CLOUD_COMPUTE_<PROVIDER>_API_KEY
+#                                    the account key of the provider sandbox and each cloudCompute
+#                                    entry name, such as SANDBOX_FLY_API_KEY and
+#                                    CLOUD_COMPUTE_VAST_API_KEY
 #
 # Each process is handed the keys it reads and no other.
 secretName: ""
@@ -74,9 +77,10 @@ auth:
 # the section of that name is read.
 gitHost:
   provider: ""
-  # The repository on the git host every repository the platform creates starts from: on GitHub
-  # the platform's public template, on a plain host a name under baseURL holding a copy of it.
-  experimentTemplateRepository: scaleresearch/hypothesisloop-experiment-template
+  # Required: the repository on the git host every repository the platform creates starts from:
+  # on GitHub the platform's public template, on a plain host a name under baseURL holding a copy
+  # of it.
+  experimentTemplateRepository: ""
   # The GitHub App a project's repository is reached through. Its private key comes from the Secret.
   github:
     appId: 0
@@ -91,18 +95,18 @@ gitHost:
     # GIT_HOST_PLAIN_PASSWORD. Left empty for a host that asks for no credential.
     username: ""
 
-# Where environment images are pushed and the registry provider whose logins control-service hands
-# out for them: the environments section of hypothesisloop.yaml, which explains each value. With
-# repository empty the deployment builds no environments. With it set, provider is required, and
-# so is that provider's section:
+# The registry provider whose logins control-service hands out for environment images, and the
+# repository they are pushed to: the container_registry section of hypothesisloop.yaml, which
+# explains each value. With provider empty the deployment builds no environments. With it set,
+# environmentsRepository is required, and so is that provider's section:
 #   gcp  Google Artifact Registry: the two service accounts, pusher and puller, and the Secret's
-#        ENVIRONMENTS_GCP_CREDENTIALS, which mints their tokens.
-environments:
-  repository: ""
+#        CONTAINER_REGISTRY_GCP_CREDENTIALS, which mints their tokens.
+containerRegistry:
   provider: ""
   gcp:
     pusher: ""
     puller: ""
+  environmentsRepository: ""
 
 # Required: the one address this API is reached at from outside the control plane, by sandboxed
 # agents and by every cluster's runtime. services.public_api_url of hypothesisloop.yaml.
@@ -160,20 +164,19 @@ memgraph:
     enabled: false
     url: ""
 
-# Durable-data object store: the data_store section of hypothesisloop.yaml.
+# Durable-data object store: the object_store section of hypothesisloop.yaml, which names its
+# provider and that provider's section.
 objectStore:
-  # How the store creates each job's key, data_store.provider: minio, the MinIO admin API, which
-  # the in-cluster store below speaks.
-  provider: minio
   # Deploys Silo, in which control-service creates the bucket named in hypothesisloop.yaml at
-  # start. false when endpoint names a store run elsewhere.
+  # start, with the root user of object_store.minio there. false when endpoint names a store run
+  # elsewhere.
   enabled: true
   image: pgsty/silo:RELEASE.2026-09-16T00-00-00Z
-  # data_store.endpoint: the address every job and agent is handed to reach the store at.
+  # object_store.endpoint: the address every job and agent is handed to reach the store at.
   # Required. Jobs in this cluster only: http://object-store.<namespace>.svc:9000. Jobs on other
   # clusters or rented hosts: an address they can reach, such as a tunnel URL to the NodePort.
   endpoint: ""
-  # data_store.control_plane_endpoint: where the control plane itself reaches the store. With
+  # object_store.control_plane_endpoint: where the control plane itself reaches the store. With
   # enabled it is the chart's own Service and this stays empty. With a store run elsewhere it is
   # required: that store's address on the control plane's network.
   controlPlaneEndpoint: ""
@@ -230,10 +233,13 @@ ui:
     nodePort: 30300
 
 # Machines control-service rents itself: the sandbox and cloud_compute sections of
-# hypothesisloop.yaml, written as those sections are, which controlplane/settings/sandbox.yaml
-# and cloud-compute.yaml describe. They hold no secret: control-service is handed its provider's key
-# from the Secret. Without a sandbox no agent runs in an agent sandbox. Each cloud_compute entry is a cluster registered
-# as any other (hl-admin cluster add, run in the control-service pod), and nothing is rented for
-# it until it is.
+# hypothesisloop.yaml, which controlplane/settings/sandbox.yaml and cloud-compute.yaml describe.
+# Each is written into the settings as it is, so its keys are the settings' own, in snake_case: the
+# provider's section is read by the provider's adapter alone, and the chart translates no key it
+# does not read. Each names its provider and holds that provider's section and no other; they hold
+# no secret: control-service is handed the provider's account key from the Secret. Without a
+# sandbox no agent runs in an agent sandbox. Each cloud_compute entry is a cluster registered as any
+# other (hl-admin cluster add, run in the control-service pod), and nothing is rented for it until
+# it is.
 sandbox: {}
 cloudCompute: []

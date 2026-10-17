@@ -43,6 +43,7 @@ func conformanceProvider(t *testing.T, accelerators []Accelerator) *Provider {
 		t.Skip("CLOUD_COMPUTE_VAST_API_KEY is not set")
 	}
 	p, err := New(Settings{
+		AccountID:        "conformance",
 		MaxPricePerHour:  0.15,
 		MinReliability:   0.99,
 		VerifiedOnly:     true,

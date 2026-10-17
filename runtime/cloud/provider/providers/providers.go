@@ -26,7 +26,7 @@ var byName = map[string]constructor{
 type constructor func(settings yaml.Node, secret string, acceleratorTypes []string, log func(format string, args ...any)) (provider.Provider, error)
 
 // adapter turns a package's New into a constructor that first decodes the provider's section of
-// the config file into that package's settings. New is handed the accelerator types as well and
+// the settings, the one under its name, into that package's settings. New is handed the accelerator types as well and
 // refuses one it cannot rent, so a shape nothing could run on stops the process at startup.
 func adapter[S any, P provider.Provider](construct func(S, string, []string, func(string, ...any)) (P, error)) constructor {
 	return func(node yaml.Node, secret string, acceleratorTypes []string, log func(format string, args ...any)) (provider.Provider, error) {
@@ -43,23 +43,28 @@ func adapter[S any, P provider.Provider](construct func(S, string, []string, fun
 		decoder := yaml.NewDecoder(bytes.NewReader(raw))
 		decoder.KnownFields(true)
 		if err := decoder.Decode(&settings); err != nil {
-			return nil, fmt.Errorf("provider.settings: %w", err)
+			return nil, fmt.Errorf("the section of the provider: %w", err)
 		}
 		return construct(settings, secret, acceleratorTypes, log)
 	}
 }
 
-// New builds the provider a config file names, from its own settings section and the account's
+// Names is every provider this binary was built with, sorted.
+func Names() []string {
+	names := make([]string, 0, len(byName))
+	for name := range byName {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// New builds the provider the settings name, from its own section of them and the account's
 // secret, for the accelerator types the caller will ask it to rent, logging to log.
 func New(name string, settings yaml.Node, secret string, acceleratorTypes []string, log func(format string, args ...any)) (provider.Provider, error) {
 	construct, known := byName[name]
 	if !known {
-		names := make([]string, 0, len(byName))
-		for name := range byName {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		return nil, fmt.Errorf("provider.name %q is not one this binary was built with (%s)", name, strings.Join(names, ", "))
+		return nil, fmt.Errorf("provider %q is not one this binary was built with (%s)", name, strings.Join(Names(), ", "))
 	}
 	return construct(settings, secret, acceleratorTypes, log)
 }

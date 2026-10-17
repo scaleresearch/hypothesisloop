@@ -28,17 +28,17 @@ const (
 // Secret is every key the chart can read from the deployment's Secret, with made-up values. A
 // test's processes get these through the environment and through nothing else.
 var Secret = map[string]string{
-	"DATABASE_URL":                       "postgres://made-up-user:made-up-database-password@db.example.invalid:5432/postgres?sslmode=require",
-	"POSTGRES_PASSWORD":                  "made-up-database-password",
-	"AUTH_SIGNING_SECRET":                "made-up-signing-secret-of-forty-characters",
-	"DATA_STORE_MINIO_SECRET_ACCESS_KEY": "made-up-object-store-secret-key",
-	"GIT_HOST_GITHUB_APP_PRIVATE_KEY":    "-----BEGIN RSA PRIVATE KEY-----\nmade-up: key # one string\n-----END RSA PRIVATE KEY-----\n",
-	"GIT_HOST_PLAIN_PASSWORD":            "made-up-git-password",
-	"ENVIRONMENTS_GCP_CREDENTIALS":       `{"type": "made-up-google-credentials"}`,
-	"CLOUD_COMPUTE_VAST_API_KEY":         "made-up-vast-api-key",
-	"SANDBOX_FLY_API_KEY":              "FlyV1 made-up-fly-token",
-	"SANDBOX_E2B_API_KEY":                "made-up-e2b-api-key",
-	"MODEL_ANTHROPIC_OAUTH_TOKEN":        "made-up-claude-subscription-token",
+	"DATABASE_URL":                         "postgres://made-up-user:made-up-database-password@db.example.invalid:5432/postgres?sslmode=require",
+	"POSTGRES_PASSWORD":                    "made-up-database-password",
+	"AUTH_SIGNING_SECRET":                  "made-up-signing-secret-of-forty-characters",
+	"OBJECT_STORE_MINIO_SECRET_ACCESS_KEY": "made-up-object-store-secret-key",
+	"GIT_HOST_GITHUB_APP_PRIVATE_KEY":      "-----BEGIN RSA PRIVATE KEY-----\nmade-up: key # one string\n-----END RSA PRIVATE KEY-----\n",
+	"GIT_HOST_PLAIN_PASSWORD":              "made-up-git-password",
+	"CONTAINER_REGISTRY_GCP_CREDENTIALS":   `{"type": "made-up-google-credentials"}`,
+	"CLOUD_COMPUTE_VAST_API_KEY":           "made-up-vast-api-key",
+	"SANDBOX_FLY_API_KEY":                  "FlyV1 made-up-fly-token",
+	"SANDBOX_E2B_API_KEY":                  "made-up-e2b-api-key",
+	"MODEL_ANTHROPIC_OAUTH_TOKEN":          "made-up-claude-subscription-token",
 }
 
 // Release is one rendering of the chart.

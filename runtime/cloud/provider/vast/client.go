@@ -120,6 +120,9 @@ func New(cfg Settings, key string, acceleratorTypes []string, log func(format st
 	}, nil
 }
 
+// Account is the account the settings name (provider.Accounted).
+func (p *Provider) Account() string { return p.cfg.AccountID }
+
 // statusError is a non-2xx answer from the API. Code is the API's own error name
 // ("no_such_instance") and Message its explanation, empty when the body carried none.
 type statusError struct {

@@ -24,9 +24,10 @@ func loadRendered(t *testing.T, release *Release, values, deployment string) *co
 		t.Fatalf("%s: %s = %q, want the mounted file", deployment, config.SettingsPath.Name, env[config.SettingsPath.Name])
 	}
 	Setenv(t, env)
-	for _, key := range config.Keys {
-		if _, set := env[key.Name]; !set {
-			t.Setenv(key.Name, "")
+	for _, variable := range os.Environ() {
+		name, _, _ := strings.Cut(variable, "=")
+		if _, set := env[name]; !set && config.IsKey(name) {
+			t.Setenv(name, "")
 		}
 	}
 	t.Setenv(config.SettingsPath.Name, release.ConfigFile(t, "hypothesisloop-config", "hypothesisloop.yaml"))
@@ -76,8 +77,8 @@ func TestEachServiceIsGivenExactlyTheKeysItReads(t *testing.T) {
 				if env[config.DatabaseURL.Name] != Secret["DATABASE_URL"] || env[config.AuthSigningSecret.Name] != Secret["AUTH_SIGNING_SECRET"] {
 					t.Error("the database address or the signing secret is not the Secret's")
 				}
-				if settings.DataStore.Bucket != "hypothesisloop-data" || settings.DataStore.MaxBytesPerAgent == 0 || len(settings.AcceleratorTypes) == 0 {
-					t.Errorf("platform policy did not come through from the settings file: %+v", settings.DataStore)
+				if settings.ObjectStore.Bucket != "hypothesisloop-data" || settings.ObjectStore.MaxBytesPerAgent == 0 || len(settings.AcceleratorTypes) == 0 {
+					t.Errorf("platform policy did not come through from the settings file: %+v", settings.ObjectStore)
 				}
 			})
 		}
@@ -140,10 +141,10 @@ func googleCredentialFiles(release *Release, secretName string) map[string]strin
 	return files
 }
 
-// A deployment that builds environments names their repository and the two service accounts in
-// the config, and control-service reads its own Google identity, which mints their tokens, as a
+// A deployment that builds environments names its registry's provider, the two service accounts
+// and the environments repository in the config, and control-service reads its own Google identity, which mints their tokens, as a
 // file of the Secret in a mounted directory. One that builds none reads no Google credential.
-func TestEnvironmentsOfTheValuesReachTheConfigWithTheGoogleIdentityThatMintsTheirTokens(t *testing.T) {
+func TestTheContainerRegistryOfTheValuesReachesTheConfigWithTheGoogleIdentityThatMintsItsTokens(t *testing.T) {
 	release := Render(t, External)
 	env := release.Env(t, "hypothesisloop-control-service", secretNames[External])
 	for name := range env {
@@ -152,18 +153,18 @@ func TestEnvironmentsOfTheValuesReachTheConfigWithTheGoogleIdentityThatMintsThei
 		}
 	}
 	files := googleCredentialFiles(release, secretNames[External])
-	if len(files) != 1 || files[env["GOOGLE_APPLICATION_CREDENTIALS"]] != "ENVIRONMENTS_GCP_CREDENTIALS" {
-		t.Errorf("GOOGLE_APPLICATION_CREDENTIALS = %q among the mounted files %v, want the one file of Secret key ENVIRONMENTS_GCP_CREDENTIALS", env["GOOGLE_APPLICATION_CREDENTIALS"], files)
+	if len(files) != 1 || files[env["GOOGLE_APPLICATION_CREDENTIALS"]] != "CONTAINER_REGISTRY_GCP_CREDENTIALS" {
+		t.Errorf("GOOGLE_APPLICATION_CREDENTIALS = %q among the mounted files %v, want the one file of Secret key CONTAINER_REGISTRY_GCP_CREDENTIALS", env["GOOGLE_APPLICATION_CREDENTIALS"], files)
 	}
-	if _, known := Secret["ENVIRONMENTS_GCP_CREDENTIALS"]; !known {
-		t.Error("Secret has no ENVIRONMENTS_GCP_CREDENTIALS")
+	if _, known := Secret["CONTAINER_REGISTRY_GCP_CREDENTIALS"]; !known {
+		t.Error("Secret has no CONTAINER_REGISTRY_GCP_CREDENTIALS")
 	}
 	for deployment := range programs {
-		cfg := loadRendered(t, release, External, deployment)
-		want := config.EnvironmentsConfig{Repository: "europe-west1-docker.pkg.dev/made-up-project/hypothesisloop-environments/environment", Provider: config.RegistryProviderGCP,
-			GCP: config.GCPRegistryConfig{Pusher: "env-pusher@made-up-project.iam.gserviceaccount.com", Puller: "env-puller@made-up-project.iam.gserviceaccount.com"}}
-		if cfg.Environments == nil || *cfg.Environments != want {
-			t.Errorf("%s: environments = %+v, want the values'", deployment, cfg.Environments)
+		got := loadRendered(t, release, External, deployment).ContainerRegistry
+		want := config.GCPRegistryConfig{Pusher: "env-pusher@made-up-project.iam.gserviceaccount.com", Puller: "env-puller@made-up-project.iam.gserviceaccount.com"}
+		if got == nil || got.Provider != config.RegistryProviderGCP || got.GCP == nil || *got.GCP != want ||
+			got.EnvironmentsRepository != "europe-west1-docker.pkg.dev/made-up-project/hypothesisloop-environments/environment" {
+			t.Errorf("%s: container_registry = %+v, want the values'", deployment, got)
 		}
 	}
 
@@ -174,8 +175,8 @@ func TestEnvironmentsOfTheValuesReachTheConfigWithTheGoogleIdentityThatMintsThei
 	if files := googleCredentialFiles(inCluster, secretNames[InCluster]); len(files) != 0 {
 		t.Errorf("mounted %v on a deployment that builds no environments", files)
 	}
-	if cfg := loadRendered(t, inCluster, InCluster, "hypothesisloop-control-service"); cfg.Environments != nil {
-		t.Errorf("environments = %+v, want none", cfg.Environments)
+	if cfg := loadRendered(t, inCluster, InCluster, "hypothesisloop-control-service"); cfg.ContainerRegistry != nil {
+		t.Errorf("container_registry = %+v, want none", cfg.ContainerRegistry)
 	}
 }
 
@@ -219,10 +220,13 @@ func TestValuesTheChartCannotUseAreRefusedWithTheirName(t *testing.T) {
 		"no agent image":              {InCluster, `agents.image=""`, "agents.image is required"},
 		"no API address":              {InCluster, `publicAPIURL=""`, "publicAPIURL is required"},
 		"an environment builder":      {InCluster, `environmentBuilder.address=tcp://builder.example.invalid:31234`, "environmentBuilder"},
-		"environments with no pusher": {External, `environments.gcp.pusher=""`, "environments.gcp.pusher is required"},
-		"environments with no puller": {External, `environments.gcp.puller=""`, "environments.gcp.puller is required"},
-		"environments of no provider": {External, `environments.provider=""`, "with environments.repository it is gcp"},
-		"accounts with no repository": {External, `environments.repository=""`, "without environments.repository"},
+		"a registry with no pusher":   {External, `containerRegistry.gcp.pusher=""`, "containerRegistry.gcp.pusher is required"},
+		"a registry with no puller":   {External, `containerRegistry.gcp.puller=""`, "containerRegistry.gcp.puller is required"},
+		"accounts of no provider":     {External, `containerRegistry.provider=""`, "without containerRegistry.provider"},
+		"a registry with no repo":     {External, `containerRegistry.environmentsRepository=""`, "containerRegistry.environmentsRepository is required"},
+		"the removed environments":    {External, `environments.repository=x`, "environments"},
+		"no template repository":      {External, `gitHost.experimentTemplateRepository=""`, "gitHost.experimentTemplateRepository is required"},
+		"a sandbox of no provider":    {External, `sandbox.provider=null`, "sandbox"},
 		"the API address per reader":  {InCluster, `agents.apiURL=http://api.example.invalid`, "apiURL"},
 		"no runtime metrics address":  {InCluster, `runtimes.metricsURL=""`, "runtimes.metricsURL is required"},
 		"no object store address":     {InCluster, `objectStore.endpoint=""`, "objectStore.endpoint is required"},

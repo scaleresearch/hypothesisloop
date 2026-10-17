@@ -4,11 +4,16 @@
 # (hl-admin cluster add <cluster_name> <org>, and hl-admin cluster share for every org's jobs): the
 # control plane runs its runtime itself, and rents nothing for a cluster that is not registered.
 # Jobs boot with services.public_api_url, which a rented machine must reach, and environments
-# named by digest come from environments.repository. This one is a vast.ai account, whose API key
-# control-service reads as CLOUD_COMPUTE_VAST_API_KEY from its environment. A provider has one
-# account, so no two entries name the same provider.
+# named by digest come from container_registry.environments_repository. Each entry names its
+# provider, whose section of the same name follows the keys every entry has, and none of the other
+# providers' sections. A provider's account key comes from the environment as
+# CLOUD_COMPUTE_<PROVIDER>_API_KEY, so a provider has one account and no two entries name the same
+# provider.
 cloud_compute:
   - cluster_name: vast
+
+    # The vendor, one of the sections below: vast.
+    provider: vast
 
     # What every instance boots. It carries hl, which each job's command runs under, and needs sh,
     # grep and curl: on vast.ai each job runs under a supervisor that stops its own instance when
@@ -37,39 +42,38 @@ cloud_compute:
     offer_wait_seconds: 180
     startup_seconds: 240
 
-    provider:
-      name: vast
-      # The account's user id, as the vast.ai console shows it. With the name it is the cluster's
-      # id, which per-cluster settings are keyed on.
+    # A vast.ai account, whose API key is CLOUD_COMPUTE_VAST_API_KEY.
+    vast:
+      # The account's user id, as the vast.ai console shows it. With the provider it is the
+      # cluster's id, which per-cluster settings are keyed on.
       account_id: REPLACE-WITH-ACCOUNT-ID
-      settings:
-        # Offers above this price for the whole instance are never rented. Each rent takes the
-        # cheapest offer that passes the filters, so this is a ceiling and not what is paid. In
-        # October 2026 a verified RTX 4090 of the shape below with reliability 0.98 cost $0.55 to
-        # $1.30 an hour in Europe and the US (median $0.76), an A100 80GB about $1.05, and any GPU
-        # machine with 8 cores and 32 GB from $0.09 (median $0.43).
-        max_price_per_hour: 1.50
-        # The vendor's own score of a host, 0 to 1.
-        min_reliability: 0.98
-        # Two-letter country codes. Leave empty for any. Europe and North America: a handful of
-        # countries alone matched no offer of the shapes below.
-        regions: [US, CA, GB, IE, NO, SE, FI, DK, IS, NL, BE, LU, DE, FR, ES, PT, IT, CH, AT, PL, CZ, SK, HU, SI, HR, RO, BG, GR, EE, LV, LT]
-        # Only hosts the vendor has verified.
-        verified_only: true
-        # Machines never rented. The log names the machine of every instance rented and of every
-        # instance that is slow to start, with what the host says; a machine that keeps failing to
-        # start instances goes here.
-        excluded_machines: []
-        # Every GPU model a shape below names, under both of its names: product as the NVIDIA
-        # driver reports it, which is what the catalog string is made from, and gpu_name as
-        # vast.ai's offer search returns it. min_gpu_ram_mb tells apart models vast.ai sells under
-        # one name.
-        accelerators:
-          - product: NVIDIA GeForce RTX 4090
-            gpu_name: RTX 4090
-          - product: NVIDIA A100 80GB PCIe
-            gpu_name: A100 PCIE
-            min_gpu_ram_mb: 80000
+      # Offers above this price for the whole instance are never rented. Each rent takes the
+      # cheapest offer that passes the filters, so this is a ceiling and not what is paid. In
+      # October 2026 a verified RTX 4090 of the shape below with reliability 0.98 cost $0.55 to
+      # $1.30 an hour in Europe and the US (median $0.76), an A100 80GB about $1.05, and any GPU
+      # machine with 8 cores and 32 GB from $0.09 (median $0.43).
+      max_price_per_hour: 1.50
+      # The vendor's own score of a host, 0 to 1.
+      min_reliability: 0.98
+      # Two-letter country codes. Leave empty for any. Europe and North America: a handful of
+      # countries alone matched no offer of the shapes below.
+      regions: [US, CA, GB, IE, NO, SE, FI, DK, IS, NL, BE, LU, DE, FR, ES, PT, IT, CH, AT, PL, CZ, SK, HU, SI, HR, RO, BG, GR, EE, LV, LT]
+      # Only hosts the vendor has verified.
+      verified_only: true
+      # Machines never rented. The log names the machine of every instance rented and of every
+      # instance that is slow to start, with what the host says; a machine that keeps failing to
+      # start instances goes here.
+      excluded_machines: []
+      # Every GPU model a shape below names, under both of its names: product as the NVIDIA
+      # driver reports it, which is what the catalog string is made from, and gpu_name as
+      # vast.ai's offer search returns it. min_gpu_ram_mb tells apart models vast.ai sells under
+      # one name.
+      accelerators:
+        - product: NVIDIA GeForce RTX 4090
+          gpu_name: RTX 4090
+        - product: NVIDIA A100 80GB PCIe
+          gpu_name: A100 PCIE
+          min_gpu_ram_mb: 80000
 
     # What this account may rent. Each of a shape's max_instances is reported as a node that holds
     # one job, so the scheduler needs no provider settings of its own. A job is admitted to a shape

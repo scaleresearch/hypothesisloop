@@ -49,11 +49,15 @@ func New() *Provider {
 }
 
 var (
-	_ provider.Provider = (*Provider)(nil)
-	_ provider.Pauser   = (*Provider)(nil)
-	_ provider.Market   = (*Provider)(nil)
-	_ provider.Warmer   = (*Provider)(nil)
+	_ provider.Provider  = (*Provider)(nil)
+	_ provider.Pauser    = (*Provider)(nil)
+	_ provider.Market    = (*Provider)(nil)
+	_ provider.Warmer    = (*Provider)(nil)
+	_ provider.Accounted = (*Provider)(nil)
 )
+
+// Account is the one account there is in memory.
+func (p *Provider) Account() string { return "fake" }
 
 func (p *Provider) Rentable(_ context.Context, spec provider.Spec, atMost int) (provider.Supply, error) {
 	p.mu.Lock()

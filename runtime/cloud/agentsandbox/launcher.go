@@ -71,6 +71,12 @@ func New(cfg Config) (*Launcher, error) {
 	if cfg.Provider == nil || cfg.Platform == nil || cfg.Log == nil {
 		return nil, errors.New("agentsandbox: Provider, Platform and Log are required")
 	}
+	if sizer, sizes := cfg.Provider.(provider.Sizer); sizes {
+		size := provider.Spec{Name: "instance", CPUMillis: cfg.Size.CPUMillis, MemoryBytes: cfg.Size.MemoryBytes, DiskBytes: cfg.Size.DiskBytes}
+		if err := sizer.CheckSize(size); err != nil {
+			return nil, fmt.Errorf("agentsandbox: the instance size: %w", err)
+		}
+	}
 	digest, err := cfg.launchDigest()
 	if err != nil {
 		return nil, err

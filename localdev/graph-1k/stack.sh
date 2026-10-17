@@ -130,9 +130,9 @@ render_settings() {
       "${repo}/controlplane/settings/hypothesisloop.yaml" >"${STATE}/hypothesisloop.yaml"
   printf '\ngit_host:\n  provider: plain\n  experiment_template_repository: experiment-template.git\n  plain:\n    base_url: http://%s:%s\n    allow_http: true\n    username: hypothesisloop\n' \
     "${HOST}" "${GIT_PORT}" >>"${STATE}/hypothesisloop.yaml"
-  if grep -q 'REPLACE-WITH\|:8081\|:8084\|greptimedb:\|memgraph:\|minio:' "${STATE}/hypothesisloop.yaml"; then
+  if grep -q 'REPLACE-WITH\|:8081\|:8084\|greptimedb:\|memgraph:\|minio:[0-9]' "${STATE}/hypothesisloop.yaml"; then
     echo "stack: the settings file changed shape; these lines still name the dev stack or a placeholder:" >&2
-    grep -n 'REPLACE-WITH\|:8081\|:8084\|greptimedb:\|memgraph:\|minio:' "${STATE}/hypothesisloop.yaml" >&2
+    grep -n 'REPLACE-WITH\|:8081\|:8084\|greptimedb:\|memgraph:\|minio:[0-9]' "${STATE}/hypothesisloop.yaml" >&2
     exit 1
   fi
 }
@@ -163,10 +163,10 @@ service_env() {
   GIT_HOST_PLAIN_PASSWORD="$(<"${STATE}/git-password")"
   METRICS_DB_URL="http://localhost:${GREPTIME_PORT}"
   GRAPH_DB_URL="bolt://localhost:${MEMGRAPH_PORT}"
-  DATA_STORE_MINIO_SECRET_ACCESS_KEY=hypothesisloop
+  OBJECT_STORE_MINIO_SECRET_ACCESS_KEY=hypothesisloop
   # The model proxy's credential is never used here: no agent is hosted.
   MODEL_ANTHROPIC_OAUTH_TOKEN=unused-by-graph-1k
-  export AUTH_SIGNING_SECRET GIT_HOST_PLAIN_PASSWORD METRICS_DB_URL GRAPH_DB_URL DATA_STORE_MINIO_SECRET_ACCESS_KEY MODEL_ANTHROPIC_OAUTH_TOKEN
+  export AUTH_SIGNING_SECRET GIT_HOST_PLAIN_PASSWORD METRICS_DB_URL GRAPH_DB_URL OBJECT_STORE_MINIO_SECRET_ACCESS_KEY MODEL_ANTHROPIC_OAUTH_TOKEN
 }
 
 # Built before anything is stopped, so a tree that does not compile leaves the running ones be.
@@ -189,7 +189,7 @@ case "${action}" in
     containers_up
     service_env
     GIT_SERVER_ADDRESS=":${GIT_PORT}" GIT_SERVER_ROOT="${STATE}/git" GIT_SERVER_USERNAME=hypothesisloop \
-      GIT_SERVER_PASSWORD="${GIT_HOST_PLAIN_PASSWORD}" start git-server "${STATE}/bin/git-server"
+      GIT_HOST_PLAIN_PASSWORD="${GIT_HOST_PLAIN_PASSWORD}" start git-server "${STATE}/bin/git-server"
     wait_for git-server "http://localhost:${GIT_PORT}/health"
     start_services
     start identity-provider node "${repo}/localdev/graph-1k/identity-provider.mjs" "${IDP_PORT}" "${STATE}/jwt-key.pem" "http://localhost:${UI_PORT}"

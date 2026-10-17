@@ -9,7 +9,7 @@
 # hardcoded. Change a published port here and every one of those needs the same change. Do not
 # rename a service either: the control plane's services below reach the others by their names
 # (compose's own per-service DNS resolves them), and controlplane/settings/hypothesisloop.yaml's
-# data_store.control_plane_endpoint names "minio".
+# object_store.control_plane_endpoint names "minio".
 #
 # Each program reads its keys from its own file, which make render-settings writes from .env
 # (localdev/lib/env.sh). A file not written yet leaves the program to refuse to start, naming the
@@ -125,7 +125,7 @@ services:
     ports:
       - "${HL_API_PORT:?localdev/lib/env.sh names the port}:${HL_API_PORT}"
     volumes:
-      # Rendered by `make render-settings` (host address substituted into data_store.endpoint) —
+      # Rendered by `make render-settings` (host address substituted into object_store.endpoint) —
       # same file both services mount, same as the pod model this replaces.
       - ../../controlplane/settings/.hypothesisloop.rendered.yaml:/settings/hypothesisloop.yaml:ro
       - ${HL_GOOGLE_CREDENTIALS_FILE:-${HOME}/.config/gcloud/application_default_credentials.json}:/google/credentials.json:ro

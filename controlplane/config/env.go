@@ -8,52 +8,72 @@ import (
 )
 
 // Key is one variable of the environment a program reads: where its settings file is, or a secret
-// of the deployment. Its name is ROLE[_PROVIDER]_NAME, the same in every file that sets it and in
-// the process.
+// of the deployment. The same name is used in every file that sets it and in the process.
 type Key struct {
 	Name string
 	// For is what the value is, said when a program refuses to start without it.
 	For string
 }
 
-var (
-	SettingsPath                  = Key{"HYPOTHESISLOOP_CONFIG", "the path of the settings file"}
-	DatabaseURL                   = Key{"DATABASE_URL", "the address of the relational database, its password in it"}
-	MetricsDBURL                  = Key{"METRICS_DB_URL", "the address of the metrics store"}
-	GraphDBURL                    = Key{"GRAPH_DB_URL", "the bolt address of the hypothesis graph"}
-	AuthSigningSecret             = Key{"AUTH_SIGNING_SECRET", fmt.Sprintf("the secret every hls_ token is derived from, at least %d characters", MinSigningSecretLength)}
-	ModelAnthropicOAuthToken      = Key{"MODEL_ANTHROPIC_OAUTH_TOKEN", "the Claude subscription token every model call of a sandboxed agent is made with"}
-	DataStoreMinIOSecretAccessKey = Key{"DATA_STORE_MINIO_SECRET_ACCESS_KEY", "the secret key of data_store.access_key_id"}
-	GitHostGitHubAppPrivateKey    = Key{"GIT_HOST_GITHUB_APP_PRIVATE_KEY", "the PEM GitHub issued for the App of git_host.github"}
-	GitHostPlainPassword          = Key{"GIT_HOST_PLAIN_PASSWORD", "the password of git_host.plain.username"}
-	SandboxE2BAPIKey              = sandboxKey("e2b")
-	SandboxE2BRegistryUsername    = Key{"SANDBOX_E2B_REGISTRY_USERNAME", "the login to the private registry of the image a template is built from"}
-	SandboxE2BRegistryPassword    = Key{"SANDBOX_E2B_REGISTRY_PASSWORD", "the password of SANDBOX_E2B_REGISTRY_USERNAME"}
+// The sections of the settings whose provider can be switched, as the names of their keys in the
+// environment begin.
+const (
+	SectionObjectStore       = "OBJECT_STORE"
+	SectionGitHost           = "GIT_HOST"
+	SectionContainerRegistry = "CONTAINER_REGISTRY"
+	SectionSandbox           = "SANDBOX"
+	SectionCloudCompute      = "CLOUD_COMPUTE"
 )
 
-// Keys is every key a program reads.
-var Keys = []Key{
-	SettingsPath, DatabaseURL, MetricsDBURL, GraphDBURL, AuthSigningSecret, ModelAnthropicOAuthToken,
-	DataStoreMinIOSecretAccessKey, GitHostGitHubAppPrivateKey, GitHostPlainPassword,
-	SandboxE2BAPIKey, SandboxE2BRegistryUsername, SandboxE2BRegistryPassword,
+// ProviderKey is a secret field of a provider of a section: <SECTION>_<PROVIDER>_<FIELD>.
+func ProviderKey(section, provider, field, purpose string) Key {
+	return Key{section + "_" + strings.ToUpper(provider) + "_" + field, purpose}
 }
 
-// The key of each provider that has one, by the provider's name in the settings. A provider that
-// is not listed takes none.
+// AccountKey is the one secret a provider of the sandbox or of cloud_compute takes, whatever the
+// provider: the key of its account at the vendor, <SECTION>_<PROVIDER>_API_KEY.
+func AccountKey(section, provider string) Key {
+	return ProviderKey(section, provider, "API_KEY", "the API key of the "+provider+" account the "+strings.ToLower(section)+" rents on")
+}
+
 var (
-	modelKeys     = map[string]Key{ModelProviderAnthropic: ModelAnthropicOAuthToken}
-	dataStoreKeys = map[string]Key{DataStoreProviderMinIO: DataStoreMinIOSecretAccessKey}
+	SettingsPath                    = Key{"HYPOTHESISLOOP_CONFIG", "the path of the settings file"}
+	DatabaseURL                     = Key{"DATABASE_URL", "the address of the relational database, its password in it"}
+	MetricsDBURL                    = Key{"METRICS_DB_URL", "the address of the metrics store"}
+	GraphDBURL                      = Key{"GRAPH_DB_URL", "the bolt address of the hypothesis graph"}
+	AuthSigningSecret               = Key{"AUTH_SIGNING_SECRET", fmt.Sprintf("the secret every hls_ token is derived from, at least %d characters", MinSigningSecretLength)}
+	ModelAnthropicOAuthToken        = Key{"MODEL_ANTHROPIC_OAUTH_TOKEN", "the Claude subscription token every model call of a sandboxed agent is made with"}
+	ObjectStoreMinIOSecretAccessKey = ProviderKey(SectionObjectStore, ObjectStoreProviderMinIO, "SECRET_ACCESS_KEY", "the secret key of object_store.minio.access_key_id")
+	GitHostGitHubAppPrivateKey      = ProviderKey(SectionGitHost, GitHostProviderGitHub, "APP_PRIVATE_KEY", "the PEM GitHub issued for the App of git_host.github")
+	GitHostPlainPassword            = ProviderKey(SectionGitHost, GitHostProviderPlain, "PASSWORD", "the password of git_host.plain.username")
+	SandboxE2BAPIKey                = AccountKey(SectionSandbox, "e2b")
+	SandboxE2BRegistryUsername      = ProviderKey(SectionSandbox, "e2b", "REGISTRY_USERNAME", "the login to the private registry of the image a template is built from")
+	SandboxE2BRegistryPassword      = ProviderKey(SectionSandbox, "e2b", "REGISTRY_PASSWORD", "the password of SANDBOX_E2B_REGISTRY_USERNAME")
 )
 
-// sandboxKey and cloudComputeKey are the account key of a rented provider, by its name in the
-// settings: SANDBOX_<NAME>_API_KEY and CLOUD_COMPUTE_<NAME>_API_KEY.
-func sandboxKey(provider string) Key {
-	return Key{"SANDBOX_" + strings.ToUpper(provider) + "_API_KEY", "the API key of the " + provider + " account the sandbox rents machines on"}
+// IsKey reports whether name is a key some program reads: one of the platform's own, or a
+// provider's, which begins with its section. A provider of the sandbox or cloud_compute is any
+// the settings name, so its keys are known by the rule alone.
+func IsKey(name string) bool {
+	for _, key := range []Key{SettingsPath, DatabaseURL, MetricsDBURL, GraphDBURL, AuthSigningSecret} {
+		if name == key.Name {
+			return true
+		}
+	}
+	for _, section := range []string{SectionObjectStore, SectionGitHost, SectionContainerRegistry, SectionSandbox, SectionCloudCompute, "MODEL"} {
+		if strings.HasPrefix(name, section+"_") {
+			return true
+		}
+	}
+	return false
 }
 
-func cloudComputeKey(provider string) Key {
-	return Key{"CLOUD_COMPUTE_" + strings.ToUpper(provider) + "_API_KEY", "the API key of the " + provider + " account of the cloud_compute entries on " + provider}
-}
+// The secret of each provider that has one, by the provider's name in the settings. A provider
+// that is not listed takes none.
+var (
+	modelKeys       = map[string]Key{ModelProviderAnthropic: ModelAnthropicOAuthToken}
+	objectStoreKeys = map[string]Key{ObjectStoreProviderMinIO: ObjectStoreMinIOSecretAccessKey}
+)
 
 // Program is a process that loads the settings file.
 type Program string
@@ -71,13 +91,13 @@ var Programs = []Program{ProgramControlService, ProgramMetricsService, ProgramAd
 func (s *Settings) Needs(p Program) []Key {
 	switch p {
 	case ProgramControlService:
-		keys := []Key{DatabaseURL, MetricsDBURL, GraphDBURL, AuthSigningSecret, modelKeys[s.Models.Provider], dataStoreKeys[s.DataStore.Provider]}
+		keys := []Key{DatabaseURL, MetricsDBURL, GraphDBURL, AuthSigningSecret, modelKeys[s.Models.Provider], objectStoreKeys[s.ObjectStore.Provider]}
 		keys = append(keys, s.gitHostKeys()...)
 		if s.Sandbox != nil {
-			keys = append(keys, sandboxKey(s.Sandbox.Provider.Name))
+			keys = append(keys, AccountKey(SectionSandbox, s.Sandbox.Provider))
 		}
 		for _, cc := range s.CloudCompute {
-			if key := cloudComputeKey(cc.Provider.Name); !slices.Contains(keys, key) {
+			if key := AccountKey(SectionCloudCompute, cc.Provider); !slices.Contains(keys, key) {
 				keys = append(keys, key)
 			}
 		}

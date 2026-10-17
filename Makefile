@@ -56,7 +56,7 @@ check-tag:
 	@test -n "$(IMAGE_PLATFORM)" || { echo "make: could not ask podman for its platform; set IMAGE_PLATFORM" >&2; exit 1; }
 	@test -n "$(TAG)" || { echo "make: could not compute an image TAG (localdev/lib/image-tag.sh)" >&2; exit 1; }
 
-# data_store.endpoint in controlplane/settings/hypothesisloop.yaml carries a
+# object_store.endpoint in controlplane/settings/hypothesisloop.yaml carries a
 # REPLACE-WITH-HOST-ADDRESS placeholder rather than an address, because a k3s job pod has its own
 # network namespace and can't reach the host's loopback, and the address differs between macOS
 # and Linux hosts. This renders HOST_ADDRESS in at start-up, or LOCAL_REACHABLE_ADDRESS when .env

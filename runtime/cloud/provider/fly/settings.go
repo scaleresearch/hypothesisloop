@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// Settings is the adapter's own section of the config file, provider.settings.
+// Settings is the adapter's own section of the settings, under its name beside provider.
 type Settings struct {
 	// App is the one Fly app every Machine is created in. It exists before the adapter starts.
 	App string `yaml:"app"`

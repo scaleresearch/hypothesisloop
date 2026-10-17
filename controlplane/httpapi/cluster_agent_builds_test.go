@@ -129,7 +129,7 @@ func TestReconcileAnswersWithoutAPullLoginWhenNoneCanBeMinted(t *testing.T) {
 	}
 }
 
-// A deployment with no environments section counts no cluster as building and hands out nothing.
+// A deployment with no container_registry section counts no cluster as building and hands out nothing.
 func TestADeploymentWithoutEnvironmentsCountsNoClusterAsBuilding(t *testing.T) {
 	w := newWorld(t, "of-a", func(base *reconcileStore) clusterexchange.Store { return base }, false)
 	w.store.assigned["of-a"] = []*domain.Environment{assignedBuild("key-1", 1)}

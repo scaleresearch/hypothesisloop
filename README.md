@@ -168,9 +168,9 @@ Every experiment keeps its code in git. A deployment's settings name its git hos
   on update" on, so that adding repositories returns there too. The page reads the App's details
   from `GET /github/app`. `hl-admin github connect ORG INSTALLATION_ID` connects one for an
   operator.
-- `plain` (`local` in `.env`): any git server that serves repositories under one root. A
+- `plain`: any git server that serves repositories under one root. A
   repository is created beforehand and named when the experiment is created. `make dev` with
-  `GIT_HOST_PROVIDER=local` runs one, and `make git-repository NAME=my-experiment` adds a
+  `GIT_HOST_PROVIDER=plain` runs one, and `make git-repository NAME=my-experiment` adds a
   repository to it.
 
 Agents, coordinators and jobs never hold a credential of the git host. They clone, fetch and push
@@ -677,10 +677,14 @@ the same way, so the rest of the system never depends on which one it is:
 - `.env` has one key `<ROLE>_PROVIDER` naming the provider, such as
   `CONTAINER_REGISTRY_PROVIDER='gcp'`, and keys `<ROLE>_<PROVIDER>_<FIELD>` that only that
   provider reads, such as `CONTAINER_REGISTRY_GCP_PROJECT`. A key with no provider in its name,
-  such as `IMAGE_TAG`, means the same with every provider.
-- A settings or config section has `provider: <name>` and a subsection named after the provider
-  with its own keys (`environments.provider: gcp` with `environments.gcp`), or, in a runtime
-  process's config, `provider.name` and `provider.settings`.
+  such as `IMAGE_TAG`, means the same with every provider. The role is the settings section's name.
+- A settings section has `provider: <name>` and a subsection named after the provider with its
+  own keys, the only one set (`container_registry.provider: gcp` with `container_registry.gcp`,
+  `sandbox.provider: fly` with `sandbox.fly`), beside the keys every provider shares.
+- A provider's secret is the environment key `<SECTION>_<PROVIDER>_<FIELD>`, the same in `.env`,
+  in the program and in the chart's Secret: `OBJECT_STORE_MINIO_SECRET_ACCESS_KEY`,
+  `GIT_HOST_GITHUB_APP_PRIVATE_KEY`, and `SANDBOX_<PROVIDER>_API_KEY` and
+  `CLOUD_COMPUTE_<PROVIDER>_API_KEY`, the one account key every rented provider takes.
 - In Go, the role is one small interface in its own package and each provider a sub-package
   (`controlplane/shared/registrycred/gcp`, `controlplane/shared/objectstore/minio`,
   `runtime/cloud/internal/provider/fly`). The provider is chosen once, from configuration, and an
@@ -688,13 +692,13 @@ the same way, so the rest of the system never depends on which one it is:
 
 | Role | `.env` | Settings | Providers |
 |---|---|---|---|
-| container registry | `CONTAINER_REGISTRY_PROVIDER` | `environments.provider` | `gcp` (Artifact Registry) |
-| durable-data object store | (local MinIO) | `data_store.provider` | `minio` (MinIO admin API: MinIO, Silo, AIStor) |
+| container registry | `CONTAINER_REGISTRY_PROVIDER` | `container_registry.provider` | `gcp` (Artifact Registry) |
+| durable-data object store | (local MinIO) | `object_store.provider` | `minio` (MinIO admin API: MinIO, Silo, AIStor) |
 | sign-in service | `IDENTITY_PROVIDER`, UI `NEXT_PUBLIC_IDENTITY_PROVIDER` | `auth.identity_providers` (any OIDC issuer) | `supabase` |
-| git host | `GIT_HOST_PROVIDER` | `git_host.provider` | `github`, `plain` (`local` in `.env`, the local git server) |
-| hosted agent sandboxes | `SANDBOX_PROVIDER` | agent-launcher `provider.name` | `fly`, `e2b` |
+| git host | `GIT_HOST_PROVIDER` | `git_host.provider` | `github`, `plain` (in `.env`, the local git server) |
+| hosted agent sandboxes | `SANDBOX_PROVIDER` | `sandbox.provider` | `fly`, `e2b` |
 | models of hosted agents | `MODEL_PROVIDER` | `models.provider` (control-service makes their calls) | `anthropic` |
-| rented compute for jobs | `CLOUD_COMPUTE_PROVIDER` | cloud-agent `provider.name` | `vast` |
+| rented compute for jobs | `CLOUD_COMPUTE_PROVIDER` | `cloud_compute[].provider` | `vast` |
 | the platform's own clusters | `OWNED_COMPUTE_CLUSTERS` | (registered clusters) | `k8s`, `bare-metal` |
 
 Every provider in `.env` is the platform's own: adding one is an operator's decision, and no
@@ -747,7 +751,7 @@ detach` then `sudo bare-agent uninstall` removes it.
 The command carries the control plane's settings: `services.public_api_url` and
 `runtimes.metrics_url` for the agents, and `runtimes.registry` and `runtimes.image_tag` for
 their images. `make images REGISTRY=...` pushes the chart beside the images. All of them, and
-the object store's `data_store.endpoint`, must be reachable from inside the cluster, by IP for
+the object store's `object_store.endpoint`, must be reachable from inside the cluster, by IP for
 a control plane on a tailnet, since pods do not resolve tailnet names. A control plane started
 with `make dev` or `make controlplane-up` names this host as local containers see it, which
 other machines cannot resolve: set `LOCAL_REACHABLE_ADDRESS` in `.env` to an address they reach

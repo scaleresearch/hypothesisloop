@@ -225,11 +225,6 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "provider": {
-          "enum": [
-            "minio"
-          ]
-        },
         "enabled": {
           "type": "boolean"
         },
@@ -417,12 +412,38 @@
       }
     },
     "sandbox": {
-      "type": "object"
+      "anyOf": [
+        {
+          "type": "object",
+          "maxProperties": 0
+        },
+        {
+          "type": "object",
+          "required": [
+            "provider"
+          ],
+          "properties": {
+            "provider": {
+              "type": "string",
+              "pattern": "^[a-z0-9]+$"
+            }
+          }
+        }
+      ]
     },
     "cloudCompute": {
       "type": "array",
       "items": {
-        "type": "object"
+        "type": "object",
+        "required": [
+          "provider"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+$"
+          }
+        }
       }
     },
     "gitHost": {
@@ -466,13 +487,10 @@
         }
       }
     },
-    "environments": {
+    "containerRegistry": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "repository": {
-          "type": "string"
-        },
         "provider": {
           "enum": [
             "",
@@ -490,6 +508,9 @@
               "type": "string"
             }
           }
+        },
+        "environmentsRepository": {
+          "type": "string"
         }
       }
     }

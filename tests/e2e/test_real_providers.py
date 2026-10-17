@@ -13,10 +13,9 @@ environment says where it runs:
     TEST_GIT_HOST_GITHUB_REPOSITORY  the repository, which must hold .hypothesisloop/experiment.yaml,
                                       mlp/job.yaml and a workload that reports val_accuracy
     SANDBOX_PROVIDER                  fly or e2b, as the stack's launcher is configured
-    SANDBOX_FLY_APP, SANDBOX_FLY_API_KEY
-                                      for fly
-    SANDBOX_E2B_API_KEY               for e2b
-    CLOUD_COMPUTE_VAST_API_KEY        the account the cloud cluster rents jobs on
+    CLOUD_COMPUTE_PROVIDER            vast, as the stack's cloud cluster is configured
+    the keys support/vendors.py reads of each: its account key, <SECTION>_<PROVIDER>_API_KEY,
+                                      and SANDBOX_FLY_APP for fly
 
     make e2e RENT=1 E2E_ARGS='e2e/test_real_providers.py -s'
 """
@@ -39,10 +38,8 @@ from support.wait import Deadline, eventually
 
 pytestmark = [pytest.mark.real_providers, pytest.mark.exclusive, pytest.mark.timeout(3600)]
 
-NEEDED = {
-    "fly": ("SANDBOX_FLY_APP", "SANDBOX_FLY_API_KEY"),
-    "e2b": ("SANDBOX_E2B_API_KEY",),
-}
+SANDBOX_PROVIDERS = ("fly", "e2b")
+CLOUD_COMPUTE_PROVIDERS = ("vast",)
 # domain.AgentProgressLimit on the stack that rents (agents.progress_limit_seconds), and the quarter
 # of it the platform may take to write a marker down.
 PROGRESS_LIMIT_S = 300
@@ -61,10 +58,11 @@ def _jobs(api: API, pe_id: str) -> list[dict]:
 
 @pytest.fixture(scope="module")
 def provider() -> str:
-    provider = os.environ.get("SANDBOX_PROVIDER", "")
-    if provider not in NEEDED:
-        pytest.skip("needs real providers: set SANDBOX_PROVIDER to fly or e2b, as the stack's launcher is configured")
-    missing = [key for key in (*NEEDED[provider], "CLOUD_COMPUTE_VAST_API_KEY", "TEST_GIT_HOST_GITHUB_INSTALLATION", "TEST_GIT_HOST_GITHUB_REPOSITORY") if not os.environ.get(key)]
+    provider, cloud = os.environ.get("SANDBOX_PROVIDER", ""), os.environ.get("CLOUD_COMPUTE_PROVIDER", "")
+    if provider not in SANDBOX_PROVIDERS or cloud not in CLOUD_COMPUTE_PROVIDERS:
+        pytest.skip("needs real providers: set SANDBOX_PROVIDER to fly or e2b and CLOUD_COMPUTE_PROVIDER to vast, as the stack is configured")
+    needed = (*vendors.needed("SANDBOX", provider), *vendors.needed("CLOUD_COMPUTE", cloud), "TEST_GIT_HOST_GITHUB_INSTALLATION", "TEST_GIT_HOST_GITHUB_REPOSITORY")
+    missing = [key for key in needed if not os.environ.get(key)]
     if missing:
         pytest.skip(f"needs real providers: {', '.join(missing)} not set")
     return provider

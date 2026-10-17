@@ -2,6 +2,7 @@ package providers
 
 import (
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -42,7 +43,7 @@ func TestAProviderIsBuiltFromItsOwnSectionOfTheConfig(t *testing.T) {
 	if len(gotTypes) != 1 || gotTypes[0] != "nvidia.com/gpu.product=NVIDIA-H100" {
 		t.Errorf("accelerator types handed to the provider = %q", gotTypes)
 	}
-	if _, err := New("example", settingsNode(t, "settings: {regoin: eu}"), "", nil, t.Logf); err == nil || !strings.Contains(err.Error(), "provider.settings") {
+	if _, err := New("example", settingsNode(t, "settings: {regoin: eu}"), "", nil, t.Logf); err == nil || !strings.Contains(err.Error(), "the section of the provider") {
 		t.Errorf("a misspelled provider setting: err = %v", err)
 	}
 	if _, err := New("example", yaml.Node{}, "", nil, t.Logf); err != nil {
@@ -57,44 +58,54 @@ func TestAProviderTheBinaryWasNotBuiltWithIsRefusedWithTheOnesItHas(t *testing.T
 	}
 }
 
-// section is the provider part of a config file, as every process that rents instances embeds it.
-type section struct {
-	Provider struct {
-		Name     string    `yaml:"name"`
-		Settings yaml.Node `yaml:"settings"`
-	} `yaml:"provider"`
-}
-
-func shippedSection(t *testing.T, path string) section {
+// shippedSections is every section of a provider the shipped example of a settings section holds,
+// by the provider's name, with each placeholder filled in.
+func shippedSections(t *testing.T, path, key string) map[string]yaml.Node {
 	t.Helper()
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var read section
-	if err := yaml.Unmarshal(raw, &read); err != nil {
+	var document map[string]yaml.Node
+	if err := yaml.Unmarshal(regexp.MustCompile(`REPLACE-WITH-[A-Z-]+`).ReplaceAll(raw, []byte("made-up")), &document); err != nil {
 		t.Fatal(err)
 	}
-	return read
+	section := document[key]
+	if section.Kind == yaml.SequenceNode {
+		section = *section.Content[0]
+	}
+	var keys map[string]yaml.Node
+	if err := section.Decode(&keys); err != nil {
+		t.Fatal(err)
+	}
+	sections := map[string]yaml.Node{}
+	for _, name := range Names() {
+		if node, found := keys[name]; found {
+			sections[name] = node
+		}
+	}
+	return sections
 }
 
+// Every provider has its section in the shipped example of the settings section it rents for, and
+// the section builds its adapter.
 func TestTheShippedProviderSectionsBuildTheirAdapters(t *testing.T) {
-	secrets := map[string]string{"fly": "FlyV1 not-a-real-token", "e2b": "not-a-real-key"}
-	for name, path := range map[string]string{
-		"fly": "../../../../controlplane/settings/provider.fly.yaml",
-		"e2b": "../../../../controlplane/settings/provider.e2b.yaml",
-	} {
+	shipped := shippedSections(t, "../../../../controlplane/settings/sandbox.yaml", "sandbox")
+	for name, node := range shippedSections(t, "../../../../controlplane/settings/cloud-compute.yaml", "cloud_compute") {
+		shipped[name] = node
+	}
+	for _, name := range Names() {
 		t.Run(name, func(t *testing.T) {
-			read := shippedSection(t, path)
-			if read.Provider.Name != name {
-				t.Fatalf("provider.name = %q, want %q", read.Provider.Name, name)
+			node, found := shipped[name]
+			if !found {
+				t.Fatalf("no shipped example of the settings has a section of %s", name)
 			}
-			if _, err := New(read.Provider.Name, read.Provider.Settings, secrets[name], nil, t.Logf); err != nil {
+			if _, err := New(name, node, "FlyV1 not-a-real-key", nil, t.Logf); err != nil {
 				t.Fatalf("provider: %v", err)
 			}
-			_, err := New(read.Provider.Name, read.Provider.Settings, secrets[name], []string{"nvidia.com/gpu.product=NVIDIA-H100"}, t.Logf)
+			_, err := New(name, node, "FlyV1 not-a-real-key", []string{"nvidia.com/gpu.product=NVIDIA-H100"}, t.Logf)
 			if err == nil || !strings.Contains(err.Error(), "NVIDIA-H100") {
-				t.Errorf("err = %v, want a refusal of an accelerator: neither vendor is rented for one", err)
+				t.Errorf("err = %v, want a refusal of an accelerator no shipped section rents", err)
 			}
 		})
 	}

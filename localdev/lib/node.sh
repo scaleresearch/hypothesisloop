@@ -43,7 +43,7 @@ wait_for() {
 # Usage: lib_create_node <context> <name> <image> <server_url> <token> <cpus> <memory> [network] [ip]
 #
 # HOST_ADDRESS (required, env) is the one address every node pulls images through — the
-# lib_host_address `make render-settings` writes for data_store.endpoint. k3s reads
+# lib_host_address `make render-settings` writes for object_store.endpoint. k3s reads
 # registries.yaml at agent-process start, not on a later reload, so it must exist inside the
 # container's filesystem before `agent` runs. It is copied in between create and start: a bind
 # mount of a host temp file disappears with it once removed (macOS virtiofs), and the node then

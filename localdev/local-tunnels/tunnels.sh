@@ -27,7 +27,7 @@ require_cloudflared() {
   fi
 }
 
-# A stack whose GIT_HOST_PROVIDER is local keeps its code on the git server make dev runs, which a
+# A stack whose GIT_HOST_PROVIDER is plain keeps its code on the git server make dev runs, which a
 # hosted agent and a rented instance clone from like they call the API.
 read_services() {
   local git_host
@@ -35,7 +35,7 @@ read_services() {
   echo "api ${HL_API_PORT}"
   echo "metric-controller ${HL_METRICS_PORT}"
   grep -Ev '^\s*(#|$)' "$CONF_FILE"
-  if [[ "${git_host}" == "local" ]]; then
+  if [[ "${git_host}" == "plain" ]]; then
     echo "git ${HL_GIT_PORT}"
   fi
 }

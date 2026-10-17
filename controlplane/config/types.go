@@ -209,16 +209,18 @@ func (c *Settings) GitProxyURL() string {
 	return strings.TrimSuffix(c.Services.PublicAPIURL, "/") + "/git"
 }
 
-// DataStoreConfig addresses the S3-compatible object store jobs write checkpoints and datasets
+// ObjectStoreConfig addresses the S3-compatible object store jobs write checkpoints and datasets
 // to. The control plane creates one key per job, hands out the address and that key, and never
 // sits in the data path: beyond the keys it lists prefixes and measures them, nothing more. The
-// configured key, AccessKeyID with the provider's secret key from the environment, creates the job
-// keys the way Provider's store does, so it must be allowed to.
+// key of the section Provider names, with that provider's secret from the environment, creates the
+// job keys, so it must be allowed to.
 // Expiring a closed platform experiment's prefix is a lifecycle rule configured on the bucket
 // itself, not a sweeper here.
-type DataStoreConfig struct {
-	// Provider names the store, which decides how a job's key is created: DataStoreProviderMinIO.
-	Provider string `yaml:"provider"`
+type ObjectStoreConfig struct {
+	// Provider names the store, which decides how a job's key is created, and the section of that
+	// name, the only one set: ObjectStoreProviderMinIO.
+	Provider string       `yaml:"provider"`
+	MinIO    *MinIOConfig `yaml:"minio"`
 	// Endpoint is the address handed to every job and agent, which reach the store from other
 	// machines. The control plane sends none of its own requests there.
 	Endpoint string `yaml:"endpoint"`
@@ -227,12 +229,17 @@ type DataStoreConfig struct {
 	ControlPlaneEndpoint string `yaml:"control_plane_endpoint"`
 	Region               string `yaml:"region"`
 	Bucket               string `yaml:"bucket"`
-	AccessKeyID          string `yaml:"access_key_id"`
 	// MaxBytesPerAgent caps how many bytes one agent may hold within one platform experiment,
 	// checked at admission against what the store reports right now. Deliberately not enforced
 	// mid-write: that would need a gateway in the data path, and a job killed as it saves loses
 	// the run it was about to preserve. Required and positive.
 	MaxBytesPerAgent int64 `yaml:"max_bytes_per_agent"`
+}
+
+// MinIOConfig is the key of a store that speaks the MinIO admin API, whose secret comes from the
+// environment.
+type MinIOConfig struct {
+	AccessKeyID string `yaml:"access_key_id"`
 }
 
 // JWTKey is one public key of the identity provider, as its JWKS document lists it. ES256 on
@@ -354,23 +361,24 @@ type RuntimesConfig struct {
 	RegistryPlainHTTP bool `yaml:"registry_plain_http"`
 }
 
-// EnvironmentsConfig is where the images a repository's .hypothesisloop/Dockerfile declares are
-// pushed by the cluster each build is assigned to, and the registry provider that hands out the
-// logins to it (clients/registrycred). Left out, the deployment builds no environments: no cluster
-// counts as building, so a job whose commit declares one is refused.
-type EnvironmentsConfig struct {
-	// Repository is the whole address environment images are pushed to by digest,
+// ContainerRegistryConfig is the registry provider that holds EnvironmentsRepository, where the
+// images a repository's .hypothesisloop/Dockerfile declares are pushed by the cluster each build is
+// assigned to, and that hands out the logins to it (clients/registrycred). Left out, the
+// deployment builds no environments: no cluster counts as building, so a job whose commit declares
+// one is refused.
+type ContainerRegistryConfig struct {
+	// Provider names the registry, and the section of that name, the only one set:
+	// RegistryProviderGCP, Google Artifact Registry.
+	Provider string             `yaml:"provider"`
+	GCP      *GCPRegistryConfig `yaml:"gcp"`
+	// EnvironmentsRepository is the whole address environment images are pushed to by digest,
 	// host/path/name, in a registry no one pulls from without a token.
-	Repository string `yaml:"repository"`
-	// Provider names the registry that holds Repository, and with it the section below that is
-	// read: RegistryProviderGCP, Google Artifact Registry.
-	Provider string            `yaml:"provider"`
-	GCP      GCPRegistryConfig `yaml:"gcp"`
+	EnvironmentsRepository string `yaml:"environments_repository"`
 }
 
-// DataStoreProviderMinIO is a store that speaks the MinIO admin API (MinIO, Silo, AIStor), which
+// ObjectStoreProviderMinIO is a store that speaks the MinIO admin API (MinIO, Silo, AIStor), which
 // creates a job's key as a service account of the configured key.
-const DataStoreProviderMinIO = "minio"
+const ObjectStoreProviderMinIO = "minio"
 
 // RegistryProviderGCP is Google Artifact Registry, logged in to with service account tokens.
 const RegistryProviderGCP = "gcp"
@@ -463,24 +471,24 @@ const MinSigningSecretLength = 32
 
 // Settings is the top-level parsed config from hypothesisloop.yaml.
 type Settings struct {
-	AcceleratorTypes []AcceleratorTypeConfig `yaml:"accelerator_types"`
-	DataStore        DataStoreConfig         `yaml:"data_store"`
-	Quota            QuotaConfig             `yaml:"quota"`
-	Scheduler        SchedulerConfig         `yaml:"scheduler"`
-	Stages           StagesConfig            `yaml:"stages"`
-	Services         ServicesConfig          `yaml:"services"`
-	Database         DatabaseConfig          `yaml:"database"`
-	Auth             AuthConfig              `yaml:"auth"`
-	Agents           AgentsConfig            `yaml:"agents"`
-	Models           ModelsConfig            `yaml:"models"`
-	Planning         PlanningConfig          `yaml:"planning"`
-	Accounts         AccountsConfig          `yaml:"accounts"`
-	Runtimes         RuntimesConfig          `yaml:"runtimes"`
-	JobImages        []JobImageConfig        `yaml:"job_images"`
-	GitHost          GitHostConfig           `yaml:"git_host"`
-	Environments     *EnvironmentsConfig     `yaml:"environments"`
-	Sandbox          *SandboxConfig          `yaml:"sandbox"`
-	CloudCompute     []CloudComputeConfig    `yaml:"cloud_compute"`
+	AcceleratorTypes  []AcceleratorTypeConfig  `yaml:"accelerator_types"`
+	ObjectStore       ObjectStoreConfig        `yaml:"object_store"`
+	Quota             QuotaConfig              `yaml:"quota"`
+	Scheduler         SchedulerConfig          `yaml:"scheduler"`
+	Stages            StagesConfig             `yaml:"stages"`
+	Services          ServicesConfig           `yaml:"services"`
+	Database          DatabaseConfig           `yaml:"database"`
+	Auth              AuthConfig               `yaml:"auth"`
+	Agents            AgentsConfig             `yaml:"agents"`
+	Models            ModelsConfig             `yaml:"models"`
+	Planning          PlanningConfig           `yaml:"planning"`
+	Accounts          AccountsConfig           `yaml:"accounts"`
+	Runtimes          RuntimesConfig           `yaml:"runtimes"`
+	JobImages         []JobImageConfig         `yaml:"job_images"`
+	GitHost           GitHostConfig            `yaml:"git_host"`
+	ContainerRegistry *ContainerRegistryConfig `yaml:"container_registry"`
+	Sandbox           *SandboxConfig           `yaml:"sandbox"`
+	CloudCompute      []CloudComputeConfig     `yaml:"cloud_compute"`
 
 	// Derived maps built by Load() for fast lookup — not in YAML.
 	RateByName         map[string]float64           // accelerator name → AccH rate

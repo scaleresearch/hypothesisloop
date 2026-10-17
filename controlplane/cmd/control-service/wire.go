@@ -38,8 +38,10 @@ type apiGate struct {
 func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Repositories, gitHost githost.Provider, pool *db.Pool, store *db.Store, graph *graphdb.Store, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.ControlService, metrics *metricsdb.Store, port string, logger *zap.Logger) *http.Server {
 	// One client for the durable-data store, shared by everything that reads it: the listing
 	// endpoint, the usage report, admission's ceiling, and the addressing handed to runtimes.
-	dataStore, err := objectstore.New(pcfg.DataStore.ControlPlaneEndpoint, pcfg.DataStore.Endpoint, pcfg.DataStore.Region, pcfg.DataStore.Bucket,
-		pcfg.DataStore.AccessKeyID, pcfg.DataStoreSecret, keyIssuer(pcfg.DataStore.Provider, logger))
+	storeCfg := pcfg.ObjectStore
+	accessKeyID, issuer := objectStoreKey(storeCfg, logger)
+	dataStore, err := objectstore.New(storeCfg.ControlPlaneEndpoint, storeCfg.Endpoint, storeCfg.Region, storeCfg.Bucket,
+		accessKeyID, pcfg.ObjectStoreSecret, issuer)
 	if err != nil {
 		logger.Fatal("control-service: configure durable data store", zap.Error(err))
 	}
@@ -60,7 +62,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	// registry at most once a minute per tag.
 	environmentsSvc := environments.NewService(store, gitHost).WithJobImages(pcfg.OfferedJobImages(), imagedigest.New(pcfg.PlainHTTPRegistries()...))
 
-	peSvc := platformexperiments.NewService(store, quotaCfg, logger, metrics, observedGapCap).WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent).WithRepositories(gitHost).
+	peSvc := platformexperiments.NewService(store, quotaCfg, logger, metrics, observedGapCap).WithDataStore(dataStore, pcfg.ObjectStore.MaxBytesPerAgent).WithRepositories(gitHost).
 		WithEnvironments(environmentsSvc).WithModelDefaults(modelDefaults(pcfg)).WithIdleNotice(store, time.Duration(pcfg.Agents.IdleNoticeMinutes)*time.Minute).WithPersonIdeas(graph)
 	launch := platformexperiments.AgentLaunch{
 		AgentSandbox: pcfg.Sandbox != nil, DefaultModel: pcfg.Agents.DefaultModel, CoordinatorModel: pcfg.Agents.CoordinatorModel,
@@ -126,17 +128,17 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 
 // newEnvironmentRegistry is where assigned environment builds push to and the logins to it, and
 // the git host their files' repositories are read from, nil on a deployment whose settings have no
-// environments section.
+// container_registry section.
 func newEnvironmentRegistry(ctx context.Context, pcfg *hypothesisloopcfg.ControlService, gitHost githost.Provider, logger *zap.Logger) *clusterexchange.EnvironmentRegistry {
-	e := pcfg.Environments
-	if e == nil {
+	r := pcfg.ContainerRegistry
+	if r == nil {
 		return nil
 	}
-	logins, err := registrycred.New(ctx, *e)
+	logins, err := registrycred.New(ctx, *r)
 	if err != nil {
 		logger.Fatal("control-service: the registry logins of environment builds", zap.Error(err))
 	}
-	return &clusterexchange.EnvironmentRegistry{Repository: e.Repository, Logins: logins, Git: gitHost}
+	return &clusterexchange.EnvironmentRegistry{Repository: r.EnvironmentsRepository, Logins: logins, Git: gitHost}
 }
 
 // openGraph connects to the hypothesis graph and makes sure its schema exists.
@@ -157,14 +159,15 @@ func modelDefaults(pcfg *hypothesisloopcfg.ControlService) domain.ModelDefaults 
 	return domain.ModelDefaults{Agent: pcfg.Agents.DefaultModel, Coordinator: pcfg.Agents.CoordinatorModel}
 }
 
-// keyIssuer is how the data store the settings name creates a job's key.
-func keyIssuer(provider string, logger *zap.Logger) func(*objectstore.Client) objectstore.KeyIssuer {
-	switch provider {
-	case hypothesisloopcfg.DataStoreProviderMinIO:
-		return func(c *objectstore.Client) objectstore.KeyIssuer { return minio.New(c, c.SecretAccessKey) }
+// objectStoreKey is the key id the object store the settings name is reached with, from its
+// provider's section, and how that store creates a job's key.
+func objectStoreKey(store hypothesisloopcfg.ObjectStoreConfig, logger *zap.Logger) (string, func(*objectstore.Client) objectstore.KeyIssuer) {
+	switch store.Provider {
+	case hypothesisloopcfg.ObjectStoreProviderMinIO:
+		return store.MinIO.AccessKeyID, func(c *objectstore.Client) objectstore.KeyIssuer { return minio.New(c, c.SecretAccessKey) }
 	}
-	logger.Fatal("control-service: the settings name no data store provider this build knows", zap.String("provider", provider))
-	return nil
+	logger.Fatal("control-service: the settings name no object store provider this build knows", zap.String("provider", store.Provider))
+	return "", nil
 }
 
 // newGitHost is the git host the settings name, one of two. On a plain one there is no GitHub App

@@ -1,4 +1,8 @@
 {{- if .Values.objectStore.enabled }}
+{{- $store := include "hypothesisloop.objectStore" . | fromYaml }}
+{{- if ne $store.provider "minio" }}
+{{- fail (printf "objectStore.enabled runs a store that speaks the MinIO admin API, and files/hypothesisloop.yaml names object_store provider %q" $store.provider) }}
+{{- end }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -39,8 +43,8 @@ spec:
           args: ["server", "/data", "--address", "0.0.0.0:9000"]
           env:
             - name: MINIO_ROOT_USER
-              value: {{ include "hypothesisloop.dataStore" (dict "key" "access_key_id" "root" $) | quote }}
-            {{- include "hypothesisloop.secretKey" (dict "env" "MINIO_ROOT_PASSWORD" "key" "DATA_STORE_MINIO_SECRET_ACCESS_KEY" "root" $) | nindent 12 }}
+              value: {{ required "files/hypothesisloop.yaml has no object_store.minio.access_key_id" (dig "minio" "access_key_id" "" $store) | quote }}
+            {{- include "hypothesisloop.secretKey" (dict "env" "MINIO_ROOT_PASSWORD" "key" (include "hypothesisloop.objectStoreSecretKey" $) "root" $) | nindent 12 }}
           ports:
             - containerPort: 9000
           volumeMounts:

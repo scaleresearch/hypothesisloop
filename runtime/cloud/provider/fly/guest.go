@@ -52,6 +52,15 @@ func (c Settings) guestFor(spec provider.Spec) (guest, error) {
 		spec.Name, spec.CPUMillis, provider.CeilDiv(spec.MemoryBytes, bytesPerMB), c.CPUKind, largest, largest*rule.MaxPerCPU)
 }
 
+// CheckSize refuses a spec no Machine of the configured CPU kind holds (provider.Sizer).
+func (p *Provider) CheckSize(spec provider.Spec) error {
+	if _, err := p.cfg.guestFor(spec); err != nil {
+		return err
+	}
+	_, err := rootfsGB(spec)
+	return err
+}
+
 func rootfsGB(spec provider.Spec) (int64, error) {
 	size := provider.CeilDiv(spec.DiskBytes, bytesPerGB)
 	if size > maxRootfsGB {

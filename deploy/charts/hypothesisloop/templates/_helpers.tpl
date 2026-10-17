@@ -37,24 +37,33 @@ from the values and every secret from the Secret, under the same name.
 {{ include "hypothesisloop.secretEnv" (dict "keys" (list "DATABASE_URL" "AUTH_SIGNING_SECRET") "root" .) }}
 {{- end -}}
 
+{{/*
+A provider's secret is the Secret key <SECTION>_<PROVIDER>_<FIELD>, as controlplane/config names it: the
+field the object store's, git host's and registry's providers each declare, and API_KEY, the account
+key, of every provider of the sandbox and cloud compute.
+*/}}
 {{- define "hypothesisloop.controlServiceEnv" -}}
-{{- $keys := list "DATABASE_URL" "AUTH_SIGNING_SECRET" "MODEL_ANTHROPIC_OAUTH_TOKEN" "DATA_STORE_MINIO_SECRET_ACCESS_KEY" -}}
-{{- if eq .Values.gitHost.provider "github" -}}
-{{- $keys = append $keys "GIT_HOST_GITHUB_APP_PRIVATE_KEY" -}}
-{{- else if and (eq .Values.gitHost.provider "plain") .Values.gitHost.plain.username -}}
-{{- $keys = append $keys "GIT_HOST_PLAIN_PASSWORD" -}}
+{{- $keys := list "DATABASE_URL" "AUTH_SIGNING_SECRET" "MODEL_ANTHROPIC_OAUTH_TOKEN" (include "hypothesisloop.objectStoreSecretKey" .) -}}
+{{- $gitHost := .Values.gitHost -}}
+{{- if or (eq $gitHost.provider "github") (and (eq $gitHost.provider "plain") $gitHost.plain.username) -}}
+{{- $keys = append $keys (printf "GIT_HOST_%s_%s" (upper $gitHost.provider) (get (dict "github" "APP_PRIVATE_KEY" "plain" "PASSWORD") $gitHost.provider)) -}}
 {{- end -}}
 {{- with .Values.sandbox -}}
-{{- $keys = append $keys (printf "SANDBOX_%s_API_KEY" (upper .provider.name)) -}}
+{{- $keys = append $keys (printf "SANDBOX_%s_API_KEY" (upper .provider)) -}}
 {{- end -}}
 {{- range .Values.cloudCompute -}}
-{{- $keys = append $keys (printf "CLOUD_COMPUTE_%s_API_KEY" (upper .provider.name)) -}}
+{{- $keys = append $keys (printf "CLOUD_COMPUTE_%s_API_KEY" (upper .provider)) -}}
 {{- end -}}
 - name: METRICS_DB_URL
   value: {{ include "hypothesisloop.metricsDBURL" . | quote }}
 - name: GRAPH_DB_URL
   value: {{ include "hypothesisloop.graphDBURL" . | quote }}
 {{ include "hypothesisloop.secretEnv" (dict "keys" (uniq $keys) "root" .) }}
+{{- end -}}
+
+{{/* The Secret key of the registry's credential file, with containerRegistry.provider gcp. */}}
+{{- define "hypothesisloop.containerRegistryCredentials" -}}
+CONTAINER_REGISTRY_{{ upper .Values.containerRegistry.provider }}_CREDENTIALS
 {{- end -}}
 
 {{/* The container securityContext of every image built from this repository. */}}
@@ -107,14 +116,23 @@ call as: include "hypothesisloop.setConfig" (dict "text" $raw "section" "auth" "
 {{ replace $found (print (regexReplaceAllLiteral "(?m)^.*\\z" $found "") $line) .text }}
 {{- end -}}
 
-{{/* The value of one key of the data_store section of the staged config. call as: include "hypothesisloop.dataStore" (dict "key" "bucket" "root" $) */}}
-{{- define "hypothesisloop.dataStore" -}}
-{{- $found := include "hypothesisloop.configKey" (dict "text" (include "hypothesisloop.stagedConfig" .root) "section" "data_store" "key" .key) -}}
-{{- $value := regexReplaceAll (printf "^  %s:[ \\t]*(\\S*).*$" .key) (regexFind "[^\\n]*\\z" $found) "${1}" | trimAll "\"'" -}}
-{{- if not $value -}}
-{{- fail (printf "files/hypothesisloop.yaml has an empty data_store.%s" .key) -}}
+{{/* The object_store section of the staged config, as YAML. call as: include "hypothesisloop.objectStore" . | fromYaml */}}
+{{- define "hypothesisloop.objectStore" -}}
+{{- $store := (include "hypothesisloop.stagedConfig" . | fromYaml).object_store -}}
+{{- if not $store -}}
+{{- fail "files/hypothesisloop.yaml has no object_store section" -}}
 {{- end -}}
-{{ $value }}
+{{ toYaml $store }}
+{{- end -}}
+
+{{/* The Secret key of the object store's provider, which the staged config names. */}}
+{{- define "hypothesisloop.objectStoreSecretKey" -}}
+{{- $provider := (include "hypothesisloop.objectStore" . | fromYaml).provider -}}
+{{- $field := get (dict "minio" "SECRET_ACCESS_KEY") (toString $provider) -}}
+{{- if not $field -}}
+{{- fail (printf "files/hypothesisloop.yaml names object_store provider %q, which the chart does not know" $provider) -}}
+{{- end -}}
+OBJECT_STORE_{{ upper $provider }}_{{ $field }}
 {{- end -}}
 
 {{- define "hypothesisloop.metricsDBURL" -}}

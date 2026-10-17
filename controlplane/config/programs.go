@@ -6,7 +6,7 @@ import "fmt"
 type ControlService struct {
 	*Settings
 	DatabaseURL, MetricsDBURL, GraphDBURL, SigningSecret string
-	ModelToken, DataStoreSecret                          string
+	ModelToken, ObjectStoreSecret                        string
 	// GitHubKey is set on a github git host, and GitPassword on a plain one with a username.
 	GitHubKey, GitPassword string
 	// SandboxSecret is the sandbox provider's key, empty with no sandbox.
@@ -22,15 +22,15 @@ func LoadControlService() (*ControlService, error) {
 	}
 	c := &ControlService{
 		Settings: s, DatabaseURL: env[DatabaseURL], MetricsDBURL: env[MetricsDBURL], GraphDBURL: env[GraphDBURL], SigningSecret: env[AuthSigningSecret],
-		ModelToken: env[modelKeys[s.Models.Provider]], DataStoreSecret: env[dataStoreKeys[s.DataStore.Provider]],
+		ModelToken: env[modelKeys[s.Models.Provider]], ObjectStoreSecret: env[objectStoreKeys[s.ObjectStore.Provider]],
 		GitHubKey: env[GitHostGitHubAppPrivateKey], GitPassword: env[GitHostPlainPassword],
 		CloudComputeSecrets: map[string]string{},
 	}
 	if s.Sandbox != nil {
-		c.SandboxSecret = env[sandboxKey(s.Sandbox.Provider.Name)]
+		c.SandboxSecret = env[AccountKey(SectionSandbox, s.Sandbox.Provider)]
 	}
 	for _, cc := range s.CloudCompute {
-		c.CloudComputeSecrets[cc.ClusterName] = env[cloudComputeKey(cc.Provider.Name)]
+		c.CloudComputeSecrets[cc.ClusterName] = env[AccountKey(SectionCloudCompute, cc.Provider)]
 	}
 	return c, nil
 }

@@ -11,6 +11,9 @@ import (
 // SandboxConfig is the provider account sandboxed agents and coordinators run on. Left out, the
 // deployment hosts nothing: every request that would host an agent is refused.
 type SandboxConfig struct {
+	// Provider names the vendor, and the section of that name, the only one beside the keys
+	// below, configures it (ProviderSections).
+	Provider string `yaml:"provider"`
 	// Name is part of every instance name, hl-agent-<name>-<the platform's name for it>: the
 	// control plane lists, creates and destroys the instances that start so and no others, which
 	// keeps two deployments on one provider account apart. Changing it, the provider or its
@@ -22,17 +25,32 @@ type SandboxConfig struct {
 	// CreatePauseMilliseconds is waited between two rentals of one pass. 0 is no pause, and the
 	// key must be present either way.
 	CreatePauseMilliseconds *int `yaml:"create_pause_milliseconds"`
-	// WarmPoolSize is how many warm instances are kept ready to start agents in. Left out, it is
-	// 2 on a provider that can warm instances and none on another.
+	// WarmPoolSize is how many warm instances are kept ready to start agents in, 0 for none, on a
+	// provider that can warm instances. The key must be present either way.
 	WarmPoolSize *int                  `yaml:"warm_pool_size"`
-	Provider     ProviderConfig        `yaml:"provider"`
 	Instance     SandboxInstanceConfig `yaml:"instance"`
+	Sections     ProviderSections      `yaml:",inline"`
 }
 
-// ProviderConfig names a vendor and holds its own section, which only its adapter reads.
-type ProviderConfig struct {
-	Name     string    `yaml:"name"`
-	Settings yaml.Node `yaml:"settings"`
+// ProviderSections holds a section of the settings that is no key of its own: the section of the
+// provider the settings name, which only that provider's adapter reads.
+type ProviderSections map[string]yaml.Node
+
+// check refuses any section but provider's, and none at all: what the provider's adapter does not
+// read would otherwise be dropped with no word said.
+func (p ProviderSections) check(where, provider string) error {
+	if provider == "" {
+		return fmt.Errorf("%s provider is required", where)
+	}
+	for name := range p {
+		if name != provider {
+			return fmt.Errorf("%s: %q is neither a key of the section nor the section of its provider %s", where, name, provider)
+		}
+	}
+	if _, set := p[provider]; !set {
+		return fmt.Errorf("%s provider %s takes the %s section of the same name", where, provider, where)
+	}
+	return nil
 }
 
 // SandboxInstanceConfig is what every agent instance runs and how large it is rented, the
@@ -63,6 +81,9 @@ func (s SandboxConfig) Interval() time.Duration {
 // cluster of that name. The cluster is registered as any other is; the control plane runs its
 // runtime itself.
 type CloudComputeConfig struct {
+	// Provider names the vendor, and the section of that name, the only one beside the keys
+	// below, configures it and names the account (ProviderSections).
+	Provider    string `yaml:"provider"`
 	ClusterName string `yaml:"cluster_name"`
 	// JobImage is what every instance boots. It carries hl, which each job's command runs under.
 	JobImage string `yaml:"job_image"`
@@ -75,18 +96,10 @@ type CloudComputeConfig struct {
 	StatusIntervalSeconds    int `yaml:"status_interval_seconds"`
 	// How long a job may wait for a machine to rent, and a rented one to start, before the job
 	// is given up here and the machine destroyed.
-	OfferWaitSeconds int                   `yaml:"offer_wait_seconds"`
-	StartupSeconds   int                   `yaml:"startup_seconds"`
-	Provider         ComputeProviderConfig `yaml:"provider"`
-	Shapes           []ShapeConfig         `yaml:"shapes"`
-}
-
-// ComputeProviderConfig is a ProviderConfig with the account it rents on.
-type ComputeProviderConfig struct {
-	Name string `yaml:"name"`
-	// AccountID is the account's id at the provider. With the name it is the cluster's id.
-	AccountID string    `yaml:"account_id"`
-	Settings  yaml.Node `yaml:"settings"`
+	OfferWaitSeconds int              `yaml:"offer_wait_seconds"`
+	StartupSeconds   int              `yaml:"startup_seconds"`
+	Shapes           []ShapeConfig    `yaml:"shapes"`
+	Sections         ProviderSections `yaml:",inline"`
 }
 
 // ShapeConfig is one size of machine the account rents for jobs, each of its max_instances
@@ -120,8 +133,8 @@ func quantities(cpu, memory, storage string) (cpuMillis, memoryBytes, storageByt
 // they ask for is the provider's to say when it is built at startup.
 func (c *Settings) buildRented() error {
 	if s := c.Sandbox; s != nil {
-		if s.Provider.Name == "" {
-			return fmt.Errorf("sandbox provider name is required")
+		if err := s.Sections.check("sandbox", s.Provider); err != nil {
+			return err
 		}
 		if s.ReconcileIntervalSeconds <= 0 {
 			return fmt.Errorf("sandbox reconcile_interval_seconds is required and positive")
@@ -129,8 +142,8 @@ func (c *Settings) buildRented() error {
 		if s.CreatePauseMilliseconds == nil || *s.CreatePauseMilliseconds < 0 {
 			return fmt.Errorf("sandbox create_pause_milliseconds is required: the pause between two rentals of one pass, 0 for none")
 		}
-		if s.WarmPoolSize != nil && *s.WarmPoolSize < 0 {
-			return fmt.Errorf("sandbox warm_pool_size must not be negative")
+		if s.WarmPoolSize == nil || *s.WarmPoolSize < 0 {
+			return fmt.Errorf("sandbox warm_pool_size is required: how many warm instances are kept, 0 for none")
 		}
 		i := &s.Instance
 		if len(i.Command) == 0 {
@@ -161,13 +174,16 @@ func (c *Settings) buildRented() error {
 			return fmt.Errorf("cloud_compute: cluster_name %q is empty or listed twice", cc.ClusterName)
 		}
 		clusters[cc.ClusterName] = true
-		// A provider's key has one name in the environment, so a provider has one account.
-		if other, taken := accounts[cc.Provider.Name]; taken {
-			return fmt.Errorf("cloud_compute %s: provider %s is %s's already, and a provider has one account", cc.ClusterName, cc.Provider.Name, other)
+		if err := cc.Sections.check("cloud_compute "+cc.ClusterName, cc.Provider); err != nil {
+			return err
 		}
-		accounts[cc.Provider.Name] = cc.ClusterName
-		if cc.Provider.Name == "" || cc.Provider.AccountID == "" || cc.JobImage == "" {
-			return fmt.Errorf("cloud_compute %s: job_image, provider name and provider account_id are required", cc.ClusterName)
+		// A provider's key has one name in the environment, so a provider has one account.
+		if other, taken := accounts[cc.Provider]; taken {
+			return fmt.Errorf("cloud_compute %s: provider %s is %s's already, and a provider has one account", cc.ClusterName, cc.Provider, other)
+		}
+		accounts[cc.Provider] = cc.ClusterName
+		if cc.JobImage == "" {
+			return fmt.Errorf("cloud_compute %s: job_image is required", cc.ClusterName)
 		}
 		if cc.OfferWaitSeconds <= 0 || cc.StartupSeconds <= 0 || cc.ReconcileIntervalSeconds <= 0 || cc.StatusIntervalSeconds <= 0 {
 			return fmt.Errorf("cloud_compute %s: offer_wait_seconds, startup_seconds, reconcile_interval_seconds and status_interval_seconds must be positive", cc.ClusterName)

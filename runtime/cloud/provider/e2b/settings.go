@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// Settings is the adapter's own section of the config file, provider.settings.
+// Settings is the adapter's own section of the settings, under its name beside provider.
 type Settings struct {
 	// LifetimeSeconds is the longest a sandbox lives before the vendor kills it. Nothing extends
 	// it. The plan caps it, and a value above the cap fails every Create with the vendor's own

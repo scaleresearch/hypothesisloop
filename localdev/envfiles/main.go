@@ -43,8 +43,8 @@ func main() {
 		}
 	}
 	files["ui"] = uiKeys()
-	// The compose stack's store, whose root password is the data store's secret key.
-	files["object-store"] = [][2]string{{"MINIO_ROOT_PASSWORD", os.Getenv(config.DataStoreMinIOSecretAccessKey.Name)}}
+	// The compose stack's store, whose root password is the object store's secret key.
+	files["object-store"] = [][2]string{{"MINIO_ROOT_PASSWORD", os.Getenv(config.ObjectStoreMinIOSecretAccessKey.Name)}}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		fail(err.Error())
 	}

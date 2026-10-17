@@ -36,36 +36,36 @@ ui:
       url: https://project.supabase.example.invalid
       publishableKey: sb_publishable_made-up
     signInProviders: [github]
-environments:
-  repository: europe-west1-docker.pkg.dev/made-up-project/hypothesisloop-environments/environment
+containerRegistry:
   provider: gcp
   gcp:
     pusher: env-pusher@made-up-project.iam.gserviceaccount.com
     puller: env-puller@made-up-project.iam.gserviceaccount.com
+  environmentsRepository: europe-west1-docker.pkg.dev/made-up-project/hypothesisloop-environments/environment
 gitHost:
   provider: github
+  experimentTemplateRepository: made-up-org/experiment-template
   github:
     appId: 4242
     appSlug: made-up-app
 cloudCompute:
   - cluster_name: vast
+    provider: vast
     job_image: registry.example.invalid/hypothesisloop-job:test
     namespace: main
     reconcile_interval_seconds: 10
     status_interval_seconds: 30
     offer_wait_seconds: 180
     startup_seconds: 240
-    provider:
-      name: vast
+    vast:
       account_id: "000000"
-      settings:
-        max_price_per_hour: 0.60
-        min_reliability: 0.98
-        regions: [SE, NL, DE]
-        verified_only: true
-        accelerators:
-          - product: NVIDIA GeForce RTX 4090
-            gpu_name: RTX 4090
+      max_price_per_hour: 0.60
+      min_reliability: 0.98
+      regions: [SE, NL, DE]
+      verified_only: true
+      accelerators:
+        - product: NVIDIA GeForce RTX 4090
+          gpu_name: RTX 4090
     shapes:
       - name: rtx4090
         accelerator_type: nvidia.com/gpu.product=NVIDIA-GEFORCE-RTX-4090
@@ -75,16 +75,15 @@ cloudCompute:
         storage: 100Gi
         max_instances: 2
 sandbox:
+  provider: fly
   name: main
   reconcile_interval_seconds: 5
   create_pause_milliseconds: 1000
   warm_pool_size: 4
-  provider:
-    name: fly
-    settings:
-      app: agents-example
-      region: ams
-      cpu_kind: shared
+  fly:
+    app: agents-example
+    region: ams
+    cpu_kind: shared
   instance:
     command: ["/opt/hypothesisloop-agent/.venv/bin/python3", "-m", "hypothesisloop_agent.claude.run"]
     cpu: "2"

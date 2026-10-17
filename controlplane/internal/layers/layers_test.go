@@ -168,10 +168,6 @@ func TestEveryPackageImportsOnlyWhatItsLayerAdmits(t *testing.T) {
 // A program reads the keys of the environment only through controlplane/config, so each reads its
 // own and refuses to start without one.
 func TestOnlyConfigReadsTheKeysOfTheEnvironment(t *testing.T) {
-	keys := map[string]bool{}
-	for _, key := range config.Keys {
-		keys[key.Name] = true
-	}
 	for _, line := range goListLines(t, "-f", `{{.ImportPath}}|{{.Dir}}|{{join .GoFiles " "}}`, module+"...") {
 		pkg, rest, _ := strings.Cut(strings.TrimPrefix(line, module), "|")
 		dir, files, _ := strings.Cut(rest, "|")
@@ -196,7 +192,7 @@ func TestOnlyConfigReadsTheKeysOfTheEnvironment(t *testing.T) {
 					return true
 				}
 				if literal, ok := call.Args[0].(*ast.BasicLit); ok {
-					if name, err := strconv.Unquote(literal.Value); err == nil && keys[name] {
+					if name, err := strconv.Unquote(literal.Value); err == nil && config.IsKey(name) {
 						t.Errorf("%s/%s reads %s, which only controlplane/config reads", pkg, file, name)
 					}
 				}

@@ -162,34 +162,40 @@ func (c *Settings) build() error {
 	}
 	// Required, not optional: every job is handed a data address, so a deployment without a
 	// store would hand out an address that resolves to nothing.
-	if c.DataStore.Endpoint == "" || c.DataStore.Region == "" || c.DataStore.Bucket == "" || c.DataStore.AccessKeyID == "" {
-		return fmt.Errorf("data_store endpoint, region, bucket and access_key_id are all required")
+	store := c.ObjectStore
+	if store.Endpoint == "" || store.Region == "" || store.Bucket == "" {
+		return fmt.Errorf("object_store endpoint, region and bucket are all required")
+	}
+	switch store.Provider {
+	case ObjectStoreProviderMinIO:
+		if store.MinIO == nil || store.MinIO.AccessKeyID == "" {
+			return fmt.Errorf("object_store provider minio takes the object_store minio section, with access_key_id")
+		}
+	default:
+		return fmt.Errorf("object_store provider %q is not a store provider this build knows (%s)", store.Provider, ObjectStoreProviderMinIO)
 	}
 	// Neither address stands in for the other: the control plane's is often one no job reaches,
 	// and a job's is often one that is down while the control plane's own store is up.
-	if c.DataStore.Provider != DataStoreProviderMinIO {
-		return fmt.Errorf("data_store provider %q is not a store provider this build knows (%s)", c.DataStore.Provider, DataStoreProviderMinIO)
+	if store.ControlPlaneEndpoint == "" {
+		return fmt.Errorf("object_store control_plane_endpoint is required: the address the control plane itself reaches the object store at, on its own network. endpoint is only what jobs and agents are handed")
 	}
-	if c.DataStore.ControlPlaneEndpoint == "" {
-		return fmt.Errorf("data_store control_plane_endpoint is required: the address the control plane itself reaches the object store at, on its own network. endpoint is only what jobs and agents are handed")
+	if own, err := url.Parse(store.ControlPlaneEndpoint); err != nil || own.Host == "" || (own.Scheme != "http" && own.Scheme != "https") {
+		return fmt.Errorf("object_store control_plane_endpoint %q must be an http(s) URL with a host", store.ControlPlaneEndpoint)
 	}
-	if own, err := url.Parse(c.DataStore.ControlPlaneEndpoint); err != nil || own.Host == "" || (own.Scheme != "http" && own.Scheme != "https") {
-		return fmt.Errorf("data_store control_plane_endpoint %q must be an http(s) URL with a host", c.DataStore.ControlPlaneEndpoint)
-	}
-	if c.DataStore.MaxBytesPerAgent <= 0 {
-		return fmt.Errorf("data_store max_bytes_per_agent is required and must be positive")
+	if store.MaxBytesPerAgent <= 0 {
+		return fmt.Errorf("object_store max_bytes_per_agent is required and must be positive")
 	}
 	// A job pod resolves endpoint from inside its own network namespace, which is not the
 	// control plane's. A loopback address works from every container that shares the host's
 	// network and from nothing else, so it fails only once a real job tries to save — hours in,
 	// with nothing to show for the run. Same failure the shared code repo's URL has, caught here
 	// instead of in a job's logs.
-	endpointHost, err := url.Parse(c.DataStore.Endpoint)
+	endpointHost, err := url.Parse(store.Endpoint)
 	if err != nil {
-		return fmt.Errorf("data_store endpoint %q is not a URL: %w", c.DataStore.Endpoint, err)
+		return fmt.Errorf("object_store endpoint %q is not a URL: %w", store.Endpoint, err)
 	}
 	if unreachableFromElsewhere(endpointHost.Hostname()) {
-		return fmt.Errorf("data_store endpoint %q is loopback or unspecified — job pods run in their own network namespace and cannot reach it. Use an address job pods reach (host.containers.internal under podman machine, else the host's LAN address)", c.DataStore.Endpoint)
+		return fmt.Errorf("object_store endpoint %q is loopback or unspecified — job pods run in their own network namespace and cannot reach it. Use an address job pods reach (host.containers.internal under podman machine, else the host's LAN address)", store.Endpoint)
 	}
 	if err := domain.ValidateStages(c.Stages.Default); err != nil {
 		return fmt.Errorf("stages.default: %w", err)
@@ -288,19 +294,22 @@ func (c *Settings) build() error {
 			return fmt.Errorf("job_images %s: environment_base is a name under runtimes.registry, beside repository, of the image an environment is built on", i.Name)
 		}
 	}
-	if e := c.Environments; e != nil {
-		if _, path, ok := strings.Cut(e.Repository, "/"); !ok || path == "" || strings.ContainsAny(e.Repository, " \t@") || strings.Contains(e.Repository, "://") {
-			return fmt.Errorf("environments repository %q must be the whole address environment images are pushed to, host/path", e.Repository)
+	if r := c.ContainerRegistry; r != nil {
+		if _, path, ok := strings.Cut(r.EnvironmentsRepository, "/"); !ok || path == "" || strings.ContainsAny(r.EnvironmentsRepository, " \t@") || strings.Contains(r.EnvironmentsRepository, "://") {
+			return fmt.Errorf("container_registry environments_repository %q must be the whole address environment images are pushed to, host/path", r.EnvironmentsRepository)
 		}
-		switch e.Provider {
+		switch r.Provider {
 		case RegistryProviderGCP:
-			for key, account := range map[string]string{"pusher": e.GCP.Pusher, "puller": e.GCP.Puller} {
+			if r.GCP == nil {
+				return fmt.Errorf("container_registry provider gcp takes the container_registry gcp section")
+			}
+			for key, account := range map[string]string{"pusher": r.GCP.Pusher, "puller": r.GCP.Puller} {
 				if !serviceAccountEmail.MatchString(account) {
-					return fmt.Errorf("environments gcp %s %q must be the email of a Google service account", key, account)
+					return fmt.Errorf("container_registry gcp %s %q must be the email of a Google service account", key, account)
 				}
 			}
 		default:
-			return fmt.Errorf("environments provider %q is not a registry provider this build knows (%s)", e.Provider, RegistryProviderGCP)
+			return fmt.Errorf("container_registry provider %q is not a registry provider this build knows (%s)", r.Provider, RegistryProviderGCP)
 		}
 	}
 	if err := c.buildRented(); err != nil {

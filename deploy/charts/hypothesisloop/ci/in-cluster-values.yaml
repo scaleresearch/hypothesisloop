@@ -17,6 +17,7 @@ objectStore:
   endpoint: http://object-store.hypothesisloop.svc:9000
 gitHost:
   provider: plain
+  experimentTemplateRepository: experiment-template.git
   plain:
     baseURL: https://git.example.invalid/experiments
     username: made-up-git-account

@@ -15,20 +15,35 @@ import requests
 
 TIMEOUT = 30
 
+# What the calls here read of each vendor beside its account key: fields of the provider's section
+# of the settings, by provider.
+FIELDS = {"fly": ("APP",)}
+
+
+def key(section: str, provider: str, field: str = "API_KEY") -> str:
+    """The environment's name of a provider's value, <SECTION>_<PROVIDER>_<FIELD>, as the platform
+    names it."""
+    return f"{section}_{provider.upper()}_{field}"
+
+
+def needed(section: str, provider: str) -> tuple[str, ...]:
+    """Every key the calls here read for provider: its account key and FIELDS."""
+    return (key(section, provider), *(key(section, provider, field) for field in FIELDS.get(provider, ())))
+
 
 def _fly_headers() -> dict[str, str]:
-    token = os.environ["SANDBOX_FLY_API_KEY"]
+    token = os.environ[key("SANDBOX", "fly")]
     return {"Authorization": token if " " in token else f"Bearer {token}"}
 
 
 def _fly_machines() -> list[dict]:
-    r = requests.get(f"https://api.machines.dev/v1/apps/{os.environ['SANDBOX_FLY_APP']}/machines", headers=_fly_headers(), timeout=TIMEOUT)
+    r = requests.get(f"https://api.machines.dev/v1/apps/{os.environ[key('SANDBOX', 'fly', 'APP')]}/machines", headers=_fly_headers(), timeout=TIMEOUT)
     r.raise_for_status()
     return r.json()
 
 
 def _e2b_headers() -> dict[str, str]:
-    return {"X-API-Key": os.environ["SANDBOX_E2B_API_KEY"]}
+    return {"X-API-Key": os.environ[key("SANDBOX", "e2b")]}
 
 
 def _e2b_sandboxes() -> list[dict]:
@@ -49,7 +64,7 @@ def sandboxes(provider: str) -> dict[str, str]:
 def lose_sandbox(provider: str, vendor_id: str) -> None:
     """Destroys a sandbox behind the platform's back, as a vendor that lost the machine would."""
     if provider == "fly":
-        r = requests.delete(f"https://api.machines.dev/v1/apps/{os.environ['SANDBOX_FLY_APP']}/machines/{vendor_id}",
+        r = requests.delete(f"https://api.machines.dev/v1/apps/{os.environ[key('SANDBOX', 'fly', 'APP')]}/machines/{vendor_id}",
                             params={"force": "true"}, headers=_fly_headers(), timeout=TIMEOUT)
     else:
         r = requests.delete(f"https://api.e2b.app/sandboxes/{vendor_id}", headers=_e2b_headers(), timeout=TIMEOUT)
@@ -91,7 +106,7 @@ def freeze_harness(provider: str, vendor_id: str) -> str:
         out = _e2b_run(vendor_id, _FREEZE)
         assert "frozen" in out, f"no harness process was found to freeze: {out!r}"
         return out.strip()
-    r = requests.post(f"https://api.machines.dev/v1/apps/{os.environ['SANDBOX_FLY_APP']}/machines/{vendor_id}/exec",
+    r = requests.post(f"https://api.machines.dev/v1/apps/{os.environ[key('SANDBOX', 'fly', 'APP')]}/machines/{vendor_id}/exec",
                       json={"command": ["sh", "-c", _FREEZE], "timeout": 20}, headers=_fly_headers(), timeout=60)
     r.raise_for_status()
     out = r.json().get("stdout") or ""
@@ -101,13 +116,13 @@ def freeze_harness(provider: str, vendor_id: str) -> str:
 
 def rented_instances() -> dict[str, str]:
     """Every instance rented for jobs, as {label: status}."""
-    r = requests.get("https://console.vast.ai/api/v0/instances/", headers={"Authorization": f"Bearer {os.environ['CLOUD_COMPUTE_VAST_API_KEY']}"}, timeout=TIMEOUT)
+    r = requests.get("https://console.vast.ai/api/v0/instances/", headers={"Authorization": f"Bearer {os.environ[key('CLOUD_COMPUTE', 'vast')]}"}, timeout=TIMEOUT)
     r.raise_for_status()
     return {str(i.get("label") or i["id"]): str(i.get("actual_status")) for i in r.json().get("instances", [])}
 
 
 def job_credit() -> float:
     """What is left on the account that rents for jobs, in dollars."""
-    r = requests.get("https://console.vast.ai/api/v0/users/current/", headers={"Authorization": f"Bearer {os.environ['CLOUD_COMPUTE_VAST_API_KEY']}"}, timeout=TIMEOUT)
+    r = requests.get("https://console.vast.ai/api/v0/users/current/", headers={"Authorization": f"Bearer {os.environ[key('CLOUD_COMPUTE', 'vast')]}"}, timeout=TIMEOUT)
     r.raise_for_status()
     return float(r.json()["credit"])

@@ -8,8 +8,11 @@ import (
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/acceleratorname"
 )
 
-// Settings is the adapter's own section of a cloud_compute entry, provider.settings.
+// Settings is the adapter's own section of a cloud_compute entry, vast.
 type Settings struct {
+	// AccountID is the account's user id, as the vast.ai console shows it. With the provider's
+	// name it is the cluster's id.
+	AccountID       string  `yaml:"account_id"`
 	MaxPricePerHour float64 `yaml:"max_price_per_hour"`
 	MinReliability  float64 `yaml:"min_reliability"`
 	// Regions are two-letter country codes. Empty allows any.
@@ -34,6 +37,9 @@ type Accelerator struct {
 }
 
 func (c Settings) validate() error {
+	if c.AccountID == "" {
+		return errors.New("vast: account_id is required")
+	}
 	if c.MaxPricePerHour <= 0 {
 		return errors.New("vast: max_price_per_hour must be positive")
 	}

@@ -1,5 +1,6 @@
 // git-server serves the bare repositories under one directory over git's smart HTTP, to
-// whoever presents the one credential: local development's git host (git_host provider plain, GIT_HOST_PROVIDER=local).
+// whoever presents the one credential: local development's git host (git_host provider plain, GIT_HOST_PROVIDER=plain).
+// Its password is the one the control plane reaches a plain host with, GIT_HOST_PLAIN_PASSWORD.
 // A push to a repository that does not exist creates it.
 package main
 
@@ -13,11 +14,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/config"
 )
 
 func main() {
 	env := map[string]string{}
-	for _, key := range []string{"GIT_SERVER_ADDRESS", "GIT_SERVER_ROOT", "GIT_SERVER_USERNAME", "GIT_SERVER_PASSWORD"} {
+	for _, key := range []string{"GIT_SERVER_ADDRESS", "GIT_SERVER_ROOT", "GIT_SERVER_USERNAME", config.GitHostPlainPassword.Name} {
 		if env[key] = os.Getenv(key); env[key] == "" {
 			log.Fatalf("git-server: %s is required", key)
 		}
@@ -35,7 +38,7 @@ func main() {
 	mux.HandleFunc("GET /health", func(http.ResponseWriter, *http.Request) {})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		username, password, _ := r.BasicAuth()
-		if subtle.ConstantTimeCompare([]byte(username), []byte(env["GIT_SERVER_USERNAME"]))&subtle.ConstantTimeCompare([]byte(password), []byte(env["GIT_SERVER_PASSWORD"])) != 1 {
+		if subtle.ConstantTimeCompare([]byte(username), []byte(env["GIT_SERVER_USERNAME"]))&subtle.ConstantTimeCompare([]byte(password), []byte(env[config.GitHostPlainPassword.Name])) != 1 {
 			w.Header().Set("WWW-Authenticate", `Basic realm="git"`)
 			http.Error(w, "unauthenticated", http.StatusUnauthorized)
 			return

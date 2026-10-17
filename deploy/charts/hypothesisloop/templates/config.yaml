@@ -3,6 +3,15 @@ The staged hypothesisloop.yaml with what differs per deployment set from values.
 secret: each service reads its own from the Secret, through its environment.
 */ -}}
 {{- $raw := include "hypothesisloop.stagedConfig" . }}
+{{- $staged := $raw | fromYaml }}
+{{- /*
+The staged file names no git host, registry or rented machines: the chart adds those the values name.
+*/ -}}
+{{- range list "git_host" "container_registry" "sandbox" "cloud_compute" }}
+{{- if hasKey $staged . }}
+{{- fail (printf "files/hypothesisloop.yaml has a %s section, and the chart would add a second one" .) }}
+{{- end }}
+{{- end }}
 {{- $set := list
   (list "services" "api_port" (int .Values.controlService.port))
   (list "services" "metric_controller_port" (int .Values.metricsService.port))
@@ -13,19 +22,15 @@ secret: each service reads its own from the Secret, through its environment.
   (list "runtimes" "metrics_url" (required "runtimes.metricsURL is required: the address a cluster's runtime reaches metrics-service at" .Values.runtimes.metricsURL))
   (list "runtimes" "registry" (required "images.registry is required: pass the REGISTRY `make publish` pushed to" .Values.images.registry))
   (list "runtimes" "image_tag" (.Values.images.tag | default .Chart.AppVersion))
-  (list "data_store" "provider" (required "objectStore.provider is required: how the store creates each job's key" .Values.objectStore.provider))
-  (list "data_store" "endpoint" (required "objectStore.endpoint is required: the address every job and agent is handed to reach the object store at" .Values.objectStore.endpoint))
-  (list "data_store" "control_plane_endpoint" (include "hypothesisloop.objectStoreControlPlaneEndpoint" .))
+  (list "object_store" "endpoint" (required "objectStore.endpoint is required: the address every job and agent is handed to reach the object store at" .Values.objectStore.endpoint))
+  (list "object_store" "control_plane_endpoint" (include "hypothesisloop.objectStoreControlPlaneEndpoint" .))
 }}
 {{- range $set }}
 {{- $raw = include "hypothesisloop.setConfig" (dict "text" $raw "section" (index . 0) "key" (index . 1) "value" (index . 2)) }}
 {{- end }}
 {{- /*
-The staged file names no git host: the chart adds the one gitHost.provider names, with its section.
+The git host gitHost.provider names, with its section.
 */ -}}
-{{- if regexMatch "(?m)^git_host:" $raw }}
-{{- fail "files/hypothesisloop.yaml has a git_host section, and the chart would add a second one" }}
-{{- end }}
 {{- $gitHost := .Values.gitHost }}
 {{- if eq $gitHost.provider "github" }}
 {{- if not $gitHost.github.appId }}
@@ -47,31 +52,21 @@ The staged file names no git host: the chart adds the one gitHost.provider names
 {{- fail (printf "gitHost.provider is %q: it is github or plain" $gitHost.provider) }}
 {{- end }}
 {{- /*
-The staged file has no environments section: the chart adds the one the values name.
+The registry containerRegistry.provider names, with its section and the environments repository.
 */ -}}
-{{- if regexMatch "(?m)^environments:" $raw }}
-{{- fail "files/hypothesisloop.yaml has an environments section, and the chart would add a second one" }}
-{{- end }}
-{{- with .Values.environments }}
-{{- if .repository }}
+{{- with .Values.containerRegistry }}
 {{- if eq .provider "gcp" }}
-{{- $raw = printf "%s\nenvironments:\n  repository: %s\n  provider: gcp\n  gcp:\n    pusher: %s\n    puller: %s\n" (trimSuffix "\n" $raw)
-  (toJson .repository)
-  (toJson (required "environments.gcp.pusher is required with environments.provider gcp: the service account that writes to the repository" .gcp.pusher))
-  (toJson (required "environments.gcp.puller is required with environments.provider gcp: the service account that reads it" .gcp.puller)) }}
-{{- else }}
-{{- fail (printf "environments.provider is %q, and with environments.repository it is gcp" .provider) }}
-{{- end }}
-{{- else if or .provider .gcp.pusher .gcp.puller }}
-{{- fail "environments.provider or its section is set without environments.repository, the repository they push to and pull from" }}
+{{- $raw = printf "%s\ncontainer_registry:\n  provider: gcp\n  gcp:\n    pusher: %s\n    puller: %s\n  environments_repository: %s\n" (trimSuffix "\n" $raw)
+  (toJson (required "containerRegistry.gcp.pusher is required with containerRegistry.provider gcp: the service account that writes to the repository" .gcp.pusher))
+  (toJson (required "containerRegistry.gcp.puller is required with containerRegistry.provider gcp: the service account that reads it" .gcp.puller))
+  (toJson (required "containerRegistry.environmentsRepository is required with containerRegistry.provider: the repository environment images are pushed to" .environmentsRepository)) }}
+{{- else if or .environmentsRepository .gcp.pusher .gcp.puller }}
+{{- fail "containerRegistry.environmentsRepository or a provider's section is set without containerRegistry.provider" }}
 {{- end }}
 {{- end }}
 {{- /*
-The staged file rents nothing: the chart adds the sandbox and cloud_compute sections the values hold.
+The sandbox and cloud_compute sections the values hold, written as they are.
 */ -}}
-{{- if regexMatch "(?m)^(sandbox|cloud_compute):" $raw }}
-{{- fail "files/hypothesisloop.yaml has a sandbox or cloud_compute section, and the chart would add a second one" }}
-{{- end }}
 {{- with .Values.sandbox }}
 {{- $raw = printf "%s\nsandbox:\n%s" (trimSuffix "\n" $raw) (toYaml . | indent 2) }}
 {{- end }}

@@ -6,7 +6,7 @@ import (
 )
 
 func TestNewRefusesIncompleteSettings(t *testing.T) {
-	valid := Settings{MaxPricePerHour: 0.5, MinReliability: 0.9}
+	valid := Settings{AccountID: "1", MaxPricePerHour: 0.5, MinReliability: 0.9}
 	if _, err := New(valid, "", nil, t.Logf); err == nil || !strings.Contains(err.Error(), "API key is required") {
 		t.Errorf("no key: err = %v, want it refused", err)
 	}
@@ -14,6 +14,7 @@ func TestNewRefusesIncompleteSettings(t *testing.T) {
 		mutate func(*Settings)
 		want   string
 	}{
+		"no account":           {func(c *Settings) { c.AccountID = "" }, "account_id"},
 		"no price ceiling":     {func(c *Settings) { c.MaxPricePerHour = 0 }, "max_price_per_hour"},
 		"reliability above 1":  {func(c *Settings) { c.MinReliability = 1.5 }, "min_reliability"},
 		"accelerator unnamed":  {func(c *Settings) { c.Accelerators = []Accelerator{{Product: "NVIDIA H200"}} }, "gpu_name"},

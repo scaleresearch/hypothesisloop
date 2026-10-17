@@ -130,7 +130,7 @@ if [[ "${git_host}" == "github" && -n "$(lib_env_value TEST_GIT_HOST_GITHUB_REPO
 fi
 
 # On a stack with the local git host the suite makes its repository where that server serves from.
-if [[ "${git_host}" == "local" ]]; then
+if [[ "${git_host}" == "plain" ]]; then
   export HL_E2E_GIT_ROOT="${HL_GIT_ROOT}"
 fi
 

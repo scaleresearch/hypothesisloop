@@ -12,9 +12,9 @@ import (
 var madeUp = map[Key]string{
 	DatabaseURL: "postgres://test.example.invalid/hypothesisloop", MetricsDBURL: "http://metrics.example.invalid:4000",
 	GraphDBURL: "bolt://graph.example.invalid:7687", AuthSigningSecret: "a-signing-secret-only-this-test-knows",
-	ModelAnthropicOAuthToken: "a-model-credential", DataStoreMinIOSecretAccessKey: "a-store-secret",
-	GitHostGitHubAppPrivateKey: "a-pem", GitHostPlainPassword: "a-git-password", sandboxKey("fly"): "FlyV1 a-token",
-	SandboxE2BAPIKey: "an-e2b-key", cloudComputeKey("vast"): "a-vast-key",
+	ModelAnthropicOAuthToken: "a-model-credential", ObjectStoreMinIOSecretAccessKey: "a-store-secret",
+	GitHostGitHubAppPrivateKey: "a-pem", GitHostPlainPassword: "a-git-password", AccountKey(SectionSandbox, "fly"): "FlyV1 a-token",
+	SandboxE2BAPIKey: "an-e2b-key", AccountKey(SectionCloudCompute, "vast"): "a-vast-key",
 }
 
 // inEnvironment sets SettingsPath to settings written from text and every key of madeUp.
@@ -33,11 +33,11 @@ func inEnvironment(t *testing.T, text string) {
 const (
 	githubHost   = "\ngit_host:\n  provider: github\n  experiment_template_repository: scaleresearch/hypothesisloop-experiment-template\n  github:\n    app_id: 4242\n    app_slug: hypothesisloop\n"
 	plainAccount = "\ngit_host:\n  provider: plain\n  experiment_template_repository: experiment-template.git\n  plain:\n    base_url: https://git.example.invalid\n    username: platform\n"
-	rents        = "\nsandbox:\n  name: main\n  reconcile_interval_seconds: 5\n  create_pause_milliseconds: 0\n  provider:\n    name: fly\n    settings: {}\n" +
+	rents        = "\nsandbox:\n  provider: fly\n  name: main\n  reconcile_interval_seconds: 5\n  create_pause_milliseconds: 0\n  warm_pool_size: 0\n  fly: {}\n" +
 		"  instance:\n    command: [run]\n    cpu: \"1\"\n    memory: 1Gi\n    storage: 1Gi\n" +
 		"cloud_compute:\n" + cluster
 	cluster = "  - cluster_name: a\n    job_image: registry.example.invalid/job:1\n    namespace: main\n    reconcile_interval_seconds: 10\n    status_interval_seconds: 30\n" +
-		"    offer_wait_seconds: 60\n    startup_seconds: 60\n    provider:\n      name: vast\n      account_id: \"1\"\n      settings: {}\n"
+		"    offer_wait_seconds: 60\n    startup_seconds: 60\n    provider: vast\n    vast:\n      account_id: \"1\"\n"
 )
 
 func names(keys []Key) []string {
@@ -55,18 +55,18 @@ func TestEachProgramNeedsItsOwnKeysAndAProvidersKeyOnlyWithThatProvider(t *testi
 		want map[Program][]Key
 	}{
 		"a plain host that asks for nothing": {plain, map[Program][]Key{
-			ProgramControlService: {DatabaseURL, MetricsDBURL, GraphDBURL, AuthSigningSecret, ModelAnthropicOAuthToken, DataStoreMinIOSecretAccessKey},
+			ProgramControlService: {DatabaseURL, MetricsDBURL, GraphDBURL, AuthSigningSecret, ModelAnthropicOAuthToken, ObjectStoreMinIOSecretAccessKey},
 			ProgramMetricsService: {DatabaseURL, MetricsDBURL, AuthSigningSecret},
 			ProgramAdmin:          {DatabaseURL, AuthSigningSecret},
 		}},
 		"a plain host with an account": {withoutGitHost(t) + plainAccount, map[Program][]Key{
-			ProgramControlService: {DatabaseURL, MetricsDBURL, GraphDBURL, AuthSigningSecret, ModelAnthropicOAuthToken, DataStoreMinIOSecretAccessKey, GitHostPlainPassword},
+			ProgramControlService: {DatabaseURL, MetricsDBURL, GraphDBURL, AuthSigningSecret, ModelAnthropicOAuthToken, ObjectStoreMinIOSecretAccessKey, GitHostPlainPassword},
 			ProgramMetricsService: {DatabaseURL, MetricsDBURL, AuthSigningSecret},
 			ProgramAdmin:          {DatabaseURL, AuthSigningSecret},
 		}},
 		"the GitHub App and rented machines": {withoutGitHost(t) + githubHost + rents, map[Program][]Key{
-			ProgramControlService: {DatabaseURL, MetricsDBURL, GraphDBURL, AuthSigningSecret, ModelAnthropicOAuthToken, DataStoreMinIOSecretAccessKey,
-				GitHostGitHubAppPrivateKey, sandboxKey("fly"), cloudComputeKey("vast")},
+			ProgramControlService: {DatabaseURL, MetricsDBURL, GraphDBURL, AuthSigningSecret, ModelAnthropicOAuthToken, ObjectStoreMinIOSecretAccessKey,
+				GitHostGitHubAppPrivateKey, AccountKey(SectionSandbox, "fly"), AccountKey(SectionCloudCompute, "vast")},
 			ProgramMetricsService: {DatabaseURL, MetricsDBURL, AuthSigningSecret},
 			ProgramAdmin:          {DatabaseURL, AuthSigningSecret, GitHostGitHubAppPrivateKey},
 		}},
@@ -123,9 +123,9 @@ func TestALoaderReadsItsOwnKeysAndIgnoresTheOthers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.SigningSecret != madeUp[AuthSigningSecret] || c.GitHubKey != madeUp[GitHostGitHubAppPrivateKey] || c.SandboxSecret != madeUp[sandboxKey("fly")] ||
-		c.ModelToken != madeUp[ModelAnthropicOAuthToken] || c.DataStoreSecret != madeUp[DataStoreMinIOSecretAccessKey] || c.GraphDBURL != madeUp[GraphDBURL] ||
-		c.CloudComputeSecrets["a"] != madeUp[cloudComputeKey("vast")] {
+	if c.SigningSecret != madeUp[AuthSigningSecret] || c.GitHubKey != madeUp[GitHostGitHubAppPrivateKey] || c.SandboxSecret != madeUp[AccountKey(SectionSandbox, "fly")] ||
+		c.ModelToken != madeUp[ModelAnthropicOAuthToken] || c.ObjectStoreSecret != madeUp[ObjectStoreMinIOSecretAccessKey] || c.GraphDBURL != madeUp[GraphDBURL] ||
+		c.CloudComputeSecrets["a"] != madeUp[AccountKey(SectionCloudCompute, "vast")] {
 		t.Errorf("control-service = %+v, want the environment's keys", c)
 	}
 	t.Setenv(ModelAnthropicOAuthToken.Name, "")

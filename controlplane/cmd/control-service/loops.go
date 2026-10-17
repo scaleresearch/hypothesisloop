@@ -53,7 +53,7 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environ
 		WithQuotaConfig(quotaCfg).
 		WithJobImages(pcfg.OfferedJobImages()).
 		WithEnvironments(environmentsSvc).
-		WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent)
+		WithDataStore(dataStore, pcfg.ObjectStore.MaxBytesPerAgent)
 
 	schedulerLoop := scheduler.NewLoop(store, expQuotaSvc, clusterReports, grace, logger).
 		WithPodResources(domain.NewPodResources(pcfg.PodResourcesByName)).

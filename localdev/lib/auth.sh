@@ -41,7 +41,7 @@ if [[ -f "${LIB_AUTH_REPO}/.env" ]]; then
 fi
 
 # The git host local platform experiments keep their code on, as GIT_HOST_PROVIDER in .env names
-# it (.env.example): github, the GitHub App of the GIT_HOST_GITHUB_APP_* keys, or local, the git
+# it (.env.example): github, the GitHub App of the GIT_HOST_GITHUB_APP_* keys, or plain, the git
 # server `make dev` runs on this machine (localdev/local-git). That one serves the bare
 # repositories under HL_GIT_ROOT to its one credential, whose password is made on this machine by
 # the first use and never leaves it, and holds a copy of the experiment template,
@@ -61,9 +61,9 @@ if [[ -f "${LIB_AUTH_REPO}/.env" ]]; then
 fi
 lib_git_host_provider() {
   case "${HL_GIT_HOST_PROVIDER}" in
-    github|local) echo "${HL_GIT_HOST_PROVIDER}" ;;
-    "") echo "auth: .env does not set GIT_HOST_PROVIDER, which is github or local (.env.example says what each is)" >&2; return 1 ;;
-    *) echo "auth: .env sets GIT_HOST_PROVIDER=${HL_GIT_HOST_PROVIDER}, which is github or local" >&2; return 1 ;;
+    github|plain) echo "${HL_GIT_HOST_PROVIDER}" ;;
+    "") echo "auth: .env does not set GIT_HOST_PROVIDER, which is github or plain (.env.example says what each is)" >&2; return 1 ;;
+    *) echo "auth: .env sets GIT_HOST_PROVIDER=${HL_GIT_HOST_PROVIDER}, which is github or plain" >&2; return 1 ;;
   esac
 }
 case "${HL_GIT_HOST_PROVIDER}" in
@@ -78,7 +78,7 @@ case "${HL_GIT_HOST_PROVIDER}" in
     HL_GIT_HOST_GITHUB_APP_ID="$(lib_env_value GIT_HOST_GITHUB_APP_ID)"
     HL_GIT_HOST_GITHUB_APP_SLUG="$(lib_env_value GIT_HOST_GITHUB_APP_SLUG)"
     ;;
-  local)
+  plain)
     if [[ ! -s "${HL_GIT_PASSWORD_FILE}" ]]; then
       mkdir -p "$(dirname "${HL_GIT_PASSWORD_FILE}")"
       (umask 077 && openssl rand -hex 24 > "${HL_GIT_PASSWORD_FILE}")
@@ -90,10 +90,10 @@ esac
 
 # The container registry CONTAINER_REGISTRY_PROVIDER in .env names, read from that provider's own
 # keys. lib_container_registry sets HL_REGISTRY, the address the deployment's images are pushed
-# under, which make dev runs them from; HL_ENVIRONMENTS_REPOSITORY, where local
-# development's environments are built to; and HL_ENVIRONMENTS_PROVIDER, the lines of the settings'
-# environments section after repository: the provider that hands out the logins to it and its own
-# section. With no provider all three are empty, and the local control plane builds no environments.
+# under, which make dev runs them from, and HL_CONTAINER_REGISTRY, the settings' container_registry
+# section: the provider that hands out the logins, its own section, and the repository local
+# development's environments are built to. With no provider both are empty, and the local control
+# plane builds no environments.
 #
 #   gcp  Google Artifact Registry: the repository CONTAINER_REGISTRY_GCP_REPOSITORY in
 #        CONTAINER_REGISTRY_GCP_LOCATION of CONTAINER_REGISTRY_GCP_PROJECT. Environments go to the
@@ -103,7 +103,7 @@ esac
 #        allowed to mint them.
 lib_container_registry() {
   local provider key project
-  HL_REGISTRY="" HL_ENVIRONMENTS_REPOSITORY="" HL_ENVIRONMENTS_PROVIDER=""
+  HL_REGISTRY="" HL_CONTAINER_REGISTRY=""
   provider="$(lib_env_value CONTAINER_REGISTRY_PROVIDER)"
   case "${provider}" in
     "") ;;
@@ -116,8 +116,7 @@ lib_container_registry() {
       done
       project="$(lib_env_value CONTAINER_REGISTRY_GCP_PROJECT)"
       HL_REGISTRY="$(lib_env_value CONTAINER_REGISTRY_GCP_LOCATION)-docker.pkg.dev/${project}/$(lib_env_value CONTAINER_REGISTRY_GCP_REPOSITORY)"
-      HL_ENVIRONMENTS_REPOSITORY="${HL_REGISTRY}-environments/environment"
-      HL_ENVIRONMENTS_PROVIDER="$(printf '  provider: gcp\n  gcp:\n    pusher: env-pusher@%s.iam.gserviceaccount.com\n    puller: env-puller@%s.iam.gserviceaccount.com' "${project}" "${project}")"
+      HL_CONTAINER_REGISTRY="$(printf 'container_registry:\n  provider: gcp\n  gcp:\n    pusher: env-pusher@%s.iam.gserviceaccount.com\n    puller: env-puller@%s.iam.gserviceaccount.com\n  environments_repository: %s-environments/environment' "${project}" "${project}" "${HL_REGISTRY}")"
       ;;
     *)
       echo "auth: .env sets CONTAINER_REGISTRY_PROVIDER=${provider}; it is empty or gcp" >&2
@@ -125,7 +124,7 @@ lib_container_registry() {
       ;;
   esac
 }
-HL_REGISTRY="" HL_ENVIRONMENTS_REPOSITORY="" HL_ENVIRONMENTS_PROVIDER=""
+HL_REGISTRY="" HL_CONTAINER_REGISTRY=""
 if [[ -f "${LIB_AUTH_REPO}/.env" ]]; then
   lib_container_registry || return 1 2>/dev/null || exit 1
 fi
@@ -133,7 +132,7 @@ fi
 # lib_render_settings <host address> <output>: the settings the local control plane runs with,
 # which are the committed ones with this host's address and the local identity providers filled
 # in, the git host GIT_HOST_PROVIDER names: the GitHub App or the local git server,
-# and the environments section when .env names a registry. The address is LOCAL_REACHABLE_ADDRESS
+# and the container_registry section when .env names a registry. The address is LOCAL_REACHABLE_ADDRESS
 # when .env sets it (lib_advertised_address), so a cluster on another machine reaches the API,
 # the metrics service, the registry, the object store, the git proxy and the git server it is
 # handed. The dev registry serves plain HTTP, which runtimes.registry_plain_http says to every
@@ -193,12 +192,12 @@ lib_render_settings() {
   for rendered in "issuer: \"${HL_DEV_JWT_ISSUER}\"" ${issuer:+"issuer: \"${issuer}\""} "  registry_plain_http: true"; do
     grep -qF -- "${rendered}" "${output}" || { echo "render-settings: the settings file changed shape, '${rendered}' was not rendered" >&2; return 1; }
   done
-  if grep -qE '^(git_host|environments):' "${output}"; then
-    echo "render-settings: the settings file has a git_host or environments section, and the render would add a second one" >&2
+  if grep -qE '^(git_host|container_registry):' "${output}"; then
+    echo "render-settings: the settings file has a git_host or container_registry section, and the render would add a second one" >&2
     return 1
   fi
-  if [[ -n "${HL_ENVIRONMENTS_REPOSITORY}" ]]; then
-    printf '\nenvironments:\n  repository: %s\n%s\n' "${HL_ENVIRONMENTS_REPOSITORY}" "${HL_ENVIRONMENTS_PROVIDER}" >> "${output}"
+  if [[ -n "${HL_CONTAINER_REGISTRY}" ]]; then
+    printf '\n%s\n' "${HL_CONTAINER_REGISTRY}" >> "${output}"
   fi
   case "$(lib_git_host_provider)" in
     github)
@@ -206,7 +205,7 @@ lib_render_settings() {
       printf '\ngit_host:\n  provider: github\n  experiment_template_repository: %s\n  github:\n    app_id: %d\n    app_slug: "%s"\n' \
         "${HL_EXPERIMENT_TEMPLATE_REPOSITORY}" "${HL_GIT_HOST_GITHUB_APP_ID}" "${HL_GIT_HOST_GITHUB_APP_SLUG}" >> "${output}"
       ;;
-    local)
+    plain)
       printf '\ngit_host:\n  provider: plain\n  experiment_template_repository: %s\n  plain:\n    base_url: http://%s:%s\n    allow_http: true\n    username: %s\n' \
         "${HL_GIT_EXPERIMENT_TEMPLATE}" "${host_address}" "${HL_GIT_PORT}" "${HL_GIT_USERNAME}" >> "${output}"
       ;;

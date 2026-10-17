@@ -17,11 +17,12 @@ type Source interface {
 	Pull(ctx context.Context) (domain.RegistryLogin, error)
 }
 
-// New is the Source of the provider the environments section names.
-func New(ctx context.Context, e config.EnvironmentsConfig) (Source, error) {
-	switch e.Provider {
+// New is the Source of the provider the container_registry section names, for its environments
+// repository.
+func New(ctx context.Context, r config.ContainerRegistryConfig) (Source, error) {
+	switch r.Provider {
 	case config.RegistryProviderGCP:
-		return gcp.New(ctx, e.Repository, e.GCP.Pusher, e.GCP.Puller)
+		return gcp.New(ctx, r.EnvironmentsRepository, r.GCP.Pusher, r.GCP.Puller)
 	}
-	return nil, fmt.Errorf("registrycred: environments provider %q is not one this build knows", e.Provider)
+	return nil, fmt.Errorf("registrycred: container_registry provider %q is not one this build knows", r.Provider)
 }

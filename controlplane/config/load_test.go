@@ -153,11 +153,11 @@ func TestLoadRefusesTheCommittedFileUntilItsPlaceholdersAreFilledIn(t *testing.T
 		}
 	}
 	if err := loadText(t, strings.Replace(rendered, "  endpoint: http://host.example.invalid:9000", "  endpoint: http://0.0.0.0:9000", 1)); err == nil {
-		t.Error("a data store at the unspecified address: Load = nil, want it refused")
+		t.Error("an object store at the unspecified address: Load = nil, want it refused")
 	}
 }
 
-func TestLoadRequiresTheControlPlanesOwnAddressOfTheDataStore(t *testing.T) {
+func TestLoadRequiresTheControlPlanesOwnAddressOfTheObjectStore(t *testing.T) {
 	const own = "  control_plane_endpoint: http://minio:9000"
 	rendered := productionConfig(t)
 	if !strings.Contains(rendered, own) {
@@ -451,36 +451,37 @@ func TestAnAcceleratorTypeDeclaresWhatEveryJobOnItNeeds(t *testing.T) {
 	}
 }
 
-const environmentsSection = `
-environments:
-  repository: europe-west1-docker.pkg.dev/project/hypothesisloop-environments/environment
+const containerRegistrySection = `
+container_registry:
+  environments_repository: europe-west1-docker.pkg.dev/project/hypothesisloop-environments/environment
   provider: gcp
   gcp:
     pusher: env-pusher@project.iam.gserviceaccount.com
     puller: env-puller@project.iam.gserviceaccount.com
 `
 
-func TestEnvironmentsAreLeftOutOrStatedWhole(t *testing.T) {
+func TestTheContainerRegistryIsLeftOutOrStatedWhole(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "hypothesisloop.yaml")
 	if err := os.WriteFile(path, []byte(productionConfig(t)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if cfg, err := LoadSettings(path); err != nil || cfg.Environments != nil {
-		t.Fatalf("Load without the section: %v, environments %+v, want it loaded with none", err, cfg.Environments)
+	if cfg, err := LoadSettings(path); err != nil || cfg.ContainerRegistry != nil {
+		t.Fatalf("Load without the section: %v, container_registry %+v, want it loaded with none", err, cfg.ContainerRegistry)
 	}
-	if err := os.WriteFile(path, []byte(productionConfig(t)+environmentsSection), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(productionConfig(t)+containerRegistrySection), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := LoadSettings(path)
 	if err != nil {
 		t.Fatalf("Load with the section: %v", err)
 	}
-	if want := (EnvironmentsConfig{Repository: "europe-west1-docker.pkg.dev/project/hypothesisloop-environments/environment", Provider: RegistryProviderGCP,
-		GCP: GCPRegistryConfig{Pusher: "env-pusher@project.iam.gserviceaccount.com", Puller: "env-puller@project.iam.gserviceaccount.com"}}); *cfg.Environments != want {
-		t.Fatalf("environments = %+v, want %+v", *cfg.Environments, want)
+	if got, want := cfg.ContainerRegistry, (GCPRegistryConfig{Pusher: "env-pusher@project.iam.gserviceaccount.com", Puller: "env-puller@project.iam.gserviceaccount.com"}); got.Provider != RegistryProviderGCP || got.GCP == nil || *got.GCP != want ||
+		got.EnvironmentsRepository != "europe-west1-docker.pkg.dev/project/hypothesisloop-environments/environment" {
+		t.Fatalf("container_registry = %+v, want the section's", got)
 	}
 	for name, replace := range map[string][2]string{
 		"no pusher":                   {"    pusher: env-pusher@project.iam.gserviceaccount.com\n", ""},
+		"no gcp section":              {"  gcp:\n    pusher: env-pusher@project.iam.gserviceaccount.com\n    puller: env-puller@project.iam.gserviceaccount.com\n", ""},
 		"no provider":                 {"  provider: gcp\n", ""},
 		"an unknown provider":         {"provider: gcp", "provider: elsewhere"},
 		"a puller that is no account": {"env-puller@project.iam.gserviceaccount.com", "someone@example.com"},
@@ -488,7 +489,7 @@ func TestEnvironmentsAreLeftOutOrStatedWhole(t *testing.T) {
 		"a repository with a scheme":  {"europe-west1-docker.pkg.dev/project", "https://europe-west1-docker.pkg.dev/project"},
 		"a repository with a digest":  {"/environment\n", "/environment@sha256:abc\n"},
 	} {
-		if err := loadText(t, productionConfig(t)+strings.Replace(environmentsSection, replace[0], replace[1], 1)); err == nil {
+		if err := loadText(t, productionConfig(t)+strings.Replace(containerRegistrySection, replace[0], replace[1], 1)); err == nil {
 			t.Errorf("%s: loaded, want it refused", name)
 		}
 	}
@@ -516,7 +517,7 @@ func TestASettingsFileWithASecretIsRefused(t *testing.T) {
 		"database url":      {"database:\n", "database:\n  url: postgres://x\n"},
 		"metrics_db_url":    {"  metric_controller_port: 8084", "  metric_controller_port: 8084\n  metrics_db_url: http://x"},
 		"oauth_token":       {"  provider: anthropic\n", "  provider: anthropic\n  anthropic:\n    oauth_token: x\n"},
-		"secret_access_key": {"  access_key_id: hypothesisloop\n", "  access_key_id: hypothesisloop\n  secret_access_key: x\n"},
+		"secret_access_key": {"    access_key_id: hypothesisloop\n", "    access_key_id: hypothesisloop\n    secret_access_key: x\n"},
 	} {
 		if !strings.Contains(text, edit[0]) {
 			t.Fatalf("%s: the settings file has no %q", name, edit[0])

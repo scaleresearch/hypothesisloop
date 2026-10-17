@@ -54,7 +54,7 @@ spec:
             - name: HYPOTHESISLOOP_CONFIG
               value: /settings/hypothesisloop.yaml
             {{- include "hypothesisloop.controlServiceEnv" . | nindent 12 }}
-            {{- if and .Values.environments.repository (eq .Values.environments.provider "gcp") }}
+            {{- if eq .Values.containerRegistry.provider "gcp" }}
             - name: GOOGLE_APPLICATION_CREDENTIALS
               value: /credentials/google.json
             {{- end }}
@@ -64,7 +64,7 @@ spec:
             - name: config
               mountPath: /settings
               readOnly: true
-            {{- if and .Values.environments.repository (eq .Values.environments.provider "gcp") }}
+            {{- if eq .Values.containerRegistry.provider "gcp" }}
             # A directory, never subPath, so a renewed Secret reaches the process without a restart.
             - name: credentials
               mountPath: /credentials
@@ -89,12 +89,12 @@ spec:
         - name: config
           configMap:
             name: hypothesisloop-config
-        {{- if and .Values.environments.repository (eq .Values.environments.provider "gcp") }}
+        {{- if eq .Values.containerRegistry.provider "gcp" }}
         - name: credentials
           secret:
             secretName: {{ include "hypothesisloop.secretName" . }}
             items:
-              - { key: ENVIRONMENTS_GCP_CREDENTIALS, path: google.json }
+              - { key: {{ include "hypothesisloop.containerRegistryCredentials" . }}, path: google.json }
         {{- end }}
 {{- if gt (int .Values.controlService.replicas) 1 }}
 ---

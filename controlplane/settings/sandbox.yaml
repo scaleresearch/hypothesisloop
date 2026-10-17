@@ -1,13 +1,17 @@
 # The sandbox section of the settings: one provider account, on which the control plane rents a
 # machine for every sandboxed agent and coordinator. A deployment that hosts agents adds it to its
-# settings file. Its provider section is one of provider.<name>.yaml beside this file.
+# settings file, with the section of the provider it names and none of the others below.
 sandbox:
+  # The vendor, one of the sections below: fly or e2b. Its account key comes from the environment
+  # as SANDBOX_<PROVIDER>_API_KEY. Nothing about the instances is kept between passes but the
+  # provider's list: changing provider, the account in its section or name leaves the machines
+  # rented before where the control plane no longer looks, running and billing. Drain first.
+  provider: REPLACE-WITH-SANDBOX-PROVIDER
+
   # 1 to 16 lowercase letters and digits, part of every instance name,
   # hl-agent-<name>-<the platform's name for it>: the control plane lists, creates and destroys
   # the instances that start so and no others, which keeps two deployments on one provider
-  # account apart. Nothing about the instances is kept between passes but the provider's list:
-  # changing provider.name, the account in provider.settings or this name leaves the machines
-  # rented before where the control plane no longer looks, running and billing. Drain first.
+  # account apart.
   name: main
 
   # One pass costs the provider one list call, one log read per running or exited agent, one stop
@@ -26,31 +30,23 @@ sandbox:
   # agents.boot_limit_seconds and agents.progress_limit_seconds.
   create_pause_milliseconds: 1000
 
-  # How many instances are kept warm: rented ahead at the size below with the image the agents are
-  # asked for under, or the platform's own image while none is, that image on their host, running
-  # nothing. A missing agent is started in one of them in seconds, where a create waits for the
-  # image's pull, and the pool is topped up after. A warm instance is billed for its disk only (on
-  # Fly the root filesystem of a stopped machine, $0.15 a GB a month), never runs, and is replaced
-  # when the agents' image or this section changes. The pool is destroyed when the control plane
-  # stops leading and when this is 0. Left out, it is 2 on a provider that can warm instances
-  # (Fly) and 0 on another (E2B).
-  warm_pool_size: 4
-
-  provider:
-    # One of fly and e2b: provider.<name>.yaml says what its settings are.
-    name: example
-    # The adapter's own section. Nothing else reads it.
-    settings: {}
+  # How many instances are kept warm, on a provider that can warm them (fly; e2b cannot, and takes
+  # 0): rented ahead at the size below with the image the agents are asked for under, or the
+  # platform's own image while none is, that image on their host, running nothing. A missing agent
+  # is started in one of them in seconds, where a create waits for the image's pull, and the pool
+  # is topped up after. A warm instance is billed for its disk only (on Fly the root filesystem of
+  # a stopped machine, $0.15 a GB a month), never runs, and is replaced when the agents' image or
+  # this section changes. The pool is destroyed when the control plane stops leading and when this
+  # is 0. Required: 0 rents nothing ahead.
+  warm_pool_size: 0
 
   # What every agent instance runs and how large it is rented. Which image it boots and the
   # environment of each agent are the platform's to say: where it reaches the API and its own
   # token, with which its harness also makes its model calls through the control plane. No model
-  # credential is in any instance. The size is bound by the provider: provider.<name>.yaml states
-  # what it can rent, and a size above that fails the create of every agent on every pass, which
-  # the log reports as NO INSTANCE COULD BE CREATED. An agent compiles and benchmarks its code here
-  # before a job runs it, so the size is a Fly performance machine of 8 cores and 16 GiB with its
-  # largest disk. E2B rents at most 8 GiB of memory and 10 or 20 GiB of disk, so a sandbox on it
-  # needs less.
+  # credential is in any instance. The provider refuses at start a size it cannot rent (below). An
+  # agent compiles and benchmarks its code here before a job runs it, so the size is a Fly
+  # performance machine of 8 cores and 16 GiB with its largest disk. A sandbox on e2b needs at
+  # most 8 GiB of memory and 20 GiB of disk.
   #
   # Each instance is rented to end by itself at the latest moment its platform experiment can
   # still be running, so a control plane that is down or cut off leaves nothing running past that.
@@ -62,3 +58,53 @@ sandbox:
     cpu: "8"
     memory: 16Gi
     storage: 50Gi
+
+  # One Fly.io organization. SANDBOX_FLY_API_KEY is a deploy token for the app below, as
+  # `fly tokens create deploy -a <app>` prints it, "FlyV1 " and the token. Use a deploy token and no
+  # wider one: it is all the adapter needs, and a token for the organization can create and destroy
+  # machines in every app of it.
+  #
+  # A machine ends when its command does. What the command left running with its output open is
+  # given five seconds to finish writing and is then stopped with the machine. The Machines API
+  # allows one request a second per action and app, with bursts of three: a list of the instances
+  # is one request, and a machine that stopped in the last two minutes adds one log read to it.
+  # Reading an instance's output is one request to the log API, which gives the last 500 entries,
+  # more than the agent's tail of 100 lines. A warm Machine is created stopped, its image pulled
+  # onto its host; starting an agent in one is an update, a wait for it and a start, about four
+  # seconds, where a create of a 0.9 GB image took seventeen.
+  fly:
+    # The one Fly app that holds every machine. It must exist: `fly apps create <name> -o <org>`.
+    # The adapter does not create it, and every pass fails with the app's name until it does.
+    # Give it a network of its own (`--network <name>`): machines on one network reach each
+    # other's ports, and an app created without one shares the organization's default network.
+    app: REPLACE-WITH-FLY-APP
+    # Three-letter code of the region machines are placed in (`fly platform regions`).
+    region: ams
+    # shared or performance. A spec gets the smallest machine of this kind that holds its cpu
+    # and memory: shared has 1, 2, 4, 6 or 8 cores with 256 MB to 2 GB each, performance 1 to 16
+    # cores with 2 to 8 GB each. A size that fits none of them or asks for more than 50 GB of disk
+    # is refused at start.
+    cpu_kind: performance
+
+  # One E2B team, whose API key is SANDBOX_E2B_API_KEY. E2B boots a sandbox from a template. Before
+  # an image can be rented at a size, build its template:
+  # `go run ./controlplane/cmd/e2b-template <image> <cores> <memory-mib>`. A Create whose template
+  # is missing fails with that command.
+  #
+  # What the plan allows, which no setting here changes: up to 8 cores and 8 GiB, fixed by the
+  # template; a disk the same for every sandbox of a plan, 10 GiB on the free plan (a sandbox there
+  # reports 11484 MiB) and 20 GiB on Pro; 20 sandboxes at once on the free plan, 100 on Pro. A size
+  # beyond 8 cores, 8 GiB or 20 GiB is refused at start, and one beyond the free plan's disk on
+  # that plan at Create. A sandbox is made with public traffic off: nothing it listens on answers
+  # from outside. A list of the instances is one request for each hundred sandboxes of the team and
+  # two more for each instance listed, eight at a time, about a fifth of a second each. Reading an
+  # instance's output is two requests and gives at most 4 MiB.
+  e2b:
+    # The longest a sandbox lives. E2B kills it then, with its output. The plan caps it: 3600 on
+    # the free plan, 86400 on Pro. A value above the cap fails every Create with the vendor's own
+    # message. An instance rented with a shorter lifetime of its own (an agent's, which the
+    # control plane decides) is killed at that. One that is wanted for longer has its command
+    # ended five minutes before the sandbox, and is listed for those minutes as exited at the
+    # plan's lifetime, so whoever rented it can tell that from a sandbox that died and rent
+    # another. More than 300.
+    lifetime_seconds: 3600

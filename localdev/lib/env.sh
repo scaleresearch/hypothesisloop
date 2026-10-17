@@ -26,6 +26,13 @@ lib_env_files() {
     bash -c 'set -a && . ./.env && set +a && exec go run ./localdev/envfiles "$1"' lib_env_files "${settings}")
 }
 
+# lib_rented <example> <provider>: the sandbox or cloud_compute example of controlplane/settings with
+# the provider .env names chosen, and the values of its section .env sets (localdev/rented).
+lib_rented() {
+  (cd "${LIB_ENV_REPO}" && env -i PATH="${PATH}" HOME="${HOME}" \
+    bash -c 'set -a && . ./.env && set +a && exec go run ./localdev/rented "$1" "$2"' lib_rented "$1" "$2")
+}
+
 # lib_run <program> <command>...: the command with the keys of the program's file, the settings
 # path the caller names, and what any command needs to run at all. It replaces the shell it runs
 # in, so a caller runs it in a subshell or last.

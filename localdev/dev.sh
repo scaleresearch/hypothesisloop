@@ -7,7 +7,7 @@
 #
 #   up       render the settings and (re)start the API and metrics-service, building hl beside
 #            them in localdev/.bin; start the tunnels that are down, the UI unless it runs, and the
-#            git server when GIT_HOST_PROVIDER is local. The settings rent compute: a sandbox
+#            git server when GIT_HOST_PROVIDER is plain. The settings rent compute: a sandbox
 #            section on the provider SANDBOX_PROVIDER in .env names, for hosted agents, and a
 #            cloud_compute section on the provider CLOUD_COMPUTE_PROVIDER names, for jobs, both run
 #            by control-service itself. They name the tunnels and the images under IMAGE_TAG in the
@@ -37,6 +37,7 @@ settings=controlplane/settings/.hypothesisloop.dev.yaml
 bin=localdev/.bin
 run=localdev/.run
 processes=(control-service metrics-service ui git-server)
+rented="${bin}/compute.yaml"
 # The compute provider jobs are rented machines on, and the name every org sees that compute under.
 cloud_provider="$( [[ ! -f .env ]] || lib_env_value CLOUD_COMPUTE_PROVIDER)"
 cloud_cluster="${cloud_provider:+hypothesisloop-${cloud_provider}}"
@@ -120,7 +121,7 @@ render_settings() {
           -e "s|^  registry: ${host}:5000$|  registry: ${registry}|"
           -e "s|^  registry_plain_http: true$|  registry_plain_http: false|"
           -e "s|^  image_tag: .*$|  image_tag: ${tag}|")
-  if [[ "${git_host}" == "local" ]]; then
+  if [[ "${git_host}" == "plain" ]]; then
     public+=(-e "s|^    base_url: http://${host}:${HL_GIT_PORT}$|    base_url: ${public_git}|")
     values+=("    base_url: ${public_git}")
   fi
@@ -132,52 +133,33 @@ render_settings() {
   done
 }
 
-# The sandbox and cloud_compute sections are the examples the core ships, with this deployment's
-# provider, images and account in them, appended to the settings. The provider's key reaches
-# control-service through its environment file. No warm pool: rendering the settings rents nothing.
+# The sandbox and cloud_compute sections are the examples the core ships, each with the provider
+# .env names and its values from .env (lib_rented), and this deployment's images in them, appended
+# to the settings. The provider's key reaches control-service through its environment file.
 render_compute() {
-  local value sandbox_settings rented="${bin}/compute.yaml"
-  case "${sandbox_provider}" in
-    fly) sandbox_settings="{app: $(lib_env_value SANDBOX_FLY_APP), region: ams, cpu_kind: performance}" ;;
-    e2b) sandbox_settings="{lifetime_seconds: 3600}" ;;
-  esac
+  local value sandbox cloud
+  sandbox="$(lib_rented controlplane/settings/sandbox.yaml "${sandbox_provider}")"
+  cloud="$(lib_rented controlplane/settings/cloud-compute.yaml "${cloud_provider}")"
   {
-    sed -e "s|^    name: example$|    name: ${sandbox_provider}|" \
-        -e "s|^    settings: {}$|    settings: ${sandbox_settings}|" \
-        -e "s|^  warm_pool_size: .*$|  warm_pool_size: 0|" \
-        controlplane/settings/sandbox.yaml
-    echo
+    printf '%s\n\n' "${sandbox}"
     sed -e "s|^  - cluster_name: .*$|  - cluster_name: ${cloud_cluster}|" \
-        -e "s|^    job_image: .*$|    job_image: ${registry}/hypothesisloop-job:${tag}|" \
-        -e "s|^      account_id: .*$|      account_id: \"$(lib_env_value CLOUD_COMPUTE_VAST_ACCOUNT_ID)\"|" \
-        "controlplane/settings/cloud-compute.yaml"
+        -e "s|^    job_image: .*$|    job_image: ${registry}/hypothesisloop-job:${tag}|" <<<"${cloud}"
   } > "${rented}"
-  for value in "    name: ${sandbox_provider}" "    settings: ${sandbox_settings}" "  warm_pool_size: 0" "  - cluster_name: ${cloud_cluster}" "    job_image: ${registry}/hypothesisloop-job:${tag}" "      account_id: \"$(lib_env_value CLOUD_COMPUTE_VAST_ACCOUNT_ID)\""; do
+  for value in "  provider: ${sandbox_provider}" "  - cluster_name: ${cloud_cluster}" "    provider: ${cloud_provider}" "    job_image: ${registry}/hypothesisloop-job:${tag}"; do
     grep -qF -- "${value}" "${rented}" || { echo "dev: controlplane/settings/sandbox.yaml or cloud-compute.yaml changed shape, '${value}' was not rendered" >&2; exit 1; }
   done
+}
+
+append_compute() {
   printf '\n' >> "${settings}"
   cat "${rented}" >> "${settings}"
 }
 
-# Each provider of .env is one its role knows, and each key that provider reads is set.
+# Each provider of .env is one its role knows, and each key that provider reads is set: the
+# rented ones are checked as their sections are rendered (localdev/rented).
 inputs() {
-  local missing=() key tunnels provider_keys
+  local missing=() key tunnels provider_keys=""
   sandbox_provider="$(lib_env_value SANDBOX_PROVIDER)"
-  case "${sandbox_provider}" in
-    fly) provider_keys="SANDBOX_FLY_APP SANDBOX_FLY_API_KEY" ;;
-    e2b) provider_keys="SANDBOX_E2B_API_KEY" ;;
-    *)
-      echo "dev: .env sets SANDBOX_PROVIDER to '${sandbox_provider}', and hosted agents run on fly or e2b" >&2
-      exit 1
-      ;;
-  esac
-  case "${cloud_provider}" in
-    vast) provider_keys+=" CLOUD_COMPUTE_VAST_API_KEY CLOUD_COMPUTE_VAST_ACCOUNT_ID" ;;
-    *)
-      echo "dev: .env sets CLOUD_COMPUTE_PROVIDER to '${cloud_provider}', and jobs are rented on vast" >&2
-      exit 1
-      ;;
-  esac
   case "$(lib_env_value MODEL_PROVIDER)" in
     anthropic) provider_keys+=" MODEL_ANTHROPIC_OAUTH_TOKEN" ;;
     *)
@@ -196,14 +178,15 @@ inputs() {
     echo "dev: .env does not set ${missing[*]} (.env.example says what each is)" >&2
     exit 1
   fi
+  registry="${HL_REGISTRY}"
+  tag="$(lib_env_value IMAGE_TAG)"
+  render_compute
   bash localdev/local-tunnels/tunnels.sh up
   tunnels="$(bash localdev/local-tunnels/tunnels.sh addresses)"
   public_api="$(awk '$1 == "api" { print $2 }' <<<"${tunnels}")"
   public_metrics="$(awk '$1 == "metric-controller" { print $2 }' <<<"${tunnels}")"
   public_store="$(awk '$1 == "object-store" { print $2 }' <<<"${tunnels}")"
   public_git="$(awk '$1 == "git" { print $2 }' <<<"${tunnels}")"
-  registry="${HL_REGISTRY}"
-  tag="$(lib_env_value IMAGE_TAG)"
 }
 
 require_settings() {
@@ -239,9 +222,9 @@ start_control_plane() {
   lib_register_clusters
 }
 
-# The git host of a stack whose GIT_HOST_PROVIDER is local. Any other runs none.
+# The git host of a stack whose GIT_HOST_PROVIDER is plain. Any other runs none.
 start_git_server() {
-  if [[ "${git_host}" != "local" ]]; then
+  if [[ "${git_host}" != "plain" ]]; then
     stop git-server
     return
   fi
@@ -253,7 +236,7 @@ start_git_server() {
   stop git-server
   require_port "${HL_GIT_PORT}"
   GIT_SERVER_ADDRESS=":${HL_GIT_PORT}" GIT_SERVER_ROOT="${HL_GIT_ROOT}" GIT_SERVER_USERNAME="${HL_GIT_USERNAME}" \
-    GIT_SERVER_PASSWORD="$(<"${HL_GIT_PASSWORD_FILE}")" start git-server "${bin}/git-server"
+    GIT_HOST_PLAIN_PASSWORD="$(<"${HL_GIT_PASSWORD_FILE}")" start git-server "${bin}/git-server"
   wait_for git-server "http://localhost:${HL_GIT_PORT}/health"
 }
 
@@ -298,7 +281,7 @@ case "${action}" in
   up)
     inputs
     render_settings
-    render_compute
+    append_compute
     start_datastores
     start_git_server
     start_control_plane

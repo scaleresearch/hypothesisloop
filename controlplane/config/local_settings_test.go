@@ -25,7 +25,7 @@ func TestTheLocalSettingsAsRenderedLoad(t *testing.T) {
 	rendered := filepath.Join(dir, "rendered.yaml")
 	// The key is made in the test's directory, and what a developer's .env adds is left out: its
 	// secrets, its identity provider and its registry are that machine's.
-	render(t, repo, dir, rendered, `HL_ENVIRONMENTS_REPOSITORY=""`)
+	render(t, repo, dir, rendered, `HL_CONTAINER_REGISTRY=""`)
 	cfg, err := LoadSettings(rendered)
 	if err != nil {
 		t.Fatalf("the rendered local settings do not load: %v", err)
@@ -40,23 +40,24 @@ func TestTheLocalSettingsAsRenderedLoad(t *testing.T) {
 	if cfg.Agents.Image != "host.example.internal:5000/hypothesisloop-harness-base:abc1234" || cfg.Agents.DefaultModel == "" || cfg.Agents.BootLimitSeconds <= 0 {
 		t.Errorf("agents = %+v, want every key set", cfg.Agents)
 	}
-	if cfg.Environments != nil {
-		t.Errorf("environments = %+v, want none without a registry in .env", cfg.Environments)
+	if cfg.ContainerRegistry != nil {
+		t.Errorf("container_registry = %+v, want none without a registry in .env", cfg.ContainerRegistry)
 	}
 	if want := (RuntimesConfig{MetricsURL: "http://host.example.internal:8084", Registry: "host.example.internal:5000", ImageTag: "abc1234", RegistryPlainHTTP: true}); cfg.Runtimes != want {
 		t.Errorf("runtimes = %+v, want %+v: the dev registry serves plain HTTP", cfg.Runtimes, want)
 	}
 
-	// With a registry in .env the environments are the ones beside it.
+	// With a registry in .env the environments repository is the one beside it.
 	registry := `lib_env_value() { case "$1" in CONTAINER_REGISTRY_PROVIDER) echo gcp ;; CONTAINER_REGISTRY_GCP_PROJECT) echo my-project ;;
 		CONTAINER_REGISTRY_GCP_LOCATION) echo europe-west1 ;; CONTAINER_REGISTRY_GCP_REPOSITORY) echo images ;; esac; } && lib_container_registry`
 	render(t, repo, dir, rendered, registry)
 	if cfg, err = LoadSettings(rendered); err != nil {
 		t.Fatalf("the rendered local settings with environments do not load: %v", err)
 	}
-	if want := (EnvironmentsConfig{Repository: "europe-west1-docker.pkg.dev/my-project/images-environments/environment", Provider: RegistryProviderGCP,
-		GCP: GCPRegistryConfig{Pusher: "env-pusher@my-project.iam.gserviceaccount.com", Puller: "env-puller@my-project.iam.gserviceaccount.com"}}); cfg.Environments == nil || *cfg.Environments != want {
-		t.Errorf("environments = %+v, want %+v", cfg.Environments, want)
+	want := GCPRegistryConfig{Pusher: "env-pusher@my-project.iam.gserviceaccount.com", Puller: "env-puller@my-project.iam.gserviceaccount.com"}
+	if got := cfg.ContainerRegistry; got == nil || got.Provider != RegistryProviderGCP || got.GCP == nil || *got.GCP != want ||
+		got.EnvironmentsRepository != "europe-west1-docker.pkg.dev/my-project/images-environments/environment" {
+		t.Errorf("container_registry = %+v, want the registry's", got)
 	}
 
 	// The committed file is the one source: without rendering it is refused for its placeholders.
@@ -72,7 +73,7 @@ func render(t *testing.T, repo, dir, rendered, environments string) {
 	t.Helper()
 	// The tag is stated: computing it reads the git state of the tree, which is absent in an
 	// exported checkout and changes under a tree others are writing to.
-	script := `. localdev/lib/auth.sh && HL_DEV_JWT_KEY="$1/key.pem" && HL_GIT_HOST_PROVIDER=local && HL_IDENTITY_PROVIDER="" && LIB_NODE_REPO="$1" && ` + environments + ` && TAG=abc1234 lib_render_settings host.example.internal "$2"`
+	script := `. localdev/lib/auth.sh && HL_DEV_JWT_KEY="$1/key.pem" && HL_GIT_HOST_PROVIDER=plain && HL_IDENTITY_PROVIDER="" && LIB_NODE_REPO="$1" && ` + environments + ` && TAG=abc1234 lib_render_settings host.example.internal "$2"`
 	cmd := exec.Command("bash", "-c", script, "render", dir, rendered)
 	cmd.Dir = repo
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -98,14 +99,14 @@ func TestTheLocalReachableAddressIsTheOneAddressEveryClusterIsHanded(t *testing.
 		t.Fatal(err)
 	}
 	rendered := filepath.Join(dir, "rendered.yaml")
-	render(t, repo, dir, rendered, `HL_ENVIRONMENTS_REPOSITORY=""`)
+	render(t, repo, dir, rendered, `HL_CONTAINER_REGISTRY=""`)
 	cfg, err := LoadSettings(rendered)
 	if err != nil {
 		t.Fatalf("the rendered local settings do not load: %v", err)
 	}
 	for what, got := range map[string]string{
 		"services.public_api_url": cfg.Services.PublicAPIURL, "runtimes.metrics_url": cfg.Runtimes.MetricsURL,
-		"runtimes.registry": cfg.Runtimes.Registry, "data_store.endpoint": cfg.DataStore.Endpoint, "git_host.plain.base_url": cfg.GitHost.Plain.BaseURL,
+		"runtimes.registry": cfg.Runtimes.Registry, "object_store.endpoint": cfg.ObjectStore.Endpoint, "git_host.plain.base_url": cfg.GitHost.Plain.BaseURL,
 		"the git proxy": cfg.GitProxyURL(),
 	} {
 		if !strings.Contains(got, "100.64.0.5:") {

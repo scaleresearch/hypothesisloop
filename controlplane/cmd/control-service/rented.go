@@ -18,10 +18,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/provider/providers"
 )
 
-// defaultWarmPool is the warm pool on a sandbox provider that can warm instances when the
-// settings name none.
-const defaultWarmPool = 2
-
 // newRented builds what rents machines elsewhere, each a loop the leader runs: the launcher of
 // sandboxed agents on the sandbox provider, and one runtime per cloud compute account. A provider
 // that cannot be built from its settings stops the process here.
@@ -35,8 +31,8 @@ func newRented(pcfg *hypothesisloopcfg.ControlService, store *db.Store, clusters
 		loops = append(loops, func(ctx context.Context) { _ = launcher.Run(ctx) })
 	}
 	environments := ""
-	if pcfg.Environments != nil {
-		environments = pcfg.Environments.Repository
+	if pcfg.ContainerRegistry != nil {
+		environments = pcfg.ContainerRegistry.EnvironmentsRepository
 	}
 	for _, cc := range pcfg.CloudCompute {
 		cluster, err := newCloudCluster(pcfg, cc, environments, store, clusters, logger)
@@ -51,17 +47,11 @@ func newRented(pcfg *hypothesisloopcfg.ControlService, store *db.Store, clusters
 func newLauncher(pcfg *hypothesisloopcfg.ControlService, s *hypothesisloopcfg.SandboxConfig, store *db.Store, metrics *metricsdb.Store, logger *zap.Logger) (*cloudagentsandbox.Launcher, error) {
 	log := logger.Named("agentsandbox")
 	// An agent instance has no accelerator, so the provider is asked for no accelerator type.
-	rented, err := providers.New(s.Provider.Name, s.Provider.Settings, pcfg.SandboxSecret, nil, log.Named(s.Provider.Name).Sugar().Infof)
+	rented, err := providers.New(s.Provider, s.Sections[s.Provider], pcfg.SandboxSecret, nil, log.Named(s.Provider).Sugar().Infof)
 	if err != nil {
 		return nil, fmt.Errorf("sandbox: %w", err)
 	}
-	warmPool := 0
-	if _, warms := rented.(provider.Warmer); warms {
-		warmPool = defaultWarmPool
-	}
-	if s.WarmPoolSize != nil {
-		warmPool = *s.WarmPoolSize
-	}
+	warmPool := *s.WarmPoolSize
 	decider := agentsandbox.NewDecider(store, metrics, agentsandbox.Settings{
 		Image: pcfg.Agents.Image, APIURL: pcfg.Services.PublicAPIURL, SigningSecret: pcfg.SigningSecret,
 		BootLimit:       time.Duration(pcfg.Agents.BootLimitSeconds) * time.Second,
@@ -79,7 +69,7 @@ func newLauncher(pcfg *hypothesisloopcfg.ControlService, s *hypothesisloopcfg.Sa
 	if err != nil {
 		return nil, fmt.Errorf("sandbox: %w", err)
 	}
-	log.Info("sandboxed agents run on the sandbox provider", zap.String("provider", s.Provider.Name), zap.String("name", s.Name),
+	log.Info("sandboxed agents run on the sandbox provider", zap.String("provider", s.Provider), zap.String("name", s.Name),
 		zap.Strings("capabilities", provider.Capabilities(rented)), zap.Int("warm_pool", warmPool))
 	return launcher, nil
 }
@@ -97,14 +87,18 @@ func newCloudCluster(pcfg *hypothesisloopcfg.ControlService, cc hypothesisloopcf
 		}
 	}
 	log := logger.Named("cloudcompute").With(zap.String("cluster", cc.ClusterName))
-	rented, err := providers.New(cc.Provider.Name, cc.Provider.Settings, pcfg.CloudComputeSecrets[cc.ClusterName], acceleratorTypes, log.Named(cc.Provider.Name).Sugar().Infof)
+	rented, err := providers.New(cc.Provider, cc.Sections[cc.Provider], pcfg.CloudComputeSecrets[cc.ClusterName], acceleratorTypes, log.Named(cc.Provider).Sugar().Infof)
 	if err != nil {
 		return nil, fmt.Errorf("cloud_compute %s: %w", cc.ClusterName, err)
+	}
+	account, accounted := rented.(provider.Accounted)
+	if !accounted {
+		return nil, fmt.Errorf("cloud_compute %s: provider %s names no account, which the cluster's id is made of", cc.ClusterName, cc.Provider)
 	}
 	cluster, err := compute.NewCluster(compute.ClusterConfig{
 		Name: cc.ClusterName,
 		Executor: compute.Config{
-			ClusterID: cc.Provider.Name + "-" + cc.Provider.AccountID, Namespace: cc.Namespace,
+			ClusterID: cc.Provider + "-" + account.Account(), Namespace: cc.Namespace,
 			APIURL: pcfg.Services.PublicAPIURL, JobImage: cc.JobImage, EnvironmentsRepository: environments,
 			Shapes: shapes, Provider: rented,
 			OfferWait: time.Duration(cc.OfferWaitSeconds) * time.Second, Startup: time.Duration(cc.StartupSeconds) * time.Second,
@@ -117,7 +111,7 @@ func newCloudCluster(pcfg *hypothesisloopcfg.ControlService, cc hypothesisloopcf
 	if err != nil {
 		return nil, err
 	}
-	log.Info("jobs of the cluster run on the cloud compute provider", zap.String("provider", cc.Provider.Name),
+	log.Info("jobs of the cluster run on the cloud compute provider", zap.String("provider", cc.Provider),
 		zap.Strings("capabilities", provider.Capabilities(rented)), zap.Int("shapes", len(shapes)))
 	return cluster, nil
 }

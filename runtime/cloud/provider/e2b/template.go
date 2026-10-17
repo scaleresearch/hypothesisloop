@@ -14,6 +14,25 @@ const bytesPerMB = 1 << 20
 // repository's root with the image, the cores and the memory in MiB after it.
 const templateCommand = "go run ./controlplane/cmd/e2b-template"
 
+// The most any plan gives a sandbox: a template holds up to maxCPUs cores and maxMemoryMB of
+// memory, and the disk is the plan's, 10 GiB on the free plan and maxDiskGB on Pro. A spec beyond
+// the free plan's disk on that plan fails at Create.
+const (
+	maxCPUs     = 8
+	maxMemoryMB = 8192
+	maxDiskGB   = 20
+)
+
+// CheckSize refuses a spec larger than any sandbox (provider.Sizer).
+func (p *Provider) CheckSize(spec provider.Spec) error {
+	asked := sizeOf(spec)
+	if disk := provider.CeilDiv(spec.DiskBytes, 1<<30); asked.CPUs > maxCPUs || asked.MemoryMB > maxMemoryMB || disk > maxDiskGB {
+		return fmt.Errorf("e2b: spec %q asks for %d cores, %d MiB of memory and %d GiB of disk, and a sandbox has at most %d, %d and %d",
+			spec.Name, asked.CPUs, asked.MemoryMB, disk, maxCPUs, maxMemoryMB, maxDiskGB)
+	}
+	return nil
+}
+
 // size is what a template fixes for every sandbox started from it.
 type size struct {
 	CPUs     int64
