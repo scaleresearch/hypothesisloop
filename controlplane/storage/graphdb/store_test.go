@@ -1023,14 +1023,14 @@ func TestConcernsAgentFindsActivityOnTheAgentsOwnHypotheses(t *testing.T) {
 		e    domain.Event
 		want bool
 	}{
-		{domain.Event{Kind: domain.EventCommentNew, Subject: mine.ID}, true},
-		{domain.Event{Kind: domain.EventFindingNew, Subject: theirs.ID}, false},
-		{domain.Event{Kind: domain.EventHypothesisLink, Subject: theirs.ID, Detail: mine.ID}, true},
-		{domain.Event{Kind: domain.EventHypothesisLink, Subject: theirs.ID, Detail: pe}, false},
-		{domain.Event{Kind: domain.EventHypothesisNew, Subject: child.ID}, true},
-		{domain.Event{Kind: domain.EventHypothesisNew, Subject: theirs.ID}, false},
-		{domain.Event{Kind: domain.EventCommentNew, Subject: pe, PlatformExperimentID: pe}, true},
-		{domain.Event{Kind: domain.EventFindingNew, Subject: pe, PlatformExperimentID: pe}, false},
+		{domain.Event{Change: domain.Change{Kind: domain.EventCommentNew, Subject: mine.ID}}, true},
+		{domain.Event{Change: domain.Change{Kind: domain.EventFindingNew, Subject: theirs.ID}}, false},
+		{domain.Event{Change: domain.Change{Kind: domain.EventHypothesisLink, Subject: theirs.ID, Detail: mine.ID}}, true},
+		{domain.Event{Change: domain.Change{Kind: domain.EventHypothesisLink, Subject: theirs.ID, Detail: pe}}, false},
+		{domain.Event{Change: domain.Change{Kind: domain.EventHypothesisNew, Subject: child.ID}}, true},
+		{domain.Event{Change: domain.Change{Kind: domain.EventHypothesisNew, Subject: theirs.ID}}, false},
+		{domain.Event{Change: domain.Change{Kind: domain.EventCommentNew, Subject: pe, PlatformExperimentID: pe}}, true},
+		{domain.Event{Change: domain.Change{Kind: domain.EventFindingNew, Subject: pe, PlatformExperimentID: pe}}, false},
 	}
 	events := make([]domain.Event, len(cases))
 	for i, c := range cases {

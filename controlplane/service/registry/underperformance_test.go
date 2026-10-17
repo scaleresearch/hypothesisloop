@@ -41,7 +41,7 @@ func (s underperformStore) MarkUnderperforming(_ context.Context, id, metricName
 			return nil
 		}
 	}
-	s.marks.events = append(s.marks.events, domain.Event{Kind: domain.EventJobUnderperforming, Subject: id, Value: metricName})
+	s.marks.events = append(s.marks.events, domain.Event{Change: domain.Change{Kind: domain.EventJobUnderperforming, Subject: id, Value: metricName}})
 	return nil
 }
 

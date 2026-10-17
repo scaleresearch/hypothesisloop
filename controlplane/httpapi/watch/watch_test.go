@@ -328,7 +328,7 @@ func (c *watchClient) nextRaw(t *testing.T) []byte {
 }
 
 func statusEvent(subject, value, agentID string) domain.Event {
-	return domain.Event{Kind: domain.EventExperimentStatus, Subject: subject, Value: value, PlatformExperimentID: "pe-1", AgentID: agentID}
+	return domain.Event{Change: domain.Change{Kind: domain.EventExperimentStatus, Subject: subject, Value: value, PlatformExperimentID: "pe-1", AgentID: agentID}}
 }
 
 func ids(events []domain.Event) []int64 {
@@ -392,8 +392,8 @@ func TestAfterHeadReadsOnlyWhatComesNext(t *testing.T) {
 func TestProgressMovesPastChangesTheSubscriptionLeavesOut(t *testing.T) {
 	changes := newFakeChanges(
 		statusEvent("exp-1", "RUNNING", "agent-a"),
-		domain.Event{Kind: domain.EventCommentNew, Subject: "hyp-1", PlatformExperimentID: "pe-1"},
-		domain.Event{Kind: domain.EventExperimentStatus, Subject: "exp-9", Value: "RUNNING", PlatformExperimentID: "pe-other"},
+		domain.Event{Change: domain.Change{Kind: domain.EventCommentNew, Subject: "hyp-1", PlatformExperimentID: "pe-1"}},
+		domain.Event{Change: domain.Change{Kind: domain.EventExperimentStatus, Subject: "exp-9", Value: "RUNNING", PlatformExperimentID: "pe-other"}},
 	)
 	client := dialWatch(t, watchServer(t, changes), url.Values{"platform_experiment_id": {"pe-1"}, "kinds": {"experiment.status"}})
 	if got := client.next(t).ID; got != 1 {
@@ -492,8 +492,8 @@ func TestChangesAnswersOneRead(t *testing.T) {
 func TestASubscriptionNamingKindsReceivesOnlyThoseKinds(t *testing.T) {
 	changes := newFakeChanges()
 	client := dialWatch(t, watchServer(t, changes), url.Values{"platform_experiment_id": {"pe-1"}, "kinds": {"experiment.status"}})
-	changes.append(domain.Event{Kind: domain.EventHypothesisNew, Subject: "hyp-1", PlatformExperimentID: "pe-1"})
-	changes.append(domain.Event{Kind: domain.EventCommentNew, Subject: "hyp-1", PlatformExperimentID: "pe-1"})
+	changes.append(domain.Event{Change: domain.Change{Kind: domain.EventHypothesisNew, Subject: "hyp-1", PlatformExperimentID: "pe-1"}})
+	changes.append(domain.Event{Change: domain.Change{Kind: domain.EventCommentNew, Subject: "hyp-1", PlatformExperimentID: "pe-1"}})
 	changes.append(statusEvent("exp-1", "RUNNING", "agent-a"))
 	if got := client.next(t); got.Kind != domain.EventExperimentStatus || got.Value != "RUNNING" {
 		t.Errorf("first delivered: got = %v %v, want = experiment.status RUNNING", got.Kind, got.Value)
@@ -501,7 +501,7 @@ func TestASubscriptionNamingKindsReceivesOnlyThoseKinds(t *testing.T) {
 }
 
 func hypEvent(kind, subject, detail, agentID string) domain.Event {
-	return domain.Event{Kind: kind, Subject: subject, Detail: detail, PlatformExperimentID: "pe-1", AgentID: agentID}
+	return domain.Event{Change: domain.Change{Kind: kind, Subject: subject, Detail: detail, PlatformExperimentID: "pe-1", AgentID: agentID}}
 }
 
 // An agent scope carries its own outcomes and what other people do to hypotheses it registered: a
@@ -666,8 +666,8 @@ func TestHLWatchKeepsRetryingAConnectionItCouldNotEstablish(t *testing.T) {
 func TestAnAgentCutReachesOnlyTheAgentItNames(t *testing.T) {
 	changes := newFakeChanges()
 	client := dialWatch(t, watchServer(t, changes), url.Values{"platform_experiment_id": {"pe-1"}, "agent_id": {"agent-a"}})
-	changes.append(domain.Event{Kind: domain.EventAgentCut, Subject: "agent-b", Value: "1", PlatformExperimentID: "pe-1", AgentID: "agent-b"})
-	changes.append(domain.Event{Kind: domain.EventAgentCut, Subject: "agent-a", Value: "1", PlatformExperimentID: "pe-1", AgentID: "agent-a"})
+	changes.append(domain.Event{Change: domain.Change{Kind: domain.EventAgentCut, Subject: "agent-b", Value: "1", PlatformExperimentID: "pe-1", AgentID: "agent-b"}})
+	changes.append(domain.Event{Change: domain.Change{Kind: domain.EventAgentCut, Subject: "agent-a", Value: "1", PlatformExperimentID: "pe-1", AgentID: "agent-a"}})
 	if got := client.next(t).Subject; got != "agent-a" {
 		t.Errorf("first delivered cut: got = %v, want = agent-a", got)
 	}
@@ -678,9 +678,9 @@ func TestAnAgentCutReachesOnlyTheAgentItNames(t *testing.T) {
 func TestARunWideChangeReachesAnAgentScopedSubscriptionWhoeverWroteIt(t *testing.T) {
 	changes := newFakeChanges()
 	client := dialWatch(t, watchServer(t, changes), url.Values{"platform_experiment_id": {"pe-1"}, "agent_id": {"agent-a"}})
-	changes.append(domain.Event{Kind: domain.EventStageBoundary, Subject: "pe-1", Value: "1", Detail: "advanced", PlatformExperimentID: "pe-1"})
-	changes.append(domain.Event{Kind: domain.EventPlatformExperimentDescription, Subject: "pe-1", PlatformExperimentID: "pe-1"})
-	changes.append(domain.Event{Kind: domain.EventPlatformExperimentStatus, Subject: "pe-1", Value: "closed", PlatformExperimentID: "pe-1"})
+	changes.append(domain.Event{Change: domain.Change{Kind: domain.EventStageBoundary, Subject: "pe-1", Value: "1", Detail: "advanced", PlatformExperimentID: "pe-1"}})
+	changes.append(domain.Event{Change: domain.Change{Kind: domain.EventPlatformExperimentDescription, Subject: "pe-1", PlatformExperimentID: "pe-1"}})
+	changes.append(domain.Event{Change: domain.Change{Kind: domain.EventPlatformExperimentStatus, Subject: "pe-1", Value: "closed", PlatformExperimentID: "pe-1"}})
 	for _, want := range []string{domain.EventStageBoundary, domain.EventPlatformExperimentDescription, domain.EventPlatformExperimentStatus} {
 		if got := client.next(t).Kind; got != want {
 			t.Errorf("delivered kind: got = %v, want = %v", got, want)
@@ -692,8 +692,8 @@ func TestARunWideChangeReachesAnAgentScopedSubscriptionWhoeverWroteIt(t *testing
 func TestAJobScopedSubscriptionDoesNotReceiveTheRunWideKinds(t *testing.T) {
 	changes := newFakeChanges()
 	client := dialWatch(t, watchServer(t, changes), url.Values{"experiment_id": {"exp-1"}})
-	changes.append(domain.Event{Kind: domain.EventPlatformExperimentStatus, Subject: "pe-1", Value: "closed", PlatformExperimentID: "pe-1"})
-	changes.append(domain.Event{Kind: domain.EventAgentCut, Subject: "agent-a", Value: "1", PlatformExperimentID: "pe-1", AgentID: "agent-a"})
+	changes.append(domain.Event{Change: domain.Change{Kind: domain.EventPlatformExperimentStatus, Subject: "pe-1", Value: "closed", PlatformExperimentID: "pe-1"}})
+	changes.append(domain.Event{Change: domain.Change{Kind: domain.EventAgentCut, Subject: "agent-a", Value: "1", PlatformExperimentID: "pe-1", AgentID: "agent-a"}})
 	changes.append(statusEvent("exp-1", "RUNNING", "agent-a"))
 	if got := client.next(t).Kind; got != domain.EventExperimentStatus {
 		t.Errorf("first delivered kind: got = %v, want = experiment.status", got)
@@ -745,9 +745,9 @@ func TestAnAgentScopeNeverCarriesAnotherAgentsOwnChanges(t *testing.T) {
 	changes := newFakeChanges()
 	client := dialWatch(t, watchServer(t, changes), url.Values{"platform_experiment_id": {"pe-1"}, "agent_id": {"agent-a"}})
 	changes.append(statusEvent("exp-2", "RUNNING", "agent-b"))
-	changes.append(domain.Event{Kind: domain.EventQuotaChanged, Subject: "agent-b", Value: "9", PlatformExperimentID: "pe-1", AgentID: "agent-b"})
-	changes.append(domain.Event{Kind: domain.EventAgentCut, Subject: "agent-b", Value: "1", PlatformExperimentID: "pe-1", AgentID: "agent-b"})
-	changes.append(domain.Event{Kind: domain.EventQuotaChanged, Subject: "agent-a", Value: "4", PlatformExperimentID: "pe-1", AgentID: "agent-a"})
+	changes.append(domain.Event{Change: domain.Change{Kind: domain.EventQuotaChanged, Subject: "agent-b", Value: "9", PlatformExperimentID: "pe-1", AgentID: "agent-b"}})
+	changes.append(domain.Event{Change: domain.Change{Kind: domain.EventAgentCut, Subject: "agent-b", Value: "1", PlatformExperimentID: "pe-1", AgentID: "agent-b"}})
+	changes.append(domain.Event{Change: domain.Change{Kind: domain.EventQuotaChanged, Subject: "agent-a", Value: "4", PlatformExperimentID: "pe-1", AgentID: "agent-a"}})
 	if got := client.next(t); got.Kind != domain.EventQuotaChanged || got.Subject != "agent-a" {
 		t.Errorf("first delivered: got = %v for %v, want = quota.changed for agent-a", got.Kind, got.Subject)
 	}

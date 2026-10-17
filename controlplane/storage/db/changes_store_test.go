@@ -325,10 +325,10 @@ func TestTheDefaultKindSetIsEveryKindOnTheStream(t *testing.T) {
 // Naming kinds means exactly those kinds.
 func TestAnExplicitKindSetMeansExactlyWhatItNames(t *testing.T) {
 	filter := domain.EventFilter{PlatformExperimentID: "pe-1", Kinds: map[string]bool{domain.EventCommentNew: true}}
-	if !filter.Matches(domain.Event{Kind: domain.EventCommentNew, Subject: "hyp-1", PlatformExperimentID: "pe-1"}) {
+	if !filter.Matches(domain.Event{Change: domain.Change{Kind: domain.EventCommentNew, Subject: "hyp-1", PlatformExperimentID: "pe-1"}}) {
 		t.Errorf("comment.new on a subscription that named it: got = %v, want = %v", false, true)
 	}
-	if filter.Matches(domain.Event{Kind: domain.EventExperimentStatus, Subject: "exp-1", PlatformExperimentID: "pe-1"}) {
+	if filter.Matches(domain.Event{Change: domain.Change{Kind: domain.EventExperimentStatus, Subject: "exp-1", PlatformExperimentID: "pe-1"}}) {
 		t.Errorf("experiment.status on a subscription that named only comment.new: got = %v, want = %v", true, false)
 	}
 }
@@ -443,33 +443,33 @@ func TestAJobOnAnotherAgentsHypothesisIsAnnouncedAsADuplicateOnce(t *testing.T) 
 func TestAnAgentScopeAdmitsItsOwnOutcomesAndNoRivalsOrIntermediateStatuses(t *testing.T) {
 	filter := domain.EventFilter{PlatformExperimentID: "pe-1", AgentID: "agent-a", Kinds: domain.DefaultKinds()}
 	admitted := []domain.Event{
-		{Kind: domain.EventExperimentStatus, Value: "COMPLETED", AgentID: "agent-a"},
-		{Kind: domain.EventExperimentStatus, Value: "EVICTED", AgentID: "agent-a"},
-		{Kind: domain.EventExperimentStatus, Value: "QUEUED", Detail: "stuck_pending: admitted and not running within 5m0s", AgentID: "agent-a"},
-		{Kind: domain.EventExperimentBlocked, Value: "job_too_long", AgentID: "agent-a"},
-		{Kind: domain.EventExperimentBlocked, Value: "exceeds_accelerator_share: cpu 64 above 8", AgentID: "agent-a"},
-		{Kind: domain.EventExperimentBlocked, Value: "exceeds_cluster_capacity: needs {accelerator:h200=3}, more than any connected cluster has installed", AgentID: "agent-a"},
-		{Kind: domain.EventQuotaChanged, Value: "4", AgentID: "agent-a"},
-		{Kind: domain.EventAgentCut, Value: "1", AgentID: "agent-a"},
-		{Kind: domain.EventStageBoundary, Value: "1", Detail: "advanced"},
-		{Kind: domain.EventPlatformExperimentStatus, Value: "closed"},
-		{Kind: domain.EventPlatformExperimentDescription},
-		{Kind: domain.EventCommentNew, AgentID: "agent-b"},
-		{Kind: domain.EventCommentNew},
+		{Change: domain.Change{Kind: domain.EventExperimentStatus, Value: "COMPLETED", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: domain.EventExperimentStatus, Value: "EVICTED", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: domain.EventExperimentStatus, Value: "QUEUED", Detail: "stuck_pending: admitted and not running within 5m0s", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: domain.EventExperimentBlocked, Value: "job_too_long", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: domain.EventExperimentBlocked, Value: "exceeds_accelerator_share: cpu 64 above 8", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: domain.EventExperimentBlocked, Value: "exceeds_cluster_capacity: needs {accelerator:h200=3}, more than any connected cluster has installed", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: domain.EventQuotaChanged, Value: "4", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: domain.EventAgentCut, Value: "1", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: domain.EventStageBoundary, Value: "1", Detail: "advanced"}},
+		{Change: domain.Change{Kind: domain.EventPlatformExperimentStatus, Value: "closed"}},
+		{Change: domain.Change{Kind: domain.EventPlatformExperimentDescription}},
+		{Change: domain.Change{Kind: domain.EventCommentNew, AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: domain.EventCommentNew}},
 	}
 	refused := []domain.Event{
-		{Kind: domain.EventExperimentStatus, Value: "QUEUED", AgentID: "agent-a"},
-		{Kind: domain.EventExperimentStatus, Value: "SUBMITTED", AgentID: "agent-a"},
-		{Kind: domain.EventExperimentStatus, Value: "RUNNING", AgentID: "agent-a"},
-		{Kind: domain.EventExperimentStatus, Value: "COMPLETED", AgentID: "agent-b"},
-		{Kind: domain.EventExperimentBlocked, Value: "job_too_long", AgentID: "agent-b"},
-		{Kind: domain.EventExperimentBlocked, Value: "capacity_unavailable", Detail: "cluster c is short of 1 x nvidia.com/gpu.product=nvidia-l40", AgentID: "agent-a"},
-		{Kind: domain.EventExperimentBlocked, Value: "outranked", AgentID: "agent-a"},
-		{Kind: domain.EventExperimentBlocked, Value: "concurrency_cap", AgentID: "agent-a"},
-		{Kind: domain.EventQuotaChanged, Value: "4", AgentID: "agent-b"},
-		{Kind: domain.EventAgentCut, Value: "1", AgentID: "agent-b"},
-		{Kind: domain.EventStageBoundary, Value: "1", Detail: "cut", AgentID: "agent-a"},
-		{Kind: domain.EventStageBoundary, Value: "1", Detail: "cut", AgentID: "agent-b"},
+		{Change: domain.Change{Kind: domain.EventExperimentStatus, Value: "QUEUED", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: domain.EventExperimentStatus, Value: "SUBMITTED", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: domain.EventExperimentStatus, Value: "RUNNING", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: domain.EventExperimentStatus, Value: "COMPLETED", AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: domain.EventExperimentBlocked, Value: "job_too_long", AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: domain.EventExperimentBlocked, Value: "capacity_unavailable", Detail: "cluster c is short of 1 x nvidia.com/gpu.product=nvidia-l40", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: domain.EventExperimentBlocked, Value: "outranked", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: domain.EventExperimentBlocked, Value: "concurrency_cap", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: domain.EventQuotaChanged, Value: "4", AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: domain.EventAgentCut, Value: "1", AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: domain.EventStageBoundary, Value: "1", Detail: "cut", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: domain.EventStageBoundary, Value: "1", Detail: "cut", AgentID: "agent-b"}},
 	}
 	for _, e := range admitted {
 		e.PlatformExperimentID = "pe-1"
@@ -489,7 +489,7 @@ func TestAnAgentScopeAdmitsItsOwnOutcomesAndNoRivalsOrIntermediateStatuses(t *te
 func TestAnAgentScopeDropsTheEchoOfItsOwnHypothesisActivity(t *testing.T) {
 	filter := domain.EventFilter{PlatformExperimentID: "pe-1", AgentID: "agent-a", Kinds: domain.DefaultKinds()}
 	for _, kind := range []string{domain.EventHypothesisNew, domain.EventHypothesisStatus, domain.EventHypothesisLink, domain.EventFindingNew, domain.EventCommentNew} {
-		if filter.Matches(domain.Event{Kind: kind, Subject: "hyp-1", PlatformExperimentID: "pe-1", AgentID: "agent-a"}) {
+		if filter.Matches(domain.Event{Change: domain.Change{Kind: kind, Subject: "hyp-1", PlatformExperimentID: "pe-1", AgentID: "agent-a"}}) {
 			t.Errorf("own %v on an agent scope: got = true, want = false", kind)
 		}
 	}
@@ -499,9 +499,9 @@ func TestAnAgentScopeDropsTheEchoOfItsOwnHypothesisActivity(t *testing.T) {
 func TestASubscriptionWithoutAnAgentCarriesEveryAgentsEvents(t *testing.T) {
 	filter := domain.EventFilter{PlatformExperimentID: "pe-1", Kinds: domain.DefaultKinds()}
 	for _, e := range []domain.Event{
-		{Kind: domain.EventExperimentStatus, Value: "RUNNING", AgentID: "agent-b"},
-		{Kind: domain.EventHypothesisNew, AgentID: "agent-b"},
-		{Kind: domain.EventStageBoundary, Detail: "cut", AgentID: "agent-b"},
+		{Change: domain.Change{Kind: domain.EventExperimentStatus, Value: "RUNNING", AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: domain.EventHypothesisNew, AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: domain.EventStageBoundary, Detail: "cut", AgentID: "agent-b"}},
 	} {
 		e.PlatformExperimentID = "pe-1"
 		if !filter.Matches(e) {
@@ -517,25 +517,25 @@ func TestTheDecisionsStreamOfAnExperimentLeavesOutJobsThatAreOnTheirWay(t *testi
 	filter := domain.EventFilter{PlatformExperimentID: "pe-1", Kinds: domain.DefaultKinds(), Decisions: true}
 	whole := domain.EventFilter{PlatformExperimentID: "pe-1", Kinds: domain.DefaultKinds()}
 	admitted := []domain.Event{
-		{Kind: domain.EventExperimentStatus, Value: "COMPLETED", AgentID: "agent-a"},
-		{Kind: domain.EventExperimentStatus, Value: "FAILED", AgentID: "agent-b"},
-		{Kind: domain.EventExperimentStatus, Value: "EVICTED", AgentID: "agent-b"},
-		{Kind: domain.EventExperimentBlocked, Value: "job_too_long", AgentID: "agent-a"},
-		{Kind: domain.EventHypothesisNew, AgentID: "agent-a"},
-		{Kind: domain.EventHypothesisStatus, Value: "confirmed", AgentID: "agent-a"},
-		{Kind: domain.EventFindingNew, Value: "job-1", AgentID: "agent-b"},
-		{Kind: domain.EventCommentNew},
-		{Kind: domain.EventQuotaChanged, Value: "4", AgentID: "agent-b"},
-		{Kind: domain.EventAgentCut, Value: "1", AgentID: "agent-b"},
-		{Kind: domain.EventStageBoundary, Value: "1", Detail: "cut", AgentID: "agent-b"},
-		{Kind: domain.EventPlatformExperimentStatus, Value: "closed"},
+		{Change: domain.Change{Kind: domain.EventExperimentStatus, Value: "COMPLETED", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: domain.EventExperimentStatus, Value: "FAILED", AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: domain.EventExperimentStatus, Value: "EVICTED", AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: domain.EventExperimentBlocked, Value: "job_too_long", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: domain.EventHypothesisNew, AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: domain.EventHypothesisStatus, Value: "confirmed", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: domain.EventFindingNew, Value: "job-1", AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: domain.EventCommentNew}},
+		{Change: domain.Change{Kind: domain.EventQuotaChanged, Value: "4", AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: domain.EventAgentCut, Value: "1", AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: domain.EventStageBoundary, Value: "1", Detail: "cut", AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: domain.EventPlatformExperimentStatus, Value: "closed"}},
 	}
 	onTheirWay := []domain.Event{
-		{Kind: domain.EventExperimentStatus, Value: "QUEUED", AgentID: "agent-a"},
-		{Kind: domain.EventExperimentStatus, Value: "SUBMITTED", AgentID: "agent-a"},
-		{Kind: domain.EventExperimentStatus, Value: "RUNNING", AgentID: "agent-b"},
-		{Kind: domain.EventExperimentBlocked, Value: "capacity_unavailable", Detail: "cluster c is short of 1 x nvidia.com/gpu.product=nvidia-l40", AgentID: "agent-a"},
-		{Kind: domain.EventExperimentBlocked, Value: "outranked", AgentID: "agent-b"},
+		{Change: domain.Change{Kind: domain.EventExperimentStatus, Value: "QUEUED", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: domain.EventExperimentStatus, Value: "SUBMITTED", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: domain.EventExperimentStatus, Value: "RUNNING", AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: domain.EventExperimentBlocked, Value: "capacity_unavailable", Detail: "cluster c is short of 1 x nvidia.com/gpu.product=nvidia-l40", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: domain.EventExperimentBlocked, Value: "outranked", AgentID: "agent-b"}},
 	}
 	for _, e := range admitted {
 		e.PlatformExperimentID = "pe-1"

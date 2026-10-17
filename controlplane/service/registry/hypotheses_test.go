@@ -343,8 +343,7 @@ func (r *recordedEvents) Around(_ context.Context, pe string, fn func(domain.Ann
 		return errors.New("commit failed")
 	}
 	for _, c := range pending.changes {
-		r.events = append(r.events, domain.Event{ID: int64(len(r.events) + 1), Kind: c.Kind, Subject: c.Subject, Value: c.Value, Detail: c.Detail,
-			PlatformExperimentID: c.PlatformExperimentID, AgentID: c.AgentID})
+		r.events = append(r.events, domain.Event{ID: int64(len(r.events) + 1), Change: c})
 	}
 	return nil
 }
@@ -499,8 +498,7 @@ func TestRegisteringANewHypothesisAnnouncesIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
-	want := domain.Event{ID: 1, Kind: domain.EventHypothesisNew, Subject: h.ID, Value: string(domain.ActorAgent), PlatformExperimentID: "pe-1",
-		AgentID: "agent-1"}
+	want := domain.Event{ID: 1, Change: domain.Change{Kind: domain.EventHypothesisNew, Subject: h.ID, Value: string(domain.ActorAgent), PlatformExperimentID: "pe-1", AgentID: "agent-1"}}
 	if len(events.events) != 1 || events.events[0] != want {
 		t.Errorf("events: got = %+v, want = [%+v]", events.events, want)
 	}

@@ -18,13 +18,8 @@ type Change struct {
 type Event struct {
 	// ID is the change's place in the stream: every change with a smaller id committed before it.
 	// A client reads on from the id of the last change it read.
-	ID                   int64  `json:"id"`
-	Kind                 string `json:"kind"`
-	Subject              string `json:"subject"`
-	Value                string `json:"value"`
-	Detail               string `json:"detail"`
-	PlatformExperimentID string `json:"platform_experiment_id"`
-	AgentID              string `json:"agent_id"`
+	ID int64 `json:"id"`
+	Change
 	// OccurredAt is when the write that made the change began.
 	OccurredAt time.Time `json:"occurred_at"`
 }

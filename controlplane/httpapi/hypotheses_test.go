@@ -312,8 +312,7 @@ func (r *recordedEvents) Around(_ context.Context, pe string, fn func(domain.Ann
 		return errors.New("commit failed")
 	}
 	for _, c := range pending.changes {
-		r.events = append(r.events, domain.Event{ID: int64(len(r.events) + 1), Kind: c.Kind, Subject: c.Subject, Value: c.Value, Detail: c.Detail,
-			PlatformExperimentID: c.PlatformExperimentID, AgentID: c.AgentID})
+		r.events = append(r.events, domain.Event{ID: int64(len(r.events) + 1), Change: c})
 	}
 	return nil
 }
