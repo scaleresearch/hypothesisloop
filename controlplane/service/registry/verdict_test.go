@@ -61,8 +61,8 @@ func TestAConfirmedOrRefutedVerdictNeedsARepeatedRunAndACompletedControl(t *test
 				}
 			}
 			var answered huma.StatusError
-			if !errors.As((&Handler{}).hypothesisWriteError(err), &answered) || answered.GetStatus() != http.StatusConflict {
-				t.Errorf("%s, %s: answered %v, want 409", status, name, (&Handler{}).hypothesisWriteError(err))
+			if !errors.As((&Service{}).WriteRefusal(err), &answered) || answered.GetStatus() != http.StatusConflict {
+				t.Errorf("%s, %s: answered %v, want 409", status, name, (&Service{}).WriteRefusal(err))
 			}
 		}
 		if got, _ := svc.GetHypothesis(ctx, h.ID); got.Status != domain.HypothesisOpen || len(store.comments) != 0 {

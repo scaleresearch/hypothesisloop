@@ -60,7 +60,7 @@ func platformRoutes(caller auth.Principal) http.Handler {
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(scheduler.NewService(nil, nil, nil,
 		struct{ scheduler.CodeHost }{}, struct{ scheduler.InstalledCapacity }{}, struct{ scheduler.QuotaSettler }{}, "http://metrics.invalid", logger).
 		WithLoop(struct{ scheduler.Triggerable }{})))
-	registry.RegisterHuma(doc, registry.NewHandler(registry.New(nil, nil, nil, logger, "http://metrics.invalid", nil), logger))
+	httpapi.RegisterRegistry(doc, registry.New(nil, nil, nil, logger, "http://metrics.invalid", nil), logger)
 	registry.RegisterWatchHuma(doc)
 	access := auth.NewAccess(authtest.Placement{})
 	r.Get("/watch", registry.NewWatchHandler(nil, nil, access, logger).ServeHTTP)

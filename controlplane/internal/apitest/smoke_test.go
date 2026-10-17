@@ -17,7 +17,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
-	"github.com/scaleresearch/hypothesisloop/controlplane/service/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
@@ -44,7 +43,7 @@ func TestSmoke(t *testing.T) {
 	httpapi.RegisterPlatformExperimentBudget(doc, peHandler, zap.NewNop())
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(
 		scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{})))
-	registry.RegisterHuma(doc, registry.NewHandler(nil, nil))
+	httpapi.RegisterRegistry(doc, nil, nil)
 	httpapi.RegisterExperimentData(doc, nil, zap.NewNop())
 	httpapi.RegisterSessions(doc, nil, zap.NewNop())
 	httpapi.RegisterExperimentDrafts(doc, nil)

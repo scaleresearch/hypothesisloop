@@ -276,7 +276,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 			accounts.Limits{MaxOrgsPerUser: pcfg.Accounts.MaxOrgsPerUser, MaxProjectsPerOrg: pcfg.Accounts.MaxProjectsPerOrg}, logger),
 		repositories: repos,
 		scheduler:    schedulerHandler,
-		registry:     registry.NewHandler(registrySvc, logger),
+		registry:     registrySvc,
 		watch:        watchHandler,
 		clusterAgent: clusterAgentHandler,
 		gitProxy: gitproxy.New(struct {
@@ -310,7 +310,7 @@ type routes struct {
 	agentTypes          *accounts.AgentTypesHandler
 	repositories        *accounts.Repositories
 	scheduler           *scheduler.Handler
-	registry            *registry.Handler
+	registry            *registry.Service
 	watch               *registry.WatchHandler
 	clusterAgent        *clusterexchange.Handler
 	gitProxy            *gitproxy.Proxy
@@ -381,7 +381,7 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 	accounts.RegisterRepositoriesHuma(doc, h.repositories)
 	scheduler.RegisterHuma(doc, h.scheduler)
 	httpapi.RegisterModelUsage(doc, h.experiments, logger)
-	registry.RegisterHuma(doc, h.registry)
+	httpapi.RegisterRegistry(doc, h.registry, logger)
 	// /watch itself cannot be registered here (it is an upgrade), but its vocabulary can be, so
 	// an agent reading /explore learns what the stream carries rather than having to be told.
 	registry.RegisterWatchHuma(doc)

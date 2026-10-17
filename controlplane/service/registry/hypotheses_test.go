@@ -15,11 +15,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
-	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/graphdb"
 )
@@ -101,7 +98,7 @@ func TestABaselineAgentRegistersNoHypothesis(t *testing.T) {
 		t.Fatalf("RegisterHypothesis for a baseline agent: got = %v, want %v", err, ErrBaselineRegistersNoHypothesis)
 	}
 	var refused *refusal.Refusal
-	if answered := (&Handler{}).hypothesisWriteError(err); !errors.As(answered, &refused) || refused.GetStatus() != http.StatusForbidden || refused.Reason != "baseline_registers_no_hypothesis" {
+	if answered := (&Service{}).WriteRefusal(err); !errors.As(answered, &refused) || refused.GetStatus() != http.StatusForbidden || refused.Reason != "baseline_registers_no_hypothesis" {
 		t.Errorf("the refused as answered: got = %#v, want 403 baseline_registers_no_hypothesis", answered)
 	}
 	if _, _, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", agentActor("agent-1"), "pe-1", "the control", buildOnRoot, nil); err != nil {
@@ -120,7 +117,7 @@ func TestAnAgentWithNoSignupHereRegistersNoHypothesis(t *testing.T) {
 		t.Fatalf("RegisterHypothesis for an agent of another platform experiment: got = %v, want %v", err, domain.ErrNotSignedUp)
 	}
 	var refused *refusal.Refusal
-	if answered := (&Handler{}).hypothesisWriteError(err); !errors.As(answered, &refused) || refused.GetStatus() != http.StatusForbidden || refused.Reason != "not_signed_up" {
+	if answered := (&Service{}).WriteRefusal(err); !errors.As(answered, &refused) || refused.GetStatus() != http.StatusForbidden || refused.Reason != "not_signed_up" {
 		t.Errorf("the refused as answered: got = %#v, want 403 not_signed_up", answered)
 	}
 	if rows := svc.graph.(*fakeGraph).rows; len(rows) != 0 {
@@ -721,17 +718,6 @@ func TestRegisterHypothesisRefusesAnUnknownPlatformExperiment(t *testing.T) {
 	}
 }
 
-func TestHypothesisGraphOfAnUnknownPlatformExperimentIsNotFound(t *testing.T) {
-	r := authtest.Router(authtest.Staff)
-	RegisterHuma(apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop()), NewHandler(poolService(&missingExperimentStore{}), zap.NewNop()))
-
-	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, authtest.Authorize(httptest.NewRequest(http.MethodGet, "/hypotheses/graph?platform_experiment_id=pe-missing", nil)))
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404: %s", rec.Code, rec.Body)
-	}
-}
-
 type evidenceStore struct {
 	poolStore
 	evidence map[string]any
@@ -772,7 +758,7 @@ func TestQueryGraphBindsTheEvidence(t *testing.T) {
 // In r7 a held agent ran its jobs under the close hypothesis and was then refused setting its
 // status. The hold has to say whose verdict that is and that a narrower claim is its own.
 func TestASimilarityHoldSaysWhoseVerdictTheCloseHypothesisIsAndThatANarrowerClaimIsNew(t *testing.T) {
-	err := (&Handler{}).hypothesisWriteError(&graphdb.SimilarError{Similar: []domain.SimilarHypothesis{{ID: "h-1"}}})
+	err := (&Service{}).WriteRefusal(&graphdb.SimilarError{Similar: []domain.SimilarHypothesis{{ID: "h-1"}}})
 	var hold *similarHypothesesError
 	if !errors.As(err, &hold) || hold.GetStatus() != http.StatusConflict || len(hold.Similar) != 1 {
 		t.Fatalf("hypothesisWriteError(SimilarError) = %#v, want a 409 carrying the similar hypotheses", err)

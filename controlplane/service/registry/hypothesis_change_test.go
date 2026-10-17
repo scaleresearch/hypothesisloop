@@ -69,7 +69,7 @@ func registerAdas(t *testing.T, svc *Service, text string) *domain.Hypothesis {
 func requireInRecord(t *testing.T, what string, err error, names ...string) {
 	t.Helper()
 	var refused *refusal.Refusal
-	if answered := (&Handler{}).hypothesisWriteError(err); !errors.As(answered, &refused) || refused.GetStatus() != http.StatusConflict || refused.Reason != "hypothesis_in_record" {
+	if answered := (&Service{}).WriteRefusal(err); !errors.As(answered, &refused) || refused.GetStatus() != http.StatusConflict || refused.Reason != "hypothesis_in_record" {
 		t.Fatalf("%s: got = %v, want 409 hypothesis_in_record", what, err)
 	}
 	for _, name := range append(names, "Add a comment") {
@@ -186,13 +186,13 @@ func TestAPersonsCloseIdeaIsRegisteredWithItsSimilarOnesAsAHint(t *testing.T) {
 	if len(similar) != 1 || similar[0].ID != "h-close" || similar[0].Actor.Name != "agent-1" {
 		t.Errorf("similar: got = %+v, want h-close with its actor named", similar)
 	}
-	body, err := json.Marshal(hypothesisResponse{Hypothesis: h, Links: []domain.Link{}, Similar: similar})
+	body, err := json.Marshal(HypothesisResponse{Hypothesis: h, Links: []domain.Link{}, Similar: similar})
 	if err != nil || !strings.Contains(string(body), `"similar":[{"id":"h-close"`) {
 		t.Errorf("the response: got = %s (%v), want similar beside the hypothesis", body, err)
 	}
 
 	_, _, _, _, err = svc.RegisterHypothesis(context.Background(), "agent-2", agentActor("agent-2"), "pe-1", "a longer warmup helps a lot", buildOnRoot, nil)
-	held, ok := (&Handler{}).hypothesisWriteError(err).(*similarHypothesesError)
+	held, ok := (&Service{}).WriteRefusal(err).(*similarHypothesesError)
 	if !ok || held.GetStatus() != http.StatusConflict || held.Reason != "similar_hypotheses" || len(held.Similar) != 1 {
 		t.Errorf("an agent's close claim: got = %v, want 409 similar_hypotheses with the close one", err)
 	}

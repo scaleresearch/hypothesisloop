@@ -63,7 +63,6 @@ func testRouter(t *testing.T) chi.Router {
 		agentTypes:          &accounts.AgentTypesHandler{},
 		repositories:        &accounts.Repositories{},
 		scheduler:           &scheduler.Handler{},
-		registry:            &registry.Handler{},
 		watch:               &registry.WatchHandler{},
 		clusterAgent:        &clusterexchange.Handler{},
 		modelProxy:          modelProxy,

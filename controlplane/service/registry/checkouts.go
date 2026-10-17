@@ -5,12 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 // Checkout is what a checkout of a hypothesis answers: the branch recorded and who else works on
@@ -69,50 +66,4 @@ func (s *Service) TakenHypotheses(ctx context.Context, platformExpID string) ([]
 		return nil, fmt.Errorf("registry.TakenHypotheses: %w", err)
 	}
 	return ids, nil
-}
-
-func registerCheckoutHuma(doc *apidocs.Doc, h *Handler) {
-	access := doc.Access
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
-		OperationID: "check-out-hypothesis", Method: "POST", Path: "/hypotheses/{id}/checkouts",
-		Summary: "Record that an agent works on a hypothesis", Tags: []string{"hypotheses"},
-		Description: "hl hypothesis checkout calls this once the branch is checked out: from then the agent is in working of " +
-			"GET /hypotheses and GET /hypotheses/{id}, its branch in implementations, and the hypothesis in hypotheses_in_flight " +
-			"of the situation, for two hours or until a job of its shows it. Checking out again renews it. Nothing is refused for " +
-			"another agent on the same hypothesis: the answer names them in working, with a warning. agent_id is the agent's: " +
-			"an agent token's own, named or not; any other caller names an agent it reaches. 403 not_signed_up for an agent " +
-			"outside the hypothesis's platform experiment.",
-	}, func(ctx context.Context, in *struct {
-		ID   string `path:"id"`
-		Body struct {
-			AgentID string `json:"agent_id,omitempty" required:"false" doc:"The agent that checked it out. Absent, the agent token's own."`
-			Branch  string `json:"branch" doc:"The branch checked out for it."`
-		}
-	}) (*struct{ Body *Checkout }, error) {
-		if in.Body.Branch == "" {
-			return nil, huma.Error400BadRequest("branch is required")
-		}
-		hyp, err := h.svc.GetHypothesis(ctx, in.ID)
-		if err != nil {
-			return nil, auth.Internal(h.logger, "get hypothesis", err)
-		}
-		if hyp == nil {
-			return nil, auth.NotFound("hypothesis")
-		}
-		if err := access.Within(ctx, "hypothesis", hyp.PlatformExperimentID); err != nil {
-			return nil, err
-		}
-		agentID, _, err := access.Writer(ctx, in.Body.AgentID)
-		if err != nil {
-			return nil, err
-		}
-		if agentID == "" {
-			return nil, huma.Error400BadRequest("agent_id is required: a checkout is an agent's")
-		}
-		out, err := h.svc.CheckOut(ctx, hyp, agentID, in.Body.Branch)
-		if err != nil {
-			return nil, h.hypothesisWriteError(err)
-		}
-		return &struct{ Body *Checkout }{Body: out}, nil
-	})
 }

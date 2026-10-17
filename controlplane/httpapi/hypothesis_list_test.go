@@ -1,4 +1,4 @@
-package registry
+package httpapi
 
 import (
 	"context"
@@ -16,6 +16,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/graphdb"
@@ -23,7 +24,7 @@ import (
 
 // listGraph holds hyp-1 to hyp-N and pages them as the graph store does, dropping ExcludeIDs first.
 type listGraph struct {
-	Graph
+	registry.Graph
 	ids      []string
 	taken    []string
 	gotTaken string
@@ -77,8 +78,8 @@ func (s *listStore) NameActors(context.Context, []*domain.Actor) error { return 
 func listHypotheses(t *testing.T, graph *listGraph, query string) (*httptest.ResponseRecorder, []string) {
 	t.Helper()
 	r := authtest.Router(authtest.Staff)
-	svc := &Service{store: &listStore{graph: graph}, graph: graph, logger: zap.NewNop()}
-	RegisterHuma(apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop()), NewHandler(svc, zap.NewNop()))
+	svc := registry.New(&listStore{graph: graph}, graph, nil, zap.NewNop(), "", nil)
+	RegisterRegistry(apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop()), svc, zap.NewNop())
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, authtest.Authorize(httptest.NewRequest(http.MethodGet, "/hypotheses?"+query, nil)))
 	if rec.Code != http.StatusOK {
@@ -134,7 +135,7 @@ func TestUntakenLeavesOutWhatAnAgentWorksOnFromThePageAndTheTotal(t *testing.T) 
 // scopedGraph pages hypotheses of named platform experiments the way the graph store does: only
 // those within the caller's scope, and of those only the ones whose text holds the search.
 type scopedGraph struct {
-	Graph
+	registry.Graph
 	pe   map[string]string
 	text map[string]string
 }
@@ -179,8 +180,8 @@ func TestAProjectsHypothesesArePagedSearchedAndKeptToTheCallersOrg(t *testing.T)
 		"pe-b1": {PlatformExperimentID: "pe-b1", ProjectID: "prj-b", OrgID: "org-b"},
 	}}
 	r := authtest.Router(authtest.As{Kind: auth.KindUser, UserID: "u-a", OrgIDs: []string{"org-a"}})
-	svc := &Service{store: &listStore{}, graph: graph, logger: zap.NewNop()}
-	RegisterHuma(apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop()), NewHandler(svc, zap.NewNop()))
+	svc := registry.New(&listStore{}, graph, nil, zap.NewNop(), "", nil)
+	RegisterRegistry(apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop()), svc, zap.NewNop())
 	list := func(query string) ([]string, string) {
 		t.Helper()
 		rec := httptest.NewRecorder()

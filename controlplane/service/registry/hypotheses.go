@@ -584,3 +584,14 @@ func (s *Service) requireAgent(ctx context.Context, agentID string) error {
 	}
 	return nil
 }
+
+// HypothesisResponse wraps a Hypothesis with whether registration found a pre-existing
+// equivalent row, and its outgoing links.
+type HypothesisResponse struct {
+	*domain.Hypothesis
+	AlreadyExisted bool          `json:"already_existed"`
+	Links          []domain.Link `json:"links"`
+	// Similar is what a person's registration reads close to, given to them as a hint where an
+	// agent's would be refused with 409 similar_hypotheses.
+	Similar []domain.SimilarHypothesis `json:"similar" doc:"The hypotheses a signed-in person's new one reads close to, each with reason close_text or refuted_parent, as on a 409 similar_hypotheses. Empty for every other caller, who is refused instead."`
+}

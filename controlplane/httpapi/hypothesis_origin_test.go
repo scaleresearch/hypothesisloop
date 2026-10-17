@@ -1,4 +1,4 @@
-package registry
+package httpapi
 
 import (
 	"bytes"
@@ -17,13 +17,14 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 var (
-	agentOne = auth.Principal{Kind: auth.KindAgent, AgentID: "agent-1", PlatformExperimentID: "pe-1", ProjectID: "prj-a", OrgIDs: []string{"org-a"}}
-	ada      = auth.Principal{Kind: auth.KindUser, UserID: "user-ada", Name: "Ada Lovelace", OrgIDs: []string{"org-a"}}
-	nameless = auth.Principal{Kind: auth.KindUser, UserID: "user-x", OrgIDs: []string{"org-a"}}
+	registryAgent = auth.Principal{Kind: auth.KindAgent, AgentID: "agent-1", PlatformExperimentID: "pe-1", ProjectID: "prj-a", OrgIDs: []string{"org-a"}}
+	ada           = auth.Principal{Kind: auth.KindUser, UserID: "user-ada", Name: "Ada Lovelace", OrgIDs: []string{"org-a"}}
+	nameless      = auth.Principal{Kind: auth.KindUser, UserID: "user-x", OrgIDs: []string{"org-a"}}
 )
 
 // registryAs serves the registry's operations to one caller over a store and graph the test
@@ -41,8 +42,8 @@ type registryAs struct {
 
 func newRegistryAs(t *testing.T, caller auth.Principal) *registryAs {
 	t.Helper()
-	store := newPoolStore()
-	svc := poolService(store)
+	store, graph, events := newPoolStore(), newFakeGraph(), &recordedEvents{}
+	svc := registry.New(store, graph, events, zap.NewNop(), "", nil)
 	ctx := context.Background()
 	seed := func(agent, pe, text string) *domain.Hypothesis {
 		hyp, _, _, _, err := svc.RegisterHypothesis(ctx, agent, agentActor(agent), pe, text, []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: pe}}, nil)
@@ -51,7 +52,7 @@ func newRegistryAs(t *testing.T, caller auth.Principal) *registryAs {
 		}
 		return hyp
 	}
-	fixture := &registryAs{store: store, graph: svc.graph.(*fakeGraph), events: svc.events.(*recordedEvents), router: authtest.Router(authtest.As(caller)),
+	fixture := &registryAs{store: store, graph: graph, events: events, router: authtest.Router(authtest.As(caller)),
 		own: seed("agent-1", "pe-1", "warmup helps"), rivals: seed("agent-2", "pe-1", "dropout hurts"), elsewhere: seed("agent-9", "pe-other", "decay hurts")}
 	unowned, _, _, _, err := svc.RegisterHypothesis(ctx, "", adaActor, "pe-1", "label smoothing is neutral", []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: "pe-1"}}, nil)
 	if err != nil {
@@ -61,7 +62,7 @@ func newRegistryAs(t *testing.T, caller auth.Principal) *registryAs {
 	for _, h := range []*domain.Hypothesis{fixture.own, fixture.rivals, unowned} {
 		store.jobs = append(store.jobs, jobOn("job-"+h.ID, h.ID, domain.StatusFailed))
 	}
-	RegisterHuma(apidocs.New(fixture.router, "test", "1.0.0", "", auth.NewAccess(watchTenancy), zap.NewNop()), NewHandler(svc, zap.NewNop()))
+	RegisterRegistry(apidocs.New(fixture.router, "test", "1.0.0", "", auth.NewAccess(watchTenancy), zap.NewNop()), svc, zap.NewNop())
 	return fixture
 }
 
@@ -96,9 +97,9 @@ func with(base map[string]any, origin map[string]any) map[string]any {
 }
 
 var (
-	keyOne      = auth.Principal{Kind: auth.KindKey, KeyID: "key-1", OrgIDs: []string{"org-a"}}
-	coordinator = auth.Principal{Kind: auth.KindCoordinator, PlatformExperimentID: "pe-1", ProjectID: "prj-a", OrgIDs: []string{"org-a"}}
-	staffToken  = auth.Principal{Kind: auth.KindStaff}
+	keyOne              = auth.Principal{Kind: auth.KindKey, KeyID: "key-1", OrgIDs: []string{"org-a"}}
+	registryCoordinator = auth.Principal{Kind: auth.KindCoordinator, PlatformExperimentID: "pe-1", ProjectID: "prj-a", OrgIDs: []string{"org-a"}}
+	staffToken          = auth.Principal{Kind: auth.KindStaff}
 )
 
 // Who made a hypothesis, a link or a comment is the credential that sent it. agent_id says whose
@@ -114,12 +115,12 @@ func TestAGraphWriteIsMadeByTheCredentialThatSentIt(t *testing.T) {
 		owner  string
 		actor  domain.Actor
 	}{
-		"an agent naming itself":             {agentOne, map[string]any{"agent_id": "agent-1"}, 201, "agent-1", agent},
-		"an agent naming nobody":             {agentOne, nil, 201, "agent-1", agent},
-		"an agent naming another":            {agentOne, map[string]any{"agent_id": "agent-2"}, 403, "", domain.Actor{}},
-		"an agent naming one of another org": {agentOne, map[string]any{"agent_id": "agent-9"}, 403, "", domain.Actor{}},
-		"an agent claiming a person's name":  {agentOne, map[string]any{"author": "Mallory"}, 422, "", domain.Actor{}},
-		"an agent as itself and a person":    {agentOne, map[string]any{"agent_id": "agent-1", "author": "Mallory"}, 422, "", domain.Actor{}},
+		"an agent naming itself":             {registryAgent, map[string]any{"agent_id": "agent-1"}, 201, "agent-1", agent},
+		"an agent naming nobody":             {registryAgent, nil, 201, "agent-1", agent},
+		"an agent naming another":            {registryAgent, map[string]any{"agent_id": "agent-2"}, 403, "", domain.Actor{}},
+		"an agent naming one of another org": {registryAgent, map[string]any{"agent_id": "agent-9"}, 403, "", domain.Actor{}},
+		"an agent claiming a person's name":  {registryAgent, map[string]any{"author": "Mallory"}, 422, "", domain.Actor{}},
+		"an agent as itself and a person":    {registryAgent, map[string]any{"agent_id": "agent-1", "author": "Mallory"}, 422, "", domain.Actor{}},
 		"a person":                           {ada, nil, 201, "", adaNamed},
 		"a person claiming another's name":   {ada, map[string]any{"author": "Mallory"}, 422, "", domain.Actor{}},
 		"a person for an agent":              {ada, map[string]any{"agent_id": "agent-1"}, 201, "agent-1", adaNamed},
@@ -128,8 +129,8 @@ func TestAGraphWriteIsMadeByTheCredentialThatSentIt(t *testing.T) {
 		"an api key":                         {keyOne, nil, 201, "", key},
 		"an api key claiming a name":         {keyOne, map[string]any{"author": "Ada Lovelace"}, 422, "", domain.Actor{}},
 		"an api key for an agent":            {keyOne, map[string]any{"agent_id": "agent-2"}, 201, "agent-2", key},
-		"a coordinator":                      {coordinator, nil, 201, "", domain.Actor{Kind: domain.ActorCoordinator, ID: "pe-1", Name: "coordinator"}},
-		"a coordinator claiming a name":      {coordinator, map[string]any{"author": "Ada Lovelace"}, 422, "", domain.Actor{}},
+		"a coordinator":                      {registryCoordinator, nil, 201, "", domain.Actor{Kind: domain.ActorCoordinator, ID: "pe-1", Name: "coordinator"}},
+		"a coordinator claiming a name":      {registryCoordinator, map[string]any{"author": "Ada Lovelace"}, 422, "", domain.Actor{}},
 		"a staff token":                      {staffToken, nil, 201, "", domain.Actor{Kind: domain.ActorStaff, Name: "staff"}},
 		"a staff token claiming a name":      {staffToken, map[string]any{"author": "Ada Lovelace"}, 422, "", domain.Actor{}},
 	} {
@@ -147,7 +148,7 @@ func TestAGraphWriteIsMadeByTheCredentialThatSentIt(t *testing.T) {
 				f.do(t, http.MethodPost, "/hypotheses", with(map[string]any{
 					"platform_experiment_id": "pe-1", "text": "cosine decay", "links": []map[string]string{{"type": "builds_on", "to": "pe-1"}}}, tc.fields)),
 				func(body []byte) (written, error) {
-					var got hypothesisResponse
+					var got registry.HypothesisResponse
 					if err := json.Unmarshal(body, &got); err != nil {
 						return written{}, err
 					}
@@ -210,7 +211,7 @@ func TestAGraphWriteIsMadeByTheCredentialThatSentIt(t *testing.T) {
 // Every caller is refused each of them with the one 409, and every caller makes them while it is
 // open.
 func TestAClosedPlatformExperimentTakesNoHypothesisWriteFromAnyone(t *testing.T) {
-	closedCoordinator := coordinator
+	closedCoordinator := registryCoordinator
 	closedCoordinator.PlatformExperimentClosed = true
 	writes := map[string]func(f *registryAs) *httptest.ResponseRecorder{
 		"POST /hypotheses": func(f *registryAs) *httptest.ResponseRecorder {
@@ -229,9 +230,9 @@ func TestAClosedPlatformExperimentTakesNoHypothesisWriteFromAnyone(t *testing.T)
 	}
 	for name, callers := range map[string]struct{ open, closed auth.Principal }{
 		"a person":        {ada, ada},
-		"an agent":        {agentOne, agentOne},
+		"an agent":        {registryAgent, registryAgent},
 		"an api key":      {keyOne, keyOne},
-		"the coordinator": {coordinator, closedCoordinator},
+		"the coordinator": {registryCoordinator, closedCoordinator},
 	} {
 		for route, write := range writes {
 			f := newRegistryAs(t, callers.closed)
@@ -261,7 +262,7 @@ func TestRegisteringAnExistingClaimLeavesWhoRegisteredIt(t *testing.T) {
 	f := newRegistryAs(t, ada)
 	again := f.do(t, http.MethodPost, "/hypotheses", map[string]any{
 		"platform_experiment_id": "pe-1", "text": "Warmup  helps", "links": []map[string]string{{"type": "builds_on", "to": "pe-1"}}})
-	var got hypothesisResponse
+	var got registry.HypothesisResponse
 	if err := json.Unmarshal(again.Body.Bytes(), &got); err != nil || again.Code != http.StatusOK || !got.AlreadyExisted {
 		t.Fatalf("registering the same text again: got = %d %s (%v), want 200 and already_existed", again.Code, again.Body, err)
 	}
@@ -282,11 +283,11 @@ func TestAVerdictIsGivenByTheCredentialThatSentIt(t *testing.T) {
 		want   int
 		actor  domain.Actor
 	}{
-		"an agent on its own, named":              {agentOne, func(f *registryAs) string { return f.own.ID }, map[string]any{"agent_id": "agent-1"}, 200, agent},
-		"an agent on its own, naming nobody":      {agentOne, func(f *registryAs) string { return f.own.ID }, nil, 200, agent},
-		"an agent on a rival's, as the rival":     {agentOne, func(f *registryAs) string { return f.rivals.ID }, map[string]any{"agent_id": "agent-2"}, 403, domain.Actor{}},
-		"an agent on a rival's, as itself":        {agentOne, func(f *registryAs) string { return f.rivals.ID }, nil, 403, domain.Actor{}},
-		"an agent on one nobody owns":             {agentOne, func(f *registryAs) string { return f.unowned.ID }, nil, 200, agent},
+		"an agent on its own, named":              {registryAgent, func(f *registryAs) string { return f.own.ID }, map[string]any{"agent_id": "agent-1"}, 200, agent},
+		"an agent on its own, naming nobody":      {registryAgent, func(f *registryAs) string { return f.own.ID }, nil, 200, agent},
+		"an agent on a rival's, as the rival":     {registryAgent, func(f *registryAs) string { return f.rivals.ID }, map[string]any{"agent_id": "agent-2"}, 403, domain.Actor{}},
+		"an agent on a rival's, as itself":        {registryAgent, func(f *registryAs) string { return f.rivals.ID }, nil, 403, domain.Actor{}},
+		"an agent on one nobody owns":             {registryAgent, func(f *registryAs) string { return f.unowned.ID }, nil, 200, agent},
 		"a person for the owning agent":           {ada, func(f *registryAs) string { return f.own.ID }, map[string]any{"agent_id": "agent-1"}, 200, adaNamed},
 		"a person for an agent that does not own": {ada, func(f *registryAs) string { return f.own.ID }, map[string]any{"agent_id": "agent-2"}, 403, domain.Actor{}},
 		"a person naming nobody on an agent's":    {ada, func(f *registryAs) string { return f.own.ID }, nil, 403, domain.Actor{}},
@@ -381,8 +382,8 @@ func TestMetricsAreAppendedByTheJobOrItsOwnAgentOnly(t *testing.T) {
 		job    string
 		want   int
 	}{
-		"agent on a rival's job":        {agentOne, "exp-of-2", http.StatusForbidden},
-		"agent on another org's job":    {agentOne, "exp-other", http.StatusNotFound},
+		"agent on a rival's job":        {registryAgent, "exp-of-2", http.StatusForbidden},
+		"agent on another org's job":    {registryAgent, "exp-other", http.StatusNotFound},
 		"job token on another job":      {auth.Principal{Kind: auth.KindJob, ExperimentID: "exp-1", PlatformExperimentID: "pe-1", ProjectID: "prj-a", OrgIDs: []string{"org-a"}}, "exp-of-2", http.StatusForbidden},
 		"user of another org":           {auth.Principal{Kind: auth.KindUser, UserID: "u", OrgIDs: []string{"org-b"}}, "exp-1", http.StatusNotFound},
 		"user on a job that is not one": {ada, "exp-1%2F..%2Fexp-other", http.StatusNotFound},
