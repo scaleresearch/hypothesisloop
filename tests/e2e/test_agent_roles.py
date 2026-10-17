@@ -13,7 +13,7 @@ flow:
     never cut, and every cut agent comes from the competitor field.
 
 The ranking arithmetic itself is pinned by controller/stages_rank_test.go and
-quota/platform_experiments_roles_test.go; what only a live run can show is that the role recorded
+service/platformexperiments/roles_test.go; what only a live run can show is that the role recorded
 at signup actually reaches the ranker, the cut and the quota ledger.
 
 API-only, parallel-safe (own platform experiments, own agents).
