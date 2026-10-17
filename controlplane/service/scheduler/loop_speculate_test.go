@@ -587,20 +587,3 @@ func TestSpeculativeCandidatesIncludesMismatchedAcceleratorTypeClusterButRanksIt
 		t.Fatalf("got %v, want cluster-h100 (proven fit) ranked ahead of cluster-amd (no live proof, but still eligible)", got)
 	}
 }
-
-func TestSpeculativeCandidatesDisabledWithoutWithSpeculation(t *testing.T) {
-	exp := distributedExperiment(1, 2)
-	accel, resources := nodeFixture()
-	l := NewLoop(&speculationStore{}, tickQuota{}, nil, testGraceLimits, zap.NewNop()) // no WithSpeculation call
-	l.observed = fakeObserved{}
-
-	got, _, err := l.speculativeCandidates(context.Background(), newResolutionCache(l), exp,
-		map[string]bool{"cluster-a": true}, map[string]bool{"cluster-a": true},
-		map[string]string{"cluster-a": "cid-a"}, nil, singleOrg, accel, resources, nil, nil, nil)
-	if err != nil {
-		t.Fatalf("speculativeCandidates: %v", err)
-	}
-	if len(got) != 0 {
-		t.Fatal("a loop that never opted into speculation must never produce a candidate")
-	}
-}

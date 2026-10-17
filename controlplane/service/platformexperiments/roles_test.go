@@ -503,7 +503,7 @@ func TestASignupThatLostTheRaceWithItsOwnTwinSucceeds(t *testing.T) {
 func TestANewcomerIsRefusedOnceTheExperimentStarted(t *testing.T) {
 	store := &signupStore{pe: &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpRunning, MaxAgents: 5}}
 	err := newSignupTestService(t, store).Signup(context.Background(), "pe-1", domain.AgentSignup{AgentID: "agent-2", Role: domain.SignupRoleCompetitor})
-	if err == nil || !strings.Contains(err.Error(), "signup_closed") {
+	if refusal.ReasonOf(err) != "signup_closed" {
 		t.Fatalf("err = %v, want signup_closed", err)
 	}
 }
@@ -520,7 +520,7 @@ func TestASignupThatLostTheRaceWithStartIsReportedClosed(t *testing.T) {
 	}
 
 	err := newSignupTestService(t, store).Signup(context.Background(), "pe-1", domain.AgentSignup{AgentID: "agent-1", Role: domain.SignupRoleCompetitor})
-	if err == nil || !strings.Contains(err.Error(), "signup_closed") {
+	if refusal.ReasonOf(err) != "signup_closed" {
 		t.Fatalf("err = %v, want signup_closed: this agent is not in the experiment and must not be told it is", err)
 	}
 }

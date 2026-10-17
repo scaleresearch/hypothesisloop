@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -659,6 +660,15 @@ func TestARunningMachinesHarnessStateGoesToTheRunsHealth(t *testing.T) {
 	}
 }
 
+// A key the platform does not know, from a newer harness, is answered in unknown and the line read
+// without it.
+func TestParseHarnessStateReadsALineWithKeysItDoesNotKnow(t *testing.T) {
+	state, unknown, err := parseHarnessState("subagents=1 turn=working since=1759990000 status=allowed newer=2")
+	if err != nil || state.Subagents != 1 || state.TurnWaiting || !state.TurnSince.Equal(time.Unix(1759990000, 0)) || !slices.Equal(unknown, []string{"newer", "status"}) {
+		t.Fatalf("read %+v, unknown %v, %v, want the line read and newer and status unknown", state, unknown, err)
+	}
+}
+
 func TestParseHarnessStateRefusesWhatTheHarnessDoesNotPrint(t *testing.T) {
 	for _, line := range []string{
 		"",
@@ -672,7 +682,6 @@ func TestParseHarnessStateRefusesWhatTheHarnessDoesNotPrint(t *testing.T) {
 		"subagents=1 turn=working since=1759990000 model_utilization=0.5",
 		"subagents=1 turn=working since=1759990000 model_status=allowed model_utilization=1.5",
 		"subagents=1 turn=working since=1759990000 model_status=allowed model_resets_at=soon",
-		"subagents=1 turn=working since=1759990000 status=allowed",
 		"subagents=1 turn=working since=1759990000 stray",
 		"subagents=1 turn=working since=1759990000 instructions_digest=0123456789",
 		"subagents=1 turn=working since=1759990000 instructions_digest=0123456789AB",

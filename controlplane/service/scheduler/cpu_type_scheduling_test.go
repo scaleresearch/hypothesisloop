@@ -439,3 +439,11 @@ func TestAJobOnCPUAboveItsShareOfOneClusterIsPlacedOnAnotherThatHoldsIt(t *testi
 		})
 	}
 }
+
+func (coreBoxes) GetAutoscalerCapability(context.Context) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+
+func (coreBoxes) GetClusterIDs(context.Context) (map[string]string, error) {
+	return map[string]string{}, nil
+}

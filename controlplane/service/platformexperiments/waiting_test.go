@@ -225,7 +225,7 @@ func TestTheRosterOfARunningPlatformExperimentSaysWhichMachinesAreStillStarting(
 		t.Fatal(err)
 	}
 	if why := roster[0].StatusReason; why == nil || why.Reason != "instance_starting" || !strings.Contains(why.Message, "asked for less than a minute ago") ||
-		why.Summary != "Its machine was requested less than a minute ago and is on its way." {
+		why.Summary != "Its machine was requested less than a minute ago and is not listed yet." {
 		t.Errorf("a machine not listed yet: got = %+v", why)
 	}
 	if roster[1].StatusReason != nil {

@@ -493,28 +493,38 @@ func TestSubmitAnswersAHypothesisElsewhereAsItDoesAnAbsentOne(t *testing.T) {
 	}
 }
 
-type twoExperimentsStore struct{ poolOnlyStore }
+type twoExperimentsStore struct {
+	poolOnlyStore
+	asked *[]string
+}
 
-func (twoExperimentsStore) GetRunningAndQueued(_ context.Context, platformExpID string) ([]*domain.Experiment, error) {
+func (s twoExperimentsStore) GetRunningAndQueued(_ context.Context, platformExpID string) ([]*domain.Experiment, error) {
+	*s.asked = append(*s.asked, platformExpID)
 	all := []*domain.Experiment{
-		{ID: "mine-1", PlatformExperimentID: "pe-1"}, {ID: "theirs-1", PlatformExperimentID: "pe-other"},
-		{ID: "mine-2", PlatformExperimentID: "pe-1"}, {ID: "human-idea-job", PlatformExperimentID: "pe-1"},
+		{ID: "mine-1", PlatformExperimentID: "pe-1", HypothesisID: "h-human"}, {ID: "theirs-1", PlatformExperimentID: "pe-other", HypothesisID: "h-human"},
+		{ID: "mine-2", PlatformExperimentID: "pe-1", HypothesisID: "h-human"}, {ID: "human-idea-job", PlatformExperimentID: "pe-1", HypothesisID: "h-human"},
 	}
 	return slices.DeleteFunc(all, func(e *domain.Experiment) bool { return e.PlatformExperimentID != platformExpID }), nil
 }
 
-type recordingNovelty struct{ compared []string }
+// stopAtPriority ends a submit where priority reads the agent's quota, after novelty is scored.
+type stopAtPriority struct{ QuotaService }
+
+func (stopAtPriority) GetAgentQuota(context.Context, string, string) (*domain.AgentQuota, error) {
+	return nil, errReachedScoring
+}
 
 // Novelty is a comparison within one platform experiment: a hypothesis belongs to one, and
-// another's jobs may be another org's.
+// another's jobs may be another org's. The job never counts against itself.
 func TestNoveltyComparesAgainstTheJobsOfTheSamePlatformExperimentOnly(t *testing.T) {
-	novelty := &recordingNovelty{}
-	s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, environments: declared{}, store: twoExperimentsStore{}, hypotheses: humanHypothesis("pe-1")}
-	if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.Is(err, errReachedScoring) {
-		t.Fatalf("Submit: got = %v, want it to reach novelty scoring", err)
+	var asked []string
+	s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, environments: declared{}, store: twoExperimentsStore{asked: &asked}, hypotheses: humanHypothesis("pe-1"), quota: stopAtPriority{}}
+	exp := humanIdeaSubmission()
+	if err := s.Submit(context.Background(), exp); !errors.Is(err, errReachedScoring) {
+		t.Fatalf("Submit: got = %v, want it to reach priority scoring", err)
 	}
-	if want := []string{"mine-1", "mine-2"}; !slices.Equal(novelty.compared, want) {
-		t.Fatalf("compared against: got = %v, want = %v", novelty.compared, want)
+	if !slices.Equal(asked, []string{"pe-1"}) || exp.NoveltyScore != 1.0/3 {
+		t.Fatalf("asked for the jobs of %v, novelty %v, want pe-1's alone and 1/3 for mine-1 and mine-2", asked, exp.NoveltyScore)
 	}
 }
 

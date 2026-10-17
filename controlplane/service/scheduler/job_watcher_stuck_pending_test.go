@@ -202,9 +202,9 @@ func TestADisconnectedClustersOverrideIsNotReplacedByTheGlobalTimeout(t *testing
 	}
 }
 
-// A deadline that cannot be read is not replaced by the global one: that decision is skipped for
-// that job this pass, whichever of the two reads failed, instead of evicting it on a timeout its
-// cluster may not have.
+// A deadline that cannot be read is not replaced by the global one: a job's cluster settings that
+// cannot be read skip that job's decision this pass, and cluster ids that cannot be read end the
+// pass, instead of evicting a job on a timeout its cluster may not have.
 func TestAnUnreadableTimeoutEvictsNothing(t *testing.T) {
 	unreadable := errors.New("unavailable")
 	for way, phase := range map[string]*scaleUpBackend{
@@ -229,8 +229,8 @@ func TestAnUnreadableTimeoutEvictsNothing(t *testing.T) {
 			store := &settingsStore{lifecycleStore: &lifecycleStore{}, submitted: []*domain.Experiment{scaleUpExperiment(1, time.Hour)}}
 			w := NewJobWatcher(store, idsBackend{scaleUpBackend: phase, idsErr: unreadable}, noopSettler{}, zap.NewNop()).WithStuckPendingTimeout(5 * time.Minute)
 
-			if err := w.scanAndWatch(context.Background()); err != nil || store.transitioned {
-				t.Fatalf("err = %v, evicted %v", err, store.terminalReasons)
+			if err := w.scanAndWatch(context.Background()); err == nil || store.transitioned {
+				t.Fatalf("err = %v, evicted %v, want the pass ended and nothing evicted", err, store.terminalReasons)
 			}
 		})
 	}
@@ -300,31 +300,6 @@ func TestAPassAppliesTheOverrideWithoutTheScaleUpOptIn(t *testing.T) {
 				t.Fatalf("terminalReasons = %v, want evicted=%v", store.terminalReasons, tc.evicted)
 			}
 		})
-	}
-}
-
-// Cluster ids that cannot be read, on a deployment without the scale-up deadline, cost the jobs
-// waiting on a stuck-pending decision that one decision. The pass itself goes on and still
-// finishes the jobs that have ended, on every runtime.
-func TestUnreadableClusterIDsDoNotEndAPassWithoutTheScaleUpOptIn(t *testing.T) {
-	finished := scaleUpExperiment(1, time.Hour)
-	finished.ID, finished.Status = "exp-finished", domain.StatusRunning
-	store := &settingsStore{
-		lifecycleStore: &lifecycleStore{},
-		submitted:      []*domain.Experiment{scaleUpExperiment(1, time.Hour)},
-		running:        []*domain.Experiment{finished},
-	}
-	backend := &phaseByJobBackend{
-		idsBackend: idsBackend{scaleUpBackend: &scaleUpBackend{scheduledNodes: 1}, idsErr: errors.New("metrics store unavailable")},
-		phases:     map[string]domain.JobPhase{"exp-su": domain.JobPhaseGone, "exp-finished": domain.JobPhaseSucceeded},
-	}
-	w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).WithStuckPendingTimeout(5 * time.Minute)
-
-	if err := w.scanAndWatch(context.Background()); err != nil {
-		t.Fatalf("the pass ended: %v", err)
-	}
-	if !store.transitioned || len(store.terminalReasons) != 0 {
-		t.Fatalf("transitioned = %v, terminalReasons = %v, want the finished job completed and nothing evicted", store.transitioned, store.terminalReasons)
 	}
 }
 

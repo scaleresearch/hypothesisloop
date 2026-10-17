@@ -311,3 +311,27 @@ func TestATickMarksTheHeldJobsOnceAfterItJudgedTheQueue(t *testing.T) {
 		t.Errorf("at the mark the blocked job waited for %q, want the reason this pass gave it", store.reasonsAtMark[blocked.ID])
 	}
 }
+
+func (resilienceWorkload) GetAutoscalerCapability(context.Context) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+
+func (resilienceWorkload) GetClusterIDs(context.Context) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
+func (skippedClusterWorkload) GetAutoscalerCapability(context.Context) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+
+func (skippedClusterWorkload) GetClusterIDs(context.Context) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
+func (s *resilienceStore) ListSubmittedExperiments(context.Context) ([]*domain.Experiment, error) {
+	return nil, nil
+}
+
+func (s *resilienceStore) RecentlyTriedClusters(context.Context, time.Duration) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}

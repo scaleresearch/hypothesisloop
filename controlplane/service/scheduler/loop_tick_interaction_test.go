@@ -169,6 +169,12 @@ func (s *noRunningListStore) UpdateNotAdmittedReason(_ context.Context, id, reas
 func (s *noRunningListStore) ListCapacityClaimedExperiments(context.Context) ([]*domain.Experiment, error) {
 	return nil, nil
 }
+func (s *noRunningListStore) ListSubmittedExperiments(context.Context) ([]*domain.Experiment, error) {
+	return nil, nil
+}
+func (s *noRunningListStore) RecentlyTriedClusters(context.Context, time.Duration) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
 
 type tickQuota struct{ LoopQuotaStore }
 
@@ -475,6 +481,12 @@ func (holdWorkload) GetNodeLabels(context.Context) (map[string]map[string]map[st
 }
 func (holdWorkload) GetMultiNodeCapability(context.Context) (map[string]bool, error) {
 	return map[string]bool{}, nil
+}
+func (holdWorkload) GetAutoscalerCapability(context.Context) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+func (holdWorkload) GetClusterIDs(context.Context) (map[string]string, error) {
+	return map[string]string{"cluster-a": "id-cluster-a", "cluster-b": "id-cluster-b"}, nil
 }
 func (holdWorkload) GetTotalCapacity(context.Context) (map[string]domain.Footprint, error) {
 	return map[string]domain.Footprint{
@@ -794,4 +806,28 @@ func TestTickTellsAJobItWaitsForACapacityReportWhenDesiredStateHasTheRoom(t *tes
 			t.Errorf("%s: not_admitted_reason =\n%q, want\n%q", tier, got, want)
 		}
 	}
+}
+
+func (fullWorkload) GetAutoscalerCapability(context.Context) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+
+func (fullWorkload) GetClusterIDs(context.Context) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
+func (layoutShortWorkload) GetAutoscalerCapability(context.Context) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+
+func (layoutShortWorkload) GetClusterIDs(context.Context) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
+func (shareWorkload) GetAutoscalerCapability(context.Context) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+
+func (shareWorkload) GetClusterIDs(context.Context) (map[string]string, error) {
+	return map[string]string{}, nil
 }

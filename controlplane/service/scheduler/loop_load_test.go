@@ -435,6 +435,7 @@ func (s *sim) loop() *Loop {
 	l.settler = &recordingSettler{}
 	l.guaranteedFairnessWindow = time.Minute
 	l.heldJobNotice = 5 * time.Minute
+	l.triedClusterTTL = 15 * time.Minute
 	return l
 }
 
@@ -1100,4 +1101,12 @@ func TestAJobsEndWakesAdmissionAndItsRoomIsRefilled(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
+}
+
+func (*sim) GetAutoscalerCapability(context.Context) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+
+func (*sim) GetClusterIDs(context.Context) (map[string]string, error) {
+	return map[string]string{}, nil
 }

@@ -902,3 +902,19 @@ func TestAJobOnCPUFindsNoSlotWithADevice(t *testing.T) {
 		t.Fatalf("misfit %q", misfit)
 	}
 }
+
+func (slotWorkload) GetAutoscalerCapability(context.Context) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+
+func (slotWorkload) GetClusterIDs(context.Context) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
+func (s *slotStore) ListSubmittedExperiments(context.Context) ([]*domain.Experiment, error) {
+	return s.submitted, nil
+}
+
+func (s *slotStore) RecentlyTriedClusters(context.Context, time.Duration) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}

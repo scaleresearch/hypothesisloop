@@ -113,7 +113,7 @@ func TestANegativeRequestInOneGroupIsRejectedEvenWhenTheTotalLooksFine(t *testin
 		{Name: "a", Replicas: 1, AcceleratorCount: 1, AcceleratorType: h100, CPU: "2", Memory: "100Gi", Storage: "1Gi"},
 		{Name: "b", Replicas: 1, AcceleratorCount: 1, AcceleratorType: h100, CPU: "2", Memory: "-100Gi", Storage: "1Gi"},
 	}
-	mustReject(t, exp, "job.memory")
+	mustReject(t, exp, `job.groups["b"].memory`)
 }
 
 // A job leaves out its retries and gets none. What submission wrote is what every later reader
