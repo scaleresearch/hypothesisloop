@@ -14,7 +14,8 @@ the one a launcher makes. The draft keeps its code in the suite's repository, wh
 here: nothing is pushed to it.
 
 Exclusive, as test_agentsandbox.py is: it asks as the one launcher the local control plane
-gives agent sandboxes to.
+gives agent sandboxes to. On the stack make dev runs control-service is that launcher too and
+rents a sandbox for the planner and each agent, so the module carries the real_providers marker.
 """
 from __future__ import annotations
 
@@ -25,7 +26,7 @@ import pytest
 from support.api import API, BASELINE_JOB_WAIT_SECONDS, token_scope
 from support.wait import Deadline, eventually
 
-pytestmark = pytest.mark.exclusive
+pytestmark = [pytest.mark.exclusive, pytest.mark.real_providers]
 
 LAUNCHER = "main"
 GOAL = "Find out whether a larger hidden layer improves validation accuracy of the sample classifier"

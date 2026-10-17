@@ -57,6 +57,17 @@ def cpu_job(cores: int = 1) -> dict:
     return {"accelerator_type": None, "accelerator_count": None, "acceptable_accelerator_types": None, "cpu": str(cores)}
 
 
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """A test that rents machines at real vendors runs only when asked for with HL_E2E_RENT set
+    (make e2e RENT=1), whatever else selected it."""
+    if os.environ.get("HL_E2E_RENT"):
+        return
+    skip = pytest.mark.skip(reason="rents real machines: run with make e2e RENT=1")
+    for item in items:
+        if item.get_closest_marker("real_providers"):
+            item.add_marker(skip)
+
+
 @pytest.fixture(scope="session")
 def run_id() -> str:
     return uuid.uuid4().hex[:8]

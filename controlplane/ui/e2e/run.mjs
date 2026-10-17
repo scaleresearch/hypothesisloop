@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { execFileSync, spawn, spawnSync } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { existsSync, readFileSync, rmSync } from 'node:fs'
@@ -97,7 +97,7 @@ const addsAgent = url => url.origin === API && /^\/platform-experiments\/[^/]+\/
 async function newContext(browser) {
   const context = await browser.newContext(VIEW)
   // The form creates every experiment for the platform to run: a sandboxed coordinator, then one
-  // sandboxed agent a call, each a machine the platform would rent. The stack rents nothing, so the
+  // sandboxed agent a call, each a machine the platform would rent. Nothing is rented, so the
   // coordinator is taken out of the create and a sandboxed agent is answered without reaching the
   // API. A scenario that asserts on these writes routes them on its page, which comes first.
   await context.route(creates, route => {
@@ -141,12 +141,10 @@ function noneOfItsOwn(page, emptyState = 'No experiments yet.') {
 
 const listening = port => fetch(`http://localhost:${port}`).then(() => true, () => false)
 
-// The run creates platform experiments and adds agents to them. On a stack that rents compute
-// (as make dev runs it) a sandboxed one would be rented for real, so only a stack that rents nothing is run against.
-async function requireLocalStack() {
-  if (spawnSync('bash', ['localdev/dev.sh', 'require-local'], { cwd: repo, stdio: 'inherit' }).status !== 0) {
-    throw new Error('the browser run needs a stack that rents nothing, and make dev renders settings that rent compute')
-  }
+// The run creates platform experiments and adds agents to them on the stack make dev runs, which
+// rents a sandbox for each sandboxed one. Every sandboxed write is stood in for (newContext), and
+// the run submits no job, so nothing is rented.
+async function requireFreeStack() {
   if (existsSync(STACK_LOCK)) {
     const owner = existsSync(join(STACK_LOCK, 'owner')) ? readFileSync(join(STACK_LOCK, 'owner'), 'utf8').trim() : 'no owner named'
     throw new Error(`the stack is held (${STACK_LOCK}): ${owner}`)
@@ -311,7 +309,7 @@ function idleReport(clusterID) {
 }
 
 async function main() {
-  await requireLocalStack()
+  await requireFreeStack()
   const idp = await startIdentityProvider({ port: 54399, keyPath: join(repo, 'localdev', '.dev-jwt-key.pem'), ui: UI })
   const closers = [() => idp.close()]
   try {

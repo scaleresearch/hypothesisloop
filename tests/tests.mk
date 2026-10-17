@@ -1,18 +1,22 @@
 .PHONY: e2e tt-e2e nvidia-e2e test agent-test test-github-live
 
 # The e2e suite against the stack `make dev` runs and the local k3s cluster, in one command
-# (localdev/e2e.sh). It refuses a stack that rents compute (as make dev runs it) and one somebody
-# else holds, brings the dev nodes up, and leaves the nodes, the API and the UI as it found them.
+# (localdev/e2e.sh). It refuses a stack somebody else holds, brings the dev nodes up, keeps the
+# suite's jobs off the cloud cluster, and leaves the nodes, the API and the UI as it found them.
+# The tests that rent machines at real vendors (marker real_providers) are skipped unless RENT=1.
 # The cluster's runtime and the test workload are images: `make reload` first when they changed.
-# Usage: make e2e                                        every test that needs no real accelerator
+# Usage: make e2e                                        every test that needs no real accelerator and rents nothing
 #        make e2e E2E_ARGS='e2e/test_accounts.py -x'      what pytest is given instead
+#        make e2e RENT=1                                  the tests that rent, with the cloud cluster left on
 e2e:
-	bash localdev/e2e.sh $(E2E_ARGS)
+	E2E_RENT="$(RENT)" bash localdev/e2e.sh $(E2E_ARGS)
 
 # What a suite run on another host's stack (tt-e2e, nvidia-e2e) is started with: the API's address, a staff
-# token, and what the suite's hl-admin calls read. Refused on a stack that rents, as make e2e is.
+# token, and what the suite's hl-admin calls read. As make e2e does, it keeps the suite's jobs off the
+# cloud cluster for the run and skips the tests that rent, unless RENT=1.
 E2E_API_URL = $${API_URL:-http://localhost:$(HL_API_PORT)}
-E2E_ENV = bash $(CURDIR)/localdev/dev.sh require-local && . $(CURDIR)/localdev/lib/auth.sh && export API_URL="$(E2E_API_URL)" && export HL_TOKEN="$${HL_TOKEN:-$$(lib_hl_admin token staff)}" &&
+E2E_ENV = . $(CURDIR)/localdev/lib/auth.sh && export API_URL="$(E2E_API_URL)" && export HL_TOKEN="$${HL_TOKEN:-$$(lib_hl_admin token staff)}" && \
+	export HL_E2E_RENT="$(RENT)" && cloud_off="$$( [[ -n "$(RENT)" ]] || lib_cloud_cluster_off)" && trap "lib_cloud_cluster_restore \"$$cloud_off\"" EXIT &&
 
 # The workloads the tests' jobs run, built and pushed as the product's images are (push_image in
 # deploy/deploy.mk) and never part of a publish. make local-images builds workload for make e2e.

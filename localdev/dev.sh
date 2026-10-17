@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# dev.sh up|api|ui|status|require-local|down
+# dev.sh up|api|ui|status|down
 #
 # Runs the control plane and the UI as host processes against the compose datastores, so a code
 # change needs a restart of one process and no image build. Every process is started detached,
@@ -17,12 +17,10 @@
 #            rendered. Everything else keeps running
 #   ui       (re)start the UI, which otherwise reloads by itself
 #   status   which processes run
-#   require-local  fail while control-service runs with settings that rent compute. What must
-#            never reach a provider (the e2e suite) asks this first
 #   down     stop them all. The tunnels are not part of this (make tunnels-down)
 set -euo pipefail
 
-action="${1:?usage: dev.sh up|api|ui|status|require-local|down}"
+action="${1:?usage: dev.sh up|api|ui|status|down}"
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo}"
 . localdev/lib/auth.sh
@@ -134,11 +132,6 @@ render_settings() {
   done
 }
 
-# rents: whether the settings last rendered rent compute.
-rents() {
-  grep -qE '^(sandbox|cloud_compute):' "${settings}"
-}
-
 # The sandbox and cloud_compute sections are the examples the core ships, with this deployment's
 # provider, images and account in them, appended to the settings. The provider's key reaches
 # control-service through its environment file. No warm pool: rendering the settings rents nothing.
@@ -246,20 +239,6 @@ start_control_plane() {
   lib_register_clusters
 }
 
-# local_cluster enable|disable: whether org default places jobs on the cluster on this machine
-# (lib_register_local_cluster). A database an earlier make dev used has it registered, so a hosted
-# stack turns it off; one that never registered it answers 404 and has nothing to turn off.
-local_cluster() {
-  local code
-  code="$(printf 'Authorization: Bearer %s\n' "$(lib_hl_admin token staff)" |
-    curl -sS -o /dev/null -w '%{http_code}' -X POST -H @- "http://localhost:${HL_API_PORT}/orgs/default/clusters/local/$1")"
-  if [[ "${code}" == "200" || ( "$1" == "disable" && "${code}" == "404" ) ]]; then
-    return
-  fi
-  echo "dev: could not $1 cluster local for org default: HTTP ${code}" >&2
-  exit 1
-}
-
 # The git host of a stack whose GIT_HOST_PROVIDER is local. Any other runs none.
 start_git_server() {
   if [[ "${git_host}" != "local" ]]; then
@@ -323,12 +302,16 @@ case "${action}" in
     start_datastores
     start_git_server
     start_control_plane
-    local_cluster disable
-    # The cloud cluster belongs to the org every schema starts with and is shared, so every org's
-    # jobs are placed on it. Registering again changes nothing. control-service rents nothing for
-    # it until it is registered.
+    # Both clusters take the jobs of org default, as placement chooses between them: the k3s
+    # cluster on this machine and the cloud cluster, which belongs to the org every schema starts
+    # with and is shared, so every org's jobs are placed on it. Registering again changes nothing,
+    # and each is turned on again for org default, which an e2e run stopped half way may have left
+    # off. control-service rents nothing for the cloud cluster until it is registered.
+    lib_register_local_cluster
+    lib_default_org_cluster local enable
     lib_hl_admin cluster add "${cloud_cluster}" default >/dev/null
     lib_hl_admin cluster share "${cloud_cluster}" on >/dev/null
+    lib_default_org_cluster "${cloud_cluster}" enable
     must_stay_up control-service
     start_ui
     echo "dev: API http://localhost:${HL_API_PORT} (from outside ${public_api}), UI http://localhost:3000"
@@ -350,19 +333,13 @@ case "${action}" in
   status)
     status
     ;;
-  require-local)
-    if running control-service && [[ -f "${settings}" ]] && rents; then
-      echo "dev: control-service runs (pid $(cat "${run}/control-service.pid")) with settings that rent compute: the sandbox and cloud_compute sections make dev renders" >&2
-      exit 1
-    fi
-    ;;
   down)
     for name in "${processes[@]}"; do
       stop "${name}"
     done
     ;;
   *)
-    echo "usage: dev.sh up|api|ui|status|require-local|down" >&2
+    echo "usage: dev.sh up|api|ui|status|down" >&2
     exit 1
     ;;
 esac

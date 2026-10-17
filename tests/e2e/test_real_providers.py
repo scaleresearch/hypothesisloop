@@ -4,7 +4,7 @@ their jobs run on a rented GPU cluster and report metrics, one sandbox is lost a
 one harness is frozen, and the experiment still ends with a summary and nothing left rented.
 
 It rents machines and spends model tokens, so it is no part of the suite: it carries the
-real_providers marker, which every default selection leaves out, and it skips unless the
+real_providers marker, which runs only with make e2e RENT=1, and it skips unless the
 environment says where it runs:
 
     API_URL, HL_TOKEN                 the dev stack (make dev) and its staff token,
@@ -18,7 +18,7 @@ environment says where it runs:
     SANDBOX_E2B_API_KEY               for e2b
     CLOUD_COMPUTE_VAST_API_KEY        the account the cloud cluster rents jobs on
 
-    cd tests && uv run pytest e2e/test_real_providers.py -m real_providers -s
+    make e2e RENT=1 E2E_ARGS='e2e/test_real_providers.py -s'
 """
 from __future__ import annotations
 

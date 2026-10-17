@@ -14,6 +14,9 @@ A sandboxed agent works in its platform experiment's repository. Most tests here
 conftest's sandbox_repository gives: on GitHub the sandbox test_experiment_repo.py pushes to,
 without which they are skipped, and on any other git host a repository made for the session.
 
+On the stack make dev runs control-service is that launcher too and rents a sandbox for each
+agent here, so the module carries the real_providers marker.
+
 Exclusive: every test here asks as the one launcher the local control plane gives sandboxed agents
 to, and a machine that launcher reported once and leaves out of a later report is an exit. Two
 tests asking at once would each end the machines the other reported.
@@ -33,7 +36,7 @@ from support.api import API, ENDED, token_scope
 from support.stages import BUDGET, BURN_JOB_HOURS, REPORT_INTERVAL_SECONDS, ROSTER_SIZE, STAGES, cross_first_boundary_ranked
 from support.wait import eventually
 
-pytestmark = pytest.mark.exclusive
+pytestmark = [pytest.mark.exclusive, pytest.mark.real_providers]
 
 LAUNCHER = "main"
 MAX_RESTARTS = 3  # domain.MaxAgentInstanceRestarts

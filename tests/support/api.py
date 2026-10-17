@@ -281,10 +281,12 @@ class API:
         """Has the platform share the default org's connected clusters with every org while the
         block runs. An org the suite makes owns no cluster that runs anything, and a platform
         experiment is created, and its baseline measured, only where a cluster takes the org's
-        jobs. Every org reads those clusters meanwhile, so a test that uses it is exclusive."""
+        jobs. Every org reads those clusters meanwhile, so a test that uses it is exclusive. One
+        the default org turned off, as make e2e does the cloud cluster, stays unshared: another
+        org would place jobs on it."""
         staff = self.staff
         names = [c["name"] for c in staff.get_json(f"/orgs/{staff.org_id}/clusters")["clusters"]
-                 if c["owned"] and c["connected"] and not c["shared"]]
+                 if c["owned"] and c["connected"] and c["enabled"] and not c["shared"]]
         assert names, "the default org has no connected cluster to share"
         for name in names:
             admin.share_cluster(name, True)
