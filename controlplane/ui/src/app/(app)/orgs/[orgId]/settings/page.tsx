@@ -129,7 +129,7 @@ export default function SettingsPage() {
 
       {!editsOrg && (
         <Text tone="muted">
-          You are a member of {org.name}. Only an owner can rename it or manage its projects, API keys and GitHub accounts.
+          You are a member of {org.name}. Only an owner can rename it or manage its projects and GitHub accounts.
         </Text>
       )}
 
@@ -137,10 +137,13 @@ export default function SettingsPage() {
         <>
           <Organization />
           <Projects />
-          <Section title="API keys" scrollX>
-            <APIKeys />
-          </Section>
         </>
+      )}
+
+      {org.actions.includes('create_api_key') && (
+        <Section title="API keys" scrollX>
+          <APIKeys />
+        </Section>
       )}
 
       <Section title="Members" scrollX>

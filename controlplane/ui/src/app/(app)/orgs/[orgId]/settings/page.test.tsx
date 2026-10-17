@@ -112,12 +112,19 @@ describe('creating a project', () => {
 describe('a member of the org', () => {
   it('sees its members and where its clusters are, and that the rest is an owner\'s, with nothing to change', () => {
     show({ ...owner, orgs: [{ ...owner.orgs[0], role: 'member', actions: ['create_api_key'] }] })
-    expect(screen.getByText(/Only an owner can rename it or manage its projects, API keys and GitHub accounts/)).toBeTruthy()
+    expect(screen.getByText(/Only an owner can rename it or manage its projects and GitHub accounts/)).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Compute Resources' }).getAttribute('href')).toBe('/orgs/org_a/clusters')
     expect(screen.getByText('members')).toBeTruthy()
-    expect(screen.queryByText('api keys')).toBeNull()
+    expect(screen.getByText('api keys')).toBeTruthy()
     expect(screen.queryByLabelText('Organization name')).toBeNull()
     expect(screen.queryByLabelText('New project name')).toBeNull()
+  })
+})
+
+describe('the API keys section', () => {
+  it('is shown only when the server lists create_api_key for the org', () => {
+    show({ ...owner, orgs: [{ ...owner.orgs[0], role: 'member', actions: [] }] })
+    expect(screen.queryByText('api keys')).toBeNull()
   })
 })
 
