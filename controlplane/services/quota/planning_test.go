@@ -18,7 +18,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/contract/repotemplate"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
@@ -157,7 +157,7 @@ func TestADraftIsCreatedFromOneSentenceWithItsPlannerAndNothingOfARun(t *testing
 func TestADraftIsAnsweredBeforeItsRepositoryAndARefusedOneClosesIt(t *testing.T) {
 	store := &draftStore{}
 	svc, call := planningAPI(t, store, planner)
-	planningRepositories.notCreated = api.Refuse(http.StatusConflict, "repository_exists", "the account already has a repository of that name")
+	planningRepositories.notCreated = refusal.Refuse(http.StatusConflict, "repository_exists", "the account already has a repository of that name")
 	code, out := call("POST", "/platform-experiments/drafts", map[string]any{"project_id": "prj-a", "goal": "Find out whether warmup helps"})
 	if code != http.StatusCreated || out["status_reason"].(map[string]any)["reason"] != "repository_creating" {
 		t.Fatalf("got = %d %v, want 201 with the repository still being created", code, out)
@@ -1273,7 +1273,7 @@ func TestABaselineAgentNamesTheJobItsFinishDeclares(t *testing.T) {
 
 	for named, reason := range map[string]string{"job-failed": "baseline_not_completed", "job-other": "no_baseline", "job-missing": "no_baseline", "job-check": "baseline_not_on_branch"} {
 		_, err := svc.FinishAgent(ctx, "pe-draft", measures, "the baseline is measured", "", named)
-		var refused *api.Refusal
+		var refused *refusal.Refusal
 		if !errors.As(err, &refused) || refused.GetStatus() != http.StatusUnprocessableEntity || refused.Reason != reason {
 			t.Errorf("a finish naming %s: %v, want 422 %s", named, err, reason)
 		}
@@ -1281,7 +1281,7 @@ func TestABaselineAgentNamesTheJobItsFinishDeclares(t *testing.T) {
 			t.Fatalf("a finish naming %s was refused and still recorded: finished %v, baseline %q", named, store.baselines[0].FinishedAt, store.created[0].BaselineJobID)
 		}
 	}
-	var refused *api.Refusal
+	var refused *refusal.Refusal
 	if _, err := svc.FinishAgent(ctx, "pe-draft", "ag-researcher", "done", "", "job-control"); !errors.As(err, &refused) || refused.Reason != "not_a_baseline_agent" {
 		t.Errorf("a researcher naming a baseline: %v, want 422 not_a_baseline_agent", err)
 	}
@@ -1336,7 +1336,7 @@ func TestABaselineAgentDeclaresNoJobItsOwnJobsBeat(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := svc.FinishAgent(ctx, "pe-draft", measures, "the baseline is measured", "", "job-default")
-	var refused *api.Refusal
+	var refused *refusal.Refusal
 	if !errors.As(err, &refused) || refused.Reason != "baseline_weaker_than_own_job" || !strings.Contains(refused.Message, "job-check") || !strings.Contains(refused.Message, "val_loss = 1.7") {
 		t.Fatalf("a finish naming the default its check beat: %v, want 422 baseline_weaker_than_own_job naming job-check and 1.7", err)
 	}
@@ -1382,7 +1382,7 @@ func TestOnlyAJobHoldingTheConstraintsMakesADeclarationWeak(t *testing.T) {
 		t.Errorf("beaten only by jobs that broke or left out a constraint: %v, want declared", err)
 	}
 	svc, _ = newSvc(declared, broken, stronger)
-	var refused *api.Refusal
+	var refused *refusal.Refusal
 	if _, err := svc.heldToBaseline(context.Background(), &p, true); !errors.As(err, &refused) || refused.Reason != "baseline_weaker_than_own_job" || !strings.Contains(refused.Message, "job job-check") {
 		t.Errorf("beaten by the check: %v, want baseline_weaker_than_own_job naming job-check", err)
 	}

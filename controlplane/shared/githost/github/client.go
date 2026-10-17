@@ -163,7 +163,7 @@ func failedFor(installationID int64, err error) error {
 		return err
 	}
 	failed := &FailedError{Installation: installationID, Err: err}
-	var refused *refusal
+	var refused *rejection
 	if errors.As(err, &refused) {
 		failed.Status, failed.Message = refused.status, refused.message
 	}
@@ -425,7 +425,7 @@ func (c *Client) CreateRepository(ctx context.Context, installationID int64, nam
 	// GitHub writes no tree to a repository with no commit, so it makes the first one itself
 	// and firstCommit takes its place.
 	body := map[string]any{"name": name, "description": description, "private": true, "auto_init": true}
-	var refused *refusal
+	var refused *rejection
 	switch err := c.call(ctx, http.MethodPost, path, token.Token, body, &out); {
 	case errors.Is(err, ErrRateLimited):
 		return nil, err
@@ -555,7 +555,7 @@ func (c *Client) mint(ctx context.Context, installationID int64, body map[string
 	}
 	var out minted
 	path := "/app/installations/" + strconv.FormatInt(installationID, 10) + "/access_tokens"
-	var refused *refusal
+	var refused *rejection
 	err = c.call(ctx, http.MethodPost, path, jwt, body, &out)
 	// GitHub has answered a mint 500 once among many that worked, and the git command an agent
 	// ran failed with it: a mint changes nothing, so one GitHub failed is asked again.
@@ -707,10 +707,10 @@ var (
 	errFailed = errors.New("github failed the call")
 )
 
-// refusal is an answer of GitHub that is not a success: one of the kinds above, or nil for any
+// rejection is an answer of GitHub that is not a success: one of the kinds above, or nil for any
 // other status, with GitHub's own message. accepted is the permissions GitHub says the call
 // takes, and nameExists that it refused a name its account already holds.
-type refusal struct {
+type rejection struct {
 	kind       error
 	status     int
 	message    string
@@ -719,14 +719,14 @@ type refusal struct {
 	detail     string
 }
 
-func (r *refusal) Error() string {
+func (r *rejection) Error() string {
 	if r.kind == nil {
 		return r.detail
 	}
 	return r.kind.Error() + " (" + r.detail + ")"
 }
 
-func (r *refusal) Unwrap() error { return r.kind }
+func (r *rejection) Unwrap() error { return r.kind }
 
 // call makes one API request with a bearer token.
 func (c *Client) call(ctx context.Context, method, path, bearer string, body, out any) error {
@@ -784,7 +784,7 @@ func (c *Client) request(ctx context.Context, method, path, authorization string
 		} `json:"errors"`
 	}
 	_ = json.Unmarshal(data, &answer)
-	refused := &refusal{
+	refused := &rejection{
 		status:   resp.StatusCode,
 		message:  bounded(answer.Message),
 		accepted: bounded(resp.Header.Get("X-Accepted-GitHub-Permissions")),

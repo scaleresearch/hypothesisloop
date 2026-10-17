@@ -16,7 +16,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
@@ -100,9 +100,9 @@ func TestABaselineAgentRegistersNoHypothesis(t *testing.T) {
 	if !errors.Is(err, ErrBaselineRegistersNoHypothesis) {
 		t.Fatalf("RegisterHypothesis for a baseline agent: got = %v, want %v", err, ErrBaselineRegistersNoHypothesis)
 	}
-	var refusal *api.Refusal
-	if answered := (&Handler{}).hypothesisWriteError(err); !errors.As(answered, &refusal) || refusal.GetStatus() != http.StatusForbidden || refusal.Reason != "baseline_registers_no_hypothesis" {
-		t.Errorf("the refusal as answered: got = %#v, want 403 baseline_registers_no_hypothesis", answered)
+	var refused *refusal.Refusal
+	if answered := (&Handler{}).hypothesisWriteError(err); !errors.As(answered, &refused) || refused.GetStatus() != http.StatusForbidden || refused.Reason != "baseline_registers_no_hypothesis" {
+		t.Errorf("the refused as answered: got = %#v, want 403 baseline_registers_no_hypothesis", answered)
 	}
 	if _, _, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-1", agentActor("agent-1"), "pe-1", "the control", buildOnRoot, nil); err != nil {
 		t.Errorf("RegisterHypothesis for a researcher: got = %v, want nil", err)
@@ -119,12 +119,12 @@ func TestAnAgentWithNoSignupHereRegistersNoHypothesis(t *testing.T) {
 	if !errors.Is(err, db.ErrNotSignedUp) {
 		t.Fatalf("RegisterHypothesis for an agent of another platform experiment: got = %v, want %v", err, db.ErrNotSignedUp)
 	}
-	var refusal *api.Refusal
-	if answered := (&Handler{}).hypothesisWriteError(err); !errors.As(answered, &refusal) || refusal.GetStatus() != http.StatusForbidden || refusal.Reason != "not_signed_up" {
-		t.Errorf("the refusal as answered: got = %#v, want 403 not_signed_up", answered)
+	var refused *refusal.Refusal
+	if answered := (&Handler{}).hypothesisWriteError(err); !errors.As(answered, &refused) || refused.GetStatus() != http.StatusForbidden || refused.Reason != "not_signed_up" {
+		t.Errorf("the refused as answered: got = %#v, want 403 not_signed_up", answered)
 	}
 	if rows := svc.graph.(*fakeGraph).rows; len(rows) != 0 {
-		t.Errorf("hypotheses after the refusal: got = %v, want none", rows)
+		t.Errorf("hypotheses after the refused: got = %v, want none", rows)
 	}
 }
 

@@ -13,7 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
@@ -174,7 +174,7 @@ func instanceStarting(signup domain.AgentSignup, now time.Time) *domain.StatusRe
 // refuseSignup is a join or a removal refused for a reason the caller can act on. Reason leads
 // the message, as every signup refusal always has.
 func refuseSignup(status int, reason, format string, args ...any) error {
-	return api.Refuse(status, reason, reason+": "+fmt.Sprintf(format, args...))
+	return refusal.Refuse(status, reason, reason+": "+fmt.Sprintf(format, args...))
 }
 
 // AddAgent joins one agent to a platform experiment: the registered agent req names, or a new
@@ -531,7 +531,7 @@ func (s *PlatformExperimentsService) FinishAgent(ctx context.Context, platformEx
 		// The same answer as to anything else sent past the close (RequireActive): the token's
 		// wind-down is for filing summaries, and the close already ended the agent's run.
 		if pe == nil || pe.Status == domain.PlatformExpClosed {
-			return nil, api.Refuse(http.StatusConflict, "experiment_closed", "platform experiment "+platformExpID+" is closed: your run is over and nothing is left to finish")
+			return nil, refusal.Refuse(http.StatusConflict, "experiment_closed", "platform experiment "+platformExpID+" is closed: your run is over and nothing is left to finish")
 		}
 		return nil, refuseSignup(409, "not_running", "platform experiment %s is %s: only an agent of role baseline finishes before it runs", platformExpID, pe.Status)
 	case errors.Is(err, db.ErrWorkUnfinished):
@@ -691,7 +691,7 @@ func (h *PlatformExperimentsHandler) WithAgentLaunch(launch AgentLaunch) *Platfo
 // refusal answers a refusal as it is; anything else is the platform's own failure, logged and
 // answered without detail.
 func (h *PlatformExperimentsHandler) refusal(op string, err error) error {
-	var refused *api.Refusal
+	var refused *refusal.Refusal
 	if errors.As(err, &refused) {
 		return refused
 	}

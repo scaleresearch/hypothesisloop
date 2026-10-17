@@ -11,7 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/graphdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
@@ -625,24 +625,24 @@ type Changer struct {
 // hypothesis a person wrote for no agent is theirs to change, and also an owner's of its org to
 // remove. An agent's hypothesis, and one written with a credential no person signed in with, is
 // nobody's to change.
-func ChangeRefusal(h *domain.Hypothesis, caller Changer, remove bool) *api.Refusal {
+func ChangeRefusal(h *domain.Hypothesis, caller Changer, remove bool) *refusal.Refusal {
 	verb := "edit"
 	if remove {
 		verb = "remove"
 	}
 	switch {
 	case caller.UserID == "":
-		return api.Refuse(http.StatusForbidden, "person_only", "only the signed-in person who wrote an idea may "+verb+" it, and this request carries no person")
+		return refusal.Refuse(http.StatusForbidden, "person_only", "only the signed-in person who wrote an idea may "+verb+" it, and this request carries no person")
 	case h.AgentID != "":
-		return api.Refuse(http.StatusForbidden, "agent_hypothesis", fmt.Sprintf("hypothesis %s is agent %s's, and an agent's hypotheses are its record: nobody may %s one. Add a comment to it instead", h.ID, h.AgentID, verb))
+		return refusal.Refuse(http.StatusForbidden, "agent_hypothesis", fmt.Sprintf("hypothesis %s is agent %s's, and an agent's hypotheses are its record: nobody may %s one. Add a comment to it instead", h.ID, h.AgentID, verb))
 	case h.Actor.Kind != domain.ActorUser:
-		return api.Refuse(http.StatusForbidden, "not_a_persons_idea", fmt.Sprintf("hypothesis %s was registered with a %s credential and no person wrote it, so nobody may %s it. Add a comment to it instead", h.ID, h.Actor.Kind, verb))
+		return refusal.Refuse(http.StatusForbidden, "not_a_persons_idea", fmt.Sprintf("hypothesis %s was registered with a %s credential and no person wrote it, so nobody may %s it. Add a comment to it instead", h.ID, h.Actor.Kind, verb))
 	case h.Actor.ID == caller.UserID, remove && caller.OrgOwner:
 		return nil
 	case remove:
-		return api.Refuse(http.StatusForbidden, "not_the_author", "only the person who wrote this idea, or an owner of its org, may remove it. Add a comment to it instead")
+		return refusal.Refuse(http.StatusForbidden, "not_the_author", "only the person who wrote this idea, or an owner of its org, may remove it. Add a comment to it instead")
 	default:
-		return api.Refuse(http.StatusForbidden, "not_the_author", "only the person who wrote this idea may edit it. Add a comment to it instead")
+		return refusal.Refuse(http.StatusForbidden, "not_the_author", "only the person who wrote this idea may edit it. Add a comment to it instead")
 	}
 }
 

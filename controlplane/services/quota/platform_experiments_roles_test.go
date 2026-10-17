@@ -14,7 +14,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 )
@@ -89,7 +89,7 @@ func TestMaxAgentsStillRejectsACompetitorOnceTheFieldIsFull(t *testing.T) {
 	svc := newSignupTestService(t, store)
 
 	err := svc.Signup(context.Background(), "pe-1", domain.AgentSignup{AgentID: "agent-3", Role: domain.SignupRoleCompetitor})
-	var refused *api.Refusal
+	var refused *refusal.Refusal
 	if !errors.As(err, &refused) || refused.Reason != "max_agents_reached" || !strings.Contains(refused.Message, "researchers (agents of role competitor)") || !strings.Contains(refused.Message, "baseline") {
 		t.Fatalf("err = %v, want max_agents_reached saying that researchers count and a baseline agent does not", err)
 	}

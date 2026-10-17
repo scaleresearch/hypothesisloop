@@ -12,7 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
@@ -64,7 +64,7 @@ type hypothesisWithJobs struct {
 // similarHypothesesError is the 409 a registration gets while it reads close to hypotheses it has
 // not been told apart from: the refusal with the hypotheses themselves beside it.
 type similarHypothesesError struct {
-	*api.Refusal
+	*refusal.Refusal
 	Similar []domain.SimilarHypothesis `json:"similar"`
 }
 
@@ -86,7 +86,7 @@ const closedRefusal = "409 experiment_closed once the platform experiment is clo
 func (h *Handler) hypothesisWriteError(err error) error {
 	var similar *graphdb.SimilarError
 	if errors.As(err, &similar) {
-		return &similarHypothesesError{Refusal: api.Refuse(http.StatusConflict, "similar_hypotheses", similarDetail), Similar: similar.Similar}
+		return &similarHypothesesError{Refusal: refusal.Refuse(http.StatusConflict, "similar_hypotheses", similarDetail), Similar: similar.Similar}
 	}
 	var unsupported *UnsupportedVerdictError
 	if errors.As(err, &unsupported) {
@@ -94,21 +94,21 @@ func (h *Handler) hypothesisWriteError(err error) error {
 	}
 	var inRecord *InRecordError
 	if errors.As(err, &inRecord) {
-		return api.Refuse(http.StatusConflict, "hypothesis_in_record", inRecord.Error())
+		return refusal.Refuse(http.StatusConflict, "hypothesis_in_record", inRecord.Error())
 	}
 	switch {
 	case errors.Is(err, graphdb.ErrDuplicateText):
-		return api.Refuse(http.StatusConflict, "duplicate_hypothesis", "another hypothesis of this platform experiment already states this text: "+
+		return refusal.Refuse(http.StatusConflict, "duplicate_hypothesis", "another hypothesis of this platform experiment already states this text: "+
 			"nothing was changed. Test or comment on that one instead")
 	case errors.Is(err, graphdb.ErrInvalidLink),
 		errors.Is(err, ErrUnknownPlatformExperiment), errors.Is(err, db.ErrUnknownAgent):
 		return huma.Error400BadRequest(err.Error())
 	case errors.Is(err, ErrBaselineRegistersNoHypothesis):
-		return api.Refuse(http.StatusForbidden, "baseline_registers_no_hypothesis", err.Error())
+		return refusal.Refuse(http.StatusForbidden, "baseline_registers_no_hypothesis", err.Error())
 	case errors.Is(err, db.ErrPlatformExperimentClosed):
-		return api.Refuse(http.StatusConflict, "experiment_closed", closedDetail)
+		return refusal.Refuse(http.StatusConflict, "experiment_closed", closedDetail)
 	case errors.Is(err, db.ErrNotSignedUp):
-		return api.Refuse(http.StatusForbidden, "not_signed_up", err.Error())
+		return refusal.Refuse(http.StatusForbidden, "not_signed_up", err.Error())
 	case errors.Is(err, ErrHypothesisNotOwner):
 		return huma.Error403Forbidden(err.Error())
 	case errors.Is(err, ErrHypothesisNotFound):
@@ -173,7 +173,7 @@ const (
 // refused, so a short page is never read as the whole set.
 func page(limit, offset int) (int, int, error) {
 	if limit < 0 || limit > maxPageLimit || offset < 0 {
-		return 0, 0, api.Refuse(http.StatusUnprocessableEntity, "invalid_page", fmt.Sprintf("limit must be 1 to %d and offset must not be negative", maxPageLimit))
+		return 0, 0, refusal.Refuse(http.StatusUnprocessableEntity, "invalid_page", fmt.Sprintf("limit must be 1 to %d and offset must not be negative", maxPageLimit))
 	}
 	if limit == 0 {
 		return defaultPageLimit, offset, nil

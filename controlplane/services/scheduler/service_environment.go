@@ -10,7 +10,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 )
@@ -79,7 +79,7 @@ func (s *Service) FindEnvironment(ctx context.Context, peID, agentID, codeRef, i
 	commit := codeRef[strings.LastIndex(codeRef, "@")+1:]
 	env, declared, err := s.environments.Find(ctx, exp.OrgID, pe.ProjectID, pe.Repository, commit, exp.Job.Image)
 	var invalid *domain.EnvironmentFileError
-	var refused *api.Refusal
+	var refused *refusal.Refusal
 	var unresolved *domain.ImageUnresolvedError
 	switch {
 	case errors.As(err, &invalid):
@@ -208,7 +208,7 @@ func registerEnvironments(doc *apidocs.Doc, h *Handler) {
 		if err != nil {
 			var refused *AdmissionError
 			if errors.As(err, &refused) {
-				return nil, api.Refuse(admissionHTTPStatus(refused.Reason), refused.Reason, refused.Message)
+				return nil, refusal.Refuse(admissionHTTPStatus(refused.Reason), refused.Reason, refused.Message)
 			}
 			return nil, auth.Internal(h.svc.logger, "build environment", err)
 		}
@@ -247,7 +247,7 @@ func registerEnvironments(doc *apidocs.Doc, h *Handler) {
 				if refused.Reason == ReasonEnvironmentNotRequested {
 					status = http.StatusNotFound
 				}
-				return nil, api.Refuse(status, refused.Reason, refused.Message)
+				return nil, refusal.Refuse(status, refused.Reason, refused.Message)
 			}
 			return nil, auth.Internal(h.svc.logger, "get environment", err)
 		}

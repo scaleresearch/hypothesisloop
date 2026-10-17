@@ -11,7 +11,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
@@ -50,13 +50,13 @@ func (s *PlatformExperimentsService) SendMessage(ctx context.Context, platformEx
 	}
 	switch {
 	case named != 1:
-		return nil, nil, api.Refuse(http.StatusUnprocessableEntity, "invalid_recipient", "invalid_recipient: name exactly one of agent_id, all and coordinator")
+		return nil, nil, refusal.Refuse(http.StatusUnprocessableEntity, "invalid_recipient", "invalid_recipient: name exactly one of agent_id, all and coordinator")
 	case req.Coordinator && by.Kind == domain.ActorCoordinator:
-		return nil, nil, api.Refuse(http.StatusUnprocessableEntity, "invalid_recipient", "invalid_recipient: the coordinator sends no message to itself")
+		return nil, nil, refusal.Refuse(http.StatusUnprocessableEntity, "invalid_recipient", "invalid_recipient: the coordinator sends no message to itself")
 	case text == "":
-		return nil, nil, api.Refuse(http.StatusUnprocessableEntity, "empty_message", "empty_message: text is empty")
+		return nil, nil, refusal.Refuse(http.StatusUnprocessableEntity, "empty_message", "empty_message: text is empty")
 	case len(written) > domain.MaxAgentMessageBytes:
-		return nil, nil, api.Refuse(http.StatusUnprocessableEntity, "message_too_long", fmt.Sprintf("message_too_long: text is %d bytes, at most %d: say the one direction that matters, with the job and hypothesis ids it rests on", len(written), domain.MaxAgentMessageBytes))
+		return nil, nil, refusal.Refuse(http.StatusUnprocessableEntity, "message_too_long", fmt.Sprintf("message_too_long: text is %d bytes, at most %d: say the one direction that matters, with the job and hypothesis ids it rests on", len(written), domain.MaxAgentMessageBytes))
 	}
 	var messages []domain.AgentMessage
 	var refused []refusedMessage
@@ -80,13 +80,13 @@ func (s *PlatformExperimentsService) SendMessage(ctx context.Context, platformEx
 	var limited *db.MessagesRateLimited
 	switch {
 	case errors.As(err, &limited):
-		return nil, nil, api.Refuse(http.StatusTooManyRequests, "message_rate_limited", fmt.Sprintf(
+		return nil, nil, refusal.Refuse(http.StatusTooManyRequests, "message_rate_limited", fmt.Sprintf(
 			"message_rate_limited: %s was sent %d messages by the %s in the last hour, the most an hour allows; the next can be sent from %s. Say in one message what you would say in several",
 			limited.AgentID, domain.MaxAgentMessagesPerHour, limited.From, limited.Next.Format(time.RFC3339)))
 	case errors.Is(err, db.ErrNoCoordinator):
-		return nil, nil, api.Refuse(http.StatusConflict, "no_coordinator", "no_coordinator: the platform hosts no coordinator for platform experiment "+platformExpID)
+		return nil, nil, refusal.Refuse(http.StatusConflict, "no_coordinator", "no_coordinator: the platform hosts no coordinator for platform experiment "+platformExpID)
 	case errors.Is(err, db.ErrPlatformExperimentClosed):
-		return nil, nil, api.Refuse(http.StatusConflict, "experiment_closed", "experiment_closed: platform experiment "+platformExpID+" is closed: no agent of it is at work")
+		return nil, nil, refusal.Refuse(http.StatusConflict, "experiment_closed", "experiment_closed: platform experiment "+platformExpID+" is closed: no agent of it is at work")
 	case errors.Is(err, db.ErrNotSignedUp):
 		return nil, nil, refuseSignup(http.StatusNotFound, "not_signed_up", "%s of platform experiment %s: hl platform-experiments agents list names its agents", err.Error(), platformExpID)
 	case errors.Is(err, db.ErrAgentEnded):

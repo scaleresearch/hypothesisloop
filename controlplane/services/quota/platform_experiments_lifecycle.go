@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
@@ -82,9 +82,9 @@ func (s *PlatformExperimentsService) validate(spec CreatePlatformExperimentReque
 	if err != nil {
 		return spec, err
 	}
-	var problems api.Problems
+	var problems refusal.Problems
 	refuse := func(reason, format string, args ...any) {
-		problems = append(problems, api.Refuse(422, reason, fmt.Sprintf(format, args...)))
+		problems = append(problems, refusal.Refuse(422, reason, fmt.Sprintf(format, args...)))
 	}
 	if spec.Name == "" || spec.Description == "" {
 		refuse("invalid_experiment", "name and description are required: the description is the brief every agent works from")
@@ -322,7 +322,7 @@ const coordinatorWanted = "The coordinator's machine is asked for once the plan 
 
 // refuseUpdate is a create or a patch the caller can fix.
 func refuseUpdate(status int, reason, format string, args ...any) error {
-	return api.Refuse(status, reason, fmt.Sprintf(format, args...))
+	return refusal.Refuse(status, reason, fmt.Sprintf(format, args...))
 }
 
 // Update changes the fields the patch carries and no others, and the experiment as patched has
@@ -596,16 +596,16 @@ func (s *PlatformExperimentsService) measuredJob(ctx context.Context, pe *domain
 	case len(measured) == 1:
 		return measured[0], nil
 	case len(measured) > 1:
-		return "", api.Refuse(http.StatusConflict, "baseline_undeclared", fmt.Sprintf("the baseline agents of platform experiment %s left %d COMPLETED jobs that report %s (%s), and the platform declares a job by itself only where there is one to declare: its coordinator declares the one the run is ranked against with %s",
+		return "", refusal.Refuse(http.StatusConflict, "baseline_undeclared", fmt.Sprintf("the baseline agents of platform experiment %s left %d COMPLETED jobs that report %s (%s), and the platform declares a job by itself only where there is one to declare: its coordinator declares the one the run is ranked against with %s",
 			pe.ID, len(measured), ranked.Key, strings.Join(measured, ", "), declareBaseline(pe.ID)))
 	case len(measuring) > 0:
-		return "", api.Refuse(http.StatusConflict, "baseline_measuring", fmt.Sprintf("baseline agent %s is measuring the baseline of platform experiment %s: when it finishes the platform declares its COMPLETED job and starts the run, and nobody else has anything to do until then",
+		return "", refusal.Refuse(http.StatusConflict, "baseline_measuring", fmt.Sprintf("baseline agent %s is measuring the baseline of platform experiment %s: when it finishes the platform declares its COMPLETED job and starts the run, and nobody else has anything to do until then",
 			strings.Join(measuring, ", "), pe.ID))
 	case len(joined) == 0:
-		return "", api.Refuse(http.StatusConflict, "baseline_required", fmt.Sprintf("platform experiment %s has no baseline declared and no agent of role baseline to measure one: its coordinator adds one with %s, and the platform declares the job it leaves and starts the run",
+		return "", refusal.Refuse(http.StatusConflict, "baseline_required", fmt.Sprintf("platform experiment %s has no baseline declared and no agent of role baseline to measure one: its coordinator adds one with %s, and the platform declares the job it leaves and starts the run",
 			pe.ID, addBaselineAgent(pe.ID)))
 	}
-	return "", api.Refuse(http.StatusConflict, "baseline_required", fmt.Sprintf("platform experiment %s has no baseline declared, and no baseline agent left a COMPLETED job that reports %s: %s. Its coordinator repairs what the brief can and adds another baseline agent with %s, and what only its owner can repair it writes into the summary",
+	return "", refusal.Refuse(http.StatusConflict, "baseline_required", fmt.Sprintf("platform experiment %s has no baseline declared, and no baseline agent left a COMPLETED job that reports %s: %s. Its coordinator repairs what the brief can and adds another baseline agent with %s, and what only its owner can repair it writes into the summary",
 		pe.ID, ranked.Key, strings.Join(gaveUp, "; "), addBaselineAgent(pe.ID)))
 }
 
@@ -629,7 +629,7 @@ func (s *PlatformExperimentsService) declareFinished(ctx context.Context, id, jo
 	if pe.Status != domain.PlatformExpOpen || pe.BaselineJobID != "" {
 		return nil
 	}
-	var refused *api.Refusal
+	var refused *refusal.Refusal
 	if jobID == "" {
 		signups, err := s.store.ListAgentSignups(ctx, id)
 		if err != nil {
@@ -655,9 +655,9 @@ func (s *PlatformExperimentsService) declareFinished(ctx context.Context, id, jo
 
 // undeclared is why the open pe, which has no baseline, has none: what measuredJob refuses with,
 // or for the one job the platform would declare, what the declaration is refused for.
-func (s *PlatformExperimentsService) undeclared(ctx context.Context, pe *domain.PlatformExperiment, signups []domain.AgentSignup) (*api.Refusal, error) {
+func (s *PlatformExperimentsService) undeclared(ctx context.Context, pe *domain.PlatformExperiment, signups []domain.AgentSignup) (*refusal.Refusal, error) {
 	jobID, err := s.measuredJob(ctx, pe, signups)
-	var refused *api.Refusal
+	var refused *refusal.Refusal
 	if errors.As(err, &refused) {
 		return refused, nil
 	}
@@ -667,12 +667,12 @@ func (s *PlatformExperimentsService) undeclared(ctx context.Context, pe *domain.
 	declared := *pe
 	declared.BaselineJobID = jobID
 	if _, err := s.heldToBaseline(ctx, &declared, true); errors.As(err, &refused) {
-		return api.Refuse(http.StatusConflict, refused.Reason, fmt.Sprintf("the platform did not declare job %s, the one job its baseline agents left, as the baseline of platform experiment %s: %s. The platform declares it in the request that clears this",
+		return refusal.Refuse(http.StatusConflict, refused.Reason, fmt.Sprintf("the platform did not declare job %s, the one job its baseline agents left, as the baseline of platform experiment %s: %s. The platform declares it in the request that clears this",
 			jobID, pe.ID, refused.Message)), nil
 	} else if err != nil {
 		return nil, err
 	}
-	return api.Refuse(http.StatusConflict, "baseline_declaring", fmt.Sprintf("job %s is the baseline of platform experiment %s and the platform declares it within a minute", jobID, pe.ID)), nil
+	return refusal.Refuse(http.StatusConflict, "baseline_declaring", fmt.Sprintf("job %s is the baseline of platform experiment %s and the platform declares it within a minute", jobID, pe.ID)), nil
 }
 
 // StartIfReady starts the open platform experiment id when nothing is missing, in the request
@@ -687,7 +687,7 @@ func (s *PlatformExperimentsService) StartIfReady(ctx context.Context, id string
 		return nil
 	}
 	_, err = s.start(ctx, pe, time.Now().UTC())
-	var waiting *api.Refusal
+	var waiting *refusal.Refusal
 	if errors.As(err, &waiting) {
 		return nil
 	}
@@ -778,14 +778,14 @@ func (s *PlatformExperimentsService) RequireActive(ctx context.Context, platform
 		return fmt.Errorf("platform_experiments.RequireActive: %w", err)
 	}
 	if pe == nil || pe.Status == domain.PlatformExpClosed {
-		return api.Refuse(http.StatusConflict, "experiment_closed", "platform experiment "+platformExpID+" is closed")
+		return refusal.Refuse(http.StatusConflict, "experiment_closed", "platform experiment "+platformExpID+" is closed")
 	}
 	cut, err := s.store.IsAgentCut(ctx, platformExpID, agentID)
 	if err != nil {
 		return fmt.Errorf("platform_experiments.RequireActive: %w", err)
 	}
 	if cut {
-		return api.Refuse(http.StatusConflict, "agent_held", "agent "+agentID+" was cut from platform experiment "+platformExpID)
+		return refusal.Refuse(http.StatusConflict, "agent_held", "agent "+agentID+" was cut from platform experiment "+platformExpID)
 	}
 	return nil
 }
@@ -797,10 +797,10 @@ func (s *PlatformExperimentsService) notStartable(ctx context.Context, pe *domai
 	// Every researcher starts from the baseline and is ranked against it, so none starts, and
 	// no machine is rented for one, before it is measured and declared.
 	if pe.BaselineJobID == "" {
-		return 0, api.Refuse(http.StatusConflict, "baseline_required", fmt.Sprintf("platform experiment %s has no baseline declared, and the platform starts the run only once it has", pe.ID))
+		return 0, refusal.Refuse(http.StatusConflict, "baseline_required", fmt.Sprintf("platform experiment %s has no baseline declared, and the platform starts the run only once it has", pe.ID))
 	}
 	if pe.StartsAt.After(now) {
-		return 0, api.Refuse(http.StatusConflict, "starts_at_ahead", fmt.Sprintf("platform experiment %s has its baseline and starts at its starts_at, %s", pe.ID, pe.StartsAt.UTC().Format(time.RFC3339)))
+		return 0, refusal.Refuse(http.StatusConflict, "starts_at_ahead", fmt.Sprintf("platform experiment %s has its baseline and starts at its starts_at, %s", pe.ID, pe.StartsAt.UTC().Format(time.RFC3339)))
 	}
 	if !slices.ContainsFunc(signups, func(signup domain.AgentSignup) bool { return signup.SharesBudget() }) {
 		return 0, noResearchers(pe.ID)
@@ -810,13 +810,13 @@ func (s *PlatformExperimentsService) notStartable(ctx context.Context, pe *domai
 		return 0, err
 	}
 	if runBudget <= 0 {
-		return 0, api.Refuse(http.StatusConflict, "budget_spent", fmt.Sprintf("measuring the baseline spent the whole budget of %g accelerator hours, so nothing is left for the researchers to share: its owner raises budget_accelerator_hours", pe.BudgetAcceleratorHours))
+		return 0, refusal.Refuse(http.StatusConflict, "budget_spent", fmt.Sprintf("measuring the baseline spent the whole budget of %g accelerator hours, so nothing is left for the researchers to share: its owner raises budget_accelerator_hours", pe.BudgetAcceleratorHours))
 	}
 	return runBudget, nil
 }
 
 func noResearchers(id string) error {
-	return api.Refuse(http.StatusConflict, "no_researchers", fmt.Sprintf("platform experiment %s has its baseline and no researcher to share its budget: add one with `hl platform-experiments agents add --hosted --platform-experiment %s` (POST /platform-experiments/%s/agents), and the platform starts the run", id, id, id))
+	return refusal.Refuse(http.StatusConflict, "no_researchers", fmt.Sprintf("platform experiment %s has its baseline and no researcher to share its budget: add one with `hl platform-experiments agents add --hosted --platform-experiment %s` (POST /platform-experiments/%s/agents), and the platform starts the run", id, id, id))
 }
 
 // Spend sets on pe what it has spent of its budget (ConsumedAcceleratorHours). A draft runs no
@@ -862,7 +862,7 @@ func declareBaseline(id string) string {
 // sentence its status_reason and its roster answer with.
 func (s *PlatformExperimentsService) waiting(ctx context.Context, pe *domain.PlatformExperiment, signups []domain.AgentSignup) (*domain.StatusReason, error) {
 	_, err := s.notStartable(ctx, pe, signups, time.Now().UTC())
-	var refused *api.Refusal
+	var refused *refusal.Refusal
 	switch {
 	case errors.As(err, &refused) && pe.BaselineJobID == "":
 		// Without a baseline the reason is where the measuring stands and whose move it is.
@@ -1219,7 +1219,7 @@ func tooLong(field string, size int) string {
 }
 
 func noPlatformExperiment(id string) error {
-	return api.Refuse(http.StatusNotFound, "not_found", "no platform experiment "+id)
+	return refusal.Refuse(http.StatusNotFound, "not_found", "no platform experiment "+id)
 }
 
 // SetSummary records the operator's narrative verdict on a run and answers the platform
@@ -1662,7 +1662,7 @@ func (s *PlatformExperimentsService) SweepAutoStart(ctx context.Context) error {
 			continue
 		}
 		_, err := s.start(ctx, pe, now)
-		var waiting *api.Refusal
+		var waiting *refusal.Refusal
 		if errors.As(err, &waiting) {
 			continue
 		}

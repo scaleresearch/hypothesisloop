@@ -12,7 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
@@ -188,13 +188,13 @@ func TestCloseAndSummaryAnswerThePlatformExperimentAndRefuseByReason(t *testing.
 		"closing one that does not exist":      func() error { _, err := svc.Close(context.Background(), "pe-none", nil, "", nil); return err }(),
 		"a summary of one that does not exist": func() error { _, err := svc.SetSummary(context.Background(), "pe-none", "s"); return err }(),
 	} {
-		var refused *api.Refusal
+		var refused *refusal.Refusal
 		if !errors.As(err, &refused) || refused.GetStatus() != http.StatusNotFound || refused.Reason != "not_found" {
 			t.Errorf("%s: got = %v, want 404 not_found", name, err)
 		}
 	}
 	_, err := svc.SetSummary(context.Background(), "pe-none", strings.Repeat("x", domain.MaxProseBytes+1))
-	var refused *api.Refusal
+	var refused *refusal.Refusal
 	if !errors.As(err, &refused) || refused.GetStatus() != http.StatusUnprocessableEntity || refused.Reason != "summary_too_long" {
 		t.Errorf("a summary too long: got = %v, want 422 summary_too_long", err)
 	}

@@ -9,7 +9,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 )
@@ -29,16 +29,16 @@ const (
 	ReasonMaxProjectsReached = "max_projects_reached"
 )
 
-func conflict(reason, message string) *api.Refusal {
-	return api.Refuse(http.StatusConflict, reason, message)
+func conflict(reason, message string) *refusal.Refusal {
+	return refusal.Refuse(http.StatusConflict, reason, message)
 }
 
-func notFound(what string) *api.Refusal {
-	return api.Refuse(http.StatusNotFound, ReasonNotFound, what+" not found")
+func notFound(what string) *refusal.Refusal {
+	return refusal.Refuse(http.StatusNotFound, ReasonNotFound, what+" not found")
 }
 
-func invalid(reason, message string) *api.Refusal {
-	return api.Refuse(http.StatusUnprocessableEntity, reason, message)
+func invalid(reason, message string) *refusal.Refusal {
+	return refusal.Refuse(http.StatusUnprocessableEntity, reason, message)
 }
 
 const (

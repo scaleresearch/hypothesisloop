@@ -15,7 +15,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
@@ -886,7 +886,7 @@ func TestAResearcherFinishingEarlyNamesItsBlockerAndTheTimeAndQuotaItLeavesAreTo
 
 	store := newStore(domain.SignupRoleCompetitor, 16*time.Minute+30*time.Second, 0.2)
 	_, err := finish(store, "")
-	var refused *api.Refusal
+	var refused *refusal.Refusal
 	if !errors.As(err, &refused) || refused.Reason != "time_and_quota_left" || refused.GetStatus() != http.StatusConflict ||
 		!strings.Contains(refused.Message, "16 of the run's 60 minutes and 2.8 of the agent's 3 AccH were left") || !strings.Contains(refused.Message, "--blocker") ||
 		store.signups[0].FinishedAt != nil {
@@ -943,7 +943,7 @@ func TestAResearcherFinishesWithoutABlockerWhenNoJobOfItFitsInTheTimeLeft(t *tes
 		"its own jobs are quick": {took("dana", 1), took("dana", 2), took("ali", 20)},
 		"no job completed":       nil,
 	} {
-		var refused *api.Refusal
+		var refused *refusal.Refusal
 		if err := finish(completed...); !errors.As(err, &refused) || refused.Reason != "time_and_quota_left" {
 			t.Errorf("%s: %v, want 409 time_and_quota_left", name, err)
 		}

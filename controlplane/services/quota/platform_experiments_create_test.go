@@ -14,8 +14,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/agenttypes"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 )
 
 // testSettings is the platform settings a service of these tests applies and holds a create to.
@@ -66,7 +66,7 @@ func TestValidateRefusesWithAReasonAndAppliesTheSettings(t *testing.T) {
 	}
 	twoLines := valid()
 	twoLines.Metrics[0].Key = "loss\nval"
-	var refused *api.Refusal
+	var refused *refusal.Refusal
 	if _, err := svc.validate(twoLines, agenttypes.Catalog()); !errors.As(err, &refused) || refused.GetStatus() != 422 || !strings.Contains(refused.Error(), "metrics[0].key is one line") {
 		t.Errorf("a metric key of two lines: got %v, want 422 naming metrics[0].key", err)
 	}
@@ -93,7 +93,7 @@ func TestValidateRefusesWithAReasonAndAppliesTheSettings(t *testing.T) {
 		req := valid()
 		c.mutate(&req)
 		_, err := svc.validate(req, agenttypes.Catalog())
-		var refused *api.Refusal
+		var refused *refusal.Refusal
 		if !errors.As(err, &refused) || refused.GetStatus() != 422 || refused.Reason != c.reason {
 			t.Errorf("%s: got %v, want 422 %s", name, err, c.reason)
 		}
@@ -122,7 +122,7 @@ func TestAFieldNoBoundaryCanCutIsStoredWithTheLadderItRuns(t *testing.T) {
 			t.Errorf("%d researchers, stages left out: stored %+v, want the ladder the run starts with %+v", researchers, checked.Stages, want)
 		}
 	}
-	var refused *api.Refusal
+	var refused *refusal.Refusal
 	if _, err := svc.validate(spec(2, ladder), agenttypes.Catalog()); !errors.As(err, &refused) || refused.GetStatus() != 422 || refused.Reason != "invalid_stages" {
 		t.Errorf("two stages stated for 2 researchers: got %v, want 422 invalid_stages", err)
 	}
@@ -148,7 +148,7 @@ func TestAPlatformExperimentNoClusterCouldRunIsRefusedWhereItComesIntoBeing(t *t
 	} {
 		svc := reaching(NewPlatformExperimentsService(&createStore{}, testSettings, zap.NewNop(), "", time.Minute), c.reachable...)
 		_, err := svc.requireReachable(context.Background(), "prj-a", c.sizedFor)
-		var refused *api.Refusal
+		var refused *refusal.Refusal
 		if got := errors.As(err, &refused) && refused.GetStatus() == 422 && refused.Reason == "accelerator_unreachable"; got != c.refused || (!c.refused && err != nil) {
 			t.Errorf("%s: got %v, refused wanted: %v", name, err, c.refused)
 		}
@@ -160,7 +160,7 @@ func TestAPlatformExperimentNoClusterCouldRunIsRefusedWhereItComesIntoBeing(t *t
 	}
 	store := &createStore{}
 	_, err := reaching(NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute)).Create(context.Background(), body)
-	var refused *api.Refusal
+	var refused *refusal.Refusal
 	if !errors.As(err, &refused) || refused.Reason != "accelerator_unreachable" || store.created != nil {
 		t.Errorf("a create no cluster could run: got %v, stored %v, want 422 accelerator_unreachable and nothing stored", err, store.created)
 	}
@@ -234,7 +234,7 @@ func TestARunThatContinuesAnotherKeepsItsMetric(t *testing.T) {
 		"a metric left out": {{Key: "val_loss", Direction: "minimize"}},
 	} {
 		err := svc.requireContinuedMetrics(context.Background(), "pe-prior", metrics)
-		var refused *api.Refusal
+		var refused *refusal.Refusal
 		if !errors.As(err, &refused) || refused.GetStatus() != 422 || refused.Reason != "invalid_metrics" ||
 			!strings.Contains(refused.Error(), "latency_ms (minimize), val_loss (minimize)") {
 			t.Errorf("%s: got %v, want 422 invalid_metrics naming both runs' metrics", name, err)

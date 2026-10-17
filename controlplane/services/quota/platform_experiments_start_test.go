@@ -13,7 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 )
@@ -181,7 +181,7 @@ func TestStartFailsRatherThanStartingWithoutAParticipantItCouldNotResolve(t *tes
 
 // reasonOf is the reason code of a refusal, empty for anything else.
 func reasonOf(err error) string {
-	var refused *api.Refusal
+	var refused *refusal.Refusal
 	if errors.As(err, &refused) {
 		return refused.Reason
 	}

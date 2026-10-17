@@ -14,7 +14,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
@@ -87,12 +87,12 @@ const (
 	clockSkew = time.Minute
 )
 
-var errNoApp = api.Refuse(http.StatusServiceUnavailable, ReasonGitHubNotConfigured,
+var errNoApp = refusal.Refuse(http.StatusServiceUnavailable, ReasonGitHubNotConfigured,
 	"this deployment has no GitHub App configured, so GitHub cannot be connected and no repository cloned through it")
 
-// refusal turns what GitHub or the store refused into what the caller is told: the store's
+// gitHubRefusal turns what GitHub or the store refused into what the caller is told: the store's
 // missing rows here, the rest as the git host answers them (github.Refusal).
-func refusal(logger *zap.Logger, op string, err error, gone int) error {
+func gitHubRefusal(logger *zap.Logger, op string, err error, gone int) error {
 	switch {
 	case errors.Is(err, db.ErrOrgNotFound):
 		return notFound("org")
@@ -129,7 +129,7 @@ func (r *Repositories) beginInstall(ctx context.Context, orgID, returnTo string)
 	}
 	actor := p.Actor()
 	if actor.ID == "" {
-		return nil, api.Refuse(http.StatusForbidden, ReasonForbidden, "an install of the GitHub App is started by a user or an API key, the one that finishes it")
+		return nil, refusal.Refuse(http.StatusForbidden, ReasonForbidden, "an install of the GitHub App is started by a user or an API key, the one that finishes it")
 	}
 	state, expires, err := r.store.IssueGitHubInstallState(ctx, orgID, actor, returnTo, installStateLifetime)
 	if err != nil {
@@ -291,7 +291,7 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 	}) (*struct{ Body *InstallStart }, error) {
 		started, err := r.beginInstall(ctx, in.ID, in.Body.ReturnTo)
 		if err != nil {
-			return nil, refusal(r.logger, "create-github-install-state", err, http.StatusUnprocessableEntity)
+			return nil, gitHubRefusal(r.logger, "create-github-install-state", err, http.StatusUnprocessableEntity)
 		}
 		return &struct{ Body *InstallStart }{Body: started}, nil
 	})
@@ -313,7 +313,7 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 	}) (*struct{ Body *InstallFinished }, error) {
 		finished, err := r.finishInstall(ctx, in.Body.State, in.Body.InstallationID)
 		if err != nil {
-			return nil, refusal(r.logger, "create-github-installation", err, http.StatusUnprocessableEntity)
+			return nil, gitHubRefusal(r.logger, "create-github-installation", err, http.StatusUnprocessableEntity)
 		}
 		return &struct{ Body *InstallFinished }{Body: finished}, nil
 	})
@@ -343,7 +343,7 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 		}
 		installations, err := r.store.ListGitHubInstallations(ctx, in.ID)
 		if err != nil {
-			return nil, refusal(r.logger, op, err, http.StatusConflict)
+			return nil, gitHubRefusal(r.logger, op, err, http.StatusConflict)
 		}
 		return &installationsPage{TotalCount: len(installations), Body: pageOf(installations, limit, offset)}, nil
 	})
@@ -360,7 +360,7 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 		InstallationID int64  `path:"installation_id"`
 	}) (*struct{}, error) {
 		if err := r.disconnect(ctx, in.ID, in.InstallationID); err != nil {
-			return nil, refusal(r.logger, "delete-github-installation", err, http.StatusConflict)
+			return nil, gitHubRefusal(r.logger, "delete-github-installation", err, http.StatusConflict)
 		}
 		return &struct{}{}, nil
 	})
@@ -380,7 +380,7 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 			return nil, err
 		}
 		if err := r.store.MakeGitHubInstallationDefault(ctx, in.ID, in.InstallationID); err != nil {
-			return nil, refusal(r.logger, op, err, http.StatusConflict)
+			return nil, gitHubRefusal(r.logger, op, err, http.StatusConflict)
 		}
 		return &struct{}{}, nil
 	})
@@ -405,14 +405,14 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 		}
 		connected, err := r.store.ListGitHubInstallations(ctx, in.ID)
 		if err != nil {
-			return nil, refusal(r.logger, op, err, http.StatusUnprocessableEntity)
+			return nil, gitHubRefusal(r.logger, op, err, http.StatusUnprocessableEntity)
 		}
 		i := slices.IndexFunc(connected, func(one *domain.OrgGitHubInstallation) bool { return one.InstallationID == in.InstallationID })
 		if i < 0 {
 			return nil, notFound("GitHub installation")
 		}
 		if _, err := github.Installed(ctx, app, connected[i]); err != nil {
-			return nil, refusal(r.logger, op, err, http.StatusUnprocessableEntity)
+			return nil, gitHubRefusal(r.logger, op, err, http.StatusUnprocessableEntity)
 		}
 		return &struct{}{}, nil
 	})
@@ -445,7 +445,7 @@ func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
 		}
 		found, err := r.repositories(ctx, in.ID, in.Q)
 		if err != nil {
-			return nil, refusal(r.logger, op, err, http.StatusConflict)
+			return nil, gitHubRefusal(r.logger, op, err, http.StatusConflict)
 		}
 		return &repositoriesPage{TotalCount: len(found), Body: pageOf(found, limit, offset)}, nil
 	})

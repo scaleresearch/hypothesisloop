@@ -10,7 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
@@ -345,19 +345,19 @@ func checkAgentType(role domain.AgentRole, name, description, prompt string, set
 // answer turns what the store refuses into what the caller is told, and anything else into the
 // platform failing.
 func (h *AgentTypesHandler) answer(op string, err error) error {
-	var refusal huma.StatusError
+	var answered huma.StatusError
 	var conflictErr *db.AgentTypeVersionConflict
 	var inUse *db.AgentTypeInUse
 	var limit *db.AgentTypeLimit
 	switch {
 	case err == nil:
 		return nil
-	case errors.As(err, &refusal):
+	case errors.As(err, &answered):
 		return err
 	case errors.Is(err, db.ErrAgentTypeNotFound):
 		return notFound("agent type")
 	case errors.Is(err, db.ErrAgentTypeBuiltin):
-		return api.Refuse(http.StatusForbidden, ReasonBuiltinReadOnly, "a built-in agent type is read-only for everyone: copy it (POST /orgs/{id}/agent-types with from) and change the copy")
+		return refusal.Refuse(http.StatusForbidden, ReasonBuiltinReadOnly, "a built-in agent type is read-only for everyone: copy it (POST /orgs/{id}/agent-types with from) and change the copy")
 	case errors.Is(err, db.ErrAgentTypeArchived):
 		return conflict(ReasonArchived, "the agent type is archived and no longer edited")
 	case errors.As(err, &conflictErr):
@@ -367,7 +367,7 @@ func (h *AgentTypesHandler) answer(op string, err error) error {
 	case errors.As(err, &limit) && limit.Types:
 		return conflict(ReasonAgentTypeLimit, limit.Error())
 	case errors.As(err, &limit):
-		return api.Refuse(http.StatusTooManyRequests, ReasonEditRateLimited, limit.Error())
+		return refusal.Refuse(http.StatusTooManyRequests, ReasonEditRateLimited, limit.Error())
 	default:
 		return auth.Internal(h.logger, "agent types request failed", err, zap.String("operation", op))
 	}

@@ -14,7 +14,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/contract/repotemplate"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 )
 
 // RepositoryName is the name of the repository the platform creates for a platform experiment:
@@ -138,7 +138,7 @@ func (h *PlatformExperimentsHandler) repositoryOf(ctx context.Context, projectID
 		return "", nil
 	}
 	if account != "" {
-		return "", api.Refuse(http.StatusUnprocessableEntity, "invalid_request", "repository_account says where a new repository is created and repository names an existing one: state one of them")
+		return "", refusal.Refuse(http.StatusUnprocessableEntity, "invalid_request", "repository_account says where a new repository is created and repository names an existing one: state one of them")
 	}
 	return h.repos.Reachable(ctx, projectID, repository)
 }
@@ -165,7 +165,7 @@ func (h *PlatformExperimentsHandler) fromRepo(ctx context.Context, req CreatePla
 }
 
 func invalidExperimentFile(repository string, err error) error {
-	return api.Refuse(http.StatusUnprocessableEntity, "invalid_experiment_file", domain.ExperimentFile+" of "+repository+" cannot be used: "+err.Error())
+	return refusal.Refuse(http.StatusUnprocessableEntity, "invalid_experiment_file", domain.ExperimentFile+" of "+repository+" cannot be used: "+err.Error())
 }
 
 // ExperimentFile is what a repository's experiment file states of a platform experiment: the

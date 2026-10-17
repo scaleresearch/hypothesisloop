@@ -15,7 +15,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
@@ -114,7 +114,7 @@ func (f *fakeRepositories) CreatesOn(_ context.Context, _, account string) (stri
 const testRepository = "Acme/Model"
 
 func notReachable() error {
-	return api.Refuse(http.StatusUnprocessableEntity, "repository_not_reachable", "the GitHub installation the org connected does not cover that repository")
+	return refusal.Refuse(http.StatusUnprocessableEntity, "repository_not_reachable", "the GitHub installation the org connected does not cover that repository")
 }
 
 func (f *fakeRepositories) Reachable(_ context.Context, projectID, repository string) (string, error) {
@@ -472,7 +472,7 @@ func TestCreateWithoutFromRepoRequiresWhatOnlyTheCallerCanSay(t *testing.T) {
 	if rec := call("POST", "/platform-experiments", invalid); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "invalid_metrics") {
 		t.Errorf("a body with no ranking metric: got = %d %s, want 422 invalid_metrics", rec.Code, rec.Body)
 	}
-	repos.notOn = api.Refuse(http.StatusUnprocessableEntity, "github_not_connected", "the org has connected no GitHub account")
+	repos.notOn = refusal.Refuse(http.StatusUnprocessableEntity, "github_not_connected", "the org has connected no GitHub account")
 	if rec := call("POST", "/platform-experiments", whole()); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "github_not_connected") {
 		t.Errorf("when the org has connected no GitHub account: got = %d %s, want 422 github_not_connected", rec.Code, rec.Body)
 	}
@@ -522,7 +522,7 @@ func TestCreateFromRepoRefusals(t *testing.T) {
 		want      int
 		namesFile bool
 	}{
-		"the repository has no such file":       {"", api.Refuse(422, "no_experiment_file", "the repository has none"), nil, http.StatusUnprocessableEntity, false},
+		"the repository has no such file":       {"", refusal.Refuse(422, "no_experiment_file", "the repository has none"), nil, http.StatusUnprocessableEntity, false},
 		"no app on this deployment":             {"", huma.Error503ServiceUnavailable("this deployment has no GitHub App configured"), nil, http.StatusServiceUnavailable, false},
 		"an empty file":                         {"", nil, nil, http.StatusUnprocessableEntity, true},
 		"a file that is not the body":           {"nmae: typo\n", nil, nil, http.StatusUnprocessableEntity, true},
@@ -733,7 +733,7 @@ func TestTheRepositoryCheckAnswersAsTheCreateWouldAndCreatesNothing(t *testing.T
 		"a repository the org does not reach": {"?repository=rival/secret", "repository_not_reachable", nil},
 		"an account beside a repository":      {"?repository=acme/model&repository_account=acme", "invalid_request", nil},
 		"an installation GitHub removed": {"", "installation_gone", func() {
-			repos.notOn = api.Refuse(http.StatusUnprocessableEntity, "installation_gone", "the GitHub App is no longer installed on acme")
+			repos.notOn = refusal.Refuse(http.StatusUnprocessableEntity, "installation_gone", "the GitHub App is no longer installed on acme")
 		}},
 	} {
 		if tc.arrange != nil {

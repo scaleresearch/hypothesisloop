@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/graphdb"
 )
@@ -46,12 +46,12 @@ func TestOnlyTheAuthorEditsAPersonsIdeaAndTheAuthorOrAnOrgOwnerRemovesIt(t *test
 		{"an org owner removes an agent's", agents, owner, true, "agent_hypothesis"},
 		{"an org owner removes one a key wrote", byKey, owner, true, "not_a_persons_idea"},
 	} {
-		refusal := ChangeRefusal(tc.h, tc.caller, tc.remove)
+		refused := ChangeRefusal(tc.h, tc.caller, tc.remove)
 		switch {
-		case tc.want == "" && refusal != nil:
-			t.Errorf("%s: got = %v, want admitted", tc.name, refusal)
-		case tc.want != "" && (refusal == nil || refusal.Reason != tc.want || refusal.GetStatus() != http.StatusForbidden):
-			t.Errorf("%s: got = %#v, want 403 %s", tc.name, refusal, tc.want)
+		case tc.want == "" && refused != nil:
+			t.Errorf("%s: got = %v, want admitted", tc.name, refused)
+		case tc.want != "" && (refused == nil || refused.Reason != tc.want || refused.GetStatus() != http.StatusForbidden):
+			t.Errorf("%s: got = %#v, want 403 %s", tc.name, refused, tc.want)
 		}
 	}
 }
@@ -69,13 +69,13 @@ func registerAdas(t *testing.T, svc *Service, text string) *domain.Hypothesis {
 // naming each of names.
 func requireInRecord(t *testing.T, what string, err error, names ...string) {
 	t.Helper()
-	var refusal *api.Refusal
-	if answered := (&Handler{}).hypothesisWriteError(err); !errors.As(answered, &refusal) || refusal.GetStatus() != http.StatusConflict || refusal.Reason != "hypothesis_in_record" {
+	var refused *refusal.Refusal
+	if answered := (&Handler{}).hypothesisWriteError(err); !errors.As(answered, &refused) || refused.GetStatus() != http.StatusConflict || refused.Reason != "hypothesis_in_record" {
 		t.Fatalf("%s: got = %v, want 409 hypothesis_in_record", what, err)
 	}
 	for _, name := range append(names, "Add a comment") {
-		if !strings.Contains(refusal.Message, name) {
-			t.Errorf("%s: message %q does not name %q", what, refusal.Message, name)
+		if !strings.Contains(refused.Message, name) {
+			t.Errorf("%s: message %q does not name %q", what, refused.Message, name)
 		}
 	}
 }

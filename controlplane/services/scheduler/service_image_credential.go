@@ -10,7 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 )
@@ -98,13 +98,13 @@ func registerImageCredentials(doc *apidocs.Doc, h *Handler) {
 			return nil, err
 		}
 		if caller.RunOver {
-			return nil, api.Refuse(http.StatusForbidden, "run_over", "the run of this token has ended, so no registry login is handed out for it")
+			return nil, refusal.Refuse(http.StatusForbidden, "run_over", "the run of this token has ended, so no registry login is handed out for it")
 		}
 		credential, err := h.svc.ImageCredential(ctx, in.ID)
 		if err != nil {
 			var refused *AdmissionError
 			if errors.As(err, &refused) {
-				return nil, api.Refuse(http.StatusConflict, refused.Reason, refused.Message)
+				return nil, refusal.Refuse(http.StatusConflict, refused.Reason, refused.Message)
 			}
 			return nil, auth.Internal(h.svc.logger, "job image credential", err, zap.String("id", in.ID))
 		}

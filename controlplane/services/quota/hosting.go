@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 )
 
 // reasonHostingNotConfigured is why hosting is unavailable on a deployment with no sandbox
@@ -37,7 +37,7 @@ func requireHosting(configured bool) error {
 	if why == nil {
 		return nil
 	}
-	refusal := api.Refuse(http.StatusServiceUnavailable, why.Reason, why.Reason+": "+why.Message)
-	refusal.Summary, refusal.OperatorDetail = why.Summary, why.OperatorDetail
-	return refusal
+	refused := refusal.Refuse(http.StatusServiceUnavailable, why.Reason, why.Reason+": "+why.Message)
+	refused.Summary, refused.OperatorDetail = why.Summary, why.OperatorDetail
+	return refused
 }

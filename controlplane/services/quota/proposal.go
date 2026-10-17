@@ -16,7 +16,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
@@ -77,7 +77,7 @@ const maxProposalTextBytes = 4000
 
 // refusedProposal is a proposal the planner can fix: reason names what is wrong.
 func refusedProposal(reason, format string, args ...any) error {
-	return api.Refuse(http.StatusUnprocessableEntity, reason, fmt.Sprintf(format, args...))
+	return refusal.Refuse(http.StatusUnprocessableEntity, reason, fmt.Sprintf(format, args...))
 }
 
 // maxProposedResearchers is the most researchers a proposal may name, and a draft's max_agents
@@ -118,9 +118,9 @@ func poolAgents(pool domain.ResearcherPool) []ProposedAgent {
 // its cost, its length and one place for each researcher. It leaves p as it is stored: every text
 // of it without the whitespace around it, and the CPU type where it states no accelerator_type.
 func (h *PlatformExperimentsHandler) checkProposal(ctx context.Context, p *Proposal, draft *domain.PlatformExperiment) (CreatePlatformExperimentRequest, error) {
-	var problems api.Problems
+	var problems refusal.Problems
 	refuse := func(reason, format string, args ...any) {
-		problems = append(problems, api.Refuse(http.StatusUnprocessableEntity, reason, fmt.Sprintf(format, args...)))
+		problems = append(problems, refusal.Refuse(http.StatusUnprocessableEntity, reason, fmt.Sprintf(format, args...)))
 	}
 	catalog, err := h.svc.store.AgentTypeCatalog(ctx, draft.ID)
 	if err != nil {
@@ -523,7 +523,7 @@ func named(experiment json.RawMessage, name string) (json.RawMessage, error) {
 }
 
 func invalidTransition(format string, args ...any) error {
-	return api.Refuse(http.StatusConflict, "invalid_transition", fmt.Sprintf(format, args...))
+	return refusal.Refuse(http.StatusConflict, "invalid_transition", fmt.Sprintf(format, args...))
 }
 
 // accept makes the draft id the open platform experiment its proposal describes, at the cost
@@ -702,11 +702,11 @@ func registerDeclineHuma(doc *apidocs.Doc, h *PlatformExperimentsHandler) {
 }
 
 func planningOver(pe *domain.PlatformExperiment) error {
-	return api.Refuse(http.StatusConflict, "planning_over", "the planning limit of draft "+pe.ID+" passed at "+pe.ClosesAt().UTC().Format(time.RFC3339)+": it takes no proposal and no decline, and is closed")
+	return refusal.Refuse(http.StatusConflict, "planning_over", "the planning limit of draft "+pe.ID+" passed at "+pe.ClosesAt().UTC().Format(time.RFC3339)+": it takes no proposal and no decline, and is closed")
 }
 
 func notADraft(pe *domain.PlatformExperiment) error {
-	return api.Refuse(http.StatusConflict, "not_a_draft", "platform experiment "+pe.ID+" is "+string(pe.Status)+": only a draft is proposed, revised or accepted")
+	return refusal.Refuse(http.StatusConflict, "not_a_draft", "platform experiment "+pe.ID+" is "+string(pe.Status)+": only a draft is proposed, revised or accepted")
 }
 
 // AcceptDue accepts, as proposed, every draft whose accepts_at has passed, for the person who
@@ -721,7 +721,7 @@ func (h *PlatformExperimentsHandler) AcceptDue(ctx context.Context) error {
 	for _, id := range ids {
 		log := h.logger.With(zap.String("platform_experiment_id", id))
 		err := h.acceptAsProposed(ctx, id)
-		var refused *api.Refusal
+		var refused *refusal.Refusal
 		switch {
 		case err == nil:
 			log.Info("draft accepted as proposed")

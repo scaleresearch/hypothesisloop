@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 )
 
 // gitHost serves the bare repositories under a temp dir with git's own HTTP backend, asking for
@@ -48,9 +48,9 @@ func gitHost(t *testing.T, username, password string, repositories ...string) st
 }
 
 func refused(err error) (int, string) {
-	var refusal *api.Refusal
-	if errors.As(err, &refusal) {
-		return refusal.GetStatus(), refusal.Reason
+	var refused *refusal.Refusal
+	if errors.As(err, &refused) {
+		return refused.GetStatus(), refused.Reason
 	}
 	return 0, ""
 }

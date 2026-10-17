@@ -180,7 +180,7 @@ func TestLiveInstallationTokenIsLimitedToOneRepository(t *testing.T) {
 	var out map[string]any
 	body := map[string]any{"repositories": []string{repoName}, "permissions": map[string]string{"issues": "write"}}
 	err = client.call(ctx, http.MethodPost, path, jwt, body, &out)
-	var refused *refusal
+	var refused *rejection
 	if !errors.Is(err, errUnprocessable) || !errors.As(err, &refused) || !strings.Contains(strings.ToLower(refused.message), "permission") {
 		t.Errorf("a permission the App lacks: got = %v, want a 422 whose message names permissions", err)
 	}

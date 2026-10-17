@@ -9,7 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 )
 
 // seatStore is createdStore with the quotas of its researchers, and the hours each used.
@@ -76,9 +76,9 @@ func TestARunningExperimentTakesAMaxAgentsItsUnspentHoursHold(t *testing.T) {
 		return store, err
 	}
 	reason := func(err error) string {
-		var refusal *api.Refusal
-		if errors.As(err, &refusal) {
-			return refusal.Reason
+		var refused *refusal.Refusal
+		if errors.As(err, &refused) {
+			return refused.Reason
 		}
 		return ""
 	}

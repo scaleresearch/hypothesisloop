@@ -13,7 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
@@ -112,7 +112,7 @@ func (s *Service) declaredEnvironment(ctx context.Context, pe *domain.PlatformEx
 	commit := exp.CodeRef[strings.LastIndex(exp.CodeRef, "@")+1:]
 	env, err := s.environments.Declared(ctx, exp.OrgID, pe.ProjectID, pe.Repository, commit, exp.Job.Image)
 	var invalid *domain.EnvironmentFileError
-	var refused *api.Refusal
+	var refused *refusal.Refusal
 	var unresolved *domain.ImageUnresolvedError
 	switch {
 	case errors.As(err, &invalid):

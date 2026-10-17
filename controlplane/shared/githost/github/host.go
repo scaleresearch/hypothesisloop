@@ -10,7 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 )
 
@@ -50,12 +50,12 @@ func NewHost(store InstallationStore, app AppClient, logger *zap.Logger) *Host {
 
 func (h *Host) URL(repository string) string { return CloneURL(repository) }
 
-func notFound(what string) *api.Refusal {
-	return api.Refuse(http.StatusNotFound, "not_found", what+" not found")
+func notFound(what string) *refusal.Refusal {
+	return refusal.Refuse(http.StatusNotFound, "not_found", what+" not found")
 }
 
-func invalid(reason, message string) *api.Refusal {
-	return api.Refuse(http.StatusUnprocessableEntity, reason, message)
+func invalid(reason, message string) *refusal.Refusal {
+	return refusal.Refuse(http.StatusUnprocessableEntity, reason, message)
 }
 
 // token mints a token for a repository through the installation the org of the project

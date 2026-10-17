@@ -12,7 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 )
 
 // declared is a repository whose commits declare the environment files held by commit, and none
@@ -92,7 +92,7 @@ func TestASubmitIsRefusedAnEnvironmentFileNotBuiltOnBaseUnreadableOrWithNoBuilde
 	}{
 		"its own base":        {declared{files: map[string]string{commit: "FROM python:3.12\nRUN true\n"}}, domain.ReasonInvalidEnvironmentFile},
 		"BASE with a default": {declared{files: map[string]string{commit: "ARG BASE=python\nFROM ${BASE}\n"}}, domain.ReasonInvalidEnvironmentFile},
-		"unreadable":          {declared{err: api.Refuse(http.StatusServiceUnavailable, "unavailable", "GitHub is rate limiting the platform")}, ReasonEnvironmentUnreadable},
+		"unreadable":          {declared{err: refusal.Refuse(http.StatusServiceUnavailable, "unavailable", "GitHub is rate limiting the platform")}, ReasonEnvironmentUnreadable},
 		"no builder":          {declared{files: map[string]string{commit: rustEnvironment}, noBuilder: true}, domain.ReasonNoEnvironmentBuilder},
 		"a build context":     {declared{files: map[string]string{commit: "ARG BASE\nFROM ${BASE}\nCOPY vendor/codec /opt/codec\n"}}, domain.ReasonInvalidEnvironmentFile},
 	} {

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 )
 
 // Plain is any git host that serves repositories under one root over smart HTTP. A repository is
@@ -45,11 +45,11 @@ func (p *Plain) URL(repository string) string { return p.base.String() + "/" + r
 // Reachable asks the host for the repository's refs, the request git ls-remote makes.
 func (p *Plain) Reachable(ctx context.Context, _, repository string) (string, error) {
 	if !plainRepository.MatchString(repository) || len(repository) > 200 {
-		return "", api.Refuse(http.StatusUnprocessableEntity, "invalid_repository", "repository must be the name of a repository under "+p.base.String()+": path segments of letters, digits, '.', '_' and '-'")
+		return "", refusal.Refuse(http.StatusUnprocessableEntity, "invalid_repository", "repository must be the name of a repository under "+p.base.String()+": path segments of letters, digits, '.', '_' and '-'")
 	}
 	address := p.URL(repository)
 	notReachable := func(why string) error {
-		return api.Refuse(http.StatusUnprocessableEntity, "repository_not_reachable", "no repository answers git at "+address+" ("+why+"): it is created on the git host before a platform experiment names it")
+		return refusal.Refuse(http.StatusUnprocessableEntity, "repository_not_reachable", "no repository answers git at "+address+" ("+why+"): it is created on the git host before a platform experiment names it")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, address+"/info/refs?service=git-upload-pack", nil)
 	if err != nil {
@@ -81,11 +81,11 @@ func (p *Plain) Create(context.Context, string, string, string, string, map[stri
 }
 
 func (p *Plain) createsNone() error {
-	return api.Refuse(http.StatusUnprocessableEntity, "repository_required", "the platform creates no repository on this deployment's git host: create one under "+p.base.String()+" and name it in repository")
+	return refusal.Refuse(http.StatusUnprocessableEntity, "repository_required", "the platform creates no repository on this deployment's git host: create one under "+p.base.String()+" and name it in repository")
 }
 
 func (p *Plain) File(_ context.Context, _, _, path string) ([]byte, error) {
-	return nil, api.Refuse(http.StatusUnprocessableEntity, "experiment_file_unsupported", "this deployment's git host hands the platform no file, so "+path+" cannot be read from the repository: state its fields in the request")
+	return nil, refusal.Refuse(http.StatusUnprocessableEntity, "experiment_file_unsupported", "this deployment's git host hands the platform no file, so "+path+" cannot be read from the repository: state its fields in the request")
 }
 
 // FileAt finds no file: the platform reads none from a plain host, so to it every repository
@@ -95,7 +95,7 @@ func (p *Plain) FileAt(context.Context, string, string, string, string) ([]byte,
 }
 
 // ErrNoCredential is Credential's answer on a host that takes none.
-var ErrNoCredential = api.Refuse(http.StatusNotFound, "not_found", "this deployment's git host takes no credential")
+var ErrNoCredential = refusal.Refuse(http.StatusNotFound, "not_found", "this deployment's git host takes no credential")
 
 func (p *Plain) Credential(context.Context, string, string, bool) (*Credential, error) {
 	if p.username == "" {

@@ -17,7 +17,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
@@ -649,9 +649,9 @@ func statusOf(err error) int {
 }
 
 func reasonOf(err error) string {
-	var refusal *api.Refusal
-	if errors.As(err, &refusal) {
-		return refusal.Reason
+	var refused *refusal.Refusal
+	if errors.As(err, &refused) {
+		return refused.Reason
 	}
 	return ""
 }

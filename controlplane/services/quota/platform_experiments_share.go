@@ -8,7 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 )
@@ -37,7 +37,7 @@ func RegisterShareHuma(doc *apidocs.Doc, store Sharing, answer PlatformExperimen
 		return func(ctx context.Context, in *struct {
 			ID string `path:"id"`
 		}) (*struct{ Body *domain.PlatformExperiment }, error) {
-			missing := api.Refuse(http.StatusNotFound, "not_found", "platform experiment not found")
+			missing := refusal.Refuse(http.StatusNotFound, "not_found", "platform experiment not found")
 			if !domain.IdentifierShaped(in.ID) {
 				return nil, missing
 			}

@@ -12,7 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
@@ -49,7 +49,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		agent, err := h.svc.RegisterAgent(ctx, in.Body.ID, in.Body.Name, orgID)
 		if errors.Is(err, db.ErrAgentExists) {
-			return nil, api.Refuse(http.StatusConflict, "agent_exists", "an agent with id "+in.Body.ID+" already exists: register under another id, or join with this one")
+			return nil, refusal.Refuse(http.StatusConflict, "agent_exists", "an agent with id "+in.Body.ID+" already exists: register under another id, or join with this one")
 		}
 		if err != nil {
 			return nil, auth.Internal(h.logger, "register agent", err, zap.String("agentID", in.Body.ID))
@@ -74,7 +74,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		TotalCount int `header:"X-Total-Count"`
 	}, error) {
 		if in.Limit < 0 || in.Limit > db.MaxAgentListLimit || in.Offset < 0 {
-			return nil, api.Refuse(http.StatusUnprocessableEntity, "invalid_page", "limit must be 1 to "+strconv.Itoa(db.MaxAgentListLimit)+" and offset must not be negative")
+			return nil, refusal.Refuse(http.StatusUnprocessableEntity, "invalid_page", "limit must be 1 to "+strconv.Itoa(db.MaxAgentListLimit)+" and offset must not be negative")
 		}
 		scope, err := access.ListScope(ctx, in.ProjectID)
 		if err != nil {
@@ -231,11 +231,11 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			return nil, err
 		}
 		if err := domain.ValidateAgentImage(in.Body.AgentImage); err != nil {
-			return nil, api.Refuse(http.StatusUnprocessableEntity, "invalid_agent_image", err.Error())
+			return nil, refusal.Refuse(http.StatusUnprocessableEntity, "invalid_agent_image", err.Error())
 		}
 		if in.Body.FromRepo {
 			if in.Body.Repository == "" {
-				return nil, api.Refuse(http.StatusUnprocessableEntity, "no_repository", "from_repo reads "+domain.ExperimentFile+" of the repository the request names, and it names none: set repository")
+				return nil, refusal.Refuse(http.StatusUnprocessableEntity, "no_repository", "from_repo reads "+domain.ExperimentFile+" of the repository the request names, and it names none: set repository")
 			}
 			named := in.Body.Repository
 			body, err := peh.fromRepo(ctx, in.Body)
@@ -272,9 +272,9 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		pe, err := peh.svc.Create(ctx, hosting)
 		// What is wrong with a body laid over the experiment file may be the file's doing.
-		var refused *api.Refusal
+		var refused *refusal.Refusal
 		if in.Body.FromRepo && errors.As(err, &refused) {
-			return nil, api.Refuse(refused.GetStatus(), refused.Reason, "with "+domain.ExperimentFile+" of the repository under the request: "+refused.Message)
+			return nil, refusal.Refuse(refused.GetStatus(), refused.Reason, "with "+domain.ExperimentFile+" of the repository under the request: "+refused.Message)
 		}
 		var answered huma.StatusError
 		if errors.As(err, &answered) {
@@ -328,7 +328,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			return nil, huma.Error400BadRequest("unknown sort field " + in.Sort)
 		}
 		if in.Limit < 0 || in.Limit > db.MaxPlatformExperimentListLimit || in.Offset < 0 {
-			return nil, api.Refuse(http.StatusUnprocessableEntity, "invalid_page", "limit must be 1 to "+strconv.Itoa(db.MaxPlatformExperimentListLimit)+" and offset must not be negative")
+			return nil, refusal.Refuse(http.StatusUnprocessableEntity, "invalid_page", "limit must be 1 to "+strconv.Itoa(db.MaxPlatformExperimentListLimit)+" and offset must not be negative")
 		}
 		scope, withShared, err := access.PlatformExperimentListScope(ctx, in.ProjectID)
 		if err != nil {
@@ -476,7 +476,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 		}
 		if caller.Kind == auth.KindCoordinator {
 			if others := in.Body.carried("description", "baseline_job_id", "baseline_reason"); len(others) > 0 {
-				return nil, api.Refuse(http.StatusForbidden, "coordinator_changes_description_only", "a coordinator's token changes the description and the baseline (baseline_job_id, baseline_reason) and nothing else, and the body also carries: "+strings.Join(others, ", ")+". Leave them out")
+				return nil, refusal.Refuse(http.StatusForbidden, "coordinator_changes_description_only", "a coordinator's token changes the description and the baseline (baseline_job_id, baseline_reason) and nothing else, and the body also carries: "+strings.Join(others, ", ")+". Leave them out")
 			}
 		}
 		by := caller.Actor()
@@ -743,7 +743,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 				return nil, auth.Internal(peh.logger, "get agent quota", err, zap.String("id", in.ID))
 			}
 			if signup != nil && signup.Role == domain.SignupRolePlanner {
-				return nil, api.Refuse(http.StatusNotFound, "planner_has_no_quota", "agent "+in.AgentID+" is the planner of platform experiment "+in.ID+": a planner submits no job, so it has no quota and needs none. The run's budget is the budget_accelerator_hours its proposal states (hl platform-experiments propose --help), sized against hl capacity, and it is shared among the researchers when the run starts")
+				return nil, refusal.Refuse(http.StatusNotFound, "planner_has_no_quota", "agent "+in.AgentID+" is the planner of platform experiment "+in.ID+": a planner submits no job, so it has no quota and needs none. The run's budget is the budget_accelerator_hours its proposal states (hl platform-experiments propose --help), sized against hl capacity, and it is shared among the researchers when the run starts")
 			}
 			if pe == nil || pe.Status != domain.PlatformExpOpen {
 				return nil, huma.Error404NotFound("agent " + in.AgentID + " has no quota in platform experiment " + in.ID)
@@ -755,7 +755,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler, peh *PlatformExperimentsHandler)
 			if err := peh.svc.Describe(ctx, pe, reader); err != nil {
 				return nil, auth.Internal(peh.logger, "get agent quota", err, zap.String("id", in.ID))
 			}
-			return nil, api.Refuse(http.StatusNotFound, "quota_not_granted", "agent "+in.AgentID+" holds no quota yet: it is granted when the platform experiment starts. "+pe.StatusReason.Message)
+			return nil, refusal.Refuse(http.StatusNotFound, "quota_not_granted", "agent "+in.AgentID+" holds no quota yet: it is granted when the platform experiment starts. "+pe.StatusReason.Message)
 		}
 		return &struct{ Body *AgentQuotaView }{Body: aq}, nil
 	})

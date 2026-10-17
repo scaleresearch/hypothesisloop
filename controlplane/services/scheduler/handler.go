@@ -11,7 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 )
@@ -135,7 +135,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 		if err := h.svc.Submit(ctx, exp); err != nil {
 			var admErr *AdmissionError
 			if errors.As(err, &admErr) {
-				return nil, api.Refuse(admissionHTTPStatus(admErr.Reason), admErr.Reason, admErr.Message)
+				return nil, refusal.Refuse(admissionHTTPStatus(admErr.Reason), admErr.Reason, admErr.Message)
 			}
 			return nil, auth.Internal(h.svc.logger, "submit experiment", err)
 		}
@@ -196,7 +196,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			in.Sort = "-created_at"
 		}
 		if in.Limit < 0 || in.Limit > maxExperimentListLimit || in.Offset < 0 {
-			return nil, api.Refuse(http.StatusUnprocessableEntity, "invalid_page", "limit must be 1 to "+strconv.Itoa(maxExperimentListLimit)+" and offset must not be negative")
+			return nil, refusal.Refuse(http.StatusUnprocessableEntity, "invalid_page", "limit must be 1 to "+strconv.Itoa(maxExperimentListLimit)+" and offset must not be negative")
 		}
 		if in.Limit == 0 {
 			in.Limit = defaultExperimentListLimit
@@ -432,7 +432,7 @@ func admissionStatusError(err error) huma.StatusError {
 	case ReasonInvalidTransition, ReasonSummaryExists:
 		status = http.StatusConflict
 	}
-	return api.Refuse(status, admErr.Reason, admErr.Message)
+	return refusal.Refuse(status, admErr.Reason, admErr.Message)
 }
 
 // admissionHTTPStatus maps an admission reason to the appropriate HTTP status code.

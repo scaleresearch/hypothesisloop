@@ -11,7 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 )
 
@@ -84,13 +84,13 @@ func Refusal(logger *zap.Logger, op string, err error, gone int) error {
 		return err
 	case errors.As(err, &uncommitted):
 		logger.Error("github created a repository and did not take its first commit", zap.String("operation", op), zap.Error(err))
-		return api.Refuse(http.StatusBadGateway, ReasonRepositoryNotCreated, "GitHub created the repository "+uncommitted.Repository+" and did not take its first commit, so nothing else was created. The repository is left on the GitHub account without the experiment's files: name it in repository on the next try, where hl repo init adds them, or delete it on GitHub")
+		return refusal.Refuse(http.StatusBadGateway, ReasonRepositoryNotCreated, "GitHub created the repository "+uncommitted.Repository+" and did not take its first commit, so nothing else was created. The repository is left on the GitHub account without the experiment's files: name it in repository on the next try, where hl repo init adds them, or delete it on GitHub")
 	case errors.As(err, &notCovered):
 		logger.Error("github created a repository and did not add it to the installation", zap.String("operation", op), zap.Error(err))
-		return api.Refuse(http.StatusBadGateway, ReasonRepositoryNotAdded, "GitHub created the repository "+notCovered.Repository+" and did not let the platform add it to the GitHub App's installation, which covers selected repositories only, so nothing else was created. Add it to the installation on GitHub (the account's Settings, Applications, Configure), then name it in repository on the next try, where hl repo init adds the experiment's files")
+		return refusal.Refuse(http.StatusBadGateway, ReasonRepositoryNotAdded, "GitHub created the repository "+notCovered.Repository+" and did not let the platform add it to the GitHub App's installation, which covers selected repositories only, so nothing else was created. Add it to the installation on GitHub (the account's Settings, Applications, Configure), then name it in repository on the next try, where hl repo init adds the experiment's files")
 	case errors.As(err, &notAsAsked):
 		logger.Error("github created a repository that is not the private one asked for", zap.String("operation", op), zap.Error(err))
-		return api.Refuse(http.StatusBadGateway, ReasonRepositoryNotCreated, "GitHub created the repository "+notAsAsked.Repository+", which is not the private repository asked for on the GitHub account the org connected, so nothing else was created. It is left on GitHub: its owner deletes it there, or makes it private and adds it to the installation, and the request names it in repository on the next try")
+		return refusal.Refuse(http.StatusBadGateway, ReasonRepositoryNotCreated, "GitHub created the repository "+notAsAsked.Repository+", which is not the private repository asked for on the GitHub account the org connected, so nothing else was created. It is left on GitHub: its owner deletes it there, or makes it private and adds it to the installation, and the request names it in repository on the next try")
 	case errors.Is(err, ErrInvalidRepository):
 		return invalid(ReasonInvalidRepository, "repository must be owner/name, as in the repository's address on GitHub")
 	case errors.Is(err, ErrNoInstallation):
@@ -102,26 +102,26 @@ func Refusal(logger *zap.Logger, op string, err error, gone int) error {
 		}
 		return invalid(ReasonRepositoryCreationNotPermitted, "GitHub does not let the platform's GitHub App create a repository on the GitHub account the org connected."+accepted+" The owner of the account accepts the App's permissions on GitHub and lets the App create repositories there, or creates a private repository on it, adds it to the installation when that covers selected repositories only, and the request names it in repository")
 	case errors.Is(err, ErrRepositoryExists):
-		return api.Refuse(http.StatusConflict, ReasonRepositoryExists, "the GitHub account the org connected already has a repository of the name this platform experiment's would take: create it again, or name a repository")
+		return refusal.Refuse(http.StatusConflict, ReasonRepositoryExists, "the GitHub account the org connected already has a repository of the name this platform experiment's would take: create it again, or name a repository")
 	case errors.As(err, &failed):
 		logger.Error("github refused to create a repository", zap.String("operation", op), zap.Error(err))
-		return api.Refuse(http.StatusBadGateway, ReasonRepositoryNotCreated, "GitHub did not create the repository, so nothing else was created. It answered "+strconv.Itoa(failed.Status)+": "+strconv.Quote(failed.Message)+". Name a repository the installation covers, or try again")
+		return refusal.Refuse(http.StatusBadGateway, ReasonRepositoryNotCreated, "GitHub did not create the repository, so nothing else was created. It answered "+strconv.Itoa(failed.Status)+": "+strconv.Quote(failed.Message)+". Name a repository the installation covers, or try again")
 	case errors.Is(err, ErrNotConnected):
-		return api.Refuse(gone, ReasonInstallationNotConnected, "the org has connected no GitHub installation on that GitHub account, the one that owns the repository or the one a new repository was asked on: an owner of the org installs the GitHub App on it in Settings, GitHub")
+		return refusal.Refuse(gone, ReasonInstallationNotConnected, "the org has connected no GitHub installation on that GitHub account, the one that owns the repository or the one a new repository was asked on: an owner of the org installs the GitHub App on it in Settings, GitHub")
 	case errors.Is(err, ErrRepositoryNotInstalled):
-		return api.Refuse(gone, ReasonRepositoryNotReachable, "the GitHub installation the org connected does not cover that repository: its owner adds it to the installation on GitHub")
+		return refusal.Refuse(gone, ReasonRepositoryNotReachable, "the GitHub installation the org connected does not cover that repository: its owner adds it to the installation on GitHub")
 	case errors.As(err, &installationGone) && installationGone.Suspended:
-		return api.Refuse(gone, ReasonInstallationSuspended, "the GitHub App is suspended on "+installationGone.Account+" (installation "+strconv.FormatInt(installationGone.Installation, 10)+"): its owner unsuspends it on GitHub, in the account's Settings, Applications")
+		return refusal.Refuse(gone, ReasonInstallationSuspended, "the GitHub App is suspended on "+installationGone.Account+" (installation "+strconv.FormatInt(installationGone.Installation, 10)+"): its owner unsuspends it on GitHub, in the account's Settings, Applications")
 	case errors.As(err, &installationGone):
-		return api.Refuse(gone, ReasonInstallationGone, "the GitHub App is no longer installed on "+installationGone.Account+" (installation "+strconv.FormatInt(installationGone.Installation, 10)+"): its owner installs the App again from Settings, GitHub")
+		return refusal.Refuse(gone, ReasonInstallationGone, "the GitHub App is no longer installed on "+installationGone.Account+" (installation "+strconv.FormatInt(installationGone.Installation, 10)+"): its owner installs the App again from Settings, GitHub")
 	case errors.Is(err, ErrInstallationSuspended):
-		return api.Refuse(gone, ReasonInstallationSuspended, "the GitHub App installation is suspended: its owner unsuspends it on GitHub, in the account's Settings, Applications")
+		return refusal.Refuse(gone, ReasonInstallationSuspended, "the GitHub App installation is suspended: its owner unsuspends it on GitHub, in the account's Settings, Applications")
 	case errors.Is(err, ErrInstallationGone):
-		return api.Refuse(gone, ReasonInstallationGone, "the GitHub App installation was removed on GitHub: its owner installs the App again from Settings, GitHub")
+		return refusal.Refuse(gone, ReasonInstallationGone, "the GitHub App installation was removed on GitHub: its owner installs the App again from Settings, GitHub")
 	case errors.As(err, &missing):
-		return api.Refuse(gone, ReasonPermissionMissing, "github_permission_missing: "+strings.Join(missing.Missing, ", ")+". The GitHub App installation has not granted that, which the platform needs: its owner accepts the App's permissions on GitHub (the account's Settings, Applications, Configure)")
+		return refusal.Refuse(gone, ReasonPermissionMissing, "github_permission_missing: "+strings.Join(missing.Missing, ", ")+". The GitHub App installation has not granted that, which the platform needs: its owner accepts the App's permissions on GitHub (the account's Settings, Applications, Configure)")
 	case errors.Is(err, ErrPermissionNotGranted):
-		return api.Refuse(gone, ReasonPermissionMissing, "the GitHub App installation has not granted the access the App asks for: its owner accepts the App's permissions on GitHub (the account's Settings, Applications, Configure)")
+		return refusal.Refuse(gone, ReasonPermissionMissing, "the GitHub App installation has not granted the access the App asks for: its owner accepts the App's permissions on GitHub (the account's Settings, Applications, Configure)")
 	case errors.Is(err, ErrFileNotFound):
 		return invalid(ReasonNoExperimentFile, "the repository has no "+domain.ExperimentFile+" on its default branch")
 	case errors.Is(err, ErrNotAFile):
@@ -130,17 +130,17 @@ func Refusal(logger *zap.Logger, op string, err error, gone int) error {
 		return invalid(ReasonNoExperimentFile, domain.ExperimentFile+" is larger than the platform reads from a repository")
 	case errors.Is(err, ErrRateLimited):
 		logger.Warn("github is rate limiting the platform", zap.String("operation", op))
-		return api.Refuse(http.StatusServiceUnavailable, ReasonUnavailable, "GitHub is rate limiting the platform: try again shortly")
+		return refusal.Refuse(http.StatusServiceUnavailable, ReasonUnavailable, "GitHub is rate limiting the platform: try again shortly")
 	case errors.Is(err, ErrAppCredentials):
 		logger.Error("github refused the App's credentials", zap.String("operation", op), zap.Error(err))
-		return api.Refuse(http.StatusBadGateway, ReasonUnavailable, "the platform could not authenticate to GitHub")
+		return refusal.Refuse(http.StatusBadGateway, ReasonUnavailable, "the platform could not authenticate to GitHub")
 	case errors.As(err, &githubFailed):
 		logger.Error("github failed a call for an installation", zap.String("operation", op), zap.Int64("installationID", githubFailed.Installation), zap.Error(err))
 		answered := "did not answer"
 		if githubFailed.Status != 0 {
 			answered = "answered " + strconv.Itoa(githubFailed.Status) + " " + strconv.Quote(githubFailed.Message)
 		}
-		return api.Refuse(http.StatusBadGateway, ReasonGitHubFailed, "GitHub failed the platform's call for GitHub App installation "+strconv.FormatInt(githubFailed.Installation, 10)+": it "+answered+". Try again later, and if GitHub keeps failing, the owner of the GitHub App reports it to GitHub Support with the installation id")
+		return refusal.Refuse(http.StatusBadGateway, ReasonGitHubFailed, "GitHub failed the platform's call for GitHub App installation "+strconv.FormatInt(githubFailed.Installation, 10)+": it "+answered+". Try again later, and if GitHub keeps failing, the owner of the GitHub App reports it to GitHub Support with the installation id")
 	default:
 		return auth.Internal(logger, "github request failed", err, zap.String("operation", op))
 	}
