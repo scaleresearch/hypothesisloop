@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -51,6 +52,9 @@ var (
 	SandboxE2BRegistryPassword      = ProviderKey(SectionSandbox, "e2b", "REGISTRY_PASSWORD", "the password of SANDBOX_E2B_REGISTRY_USERNAME")
 )
 
+// providerField is <PROVIDER>_<FIELD> of a provider's key, each of capitals and digits.
+var providerField = regexp.MustCompile(`^[A-Z0-9]+_[A-Z0-9]+(_[A-Z0-9]+)*$`)
+
 // IsKey reports whether name is a key some program reads: one of the platform's own, or a
 // provider's, which begins with its section. A provider of the sandbox or cloud_compute is any
 // the settings name, so its keys are known by the rule alone.
@@ -61,7 +65,7 @@ func IsKey(name string) bool {
 		}
 	}
 	for _, section := range []string{SectionObjectStore, SectionGitHost, SectionContainerRegistry, SectionSandbox, SectionCloudCompute, "MODEL"} {
-		if strings.HasPrefix(name, section+"_") {
+		if rest, ok := strings.CutPrefix(name, section+"_"); ok && providerField.MatchString(rest) {
 			return true
 		}
 	}

@@ -177,7 +177,7 @@ func TestAProvidersKeyIsItsSectionItsProviderAndItsField(t *testing.T) {
 			t.Errorf("IsKey(%s) = false, want a key some program reads", name)
 		}
 	}
-	for _, name := range []string{"", "PATH", "HOME", "DATA_STORE_MINIO_SECRET_ACCESS_KEY", "ENVIRONMENTS_GCP_CREDENTIALS", "GITHUB_APP_PRIVATE_KEY", "SANDBOX", "sandbox_fly_api_key", "DATABASE_URL_RO", "HL_TOKEN", "GOOGLE_APPLICATION_CREDENTIALS"} {
+	for _, name := range []string{"", "PATH", "HOME", "DATA_STORE_MINIO_SECRET_ACCESS_KEY", "ENVIRONMENTS_GCP_CREDENTIALS", "GITHUB_APP_PRIVATE_KEY", "SANDBOX", "SANDBOX_", "SANDBOX_FLY", "SANDBOX_FLY_", "OBJECT_STORE__SECRET", "sandbox_fly_api_key", "DATABASE_URL_RO", "HL_TOKEN", "GOOGLE_APPLICATION_CREDENTIALS"} {
 		if IsKey(name) {
 			t.Errorf("IsKey(%q) = true, want no key of the platform", name)
 		}
