@@ -1135,3 +1135,24 @@ func TestOpenPersonIdeasListFirstAndAreCounted(t *testing.T) {
 		t.Errorf("OpenPersonIdeas: got = (%d, %v), want (2, nil)", n, err)
 	}
 }
+
+func TestEnsureSchemaRefusesAnIndexItDoesNotDeclare(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	run := func(stmt string) {
+		session := s.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+		defer session.Close(ctx)
+		result, err := session.Run(ctx, stmt, nil)
+		if err == nil {
+			_, err = result.Consume(ctx)
+		}
+		if err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	run("CREATE INDEX ON :Hypothesis(stray)")
+	t.Cleanup(func() { run("DROP INDEX ON :Hypothesis(stray)") })
+	if err := s.EnsureSchema(ctx); err == nil || !strings.Contains(err.Error(), "unexpected index label+property Hypothesis(stray)") {
+		t.Fatalf("got = %v, want a refusal naming the index", err)
+	}
+}

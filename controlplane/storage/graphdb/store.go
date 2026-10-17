@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -69,34 +71,96 @@ func (s *Store) Close(ctx context.Context) error {
 // CALL text_search.search_all('hypothesis_text', '<words>').
 const TextIndex = "hypothesis_text"
 
-// Memgraph does not back a uniqueness constraint with an index, so every property a write looks a
-// node up by gets its own.
-var schemaStatements = []string{
-	"CREATE CONSTRAINT ON (h:Hypothesis) ASSERT h.id IS UNIQUE",
-	"CREATE CONSTRAINT ON (h:Hypothesis) ASSERT h.platform_experiment_id, h.normalized_text IS UNIQUE",
-	"CREATE CONSTRAINT ON (o:Objective) ASSERT o.id IS UNIQUE",
-	"CREATE INDEX ON :Hypothesis(id)",
-	"CREATE INDEX ON :Hypothesis(platform_experiment_id)",
-	"CREATE INDEX ON :Objective(id)",
-	"CREATE TEXT INDEX " + TextIndex + " ON :Hypothesis(text)",
+// schemaObject is a constraint or an index the store relies on: the statement that creates it,
+// and the line it is listed as (listedSchema).
+type schemaObject struct {
+	create, listed string
 }
 
-// EnsureSchema creates the constraints and indexes the store relies on. Every statement is a
-// no-op when its object already exists, so it runs on every start.
+// Memgraph does not back a uniqueness constraint with an index, so every property a write looks a
+// node up by gets its own.
+var schema = []schemaObject{
+	{"CREATE CONSTRAINT ON (h:Hypothesis) ASSERT h.id IS UNIQUE", "constraint unique Hypothesis(id)"},
+	{"CREATE CONSTRAINT ON (h:Hypothesis) ASSERT h.platform_experiment_id, h.normalized_text IS UNIQUE",
+		"constraint unique Hypothesis(platform_experiment_id, normalized_text)"},
+	{"CREATE CONSTRAINT ON (o:Objective) ASSERT o.id IS UNIQUE", "constraint unique Objective(id)"},
+	{"CREATE INDEX ON :Hypothesis(id)", "index label+property Hypothesis(id)"},
+	{"CREATE INDEX ON :Hypothesis(platform_experiment_id)", "index label+property Hypothesis(platform_experiment_id)"},
+	{"CREATE INDEX ON :Objective(id)", "index label+property Objective(id)"},
+	{"CREATE TEXT INDEX " + TextIndex + " ON :Hypothesis(text)", "index label_text (name: " + TextIndex + ") Hypothesis(text)"},
+}
+
+// EnsureSchema creates the constraints and indexes the store relies on, then refuses unless they
+// are exactly the ones the store holds. Every statement is a no-op when its object already
+// exists, so it runs on every start.
 func (s *Store) EnsureSchema(ctx context.Context) error {
 	// Memgraph refuses schema changes inside an explicit transaction, so these run auto-commit.
 	session := s.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
 	defer session.Close(ctx)
-	for _, stmt := range schemaStatements {
-		result, err := session.Run(ctx, stmt, nil)
+	want := map[string]bool{}
+	for _, o := range schema {
+		result, err := session.Run(ctx, o.create, nil)
 		if err == nil {
 			_, err = result.Consume(ctx)
 		}
 		if err != nil {
-			return fmt.Errorf("graphdb.EnsureSchema: %s: %w", stmt, err)
+			return fmt.Errorf("graphdb.EnsureSchema: %s: %w", o.create, err)
+		}
+		want[o.listed] = true
+	}
+	have, err := listedSchema(ctx, session)
+	if err != nil {
+		return fmt.Errorf("graphdb.EnsureSchema: %w", err)
+	}
+	var differences []string
+	for _, o := range schema {
+		if !have[o.listed] {
+			differences = append(differences, "missing "+o.listed)
 		}
 	}
+	for _, listed := range slices.Sorted(maps.Keys(have)) {
+		if !want[listed] {
+			differences = append(differences, "unexpected "+listed)
+		}
+	}
+	if len(differences) > 0 {
+		return fmt.Errorf("graphdb.EnsureSchema: the graph is not the schema this release declares: %s", strings.Join(differences, "; "))
+	}
 	return nil
+}
+
+// listedSchema is every index and constraint the store holds, each as "index <type>
+// <label>(<properties>)" or "constraint <type> <label>(<properties>)".
+func listedSchema(ctx context.Context, session neo4j.SessionWithContext) (map[string]bool, error) {
+	listed := map[string]bool{}
+	for _, show := range []struct{ query, kind, typeKey, propertiesKey string }{
+		{"SHOW INDEX INFO", "index", "index type", "property"},
+		{"SHOW CONSTRAINT INFO", "constraint", "constraint type", "properties"},
+	} {
+		result, err := session.Run(ctx, show.query, nil)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", show.query, err)
+		}
+		records, err := result.Collect(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", show.query, err)
+		}
+		for _, r := range records {
+			kind, _ := r.Get(show.typeKey)
+			label, _ := r.Get("label")
+			raw, _ := r.Get(show.propertiesKey)
+			names, ok := raw.([]any)
+			if !ok {
+				return nil, fmt.Errorf("%s: %s is %T, want a list", show.query, show.propertiesKey, raw)
+			}
+			properties := make([]string, len(names))
+			for i, name := range names {
+				properties[i] = fmt.Sprint(name)
+			}
+			listed[fmt.Sprintf("%s %v %v(%s)", show.kind, kind, label, strings.Join(properties, ", "))] = true
+		}
+	}
+	return listed, nil
 }
 
 func (s *Store) write(ctx context.Context, work neo4j.ManagedTransactionWork) (any, error) {
