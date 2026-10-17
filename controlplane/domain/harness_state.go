@@ -2,7 +2,7 @@ package domain
 
 import "time"
 
-// HarnessState is what the harness of a hosted agent, or of a hosted coordinator (Role
+// HarnessState is what the harness of a sandboxed agent, or of a sandboxed coordinator (Role
 // CoordinatorHealthRole, no AgentID), last said of itself on its hl-state line: the subagents it
 // has running, whether its turn waits for platform updates and since when, the digest of the
 // instructions it runs, and the model provider's rate limit it last read. At is when the platform last read such a line.

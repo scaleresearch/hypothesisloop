@@ -17,7 +17,7 @@ import (
 type SendMessageRequest struct {
 	AgentID     string `json:"agent_id,omitempty" doc:"The agent to send it to. Exactly one of agent_id, all and coordinator."`
 	All         bool   `json:"all,omitempty" doc:"Send it to every researcher (role competitor) at work: none that finished or was cut."`
-	Coordinator bool   `json:"coordinator,omitempty" doc:"Send it to the hosted coordinator, from a person or a key."`
+	Coordinator bool   `json:"coordinator,omitempty" doc:"Send it to the sandboxed coordinator, from a person or a key."`
 	Text        string `json:"text" minLength:"1" doc:"What the agent is told, at most 1500 bytes."`
 }
 
@@ -29,7 +29,7 @@ type RefusedMessage struct {
 }
 
 // SendMessage sends text from by to the agent named, with all to every researcher at work that by
-// may message now and names the rest as refused, or with coordinator to the hosted coordinator.
+// may message now and names the rest as refused, or with coordinator to the sandboxed coordinator.
 func (s *Service) SendMessage(ctx context.Context, platformExpID string, req SendMessageRequest, by domain.Actor) ([]domain.AgentMessage, []RefusedMessage, error) {
 	written := strings.TrimSpace(req.Text)
 	text := strings.TrimSpace(domain.EventDetail(written))

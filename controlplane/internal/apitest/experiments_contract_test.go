@@ -99,7 +99,7 @@ func schedulerRouter(t *testing.T, store scheduler.Store) http.Handler {
 	httpapi.Register(d, httpapi.Handlers{
 		Logger:     zap.NewNop(),
 		Hypotheses: struct{ platformexperiments.Hypotheses }{},
-		Launch:     platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: "contract-test-signing-secret", MaxHosted: 20},
+		Launch:     platformexperiments.AgentLaunch{AgentSandbox: true, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: "contract-test-signing-secret", MaxAgentSandboxes: 20},
 		Scheduler:  scheduler.NewService(store, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, metricsdb.New(metrics.URL), zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{}),
 	})
 	return answering(t, d.API, r)

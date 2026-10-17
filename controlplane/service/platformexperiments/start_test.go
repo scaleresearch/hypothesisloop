@@ -304,7 +304,7 @@ func TestEveryStatusSaysWhyInItsStatusReason(t *testing.T) {
 		}
 	}
 	// A draft waits for its planner until it answers, and from then for a person. An open one
-	// whose coordinator is a person asks that person for what a hosted coordinator would do.
+	// whose coordinator is a person asks that person for what a sandboxed coordinator would do.
 	answered := now
 	proposed := &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpDraft, ProposedAt: &answered}
 	for name, c := range map[string]struct {
@@ -314,8 +314,8 @@ func TestEveryStatusSaysWhyInItsStatusReason(t *testing.T) {
 		"a draft being planned":             {&domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpDraft}, domain.WaitsForPlatform},
 		"a draft with a proposal":           {proposed, domain.WaitsForOwner},
 		"an open one a person coordinates":  {&domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpOpen}, domain.WaitsForOwner},
-		"an open one with its coordinator":  {&domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpOpen, CoordinatorHosted: true}, domain.WaitsForCoordinator},
-		"an open one with nobody to run it": {&domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpOpen, CoordinatorHosted: true, BaselineJobID: "job-1"}, domain.WaitsForOwner},
+		"an open one with its coordinator":  {&domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpOpen, CoordinatorInAgentSandbox: true}, domain.WaitsForCoordinator},
+		"an open one with nobody to run it": {&domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpOpen, CoordinatorInAgentSandbox: true, BaselineJobID: "job-1"}, domain.WaitsForOwner},
 	} {
 		if err := svc.Describe(context.Background(), c.pe, auth.Principal{Kind: auth.KindUser}); err != nil || c.pe.StatusReason.WaitsFor != c.who {
 			t.Errorf("%s: status_reason = %+v, %v, want it to wait for %s", name, c.pe.StatusReason, err, c.who)

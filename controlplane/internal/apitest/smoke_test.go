@@ -87,7 +87,7 @@ func TestSmoke(t *testing.T) {
 		Logger:              zap.NewNop(),
 		PlatformExperiments: peHandler,
 		Hypotheses:          struct{ platformexperiments.Hypotheses }{},
-		Launch:              platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: "contract-test-signing-secret", MaxHosted: 20},
+		Launch:              platformexperiments.AgentLaunch{AgentSandbox: true, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: "contract-test-signing-secret", MaxAgentSandboxes: 20},
 		Scheduler:           scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, metricsdb.New("http://metrics.invalid"), zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{}),
 	})
 	doc.MountExplore(r)

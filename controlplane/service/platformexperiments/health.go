@@ -7,7 +7,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// RunHealth is where each agent of a platform experiment, and its hosted coordinator, last stood,
+// RunHealth is where each agent of a platform experiment, and its sandboxed coordinator, last stood,
 // as the run's health series in the metrics store hold it.
 type RunHealth struct {
 	PlatformExperimentID string               `json:"platform_experiment_id"`

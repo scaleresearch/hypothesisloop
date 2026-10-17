@@ -16,32 +16,32 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// hostedThing is a hosted agent or, with no agent id, a hosted coordinator, and how each is read
+// sandboxedThing is a sandboxed agent or, with no agent id, a sandboxed coordinator, and how each is read
 // back and aged.
-type hostedThing struct {
+type sandboxedThing struct {
 	pe, agentID string
 	instance    func() domain.AgentInstance
 	age         func(column string, by time.Duration)
 }
 
-func hostedThings(t *testing.T, pool *Pool) map[string]hostedThing {
+func sandboxedThings(t *testing.T, pool *Pool) map[string]sandboxedThing {
 	t.Helper()
 	ctx := context.Background()
 	pes := NewStore(pool, 3)
 	age := func(pe, agentID string) func(string, time.Duration) {
 		return func(column string, by time.Duration) {
 			t.Helper()
-			if _, err := pool.pool.Exec(ctx, `UPDATE hosted_instances SET `+column+` = now() - make_interval(secs => $1) WHERE platform_experiment_id = $2 AND agent_id = $3`, by.Seconds(), pe, agentID); err != nil {
+			if _, err := pool.pool.Exec(ctx, `UPDATE agentsandbox_instances SET `+column+` = now() - make_interval(secs => $1) WHERE platform_experiment_id = $2 AND agent_id = $3`, by.Seconds(), pe, agentID); err != nil {
 				t.Fatal(err)
 			}
 		}
 	}
 	pe := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, pe, 10)
-	agent := spawnTestAgents(t, pes, pe, domain.AgentSignup{Actor: testActor, Hosted: true})[0]
+	agent := spawnTestAgents(t, pes, pe, domain.AgentSignup{Actor: testActor, InAgentSandbox: true})[0]
 	coordinated := createTestPEWithCoordinator(t, pool)
 	setPEStatus(t, pool, coordinated, domain.PlatformExpRunning, 0)
-	return map[string]hostedThing{
+	return map[string]sandboxedThing{
 		"agent": {pe, agent, func() domain.AgentInstance {
 			t.Helper()
 			signup, err := pes.GetAgentSignup(ctx, pe, agent)
@@ -66,7 +66,7 @@ func TestAnExitedMachineIsRecordedRestartedAndFinallyStopsWhatItRan(t *testing.T
 	ctx := context.Background()
 	pes := NewStore(pool, 3)
 	const maxRestarts = 2
-	for kind, thing := range hostedThings(t, pool) {
+	for kind, thing := range sandboxedThings(t, pool) {
 		if got := thing.instance(); got != (domain.AgentInstance{}) {
 			t.Fatalf("%s: a fresh instance: got = %+v, want nothing recorded", kind, got)
 		}
@@ -131,7 +131,7 @@ func TestRestartsOlderThanTheWindowNoLongerCount(t *testing.T) {
 	ctx := context.Background()
 	pes := NewStore(pool, 3)
 	const maxRestarts = 2
-	for kind, thing := range hostedThings(t, pool) {
+	for kind, thing := range sandboxedThings(t, pool) {
 		exit := func(name string) domain.AgentInstance {
 			t.Helper()
 			if err := pes.AskInstance(ctx, thing.pe, thing.agentID, name, "launch-1"); err != nil {
@@ -146,7 +146,7 @@ func TestRestartsOlderThanTheWindowNoLongerCount(t *testing.T) {
 		for i := range maxRestarts {
 			exit(fmt.Sprintf("early-%d", i))
 		}
-		if _, err := pool.pool.Exec(ctx, `UPDATE hosted_instances
+		if _, err := pool.pool.Exec(ctx, `UPDATE agentsandbox_instances
 SET restarted_at = ARRAY(SELECT t - make_interval(secs => $1) FROM unnest(restarted_at) t)
 WHERE platform_experiment_id = $2 AND agent_id = $3`, (domain.AgentInstanceRestartWindow + time.Minute).Seconds(), thing.pe, thing.agentID); err != nil {
 			t.Fatal(err)
@@ -169,7 +169,7 @@ func TestAnExpiredMachineSpendsNoRestartAndNeverStopsWhatItRan(t *testing.T) {
 	ctx := context.Background()
 	pes := NewStore(pool, 3)
 	const maxRestarts = 2
-	for kind, thing := range hostedThings(t, pool) {
+	for kind, thing := range sandboxedThings(t, pool) {
 		end := func(name string, how InstanceEnd) domain.AgentInstance {
 			t.Helper()
 			if err := pes.AskInstance(ctx, thing.pe, thing.agentID, name, "launch-1"); err != nil {
@@ -214,7 +214,7 @@ func TestAMachineIsGivenUpOnWhenItIsNeverSeenStaysStartingOrIsGone(t *testing.T)
 	ctx := context.Background()
 	pes := NewStore(pool, 3)
 	const bootLimit, maxRestarts = 5 * time.Minute, 3
-	for kind, thing := range hostedThings(t, pool) {
+	for kind, thing := range sandboxedThings(t, pool) {
 		ask := func(name string) {
 			t.Helper()
 			if err := pes.AskInstance(ctx, thing.pe, thing.agentID, name, "launch-1"); err != nil {
@@ -292,7 +292,7 @@ func TestALauncherIsToldTheMachineOfEveryNameItHolds(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewStore(pool, 3)
-	for kind, thing := range hostedThings(t, pool) {
+	for kind, thing := range sandboxedThings(t, pool) {
 		name := "held-" + uuid.New().String()[:8]
 		machineOf := func(names ...string) string {
 			t.Helper()
@@ -354,7 +354,7 @@ func TestOneExitReportedByTwoReconcilesAtOnceSpendsOneRestart(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewStore(pool, 3)
-	for kind, thing := range hostedThings(t, pool) {
+	for kind, thing := range sandboxedThings(t, pool) {
 		if err := pes.AskInstance(ctx, thing.pe, thing.agentID, "name-1", "launch-1"); err != nil {
 			t.Fatal(err)
 		}
@@ -385,9 +385,9 @@ func TestOneExitReportedByTwoReconcilesAtOnceSpendsOneRestart(t *testing.T) {
 	}
 }
 
-// The bound is on machines, so a hosted baseline or reviewer counts as a competitor does, and so
+// The bound is on machines, so a sandboxed baseline or reviewer counts as a competitor does, and so
 // does the coordinator.
-func TestHostedAgentsOfEveryRoleAndTheCoordinatorCountAgainstTheMachinesOfOneExperiment(t *testing.T) {
+func TestSandboxedAgentsOfEveryRoleAndTheCoordinatorCountAgainstTheMachinesOfOneExperiment(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewStore(pool, 3)
@@ -397,8 +397,8 @@ func TestHostedAgentsOfEveryRoleAndTheCoordinatorCountAgainstTheMachinesOfOneExp
 		MaxAgents: 2, StartsAt: now, EndsAt: now.Add(24 * time.Hour), Status: domain.PlatformExpOpen,
 		Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
 		Stages:    []domain.Stage{{LengthPct: 100, EvictPct: 0}},
-		CreatedAt: now, UpdatedAt: now, MaxHosted: 4,
-		CoordinatorHosted: true, Coordinator: &domain.HostedCoordinator{Model: "model-1"},
+		CreatedAt: now, UpdatedAt: now, MaxAgentSandboxes: 4,
+		CoordinatorInAgentSandbox: true, Coordinator: &domain.AgentSandboxCoordinator{Model: "model-1"},
 	}
 	if err := pes.CreatePlatformExperiment(ctx, pe, nil, nil); err != nil {
 		t.Fatal(err)
@@ -415,13 +415,13 @@ func TestHostedAgentsOfEveryRoleAndTheCoordinatorCountAgainstTheMachinesOfOneExp
 	// max_agents is two competitors, which no baseline or reviewer counts against. Added one at
 	// a time they would be without end, were machines not counted.
 	for i, role := range []domain.SignupRole{domain.SignupRoleBaseline, domain.SignupRoleReviewer, domain.SignupRoleBaseline} {
-		if err := add(domain.AgentSignup{Actor: testActor, Role: role, Hosted: true}); err != nil {
-			t.Fatalf("hosted %s %d: got = %v, want = nil", role, i+1, err)
+		if err := add(domain.AgentSignup{Actor: testActor, Role: role, InAgentSandbox: true}); err != nil {
+			t.Fatalf("sandboxed %s %d: got = %v, want = nil", role, i+1, err)
 		}
 	}
 	for _, role := range []domain.SignupRole{domain.SignupRoleBaseline, domain.SignupRoleReviewer, domain.SignupRoleCompetitor} {
-		if err := add(domain.AgentSignup{Actor: testActor, Role: role, Hosted: true}); !errors.Is(err, ErrMaxHostedReached) {
-			t.Fatalf("a fifth machine, a hosted %s: got = %v, want ErrMaxHostedReached", role, err)
+		if err := add(domain.AgentSignup{Actor: testActor, Role: role, InAgentSandbox: true}); !errors.Is(err, ErrMaxAgentSandboxesReached) {
+			t.Fatalf("a fifth machine, a sandboxed %s: got = %v, want ErrMaxAgentSandboxesReached", role, err)
 		}
 	}
 	// An agent its owner runs is no machine of the platform's.
@@ -429,7 +429,7 @@ func TestHostedAgentsOfEveryRoleAndTheCoordinatorCountAgainstTheMachinesOfOneExp
 		t.Fatalf("a self-run agent in a full house: got = %v, want = nil", err)
 	}
 	if joined, err := pes.ListAgentSignups(ctx, pe.ID); err != nil || len(joined) != 4 {
-		t.Fatalf("joined = %d, %v, want the three hosted and the self-run one", len(joined), err)
+		t.Fatalf("joined = %d, %v, want the three sandboxed and the self-run one", len(joined), err)
 	}
 }
 
@@ -445,8 +445,8 @@ func TestOneMachineIsKeptForTheBaselineAndAFinishedAgentHoldsNone(t *testing.T) 
 		MaxAgents: 5, StartsAt: now, EndsAt: now.Add(24 * time.Hour), Status: domain.PlatformExpOpen,
 		Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
 		Stages:    []domain.Stage{{LengthPct: 100, EvictPct: 0}},
-		CreatedAt: now, UpdatedAt: now, MaxHosted: 4,
-		CoordinatorHosted: true, Coordinator: &domain.HostedCoordinator{Model: "model-1"},
+		CreatedAt: now, UpdatedAt: now, MaxAgentSandboxes: 4,
+		CoordinatorInAgentSandbox: true, Coordinator: &domain.AgentSandboxCoordinator{Model: "model-1"},
 	}
 	if err := pes.CreatePlatformExperiment(ctx, pe, nil, nil); err != nil {
 		t.Fatal(err)
@@ -457,7 +457,7 @@ func TestOneMachineIsKeptForTheBaselineAndAFinishedAgentHoldsNone(t *testing.T) 
 			t.Fatal(err)
 		}
 		agent := &domain.Agent{ID: id, Name: id, CreatedAt: now}
-		return id, pes.SpawnAgent(ctx, pe.ID, agent, domain.AgentSignup{Actor: testActor, AgentID: id, Role: role, Hosted: true})
+		return id, pes.SpawnAgent(ctx, pe.ID, agent, domain.AgentSignup{Actor: testActor, AgentID: id, Role: role, InAgentSandbox: true})
 	}
 	for i := range 2 {
 		if _, err := add(domain.SignupRoleCompetitor); err != nil {
@@ -465,16 +465,16 @@ func TestOneMachineIsKeptForTheBaselineAndAFinishedAgentHoldsNone(t *testing.T) 
 		}
 	}
 	for _, role := range []domain.SignupRole{domain.SignupRoleCompetitor, domain.SignupRoleReviewer} {
-		if _, err := add(role); !errors.Is(err, ErrMaxHostedReached) {
-			t.Fatalf("a hosted %s for the machine kept for the baseline: got = %v, want ErrMaxHostedReached", role, err)
+		if _, err := add(role); !errors.Is(err, ErrMaxAgentSandboxesReached) {
+			t.Fatalf("a sandboxed %s for the machine kept for the baseline: got = %v, want ErrMaxAgentSandboxesReached", role, err)
 		}
 	}
 	first, err := add(domain.SignupRoleBaseline)
 	if err != nil {
 		t.Fatalf("the baseline agent in the machine kept for it: got = %v, want = nil", err)
 	}
-	if _, err := add(domain.SignupRoleBaseline); !errors.Is(err, ErrMaxHostedReached) {
-		t.Fatalf("a second baseline agent while the first holds the machine: got = %v, want ErrMaxHostedReached", err)
+	if _, err := add(domain.SignupRoleBaseline); !errors.Is(err, ErrMaxAgentSandboxesReached) {
+		t.Fatalf("a second baseline agent while the first holds the machine: got = %v, want ErrMaxAgentSandboxesReached", err)
 	}
 	if err := pes.FinishAgent(ctx, pe.ID, first, "the control does not run"); err != nil {
 		t.Fatal(err)
@@ -482,8 +482,8 @@ func TestOneMachineIsKeptForTheBaselineAndAFinishedAgentHoldsNone(t *testing.T) 
 	if _, err := add(domain.SignupRoleBaseline); err != nil {
 		t.Fatalf("a second baseline agent once the first finished: got = %v, want = nil", err)
 	}
-	if _, err := add(domain.SignupRoleCompetitor); !errors.Is(err, ErrMaxHostedReached) {
-		t.Fatalf("a researcher in a full house: got = %v, want ErrMaxHostedReached", err)
+	if _, err := add(domain.SignupRoleCompetitor); !errors.Is(err, ErrMaxAgentSandboxesReached) {
+		t.Fatalf("a researcher in a full house: got = %v, want ErrMaxAgentSandboxesReached", err)
 	}
 }
 
@@ -493,7 +493,7 @@ func TestARunningMachinesProgressIsStampedOnThisClockAndItsSilenceEndsIt(t *test
 	pes := NewStore(pool, 3)
 	const limit, maxRestarts = 8 * time.Minute, 3
 	marker := func(m string) *string { return &m }
-	for kind, thing := range hostedThings(t, pool) {
+	for kind, thing := range sandboxedThings(t, pool) {
 		observe := func(state string, progress *string) {
 			t.Helper()
 			if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, "name-1", state, progress, limit, "", "machine-1"); err != nil {
@@ -593,7 +593,7 @@ func TestARunningMachineWhoseProgressIsUnreadableIsEndedByTheSilentClockAndSpend
 	pes := NewStore(pool, 3)
 	const limit, maxRestarts = 8 * time.Minute, 1
 	marker := "7"
-	for kind, thing := range hostedThings(t, pool) {
+	for kind, thing := range sandboxedThings(t, pool) {
 		observe := func(name, state string, progress *string) {
 			t.Helper()
 			if err := pes.ObserveInstance(ctx, thing.pe, thing.agentID, name, state, progress, limit, "", "machine-1"); err != nil {
@@ -704,7 +704,7 @@ func TestAMachineThePlatformNoLongerAsksForIsRecordedAsReleasedAndNeverAsLost(t 
 	rent(draft, planner, "planner-machine")
 	closing := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, closing, 10)
-	agent := spawnTestAgents(t, pes, closing, domain.AgentSignup{Actor: testActor, Hosted: true, AgentType: "generalist"})[0]
+	agent := spawnTestAgents(t, pes, closing, domain.AgentSignup{Actor: testActor, InAgentSandbox: true, AgentType: "generalist"})[0]
 	setPEStatus(t, pool, closing, domain.PlatformExpRunning, time.Hour)
 	rent(closing, agent, "agent-machine")
 	coordinated := createTestPEWithCoordinator(t, pool)
@@ -828,12 +828,12 @@ func TestADraftWhosePlannerIsGivenUpOnIsClosedSayingSo(t *testing.T) {
 // was first read, and answered on the agent, on the coordinator and, for a planner, on its draft.
 // It is what the machine asked for now says: a new machine, an ended one and a released one say
 // nothing.
-func TestWhatAHostedAgentIsDoingIsKeptOnItsRowAndAnsweredWhereItIsRead(t *testing.T) {
+func TestWhatASandboxedAgentIsDoingIsKeptOnItsRowAndAnsweredWhereItIsRead(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewStore(pool, 3)
 	pe := createTestPEWithCoordinator(t, pool)
-	agent := spawnTestAgents(t, pes, pe, domain.AgentSignup{Actor: testActor, Role: domain.SignupRoleBaseline, Hosted: true, AgentType: "baseline"})[0]
+	agent := spawnTestAgents(t, pes, pe, domain.AgentSignup{Actor: testActor, Role: domain.SignupRoleBaseline, InAgentSandbox: true, AgentType: "baseline"})[0]
 	draft, planner := createTestDraft(t, pool)
 
 	said := func(platformExpID, agentID string) *domain.AgentActivity {

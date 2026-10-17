@@ -22,7 +22,7 @@ const Prefix = "/model/"
 
 // Store says whom the platform runs. *db.Store satisfies it.
 type Store interface {
-	Hosted(ctx context.Context, platformExpID, agentID string) (bool, error)
+	InAgentSandbox(ctx context.Context, platformExpID, agentID string) (bool, error)
 }
 
 // Usage stores what the provider counted for a call.
@@ -168,11 +168,11 @@ func (p *Proxy) authorize(ctx context.Context) (caller, error) {
 		return caller{}, auth.Internal(p.logger, "model proxy: place a caller", errors.New("an agent or coordinator principal without its one org and platform experiment"))
 	}
 	who.org = principal.OrgIDs[0]
-	hosted, err := p.store.Hosted(ctx, principal.PlatformExperimentID, principal.AgentID)
+	sandboxed, err := p.store.InAgentSandbox(ctx, principal.PlatformExperimentID, principal.AgentID)
 	if err != nil {
 		return caller{}, auth.Internal(p.logger, "model proxy: read whether the platform runs a caller", err, zap.String("platform_experiment_id", principal.PlatformExperimentID))
 	}
-	if !hosted {
+	if !sandboxed {
 		return caller{}, auth.Forbidden("the platform does not run " + who.agent + " of platform experiment " + who.platformExperiment + ", so its model calls are not made through the platform")
 	}
 	return who, nil

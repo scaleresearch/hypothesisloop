@@ -31,8 +31,8 @@ const me: Me = {
   projects: [{ id: 'prj_1', org_id: 'org_a', name: 'default', created_at: at }],
 }
 
-function signup(id: string, hosted: boolean, agentType = ''): JoinedAgent {
-  return { platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, hosted, agent_type: agentType, model: '', hyperparameters: null, at_work: true, signed_up_at: at, actions: [] }
+function signup(id: string, sandboxed: boolean, agentType = ''): JoinedAgent {
+  return { platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, in_agentsandbox: sandboxed, agent_type: agentType, model: '', hyperparameters: null, at_work: true, signed_up_at: at, actions: [] }
 }
 
 // As the API answers an agent to the experiment's owner.
@@ -40,7 +40,7 @@ function asListed(agent: JoinedAgent): JoinedAgent {
   const actions: SignupAction[] = []
   if (agent.role !== 'planner' && !agent.finished_at && shownStatus !== 'closed') actions.push('message')
   if (shownStatus === 'open') actions.push('remove')
-  if (!agent.hosted) actions.push('show_token')
+  if (!agent.in_agentsandbox) actions.push('show_token')
   return { ...agent, actions }
 }
 
@@ -66,9 +66,9 @@ beforeEach(() => {
   roster = [signup('ag-old', true)]
   vi.mocked(fetchPlatformExperimentAgents).mockImplementation(async () => roster.map(asListed))
   vi.mocked(addPlatformExperimentAgents).mockImplementation(async (_pe, req) => {
-    const added = signup(`ag-new${roster.length}`, !!req.hosted, req.agent_type)
+    const added = signup(`ag-new${roster.length}`, !!req.in_agentsandbox, req.agent_type)
     roster = [...roster, added]
-    return [asListed(req.hosted ? added : { ...added, token: `hls_token-of-${added.agent_id}` })]
+    return [asListed(req.in_agentsandbox ? added : { ...added, token: `hls_token-of-${added.agent_id}` })]
   })
   vi.mocked(fetchPlatformExperimentAgentToken).mockImplementation(async (_pe, id) => (
     asListed({ ...roster.find(a => a.agent_id === id)!, token: `hls_token-of-${id}` })
@@ -114,7 +114,7 @@ describe('adding agents', () => {
   it('asks the platform to run them by default and shows no token', async () => {
     show()
     await userEvent.click(screen.getByRole('button', { name: 'Add agent' }))
-    expect(addPlatformExperimentAgents).toHaveBeenCalledExactlyOnceWith('pe-1', { hosted: true, agent_type: 'generalist', model: undefined })
+    expect(addPlatformExperimentAgents).toHaveBeenCalledExactlyOnceWith('pe-1', { in_agentsandbox: true, agent_type: 'generalist', model: undefined })
     expect(await screen.findByRole('cell', { name: 'ag-new1' })).toBeTruthy()
     expect(screen.queryByTestId('secret')).toBeNull()
   })
@@ -126,7 +126,7 @@ describe('adding agents', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Me' }))
     await userEvent.click(screen.getByRole('button', { name: 'Add agent' }))
     expect(addPlatformExperimentAgents).toHaveBeenCalledExactlyOnceWith('pe-1', {
-      hosted: false, agent_type: 'data-search', model: 'claude-opus-4-5',
+      in_agentsandbox: false, agent_type: 'data-search', model: 'claude-opus-4-5',
     })
     const secrets = await screen.findAllByTestId('secret')
     expect(secrets.map(s => s.textContent)).toEqual([
@@ -237,7 +237,7 @@ describe('once the experiment has started', () => {
 })
 
 describe('an experiment waiting to start', () => {
-  const waits = { reason: 'baseline_required', waits_for: 'coordinator' as const, summary: 'No usable baseline is measured yet.', message: 'Add a baseline agent with `hl platform-experiments agents add --hosted --role baseline --platform-experiment pe-1`: none has joined. platform experiment pe-1 has no baseline declared' }
+  const waits = { reason: 'baseline_required', waits_for: 'coordinator' as const, summary: 'No usable baseline is measured yet.', message: 'Add a baseline agent with `hl platform-experiments agents add --in-agentsandbox --role baseline --platform-experiment pe-1`: none has joined. platform experiment pe-1 has no baseline declared' }
 
   it('offers nothing to start it with', async () => {
     show('open', { status_reason: waits })

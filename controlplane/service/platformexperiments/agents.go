@@ -23,7 +23,7 @@ type AddAgentRequest struct {
 	Name            string         `json:"name,omitempty" doc:"Display name of a created agent, unique in the platform experiment: 409 agent_name_taken for one another agent of it carries. Omitted, it is named by its role and a number no other agent of the experiment has: \"Researcher 2\", \"Baseline 1\"."`
 	Role            string         `json:"role,omitempty" doc:"\"competitor\" (default), \"baseline\" or \"reviewer\"."`
 	QuotaTier       string         `json:"quota_tier,omitempty" doc:"\"guaranteed\" or \"burst_only\"; omitted, the platform experiment's default_quota_tier applies."`
-	Hosted          bool           `json:"hosted,omitempty" doc:"true: the platform runs the agent. false (default): its token is returned and you run it."`
+	InAgentSandbox  bool           `json:"in_agentsandbox,omitempty" doc:"true: the platform runs the agent. false (default): its token is returned and you run it."`
 	AgentType       string         `json:"agent_type,omitempty" doc:"Which specialization the agent runs, which it reads from its signup: generalist (default), hyperparameter-search, architecture-search or data-search."`
 	Hyperparameters map[string]any `json:"hyperparameters,omitempty" doc:"A small JSON object the agent reads from its signup, at most 4096 bytes as JSON."`
 	Model           string         `json:"model,omitempty" doc:"The model the agent runs on, which it reads from its signup. Omitted, the platform's default applies and is what the answer shows."`
@@ -31,17 +31,17 @@ type AddAgentRequest struct {
 
 // AgentLaunch is what joining needs beyond the store.
 type AgentLaunch struct {
-	// Hosting says the deployment has a sandbox provider: without one nothing is hosted.
-	Hosting bool
+	// AgentSandbox says the deployment has a sandbox provider: without one no agent runs in an agent sandbox.
+	AgentSandbox bool
 	// DefaultModel is what an agent that names no model runs on.
 	DefaultModel string
-	// CoordinatorModel is what a hosted coordinator that names no model runs on.
+	// CoordinatorModel is what a sandboxed coordinator that names no model runs on.
 	CoordinatorModel string
 	// SigningSecret derives an agent's own token.
 	SigningSecret string
-	// MaxHosted is how many machines the platform runs for one platform experiment, written
+	// MaxAgentSandboxes is how many machines the platform runs for one platform experiment, written
 	// onto each when it is created.
-	MaxHosted int
+	MaxAgentSandboxes int
 }
 
 // JoinedAgent is one agent's place in a platform experiment as the API answers with it. Token is
@@ -50,7 +50,7 @@ type JoinedAgent struct {
 	domain.AgentSignup
 	// StatusReason is why the agent is not at work yet: its platform experiment is open and has
 	// not started, or its machine is asked for and not running.
-	StatusReason *domain.StatusReason  `json:"status_reason,omitempty" doc:"Why the agent is not at work yet. On an agent that waits for its open platform experiment to start, every one but those of role baseline: reason is the platform experiment's own (baseline_measuring, baseline_required and the others of its status_reason), and message says the agent takes no turn and, when the platform runs it, has no machine asked for until the start. Its instance reads waiting until then. On a hosted agent whose machine is asked for and not running yet, its instance reading requested or starting: instance_starting, and message says how long ago the machine was asked for. That is a start in progress and no failure. On an agent that waited for the start of a platform experiment that closed before its run started, and had no machine asked for it: never_launched, with no waits_for, and message gives the close_reason and why it closed. Its instance reads stopped with no end_reason."`
+	StatusReason *domain.StatusReason  `json:"status_reason,omitempty" doc:"Why the agent is not at work yet. On an agent that waits for its open platform experiment to start, every one but those of role baseline: reason is the platform experiment's own (baseline_measuring, baseline_required and the others of its status_reason), and message says the agent takes no turn and, when the platform runs it, has no machine asked for until the start. Its instance reads waiting until then. On a sandboxed agent whose machine is asked for and not running yet, its instance reading requested or starting: instance_starting, and message says how long ago the machine was asked for. That is a start in progress and no failure. On an agent that waited for the start of a platform experiment that closed before its run started, and had no machine asked for it: never_launched, with no waits_for, and message gives the close_reason and why it closed. Its instance reads stopped with no end_reason."`
 	Token        string                `json:"token,omitempty"`
 	Actions      []domain.SignupAction `json:"actions" doc:"What the reader may do to the agent now, each a write the API accepts from them: message (POST /platform-experiments/{id}/messages naming it), remove (DELETE /platform-experiments/{id}/agents/{agent_id}, which still refuses an agent with a job queued or running) and show_token (POST /platform-experiments/{id}/agents with its agent_id, which answers the token of an agent the platform does not run). Empty for a reader who writes nothing of the platform experiment."`
 	// The fields below say what an agent of an open or running platform experiment has going,
@@ -112,7 +112,7 @@ func (s *Service) roster(ctx context.Context, platformExpID string, signups []do
 	if err != nil {
 		return nil, err
 	}
-	who, err := domain.WaitsFor(why.Reason, pe.CoordinatorHosted)
+	who, err := domain.WaitsFor(why.Reason, pe.CoordinatorInAgentSandbox)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.roster: %w", err)
 	}
@@ -121,7 +121,7 @@ func (s *Service) roster(ctx context.Context, platformExpID string, signups []do
 			continue
 		}
 		waits, summary := "it takes its first turn when the platform starts the run", "It starts with the run."
-		if signup.Hosted {
+		if signup.InAgentSandbox {
 			waits, summary = "its machine is asked for when the platform starts the run, and none is before", "Its machine starts with the run."
 		}
 		if signup.Instance != nil {
@@ -144,11 +144,11 @@ func neverLaunched(why *domain.StatusReason) *domain.StatusReason {
 		Summary: "Never started: the experiment closed before the run."}
 }
 
-// instanceStarting is the status_reason of a hosted agent whose run goes on and whose machine is
+// instanceStarting is the status_reason of a sandboxed agent whose run goes on and whose machine is
 // not running yet, nil for every other. Its instance reads requested or starting then, which is
 // a start in progress and was read as a launch that failed.
 func instanceStarting(signup domain.AgentSignup, now time.Time) *domain.StatusReason {
-	if !signup.Hosted || signup.Instance == nil || signup.Ended != "" {
+	if !signup.InAgentSandbox || signup.Instance == nil || signup.Ended != "" {
 		return nil
 	}
 	instance := *signup.Instance
@@ -202,10 +202,10 @@ func (s *Service) AddAgent(ctx context.Context, platformExpID string, req AddAge
 	}
 	signup := domain.AgentSignup{
 		AgentID: req.AgentID, Role: role, QuotaTier: domain.QuotaTier(req.QuotaTier),
-		Hosted: req.Hosted, AgentType: choice.AgentType, Hyperparameters: choice.Hyperparameters, Model: choice.Model, Actor: &by,
+		InAgentSandbox: req.InAgentSandbox, AgentType: choice.AgentType, Hyperparameters: choice.Hyperparameters, Model: choice.Model, Actor: &by,
 	}
-	if req.Hosted {
-		if err := requireHosting(launch.Hosting); err != nil {
+	if req.InAgentSandbox {
+		if err := requireAgentSandbox(launch.AgentSandbox); err != nil {
 			return nil, err
 		}
 	}
@@ -308,8 +308,8 @@ func enrolRefused(err error, pe *domain.PlatformExperiment, name string) error {
 		return agentNameTaken(name)
 	case errors.Is(err, db.ErrMaxAgentsReached):
 		return maxAgentsReached(pe.MaxAgents)
-	case errors.Is(err, db.ErrMaxHostedReached):
-		return refuseSignup(409, "max_hosted_reached", "%s", maxHostedReached(pe.MaxHosted))
+	case errors.Is(err, db.ErrMaxAgentSandboxesReached):
+		return refuseSignup(409, "max_agentsandboxes_reached", "%s", maxAgentSandboxesReached(pe.MaxAgentSandboxes))
 	case errors.Is(err, db.ErrNoShareLeft):
 		return refuseSignup(409, "no_share_left", "a researcher that joins running platform experiment %s is given an even part, with the researchers at work, of what all researchers left unspent, and that part would not hold one trial of the baseline: one joins when a researcher at work finishes", pe.ID)
 	}
@@ -394,7 +394,7 @@ func (s *Service) spawn(ctx context.Context, pe *domain.PlatformExperiment, req 
 		return nil, fmt.Errorf("platform_experiments.AddAgent: agent %s is not signed up after being created", id)
 	}
 	s.logger.Info("agent spawned", zap.String("platformExpID", platformExpID), zap.String("agentID", id),
-		zap.Bool("hosted", signup.Hosted))
+		zap.Bool("in_agentsandbox", signup.InAgentSandbox))
 	return []domain.AgentSignup{*joined}, nil
 }
 

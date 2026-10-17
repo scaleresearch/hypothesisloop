@@ -18,9 +18,9 @@ import (
 // ErrMaxAgentsReached is a researcher's signup refused because max_agents researchers are at work.
 var ErrMaxAgentsReached = errors.New("max_agents reached")
 
-// ErrMaxHostedReached is returned when a platform experiment would have the platform run more
-// machines than its max_hosted, or leave none of them to measure its baseline.
-var ErrMaxHostedReached = errors.New("max_hosted reached")
+// ErrMaxAgentSandboxesReached is returned when a platform experiment would have the platform run more
+// machines than its max_agentsandboxes, or leave none of them to measure its baseline.
+var ErrMaxAgentSandboxesReached = errors.New("max_agentsandboxes reached")
 
 // ErrAgentNameTaken is an agent refused a place because another agent of the platform experiment
 // carries its name.
@@ -58,7 +58,7 @@ func (s *Store) Signup(ctx context.Context, platformExpID string, signup domain.
 // SpawnAgent creates an agent in the platform experiment's org and signs it up, both or neither.
 // An agent without a name is given one (domain.AgentName), which agent then carries.
 // ErrAgentNameTaken when its name is another agent's in the experiment. ErrSignupClosed when the experiment is not open, ErrMaxAgentsReached when it is a competitor
-// with no place left, ErrMaxHostedReached when it is one machine too many.
+// with no place left, ErrMaxAgentSandboxesReached when it is one machine too many.
 func (s *Store) SpawnAgent(ctx context.Context, platformExpID string, agent *domain.Agent, signup domain.AgentSignup) error {
 	_, err := s.enrol(ctx, platformExpID, []*domain.Agent{agent}, []domain.AgentSignup{signup}, nil)
 	return err
@@ -172,14 +172,14 @@ func allocateBaselineQuota(ctx context.Context, tx *Write, platformExpID, agentI
 // is a researcher that joins a running one (allocateLateQuota).
 func enrolTx(ctx context.Context, tx *Write, platformExpID string, create []*domain.Agent, signups []domain.AgentSignup, late *LateJoin) (int, error) {
 	var status, orgID string
-	var maxAgents, maxHosted int
-	var coordinatorHosted bool
+	var maxAgents, maxAgentSandboxes int
+	var coordinatorInAgentSandbox bool
 	var budget float64
 	var defaultTier domain.QuotaTier
 	if err := tx.QueryRow(ctx, `
-SELECT pe.status, pe.max_agents, pe.max_hosted, pe.coordinator_hosted, p.org_id, pe.budget_accelerator_hours, pe.default_quota_tier
+SELECT pe.status, pe.max_agents, pe.max_agentsandboxes, pe.coordinator_in_agentsandbox, p.org_id, pe.budget_accelerator_hours, pe.default_quota_tier
 FROM platform_experiments pe JOIN projects p ON p.id = pe.project_id
-WHERE pe.id=$1 FOR UPDATE OF pe`, platformExpID).Scan(&status, &maxAgents, &maxHosted, &coordinatorHosted, &orgID, &budget, &defaultTier); err != nil {
+WHERE pe.id=$1 FOR UPDATE OF pe`, platformExpID).Scan(&status, &maxAgents, &maxAgentSandboxes, &coordinatorInAgentSandbox, &orgID, &budget, &defaultTier); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, ErrSignupClosed
 		}
@@ -234,7 +234,7 @@ VALUES ($1, $2, $3, $4)`, agent.ID, agent.Name, agent.OrgID, agent.CreatedAt); e
 	for _, agent := range create {
 		created[agent.ID] = true
 	}
-	inserted, competitors, hosted := 0, false, false
+	inserted, competitors, sandboxed := 0, false, false
 	var joined []domain.AgentSignup
 	for _, signup := range signups {
 		if !created[signup.AgentID] {
@@ -265,7 +265,7 @@ VALUES ($1, $2, $3, $4)`, agent.ID, agent.Name, agent.OrgID, agent.CreatedAt); e
 		signup.QuotaTier = domain.ResolveQuotaTier(signup.QuotaTier, defaultTier)
 		var why string
 		err = tx.QueryRow(ctx, `
-INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, agent_type, hyperparameters, model, added_by_kind, added_by_id,
+INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, in_agentsandbox, agent_type, hyperparameters, model, added_by_kind, added_by_id,
                                 replaces)
 VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $8, $9, $10, $11::text)
 ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING
@@ -273,7 +273,7 @@ RETURNING COALESCE((SELECT CASE WHEN gone.finished_at IS NOT NULL THEN 'it finis
                                 ELSE 'its machine stopped with no restart left' END
                     FROM experiment_signups gone WHERE gone.platform_experiment_id = $1 AND gone.agent_id = $11::text), '')`,
 			platformExpID, signup.AgentID, string(signup.Role), string(signup.QuotaTier),
-			signup.Hosted, agentType, hyperparameters, model, string(addedBy.Kind), addedBy.ID, signup.Replaces).Scan(&why)
+			signup.InAgentSandbox, agentType, hyperparameters, model, string(addedBy.Kind), addedBy.ID, signup.Replaces).Scan(&why)
 		if errors.Is(err, pgx.ErrNoRows) {
 			continue
 		}
@@ -287,7 +287,7 @@ RETURNING COALESCE((SELECT CASE WHEN gone.finished_at IS NOT NULL THEN 'it finis
 		}
 		inserted++
 		competitors = competitors || signup.Role == domain.SignupRoleCompetitor
-		hosted = hosted || signup.Hosted
+		sandboxed = sandboxed || signup.InAgentSandbox
 		if running {
 			joined = append(joined, signup)
 			continue
@@ -299,25 +299,25 @@ RETURNING COALESCE((SELECT CASE WHEN gone.finished_at IS NOT NULL THEN 'it finis
 			return 0, fmt.Errorf("platform_experiments_store.Signup: %w", err)
 		}
 	}
-	// max_hosted bounds the machines the platform rents for the experiment at once. An agent that
+	// max_agentsandboxes bounds the machines the platform rents for the experiment at once. An agent that
 	// finished holds none, nor does one whose machine stopped with no restart left, and a planner
 	// is no agent of an open experiment. One machine is kept for measuring the baseline, which
 	// nothing starts without: the coordinator and the agents that do not measure it take the
 	// others. A baseline agent whose machine stopped leaves that one to the next.
-	if hosted || (len(signups) == 0 && coordinatorHosted) {
+	if sandboxed || (len(signups) == 0 && coordinatorInAgentSandbox) {
 		var measuring, others int
 		if err := tx.QueryRow(ctx, `
 SELECT COUNT(*) FILTER (WHERE role = $2), COUNT(*) FILTER (WHERE role <> $2)
 FROM experiment_signups s
-WHERE s.platform_experiment_id = $1 AND s.hosted AND s.finished_at IS NULL AND NOT `+stoppedSQL+` AND s.role <> $3`,
+WHERE s.platform_experiment_id = $1 AND s.in_agentsandbox AND s.finished_at IS NULL AND NOT `+stoppedSQL+` AND s.role <> $3`,
 			platformExpID, string(domain.SignupRoleBaseline), string(domain.SignupRolePlanner)).Scan(&measuring, &others); err != nil {
-			return 0, fmt.Errorf("platform_experiments_store.Signup: count hosted: %w", err)
+			return 0, fmt.Errorf("platform_experiments_store.Signup: count sandboxed: %w", err)
 		}
-		if coordinatorHosted {
+		if coordinatorInAgentSandbox {
 			others++
 		}
-		if others > maxHosted-1 || measuring+others > maxHosted {
-			return 0, ErrMaxHostedReached
+		if others > maxAgentSandboxes-1 || measuring+others > maxAgentSandboxes {
+			return 0, ErrMaxAgentSandboxesReached
 		}
 	}
 	if inserted == 0 {

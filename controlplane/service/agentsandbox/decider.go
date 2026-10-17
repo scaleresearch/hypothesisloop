@@ -1,4 +1,4 @@
-package hosting
+package agentsandbox
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/hypothesisloop/contract/hostingapi"
+	sandboxapi "github.com/scaleresearch/hypothesisloop/contract/agentsandbox"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
@@ -22,7 +22,7 @@ type Store interface {
 	ListLauncherAgents(ctx context.Context, windDown time.Duration) ([]db.LauncherAgent, error)
 	ListLauncherCoordinators(ctx context.Context, windDown time.Duration) ([]db.LauncherCoordinator, error)
 	ReleaseInstances(ctx context.Context, windDown, coordinatorWindDown time.Duration) error
-	// The three writes take a hosted agent's id, or none for a platform experiment's coordinator.
+	// The three writes take a sandboxed agent's id, or none for a platform experiment's coordinator.
 	AskInstance(ctx context.Context, platformExpID, agentID, name, launch string) error
 	ObserveInstance(ctx context.Context, platformExpID, agentID, name, state string, progress *string, progressLimit time.Duration, activity, machine string) error
 	EndInstance(ctx context.Context, platformExpID, agentID, name string, how db.InstanceEnd, exitLog string, limit time.Duration, maxRestarts int) (after domain.AgentInstance, recorded bool, err error)
@@ -35,9 +35,9 @@ type Metrics interface {
 	RecordHarnessState(ctx context.Context, at time.Time, states []domain.HarnessState) error
 }
 
-// Settings is what the platform's config decides about hosted machines.
+// Settings is what the platform's config decides about agent sandboxes.
 type Settings struct {
-	// Image is what a hosted machine boots unless its platform experiment names its own, and
+	// Image is what an agent sandbox boots unless its platform experiment names its own, and
 	// APIURL where it reaches the API.
 	Image  string
 	APIURL string
@@ -65,7 +65,7 @@ type Decider struct {
 
 func NewDecider(store Store, metrics Metrics, cfg Settings, logger *zap.Logger) *Decider {
 	if store == nil || metrics == nil || cfg.Image == "" || cfg.APIURL == "" || cfg.SigningSecret == "" || cfg.BootLimit <= 0 || cfg.ProgressLimit <= 0 || cfg.MaxNewPerAnswer <= 0 || logger == nil {
-		panic("hosting.NewDecider: store, metrics, logger and every setting are required")
+		panic("agentsandbox.NewDecider: store, metrics, logger and every setting are required")
 	}
 	return &Decider{store: store, metrics: metrics, cfg: cfg, logger: logger}
 }
@@ -89,7 +89,7 @@ type kept struct {
 	// launch is launchOf the image this one boots and the launcher's digest.
 	launch string
 	// describe takes how many machines of this one ended before.
-	describe func(ended int) (hostingapi.Instance, error)
+	describe func(ended int) (sandboxapi.Instance, error)
 }
 
 // launchOf identifies what a machine is started with on the platform's and the launcher's side.
@@ -111,23 +111,23 @@ func (h *Decider) imageOf(agentImage string) string {
 
 // Held is every machine the platform holds, an agent's, a coordinator's or one of the warm pool's.
 // It changes nothing.
-func (h *Decider) Held(ctx context.Context) ([]hostingapi.HeldMachine, error) {
+func (h *Decider) Held(ctx context.Context) ([]sandboxapi.HeldMachine, error) {
 	machines, err := h.store.ListLauncherMachines(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("hosting.Held: %w", err)
+		return nil, fmt.Errorf("agentsandbox.Held: %w", err)
 	}
-	held := make([]hostingapi.HeldMachine, 0, len(machines))
+	held := make([]sandboxapi.HeldMachine, 0, len(machines))
 	for _, m := range machines {
-		held = append(held, hostingapi.HeldMachine{Name: m.Name, Machine: m.Machine})
+		held = append(held, sandboxapi.HeldMachine{Name: m.Name, Machine: m.Machine})
 	}
 	return held, nil
 }
 
 // Reconcile records what the launcher observed and evaluates everything else: which agents and
-// coordinators are hosted, which of them still run, which have domain.AgentWindDown
+// coordinators are sandboxed, which of them still run, which have domain.AgentWindDown
 // (a coordinator domain.CoordinatorWindDown) left, and which get another machine after theirs ended. One that cannot be evaluated is
 // logged and left out and the rest of the list stands.
-func (h *Decider) Reconcile(ctx context.Context, observed hostingapi.Observed) (*hostingapi.Desired, error) {
+func (h *Decider) Reconcile(ctx context.Context, observed sandboxapi.Observed) (*sandboxapi.Desired, error) {
 	// A machine this answer no longer names is taken down by the launcher: that is written
 	// down first, as the platform's own doing, so no later answer reads it as lost.
 	if err := h.store.ReleaseInstances(ctx, domain.AgentWindDown, domain.CoordinatorWindDown); err != nil {
@@ -148,7 +148,7 @@ func (h *Decider) Reconcile(ctx context.Context, observed hostingapi.Observed) (
 	if err != nil {
 		return nil, err
 	}
-	seen := map[string]hostingapi.ObservedInstance{}
+	seen := map[string]sandboxapi.ObservedInstance{}
 	for _, instance := range observed.Instances {
 		seen[instance.Name] = instance
 	}
@@ -156,14 +156,14 @@ func (h *Decider) Reconcile(ctx context.Context, observed hostingapi.Observed) (
 	var all []kept
 	for _, agent := range agents {
 		if agent.Instance == nil {
-			h.logger.Error("the hosted list holds an agent that is not hosted", zap.String("platformExpID", agent.PlatformExperimentID), zap.String("agentID", agent.AgentID))
+			h.logger.Error("the sandboxed list holds an agent that is not sandboxed", zap.String("platformExpID", agent.PlatformExperimentID), zap.String("agentID", agent.AgentID))
 			continue
 		}
 		signup, image := agent.AgentSignup, h.imageOf(agent.AgentImage)
 		all = append(all, kept{
 			platformExperimentID: agent.PlatformExperimentID, agentID: agent.AgentID, role: string(agent.Role), agentType: agent.AgentType, instance: *agent.Instance, ending: agent.Ended != "",
 			launch: launchOf(image, observed.LaunchDigest),
-			describe: func(ended int) (hostingapi.Instance, error) {
+			describe: func(ended int) (sandboxapi.Instance, error) {
 				return instanceFor(signup, ended, image, h.cfg.APIURL, h.cfg.SigningSecret, observed.LaunchDigest)
 			},
 		})
@@ -173,13 +173,13 @@ func (h *Decider) Reconcile(ctx context.Context, observed hostingapi.Observed) (
 		all = append(all, kept{
 			platformExperimentID: pe, role: domain.CoordinatorHealthRole, agentType: domain.CoordinatorAgentType, instance: coordinator.Instance, ending: coordinator.Ending,
 			launch: launchOf(image, observed.LaunchDigest),
-			describe: func(ended int) (hostingapi.Instance, error) {
+			describe: func(ended int) (sandboxapi.Instance, error) {
 				return coordinatorInstanceFor(pe, ended, image, h.cfg.APIURL, h.cfg.SigningSecret, observed.LaunchDigest)
 			},
 		})
 	}
 
-	out := &hostingapi.Desired{Instances: []hostingapi.Instance{}, Ending: []string{}, Image: h.cfg.Image}
+	out := &sandboxapi.Desired{Instances: []sandboxapi.Instance{}, Ending: []string{}, Image: h.cfg.Image}
 	asked := 0
 	var states []domain.HarnessState
 	for _, one := range all {
@@ -187,7 +187,7 @@ func (h *Decider) Reconcile(ctx context.Context, observed hostingapi.Observed) (
 		current := one.instance
 		// A machine is named after how many ended before it, whether or not their end spent a
 		// restart, so every one that ends is followed by another name.
-		describe := func(restarts, renewals int) (hostingapi.Instance, error) {
+		describe := func(restarts, renewals int) (sandboxapi.Instance, error) {
 			return one.describe(restarts + renewals)
 		}
 		if one.ending {
@@ -206,7 +206,7 @@ func (h *Decider) Reconcile(ctx context.Context, observed hostingapi.Observed) (
 		}
 		instance, err := describe(current.Restarts, current.Renewals)
 		if err != nil {
-			log.Error("hosted instance cannot be described", zap.Error(err))
+			log.Error("agent sandbox cannot be described", zap.Error(err))
 			continue
 		}
 		// What the launcher reports counts only for the machine that is still the one wanted. A
@@ -218,26 +218,26 @@ func (h *Decider) Reconcile(ctx context.Context, observed hostingapi.Observed) (
 					log.Debug("harness state fields this platform does not know are ignored", zap.String("instance", current.Name), zap.Strings("fields", unknown))
 				}
 				if err != nil {
-					log.Warn("hosted instance reported a harness state that cannot be read", zap.String("instance", current.Name), zap.Error(err))
+					log.Warn("agent sandbox reported a harness state that cannot be read", zap.String("instance", current.Name), zap.Error(err))
 				} else {
 					state.PlatformExperimentID, state.AgentID, state.Role, state.AgentType = one.platformExperimentID, one.agentID, one.role, one.agentType
 					states = append(states, state)
 				}
 			}
-			after, ended, err := h.observe(ctx, one, seen, instance.Env[hostingapi.EnvToken])
+			after, ended, err := h.observe(ctx, one, seen, instance.Env[sandboxapi.EnvToken])
 			if err != nil {
 				log.Error("record instance outcome failed", zap.Error(err))
 				out.Instances = append(out.Instances, instance)
 				continue
 			}
 			if ended {
-				log.Warn("hosted instance ended", zap.String("instance", current.Name), zap.Int("restarts", after.Restarts), zap.Bool("stopped", after.Stopped), zap.String("why", after.ExitLog))
+				log.Warn("agent sandbox ended", zap.String("instance", current.Name), zap.Int("restarts", after.Restarts), zap.Bool("stopped", after.Stopped), zap.String("why", after.ExitLog))
 				if after.Stopped {
 					continue
 				}
 				current.Name = ""
 				if instance, err = describe(after.Restarts, after.Renewals); err != nil {
-					log.Error("hosted instance cannot be described", zap.Error(err))
+					log.Error("agent sandbox cannot be described", zap.Error(err))
 					continue
 				}
 			}
@@ -247,7 +247,7 @@ func (h *Decider) Reconcile(ctx context.Context, observed hostingapi.Observed) (
 			// would have the launcher destroy a machine the platform still asks for.
 			keepCurrent := func() {
 				if current.Name != "" {
-					out.Instances = append(out.Instances, hostingapi.Instance{Name: current.Name, Image: instance.Image, Env: instance.Env})
+					out.Instances = append(out.Instances, sandboxapi.Instance{Name: current.Name, Image: instance.Image, Env: instance.Env})
 				}
 			}
 			// The launcher creates one machine after another, so an answer asks for a bounded
@@ -298,7 +298,7 @@ func (h *Decider) Reconcile(ctx context.Context, observed hostingapi.Observed) (
 //
 // The limits are counted by the store on the database's clock. token is the one this API
 // minted for the machine, which its output must not carry into the database.
-func (h *Decider) observe(ctx context.Context, one kept, seen map[string]hostingapi.ObservedInstance, token string) (domain.AgentInstance, bool, error) {
+func (h *Decider) observe(ctx context.Context, one kept, seen map[string]sandboxapi.ObservedInstance, token string) (domain.AgentInstance, bool, error) {
 	name := one.instance.Name
 	end := func(how db.InstanceEnd, exitLog string) (domain.AgentInstance, bool, error) {
 		limit := h.cfg.BootLimit

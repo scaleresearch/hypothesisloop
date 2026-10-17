@@ -32,7 +32,7 @@ func (s *reopenStore) ReopenPlatformExperiment(_ context.Context, id string, end
 		if pe.ID != id {
 			continue
 		}
-		if pe.Status != domain.PlatformExpClosed || pe.StartedAt.IsZero() || s.continued[id] || coordinatorModel != "" && !pe.CoordinatorHosted {
+		if pe.Status != domain.PlatformExpClosed || pe.StartedAt.IsZero() || s.continued[id] || coordinatorModel != "" && !pe.CoordinatorInAgentSandbox {
 			return db.ErrNotReopenable
 		}
 		pe.Status, pe.ClosedAt, pe.ClosedBy, pe.CloseReason, pe.CloseMessage = domain.PlatformExpRunning, nil, nil, "", ""
@@ -55,20 +55,20 @@ func reopenRouter(t *testing.T, store *reopenStore, caller auth.Principal) http.
 	r := authtest.Router(authtest.As(caller))
 	doc := NewDoc(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{PlatformExperiments: tenancy}), zap.NewNop())
 	handler := newSignupTestService(t, store).WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning).
-		WithAgentLaunch(platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model-default", CoordinatorModel: "coordinator-default", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted})
+		WithAgentLaunch(platformexperiments.AgentLaunch{AgentSandbox: true, DefaultModel: "model-default", CoordinatorModel: "coordinator-default", SigningSecret: "a-secret-only-this-test-knows-00", MaxAgentSandboxes: createMaxAgentSandboxes})
 	registerPlatformExperimentsAndBudget(doc, handler)
 	return r
 }
 
-func closedRun(id string, startedAt time.Time, hosted bool) *domain.PlatformExperiment {
+func closedRun(id string, startedAt time.Time, sandboxed bool) *domain.PlatformExperiment {
 	closedAt := startedAt.Add(time.Hour)
 	pe := &domain.PlatformExperiment{
 		ID: id, ProjectID: "prj-a", Status: domain.PlatformExpClosed, Stages: []domain.Stage{{LengthPct: 100}},
 		StartsAt: startedAt, StartedAt: startedAt, DurationHours: 24, EndsAt: startedAt.Add(24 * time.Hour),
 		ClosedAt: &closedAt, CloseReason: domain.CloseByRequest, CloseMessage: "redeploying the platform", ClosedBy: &domain.Actor{Kind: domain.ActorStaff},
 	}
-	if hosted {
-		pe.CoordinatorHosted, pe.Coordinator = true, &domain.HostedCoordinator{Model: "coordinator-old"}
+	if sandboxed {
+		pe.CoordinatorInAgentSandbox, pe.Coordinator = true, &domain.AgentSandboxCoordinator{Model: "coordinator-old"}
 	}
 	return pe
 }
@@ -91,7 +91,7 @@ func TestStaffReopenAClosedRunUntilANewEndAndItReadsRunning(t *testing.T) {
 	}
 }
 
-func TestAReopenMovesAHostedCoordinatorToTheModelItNamesCheckedAsACreateIs(t *testing.T) {
+func TestAReopenMovesASandboxedCoordinatorToTheModelItNamesCheckedAsACreateIs(t *testing.T) {
 	start := time.Now().UTC().Add(-2 * time.Hour)
 	store := &reopenStore{statusStore: statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{closedRun("pe-1", start, true)}}}}
 	r := reopenRouter(t, store, auth.Principal{Kind: auth.KindStaff})
@@ -123,13 +123,13 @@ func TestAReopenIsRefusedWithAPlainReason(t *testing.T) {
 		path, body, reason string
 		status             int
 	}{
-		"one still running":                  {"/platform-experiments/pe-running/reopen", fmt.Sprintf(`{"ends_at":%q}`, ahead), "invalid_transition", 409},
-		"one closed before its run started":  {"/platform-experiments/pe-never/reopen", fmt.Sprintf(`{"ends_at":%q}`, ahead), "invalid_transition", 409},
-		"one a later run continues":          {"/platform-experiments/pe-continued/reopen", fmt.Sprintf(`{"ends_at":%q}`, ahead), "invalid_transition", 409},
-		"an ends_at that has passed":         {"/platform-experiments/pe-1/reopen", fmt.Sprintf(`{"ends_at":%q}`, now.Add(-time.Minute).Format(time.RFC3339)), "invalid_length", 422},
-		"an ends_at past the longest run":    {"/platform-experiments/pe-1/reopen", fmt.Sprintf(`{"ends_at":%q}`, now.Add(platformexperimentstest.Settings.MaxRunLength).Format(time.RFC3339)), "run_too_long", 422},
-		"a model with no hosted coordinator": {"/platform-experiments/pe-1/reopen", fmt.Sprintf(`{"ends_at":%q,"coordinator_model":"coordinator-new"}`, ahead), "invalid_request", 400},
-		"one that does not exist":            {"/platform-experiments/pe-none/reopen", fmt.Sprintf(`{"ends_at":%q}`, ahead), "not_found", 404},
+		"one still running":                     {"/platform-experiments/pe-running/reopen", fmt.Sprintf(`{"ends_at":%q}`, ahead), "invalid_transition", 409},
+		"one closed before its run started":     {"/platform-experiments/pe-never/reopen", fmt.Sprintf(`{"ends_at":%q}`, ahead), "invalid_transition", 409},
+		"one a later run continues":             {"/platform-experiments/pe-continued/reopen", fmt.Sprintf(`{"ends_at":%q}`, ahead), "invalid_transition", 409},
+		"an ends_at that has passed":            {"/platform-experiments/pe-1/reopen", fmt.Sprintf(`{"ends_at":%q}`, now.Add(-time.Minute).Format(time.RFC3339)), "invalid_length", 422},
+		"an ends_at past the longest run":       {"/platform-experiments/pe-1/reopen", fmt.Sprintf(`{"ends_at":%q}`, now.Add(platformexperimentstest.Settings.MaxRunLength).Format(time.RFC3339)), "run_too_long", 422},
+		"a model with no sandboxed coordinator": {"/platform-experiments/pe-1/reopen", fmt.Sprintf(`{"ends_at":%q,"coordinator_model":"coordinator-new"}`, ahead), "invalid_request", 400},
+		"one that does not exist":               {"/platform-experiments/pe-none/reopen", fmt.Sprintf(`{"ends_at":%q}`, ahead), "not_found", 404},
 	} {
 		if code, out := call(t, staff, "POST", c.path, c.body); code != c.status || out["reason"] != c.reason || out["message"] == "" {
 			t.Errorf("%s: got = %d %v, want %d %s with a message", name, code, out, c.status, c.reason)

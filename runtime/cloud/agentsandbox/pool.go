@@ -1,4 +1,4 @@
-package hosting
+package agentsandbox
 
 import (
 	"context"

@@ -75,7 +75,7 @@ researchers:
     count: 1
   - agent_type: data-search
     count: 1
-coordinator_hosted: true
+coordinator_in_agentsandbox: true
 # Jobs end in about a minute, so every 5s still gives a short job several points.
 report_interval_seconds: 5
 stages:

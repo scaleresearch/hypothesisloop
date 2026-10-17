@@ -6,7 +6,7 @@
 # the ones it needs and does not start without one of them.
 
 #   public_api_url  the one address this API is reached at from outside the control plane: by a
-#                   hosted agent from wherever its sandbox runs, and by a cluster's runtime
+#                   sandboxed agent from wherever its sandbox runs, and by a cluster's runtime
 #                   from inside its cluster. Registering a cluster hands it out. A loopback
 #                   address is rejected at load.
 services:
@@ -43,26 +43,26 @@ auth:
   ui_origin: REPLACE-WITH-UI-ORIGIN
 
 # Agents the platform runs. An agent joins through POST /platform-experiments/{id}/agents; one
-# asked for with hosted: true runs on a machine the control plane rents on the provider of the
-# sandbox section (sandbox.yaml beside this file), and hosting is refused while there is none.
-# Nothing here names a provider. A platform experiment created with coordinator_hosted gets its
+# asked for with in_agentsandbox: true runs on a machine the control plane rents on the provider of the
+# sandbox section (sandbox.yaml beside this file), and an agent sandbox is refused while there is none.
+# Nothing here names a provider. A platform experiment created with coordinator_in_agentsandbox gets its
 # coordinator the same way: one more machine of the same image, on coordinator_model unless the
 # request names another.
 #
-#   image      what every hosted agent's machine boots. The sandbox provider must be able to
+#   image      what every sandboxed agent's machine boots. The sandbox provider must be able to
 #              pull it. A change replaces every running agent's machine.
 #   default_model  the model an agent runs on when it joins without naming one. Written onto the
 #              agent when it joins, so a change moves new agents only.
-#   coordinator_model  the model a hosted coordinator runs on when its create request names none,
+#   coordinator_model  the model a sandboxed coordinator runs on when its create request names none,
 #              a stronger one than default_model since it supervises the whole run. Written onto
 #              the platform experiment when it is created, so a change moves new ones only.
-#   boot_limit_seconds  how long a hosted machine may go unlisted by its provider after it was
+#   boot_limit_seconds  how long an agent sandbox may go unlisted by its provider after it was
 #              asked for, or stay starting after it was first reported, before it is given up on
 #              and a restart is spent: three in any six hours, the fourth stops the agent. A
 #              first boot pulls the agent image (about 11 seconds on the slowest provider measured). Too low spends every restart on slow
 #              pulls. Restarts are spent under one image and one sandbox instance: a change of
 #              either gives every agent its restarts back and starts a stopped one again.
-#   progress_limit_seconds  how long a running hosted machine may go without its agent reporting
+#   progress_limit_seconds  how long a running agent sandbox may go without its agent reporting
 #              progress before it is given up on and a restart is spent. An agent prints a
 #              progress marker every 15 seconds while it works or waits as it should, the
 #              newest one is read on each pass over the sandbox provider, and the limit runs on this platform's clock
@@ -74,8 +74,8 @@ auth:
 #              how long a pass takes: the settings are refused unless twice (this x
 #              sandbox.create_pause_milliseconds + sandbox.reconcile_interval_seconds) fits the
 #              boot limit and the progress limit.
-#   max_hosted_per_platform_experiment  how many machines the platform runs for one platform
-#              experiment: its hosted agents of every role and its coordinator. Written onto the
+#   max_agentsandboxes_per_platform_experiment  how many machines the platform runs for one platform
+#              experiment: its sandboxed agents of every role and its coordinator. Written onto the
 #              platform experiment when it is created, so a change bounds new ones only.
 #   idle_notice_minutes  how long a researcher of a running platform experiment may go with no
 #              job of its own created or running since the run started or the last one
@@ -90,11 +90,11 @@ agents:
   boot_limit_seconds: 300
   progress_limit_seconds: 300
   max_new_instances_per_answer: 10
-  max_hosted_per_platform_experiment: 25
+  max_agentsandboxes_per_platform_experiment: 25
   idle_notice_minutes: 10
 
-# Whose models hosted agents run on. The control plane holds the provider's credential and makes
-# every model call of a hosted agent or coordinator for it at <public_api_url>/model/<provider>,
+# Whose models sandboxed agents run on. The control plane holds the provider's credential and makes
+# every model call of a sandboxed agent or coordinator for it at <public_api_url>/model/<provider>,
 # where the agent authenticates with its own platform token. No agent's machine holds the
 # credential, and each call's tokens are recorded for its org, platform experiment and agent.
 #
@@ -580,6 +580,6 @@ stages:
       evict_pct: 0
 
 # The machines the control plane rents itself, both left out here: sandbox, the provider account
-# hosted agents run on (sandbox.yaml beside this file), and cloud_compute, the provider accounts
+# sandboxed agents run on (sandbox.yaml beside this file), and cloud_compute, the provider accounts
 # jobs run on, each scheduled as a cluster (cloud-compute.yaml). A deployment that has them adds
 # those sections to this file; make dev-hosted does.

@@ -27,7 +27,7 @@ class SendTest(unittest.TestCase):
             except api_client.APIError as e:
                 return e, urlopen.call_count, sleep.call_args_list
 
-    # The hosted coordinator died of a read that timed out through the public tunnel.
+    # The sandboxed coordinator died of a read that timed out through the public tunnel.
     def test_a_get_that_times_out_or_meets_a_gateway_is_asked_again_with_backoff(self):
         body, calls, sleeps = self.send("GET", TimeoutError("The read operation timed out"),
                                         ConnectionResetError("reset"), http_error(502), http_error(504), Answer(b"{}"))

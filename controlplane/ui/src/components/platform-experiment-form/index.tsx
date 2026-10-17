@@ -53,7 +53,7 @@ const FILE_FIELDS = [
 
 /**
  * The one form a platform experiment is created and edited with, in three steps. A new one is
- * run by the platform: one create stands up a hosted coordinator and the starting agents. Every
+ * run by the platform: one create stands up a sandboxed coordinator and the starting agents. Every
  * rule is the API's: the editors hint at what the API will refuse as it is typed, and a refusal
  * is shown at the step it concerns. A new experiment left with anything typed is kept as a draft.
  */
@@ -263,7 +263,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
       }
       setRefused(null)
       // No start time: the platform starts it once its baseline is declared.
-      const experiment = await createPlatformExperiment(project.id, { ...payload, coordinator_hosted: true })
+      const experiment = await createPlatformExperiment(project.id, { ...payload, coordinator_in_agentsandbox: true })
       // The draft goes once the experiment it was for exists. One that stays is listed, to delete.
       if (draftID) await deleteExperimentDraft(project.id, draftID).catch(() => undefined)
       void mutate(keys.experimentDrafts(project.id))

@@ -1,5 +1,5 @@
-"""The whole hosted path on real providers, with nothing but an API key of an ordinary org: a
-hosted coordinator and two hosted researchers in rented sandboxes work in a real repository,
+"""The whole sandboxed path on real providers, with nothing but an API key of an ordinary org: a
+sandboxed coordinator and two sandboxed researchers in rented sandboxes work in a real repository,
 their jobs run on a rented GPU cluster and report metrics, one sandbox is lost at the vendor and
 one harness is frozen, and the experiment still ends with a summary and nothing left rented.
 
@@ -7,7 +7,7 @@ It rents machines and spends model tokens, so it is no part of the suite: it car
 real_providers marker, which every default selection leaves out, and it skips unless the
 environment says where it runs:
 
-    API_URL, HL_TOKEN                 the hosted dev stack (make dev-hosted) and its staff token,
+    API_URL, HL_TOKEN                 the dev stack that rents (make dev-hosted) and its staff token,
                                       used here only to make the org and connect the repository
     TEST_GIT_HOST_GITHUB_INSTALLATIONthe installation of the platform's GitHub App that covers
     TEST_GIT_HOST_GITHUB_REPOSITORY  the repository, which must hold .hypothesisloop/experiment.yaml,
@@ -43,7 +43,7 @@ NEEDED = {
     "fly": ("SANDBOX_FLY_APP", "SANDBOX_FLY_API_TOKEN"),
     "e2b": ("SANDBOX_E2B_API_KEY",),
 }
-# domain.AgentProgressLimit on the hosted stack (agents.progress_limit_seconds), and the quarter
+# domain.AgentProgressLimit on the stack that rents (agents.progress_limit_seconds), and the quarter
 # of it the platform may take to write a marker down.
 PROGRESS_LIMIT_S = 300
 MINUTE = 60.0
@@ -82,7 +82,7 @@ def org(api: API, run_id: str, provider: str) -> API:
     return api.as_caller(key, home["org_id"], home["project_id"])
 
 
-def test_a_hosted_experiment_runs_end_to_end_on_rented_machines_and_survives_a_lost_and_a_hung_sandbox(org: API, provider: str, run_id: str):
+def test_a_sandboxed_experiment_runs_end_to_end_on_rented_machines_and_survives_a_lost_and_a_hung_sandbox(org: API, provider: str, run_id: str):
     assert not vendors.sandboxes(provider) and not vendors.rented_instances(), "something is rented before the test starts"
     credit = vendors.job_credit()
     deadline = Deadline.in_seconds(50 * MINUTE)
@@ -94,13 +94,13 @@ def test_a_hosted_experiment_runs_end_to_end_on_rented_machines_and_survives_a_l
         "project_id": org.project_id, "repository": os.environ["TEST_GIT_HOST_GITHUB_REPOSITORY"],
         "description": stated["description"], "metrics": stated["metrics"],
         "name": f"real-providers-{run_id}", "budget_accelerator_hours": 1, "max_agents": 3,
-        "coordinator_hosted": True, "duration_hours": 24,
+        "coordinator_in_agentsandbox": True, "duration_hours": 24,
     })
     assert created.status_code == 201, f"create: {created.status_code} {created.text}"
     pe_id = created.json()["id"]
     org.created_platform_experiments.append(pe_id)
     assert created.json()["repository_url"].endswith(os.environ["TEST_GIT_HOST_GITHUB_REPOSITORY"] + ".git")
-    researchers = [org.add_agents(pe_id, hosted=True, agent_type=agent_type)[0]["agent_id"] for agent_type in ("hyperparameter-search", "architecture-search")]
+    researchers = [org.add_agents(pe_id, in_agentsandbox=True, agent_type=agent_type)[0]["agent_id"] for agent_type in ("hyperparameter-search", "architecture-search")]
     # Its start time is now. The create made its agent of role baseline, and when that agent
     # finishes with one completed job the platform declares it and starts the run: no researcher's
     # machine is rented before, and duration_hours counts from that start.

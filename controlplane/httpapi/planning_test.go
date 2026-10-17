@@ -54,7 +54,7 @@ func planningRouter(t *testing.T, store platformexperiments.Store, caller auth.P
 	planningRepositories = &fakeRepositories{files: map[string]string{"prj-a": ""}}
 	svc.WithRepositories(planningRepositories)
 	handler := svc.WithRepositories(planningRepositories).WithPlanning(testPlanning).WithGitProxy("https://api.test/git").
-		WithAgentLaunch(platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted}).
+		WithAgentLaunch(platformexperiments.AgentLaunch{AgentSandbox: true, DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxAgentSandboxes: createMaxAgentSandboxes}).
 		WithJobImages([]domain.JobImage{{Name: "torch", Image: "registry.example.com/hl/torch:1"}})
 	if drafts, ok := store.(*draftStore); ok {
 		svc.WithReachable(func(context.Context, string) (map[string][]domain.Cluster, error) { return drafts.reachable, nil })
@@ -99,11 +99,11 @@ func TestADraftIsCreatedFromOneSentenceWithItsPlannerAndNothingOfARun(t *testing
 	if pe.Status != domain.PlatformExpDraft || pe.Goal != goal || out["status"] != "draft" || out["goal"] != goal {
 		t.Fatalf("created %+v", pe)
 	}
-	if pe.BudgetAcceleratorHours != 0 || len(pe.Metrics) != 0 || pe.CoordinatorHosted {
-		t.Errorf("a draft holds %v AccH, %d metrics, coordinator %v: want no budget and nothing of a run", pe.BudgetAcceleratorHours, len(pe.Metrics), pe.CoordinatorHosted)
+	if pe.BudgetAcceleratorHours != 0 || len(pe.Metrics) != 0 || pe.CoordinatorInAgentSandbox {
+		t.Errorf("a draft holds %v AccH, %d metrics, coordinator %v: want no budget and nothing of a run", pe.BudgetAcceleratorHours, len(pe.Metrics), pe.CoordinatorInAgentSandbox)
 	}
 	// A planner read a made-up max_agents of 1 as a cap and proposed one researcher.
-	if most := platformexperiments.MaxProposedResearchers(hostingMaxHosted); pe.MaxAgents != most || out["max_agents"] != float64(most) {
+	if most := platformexperiments.MaxProposedResearchers(createMaxAgentSandboxes); pe.MaxAgents != most || out["max_agents"] != float64(most) {
 		t.Errorf("a draft reads max_agents %d (%v answered), want %d: the most researchers a proposal is accepted with", pe.MaxAgents, out["max_agents"], most)
 	}
 	if limit := pe.PlanningEndsAt.Sub(before); limit < testPlanning.Limit-time.Minute || limit > testPlanning.Limit+time.Minute {
@@ -120,9 +120,9 @@ func TestADraftIsCreatedFromOneSentenceWithItsPlannerAndNothingOfARun(t *testing
 	}
 	// Its one agent is the planner, which the platform runs and never ranks or cuts.
 	planner, signup := store.planners[pe.ID], store.signups[pe.ID]
-	if planner == nil || planner.Name != "Planner" || signup.AgentID != planner.ID || !signup.Hosted ||
+	if planner == nil || planner.Name != "Planner" || signup.AgentID != planner.ID || !signup.InAgentSandbox ||
 		signup.AgentType != domain.PlannerAgentType || signup.Role != domain.SignupRolePlanner || signup.Model != "platform-model-1" || out["signup_count"] != float64(1) {
-		t.Errorf("planner %+v signed up as %+v, want a hosted planner of role baseline on the platform's model", planner, signup)
+		t.Errorf("planner %+v signed up as %+v, want a sandboxed planner of role baseline on the platform's model", planner, signup)
 	}
 	// A draft has a repository: the one named, or a new one the repository pass makes after the
 	// create answered.
@@ -415,16 +415,16 @@ func aProposal(more map[string]any) map[string]any {
 	return body
 }
 
-// draftMaxHosted leaves a draft three researchers beside its coordinator and the agent that
+// draftMaxAgentSandboxes leaves a draft three researchers beside its coordinator and the agent that
 // measures its baseline.
-const draftMaxHosted = 5
+const draftMaxAgentSandboxes = 5
 
 func draftWithPlanner() *draftStore {
 	return &draftStore{
 		statusStore: statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{{
-			ID: "pe-draft", ProjectID: "prj-a", Status: domain.PlatformExpDraft, Goal: "g", GoalVersion: 1, MaxHosted: draftMaxHosted, PlanningEndsAt: time.Now().Add(time.Minute),
+			ID: "pe-draft", ProjectID: "prj-a", Status: domain.PlatformExpDraft, Goal: "g", GoalVersion: 1, MaxAgentSandboxes: draftMaxAgentSandboxes, PlanningEndsAt: time.Now().Add(time.Minute),
 		}}}},
-		signups:   map[string]domain.AgentSignup{"pe-draft": {AgentID: "ag-planner", Role: domain.SignupRolePlanner, AgentType: domain.PlannerAgentType, Hosted: true}},
+		signups:   map[string]domain.AgentSignup{"pe-draft": {AgentID: "ag-planner", Role: domain.SignupRolePlanner, AgentType: domain.PlannerAgentType, InAgentSandbox: true}},
 		reachable: map[string][]domain.Cluster{"rtx-4090": {{Name: "rented"}}},
 	}
 }
@@ -617,7 +617,7 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 	if pe.StartsAt.Before(before) || pe.DurationHours != 2 || !pe.EndsAt.IsZero() || !pe.BaselineDueAt.Equal(pe.StartsAt.Add(25*time.Minute)) {
 		t.Errorf("starts %v, %v hours ending %v, baseline due %v: want 2 hours with no end yet and the baseline due 25 minutes after the accept", pe.StartsAt, pe.DurationHours, pe.EndsAt, pe.BaselineDueAt)
 	}
-	if !pe.CoordinatorHosted || pe.Coordinator == nil || pe.Coordinator.Model != "" {
+	if !pe.CoordinatorInAgentSandbox || pe.Coordinator == nil || pe.Coordinator.Model != "" {
 		t.Errorf("coordinator %+v, want one the platform hosts on its type's model", pe.Coordinator)
 	}
 	// A coordinator had to boot, take a turn and add the agent that measures the baseline before
@@ -627,13 +627,13 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 	}
 	for i, signup := range store.acceptedSignups {
 		agent := store.acceptedAgents[i]
-		if agent.Name != "" || signup.AgentID != agent.ID || !signup.Hosted || signup.Role != domain.SignupRoleCompetitor || signup.Model != "" ||
+		if agent.Name != "" || signup.AgentID != agent.ID || !signup.InAgentSandbox || signup.Role != domain.SignupRoleCompetitor || signup.Model != "" ||
 			signup.Actor == nil || signup.Actor.ID != "u-1" {
-			t.Errorf("agent %d: %+v signed up as %+v, want a hosted researcher added by the person who accepted", i, agent, signup)
+			t.Errorf("agent %d: %+v signed up as %+v, want a sandboxed researcher added by the person who accepted", i, agent, signup)
 		}
 	}
-	if measures := store.baselines[0]; measures.Role != domain.SignupRoleBaseline || !measures.Hosted || measures.AgentType != "baseline" || len(measures.Hyperparameters) != 0 {
-		t.Errorf("the baseline agent runs as %+v, want a hosted one of the built-in baseline type and no hyperparameters", measures)
+	if measures := store.baselines[0]; measures.Role != domain.SignupRoleBaseline || !measures.InAgentSandbox || measures.AgentType != "baseline" || len(measures.Hyperparameters) != 0 {
+		t.Errorf("the baseline agent runs as %+v, want a sandboxed one of the built-in baseline type and no hyperparameters", measures)
 	}
 	if first := store.acceptedSignups[0]; first.AgentType != "architecture-search" || first.Hyperparameters["depth"] != float64(4) || store.acceptedSignups[1].AgentType != domain.DefaultAgentType {
 		t.Errorf("signups %+v, want the agent types and hyperparameters the person stated", store.acceptedSignups)
@@ -1229,7 +1229,7 @@ func TestAProposalIsAcceptedAsProposedUnlessAPersonActsFirst(t *testing.T) {
 		}
 		svc, call := planningRouter(t, store, planner)
 		handler := svc.WithRepositories(planningRepositories).WithPlanning(testPlanning).WithGitProxy("https://api.test/git").
-			WithAgentLaunch(platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted}).
+			WithAgentLaunch(platformexperiments.AgentLaunch{AgentSandbox: true, DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxAgentSandboxes: createMaxAgentSandboxes}).
 			WithJobImages([]domain.JobImage{{Name: "torch", Image: "registry.example.com/hl/torch:1"}})
 		return store, handler, call
 	}
@@ -1247,8 +1247,8 @@ func TestAProposalIsAcceptedAsProposedUnlessAPersonActsFirst(t *testing.T) {
 	}
 	// The proposal signed up the agent that measures the baseline, for the person who created the
 	// draft, so that its machine starts while the proposal is read.
-	if len(store.baselines) != 1 || store.baselines[0].Role != domain.SignupRoleBaseline || !store.baselines[0].Hosted || store.baselines[0].Actor == nil || store.baselines[0].Actor.ID != "u-creator" {
-		t.Fatalf("baseline agents after the proposal: %+v, want one hosted, added for the creator", store.baselines)
+	if len(store.baselines) != 1 || store.baselines[0].Role != domain.SignupRoleBaseline || !store.baselines[0].InAgentSandbox || store.baselines[0].Actor == nil || store.baselines[0].Actor.ID != "u-creator" {
+		t.Fatalf("baseline agents after the proposal: %+v, want one sandboxed, added for the creator", store.baselines)
 	}
 	if err := handler.AcceptDue(context.Background()); err != nil || store.created[0].Status != domain.PlatformExpDraft {
 		t.Fatalf("before accepts_at: %v, status %s, want a draft still", err, store.created[0].Status)
@@ -1332,7 +1332,7 @@ func TestAProposalWithQuestionsWaitsForAPersonWhoseAnswersGoIntoTheBrief(t *test
 		}
 		svc, call := planningRouter(t, store, planner)
 		handler := svc.WithRepositories(planningRepositories).WithPlanning(testPlanning).WithGitProxy("https://api.test/git").
-			WithAgentLaunch(platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxHosted: hostingMaxHosted}).
+			WithAgentLaunch(platformexperiments.AgentLaunch{AgentSandbox: true, DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxAgentSandboxes: createMaxAgentSandboxes}).
 			WithJobImages([]domain.JobImage{{Name: "torch", Image: "registry.example.com/hl/torch:1"}})
 		return store, handler, call
 	}
@@ -1420,7 +1420,7 @@ func TestTheReadOfAPlatformExperimentListsThePriorRunsItsCallerReaches(t *testin
 	}
 }
 
-const hostingMaxHosted = 4
+const createMaxAgentSandboxes = 4
 
 // fakeRepositories is GitHub as the org of each project reaches it: files holds, by project, the
 // experiment file of the one repository its org's installation covers, acme/model, which GitHub

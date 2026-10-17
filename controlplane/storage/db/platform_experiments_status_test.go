@@ -116,8 +116,8 @@ func TestARunWaitsForItsFirstResearchersMachineWithinItsRun(t *testing.T) {
 			t.Fatal(err)
 		}
 		ids := spawnTestAgents(t, pes, pe,
-			domain.AgentSignup{Actor: testActor, Hosted: true, AgentType: "generalist"},
-			domain.AgentSignup{Actor: testActor, Hosted: true, AgentType: "baseline", Role: domain.SignupRoleBaseline})
+			domain.AgentSignup{Actor: testActor, InAgentSandbox: true, AgentType: "generalist"},
+			domain.AgentSignup{Actor: testActor, InAgentSandbox: true, AgentType: "baseline", Role: domain.SignupRoleBaseline})
 		started, _, err := pes.StartPlatformExperimentTx(ctx, pe, agentsDue, func([]StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error) { return nil, oneStage, nil })
 		if err != nil || !started {
 			t.Fatalf("start: got = %v, %v, want started", started, err)

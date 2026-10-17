@@ -52,7 +52,7 @@ duration_hours: 2
 researchers:
   - agent_type: generalist
     count: 2
-coordinator_hosted: true
+coordinator_in_agentsandbox: true
 report_interval_seconds: 10
 stages:
   - length_pct: 100

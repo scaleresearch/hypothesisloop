@@ -63,8 +63,8 @@ func (s *Store) startClock(ctx context.Context, platformExpID, agentID, name str
 UPDATE platform_experiments pe
 SET started_at = NOW(), ends_at = `+runOverAtSQL+`, updated_at = NOW()
 WHERE pe.id = $1 AND pe.status = 'running' AND pe.started_at IS NULL
-  AND EXISTS (SELECT 1 FROM experiment_signups s JOIN hosted_instances i USING (platform_experiment_id, agent_id)
-              WHERE s.platform_experiment_id = pe.id AND s.agent_id = $2 AND s.hosted AND i.name = $3
+  AND EXISTS (SELECT 1 FROM experiment_signups s JOIN agentsandbox_instances i USING (platform_experiment_id, agent_id)
+              WHERE s.platform_experiment_id = pe.id AND s.agent_id = $2 AND s.in_agentsandbox AND i.name = $3
                 AND i.state = '`+domain.InstanceRunning+`' AND `+sharesBudgetSQL+`)`,
 		platformExpID, agentID, name); err != nil {
 		return fmt.Errorf("platform_experiments_store.startClock: %w", err)
@@ -97,7 +97,7 @@ func (s *Store) StartPlatformExperimentTx(ctx context.Context, id string, agents
 		moved, err := moveRun(ctx, tx, `
 WITH at_work AS (
     SELECT EXISTS (SELECT 1 FROM experiment_signups s
-                   WHERE s.platform_experiment_id = $1 AND NOT s.hosted AND `+sharesBudgetSQL+`) AS already
+                   WHERE s.platform_experiment_id = $1 AND NOT s.in_agentsandbox AND `+sharesBudgetSQL+`) AS already
 )
 UPDATE platform_experiments pe
 SET status='running', updated_at=NOW(), starts_at = NOW(), `+statusMoved+`,

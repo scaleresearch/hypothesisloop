@@ -129,7 +129,7 @@ var metricTables = []*table{
 
 // The tables written through SQL, for what is not a number. job_logs and job_phase_detail keep
 // one row per (experiment_id, ts), the latest a job's current read. phase_message, not message:
-// GreptimeDB's SQL parser reserves message. model_usage holds one row per model call a hosted
+// GreptimeDB's SQL parser reserves message. model_usage holds one row per model call a sandboxed
 // agent made through the model proxy; append_mode keeps two calls of one agent on one model in the
 // same millisecond as two rows, where a primary key and a timestamp would keep the last.
 var sqlTables = []*table{

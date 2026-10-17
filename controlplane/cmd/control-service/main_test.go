@@ -20,7 +20,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/hypothesisloop/contract/hostingapi"
+	"github.com/scaleresearch/hypothesisloop/contract/agentsandbox"
 	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
@@ -55,10 +55,10 @@ type (
 func testRouter(t *testing.T) chi.Router {
 	t.Helper()
 	unreachable := authtest.As{Kind: auth.KindStaff}
-	launch := platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model", CoordinatorModel: "model", SigningSecret: "secret", MaxHosted: 1}
+	launch := platformexperiments.AgentLaunch{AgentSandbox: true, DefaultModel: "model", CoordinatorModel: "model", SigningSecret: "secret", MaxAgentSandboxes: 1}
 	platformExperiments := platformexperiments.NewService(nil, domain.QuotaConfig{}, zap.NewNop(), nil, time.Minute).WithRepositories(noRepositories{}).
 		WithPlanning(platformexperiments.Planning{Limit: time.Minute, ProposedFor: time.Minute, PlannerKept: time.Minute}).WithAgentLaunch(launch)
-	modelProxy, err := modelproxy.New(noOneHosted{}, metricsdb.New(""), "https://model.example.invalid", "credential", zap.NewNop())
+	modelProxy, err := modelproxy.New(noneInAgentSandbox{}, metricsdb.New(""), "https://model.example.invalid", "credential", zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,9 +75,11 @@ func testRouter(t *testing.T) chi.Router {
 	})
 }
 
-type noOneHosted struct{}
+type noneInAgentSandbox struct{}
 
-func (noOneHosted) Hosted(context.Context, string, string) (bool, error) { return false, nil }
+func (noneInAgentSandbox) InAgentSandbox(context.Context, string, string) (bool, error) {
+	return false, nil
+}
 
 var pathParam = regexp.MustCompile(`\{[^}]+\}`)
 
@@ -297,15 +299,15 @@ TestTheHarnessVocabularyIsUnchanged -update). Change those definitions, never th
 	v.text("SCOPE_AGENT", string(scope.KindAgent))
 	v.text("SCOPE_COORDINATOR", string(scope.KindCoordinator))
 
-	v.section("The lines the launcher reads from a hosted harness's output, and the environment it starts the harness with (hostingapi).")
-	v.text("PROGRESS_PREFIX", hostingapi.ProgressPrefix)
-	v.text("ACTIVITY_PREFIX", hostingapi.ActivityPrefix)
-	v.text("STATE_PREFIX", hostingapi.StatePrefix)
-	v.number("MAX_ACTIVITY_LENGTH", hostingapi.MaxActivityLength)
-	v.number("MAX_STATE_LENGTH", hostingapi.MaxStateLength)
-	v.number("PROGRESS_INTERVAL_S", hostingapi.ProgressIntervalSeconds)
-	v.text("ENV_API_URL", hostingapi.EnvAPIURL)
-	v.text("ENV_TOKEN", hostingapi.EnvToken)
+	v.section("The lines the launcher reads from a sandboxed harness's output, and the environment it starts the harness with (agentsandbox).")
+	v.text("PROGRESS_PREFIX", agentsandbox.ProgressPrefix)
+	v.text("ACTIVITY_PREFIX", agentsandbox.ActivityPrefix)
+	v.text("STATE_PREFIX", agentsandbox.StatePrefix)
+	v.number("MAX_ACTIVITY_LENGTH", agentsandbox.MaxActivityLength)
+	v.number("MAX_STATE_LENGTH", agentsandbox.MaxStateLength)
+	v.number("PROGRESS_INTERVAL_S", agentsandbox.ProgressIntervalSeconds)
+	v.text("ENV_API_URL", agentsandbox.EnvAPIURL)
+	v.text("ENV_TOKEN", agentsandbox.EnvToken)
 
 	v.section("How long a token works and a machine stays after its run ended (domain.AgentWindDown, domain.CoordinatorWindDown).")
 	v.number("AGENT_WIND_DOWN_S", int(domain.AgentWindDown/time.Second))

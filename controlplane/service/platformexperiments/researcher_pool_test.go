@@ -60,37 +60,37 @@ func TestKeepResearchersReplacesWhoEndedAndNobodyElse(t *testing.T) {
 	pool := domain.ResearcherPool{{AgentType: "generalist", Model: "model-1", Count: 2}, {AgentType: "data-search", Model: "model-1", Count: 1}}
 	now := time.Now().UTC()
 	for name, c := range map[string]struct {
-		state    db.PoolState
-		endsIn   time.Duration
-		hosted   bool
-		joinErr  error
-		replaces []string
+		state     db.PoolState
+		endsIn    time.Duration
+		sandboxed bool
+		joinErr   error
+		replaces  []string
 	}{
 		"a researcher whose machine stopped for good": {
 			state:  db.PoolState{Pool: pool, MaxAgents: 3, AtWork: map[domain.PoolKey]int{generalist: 1, searcher: 1}, Ended: map[domain.PoolKey][]db.EndedResearcher{generalist: {ended("ag-stopped", generalist)}}},
-			endsIn: 10 * time.Hour, hosted: true, replaces: []string{"ag-stopped"},
+			endsIn: 10 * time.Hour, sandboxed: true, replaces: []string{"ag-stopped"},
 		},
 		"a researcher that finished": {
 			state:  db.PoolState{Pool: pool, MaxAgents: 3, AtWork: map[domain.PoolKey]int{generalist: 2}, Ended: map[domain.PoolKey][]db.EndedResearcher{searcher: {ended("ag-finished", searcher)}}},
-			endsIn: 10 * time.Hour, hosted: true, replaces: []string{"ag-finished"},
+			endsIn: 10 * time.Hour, sandboxed: true, replaces: []string{"ag-finished"},
 		},
 		// The cut lowered the pool in its own write: the pool read wants one fewer.
 		"a cut researcher": {
 			state:  db.PoolState{Pool: pool.Lowered([]domain.PoolKey{generalist}), MaxAgents: 3, AtWork: map[domain.PoolKey]int{generalist: 1, searcher: 1}},
-			endsIn: 10 * time.Hour, hosted: true,
+			endsIn: 10 * time.Hour, sandboxed: true,
 		},
 		"the last minutes of the run": {
 			state:  db.PoolState{Pool: pool, MaxAgents: 3, AtWork: map[domain.PoolKey]int{generalist: 1, searcher: 1}, Ended: map[domain.PoolKey][]db.EndedResearcher{generalist: {ended("ag-stopped", generalist)}}},
-			endsIn: 10 * time.Minute, hosted: true,
+			endsIn: 10 * time.Minute, sandboxed: true,
 		},
 		"a budget that holds no share for a newcomer": {
 			state:  db.PoolState{Pool: pool, MaxAgents: 3, AtWork: map[domain.PoolKey]int{generalist: 1, searcher: 1}, Ended: map[domain.PoolKey][]db.EndedResearcher{generalist: {ended("ag-stopped", generalist)}}},
-			endsIn: 10 * time.Hour, hosted: true, joinErr: db.ErrNoShareLeft,
+			endsIn: 10 * time.Hour, sandboxed: true, joinErr: db.ErrNoShareLeft,
 		},
 		// The coordinator's own addition took the place up to max_agents.
 		"max_agents taken by an addition of the coordinator": {
 			state:  db.PoolState{Pool: pool, MaxAgents: 3, AtWork: map[domain.PoolKey]int{generalist: 1, searcher: 1, {AgentType: "architecture-search", Model: "model-1"}: 1}, Ended: map[domain.PoolKey][]db.EndedResearcher{generalist: {ended("ag-stopped", generalist)}}},
-			endsIn: 10 * time.Hour, hosted: true,
+			endsIn: 10 * time.Hour, sandboxed: true,
 		},
 		"researchers that run themselves": {
 			state:  db.PoolState{Pool: pool, MaxAgents: 3, AtWork: map[domain.PoolKey]int{generalist: 1, searcher: 1}, Ended: map[domain.PoolKey][]db.EndedResearcher{generalist: {ended("ag-stopped", generalist)}}},
@@ -99,17 +99,17 @@ func TestKeepResearchersReplacesWhoEndedAndNobodyElse(t *testing.T) {
 	} {
 		store := &keepStore{state: c.state, joinErr: c.joinErr}
 		svc := NewService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), time.Minute)
-		pe := &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpRunning, CoordinatorHosted: c.hosted, EndsAt: now.Add(c.endsIn), JobEstimatedDurationHours: 0.5,
+		pe := &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpRunning, CoordinatorInAgentSandbox: c.sandboxed, EndsAt: now.Add(c.endsIn), JobEstimatedDurationHours: 0.5,
 			Actor: &domain.Actor{Kind: domain.ActorUser, ID: "user-1"}}
-		if err := svc.WithAgentLaunch(AgentLaunch{Hosting: true, DefaultModel: "model-1"}).KeepResearchers(context.Background(), pe, now); err != nil {
+		if err := svc.WithAgentLaunch(AgentLaunch{AgentSandbox: true, DefaultModel: "model-1"}).KeepResearchers(context.Background(), pe, now); err != nil {
 			t.Errorf("%s: got = %v, want nil", name, err)
 			continue
 		}
 		var replaced []string
 		for _, signup := range store.joined {
 			replaced = append(replaced, signup.Replaces)
-			if !signup.Hosted || signup.Role != domain.SignupRoleCompetitor || signup.Hyperparameters["area"] != signup.Replaces || signup.QuotaTier != domain.QuotaTierBurstOnly {
-				t.Errorf("%s: added %+v, want a hosted researcher with what the one it replaces had", name, signup)
+			if !signup.InAgentSandbox || signup.Role != domain.SignupRoleCompetitor || signup.Hyperparameters["area"] != signup.Replaces || signup.QuotaTier != domain.QuotaTierBurstOnly {
+				t.Errorf("%s: added %+v, want a sandboxed researcher with what the one it replaces had", name, signup)
 			}
 		}
 		if len(replaced) != len(c.replaces) || (len(replaced) > 0 && replaced[0] != c.replaces[0]) {
@@ -124,8 +124,8 @@ func TestKeepResearchersFillsAPlaceThePoolGained(t *testing.T) {
 	store := &keepStore{state: db.PoolState{Pool: domain.ResearcherPool{{AgentType: "generalist", Model: "model-1", Hyperparameters: map[string]any{"from": "entry"}, Count: 3}}, MaxAgents: 5, AtWork: map[domain.PoolKey]int{key: 1}}}
 	svc := NewService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), time.Minute)
 	now := time.Now().UTC()
-	pe := &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpRunning, CoordinatorHosted: true, EndsAt: now.Add(time.Hour)}
-	if err := svc.WithAgentLaunch(AgentLaunch{Hosting: true, DefaultModel: "model-1"}).KeepResearchers(context.Background(), pe, now); err != nil {
+	pe := &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpRunning, CoordinatorInAgentSandbox: true, EndsAt: now.Add(time.Hour)}
+	if err := svc.WithAgentLaunch(AgentLaunch{AgentSandbox: true, DefaultModel: "model-1"}).KeepResearchers(context.Background(), pe, now); err != nil {
 		t.Fatal(err)
 	}
 	if len(store.joined) != 2 || store.joined[0].Replaces != "" || store.joined[0].Hyperparameters["from"] != "entry" {
@@ -150,10 +150,10 @@ func TestKeepResearchersHoldsThePlacesOfEarlyEndsAndAboveTheLimitAndSaysWhy(t *t
 	}}
 	svc := NewService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), time.Minute)
 	now := time.Now().UTC()
-	pe := &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpRunning, CoordinatorHosted: true, EndsAt: now.Add(10 * time.Hour)}
+	pe := &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpRunning, CoordinatorInAgentSandbox: true, EndsAt: now.Add(10 * time.Hour)}
 	keep := func() {
 		t.Helper()
-		if err := svc.WithAgentLaunch(AgentLaunch{Hosting: true, DefaultModel: "model-1"}).KeepResearchers(context.Background(), pe, now); err != nil {
+		if err := svc.WithAgentLaunch(AgentLaunch{AgentSandbox: true, DefaultModel: "model-1"}).KeepResearchers(context.Background(), pe, now); err != nil {
 			t.Fatal(err)
 		}
 	}

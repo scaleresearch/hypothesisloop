@@ -31,15 +31,15 @@ func waitingAgent(id string) auth.Principal {
 // for each state, and names the command of whoever acts.
 func TestStatusReasonOfAnOpenPlatformExperimentSaysWhereItsBaselineStands(t *testing.T) {
 	finished := time.Now()
-	measuring := domain.AgentSignup{AgentID: "ag-b", Name: "Baseline 1", Role: domain.SignupRoleBaseline, Hosted: true}
+	measuring := domain.AgentSignup{AgentID: "ag-b", Name: "Baseline 1", Role: domain.SignupRoleBaseline, InAgentSandbox: true}
 	done := measuring
 	done.FinishedAt, done.FinishedReason = &finished, "train.py does not run"
 	stopped := measuring
 	stopped.Instance = &domain.AgentInstance{Stopped: true}
-	second := domain.AgentSignup{AgentID: "ag-c", Name: "Baseline 2", Role: domain.SignupRoleBaseline, Hosted: true}
-	researcher := domain.AgentSignup{AgentID: "ag-r", Name: "Researcher 1", Role: domain.SignupRoleCompetitor, Hosted: true}
+	second := domain.AgentSignup{AgentID: "ag-c", Name: "Baseline 2", Role: domain.SignupRoleBaseline, InAgentSandbox: true}
+	researcher := domain.AgentSignup{AgentID: "ag-r", Name: "Researcher 1", Role: domain.SignupRoleCompetitor, InAgentSandbox: true}
 	due := time.Now().UTC().Add(10*time.Minute - time.Second).Truncate(time.Second)
-	const add, declare = "`hl platform-experiments agents add --hosted --role baseline --platform-experiment pe-1`", "`hl platform-experiments update --baseline-job JOB --platform-experiment pe-1`"
+	const add, declare = "`hl platform-experiments agents add --in-agentsandbox --role baseline --platform-experiment pe-1`", "`hl platform-experiments update --baseline-job JOB --platform-experiment pe-1`"
 	job := func(id string) *domain.Experiment {
 		measured := *measuredBaseline().Job
 		measured.ID = id
@@ -76,7 +76,7 @@ func TestStatusReasonOfAnOpenPlatformExperimentSaysWhereItsBaselineStands(t *tes
 		"a researcher":                   {waitingAgent("ag-r"), []domain.AgentSignup{measuring, researcher}, nil, nil, 6, "baseline_measuring", []string{"Every job you submit is refused until the platform starts the run", "end your turn", "The run lasts its duration_hours, 1"}, []string{add, "baseline_due_at is"}},
 	} {
 		store := newRosterStore(domain.PlatformExpOpen, 2)
-		store.pe.CoordinatorHosted, store.signups, store.left, store.objective = true, c.signups, c.left, c.objective
+		store.pe.CoordinatorInAgentSandbox, store.signups, store.left, store.objective = true, c.signups, c.left, c.objective
 		store.pe.Metrics, store.pe.BudgetAcceleratorHours, store.pe.BaselineDueAt, store.pe.DurationHours = openExperiment().Metrics, c.budget, due, 1
 		svc := newSignupTestService(t, store)
 		svc.baseline = func(_ context.Context, _ *domain.PlatformExperiment, jobID string) (*Baseline, error) {
@@ -113,20 +113,20 @@ func TestStatusReasonOfAnOpenPlatformExperimentSaysWhereItsBaselineStands(t *tes
 // names who closes it: its coordinator where the platform hosts one, its owner otherwise.
 func TestARunningPlatformExperimentWithNoResearcherLeftSaysSoAndWhoClosesIt(t *testing.T) {
 	finished := time.Now()
-	atWork := domain.AgentSignup{AgentID: "ag-1", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: &domain.AgentInstance{Name: "m-1", Reported: domain.InstanceRunning}}
-	done := domain.AgentSignup{AgentID: "ag-2", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: &domain.AgentInstance{}, FinishedAt: &finished, Ended: domain.RunEndFinished}
+	atWork := domain.AgentSignup{AgentID: "ag-1", Role: domain.SignupRoleCompetitor, InAgentSandbox: true, Instance: &domain.AgentInstance{Name: "m-1", Reported: domain.InstanceRunning}}
+	done := domain.AgentSignup{AgentID: "ag-2", Role: domain.SignupRoleCompetitor, InAgentSandbox: true, Instance: &domain.AgentInstance{}, FinishedAt: &finished, Ended: domain.RunEndFinished}
 	cut := domain.AgentSignup{AgentID: "ag-3", Role: domain.SignupRoleCompetitor, Ended: domain.RunEndCut}
-	stopped := domain.AgentSignup{AgentID: "ag-4", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: &domain.AgentInstance{Stopped: true}}
+	stopped := domain.AgentSignup{AgentID: "ag-4", Role: domain.SignupRoleCompetitor, InAgentSandbox: true, Instance: &domain.AgentInstance{Stopped: true}}
 	selfRun := domain.AgentSignup{AgentID: "ag-5", Role: domain.SignupRoleCompetitor}
-	baseline := domain.AgentSignup{AgentID: "ag-b", Role: domain.SignupRoleBaseline, Hosted: true, Instance: &domain.AgentInstance{}, FinishedAt: &finished, Ended: domain.RunEndFinished}
+	baseline := domain.AgentSignup{AgentID: "ag-b", Role: domain.SignupRoleBaseline, InAgentSandbox: true, Instance: &domain.AgentInstance{}, FinishedAt: &finished, Ended: domain.RunEndFinished}
 	reviewer := domain.AgentSignup{AgentID: "ag-v", Role: domain.SignupRoleReviewer}
 
 	for name, c := range map[string]struct {
-		signups           []domain.AgentSignup
-		coordinatorHosted bool
-		clockRuns         bool
-		reason            string
-		waitsFor          domain.Waiter
+		signups                   []domain.AgentSignup
+		coordinatorInAgentSandbox bool
+		clockRuns                 bool
+		reason                    string
+		waitsFor                  domain.Waiter
 	}{
 		"one at work beside those that ended":    {[]domain.AgentSignup{baseline, done, cut, stopped, atWork}, true, true, "running", domain.WaitsForPlatform},
 		"one its owner runs, which says nothing": {[]domain.AgentSignup{baseline, done, selfRun}, true, true, "running", domain.WaitsForPlatform},
@@ -135,7 +135,7 @@ func TestARunningPlatformExperimentWithNoResearcherLeftSaysSoAndWhoClosesIt(t *t
 		"none up yet and its clock not started":  {[]domain.AgentSignup{baseline, stopped}, true, false, "agents_starting", domain.WaitsForPlatform},
 	} {
 		store := newRosterStore(domain.PlatformExpRunning, 5)
-		store.pe.CoordinatorHosted, store.signups = c.coordinatorHosted, c.signups
+		store.pe.CoordinatorInAgentSandbox, store.signups = c.coordinatorInAgentSandbox, c.signups
 		if c.clockRuns {
 			store.pe.StartedAt = finished.Add(-time.Hour)
 		}
@@ -181,19 +181,19 @@ func (f *toldStore) TellCoordinator(_ context.Context, _, reason string) error {
 
 // A coordinator was woken when the last researcher finished, by agent.finished, and by nothing
 // when the last one's machine stopped with no restart left: the run read researchers_done and
-// its coordinator slept until ends_at. The sweep records the reason that waits for a hosted
+// its coordinator slept until ends_at. The sweep records the reason that waits for a sandboxed
 // coordinator, and none while the experiment waits for someone else.
-func TestTheSweepTellsAHostedCoordinatorTheReasonThatWaitsForIt(t *testing.T) {
+func TestTheSweepTellsASandboxedCoordinatorTheReasonThatWaitsForIt(t *testing.T) {
 	started := time.Now().Add(-time.Hour)
-	atWork := domain.AgentSignup{AgentID: "ag-1", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: &domain.AgentInstance{Name: "m-1", Reported: domain.InstanceRunning}}
-	stopped := domain.AgentSignup{AgentID: "ag-1", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: &domain.AgentInstance{Stopped: true}}
+	atWork := domain.AgentSignup{AgentID: "ag-1", Role: domain.SignupRoleCompetitor, InAgentSandbox: true, Instance: &domain.AgentInstance{Name: "m-1", Reported: domain.InstanceRunning}}
+	stopped := domain.AgentSignup{AgentID: "ag-1", Role: domain.SignupRoleCompetitor, InAgentSandbox: true, Instance: &domain.AgentInstance{Stopped: true}}
 	cut := domain.AgentSignup{AgentID: "ag-2", Role: domain.SignupRoleCompetitor, Ended: domain.RunEndCut}
 
 	for name, c := range map[string]struct {
-		status            domain.PlatformExperimentStatus
-		coordinatorHosted bool
-		signups           []domain.AgentSignup
-		told              []string
+		status                    domain.PlatformExperimentStatus
+		coordinatorInAgentSandbox bool
+		signups                   []domain.AgentSignup
+		told                      []string
 	}{
 		"a researcher at work":                    {domain.PlatformExpRunning, true, []domain.AgentSignup{atWork, cut}, []string{""}},
 		"the last one's machine stopped for good": {domain.PlatformExpRunning, true, []domain.AgentSignup{stopped, cut}, []string{"researchers_done"}},
@@ -202,7 +202,7 @@ func TestTheSweepTellsAHostedCoordinatorTheReasonThatWaitsForIt(t *testing.T) {
 		"closed":                                  {domain.PlatformExpClosed, true, []domain.AgentSignup{stopped}, nil},
 	} {
 		store := &toldStore{rosterStore: newRosterStore(c.status, 5)}
-		store.pe.CoordinatorHosted, store.signups, store.pe.StartedAt = c.coordinatorHosted, c.signups, started
+		store.pe.CoordinatorInAgentSandbox, store.signups, store.pe.StartedAt = c.coordinatorInAgentSandbox, c.signups, started
 		store.pe.Metrics = openExperiment().Metrics
 		if err := newSignupTestService(t, store).TellCoordinators(context.Background()); err != nil {
 			t.Fatalf("%s: %v", name, err)
@@ -217,8 +217,8 @@ func TestTheRosterOfARunningPlatformExperimentSaysWhichMachinesAreStillStarting(
 	store := newRosterStore(domain.PlatformExpRunning, 5)
 	asked := time.Now().Add(-40 * time.Second)
 	signups := []domain.AgentSignup{
-		{AgentID: "dana", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: &domain.AgentInstance{Name: "m-1", AskedAt: &asked}},
-		{AgentID: "eli", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: &domain.AgentInstance{Name: "m-2", AskedAt: &asked, SeenAt: &asked, Reported: domain.InstanceRunning}},
+		{AgentID: "dana", Role: domain.SignupRoleCompetitor, InAgentSandbox: true, Instance: &domain.AgentInstance{Name: "m-1", AskedAt: &asked}},
+		{AgentID: "eli", Role: domain.SignupRoleCompetitor, InAgentSandbox: true, Instance: &domain.AgentInstance{Name: "m-2", AskedAt: &asked, SeenAt: &asked, Reported: domain.InstanceRunning}},
 	}
 	roster, err := newSignupTestService(t, store).roster(context.Background(), "pe-1", signups, domain.Actor{})
 	if err != nil {
@@ -250,8 +250,8 @@ func TestTheRosterOfARunningPlatformExperimentSaysWhichMachinesAreStillStarting(
 func TestAResearchersInstanceReadsWaitingUntilThePlatformExperimentStarts(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 5)
 	store.signups = []domain.AgentSignup{
-		{AgentID: "dana", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: &domain.AgentInstance{}},
-		{AgentID: "bo", Role: domain.SignupRoleBaseline, Hosted: true, Instance: &domain.AgentInstance{}},
+		{AgentID: "dana", Role: domain.SignupRoleCompetitor, InAgentSandbox: true, Instance: &domain.AgentInstance{}},
+		{AgentID: "bo", Role: domain.SignupRoleBaseline, InAgentSandbox: true, Instance: &domain.AgentInstance{}},
 		{AgentID: "eli", Role: domain.SignupRoleCompetitor},
 	}
 	state := func(agent JoinedAgent) string {
@@ -308,8 +308,8 @@ func TestAResearcherOfAnExperimentClosedBeforeItsRunSaysItNeverLaunchedAndWhy(t 
 	store.submitted = map[string]int{"bo": 2}
 	asked := time.Now()
 	store.signups = []domain.AgentSignup{
-		{AgentID: "dana", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: &domain.AgentInstance{Released: true}},
-		{AgentID: "bo", Role: domain.SignupRoleBaseline, Hosted: true, Instance: &domain.AgentInstance{AskedAt: &asked, Released: true}},
+		{AgentID: "dana", Role: domain.SignupRoleCompetitor, InAgentSandbox: true, Instance: &domain.AgentInstance{Released: true}},
+		{AgentID: "bo", Role: domain.SignupRoleBaseline, InAgentSandbox: true, Instance: &domain.AgentInstance{AskedAt: &asked, Released: true}},
 	}
 	roster, err := newSignupTestService(t, store).roster(context.Background(), "pe-1", store.signups, domain.Actor{})
 	if err != nil {

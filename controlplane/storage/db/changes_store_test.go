@@ -510,7 +510,7 @@ func TestASubscriptionWithoutAnAgentCarriesEveryAgentsEvents(t *testing.T) {
 	}
 }
 
-// A hosted coordinator was woken for every job being queued, admitted and started, each wake a
+// A sandboxed coordinator was woken for every job being queued, admitted and started, each wake a
 // reread of its whole context that ended in "nothing to act on". Whoever steers an experiment
 // decides on outcomes and on jobs that are stuck, across every agent.
 func TestTheDecisionsStreamOfAnExperimentLeavesOutJobsThatAreOnTheirWay(t *testing.T) {

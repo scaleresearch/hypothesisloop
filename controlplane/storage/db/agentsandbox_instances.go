@@ -58,11 +58,11 @@ const progressStampsPerLimit = 4
 // signupInstanceJoin joins experiment_signups s to the machine of its agent as i, NULL for an
 // agent that never had one asked for.
 const signupInstanceJoin = `
-LEFT JOIN hosted_instances i ON i.platform_experiment_id = s.platform_experiment_id AND i.agent_id = s.agent_id`
+LEFT JOIN agentsandbox_instances i ON i.platform_experiment_id = s.platform_experiment_id AND i.agent_id = s.agent_id`
 
 // coordinatorInstanceJoin joins platform_experiments pe to the machine of its coordinator as ci.
 const coordinatorInstanceJoin = `
-LEFT JOIN hosted_instances ci ON ci.platform_experiment_id = pe.id AND ci.agent_id = ''`
+LEFT JOIN agentsandbox_instances ci ON ci.platform_experiment_id = pe.id AND ci.agent_id = ''`
 
 // instanceColumns read the machine i of signupInstanceJoin as domain.AgentInstance holds it, what
 // it holds before one is asked for where none was.
@@ -71,25 +71,25 @@ const instanceColumns = `COALESCE(i.name, ''), COALESCE(i.restarts, 0), COALESCE
        COALESCE(i.state, ''), i.progress_at, COALESCE(i.end_reason, ''), COALESCE(i.activity, ''), i.activity_at`
 
 // stoppedSQL is whether the machine of signup s stopped with no restart left.
-const stoppedSQL = `EXISTS (SELECT 1 FROM hosted_instances stopped
+const stoppedSQL = `EXISTS (SELECT 1 FROM agentsandbox_instances stopped
         WHERE stopped.platform_experiment_id = s.platform_experiment_id AND stopped.agent_id = s.agent_id AND stopped.stopped)`
 
-// hostedSQL is whether the platform runs the agent $2 of platform experiment $1, or with $2 empty
+// inAgentSandboxSQL is whether the platform runs the agent $2 of platform experiment $1, or with $2 empty
 // its coordinator.
-const hostedSQL = `(EXISTS (SELECT 1 FROM experiment_signups s WHERE s.platform_experiment_id = $1 AND s.agent_id = $2 AND s.hosted)
-   OR $2 = '' AND EXISTS (SELECT 1 FROM platform_experiments pe WHERE pe.id = $1 AND pe.coordinator_hosted))`
+const inAgentSandboxSQL = `(EXISTS (SELECT 1 FROM experiment_signups s WHERE s.platform_experiment_id = $1 AND s.agent_id = $2 AND s.in_agentsandbox)
+   OR $2 = '' AND EXISTS (SELECT 1 FROM platform_experiments pe WHERE pe.id = $1 AND pe.coordinator_in_agentsandbox))`
 
-// Hosted reports whether the platform runs the agent agentID of a platform experiment, or with no
+// Sandboxed reports whether the platform runs the agent agentID of a platform experiment, or with no
 // agentID its coordinator.
-func (s *Store) Hosted(ctx context.Context, platformExpID, agentID string) (bool, error) {
-	var hosted bool
-	if err := s.pool.pool.QueryRow(ctx, `SELECT `+hostedSQL, platformExpID, agentID).Scan(&hosted); err != nil {
-		return false, fmt.Errorf("platform_experiments_store.Hosted: %w", err)
+func (s *Store) InAgentSandbox(ctx context.Context, platformExpID, agentID string) (bool, error) {
+	var sandboxed bool
+	if err := s.pool.pool.QueryRow(ctx, `SELECT `+inAgentSandboxSQL, platformExpID, agentID).Scan(&sandboxed); err != nil {
+		return false, fmt.Errorf("platform_experiments_store.InAgentSandbox: %w", err)
 	}
-	return hosted, nil
+	return sandboxed, nil
 }
 
-// AskInstance records the name a hosted agent's machine, or with no agentID a hosted
+// AskInstance records the name a sandboxed agent's machine, or with no agentID a sandboxed
 // coordinator's, is asked for under, and when. launch identifies what the machine is started
 // with: under the launch the restart budget was spent under it stands, and under another the
 // budget is whole and a stopped one is asked for again. restarts counts every one, ever. It
@@ -97,9 +97,9 @@ func (s *Store) Hosted(ctx context.Context, platformExpID, agentID string) (bool
 func (s *Store) AskInstance(ctx context.Context, platformExpID, agentID, name, launch string) error {
 	return s.write(ctx, func(w *Write) error {
 		tag, err := w.Exec(ctx, `
-INSERT INTO hosted_instances AS i (platform_experiment_id, agent_id, name, launch, asked_at)
+INSERT INTO agentsandbox_instances AS i (platform_experiment_id, agent_id, name, launch, asked_at)
 SELECT $1, $2, $3, $4, now()
-WHERE `+hostedSQL+`
+WHERE `+inAgentSandboxSQL+`
 ON CONFLICT (platform_experiment_id, agent_id) DO UPDATE
 SET name = $3, asked_at = now(), seen_at = NULL, launch = $4, machine = '',
     state = '', progress = '', progress_at = NULL, activity = '', activity_at = NULL,
@@ -136,13 +136,13 @@ func (s *Store) ObserveInstance(ctx context.Context, platformExpID, agentID, nam
 	err := s.write(ctx, func(w *Write) error {
 		var moved, spoke bool
 		err := w.QueryRow(ctx, `
-UPDATE hosted_instances i
+UPDATE agentsandbox_instances i
 SET seen_at = COALESCE(i.seen_at, now()), state = $4, machine = $8,
     progress = CASE WHEN `+stamp+` THEN $5 ELSE i.progress END,
     progress_at = CASE WHEN `+stamp+` THEN now() ELSE i.progress_at END,
     activity_at = CASE WHEN `+said+` THEN now() ELSE i.activity_at END,
     activity = CASE WHEN `+said+` THEN $7 ELSE i.activity END
-FROM hosted_instances was
+FROM agentsandbox_instances was
 WHERE was.platform_experiment_id = i.platform_experiment_id AND was.agent_id = i.agent_id
   AND i.platform_experiment_id = $1 AND i.agent_id = $2 AND i.name = $3 AND i.name <> ''
   AND (i.seen_at IS NULL OR i.state <> $4 OR i.machine <> $8 OR `+stamp+` OR `+said+`)
@@ -201,7 +201,7 @@ func (s *Store) EndInstance(ctx context.Context, platformExpID, agentID, name st
 		const recent = `ARRAY(SELECT t FROM unnest(restarted_at) t WHERE t > now() - make_interval(secs => $9))`
 		const restart = `$8::boolean AND cardinality(` + recent + `) < $5`
 		err = tx.QueryRow(ctx, `
-UPDATE hosted_instances
+UPDATE agentsandbox_instances
 SET name = '', machine = '', exited_at = now(), exit_log = $4, end_reason = $7, state = '',
     activity = '', activity_at = NULL,
     stopped = $8::boolean AND cardinality(`+recent+`) >= $5,
@@ -260,21 +260,21 @@ func (s *Store) ReleaseInstances(ctx context.Context, windDown, coordinatorWindD
     activity = '', activity_at = NULL`
 	return s.write(ctx, func(w *Write) error {
 		if err := releaseTx(ctx, w, `
-UPDATE hosted_instances i
+UPDATE agentsandbox_instances i
 SET `+released+`, exit_log = $2::jsonb ->> (`+runEndSQL+`)
 FROM experiment_signups s
 WHERE s.platform_experiment_id = i.platform_experiment_id AND s.agent_id = i.agent_id
-  AND s.hosted AND i.name <> ''
+  AND s.in_agentsandbox AND i.name <> ''
   AND (s.platform_experiment_id, s.agent_id) NOT IN (SELECT s.platform_experiment_id, s.agent_id`+launcherAgentsFrom+`)`,
 			windDown.Seconds(), because); err != nil {
 			return fmt.Errorf("platform_experiments_store.ReleaseInstances: agents: %w", err)
 		}
 		if err := releaseTx(ctx, w, `
-UPDATE hosted_instances i
+UPDATE agentsandbox_instances i
 SET `+released+`, exit_log = $2
 FROM platform_experiments pe
 WHERE pe.id = i.platform_experiment_id AND i.agent_id = ''
-  AND pe.coordinator_hosted AND i.name <> ''
+  AND pe.coordinator_in_agentsandbox AND i.name <> ''
   AND pe.id NOT IN (SELECT pe.id`+launcherCoordinatorsWhere+`)`,
 			coordinatorWindDown.Seconds(), domain.RunEndClosed.ReleasedBecause()); err != nil {
 			return fmt.Errorf("platform_experiments_store.ReleaseInstances: coordinators: %w", err)
@@ -311,18 +311,18 @@ type LauncherMachine struct {
 	Machine string
 }
 
-// ListLauncherMachines returns every hosted machine, an agent's or a coordinator's, whose name is
+// ListLauncherMachines returns every agent sandbox, an agent's or a coordinator's, whose name is
 // still held and was reported with a machine id, and every machine of the launcher's warm pool as
 // it last reported them (HoldPool), by name. It writes nothing.
 func (s *Store) ListLauncherMachines(ctx context.Context) ([]LauncherMachine, error) {
 	rows, err := s.pool.pool.Query(ctx, `
-SELECT i.name, i.machine FROM hosted_instances i
+SELECT i.name, i.machine FROM agentsandbox_instances i
 LEFT JOIN experiment_signups s ON s.platform_experiment_id = i.platform_experiment_id AND s.agent_id = i.agent_id
 LEFT JOIN platform_experiments pe ON pe.id = i.platform_experiment_id AND i.agent_id = ''
 WHERE i.name <> '' AND i.machine <> ''
-  AND (s.hosted OR pe.coordinator_hosted)
+  AND (s.in_agentsandbox OR pe.coordinator_in_agentsandbox)
 UNION ALL
-SELECT name, machine FROM hosted_pool
+SELECT name, machine FROM agentsandbox_pool
 ORDER BY 1, 2`)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.ListLauncherMachines: %w", err)
@@ -351,9 +351,9 @@ func (s *Store) HoldPool(ctx context.Context, machines []LauncherMachine) error 
 	}
 	_, err := s.pool.pool.Exec(ctx, `
 WITH reported AS (SELECT * FROM unnest($1::text[], $2::text[]) AS r(name, machine)),
-gone AS (DELETE FROM hosted_pool WHERE machine NOT IN (SELECT machine FROM reported))
-INSERT INTO hosted_pool (machine, name) SELECT machine, name FROM reported
-ON CONFLICT (machine) DO UPDATE SET name = EXCLUDED.name WHERE hosted_pool.name <> EXCLUDED.name`, names, ids)
+gone AS (DELETE FROM agentsandbox_pool WHERE machine NOT IN (SELECT machine FROM reported))
+INSERT INTO agentsandbox_pool (machine, name) SELECT machine, name FROM reported
+ON CONFLICT (machine) DO UPDATE SET name = EXCLUDED.name WHERE agentsandbox_pool.name <> EXCLUDED.name`, names, ids)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.HoldPool: %w", err)
 	}

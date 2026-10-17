@@ -159,7 +159,7 @@ func (s *Service) TellCoordinators(ctx context.Context) error {
 			continue
 		}
 		for _, pe := range pes {
-			if !pe.CoordinatorHosted {
+			if !pe.CoordinatorInAgentSandbox {
 				continue
 			}
 			if err := s.tellCoordinator(ctx, pe); err != nil {

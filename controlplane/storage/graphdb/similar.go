@@ -37,7 +37,7 @@ const (
 	similarThreshold = 0.05
 	// newLineThreshold is that score for a hypothesis that builds on the objective alone: a new
 	// line, placed under nothing its agent had to read first. Agents state a claim at length, with
-	// its rationale and numbers, which dilutes the score: on a hosted run a new line restating
+	// its rationale and numbers, which dilutes the score: on a sandboxed run a new line restating
 	// another agent's confirmed one in other words scored 0.027 against it. No bar tells that apart
 	// from a new line that moves another lever and explains how (0.036 in the tests), so this one
 	// holds both: a distinct line passes with one distinct_from, a duplicated one costs a line of work.

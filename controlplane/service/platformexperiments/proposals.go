@@ -82,10 +82,10 @@ func refusedProposal(reason, format string, args ...any) error {
 }
 
 // MaxProposedResearchers is the most researchers a proposal may name, and a draft's max_agents
-// until one is accepted: of the maxHosted machines the platform runs for an accepted draft, one
+// until one is accepted: of the maxAgentSandboxes machines the platform runs for an accepted draft, one
 // is its coordinator's and one its baseline agent's.
-func MaxProposedResearchers(maxHosted int) int {
-	return maxHosted - 2
+func MaxProposedResearchers(maxAgentSandboxes int) int {
+	return maxAgentSandboxes - 2
 }
 
 // proposedPool is the researchers the agents of a proposal make: an entry for each agent type and
@@ -102,7 +102,7 @@ func proposedPool(catalog domain.AgentTypeCatalog, agents []ProposedAgent) (doma
 	return domain.PoolOf(keys), nil
 }
 
-// poolAgents is a researcher of each place of pool, as hostedAgents creates them.
+// poolAgents is a researcher of each place of pool, as sandboxedAgents creates them.
 func poolAgents(pool domain.ResearcherPool) []ProposedAgent {
 	agents := []ProposedAgent{}
 	for _, e := range pool {
@@ -133,7 +133,7 @@ func (s *Service) checkProposal(ctx context.Context, p *Proposal, draft *domain.
 	if !decoded {
 		refuse("invalid_experiment", "experiment: %s", err)
 	}
-	if most := MaxProposedResearchers(draft.MaxHosted); len(p.Agents) == 0 || len(p.Agents) > most {
+	if most := MaxProposedResearchers(draft.MaxAgentSandboxes); len(p.Agents) == 0 || len(p.Agents) > most {
 		refuse("invalid_agents", "agents: propose between 1 and %d researchers (the draft's max_agents), got %d", most, len(p.Agents))
 	}
 	least, limit := max(1, int(s.cfg.MinBaseline.Minutes())), int(s.cfg.BaselineLimit.Minutes())
@@ -367,7 +367,7 @@ func (s *Service) proposed(ctx context.Context, pe *domain.PlatformExperiment, p
 		at := now.Add(s.planning.AutoAccept)
 		proposed.AcceptsAt = &at
 	}
-	if !s.launch.Hosting || s.launch.DefaultModel == "" {
+	if !s.launch.AgentSandbox || s.launch.DefaultModel == "" {
 		return proposed, nil
 	}
 	var by domain.Actor
@@ -378,7 +378,7 @@ func (s *Service) proposed(ctx context.Context, pe *domain.PlatformExperiment, p
 	if err != nil {
 		return proposed, err
 	}
-	agents, signups, err := hostedAgents(catalog, nil, by, now)
+	agents, signups, err := sandboxedAgents(catalog, nil, by, now)
 	if err != nil {
 		return proposed, err
 	}
@@ -452,7 +452,7 @@ func invalidTransition(format string, args ...any) error {
 }
 
 // accept makes the draft id the open platform experiment its proposal describes, at the cost
-// req states, with a hosted coordinator, its researchers and the agent that measures its
+// req states, with a sandboxed coordinator, its researchers and the agent that measures its
 // baseline, in one write. by owns its agents; acceptedBy is the person who accepted, nil when the
 // platform accepts it as proposed.
 func (s *Service) accept(ctx context.Context, id string, req AcceptRequest, by domain.Actor, acceptedBy *domain.Actor) (*domain.PlatformExperiment, error) {
@@ -489,7 +489,7 @@ func (s *Service) accept(ctx context.Context, id string, req AcceptRequest, by d
 	if s.launch.DefaultModel == "" || s.launch.CoordinatorModel == "" {
 		return nil, s.refusal("accept", errors.New("the handler has no agent launch settings"))
 	}
-	if err := requireHosting(s.launch.Hosting); err != nil {
+	if err := requireAgentSandbox(s.launch.AgentSandbox); err != nil {
 		return nil, s.refusal("accept", err)
 	}
 
@@ -498,14 +498,14 @@ func (s *Service) accept(ctx context.Context, id string, req AcceptRequest, by d
 	pe.MaxConcurrentAccelerators = experiment.MaxConcurrentAccelerators
 	pe.BudgetAcceleratorHours, pe.MaxAgents, pe.Researchers, pe.DurationHours = experiment.BudgetAcceleratorHours, experiment.MaxAgents, experiment.Researchers, experiment.DurationHours
 	pe.StartsAt, pe.BaselineDueAt = now, now.Add(time.Duration(req.BaselineMinutes)*time.Minute)
-	pe.CoordinatorHosted, pe.Coordinator = true, &domain.HostedCoordinator{}
+	pe.CoordinatorInAgentSandbox, pe.Coordinator = true, &domain.AgentSandboxCoordinator{}
 	pe.AcceptedAt, pe.AcceptedBy, pe.AcceptedAnswers = &now, acceptedBy, answers
 
 	catalog, err := s.store.AgentTypeCatalog(ctx, id)
 	if err != nil {
 		return nil, s.refusal("accept", err)
 	}
-	agents, signups, err := hostedAgents(catalog, req.Agents, by, now)
+	agents, signups, err := sandboxedAgents(catalog, req.Agents, by, now)
 	if err != nil {
 		return nil, s.refusal("accept", err)
 	}
@@ -522,8 +522,8 @@ func (s *Service) accept(ctx context.Context, id string, req AcceptRequest, by d
 		return nil, invalidTransition("platform experiment %s is no longer a draft", id)
 	case errors.Is(err, db.ErrNothingProposed):
 		return nil, invalidTransition("draft %s has no proposal to accept", id)
-	case errors.Is(err, db.ErrMaxHostedReached):
-		return nil, refusedProposal("invalid_agents", "%s", maxHostedReached(pe.MaxHosted))
+	case errors.Is(err, db.ErrMaxAgentSandboxesReached):
+		return nil, refusedProposal("invalid_agents", "%s", maxAgentSandboxesReached(pe.MaxAgentSandboxes))
 	case err != nil:
 		return nil, s.refusal("accept", err)
 	}

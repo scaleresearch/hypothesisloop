@@ -7,7 +7,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// RunHealth returns how each agent and hosted coordinator of every open or running platform
+// RunHealth returns how each agent and sandboxed coordinator of every open or running platform
 // experiment is getting on, one statement so every one is described at the same moment. An agent
 // is timed from when it could first submit: a researcher from the run's start or, joining later,
 // its own signup; any other agent from its signup. A job ended at its ended_at. Restarts are the
@@ -31,8 +31,8 @@ GROUP BY s.platform_experiment_id, s.agent_id, s.role, st.start, i.restarts
 UNION ALL
 SELECT p.id, '', $1::text, NULL, NULL, 0, COALESCE(ci.restarts, 0), 0
 FROM platform_experiments p
-LEFT JOIN hosted_instances ci ON ci.platform_experiment_id = p.id AND ci.agent_id = ''
-WHERE p.status IN ('open', 'running') AND p.coordinator_hosted`, domain.CoordinatorHealthRole)
+LEFT JOIN agentsandbox_instances ci ON ci.platform_experiment_id = p.id AND ci.agent_id = ''
+WHERE p.status IN ('open', 'running') AND p.coordinator_in_agentsandbox`, domain.CoordinatorHealthRole)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.RunHealth: %w", err)
 	}

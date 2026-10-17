@@ -3,7 +3,7 @@
 POST /platform-experiments/drafts makes a draft with a planner the platform runs. The planner
 proposes the experiment's definition and runs nothing. A person asks for a change in a sentence,
 the planner proposes again, and the person accepts at a cost they state: the draft becomes an open
-platform experiment with a hosted coordinator, its researchers and one agent of role baseline. No
+platform experiment with a sandboxed coordinator, its researchers and one agent of role baseline. No
 researcher's machine is asked for and nothing starts until an agent of role baseline has measured
 the baseline and it is declared; then the platform starts the run. Here a second baseline agent,
 run by the test, measures it and the test declares its job.
@@ -13,8 +13,8 @@ here with its own token, which the launcher's desired state carries, and each re
 the one a launcher makes. The draft keeps its code in the suite's repository, which is only named
 here: nothing is pushed to it.
 
-Exclusive, as test_hosted_agents.py is: it asks as the one launcher the local control plane
-gives hosted machines to.
+Exclusive, as test_agentsandbox.py is: it asks as the one launcher the local control plane
+gives agent sandboxes to.
 """
 from __future__ import annotations
 
@@ -78,7 +78,7 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
 
         # Its one agent is the planner, and the launcher is asked for its machine.
         roster = api.agents(pe_id)
-        assert [(a["name"], a["agent_type"], a["role"], a["hosted"]) for a in roster] == [("Planner", "planner", "planner", True)], roster
+        assert [(a["name"], a["agent_type"], a["role"], a["in_agentsandbox"]) for a in roster] == [("Planner", "planner", "planner", True)], roster
         planner_id = roster[0]["agent_id"]
         instance, _ = _planner_instance(api, pe_id)
         assert instance is not None and token_scope(instance["env"]["HL_TOKEN"])[2] == planner_id, instance
@@ -165,7 +165,7 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         # The accept made the researchers, beside the one agent the proposal signed up to measure
         # the baseline.
         joined = [a for a in api.agents(pe_id) if a["agent_type"] != "planner"]
-        assert all(a["hosted"] for a in joined), joined
+        assert all(a["in_agentsandbox"] for a in joined), joined
         researchers = [a for a in joined if a["role"] == "competitor"]
         assert sorted(a["agent_type"] for a in researchers) == ["data-search", "generalist"], researchers
         measurers = [a for a in joined if a["role"] == "baseline"]

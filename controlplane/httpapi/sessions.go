@@ -34,7 +34,7 @@ type sessionsAPI struct {
 	logger   *zap.Logger
 }
 
-// registerSessions registers where a hosted agent and a hosted coordinator keep their model
+// registerSessions registers where a sandboxed agent and a sandboxed coordinator keep their model
 // session, so that it outlives the machine they run on.
 func registerSessions(doc *Doc, sessions *platformexperiments.Sessions, logger *zap.Logger) {
 	a := sessionsAPI{sessions: sessions, access: doc.Access, logger: logger}
@@ -51,12 +51,12 @@ func registerSessions(doc *Doc, sessions *platformexperiments.Sessions, logger *
 	// the writes its token keeps after the close, until the token ends with the wind-down.
 	register(doc, auth.AudienceCoordinator, afterClose(huma.Operation{
 		OperationID: "put-coordinator-session", Method: "PUT", Path: "/platform-experiments/{id}/coordinator/session",
-		Summary: "Store the hosted coordinator's model session", Tags: []string{"platform-experiments"},
+		Summary: "Store the sandboxed coordinator's model session", Tags: []string{"platform-experiments"},
 		MaxBodyBytes: domain.MaxAgentSessionBytes, Description: sessionDescription,
 	}), a.putCoordinator)
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "get-coordinator-session", Method: "GET", Path: "/platform-experiments/{id}/coordinator/session",
-		Summary: "Read the hosted coordinator's stored model session", Tags: []string{"platform-experiments"}, Description: sessionDescription,
+		Summary: "Read the sandboxed coordinator's stored model session", Tags: []string{"platform-experiments"}, Description: sessionDescription,
 	}, a.getCoordinator)
 }
 

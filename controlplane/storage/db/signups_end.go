@@ -30,7 +30,7 @@ func (s *Store) RemoveAgent(ctx context.Context, platformExpID, agentID string, 
 		}
 		var status string
 		var platformRuns bool
-		if err := tx.QueryRow(ctx, `SELECT status, coordinator_hosted FROM platform_experiments WHERE id=$1 FOR UPDATE`, platformExpID).Scan(&status, &platformRuns); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT status, coordinator_in_agentsandbox FROM platform_experiments WHERE id=$1 FOR UPDATE`, platformExpID).Scan(&status, &platformRuns); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrSignupClosed
 			}
@@ -67,7 +67,7 @@ WHERE s.platform_experiment_id=$1 AND s.agent_id=$2 FOR UPDATE OF s`, platformEx
 		if err != nil {
 			return fmt.Errorf("platform_experiments_store.RemoveAgent: %w", err)
 		}
-		if _, err := tx.Exec(ctx, `DELETE FROM hosted_instances WHERE platform_experiment_id=$1 AND agent_id=$2`, platformExpID, agentID); err != nil {
+		if _, err := tx.Exec(ctx, `DELETE FROM agentsandbox_instances WHERE platform_experiment_id=$1 AND agent_id=$2`, platformExpID, agentID); err != nil {
 			return fmt.Errorf("platform_experiments_store.RemoveAgent: %w", err)
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM experiment_signups WHERE platform_experiment_id=$1 AND agent_id=$2`, platformExpID, agentID); err != nil {

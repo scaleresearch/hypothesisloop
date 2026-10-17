@@ -1,4 +1,4 @@
-package hosting
+package agentsandbox
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/contract/hostingapi"
+	sandboxapi "github.com/scaleresearch/hypothesisloop/contract/agentsandbox"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/provider"
 )
 
@@ -218,7 +218,7 @@ func TestThePlatformsImageNeverOutweighsTheAgentsAskedFor(t *testing.T) {
 	h := newPoolHarness(t, 1)
 	other := agent("a")
 	other.Image = image2
-	h.cp.answer(hostingapi.Desired{Instances: []hostingapi.Instance{other}, Image: image1})
+	h.cp.answer(sandboxapi.Desired{Instances: []sandboxapi.Instance{other}, Image: image1})
 	h.mustPass()
 	h.names(full("a"), h.launcher.poolName(image2))
 }
@@ -456,7 +456,7 @@ func TestThePoolIsReportedForThePlatformToHoldAndADestroyedMachineIsDroppedFromI
 	h.mustPass()
 	ids := h.rented.IDs(pool)
 	short := pool[len("hl-agent-main-"):]
-	want := []hostingapi.PoolMachine{{Name: short, Machine: ids[0]}, {Name: short, Machine: ids[1]}}
+	want := []sandboxapi.PoolMachine{{Name: short, Machine: ids[0]}, {Name: short, Machine: ids[1]}}
 	if got := h.cp.lastQuestion().Pool; !reflect.DeepEqual(got, want) {
 		t.Fatalf("pool reported = %+v, want %+v", got, want)
 	}

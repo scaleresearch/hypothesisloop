@@ -4,7 +4,7 @@
  */
 export const keys = {
   me: () => ['me'],
-  hosting: () => ['hosting'],
+  agentSandbox: () => ['agentsandbox'],
 
   apiKeys: (orgID: string) => ['api-keys', orgID],
   orgMembers: (orgID: string) => ['org-members', orgID],

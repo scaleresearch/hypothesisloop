@@ -63,9 +63,9 @@ func (directory) PlannerAnsweredAt(context.Context, string, string) (*time.Time,
 }
 func (directory) ClusterOrg(context.Context, string) (string, bool, error) { return "org-1", true, nil }
 
-type hosted map[string]bool
+type sandboxed map[string]bool
 
-func (h hosted) Hosted(_ context.Context, pe, agent string) (bool, error) {
+func (h sandboxed) InAgentSandbox(_ context.Context, pe, agent string) (bool, error) {
 	return h[pe+"/"+agent], nil
 }
 
@@ -144,7 +144,7 @@ func newAPI(t *testing.T, upstream string, usage Usage) *httptest.Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxy, err := New(hosted{"pe-1/agent-a": true, "pe-1/": true, "pe-1/agent-cut": true, "pe-1/agent-ending": true, "pe-2/agent-b": true},
+	proxy, err := New(sandboxed{"pe-1/agent-a": true, "pe-1/": true, "pe-1/agent-cut": true, "pe-1/agent-ending": true, "pe-2/agent-b": true},
 		usage, upstream, credential, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
@@ -228,13 +228,13 @@ func TestACallWithoutATokenIsRefusedBeforeTheProvider(t *testing.T) {
 
 // Only the agents and coordinators the platform runs make model calls through it, while their
 // token lives: an agent's last turn in its wind-down still runs, and nothing after it does.
-func TestOnlyAHostedAgentOrCoordinatorWhoseTokenLivesIsServed(t *testing.T) {
+func TestOnlyASandboxedAgentOrCoordinatorWhoseTokenLivesIsServed(t *testing.T) {
 	for _, tc := range []struct {
 		name, scope string
 		want        int
 	}{
-		{"a hosted agent", scope.Agent("pe-1", "agent-a"), http.StatusOK},
-		{"a hosted coordinator", scope.Coordinator("pe-1"), http.StatusOK},
+		{"a sandboxed agent", scope.Agent("pe-1", "agent-a"), http.StatusOK},
+		{"a sandboxed coordinator", scope.Coordinator("pe-1"), http.StatusOK},
 		{"an agent in its wind-down, for its last turn", scope.Agent("pe-1", "agent-ending"), http.StatusOK},
 		{"an agent the platform does not run", scope.Agent("pe-1", "agent-self"), http.StatusForbidden},
 		{"an agent whose wind-down is over", scope.Agent("pe-1", "agent-cut"), http.StatusUnauthorized},

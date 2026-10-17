@@ -97,7 +97,7 @@ func TestAnExperimentThatClosesWithNoSummaryIsGivenTheRecordOfItsClose(t *testin
 	asked := now.Add(-10 * time.Minute)
 	pe := &domain.PlatformExperiment{ID: "pe-late", ProjectID: "prj-a", Status: domain.PlatformExpOpen, CreatedAt: now.Add(-time.Hour),
 		DurationHours: 1, BudgetAcceleratorHours: 18, BaselineDueAt: now.Add(-time.Minute), Stages: []domain.Stage{{LengthPct: 100}},
-		CoordinatorHosted: true, Coordinator: &domain.HostedCoordinator{Instance: domain.AgentInstance{State: domain.InstanceWaiting}}}
+		CoordinatorInAgentSandbox: true, Coordinator: &domain.AgentSandboxCoordinator{Instance: domain.AgentInstance{State: domain.InstanceWaiting}}}
 	store := &statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{pe}, researchers: []string{"ag-researcher"},
 		baselines: []domain.AgentSignup{{AgentID: "ag-baseline", Name: "baseline", Role: domain.SignupRoleBaseline,
 			Instance: &domain.AgentInstance{AskedAt: &asked, Name: "m-1", Reported: domain.InstanceRunning}, Activity: &domain.AgentActivity{Text: "writing harness/run_trial.py", At: asked}}}}}

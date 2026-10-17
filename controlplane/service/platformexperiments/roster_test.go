@@ -109,7 +109,7 @@ func (f *rosterStore) Create(context.Context, string, string, string, string, ma
 
 func (f *rosterStore) CreatesOn(context.Context, string, string) (string, error) { return "", nil }
 
-const rosterMaxHosted = 6
+const rosterMaxAgentSandboxes = 6
 
 func (f *rosterStore) ListSignups(context.Context, string) ([]string, error) {
 	ids := make([]string, 0, len(f.signups))
@@ -122,12 +122,12 @@ func (f *rosterStore) ListSignups(context.Context, string) ([]string, error) {
 // rented counts the machines as the store does: an agent that finished holds none, and those
 // that measure the baseline are counted apart from the coordinator and the other agents.
 func (f *rosterStore) rented(more ...domain.AgentSignup) (measuring, others int) {
-	if f.pe.CoordinatorHosted {
+	if f.pe.CoordinatorInAgentSandbox {
 		others++
 	}
 	for _, s := range append(append([]domain.AgentSignup{}, f.signups...), more...) {
 		switch {
-		case !s.Hosted || s.FinishedAt != nil || s.Instance != nil && s.Instance.Stopped:
+		case !s.InAgentSandbox || s.FinishedAt != nil || s.Instance != nil && s.Instance.Stopped:
 		case s.Role == domain.SignupRoleBaseline:
 			measuring++
 		default:
@@ -140,13 +140,13 @@ func (f *rosterStore) rented(more ...domain.AgentSignup) (measuring, others int)
 // full says more would be a machine too many, or would take the one kept for the baseline.
 func (f *rosterStore) full(more domain.AgentSignup) bool {
 	measuring, others := f.rented(more)
-	return more.Hosted && (others > f.pe.MaxHosted-1 || measuring+others > f.pe.MaxHosted)
+	return more.InAgentSandbox && (others > f.pe.MaxAgentSandboxes-1 || measuring+others > f.pe.MaxAgentSandboxes)
 }
 
 func newRosterStore(status domain.PlatformExperimentStatus, maxAgents int) *rosterStore {
 	return &rosterStore{
 		pe: &domain.PlatformExperiment{
-			ID: "pe-1", ProjectID: "project-a", Status: status, MaxAgents: maxAgents, MaxHosted: rosterMaxHosted, Repository: "acme/model",
+			ID: "pe-1", ProjectID: "project-a", Status: status, MaxAgents: maxAgents, MaxAgentSandboxes: rosterMaxAgentSandboxes, Repository: "acme/model",
 		},
 		agents: map[string]*domain.Agent{},
 	}
@@ -189,7 +189,7 @@ func (f *rosterStore) Signup(_ context.Context, _ string, signup domain.AgentSig
 		return false, db.ErrMaxAgentsReached
 	}
 	if f.full(signup) {
-		return false, db.ErrMaxHostedReached
+		return false, db.ErrMaxAgentSandboxesReached
 	}
 	signup.PlatformExperimentID, signup.Name = f.pe.ID, f.agents[signup.AgentID].Name
 	f.signups = append(f.signups, signup)
@@ -204,7 +204,7 @@ func (f *rosterStore) SpawnAgent(_ context.Context, _ string, agent *domain.Agen
 		return db.ErrMaxAgentsReached
 	}
 	if f.full(signup) {
-		return db.ErrMaxHostedReached
+		return db.ErrMaxAgentSandboxesReached
 	}
 	taken := func(name string) bool {
 		for _, s := range f.signups {

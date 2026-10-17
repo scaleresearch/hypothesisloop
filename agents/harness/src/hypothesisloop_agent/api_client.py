@@ -71,7 +71,7 @@ class PlatformClient:
                 raise
             raise SystemExit(
                 f"agent: HL_TOKEN does not coordinate platform experiment {pe_id} (HTTP {e.status}). A "
-                "coordinator the platform runs is asked for with coordinator_hosted when the platform "
+                "coordinator the platform runs is asked for with coordinator_in_agentsandbox when the platform "
                 "experiment is created.") from None
 
     async def get_bytes(self, path: str) -> bytes | None:

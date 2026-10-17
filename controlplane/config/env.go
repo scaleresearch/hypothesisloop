@@ -21,7 +21,7 @@ var (
 	MetricsDBURL                  = Key{"METRICS_DB_URL", "the address of the metrics store"}
 	GraphDBURL                    = Key{"GRAPH_DB_URL", "the bolt address of the hypothesis graph"}
 	AuthSigningSecret             = Key{"AUTH_SIGNING_SECRET", fmt.Sprintf("the secret every hls_ token is derived from, at least %d characters", MinSigningSecretLength)}
-	ModelAnthropicOAuthToken      = Key{"MODEL_ANTHROPIC_OAUTH_TOKEN", "the Claude subscription token every model call of a hosted agent is made with"}
+	ModelAnthropicOAuthToken      = Key{"MODEL_ANTHROPIC_OAUTH_TOKEN", "the Claude subscription token every model call of a sandboxed agent is made with"}
 	DataStoreMinIOSecretAccessKey = Key{"DATA_STORE_MINIO_SECRET_ACCESS_KEY", "the secret key of data_store.access_key_id"}
 	GitHostGitHubAppPrivateKey    = Key{"GIT_HOST_GITHUB_APP_PRIVATE_KEY", "the PEM GitHub issued for the App of git_host.github"}
 	GitHostPlainPassword          = Key{"GIT_HOST_PLAIN_PASSWORD", "the password of git_host.plain.username"}

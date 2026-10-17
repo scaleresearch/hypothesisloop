@@ -65,7 +65,7 @@ DERIVED_TOKEN_PREFIX = "hls_"
 SCOPE_AGENT = "agent"
 SCOPE_COORDINATOR = "coordinator"
 
-# The lines the launcher reads from a hosted harness's output, and the environment it starts the harness with (hostingapi).
+# The lines the launcher reads from a sandboxed harness's output, and the environment it starts the harness with (agentsandbox).
 PROGRESS_PREFIX = "hl-progress"
 ACTIVITY_PREFIX = "hl-activity"
 STATE_PREFIX = "hl-state"

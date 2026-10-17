@@ -14,9 +14,9 @@ import (
 // sentence, and a reason it has none for is an error.
 func summarize(why *domain.StatusReason, pe *domain.PlatformExperiment, signups []domain.AgentSignup, now time.Time) error {
 	in := func(at time.Time) string { return readableDuration(max(0, at.Sub(now))) }
-	// next is what whoever coordinates does: the hosted coordinator, or else a person of the org.
+	// next is what whoever coordinates does: the sandboxed coordinator, or else a person of the org.
 	next := func(move string) string {
-		if pe.CoordinatorHosted {
+		if pe.CoordinatorInAgentSandbox {
 			return "The coordinator will " + move + "."
 		}
 		return strings.ToUpper(move[:1]) + move[1:] + "."

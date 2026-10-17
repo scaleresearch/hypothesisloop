@@ -20,11 +20,11 @@ func createTestDraft(t *testing.T, pool *Pool) (peID, plannerID string) {
 		ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "a goal", Goal: "a goal, in a sentence", Actor: &by,
 		MaxAgents: 1, PlanningEndsAt: now.Add(30 * time.Minute), Status: domain.PlatformExpDraft,
 		Metrics: []domain.MetricDefinition{}, ReportIntervalSeconds: 30, Stages: []domain.Stage{{LengthPct: 100}},
-		CreatedAt: now, UpdatedAt: now, MaxHosted: 5, Repository: "acme/a-goal", RepositoryURL: "https://github.com/acme/a-goal.git",
+		CreatedAt: now, UpdatedAt: now, MaxAgentSandboxes: 5, Repository: "acme/a-goal", RepositoryURL: "https://github.com/acme/a-goal.git",
 	}
 	planner := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Name: "Planner", CreatedAt: now}
 	signup := domain.AgentSignup{Actor: testActor, AgentID: planner.ID, Role: domain.SignupRolePlanner, QuotaTier: domain.QuotaTierGuaranteed,
-		Hosted: true, AgentType: domain.PlannerAgentType, Model: "model-1"}
+		InAgentSandbox: true, AgentType: domain.PlannerAgentType, Model: "model-1"}
 	if err := NewStore(pool, 3).CreateDraft(context.Background(), pe, planner, signup); err != nil {
 		t.Fatalf("create draft: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestADraftIsStoredWithItsGoalItsCreatorAndItsPlanner(t *testing.T) {
 		t.Fatalf("got = %+v (created by %+v), %v", got, got.Actor, err)
 	}
 	signup, err := pes.GetAgentSignup(ctx, pe, planner)
-	if err != nil || signup == nil || signup.Name != "Planner" || signup.AgentType != domain.PlannerAgentType || signup.Role != domain.SignupRolePlanner || !signup.Hosted {
+	if err != nil || signup == nil || signup.Name != "Planner" || signup.AgentType != domain.PlannerAgentType || signup.Role != domain.SignupRolePlanner || !signup.InAgentSandbox {
 		t.Fatalf("planner signed up as %+v, %v", signup, err)
 	}
 	// A planner runs no job, so it holds no quota, and no finding is filed for a job yet.
@@ -96,7 +96,7 @@ func TestADraftIsStoredWithItsGoalItsCreatorAndItsPlanner(t *testing.T) {
 	now := time.Now().UTC()
 	bad := &domain.PlatformExperiment{Actor: testActor, DefaultQuotaTier: domain.QuotaTierGuaranteed, ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Status: domain.PlatformExpDraft, PlanningEndsAt: now, Stages: []domain.Stage{{LengthPct: 100}}}
 	agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:12]}
-	if err := pes.CreateDraft(ctx, bad, agent, domain.AgentSignup{Actor: testActor, AgentID: agent.ID, AgentType: "generalist", Hosted: true}); err == nil {
+	if err := pes.CreateDraft(ctx, bad, agent, domain.AgentSignup{Actor: testActor, AgentID: agent.ID, AgentType: "generalist", InAgentSandbox: true}); err == nil {
 		t.Fatal("a draft whose agent is no planner was created")
 	}
 	if got, _ := pes.GetPlatformExperiment(ctx, bad.ID); got != nil {
@@ -115,10 +115,10 @@ func TestNoMachineIsWantedBeforeTheRepositoryIsRecorded(t *testing.T) {
 		now := time.Now().UTC()
 		pe := &domain.PlatformExperiment{Actor: testActor, DefaultQuotaTier: domain.QuotaTierGuaranteed, ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "a goal", Goal: "a goal",
 			MaxAgents: 1, PlanningEndsAt: now.Add(30 * time.Minute), Status: domain.PlatformExpDraft,
-			Metrics: []domain.MetricDefinition{}, ReportIntervalSeconds: 30, Stages: []domain.Stage{{LengthPct: 100}}, CreatedAt: now, UpdatedAt: now, MaxHosted: 5, RepositoryAccount: "acme"}
+			Metrics: []domain.MetricDefinition{}, ReportIntervalSeconds: 30, Stages: []domain.Stage{{LengthPct: 100}}, CreatedAt: now, UpdatedAt: now, MaxAgentSandboxes: 5, RepositoryAccount: "acme"}
 		planner := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Name: "Planner", CreatedAt: now}
 		if err := pes.CreateDraft(ctx, pe, planner, domain.AgentSignup{Actor: testActor, AgentID: planner.ID, Role: domain.SignupRolePlanner, QuotaTier: domain.QuotaTierGuaranteed,
-			Hosted: true, AgentType: domain.PlannerAgentType, Model: "model-1"}); err != nil {
+			InAgentSandbox: true, AgentType: domain.PlannerAgentType, Model: "model-1"}); err != nil {
 			t.Fatal(err)
 		}
 		return pe, planner.ID
@@ -160,8 +160,8 @@ func TestNoMachineIsWantedBeforeTheRepositoryIsRecorded(t *testing.T) {
 	now := time.Now().UTC()
 	whole := &domain.PlatformExperiment{Actor: testActor, DefaultQuotaTier: domain.QuotaTierGuaranteed, ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "whole", BudgetAcceleratorHours: 10,
 		MaxAgents: 2, Status: domain.PlatformExpOpen, Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}}, ReportIntervalSeconds: 30,
-		Stages: []domain.Stage{{LengthPct: 100}}, CreatedAt: now, UpdatedAt: now, BaselineDueAt: now.Add(time.Hour), MaxHosted: 5, RepositoryAccount: "acme",
-		CoordinatorHosted: true, Coordinator: &domain.HostedCoordinator{Model: "model-1"}}
+		Stages: []domain.Stage{{LengthPct: 100}}, CreatedAt: now, UpdatedAt: now, BaselineDueAt: now.Add(time.Hour), MaxAgentSandboxes: 5, RepositoryAccount: "acme",
+		CoordinatorInAgentSandbox: true, Coordinator: &domain.AgentSandboxCoordinator{Model: "model-1"}}
 	if err := pes.CreatePlatformExperiment(ctx, whole, nil, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -368,7 +368,7 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 		pe.StartsAt, pe.DurationHours = time.Now().UTC(), 4
 		pe.BaselineDueAt = pe.StartsAt.Add(time.Hour)
 		pe.DefaultQuotaTier = domain.QuotaTierGuaranteed
-		pe.CoordinatorHosted, pe.Coordinator = true, &domain.HostedCoordinator{Model: "model-1"}
+		pe.CoordinatorInAgentSandbox, pe.Coordinator = true, &domain.AgentSandboxCoordinator{Model: "model-1"}
 		acceptedAt := time.Now().UTC()
 		pe.AcceptedAt, pe.AcceptedBy, pe.AcceptedAnswers = &acceptedAt, &domain.Actor{Kind: domain.ActorUser, ID: "u-accepting"}, []string{"32 only."}
 		var agents []*domain.Agent
@@ -381,7 +381,7 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 			}
 			agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], CreatedAt: time.Now().UTC()}
 			agents = append(agents, agent)
-			signups = append(signups, domain.AgentSignup{Actor: testActor, AgentID: agent.ID, Role: role, Hosted: true, Model: "model-1"})
+			signups = append(signups, domain.AgentSignup{Actor: testActor, AgentID: agent.ID, Role: role, InAgentSandbox: true, Model: "model-1"})
 		}
 		return pe, agents, signups
 	}
@@ -448,8 +448,8 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	// More machines than the draft may have: nothing of the accept is kept. The draft's limit is
 	// 5, its coordinator is one, its baseline agent another, and the planner is none of them.
 	pe, agents, signups = accepted(4)
-	if err := pes.AcceptDraft(ctx, pe, agents, signups); err != ErrMaxHostedReached {
-		t.Fatalf("four researchers, a baseline agent and a coordinator in five machines: got = %v, want ErrMaxHostedReached", err)
+	if err := pes.AcceptDraft(ctx, pe, agents, signups); err != ErrMaxAgentSandboxesReached {
+		t.Fatalf("four researchers, a baseline agent and a coordinator in five machines: got = %v, want ErrMaxAgentSandboxesReached", err)
 	}
 	if got, _ := pes.GetPlatformExperiment(ctx, id); got.Status != domain.PlatformExpDraft || got.Name == "accepted" {
 		t.Fatalf("a refused accept left %+v", got)
@@ -464,7 +464,7 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	}
 	got, err := pes.GetPlatformExperiment(ctx, id)
 	if err != nil || got.Status != domain.PlatformExpOpen || got.Name != "accepted" || got.Description != "the brief" || got.BudgetAcceleratorHours != 6 ||
-		got.MaxAgents != 3 || len(got.Stages) != 2 || len(got.Metrics) != 1 || !got.CoordinatorHosted || got.Coordinator == nil ||
+		got.MaxAgents != 3 || len(got.Stages) != 2 || len(got.Metrics) != 1 || !got.CoordinatorInAgentSandbox || got.Coordinator == nil ||
 		got.Goal != "a goal, in a sentence, by validation loss" {
 		t.Fatalf("accepted: got = %+v (coordinator %+v), %v", got, got.Coordinator, err)
 	}
@@ -502,11 +502,11 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	// Every machine the draft may have is taken, so a second baseline agent has none while the
 	// first holds its own, and takes its place once the first's machine stopped for good.
 	second := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], CreatedAt: time.Now().UTC()}
-	another := domain.AgentSignup{Actor: testActor, AgentID: second.ID, Role: domain.SignupRoleBaseline, Hosted: true, AgentType: "baseline", Model: "model-1"}
-	if err := pes.SpawnAgent(ctx, id, second, another); err != ErrMaxHostedReached {
-		t.Fatalf("a second baseline agent beside the first: got = %v, want ErrMaxHostedReached", err)
+	another := domain.AgentSignup{Actor: testActor, AgentID: second.ID, Role: domain.SignupRoleBaseline, InAgentSandbox: true, AgentType: "baseline", Model: "model-1"}
+	if err := pes.SpawnAgent(ctx, id, second, another); err != ErrMaxAgentSandboxesReached {
+		t.Fatalf("a second baseline agent beside the first: got = %v, want ErrMaxAgentSandboxesReached", err)
 	}
-	if _, err := pool.pool.Exec(ctx, `INSERT INTO hosted_instances (platform_experiment_id, agent_id, stopped) VALUES ($1, $2, true) ON CONFLICT (platform_experiment_id, agent_id) DO UPDATE SET stopped = EXCLUDED.stopped`, id, baseline.ID); err != nil {
+	if _, err := pool.pool.Exec(ctx, `INSERT INTO agentsandbox_instances (platform_experiment_id, agent_id, stopped) VALUES ($1, $2, true) ON CONFLICT (platform_experiment_id, agent_id) DO UPDATE SET stopped = EXCLUDED.stopped`, id, baseline.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := pes.SpawnAgent(ctx, id, second, another); err != nil || second.Name != "Baseline 2" {
@@ -515,7 +515,7 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	if err := pes.RemoveAgent(ctx, id, second.ID, func(context.Context, string) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.pool.Exec(ctx, `INSERT INTO hosted_instances (platform_experiment_id, agent_id, stopped) VALUES ($1, $2, false) ON CONFLICT (platform_experiment_id, agent_id) DO UPDATE SET stopped = EXCLUDED.stopped`, id, baseline.ID); err != nil {
+	if _, err := pool.pool.Exec(ctx, `INSERT INTO agentsandbox_instances (platform_experiment_id, agent_id, stopped) VALUES ($1, $2, false) ON CONFLICT (platform_experiment_id, agent_id) DO UPDATE SET stopped = EXCLUDED.stopped`, id, baseline.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -827,7 +827,7 @@ func TestAProposalSignsUpTheBaselineAgentWhoseMachineRunsUntilTheDraftIsHeld(t *
 	by := domain.Actor{Kind: domain.ActorUser, ID: "u-planning"}
 	baselineAgent := func() (*domain.Agent, domain.AgentSignup) {
 		agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], CreatedAt: time.Now().UTC()}
-		return agent, domain.AgentSignup{AgentID: agent.ID, Role: domain.SignupRoleBaseline, Hosted: true, AgentType: "baseline", Model: "model-1", Actor: &by}
+		return agent, domain.AgentSignup{AgentID: agent.ID, Role: domain.SignupRoleBaseline, InAgentSandbox: true, AgentType: "baseline", Model: "model-1", Actor: &by}
 	}
 	wait := time.Now().UTC().Add(7 * 24 * time.Hour)
 	soon := time.Now().UTC().Add(30 * time.Second)
@@ -905,11 +905,11 @@ func TestAProposalSignsUpTheBaselineAgentWhoseMachineRunsUntilTheDraftIsHeld(t *
 	pe.StartsAt, pe.DurationHours = time.Now().UTC(), 4
 	pe.BaselineDueAt = pe.StartsAt.Add(time.Hour)
 	pe.DefaultQuotaTier = domain.QuotaTierGuaranteed
-	pe.CoordinatorHosted, pe.Coordinator = true, &domain.HostedCoordinator{Model: "model-1"}
+	pe.CoordinatorInAgentSandbox, pe.Coordinator = true, &domain.AgentSandboxCoordinator{Model: "model-1"}
 	acceptedAt := time.Now().UTC()
 	pe.AcceptedAt = &acceptedAt
 	researcher := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], CreatedAt: time.Now().UTC()}
-	if err := pes.AcceptDraft(ctx, pe, []*domain.Agent{researcher}, []domain.AgentSignup{{Actor: testActor, AgentID: researcher.ID, Role: domain.SignupRoleCompetitor, Hosted: true, AgentType: "generalist", Model: "model-1"}}); err != nil {
+	if err := pes.AcceptDraft(ctx, pe, []*domain.Agent{researcher}, []domain.AgentSignup{{Actor: testActor, AgentID: researcher.ID, Role: domain.SignupRoleCompetitor, InAgentSandbox: true, AgentType: "generalist", Model: "model-1"}}); err != nil {
 		t.Fatal(err)
 	}
 	if quota, err := pes.GetAgentQuota(ctx, agent.ID, id); err != nil || quota == nil || quota.GuaranteedAcceleratorHours != 3 {

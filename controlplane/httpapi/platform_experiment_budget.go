@@ -24,7 +24,7 @@ func registerPlatformExperimentBudget(doc *Doc, experiments *platformexperiments
 	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "get-platform-experiment-health", Method: "GET", Path: "/platform-experiments/{id}/health",
 		Summary: "Where each agent of a run last stood", Tags: []string{"platform-experiments"},
-		Description: "For each agent and the hosted coordinator, the latest values of the run's health series, read from the metrics store, which records them while the run is open or running: " +
+		Description: "For each agent and the sandboxed coordinator, the latest values of the run's health series, read from the metrics store, which records them while the run is open or running: " +
 			"seconds to its first job and its first completed job, jobs in flight, restarts of its machine over the whole run and messages the coordinator sent it. " +
 			"agents is empty for a run that never opened.",
 	}, a.getPlatformExperimentHealth)

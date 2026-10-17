@@ -43,7 +43,7 @@ function envFile(agent: JoinedAgent): string {
 function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: JoinedAgent[]) => Promise<unknown> }) {
   const { org } = useTenant()
   const { data: catalog } = useAgentTypes(org.id)
-  const [hosted, setHosted] = useState(true)
+  const [sandboxed, setSandboxed] = useState(true)
   const [agentType, setAgentType] = useState(DEFAULT_AGENT_TYPE)
   const [model, setModel] = useState('')
   const [busy, setBusy] = useState(false)
@@ -55,7 +55,7 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
     setError('')
     try {
       await onAdded(await addPlatformExperimentAgents(pe.id, {
-        hosted, agent_type: agentType, model: model.trim() || undefined,
+        in_agentsandbox: sandboxed, agent_type: agentType, model: model.trim() || undefined,
       }))
     } catch (e) {
       setError(errorMessage(e))
@@ -90,14 +90,14 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
         <Stack gap="xs" role="group" aria-label="Run by">
           <Eyebrow>Run by</Eyebrow>
           <Inline gap="xs" nowrap>
-            <Chip type="button" active={hosted} onClick={() => setHosted(true)}>The platform</Chip>
-            <Chip type="button" active={!hosted} onClick={() => setHosted(false)}>Me</Chip>
+            <Chip type="button" active={sandboxed} onClick={() => setSandboxed(true)}>The platform</Chip>
+            <Chip type="button" active={!sandboxed} onClick={() => setSandboxed(false)}>Me</Chip>
           </Inline>
         </Stack>
         <Button size="sm" variant="primary" type="submit" loading={busy}>Add agent</Button>
       </Inline>
       <Text variant="hint">
-        {hosted
+        {sandboxed
           ? 'The platform starts a machine for the agent and keeps it until the experiment closes or the agent finishes or is cut.'
           : 'The agent comes back with a token. You start the agent yourself with it, and can show the token again from the agent\'s row.'}
       </Text>
@@ -112,7 +112,7 @@ function statusOf(agent: JoinedAgent, closed: boolean): { label: string; tone: T
   if (agent.finished_at) return { label: `Finished ${relTime(agent.finished_at)}`, tone: 'neutral', detail }
   if (agent.cut_reason === 'max_agents_lowered') return { label: 'Cut, max researchers lowered', tone: 'neutral', detail }
   if (closed) return { label: 'Stopped, experiment closed', tone: 'neutral', detail }
-  if (!agent.instance) return { label: agent.hosted ? 'Not reported yet' : 'Run by its operator', tone: 'neutral', detail }
+  if (!agent.instance) return { label: agent.in_agentsandbox ? 'Not reported yet' : 'Run by its operator', tone: 'neutral', detail }
   switch (agent.instance.state) {
     case 'running': return { label: 'Running', tone: 'success', detail }
     case 'starting': return { label: 'Starting', tone: 'warning', detail }
@@ -188,7 +188,7 @@ function AgentDetails({ agent, messages, catalog }: { agent: JoinedAgent; messag
     <Stack gap="sm">
       <Facts facts={[
         ['Id', agent.agent_id],
-        ['Run by', agent.hosted ? 'the platform' : 'its operator'],
+        ['Run by', agent.in_agentsandbox ? 'the platform' : 'its operator'],
         ['Type', <AgentTypeLabel key="type" agent={agent} catalog={catalog} />],
         ['Model', agent.model ?? 'default'],
         ['Joined', new Date(agent.signed_up_at).toLocaleString()],
@@ -359,7 +359,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
             onConfirm={() => remove(removing)}
             onClose={() => setRemoving(null)}
           >
-            Its token stops working{removing.hosted ? ' and its machine is taken down' : ''}.
+            Its token stops working{removing.in_agentsandbox ? ' and its machine is taken down' : ''}.
           </ConfirmDialog>
         )}
     </Section>

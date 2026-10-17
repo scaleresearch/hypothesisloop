@@ -7,14 +7,14 @@ measure its baseline: a researcher's machine is asked for from the start on.
 No launcher process and no provider is involved: each reconcile call made here is the one a
 launcher makes, and what a launcher does with the answer is pinned by
 runtime/cloud/internal/agentlaunch's own tests, one of which runs it against the control plane's
-handler. The local control plane gives hosted agents to the launcher named in its config
+handler. The local control plane gives sandboxed agents to the launcher named in its config
 (agents.launcher).
 
-A hosted agent works in its platform experiment's repository. Most tests here name the one
+A sandboxed agent works in its platform experiment's repository. Most tests here name the one
 conftest's sandbox_repository gives: on GitHub the sandbox test_experiment_repo.py pushes to,
 without which they are skipped, and on any other git host a repository made for the session.
 
-Exclusive: every test here asks as the one launcher the local control plane gives hosted agents
+Exclusive: every test here asks as the one launcher the local control plane gives sandboxed agents
 to, and a machine that launcher reported once and leaves out of a later report is an exit. Two
 tests asking at once would each end the machines the other reported.
 """
@@ -43,14 +43,14 @@ MAX_RESTARTS = 3  # domain.MaxAgentInstanceRestarts
 @pytest.fixture(scope="module")
 def with_repo(api: API, sandbox_repository: str) -> API:
     """The staff caller whose platform experiments name the sandbox repository, so agents can be
-    hosted in them. It works in the default org, which has clusters to run jobs on."""
+    sandboxed in them. It works in the default org, which has clusters to run jobs on."""
     caller = api.as_caller(api.token, api.org_id, api.project_id)
     caller.repository = sandbox_repository
     return caller
 
 
 @pytest.fixture
-def hosted_pe(with_repo: API, run_id: str):
+def sandboxed_pe(with_repo: API, run_id: str):
     created: list[str] = []
 
     def _create(name: str, budget: float, max_agents: int, **kw) -> str:
@@ -82,7 +82,7 @@ def coordinator_for(api: API, pe_id: str, observed: list[dict] | None = None) ->
     return (own[0] if own else None), set(desired["ending"])
 
 
-def _hosted_run(project: API, name: str, **more) -> requests.Response:
+def _sandboxed_run(project: API, name: str, **more) -> requests.Response:
     body = {
         "project_id": project.project_id, "name": name, "description": name, "budget_accelerator_hours": 1.0, "max_agents": 5,
         "report_interval_seconds": 10, "metrics": [{"key": "val_accuracy", "direction": "maximize"}], "duration_hours": 24,
@@ -99,32 +99,32 @@ def _at(moment: str) -> datetime:
     return datetime.fromisoformat(moment.replace("Z", "+00:00"))
 
 
-def test_agents_and_a_coordinator_are_hosted_in_the_experiments_repository(api: API, run_id: str):
+def test_agents_and_a_coordinator_are_sandboxed_in_the_experiments_repository(api: API, run_id: str):
     project = api
-    r = _hosted_run(project, f"hosted-either-stack-{run_id}", coordinator_hosted=True)
-    assert r.status_code == 201 and r.json()["coordinator_hosted"] is True, f"{r.status_code} {r.text}"
+    r = _sandboxed_run(project, f"sandboxed-either-stack-{run_id}", coordinator_in_agentsandbox=True)
+    assert r.status_code == 201 and r.json()["coordinator_in_agentsandbox"] is True, f"{r.status_code} {r.text}"
     pe_id = r.json()["id"]
     try:
         assert r.json()["repository"] == project.sandbox_repository() and r.json()["repository_url"], r.text
-        # Created with a hosted coordinator, it has the agent that measures its baseline from the
+        # Created with a sandboxed coordinator, it has the agent that measures its baseline from the
         # create on, as an accepted draft has, and says so.
         assert r.json()["signup_count"] == 1, r.json()
-        created_with = [(a["name"], a["role"], a["hosted"]) for a in project.agents(pe_id)]
+        created_with = [(a["name"], a["role"], a["in_agentsandbox"]) for a in project.agents(pe_id)]
         assert created_with == [("Baseline 1", "baseline", True)], created_with
         waits = project.get_json(f"/platform-experiments/{pe_id}")["status_reason"]
         assert (waits["reason"], waits["waits_for"]) == ("baseline_measuring", "platform"), waits
-        r = project.post(f"/platform-experiments/{pe_id}/agents", {"hosted": True})
-        assert r.status_code == 201, f"hosted: {r.status_code} {r.text}"
-        hosted = r.json()["agents"][0]
-        assert hosted["hosted"] and hosted["launcher"], hosted
-        removed = project.remove_agent(pe_id, hosted["agent_id"])
+        r = project.post(f"/platform-experiments/{pe_id}/agents", {"in_agentsandbox": True})
+        assert r.status_code == 201, f"sandboxed: {r.status_code} {r.text}"
+        sandboxed = r.json()["agents"][0]
+        assert sandboxed["in_agentsandbox"] and sandboxed["launcher"], sandboxed
+        removed = project.remove_agent(pe_id, sandboxed["agent_id"])
         assert removed.status_code == 204 and not removed.content, f"remove: {removed.status_code} {removed.text}"
-        assert [a["name"] for a in project.agents(pe_id)] == ["Baseline 1"], "the hosted agent was not removed"
+        assert [a["name"] for a in project.agents(pe_id)] == ["Baseline 1"], "the sandboxed agent was not removed"
 
         # An agent its owner runs needs nothing of the platform's to start, and joins. What it
         # runs is resolved here and shown: the default agent type and the platform's default model.
         own = project.add_agents(pe_id)[0]
-        assert not own["hosted"] and own["token"].startswith("hls_") and "instance" not in own, own
+        assert not own["in_agentsandbox"] and own["token"].startswith("hls_") and "instance" not in own, own
         assert own["agent_type"] == "generalist" and own["model"], own
         named = project.add_agents(pe_id, agent_type="data-search", model="another-model-1")[0]
         assert (named["agent_type"], named["model"]) == ("data-search", "another-model-1"), named
@@ -140,41 +140,41 @@ def test_agents_and_a_coordinator_are_hosted_in_the_experiments_repository(api: 
         again = project.post_json(f"/platform-experiments/{pe_id}/agents", {"agent_id": own["agent_id"]})["agents"][0]
         assert again["agent_id"] == own["agent_id"] and again["token"] == own["token"], again
 
-        r = _hosted_run(project, f"hosted-either-stack-{run_id}", coordinator_model="some-model")
+        r = _sandboxed_run(project, f"sandboxed-either-stack-{run_id}", coordinator_model="some-model")
         assert r.status_code == 400, f"a model with no coordinator: {r.status_code} {r.text}"
     finally:
         project.close_platform_experiment(pe_id)
 
 
-def test_agents_join_through_the_api_and_the_launcher_is_told_what_to_run(with_repo: API, hosted_pe, run_id: str):
+def test_agents_join_through_the_api_and_the_launcher_is_told_what_to_run(with_repo: API, sandboxed_pe, run_id: str):
     api = with_repo
-    pe_id = hosted_pe("hosted-agents", 1.0, 5)
+    pe_id = sandboxed_pe("sandboxed-agents", 1.0, 5)
 
-    launch = {"hosted": True, "agent_type": "data-search", "model": "claude-sonnet-5", "hyperparameters": {"batch_size": 64}}
-    hosted = api.add_agents(pe_id, name=f"hosted-{run_id}", **launch)
-    r = api.post(f"/platform-experiments/{pe_id}/agents", {"name": f"hosted-{run_id}", **launch})
+    launch = {"in_agentsandbox": True, "agent_type": "data-search", "model": "claude-sonnet-5", "hyperparameters": {"batch_size": 64}}
+    sandboxed = api.add_agents(pe_id, name=f"sandboxed-{run_id}", **launch)
+    r = api.post(f"/platform-experiments/{pe_id}/agents", {"name": f"sandboxed-{run_id}", **launch})
     assert (r.status_code, r.json()["reason"]) == (409, "agent_name_taken"), f"a second agent of one name: {r.status_code} {r.text}"
-    hosted += api.add_agents(pe_id, **launch)
+    sandboxed += api.add_agents(pe_id, **launch)
     self_run = api.add_agents(pe_id, agent_type="generalist")
-    measurer = api.add_agents(pe_id, hosted=True, role="baseline")[0]["agent_id"]
-    assert len(hosted) == 2 and len(self_run) == 1
-    hosted_ids = [a["agent_id"] for a in hosted]
+    measurer = api.add_agents(pe_id, in_agentsandbox=True, role="baseline")[0]["agent_id"]
+    assert len(sandboxed) == 2 and len(self_run) == 1
+    sandboxed_ids = [a["agent_id"] for a in sandboxed]
     own_id, own_token = self_run[0]["agent_id"], self_run[0]["token"]
-    assert all(a["hosted"] and a["launcher"] == LAUNCHER and "token" not in a for a in hosted), hosted
+    assert all(a["in_agentsandbox"] and a["launcher"] == LAUNCHER and "token" not in a for a in sandboxed), sandboxed
     # No machine is asked for a researcher before the start, and each says what the start waits
     # for: here a baseline, which nobody measures yet and a person adds an agent for.
-    assert all(a["instance"] == {"state": "waiting", "restarts": 0, "stopped": False} for a in hosted), hosted
-    assert all((a["status_reason"]["reason"], a["status_reason"]["waits_for"]) == ("baseline_required", "owner") for a in hosted), hosted
-    assert [a["name"] for a in hosted] == [f"hosted-{run_id}", "Researcher 1"]
+    assert all(a["instance"] == {"state": "waiting", "restarts": 0, "stopped": False} for a in sandboxed), sandboxed
+    assert all((a["status_reason"]["reason"], a["status_reason"]["waits_for"]) == ("baseline_required", "owner") for a in sandboxed), sandboxed
+    assert [a["name"] for a in sandboxed] == [f"sandboxed-{run_id}", "Researcher 1"]
     r = api.post(f"/platform-experiments/{pe_id}/agents", {"count": 2})
     assert r.status_code == 422, f"a request that still asks for several agents: {r.status_code} {r.text}"
-    assert not self_run[0]["hosted"] and "launcher" not in self_run[0] and own_token.startswith("hls_")
-    assert len(set(hosted_ids + [own_id])) == 3 and all(i.startswith("ag-") for i in hosted_ids + [own_id])
+    assert not self_run[0]["in_agentsandbox"] and "launcher" not in self_run[0] and own_token.startswith("hls_")
+    assert len(set(sandboxed_ids + [own_id])) == 3 and all(i.startswith("ag-") for i in sandboxed_ids + [own_id])
 
     listed = api.agents(pe_id)
-    assert [a["agent_id"] for a in listed] == hosted_ids + [own_id, measurer]
+    assert [a["agent_id"] for a in listed] == sandboxed_ids + [own_id, measurer]
     assert all("token" not in a for a in listed), "the roster lists a token"
-    for agent_id in hosted_ids + [own_id]:
+    for agent_id in sandboxed_ids + [own_id]:
         assert api.signup_role(pe_id, agent_id) == (200, "competitor")
 
     # Open: the launcher is told to run the agent that measures the baseline and no researcher.
@@ -193,8 +193,8 @@ def test_agents_join_through_the_api_and_the_launcher_is_told_what_to_run(with_r
     r = api.post(f"/platform-experiments/{pe_id}/signup", {"agent_id": own_id})
     assert r.status_code in (404, 405), f"the old signup path still answers: {r.status_code} {r.text}"
 
-    # Removing a hosted agent before the start ends its token.
-    removed, kept = hosted_ids
+    # Removing a sandboxed agent before the start ends its token.
+    removed, kept = sandboxed_ids
     removed_token = admin.token(f"agent:{pe_id}/{removed}")
     assert api.as_caller(removed_token).signup_role(pe_id, removed) == (200, "competitor")
     r = api.remove_agent(pe_id, removed)
@@ -215,13 +215,13 @@ def test_agents_join_through_the_api_and_the_launcher_is_told_what_to_run(with_r
     instances, ending = desired_for(api, pe_id, up)
     assert not instances and measurer_name in ending, f"after the baseline agent finished: {sorted(instances)}, ending {sorted(ending)}"
     # It left no job to declare, so the baseline is to be measured again, which is a person's
-    # move where no coordinator is hosted.
+    # move where no coordinator is sandboxed.
     waits = api.get_json(f"/platform-experiments/{pe_id}")["status_reason"]
     assert (waits["reason"], waits["waits_for"]) == ("baseline_required", "owner"), waits
 
     # Started: nobody is removed, a researcher joins only with what one that ended left unspent, and the researcher's machine is asked for.
     api.declare_baseline_and_wait_running(pe_id)
-    r = api.post(f"/platform-experiments/{pe_id}/agents", {"hosted": True})
+    r = api.post(f"/platform-experiments/{pe_id}/agents", {"in_agentsandbox": True})
     assert r.status_code == 409 and r.json()["reason"] == "no_share_left", f"join after start: {r.status_code} {r.text}"
     r = api.remove_agent(pe_id, kept)
     assert r.status_code == 409 and r.json()["reason"] == "experiment_started", f"remove after start: {r.status_code} {r.text}"
@@ -248,7 +248,7 @@ def test_agents_join_through_the_api_and_the_launcher_is_told_what_to_run(with_r
     assert as_kept.signup_role(pe_id, kept) == (200, "competitor")
     r = as_kept.post("/hypotheses", {"agent_id": own_id, "platform_experiment_id": pe_id, "text": "as another",
                                      "links": [{"type": "builds_on", "to": pe_id}], "distinct_from": []})
-    assert r.status_code == 403, f"a hosted agent's token naming another agent: {r.status_code} {r.text}"
+    assert r.status_code == 403, f"a sandboxed agent's token naming another agent: {r.status_code} {r.text}"
     # The name a machine is asked for under is on the roster.
     assert roster(api, pe_id)[kept]["instance"]["name"] == instance["name"]
 
@@ -290,10 +290,10 @@ def test_agents_join_through_the_api_and_the_launcher_is_told_what_to_run(with_r
     assert (left["name"], left["restarts"], left["stopped"]) == (kept_name, 0, False) and "end_reason" not in left, left
 
 
-def test_an_exited_machine_is_recorded_restarted_a_few_times_and_then_stops_its_agent(with_repo: API, hosted_pe, run_id: str):
+def test_an_exited_machine_is_recorded_restarted_a_few_times_and_then_stops_its_agent(with_repo: API, sandboxed_pe, run_id: str):
     api = with_repo
-    pe_id = hosted_pe("hosted-agents-exit", 1.0, 5)
-    crashing, steady = (a["agent_id"] for a in api.add_agents(pe_id, count=2, hosted=True))
+    pe_id = sandboxed_pe("sandboxed-agents-exit", 1.0, 5)
+    crashing, steady = (a["agent_id"] for a in api.add_agents(pe_id, count=2, in_agentsandbox=True))
     api.declare_baseline_and_wait_running(pe_id)
     # Every researcher is one the platform runs, so none is at work until the first one's machine
     # is running. The run's clock ran from its start all along.
@@ -342,11 +342,11 @@ def test_an_exited_machine_is_recorded_restarted_a_few_times_and_then_stops_its_
     assert api.signup_role(pe_id, crashing) == (200, "competitor")
 
 
-def test_a_cut_hosted_agent_is_left_to_end_while_survivors_keep_running(with_repo: API, hosted_pe, run_id: str, deadline):
+def test_a_cut_sandboxed_agent_is_left_to_end_while_survivors_keep_running(with_repo: API, sandboxed_pe, run_id: str, deadline):
     api = with_repo
     # Six agents and a 50% first cut: above the roster floor for a cut, see test_stage_ladder_cut.
-    pe_id = hosted_pe("hosted-agents-cut", BUDGET, ROSTER_SIZE, report_interval_seconds=REPORT_INTERVAL_SECONDS, stages=STAGES)
-    agents = [a["agent_id"] for a in api.add_agents(pe_id, count=ROSTER_SIZE, hosted=True, quota_tier="guaranteed")]
+    pe_id = sandboxed_pe("sandboxed-agents-cut", BUDGET, ROSTER_SIZE, report_interval_seconds=REPORT_INTERVAL_SECONDS, stages=STAGES)
+    agents = [a["agent_id"] for a in api.add_agents(pe_id, count=ROSTER_SIZE, in_agentsandbox=True, quota_tier="guaranteed")]
     assert not desired_for(api, pe_id)[0], "a researcher's machine is asked for before there is a baseline"
     api.declare_baseline_and_wait_running(pe_id)
     before, _ = desired_for(api, pe_id)
@@ -429,15 +429,15 @@ def test_a_cut_hosted_agent_is_left_to_end_while_survivors_keep_running(with_rep
         assert before[agent]["name"] in ending, f"{agent} is not left to end after the close"
 
 
-def test_a_hosted_coordinator_and_hosted_agents_each_get_a_machine_the_launcher_keeps(with_repo: API, run_id: str):
-    r = _hosted_run(with_repo, f"coordinated-{run_id}", coordinator_hosted=True)
+def test_a_sandboxed_coordinator_and_sandboxed_agents_each_get_a_machine_the_launcher_keeps(with_repo: API, run_id: str):
+    r = _sandboxed_run(with_repo, f"coordinated-{run_id}", coordinator_in_agentsandbox=True)
     assert r.status_code == 201, f"create: {r.status_code} {r.text}"
     pe_id = r.json()["id"]
     try:
         # The create made the one agent that measures the baseline.
-        assert r.json()["coordinator_hosted"] is True and r.json()["signup_count"] == 1, r.json()
+        assert r.json()["coordinator_in_agentsandbox"] is True and r.json()["signup_count"] == 1, r.json()
         (measurer,) = roster(with_repo, pe_id)
-        with_repo.add_agents(pe_id, count=2, hosted=True)
+        with_repo.add_agents(pe_id, count=2, in_agentsandbox=True)
         pe = with_repo.get_json(f"/platform-experiments/{pe_id}")
         assert pe["coordinator"]["launcher"] == LAUNCHER and pe["coordinator"]["model"], pe.get("coordinator")
         assert pe["coordinator"]["instance"]["restarts"] == 0 and not pe["coordinator"]["instance"]["stopped"], pe["coordinator"]
@@ -446,7 +446,7 @@ def test_a_hosted_coordinator_and_hosted_agents_each_get_a_machine_the_launcher_
         # The coordinator is no agent: the roster and the quotas hold the baseline agent and the
         # two researchers and nothing else.
         agents = roster(with_repo, pe_id)
-        assert len(agents) == 3 and all(a["hosted"] and a["launcher"] == LAUNCHER for a in agents.values()), agents
+        assert len(agents) == 3 and all(a["in_agentsandbox"] and a["launcher"] == LAUNCHER for a in agents.values()), agents
         assert sorted(a["role"] for a in agents.values()) == ["baseline", "competitor", "competitor"], agents
         assert {q["agent_id"] for q in with_repo.platform_experiment_quotas(pe_id)} <= set(agents), "the coordinator holds a quota"
 
@@ -506,7 +506,7 @@ def test_a_hosted_coordinator_and_hosted_agents_each_get_a_machine_the_launcher_
 
 
 def test_a_coordinators_machine_that_keeps_exiting_is_stopped_and_shown(with_repo: API, run_id: str):
-    r = _hosted_run(with_repo, f"coordinator-crashing-{run_id}", coordinator_hosted=True)
+    r = _sandboxed_run(with_repo, f"coordinator-crashing-{run_id}", coordinator_in_agentsandbox=True)
     assert r.status_code == 201, f"create: {r.status_code} {r.text}"
     pe_id = r.json()["id"]
     try:
@@ -526,7 +526,7 @@ def test_a_coordinators_machine_that_keeps_exiting_is_stopped_and_shown(with_rep
 
 
 def test_a_coordinator_closes_its_platform_experiment_through_hl(with_repo: API, run_id: str):
-    r = _hosted_run(with_repo, f"coordinator-closing-{run_id}", coordinator_hosted=True)
+    r = _sandboxed_run(with_repo, f"coordinator-closing-{run_id}", coordinator_in_agentsandbox=True)
     assert r.status_code == 201, f"create: {r.status_code} {r.text}"
     pe_id = r.json()["id"]
     try:
@@ -552,20 +552,20 @@ def test_a_coordinator_closes_its_platform_experiment_through_hl(with_repo: API,
 
 
 def test_creating_a_platform_experiment_adds_no_agent(with_repo: API, run_id: str):
-    name = f"hosted-with-agents-{run_id}"
-    r = _hosted_run(with_repo, name, hosted_agents=3)
+    name = f"sandboxed-with-agents-{run_id}"
+    r = _sandboxed_run(with_repo, name, sandboxed_agents=3)
     assert r.status_code == 422, f"a create that asks for agents: {r.status_code} {r.text}"
     listed = with_repo.get_json(f"/platform-experiments?q={name}&limit=50")
     assert not [pe for pe in listed if pe["name"] == name], f"a refused create left a platform experiment: {listed}"
 
 
-def test_a_machine_never_reported_costs_nothing_inside_the_boot_limit_and_one_reported_and_gone_is_an_exit(with_repo: API, hosted_pe, run_id: str):
+def test_a_machine_never_reported_costs_nothing_inside_the_boot_limit_and_one_reported_and_gone_is_an_exit(with_repo: API, sandboxed_pe, run_id: str):
     """Past the boot limit (agents.boot_limit_seconds, minutes on the local stack) a machine never
     reported or still starting spends a restart, which the handler's and the store's own tests
     follow with a clock of their own."""
     api = with_repo
-    pe_id = hosted_pe("hosted-seen-gone", 1.0, 5)
-    agent_id = api.add_agents(pe_id, hosted=True, role="baseline")[0]["agent_id"]
+    pe_id = sandboxed_pe("sandboxed-seen-gone", 1.0, 5)
+    agent_id = api.add_agents(pe_id, in_agentsandbox=True, role="baseline")[0]["agent_id"]
     name = desired_for(api, pe_id)[0][agent_id]["name"]
 
     # A create that failed is said by nobody: the name is asked for again and nothing is spent.
@@ -600,13 +600,13 @@ def test_a_machine_never_reported_costs_nothing_inside_the_boot_limit_and_one_re
     assert r.status_code == 400, f"expired of a machine that has not exited: {r.status_code} {r.text}"
 
 
-def test_a_running_machines_progress_is_shown_with_its_state(with_repo: API, hosted_pe, run_id: str):
+def test_a_running_machines_progress_is_shown_with_its_state(with_repo: API, sandboxed_pe, run_id: str):
     """A machine whose marker stands still for agents.progress_limit_seconds (minutes on the local
     stack) is ended as silent, which the handler's and the store's own tests follow with a clock
     of their own, and test_real_providers.py with a real harness."""
     api = with_repo
-    pe_id = hosted_pe("hosted-progress", 1.0, 5)
-    agent_id = api.add_agents(pe_id, hosted=True, role="baseline")[0]["agent_id"]
+    pe_id = sandboxed_pe("sandboxed-progress", 1.0, 5)
+    agent_id = api.add_agents(pe_id, in_agentsandbox=True, role="baseline")[0]["agent_id"]
     name = desired_for(api, pe_id)[0][agent_id]["name"]
     assert roster(api, pe_id)[agent_id]["instance"]["state"] == "requested"
 
@@ -657,7 +657,7 @@ def test_a_running_machines_progress_is_shown_with_its_state(with_repo: API, hos
 
 def test_an_agent_and_a_coordinator_keep_their_own_session_and_only_their_org_reads_it(with_repo: API, run_id: str):
     api = with_repo
-    r = _hosted_run(api, f"hosted-sessions-{run_id}", coordinator_hosted=True)
+    r = _sandboxed_run(api, f"sandboxed-sessions-{run_id}", coordinator_in_agentsandbox=True)
     assert r.status_code == 201, f"create: {r.status_code} {r.text}"
     pe_id = r.json()["id"]
     try:
@@ -668,7 +668,7 @@ def test_an_agent_and_a_coordinator_keep_their_own_session_and_only_their_org_re
 
 def _sessions_are_their_owners(api: API, pe_id: str) -> None:
     # Of role baseline, so that each has its machine and its token while the experiment is open.
-    first, second = (api.add_agents(pe_id, hosted=True, role="baseline")[0]["agent_id"] for _ in range(2))
+    first, second = (api.add_agents(pe_id, in_agentsandbox=True, role="baseline")[0]["agent_id"] for _ in range(2))
     instances, _ = desired_for(api, pe_id)
     tokens = {first: instances[first]["env"]["HL_TOKEN"], second: instances[second]["env"]["HL_TOKEN"],
               "coordinator": admin.token(f"coordinator:{pe_id}")}
@@ -743,37 +743,37 @@ def test_a_launcher_is_answered_while_it_is_registered_and_refused_when_its_pass
 
 
 def test_the_machines_of_one_platform_experiment_are_bounded_whatever_their_role(with_repo: API, run_id: str):
-    r = _hosted_run(with_repo, f"hosted-bound-{run_id}", coordinator_hosted=True, max_agents=1)
+    r = _sandboxed_run(with_repo, f"sandboxed-bound-{run_id}", coordinator_in_agentsandbox=True, max_agents=1)
     assert r.status_code == 201, f"create: {r.status_code} {r.text}"
-    pe_id, bound = r.json()["id"], r.json()["max_hosted"]
+    pe_id, bound = r.json()["id"], r.json()["max_agentsandboxes"]
     try:
-        assert bound >= 3, f"max_hosted = {bound}: the local settings leave room for no agent beside the coordinator and the baseline's machine"
+        assert bound >= 3, f"max_agentsandboxes = {bound}: the local settings leave room for no agent beside the coordinator and the baseline's machine"
         # max_agents counts competitors, so reviewers are added until the machines run out. One
         # machine is the coordinator's and one is kept for an agent of role baseline.
         for _ in range(bound - 2):
-            r = with_repo.post(f"/platform-experiments/{pe_id}/agents", {"hosted": True, "role": "reviewer"})
-            assert r.status_code == 201, f"a hosted reviewer below the bound: {r.status_code} {r.text}"
-        for body in ({"hosted": True, "role": "reviewer"}, {"hosted": True}):
+            r = with_repo.post(f"/platform-experiments/{pe_id}/agents", {"in_agentsandbox": True, "role": "reviewer"})
+            assert r.status_code == 201, f"a sandboxed reviewer below the bound: {r.status_code} {r.text}"
+        for body in ({"in_agentsandbox": True, "role": "reviewer"}, {"in_agentsandbox": True}):
             r = with_repo.post(f"/platform-experiments/{pe_id}/agents", body)
-            assert r.status_code == 409 and r.json()["reason"] == "max_hosted_reached", f"{body} beside the kept machine: {r.status_code} {r.text}"
+            assert r.status_code == 409 and r.json()["reason"] == "max_agentsandboxes_reached", f"{body} beside the kept machine: {r.status_code} {r.text}"
         # The machine kept for an agent of role baseline is taken by the one the create made.
         assert [a["role"] for a in roster(with_repo, pe_id).values() if a["role"] != "reviewer"] == ["baseline"]
-        r = with_repo.post(f"/platform-experiments/{pe_id}/agents", {"hosted": True, "role": "baseline"})
-        assert r.status_code == 409 and r.json()["reason"] == "max_hosted_reached", f"a second hosted baseline agent at the bound: {r.status_code} {r.text}"
+        r = with_repo.post(f"/platform-experiments/{pe_id}/agents", {"in_agentsandbox": True, "role": "baseline"})
+        assert r.status_code == 409 and r.json()["reason"] == "max_agentsandboxes_reached", f"a second sandboxed baseline agent at the bound: {r.status_code} {r.text}"
         r = with_repo.post(f"/platform-experiments/{pe_id}/agents", {"role": "reviewer"})
         assert r.status_code == 201, f"a self-run reviewer at the bound: {r.status_code} {r.text}"
-        assert len([a for a in roster(with_repo, pe_id).values() if a["hosted"]]) == bound - 1
+        assert len([a for a in roster(with_repo, pe_id).values() if a["in_agentsandbox"]]) == bound - 1
     finally:
         with_repo.close_platform_experiment(pe_id)
 
 
 def test_a_coordinators_token_changes_the_description_only_and_acts_as_no_agent(with_repo: API, run_id: str):
-    r = _hosted_run(with_repo, f"coordinator-bounds-{run_id}", coordinator_hosted=True)
+    r = _sandboxed_run(with_repo, f"coordinator-bounds-{run_id}", coordinator_in_agentsandbox=True)
     assert r.status_code == 201, f"create: {r.status_code} {r.text}"
     pe = r.json()
     pe_id = pe["id"]
     try:
-        with_repo.add_agents(pe_id, hosted=True)
+        with_repo.add_agents(pe_id, in_agentsandbox=True)
         agent_id = next(iter(roster(with_repo, pe_id)))
         as_coordinator = with_repo.as_caller(admin.token(f"coordinator:{pe_id}"), with_repo.org_id, with_repo.project_id)
         live = {key: pe[key] for key in ("name", "description", "budget_accelerator_hours", "max_agents", "metrics",

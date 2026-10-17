@@ -7,8 +7,8 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/agentsandbox"
 	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
-	"github.com/scaleresearch/hypothesisloop/contract/hostingapi"
 )
 
 // AgentSignup is one agent's place in one platform experiment, and for an agent the platform
@@ -19,10 +19,10 @@ type AgentSignup struct {
 	Name                 string     `json:"name"`
 	Role                 SignupRole `json:"role"`
 	QuotaTier            QuotaTier  `json:"quota_tier,omitempty"`
-	// Hosted means the platform runs the agent: its launcher keeps one machine for it while the
+	// Sandboxed means the platform runs the agent: its launcher keeps one machine for it while the
 	// platform experiment is running and the agent is not cut, and for one that measures the
 	// baseline also while it is open.
-	Hosted bool `json:"hosted"`
+	InAgentSandbox bool `json:"in_agentsandbox"`
 	// AgentType is the id of the agent type it runs, fixed when it joins: it runs the type's current
 	// version. Model, empty, and Hyperparameters, nil, are the type's, read whenever it is served.
 	AgentType       string         `json:"agent_type" doc:"The agent type it runs, by id. It runs the type's current version, told with agent.instructions when that changes."`
@@ -41,7 +41,7 @@ type AgentSignup struct {
 	Replaces   string `json:"replaces,omitempty" doc:"The researcher that finished or lost its machine whose place the platform added this one in, with its agent type, model and hyperparameters."`
 	ReplacedBy string `json:"replaced_by,omitempty" doc:"The researcher the platform added in this one's place. A replaced researcher takes no place and is never started again."`
 	// Ended is why the agent's run in the platform experiment is over, empty while it goes on.
-	// A hosted agent's machine is told to stop for this and for nothing else, and the agent
+	// A sandboxed agent's machine is told to stop for this and for nothing else, and the agent
 	// reads it to learn why.
 	Ended RunEnd `json:"-"`
 	// CutReason is why the platform cut the agent other than at a stage boundary, empty for a stage
@@ -51,7 +51,7 @@ type AgentSignup struct {
 	// hold to, and EndedReason why a researcher's place is free: one of the EndedReason constants.
 	AtWork      bool   `json:"at_work" doc:"Whether it is a researcher at work: of role competitor, not finished, not cut, not replaced and, run by the platform, with a machine. The one count max_agents and the researchers pool hold to."`
 	EndedReason string `json:"ended_reason,omitempty" enum:"finished,cut,replaced,stopped" doc:"Why it no longer holds a place among the researchers: finished, cut (at a stage boundary or by a lowered max_agents), replaced (the platform added a researcher in its place) or stopped (its machine stopped with no restart left). Absent while it holds one, and for an agent whose run is over only with the close."`
-	// Instance is what became of a hosted agent's machine, nil for an agent the platform does
+	// Instance is what became of a sandboxed agent's machine, nil for an agent the platform does
 	// not run.
 	Instance *AgentInstance `json:"instance,omitempty"`
 	// Activity is what the agent on the machine asked for last said it is doing.
@@ -105,7 +105,7 @@ func (f InFlight) MinutesWithoutJob(now time.Time) *int {
 	return &minutes
 }
 
-// AgentTurn is whether a hosted agent's harness is in a turn of its model or waits for platform
+// AgentTurn is whether a sandboxed agent's harness is in a turn of its model or waits for platform
 // updates between turns, as the harness last said it.
 type AgentTurn struct {
 	State string    `json:"state" enum:"working,waiting" doc:"working: the model is in a turn. waiting: the turn ended and the harness waits for the platform's next update to the agent."`
@@ -124,7 +124,7 @@ type MessageAllowance struct {
 	NextAt       *time.Time `json:"next_at,omitempty" doc:"When left_this_hour next grows: the oldest of the reader's messages of the last hour leaves it then. Absent while it sent none in the last hour."`
 }
 
-// ModelAllowance is what a hosted agent's or coordinator's model account has left of the model
+// ModelAllowance is what a sandboxed agent's or coordinator's model account has left of the model
 // provider's rate limit, as its harness last read it.
 type ModelAllowance struct {
 	Utilization  *float64   `json:"utilization,omitempty" doc:"The share of the account's rate limit used, 0 to 1. Absent before a reading that says it, and once the window it was read in has reset."`
@@ -154,7 +154,7 @@ func TurnOf(state HarnessState) *AgentTurn {
 	return turn
 }
 
-// AgentHealth is how one agent of a platform experiment, or its hosted coordinator, is getting on,
+// AgentHealth is how one agent of a platform experiment, or its sandboxed coordinator, is getting on,
 // as the run's health series in the metrics store record it.
 type AgentHealth struct {
 	PlatformExperimentID string `json:"-"`
@@ -167,16 +167,16 @@ type AgentHealth struct {
 	JobsInFlight          int      `json:"jobs_in_flight" doc:"Its jobs queued, submitted or running."`
 	Restarts              int      `json:"restarts" doc:"Every machine of its that exited and was asked for again, over the run, whatever image it ran."`
 	CoordinatorMessages   int      `json:"coordinator_messages" doc:"Messages the coordinator sent it."`
-	// The two below are of a hosted agent or coordinator, from the rate limit its harness last
+	// The two below are of a sandboxed agent or coordinator, from the rate limit its harness last
 	// read from the model provider (HarnessState).
 	RateLimitUtilization *float64   `json:"rate_limit_utilization,omitempty" doc:"The share of its model account's rate limit used, 0 to 1, at the last reading of its machine. Absent before a reading that says it."`
 	RateLimitedUntil     *time.Time `json:"rate_limited_until,omitempty" doc:"Present while the model provider refuses its model calls: when the provider said its limit resets. It waits until then and resumes, spending no restart."`
 }
 
-// CoordinatorHealthRole is the role the run's health series give its hosted coordinator.
+// CoordinatorHealthRole is the role the run's health series give its sandboxed coordinator.
 const CoordinatorHealthRole = "coordinator"
 
-// AgentActivity is what a hosted agent or coordinator is doing now, as its harness last said it
+// AgentActivity is what a sandboxed agent or coordinator is doing now, as its harness last said it
 // beside its progress marker. The platform keeps the latest sentence only.
 type AgentActivity struct {
 	Text string    `json:"text" maxLength:"120" doc:"A short sentence of what the agent is doing now, written by its harness from the tool call in flight: \"thinking\", \"reading train.py\", \"running hl capacity\", \"waiting for platform updates\". It names commands, file names and ids, and carries no argument, file content or secret."`
@@ -227,7 +227,7 @@ func (e RunEnd) ReleasedBecause() string {
 	return released + "its run is over"
 }
 
-// AgentInstance is the recorded outcome of a hosted agent's machine, as its launcher reported it.
+// AgentInstance is the recorded outcome of a sandboxed agent's machine, as its launcher reported it.
 type AgentInstance struct {
 	// Name is the name the machine was last asked for under, without the launcher's prefix.
 	// Empty until the launcher first asked, and after an exit until it asks again.
@@ -311,10 +311,10 @@ func (i AgentInstance) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-// HostedCoordinator is the coordinator the platform runs for one platform experiment: one more
-// hosted machine, started as the agents are and holding a coordinator token. It is not
+// AgentSandboxCoordinator is the coordinator the platform runs for one platform experiment: one more
+// agent sandbox, started as the agents are and holding a coordinator token. It is not
 // signed up, so it holds no quota and is not ranked.
-type HostedCoordinator struct {
+type AgentSandboxCoordinator struct {
 	Model string `json:"model"`
 	// Instance is what became of its machine.
 	Instance AgentInstance `json:"instance"`
@@ -343,7 +343,7 @@ func InstanceReleasedSQL(endedAt string) string {
 	return fmt.Sprintf("COALESCE(%s <= now() - make_interval(secs => %d), false)", endedAt, int(AgentWindDown.Seconds()))
 }
 
-// MaxAgentInstanceRestarts is how many times an exited machine of one hosted agent is asked for
+// MaxAgentInstanceRestarts is how many times an exited machine of one sandboxed agent is asked for
 // again within AgentInstanceRestartWindow. The next exit inside that window stops the agent, and
 // restarts older than the window are no longer counted, so a long run survives occasional exits.
 const MaxAgentInstanceRestarts = 3
@@ -355,7 +355,7 @@ const AgentInstanceRestartWindow = 6 * time.Hour
 // marker (agents/harness, progress.py), and MinAgentProgressLimitSeconds the shortest
 // silence the platform may be configured to give up on.
 const (
-	AgentProgressIntervalSeconds = hostingapi.ProgressIntervalSeconds
+	AgentProgressIntervalSeconds = agentsandbox.ProgressIntervalSeconds
 	MinAgentProgressLimitSeconds = 8 * AgentProgressIntervalSeconds
 )
 

@@ -40,7 +40,7 @@ func (s *Service) resolvedPool(catalog domain.AgentTypeCatalog, pool domain.Rese
 // that joins a running platform experiment is (lateShare).
 func (s *Service) KeepResearchers(ctx context.Context, pe *domain.PlatformExperiment, now time.Time) error {
 	launch := s.launch
-	if pe.Status != domain.PlatformExpRunning || !pe.CoordinatorHosted {
+	if pe.Status != domain.PlatformExpRunning || !pe.CoordinatorInAgentSandbox {
 		return nil
 	}
 	if pe.EndsAt.Sub(now) < domain.ReplacementLead(pe.JobEstimatedDurationHours) {
@@ -82,7 +82,7 @@ func (s *Service) KeepResearchers(ctx context.Context, pe *domain.PlatformExperi
 	if err != nil {
 		return fmt.Errorf("platform_experiments.KeepResearchers: %w", err)
 	}
-	if err := requireHosting(launch.Hosting); err != nil {
+	if err := requireAgentSandbox(launch.AgentSandbox); err != nil {
 		return fmt.Errorf("platform_experiments.KeepResearchers: %w", err)
 	}
 	// Nobody's credential adds it: it is the platform's, on behalf of whoever created the run.
@@ -104,7 +104,7 @@ func (s *Service) KeepResearchers(ctx context.Context, pe *domain.PlatformExperi
 			continue
 		}
 		signup := domain.AgentSignup{
-			Role: domain.SignupRoleCompetitor, QuotaTier: tier, Hosted: true,
+			Role: domain.SignupRoleCompetitor, QuotaTier: tier, InAgentSandbox: true,
 			AgentType: choice.AgentType, Model: choice.Model, Hyperparameters: choice.Hyperparameters, Actor: &by, Replaces: place.Replaces,
 		}
 		late, err := s.lateShare(ctx, pe)
@@ -122,7 +122,7 @@ func (s *Service) KeepResearchers(ctx context.Context, pe *domain.PlatformExperi
 		agent := &domain.Agent{ID: id, CreatedAt: now}
 		err = s.store.JoinRunning(ctx, pe.ID, agent, signup, *late)
 		switch {
-		case errors.Is(err, db.ErrNoShareLeft), errors.Is(err, db.ErrMaxAgentsReached), errors.Is(err, db.ErrMaxHostedReached), errors.Is(err, db.ErrSignupClosed), errors.Is(err, db.ErrPoolSatisfied):
+		case errors.Is(err, db.ErrNoShareLeft), errors.Is(err, db.ErrMaxAgentsReached), errors.Is(err, db.ErrMaxAgentSandboxesReached), errors.Is(err, db.ErrSignupClosed), errors.Is(err, db.ErrPoolSatisfied):
 			s.logger.Info("keep researchers: none added", zap.String("platform_experiment_id", pe.ID), zap.String("replaces", place.Replaces), zap.String("why", err.Error()))
 			return nil
 		case err != nil:

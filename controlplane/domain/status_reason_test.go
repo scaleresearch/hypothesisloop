@@ -13,7 +13,7 @@ func TestEveryStatusReasonNamesWhoActs(t *testing.T) {
 		"baseline_measuring": WaitsForPlatform, "starts_at_ahead": WaitsForPlatform, "starting": WaitsForPlatform, "agents_starting": WaitsForPlatform,
 	} {
 		if got, err := WaitsFor(reason, true); err != nil || got != want {
-			t.Errorf("%s with a hosted coordinator: got = %q, %v, want %s", reason, got, err, want)
+			t.Errorf("%s with a sandboxed coordinator: got = %q, %v, want %s", reason, got, err, want)
 		}
 		// A person who coordinates is the coordinator.
 		if want == WaitsForCoordinator {

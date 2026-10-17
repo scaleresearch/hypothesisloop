@@ -12,7 +12,7 @@ import (
 )
 
 // The run's health series, one per agent, labelled platform_experiment_id, agent_id and role, and
-// one for a hosted coordinator, of role coordinator with no agent_id. A run's total is a sum over
+// one for a sandboxed coordinator, of role coordinator with no agent_id. A run's total is a sum over
 // them (sum by (platform_experiment_id)).
 const (
 	agentFirstJobSecondsMetric          = "agent_first_job_seconds"
@@ -70,7 +70,7 @@ func (s *Store) RecordRunHealth(ctx context.Context, at time.Time, agents []doma
 	return nil
 }
 
-// RecordHarnessState writes what each hosted harness last said of itself, read at at, in one
+// RecordHarnessState writes what each sandboxed harness last said of itself, read at at, in one
 // request: its subagents, its turn, and the rate limit when it has read one.
 func (s *Store) RecordHarnessState(ctx context.Context, at time.Time, states []domain.HarnessState) error {
 	var samples []gauge
@@ -149,7 +149,7 @@ func refusedUntil(values map[string]float64) (time.Time, bool) {
 	return unixGauge(resets), true
 }
 
-// LatestRunHealth reads where each agent of platformExperimentID, and its hosted coordinator,
+// LatestRunHealth reads where each agent of platformExperimentID, and its sandboxed coordinator,
 // last stood: the latest value of each of its health series since the run's row came into being
 // at createdAt. A first-job value is nil until there is a first job. Sorted by role, then agent.
 func (s *Store) LatestRunHealth(ctx context.Context, platformExperimentID string, createdAt time.Time) ([]domain.AgentHealth, error) {
@@ -182,8 +182,8 @@ func (s *Store) LatestRunHealth(ctx context.Context, platformExperimentID string
 	return out, nil
 }
 
-// LatestHarnessState reads what the harness of each hosted agent of platformExperimentID, and of
-// its hosted coordinator, last said of itself since the run's row came into being at createdAt.
+// LatestHarnessState reads what the harness of each sandboxed agent of platformExperimentID, and of
+// its sandboxed coordinator, last said of itself since the run's row came into being at createdAt.
 // One whose harness said nothing in that time is left out. Model is the rate limit last read,
 // Rejected only while its reset is ahead. Sorted by role, then agent.
 func (s *Store) LatestHarnessState(ctx context.Context, platformExperimentID string, createdAt time.Time) ([]domain.HarnessState, error) {

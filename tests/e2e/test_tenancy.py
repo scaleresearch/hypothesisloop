@@ -211,7 +211,7 @@ def test_another_org_writes_nothing(tenants):
     body_as_b["metadata"]["agent_id"] = b.agent
     writes = [
         ("POST", f"/platform-experiments/{b.pe_id}/agents", {"agent_id": a.agent}),
-        ("POST", f"/platform-experiments/{b.pe_id}/agents", {"hosted": True}),
+        ("POST", f"/platform-experiments/{b.pe_id}/agents", {"in_agentsandbox": True}),
         ("DELETE", f"/platform-experiments/{b.pe_id}/agents/{b.agent}", None),
         ("PATCH", f"/platform-experiments/{b.pe_id}", {"name": "taken over"}),
         ("POST", f"/platform-experiments/{b.pe_id}/close", {"top_results": []}),

@@ -90,7 +90,7 @@ var ErrNotReopenable = errors.New("platform experiment is not a closed run that 
 
 // ReopenPlatformExperiment sets the closed platform experiment id, whose run started and which no
 // other run continues, running again until endsAt, durationHours from its start, and with a
-// coordinatorModel that is not empty its hosted coordinator on that model. What the close wrote
+// coordinatorModel that is not empty its sandboxed coordinator on that model. What the close wrote
 // goes with it: closed_at, why and by whom, the agent lines and record of the close and the
 // placements, so every reader takes it for the running run it was. The status, and a run length
 // that changed, are announced. ErrNotReopenable, and ErrPlatformExperimentNotFound for an id none
@@ -105,7 +105,7 @@ SET status = 'running', updated_at = now(), ends_at = $2, duration_hours = $3,
     closed_at = NULL, close_reason = '', closed_by_kind = '', closed_by_id = '', close_message = '',
     close_agents = '', close_record = '', `+statusMoved+`
 FROM (SELECT duration_hours FROM platform_experiments WHERE id = $1 FOR UPDATE) old
-WHERE pe.id = $1 AND pe.status = 'closed' AND pe.removed_at IS NULL AND pe.started_at IS NOT NULL AND ($4 = '' OR pe.coordinator_hosted)
+WHERE pe.id = $1 AND pe.status = 'closed' AND pe.removed_at IS NULL AND pe.started_at IS NOT NULL AND ($4 = '' OR pe.coordinator_in_agentsandbox)
   AND NOT EXISTS (SELECT 1 FROM platform_experiments later WHERE later.continues = pe.id)
 RETURNING pe.duration_hours IS DISTINCT FROM old.duration_hours`, id, endsAt, durationHours, coordinatorModel).Scan(&lengthMoved)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {

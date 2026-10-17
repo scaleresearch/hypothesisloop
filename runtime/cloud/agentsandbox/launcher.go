@@ -1,4 +1,4 @@
-package hosting
+package agentsandbox
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/contract/hostingapi"
+	sandboxapi "github.com/scaleresearch/hypothesisloop/contract/agentsandbox"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/provider"
 )
 
@@ -24,10 +24,10 @@ type Size struct {
 }
 
 // Platform is what the launcher asks of the platform: the machines it holds, and the machines
-// to keep for what the launcher observed (service/hosting.Decider).
+// to keep for what the launcher observed (service/agentsandbox.Decider).
 type Platform interface {
-	Held(ctx context.Context) ([]hostingapi.HeldMachine, error)
-	Reconcile(ctx context.Context, observed hostingapi.Observed) (*hostingapi.Desired, error)
+	Held(ctx context.Context) ([]sandboxapi.HeldMachine, error)
+	Reconcile(ctx context.Context, observed sandboxapi.Observed) (*sandboxapi.Desired, error)
 }
 
 type Config struct {
@@ -69,7 +69,7 @@ func New(cfg Config) (*Launcher, error) {
 		return nil, err
 	}
 	if cfg.Provider == nil || cfg.Platform == nil || cfg.Log == nil {
-		return nil, errors.New("hosting: Provider, Platform and Log are required")
+		return nil, errors.New("agentsandbox: Provider, Platform and Log are required")
 	}
 	digest, err := cfg.launchDigest()
 	if err != nil {
@@ -82,7 +82,7 @@ func New(cfg Config) (*Launcher, error) {
 	l.poolPrefix = l.prefix + poolSegment
 	l.warmer, _ = l.provider.(provider.Warmer)
 	if cfg.WarmPool > 0 && l.warmer == nil {
-		return nil, fmt.Errorf("hosting: a warm pool of %d needs a provider that can warm instances, and this one can %v", cfg.WarmPool, provider.Capabilities(cfg.Provider))
+		return nil, fmt.Errorf("agentsandbox: a warm pool of %d needs a provider that can warm instances, and this one can %v", cfg.WarmPool, provider.Capabilities(cfg.Provider))
 	}
 	return l, nil
 }
@@ -96,7 +96,7 @@ func (cfg Config) launchDigest() (string, error) {
 		Size    Size     `json:"size"`
 	}{cfg.Command, cfg.Size})
 	if err != nil {
-		return "", fmt.Errorf("hosting: digest launch inputs: %w", err)
+		return "", fmt.Errorf("agentsandbox: digest launch inputs: %w", err)
 	}
 	digest := sha256.Sum256(inputs)
 	return hex.EncodeToString(digest[:]), nil
@@ -106,19 +106,19 @@ func (cfg Config) launchDigest() (string, error) {
 // the provider is built.
 func (cfg Config) Validate() error {
 	if err := provider.ValidateSegment("sandbox name", cfg.Name); err != nil {
-		return fmt.Errorf("hosting: %w", err)
+		return fmt.Errorf("agentsandbox: %w", err)
 	}
 	if len(cfg.Command) == 0 {
-		return errors.New("hosting: Command is required")
+		return errors.New("agentsandbox: Command is required")
 	}
 	if cfg.Size.CPUMillis <= 0 || cfg.Size.MemoryBytes <= 0 || cfg.Size.DiskBytes <= 0 {
-		return errors.New("hosting: the instance size needs positive cpu, memory and storage")
+		return errors.New("agentsandbox: the instance size needs positive cpu, memory and storage")
 	}
 	if cfg.Interval <= 0 {
-		return errors.New("hosting: Interval must be positive")
+		return errors.New("agentsandbox: Interval must be positive")
 	}
 	if cfg.CreatePause < 0 || cfg.WarmPool < 0 {
-		return errors.New("hosting: CreatePause and WarmPool must not be negative")
+		return errors.New("agentsandbox: CreatePause and WarmPool must not be negative")
 	}
 	return nil
 }
@@ -182,9 +182,9 @@ func (l *Launcher) Pass(ctx context.Context) error {
 		}
 		byName[i.Name] = append(byName[i.Name], i)
 	}
-	observed := hostingapi.Observed{LaunchDigest: l.launchDigest, Instances: l.observe(ctx, byName), Pool: []hostingapi.PoolMachine{}}
+	observed := sandboxapi.Observed{LaunchDigest: l.launchDigest, Instances: l.observe(ctx, byName), Pool: []sandboxapi.PoolMachine{}}
 	for _, i := range sortedByID(pool) {
-		observed.Pool = append(observed.Pool, hostingapi.PoolMachine{Name: i.Name[len(l.prefix):], Machine: i.ID})
+		observed.Pool = append(observed.Pool, sandboxapi.PoolMachine{Name: i.Name[len(l.prefix):], Machine: i.ID})
 	}
 	answer, err := l.cfg.Platform.Reconcile(ctx, observed)
 	if err != nil {
@@ -232,7 +232,7 @@ func (l *Launcher) Pass(ctx context.Context) error {
 // a read that says the machine is gone leaves it out, and a read that fails fails the pass, so
 // nothing is reported from a list that may be missing a machine. A read that finds the machine
 // replaces whatever the list says of that id.
-func (l *Launcher) confirmUnlisted(ctx context.Context, rented []provider.Instance, held []hostingapi.HeldMachine) ([]provider.Instance, error) {
+func (l *Launcher) confirmUnlisted(ctx context.Context, rented []provider.Instance, held []sandboxapi.HeldMachine) ([]provider.Instance, error) {
 	for _, h := range held {
 		name := l.prefix + h.Name
 		listed := false
@@ -383,9 +383,9 @@ const (
 // plane's to give a meaning to: progress is a marker, activity a sentence it shows of what the
 // agent is doing, and state what the harness runs and the rate limit it last read.
 var (
-	progressPattern     = regexp.MustCompile(fmt.Sprintf(`^%s ([A-Za-z0-9._:-]{1,%d})$`, hostingapi.ProgressPrefix, hostingapi.MaxProgressMarker))
-	activityPattern     = regexp.MustCompile(fmt.Sprintf(`^%s (.+)$`, hostingapi.ActivityPrefix))
-	harnessStatePattern = regexp.MustCompile(fmt.Sprintf(`^%s (.{1,%d})$`, hostingapi.StatePrefix, hostingapi.MaxStateLength))
+	progressPattern     = regexp.MustCompile(fmt.Sprintf(`^%s ([A-Za-z0-9._:-]{1,%d})$`, sandboxapi.ProgressPrefix, sandboxapi.MaxProgressMarker))
+	activityPattern     = regexp.MustCompile(fmt.Sprintf(`^%s (.+)$`, sandboxapi.ActivityPrefix))
+	harnessStatePattern = regexp.MustCompile(fmt.Sprintf(`^%s (.{1,%d})$`, sandboxapi.StatePrefix, sandboxapi.MaxStateLength))
 )
 
 // lastMatch is what pattern captures of the newest of lines it matches, or "" when none does.
@@ -402,8 +402,8 @@ func lastMatch(lines []string, pattern *regexp.Regexp) string {
 // newest sentence, cut to what the control plane takes.
 func activityOf(lines []string) string {
 	said := []rune(lastMatch(lines, activityPattern))
-	if len(said) > hostingapi.MaxActivityLength {
-		said = said[:hostingapi.MaxActivityLength]
+	if len(said) > sandboxapi.MaxActivityLength {
+		said = said[:sandboxapi.MaxActivityLength]
 	}
 	return string(said)
 }
@@ -420,8 +420,8 @@ var liveness = map[provider.State]int{
 // printed and what it last said its agent is doing, both from one read of its output. A marker
 // that could not be read is left out, which the control plane tells apart from one that was
 // never printed. The output is sent and never logged here.
-func (l *Launcher) observe(ctx context.Context, byName map[string][]provider.Instance) []hostingapi.ObservedInstance {
-	observed := []hostingapi.ObservedInstance{}
+func (l *Launcher) observe(ctx context.Context, byName map[string][]provider.Instance) []sandboxapi.ObservedInstance {
+	observed := []sandboxapi.ObservedInstance{}
 	for _, name := range sortedKeys(byName) {
 		instances := byName[name]
 		sort.SliceStable(instances, func(a, b int) bool { return instances[a].ID < instances[b].ID })
@@ -437,7 +437,7 @@ func (l *Launcher) observe(ctx context.Context, byName map[string][]provider.Ins
 				running = &i
 			}
 		}
-		entry := hostingapi.ObservedInstance{Name: name[len(l.prefix):], Machine: reportedBy.ID, State: string(state)}
+		entry := sandboxapi.ObservedInstance{Name: name[len(l.prefix):], Machine: reportedBy.ID, State: string(state)}
 		if running != nil {
 			if lines, ok := l.progressOf(ctx, *running); ok {
 				progress := lastMatch(lines, progressPattern)

@@ -8,12 +8,12 @@ import (
 	"go.uber.org/zap"
 
 	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/config"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/agentsandbox"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
-	"github.com/scaleresearch/hypothesisloop/controlplane/service/hosting"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
+	cloudagentsandbox "github.com/scaleresearch/hypothesisloop/runtime/cloud/agentsandbox"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/compute"
-	cloudhosting "github.com/scaleresearch/hypothesisloop/runtime/cloud/hosting"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/provider"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/provider/providers"
 )
@@ -23,7 +23,7 @@ import (
 const defaultWarmPool = 2
 
 // newRented builds what rents machines elsewhere, each a loop the leader runs: the launcher of
-// hosted agents on the sandbox provider, and one runtime per cloud compute account. A provider
+// sandboxed agents on the sandbox provider, and one runtime per cloud compute account. A provider
 // that cannot be built from its settings stops the process here.
 func newRented(pcfg *hypothesisloopcfg.ControlService, store *db.Store, clusters *clusterexchange.Service, metrics *metricsdb.Store, logger *zap.Logger) ([]func(context.Context), error) {
 	var loops []func(context.Context)
@@ -48,8 +48,8 @@ func newRented(pcfg *hypothesisloopcfg.ControlService, store *db.Store, clusters
 	return loops, nil
 }
 
-func newLauncher(pcfg *hypothesisloopcfg.ControlService, s *hypothesisloopcfg.SandboxConfig, store *db.Store, metrics *metricsdb.Store, logger *zap.Logger) (*cloudhosting.Launcher, error) {
-	log := logger.Named("hosting")
+func newLauncher(pcfg *hypothesisloopcfg.ControlService, s *hypothesisloopcfg.SandboxConfig, store *db.Store, metrics *metricsdb.Store, logger *zap.Logger) (*cloudagentsandbox.Launcher, error) {
+	log := logger.Named("agentsandbox")
 	// An agent instance has no accelerator, so the provider is asked for no accelerator type.
 	rented, err := providers.New(s.Provider.Name, s.Provider.Settings, pcfg.SandboxSecret, nil, log.Named(s.Provider.Name).Sugar().Infof)
 	if err != nil {
@@ -62,16 +62,16 @@ func newLauncher(pcfg *hypothesisloopcfg.ControlService, s *hypothesisloopcfg.Sa
 	if s.WarmPoolSize != nil {
 		warmPool = *s.WarmPoolSize
 	}
-	decider := hosting.NewDecider(store, metrics, hosting.Settings{
+	decider := agentsandbox.NewDecider(store, metrics, agentsandbox.Settings{
 		Image: pcfg.Agents.Image, APIURL: pcfg.Services.PublicAPIURL, SigningSecret: pcfg.SigningSecret,
 		BootLimit:       time.Duration(pcfg.Agents.BootLimitSeconds) * time.Second,
 		ProgressLimit:   time.Duration(pcfg.Agents.ProgressLimitSeconds) * time.Second,
 		MaxNewPerAnswer: pcfg.Agents.MaxNewInstancesPerAnswer,
 	}, log)
-	launcher, err := cloudhosting.New(cloudhosting.Config{
+	launcher, err := cloudagentsandbox.New(cloudagentsandbox.Config{
 		Name:     s.Name,
 		Command:  s.Instance.Command,
-		Size:     cloudhosting.Size{CPUMillis: s.Instance.CPUMillis, MemoryBytes: s.Instance.MemoryBytes, DiskBytes: s.Instance.DiskBytes},
+		Size:     cloudagentsandbox.Size{CPUMillis: s.Instance.CPUMillis, MemoryBytes: s.Instance.MemoryBytes, DiskBytes: s.Instance.DiskBytes},
 		Provider: rented, Platform: decider,
 		Interval: s.Interval(), CreatePause: s.CreatePause(), WarmPool: warmPool,
 		Log: log.Sugar().Infof,
@@ -79,7 +79,7 @@ func newLauncher(pcfg *hypothesisloopcfg.ControlService, s *hypothesisloopcfg.Sa
 	if err != nil {
 		return nil, fmt.Errorf("sandbox: %w", err)
 	}
-	log.Info("hosted agents run on the sandbox provider", zap.String("provider", s.Provider.Name), zap.String("name", s.Name),
+	log.Info("sandboxed agents run on the sandbox provider", zap.String("provider", s.Provider.Name), zap.String("name", s.Name),
 		zap.Strings("capabilities", provider.Capabilities(rented)), zap.Int("warm_pool", warmPool))
 	return launcher, nil
 }

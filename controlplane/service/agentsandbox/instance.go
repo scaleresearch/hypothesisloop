@@ -1,4 +1,4 @@
-package hosting
+package agentsandbox
 
 import (
 	"crypto/sha256"
@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/scaleresearch/hypothesisloop/contract/hostingapi"
+	sandboxapi "github.com/scaleresearch/hypothesisloop/contract/agentsandbox"
 	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
@@ -24,7 +24,7 @@ const (
 // MaxInstanceNameLength is the longest name instanceName returns.
 const MaxInstanceNameLength = namePlatformExperimentLength + 1 + nameAgentLength + 1 + nameDigestLength
 
-// instanceFor is the machine a hosted agent runs in. Everything in it follows from the agent's
+// instanceFor is the machine a sandboxed agent runs in. Everything in it follows from the agent's
 // signup, the platform's config and what the launcher says it starts machines with, so every
 // reconcile answers with the same one until one of them changes.
 //
@@ -32,43 +32,43 @@ const MaxInstanceNameLength = namePlatformExperimentLength + 1 + nameAgentLength
 // says which agent of which platform experiment it is, and the agent reads its agent type, model
 // and hyperparameters from its instructions, again whenever they change. None of them goes into
 // the machine's name: the agent applies an edit of its type or model on the machine it has.
-func instanceFor(agent domain.AgentSignup, ended int, image, apiURL, signingSecret, launchDigest string) (hostingapi.Instance, error) {
+func instanceFor(agent domain.AgentSignup, ended int, image, apiURL, signingSecret, launchDigest string) (sandboxapi.Instance, error) {
 	startedAs := map[string]string{
-		hostingapi.EnvAPIURL:     apiURL,
+		sandboxapi.EnvAPIURL:     apiURL,
 		"AGENT_ID":               agent.AgentID,
 		"PLATFORM_EXPERIMENT_ID": agent.PlatformExperimentID,
 	}
 	name, err := instanceName(agent.PlatformExperimentID, agent.AgentID, "", image, startedAs, launchDigest, ended)
 	if err != nil {
-		return hostingapi.Instance{}, err
+		return sandboxapi.Instance{}, err
 	}
 	token, err := auth.Mint(signingSecret, scope.Agent(agent.PlatformExperimentID, agent.AgentID))
 	if err != nil {
-		return hostingapi.Instance{}, err
+		return sandboxapi.Instance{}, err
 	}
-	return hostingapi.Instance{Name: name, Image: image, Env: map[string]string{hostingapi.EnvAPIURL: apiURL, hostingapi.EnvToken: token}}, nil
+	return sandboxapi.Instance{Name: name, Image: image, Env: map[string]string{sandboxapi.EnvAPIURL: apiURL, sandboxapi.EnvToken: token}}, nil
 }
 
 // coordinatorName stands where an agent's id does in the name of a coordinator's machine.
 const coordinatorName = "coordinator"
 
-// coordinatorInstanceFor is the machine a platform experiment's hosted coordinator runs in: the
+// coordinatorInstanceFor is the machine a platform experiment's sandboxed coordinator runs in: the
 // agents' image started with the platform experiment's coordinator token, which is what makes it
 // a coordinator. It reads its model from its instructions, so a change of it keeps the machine.
-func coordinatorInstanceFor(platformExperimentID string, ended int, image, apiURL, signingSecret, launchDigest string) (hostingapi.Instance, error) {
+func coordinatorInstanceFor(platformExperimentID string, ended int, image, apiURL, signingSecret, launchDigest string) (sandboxapi.Instance, error) {
 	startedAs := map[string]string{
-		hostingapi.EnvAPIURL:     apiURL,
+		sandboxapi.EnvAPIURL:     apiURL,
 		"PLATFORM_EXPERIMENT_ID": platformExperimentID,
 	}
 	name, err := instanceName(platformExperimentID, coordinatorName, coordinatorName, image, startedAs, launchDigest, ended)
 	if err != nil {
-		return hostingapi.Instance{}, err
+		return sandboxapi.Instance{}, err
 	}
 	token, err := auth.Mint(signingSecret, scope.Coordinator(platformExperimentID))
 	if err != nil {
-		return hostingapi.Instance{}, err
+		return sandboxapi.Instance{}, err
 	}
-	return hostingapi.Instance{Name: name, Image: image, Env: map[string]string{hostingapi.EnvAPIURL: apiURL, hostingapi.EnvToken: token}}, nil
+	return sandboxapi.Instance{Name: name, Image: image, Env: map[string]string{sandboxapi.EnvAPIURL: apiURL, sandboxapi.EnvToken: token}}, nil
 }
 
 // instanceName names one machine of one agent, or of a coordinator when role says so: an agent

@@ -99,7 +99,7 @@ func SignupActions(pe *domain.PlatformExperiment, signup domain.AgentSignup, cal
 	if removesAgent(pe, signup, caller.Actor()) == nil {
 		actions = append(actions, domain.SignupActionRemove)
 	}
-	if !signup.Hosted {
+	if !signup.InAgentSandbox {
 		actions = append(actions, domain.SignupActionShowToken)
 	}
 	return actions

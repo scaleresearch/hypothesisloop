@@ -19,7 +19,7 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-describe('the health of a hosted machine', () => {
+describe('the health of an agent sandbox', () => {
   it('keeps the age of the machine up with the clock between reads', () => {
     render(<InstanceHealth instance={instance({ asked_at: ago(120), seen_at: ago(30) })} />)
     expect(screen.getByText('first reported 30s ago')).toBeTruthy()

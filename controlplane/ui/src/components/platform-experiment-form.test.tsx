@@ -93,13 +93,13 @@ beforeEach(() => {
 })
 
 describe('a new platform experiment', () => {
-  it('is run by the platform with its defaults in one create: a hosted coordinator, max_agents generalists to start with, and the platform\'s ladder', async () => {
+  it('is run by the platform with its defaults in one create: a sandboxed coordinator, max_agents generalists to start with, and the platform\'s ladder', async () => {
     show()
     await essentials()
     await create()
     await waitFor(() => expect(onSaved).toHaveBeenCalledExactlyOnceWith(created, true))
     expect(sent()).toMatchObject({
-      name: 'Run', description: 'The brief', coordinator_hosted: true, max_agents: 2, duration_hours: 48, budget_accelerator_hours: 10,
+      name: 'Run', description: 'The brief', coordinator_in_agentsandbox: true, max_agents: 2, duration_hours: 48, budget_accelerator_hours: 10,
       researchers: [{ agent_type: 'generalist', count: 2 }],
     })
     for (const left of ['stages', 'report_interval_seconds', 'starts_at', 'repository']) expect(sent()).not.toHaveProperty(left)

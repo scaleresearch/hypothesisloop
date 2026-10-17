@@ -176,21 +176,21 @@ type PlatformExperiment struct {
 	PriorRuns []PriorRun `json:"prior_runs,omitempty" doc:"Every other closed platform experiment of the same project that works on the same repository and ran (its researchers started or it declared a baseline), latest close first. Its agents and its coordinator read each as they read their own, passing its id as platform_experiment_id or --platform-experiment: its summary, standings, jobs and their logs, its hypotheses and findings, and the data its jobs wrote by the url of each object GET /experiments/{id}/data lists. They write nothing to it. Absent when there is none, and on a list."`
 	// DefaultQuotaTier is the tier of a signup that does not choose its own.
 	DefaultQuotaTier QuotaTier `json:"default_quota_tier,omitempty"`
-	// MaxHosted is how many machines the platform may run for this platform experiment, its
+	// MaxAgentSandboxes is how many machines the platform may run for this platform experiment, its
 	// coordinator included. Fixed at creation.
-	MaxHosted int `json:"max_hosted"`
+	MaxAgentSandboxes int `json:"max_agentsandboxes"`
 	// Shared is the platform's decision that every account may read this platform experiment and
 	// everything in it. Staff set it; nobody outside its org writes to it.
 	Shared bool `json:"shared"`
 
-	// CoordinatorHosted means the platform runs this platform experiment's coordinator. Fixed at
+	// CoordinatorInAgentSandbox means the platform runs this platform experiment's coordinator. Fixed at
 	// creation. Coordinator says on which model and what became of its machine; it
 	// is carried by a read of one platform experiment and left out of a list.
-	CoordinatorHosted bool               `json:"coordinator_hosted"`
-	Coordinator       *HostedCoordinator `json:"coordinator,omitempty"`
+	CoordinatorInAgentSandbox bool                     `json:"coordinator_in_agentsandbox"`
+	Coordinator               *AgentSandboxCoordinator `json:"coordinator,omitempty"`
 
 	// Repository is the code the platform experiment works on, as the deployment's git host
-	// names it, and RepositoryURL the address it is cloned from. AgentImage is the image its hosted agents and
+	// names it, and RepositoryURL the address it is cloned from. AgentImage is the image its sandboxed agents and
 	// coordinator run, empty for the platform's own. All fixed at creation.
 	Repository    string `json:"repository,omitempty"`
 	RepositoryURL string `json:"repository_url,omitempty" doc:"The HTTPS address of the repository on the git host. A job's code_ref names it."`
@@ -360,7 +360,7 @@ type StatusReason struct {
 	Summary        string     `json:"summary" doc:"One short plain sentence for a person: what is wrong or happening, what it affects, and who acts. What a UI shows."`
 	OperatorDetail string     `json:"operator_detail,omitempty" doc:"What the platform's operator checks, only in answers to staff and only where an operator acts."`
 	Since          *time.Time `json:"since,omitempty" doc:"When the condition began, where it is known."`
-	WaitsFor       Waiter     `json:"waits_for,omitempty" doc:"Who acts to change the state, on every status but closed, which waits for nobody. owner: a person of its organisation, and nothing its agents or the platform do changes it (a proposal to accept, a budget below what the measured baseline needs, no researcher, a spent budget). coordinator: its hosted coordinator, and its owner where a person coordinates it, so a person is never told to wait for an agent that does not exist. platform: nobody, since the platform, an agent already at work or the clock brings the next state."`
+	WaitsFor       Waiter     `json:"waits_for,omitempty" doc:"Who acts to change the state, on every status but closed, which waits for nobody. owner: a person of its organisation, and nothing its agents or the platform do changes it (a proposal to accept, a budget below what the measured baseline needs, no researcher, a spent budget). coordinator: its sandboxed coordinator, and its owner where a person coordinates it, so a person is never told to wait for an agent that does not exist. platform: nobody, since the platform, an agent already at work or the clock brings the next state."`
 }
 
 // CloseReason is why a platform experiment closed. Nothing else closes one: a spent budget
@@ -408,9 +408,9 @@ type BaselineRaise struct {
 }
 
 // AgentMessage is one direct message from the coordinator or the owner to an agent of a platform
-// experiment, or from the owner to its hosted coordinator, told to its reader as agent.message.
+// experiment, or from the owner to its sandboxed coordinator, told to its reader as agent.message.
 type AgentMessage struct {
-	AgentID string    `json:"agent_id" doc:"The agent it was sent to, coordinator for the hosted coordinator."`
+	AgentID string    `json:"agent_id" doc:"The agent it was sent to, coordinator for the sandboxed coordinator."`
 	From    string    `json:"from" enum:"coordinator,owner" doc:"coordinator for the platform experiment's coordinator, owner for a person or an API key of its org."`
 	Text    string    `json:"text"`
 	Actor   Actor     `json:"actor"`
@@ -434,7 +434,7 @@ const (
 	MaxAgentMessagesPerHour = 6
 )
 
-// CoordinatorRecipient is the agent_id a message to the hosted coordinator is kept and told under:
+// CoordinatorRecipient is the agent_id a message to the sandboxed coordinator is kept and told under:
 // a coordinator has no agent id, and no agent's id is this.
 const CoordinatorRecipient = "coordinator"
 

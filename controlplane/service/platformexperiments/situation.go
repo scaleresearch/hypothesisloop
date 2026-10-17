@@ -25,7 +25,7 @@ type Situation struct {
 	Agents      []SituationAgent      `json:"agents" doc:"Every agent but a draft's planner. An agent's token reads its own row only."`
 	InFlight    []SituationHypothesis `json:"hypotheses_in_flight,omitempty" doc:"Each hypothesis with jobs queued or running or checked out within two hours, and who is on it: two agents on one is one idea worked twice. Absent on an agent's token."`
 	Ideas       SituationIdeas        `json:"ideas_from_people"`
-	Coordinator *SituationCoordinator `json:"coordinator,omitempty" doc:"The hosted coordinator, absent on an agent's token and where the platform hosts none."`
+	Coordinator *SituationCoordinator `json:"coordinator,omitempty" doc:"The sandboxed coordinator, absent on an agent's token and where the platform hosts none."`
 }
 
 // SituationHypothesis is one hypothesis with jobs in flight or a checkout that claims it.
@@ -164,7 +164,7 @@ type AgentBudget struct {
 	NextShareAccH  *float64 `json:"next_share_acch,omitempty" doc:"What share becomes at the next stage, at the least. Present with run.stage.next_boundary_at."`
 }
 
-// SituationCoordinator is the hosted coordinator.
+// SituationCoordinator is the sandboxed coordinator.
 type SituationCoordinator struct {
 	SummaryWrittenAt          *time.Time             `json:"summary_written_at,omitempty" doc:"When the summary was last written, absent while it never was."`
 	JobsCompletedSinceSummary int                    `json:"jobs_completed_since_summary" doc:"How many jobs of the run completed after summary_written_at, every one while it was never written: findings the summary does not hold yet."`
@@ -507,7 +507,7 @@ func (s *Service) Situation(ctx context.Context, id, agentID string, reader doma
 	if out.Ideas.Open, err = s.personIdeas.OpenPersonIdeas(ctx, id); err != nil {
 		return nil, fmt.Errorf("situation: %w", err)
 	}
-	if agentID == "" && pe.CoordinatorHosted && pe.Coordinator != nil {
+	if agentID == "" && pe.CoordinatorInAgentSandbox && pe.Coordinator != nil {
 		if out.Coordinator, err = s.situationCoordinator(ctx, pe); err != nil {
 			return nil, fmt.Errorf("situation: %w", err)
 		}
@@ -557,7 +557,7 @@ func situationAgent(row JoinedAgent, budget *AgentBudget) SituationAgent {
 	return out
 }
 
-// situationCoordinator is the hosted coordinator of pe as the situation answers it.
+// situationCoordinator is the sandboxed coordinator of pe as the situation answers it.
 func (s *Service) situationCoordinator(ctx context.Context, pe *domain.PlatformExperiment) (*SituationCoordinator, error) {
 	out := &SituationCoordinator{}
 	var err error

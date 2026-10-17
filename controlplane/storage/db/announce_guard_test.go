@@ -17,19 +17,19 @@ var announcedInserts = map[string]bool{
 	"experiments": true, "agent_quotas": true, "hypothesis_findings": true, "hypothesis_comments": true,
 	"platform_experiment_stage_advances": true, "platform_experiment_cuts": true,
 	"baseline_raises": true, "agent_messages": true, "platform_rules": true,
-	"platform_experiments": true, "experiment_signups": true, "hosted_instances": true,
+	"platform_experiments": true, "experiment_signups": true, "agentsandbox_instances": true,
 }
 
 // announcedUpdates are the columns, per table, a write of which is a change GET /watch delivers. An
 // empty set is every column.
 var announcedUpdates = map[string][]string{
-	"experiments":          {"status", "not_admitted_reason", "underperforming_metric", "held_reason", "same_hypothesis"},
-	"platform_experiments": {"status", "description", "duration_hours", "coordinator_reason", "researchers_held", "capacity_noticed_at", "goal", "proposed_at"},
-	"agent_quotas":         {},
-	"experiment_signups":   {"finished_at", "idle_noticed_at"},
-	"environment_waiters":  {"loaded"},
-	"agent_types":          {"current_version"},
-	"hosted_instances":     {"state", "activity"},
+	"experiments":            {"status", "not_admitted_reason", "underperforming_metric", "held_reason", "same_hypothesis"},
+	"platform_experiments":   {"status", "description", "duration_hours", "coordinator_reason", "researchers_held", "capacity_noticed_at", "goal", "proposed_at"},
+	"agent_quotas":           {},
+	"experiment_signups":     {"finished_at", "idle_noticed_at"},
+	"environment_waiters":    {"loaded"},
+	"agent_types":            {"current_version"},
+	"agentsandbox_instances": {"state", "activity"},
 }
 
 // appendOnly are the tables no write updates or deletes.

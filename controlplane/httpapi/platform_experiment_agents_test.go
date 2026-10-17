@@ -124,7 +124,7 @@ func (f *rosterStore) Create(context.Context, string, string, string, string, ma
 
 func (f *rosterStore) CreatesOn(context.Context, string, string) (string, error) { return "", nil }
 
-const rosterMaxHosted = 6
+const rosterMaxAgentSandboxes = 6
 
 func (f *rosterStore) ListSignups(context.Context, string) ([]string, error) {
 	ids := make([]string, 0, len(f.signups))
@@ -143,12 +143,12 @@ func (f *rosterStore) machines(more ...domain.AgentSignup) int {
 // rented counts the machines as the store does: an agent that finished holds none, and those
 // that measure the baseline are counted apart from the coordinator and the other agents.
 func (f *rosterStore) rented(more ...domain.AgentSignup) (measuring, others int) {
-	if f.pe.CoordinatorHosted {
+	if f.pe.CoordinatorInAgentSandbox {
 		others++
 	}
 	for _, s := range append(append([]domain.AgentSignup{}, f.signups...), more...) {
 		switch {
-		case !s.Hosted || s.FinishedAt != nil || s.Instance != nil && s.Instance.Stopped:
+		case !s.InAgentSandbox || s.FinishedAt != nil || s.Instance != nil && s.Instance.Stopped:
 		case s.Role == domain.SignupRoleBaseline:
 			measuring++
 		default:
@@ -161,13 +161,13 @@ func (f *rosterStore) rented(more ...domain.AgentSignup) (measuring, others int)
 // full says more would be a machine too many, or would take the one kept for the baseline.
 func (f *rosterStore) full(more domain.AgentSignup) bool {
 	measuring, others := f.rented(more)
-	return more.Hosted && (others > f.pe.MaxHosted-1 || measuring+others > f.pe.MaxHosted)
+	return more.InAgentSandbox && (others > f.pe.MaxAgentSandboxes-1 || measuring+others > f.pe.MaxAgentSandboxes)
 }
 
 func newRosterStore(status domain.PlatformExperimentStatus, maxAgents int) *rosterStore {
 	return &rosterStore{
 		pe: &domain.PlatformExperiment{
-			ID: "pe-1", ProjectID: "project-a", Status: status, MaxAgents: maxAgents, MaxHosted: rosterMaxHosted, Repository: "acme/model",
+			ID: "pe-1", ProjectID: "project-a", Status: status, MaxAgents: maxAgents, MaxAgentSandboxes: rosterMaxAgentSandboxes, Repository: "acme/model",
 		},
 		agents: map[string]*domain.Agent{},
 	}
@@ -210,7 +210,7 @@ func (f *rosterStore) Signup(_ context.Context, _ string, signup domain.AgentSig
 		return false, db.ErrMaxAgentsReached
 	}
 	if f.full(signup) {
-		return false, db.ErrMaxHostedReached
+		return false, db.ErrMaxAgentSandboxesReached
 	}
 	signup.PlatformExperimentID, signup.Name = f.pe.ID, f.agents[signup.AgentID].Name
 	f.signups = append(f.signups, signup)
@@ -225,7 +225,7 @@ func (f *rosterStore) SpawnAgent(_ context.Context, _ string, agent *domain.Agen
 		return db.ErrMaxAgentsReached
 	}
 	if f.full(signup) {
-		return db.ErrMaxHostedReached
+		return db.ErrMaxAgentSandboxesReached
 	}
 	taken := func(name string) bool {
 		for _, s := range f.signups {
@@ -316,7 +316,7 @@ func agentsRouter(t *testing.T, store *rosterStore, caller auth.Principal) http.
 }
 
 func agentsTestLaunch() platformexperiments.AgentLaunch {
-	return platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxHosted: 20}
+	return platformexperiments.AgentLaunch{AgentSandbox: true, DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxAgentSandboxes: 20}
 }
 
 // addEach makes the same request n times, as a client that wants n agents does, and returns the
@@ -357,10 +357,10 @@ var (
 	waitingCoordinator = auth.Principal{Kind: auth.KindCoordinator, PlatformExperimentID: "pe-1", OrgIDs: []string{"org-a"}}
 )
 
-func TestHostedAgentsAreCreatedForTheConfiguredLauncherAndHandedNoToken(t *testing.T) {
+func TestSandboxedAgentsAreCreatedForTheConfiguredLauncherAndHandedNoToken(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 5)
 	r := agentsRouter(t, store, staff)
-	agents := addEach(t, r, 3, `{"hosted":true,"agent_type":"hyperparameter-search","model":"claude-sonnet-5","hyperparameters":{"batch_size":64}}`)
+	agents := addEach(t, r, 3, `{"in_agentsandbox":true,"agent_type":"hyperparameter-search","model":"claude-sonnet-5","hyperparameters":{"batch_size":64}}`)
 	if len(agents) != 3 || len(store.signups) != 3 {
 		t.Fatalf("agents = %d, signups = %d, want 3 and 3", len(agents), len(store.signups))
 	}
@@ -372,10 +372,10 @@ func TestHostedAgentsAreCreatedForTheConfiguredLauncherAndHandedNoToken(t *testi
 		}
 		seen[id] = true
 		if _, has := a["token"]; has {
-			t.Errorf("a hosted agent was handed its token: %v", a)
+			t.Errorf("a sandboxed agent was handed its token: %v", a)
 		}
 		want := map[string]any{
-			"hosted": true, "agent_type": "hyperparameter-search", "model": "claude-sonnet-5",
+			"in_agentsandbox": true, "agent_type": "hyperparameter-search", "model": "claude-sonnet-5",
 			"role": "competitor", "hyperparameters": map[string]any{"batch_size": float64(64)}, "platform_experiment_id": "pe-1",
 		}
 		for key, value := range want {
@@ -413,7 +413,7 @@ func TestASelfRunAgentIsHandedTheTokenThatActsAsItAndNoLauncher(t *testing.T) {
 		t.Errorf("token = %v, want the agent:pe-1/%s token", agents[0]["token"], id)
 	}
 	// Named by its place, which is what a person reads in every list in place of the id.
-	if agents[0]["hosted"] != false || agents[0]["launcher"] != nil || agents[0]["name"] != "Researcher 1" {
+	if agents[0]["in_agentsandbox"] != false || agents[0]["launcher"] != nil || agents[0]["name"] != "Researcher 1" {
 		t.Errorf("agent = %v", agents[0])
 	}
 
@@ -443,12 +443,12 @@ func TestARegisteredAgentJoinsByIDAndJoiningAgainReturnsTheSameTokenAndChangesNo
 
 	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpOpen, domain.PlatformExpRunning, domain.PlatformExpClosed} {
 		store.pe.Status = status
-		code, again := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"agent_id":"veteran","role":"competitor","hosted":true}`)
+		code, again := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"agent_id":"veteran","role":"competitor","in_agentsandbox":true}`)
 		if code != http.StatusCreated {
 			t.Fatalf("%s: repeat status = %d: %v", status, code, again)
 		}
 		b := joined(t, again)[0]
-		if b["token"] != a["token"] || b["role"] != "baseline" || b["hosted"] != false {
+		if b["token"] != a["token"] || b["role"] != "baseline" || b["in_agentsandbox"] != false {
 			t.Errorf("%s: a repeat join changed the agent: %v", status, b)
 		}
 	}
@@ -464,21 +464,21 @@ func TestJoiningIsRefusedWithAReasonTheCallerCanActOn(t *testing.T) {
 		wantCode   int
 		wantReason string
 	}{
-		"running, nothing left":      {domain.PlatformExpRunning, "pe-1", `{}`, 409, "no_share_left"},
-		"running, a reviewer":        {domain.PlatformExpRunning, "pe-1", `{"role":"reviewer"}`, 409, "signup_closed"},
-		"closed":                     {domain.PlatformExpClosed, "pe-1", `{"hosted":true}`, 409, "signup_closed"},
-		"registered, running":        {domain.PlatformExpRunning, "pe-1", `{"agent_id":"dana"}`, 409, "no_share_left"},
-		"field full":                 {domain.PlatformExpOpen, "pe-1", `{}` + "\x00" + `{}` + "\x00" + `{}`, 409, "max_agents_reached"},
-		"registered, full":           {domain.PlatformExpOpen, "pe-1", `{}` + "\x00" + `{}` + "\x00" + `{"agent_id":"dana"}`, 409, "max_agents_reached"},
-		"no such experiment":         {domain.PlatformExpOpen, "pe-none", `{}`, 404, "experiment_not_found"},
-		"no such agent":              {domain.PlatformExpOpen, "pe-1", `{"agent_id":"ghost"}`, 404, "agent_not_found"},
-		"unknown role":               {domain.PlatformExpOpen, "pe-1", `{"role":"judge"}`, 400, "unknown_role"},
-		"unknown tier":               {domain.PlatformExpOpen, "pe-1", `{"quota_tier":"gold"}`, 400, "invalid_request"},
-		"name with agent_id":         {domain.PlatformExpOpen, "pe-1", `{"agent_id":"dana","name":"x"}`, 400, "invalid_request"},
-		"agent type not an id":       {domain.PlatformExpOpen, "pe-1", `{"agent_type":"../x"}`, 400, "invalid_request"},
-		"unknown agent type":         {domain.PlatformExpOpen, "pe-1", `{"agent_type":"prompt-search"}`, 400, "invalid_request"},
-		"unknown agent type, hosted": {domain.PlatformExpOpen, "pe-1", `{"agent_type":"prompt-search","hosted":true}`, 400, "invalid_request"},
-		"model with a space":         {domain.PlatformExpOpen, "pe-1", `{"model":"a b"}`, 400, "invalid_request"},
+		"running, nothing left":         {domain.PlatformExpRunning, "pe-1", `{}`, 409, "no_share_left"},
+		"running, a reviewer":           {domain.PlatformExpRunning, "pe-1", `{"role":"reviewer"}`, 409, "signup_closed"},
+		"closed":                        {domain.PlatformExpClosed, "pe-1", `{"in_agentsandbox":true}`, 409, "signup_closed"},
+		"registered, running":           {domain.PlatformExpRunning, "pe-1", `{"agent_id":"dana"}`, 409, "no_share_left"},
+		"field full":                    {domain.PlatformExpOpen, "pe-1", `{}` + "\x00" + `{}` + "\x00" + `{}`, 409, "max_agents_reached"},
+		"registered, full":              {domain.PlatformExpOpen, "pe-1", `{}` + "\x00" + `{}` + "\x00" + `{"agent_id":"dana"}`, 409, "max_agents_reached"},
+		"no such experiment":            {domain.PlatformExpOpen, "pe-none", `{}`, 404, "experiment_not_found"},
+		"no such agent":                 {domain.PlatformExpOpen, "pe-1", `{"agent_id":"ghost"}`, 404, "agent_not_found"},
+		"unknown role":                  {domain.PlatformExpOpen, "pe-1", `{"role":"judge"}`, 400, "unknown_role"},
+		"unknown tier":                  {domain.PlatformExpOpen, "pe-1", `{"quota_tier":"gold"}`, 400, "invalid_request"},
+		"name with agent_id":            {domain.PlatformExpOpen, "pe-1", `{"agent_id":"dana","name":"x"}`, 400, "invalid_request"},
+		"agent type not an id":          {domain.PlatformExpOpen, "pe-1", `{"agent_type":"../x"}`, 400, "invalid_request"},
+		"unknown agent type":            {domain.PlatformExpOpen, "pe-1", `{"agent_type":"prompt-search"}`, 400, "invalid_request"},
+		"unknown agent type, sandboxed": {domain.PlatformExpOpen, "pe-1", `{"agent_type":"prompt-search","in_agentsandbox":true}`, 400, "invalid_request"},
+		"model with a space":            {domain.PlatformExpOpen, "pe-1", `{"model":"a b"}`, 400, "invalid_request"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			store := newRosterStore(tc.status, 2)
@@ -517,26 +517,26 @@ func TestBaselinesAndReviewersJoinAFullField(t *testing.T) {
 	}
 }
 
-// max_agents bounds competitors only, so without a bound on machines a caller could add hosted
+// max_agents bounds competitors only, so without a bound on machines a caller could add sandboxed
 // baselines or reviewers a few at a time for as long as it liked.
-func TestHostedAgentsOfEveryRoleStopAtThePlatformsBoundOnMachines(t *testing.T) {
+func TestSandboxedAgentsOfEveryRoleStopAtThePlatformsBoundOnMachines(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 1)
-	store.pe.CoordinatorHosted = true
+	store.pe.CoordinatorInAgentSandbox = true
 	store.agents["veteran"] = &domain.Agent{ID: "veteran", Name: "Veteran", OrgID: "org-a"}
 	r := agentsRouter(t, store, staff)
-	addEach(t, r, 3, `{"hosted":true,"role":"baseline"}`)
-	addEach(t, r, 2, `{"hosted":true,"role":"reviewer"}`)
-	for _, body := range []string{`{"hosted":true,"role":"baseline"}`, `{"hosted":true,"role":"reviewer"}`, `{"hosted":true}`, `{"agent_id":"veteran","hosted":true,"role":"reviewer"}`} {
+	addEach(t, r, 3, `{"in_agentsandbox":true,"role":"baseline"}`)
+	addEach(t, r, 2, `{"in_agentsandbox":true,"role":"reviewer"}`)
+	for _, body := range []string{`{"in_agentsandbox":true,"role":"baseline"}`, `{"in_agentsandbox":true,"role":"reviewer"}`, `{"in_agentsandbox":true}`, `{"agent_id":"veteran","in_agentsandbox":true,"role":"reviewer"}`} {
 		code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", body)
-		if code != http.StatusConflict || out["reason"] != "max_hosted_reached" {
-			t.Fatalf("%s with the coordinator and five agents hosted: got = %d %v, want = 409 max_hosted_reached", body, code, out)
+		if code != http.StatusConflict || out["reason"] != "max_agentsandboxes_reached" {
+			t.Fatalf("%s with the coordinator and five agents sandboxed: got = %d %v, want = 409 max_agentsandboxes_reached", body, code, out)
 		}
 		if message, _ := out["message"].(string); !strings.Contains(message, "at most 6 machines") {
 			t.Errorf("%s: the refusal does not say the bound: %q", body, message)
 		}
 	}
-	if store.machines() != rosterMaxHosted {
-		t.Fatalf("machines = %d, want %d", store.machines(), rosterMaxHosted)
+	if store.machines() != rosterMaxAgentSandboxes {
+		t.Fatalf("machines = %d, want %d", store.machines(), rosterMaxAgentSandboxes)
 	}
 	// An agent its owner runs is no machine of the platform's.
 	addEach(t, r, 3, `{"role":"reviewer"}`)
@@ -545,26 +545,26 @@ func TestHostedAgentsOfEveryRoleStopAtThePlatformsBoundOnMachines(t *testing.T) 
 // Nothing starts without a baseline, so the agents that do not measure it never take the machine
 // one that does needs, and the refusal says what the machines are for.
 func TestOneMachineIsKeptForAnAgentThatMeasuresTheBaseline(t *testing.T) {
-	store := newRosterStore(domain.PlatformExpOpen, rosterMaxHosted)
-	store.pe.CoordinatorHosted = true
+	store := newRosterStore(domain.PlatformExpOpen, rosterMaxAgentSandboxes)
+	store.pe.CoordinatorInAgentSandbox = true
 	r := agentsRouter(t, store, staff)
-	addEach(t, r, rosterMaxHosted-2, `{"hosted":true}`)
-	for _, body := range []string{`{"hosted":true}`, `{"hosted":true,"role":"reviewer"}`} {
+	addEach(t, r, rosterMaxAgentSandboxes-2, `{"in_agentsandbox":true}`)
+	for _, body := range []string{`{"in_agentsandbox":true}`, `{"in_agentsandbox":true,"role":"reviewer"}`} {
 		code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", body)
 		message, _ := out["message"].(string)
-		if code != http.StatusConflict || out["reason"] != "max_hosted_reached" || !strings.Contains(message, "One is kept for an agent of role baseline") {
-			t.Fatalf("%s for the last machine: got = %d %v, want = 409 max_hosted_reached naming the baseline", body, code, out)
+		if code != http.StatusConflict || out["reason"] != "max_agentsandboxes_reached" || !strings.Contains(message, "One is kept for an agent of role baseline") {
+			t.Fatalf("%s for the last machine: got = %d %v, want = 409 max_agentsandboxes_reached naming the baseline", body, code, out)
 		}
 	}
-	addEach(t, r, 1, `{"hosted":true,"role":"baseline"}`)
-	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"hosted":true,"role":"baseline"}`); code != http.StatusConflict || out["reason"] != "max_hosted_reached" {
-		t.Fatalf("a second baseline agent beside the first: got = %d %v, want = 409 max_hosted_reached", code, out)
+	addEach(t, r, 1, `{"in_agentsandbox":true,"role":"baseline"}`)
+	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"in_agentsandbox":true,"role":"baseline"}`); code != http.StatusConflict || out["reason"] != "max_agentsandboxes_reached" {
+		t.Fatalf("a second baseline agent beside the first: got = %d %v, want = 409 max_agentsandboxes_reached", code, out)
 	}
 	// The first one finished without a baseline that can be declared: its machine is released,
 	// and the next takes its place.
 	finished := time.Now()
 	store.signups[len(store.signups)-1].FinishedAt = &finished
-	addEach(t, r, 1, `{"hosted":true,"role":"baseline"}`)
+	addEach(t, r, 1, `{"in_agentsandbox":true,"role":"baseline"}`)
 }
 
 // A coordinator's token outlives the close by its wind-down, and adds nothing in it.
@@ -573,7 +573,7 @@ func TestACoordinatorAddsNoAgentOnceItsExperimentClosed(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpClosed, 5)
 	store.lateShare = 1
 	r := agentsRouter(t, store, coordinator)
-	for _, body := range []string{`{"hosted":true}`, `{"hosted":true,"role":"reviewer"}`, `{}`} {
+	for _, body := range []string{`{"in_agentsandbox":true}`, `{"in_agentsandbox":true,"role":"reviewer"}`, `{}`} {
 		code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", body)
 		if code != http.StatusConflict || out["reason"] != "signup_closed" {
 			t.Fatalf("%s: got = %d %v, want = 409 signup_closed", body, code, out)
@@ -593,17 +593,17 @@ func TestACoordinatorReplacesAResearcherWhileTheRunGoesOn(t *testing.T) {
 	finished := time.Now()
 	store.signups = []domain.AgentSignup{{AgentID: "ended", Role: domain.SignupRoleCompetitor, FinishedAt: &finished}}
 	r := agentsRouter(t, store, coordinator)
-	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"hosted":true,"role":"reviewer"}`); code != http.StatusConflict || out["reason"] != "signup_closed" {
+	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"in_agentsandbox":true,"role":"reviewer"}`); code != http.StatusConflict || out["reason"] != "signup_closed" {
 		t.Fatalf("a reviewer: got = %d %v, want = 409 signup_closed", code, out)
 	}
-	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"hosted":true}`); code != http.StatusCreated {
+	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"in_agentsandbox":true}`); code != http.StatusCreated {
 		t.Fatalf("a researcher: got = %d %v, want = 201", code, out)
 	}
 	if len(store.signups) != 2 {
 		t.Fatalf("signups = %d, want the one that ended and its replacement", len(store.signups))
 	}
 	agent := agentsRouter(t, store, auth.Principal{Kind: auth.KindAgent, OrgIDs: []string{"org-a"}, ProjectID: "project-a", PlatformExperimentID: "pe-1", AgentID: "ended"})
-	if code, out := call(t, agent, "POST", "/platform-experiments/pe-1/agents", `{"hosted":true}`); code == http.StatusCreated {
+	if code, out := call(t, agent, "POST", "/platform-experiments/pe-1/agents", `{"in_agentsandbox":true}`); code == http.StatusCreated {
 		t.Fatalf("an agent's token: got = %d %v, want a refusal", code, out)
 	}
 }
@@ -611,7 +611,7 @@ func TestACoordinatorReplacesAResearcherWhileTheRunGoesOn(t *testing.T) {
 func TestAnAgentIsRemovedOnlyBeforeTheStart(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 5)
 	r := agentsRouter(t, store, staff)
-	agents := addEach(t, r, 2, `{"hosted":true}`)
+	agents := addEach(t, r, 2, `{"in_agentsandbox":true}`)
 	first, second := agents[0]["agent_id"].(string), agents[1]["agent_id"].(string)
 
 	if code, out := call(t, r, "DELETE", "/platform-experiments/pe-1/agents/"+first, ""); code != http.StatusNoContent || len(out) != 0 {
@@ -687,7 +687,7 @@ func TestOnlyACallerOfTheExperimentsOrgMayChangeOrReadItsRoster(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			store := newRosterStore(domain.PlatformExpOpen, 5)
 			r := agentsRouter(t, store, tc.caller)
-			code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"hosted":true}`)
+			code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"in_agentsandbox":true}`)
 			if code != tc.want {
 				t.Fatalf("add: got = %d %v, want = %d", code, out, tc.want)
 			}
@@ -726,20 +726,20 @@ func TestACallerMayOnlyJoinARegisteredAgentOfItsOwnOrg(t *testing.T) {
 	}
 }
 
-// Hosting needed a repository to clone, and a person with an idea and no repository could not
+// An agent sandbox needed a repository to clone, and a person with an idea and no repository could not
 // start. The agent now starts in an empty directory and the platform keeps what it pushes.
-func TestAHostedAgentJoinsAPlatformExperimentThatNamesNoRepository(t *testing.T) {
+func TestASandboxedAgentJoinsAPlatformExperimentThatNamesNoRepository(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 5)
 	store.pe.Repository = ""
 	store.agents["veteran"] = &domain.Agent{ID: "veteran", Name: "Veteran", OrgID: "org-a"}
 	r := agentsRouter(t, store, staff)
-	for _, body := range []string{`{"hosted":true}`, `{"agent_id":"veteran","hosted":true}`} {
+	for _, body := range []string{`{"in_agentsandbox":true}`, `{"agent_id":"veteran","in_agentsandbox":true}`} {
 		code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", body)
 		if code != http.StatusCreated && code != http.StatusOK {
 			t.Fatalf("%s: got = %d %v, want it joined", body, code, out)
 		}
-		if agent := joined(t, out)[0]; agent["hosted"] != true {
-			t.Errorf("%s: joined as %v, want hosted", body, agent)
+		if agent := joined(t, out)[0]; agent["in_agentsandbox"] != true {
+			t.Errorf("%s: joined as %v, want sandboxed", body, agent)
 		}
 	}
 	if len(store.signups) != 2 {
@@ -750,7 +750,7 @@ func TestAHostedAgentJoinsAPlatformExperimentThatNamesNoRepository(t *testing.T)
 func TestAnAgentNamingNoModelIsStoredRunningItsTypes(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 5)
 	r := agentsRouter(t, store, staff)
-	code, body := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"hosted":true}`)
+	code, body := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"in_agentsandbox":true}`)
 	if code != http.StatusCreated {
 		t.Fatalf("status = %d: %v", code, body)
 	}
@@ -769,7 +769,7 @@ func TestAnAgentNamingNoModelIsStoredRunningItsTypes(t *testing.T) {
 func TestHyperparametersAboveTheBoundAreRefusedAtJoin(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 200)
 	r := agentsRouter(t, store, staff)
-	big := `{"hosted":true,"hyperparameters":{"blob":"` + strings.Repeat("x", domain.MaxHyperparametersBytes) + `"}}`
+	big := `{"in_agentsandbox":true,"hyperparameters":{"blob":"` + strings.Repeat("x", domain.MaxHyperparametersBytes) + `"}}`
 	code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", big)
 	if code != http.StatusBadRequest || out["reason"] != "invalid_request" || !strings.Contains(out["message"].(string), "4096") {
 		t.Fatalf("got = %d %v, want = 400 naming the limit", code, out)
@@ -777,7 +777,7 @@ func TestHyperparametersAboveTheBoundAreRefusedAtJoin(t *testing.T) {
 	if len(store.signups) != 0 {
 		t.Fatalf("%d signups were written", len(store.signups))
 	}
-	fits := `{"hosted":true,"hyperparameters":{"blob":"` + strings.Repeat("x", domain.MaxHyperparametersBytes-len(`{"blob":""}`)) + `"}}`
+	fits := `{"in_agentsandbox":true,"hyperparameters":{"blob":"` + strings.Repeat("x", domain.MaxHyperparametersBytes-len(`{"blob":""}`)) + `"}}`
 	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", fits); code != http.StatusCreated {
 		t.Fatalf("hyperparameters of exactly the limit: got = %d %v", code, out)
 	}
@@ -927,13 +927,13 @@ func TestAFinishAnswersTheHypothesesTheAgentLeavesOpen(t *testing.T) {
 }
 
 // A researcher of an open platform experiment has no machine asked for and its instance reads
-// requested, which a coordinator reported as hosted instances that never launched. Each agent
+// requested, which a coordinator reported as sandboxed instances that never launched. Each agent
 // that waits for the start says so in the roster, for the reason its platform experiment waits.
 func TestTheRosterOfAnOpenPlatformExperimentSaysWhyAnAgentWaits(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 5)
 	r := agentsRouter(t, store, waitingCoordinator)
-	addEach(t, r, 1, `{"hosted":true,"role":"baseline"}`)
-	added := addEach(t, r, 1, `{"hosted":true}`)
+	addEach(t, r, 1, `{"in_agentsandbox":true,"role":"baseline"}`)
+	added := addEach(t, r, 1, `{"in_agentsandbox":true}`)
 	addEach(t, r, 1, `{}`)
 
 	reasonOf := func(agent map[string]any) (string, string) {
@@ -971,13 +971,13 @@ func TestTheRosterOfAnOpenPlatformExperimentSaysWhyAnAgentWaits(t *testing.T) {
 
 // The roster said which machines ran and nothing of what their agents did. Each entry answers
 // what its agent is doing now and since when, and one whose machine says nothing answers none.
-func TestTheRosterAnswersWhatEachHostedAgentIsDoing(t *testing.T) {
+func TestTheRosterAnswersWhatEachSandboxedAgentIsDoing(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpRunning, 5)
 	since := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 	running := &domain.AgentInstance{Name: "m-1", AskedAt: &since, SeenAt: &since, Reported: domain.InstanceRunning}
 	store.signups = []domain.AgentSignup{
-		{AgentID: "dana", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: running, Activity: &domain.AgentActivity{Text: "running hl job submit", At: since}},
-		{AgentID: "eli", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: running},
+		{AgentID: "dana", Role: domain.SignupRoleCompetitor, InAgentSandbox: true, Instance: running, Activity: &domain.AgentActivity{Text: "running hl job submit", At: since}},
+		{AgentID: "eli", Role: domain.SignupRoleCompetitor, InAgentSandbox: true, Instance: running},
 	}
 	code, out := call(t, agentsRouter(t, store, waitingPerson), "GET", "/platform-experiments/pe-1/agents", "")
 	if code != http.StatusOK {
@@ -995,8 +995,8 @@ func TestTheRosterAnswersWhatEachHostedAgentIsDoing(t *testing.T) {
 
 // Nobody asks for a planner: it is no agent type a request can name.
 func TestNobodyAsksForAPlanner(t *testing.T) {
-	open := &rosterStore{pe: &domain.PlatformExperiment{ID: "pe-1", ProjectID: "prj-a", Status: domain.PlatformExpOpen, MaxAgents: 5, MaxHosted: rosterMaxHosted, Repository: "acme/model"}, agents: map[string]*domain.Agent{}}
-	if code, body := call(t, agentsRouter(t, open, staff), "POST", "/platform-experiments/pe-1/agents", `{"hosted":true,"agent_type":"planner"}`); code != http.StatusBadRequest || len(open.signups) != 0 {
+	open := &rosterStore{pe: &domain.PlatformExperiment{ID: "pe-1", ProjectID: "prj-a", Status: domain.PlatformExpOpen, MaxAgents: 5, MaxAgentSandboxes: rosterMaxAgentSandboxes, Repository: "acme/model"}, agents: map[string]*domain.Agent{}}
+	if code, body := call(t, agentsRouter(t, open, staff), "POST", "/platform-experiments/pe-1/agents", `{"in_agentsandbox":true,"agent_type":"planner"}`); code != http.StatusBadRequest || len(open.signups) != 0 {
 		t.Errorf("an agent asked for as a planner: got = %d %v, want 400 and nobody joined", code, body)
 	}
 }

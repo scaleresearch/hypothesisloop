@@ -4,10 +4,10 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import useSWR from 'swr'
 import { Field, Label } from '@headlessui/react'
 import { GITHUB_NOT_CONFIGURED } from '@/lib/api/github'
-import { fetchHosting } from '@/lib/api/hosting'
+import { fetchAgentSandbox } from '@/lib/api/agentsandbox'
 import { createDraft } from '@/lib/api/planning'
 import { ApiError } from '@/lib/api/request'
-import { formDraftFromGoal, hostingRefusal, MAX_GOAL_LENGTH } from '@/lib/planning'
+import { formDraftFromGoal, agentSandboxRefusal, MAX_GOAL_LENGTH } from '@/lib/planning'
 import { useGitHubApp } from '@/lib/github-connect'
 import { GOAL_EXAMPLES } from '@/lib/goal-examples'
 import { BriefGuide } from '@/components/brief-guide'
@@ -92,8 +92,8 @@ export function GoalInput({ projectID, onCreated, onConfigure }: {
   const app = useGitHubApp()
   const plainHost = app.error instanceof ApiError && app.error.reason === GITHUB_NOT_CONFIGURED
   // Read again while the page is open, so that planning is offered again once it can start.
-  const hosting = useSWR(keys.hosting(), fetchHosting, { refreshInterval: POLL.standing, onSuccess: h => { if (h.available) setRefused(null) } })
-  const unavailable = hosting.data && !hosting.data.available ? hosting.data.unavailable ?? null : refused
+  const agentSandbox = useSWR(keys.agentSandbox(), fetchAgentSandbox, { refreshInterval: POLL.standing, onSuccess: h => { if (h.available) setRefused(null) } })
+  const unavailable = agentSandbox.data && !agentSandbox.data.available ? agentSandbox.data.unavailable ?? null : refused
   const [repository, setRepository] = useState('')
   const box = useRef<HTMLTextAreaElement>(null)
   const placeholder = useTypedExamples(touched)
@@ -115,10 +115,10 @@ export function GoalInput({ projectID, onCreated, onConfigure }: {
     try {
       onCreated(await createDraft(projectID, goal.trim(), repositoryFields(repository)))
     } catch (e) {
-      const hostingReason = hostingRefusal(e)
-      if (hostingReason) {
-        setRefused(hostingReason)
-        void hosting.mutate()
+      const agentSandboxReason = agentSandboxRefusal(e)
+      if (agentSandboxReason) {
+        setRefused(agentSandboxReason)
+        void agentSandbox.mutate()
       } else setError(errorMessage(e))
       setSending(false)
     }
@@ -165,7 +165,7 @@ export function GoalInput({ projectID, onCreated, onConfigure }: {
           </Callout>
         </div>
       )}
-      {hosting.error && <InlineError className="block px-6 pb-3">Could not check whether planning is available: {hosting.error.message}</InlineError>}
+      {agentSandbox.error && <InlineError className="block px-6 pb-3">Could not check whether planning is available: {agentSandbox.error.message}</InlineError>}
       <Inline gap="md" className="px-4 pb-4">
         {(github === 'connected' || plainHost) && (
           <Field className="flex min-w-0 items-center gap-2 pl-2">

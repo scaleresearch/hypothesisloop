@@ -195,7 +195,7 @@ type ServicesConfig struct {
 	// single /explore to discover all of it.
 	APIPort int `yaml:"api_port"`
 	// PublicAPIURL is the one address everything outside the control plane reaches this API at:
-	// a hosted agent from wherever its sandbox runs, and a cluster's runtime from inside its
+	// a sandboxed agent from wherever its sandbox runs, and a cluster's runtime from inside its
 	// cluster. It is handed to both, so it is never loopback.
 	PublicAPIURL string `yaml:"public_api_url"`
 	// MetricControllerPort serves the internal controller only; nothing agent-facing.
@@ -273,25 +273,25 @@ type AuthConfig struct {
 // AgentsConfig decides what an agent the platform runs is started from and how it is watched.
 // Which account its machine is rented on is the sandbox section's.
 type AgentsConfig struct {
-	// Image is what every hosted agent's machine boots.
+	// Image is what every sandboxed agent's machine boots.
 	Image string `yaml:"image"`
 	// DefaultModel is the model an agent runs on when it joins without naming one. It is
 	// resolved onto the agent's signup at that moment, so changing it moves new agents only.
 	DefaultModel string `yaml:"default_model"`
-	// CoordinatorModel is the model a hosted coordinator runs on when the create request names
+	// CoordinatorModel is the model a sandboxed coordinator runs on when the create request names
 	// none. It is written onto the platform experiment when it is created.
 	CoordinatorModel string `yaml:"coordinator_model"`
-	// BootLimitSeconds is how long a hosted machine may go unreported after it was asked for, or
+	// BootLimitSeconds is how long an agent sandbox may go unreported after it was asked for, or
 	// stay starting after it was first reported, before it is given up on as an exited one is.
 	BootLimitSeconds int `yaml:"boot_limit_seconds"`
-	// ProgressLimitSeconds is how long a running hosted machine may go without reporting
+	// ProgressLimitSeconds is how long a running agent sandbox may go without reporting
 	// progress before it is given up on and a restart is spent.
 	ProgressLimitSeconds int `yaml:"progress_limit_seconds"`
 	// MaxNewInstancesPerAnswer is how many machines one pass over the sandbox provider creates.
 	MaxNewInstancesPerAnswer int `yaml:"max_new_instances_per_answer"`
-	// MaxHostedPerPlatformExperiment is how many machines the platform runs for one platform
-	// experiment: its hosted agents of every role and its coordinator.
-	MaxHostedPerPlatformExperiment int `yaml:"max_hosted_per_platform_experiment"`
+	// MaxAgentSandboxesPerPlatformExperiment is how many machines the platform runs for one platform
+	// experiment: its sandboxed agents of every role and its coordinator.
+	MaxAgentSandboxesPerPlatformExperiment int `yaml:"max_agentsandboxes_per_platform_experiment"`
 	// IdleNoticeMinutes is how long a researcher of a running platform experiment may go with no
 	// job of its own on the platform before it and the coordinator are told (agent.idle), and how
 	// long a run's capacity may hold places beyond its queued jobs before the coordinator is told
@@ -299,14 +299,14 @@ type AgentsConfig struct {
 	IdleNoticeMinutes int `yaml:"idle_notice_minutes"`
 }
 
-// ModelsConfig is whose models hosted agents run on. The control plane holds that provider's
-// credential, from the environment, and makes every model call of a hosted agent for it
+// ModelsConfig is whose models sandboxed agents run on. The control plane holds that provider's
+// credential, from the environment, and makes every model call of a sandboxed agent for it
 // (httpapi/modelproxy), so no agent's machine holds the credential.
 type ModelsConfig struct {
 	Provider string `yaml:"provider"`
 }
 
-// ModelProviderAnthropic is Claude, which hosted agents run through Claude Code.
+// ModelProviderAnthropic is Claude, which sandboxed agents run through Claude Code.
 const ModelProviderAnthropic = "anthropic"
 
 // PlanningConfig bounds a draft: a platform experiment being planned from one sentence by an

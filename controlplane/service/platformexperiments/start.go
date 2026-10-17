@@ -196,8 +196,8 @@ func maxAgentsReached(limit int) error {
 	return refuseSignup(409, "max_agents_reached", "max_agents is %d and that many researchers (agents of role competitor) are at work. One that finished, was cut, was replaced or lost its machine with no restart left no longer counts, and agents of role baseline, reviewers and the coordinator never do: the owner raises max_agents, or the agent joins with another role", limit)
 }
 
-func maxHostedReached(limit int) string {
-	return fmt.Sprintf("the platform runs at most %d machines for one platform experiment at once. One is kept for an agent of role baseline, which measures the baseline nothing starts without, and its coordinator and its other hosted agents take the rest. An agent that finished holds none, nor does one whose machine stopped with no restart left", limit)
+func maxAgentSandboxesReached(limit int) string {
+	return fmt.Sprintf("the platform runs at most %d machines for one platform experiment at once. One is kept for an agent of role baseline, which measures the baseline nothing starts without, and its coordinator and its other sandboxed agents take the rest. An agent that finished holds none, nor does one whose machine stopped with no restart left", limit)
 }
 
 // Signup gives a registered agent its place in a platform experiment: a fixed role, and
@@ -235,8 +235,8 @@ func (s *Service) Signup(ctx context.Context, platformExpID string, signup domai
 	if errors.Is(err, db.ErrMaxAgentsReached) {
 		return maxAgentsReached(pe.MaxAgents)
 	}
-	if errors.Is(err, db.ErrMaxHostedReached) {
-		return refuseSignup(409, "max_hosted_reached", "%s", maxHostedReached(pe.MaxHosted))
+	if errors.Is(err, db.ErrMaxAgentSandboxesReached) {
+		return refuseSignup(409, "max_agentsandboxes_reached", "%s", maxAgentSandboxesReached(pe.MaxAgentSandboxes))
 	}
 	// Not found either way: an agent of another org is not this experiment's to learn of.
 	if errors.Is(err, db.ErrAgentOutsideOrg) {
@@ -308,7 +308,7 @@ func (s *Service) notStartable(ctx context.Context, pe *domain.PlatformExperimen
 }
 
 func noResearchers(id string) error {
-	return refusal.Refuse(http.StatusConflict, "no_researchers", fmt.Sprintf("platform experiment %s has its baseline and no researcher to share its budget: add one with `hl platform-experiments agents add --hosted --platform-experiment %s` (POST /platform-experiments/%s/agents), and the platform starts the run", id, id, id))
+	return refusal.Refuse(http.StatusConflict, "no_researchers", fmt.Sprintf("platform experiment %s has its baseline and no researcher to share its budget: add one with `hl platform-experiments agents add --in-agentsandbox --platform-experiment %s` (POST /platform-experiments/%s/agents), and the platform starts the run", id, id, id))
 }
 
 // start makes the open pe running and allocates each agent that shares the budget its quota. It

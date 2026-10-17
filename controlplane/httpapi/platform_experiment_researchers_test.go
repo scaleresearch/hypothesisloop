@@ -7,12 +7,12 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// A create with a hosted coordinator states who starts in researchers, and the platform creates
+// A create with a sandboxed coordinator states who starts in researchers, and the platform creates
 // them in the same write as the experiment and its baseline agent, each with its entry's agent
 // type, model and hyperparameters: nothing is left for the browser to add one call at a time.
-func TestCreateWithAHostedCoordinatorCreatesItsResearchersInTheSameWrite(t *testing.T) {
-	store, create := hostingAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
-	code, out := create(run(map[string]any{"coordinator_hosted": true, "max_agents": 4, "researchers": []map[string]any{
+func TestCreateWithASandboxedCoordinatorCreatesItsResearchersInTheSameWrite(t *testing.T) {
+	store, create := agentSandboxAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
+	code, out := create(run(map[string]any{"coordinator_in_agentsandbox": true, "max_agents": 4, "researchers": []map[string]any{
 		{"count": 2},
 		{"agent_type": "data-search", "model": "model-2", "hyperparameters": map[string]any{"lr": 0.1}, "count": 1},
 	}}))
@@ -35,12 +35,12 @@ func TestCreateWithAHostedCoordinatorCreatesItsResearchersInTheSameWrite(t *test
 // Every answer about a platform experiment counts the researchers at work, as the store counts them,
 // against each entry of the pool in its order and outside it.
 func TestTheAnswerCountsTheResearchersAtWorkPerPoolEntryAndOutsideIt(t *testing.T) {
-	store, create := hostingAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
+	store, create := agentSandboxAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
 	store.atWork = map[domain.PoolKey]int{
 		{AgentType: "generalist"}:            2,
 		{AgentType: "hyperparameter-search"}: 3,
 	}
-	code, out := create(run(map[string]any{"coordinator_hosted": true, "max_agents": 6, "researchers": []map[string]any{
+	code, out := create(run(map[string]any{"coordinator_in_agentsandbox": true, "max_agents": 6, "researchers": []map[string]any{
 		{"count": 2},
 		{"agent_type": "data-search", "count": 1},
 	}}))
@@ -63,15 +63,15 @@ func TestResearchersAreCheckedBeforeAnythingIsCreated(t *testing.T) {
 		"a count of none":       {{"count": 0}},
 		"a model no agent runs": {{"model": "a model with spaces", "count": 1}},
 	} {
-		store, create := hostingAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
-		code, out := create(run(map[string]any{"coordinator_hosted": true, "researchers": researchers}))
+		store, create := agentSandboxAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
+		code, out := create(run(map[string]any{"coordinator_in_agentsandbox": true, "researchers": researchers}))
 		if code != http.StatusUnprocessableEntity || out["reason"] != "invalid_agents" || len(store.created) != 0 {
 			t.Errorf("%s: got = %d %v, created %d, want 422 invalid_agents and nothing", name, code, out, len(store.created))
 		}
 	}
 	// Researchers are optional: the cap alone creates no researcher.
-	store, create := hostingAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
-	if code, out := create(run(map[string]any{"coordinator_hosted": true})); code != http.StatusCreated || len(store.researchers) != 0 {
+	store, create := agentSandboxAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
+	if code, out := create(run(map[string]any{"coordinator_in_agentsandbox": true})); code != http.StatusCreated || len(store.researchers) != 0 {
 		t.Errorf("without researchers: got = %d %v and %d researchers, want 201 and none", code, out, len(store.researchers))
 	}
 }

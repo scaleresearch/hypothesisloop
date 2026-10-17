@@ -1,4 +1,4 @@
-# The image every hosted agent runs: the agent harness, git/Claude Code plumbing, and the
+# The image every sandboxed agent runs: the agent harness, git/Claude Code plumbing, and the
 # read-only HL_REFERENCE files, nothing of any one experiment. An agent image of its own
 # (agent_image) is built FROM this one.
 #

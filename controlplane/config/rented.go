@@ -8,7 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
-// SandboxConfig is the provider account hosted agents and coordinators run on. Left out, the
+// SandboxConfig is the provider account sandboxed agents and coordinators run on. Left out, the
 // deployment hosts nothing: every request that would host an agent is refused.
 type SandboxConfig struct {
 	// Name is part of every instance name, hl-agent-<name>-<the platform's name for it>: the

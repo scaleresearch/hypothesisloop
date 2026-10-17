@@ -44,7 +44,7 @@ func registerPlanning(doc *Doc, experiments *platformexperiments.Service, logger
 			"The platform makes the same accept by itself at accepts_at, at the proposal's own budget, length, baseline_minutes and researchers, for the person who created the draft, unless a person accepted, held or closed it or changed its goal first; one the check refuses then waits for a person. A proposal with questions has no accepts_at and waits for a person to answer them. " +
 			"409 invalid_transition for anything but a draft with a proposal, which a change of its goal takes back until its planner answers again; 422 with the proposal's reasons when the stated cost, baseline_minutes or agents do not pass its check, " +
 			"accelerator_unreachable among them when the proposal's accelerator_type is on no cluster the org's jobs can be placed on now, and no_cluster_for_image when none that has it runs the proposal's image any more; " +
-			"503 hosting_not_configured when nothing could run it. A draft's own planner cannot accept it.",
+			"503 agentsandbox_not_configured when nothing could run it. A draft's own planner cannot accept it.",
 	}, a.acceptDraft)
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "hold-draft", Method: "POST", Path: "/platform-experiments/{id}/hold",
@@ -76,7 +76,7 @@ func registerPlanning(doc *Doc, experiments *platformexperiments.Service, logger
 		Description: "Creates a platform experiment in status draft from goal, one sentence saying what the caller wants to find out. " +
 			"A draft has no budget, no metrics, and one agent, its planner, which the platform runs (role planner, in the roster like any agent) " +
 			"and nobody else joins: the planner works out how to measure the goal and proposes the metrics, " +
-			"the brief, the hardware, the budget and the agents, and it opens only when that proposal is accepted: by a person, or by the platform as proposed at accepts_at. Until then its max_agents is the most researchers a proposal may name: max_hosted less the coordinator and the baseline agent an accepted draft is given. A draft takes no job, so nothing is measured " +
+			"the brief, the hardware, the budget and the agents, and it opens only when that proposal is accepted: by a person, or by the platform as proposed at accepts_at. Until then its max_agents is the most researchers a proposal may name: max_agentsandboxes less the coordinator and the baseline agent an accepted draft is given. A draft takes no job, so nothing is measured " +
 			"and no compute is spent until then. Its name is the goal cut short until the proposal names it. POST /platform-experiments creates one whole instead, " +
 			"and states what a run costs itself. Closing a draft (POST /platform-experiments/{id}/close) abandons it. " +
 			"Its planner and later its agents keep their code in repository: the one the request names, checked as on POST /platform-experiments, or a private one the platform creates on the GitHub account the org connected. " +
@@ -84,7 +84,7 @@ func registerPlanning(doc *Doc, experiments *platformexperiments.Service, logger
 			"A repository the platform creates is created after this answers: the draft is answered without repository and with status_reason repository_creating, and its planner starts once the repository is there. " +
 			"When GitHub does not create it the draft is closed with close_reason repository_not_created, and its status_reason message says what GitHub answered. " +
 			"On a deployment whose git host is plain, repository is a name under the host's root and is required: 422 repository_required without it, repository_not_reachable when it does not answer git. " +
-			"422 invalid_goal for a goal that is empty or over the length, invalid_continues for a continues that names no closed platform experiment of the project and repository with a declared baseline. 503 hosting_not_configured when the deployment has no sandbox provider to run the planner on.",
+			"422 invalid_goal for a goal that is empty or over the length, invalid_continues for a continues that names no closed platform experiment of the project and repository with a declared baseline. 503 agentsandbox_not_configured when the deployment has no sandbox provider to run the planner on.",
 	}, a.createDraft)
 }
 

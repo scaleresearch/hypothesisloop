@@ -70,12 +70,12 @@ var statusWaiters = map[string]Waiter{
 
 // WaitsFor is who acts on a platform experiment that answers reason. Where it has no coordinator
 // the platform hosts, a person coordinates it, so what its coordinator would do is its owner's.
-func WaitsFor(reason string, coordinatorHosted bool) (Waiter, error) {
+func WaitsFor(reason string, coordinatorInAgentSandbox bool) (Waiter, error) {
 	who, known := statusWaiters[reason]
 	if !known {
 		return "", fmt.Errorf("status reason %q names nobody it waits for", reason)
 	}
-	if who == WaitsForCoordinator && !coordinatorHosted {
+	if who == WaitsForCoordinator && !coordinatorInAgentSandbox {
 		return WaitsForOwner, nil
 	}
 	return who, nil

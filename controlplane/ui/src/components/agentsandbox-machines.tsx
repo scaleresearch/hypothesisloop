@@ -7,7 +7,7 @@ import type { AgentInstance, PlatformExperiment } from '@/types/api'
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`
 
 /**
- * What the machines of a hosted experiment are doing, in one sentence and what comes next. The
+ * What the machines of a sandboxed experiment are doing, in one sentence and what comes next. The
  * first minutes after an experiment starts show no hypothesis, no job and no metric, and this
  * is what says that something is happening.
  */
@@ -28,7 +28,7 @@ function machinesStatus(instances: AgentInstance[], jobs: number): string | null
 }
 
 /** The status of the machines of a running experiment, under its title. Nothing for an experiment with none. */
-export function HostedMachines({ pe, jobs }: { pe: PlatformExperiment; jobs: number }) {
+export function AgentSandboxMachines({ pe, jobs }: { pe: PlatformExperiment; jobs: number }) {
   const { data: agents } = useRoster(pe)
   if (pe.status !== 'running' || !agents) return null
   const instances = [pe.coordinator?.instance, ...agents.map(a => a.instance)].filter((i): i is AgentInstance => !!i)

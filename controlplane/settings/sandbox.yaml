@@ -1,5 +1,5 @@
 # The sandbox section of the settings: one provider account, on which the control plane rents a
-# machine for every hosted agent and coordinator. A deployment that hosts agents adds it to its
+# machine for every sandboxed agent and coordinator. A deployment that hosts agents adds it to its
 # settings file. Its provider section is one of provider.<name>.yaml beside this file.
 sandbox:
   # 1 to 16 lowercase letters and digits, part of every instance name,

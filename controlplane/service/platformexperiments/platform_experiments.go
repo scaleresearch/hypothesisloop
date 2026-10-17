@@ -48,7 +48,7 @@ type Store interface {
 	// db.ErrPlatformExperimentNotFound.
 	RemovePlatformExperiment(ctx context.Context, id string, by domain.Actor) error
 	// ReopenPlatformExperiment sets a closed run that started running again until endsAt, its
-	// hosted coordinator on coordinatorModel unless it is empty, and takes back what the close
+	// sandboxed coordinator on coordinatorModel unless it is empty, and takes back what the close
 	// wrote: db.ErrNotReopenable, db.ErrPlatformExperimentNotFound.
 	ReopenPlatformExperiment(ctx context.Context, id string, endsAt time.Time, durationHours float64, coordinatorModel string) error
 	// UpdatePlatformExperiment writes pe only if it is still in expectedStatus — see the db
@@ -140,7 +140,7 @@ type Store interface {
 	// SendAgentMessages stores a message to each agent named, or with none to every researcher at
 	// work, or stores none (see the db implementation for its refusals).
 	SendAgentMessages(ctx context.Context, platformExpID string, to []string, text string, sender domain.Actor) ([]domain.AgentMessage, []db.MessagesRateLimited, error)
-	// SendCoordinatorMessage stores a message of a person or a key to the hosted coordinator, or
+	// SendCoordinatorMessage stores a message of a person or a key to the sandboxed coordinator, or
 	// none (see the db implementation for its refusals).
 	SendCoordinatorMessage(ctx context.Context, platformExpID, text string, sender domain.Actor) (*domain.AgentMessage, error)
 	// ListAgentMessages is the messages sent in a platform experiment, to agentID alone unless it
@@ -239,7 +239,7 @@ type Service struct {
 	capacityFreshness time.Duration
 	clusters          ClusterRegistry
 	podResources      domain.PodResources
-	// launch is what a hosted agent is launched with (WithAgentLaunch).
+	// launch is what a sandboxed agent is launched with (WithAgentLaunch).
 	launch AgentLaunch
 	// planning is what bounds a draft (WithPlanning).
 	planning Planning
@@ -357,14 +357,14 @@ type CreatePlatformExperimentRequest struct {
 	Continues         string    `json:"continues,omitempty" doc:"The id of a closed platform experiment of the same project to carry on, which keeps its code in the repository this one names. Its baseline starts from the commit of that run's baseline job, so both are measured by the same harness. It keeps the metric keys and directions of that run: 422 invalid_metrics for others. Left out, it starts fresh. 422 invalid_continues for one that is no closed platform experiment of the project, keeps its code in another repository or declared no baseline."`
 	StartsAt          time.Time `json:"starts_at" required:"false" doc:"When its baseline begins to be measured, for a later start than this create. Left out, or past, it is this create."`
 
-	// coordinator is CoordinatorHosted resolved by CreateExperiment: which model.
-	coordinator *domain.HostedCoordinator
-	// agents and signups are the agents created with it (hostedAgents), none without a hosted
+	// coordinator is CoordinatorInAgentSandbox resolved by CreateExperiment: which model.
+	coordinator *domain.AgentSandboxCoordinator
+	// agents and signups are the agents created with it (sandboxedAgents), none without a sandboxed
 	// coordinator.
 	agents  []*domain.Agent
 	signups []domain.AgentSignup
-	// maxHosted is how many machines the platform may run for the experiment, from config.
-	maxHosted int
+	// maxAgentSandboxes is how many machines the platform may run for the experiment, from config.
+	maxAgentSandboxes int
 	// createdBy is whose credential the request came with.
 	createdBy *domain.Actor
 	// repository is where it keeps its code, as CreateExperiment resolved the request's repository

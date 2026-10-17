@@ -1,7 +1,7 @@
-// Package hostingapi is what the launcher of hosted agents and the platform say to each other:
+// Package agentsandbox is what the launcher of sandboxed agents and the platform say to each other:
 // what the launcher observed on its provider account, and the machines the platform decides it
 // keeps.
-package hostingapi
+package agentsandbox
 
 // Observed is what the launcher found on its provider account: every instance whose name starts
 // with its own prefix, by the name the decider gave it.
@@ -69,7 +69,7 @@ type HeldMachine struct {
 	Machine string
 }
 
-// The lines a hosted agent's harness prints while it works, which the launcher reads from its
+// The lines a sandboxed agent's harness prints while it works, which the launcher reads from its
 // output: a progress marker, a sentence of what the agent is doing, and what the harness observes
 // of itself. Each is its prefix and a space before what it says: the launcher takes a marker and a
 // state of at most their bound of characters, and cuts a sentence to its own.
@@ -84,7 +84,7 @@ const (
 	ProgressIntervalSeconds = 15
 )
 
-// The environment a hosted agent's machine is started with: where the platform is and the
+// The environment a sandboxed agent's machine is started with: where the platform is and the
 // agent's token.
 const (
 	EnvAPIURL = "API_URL"

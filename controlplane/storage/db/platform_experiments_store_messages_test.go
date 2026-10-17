@@ -136,8 +136,8 @@ func TestTheMessageAllowanceCountsTheLastHour(t *testing.T) {
 	}
 }
 
-// A person's message to the hosted coordinator is told to its stream alone, as agent.message to
-// coordinator from the owner, live and replayed, and is refused where no coordinator is hosted,
+// A person's message to the sandboxed coordinator is told to its stream alone, as agent.message to
+// coordinator from the owner, live and replayed, and is refused where no coordinator is sandboxed,
 // past the hourly limit and once closed.
 func TestAMessageToTheCoordinatorIsToldToItsStreamAlone(t *testing.T) {
 	pool := eventsTestDB(t)
@@ -148,9 +148,9 @@ func TestAMessageToTheCoordinatorIsToldToItsStreamAlone(t *testing.T) {
 	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist')`, peID, agentID)
 	staff := domain.Actor{Kind: domain.ActorStaff}
 	if _, err := pes.SendCoordinatorMessage(ctx, peID, "look at the gap", staff); !errors.Is(err, ErrNoCoordinator) {
-		t.Fatalf("with no hosted coordinator: got = %v, want %v", err, ErrNoCoordinator)
+		t.Fatalf("with no sandboxed coordinator: got = %v, want %v", err, ErrNoCoordinator)
 	}
-	exec(t, pool, `UPDATE platform_experiments SET coordinator_hosted = true WHERE id = $1`, peID)
+	exec(t, pool, `UPDATE platform_experiments SET coordinator_in_agentsandbox = true WHERE id = $1`, peID)
 	before := cursorNow(t, pool)
 
 	sent, err := pes.SendCoordinatorMessage(ctx, peID, "look at the gap", staff)

@@ -20,8 +20,8 @@ import (
 // A draft names its repository, or the account the platform creates one on after this returns
 // (RepositoriesToCreate).
 func (s *Store) CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup) error {
-	if pe.Status != domain.PlatformExpDraft || signup.AgentID != planner.ID || signup.Role != domain.SignupRolePlanner || !signup.Hosted {
-		return fmt.Errorf("platform_experiments_store.CreateDraft: a draft is created with status draft and its hosted planner, got status %s and signup %+v", pe.Status, signup)
+	if pe.Status != domain.PlatformExpDraft || signup.AgentID != planner.ID || signup.Role != domain.SignupRolePlanner || !signup.InAgentSandbox {
+		return fmt.Errorf("platform_experiments_store.CreateDraft: a draft is created with status draft and its sandboxed planner, got status %s and signup %+v", pe.Status, signup)
 	}
 	if (pe.Repository == "") == (pe.RepositoryAccount == "") {
 		return fmt.Errorf("platform_experiments_store.CreateDraft: a draft names its repository or the account one is created on, got repository %q and account %q", pe.Repository, pe.RepositoryAccount)
@@ -54,9 +54,9 @@ VALUES ($1, $2, $3, $4)`, planner.ID, planner.Name, planner.OrgID, planner.Creat
 			return fmt.Errorf("platform_experiments_store.CreateDraft: %w", err)
 		}
 		if _, err := tx.Exec(ctx, `
-INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, agent_type, hyperparameters, model, added_by_kind, added_by_id)
+INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, in_agentsandbox, agent_type, hyperparameters, model, added_by_kind, added_by_id)
 VALUES ($1, $2, NOW(), $3, COALESCE(NULLIF($4, ''), (SELECT default_quota_tier FROM platform_experiments WHERE id = $1)), $5, $6, $7, $8, $9, $10)`, pe.ID, signup.AgentID, string(signup.Role), string(signup.QuotaTier),
-			signup.Hosted, agentType, hyperparameters, model, string(addedBy.Kind), addedBy.ID); err != nil {
+			signup.InAgentSandbox, agentType, hyperparameters, model, string(addedBy.Kind), addedBy.ID); err != nil {
 			return fmt.Errorf("platform_experiments_store.CreateDraft: sign the planner up: %w", err)
 		}
 		tx.agentActivity(pe.ID, signup.AgentID, domain.ActivitySignedUp)
@@ -113,7 +113,7 @@ type Proposed struct {
 	KeepPlanner time.Duration
 	// AcceptsAt is when the platform accepts the proposal as proposed, nil for never.
 	AcceptsAt *time.Time
-	// Baseline is the agent that is to measure the baseline, signed up hosted as BaselineSignup
+	// Baseline is the agent that is to measure the baseline, signed up sandboxed as BaselineSignup
 	// says when the draft has no agent of role baseline yet. Its machine starts while AcceptsAt
 	// is set (launcherAgentsFrom), so that it is up when the proposal is accepted. nil signs up
 	// nobody.
@@ -127,8 +127,8 @@ type Proposed struct {
 // (plannerKeptSQL). The draft's baseline agent is signed up in the same write, once.
 // ErrNotDraft, ErrPlanningOver, and ErrGoalChanged once the draft has another goal.
 func (s *Store) SetProposal(ctx context.Context, id string, goalVersion int, proposal []byte, p Proposed) error {
-	if p.Baseline != nil && (p.BaselineSignup.AgentID != p.Baseline.ID || p.BaselineSignup.Role != domain.SignupRoleBaseline || !p.BaselineSignup.Hosted) {
-		return fmt.Errorf("platform_experiments_store.SetProposal: a proposal signs up a hosted agent of role baseline, got %+v", p.BaselineSignup)
+	if p.Baseline != nil && (p.BaselineSignup.AgentID != p.Baseline.ID || p.BaselineSignup.Role != domain.SignupRoleBaseline || !p.BaselineSignup.InAgentSandbox) {
+		return fmt.Errorf("platform_experiments_store.SetProposal: a proposal signs up a sandboxed agent of role baseline, got %+v", p.BaselineSignup)
 	}
 	return s.write(ctx, func(tx *Write) error {
 		err := answerDraftTx(ctx, tx, id, goalVersion, `
@@ -190,9 +190,9 @@ VALUES ($1, $2, $3, $4)`, agent.ID, agent.Name, agent.OrgID, agent.CreatedAt); e
 		return err
 	}
 	if _, err := tx.Exec(ctx, `
-INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, agent_type, hyperparameters, model, added_by_kind, added_by_id)
+INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, in_agentsandbox, agent_type, hyperparameters, model, added_by_kind, added_by_id)
 VALUES ($1, $2, NOW(), $3, COALESCE(NULLIF($4, ''), (SELECT default_quota_tier FROM platform_experiments WHERE id = $1)), $5, $6, $7, $8, $9, $10)`, id, signup.AgentID, string(signup.Role), string(signup.QuotaTier),
-		signup.Hosted, agentType, hyperparameters, model, string(addedBy.Kind), addedBy.ID); err != nil {
+		signup.InAgentSandbox, agentType, hyperparameters, model, string(addedBy.Kind), addedBy.ID); err != nil {
 		return fmt.Errorf("sign the baseline agent up: %w", err)
 	}
 	tx.agentActivity(id, signup.AgentID, domain.ActivitySignedUp)
@@ -274,9 +274,9 @@ var ErrNothingProposed = errors.New("nothing is proposed")
 // accepts stated, and who accepted it, when and with which answers, beside the proposal kept as proposed; its baseline is measured from its StartsAt, and it is open until its
 // BaselineDueAt. Its planner has nothing left to answer, so the time its machine was kept for a
 // change of the goal ends with the accept. The limits a signup holds are held here too
-// (ErrMaxAgentsReached, ErrMaxHostedReached).
+// (ErrMaxAgentsReached, ErrMaxAgentSandboxesReached).
 func (s *Store) AcceptDraft(ctx context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error {
-	if pe.Coordinator == nil || !pe.CoordinatorHosted {
+	if pe.Coordinator == nil || !pe.CoordinatorInAgentSandbox {
 		return errors.New("platform_experiments_store.AcceptDraft: an accepted draft is run by a coordinator the platform hosts")
 	}
 	metrics, err := json.Marshal(pe.Metrics)
@@ -324,7 +324,7 @@ UPDATE platform_experiments
 SET status = 'open', `+statusMoved+`, name = $2, description = $3, budget_accelerator_hours = $4, max_agents = $5, metrics = $6,
     report_interval_seconds = $7, starts_at = $14, ends_at = $8, stages = $9, current_stage = 1,
     default_quota_tier = $10, max_concurrent_accelerators = $11,
-    coordinator_hosted = true, coordinator_model = NULLIF($12, ''), duration_hours = $13, updated_at = now(),
+    coordinator_in_agentsandbox = true, coordinator_model = NULLIF($12, ''), duration_hours = $13, updated_at = now(),
     planner_ends_at = LEAST(planner_ends_at, now()), accepts_at = NULL,
     accepted_at = $15, accepted_by_kind = $16, accepted_by_id = $17, accepted_answers = $18, researchers = $19
 WHERE id = $1`, pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents, metrics,
@@ -421,7 +421,7 @@ RETURNING status, goal_version, (SELECT agent_id FROM experiment_signups WHERE p
 			// A planner whose machine ended because its work was done is asked for under a new
 			// launch, with its own restarts: a launch the launcher's reconcile does not know spends
 			// none of the old one's. One whose machine is still there keeps it and its launch.
-			if _, err := tx.Exec(ctx, `UPDATE hosted_instances SET launch = ''
+			if _, err := tx.Exec(ctx, `UPDATE agentsandbox_instances SET launch = ''
 WHERE platform_experiment_id = $1 AND agent_id = $2 AND name = ''`, id, recipient); err != nil {
 				return fmt.Errorf("platform_experiments_store.SetGoal: renew the planner's launch: %w", err)
 			}

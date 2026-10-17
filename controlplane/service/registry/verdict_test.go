@@ -17,7 +17,7 @@ func jobOn(id, hypothesisID string, status domain.ExperimentStatus) *domain.Expe
 	return &domain.Experiment{ID: id, HypothesisID: hypothesisID, PlatformExperimentID: "pe-1", Status: status}
 }
 
-// Six hosted agents with the same evidence, one run each and no measured baseline, called their
+// Six sandboxed agents with the same evidence, one run each and no measured baseline, called their
 // hypotheses confirmed, inconclusive and open, and a summary repeated a win over a baseline
 // nobody ran. A verdict is a claim about a difference, so the record has to hold both sides of
 // it and a repeat, or the agent's own words for why it holds without.

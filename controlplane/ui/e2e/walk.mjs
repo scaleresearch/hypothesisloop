@@ -1,4 +1,4 @@
-// Walks the path of a new person on the hosted stack: sign in, open the full form behind
+// Walks the path of a new person on a stack that rents: sign in, open the full form behind
 // Advanced on the home page, pick a repository, Create and run,
 // and watch the experiment. It rents real machines, so it is run by hand:
 //   node e2e/walk.mjs [--until form|filled|created|done] [--off cluster,cluster]
@@ -123,7 +123,7 @@ async function main() {
     await form.getByText(/Filled in from|has no \.hypothesisloop|Could not read/).waitFor()
     passed('form-repository-chosen')
     await form.getByRole('button', { name: 'Next: budget and rules' }).click()
-    await form.getByRole('button', { name: 'Hosted agents' }).click()
+    await form.getByRole('button', { name: 'Sandboxed agents' }).click()
     await form.getByLabel('Researchers').fill(String(RESEARCHERS))
     passed('form-competition-settings')
     if (until === 'filled') return

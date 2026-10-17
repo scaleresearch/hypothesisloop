@@ -1,4 +1,4 @@
-package hosting
+package agentsandbox
 
 import (
 	"context"
@@ -14,10 +14,10 @@ import (
 )
 
 // launcherStore is the decider's store in memory, with the conditions the database's own
-// statements apply, for tests that follow a hosted machine over several reconciles.
+// statements apply, for tests that follow an agent sandbox over several reconciles.
 type launcherStore struct {
 	mu sync.Mutex
-	// ByLauncher holds the hosted agents under any keys, Instance set on every one.
+	// ByLauncher holds the sandboxed agents under any keys, Instance set on every one.
 	ByLauncher   map[string][]db.LauncherAgent
 	Coordinators []db.LauncherCoordinator
 	// Err fails the listing, and WriteErr every write for the agent id it names.
@@ -53,7 +53,7 @@ type launcherStore struct {
 
 var epoch = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
-// agents is every hosted agent, in the order of its key.
+// agents is every sandboxed agent, in the order of its key.
 func (s *launcherStore) agents() []db.LauncherAgent {
 	var all []db.LauncherAgent
 	for _, key := range slices.Sorted(maps.Keys(s.ByLauncher)) {
@@ -130,7 +130,7 @@ func (s *launcherStore) Find(platformExpID, agentID string) *domain.AgentInstanc
 			return agent.Instance
 		}
 	}
-	panic("hosting test: nothing hosted as " + platformExpID + "/" + agentID)
+	panic("agentsandbox test: nothing sandboxed as " + platformExpID + "/" + agentID)
 }
 
 func (s *launcherStore) AskInstance(_ context.Context, platformExpID, agentID, name, launch string) error {
@@ -157,7 +157,7 @@ func (s *launcherStore) AskInstance(_ context.Context, platformExpID, agentID, n
 
 func (s *launcherStore) ObserveInstance(_ context.Context, platformExpID, agentID, name, state string, progress *string, progressLimit time.Duration, activity, machine string) error {
 	if machine == "" {
-		return fmt.Errorf("hosting test: %s is reported with no machine id", name)
+		return fmt.Errorf("agentsandbox test: %s is reported with no machine id", name)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

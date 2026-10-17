@@ -90,10 +90,10 @@ func (s *Service) createDraft(ctx context.Context, projectID, goal, continues st
 	if launch.DefaultModel == "" {
 		return nil, errors.New("platform_experiments.CreateDraft: no agent launch settings, and a draft is planned by an agent the platform runs")
 	}
-	if MaxProposedResearchers(launch.MaxHosted) < 1 {
-		return nil, fmt.Errorf("platform_experiments.CreateDraft: the platform runs %d machines for one platform experiment (agents.max_hosted_per_platform_experiment), and an accepted draft takes three at least: its coordinator, its baseline agent and one researcher", launch.MaxHosted)
+	if MaxProposedResearchers(launch.MaxAgentSandboxes) < 1 {
+		return nil, fmt.Errorf("platform_experiments.CreateDraft: the platform runs %d machines for one platform experiment (agents.max_agentsandboxes_per_platform_experiment), and an accepted draft takes three at least: its coordinator, its baseline agent and one researcher", launch.MaxAgentSandboxes)
 	}
-	if err := requireHosting(launch.Hosting); err != nil {
+	if err := requireAgentSandbox(launch.AgentSandbox); err != nil {
 		return nil, err
 	}
 	if err := s.requireContinuable(ctx, projectID, repository.Named, continues); err != nil {
@@ -118,7 +118,7 @@ func (s *Service) createDraft(ctx context.Context, projectID, goal, continues st
 		GoalVersion:           1,
 		Continues:             continues,
 		Actor:                 &by,
-		MaxAgents:             MaxProposedResearchers(launch.MaxHosted),
+		MaxAgents:             MaxProposedResearchers(launch.MaxAgentSandboxes),
 		Researchers:           domain.ResearcherPool{},
 		Metrics:               []domain.MetricDefinition{},
 		ReportIntervalSeconds: settings.ReportIntervalSeconds,
@@ -127,7 +127,7 @@ func (s *Service) createDraft(ctx context.Context, projectID, goal, continues st
 		Stages:                settings.Stages,
 		CurrentStage:          1,
 		DefaultQuotaTier:      domain.QuotaTier(settings.DefaultQuotaTier),
-		MaxHosted:             launch.MaxHosted,
+		MaxAgentSandboxes:     launch.MaxAgentSandboxes,
 		Repository:            repository.Named,
 		RepositoryURL:         repository.URL,
 		RepositoryAccount:     repository.CreateOn,
@@ -137,7 +137,7 @@ func (s *Service) createDraft(ctx context.Context, projectID, goal, continues st
 	planner := &domain.Agent{ID: plannerID, Name: "Planner", CreatedAt: now}
 	signup := domain.AgentSignup{
 		AgentID: plannerID, Role: domain.SignupRolePlanner, QuotaTier: domain.QuotaTierGuaranteed,
-		Hosted: true, AgentType: domain.PlannerAgentType, Model: launch.DefaultModel,
+		InAgentSandbox: true, AgentType: domain.PlannerAgentType, Model: launch.DefaultModel,
 		Actor: &by,
 	}
 	if err := s.store.CreateDraft(ctx, pe, planner, signup); err != nil {

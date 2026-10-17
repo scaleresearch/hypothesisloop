@@ -251,7 +251,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 
 	doc := httpapi.NewDoc(api.router, "hypothesisloop API", "1.0.0", "", access, logger)
 	api.docs[""] = doc
-	launch := platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: worldSecret, MaxHosted: 20}
+	launch := platformexperiments.AgentLaunch{AgentSandbox: true, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: worldSecret, MaxAgentSandboxes: 20}
 	peHandler := platformexperiments.NewService(nil, domain.QuotaConfig{}, logger, nil, time.Minute).WithRepositories(worldRepositories{}).WithPlanning(worldPlanning).WithAgentLaunch(launch)
 	httpapi.Register(doc, httpapi.Handlers{
 		Logger:              logger,

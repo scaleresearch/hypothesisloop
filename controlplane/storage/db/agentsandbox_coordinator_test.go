@@ -19,7 +19,7 @@ func createTestPEWithCoordinator(t *testing.T, pool *Pool) string {
 		Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
 		Stages:    []domain.Stage{{LengthPct: 40, EvictPct: 75}, {LengthPct: 60, EvictPct: 0}},
 		CreatedAt: now, UpdatedAt: now,
-		CoordinatorHosted: true, Coordinator: &domain.HostedCoordinator{Model: "model-1"}, MaxHosted: 50,
+		CoordinatorInAgentSandbox: true, Coordinator: &domain.AgentSandboxCoordinator{Model: "model-1"}, MaxAgentSandboxes: 50,
 	}
 	if err := NewStore(pool, 3).CreatePlatformExperiment(context.Background(), pe, nil, nil); err != nil {
 		t.Fatalf("create: got = %v, want = nil", err)
@@ -27,33 +27,33 @@ func createTestPEWithCoordinator(t *testing.T, pool *Pool) string {
 	return pe.ID
 }
 
-func TestHostedSaysWhoThePlatformRuns(t *testing.T) {
+func TestSandboxedSaysWhoThePlatformRuns(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewStore(pool, 3)
 	coordinated := createTestPEWithCoordinator(t, pool)
 	plain := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, plain, 10)
-	agents := spawnTestAgents(t, pes, plain, domain.AgentSignup{Hosted: true}, domain.AgentSignup{})
+	agents := spawnTestAgents(t, pes, plain, domain.AgentSignup{InAgentSandbox: true}, domain.AgentSignup{})
 	for _, tc := range []struct {
 		name, pe, agent string
 		want            bool
 	}{
-		{"a hosted coordinator", coordinated, "", true},
+		{"a sandboxed coordinator", coordinated, "", true},
 		{"a coordinator the platform does not run", plain, "", false},
-		{"a hosted agent", plain, agents[0], true},
+		{"a sandboxed agent", plain, agents[0], true},
 		{"an agent run elsewhere", plain, agents[1], false},
 		{"an agent of another platform experiment", coordinated, agents[0], false},
 		{"no platform experiment", "pe-missing", "", false},
 	} {
-		got, err := pes.Hosted(ctx, tc.pe, tc.agent)
+		got, err := pes.InAgentSandbox(ctx, tc.pe, tc.agent)
 		if err != nil || got != tc.want {
 			t.Errorf("%s: got = %v, %v, want = %v", tc.name, got, err, tc.want)
 		}
 	}
 }
 
-func TestAHostedCoordinatorIsStoredReadAndListedOnlyWhereItIsOne(t *testing.T) {
+func TestASandboxedCoordinatorIsStoredReadAndListedOnlyWhereItIsOne(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewStore(pool, 3)
@@ -62,25 +62,25 @@ func TestAHostedCoordinatorIsStoredReadAndListedOnlyWhereItIsOne(t *testing.T) {
 	createTestPE(t, pool, plain, 10)
 
 	got, err := pes.GetPlatformExperiment(ctx, pe)
-	if err != nil || !got.CoordinatorHosted || got.Coordinator == nil || got.Coordinator.Model != "model-1" || got.Coordinator.Instance.Name != "" {
+	if err != nil || !got.CoordinatorInAgentSandbox || got.Coordinator == nil || got.Coordinator.Model != "model-1" || got.Coordinator.Instance.Name != "" {
 		t.Fatalf("got = %+v (coordinator %+v), %v", got, got.Coordinator, err)
 	}
-	if other, err := pes.GetPlatformExperiment(ctx, plain); err != nil || other.CoordinatorHosted || other.Coordinator != nil {
+	if other, err := pes.GetPlatformExperiment(ctx, plain); err != nil || other.CoordinatorInAgentSandbox || other.Coordinator != nil {
 		t.Fatalf("a platform experiment without one: got = %+v, %v", other, err)
 	}
 	if err := pes.AskInstance(ctx, plain, "", "x", "launch-1"); err != nil {
 		t.Fatal(err)
 	}
 	if _, recorded, err := pes.EndInstance(ctx, plain, "", "x", InstanceExited, "boom", time.Minute, 3); err != nil || recorded {
-		t.Fatalf("an exit where no coordinator is hosted: got = %v, %v, want = false", recorded, err)
+		t.Fatalf("an exit where no coordinator is sandboxed: got = %v, %v, want = false", recorded, err)
 	}
 	listedAll, err := pes.ListPlatformExperimentsByStatus(ctx, domain.PlatformExpOpen)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, one := range listedAll {
-		if one.ID == pe && (!one.CoordinatorHosted || one.Coordinator != nil) {
-			t.Errorf("listed = %+v, want coordinator_hosted without the coordinator's detail", one)
+		if one.ID == pe && (!one.CoordinatorInAgentSandbox || one.Coordinator != nil) {
+			t.Errorf("listed = %+v, want coordinator_in_agentsandbox without the coordinator's detail", one)
 		}
 	}
 
@@ -119,7 +119,7 @@ func TestAHostedCoordinatorIsStoredReadAndListedOnlyWhereItIsOne(t *testing.T) {
 	}
 }
 
-// A platform experiment created with a hosted coordinator waited for the coordinator to boot and
+// A platform experiment created with a sandboxed coordinator waited for the coordinator to boot and
 // add the agent that measures its baseline, where an accepted draft had that agent from the
 // accept. It is created with it, in one write, and a create the signup refuses stores nothing.
 func TestAPlatformExperimentIsCreatedWithItsAgentsOrNotAtAll(t *testing.T) {
@@ -127,19 +127,19 @@ func TestAPlatformExperimentIsCreatedWithItsAgentsOrNotAtAll(t *testing.T) {
 	ctx := context.Background()
 	pes := NewStore(pool, 3)
 	now := time.Now().UTC()
-	experiment := func(maxHosted int) *domain.PlatformExperiment {
+	experiment := func(maxAgentSandboxes int) *domain.PlatformExperiment {
 		return &domain.PlatformExperiment{Actor: testActor,
 			ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "created", BudgetAcceleratorHours: 6,
 			MaxAgents: 3, StartsAt: now, EndsAt: now.Add(24 * time.Hour), Status: domain.PlatformExpOpen,
 			Metrics: []domain.MetricDefinition{{Key: "val_accuracy", Direction: "maximize"}}, ReportIntervalSeconds: 30,
 			Stages:    []domain.Stage{{LengthPct: 40, EvictPct: 75}, {LengthPct: 60, EvictPct: 0}},
 			CreatedAt: now, UpdatedAt: now, DefaultQuotaTier: domain.QuotaTierGuaranteed,
-			CoordinatorHosted: true, Coordinator: &domain.HostedCoordinator{Model: "model-1"}, MaxHosted: maxHosted,
+			CoordinatorInAgentSandbox: true, Coordinator: &domain.AgentSandboxCoordinator{Model: "model-1"}, MaxAgentSandboxes: maxAgentSandboxes,
 		}
 	}
 	measuring := func() ([]*domain.Agent, []domain.AgentSignup) {
 		agent := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], CreatedAt: now}
-		return []*domain.Agent{agent}, []domain.AgentSignup{{Actor: testActor, AgentID: agent.ID, Role: domain.SignupRoleBaseline, Hosted: true, AgentType: "baseline", Model: "model-1"}}
+		return []*domain.Agent{agent}, []domain.AgentSignup{{Actor: testActor, AgentID: agent.ID, Role: domain.SignupRoleBaseline, InAgentSandbox: true, AgentType: "baseline", Model: "model-1"}}
 	}
 
 	pe := experiment(4)
@@ -164,8 +164,8 @@ func TestAPlatformExperimentIsCreatedWithItsAgentsOrNotAtAll(t *testing.T) {
 	// The coordinator's machine is the only one this experiment may have, so none measures.
 	refused := experiment(1)
 	agents, signups = measuring()
-	if err := pes.CreatePlatformExperiment(ctx, refused, agents, signups); err != ErrMaxHostedReached {
-		t.Fatalf("no machine for the baseline agent: got = %v, want ErrMaxHostedReached", err)
+	if err := pes.CreatePlatformExperiment(ctx, refused, agents, signups); err != ErrMaxAgentSandboxesReached {
+		t.Fatalf("no machine for the baseline agent: got = %v, want ErrMaxAgentSandboxesReached", err)
 	}
 	if stored, err := pes.GetPlatformExperiment(ctx, refused.ID); err != nil || stored != nil {
 		t.Fatalf("a refused create left %+v, %v, want nothing stored", stored, err)

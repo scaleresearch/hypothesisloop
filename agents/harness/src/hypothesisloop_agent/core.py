@@ -241,7 +241,7 @@ def _closer(actor: dict | None) -> str:
 
 async def run_ended(setup: RunSetup) -> str:
     """Why the platform ended this agent's run, "" while it goes on. The platform decides it, and
-    tells a hosted machine to stop for this and for nothing else: closed, cut, finished, or
+    tells an agent sandbox to stop for this and for nothing else: closed, cut, finished, or
     planned for a planner whose answer to its draft is stored. A coordinator's run ends when its
     platform experiment closes."""
     return (await _run_end(setup))[0]

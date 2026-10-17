@@ -31,7 +31,7 @@ const END_REASON: Record<NonNullable<AgentInstance['end_reason']>, string> = {
 }
 
 /**
- * The health of the machine the platform runs for a hosted agent or a coordinator: what it is
+ * The health of the machine the platform runs for a sandboxed agent or a coordinator: what it is
  * doing now, since when, how often it was restarted, and what became of the last
  * machine that ended, with the end of its log folded away.
  */

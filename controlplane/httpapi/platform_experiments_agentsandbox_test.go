@@ -21,28 +21,28 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
 )
 
-type hostingStore struct {
+type agentSandboxStore struct {
 	createdStore
 	createErr error
 	// unregistered is a launcher config names and no operator registered.
 	unregistered bool
 }
 
-func (s *hostingStore) CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error {
+func (s *agentSandboxStore) CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error {
 	if s.createErr != nil {
 		return s.createErr
 	}
 	return s.createdStore.CreatePlatformExperiment(ctx, pe, create, signups)
 }
 
-func hostingAPI(t *testing.T, repos *fakeRepositories) (*hostingStore, func(body map[string]any) (int, map[string]any)) {
+func agentSandboxAPI(t *testing.T, repos *fakeRepositories) (*agentSandboxStore, func(body map[string]any) (int, map[string]any)) {
 	t.Helper()
-	store := &hostingStore{}
+	store := &agentSandboxStore{}
 	svc := reaching(platformexperiments.NewService(store, platformexperimentstest.Settings, zap.NewNop(), nil, time.Minute), domain.CPUType)
 	placement := authtest.Placement{Projects: map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}}, PlatformExperiments: map[string]domain.Tenancy{}}
 	router := authtest.Router(ownerOfA)
 	doc := NewDoc(router, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
-	handler := svc.WithRepositories(repos).WithPlanning(testPlanning).WithGitProxy("https://api.test/git").WithAgentLaunch(platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model-default", CoordinatorModel: "coordinator-default", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted})
+	handler := svc.WithRepositories(repos).WithPlanning(testPlanning).WithGitProxy("https://api.test/git").WithAgentLaunch(platformexperiments.AgentLaunch{AgentSandbox: true, DefaultModel: "model-default", CoordinatorModel: "coordinator-default", SigningSecret: "a-secret-only-this-test-knows-00", MaxAgentSandboxes: createMaxAgentSandboxes})
 	registerPlatformExperimentsAndBudget(doc, handler)
 	return store, func(body map[string]any) (int, map[string]any) {
 		t.Helper()
@@ -62,37 +62,37 @@ func hostingAPI(t *testing.T, repos *fakeRepositories) (*hostingStore, func(body
 	}
 }
 
-func TestCreateWithAHostedCoordinatorGivesItToTheConfiguredLauncher(t *testing.T) {
-	store, create := hostingAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
-	code, out := create(run(map[string]any{"coordinator_hosted": true}))
+func TestCreateWithASandboxedCoordinatorGivesItToTheConfiguredLauncher(t *testing.T) {
+	store, create := agentSandboxAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
+	code, out := create(run(map[string]any{"coordinator_in_agentsandbox": true}))
 	if code != http.StatusCreated {
 		t.Fatalf("got = %d %v, want 201", code, out)
 	}
 	pe := store.created[0]
-	if !pe.CoordinatorHosted || pe.Coordinator == nil || pe.Coordinator.Model != "" {
+	if !pe.CoordinatorInAgentSandbox || pe.Coordinator == nil || pe.Coordinator.Model != "" {
 		t.Fatalf("created = %+v (coordinator %+v), want one on the configured launcher and its type's model", pe, pe.Coordinator)
 	}
-	if out["coordinator_hosted"] != true || out["signup_count"] != float64(1) || out["max_hosted"] != float64(hostingMaxHosted) {
-		t.Errorf("answer = %v, want coordinator_hosted, its baseline agent and the bound on machines", out)
+	if out["coordinator_in_agentsandbox"] != true || out["signup_count"] != float64(1) || out["max_agentsandboxes"] != float64(createMaxAgentSandboxes) {
+		t.Errorf("answer = %v, want coordinator_in_agentsandbox, its baseline agent and the bound on machines", out)
 	}
-	// What accepting a draft stands up for the time before the run, a create with a hosted
+	// What accepting a draft stands up for the time before the run, a create with a sandboxed
 	// coordinator does too: nobody adds the agent that measures the baseline.
 	owner := auth.Principal(ownerOfA).Actor()
-	want := domain.AgentSignup{AgentID: store.baselines[0].AgentID, Name: "Baseline 1", Role: domain.SignupRoleBaseline, Hosted: true, AgentType: "baseline", Actor: &owner}
+	want := domain.AgentSignup{AgentID: store.baselines[0].AgentID, Name: "Baseline 1", Role: domain.SignupRoleBaseline, InAgentSandbox: true, AgentType: "baseline", Actor: &owner}
 	if len(store.baselines) != 1 || len(store.researchers) != 0 || !reflect.DeepEqual(store.baselines[0], want) {
-		t.Errorf("created with %+v and researchers %v, want one hosted baseline agent added by the creator and no researcher", store.baselines, store.researchers)
+		t.Errorf("created with %+v and researchers %v, want one sandboxed baseline agent added by the creator and no researcher", store.baselines, store.researchers)
 	}
 	if why, _ := out["status_reason"].(map[string]any); why["reason"] != "baseline_measuring" || why["waits_for"] != "platform" {
 		t.Errorf("status_reason = %v, want baseline_measuring, which waits for the platform", out["status_reason"])
 	}
 
-	store, create = hostingAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
-	if code, out := create(run(map[string]any{"coordinator_hosted": true, "coordinator_model": "model-2"})); code != http.StatusCreated || store.created[0].Coordinator.Model != "model-2" {
+	store, create = agentSandboxAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
+	if code, out := create(run(map[string]any{"coordinator_in_agentsandbox": true, "coordinator_model": "model-2"})); code != http.StatusCreated || store.created[0].Coordinator.Model != "model-2" {
 		t.Fatalf("with a model: got = %d %v, created %+v", code, out, store.created)
 	}
-	store, create = hostingAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
+	store, create = agentSandboxAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
 	code, out = create(run(nil))
-	if code != http.StatusCreated || store.created[0].CoordinatorHosted || store.created[0].Coordinator != nil || out["coordinator_hosted"] != false {
+	if code != http.StatusCreated || store.created[0].CoordinatorInAgentSandbox || store.created[0].Coordinator != nil || out["coordinator_in_agentsandbox"] != false {
 		t.Fatalf("without one: got = %d %v, created %+v", code, out, store.created[0])
 	}
 	// With no coordinator of the platform's a person coordinates: no agent is created, and the
@@ -100,11 +100,11 @@ func TestCreateWithAHostedCoordinatorGivesItToTheConfiguredLauncher(t *testing.T
 	why, _ := out["status_reason"].(map[string]any)
 	message, _ := why["message"].(string)
 	if out["signup_count"] != float64(0) || len(store.baselines) != 0 || why["reason"] != "baseline_required" || why["waits_for"] != "owner" ||
-		!strings.Contains(message, "`hl platform-experiments agents add --hosted --role baseline --platform-experiment "+store.created[0].ID+"`") {
+		!strings.Contains(message, "`hl platform-experiments agents add --in-agentsandbox --role baseline --platform-experiment "+store.created[0].ID+"`") {
 		t.Errorf("without one: %v agents, status_reason %v, want none and baseline_required of its owner with the command", out["signup_count"], why)
 	}
 	// How many may join is the creator's to say, and no setting stands in for it.
-	store, create = hostingAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
+	store, create = agentSandboxAPI(t, &fakeRepositories{files: map[string]string{"prj-a": experimentBase}})
 	unbounded := run(nil)
 	delete(unbounded, "max_agents")
 	if code, out := create(unbounded); code != http.StatusUnprocessableEntity || len(store.created) != 0 {
@@ -112,7 +112,7 @@ func TestCreateWithAHostedCoordinatorGivesItToTheConfiguredLauncher(t *testing.T
 	}
 }
 
-func TestCreateRefusesHostingItCannotStart(t *testing.T) {
+func TestCreateRefusesAnAgentSandboxItCannotStart(t *testing.T) {
 	whole := map[string]any{
 		"project_id": "prj-a", "name": "n", "description": "d", "budget_accelerator_hours": 5, "max_agents": 3, "duration_hours": 24,
 		"metrics": []map[string]any{{"key": "val_accuracy", "direction": "maximize"}}, "report_interval_seconds": 30,
@@ -134,9 +134,9 @@ func TestCreateRefusesHostingItCannotStart(t *testing.T) {
 		reason string
 	}{
 		"a model without a coordinator": {map[string]any{"coordinator_model": "m", "repository": "acme/model"}, &fakeRepositories{files: map[string]string{"prj-a": ""}}, 400, "invalid_request"},
-		"a model no name can be":        {map[string]any{"coordinator_hosted": true, "coordinator_model": "a b", "repository": "acme/model"}, &fakeRepositories{files: map[string]string{"prj-a": ""}}, 400, "invalid_request"},
+		"a model no name can be":        {map[string]any{"coordinator_in_agentsandbox": true, "coordinator_model": "a b", "repository": "acme/model"}, &fakeRepositories{files: map[string]string{"prj-a": ""}}, 400, "invalid_request"},
 	} {
-		store, create := hostingAPI(t, tc.repos)
+		store, create := agentSandboxAPI(t, tc.repos)
 		code, out := create(with(tc.more))
 		reason, _ := out["reason"].(string)
 		if code != tc.status || reason != tc.reason || len(store.created) != 0 {
@@ -145,9 +145,9 @@ func TestCreateRefusesHostingItCannotStart(t *testing.T) {
 	}
 
 	attached := &fakeRepositories{files: map[string]string{"prj-a": ""}}
-	store, create := hostingAPI(t, attached)
+	store, create := agentSandboxAPI(t, attached)
 	store.createErr = errors.New("the database is away")
-	if code, out := create(with(map[string]any{"coordinator_hosted": true, "repository": "acme/model"})); code != http.StatusInternalServerError || len(store.created) != 0 {
+	if code, out := create(with(map[string]any{"coordinator_in_agentsandbox": true, "repository": "acme/model"})); code != http.StatusInternalServerError || len(store.created) != 0 {
 		t.Fatalf("a write that failed: got = %d %v with %d created, want 500 and nothing", code, out, len(store.created))
 	}
 }
@@ -174,7 +174,7 @@ func TestACoordinatorsTokenChangesTheDescriptionAndNothingARunsCostFollowsFrom(t
 		}
 		router := authtest.Router(authtest.As(caller))
 		doc := NewDoc(router, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
-		registerPlatformExperimentsAndBudget(doc, svc.WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning).WithGitProxy("https://api.test/git").WithAgentLaunch(platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "m", CoordinatorModel: "c", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted}))
+		registerPlatformExperimentsAndBudget(doc, svc.WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning).WithGitProxy("https://api.test/git").WithAgentLaunch(platformexperiments.AgentLaunch{AgentSandbox: true, DefaultModel: "m", CoordinatorModel: "c", SigningSecret: "a-secret-only-this-test-knows-00", MaxAgentSandboxes: createMaxAgentSandboxes}))
 		var payload bytes.Buffer
 		if err := json.NewEncoder(&payload).Encode(body); err != nil {
 			t.Fatal(err)

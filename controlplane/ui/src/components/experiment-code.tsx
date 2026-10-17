@@ -4,7 +4,7 @@ import { Text } from '@/components/ui/text'
 import type { PlatformExperiment } from '@/types/api'
 
 /**
- * The repository a platform experiment works on, as owner/name, and the image its hosted agents
+ * The repository a platform experiment works on, as owner/name, and the image its sandboxed agents
  * run when it is not the platform's own. Both are fixed at creation.
  */
 export function ExperimentCode({ pe }: { pe: Pick<PlatformExperiment, 'repository' | 'repository_url' | 'agent_image'> }) {

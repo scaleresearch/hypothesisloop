@@ -118,7 +118,7 @@ func (s *Service) close(ctx context.Context, pe *domain.PlatformExperiment, topR
 // wrote goes. Its agents and coordinator are live again by the rows alone: those whose run ended
 // only with the close have no end of their own, while one that finished or was cut before keeps
 // it. endsAt is held to the length a create is held to, counted from the run's start.
-// coordinatorModel, resolved by the caller, moves a hosted coordinator to that model, and empty
+// coordinatorModel, resolved by the caller, moves a sandboxed coordinator to that model, and empty
 // keeps the one stored.
 func (s *Service) Reopen(ctx context.Context, id string, endsAt time.Time, coordinatorModel string) (*domain.PlatformExperiment, error) {
 	pe, err := s.stored(ctx, id)
@@ -132,8 +132,8 @@ func (s *Service) Reopen(ctx context.Context, id string, endsAt time.Time, coord
 		return nil, invalidTransition("platform experiment %s closed before its run started (close_reason %s): there is no run to continue, create it again", id, pe.CloseReason)
 	case !endsAt.After(time.Now()):
 		return nil, refuseUpdate(422, "invalid_length", "ends_at %s has passed: state a time ahead", endsAt.UTC().Format(time.RFC3339))
-	case coordinatorModel != "" && !pe.CoordinatorHosted:
-		return nil, refuseSignup(400, "invalid_request", "coordinator_model is set and platform experiment %s has no hosted coordinator", id)
+	case coordinatorModel != "" && !pe.CoordinatorInAgentSandbox:
+		return nil, refuseSignup(400, "invalid_request", "coordinator_model is set and platform experiment %s has no sandboxed coordinator", id)
 	}
 	if length := endsAt.Sub(pe.StartsAt); length > s.cfg.MaxRunLength {
 		return nil, refuseUpdate(422, "run_too_long", "ends_at %s would have the run, started at %s, last %.1f days, and a platform experiment runs at most %g days (quota.max_platform_experiment_days): state an earlier ends_at",

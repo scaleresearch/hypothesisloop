@@ -34,7 +34,7 @@ type experimentAgentsAPI struct {
 // registerExperimentAgents registers how agents join and leave a platform experiment. graph is
 // where a finish reads what the agent left open, and launch what joining needs beyond the store.
 func registerExperimentAgents(doc *Doc, experiments *platformexperiments.Service, graph platformexperiments.Hypotheses, launch platformexperiments.AgentLaunch, logger *zap.Logger) {
-	if launch.DefaultModel == "" || launch.SigningSecret == "" || launch.MaxHosted <= 0 || graph == nil {
+	if launch.DefaultModel == "" || launch.SigningSecret == "" || launch.MaxAgentSandboxes <= 0 || graph == nil {
 		panic("httpapi.registerExperimentAgents: every field of the agent launch and the hypothesis graph are required")
 	}
 	a := experimentAgentsAPI{experiments: experiments, graph: graph, launch: launch, access: doc.Access, logger: logger}
@@ -47,16 +47,16 @@ func registerExperimentAgents(doc *Doc, experiments *platformexperiments.Service
 			"Creates one agent with a generated id and signs it up; or, with agent_id, signs up that registered agent. For several agents, call once for each. " +
 			"An agent's name is unique in the platform experiment and, when the platform gives it, says its role: 409 agent_name_taken for a stated name, or a registered agent's, that another agent of it carries. " +
 			"The answer is agents, a list holding that one agent. " +
-			"hosted=true has the platform start a machine for the agent when the experiment starts and keep it until the experiment closes, the agent is cut or it finishes. " +
+			"in_agentsandbox=true has the platform start a machine for the agent when the experiment starts and keep it until the experiment closes, the agent is cut or it finishes. " +
 			"Until the start the agent answered carries status_reason, the reason the platform experiment is not running yet, and its instance reads waiting: no machine exists before the start. " +
-			"409 max_hosted_reached beyond max_hosted machines at once, of which one is kept for an agent of role baseline: when one finished without a baseline that can be declared, or its machine stopped with no restart left, the next is added in its place. " +
+			"409 max_agentsandboxes_reached beyond max_agentsandboxes machines at once, of which one is kept for an agent of role baseline: when one finished without a baseline that can be declared, or its machine stopped with no restart left, the next is added in its place. " +
 			"agent_type and model are resolved here and stored: the answer shows what the agent runs. " +
-			"hosted=false returns the agent's token: run the agent yourself with it as HL_TOKEN and the API's address as API_URL, which is all it is started with. " +
+			"in_agentsandbox=false returns the agent's token: run the agent yourself with it as HL_TOKEN and the API's address as API_URL, which is all it is started with. " +
 			"The token acts as that agent in that platform experiment and nowhere else, and asking again with agent_id returns it again. " +
 			"role decides ranking: \"competitor\" (default) is a researcher, whatever its agent type: ranked, cut-eligible and counted against max_agents; \"baseline\" and " +
 			"\"reviewer\" are none of the three, though their jobs are billed and gated identically. " +
 			"409 max_agents_reached for a researcher past max_agents, which counts the researchers at work, none that finished, was cut, was replaced or lost its machine with no restart left, and no agent of another role and no coordinator. 409 signup_closed for any role but researcher once the run started, and for every one once it closed. " +
-			"An agent of role baseline measures the baseline before the start: its machine, when hosted, starts at once, it holds a quota from the moment it joins (half the budget, which no researcher can spend before the start, so a failed measurement can be run again; it follows a later change of the budget while the experiment is open)," +
+			"An agent of role baseline measures the baseline before the start: its machine, when sandboxed, starts at once, it holds a quota from the moment it joins (half the budget, which no researcher can spend before the start, so a failed measurement can be run again; it follows a later change of the budget while the experiment is open)," +
 			"and its job is the only one an open experiment accepts. It takes no share at the start, and what it spent is taken from the budget before the others' shares are carved.",
 	}, a.add)
 
@@ -64,13 +64,13 @@ func registerExperimentAgents(doc *Doc, experiments *platformexperiments.Service
 		OperationID: "list-platform-experiment-agents", Method: "GET", Path: "/platform-experiments/{id}/agents",
 		Summary: "List the agents of a platform experiment", Tags: []string{"platform-experiments"},
 		Description: "Every agent that joined, in the order they did, with its role, what it was launched with and actor, whose credential added it. No token is listed. " +
-			"A hosted agent carries instance: the name its machine was last asked for under, how many times it exited and was started again, " +
+			"A sandboxed agent carries instance: the name its machine was last asked for under, how many times it exited and was started again, " +
 			"and once it exited with no restart left, stopped=true with exited_at and exit_log, the end of what its command wrote. " +
-			"A hosted agent whose machine is up carries activity {text, at}: what the agent is doing now, in a short sentence its harness writes from the tool call in flight (\"thinking\", \"running hl job submit\", \"waiting for platform updates\"), and when the platform first read that sentence. Only the latest is kept, it is read from the machine about every 15 seconds, and it is absent while no machine is up. The coordinator's is coordinator.activity on GET /platform-experiments/{id}, and a draft's planner's is activity there. " +
+			"A sandboxed agent whose machine is up carries activity {text, at}: what the agent is doing now, in a short sentence its harness writes from the tool call in flight (\"thinking\", \"running hl job submit\", \"waiting for platform updates\"), and when the platform first read that sentence. Only the latest is kept, it is read from the machine about every 15 seconds, and it is absent while no machine is up. The coordinator's is coordinator.activity on GET /platform-experiments/{id}, and a draft's planner's is activity there. " +
 			"Every agent carries in_flight {jobs, queued, running}: how many of its jobs are queued or running now. 0 is an agent with nothing of its own on the platform, whatever its activity says. " +
 			"While the platform experiment is open or running, an agent whose run goes on carries messages {left_this_hour, next_at}, how many more messages the caller may send it this hour, and in a running one minutes_without_job_in_flight. " +
-			"A hosted one whose machine reports carries what its harness last said of that machine: subagents, the subagents running, turn {state working or waiting, since}, and model_allowance {utilization, resets_at, refused_until}. GET /platform-experiments/{id}/situation reads the same in one answer with the run's clock, objective, capacity and budget. " +
-			"While the platform experiment is open, every agent but those of role baseline waits for the start and carries status_reason: the reason the platform experiment is not running yet, and that no machine is asked for the agent before it is. Its instance reads waiting until then. One that closed before its run started leaves each of them status_reason never_launched, whose message gives the close_reason and why it closed.A hosted agent whose machine is asked for and not running yet, its instance reading requested or starting, carries status_reason instance_starting with how long ago the machine was asked for: a start in progress, and a failed one reads stopped with end_reason.",
+			"A sandboxed one whose machine reports carries what its harness last said of that machine: subagents, the subagents running, turn {state working or waiting, since}, and model_allowance {utilization, resets_at, refused_until}. GET /platform-experiments/{id}/situation reads the same in one answer with the run's clock, objective, capacity and budget. " +
+			"While the platform experiment is open, every agent but those of role baseline waits for the start and carries status_reason: the reason the platform experiment is not running yet, and that no machine is asked for the agent before it is. Its instance reads waiting until then. One that closed before its run started leaves each of them status_reason never_launched, whose message gives the close_reason and why it closed.A sandboxed agent whose machine is asked for and not running yet, its instance reading requested or starting, carries status_reason instance_starting with how long ago the machine was asked for: a start in progress, and a failed one reads stopped with end_reason.",
 	}, a.list)
 
 	register(doc, auth.AudienceCoordinator, huma.Operation{
@@ -123,7 +123,7 @@ func (a experimentAgentsAPI) add(ctx context.Context, in *struct {
 		return nil, refused(a.logger, "add agent", err)
 	}
 	for i, agent := range out.Body.Agents {
-		if agent.Hosted {
+		if agent.InAgentSandbox {
 			continue
 		}
 		token, err := auth.Mint(a.launch.SigningSecret, scope.Agent(in.ID, agent.AgentID))

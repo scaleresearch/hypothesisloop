@@ -30,7 +30,7 @@ function experiment(status: `${PlatformExperimentStatus}`, reason: string, more:
 
 function agent(role: JoinedAgent['role'], more: Partial<JoinedAgent> = {}): JoinedAgent {
   return {
-    platform_experiment_id: 'pe-1', agent_id: `ag-${role}`, name: role === 'baseline' ? 'Baseline 1' : 'Planner 1', role, hosted: true, agent_type: role === 'planner' ? 'planner' : 'generalist', model: '', hyperparameters: null,
+    platform_experiment_id: 'pe-1', agent_id: `ag-${role}`, name: role === 'baseline' ? 'Baseline 1' : 'Planner 1', role, in_agentsandbox: true, agent_type: role === 'planner' ? 'planner' : 'generalist', model: '', hyperparameters: null,
     actor: { kind: 'coordinator', id: 'pe-1', name: 'coordinator' }, at_work: false, signed_up_at: at, instance: { state: 'running', restarts: 0, stopped: false }, actions: [], ...more,
   }
 }

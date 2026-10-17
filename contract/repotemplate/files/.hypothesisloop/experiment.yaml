@@ -35,7 +35,7 @@
 #     model: claude-sonnet-5            # optional: the agent type's, else the platform's default
 #     hyperparameters: {}               # optional: a JSON object of at most 4096 bytes
 #     count: 2
-# coordinator_hosted: true              # the platform runs the coordinator and the baseline agent
+# coordinator_in_agentsandbox: true     # the platform runs the coordinator and the baseline agent
 # coordinator_model: claude-sonnet-5    # optional: the platform's coordinator default
 # report_interval_seconds: 10           # optional: how often a job reports, else the platform's
 # stages:                               # optional: the elimination ladder, else the platform's.

@@ -96,21 +96,21 @@ const addsAgent = url => url.origin === API && /^\/platform-experiments\/[^/]+\/
 // Every context reports its uncaught page errors and every URL it asked for.
 async function newContext(browser) {
   const context = await browser.newContext(VIEW)
-  // The form creates every experiment for the platform to run: a hosted coordinator, then one
-  // hosted agent a call, each a machine the platform would rent. The stack rents nothing, so the
-  // coordinator is taken out of the create and a hosted agent is answered without reaching the
+  // The form creates every experiment for the platform to run: a sandboxed coordinator, then one
+  // sandboxed agent a call, each a machine the platform would rent. The stack rents nothing, so the
+  // coordinator is taken out of the create and a sandboxed agent is answered without reaching the
   // API. A scenario that asserts on these writes routes them on its page, which comes first.
   await context.route(creates, route => {
     const request = route.request()
     const body = request.method() === 'POST' ? request.postDataJSON() : null
     if (!body) return route.fallback()
-    const { coordinator_hosted: _hosted, ...rest } = body
+    const { coordinator_in_agentsandbox: _sandboxed, ...rest } = body
     const repository = rest.repository || rest.repository_account ? {} : { repository: sandbox.repository }
     return route.continue({ postData: JSON.stringify({ ...rest, ...repository }) })
   })
   await context.route(addsAgent, route => {
     const request = route.request()
-    if (request.method() !== 'POST' || request.postDataJSON()?.hosted !== true) return route.fallback()
+    if (request.method() !== 'POST' || request.postDataJSON()?.in_agentsandbox !== true) return route.fallback()
     return route.fulfill({ status: 201, headers: { 'access-control-allow-origin': UI }, json: { agents: [] } })
   })
   context.on('weberror', webError => crashes.push(`${webError.page()?.url()}: ${webError.error().message}`))
@@ -142,7 +142,7 @@ function noneOfItsOwn(page, emptyState = 'No experiments yet.') {
 const listening = port => fetch(`http://localhost:${port}`).then(() => true, () => false)
 
 // The run creates platform experiments and adds agents to them. On a stack that rents compute
-// (make dev-hosted) a hosted one would be rented for real, so only the local stack is run against.
+// (make dev-hosted) a sandboxed one would be rented for real, so only the local stack is run against.
 async function requireLocalStack() {
   if (spawnSync('bash', ['localdev/dev.sh', 'require-local'], { cwd: repo, stdio: 'inherit' }).status !== 0) {
     throw new Error('the browser run needs the stack make dev runs, which rents nothing')
@@ -486,7 +486,7 @@ async function scenarios(browser) {
   const adaMe = await (await api((await created).headers().authorization.slice(7), '/me')).json()
   assert.equal(createBody.project_id, adaMe.projects[0].id, 'the new experiment is sent with the project')
   assert.deepEqual(createBody.metrics, [{ key: 'val_accuracy', direction: 'maximize' }], 'the metric picked from Add a metric, in its own direction')
-  assert.equal(createBody.coordinator_hosted, true, 'a new experiment is run by the platform')
+  assert.equal(createBody.coordinator_in_agentsandbox, true, 'a new experiment is run by the platform')
   await page.getByText(experimentName).first().waitFor()
 
   section('adding and removing agents on the experiment page')
@@ -504,7 +504,7 @@ async function scenarios(browser) {
   await page.getByTestId('secret').waitFor()
   await page.getByRole('button', { name: 'Add agent' }).click()
   await page.getByTestId('secret').nth(1).waitFor()
-  assert.deepEqual(agentAdds.map(r => r.postDataJSON()), Array(2).fill({ hosted: false, agent_type: 'hyperparameter-search' }), 'each agent is one call that names no count')
+  assert.deepEqual(agentAdds.map(r => r.postDataJSON()), Array(2).fill({ in_agentsandbox: false, agent_type: 'hyperparameter-search' }), 'each agent is one call that names no count')
   const agentEnv = await page.getByTestId('secret').first().innerText()
   // An agent is started with the API's address and its token, and nothing else.
   assert.match(agentEnv, /^API_URL=http\S+\nHL_TOKEN=hls_\S+$/)
@@ -528,22 +528,22 @@ async function scenarios(browser) {
   const agentRows = page.getByRole('table', { name: 'Agents' }).locator('tbody tr')
   assert.equal(await agentRows.count(), 2)
 
-  section('a hosted agent the platform refuses is not listed, and the page says why')
+  section('a sandboxed agent the platform refuses is not listed, and the page says why')
   // The real API would take this one and rent for it. The refusal is stood in for: what a deployment
   // with no sandbox provider in its settings answers. Nothing reaches the API.
-  const refusedHosting = { reason: 'hosting_not_configured', message: 'hosting_not_configured: this deployment has no sandbox provider to run hosted machines on', summary: 'Hosted agents are not available on this platform.' }
-  const hostedAddURL = `${API}/platform-experiments/${experimentID}/agents`
-  const refuseHosted = route => route.request().method() === 'POST'
-    ? route.fulfill({ status: 503, headers: { 'access-control-allow-origin': UI }, json: refusedHosting })
+  const refusedAgentSandbox = { reason: 'agentsandbox_not_configured', message: 'agentsandbox_not_configured: this deployment has no sandbox provider to run agent sandboxes on', summary: 'Sandboxed agents are not available on this platform.' }
+  const sandboxedAddURL = `${API}/platform-experiments/${experimentID}/agents`
+  const refuseSandboxed = route => route.request().method() === 'POST'
+    ? route.fulfill({ status: 503, headers: { 'access-control-allow-origin': UI }, json: refusedAgentSandbox })
     : route.fallback()
-  await page.route(hostedAddURL, refuseHosted)
-  const hostedAdd = page.waitForResponse(r => r.request().method() === 'POST' && r.url() === hostedAddURL)
+  await page.route(sandboxedAddURL, refuseSandboxed)
+  const sandboxedAdd = page.waitForResponse(r => r.request().method() === 'POST' && r.url() === sandboxedAddURL)
   await page.getByRole('button', { name: 'The platform' }).click()
   await page.getByRole('button', { name: 'Add agent' }).click()
-  assert.deepEqual((await hostedAdd).request().postDataJSON().hosted, true, 'the agent was asked for hosted')
-  const hostedRefusal = page.locator('.error-banner', { hasText: 'Hosted agents are not available on this platform.' })
-  await hostedRefusal.waitFor()
-  await page.unroute(hostedAddURL, refuseHosted)
+  assert.deepEqual((await sandboxedAdd).request().postDataJSON().in_agentsandbox, true, 'the agent was asked for in an agent sandbox')
+  const sandboxedRefusal = page.locator('.error-banner', { hasText: 'Sandboxed agents are not available on this platform.' })
+  await sandboxedRefusal.waitFor()
+  await page.unroute(sandboxedAddURL, refuseSandboxed)
   assert.equal(await agentRows.count(), 2, 'the refused agent is not listed')
 
   section('removing an agent ends its token')
@@ -554,37 +554,37 @@ async function scenarios(browser) {
   assert.equal(await agentRows.count(), 1)
   assert.equal((await api(agentToken, `/platform-experiments/${experimentID}`)).status, 401, 'the same request is refused once the agent is removed')
 
-  section('a hosted agent shows what became of its machine')
+  section('a sandboxed agent shows what became of its machine')
   // Stood in for: an agent the platform really hosts needs a repository and a sandbox provider that rents.
   const agentsAPI = `${API}/platform-experiments/${experimentID}/agents`
-  const signedUp = { platform_experiment_id: experimentID, role: 'competitor', hosted: true, agent_type: 'generalist', model: 'stand-in-model', signed_up_at: new Date().toISOString() }
+  const signedUp = { platform_experiment_id: experimentID, role: 'competitor', in_agentsandbox: true, agent_type: 'generalist', model: 'stand-in-model', signed_up_at: new Date().toISOString() }
   await page.route(agentsAPI, route => route.request().method() === 'GET'
     ? route.fulfill({
       headers: { 'access-control-allow-origin': UI },
       json: {
         agents: [
-          { ...signedUp, agent_id: 'ag-hosted-running', name: 'ag-hosted-running', instance: { state: 'running', restarts: 1, stopped: false, progress_at: new Date().toISOString(), end_reason: 'exited', exited_at: new Date().toISOString() } },
-          { ...signedUp, agent_id: 'ag-hosted-stopped', name: 'ag-hosted-stopped', instance: { state: 'stopped', restarts: 3, stopped: true, end_reason: 'silent', exited_at: new Date().toISOString(), exit_log: 'the last lines it wrote' } },
-          { ...signedUp, agent_id: 'ag-hosted-new', name: 'ag-hosted-new' },
+          { ...signedUp, agent_id: 'ag-sandboxed-running', name: 'ag-sandboxed-running', instance: { state: 'running', restarts: 1, stopped: false, progress_at: new Date().toISOString(), end_reason: 'exited', exited_at: new Date().toISOString() } },
+          { ...signedUp, agent_id: 'ag-sandboxed-stopped', name: 'ag-sandboxed-stopped', instance: { state: 'stopped', restarts: 3, stopped: true, end_reason: 'silent', exited_at: new Date().toISOString(), exit_log: 'the last lines it wrote' } },
+          { ...signedUp, agent_id: 'ag-sandboxed-new', name: 'ag-sandboxed-new' },
         ],
       },
     })
     : route.fallback())
   await page.reload()
-  const runningRow = agentRows.filter({ hasText: 'ag-hosted-running' })
-  await runningRow.getByRole('button', { name: 'Details of ag-hosted-running' }).click()
+  const runningRow = agentRows.filter({ hasText: 'ag-sandboxed-running' })
+  await runningRow.getByRole('button', { name: 'Details of ag-sandboxed-running' }).click()
   await runningRow.getByText('running', { exact: true }).waitFor()
   await runningRow.getByText('restarted once').waitFor()
   await runningRow.getByText(/^last progress /).waitFor()
   await runningRow.getByText(/^Replaced: the machine before this one ended .*, its command ended\.$/).waitFor()
-  assert.equal(await runningRow.getByRole('button', { name: 'Show token' }).count(), 0, 'a hosted agent has no token to show')
-  const stoppedRow = agentRows.filter({ hasText: 'ag-hosted-stopped' })
-  await stoppedRow.getByRole('button', { name: 'Details of ag-hosted-stopped' }).click()
+  assert.equal(await runningRow.getByRole('button', { name: 'Show token' }).count(), 0, 'a sandboxed agent has no token to show')
+  const stoppedRow = agentRows.filter({ hasText: 'ag-sandboxed-stopped' })
+  await stoppedRow.getByRole('button', { name: 'Details of ag-sandboxed-stopped' }).click()
   await stoppedRow.getByText('stopped', { exact: true }).waitFor()
   await stoppedRow.getByText(/^Stopped for good: its last machine ended .*, it ran and made no progress\.$/).waitFor()
   await stoppedRow.getByRole('button', { name: 'Exit log' }).click()
   await stoppedRow.getByText('the last lines it wrote').waitFor()
-  await agentRows.filter({ hasText: 'ag-hosted-new' }).getByText('not reported yet').waitFor()
+  await agentRows.filter({ hasText: 'ag-sandboxed-new' }).getByText('not reported yet').waitFor()
   await page.unroute(agentsAPI)
 
   section('home: Configure it myself opens the full form in a dialog, the new experiment is created there, and nothing starts it before its baseline')
@@ -618,8 +618,8 @@ async function scenarios(browser) {
   section('home: Create experiment composes create and one call an agent, and nothing is rented')
   // The stack has no GitHub account connected, and an agent the platform really hosts is
   // rented for. So the repository list is stood in for, and each write goes to
-  // the real API with what would rent taken out of it: the repository and the hosted coordinator
-  // from the create, and hosted from each agent, which then joins as one its operator runs. What
+  // the real API with what would rent taken out of it: the repository and the sandboxed coordinator
+  // from the create, and in_agentsandbox from each agent, which then joins as one its operator runs. What
   // the page sent is asserted as sent, and what exists afterwards is asserted from the real API.
   const runCors = { 'access-control-allow-origin': UI, 'access-control-expose-headers': 'X-Total-Count' }
   const runInstallations = url => url.href.startsWith(`${API}/orgs/${adaMe.orgs[0].id}/github-installations`)
@@ -642,7 +642,7 @@ async function scenarios(browser) {
     const body = request.postDataJSON()
     runWrites.push({ path, body })
     if (path === '/platform-experiments') {
-      const { repository: _repository, coordinator_hosted: _coordinator, ...rest } = body
+      const { repository: _repository, coordinator_in_agentsandbox: _coordinator, ...rest } = body
       return route.continue({ postData: JSON.stringify({ ...rest, repository: sandbox.repository }) })
     }
     return route.continue()
@@ -669,7 +669,7 @@ async function scenarios(browser) {
   assert.deepEqual(runWrites.map(w => w.path), ['/platform-experiments'],
     'one create and no start: the platform creates the researchers with it and starts it once its baseline is declared')
   assert.equal(runWrites[0].body.repository, 'acme/widgets')
-  assert.equal(runWrites[0].body.coordinator_hosted, true)
+  assert.equal(runWrites[0].body.coordinator_in_agentsandbox, true)
   assert.equal(runWrites[0].body.max_agents, 2, 'the most researchers at once')
   assert.deepEqual(runWrites[0].body.researchers, [{ agent_type: 'generalist', count: 2 }], 'max_agents generalists to start with')
   assert.deepEqual(runWrites[0].body.metrics, [{ key: 'val_accuracy', direction: 'maximize' }])
@@ -718,7 +718,7 @@ async function scenarios(browser) {
       return json(draftNow)
     }
     if (path === `/platform-experiments/${draftID}`) return json(draftNow)
-    if (path.endsWith('/agents')) return json({ agents: [{ platform_experiment_id: draftID, agent_id: 'ag-planner', name: 'Planner', role: 'baseline', hosted: true, agent_type: 'planner', signed_up_at: new Date().toISOString(), instance: { state: 'starting', restarts: 0, stopped: false } }] })
+    if (path.endsWith('/agents')) return json({ agents: [{ platform_experiment_id: draftID, agent_id: 'ag-planner', name: 'Planner', role: 'baseline', in_agentsandbox: true, agent_type: 'planner', signed_up_at: new Date().toISOString(), instance: { state: 'starting', restarts: 0, stopped: false } }] })
     return json([])
   })
   await page.goto(`${UI}/projects/${adaMe.projects[0].id}/experiments`)
@@ -1284,7 +1284,7 @@ async function scenarios(browser) {
     assert.equal(await otherPage.getByRole('button', { name: 'Add agent' }).count(), 0)
 
     section('shared: the API refuses the reader every write to it')
-    assert.equal((await api(bobToken, `/platform-experiments/${experimentID}/agents`, 'POST', { hosted: false })).status, 404)
+    assert.equal((await api(bobToken, `/platform-experiments/${experimentID}/agents`, 'POST', { in_agentsandbox: false })).status, 404)
     assert.equal((await api(bobToken, `/platform-experiments/${experimentID}/close`, 'POST')).status, 404)
 
     section('shared: it does not count as the reader\'s own, and the pickers offer it')

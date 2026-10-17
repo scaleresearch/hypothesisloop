@@ -40,7 +40,7 @@ func createTestPE(t *testing.T, pool *Pool, id string, budget float64) {
 		DefaultQuotaTier:      domain.QuotaTierGuaranteed,
 		Actor:                 &domain.Actor{Kind: domain.ActorStaff},
 	}
-	pe.MaxHosted = 50
+	pe.MaxAgentSandboxes = 50
 	if err := pes.CreatePlatformExperiment(context.Background(), pe, nil, nil); err != nil {
 		t.Fatalf("create platform experiment: got = %v, want = nil", err)
 	}

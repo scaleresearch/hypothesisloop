@@ -1,5 +1,5 @@
 // Package provider is the contract between what rents machines (the cloud cluster's runtime for
-// jobs, the launcher for hosted agents) and a vendor's adapter.
+// jobs, the launcher for sandboxed agents) and a vendor's adapter.
 //
 // Provider is the required core, kept to what every vendor can do: create, list, read output,
 // stop, destroy. What only some vendors can do is a capability: a small interface of its own

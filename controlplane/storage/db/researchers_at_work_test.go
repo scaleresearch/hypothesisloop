@@ -26,12 +26,12 @@ func TestResearchersAtWorkAreCountedByTheOneRuleForEachAgentAndTheWholePool(t *t
 	if err := pes.FinishAgent(ctx, pe, finished, "nothing left"); err != nil {
 		t.Fatal(err)
 	}
-	exec(t, pool, `INSERT INTO hosted_instances (platform_experiment_id, agent_id, stopped) VALUES ($1, $2, true) ON CONFLICT (platform_experiment_id, agent_id) DO UPDATE SET stopped = EXCLUDED.stopped`, pe, stopped)
+	exec(t, pool, `INSERT INTO agentsandbox_instances (platform_experiment_id, agent_id, stopped) VALUES ($1, $2, true) ON CONFLICT (platform_experiment_id, agent_id) DO UPDATE SET stopped = EXCLUDED.stopped`, pe, stopped)
 	exec(t, pool, `INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index) VALUES ($1, $2, 1)`, pe, cut)
-	exec(t, pool, `INSERT INTO hosted_instances (platform_experiment_id, agent_id, stopped) VALUES ($1, $2, true) ON CONFLICT (platform_experiment_id, agent_id) DO UPDATE SET stopped = EXCLUDED.stopped`, pe, replaced)
+	exec(t, pool, `INSERT INTO agentsandbox_instances (platform_experiment_id, agent_id, stopped) VALUES ($1, $2, true) ON CONFLICT (platform_experiment_id, agent_id) DO UPDATE SET stopped = EXCLUDED.stopped`, pe, replaced)
 	replacement, _ := domain.NewID(domain.AgentIDPrefix)
 	if err := pes.JoinRunning(ctx, pe, &domain.Agent{ID: replacement, CreatedAt: time.Now().UTC()},
-		domain.AgentSignup{Actor: testActor, AgentID: replacement, Role: domain.SignupRoleCompetitor, Hosted: true, AgentType: "generalist", Model: "model-1", Replaces: replaced},
+		domain.AgentSignup{Actor: testActor, AgentID: replacement, Role: domain.SignupRoleCompetitor, InAgentSandbox: true, AgentType: "generalist", Model: "model-1", Replaces: replaced},
 		LateJoin{Used: map[string]float64{}}); err != nil {
 		t.Fatal(err)
 	}

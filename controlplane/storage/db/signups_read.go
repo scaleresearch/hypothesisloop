@@ -90,7 +90,7 @@ const endedReasonSQL = `CASE WHEN EXISTS (SELECT 1 FROM platform_experiment_cuts
 // released, and why it ended: its platform experiment closed, it was cut, it finished, or it is
 // a planner whose answer is stored.
 var agentSignupColumns = `s.platform_experiment_id, s.agent_id, COALESCE(a.name, s.agent_id), s.role, s.quota_tier,
-       s.hosted, s.agent_type, s.hyperparameters, COALESCE(s.model, ''), s.signed_up_at,
+       s.in_agentsandbox, s.agent_type, s.hyperparameters, COALESCE(s.model, ''), s.signed_up_at,
        ` + instanceColumns + `,
        s.finished_at, s.finished_reason, s.added_by_kind, s.added_by_id, s.replaces,
        COALESCE((SELECT r.agent_id FROM experiment_signups r WHERE r.platform_experiment_id = s.platform_experiment_id AND r.replaces = s.agent_id), ''),
@@ -112,14 +112,14 @@ func scanAgentSignup(row pgx.Row, more ...any) (domain.AgentSignup, error) {
 	var activity string
 	var activityAt *time.Time
 	if err := row.Scan(append([]any{&signup.PlatformExperimentID, &signup.AgentID, &signup.Name, &signup.Role, &signup.QuotaTier,
-		&signup.Hosted, &signup.AgentType, &hyperparameters, &signup.Model, &signup.SignedUpAt,
+		&signup.InAgentSandbox, &signup.AgentType, &hyperparameters, &signup.Model, &signup.SignedUpAt,
 		&instance.Name, &instance.Restarts, &instance.Renewals, &instance.Stopped, &instance.ExitedAt, &instance.ExitLog,
 		&instance.SeenAt, &instance.AskedAt, &instance.Launch, &instance.Reported, &instance.ProgressAt, &instance.EndReason, &activity, &activityAt,
 		&signup.FinishedAt, &signup.FinishedReason, &addedBy.Kind, &addedBy.ID, &signup.Replaces, &signup.ReplacedBy, &instance.Released, &signup.Ended, &signup.CutReason, &signup.AtWork, &signup.EndedReason}, more...)...); err != nil {
 		return domain.AgentSignup{}, err
 	}
 	signup.Actor = &addedBy
-	if signup.Hosted {
+	if signup.InAgentSandbox {
 		signup.Instance = &instance
 		signup.Activity = domain.ActivityOf(activity, activityAt)
 	}
@@ -179,7 +179,7 @@ WHERE s.platform_experiment_id = $1 AND s.agent_id = $2`, platformExpID, agentID
 	return &signup, nil
 }
 
-// LauncherAgent is a hosted agent as its launcher's desired state names it. Once its run Ended
+// LauncherAgent is a sandboxed agent as its launcher's desired state names it. Once its run Ended
 // its machine is no longer wanted and is left to finish its last turn.
 type LauncherAgent struct {
 	domain.AgentSignup
@@ -188,7 +188,7 @@ type LauncherAgent struct {
 	AgentImage string
 }
 
-// launcherAgentsFrom selects the hosted agents the launcher still has something to do for: those
+// launcherAgentsFrom selects the sandboxed agents the launcher still has something to do for: those
 // of a running platform experiment that were not cut and did not finish, those that measure the
 // baseline of an open one, since no researcher's machine is rented before there is a baseline to
 // start from, and those
@@ -216,7 +216,7 @@ FROM experiment_signups s
 JOIN platform_experiments pe ON pe.id = s.platform_experiment_id
 LEFT JOIN agents a ON a.id = s.agent_id` + signupInstanceJoin + `
 LEFT JOIN platform_experiment_cuts c ON c.platform_experiment_id = s.platform_experiment_id AND c.agent_id = s.agent_id
-WHERE s.hosted AND NOT (` + awaitsRepository + `)
+WHERE s.in_agentsandbox AND NOT (` + awaitsRepository + `)
   AND (pe.status = 'closed' AND pe.closed_at > now() - make_interval(secs => $1)
        OR s.role <> '` + string(domain.SignupRolePlanner) + `' AND (pe.status = 'running' OR pe.status = 'open' AND s.role = '` + string(domain.SignupRoleBaseline) + `')
        OR s.role = '` + string(domain.SignupRoleBaseline) + `' AND pe.status = 'draft' AND pe.accepts_at IS NOT NULL
@@ -225,7 +225,7 @@ WHERE s.hosted AND NOT (` + awaitsRepository + `)
   AND (s.finished_at IS NULL OR s.finished_at > now() - make_interval(secs => $1))
   AND NOT ` + replacedSQL
 
-// ListLauncherAgents returns the hosted agents the launcher's desired state is decided from.
+// ListLauncherAgents returns the sandboxed agents the launcher's desired state is decided from.
 func (s *Store) ListLauncherAgents(ctx context.Context, windDown time.Duration) ([]LauncherAgent, error) {
 	rows, err := s.pool.pool.Query(ctx, `
 SELECT `+agentSignupColumns+`, pe.agent_image`+launcherAgentsFrom+`

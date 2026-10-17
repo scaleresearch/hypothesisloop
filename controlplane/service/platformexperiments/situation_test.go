@@ -172,7 +172,7 @@ func TestTheRecordOfACloseStatesTheAgentsAsTheyStoodAtTheClose(t *testing.T) {
 	asked, exited := now.Add(-3*time.Hour), now.Add(-2*time.Hour)
 	pe := &domain.PlatformExperiment{ID: "pe-ended", ProjectID: "prj-a", Status: domain.PlatformExpRunning, CreatedAt: now.Add(-4 * time.Hour),
 		StartedAt: now.Add(-3 * time.Hour), EndsAt: now.Add(-time.Second), DurationHours: 3, BudgetAcceleratorHours: 6, Stages: []domain.Stage{{LengthPct: 100}}}
-	store := &statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{pe}, baselines: []domain.AgentSignup{{AgentID: "ag-1", Name: "Researcher 1", Role: domain.SignupRoleCompetitor, Hosted: true,
+	store := &statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{pe}, baselines: []domain.AgentSignup{{AgentID: "ag-1", Name: "Researcher 1", Role: domain.SignupRoleCompetitor, InAgentSandbox: true,
 		Instance: &domain.AgentInstance{AskedAt: &asked, Name: "m-2", Reported: domain.InstanceRunning, EndReason: "gone", ExitedAt: &exited},
 		Activity: &domain.AgentActivity{Text: "running hl job submit", At: now.Add(-time.Minute)}}}},
 		unsettled: map[string]bool{"pe-ended": true}}
@@ -260,8 +260,8 @@ func situationRun(t *testing.T) (*Service, *situationStore) {
 	idleSince, summaryAt := now.Add(-25*time.Minute), now.Add(-time.Hour)
 	pe := &domain.PlatformExperiment{ID: "pe-1", ProjectID: "prj-a", Status: domain.PlatformExpRunning, CreatedAt: now.Add(-5 * time.Hour),
 		StartedAt: now.Add(-3 * time.Hour), EndsAt: now.Add(90 * time.Minute), DurationHours: 4.5, BudgetAcceleratorHours: 100,
-		Stages: []domain.Stage{{LengthPct: 100}}, CurrentStage: 1, BaselineJobID: "job-base", CoordinatorHosted: true,
-		Coordinator: &domain.HostedCoordinator{}, Metrics: []domain.MetricDefinition{{Key: "acc", Direction: "maximize"}}}
+		Stages: []domain.Stage{{LengthPct: 100}}, CurrentStage: 1, BaselineJobID: "job-base", CoordinatorInAgentSandbox: true,
+		Coordinator: &domain.AgentSandboxCoordinator{}, Metrics: []domain.MetricDefinition{{Key: "acc", Direction: "maximize"}}}
 	store := &situationStore{
 		statusStore: statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{pe}, researchers: []string{}, baselines: []domain.AgentSignup{
 			{AgentID: "ag-1", Name: "Researcher 1", Role: domain.SignupRoleCompetitor, InFlight: &domain.InFlight{Jobs: 2, Queued: 1, Running: 1}},
@@ -291,7 +291,7 @@ func situationRun(t *testing.T) (*Service, *situationStore) {
 	return svc, store
 }
 
-// An agent's token reads the run and its own row; a coordinator's reads every row and the hosted
+// An agent's token reads the run and its own row; a coordinator's reads every row and the sandboxed
 // coordinator. Capacity counts the run's jobs of every agent either way.
 func TestTheSituationAnswersTheRunAndTheRowsTheCallerMaySee(t *testing.T) {
 	svc, _ := situationRun(t)

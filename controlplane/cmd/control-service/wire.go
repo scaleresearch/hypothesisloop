@@ -62,8 +62,8 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	peSvc := platformexperiments.NewService(store, quotaCfg, logger, metrics, observedGapCap).WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent).WithRepositories(gitHost).
 		WithEnvironments(environmentsSvc).WithModelDefaults(modelDefaults(pcfg)).WithIdleNotice(store, time.Duration(pcfg.Agents.IdleNoticeMinutes)*time.Minute).WithPersonIdeas(graph)
 	launch := platformexperiments.AgentLaunch{
-		Hosting: pcfg.Sandbox != nil, DefaultModel: pcfg.Agents.DefaultModel, CoordinatorModel: pcfg.Agents.CoordinatorModel,
-		SigningSecret: pcfg.SigningSecret, MaxHosted: pcfg.Agents.MaxHostedPerPlatformExperiment,
+		AgentSandbox: pcfg.Sandbox != nil, DefaultModel: pcfg.Agents.DefaultModel, CoordinatorModel: pcfg.Agents.CoordinatorModel,
+		SigningSecret: pcfg.SigningSecret, MaxAgentSandboxes: pcfg.Agents.MaxAgentSandboxesPerPlatformExperiment,
 	}
 	peSvc = peSvc.WithPlanning(platformexperiments.Planning{
 		Limit:       time.Duration(pcfg.Planning.LimitMinutes) * time.Minute,

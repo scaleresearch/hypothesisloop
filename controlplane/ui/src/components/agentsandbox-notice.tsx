@@ -8,7 +8,7 @@ import type { StatusReason } from '@/types/api'
  * Why planning cannot go on right now, in the platform's plain sentence, what that means for the
  * person, and the ways on. The operator's detail is there only in answers to the platform's operators.
  */
-export function HostingNotice({ reason, title, meaning, actions }: {
+export function AgentSandboxNotice({ reason, title, meaning, actions }: {
   reason: StatusReason
   title: string
   meaning: ReactNode

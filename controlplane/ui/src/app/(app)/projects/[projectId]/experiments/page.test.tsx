@@ -159,12 +159,12 @@ describe('the experiments page', () => {
   })
 
   it('says why a sentence was refused, and that no cluster is online, and stays', async () => {
-    vi.mocked(apiSend).mockRejectedValue(new Error('hosting_not_configured: this deployment has no sandbox provider to run hosted machines on'))
+    vi.mocked(apiSend).mockRejectedValue(new Error('agentsandbox_not_configured: this deployment has no sandbox provider to run agent sandboxes on'))
     show()
     expect(await screen.findByText(/^No compute is online yet\./)).toBeTruthy()
     await userEvent.type(screen.getByLabelText('What do you want to find out?'), 'goal')
     await userEvent.click(screen.getByRole('button', { name: 'Plan it' }))
-    expect(await screen.findByText(/no sandbox provider to run hosted machines on/)).toBeTruthy()
+    expect(await screen.findByText(/no sandbox provider to run agent sandboxes on/)).toBeTruthy()
     expect(navigation.push).not.toHaveBeenCalled()
   })
 

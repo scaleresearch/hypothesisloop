@@ -96,7 +96,7 @@ it wakes the agent). A message gives a direction; what an agent is doing is read
 never asked. Each one spends one of the messages its recipient may be sent this hour, as the
 situation shows: say everything for one researcher in one message, and use `--all` for what
 concerns every researcher alike. Next comes a correction of the brief, then a researcher added
-with a new direction (`hl platform-experiments agents add --hosted --hyperparameters J`), up to
+with a new direction (`hl platform-experiments agents add --in-agentsandbox --hyperparameters J`), up to
 `max_agents`. The platform keeps the run's researchers itself: one that finished or lost its
 machine is replaced by a new one of the same agent type, model and hyperparameters while time and
 budget hold a trial for it (`agent.replaced`), and a cut lowers the researchers it keeps. Give a

@@ -38,7 +38,7 @@ spec:
             - name: PORT
               value: {{ .Values.ui.port | quote }}
             - name: UI_API_URL
-              value: {{ required "publicAPIURL is required: the address hosted agents and every cluster's runtime reach the API at" .Values.publicAPIURL | quote }}
+              value: {{ required "publicAPIURL is required: the address sandboxed agents and every cluster's runtime reach the API at" .Values.publicAPIURL | quote }}
             - name: IDENTITY_PROVIDER
               value: {{ .Values.ui.identity.provider | quote }}
             {{- if eq .Values.ui.identity.provider "supabase" }}

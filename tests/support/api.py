@@ -419,7 +419,7 @@ class API:
     def add_agents(self, pe_id: str, count: int = 1, **body: Any) -> list[dict]:
         """POST /platform-experiments/{id}/agents with no agent_id, `count` times: each call has
         the platform create one agent. Returns each one as answered, with its token when it is
-        not hosted."""
+        not sandboxed."""
         added: list[dict] = []
         for _ in range(count):
             answered = self.post_json(f"/platform-experiments/{pe_id}/agents", body)["agents"]

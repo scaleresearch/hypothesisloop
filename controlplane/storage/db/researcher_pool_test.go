@@ -22,7 +22,7 @@ func poolRun(t *testing.T, pool *Pool, maxAgents int, researchers domain.Researc
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET max_agents = $2, researchers = $3, coordinator_hosted = true WHERE id = $1`, pe, maxAgents, encoded); err != nil {
+	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET max_agents = $2, researchers = $3, coordinator_in_agentsandbox = true WHERE id = $1`, pe, maxAgents, encoded); err != nil {
 		t.Fatal(err)
 	}
 	return pe, pes
@@ -32,7 +32,7 @@ func spawnResearcher(t *testing.T, pes *Store, pe, agentType string) string {
 	t.Helper()
 	id, _ := domain.NewID(domain.AgentIDPrefix)
 	agent := &domain.Agent{ID: id, Name: "r-" + id, CreatedAt: time.Now().UTC()}
-	if err := pes.SpawnAgent(context.Background(), pe, agent, domain.AgentSignup{Actor: testActor, AgentID: id, Role: domain.SignupRoleCompetitor, Hosted: true, AgentType: agentType, Model: "model-1"}); err != nil {
+	if err := pes.SpawnAgent(context.Background(), pe, agent, domain.AgentSignup{Actor: testActor, AgentID: id, Role: domain.SignupRoleCompetitor, InAgentSandbox: true, AgentType: agentType, Model: "model-1"}); err != nil {
 		t.Fatalf("spawn: got = %v, want = nil", err)
 	}
 	qid, _ := domain.NewID(domain.AgentQuotaIDPrefix)
@@ -59,7 +59,7 @@ func TestThePoolStateNamesWhoEndedAndAReplacementTakesItsPlaceOnce(t *testing.T)
 	if err := pes.FinishAgent(ctx, pe, finished, "nothing left"); err != nil {
 		t.Fatal(err)
 	}
-	exec(t, pool, `INSERT INTO hosted_instances (platform_experiment_id, agent_id, stopped) VALUES ($1, $2, true) ON CONFLICT (platform_experiment_id, agent_id) DO UPDATE SET stopped = EXCLUDED.stopped`, pe, stopped)
+	exec(t, pool, `INSERT INTO agentsandbox_instances (platform_experiment_id, agent_id, stopped) VALUES ($1, $2, true) ON CONFLICT (platform_experiment_id, agent_id) DO UPDATE SET stopped = EXCLUDED.stopped`, pe, stopped)
 	exec(t, pool, `INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index) VALUES ($1, $2, 1)`, pe, cut)
 
 	state, err := pes.ResearcherPoolState(ctx, pe)
@@ -77,7 +77,7 @@ func TestThePoolStateNamesWhoEndedAndAReplacementTakesItsPlaceOnce(t *testing.T)
 	before := cursorNow(t, pool)
 	replacement, _ := domain.NewID(domain.AgentIDPrefix)
 	if err := pes.JoinRunning(ctx, pe, &domain.Agent{ID: replacement, CreatedAt: time.Now().UTC()},
-		domain.AgentSignup{Actor: testActor, AgentID: replacement, Role: domain.SignupRoleCompetitor, Hosted: true, AgentType: "generalist", Model: "model-1", Replaces: stopped},
+		domain.AgentSignup{Actor: testActor, AgentID: replacement, Role: domain.SignupRoleCompetitor, InAgentSandbox: true, AgentType: "generalist", Model: "model-1", Replaces: stopped},
 		LateJoin{Used: map[string]float64{}}); err != nil {
 		t.Fatalf("a replacement: got = %v, want = nil", err)
 	}
@@ -110,7 +110,7 @@ func TestThePoolStateNamesWhoEndedAndAReplacementTakesItsPlaceOnce(t *testing.T)
 	// A researcher is replaced once.
 	twice, _ := domain.NewID(domain.AgentIDPrefix)
 	if err := pes.JoinRunning(ctx, pe, &domain.Agent{ID: twice, CreatedAt: time.Now().UTC()},
-		domain.AgentSignup{Actor: testActor, AgentID: twice, Role: domain.SignupRoleCompetitor, Hosted: true, AgentType: "generalist", Model: "model-1", Replaces: stopped},
+		domain.AgentSignup{Actor: testActor, AgentID: twice, Role: domain.SignupRoleCompetitor, InAgentSandbox: true, AgentType: "generalist", Model: "model-1", Replaces: stopped},
 		LateJoin{Used: map[string]float64{}}); err == nil {
 		t.Error("a second replacement of one researcher was written")
 	}
@@ -243,15 +243,15 @@ func TestAPlatformExperimentIsCreatedWithItsResearchersOrNotAtAll(t *testing.T) 
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewStore(pool, 3)
-	create := func(maxHosted, researchers int) (string, error) {
+	create := func(maxAgentSandboxes, researchers int) (string, error) {
 		now := time.Now().UTC()
 		pe := &domain.PlatformExperiment{Actor: testActor, DefaultQuotaTier: domain.QuotaTierGuaranteed,
 			ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "pool", BudgetAcceleratorHours: 10,
 			MaxAgents: researchers, Researchers: domain.ResearcherPool{{AgentType: "generalist", Model: "model-1", Count: researchers}},
 			StartsAt: now, DurationHours: 24, EndsAt: now.Add(24 * time.Hour), Status: domain.PlatformExpOpen,
 			Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}}, ReportIntervalSeconds: 30,
-			Stages: []domain.Stage{{LengthPct: 100}}, CreatedAt: now, UpdatedAt: now, MaxHosted: maxHosted,
-			CoordinatorHosted: true, Coordinator: &domain.HostedCoordinator{Model: "model-1"},
+			Stages: []domain.Stage{{LengthPct: 100}}, CreatedAt: now, UpdatedAt: now, MaxAgentSandboxes: maxAgentSandboxes,
+			CoordinatorInAgentSandbox: true, Coordinator: &domain.AgentSandboxCoordinator{Model: "model-1"},
 		}
 		var agents []*domain.Agent
 		var signups []domain.AgentSignup
@@ -262,7 +262,7 @@ func TestAPlatformExperimentIsCreatedWithItsResearchersOrNotAtAll(t *testing.T) 
 				role = domain.SignupRoleBaseline
 			}
 			agents = append(agents, &domain.Agent{ID: id, CreatedAt: now})
-			signups = append(signups, domain.AgentSignup{Actor: testActor, AgentID: id, Role: role, Hosted: true, Model: "model-1"})
+			signups = append(signups, domain.AgentSignup{Actor: testActor, AgentID: id, Role: role, InAgentSandbox: true, Model: "model-1"})
 		}
 		return pe.ID, pes.CreatePlatformExperiment(ctx, pe, agents, signups)
 	}
@@ -274,8 +274,8 @@ func TestAPlatformExperimentIsCreatedWithItsResearchersOrNotAtAll(t *testing.T) 
 		t.Errorf("signups %d %v, want all four", len(signups), err)
 	}
 	id, err = create(4, 3)
-	if !errors.Is(err, ErrMaxHostedReached) {
-		t.Fatalf("one machine too many: got = %v, want ErrMaxHostedReached", err)
+	if !errors.Is(err, ErrMaxAgentSandboxesReached) {
+		t.Fatalf("one machine too many: got = %v, want ErrMaxAgentSandboxesReached", err)
 	}
 	if got, err := pes.GetPlatformExperiment(ctx, id); err != nil || got != nil {
 		t.Errorf("after the refusal: got = %+v %v, want no platform experiment", got, err)

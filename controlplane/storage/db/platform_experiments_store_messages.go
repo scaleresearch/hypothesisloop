@@ -136,7 +136,7 @@ VALUES ($1, $2, $3, $4, $5, $6) RETURNING created_at`,
 	return messages, refused, nil
 }
 
-// SendCoordinatorMessage stores text as a message from sender, a person or a key, to the hosted
+// SendCoordinatorMessage stores text as a message from sender, a person or a key, to the sandboxed
 // coordinator of a platform experiment, kept and told as agent.message under
 // domain.CoordinatorRecipient, or stores none: domain.ErrPlatformExperimentClosed once it closed,
 // ErrNoCoordinator where the platform hosts none, and *MessagesRateLimited past
@@ -148,14 +148,14 @@ func (s *Store) SendCoordinatorMessage(ctx context.Context, platformExpID, text 
 		from := domain.MessageFrom(sender)
 		// The row is locked so that two sends to the coordinator count each other.
 		var status string
-		var hosted bool
+		var sandboxed bool
 		var recent []time.Time
 		err = tx.QueryRow(ctx, `
-SELECT p.status::text, p.coordinator_hosted,
+SELECT p.status::text, p.coordinator_in_agentsandbox,
        COALESCE((SELECT array_agg(m.created_at ORDER BY m.created_at) FROM agent_messages m
                  WHERE m.platform_experiment_id = p.id AND m.agent_id = $2 AND m.sender = $3
                    AND m.created_at > now() - interval '1 hour'), '{}')
-FROM platform_experiments p WHERE p.id = $1 FOR NO KEY UPDATE OF p`, platformExpID, domain.CoordinatorRecipient, from).Scan(&status, &hosted, &recent)
+FROM platform_experiments p WHERE p.id = $1 FOR NO KEY UPDATE OF p`, platformExpID, domain.CoordinatorRecipient, from).Scan(&status, &sandboxed, &recent)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 			return ErrNoCoordinator
@@ -163,7 +163,7 @@ FROM platform_experiments p WHERE p.id = $1 FOR NO KEY UPDATE OF p`, platformExp
 			return fmt.Errorf("platform_experiments_store.SendCoordinatorMessage: %w", err)
 		case status == string(domain.PlatformExpClosed):
 			return domain.ErrPlatformExperimentClosed
-		case !hosted:
+		case !sandboxed:
 			return ErrNoCoordinator
 		case len(recent) >= domain.MaxAgentMessagesPerHour:
 			return &MessagesRateLimited{AgentID: domain.CoordinatorRecipient, From: from, Next: recent[len(recent)-domain.MaxAgentMessagesPerHour].Add(time.Hour).UTC()}

@@ -30,7 +30,7 @@ func registerSituation(doc *Doc, experiments *platformexperiments.Service, logge
 			"the run's budget and spend, for a coordinator, a person or a key each hypothesis with jobs queued or running or checked out within two hours and who is on it, and for each agent its jobs queued and running, the subagents and turn its harness last reported, its activity, minutes without a job in flight, " +
 			"the messages the reader may still send it this hour, its model account's allowance, and its share and the room left in it, " +
 			"and ideas_from_people: how many open ideas people registered, those no agent has settled or built on yet, and the command that lists them. " +
-			"An agent's token reads the run and its own row. A coordinator, a person or a key reads every row and the hosted coordinator: when its summary was last written, how many jobs completed since, and its model allowance.",
+			"An agent's token reads the run and its own row. A coordinator, a person or a key reads every row and the sandboxed coordinator: when its summary was last written, how many jobs completed since, and its model allowance.",
 	}, a.get)
 
 }

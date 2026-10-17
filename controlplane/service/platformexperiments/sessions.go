@@ -13,7 +13,7 @@ type SessionStore interface {
 	GetSession(ctx context.Context, platformExperimentID, agentID string, maxBytes int64) ([]byte, error)
 }
 
-// Sessions keeps the model session of each hosted agent and coordinator, so that it outlives the
+// Sessions keeps the model session of each sandboxed agent and coordinator, so that it outlives the
 // machine they run on. An empty agentID is the coordinator's.
 type Sessions struct {
 	store SessionStore

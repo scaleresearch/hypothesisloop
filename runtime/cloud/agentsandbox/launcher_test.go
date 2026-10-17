@@ -1,4 +1,4 @@
-package hosting
+package agentsandbox
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/contract/hostingapi"
+	sandboxapi "github.com/scaleresearch/hypothesisloop/contract/agentsandbox"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/provider"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/provider/fake"
 )
@@ -21,32 +21,32 @@ const agentToken = "hls_agent-token"
 // controlPlane is the platform as the launcher sees it, answering with whatever the test last set.
 type controlPlane struct {
 	mu      sync.Mutex
-	desired hostingapi.Desired
+	desired sandboxapi.Desired
 	err     error
 	// asked holds every question, as the launcher asked it.
-	asked []hostingapi.Observed
+	asked []sandboxapi.Observed
 	// held is what Held answers besides the pool, heldErr a failure in its place.
-	held    []hostingapi.HeldMachine
+	held    []sandboxapi.HeldMachine
 	heldErr error
 	// pool is the warm pool the launcher last reported, which Held answers too, as the decider
 	// does.
-	pool []hostingapi.PoolMachine
+	pool []sandboxapi.PoolMachine
 }
 
-func (cp *controlPlane) Held(context.Context) ([]hostingapi.HeldMachine, error) {
+func (cp *controlPlane) Held(context.Context) ([]sandboxapi.HeldMachine, error) {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
 	if cp.heldErr != nil {
 		return nil, cp.heldErr
 	}
-	held := append([]hostingapi.HeldMachine{}, cp.held...)
+	held := append([]sandboxapi.HeldMachine{}, cp.held...)
 	for _, m := range cp.pool {
-		held = append(held, hostingapi.HeldMachine{Name: m.Name, Machine: m.Machine})
+		held = append(held, sandboxapi.HeldMachine{Name: m.Name, Machine: m.Machine})
 	}
 	return held, nil
 }
 
-func (cp *controlPlane) Reconcile(_ context.Context, observed hostingapi.Observed) (*hostingapi.Desired, error) {
+func (cp *controlPlane) Reconcile(_ context.Context, observed sandboxapi.Observed) (*sandboxapi.Desired, error) {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
 	cp.asked = append(cp.asked, observed)
@@ -54,7 +54,7 @@ func (cp *controlPlane) Reconcile(_ context.Context, observed hostingapi.Observe
 		return nil, cp.err
 	}
 	cp.pool = observed.Pool
-	answer := hostingapi.Desired{Instances: []hostingapi.Instance{}, Ending: append([]string{}, cp.desired.Ending...), Image: cp.desired.Image}
+	answer := sandboxapi.Desired{Instances: []sandboxapi.Instance{}, Ending: append([]string{}, cp.desired.Ending...), Image: cp.desired.Image}
 	for _, i := range cp.desired.Instances {
 		i.Env = maps.Clone(i.Env)
 		answer.Instances = append(answer.Instances, i)
@@ -63,34 +63,34 @@ func (cp *controlPlane) Reconcile(_ context.Context, observed hostingapi.Observe
 }
 
 // holds sets the machines the platform holds.
-func (cp *controlPlane) holds(machines ...hostingapi.HeldMachine) {
+func (cp *controlPlane) holds(machines ...sandboxapi.HeldMachine) {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
 	cp.held = machines
 }
 
-func (cp *controlPlane) lastQuestion() hostingapi.Observed {
+func (cp *controlPlane) lastQuestion() sandboxapi.Observed {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
 	return cp.asked[len(cp.asked)-1]
 }
 
-type entry = hostingapi.Instance
+type entry = sandboxapi.Instance
 
 func agent(name string) entry {
 	return entry{Name: name, Image: "registry.example.invalid/agent:1", Env: map[string]string{"AGENT_ID": name, "HL_TOKEN": agentToken}}
 }
 
 func (cp *controlPlane) want(instances []entry, ending []string) {
-	cp.answer(hostingapi.Desired{Instances: instances, Ending: ending})
+	cp.answer(sandboxapi.Desired{Instances: instances, Ending: ending})
 }
 
 // idle answers that no agent is wanted and that the platform's image is image.
 func (cp *controlPlane) idle(image string) {
-	cp.answer(hostingapi.Desired{Image: image})
+	cp.answer(sandboxapi.Desired{Image: image})
 }
 
-func (cp *controlPlane) answer(desired hostingapi.Desired) {
+func (cp *controlPlane) answer(desired sandboxapi.Desired) {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
 	cp.desired, cp.err = desired, nil
@@ -314,7 +314,7 @@ func TestAnExitedInstanceIsReportedWithTheEndOfItsOutputAndNeverRentedAgainFromH
 	for pass := 1; pass <= 3; pass++ {
 		h.mustPass()
 		question := h.cp.lastQuestion()
-		want := []hostingapi.ObservedInstance{
+		want := []sandboxapi.ObservedInstance{
 			{Name: "a", Machine: crashed[0], State: "exited", Log: "starting\nTraceback (most recent call last):\nSystemExit: agent: the reason"},
 			{Name: "b", Machine: h.rented.IDs(full("b"))[0], State: "running", Progress: new(string)},
 		}
@@ -376,7 +376,7 @@ func TestAnExitWhoseOutputCannotBeReadIsStillReported(t *testing.T) {
 		return nil
 	}
 	h.mustPass()
-	if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, []hostingapi.ObservedInstance{{Name: "a", Machine: "fake-0001", State: "exited"}}) {
+	if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, []sandboxapi.ObservedInstance{{Name: "a", Machine: "fake-0001", State: "exited"}}) {
 		t.Fatalf("told the control plane %+v", got)
 	}
 	if h.logged("read the output of exited "+full("a")) != 1 {
@@ -395,7 +395,7 @@ func TestANameIsReportedOnceAndAsLiveWhileAnyInstanceOfItIs(t *testing.T) {
 	rent(t, h.rented, full("b"))
 	rent(t, h.rented, "hl-agent-other-zzz")
 	h.mustPass()
-	want := []hostingapi.ObservedInstance{{Name: "a", Machine: "fake-0002", State: "starting"}, {Name: "b", Machine: "fake-0003", State: "running", Progress: new(string)}}
+	want := []sandboxapi.ObservedInstance{{Name: "a", Machine: "fake-0002", State: "starting"}, {Name: "b", Machine: "fake-0003", State: "running", Progress: new(string)}}
 	if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, want) {
 		t.Fatalf("told the control plane %+v\nwant %+v", got, want)
 	}
@@ -592,21 +592,21 @@ func TestAFailedListChangesNothing(t *testing.T) {
 }
 
 func TestAnAnswerThatCannotBeActedOnWholeChangesNothing(t *testing.T) {
-	with := func(desired hostingapi.Desired) func(*controlPlane) {
+	with := func(desired sandboxapi.Desired) func(*controlPlane) {
 		return func(cp *controlPlane) { cp.answer(desired) }
 	}
-	one := func(name string) hostingapi.Instance {
-		return hostingapi.Instance{Name: name, Image: "i", Env: map[string]string{}}
+	one := func(name string) sandboxapi.Instance {
+		return sandboxapi.Instance{Name: name, Image: "i", Env: map[string]string{}}
 	}
 	for name, set := range map[string]func(*controlPlane){
 		"an error":                func(cp *controlPlane) { cp.fail(errors.New("database down")) },
-		"instance without a name": with(hostingapi.Desired{Instances: []hostingapi.Instance{{Image: "i"}}}),
-		"instance without image":  with(hostingapi.Desired{Instances: []hostingapi.Instance{{Name: "a"}}}),
-		"name outside the rules":  with(hostingapi.Desired{Instances: []hostingapi.Instance{one("A_b")}}),
-		"name too long":           with(hostingapi.Desired{Instances: []hostingapi.Instance{one(strings.Repeat("x", 120))}}),
-		"one name twice":          with(hostingapi.Desired{Instances: []hostingapi.Instance{one("a"), one("a")}}),
-		"running and ending":      with(hostingapi.Desired{Instances: []hostingapi.Instance{one("a")}, Ending: []string{"a"}}),
-		"ending without a name":   with(hostingapi.Desired{Ending: []string{""}}),
+		"instance without a name": with(sandboxapi.Desired{Instances: []sandboxapi.Instance{{Image: "i"}}}),
+		"instance without image":  with(sandboxapi.Desired{Instances: []sandboxapi.Instance{{Name: "a"}}}),
+		"name outside the rules":  with(sandboxapi.Desired{Instances: []sandboxapi.Instance{one("A_b")}}),
+		"name too long":           with(sandboxapi.Desired{Instances: []sandboxapi.Instance{one(strings.Repeat("x", 120))}}),
+		"one name twice":          with(sandboxapi.Desired{Instances: []sandboxapi.Instance{one("a"), one("a")}}),
+		"running and ending":      with(sandboxapi.Desired{Instances: []sandboxapi.Instance{one("a")}, Ending: []string{"a"}}),
+		"ending without a name":   with(sandboxapi.Desired{Ending: []string{""}}),
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t)
@@ -828,7 +828,7 @@ func TestAnInstanceTheProviderCannotPlaceIsReportedAsUnknownAndLeftAlone(t *test
 	h.rented.Lose(full("a"))
 
 	h.mustPass()
-	if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, []hostingapi.ObservedInstance{{Name: "a", Machine: "fake-0001", State: "unknown"}}) {
+	if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, []sandboxapi.ObservedInstance{{Name: "a", Machine: "fake-0001", State: "unknown"}}) {
 		t.Fatalf("told the control plane %+v", got)
 	}
 	if h.rented.Calls("Create") != 1 || h.rented.Calls("Destroy") != 0 || h.rented.Calls("Logs") != 0 {
@@ -843,7 +843,7 @@ func TestAnInstanceThatStaysStartingIsReportedAndNeverReplacedFromHere(t *testin
 	ids := h.rented.IDs(full("a"))
 	for range 5 {
 		h.mustPass()
-		if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, []hostingapi.ObservedInstance{{Name: "a", Machine: "fake-0001", State: "starting"}}) {
+		if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, []sandboxapi.ObservedInstance{{Name: "a", Machine: "fake-0001", State: "starting"}}) {
 			t.Fatalf("told the control plane %+v", got)
 		}
 	}
@@ -1031,7 +1031,7 @@ func TestTheNewestProgressMarkerOfEachRunningInstanceIsReported(t *testing.T) {
 	}
 	h.mustPass()
 	four, none := "4", ""
-	want := []hostingapi.ObservedInstance{
+	want := []sandboxapi.ObservedInstance{
 		{Name: "a", Machine: "fake-0001", State: "running", Progress: &four},
 		{Name: "b", Machine: "fake-0002", State: "running", Progress: &none},
 		{Name: "c", Machine: "fake-0003", State: "starting"},
@@ -1071,8 +1071,8 @@ func TestWhatARunningAgentSaysItIsDoingIsReportedWithItsProgress(t *testing.T) {
 	if told[1].Activity != "" {
 		t.Fatalf("b, which printed no such line: told activity %q, want none", told[1].Activity)
 	}
-	if got := []rune(told[2].Activity); len(got) != hostingapi.MaxActivityLength || !strings.HasPrefix(told[2].Activity, "running hl job wait é") {
-		t.Fatalf("c: told %d characters %q, want this launcher's own environment taken out and the sentence cut to %d", len(got), told[2].Activity, hostingapi.MaxActivityLength)
+	if got := []rune(told[2].Activity); len(got) != sandboxapi.MaxActivityLength || !strings.HasPrefix(told[2].Activity, "running hl job wait é") {
+		t.Fatalf("c: told %d characters %q, want this launcher's own environment taken out and the sentence cut to %d", len(got), told[2].Activity, sandboxapi.MaxActivityLength)
 	}
 	if reads := h.rented.Calls("Logs") - before; reads != 3 {
 		t.Fatalf("the pass read the output of 3 running instances %d times, want once each", reads)
@@ -1125,10 +1125,10 @@ func TestAHeldMachineTheListLeavesOutIsReadByItsIDAndReportedAsFound(t *testing.
 	h.mustPass()
 	h.rented.Start(full("a"))
 	id := h.rented.IDs(full("a"))[0]
-	h.cp.holds(hostingapi.HeldMachine{Name: "a", Machine: id})
+	h.cp.holds(sandboxapi.HeldMachine{Name: "a", Machine: id})
 	h.rented.Hide(full("a"))
 	h.mustPass()
-	want := []hostingapi.ObservedInstance{{Name: "a", Machine: id, State: "running", Progress: new(string)}}
+	want := []sandboxapi.ObservedInstance{{Name: "a", Machine: id, State: "running", Progress: new(string)}}
 	if got := h.cp.lastQuestion().Instances; !reflect.DeepEqual(got, want) {
 		t.Fatalf("told the control plane %+v\nwant %+v", got, want)
 	}
@@ -1149,7 +1149,7 @@ func TestAHeldMachineTheListLeavesOutIsReadByItsIDAndReportedAsFound(t *testing.
 // Only a read that says the machine is gone leaves it out of the report.
 func TestAHeldMachineThatIsGoneIsLeftOut(t *testing.T) {
 	h := newHarness(t)
-	h.cp.holds(hostingapi.HeldMachine{Name: "a", Machine: "fake-9999"})
+	h.cp.holds(sandboxapi.HeldMachine{Name: "a", Machine: "fake-9999"})
 	h.mustPass()
 	if got := h.cp.lastQuestion().Instances; len(got) != 0 {
 		t.Fatalf("told the control plane %+v, want nothing", got)
@@ -1166,7 +1166,7 @@ func TestAPassThatCannotTellWhetherAHeldMachineIsGoneReportsNothing(t *testing.T
 	h.cp.want([]entry{agent("a")}, nil)
 	h.mustPass()
 	h.rented.Start(full("a"))
-	h.cp.holds(hostingapi.HeldMachine{Name: "a", Machine: h.rented.IDs(full("a"))[0]})
+	h.cp.holds(sandboxapi.HeldMachine{Name: "a", Machine: h.rented.IDs(full("a"))[0]})
 	h.rented.Hide(full("a"))
 	h.rented.Fail = func(method, _ string) error {
 		if method == "Get" {

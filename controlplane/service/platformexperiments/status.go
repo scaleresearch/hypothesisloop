@@ -45,7 +45,7 @@ func draftReason(pe *domain.PlatformExperiment) *domain.StatusReason {
 // The commands a status_reason names are whole as a person types them, who coordinates where the
 // platform hosts no coordinator and whose token names no platform experiment.
 func addBaselineAgent(id string) string {
-	return "`hl platform-experiments agents add --hosted --role baseline --platform-experiment " + id + "`"
+	return "`hl platform-experiments agents add --in-agentsandbox --role baseline --platform-experiment " + id + "`"
 }
 
 func declareBaseline(id string) string {
@@ -150,7 +150,7 @@ func baselineClock(due, now time.Time) string {
 // cut, and whose machine, where the platform runs it, did not stop with no restart left.
 func researcherLeft(signups []domain.AgentSignup) bool {
 	return slices.ContainsFunc(signups, func(signup domain.AgentSignup) bool {
-		stopped := signup.Hosted && signup.Instance != nil && signup.Instance.Stopped
+		stopped := signup.InAgentSandbox && signup.Instance != nil && signup.Instance.Stopped
 		return signup.Role == domain.SignupRoleCompetitor && signup.Ended == "" && !stopped
 	})
 }
@@ -162,7 +162,7 @@ func runningReason(pe *domain.PlatformExperiment, signups []domain.AgentSignup, 
 	case pe.AwaitsAgents():
 		return &domain.StatusReason{Reason: "agents_starting", Message: "the run started at starts_at, " + pe.StartsAt.UTC().Format(time.RFC3339) + ", and its researchers' machines are starting: the first one running sets started_at. The platform closes it at agents_due_at, with close_reason " + string(domain.CloseAgentsNotStarted) + ", if none is running by then, and at " + endsClock(pe, now) + ", in any case"}
 	case !researcherLeft(signups):
-		return &domain.StatusReason{Reason: "researchers_done", Message: fmt.Sprintf("every researcher of platform experiment %s has finished, was cut or lost its machine with no restart left, so nobody is left to submit a job. Where it runs them the platform adds a researcher of its researchers in the place of one that finished or lost its machine while the run has time for a trial and its budget a share for one, and none is added now; its coordinator may add one up to max_agents with `hl platform-experiments agents add --hosted --platform-experiment %s`. The platform closes it at its %s, and its coordinator may write the summary with `hl platform-experiments summary --file FILE --platform-experiment %s` and close it sooner with `hl platform-experiments close --platform-experiment %s`",
+		return &domain.StatusReason{Reason: "researchers_done", Message: fmt.Sprintf("every researcher of platform experiment %s has finished, was cut or lost its machine with no restart left, so nobody is left to submit a job. Where it runs them the platform adds a researcher of its researchers in the place of one that finished or lost its machine while the run has time for a trial and its budget a share for one, and none is added now; its coordinator may add one up to max_agents with `hl platform-experiments agents add --in-agentsandbox --platform-experiment %s`. The platform closes it at its %s, and its coordinator may write the summary with `hl platform-experiments summary --file FILE --platform-experiment %s` and close it sooner with `hl platform-experiments close --platform-experiment %s`",
 			pe.ID, pe.ID, endsClock(pe, now), pe.ID, pe.ID)}
 	}
 	return &domain.StatusReason{Reason: "running", Message: "its researchers are at work and the platform closes it at " + endsClock(pe, now)}
@@ -279,7 +279,7 @@ func (s *Service) Describe(ctx context.Context, pe *domain.PlatformExperiment, r
 	if err := summarize(why, pe, signups, now); err != nil {
 		return fmt.Errorf("platform_experiments.Describe: %w", err)
 	}
-	if why.WaitsFor, err = domain.WaitsFor(why.Reason, pe.CoordinatorHosted); err != nil {
+	if why.WaitsFor, err = domain.WaitsFor(why.Reason, pe.CoordinatorInAgentSandbox); err != nil {
 		return fmt.Errorf("platform_experiments.Describe: %w", err)
 	}
 	pe.StatusReason = why

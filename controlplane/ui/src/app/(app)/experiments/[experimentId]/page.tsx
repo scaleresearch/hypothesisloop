@@ -11,7 +11,7 @@ import { DraftView } from '@/components/draft'
 import { ExperimentAgents } from '@/components/experiment-agents'
 import { ExperimentCode } from '@/components/experiment-code'
 import { GoalEditor } from '@/components/goal-editor'
-import { HostedMachines } from '@/components/hosted-machines'
+import { AgentSandboxMachines } from '@/components/agentsandbox-machines'
 import { PhaseStrip } from '@/components/phase-strip'
 import { PlatformExperimentDialog } from '@/components/platform-experiment-form'
 import { ReferenceValues } from '@/components/reference-values'
@@ -115,7 +115,7 @@ function PlatformExperimentDetail({ id }: { id: string }) {
     >
       {editing && <PlatformExperimentDialog initial={pe} onClose={() => setEditing(false)} onSaved={() => void mutatePE()} />}
       <PhaseStrip pe={pe} jobs={jobRows} stages={stages}>
-        <HostedMachines pe={pe} jobs={stats?.total ?? 0} />
+        <AgentSandboxMachines pe={pe} jobs={stats?.total ?? 0} />
       </PhaseStrip>
 
       <Baseline pe={pe} />

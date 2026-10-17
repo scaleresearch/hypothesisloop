@@ -63,7 +63,7 @@ func registerPlatformExperiments(doc *Doc, experiments *platformexperiments.Serv
 			"The platform starts the run, and nothing else does: once a baseline is declared (PATCH baseline_job_id), at starts_at or at once without one or with one past. Until then it is open and GET /platform-experiments/{id} says in status_reason what it waits for. " +
 			"What it is created as is checked by the rules a draft's proposal is checked by, and refused with 422 and the same reasons: invalid_experiment, invalid_metrics, invalid_stages, invalid_cost, invalid_agents, invalid_length, run_too_long, " +
 			"and accelerator_unreachable when no cluster the org's jobs can be placed on reports capacity now (GET /resource-catalog/capacity lists none): nothing of it could run. " +
-			"coordinator_hosted: true has the platform run the coordinator as one more machine beside the agents', on coordinator_model or the platform's coordinator default: " +
+			"coordinator_in_agentsandbox: true has the platform run the coordinator as one more machine beside the agents', on coordinator_model or the platform's coordinator default: " +
 			"it holds this platform experiment's coordinator token, is no agent of it, holds no quota and is not ranked. " + platformexperiments.CoordinatorWanted + " " +
 			"It is fixed from then on. " +
 			"repository is the code the platform experiment works on, owner/name on GitHub: agents clone it and push their branches to it, jobs check it out, and repository_url in the answer is where from. " +
@@ -82,22 +82,22 @@ func registerPlatformExperiments(doc *Doc, experiments *platformexperiments.Serv
 			"502 github_failed when GitHub answers 5xx or not at all for the installation, the message naming it and GitHub's answer. " +
 			"On a deployment whose git host is plain the platform creates none: repository is a name under the host's root, created there beforehand, " +
 			"422 repository_required without it, and repository_not_reachable when it does not answer git. " +
-			"agent_image is the image the hosted agents and the coordinator run, built FROM the platform's agent image so the harness is in it. Left out, " +
+			"agent_image is the image the sandboxed agents and the coordinator run, built FROM the platform's agent image so the harness is in it. Left out, " +
 			"it is the platform's own. 422 invalid_agent_image when it is no image reference. Both are fixed from then on. " +
-			"With coordinator_hosted: true it also creates, in the same write, one hosted researcher for each place of researchers, of its entry's agent type, model and hyperparameters, whose machines are asked for when the run starts. While the run goes on the platform keeps them at work: it adds a new researcher in the place of one that finished or whose machine stopped with no restart left, with its agent type, model and hyperparameters, until less of the run is left than one trial of the baseline job (job_estimated_duration_hours, at least 15 minutes) or the budget its researchers left unspent holds no trial for one, and a stage boundary lowers the counts by the researchers it cuts, so none of them is replaced. agent.replaced tells each researcher added. " +
-			"It also creates one hosted agent of role baseline, named by its role, as accepting a draft does: its machine is asked for at once, it measures the baseline, and the platform declares the job it leaves when it finishes, so status_reason reads baseline_measuring from the first answer and nobody adds a baseline agent. 409 max_hosted_reached where the platform's limit holds no machine for it beside the coordinator's. " +
-			"Without coordinator_hosted this call creates the experiment and no agent, and the platform adds none: every researcher, and any other agent, joins by its own POST /platform-experiments/{id}/agents. " +
-			"max_hosted in the answer is how many machines the platform runs for this platform experiment at once, its hosted agents of every role and its coordinator together: " +
+			"With coordinator_in_agentsandbox: true it also creates, in the same write, one sandboxed researcher for each place of researchers, of its entry's agent type, model and hyperparameters, whose machines are asked for when the run starts. While the run goes on the platform keeps them at work: it adds a new researcher in the place of one that finished or whose machine stopped with no restart left, with its agent type, model and hyperparameters, until less of the run is left than one trial of the baseline job (job_estimated_duration_hours, at least 15 minutes) or the budget its researchers left unspent holds no trial for one, and a stage boundary lowers the counts by the researchers it cuts, so none of them is replaced. agent.replaced tells each researcher added. " +
+			"It also creates one sandboxed agent of role baseline, named by its role, as accepting a draft does: its machine is asked for at once, it measures the baseline, and the platform declares the job it leaves when it finishes, so status_reason reads baseline_measuring from the first answer and nobody adds a baseline agent. 409 max_agentsandboxes_reached where the platform's limit holds no machine for it beside the coordinator's. " +
+			"Without coordinator_in_agentsandbox this call creates the experiment and no agent, and the platform adds none: every researcher, and any other agent, joins by its own POST /platform-experiments/{id}/agents. " +
+			"max_agentsandboxes in the answer is how many machines the platform runs for this platform experiment at once, its sandboxed agents of every role and its coordinator together: " +
 			"one of them is kept for an agent of role baseline, and an agent that finished holds none. " +
 			"GET /platform-experiments/{id} shows the coordinator's model and what became of its machine.",
 	}, a.createPlatformExperiment)
 
 	register(doc, auth.AudienceCoordinator, huma.Operation{
-		OperationID: "get-hosting", Method: "GET", Path: "/hosting",
+		OperationID: "get-agentsandbox", Method: "GET", Path: "/agentsandbox",
 		Summary: "Whether the platform can host agents now", Tags: []string{"platform-experiments"},
-		Description: "available is true while the deployment has a sandbox provider to run hosted machines on. " +
+		Description: "available is true while the deployment has a sandbox provider to run agent sandboxes on. " +
 			"While it is false, unavailable says why, and every request that would host an agent, a draft's planner or a coordinator is refused with 503 and the same reason.",
-	}, a.getHosting)
+	}, a.getAgentSandbox)
 
 	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "list-platform-experiments", Method: "GET", Path: "/platform-experiments",
@@ -197,11 +197,11 @@ func registerPlatformExperiments(doc *Doc, experiments *platformexperiments.Serv
 		Summary: "Set a closed platform experiment running again", Tags: []string{"platform-experiments"},
 		Description: "Staff only. A run closed early, for one to redeploy the platform, continues as the same run until ends_at: its hypotheses, jobs, branches, brief, baseline and agents stay as the close left them. " +
 			"closed_at, close_reason, closed_by, close_message, the record of the close and its placements go, and the answer reads running with the new ends_at and duration_hours counted from its start. " +
-			"Every agent whose run ended only with the close is at work again, its machine asked for and its token accepted, and so is a hosted coordinator. One that finished or was cut before the close stays as it ended. " +
+			"Every agent whose run ended only with the close is at work again, its machine asked for and its token accepted, and so is a sandboxed coordinator. One that finished or was cut before the close stays as it ended. " +
 			"Jobs the close evicted stay evicted. Agents are told with platform_experiment.status running and platform_experiment.description, as the run's length changed. " +
-			"coordinator_model moves a hosted coordinator to that model, checked as on a create, and left out keeps the one it has. " +
+			"coordinator_model moves a sandboxed coordinator to that model, checked as on a create, and left out keeps the one it has. " +
 			"409 invalid_transition for one that is not closed, one that closed before its run started, and one a later run continues. 422 invalid_length for an ends_at that has passed, run_too_long for one past quota.max_platform_experiment_days from the run's start. " +
-			"400 invalid_request for a coordinator_model on a run with no hosted coordinator.",
+			"400 invalid_request for a coordinator_model on a run with no sandboxed coordinator.",
 	}, a.reopenPlatformExperiment)
 
 	register(doc, auth.AudienceAgent, huma.Operation{
@@ -273,11 +273,15 @@ func (a platformExperimentsAPI) createPlatformExperiment(ctx context.Context, in
 	return a.answer(ctx, pe)
 }
 
-func (a platformExperimentsAPI) getHosting(ctx context.Context, _ *struct{}) (*struct{ Body platformexperiments.Hosting }, error) {
+func (a platformExperimentsAPI) getAgentSandbox(ctx context.Context, _ *struct{}) (*struct {
+	Body platformexperiments.AgentSandbox
+}, error) {
 	if _, err := a.access.Account(ctx); err != nil {
 		return nil, err
 	}
-	return &struct{ Body platformexperiments.Hosting }{Body: a.experiments.Hosting()}, nil
+	return &struct {
+		Body platformexperiments.AgentSandbox
+	}{Body: a.experiments.AgentSandbox()}, nil
 }
 
 func (a platformExperimentsAPI) listPlatformExperiments(ctx context.Context, in *struct {
@@ -469,7 +473,7 @@ func (a platformExperimentsAPI) removePlatformExperiment(ctx context.Context, in
 
 type reopenRequest struct {
 	EndsAt           time.Time `json:"ends_at" doc:"When the run closes again, RFC 3339, in the future."`
-	CoordinatorModel string    `json:"coordinator_model,omitempty" doc:"The model the hosted coordinator runs on from now. Left out, it keeps the one it has."`
+	CoordinatorModel string    `json:"coordinator_model,omitempty" doc:"The model the sandboxed coordinator runs on from now. Left out, it keeps the one it has."`
 }
 
 func (a platformExperimentsAPI) reopenPlatformExperiment(ctx context.Context, in *struct {

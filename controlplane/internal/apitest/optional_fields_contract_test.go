@@ -36,7 +36,7 @@ func TestFieldsAddedToExistingRequestBodiesStayOptional(t *testing.T) {
 	}{
 		{"/platform-experiments/{id}/agents", "role", "competitor is the documented default, and a caller adding competitors omits it"},
 		{"/platform-experiments/{id}/agents", "agent_id", "a caller creating an agent names none"},
-		{"/platform-experiments/{id}/agents", "hosted", "an agent the caller runs itself is the default"},
+		{"/platform-experiments/{id}/agents", "in_agentsandbox", "an agent the caller runs itself is the default"},
 		{"/platform-experiments/{id}/agents", "agent_type", "an agent with no agent type runs the harness's default"},
 		{"/platform-experiments/{id}/agents", "hyperparameters", "an agent with none gets an empty object"},
 		{"/platform-experiments/{id}/agents", "model", "an agent with no model runs the harness's default"},
@@ -61,7 +61,7 @@ func openAPISpec(t *testing.T) map[string]any {
 	t.Helper()
 	r := authtest.Router(authtest.Staff)
 	doc := httpapi.NewDoc(r, "hypothesisloop API", "1.0.0", agenttypes.PlatformRules, auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	launch := platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: "contract-test-signing-secret", MaxHosted: 20}
+	launch := platformexperiments.AgentLaunch{AgentSandbox: true, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: "contract-test-signing-secret", MaxAgentSandboxes: 20}
 	platformExperiments := platformexperiments.NewService(nil, domain.QuotaConfig{}, zap.NewNop(), nil, time.Minute).WithRepositories(worldRepositories{}).WithPlanning(worldPlanning).WithAgentLaunch(launch)
 	httpapi.Register(doc, httpapi.Handlers{
 		Logger:              zap.NewNop(),

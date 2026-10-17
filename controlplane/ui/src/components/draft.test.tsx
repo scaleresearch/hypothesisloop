@@ -75,7 +75,7 @@ function show(d: PlatformExperiment) {
 beforeEach(() => {
   vi.mocked(apiSend).mockReset().mockResolvedValue({})
   vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([
-    { platform_experiment_id: 'pe-1', agent_id: 'ag-p', name: 'Planner', role: 'planner', hosted: true, agent_type: 'planner', signed_up_at: '', instance: { state: 'starting', restarts: 0, stopped: false } } as JoinedAgent,
+    { platform_experiment_id: 'pe-1', agent_id: 'ag-p', name: 'Planner', role: 'planner', in_agentsandbox: true, agent_type: 'planner', signed_up_at: '', instance: { state: 'starting', restarts: 0, stopped: false } } as JoinedAgent,
   ])
 })
 

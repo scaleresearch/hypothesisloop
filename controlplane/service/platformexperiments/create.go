@@ -166,8 +166,8 @@ func (s *Service) Create(ctx context.Context, req CreatePlatformExperimentReques
 	if _, err := s.requireReachable(ctx, req.ProjectID, nil); err != nil {
 		return nil, err
 	}
-	if req.CoordinatorHosted != (req.coordinator != nil) {
-		return nil, fmt.Errorf("platform_experiments.Create: coordinator_hosted is %v and its model is resolved: %v", req.CoordinatorHosted, req.coordinator != nil)
+	if req.CoordinatorInAgentSandbox != (req.coordinator != nil) {
+		return nil, fmt.Errorf("platform_experiments.Create: coordinator_in_agentsandbox is %v and its model is resolved: %v", req.CoordinatorInAgentSandbox, req.coordinator != nil)
 	}
 	if err := s.requireContinuable(ctx, req.ProjectID, req.repository.Named, req.Continues); err != nil {
 		return nil, err
@@ -198,9 +198,9 @@ func (s *Service) Create(ctx context.Context, req CreatePlatformExperimentReques
 		MaxConcurrentAccelerators: req.MaxConcurrentAccelerators,
 		CreatedAt:                 now,
 		UpdatedAt:                 now,
-		CoordinatorHosted:         req.CoordinatorHosted,
+		CoordinatorInAgentSandbox: req.CoordinatorInAgentSandbox,
 		Coordinator:               req.coordinator,
-		MaxHosted:                 req.maxHosted,
+		MaxAgentSandboxes:         req.maxAgentSandboxes,
 		Repository:                req.repository.Named,
 		RepositoryURL:             req.repository.URL,
 		RepositoryAccount:         req.repository.CreateOn,
@@ -298,7 +298,7 @@ func noPlatformExperiment(id string) error {
 }
 
 // CreateExperiment creates the platform experiment req asks for, for by: in the repository it
-// names or one the platform creates, and with the hosted agents its pool names.
+// names or one the platform creates, and with the sandboxed agents its pool names.
 func (s *Service) CreateExperiment(ctx context.Context, req CreatePlatformExperimentRequest, by domain.Actor) (*domain.PlatformExperiment, error) {
 	named, err := s.repositoryOf(ctx, req.ProjectID, req.Repository, req.RepositoryAccount)
 	if err != nil {
@@ -312,20 +312,20 @@ func (s *Service) CreateExperiment(ctx context.Context, req CreatePlatformExperi
 	if req.Researchers, err = s.resolvedPool(catalog, req.Researchers); err != nil {
 		return nil, err
 	}
-	hosting, err := withHosting(req, s.launch)
+	create, err := withAgentSandbox(req, s.launch)
 	if err != nil {
 		return nil, s.refusal("create platform experiment", err)
 	}
-	hosting.createdBy = &by
-	if hosting.CoordinatorHosted {
-		if hosting.agents, hosting.signups, err = hostedAgents(catalog, poolAgents(hosting.Researchers), by, time.Now().UTC()); err != nil {
+	create.createdBy = &by
+	if create.CoordinatorInAgentSandbox {
+		if create.agents, create.signups, err = sandboxedAgents(catalog, poolAgents(create.Researchers), by, time.Now().UTC()); err != nil {
 			return nil, s.refusal("create platform experiment", err)
 		}
 	}
-	if hosting.repository, err = s.chooseRepository(ctx, req.ProjectID, hosting.Repository, req.RepositoryAccount); err != nil {
+	if create.repository, err = s.chooseRepository(ctx, req.ProjectID, create.Repository, req.RepositoryAccount); err != nil {
 		return nil, err
 	}
-	pe, err := s.Create(ctx, hosting)
+	pe, err := s.Create(ctx, create)
 	var answered interface{ GetStatus() int }
 	if errors.As(err, &answered) {
 		return nil, err

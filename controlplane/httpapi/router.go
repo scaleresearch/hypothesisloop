@@ -72,7 +72,7 @@ func NewRouter(h Handlers) chi.Router {
 	r.Get("/changes", h.Watch.ServeChanges)
 	// git's smart HTTP is no JSON API, so it is mounted beside the documented operations.
 	r.Handle(auth.GitPrefix+"*", h.GitProxy)
-	// The model calls of hosted agents are the provider's own API, passed on with the platform's
+	// The model calls of sandboxed agents are the provider's own API, passed on with the platform's
 	// credential, and no operation of this one.
 	r.Handle(modelproxy.Prefix+"*", h.ModelProxy)
 

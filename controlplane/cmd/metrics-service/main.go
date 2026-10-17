@@ -116,7 +116,7 @@ func newControllerServer(authenticator *auth.Authenticator, pool *db.Pool, store
 	// Each pass keeps the researchers of every running platform experiment at work as its pool
 	// says, launched as the control service launches the researchers it creates.
 	ctrl = ctrl.WithResearcherKeeper(peSvc.WithAgentLaunch(platformexperiments.AgentLaunch{
-		Hosting: pcfg.Sandbox != nil, DefaultModel: pcfg.Agents.DefaultModel,
+		AgentSandbox: pcfg.Sandbox != nil, DefaultModel: pcfg.Agents.DefaultModel,
 	}))
 
 	// settler durably writes a terminal experiment's final observed usage (see

@@ -199,16 +199,16 @@ func (c *Settings) build() error {
 		return fmt.Errorf("service ports must be in 1-65535")
 	}
 	if c.Agents.Image == "" {
-		return fmt.Errorf("agents image is required: what a hosted agent's machine boots")
+		return fmt.Errorf("agents image is required: what a sandboxed agent's machine boots")
 	}
 	if err := domain.ValidateModel(c.Agents.DefaultModel); err != nil {
 		return fmt.Errorf("agents default_model is required, the model an agent runs on when it names none: %w", err)
 	}
 	if err := domain.ValidateModel(c.Agents.CoordinatorModel); err != nil {
-		return fmt.Errorf("agents coordinator_model is required, the model a hosted coordinator runs on when it names none: %w", err)
+		return fmt.Errorf("agents coordinator_model is required, the model a sandboxed coordinator runs on when it names none: %w", err)
 	}
 	if c.Agents.BootLimitSeconds <= 0 {
-		return fmt.Errorf("agents boot_limit_seconds is required and positive: how long a hosted agent's machine may stay starting")
+		return fmt.Errorf("agents boot_limit_seconds is required and positive: how long a sandboxed agent's machine may stay starting")
 	}
 	if c.Agents.ProgressLimitSeconds < domain.MinAgentProgressLimitSeconds {
 		return fmt.Errorf("agents progress_limit_seconds is required and at least %d: an agent prints its progress every %d seconds, and a limit under %d of those ends machines whose output only reached the platform late",
@@ -217,8 +217,8 @@ func (c *Settings) build() error {
 	if c.Agents.MaxNewInstancesPerAnswer <= 0 {
 		return fmt.Errorf("agents max_new_instances_per_answer is required and positive: how many machines one pass over the sandbox provider creates")
 	}
-	if c.Agents.MaxHostedPerPlatformExperiment <= 0 {
-		return fmt.Errorf("agents max_hosted_per_platform_experiment is required and positive: how many machines the platform runs for one platform experiment, its coordinator included")
+	if c.Agents.MaxAgentSandboxesPerPlatformExperiment <= 0 {
+		return fmt.Errorf("agents max_agentsandboxes_per_platform_experiment is required and positive: how many machines the platform runs for one platform experiment, its coordinator included")
 	}
 	if c.Agents.IdleNoticeMinutes <= 0 {
 		return fmt.Errorf("agents idle_notice_minutes is required and positive: how long a researcher may go with no job in flight before it and the coordinator are told")
@@ -226,7 +226,7 @@ func (c *Settings) build() error {
 	switch m := c.Models; m.Provider {
 	case ModelProviderAnthropic:
 	default:
-		return fmt.Errorf("models provider %q is not %s: the provider whose models hosted agents run on", m.Provider, ModelProviderAnthropic)
+		return fmt.Errorf("models provider %q is not %s: the provider whose models sandboxed agents run on", m.Provider, ModelProviderAnthropic)
 	}
 	if c.Planning.LimitMinutes <= 0 {
 		return fmt.Errorf("planning limit_minutes is required and positive: how long a draft's planner has to propose")
@@ -258,7 +258,7 @@ func (c *Settings) build() error {
 			return fmt.Errorf("%s %q must be the http(s) address the platform is reached at from outside it", key, address)
 		}
 		if unreachableFromElsewhere(parsed.Hostname()) {
-			return fmt.Errorf("%s %q is loopback or unspecified: a hosted agent or a runtime inside a cluster cannot reach it", key, address)
+			return fmt.Errorf("%s %q is loopback or unspecified: a sandboxed agent or a runtime inside a cluster cannot reach it", key, address)
 		}
 	}
 	registry, err := url.Parse("//" + c.Runtimes.Registry)

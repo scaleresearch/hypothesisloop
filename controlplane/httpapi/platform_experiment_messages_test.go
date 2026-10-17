@@ -114,14 +114,14 @@ func TestTheCoordinatorAndTheOwnerMessageAgentsAndAnAgentReadsItsOwn(t *testing.
 		t.Errorf("all with every one limited: got = %d %v, want 429", code, out)
 	}
 
-	// A person steers the coordinator the same way, and is told where none is hosted.
+	// A person steers the coordinator the same way, and is told where none is sandboxed.
 	store = &messageStore{}
 	if code, out := call(t, messagesRouter(t, store, owner), "POST", "/platform-experiments/pe-1/messages", `{"coordinator":true,"text":"model the gap"}`); code != http.StatusCreated ||
 		len(store.to) != 1 || store.to[0] != domain.CoordinatorRecipient || store.text != "model the gap" || store.sender.Kind != domain.ActorUser {
 		t.Fatalf("owner's message to the coordinator: got = %d %v, to %v %q by %+v", code, out, store.to, store.text, store.sender)
 	}
 	if code, out := call(t, messagesRouter(t, &messageStore{refuse: db.ErrNoCoordinator}, owner), "POST", "/platform-experiments/pe-1/messages", `{"coordinator":true,"text":"x"}`); code != http.StatusConflict || out["reason"] != "no_coordinator" {
-		t.Errorf("to no hosted coordinator: got = %d %v, want 409 no_coordinator", code, out)
+		t.Errorf("to no sandboxed coordinator: got = %d %v, want 409 no_coordinator", code, out)
 	}
 
 	agent := auth.Principal{Kind: auth.KindAgent, OrgIDs: []string{"org-a"}, ProjectID: "project-a", PlatformExperimentID: "pe-1", AgentID: "veteran"}

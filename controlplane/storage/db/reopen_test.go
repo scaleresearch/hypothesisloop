@@ -24,10 +24,10 @@ func closedRunWithAgents(t *testing.T, pool *Pool) ClosedRun {
 	ctx := context.Background()
 	pes := NewStore(pool, 3)
 	pe := createTestPEWithCoordinator(t, pool)
-	hosted := domain.AgentSignup{Actor: testActor, Hosted: true, AgentType: "generalist", Model: "model-1"}
-	baseline := hosted
+	sandboxed := domain.AgentSignup{Actor: testActor, InAgentSandbox: true, AgentType: "generalist", Model: "model-1"}
+	baseline := sandboxed
 	baseline.Role, baseline.AgentType = domain.SignupRoleBaseline, "baseline"
-	agents := spawnTestAgents(t, pes, pe, baseline, hosted, hosted, hosted)
+	agents := spawnTestAgents(t, pes, pe, baseline, sandboxed, sandboxed, sandboxed)
 	run := ClosedRun{ID: pe, Baseline: agents[0], Live: agents[1], Finished: agents[2], Cut: agents[3]}
 	setPEStatus(t, pool, pe, domain.PlatformExpRunning, 3*time.Hour)
 	for _, agent := range []string{run.Baseline, run.Finished} {
@@ -178,7 +178,7 @@ func TestOnlyAClosedRunThatStartedAndNobodyContinuesIsReopened(t *testing.T) {
 	setPEStatus(t, pool, plain, domain.PlatformExpRunning, time.Hour)
 	setPEStatus(t, pool, plain, domain.PlatformExpClosed, time.Minute)
 	if err := pes.ReopenPlatformExperiment(ctx, plain, endsAt, 5, "coordinator-2"); !errors.Is(err, ErrNotReopenable) {
-		t.Fatalf("a coordinator model with no hosted coordinator: got = %v, want = ErrNotReopenable", err)
+		t.Fatalf("a coordinator model with no sandboxed coordinator: got = %v, want = ErrNotReopenable", err)
 	}
 	if pe, err := pes.GetPlatformExperiment(ctx, plain); err != nil || pe.Status != domain.PlatformExpClosed {
 		t.Fatalf("after a refused reopen: got = %+v, %v, want it closed", pe, err)

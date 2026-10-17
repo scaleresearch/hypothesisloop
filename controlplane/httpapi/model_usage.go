@@ -22,7 +22,7 @@ func registerModelUsage(doc *Doc, experiments *platformexperiments.Service, logg
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "get-platform-experiment-model-usage", Method: "GET", Path: "/platform-experiments/{id}/model-usage",
 		Summary: "Get the model tokens the platform's agents spent, per agent and model", Tags: []string{"platform-experiments"},
-		Description: "The model calls the platform made for this platform experiment's hosted agents and coordinator, " +
+		Description: "The model calls the platform made for this platform experiment's sandboxed agents and coordinator, " +
 			"summed per agent and model as the provider counted them: input, output, cache write and cache read tokens.",
 	}, a.get)
 }

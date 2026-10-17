@@ -262,7 +262,7 @@ CREATE TABLE platform_experiments (
 
     budget_accelerator_hours       DOUBLE PRECISION NOT NULL,
     max_agents                     INTEGER          NOT NULL DEFAULT 100,
-    max_hosted                     INTEGER          NOT NULL DEFAULT 0,
+    max_agentsandboxes             INTEGER          NOT NULL DEFAULT 0,
     max_concurrent_accelerators    INTEGER,
     default_quota_tier             TEXT             NOT NULL,
     researchers                    JSONB            NOT NULL DEFAULT '[]',
@@ -297,7 +297,7 @@ CREATE TABLE platform_experiments (
     baseline_held_seconds          DOUBLE PRECISION NOT NULL DEFAULT 0,
     baseline_held_at               TIMESTAMPTZ,
 
-    coordinator_hosted             BOOLEAN          NOT NULL DEFAULT false,
+    coordinator_in_agentsandbox    BOOLEAN          NOT NULL DEFAULT false,
     coordinator_model              TEXT,
     coordinator_agent_type         TEXT             NOT NULL DEFAULT 'coordinator' REFERENCES agent_types(id),
     coordinator_reason             TEXT,
@@ -356,7 +356,7 @@ CREATE TABLE experiment_signups (
     added_by_kind          TEXT        NOT NULL,
     added_by_id            TEXT        NOT NULL DEFAULT '',
 
-    hosted                 BOOLEAN     NOT NULL DEFAULT false,
+    in_agentsandbox        BOOLEAN     NOT NULL DEFAULT false,
     agent_type             TEXT        NOT NULL REFERENCES agent_types(id),
     model                  TEXT,
     hyperparameters        JSONB,
@@ -450,15 +450,15 @@ CREATE TABLE experiment_drafts (
 CREATE INDEX idx_experiment_drafts_project ON experiment_drafts(project_id, updated_at DESC);
 
 -- ---------------------------------------------------------------------------
--- Hosted machines
+-- Agent sandboxes
 -- ---------------------------------------------------------------------------
 
--- The machine the platform runs for a hosted agent (agent_id) or for a platform experiment's hosted
+-- The machine the platform runs for a sandboxed agent (agent_id) or for a platform experiment's sandboxed
 -- coordinator (agent_id ''), written by its launcher's reconcile. name is what the machine is asked
 -- for under, '' while none is; it is cleared when the machine is given up on, and a restart asks
 -- again under a new name until stopped. restarted_at holds the restarts inside
 -- domain.AgentInstanceRestartWindow, spent under launch: another launch gets a fresh budget.
-CREATE TABLE hosted_instances (
+CREATE TABLE agentsandbox_instances (
     platform_experiment_id TEXT          NOT NULL REFERENCES platform_experiments(id),
     agent_id               TEXT          NOT NULL,
     name                   TEXT          NOT NULL DEFAULT '',
@@ -479,15 +479,15 @@ CREATE TABLE hosted_instances (
     exit_log               TEXT          NOT NULL DEFAULT '',
     end_reason             TEXT          NOT NULL DEFAULT '',
     PRIMARY KEY (platform_experiment_id, agent_id),
-    CONSTRAINT hosted_instances_state CHECK (state IN ('', 'starting', 'running')),
-    CONSTRAINT hosted_instances_end_reason CHECK (end_reason IN (
+    CONSTRAINT agentsandbox_instances_state CHECK (state IN ('', 'starting', 'running')),
+    CONSTRAINT agentsandbox_instances_end_reason CHECK (end_reason IN (
         '', 'exited', 'gone', 'never_seen', 'still_starting', 'silent', 'progress_unreadable', 'expired', 'released'
     ))
 );
 
 -- The launcher's warm pool as it last reported it, held so that a pool machine its provider's
 -- list leaves out is read by its id and not warmed again.
-CREATE TABLE hosted_pool (
+CREATE TABLE agentsandbox_pool (
     machine TEXT PRIMARY KEY,
     name    TEXT NOT NULL
 );

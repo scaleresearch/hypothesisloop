@@ -8,7 +8,7 @@ import { formDraftFromGoal, PLANNING_MOVES } from '@/lib/planning'
 import { projectPath } from '@/lib/routes'
 import { useTenant } from '@/lib/tenant'
 import { useTick } from '@/lib/tick'
-import { HostingNotice } from '@/components/hosting-notice'
+import { AgentSandboxNotice } from '@/components/agentsandbox-notice'
 import { Button } from '@/components/ui/button'
 import { Stack } from '@/components/ui/stack'
 import { InlineError } from '@/components/ui/status-message'
@@ -70,7 +70,7 @@ export function PlanningProgress({ pe, planner }: { pe: PlatformExperiment; plan
 
   if (!PLANNING_MOVES.has(reason.reason)) {
     return (
-      <HostingNotice
+      <AgentSandboxNotice
         reason={reason}
         title="Planning is on hold"
         meaning={(

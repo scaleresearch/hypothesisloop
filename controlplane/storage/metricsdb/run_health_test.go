@@ -51,7 +51,7 @@ func TestLatestRunHealthReadsEachAgentsLatestValues(t *testing.T) {
 	}
 }
 
-// A hosted agent's rate limit is read back beside its other health values: its utilization, and
+// A sandboxed agent's rate limit is read back beside its other health values: its utilization, and
 // while the provider refuses its calls the reset it waits for. A refusal whose reset has passed is
 // over even before a reading says so.
 func TestLatestRunHealthReadsWhetherAnAgentIsRateLimited(t *testing.T) {

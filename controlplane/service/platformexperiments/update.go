@@ -17,7 +17,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
-// CoordinatorWanted says when the platform runs a hosted coordinator's machine (db.launcherCoordinatorsWhere).
+// CoordinatorWanted says when the platform runs a sandboxed coordinator's machine (db.launcherCoordinatorsWhere).
 const CoordinatorWanted = "The coordinator's machine is asked for once the plan is accepted and the experiment is open, so it supervises the baseline and can change the lineup before the start, and is kept until the experiment closes."
 
 // refuseUpdate is a create or a patch the caller can fix.
