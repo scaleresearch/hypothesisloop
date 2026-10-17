@@ -61,11 +61,11 @@ function AgentExperimentQuota({ agentId, pe, colSpan }: { agentId: string; pe: P
           <TextLink href={experimentPath(pe.id)} className="text-xs">{pe.name}</TextLink>
           <span>
             <Badge status="guaranteed" className="mr-1">Guaranteed</Badge>
-            <Code>{formatAccH(q.used_guaranteed_acch)} / {formatAccH(q.guaranteed_accelerator_hours)}</Code> {unit} used
+            <Code>{formatAccH(q.used_guaranteed_acch)} / {formatAccH(q.guaranteed_accelerator_hours)}</Code> {unit} reserved
           </span>
           <span>
             <Badge status="burst" className="mr-1">Burst</Badge>
-            <Code>{formatAccH(q.used_burst_acch)} / {formatAccH(q.burst_accelerator_hours)}</Code> {unit} used
+            <Code>{formatAccH(q.used_burst_acch)} / {formatAccH(q.burst_accelerator_hours)}</Code> {unit} reserved
           </span>
           <span className={room ? 'text-success' : 'text-danger'} title="The largest job a submit is admitted with now: every job that has not ended holds its whole estimate">
             room for a job of <Code>{formatAccH(q.remaining_guaranteed_accelerator_hours)}</Code> guaranteed

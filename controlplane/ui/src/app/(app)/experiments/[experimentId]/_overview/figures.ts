@@ -7,21 +7,19 @@ import type { Phase } from '@/lib/phase'
 import { experimentPath, withQuery } from '@/lib/routes'
 import { inFlight } from '@/lib/units'
 import { hypothesisStatusValues } from '@/types/api'
-import type { AgentQuotaView, ExperimentStats, HypothesisStats, PlatformExperiment } from '@/types/api'
+import type { ExperimentStats, HypothesisStats, PlatformExperiment } from '@/types/api'
 
 /** The experiment in figures: what it spent and holds, its jobs, hypotheses and researchers. */
-export function overviewFigures({ pe, phase, plannedOnly, unit, quotas, stats, hypothesisStats, verdicts, researchers }: {
+export function overviewFigures({ pe, phase, plannedOnly, unit, stats, hypothesisStats, verdicts, researchers }: {
   pe: PlatformExperiment
   phase: Phase
   plannedOnly: boolean
   unit: string
-  quotas: AgentQuotaView[] | undefined
   stats: ExperimentStats | undefined
   hypothesisStats: ExperimentStats | undefined
   verdicts: HypothesisStats | undefined
   researchers: number | undefined
 }): Figure[] {
-  const totalUsed = (quotas ?? []).reduce((s, q) => s + q.used_guaranteed_acch + q.used_burst_acch, 0)
   // SUBMITTED and RUNNING, the set max_concurrent_accelerators is checked against.
   const held = inFlight(stats?.in_flight_accelerators ?? 0, stats?.in_flight_cores ?? 0, pe.max_concurrent_accelerators)
   const jobsByStatus = stats?.by_status ?? {}
@@ -49,7 +47,7 @@ export function overviewFigures({ pe, phase, plannedOnly, unit, quotas, stats, h
 
   const figures: Figure[] = []
   if (pe.started_at) {
-    figures.push({ label: 'Budget used', value: `${formatAccH(totalUsed)} of ${pe.budget_accelerator_hours} ${unit}` })
+    figures.push({ label: 'Budget spent', value: `${formatAccH(pe.consumed_accelerator_hours ?? 0)} of ${pe.budget_accelerator_hours} ${unit}` })
   } else if (!plannedOnly) {
     figures.push({ label: 'Budget', value: `${pe.budget_accelerator_hours} ${unit}` })
   }

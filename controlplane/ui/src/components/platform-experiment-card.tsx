@@ -3,7 +3,7 @@
 import useSWR from 'swr'
 import { clsx } from 'clsx'
 import { fetchHypothesisStats } from '@/lib/api/hypotheses'
-import { fetchPlatformExperimentQuotas } from '@/lib/api/quotas'
+import { fetchPlatformExperiment } from '@/lib/api/platform-experiments'
 import { useRouter } from 'next/navigation'
 import { experimentPath } from '@/lib/routes'
 import { formatAccH, isZeroDate } from '@/lib/format'
@@ -17,7 +17,7 @@ import { RemoveExperiment } from '@/components/remove-experiment'
 import { keys } from '@/lib/keys'
 import { POLL } from '@/lib/poll'
 import { proposalOf } from '@/lib/planning'
-import type { AgentQuotaView, PlatformExperiment } from '@/types/api'
+import type { PlatformExperiment } from '@/types/api'
 
 const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' })
 
@@ -37,9 +37,10 @@ export function PlatformExperimentCard({
   const href = experimentPath(pe.id)
   const started = pe.status !== 'draft'
 
-  const { data: quotas, error: quotasError } = useSWR<AgentQuotaView[]>(
-    started ? keys.quotas(pe.id) : null,
-    () => fetchPlatformExperimentQuotas(pe.id),
+  // The list carries no spend: a read of the one experiment does.
+  const { data: spent, error: spentError } = useSWR<PlatformExperiment>(
+    started ? keys.experiment(pe.id) : null,
+    () => fetchPlatformExperiment(pe.id),
     { refreshInterval: POLL.reports },
   )
   const { data: verdicts, error: verdictsError } = useSWR(
@@ -55,14 +56,14 @@ export function PlatformExperimentCard({
 
   // A figure whose read failed says so, and one still in flight is left out, so neither reads as none.
   const figures: { text: string; title?: string }[] = []
-  if (quotasError) {
-    figures.push({ text: 'compute used unknown', title: `Could not load: ${quotasError.message}` })
-  } else if (!started || quotas) {
-    const used = (quotas ?? []).reduce((s, q) => s + q.used_guaranteed_acch + q.used_burst_acch, 0)
+  if (spentError) {
+    figures.push({ text: 'compute spent unknown', title: `Could not load: ${spentError.message}` })
+  } else if (!started || spent) {
+    const used = spent?.consumed_accelerator_hours ?? 0
     if (live && pe.budget_accelerator_hours > 0) {
       figures.push({ text: used > 0 ? `${formatAccH(used)} of ${pe.budget_accelerator_hours} ${unit}` : `${pe.budget_accelerator_hours} ${unit}` })
     } else if (used > 0) {
-      figures.push({ text: `${formatAccH(used)} ${unit} used` })
+      figures.push({ text: `${formatAccH(used)} ${unit} spent` })
     }
   }
   if (live && pe.signup_count > 0) figures.push({ text: `${pe.signup_count} ${pe.signup_count === 1 ? 'agent' : 'agents'}` })

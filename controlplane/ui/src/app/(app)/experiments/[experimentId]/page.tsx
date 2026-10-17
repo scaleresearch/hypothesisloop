@@ -86,7 +86,7 @@ function PlatformExperimentDetail({ id }: { id: string }) {
   // A draft that closed never had researchers: its max_agents is still the most its planner could propose.
   const plannedOnly = pe.close_reason != null && PLANNED_ONLY.includes(pe.close_reason)
   const figures = overviewFigures({
-    pe, phase, plannedOnly, unit, quotas, stats,
+    pe, phase, plannedOnly, unit, stats,
     hypothesisStats: reads.hypothesisStats,
     verdicts: reads.verdicts,
     researchers: roster?.filter(agent => agent.role === 'competitor').length,

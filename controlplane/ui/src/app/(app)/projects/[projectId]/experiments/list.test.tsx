@@ -20,7 +20,7 @@ vi.mock('@/lib/api/agents', () => ({ fetchAgentsPage: vi.fn() }))
 vi.mock('@/lib/api/clusters', () => ({ fetchOrgClusters: vi.fn() }))
 vi.mock('@/lib/api/hypotheses', () => ({ fetchHypothesisStats: vi.fn() }))
 vi.mock('@/lib/api/jobs', () => ({ fetchExperimentStats: vi.fn() }))
-vi.mock('@/lib/api/platform-experiments', () => ({ fetchPlatformExperimentsPage: vi.fn(), createPlatformExperiment: vi.fn(), updatePlatformExperiment: vi.fn() }))
+vi.mock('@/lib/api/platform-experiments', () => ({ fetchPlatformExperimentsPage: vi.fn(), fetchPlatformExperiment: vi.fn(async () => ({ consumed_accelerator_hours: 0 })), createPlatformExperiment: vi.fn(), updatePlatformExperiment: vi.fn() }))
 vi.mock('@/lib/api/quotas', () => ({ fetchPlatformExperimentQuotas: vi.fn() }))
 vi.mock('@/lib/api/request', async importActual => ({
   ...(await importActual<typeof import('@/lib/api/request')>()),

@@ -28,10 +28,14 @@ vi.mock('@/lib/api/hypotheses', () => ({
 }))
 vi.mock('@/lib/api/jobs', () => ({ fetchExperimentStats: vi.fn() }))
 vi.mock('@/lib/api/quotas', () => ({ fetchPlatformExperimentQuotas: vi.fn() }))
+vi.mock('@/lib/api/platform-experiments', async importActual => ({
+  ...(await importActual<typeof import('@/lib/api/platform-experiments')>()),
+  fetchPlatformExperiment: vi.fn(async () => ({ consumed_accelerator_hours: 0 })),
+}))
 
 const at = '2026-01-01T00:00:00Z'
 // A self-run agent of the experiment, as the API lists it to one who writes nothing of it.
-const self: JoinedAgent = { platform_experiment_id: 'pe-x', agent_id: 'ag-self', name: 'ag-self', role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, in_agentsandbox: false, agent_type: 'generalist', model: '', hyperparameters: null, at_work: true, signed_up_at: at, actions: [] }
+const self: JoinedAgent = { platform_experiment_id: 'pe-x', agent_id: 'ag-self', name: 'ag-self', role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, in_agentsandbox: false, agent_type: 'generalist', model: '', hyperparameters: null, at_work: true, ended: '', signed_up_at: at, actions: [] }
 const me: Me = {
   kind: 'user',
   user_id: 'u1',
