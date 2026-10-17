@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"regexp"
 	"time"
+
+	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
 )
 
 // AgentSignup is one agent's place in one platform experiment, and for an agent the platform
@@ -356,7 +358,7 @@ const MaxAgentInstanceLogBytes = 4 << 10
 
 // MaxHyperparametersBytes bounds an agent's hyperparameters as JSON. They travel in every answer
 // to the agent's launcher and in the agent's environment.
-const MaxHyperparametersBytes = 4 << 10
+const MaxHyperparametersBytes = experimentspec.MaxHyperparametersBytes
 
 // DefaultAgentFlavor is the agent type a researcher runs as when it joins without naming one.
 const DefaultAgentFlavor = "generalist"

@@ -1,12 +1,16 @@
 package repotemplate
 
-import _ "embed"
+import (
+	_ "embed"
+
+	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
+)
 
 // The files every experiment's repository holds, at the paths the platform, hl and the agents'
 // briefings name. hl repo check says what makes them ready.
 const (
 	Readme         = "README.md"
-	ExperimentFile = ".hypothesisloop/experiment.yaml"
+	ExperimentFile = experimentspec.File
 	JobSpec        = ".hypothesisloop/job.yaml"
 	Environment    = ".hypothesisloop/Dockerfile"
 	Gitignore      = ".gitignore"
