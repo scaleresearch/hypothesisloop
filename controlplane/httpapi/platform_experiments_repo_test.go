@@ -245,9 +245,9 @@ func TestAnUpdateTakesOnlyTheFieldsThatChange(t *testing.T) {
 		reason, says string
 	}{
 		"nothing":                       {domain.PlatformExpOpen, map[string]any{}, 422, "nothing_to_change", ""},
-		"a budget once it runs":         {domain.PlatformExpRunning, map[string]any{"description": "d", "budget_accelerator_hours": 9, "starts_at": "2030-01-02T00:00:00Z", "max_agents": 9, "duration_hours": 9}, 409, "experiment_running", "carries: budget_accelerator_hours, starts_at."},
-		"a closed one":                  {domain.PlatformExpClosed, map[string]any{"description": "d"}, 409, "experiment_not_editable", ""},
-		"a draft":                       {domain.PlatformExpDraft, map[string]any{"description": "d"}, 409, "experiment_not_editable", ""},
+		"a budget once it runs":         {domain.PlatformExpRunning, map[string]any{"description": "d", "budget_accelerator_hours": 9, "starts_at": "2030-01-02T00:00:00Z", "max_agents": 9, "duration_hours": 9}, 409, "not_editable", "budget_accelerator_hours, starts_at can't change while it is running."},
+		"a closed one":                  {domain.PlatformExpClosed, map[string]any{"description": "d"}, 409, "not_editable", "is closed"},
+		"a draft":                       {domain.PlatformExpDraft, map[string]any{"description": "d"}, 409, "not_editable", "comes from its planner"},
 		"no name":                       {domain.PlatformExpOpen, map[string]any{"name": " "}, 422, "invalid_experiment", "name"},
 		"a name of two lines":           {domain.PlatformExpRunning, map[string]any{"name": "one\ntwo"}, 422, "invalid_experiment", "name is one line"},
 		"no brief":                      {domain.PlatformExpRunning, map[string]any{"description": " "}, 422, "invalid_experiment", "description"},

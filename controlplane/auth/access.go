@@ -116,6 +116,23 @@ func (a *Access) PlatformExperiment(ctx context.Context, platformExperimentID st
 	return a.within(ctx, "platform experiment", platformExperimentID)
 }
 
+// Writes says the principal may write the platform experiment: its scope admits it, without the
+// shared platform experiments and the prior runs a read also reaches.
+func (a *Access) Writes(ctx context.Context, platformExperimentID string) (bool, error) {
+	p, err := principal(ctx)
+	if err != nil {
+		return false, err
+	}
+	if p.Scope().Unrestricted() {
+		return true, nil
+	}
+	tenancy, _, err := a.placement.PlatformExperimentTenancy(ctx, platformExperimentID)
+	if err != nil {
+		return false, err
+	}
+	return tenancy != nil && p.Scope().Admits(*tenancy), nil
+}
+
 // Within admits the principal to something that lives in a platform experiment and has no row
 // of its own to place, naming it in the refusal so that it reads the same as an absent one.
 func (a *Access) Within(ctx context.Context, what, platformExperimentID string) error {

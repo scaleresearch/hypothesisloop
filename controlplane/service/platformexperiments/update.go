@@ -26,13 +26,10 @@ func refuseUpdate(status int, reason, format string, args ...any) error {
 }
 
 // Update changes the fields the patch carries and no others, and the experiment as patched has
-// to pass validate. While the experiment is open every
-// field of the patch can change. Once it runs, only the name, the description, duration_hours and
-// max_agents can, and the baseline be raised: admission and the stage ladder have already acted on
-// the rest. A new duration_hours moves the end of the run, counted from its start as before. A
-// max_agents of a running one changes only the places not taken, and is held to the unspent hours
-// of its researchers (seatsHoldTrials). A closed one, and a draft, which its
-// planner's proposal fills, take no patch.
+// to pass validate. The fields its status takes are fieldsIn's. A new duration_hours of a running
+// one moves the end of the run, counted from its start as before. A max_agents of a running one
+// changes only the places not taken, and is held to the unspent hours of its researchers
+// (seatsHoldTrials).
 //
 // While it runs, baseline_job_id with baseline_reason raises the baseline (raisedBaseline).
 //
@@ -52,11 +49,8 @@ func (s *Service) Update(ctx context.Context, id string, patch PlatformExperimen
 	if len(patch.carried()) == 0 {
 		return nil, refuseUpdate(422, "nothing_to_change", "the body names no field: send the fields that change")
 	}
-	if pe.Status != domain.PlatformExpOpen && pe.Status != domain.PlatformExpRunning {
-		return nil, refuseUpdate(409, "experiment_not_editable", "platform experiment %s is %s: only an open or running one is changed", id, pe.Status)
-	}
-	if locked := patch.carried("name", "description", "duration_hours", "max_agents", "researchers", "baseline_job_id", "baseline_reason"); pe.Status == domain.PlatformExpRunning && len(locked) > 0 {
-		return nil, refuseUpdate(409, "experiment_running", "only name, description, duration_hours, max_agents, researchers and the baseline (baseline_job_id with baseline_reason) change once a platform experiment runs, and the body also carries: %s. Leave them out", strings.Join(locked, ", "))
+	if locked := patch.carried(fieldsIn(pe.Status)...); len(locked) > 0 {
+		return nil, notEditable(pe, locked)
 	}
 	raising := pe.Status == domain.PlatformExpRunning && patch.BaselineJobID != nil
 	if err := checkRaiseRequest(pe, patch); err != nil {
@@ -251,7 +245,7 @@ func (s *Service) SetSummary(ctx context.Context, id, summary string) (*domain.P
 // nothing a run's cost or length follows from.
 func (s *Service) Patch(ctx context.Context, id string, patch PlatformExperimentPatch, caller auth.Principal) (*domain.PlatformExperiment, error) {
 	if caller.Kind == auth.KindCoordinator {
-		if others := patch.carried("description", "baseline_job_id", "baseline_reason"); len(others) > 0 {
+		if others := patch.carried(coordinatorFields...); len(others) > 0 {
 			return nil, refusal.Refuse(http.StatusForbidden, "coordinator_changes_description_only", "a coordinator's token changes the description and the baseline (baseline_job_id, baseline_reason) and nothing else, and the body also carries: "+strings.Join(others, ", ")+". Leave them out")
 		}
 	}

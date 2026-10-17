@@ -134,11 +134,12 @@ func registerPlatformExperiments(doc *Doc, experiments *platformexperiments.Serv
 		OperationID: "update-platform-experiment", Method: "PATCH", Path: "/platform-experiments/{id}",
 		Summary: "Change fields of a platform experiment", Tags: []string{"platform-experiments"},
 		Description: "Takes only the fields that change; a field left out keeps its value, and a body with none answers 422 nothing_to_change. " +
+			"editable on GET /platform-experiments/{id} lists the fields the caller may change now, and a body that carries another answers 409 not_editable and names it. " +
 			"While the experiment is open every field of the body can change, `metrics` among them, so a mis-specified ranking metric is fixed in place. " +
-			"Once it runs only `name`, `description`, `duration_hours`, `max_agents` and the baseline (`baseline_job_id` with `baseline_reason`) do, because admission and the stage ladder have acted on the rest: a body that carries another field answers 409 experiment_running and names it. " +
+			"Once it runs only `name`, `description`, `duration_hours`, `max_agents`, `researchers` and the baseline (`baseline_job_id` with `baseline_reason`) do, because admission and the stage ladder have acted on the rest. " +
 			"A max_agents of a running one changes the places nobody took: a researcher added in one is given an even part, with the researchers at work, of what all researchers left unspent, and a max_agents raised so far that the hours its researchers left unspent, split over max_agents, would not hold one trial of the baseline each (the job again at job_estimated_duration_hours) is 422 budget_below_baseline. " +
 			"A duration_hours of a running one moves the end of its run, still counted from its start, and one that ends it before now is 422 invalid_length. A new description or duration_hours reaches every agent of it as platform_experiment.description. " +
-			"409 experiment_not_editable for a draft or a closed one. The experiment as patched is checked like a create and refused with the same 422: " +
+			"A draft's plan comes from its planner and is edited in the accept, and a closed one changes nothing: 409 not_editable. The experiment as patched is checked like a create and refused with the same 422: " +
 			"invalid_experiment (an empty name or description among them), invalid_metrics, invalid_cost, invalid_agents, invalid_length, " +
 			"A max_agents lowered below the researchers (agents of role competitor) at work of a running one cuts the newest of them, the count a join is held to: each winds down as a cut researcher does, told by agent.cut with detail max_agents_lowered, and nobody is added in its place; researchers the body does not state are lowered to it from the last entry. " +
 			"Before the run starts 409 max_agents_below_researchers refuses one under the researchers signed up, which the message gives. 409 researchers_below_at_work for researchers that want fewer of an agent type and model than are at work. researchers above max_agents in all is 422 invalid_agents. " +
@@ -483,7 +484,7 @@ func (a platformExperimentsAPI) getPlatformExperimentResults(ctx context.Context
 }
 
 // answer is how a route answers one platform experiment: described for its reader, with its
-// researchers at work and where its repository is served.
+// researchers at work, what the reader may change of it and where its repository is served.
 func (a platformExperimentsAPI) answer(ctx context.Context, pe *domain.PlatformExperiment) (*struct{ Body *domain.PlatformExperiment }, error) {
 	reader, err := caller(ctx, a.logger)
 	if err != nil {
@@ -498,6 +499,13 @@ func (a platformExperimentsAPI) answer(ctx context.Context, pe *domain.PlatformE
 	}
 	counts := pe.Researchers.AtWorkOf(atWork)
 	pe.ResearchersAtWork = &counts
+	writes, err := a.access.Writes(ctx, pe.ID)
+	if err != nil {
+		return nil, auth.Internal(a.logger, "describe platform experiment", err, zap.String("id", pe.ID))
+	}
+	if writes {
+		pe.Editable = platformexperiments.Editable(pe, reader)
+	}
 	if pe.Repository != "" {
 		if pe.GitURL, err = a.experiments.GitURL(pe.ID); err != nil {
 			return nil, auth.Internal(a.logger, "describe platform experiment", err, zap.String("id", pe.ID))

@@ -92,7 +92,7 @@ func TestARunningExperimentsBaselineIsRaisedToAStrongerJobOfTheControl(t *testin
 		"a gate it fails":                {raise, func(_, b *platformexperiments.Baseline) { b.Reported["exact_match"] = 0.9 }, 422, "baseline_breaks_constraint"},
 		"a metric it never reported":     {raise, func(_, b *platformexperiments.Baseline) { delete(b.Reported, "exact_match") }, 422, "baseline_missing_metric"},
 		"another environment than ran":   {raise, func(_, b *platformexperiments.Baseline) { b.Declared = &[]string{branchEnvironment}[0] }, 422, "baseline_environment_differs"},
-		"another field of a running one": {map[string]any{"baseline_job_id": "job-2", "baseline_reason": raiseReason, "budget_accelerator_hours": 9}, nil, 409, "experiment_running"},
+		"another field of a running one": {map[string]any{"baseline_job_id": "job-2", "baseline_reason": raiseReason, "budget_accelerator_hours": 9}, nil, 409, "not_editable"},
 	} {
 		current, candidate := measuredBaseline(), strongerControl()
 		if c.change != nil {
@@ -130,7 +130,7 @@ func TestTheBaselineIsRaisedOnlyWhileTheRunGoesOn(t *testing.T) {
 	closed := runningOnBaseline()
 	closed.Status = domain.PlatformExpClosed
 	store, patch = declareJobsAPI(t, closed, []*platformexperiments.Baseline{measuredBaseline(), strongerControl()}, theCoordinator)
-	if code, out := patch(raise); code != http.StatusConflict || out["reason"] != "experiment_not_editable" || store.created[0].BaselineJobID != "job-1" {
-		t.Errorf("closed: got = %d %v, want 409 experiment_not_editable and the baseline kept", code, out)
+	if code, out := patch(raise); code != http.StatusConflict || out["reason"] != "not_editable" || store.created[0].BaselineJobID != "job-1" {
+		t.Errorf("closed: got = %d %v, want 409 not_editable and the baseline kept", code, out)
 	}
 }
