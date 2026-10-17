@@ -51,12 +51,9 @@ spec:
           imagePullPolicy: {{ .Values.images.pullPolicy }}
           {{- include "hypothesisloop.securityContext" . | nindent 10 }}
           env:
-            - name: API_PORT
-              value: {{ .Values.controlService.port | quote }}
             - name: HYPOTHESISLOOP_CONFIG
               value: /settings/hypothesisloop.yaml
-            {{- include "hypothesisloop.configSecretEnv" . | nindent 12 }}
-            {{- include "hypothesisloop.secretEnv" (dict "keys" .Values.providerSecretEnv "root" $) | nindent 12 }}
+            {{- include "hypothesisloop.controlServiceEnv" . | nindent 12 }}
             {{- if and .Values.environments.repository (eq .Values.environments.provider "gcp") }}
             - name: GOOGLE_APPLICATION_CREDENTIALS
               value: /credentials/google.json

@@ -415,20 +415,10 @@
         "type": "object"
       }
     },
-    "providerSecretEnv": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
-      }
-    },
     "gitHost": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "proxyURL": {
-          "type": "string"
-        },
         "provider": {
           "type": "string",
           "enum": ["github", "plain"]

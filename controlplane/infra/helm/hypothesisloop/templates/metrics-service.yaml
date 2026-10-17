@@ -44,11 +44,9 @@ spec:
           imagePullPolicy: {{ .Values.images.pullPolicy }}
           {{- include "hypothesisloop.securityContext" . | nindent 10 }}
           env:
-            - name: METRIC_CONTROLLER_PORT
-              value: {{ .Values.metricsService.port | quote }}
             - name: HYPOTHESISLOOP_CONFIG
               value: /settings/hypothesisloop.yaml
-            {{- include "hypothesisloop.configSecretEnv" . | nindent 12 }}
+            {{- include "hypothesisloop.metricsServiceEnv" . | nindent 12 }}
           ports:
             - containerPort: {{ .Values.metricsService.port }}
           volumeMounts:

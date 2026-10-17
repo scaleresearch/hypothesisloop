@@ -42,12 +42,10 @@ environments:
     pusher: env-pusher@made-up-project.iam.gserviceaccount.com
     puller: env-puller@made-up-project.iam.gserviceaccount.com
 gitHost:
-  proxyURL: https://api.example.invalid/git
   provider: github
   github:
     appId: 4242
     appSlug: made-up-app
-providerSecretEnv: [VAST_API_KEY, FLY_API_TOKEN]
 cloudCompute:
   - cluster_name: vast
     job_image: registry.example.invalid/hypothesisloop-job:test
@@ -60,7 +58,6 @@ cloudCompute:
       name: vast
       account_id: "000000"
       settings:
-        api_key_env: VAST_API_KEY
         max_price_per_hour: 0.60
         min_reliability: 0.98
         regions: [SE, NL, DE]
@@ -84,7 +81,6 @@ sandbox:
   provider:
     name: fly
     settings:
-      api_token_env: FLY_API_TOKEN
       app: agents-example
       region: ams
       cpu_kind: shared

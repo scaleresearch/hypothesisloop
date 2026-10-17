@@ -28,16 +28,43 @@
 {{- end -}}
 
 {{/*
-Every ${NAME} of the rendered hypothesisloop.yaml, for the two processes that load it.
+The keys each process reads, as controlplane/config names them (Settings.Needs): the stores' addresses
+from the values and every secret from the Secret, under the same name.
 */}}
-{{- define "hypothesisloop.configSecretEnv" -}}
-{{- $keys := list "DATABASE_URL" "HYPOTHESISLOOP_SIGNING_SECRET" "MODEL_ANTHROPIC_OAUTH_TOKEN" "OBJECT_STORE_ACCESS_KEY_ID" "OBJECT_STORE_SECRET_ACCESS_KEY" -}}
-{{- if eq .Values.gitHost.provider "github" -}}
-{{- $keys = concat $keys (list "HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY") -}}
-{{- else if and (eq .Values.gitHost.provider "plain") .Values.gitHost.plain.username -}}
-{{- $keys = append $keys "HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD" -}}
+{{- define "hypothesisloop.metricsServiceEnv" -}}
+- name: METRICS_DB_URL
+  value: {{ include "hypothesisloop.metricsDBURL" . | quote }}
+{{ include "hypothesisloop.secretEnv" (dict "keys" (list "DATABASE_URL" "AUTH_SIGNING_SECRET") "root" .) }}
 {{- end -}}
-{{ include "hypothesisloop.secretEnv" (dict "keys" $keys "root" .) }}
+
+{{/* The key of each provider that takes one, by the provider's name in the settings. */}}
+{{- define "hypothesisloop.providerKeys" -}}
+{{- toJson (dict "sandbox" (dict "fly" "SANDBOX_FLY_API_TOKEN" "e2b" "SANDBOX_E2B_API_KEY") "cloudCompute" (dict "vast" "CLOUD_COMPUTE_VAST_API_KEY")) -}}
+{{- end -}}
+
+{{- define "hypothesisloop.controlServiceEnv" -}}
+{{- $providerKeys := include "hypothesisloop.providerKeys" . | fromJson -}}
+{{- $keys := list "DATABASE_URL" "AUTH_SIGNING_SECRET" "MODEL_ANTHROPIC_OAUTH_TOKEN" "DATA_STORE_MINIO_SECRET_ACCESS_KEY" -}}
+{{- if eq .Values.gitHost.provider "github" -}}
+{{- $keys = append $keys "GIT_HOST_GITHUB_APP_PRIVATE_KEY" -}}
+{{- else if and (eq .Values.gitHost.provider "plain") .Values.gitHost.plain.username -}}
+{{- $keys = append $keys "GIT_HOST_PLAIN_PASSWORD" -}}
+{{- end -}}
+{{- with .Values.sandbox -}}
+{{- with get $providerKeys.sandbox .provider.name -}}
+{{- $keys = append $keys . -}}
+{{- end -}}
+{{- end -}}
+{{- range .Values.cloudCompute -}}
+{{- with get $providerKeys.cloudCompute .provider.name -}}
+{{- $keys = append $keys . -}}
+{{- end -}}
+{{- end -}}
+- name: METRICS_DB_URL
+  value: {{ include "hypothesisloop.metricsDBURL" . | quote }}
+- name: GRAPH_DB_URL
+  value: {{ include "hypothesisloop.graphDBURL" . | quote }}
+{{ include "hypothesisloop.secretEnv" (dict "keys" (uniq $keys) "root" .) }}
 {{- end -}}
 
 {{/* The container securityContext of every image built from this repository. */}}
@@ -90,14 +117,14 @@ call as: include "hypothesisloop.setConfig" (dict "text" $raw "section" "auth" "
 {{ replace $found (print (regexReplaceAllLiteral "(?m)^.*\\z" $found "") $line) .text }}
 {{- end -}}
 
-{{/* The bucket named by data_store.bucket in the staged config. */}}
-{{- define "hypothesisloop.bucket" -}}
-{{- $found := include "hypothesisloop.configKey" (dict "text" (include "hypothesisloop.stagedConfig" .) "section" "data_store" "key" "bucket") -}}
-{{- $bucket := regexReplaceAll "^  bucket:[ \\t]*(\\S*).*$" (regexFind "[^\\n]*\\z" $found) "${1}" | trimAll "\"'" -}}
-{{- if not $bucket -}}
-{{- fail "files/hypothesisloop.yaml has an empty data_store.bucket" -}}
+{{/* The value of one key of the data_store section of the staged config. call as: include "hypothesisloop.dataStore" (dict "key" "bucket" "root" $) */}}
+{{- define "hypothesisloop.dataStore" -}}
+{{- $found := include "hypothesisloop.configKey" (dict "text" (include "hypothesisloop.stagedConfig" .root) "section" "data_store" "key" .key) -}}
+{{- $value := regexReplaceAll (printf "^  %s:[ \\t]*(\\S*).*$" .key) (regexFind "[^\\n]*\\z" $found) "${1}" | trimAll "\"'" -}}
+{{- if not $value -}}
+{{- fail (printf "files/hypothesisloop.yaml has an empty data_store.%s" .key) -}}
 {{- end -}}
-{{ $bucket }}
+{{ $value }}
 {{- end -}}
 
 {{- define "hypothesisloop.metricsDBURL" -}}

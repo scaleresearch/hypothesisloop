@@ -39,15 +39,8 @@ spec:
           args: ["server", "/data", "--address", "0.0.0.0:9000"]
           env:
             - name: MINIO_ROOT_USER
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "hypothesisloop.secretName" . }}
-                  key: OBJECT_STORE_ACCESS_KEY_ID
-            - name: MINIO_ROOT_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "hypothesisloop.secretName" . }}
-                  key: OBJECT_STORE_SECRET_ACCESS_KEY
+              value: {{ include "hypothesisloop.dataStore" (dict "key" "access_key_id" "root" $) | quote }}
+            {{- include "hypothesisloop.secretKey" (dict "env" "MINIO_ROOT_PASSWORD" "key" "DATA_STORE_MINIO_SECRET_ACCESS_KEY" "root" $) | nindent 12 }}
           ports:
             - containerPort: 9000
           volumeMounts:
@@ -73,7 +66,7 @@ spec:
           requests:
             storage: {{ .Values.objectStore.storage }}
 ---
-{{- $bucket := include "hypothesisloop.bucket" . }}
+{{- $bucket := include "hypothesisloop.dataStore" (dict "key" "bucket" "root" $) }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -92,7 +85,7 @@ spec:
           command:
             - sh
             - -c
-            - mcli alias set hl http://object-store:9000 "$OBJECT_STORE_ACCESS_KEY_ID" "$OBJECT_STORE_SECRET_ACCESS_KEY" && mcli mb --ignore-existing hl/{{ $bucket }}
+            - mcli alias set hl http://object-store:9000 {{ include "hypothesisloop.dataStore" (dict "key" "access_key_id" "root" $) | squote }} "$DATA_STORE_MINIO_SECRET_ACCESS_KEY" && mcli mb --ignore-existing hl/{{ $bucket }}
           env:
-            {{- include "hypothesisloop.secretEnv" (dict "keys" (list "OBJECT_STORE_ACCESS_KEY_ID" "OBJECT_STORE_SECRET_ACCESS_KEY") "root" $) | nindent 12 }}
+            {{- include "hypothesisloop.secretEnv" (dict "keys" (list "DATA_STORE_MINIO_SECRET_ACCESS_KEY") "root" $) | nindent 12 }}
 {{- end }}

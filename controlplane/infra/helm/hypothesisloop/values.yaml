@@ -24,23 +24,26 @@ images:
 #   DATABASE_URL                     Postgres connection string. With postgres.enabled it is
 #                                    postgres://<postgres.user>:<POSTGRES_PASSWORD>@hypothesisloop-postgres:5432/<postgres.database>?sslmode=disable
 #   POSTGRES_PASSWORD                only with postgres.enabled
-#   HYPOTHESISLOOP_SIGNING_SECRET    derives every token the platform hands out, 32 characters or
+#   AUTH_SIGNING_SECRET              derives every token the platform hands out, 32 characters or
 #                                    more. Whoever holds it can mint a staff token.
 #   MODEL_ANTHROPIC_OAUTH_TOKEN      the Claude subscription token control-service makes every
 #                                    hosted agent's model calls with (models in
 #                                    hypothesisloop.yaml). No agent's machine is given it.
-#   OBJECT_STORE_ACCESS_KEY_ID       object store key that may create service accounts; with
-#   OBJECT_STORE_SECRET_ACCESS_KEY   objectStore.enabled these become the store's root user
-#   HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY     only with gitHost.provider github: the PEM
-#                                                      GitHub issued for the App
-#   HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD   only with gitHost.plain.username: that account's password
+#   DATA_STORE_MINIO_SECRET_ACCESS_KEY  the secret key of data_store.access_key_id in
+#                                    hypothesisloop.yaml, a key that may create service accounts;
+#                                    with objectStore.enabled the two are the store's root user
+#   GIT_HOST_GITHUB_APP_PRIVATE_KEY  only with gitHost.provider github: the PEM GitHub issued for
+#                                    the App
+#   GIT_HOST_PLAIN_PASSWORD          only with gitHost.plain.username: that account's password
 #   ENVIRONMENTS_GCP_CREDENTIALS     only with environments.provider gcp: control-service's own
 #                                    Google identity, as an application default credentials file
 #                                    (a service account key or a workload identity federation
 #                                    config), which may mint the tokens of environments.gcp.pusher
 #                                    and environments.gcp.puller
+#   SANDBOX_FLY_API_TOKEN, SANDBOX_E2B_API_KEY, CLOUD_COMPUTE_VAST_API_KEY
+#                                    the key of each provider sandbox and cloudCompute name
 #
-# plus whatever providerSecretEnv names.
+# Each process is handed the keys it reads and no other.
 secretName: ""
 
 # Set to any string that changes when the Secret's content does (a hash of it). It is stamped on
@@ -69,10 +72,6 @@ auth:
 # hypothesisloop.yaml, which explains each value. Required: provider is github or plain, and only
 # the section of that name is read.
 gitHost:
-  # Required: the address agents and jobs reach the API's /git at, the git proxy they clone and
-  # push through with their own token. publicAPIURL with /git after it, unless something in front
-  # of the API serves it elsewhere.
-  proxyURL: ""
   provider: ""
   # The GitHub App a project's repository is reached through. Its private key comes from the Secret.
   github:
@@ -85,7 +84,7 @@ gitHost:
     # true lets baseURL be http, for a host on the deployment's own network.
     allowHTTP: false
     # The account the platform and every agent reach the host as. Its password is the Secret's
-    # HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD. Left empty for a host that asks for no credential.
+    # GIT_HOST_PLAIN_PASSWORD. Left empty for a host that asks for no credential.
     username: ""
 
 # Where environment images are pushed and the registry provider whose logins control-service hands
@@ -228,12 +227,9 @@ ui:
 
 # Machines control-service rents itself: the sandbox and cloud_compute sections of
 # hypothesisloop.yaml, written as those sections are, which controlplane/settings/sandbox.yaml
-# and cloud-compute.yaml describe. They hold the names of environment variables and never a
-# secret. Without a sandbox nothing is hosted. Each cloud_compute entry is a cluster registered
+# and cloud-compute.yaml describe. They hold no secret: control-service is handed its provider's key
+# from the Secret. Without a sandbox nothing is hosted. Each cloud_compute entry is a cluster registered
 # as any other (hl-admin cluster add, run in the control-service pod), and nothing is rented for
 # it until it is.
 sandbox: {}
 cloudCompute: []
-# Secret keys handed to control-service as environment variables of the same name: every variable
-# the provider settings above name, such as FLY_API_TOKEN or VAST_API_KEY.
-providerSecretEnv: []

@@ -12,40 +12,72 @@ import (
 // The Secret each ci values file names.
 var secretNames = map[string]string{charttest.InCluster: "hypothesisloop", charttest.External: "deployment-secrets"}
 
-var configLoaders = []string{"hypothesisloop-control-service", "hypothesisloop-metrics-service"}
+// The program each Deployment runs, which loads the settings.
+var programs = map[string]config.Program{"hypothesisloop-control-service": config.ProgramControlService, "hypothesisloop-metrics-service": config.ProgramMetricsService}
 
+// loadRendered runs the loader of deployment's program on the config the chart mounts and the
+// environment it gives the container, and nothing else, and returns the settings it loaded.
 func loadRendered(t *testing.T, release *charttest.Release, values, deployment string) *config.Settings {
 	t.Helper()
 	env := release.Env(t, deployment, secretNames[values])
-	if env["HYPOTHESISLOOP_CONFIG"] != "/settings/hypothesisloop.yaml" {
-		t.Fatalf("%s: HYPOTHESISLOOP_CONFIG = %q, want the mounted file", deployment, env["HYPOTHESISLOOP_CONFIG"])
+	if env[config.SettingsPath.Name] != "/settings/hypothesisloop.yaml" {
+		t.Fatalf("%s: %s = %q, want the mounted file", deployment, config.SettingsPath.Name, env[config.SettingsPath.Name])
 	}
 	charttest.Setenv(t, env)
-	cfg, err := config.Load(release.ConfigFile(t, "hypothesisloop-config", "hypothesisloop.yaml"))
-	if err != nil {
-		t.Fatalf("%s with %s values: the rendered config does not load: %v", deployment, values, err)
+	for _, key := range config.Keys {
+		if _, set := env[key.Name]; !set {
+			t.Setenv(key.Name, "")
+		}
 	}
-	return cfg
+	t.Setenv(config.SettingsPath.Name, release.ConfigFile(t, "hypothesisloop-config", "hypothesisloop.yaml"))
+	var settings *config.Settings
+	var err error
+	switch programs[deployment] {
+	case config.ProgramControlService:
+		var c *config.ControlService
+		if c, err = config.LoadControlService(); err == nil {
+			settings = c.Settings
+		}
+	case config.ProgramMetricsService:
+		var m *config.MetricsService
+		if m, err = config.LoadMetricsService(); err == nil {
+			settings = m.Settings
+		}
+	}
+	if err != nil {
+		t.Fatalf("%s with %s values does not start: %v", deployment, values, err)
+	}
+	return settings
 }
 
-func TestTheRenderedConfigLoadsWithTheEnvironmentEachServiceIsGiven(t *testing.T) {
+// Each process is handed exactly the keys its program reads under the settings it is given.
+func TestEachServiceIsGivenExactlyTheKeysItReads(t *testing.T) {
 	for _, values := range []string{charttest.InCluster, charttest.External} {
 		release := charttest.Render(t, values)
-		for _, deployment := range configLoaders {
+		for deployment, program := range programs {
 			t.Run(values+"/"+deployment, func(t *testing.T) {
-				cfg := loadRendered(t, release, values, deployment)
-				if got := release.Env(t, deployment, secretNames[values])["DATABASE_URL"]; got != charttest.Secret["DATABASE_URL"] {
-					t.Errorf("DATABASE_URL = %q, want the Secret's", got)
+				settings := loadRendered(t, release, values, deployment)
+				want := []string{config.SettingsPath.Name}
+				for _, key := range settings.Needs(program) {
+					want = append(want, key.Name)
 				}
-				if cfg.Auth.SigningSecret != charttest.Secret["HYPOTHESISLOOP_SIGNING_SECRET"] {
-					t.Errorf("signing secret = %q, want the Secret's", cfg.Auth.SigningSecret)
+				env := release.Env(t, deployment, secretNames[values])
+				var got []string
+				for name := range env {
+					if name != "GOOGLE_APPLICATION_CREDENTIALS" {
+						got = append(got, name)
+					}
 				}
-				if cfg.DataStore.AccessKeyID != charttest.Secret["OBJECT_STORE_ACCESS_KEY_ID"] ||
-					cfg.DataStore.SecretAccessKey != charttest.Secret["OBJECT_STORE_SECRET_ACCESS_KEY"] {
-					t.Errorf("object store key = %q / %q, want the Secret's", cfg.DataStore.AccessKeyID, cfg.DataStore.SecretAccessKey)
+				slices.Sort(want)
+				slices.Sort(got)
+				if !slices.Equal(got, want) {
+					t.Errorf("env = %q, want %q", got, want)
 				}
-				if cfg.DataStore.Bucket != "hypothesisloop-data" || cfg.DataStore.MaxBytesPerAgent == 0 || len(cfg.AcceleratorTypes) == 0 {
-					t.Errorf("platform policy did not come through from the settings file: %+v", cfg.DataStore)
+				if env[config.DatabaseURL.Name] != charttest.Secret["DATABASE_URL"] || env[config.AuthSigningSecret.Name] != charttest.Secret["AUTH_SIGNING_SECRET"] {
+					t.Error("the database address or the signing secret is not the Secret's")
+				}
+				if settings.DataStore.Bucket != "hypothesisloop-data" || settings.DataStore.MaxBytesPerAgent == 0 || len(settings.AcceleratorTypes) == 0 {
+					t.Errorf("platform policy did not come through from the settings file: %+v", settings.DataStore)
 				}
 			})
 		}
@@ -63,14 +95,9 @@ func TestNoSecretIsCreatedAndNoSecretValueIsRendered(t *testing.T) {
 				t.Errorf("%s: the value of Secret key %s is in the rendered manifests", values, key)
 			}
 		}
-		rendered := release.ConfigMaps["hypothesisloop-config"].Data["hypothesisloop.yaml"]
-		for _, reference := range []string{
-			`signing_secret: "${HYPOTHESISLOOP_SIGNING_SECRET}"`,
-			`access_key_id: "${OBJECT_STORE_ACCESS_KEY_ID}"`,
-			`secret_access_key: "${OBJECT_STORE_SECRET_ACCESS_KEY}"`,
-		} {
-			if !strings.Contains(rendered, reference) {
-				t.Errorf("%s: the rendered config has no %s, so that secret is a literal in a ConfigMap", values, reference)
+		for _, line := range strings.Split(release.ConfigMaps["hypothesisloop-config"].Data["hypothesisloop.yaml"], "\n") {
+			if !strings.HasPrefix(strings.TrimSpace(line), "#") && strings.Contains(line, "${") {
+				t.Errorf("%s: the rendered config names an environment variable: %s", values, line)
 			}
 		}
 	}
@@ -131,7 +158,7 @@ func TestEnvironmentsOfTheValuesReachTheConfigWithTheGoogleIdentityThatMintsThei
 	if _, known := charttest.Secret["ENVIRONMENTS_GCP_CREDENTIALS"]; !known {
 		t.Error("charttest.Secret has no ENVIRONMENTS_GCP_CREDENTIALS")
 	}
-	for _, deployment := range configLoaders {
+	for deployment := range programs {
 		cfg := loadRendered(t, release, charttest.External, deployment)
 		want := config.EnvironmentsConfig{Repository: "europe-west1-docker.pkg.dev/made-up-project/hypothesisloop-environments/environment", Provider: config.RegistryProviderGCP,
 			GCP: config.GCPRegistryConfig{Pusher: "env-pusher@made-up-project.iam.gserviceaccount.com", Puller: "env-puller@made-up-project.iam.gserviceaccount.com"}}
@@ -160,23 +187,27 @@ func TestTwoRendersOfTheSameValuesAreIdentical(t *testing.T) {
 	}
 }
 
-// The staged file names no git host. The chart adds the one gitHost.provider names: the App, the
-// ids as values and the two secrets as references both services resolve from the Secret, or the
-// plain host of the values with its password from the Secret.
+// The staged file names no git host. The chart adds the one gitHost.provider names: the App's ids
+// from the values, or the plain host of the values. Its secret is control-service's alone, from the
+// Secret.
 func TestTheGitHostOfTheValuesReachesTheConfig(t *testing.T) {
 	inCluster := charttest.Render(t, charttest.InCluster)
 	release := charttest.Render(t, charttest.External)
-	for _, deployment := range configLoaders {
+	for deployment := range programs {
 		plain := loadRendered(t, inCluster, charttest.InCluster, deployment)
-		if want := (config.PlainGitConfig{BaseURL: "https://git.example.invalid/experiments", Username: "made-up-git-account",
-			Password: charttest.Secret["HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD"]}); plain.GitHost.Provider != config.GitHostProviderPlain || plain.GitHost.GitHub != nil || plain.GitHost.Plain == nil || *plain.GitHost.Plain != want {
-			t.Errorf("%s: in-cluster git host is %s, want the values' plain host and the Secret's password", deployment, plain.GitHost.Provider)
+		if want := (config.PlainGitConfig{BaseURL: "https://git.example.invalid/experiments", Username: "made-up-git-account"}); plain.GitHost.Provider != config.GitHostProviderPlain || plain.GitHost.GitHub != nil || plain.GitHost.Plain == nil || *plain.GitHost.Plain != want {
+			t.Errorf("%s: in-cluster git host is %s, want the values' plain host", deployment, plain.GitHost.Provider)
 		}
 		cfg := loadRendered(t, release, charttest.External, deployment)
-		want := config.GitHubConfig{AppID: 4242, AppSlug: "made-up-app", PrivateKey: charttest.Secret["HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY"]}
-		if got := cfg.GitHost; got.Provider != config.GitHostProviderGitHub || got.Plain != nil || got.GitHub == nil || *got.GitHub != want {
-			t.Errorf("%s: the git host is %q, or its App or key are not the values' and the Secret's", deployment, got.Provider)
+		if got := cfg.GitHost; got.Provider != config.GitHostProviderGitHub || got.Plain != nil || got.GitHub == nil || *got.GitHub != (config.GitHubConfig{AppID: 4242, AppSlug: "made-up-app"}) {
+			t.Errorf("%s: the git host is %q, or its App is not the values'", deployment, got.Provider)
 		}
+	}
+	if got := release.Env(t, "hypothesisloop-control-service", secretNames[charttest.External])[config.GitHostGitHubAppPrivateKey.Name]; got != charttest.Secret["GIT_HOST_GITHUB_APP_PRIVATE_KEY"] {
+		t.Errorf("control-service's App key = %q, want the Secret's", got)
+	}
+	if got := inCluster.Env(t, "hypothesisloop-control-service", secretNames[charttest.InCluster])[config.GitHostPlainPassword.Name]; got != charttest.Secret["GIT_HOST_PLAIN_PASSWORD"] {
+		t.Errorf("control-service's git password = %q, want the Secret's", got)
 	}
 }
 
@@ -215,7 +246,7 @@ func TestValuesTheChartCannotUseAreRefusedWithTheirName(t *testing.T) {
 		"a flag that is text":         {charttest.External, `postgres.enabled="no"`, "/postgres/enabled"},
 		"a secret passed as a value":  {charttest.External, `auth.signingSecret="made-up"`, "signingSecret"},
 		"the removed extra section":   {charttest.External, `config={"extra":"auth: {}"}`, "config"},
-		"env names as one string":     {charttest.External, `providerSecretEnv="VAST_API_KEY"`, "/providerSecretEnv"},
+		"a git proxy of its own":      {charttest.External, `gitHost.proxyURL=https://api.example.invalid/git`, "proxyURL"},
 	} {
 		if complaint := charttest.RenderError(t, refused.values, refused.set); !strings.Contains(complaint, refused.complaint) {
 			t.Errorf("%s: helm said %q, want it to name %q", name, complaint, refused.complaint)

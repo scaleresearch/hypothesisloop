@@ -1,14 +1,11 @@
 {{- /*
-The staged hypothesisloop.yaml with what differs per deployment set from values. A secret is
-written as ${NAME}: both services replace it from their environment, which the Secret fills.
+The staged hypothesisloop.yaml with what differs per deployment set from values. It holds no
+secret: each service reads its own from the Secret, through its environment.
 */ -}}
 {{- $raw := include "hypothesisloop.stagedConfig" . }}
 {{- $set := list
-  (list "services" "metrics_db_url" (include "hypothesisloop.metricsDBURL" .))
-  (list "services" "graph_db_url" (include "hypothesisloop.graphDBURL" .))
   (list "services" "public_api_url" (required "publicAPIURL is required: the address hosted agents and every cluster's runtime reach the API at" .Values.publicAPIURL))
   (list "auth" "identity_providers" .Values.auth.identityProviders)
-  (list "auth" "signing_secret" "${HYPOTHESISLOOP_SIGNING_SECRET}")
   (list "auth" "ui_origin" (required "auth.uiOrigin is required: the one browser origin allowed to call the API, which is the address people open the UI at" .Values.auth.uiOrigin))
   (list "agents" "image" (required "agents.image is required: the image a hosted agent's machine boots" .Values.agents.image))
   (list "runtimes" "metrics_url" (required "runtimes.metricsURL is required: the address a cluster's runtime reaches metrics-service at" .Values.runtimes.metricsURL))
@@ -17,8 +14,6 @@ written as ${NAME}: both services replace it from their environment, which the S
   (list "data_store" "provider" (required "objectStore.provider is required: how the store creates each job's key" .Values.objectStore.provider))
   (list "data_store" "endpoint" (required "objectStore.endpoint is required: the address every job and agent is handed to reach the object store at" .Values.objectStore.endpoint))
   (list "data_store" "control_plane_endpoint" (include "hypothesisloop.objectStoreControlPlaneEndpoint" .))
-  (list "data_store" "access_key_id" "${OBJECT_STORE_ACCESS_KEY_ID}")
-  (list "data_store" "secret_access_key" "${OBJECT_STORE_SECRET_ACCESS_KEY}")
 }}
 {{- range $set }}
 {{- $raw = include "hypothesisloop.setConfig" (dict "text" $raw "section" (index . 0) "key" (index . 1) "value" (index . 2)) }}
@@ -30,21 +25,19 @@ The staged file names no git host: the chart adds the one gitHost.provider names
 {{- fail "files/hypothesisloop.yaml has a git_host section, and the chart would add a second one" }}
 {{- end }}
 {{- $gitHost := .Values.gitHost }}
-{{- $proxyURL := toJson (required "gitHost.proxyURL is required: the address agents and jobs reach the API's /git at" $gitHost.proxyURL) }}
 {{- if eq $gitHost.provider "github" }}
 {{- if not $gitHost.github.appId }}
 {{- fail "gitHost.github.appId is required with gitHost.provider github: the App's number" }}
 {{- end }}
-{{- $raw = printf "%s\ngit_host:\n  proxy_url: %s\n  provider: github\n  github:\n    app_id: %s\n    app_slug: %s\n    private_key: %s\n" (trimSuffix "\n" $raw) $proxyURL
+{{- $raw = printf "%s\ngit_host:\n  provider: github\n  github:\n    app_id: %s\n    app_slug: %s\n" (trimSuffix "\n" $raw)
   (toJson (int64 $gitHost.github.appId))
-  (toJson (required "gitHost.github.appSlug is required with gitHost.provider github: the name in the App's URL" $gitHost.github.appSlug))
-  (toJson "${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY}") }}
+  (toJson (required "gitHost.github.appSlug is required with gitHost.provider github: the name in the App's URL" $gitHost.github.appSlug)) }}
 {{- else if eq $gitHost.provider "plain" }}
-{{- $raw = printf "%s\ngit_host:\n  proxy_url: %s\n  provider: plain\n  plain:\n    base_url: %s\n    allow_http: %s\n" (trimSuffix "\n" $raw) $proxyURL
+{{- $raw = printf "%s\ngit_host:\n  provider: plain\n  plain:\n    base_url: %s\n    allow_http: %s\n" (trimSuffix "\n" $raw)
   (toJson (required "gitHost.plain.baseURL is required with gitHost.provider plain: the root the deployment's repositories are cloned from" $gitHost.plain.baseURL))
   (toJson $gitHost.plain.allowHTTP) }}
 {{- if $gitHost.plain.username }}
-{{- $raw = printf "%s    username: %s\n    password: %s\n" $raw (toJson $gitHost.plain.username) (toJson "${HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD}") }}
+{{- $raw = printf "%s    username: %s\n" $raw (toJson $gitHost.plain.username) }}
 {{- end }}
 {{- else }}
 {{- fail (printf "gitHost.provider is %q: it is github or plain" $gitHost.provider) }}
