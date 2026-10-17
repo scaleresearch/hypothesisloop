@@ -24,8 +24,6 @@ var made = map[config.Key]func() (string, error){
 	config.GitHostPlainPassword: file("localdev/.run/git-password"),
 }
 
-const uiAPIURL = "http://localhost:8081"
-
 func main() {
 	if len(os.Args) != 2 {
 		fail("usage: envfiles <settings>")
@@ -70,9 +68,13 @@ func valueOf(key config.Key) (string, error) {
 	return from()
 }
 
-// uiKeys is what the UI is built with, from the IDENTITY_ keys of .env.
+// uiKeys is what the UI is built with, from the UI_ and IDENTITY_ keys of .env.
 func uiKeys() [][2]string {
-	keys := [][2]string{{"NEXT_PUBLIC_API_URL", uiAPIURL}, {"NEXT_PUBLIC_IDENTITY_PROVIDER", os.Getenv("IDENTITY_PROVIDER")}}
+	apiURL := os.Getenv("UI_API_URL")
+	if apiURL == "" {
+		fail("envfiles: .env does not set UI_API_URL, the API's address as the UI's browser reaches it")
+	}
+	keys := [][2]string{{"NEXT_PUBLIC_API_URL", apiURL}, {"NEXT_PUBLIC_IDENTITY_PROVIDER", os.Getenv("IDENTITY_PROVIDER")}}
 	if project := os.Getenv("IDENTITY_SUPABASE_PROJECT_REF"); project != "" {
 		keys = append(keys, [2]string{"NEXT_PUBLIC_IDENTITY_SUPABASE_URL", "https://" + project + ".supabase.co"})
 	}
