@@ -37,6 +37,7 @@ func (LinkType) Schema(r huma.Registry) *huma.Schema        { return enumSchema(
 func (CloseReason) Schema(r huma.Registry) *huma.Schema     { return enumSchema(r, AnsweredCloseReasons) }
 func (Waiter) Schema(r huma.Registry) *huma.Schema          { return enumSchema(r, Waiters) }
 func (SignupRole) Schema(r huma.Registry) *huma.Schema      { return enumSchema(r, SignupRoles) }
+func (SignupAction) Schema(r huma.Registry) *huma.Schema    { return enumSchema(r, SignupActions) }
 func (AgentRole) Schema(r huma.Registry) *huma.Schema       { return enumSchema(r, AgentRoles) }
 func (AgentTypeAction) Schema(r huma.Registry) *huma.Schema { return enumSchema(r, AgentTypeActions) }
 func (OrgRole) Schema(r huma.Registry) *huma.Schema         { return enumSchema(r, OrgRoles) }

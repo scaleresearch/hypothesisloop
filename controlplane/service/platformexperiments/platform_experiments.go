@@ -526,16 +526,21 @@ func (s *Service) Get(ctx context.Context, id string, reaches func(id string) bo
 // ErrNotSignedUp is an agent read on a platform experiment it is not signed up to.
 var ErrNotSignedUp = errors.New("agent is not signed up to this platform experiment")
 
-// AgentSignup reads the signup of agentID to the platform experiment id.
-func (s *Service) AgentSignup(ctx context.Context, id, agentID string) (*domain.AgentSignup, error) {
+// AgentSignup reads the signup of agentID to the platform experiment id, with what reader may do
+// to the agent when it writes the platform experiment.
+func (s *Service) AgentSignup(ctx context.Context, id, agentID string, reader auth.Principal, writes bool) (*domain.AgentSignup, []domain.SignupAction, error) {
 	signup, err := s.store.GetAgentSignup(ctx, id, agentID)
 	if err != nil {
-		return nil, auth.Internal(s.logger, "get platform experiment signup", err, zap.String("id", id))
+		return nil, nil, auth.Internal(s.logger, "get platform experiment signup", err, zap.String("id", id))
 	}
 	if signup == nil {
-		return nil, ErrNotSignedUp
+		return nil, nil, ErrNotSignedUp
 	}
-	return signup, nil
+	pe, err := s.stored(ctx, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	return signup, SignupActions(pe, *signup, reader, writes), nil
 }
 
 // ResearchersAtWork counts the researchers at work of the platform experiment id by agent type

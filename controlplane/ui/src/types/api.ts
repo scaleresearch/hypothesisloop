@@ -3310,6 +3310,8 @@ export interface components {
             summary: string;
         };
         JoinedAgent: {
+            /** @description What the reader may do to the agent now, each a write the API accepts from them: message (POST /platform-experiments/{id}/messages naming it), remove (DELETE /platform-experiments/{id}/agents/{agent_id}, which still refuses an agent with a job queued or running) and show_token (POST /platform-experiments/{id}/agents with its agent_id, which answers the token of an agent the platform does not run). Empty for a reader who writes nothing of the platform experiment. */
+            actions: components["schemas"]["SignupAction"][];
             activity?: components["schemas"]["AgentActivity"];
             actor?: components["schemas"]["Actor"];
             agent_id: string;
@@ -4215,7 +4217,11 @@ export interface components {
             /** @description What the agent is told, at most 1500 bytes. */
             text: string;
         };
+        /** @enum {string} */
+        SignupAction: "message" | "remove" | "show_token";
         SignupReply: {
+            /** @description What the reader may do to the agent now, as on each agent of GET /platform-experiments/{id}/agents. */
+            actions: components["schemas"]["SignupAction"][];
             agent_id: string;
             /** @description The agent type it runs, by id. */
             agent_type: string;
@@ -4761,6 +4767,7 @@ export type RunBest = components['schemas']['RunBest'];
 export type RunHealth = components['schemas']['RunHealth'];
 export type RunSummaryRequest = components['schemas']['RunSummaryRequest'];
 export type SendMessageRequest = components['schemas']['SendMessageRequest'];
+export type SignupAction = components['schemas']['SignupAction'];
 export type SignupReply = components['schemas']['SignupReply'];
 export type SignupRole = components['schemas']['SignupRole'];
 export type SimilarHypothesis = components['schemas']['SimilarHypothesis'];
@@ -8863,6 +8870,7 @@ export const orgRoleValues: ReadonlyArray<FlattenedDeepRequired<components>["sch
 export const platformExperimentActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["PlatformExperimentAction"]> = ["close", "abandon", "remove", "accept", "add_agent", "add_idea"];
 export const platformExperimentStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["PlatformExperimentStatus"]> = ["draft", "open", "running", "closed"];
 export const referenceValueConstraints_metValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ReferenceValue"]["constraints_met"]> = ["true", "false", "unknown"];
+export const signupActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SignupAction"]> = ["message", "remove", "show_token"];
 export const signupReplyEndedValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SignupReply"]["ended"]> = ["", "closed", "cut", "finished", "planned"];
 export const signupRoleValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SignupRole"]> = ["competitor", "baseline", "reviewer", "planner"];
 export const similarHypothesisReasonValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SimilarHypothesis"]["reason"]> = ["close_text", "refuted_parent"];

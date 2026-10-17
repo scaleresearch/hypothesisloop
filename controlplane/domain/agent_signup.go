@@ -59,6 +59,17 @@ type AgentSignup struct {
 	InFlight *InFlight `json:"in_flight,omitempty"`
 }
 
+// SignupAction is something the reader of an agent's signup may do to the agent now.
+type SignupAction string
+
+const (
+	SignupActionMessage   SignupAction = "message"
+	SignupActionRemove    SignupAction = "remove"
+	SignupActionShowToken SignupAction = "show_token"
+)
+
+var SignupActions = []SignupAction{SignupActionMessage, SignupActionRemove, SignupActionShowToken}
+
 // InFlight counts what of an agent's own is queued or running on the platform now.
 type InFlight struct {
 	Jobs    int `json:"jobs" doc:"Its jobs queued or running, those waiting for their environment's build included. 0: nothing of its own is on the platform, and an agent waiting then waits for nothing it started."`

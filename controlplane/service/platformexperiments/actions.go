@@ -86,6 +86,43 @@ func actions(pe *domain.PlatformExperiment, caller auth.Principal) []domain.Plat
 	return actions
 }
 
+// SignupActions is what caller may do now to the agent of signup in pe: nothing when caller does
+// not write pe.
+func SignupActions(pe *domain.PlatformExperiment, signup domain.AgentSignup, caller auth.Principal, writes bool) []domain.SignupAction {
+	actions := []domain.SignupAction{}
+	if !writes || !auth.AudienceCoordinator.Admits(caller, "") {
+		return actions
+	}
+	if takesMessages(signup) {
+		actions = append(actions, domain.SignupActionMessage)
+	}
+	if removesAgent(pe, signup, caller.Actor()) == nil {
+		actions = append(actions, domain.SignupActionRemove)
+	}
+	if !signup.Hosted {
+		actions = append(actions, domain.SignupActionShowToken)
+	}
+	return actions
+}
+
+// takesMessages says the agent of signup reads a message: it is no planner and its run goes on.
+// The store refuses a message by the same rule (db.Store.SendAgentMessages).
+func takesMessages(signup domain.AgentSignup) bool {
+	return signup.Role != domain.SignupRolePlanner && signup.Ended == ""
+}
+
+// removesAgent refuses by taking the agent of signup out of pe: once pe is no longer open, and to a
+// coordinator's token one it did not add itself.
+func removesAgent(pe *domain.PlatformExperiment, signup domain.AgentSignup, by domain.Actor) error {
+	if pe.Status != domain.PlatformExpOpen {
+		return refuseSignup(409, "experiment_started", "experiment is %s: once started, an agent leaves by being cut or by the experiment closing", pe.Status)
+	}
+	if by.Kind == domain.ActorCoordinator && (signup.Actor == nil || signup.Actor.Kind != domain.ActorCoordinator || signup.Actor.ID != by.ID) {
+		return refuseSignup(403, "agent_not_added_by_coordinator", "agent %s was not added by this platform experiment's coordinator, and a coordinator's token removes only the agents it added itself: its owner removes this one", signup.AgentID)
+	}
+	return nil
+}
+
 // closes refuses to close pe once it is closed.
 func closes(pe *domain.PlatformExperiment) error {
 	if pe.Status == domain.PlatformExpClosed {

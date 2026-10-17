@@ -8,7 +8,7 @@ import { fetchPlatformExperiment, fetchPlatformExperimentResults, fetchPlatformE
 import { fetchPlatformExperimentQuotas } from '@/lib/api/quotas'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import PlatformExperimentDetailPage from '@/app/(app)/experiments/[experimentId]/page'
-import type { Me, PlatformExperiment } from '@/types/api'
+import type { JoinedAgent, Me, PlatformExperiment } from '@/types/api'
 
 const navigation = vi.hoisted(() => ({ search: '', push: vi.fn(), replace: vi.fn() }))
 
@@ -29,6 +29,8 @@ vi.mock('@/lib/api/platform-experiments', () => ({
 vi.mock('@/lib/api/quotas', () => ({ fetchPlatformExperimentQuotas: vi.fn() }))
 
 const at = '2026-01-01T00:00:00Z'
+// A self-run agent of the experiment, as the API lists it to one who writes nothing of it.
+const self: JoinedAgent = { platform_experiment_id: 'pe-x', agent_id: 'ag-self', name: 'ag-self', role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, hosted: false, agent_type: 'generalist', model: '', hyperparameters: null, at_work: true, signed_up_at: at, actions: [] }
 const me: Me = {
   kind: 'user',
   user_id: 'u1',
@@ -63,9 +65,7 @@ beforeEach(() => {
   vi.mocked(fetchStages).mockResolvedValue({ stages: [], current_stage: 1, progress: 0, next_boundary_progress: 1, advances: [], active_agents: [], cut_agents: [] })
   vi.mocked(fetchHypothesisStats).mockResolvedValue({ total: 0, by_status: {} })
   vi.mocked(fetchFindings).mockResolvedValue([])
-  vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([
-    { platform_experiment_id: 'pe-x', agent_id: 'ag-self', name: 'ag-self', role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, hosted: false, agent_type: 'generalist', model: '', hyperparameters: null, at_work: true, signed_up_at: at },
-  ])
+  vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([self])
 })
 
 describe('a shared platform experiment of another org', () => {
@@ -158,6 +158,7 @@ describe('the references of a platform experiment', () => {
 
 describe('a shared platform experiment of the caller\'s own org', () => {
   it('is theirs to change, marked shared, with no read-only note', async () => {
+    vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([{ ...self, actions: ['message', 'remove', 'show_token'] }])
     show('', { project_id: 'prj_1', editable: ['name'], actions: ['remove', 'close', 'add_agent', 'add_idea'] })
     expect(await screen.findByRole('button', { name: 'Add agent' })).toBeTruthy()
     expect(await screen.findByRole('button', { name: 'Show token' })).toBeTruthy()

@@ -225,13 +225,10 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
   const [open, setOpen] = useState<string | null>(null)
   const { org } = useTenant()
   const { data: catalog } = useAgentTypes(org.id)
-  // Quota is divided at the start over the agents present, so the roster is fixed from then on.
-  const started = pe.status === 'running' || pe.status === 'closed'
   const { data: messages, mutate: mutateMessages } = useSWR(
     pe.status === 'draft' ? null : keys.messages(pe.id),
     () => fetchPlatformExperimentMessages(pe.id),
   )
-  const at = pe.status === 'open' || pe.status === 'running'
   const messagesTo = (agent: JoinedAgent) => messages?.filter(m => m.agent_id === agent.agent_id) ?? []
 
   async function remove(agent: JoinedAgent) {
@@ -330,15 +327,11 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
                         <td className="whitespace-nowrap text-xs"><AgentTypeLabel agent={agent} catalog={catalog} /></td>
                         <td><StatusLabel tone={status.tone} title={status.detail}>{status.label}</StatusLabel></td>
                         <td>
-                          {pe.actions.length > 0 && (
-                            <Inline gap="xs" nowrap className="justify-end">
-                              {at && !agent.finished_at && agent.role !== 'planner' && (
-                                <Button size="sm" onClick={() => setMessaging(agent)}>Message</Button>
-                              )}
-                              {!agent.hosted && <Button size="sm" onClick={() => showToken(agent)}>Show token</Button>}
-                              {!started && <Button size="sm" variant="danger" onClick={() => setRemoving(agent)}>Remove</Button>}
-                            </Inline>
-                          )}
+                          <Inline gap="xs" nowrap className="justify-end">
+                            {agent.actions.includes('message') && <Button size="sm" onClick={() => setMessaging(agent)}>Message</Button>}
+                            {agent.actions.includes('show_token') && <Button size="sm" onClick={() => showToken(agent)}>Show token</Button>}
+                            {agent.actions.includes('remove') && <Button size="sm" variant="danger" onClick={() => setRemoving(agent)}>Remove</Button>}
+                          </Inline>
                         </td>
                       </tr>
                       {expanded && (

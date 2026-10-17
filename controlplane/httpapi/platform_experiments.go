@@ -400,7 +400,15 @@ func (a platformExperimentsAPI) getPlatformExperimentSignup(ctx context.Context,
 	if err := a.access.PlatformExperiment(ctx, in.ID); err != nil {
 		return nil, err
 	}
-	signup, err := a.experiments.AgentSignup(ctx, in.ID, in.AgentID)
+	reader, err := caller(ctx, a.logger)
+	if err != nil {
+		return nil, err
+	}
+	writes, err := a.access.Writes(ctx, in.ID)
+	if err != nil {
+		return nil, auth.Internal(a.logger, "get platform experiment signup", err, zap.String("id", in.ID))
+	}
+	signup, actions, err := a.experiments.AgentSignup(ctx, in.ID, in.AgentID, reader, writes)
 	if errors.Is(err, platformexperiments.ErrNotSignedUp) {
 		return nil, huma.Error404NotFound(err.Error())
 	}
@@ -410,6 +418,7 @@ func (a platformExperimentsAPI) getPlatformExperimentSignup(ctx context.Context,
 	return &struct{ Body signupReply }{Body: signupReply{
 		AgentID: signup.AgentID, Name: signup.Name, Role: string(signup.Role), AgentType: signup.AgentType,
 		Model: signup.Model, Hyperparameters: signup.Hyperparameters, FinishedAt: signup.FinishedAt, Ended: signup.Ended, CutReason: signup.CutReason,
+		Actions: actions,
 	}}, nil
 }
 
@@ -535,13 +544,14 @@ func (a platformExperimentsAPI) answer(ctx context.Context, pe *domain.PlatformE
 
 // signupReply is an agent's signup as any caller in its platform experiment reads it.
 type signupReply struct {
-	AgentID         string         `json:"agent_id"`
-	Name            string         `json:"name" doc:"The name the agent's branches carry: hl/<platform experiment>/<name>/..."`
-	Role            string         `json:"role"`
-	AgentType       string         `json:"agent_type" doc:"The agent type it runs, by id."`
-	Model           string         `json:"model" doc:"Its own model, empty when it runs on its agent type's. What it runs with is its instructions: GET /platform-experiments/{id}/agents/{agent_id}/instructions."`
-	Hyperparameters map[string]any `json:"hyperparameters" nullable:"true" doc:"Its own hyperparameters, null when it runs with its agent type's."`
-	FinishedAt      *time.Time     `json:"finished_at,omitempty" doc:"When the agent said it has nothing left to do."`
-	Ended           domain.RunEnd  `json:"ended" enum:",closed,cut,finished,planned" doc:"Why the agent's run here is over, the empty string while it goes on: the platform experiment closed, the agent was cut, it finished, or it is a draft's planner whose proposal or decline is stored. A machine the platform runs for the agent is told to stop for this and nothing else."`
-	CutReason       string         `json:"cut_reason,omitempty" doc:"Why the platform cut it other than at a stage boundary: max_agents_lowered for one of the newest researchers above a max_agents lowered below those at work. Absent for a stage cut."`
+	AgentID         string                `json:"agent_id"`
+	Name            string                `json:"name" doc:"The name the agent's branches carry: hl/<platform experiment>/<name>/..."`
+	Role            string                `json:"role"`
+	AgentType       string                `json:"agent_type" doc:"The agent type it runs, by id."`
+	Model           string                `json:"model" doc:"Its own model, empty when it runs on its agent type's. What it runs with is its instructions: GET /platform-experiments/{id}/agents/{agent_id}/instructions."`
+	Hyperparameters map[string]any        `json:"hyperparameters" nullable:"true" doc:"Its own hyperparameters, null when it runs with its agent type's."`
+	FinishedAt      *time.Time            `json:"finished_at,omitempty" doc:"When the agent said it has nothing left to do."`
+	Ended           domain.RunEnd         `json:"ended" enum:",closed,cut,finished,planned" doc:"Why the agent's run here is over, the empty string while it goes on: the platform experiment closed, the agent was cut, it finished, or it is a draft's planner whose proposal or decline is stored. A machine the platform runs for the agent is told to stop for this and nothing else."`
+	CutReason       string                `json:"cut_reason,omitempty" doc:"Why the platform cut it other than at a stage boundary: max_agents_lowered for one of the newest researchers above a max_agents lowered below those at work. Absent for a stage cut."`
+	Actions         []domain.SignupAction `json:"actions" doc:"What the reader may do to the agent now, as on each agent of GET /platform-experiments/{id}/agents."`
 }

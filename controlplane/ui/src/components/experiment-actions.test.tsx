@@ -14,7 +14,7 @@ import { ExperimentAgents } from '@/components/experiment-agents'
 import { AddCommentForm, AddLinkForm } from '@/components/hypotheses/human-idea'
 import { HypothesisPanel, ObjectiveBar } from '@/components/hypotheses/panel'
 import { PlatformExperimentCard } from '@/components/platform-experiment-card'
-import type { GraphNode, HypothesisGraph, HypothesisWithJobs, Me, PlatformExperiment } from '@/types/api'
+import type { GraphNode, HypothesisGraph, HypothesisWithJobs, JoinedAgent, Me, PlatformExperiment } from '@/types/api'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -31,6 +31,8 @@ vi.mock('@/lib/api/jobs', () => ({ fetchExperimentStats: vi.fn() }))
 vi.mock('@/lib/api/quotas', () => ({ fetchPlatformExperimentQuotas: vi.fn() }))
 
 const at = '2026-01-01T00:00:00Z'
+// A self-run agent of the experiment, as the API lists it to one who writes nothing of it.
+const self: JoinedAgent = { platform_experiment_id: 'pe-x', agent_id: 'ag-self', name: 'ag-self', role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, hosted: false, agent_type: 'generalist', model: '', hyperparameters: null, at_work: true, signed_up_at: at, actions: [] }
 const me: Me = {
   kind: 'user',
   user_id: 'u1',
@@ -83,9 +85,7 @@ function names(role: 'button' | 'textbox') {
 }
 
 beforeEach(() => {
-  vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([
-    { platform_experiment_id: 'pe-x', agent_id: 'ag-self', name: 'ag-self', role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, hosted: false, agent_type: 'generalist', model: '', hyperparameters: null, at_work: true, signed_up_at: at },
-  ])
+  vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([self])
   vi.mocked(fetchPlatformExperimentQuotas).mockResolvedValue([])
   vi.mocked(fetchHypothesisStats).mockResolvedValue({ total: 0, by_status: {} })
   vi.mocked(fetchExperimentStats).mockResolvedValue({ total: 0, by_status: {} } as never)
@@ -93,11 +93,13 @@ beforeEach(() => {
 
 describe('a shared platform experiment of another org shows no control that writes', () => {
   it('to its agents: no add, no token, no remove', async () => {
+    vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([{ ...self, actions: ['message', 'remove', 'show_token'] }])
     const own = show(<ExperimentAgents pe={owned} />, owned)
     await screen.findByRole('cell', { name: 'ag-self' })
     expect(names('button')).toEqual(expect.arrayContaining(['Add agent', 'Show token', 'Remove']))
     own.unmount()
 
+    vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([self])
     show(<ExperimentAgents pe={pe} />, pe)
     await screen.findByRole('cell', { name: 'ag-self' })
     expect(names('button')).toEqual(['Details of ag-self'])

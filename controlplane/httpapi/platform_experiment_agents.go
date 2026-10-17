@@ -118,7 +118,7 @@ func (a experimentAgentsAPI) add(ctx context.Context, in *struct {
 		return nil, err
 	}
 	out := &struct{ Body joinedAgents }{}
-	if out.Body.Agents, err = a.experiments.Join(ctx, in.ID, in.Body, caller.Actor(), a.launch); err != nil {
+	if out.Body.Agents, err = a.experiments.Join(ctx, in.ID, in.Body, caller, a.launch); err != nil {
 		return nil, refused(a.logger, "add agent", err)
 	}
 	for i, agent := range out.Body.Agents {
@@ -144,8 +144,12 @@ func (a experimentAgentsAPI) list(ctx context.Context, in *struct {
 	if err != nil {
 		return nil, err
 	}
+	writes, err := a.access.Writes(ctx, in.ID)
+	if err != nil {
+		return nil, auth.Internal(a.logger, "list agents", err, zap.String("id", in.ID))
+	}
 	out := &struct{ Body joinedAgents }{}
-	out.Body.Agents, err = a.experiments.Roster(ctx, in.ID, caller.Actor())
+	out.Body.Agents, err = a.experiments.Roster(ctx, in.ID, caller, writes)
 	if errors.Is(err, platformexperiments.ErrPlatformExperimentNotFound) {
 		return nil, huma.Error404NotFound("platform experiment not found")
 	}

@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
@@ -48,8 +49,9 @@ type JoinedAgent struct {
 	domain.AgentSignup
 	// StatusReason is why the agent is not at work yet: its platform experiment is open and has
 	// not started, or its machine is asked for and not running.
-	StatusReason *domain.StatusReason `json:"status_reason,omitempty" doc:"Why the agent is not at work yet. On an agent that waits for its open platform experiment to start, every one but those of role baseline: reason is the platform experiment's own (baseline_measuring, baseline_required and the others of its status_reason), and message says the agent takes no turn and, when the platform runs it, has no machine asked for until the start. Its instance reads waiting until then. On a hosted agent whose machine is asked for and not running yet, its instance reading requested or starting: instance_starting, and message says how long ago the machine was asked for. That is a start in progress and no failure. On an agent that waited for the start of a platform experiment that closed before its run started, and had no machine asked for it: never_launched, with no waits_for, and message gives the close_reason and why it closed. Its instance reads stopped with no end_reason."`
-	Token        string               `json:"token,omitempty"`
+	StatusReason *domain.StatusReason  `json:"status_reason,omitempty" doc:"Why the agent is not at work yet. On an agent that waits for its open platform experiment to start, every one but those of role baseline: reason is the platform experiment's own (baseline_measuring, baseline_required and the others of its status_reason), and message says the agent takes no turn and, when the platform runs it, has no machine asked for until the start. Its instance reads waiting until then. On a hosted agent whose machine is asked for and not running yet, its instance reading requested or starting: instance_starting, and message says how long ago the machine was asked for. That is a start in progress and no failure. On an agent that waited for the start of a platform experiment that closed before its run started, and had no machine asked for it: never_launched, with no waits_for, and message gives the close_reason and why it closed. Its instance reads stopped with no end_reason."`
+	Token        string                `json:"token,omitempty"`
+	Actions      []domain.SignupAction `json:"actions" doc:"What the reader may do to the agent now, each a write the API accepts from them: message (POST /platform-experiments/{id}/messages naming it), remove (DELETE /platform-experiments/{id}/agents/{agent_id}, which still refuses an agent with a job queued or running) and show_token (POST /platform-experiments/{id}/agents with its agent_id, which answers the token of an agent the platform does not run). Empty for a reader who writes nothing of the platform experiment."`
 	// The fields below say what an agent of an open or running platform experiment has going,
 	// absent once its run ended (withWork).
 	Subagents                 *int                     `json:"subagents,omitempty" doc:"How many subagents its harness last reported running, of the machine it holds now. Absent with no such report, as for an agent the platform does not run."`
@@ -69,7 +71,7 @@ func (s *Service) roster(ctx context.Context, platformExpID string, signups []do
 	out := make([]JoinedAgent, len(signups))
 	now := time.Now()
 	for i, signup := range signups {
-		out[i] = JoinedAgent{AgentSignup: signup, StatusReason: instanceStarting(signup, now)}
+		out[i] = JoinedAgent{AgentSignup: signup, StatusReason: instanceStarting(signup, now), Actions: []domain.SignupAction{}}
 		if why := out[i].StatusReason; why != nil {
 			var err error
 			if why.WaitsFor, err = domain.WaitsFor(why.Reason, false); err != nil {
@@ -407,17 +409,15 @@ func (s *Service) RemoveAgent(ctx context.Context, platformExpID, agentID string
 	if pe == nil {
 		return refuseSignup(404, "experiment_not_found", "no platform experiment %s", platformExpID)
 	}
-	if by.Kind == domain.ActorCoordinator {
-		signup, err := s.store.GetAgentSignup(ctx, platformExpID, agentID)
-		if err != nil {
-			return fmt.Errorf("platform_experiments.RemoveAgent: %w", err)
-		}
-		if signup == nil {
-			return refuseSignup(404, "not_signed_up", "agent %s is not in platform experiment %s", agentID, platformExpID)
-		}
-		if signup.Actor == nil || signup.Actor.Kind != domain.ActorCoordinator || signup.Actor.ID != by.ID {
-			return refuseSignup(403, "agent_not_added_by_coordinator", "agent %s was not added by this platform experiment's coordinator, and a coordinator's token removes only the agents it added itself: its owner removes this one", agentID)
-		}
+	signup, err := s.store.GetAgentSignup(ctx, platformExpID, agentID)
+	if err != nil {
+		return fmt.Errorf("platform_experiments.RemoveAgent: %w", err)
+	}
+	if signup == nil {
+		return refuseSignup(404, "not_signed_up", "agent %s is not in platform experiment %s", agentID, platformExpID)
+	}
+	if err := removesAgent(pe, *signup, by); err != nil {
+		return err
 	}
 	err = s.store.RemoveAgent(ctx, platformExpID, agentID, s.dataStore.DeleteDataKey)
 	switch {
@@ -448,19 +448,29 @@ func (s *Service) nameAddedBy(ctx context.Context, signups []domain.AgentSignup)
 	return s.store.NameActors(ctx, actors)
 }
 
-// Join adds the agent req asks for to the platform experiment, added by by, and answers it as the
-// roster lists it to by.
-func (s *Service) Join(ctx context.Context, platformExpID string, req AddAgentRequest, by domain.Actor, launch AgentLaunch) ([]JoinedAgent, error) {
-	signups, err := s.AddAgent(ctx, platformExpID, req, by, launch)
+// Join adds the agent req asks for to the platform experiment, added by by, who writes it, and
+// answers it as the roster lists it to by.
+func (s *Service) Join(ctx context.Context, platformExpID string, req AddAgentRequest, by auth.Principal, launch AgentLaunch) ([]JoinedAgent, error) {
+	signups, err := s.AddAgent(ctx, platformExpID, req, by.Actor(), launch)
 	if err != nil {
 		return nil, err
 	}
-	return s.namedRoster(ctx, platformExpID, signups, by)
+	agents, err := s.namedRoster(ctx, platformExpID, signups, by.Actor())
+	if err != nil {
+		return nil, err
+	}
+	pe, err := s.stored(ctx, platformExpID)
+	if err != nil {
+		return nil, err
+	}
+	permitAgents(pe, agents, by, true)
+	return agents, nil
 }
 
 // Roster is every agent that joined the platform experiment, in the order they did, as reader
-// reads them, or ErrPlatformExperimentNotFound.
-func (s *Service) Roster(ctx context.Context, platformExpID string, reader domain.Actor) ([]JoinedAgent, error) {
+// reads them, with what reader may do to each when it writes the platform experiment, or
+// ErrPlatformExperimentNotFound.
+func (s *Service) Roster(ctx context.Context, platformExpID string, reader auth.Principal, writes bool) ([]JoinedAgent, error) {
 	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
 	if err != nil {
 		return nil, err
@@ -472,7 +482,18 @@ func (s *Service) Roster(ctx context.Context, platformExpID string, reader domai
 	if err != nil {
 		return nil, err
 	}
-	return s.namedRoster(ctx, platformExpID, signups, reader)
+	agents, err := s.namedRoster(ctx, platformExpID, signups, reader.Actor())
+	if err != nil {
+		return nil, err
+	}
+	permitAgents(pe, agents, reader, writes)
+	return agents, nil
+}
+
+func permitAgents(pe *domain.PlatformExperiment, agents []JoinedAgent, caller auth.Principal, writes bool) {
+	for i := range agents {
+		agents[i].Actions = SignupActions(pe, agents[i].AgentSignup, caller, writes)
+	}
 }
 
 // namedRoster is roster with whoever added each agent named.

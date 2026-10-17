@@ -9,7 +9,7 @@ import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { choose } from '@/test-select'
 import { CATALOG } from '@/test-agent-types'
 import { ExperimentAgents } from '@/components/experiment-agents'
-import type { AgentMessage, JoinedAgent, Me, PlatformExperiment, PlatformExperimentAction } from '@/types/api'
+import type { AgentMessage, JoinedAgent, Me, PlatformExperiment, PlatformExperimentAction, SignupAction } from '@/types/api'
 
 class ApiError extends Error {
   constructor(readonly status: number, message: string, readonly reason?: string) { super(message) }
@@ -23,6 +23,7 @@ vi.mock('@/lib/api/platform-experiments', () => ({ createPlatformExperiment: vi.
 
 const at = '2026-01-01T00:00:00Z'
 let roster: JoinedAgent[]
+let shownStatus = 'open'
 
 const me: Me = {
   kind: 'user', user_id: 'u1', name: 'Ada',
@@ -31,7 +32,16 @@ const me: Me = {
 }
 
 function signup(id: string, hosted: boolean, agentType = ''): JoinedAgent {
-  return { platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, hosted, agent_type: agentType, model: '', hyperparameters: null, at_work: true, signed_up_at: at }
+  return { platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, hosted, agent_type: agentType, model: '', hyperparameters: null, at_work: true, signed_up_at: at, actions: [] }
+}
+
+// As the API answers an agent to the experiment's owner.
+function asListed(agent: JoinedAgent): JoinedAgent {
+  const actions: SignupAction[] = []
+  if (agent.role !== 'planner' && !agent.finished_at && shownStatus !== 'closed') actions.push('message')
+  if (shownStatus === 'open') actions.push('remove')
+  if (!agent.hosted) actions.push('show_token')
+  return { ...agent, actions }
 }
 
 // As the API lists them to the experiment's owner: a researcher joins it while it is open or runs.
@@ -41,6 +51,7 @@ function ownerActions(status: string): PlatformExperimentAction[] {
 }
 
 function show(status = 'open', more: Partial<PlatformExperiment> = {}) {
+  shownStatus = status
   const pe = { id: 'pe-1', project_id: 'prj_1', status, editable: [], actions: ownerActions(status), ...more } as PlatformExperiment
   const resolved = resolveTenant(me, '')
   if (resolved.state !== 'selected') throw new Error('no tenant')
@@ -53,14 +64,14 @@ function show(status = 'open', more: Partial<PlatformExperiment> = {}) {
 
 beforeEach(() => {
   roster = [signup('ag-old', true)]
-  vi.mocked(fetchPlatformExperimentAgents).mockImplementation(async () => [...roster])
+  vi.mocked(fetchPlatformExperimentAgents).mockImplementation(async () => roster.map(asListed))
   vi.mocked(addPlatformExperimentAgents).mockImplementation(async (_pe, req) => {
     const added = signup(`ag-new${roster.length}`, !!req.hosted, req.agent_type)
     roster = [...roster, added]
-    return [req.hosted ? added : { ...added, token: `hls_token-of-${added.agent_id}` }]
+    return [asListed(req.hosted ? added : { ...added, token: `hls_token-of-${added.agent_id}` })]
   })
   vi.mocked(fetchPlatformExperimentAgentToken).mockImplementation(async (_pe, id) => (
-    { ...roster.find(a => a.agent_id === id)!, token: `hls_token-of-${id}` }
+    asListed({ ...roster.find(a => a.agent_id === id)!, token: `hls_token-of-${id}` })
   ))
   vi.mocked(removePlatformExperimentAgent).mockImplementation(async (_pe, id) => {
     roster = roster.filter(a => a.agent_id !== id)
