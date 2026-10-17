@@ -27,10 +27,9 @@ func agentSandboxOf(configured bool) AgentSandbox {
 		return AgentSandbox{Available: true}
 	}
 	return AgentSandbox{Unavailable: &domain.StatusReason{
-		Reason:         reasonAgentSandboxNotConfigured,
-		Message:        "this deployment has no sandbox provider to run agent sandboxes on",
-		Summary:        "Sandboxed agents are not available on this platform.",
-		OperatorDetail: "The settings have no sandbox section.",
+		Reason:  reasonAgentSandboxNotConfigured,
+		Message: "this deployment has no sandbox provider to run agent sandboxes on",
+		Summary: "Sandboxed agents are not available on this platform.",
 	}}
 }
 

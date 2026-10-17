@@ -6,6 +6,7 @@ import { useGitHubApp, useGitHubInstall } from '@/lib/github-connect'
 import { useTenant } from '@/lib/tenant'
 import { GitHubSettingsLink, InstallProgress } from '@/components/github-status'
 import { Button } from '@/components/ui/button'
+import { Inline } from '@/components/ui/stack'
 import { Text } from '@/components/ui/text'
 import { keys } from '@/lib/keys'
 
@@ -41,8 +42,10 @@ export function InstallGitHub({ label = 'Install GitHub App' }: { label?: string
   }
   return (
     <>
-      <Button type="button" variant="primary" disabled={install.phase === 'waiting'} onClick={start}>{label}</Button>
-      <GitHubSettingsLink orgID={org.id} />
+      <Inline gap="md">
+        <Button type="button" variant="primary" disabled={install.phase === 'waiting'} onClick={start}>{label}</Button>
+        <GitHubSettingsLink orgID={org.id} />
+      </Inline>
       <InstallProgress install={install} onCancel={reset} />
     </>
   )

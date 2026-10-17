@@ -9,6 +9,7 @@ import { inlineLinkClass, TextLink } from '@/components/ui/link'
 import { Inline } from '@/components/ui/stack'
 import { InlineError, Spinner } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
+import { useTenant } from '@/lib/tenant'
 import type { OrgGitHubInstallation } from '@/types/api'
 
 /** A state in a short chip, with its explanation on hover and focus and to a screen reader. */
@@ -46,13 +47,14 @@ function permissionsIn(message: string): string {
 
 /**
  * A refusal about GitHub as a short status: the reason code picks the chip and its one fix, and
- * the API's message is shown only where no plain sentence says it better.
+ * the API's message is shown only where no plain sentence says it better. An install is an
+ * owner's, so a member is told an owner does it.
  */
-function githubProblem(reason: string | undefined, message: string, account: string): Problem {
+function githubProblem(reason: string | undefined, message: string, account: string, owner: boolean): Problem {
   const on = account ? ` on ${account}` : ''
   switch (reason) {
     case 'installation_gone':
-      return { tone: 'danger', label: 'Not installed', explain: `The GitHub App was removed${on}, so experiments cannot use its repositories. Reinstall it to connect again.`, fix: 'install' }
+      return { tone: 'danger', label: 'Not installed', explain: `The GitHub App was removed${on}, so experiments cannot use its repositories. ${owner ? 'Reinstall it' : 'An owner of the org reinstalls it'} to connect again.`, fix: 'install' }
     case 'installation_suspended':
       return { tone: 'warning', label: 'Suspended', explain: `The GitHub App is suspended${on}. Unsuspend it on GitHub to use its repositories again.`, fix: 'review' }
     case 'git_host_permission_missing': {
@@ -60,12 +62,12 @@ function githubProblem(reason: string | undefined, message: string, account: str
       return { tone: 'warning', label: 'Missing permission', explain: `The GitHub App${on} has not been granted ${missing || 'every permission it asks for'}. Accept the permissions on GitHub.`, fix: 'review' }
     }
     case 'repository_not_reachable':
-      return { tone: 'warning', label: 'No access', explain: `The GitHub App cannot reach this repository. Add it to the App's repositories${on}.`, fix: 'install' }
+      return { tone: 'warning', label: 'No access', explain: `The GitHub App cannot reach this repository. ${owner ? 'Add it' : 'An owner of the org adds it'} to the App's repositories${on}.`, fix: 'install' }
     case 'repository_creation_not_permitted':
       return { tone: 'warning', label: 'Cannot create', explain: `GitHub does not let the App create repositories${on}. Review the App's permissions on GitHub, or pick an existing repository.`, fix: 'review' }
     case 'installation_not_connected':
     case 'git_host_not_connected':
-      return { tone: 'warning', label: 'Not connected', explain: `No GitHub account${on} is connected. Install the GitHub App on it.`, fix: 'install' }
+      return { tone: 'warning', label: 'Not connected', explain: `No GitHub account${on} is connected. ${owner ? 'Install' : 'An owner of the org installs'} the GitHub App on it.`, fix: 'install' }
     case 'git_host_failed':
     case 'unavailable':
       return { tone: 'neutral', label: 'No answer', explain: 'GitHub did not answer the check. Try again in a moment.', fix: 'retry' }
@@ -87,7 +89,8 @@ export function GitHubProblem({ reason, message, account, installation, onInstal
   onRetry: () => void
   retrying?: boolean
 }) {
-  const problem = githubProblem(reason, message, account)
+  const { org } = useTenant()
+  const problem = githubProblem(reason, message, account, org.actions.includes('edit'))
   let action: ReactNode = <Button type="button" variant="link" size="sm" loading={retrying} onClick={onRetry}>Check again</Button>
   if (problem.fix === 'install' && onInstall) {
     action = <Button type="button" variant="link" size="sm" onClick={onInstall}>{reason === 'installation_gone' ? 'Reinstall' : reason === 'repository_not_reachable' ? 'Add repositories' : 'Install GitHub App'}</Button>

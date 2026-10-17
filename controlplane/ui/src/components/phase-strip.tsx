@@ -101,8 +101,6 @@ export function PhaseStrip({ pe, jobs = [], stages, children }: {
       {reasonOf(pe).summary}
     </Text>
   )
-  // Present only in answers to staff.
-  const operatorDetail = reasonOf(pe).operator_detail
   // A closed experiment waits for nobody, and a reader is told neither whose move it is.
   const who = pe.actions.length === 0 || phase === 'closed' ? undefined : waitsFor(pe)
   const planner = agents?.find(agent => agent.agent_type === 'planner')
@@ -131,7 +129,6 @@ export function PhaseStrip({ pe, jobs = [], stages, children }: {
             <Text variant="note">Nothing is needed from you: {NEXT_IS[who]}.</Text>
           </div>
         )}
-        {phase !== 'planning' && operatorDetail && <Text variant="note">Operator: {operatorDetail}</Text>}
         {children}
         {phase === 'baseline' && baseline && (
           <InsetCard role="group" aria-label="Baseline agent">

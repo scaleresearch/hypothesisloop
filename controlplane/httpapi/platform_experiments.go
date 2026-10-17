@@ -292,8 +292,8 @@ func (a platformExperimentsAPI) checkRepository(ctx context.Context, in *struct 
 func (a platformExperimentsAPI) createPlatformExperiment(ctx context.Context, in *struct {
 	Body platformexperiments.CreatePlatformExperimentRequest
 }) (*struct{ Body *domain.PlatformExperiment }, error) {
-	if in.Body.ProjectID == "" {
-		return nil, huma.Error400BadRequest("project_id is required")
+	if err := platformexperiments.CheckCreate(in.Body); err != nil {
+		return nil, err
 	}
 	if err := a.access.Project(ctx, in.Body.ProjectID); err != nil {
 		return nil, err

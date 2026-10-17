@@ -77,11 +77,12 @@ func registerRepositories(doc *Doc, repositories *accounts.Repositories) {
 			"such a create is refused 422 repository_account_required. Disconnecting the default leaves none. 404 not_found when the org has not connected it.",
 	}, a.makeDefault)
 	register(doc, auth.AudienceCoordinator, huma.Operation{
-		OperationID: "check-github-installation", Method: "GET", Path: "/orgs/{id}/github-installations/{installation_id}/check", DefaultStatus: http.StatusNoContent,
+		OperationID: "check-github-installation", Method: "GET", Path: "/orgs/{id}/github-installations/{installation_id}/check",
 		Summary: "Check with GitHub that a connected installation still works", Tags: []string{"github"},
 		Description: "For any member of the org. Asks GitHub now whether the App is still installed on the account and has granted every permission the App asks for (app-manifest.json), " +
-			"the check a create runs on the account it creates on. 204 when it has. 422 installation_gone when GitHub removed it, installation_suspended when its owner suspended it, git_host_permission_missing naming what it has not granted, " +
-			"each with what to do. 404 not_found when the org has not connected it. 502 git_host_failed, 503 github_not_configured.",
+			"the check a create runs on the account it creates on. What GitHub says is the answer: working, or reason installation_gone when GitHub removed it, installation_suspended when its owner suspended it, " +
+			"git_host_permission_missing naming what it has not granted, each with what to do in message, where a create on the account is refused 422 with that reason. " +
+			"404 not_found when the org has not connected it. 502 git_host_failed, 503 github_not_configured.",
 	}, a.check)
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "list-github-repositories", Method: "GET", Path: "/orgs/{id}/github-repositories",
@@ -167,11 +168,12 @@ func (a repositoriesAPI) makeDefault(ctx context.Context, in *struct {
 func (a repositoriesAPI) check(ctx context.Context, in *struct {
 	ID             string `path:"id"`
 	InstallationID int64  `path:"installation_id"`
-}) (*struct{}, error) {
-	if err := a.repositories.Check(ctx, in.ID, in.InstallationID); err != nil {
+}) (*struct{ Body accounts.InstallationCheck }, error) {
+	check, err := a.repositories.Check(ctx, in.ID, in.InstallationID)
+	if err != nil {
 		return nil, err
 	}
-	return &struct{}{}, nil
+	return &struct{ Body accounts.InstallationCheck }{Body: check}, nil
 }
 
 func (a repositoriesAPI) repositoriesOf(ctx context.Context, in *struct {

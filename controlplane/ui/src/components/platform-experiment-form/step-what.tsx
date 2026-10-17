@@ -10,12 +10,13 @@ import type { StepProps } from '@/components/platform-experiment-form/model'
 
 /**
  * What the experiment file at the chosen repository and branch did to the form: is being read,
- * filled the fields named, is not there, places the experiment elsewhere, or could not be read.
+ * filled the fields named, is not there, places the experiment elsewhere, cannot be used, or
+ * could not be read. The API's message for one elsewhere or unusable names the file and where.
  */
 export type FileNote =
   | { repository: string; branch: string; state: 'reading' | 'none' }
   | { repository: string; branch: string; state: 'filled'; filled: string[] }
-  | { repository: string; branch: string; state: 'elsewhere' | 'failed'; message: string }
+  | { repository: string; branch: string; state: 'elsewhere' | 'invalid' | 'failed'; message: string }
 
 const FILE = '.hypothesisloop/experiment.yaml'
 
@@ -51,9 +52,9 @@ export function StepWhat({ form, set, isEdit, locked, fileNote, onRead }: StepPr
             )}
             {fileNote?.state === 'none' && <Text variant="note" role="status">{at(fileNote)} has no {FILE}.</Text>}
             {fileNote?.state === 'elsewhere' && <Text variant="note" role="status">{fileNote.message}</Text>}
-            {fileNote?.state === 'failed' && (
+            {(fileNote?.state === 'invalid' || fileNote?.state === 'failed') && (
               <Inline gap="sm">
-                <InlineError>Could not read {FILE} of {at(fileNote)}: {fileNote.message}</InlineError>
+                <InlineError>{fileNote.state === 'invalid' ? fileNote.message : `Could not read ${FILE} of ${at(fileNote)}: ${fileNote.message}`}</InlineError>
                 <Button type="button" size="sm" onClick={() => onRead(fileNote.repository, fileNote.branch)}>Try again</Button>
               </Inline>
             )}

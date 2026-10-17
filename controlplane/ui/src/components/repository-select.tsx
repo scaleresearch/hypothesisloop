@@ -50,15 +50,12 @@ function newRepositoryURL(form: string, accounts: OrgGitHubInstallation[]): stri
   return url.toString()
 }
 
-// What GitHub says of an installation that leaves it no account to create on: removed, suspended,
-// or without a permission the App asks for. GitHub failing to answer says nothing of it.
-const UNUSABLE = new Set(['installation_gone', 'installation_suspended', 'git_host_permission_missing'])
-
-// The installations GitHub says are unusable, asked by the check Settings runs on each.
+// The installations GitHub says are unusable, asked by the check Settings runs on each: removed,
+// suspended, or without a permission the App asks for. A check that failed says nothing of one.
 async function unusable(orgID: string, accounts: OrgGitHubInstallation[]): Promise<number[]> {
   const found = await Promise.all(accounts.map(a => checkGitHubInstallation(orgID, a.installation_id).then(
+    check => check.working ? null : a.installation_id,
     () => null,
-    (e: unknown) => e instanceof ApiError && e.reason && UNUSABLE.has(e.reason) ? a.installation_id : null,
   )))
   return found.filter((id): id is number => id != null)
 }
@@ -90,6 +87,7 @@ function RepositoryCheckNote({ value, account, onInstall }: { value: string; acc
         onRetry={() => void mutate()}
         retrying={isValidating}
       />
+      <span aria-hidden className="text-xs text-muted">·</span>
       <GitHubSettingsLink orgID={org.id} />
     </Inline>
   )
@@ -147,7 +145,7 @@ export function RepositorySelect({ value, onChange, compact = false }: {
         <Text variant="note">
           No GitHub account is connected to {org.name}.{' '}
           {onInstall
-            ? <Button type="button" variant="link" size="sm" disabled={install.phase === 'waiting'} onClick={onInstall}>Install GitHub App</Button>
+            ? <><Button type="button" variant="link" size="sm" disabled={install.phase === 'waiting'} onClick={onInstall}>Install GitHub App</Button>.</>
             : 'An owner of the org installs the GitHub App.'}{' '}
           <GitHubSettingsLink orgID={org.id} />
         </Text>

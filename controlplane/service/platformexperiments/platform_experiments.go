@@ -168,6 +168,9 @@ type Store interface {
 	// CompletedJobIDs is the jobs that ran to a successful end: of them, the ones that hold every
 	// constraint rank.
 	CompletedJobIDs(ctx context.Context, platformExpID string) (map[string]bool, error)
+	// OnCoresOnly is, of the platform experiments ids, those that have jobs and run every one of
+	// them on CPU cores.
+	OnCoresOnly(ctx context.Context, ids []string) (map[string]bool, error)
 	// AgentJobsByAgent is, for every agent that submitted a job, how many it submitted.
 	AgentJobsByAgent(ctx context.Context, platformExpID string) (map[string]db.AgentJobs, error)
 	IsSignedUp(ctx context.Context, platformExpID, agentID string) (bool, error)
@@ -482,6 +485,9 @@ func (s *Service) List(ctx context.Context, q ListQuery) ([]*domain.PlatformExpe
 		pes = []*domain.PlatformExperiment{}
 	}
 	if err := s.spendEach(ctx, pes); err != nil {
+		return nil, 0, auth.Internal(s.logger, "list platform experiments", err)
+	}
+	if err := s.budgetKinds(ctx, pes); err != nil {
 		return nil, 0, auth.Internal(s.logger, "list platform experiments", err)
 	}
 	return pes, total, nil

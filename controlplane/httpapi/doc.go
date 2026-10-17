@@ -8,6 +8,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -143,11 +144,36 @@ func NewDoc(r chi.Router, title, version, preamble string, access *auth.Access, 
 	// data for it is indistinguishable from a correct answer — a caller filtering by a mistyped or
 	// imagined param silently reads the whole table and believes it. 400 instead, naming the param.
 	cfg.RejectUnknownQueryParameters = true
+	cfg.Formats = readableFormats(cfg.Formats)
 	api := humachi.New(r, cfg)
 	api.UseMiddleware(func(ctx huma.Context, next func(huma.Context)) {
 		next(huma.WithValue(ctx, loggerKey{}, logger))
 	})
 	return &Doc{API: api, title: title, preamble: preamble, logger: logger, Access: access}
+}
+
+// errNotJSON is a body that cannot be read as JSON at all, answered 400 invalid_request. A body
+// that is JSON and breaks a rule of the operation is 422.
+var errNotJSON = errors.New("not valid JSON")
+
+// readableFormats is formats with a JSON body that does not parse refused by errNotJSON, never by
+// the parser's text, which quotes what was sent.
+func readableFormats(formats map[string]huma.Format) map[string]huma.Format {
+	out := make(map[string]huma.Format, len(formats))
+	for name, format := range formats {
+		out[name] = format
+	}
+	jsonFormat := formats["application/json"]
+	readable := huma.Format{Marshal: jsonFormat.Marshal, Unmarshal: func(data []byte, v any) error {
+		err := jsonFormat.Unmarshal(data, v)
+		var syntax *json.SyntaxError
+		if errors.As(err, &syntax) {
+			return errNotJSON
+		}
+		return err
+	}}
+	out["application/json"], out["json"] = readable, readable
+	return out
 }
 
 // afterCloseKey marks an operation a coordinator token may still call once its platform

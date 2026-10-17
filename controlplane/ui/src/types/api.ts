@@ -1022,7 +1022,7 @@ export interface paths {
         };
         /**
          * Check with GitHub that a connected installation still works
-         * @description For any member of the org. Asks GitHub now whether the App is still installed on the account and has granted every permission the App asks for (app-manifest.json), the check a create runs on the account it creates on. 204 when it has. 422 installation_gone when GitHub removed it, installation_suspended when its owner suspended it, git_host_permission_missing naming what it has not granted, each with what to do. 404 not_found when the org has not connected it. 502 git_host_failed, 503 github_not_configured.
+         * @description For any member of the org. Asks GitHub now whether the App is still installed on the account and has granted every permission the App asks for (app-manifest.json), the check a create runs on the account it creates on. What GitHub says is the answer: working, or reason installation_gone when GitHub removed it, installation_suspended when its owner suspended it, git_host_permission_missing naming what it has not granted, each with what to do in message, where a create on the account is refused 422 with that reason. 404 not_found when the org has not connected it. 502 git_host_failed, 503 github_not_configured.
          */
         get: operations["check-github-installation"];
         put?: never;
@@ -2630,8 +2630,11 @@ export interface components {
             agent_image?: string;
             /** @description The branch of repository its agents clone and start from, which none of them pushes to. Required with repository, and refused without it: a repository the platform creates is worked on at its default branch. */
             branch?: string;
-            /** Format: double */
-            budget_accelerator_hours: number;
+            /**
+             * Format: double
+             * @description The cap on everything the run spends, in accelerator-hours, and in CPU core-hours for work on cores. Required and positive: 422 invalid_cost otherwise.
+             */
+            budget_accelerator_hours?: number;
             /** @description The id of a closed platform experiment of the same project to carry on, which keeps its code in the repository this one names. Its baseline starts from the commit of that run's baseline job, so both are measured by the same harness. It keeps the metric keys and directions of that run: 422 invalid_metrics for others. Left out, it starts fresh. 422 invalid_continues for one that is no closed platform experiment of the project, keeps its code in another repository or declared no baseline. */
             continues?: string;
             coordinator_in_agentsandbox?: boolean;
@@ -2645,9 +2648,9 @@ export interface components {
             duration_hours?: number;
             /**
              * Format: int64
-             * @description How many researchers may be at work at once: the agents of role competitor, whatever their agent type, that have not finished, were not cut, were not replaced and still have a machine. One that ended leaves its place to another. The coordinator, a draft's planner and agents of role baseline, which measure the baseline before the run and are not ranked, never count, nor do reviewers. At least the total of researchers.
+             * @description Required and positive: 422 invalid_agents otherwise. How many researchers may be at work at once: the agents of role competitor, whatever their agent type, that have not finished, were not cut, were not replaced and still have a machine. One that ended leaves its place to another. The coordinator, a draft's planner and agents of role baseline, which measure the baseline before the run and are not ranked, never count, nor do reviewers. At least the total of researchers.
              */
-            max_agents: number;
+            max_agents?: number;
             /** Format: int64 */
             max_concurrent_accelerators?: number;
             metrics?: components["schemas"]["MetricDefinition"][];
@@ -2935,8 +2938,11 @@ export interface components {
             agent_image?: string;
             /** @description The branch of repository its agents clone and start from, which none of them pushes to. Required with repository, and refused without it: a repository the platform creates is worked on at its default branch. */
             branch?: string;
-            /** Format: double */
-            budget_accelerator_hours: number;
+            /**
+             * Format: double
+             * @description The cap on everything the run spends, in accelerator-hours, and in CPU core-hours for work on cores. Required and positive: 422 invalid_cost otherwise.
+             */
+            budget_accelerator_hours?: number;
             coordinator_in_agentsandbox?: boolean;
             coordinator_model?: string;
             default_quota_tier?: components["schemas"]["QuotaTier"];
@@ -2948,9 +2954,9 @@ export interface components {
             duration_hours?: number;
             /**
              * Format: int64
-             * @description How many researchers may be at work at once: the agents of role competitor, whatever their agent type, that have not finished, were not cut, were not replaced and still have a machine. One that ended leaves its place to another. The coordinator, a draft's planner and agents of role baseline, which measure the baseline before the run and are not ranked, never count, nor do reviewers. At least the total of researchers.
+             * @description Required and positive: 422 invalid_agents otherwise. How many researchers may be at work at once: the agents of role competitor, whatever their agent type, that have not finished, were not cut, were not replaced and still have a machine. One that ended leaves its place to another. The coordinator, a draft's planner and agents of role baseline, which measure the baseline before the run and are not ranked, never count, nor do reviewers. At least the total of researchers.
              */
-            max_agents: number;
+            max_agents?: number;
             /** Format: int64 */
             max_concurrent_accelerators?: number;
             metrics?: components["schemas"]["MetricDefinition"][];
@@ -3226,6 +3232,14 @@ export interface components {
             install_url: string;
             /** @description Good once, for the caller, until expires_at. GitHub hands it back to the App's setup URL with installation_id. */
             state: string;
+        };
+        InstallationCheck: {
+            /** @description What is wrong and who does what about it, absent when it works. */
+            message?: string;
+            /** @description Why it does not work, absent when it does: installation_gone when GitHub removed it, installation_suspended when its owner suspended it, git_host_permission_missing when it has not granted every permission, which message names. */
+            reason?: string;
+            /** @description Whether the App is still installed on the account and has granted every permission the App asks for. */
+            working: boolean;
         };
         Instructions: {
             /** @description The agent type it runs, by id. */
@@ -3836,6 +3850,8 @@ export interface components {
             branch?: string;
             /** Format: double */
             budget_accelerator_hours: number;
+            /** @description What budget_accelerator_hours and consumed_accelerator_hours count: cpu when they are CPU core-hours, accelerator when they are accelerator-hours. The kind of the accelerator_type its proposal was sized for, and without a proposal cpu only once it has jobs and every one of them runs on CPU cores. On every platform experiment, listed or read. */
+            budget_kind: components["schemas"]["TypeKind"];
             /** @description What whoever closed it gave as the reason with POST /platform-experiments/{id}/close, absent when they gave none. status_reason's message and the platform's record of the close in summary repeat it. */
             close_message?: string;
             /** @description Absent while it is not closed, and on one closed before reasons were kept. status_reason says the same with a sentence. planner_stopped is a draft whose planner's machine ended with every restart spent before it answered: the platform restarts a planner that dies, with its session, as it does any agent, and closes the draft in the write that gives the machine up. repository_not_created is a draft or an experiment whose repository the platform could not create after the create answered, and its status_reason message says what the git host answered. */
@@ -4602,8 +4618,6 @@ export interface components {
         };
         StatusReason: {
             message: string;
-            /** @description What the platform's operator checks, only in answers to staff and only where an operator acts. */
-            operator_detail?: string;
             reason: string;
             /**
              * Format: date-time
@@ -4852,6 +4866,7 @@ export type Implementation = components['schemas']['Implementation'];
 export type InFlight = components['schemas']['InFlight'];
 export type InstallFinished = components['schemas']['InstallFinished'];
 export type InstallStart = components['schemas']['InstallStart'];
+export type InstallationCheck = components['schemas']['InstallationCheck'];
 export type Instructions = components['schemas']['Instructions'];
 export type JobCost = components['schemas']['JobCost'];
 export type JobCounts = components['schemas']['JobCounts'];
@@ -7053,12 +7068,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description No Content */
-            204: {
+            /** @description OK */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["InstallationCheck"];
+                };
             };
             /** @description Error */
             default: {

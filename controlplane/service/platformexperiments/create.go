@@ -61,27 +61,44 @@ var specReasons = map[string]string{
 	"agent_image":              "invalid_agent_image",
 }
 
+// specProblems is every rule spec breaks (experimentspec.Spec.Validate), each a refusal on its key.
+func specProblems(spec experimentspec.Spec) refusal.Problems {
+	var problems refusal.Problems
+	var broken experimentspec.Problems
+	if !errors.As(spec.Validate(), &broken) {
+		return nil
+	}
+	for _, problem := range broken {
+		reason, ok := specReasons[problem.Key]
+		if !ok {
+			reason = "invalid_experiment"
+		}
+		refused := refusal.Refuse(http.StatusUnprocessableEntity, reason, problem.Message)
+		if problem.Key != "" {
+			refused.On(problem.Key)
+		}
+		problems = append(problems, refused)
+	}
+	return problems
+}
+
+// CheckCreate refuses a create body for every field it leaves out or states wrong that the body
+// alone shows, all in one answer, before anything is read for it.
+func CheckCreate(req CreatePlatformExperimentRequest) error {
+	var problems refusal.Problems
+	if strings.TrimSpace(req.ProjectID) == "" {
+		problems = append(problems, refusal.Refuse(http.StatusUnprocessableEntity, refusal.ReasonInvalidRequest, "project_id is required: the project the experiment belongs to").On("project_id"))
+	}
+	return append(problems, specProblems(req.Spec)...).Err()
+}
+
 // validate is the one check of what a platform experiment is, whoever states it: a create, a
 // planner's proposal, the person accepting one or a patch of an existing one. The spec's own rules
 // come first (experimentspec.Spec.Validate), then those of the platform's settings and catalog. It
 // returns req as it is stored, trimmed and with the platform's settings where it leaves a field to
 // them, and refuses with every problem it finds.
 func (s *Service) validate(req CreatePlatformExperimentRequest, catalog domain.AgentTypeCatalog) (CreatePlatformExperimentRequest, error) {
-	var problems refusal.Problems
-	var broken experimentspec.Problems
-	if errors.As(req.Spec.Validate(), &broken) {
-		for _, problem := range broken {
-			reason, ok := specReasons[problem.Key]
-			if !ok {
-				reason = "invalid_experiment"
-			}
-			refused := refusal.Refuse(422, reason, problem.Message)
-			if problem.Key != "" {
-				refused.On(problem.Key)
-			}
-			problems = append(problems, refused)
-		}
-	}
+	problems := specProblems(req.Spec)
 	req.Spec = s.withSettings(req.Spec.Trimmed())
 	if err := domain.ResearcherPool(req.Researchers).Check(catalog); err != nil {
 		problems = append(problems, refusal.Refuse(422, "invalid_agents", err.Error()+": researchers is the researchers it is to have at work, [{agent_type, model, hyperparameters, count}]").On("researchers"))

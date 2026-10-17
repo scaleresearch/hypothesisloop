@@ -40,7 +40,7 @@ beforeEach(() => {
   installations = [acme]
   vi.mocked(fetchGitHubApp).mockResolvedValue(app)
   vi.mocked(fetchGitHubInstallations).mockImplementation(async () => ({ items: [...installations], total: installations.length }))
-  vi.mocked(checkGitHubInstallation).mockResolvedValue(undefined)
+  vi.mocked(checkGitHubInstallation).mockResolvedValue({ working: true })
   vi.mocked(makeGitHubInstallationDefault).mockImplementation(async (_, id) => {
     installations = installations.map(i => ({ ...i, default: i.installation_id === id }))
   })
@@ -72,7 +72,8 @@ describe('a connected GitHub account GitHub refuses', () => {
   ]
   for (const tc of cases) {
     it(`shows ${tc.chip} with ${tc.action}, and the API's words nowhere in the row`, async () => {
-      vi.mocked(checkGitHubInstallation).mockRejectedValue(new ApiError(422, tc.message, tc.reason))
+      if (tc.reason === 'git_host_failed') vi.mocked(checkGitHubInstallation).mockRejectedValue(new ApiError(502, tc.message, tc.reason))
+      else vi.mocked(checkGitHubInstallation).mockResolvedValue({ working: false, reason: tc.reason, message: tc.message })
       show()
       const row = (await screen.findByRole('cell', { name: 'acme' })).closest('tr')!
       const chip = (await within(row).findByText(tc.chip)).closest('[title]')!
@@ -86,7 +87,7 @@ describe('a connected GitHub account GitHub refuses', () => {
   }
 
   it('reinstalls in a new tab, as Install GitHub App does', async () => {
-    vi.mocked(checkGitHubInstallation).mockRejectedValue(new ApiError(422, 'gone', 'installation_gone'))
+    vi.mocked(checkGitHubInstallation).mockResolvedValue({ working: false, reason: 'installation_gone', message: 'gone' })
     vi.spyOn(window, 'open').mockReturnValue({ location: { href: '' }, close: vi.fn() } as unknown as Window)
     vi.mocked(beginGitHubInstall).mockResolvedValue({ state: 's-1', install_url: `${app.install_url}?state=s-1`, expires_at: at })
     show()
@@ -99,15 +100,16 @@ describe('a connected GitHub account GitHub refuses', () => {
     vi.mocked(checkGitHubInstallation).mockRejectedValue(new ApiError(502, 'no answer', 'git_host_failed'))
     show()
     await userEvent.click(await screen.findByRole('button', { name: 'Check again' }))
-    vi.mocked(checkGitHubInstallation).mockResolvedValue(undefined)
+    vi.mocked(checkGitHubInstallation).mockResolvedValue({ working: true })
     await userEvent.click(screen.getByRole('button', { name: 'Check again' }))
     expect(await screen.findByText('Working')).toBeTruthy()
   })
 
   it('offers a member no action that installs', async () => {
-    vi.mocked(checkGitHubInstallation).mockRejectedValue(new ApiError(422, 'gone', 'installation_gone'))
+    vi.mocked(checkGitHubInstallation).mockResolvedValue({ working: false, reason: 'installation_gone', message: 'gone' })
     show(member)
-    expect(await screen.findByText('Not installed')).toBeTruthy()
+    const chip = (await screen.findByText('Not installed')).closest('[title]')!
+    expect(chip.getAttribute('title')).toBe('The GitHub App was removed on acme, so experiments cannot use its repositories. An owner of the org reinstalls it to connect again.')
     expect(screen.queryByRole('button', { name: 'Reinstall' })).toBeNull()
   })
 })

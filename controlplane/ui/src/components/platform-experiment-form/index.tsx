@@ -3,7 +3,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { useSWRConfig } from 'swr'
 import { createExperimentDraft, deleteExperimentDraft, updateExperimentDraft } from '@/lib/api/drafts'
-import { createPlatformExperiment, EXPERIMENT_FILE_ELSEWHERE, fetchExperimentFile, NO_EXPERIMENT_FILE, updatePlatformExperiment } from '@/lib/api/platform-experiments'
+import { createPlatformExperiment, EXPERIMENT_FILE_ELSEWHERE, fetchExperimentFile, INVALID_EXPERIMENT_FILE, NO_EXPERIMENT_FILE, updatePlatformExperiment } from '@/lib/api/platform-experiments'
 import type { CreatePlatformExperimentRequest, PlatformExperimentPatch } from '@/types/api'
 import { ApiError } from '@/lib/api/request'
 import { isZeroDate } from '@/lib/format'
@@ -206,6 +206,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
     } catch (err: unknown) {
       if (err instanceof ApiError && err.reason === NO_EXPERIMENT_FILE) return setFromFile({ repository, branch, state: 'none' })
       if (err instanceof ApiError && err.reason === EXPERIMENT_FILE_ELSEWHERE) return setFromFile({ repository, branch, state: 'elsewhere', message: err.message })
+      if (err instanceof ApiError && err.reason === INVALID_EXPERIMENT_FILE) return setFromFile({ repository, branch, state: 'invalid', message: err.message })
       setFromFile({ repository, branch, state: 'failed', message: errorMessage(err) })
     }
   }
@@ -307,7 +308,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
         <div ref={panel} role="tabpanel" aria-label={STEPS[at].label} className="grid gap-6">
           {step === '1' && <StepWhat {...stepProps} fileNote={fileNote} onRead={(r, b) => void readFile(r, b)} />}
           {step === '2' && <StepMeasure {...stepProps} />}
-          {step === '3' && <StepBudget {...stepProps} />}
+          {step === '3' && <StepBudget {...stepProps} budgetKind={initial?.budget_kind} />}
         </div>
 
         {refused && (

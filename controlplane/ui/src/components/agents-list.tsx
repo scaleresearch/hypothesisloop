@@ -24,19 +24,18 @@ import { Loading, ErrorMessage, InlineError } from '@/components/ui/status-messa
 import { PlatformExperimentSelect } from '@/components/platform-experiment-select'
 import { Pagination } from '@/components/ui/pagination'
 import { formatAccH } from '@/lib/format'
-import { budgetKind, budgetUnit } from '@/lib/units'
+import { budgetUnit } from '@/lib/units'
 import { useRouter } from 'next/navigation'
 import { experimentPath, jobPath, projectPath } from '@/lib/routes'
 import { useTenant } from '@/lib/tenant'
 import { keys } from '@/lib/keys'
 import { POLL } from '@/lib/poll'
-import { proposalOf } from '@/lib/planning'
 import type { PlatformExperiment } from '@/types/api'
 
 const PAGE_SIZE = 25
 
 function unitOf(pe: PlatformExperiment): string {
-  return budgetUnit(budgetKind(proposalOf(pe)?.accelerator_kind, []))
+  return budgetUnit(pe.budget_kind)
 }
 
 // One agent's compute in one experiment. An agent that is not in the experiment has none, which

@@ -1,6 +1,6 @@
 import { apiCall, apiFetch, apiFetchPage, apiSend, MAX_LIST_PAGE_SIZE, withQuery } from '@/lib/api/request'
 import type { Page } from '@/lib/api/request'
-import type { GitHubAddresses, InstallFinished, InstallStart, OrgGitHubInstallation, Repository } from '@/types/api'
+import type { GitHubAddresses, InstallationCheck, InstallFinished, InstallStart, OrgGitHubInstallation, Repository } from '@/types/api'
 
 /** The reason the API gives on a deployment whose git host is not GitHub. */
 export const GITHUB_NOT_CONFIGURED = 'github_not_configured'
@@ -30,10 +30,10 @@ export async function disconnectGitHubInstallation(orgID: string, installationID
   await apiCall('DELETE', `/orgs/${orgID}/github-installations/${installationID}`)
 }
 
-// Asks GitHub whether the App is still installed there and may create and push. Refused with
-// the reason and what to do, as a create on that account would be.
-export async function checkGitHubInstallation(orgID: string, installationID: number): Promise<void> {
-  await apiCall('GET', `/orgs/${orgID}/github-installations/${installationID}/check`)
+// Asks GitHub whether the App is still installed there and may create and push: working, or the
+// reason a create on that account would be refused for, with what to do.
+export function checkGitHubInstallation(orgID: string, installationID: number): Promise<InstallationCheck> {
+  return apiFetch<InstallationCheck>(`/orgs/${orgID}/github-installations/${installationID}/check`)
 }
 
 // For an owner: where a new repository goes when a create names no account.

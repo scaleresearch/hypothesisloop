@@ -30,13 +30,16 @@ function InstallationState({ installation, onInstall }: { installation: OrgGitHu
   const { org } = useTenant()
   const { data, error, isValidating, mutate } = useSWR(
     keys.githubInstallationCheck(org.id, installation.installation_id),
-    () => checkGitHubInstallation(org.id, installation.installation_id).then(() => true),
+    () => checkGitHubInstallation(org.id, installation.installation_id),
   )
-  if (error) {
+  // What GitHub says of it, or why the check could not be made.
+  const problem = error ? { reason: error instanceof ApiError ? error.reason : undefined, message: String(error.message) }
+    : data && !data.working ? { reason: data.reason, message: data.message ?? '' } : null
+  if (problem) {
     return (
       <GitHubProblem
-        reason={error instanceof ApiError ? error.reason : undefined}
-        message={error.message}
+        reason={problem.reason}
+        message={problem.message}
         account={installation.account_login}
         installation={installation}
         onInstall={onInstall}

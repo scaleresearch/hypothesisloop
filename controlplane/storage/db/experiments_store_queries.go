@@ -106,6 +106,28 @@ func (s *Store) CompletedJobIDs(ctx context.Context, platformExpID string) (map[
 	return completed, nil
 }
 
+// OnCoresOnly returns, of the platform experiments ids, those that have jobs and run every one of
+// them on CPU cores.
+func (s *Store) OnCoresOnly(ctx context.Context, ids []string) (map[string]bool, error) {
+	if len(ids) == 0 {
+		return map[string]bool{}, nil
+	}
+	rows, err := s.pool.pool.Query(ctx, `SELECT platform_experiment_id FROM experiments WHERE platform_experiment_id = ANY($1)
+GROUP BY platform_experiment_id HAVING bool_and(lower(accelerator_type) = lower($2))`, ids, string(domain.CPUType))
+	if err != nil {
+		return nil, fmt.Errorf("experiments_store.OnCoresOnly: %w", err)
+	}
+	found, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("experiments_store.OnCoresOnly: %w", err)
+	}
+	onCores := make(map[string]bool, len(found))
+	for _, id := range found {
+		onCores[id] = true
+	}
+	return onCores, nil
+}
+
 // CompletedJobs returns every COMPLETED job of a platform experiment, whoever ran it on whichever
 // branch, oldest first.
 func (s *Store) CompletedJobs(ctx context.Context, platformExpID string) ([]*domain.Experiment, error) {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 )
 
@@ -175,7 +176,7 @@ func (a planningAPI) createDraft(ctx context.Context, in *struct {
 	Body createDraftRequest
 }) (*struct{ Body *domain.PlatformExperiment }, error) {
 	if in.Body.ProjectID == "" {
-		return nil, huma.Error400BadRequest("project_id is required")
+		return nil, refusal.Invalid(refusal.ReasonInvalidRequest, "project_id is required: the project the experiment belongs to").On("project_id")
 	}
 	if err := a.access.Project(ctx, in.Body.ProjectID); err != nil {
 		return nil, err

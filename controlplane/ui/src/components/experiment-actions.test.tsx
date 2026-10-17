@@ -44,7 +44,7 @@ const me: Me = {
 }
 const pe = {
   id: 'pe-x', project_id: 'prj_platform', name: 'Vision benchmark', status: 'open' as const, shared: true,
-  budget_accelerator_hours: 100, max_agents: 4, signup_count: 2, stages: [], current_stage: 1, created_at: at,
+  budget_accelerator_hours: 100, budget_kind: 'accelerator' as const, max_agents: 4, signup_count: 2, stages: [], current_stage: 1, created_at: at,
   description: '', metrics: [], researchers: [], coordinator_in_agentsandbox: false, max_agentsandboxes: 0, report_interval_seconds: 60, starts_at: at, updated_at: at,
   editable: [], actions: [],
 } as PlatformExperiment

@@ -26,6 +26,9 @@ export const NO_EXPERIMENT_FILE = 'no_experiment_file'
 /** The reason the API gives for an experiment file that places the experiment in another project, repository or branch. */
 export const EXPERIMENT_FILE_ELSEWHERE = 'experiment_file_elsewhere'
 
+/** The reason the API gives for an experiment file that cannot be used, its message naming the file, where it was read and why. */
+export const INVALID_EXPERIMENT_FILE = 'invalid_experiment_file'
+
 export function fetchExperimentFile(projectID: string, repository: string, branch: string): Promise<ExperimentFile> {
   return apiFetch<ExperimentFile>(withQuery(`/projects/${projectID}/experiment-file`, { repository, branch }))
 }

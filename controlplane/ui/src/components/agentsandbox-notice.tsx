@@ -6,7 +6,7 @@ import type { StatusReason } from '@/types/api'
 
 /**
  * Why planning cannot go on right now, in the platform's plain sentence, what that means for the
- * person, and the ways on. The operator's detail is there only in answers to the platform's operators.
+ * person, and the ways on.
  */
 export function AgentSandboxNotice({ reason, title, meaning, actions }: {
   reason: StatusReason
@@ -20,7 +20,6 @@ export function AgentSandboxNotice({ reason, title, meaning, actions }: {
       <Text>{reason.summary}</Text>
       <Text variant="note" tone="default">{meaning}</Text>
       {actions && <Inline gap="sm">{actions}</Inline>}
-      {reason.operator_detail && <Text variant="note">Operator: {reason.operator_detail}</Text>}
     </Callout>
   )
 }

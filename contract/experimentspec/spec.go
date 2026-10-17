@@ -54,8 +54,8 @@ type Spec struct {
 	Name                      string                `json:"name" required:"false"`
 	Description               string                `json:"description" required:"false"`
 	Metrics                   []MetricDefinition    `json:"metrics" required:"false"`
-	BudgetAcceleratorHours    float64               `json:"budget_accelerator_hours"`
-	MaxAgents                 int                   `json:"max_agents" doc:"How many researchers may be at work at once: the agents of role competitor, whatever their agent type, that have not finished, were not cut, were not replaced and still have a machine. One that ended leaves its place to another. The coordinator, a draft's planner and agents of role baseline, which measure the baseline before the run and are not ranked, never count, nor do reviewers. At least the total of researchers."`
+	BudgetAcceleratorHours    float64               `json:"budget_accelerator_hours" required:"false" doc:"The cap on everything the run spends, in accelerator-hours, and in CPU core-hours for work on cores. Required and positive: 422 invalid_cost otherwise."`
+	MaxAgents                 int                   `json:"max_agents" required:"false" doc:"Required and positive: 422 invalid_agents otherwise. How many researchers may be at work at once: the agents of role competitor, whatever their agent type, that have not finished, were not cut, were not replaced and still have a machine. One that ended leaves its place to another. The coordinator, a draft's planner and agents of role baseline, which measure the baseline before the run and are not ranked, never count, nor do reviewers. At least the total of researchers."`
 	DurationHours             float64               `json:"duration_hours" required:"false" doc:"How long the run lasts, in hours from the moment it starts, at most quota.max_platform_experiment_days. Required: 422 invalid_length without it. The time it is open before, while its baseline is measured, is no part of it."`
 	Researchers               []ResearcherPoolEntry `json:"researchers,omitempty" doc:"Optional: the researchers it is to have at work, an entry each agent type and model, [{agent_type, model, hyperparameters, count}], at most max_agents in all. A model left out is the platform's default, which the answer shows. 422 invalid_agents for a count below 1, an agent type that is none, a model no agent can be started on, two entries of one agent type and model, or more than max_agents in all. With coordinator_in_agentsandbox the platform creates them with the platform experiment, runs them and keeps their counts at work while the run goes on. The coordinator may add researchers beyond them, up to max_agents."`
 	CoordinatorInAgentSandbox bool                  `json:"coordinator_in_agentsandbox,omitempty"`
@@ -233,8 +233,11 @@ func (spec *Spec) Validate() error {
 			refuse(key, "%s is one line and holds a line break: state it on a single line", field)
 		}
 	}
-	if s.Name == "" || s.Description == "" {
-		refuse("name", "name and description are required: the description is the text every agent works from")
+	if s.Name == "" {
+		refuse("name", "name is required")
+	}
+	if s.Description == "" {
+		refuse("description", "description is required: the text every agent works from")
 	}
 	if why := ProseTooLong("description", s.Description); why != "" {
 		refuse("description", "%s", why)

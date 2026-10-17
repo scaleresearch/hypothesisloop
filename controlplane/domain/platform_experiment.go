@@ -109,7 +109,10 @@ type PlatformExperiment struct {
 	// jobs that ended were billed, measuring the baseline included. Read from the metrics store
 	// when platform experiments are read or listed, and stored nowhere.
 	ConsumedAcceleratorHours *float64 `json:"consumed_accelerator_hours,omitempty" doc:"What it has spent of budget_accelerator_hours: what its jobs that ended were billed, the baseline's among them. A running job's cost joins when the job ends. On every platform experiment that is no draft, listed or read, and the whole spend once it is closed."`
-	MaxAgents                int      `json:"max_agents" doc:"How many researchers may be at work at once, the one count of them: the agents of role competitor, whatever their agent type, that have not finished, were not cut, were not replaced and still have a machine. One that ended leaves its place to another. The coordinator, a draft's planner and agents of role baseline, which measure the baseline before the run and are not ranked, never count, nor do reviewers. Its owner changes it, never below the researchers at work nor below the total of researchers. On a draft: the most researchers its planner may propose, which accepting replaces with the number accepted."`
+	// BudgetKind is what the budget is spent on, worked out on every answer
+	// (platformexperiments.Service.budgetKinds) and stored nowhere.
+	BudgetKind TypeKind `json:"budget_kind" doc:"What budget_accelerator_hours and consumed_accelerator_hours count: cpu when they are CPU core-hours, accelerator when they are accelerator-hours. The kind of the accelerator_type its proposal was sized for, and without a proposal cpu only once it has jobs and every one of them runs on CPU cores. On every platform experiment, listed or read."`
+	MaxAgents  int      `json:"max_agents" doc:"How many researchers may be at work at once, the one count of them: the agents of role competitor, whatever their agent type, that have not finished, were not cut, were not replaced and still have a machine. One that ended leaves its place to another. The coordinator, a draft's planner and agents of role baseline, which measure the baseline before the run and are not ranked, never count, nor do reviewers. Its owner changes it, never below the researchers at work nor below the total of researchers. On a draft: the most researchers its planner may propose, which accepting replaces with the number accepted."`
 	// Researchers is the desired state of who researches: how many of each agent type and model
 	// are to be at work, at most MaxAgents in all. The platform keeps it while the run goes on
 	// (platformexperiments.Service.KeepResearchers). Optional; empty on a draft, which its accepted proposal fills.
@@ -354,12 +357,11 @@ func ClockStart(stated, now time.Time) time.Time {
 // StatusReason says why a platform experiment is in its status: a stable code, the sentence an
 // agent acts on (Message), the one a person reads (Summary), and whose move it is (WaitsFor).
 type StatusReason struct {
-	Reason         string     `json:"reason"`
-	Message        string     `json:"message"`
-	Summary        string     `json:"summary" doc:"One short plain sentence for a person: what is wrong or happening, what it affects, and who acts. What a UI shows."`
-	OperatorDetail string     `json:"operator_detail,omitempty" doc:"What the platform's operator checks, only in answers to staff and only where an operator acts."`
-	Since          *time.Time `json:"since,omitempty" doc:"When the condition began, where it is known."`
-	WaitsFor       Waiter     `json:"waits_for,omitempty" doc:"Who acts to change the state, on every status but closed, which waits for nobody. owner: a person of its organisation, and nothing its agents or the platform do changes it (a proposal to accept, a budget below what the measured baseline needs, no researcher, a spent budget). coordinator: its sandboxed coordinator, and its owner where a person coordinates it, so a person is never told to wait for an agent that does not exist. platform: nobody, since the platform, an agent already at work or the clock brings the next state."`
+	Reason   string     `json:"reason"`
+	Message  string     `json:"message"`
+	Summary  string     `json:"summary" doc:"One short plain sentence for a person: what is wrong or happening, what it affects, and who acts. What a UI shows."`
+	Since    *time.Time `json:"since,omitempty" doc:"When the condition began, where it is known."`
+	WaitsFor Waiter     `json:"waits_for,omitempty" doc:"Who acts to change the state, on every status but closed, which waits for nobody. owner: a person of its organisation, and nothing its agents or the platform do changes it (a proposal to accept, a budget below what the measured baseline needs, no researcher, a spent budget). coordinator: its sandboxed coordinator, and its owner where a person coordinates it, so a person is never told to wait for an agent that does not exist. platform: nobody, since the platform, an agent already at work or the clock brings the next state."`
 }
 
 // CloseReason is why a platform experiment closed. Nothing else closes one: a spent budget

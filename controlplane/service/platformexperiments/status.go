@@ -2,6 +2,7 @@ package platformexperiments
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -51,6 +52,38 @@ func (s *Service) spendEach(ctx context.Context, pes []*domain.PlatformExperimen
 		if pe.Status != domain.PlatformExpDraft {
 			consumed := spent[pe.ID]
 			pe.ConsumedAcceleratorHours = &consumed
+		}
+	}
+	return nil
+}
+
+// budgetKinds sets on each of pes what its budget is spent on (BudgetKind): the kind of the type
+// its proposal was sized for, and without a proposal cores only once it has jobs and runs every
+// one of them on cores.
+func (s *Service) budgetKinds(ctx context.Context, pes []*domain.PlatformExperiment) error {
+	var unproposed []string
+	for _, pe := range pes {
+		if len(pe.Proposal) == 0 {
+			unproposed = append(unproposed, pe.ID)
+			continue
+		}
+		var proposal Proposal
+		if err := json.Unmarshal(pe.Proposal, &proposal); err != nil {
+			return fmt.Errorf("platform_experiments.budgetKinds: the proposal of %s: %w", pe.ID, err)
+		}
+		pe.BudgetKind = proposal.AcceleratorType.Kind()
+	}
+	onCores, err := s.store.OnCoresOnly(ctx, unproposed)
+	if err != nil {
+		return fmt.Errorf("platform_experiments.budgetKinds: %w", err)
+	}
+	for _, pe := range pes {
+		if len(pe.Proposal) > 0 {
+			continue
+		}
+		pe.BudgetKind = domain.TypeKindAccelerator
+		if onCores[pe.ID] {
+			pe.BudgetKind = domain.TypeKindCPU
 		}
 	}
 	return nil
@@ -263,6 +296,9 @@ func (s *Service) jobsSubmitted(ctx context.Context, id string) (int, error) {
 // planner, on an open one why it is not running yet and what reader does about it, on a running
 // one whether its clock runs and whether a researcher is left to work, and on a closed one why it closed. It is the one place that says so.
 func (s *Service) Describe(ctx context.Context, pe *domain.PlatformExperiment, reader auth.Principal) error {
+	if err := s.budgetKinds(ctx, []*domain.PlatformExperiment{pe}); err != nil {
+		return fmt.Errorf("platform_experiments.Describe: %w", err)
+	}
 	var why *domain.StatusReason
 	var signups []domain.AgentSignup
 	var err error

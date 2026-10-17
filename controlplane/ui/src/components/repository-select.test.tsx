@@ -56,7 +56,7 @@ function show(initial?: string, as: Me = me) {
 
 beforeEach(() => {
   vi.mocked(checkRepository).mockResolvedValue({ repository_account: 'acme' })
-  vi.mocked(checkGitHubInstallation).mockResolvedValue(undefined)
+  vi.mocked(checkGitHubInstallation).mockResolvedValue({ working: true })
   vi.mocked(fetchGitHubApp).mockResolvedValue({ slug: 'hl', install_url: 'https://github.test/install', new_repository_url: 'https://github.test/new' })
   vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [{ org_id: 'org_a', installation_id: 7, account_login: 'acme', account_type: 'Organization', connected_actor: { kind: 'user', id: 'u9', name: 'Una' }, connected_at: at, default: false }], total: 1 })
   vi.mocked(fetchGitHubRepositories).mockImplementation(async (_, params) => {
@@ -153,9 +153,7 @@ describe('the repository of a new platform experiment', () => {
   it('offers no account GitHub removed the App from, and takes the one working account unasked', async () => {
     const removed = { ...organisation, installation_id: 8, account_login: 'antonibertel', account_type: 'User' as const }
     vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [organisation, removed], total: 2 })
-    vi.mocked(checkGitHubInstallation).mockImplementation(async (_, id) => {
-      if (id === 8) throw new ApiError(422, 'gone', 'installation_gone')
-    })
+    vi.mocked(checkGitHubInstallation).mockImplementation(async (_, id) => id === 8 ? { working: false, reason: 'installation_gone', message: 'gone' } : { working: true })
     show()
     await waitFor(() => expect(screen.getByRole('combobox').getAttribute('placeholder')).toBe('A new private repository on acme'))
     await userEvent.click(screen.getByRole('combobox'))
@@ -172,7 +170,7 @@ describe('the repository of a new platform experiment', () => {
     expect(document.body.textContent).not.toContain(gone)
     expect(checkRepository).toHaveBeenCalledWith('prj_1', {})
     vi.mocked(checkRepository).mockResolvedValue({ repository_account: 'acme' })
-  vi.mocked(checkGitHubInstallation).mockResolvedValue(undefined)
+  vi.mocked(checkGitHubInstallation).mockResolvedValue({ working: true })
     await userEvent.click(screen.getByRole('button', { name: 'Check again' }))
     await waitFor(() => expect(screen.queryByText('Not installed')).toBeNull())
   })

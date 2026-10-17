@@ -46,7 +46,7 @@ beforeEach(() => {
   vi.spyOn(window, 'open').mockReturnValue(opened as unknown as Window)
   vi.mocked(beginGitHubInstall).mockResolvedValue({ state: 's-1', install_url: `${app.install_url}?state=s-1`, expires_at: at })
   vi.mocked(fetchGitHubApp).mockResolvedValue(app)
-  vi.mocked(checkGitHubInstallation).mockResolvedValue(undefined)
+  vi.mocked(checkGitHubInstallation).mockResolvedValue({ working: true })
   vi.mocked(fetchGitHubInstallations).mockImplementation(async () => ({ items: [...installations], total: installations.length }))
   vi.mocked(disconnectGitHubInstallation).mockImplementation(async (_, id) => { installations = installations.filter(i => i.installation_id !== id) })
 })

@@ -6,7 +6,7 @@ import { fetchHypothesisStats } from '@/lib/api/hypotheses'
 import { useRouter } from 'next/navigation'
 import { experimentPath } from '@/lib/routes'
 import { formatAccH, isZeroDate } from '@/lib/format'
-import { budgetKind, budgetUnit } from '@/lib/units'
+import { budgetUnit } from '@/lib/units'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { SharedBadge } from '@/components/shared-badge'
@@ -14,7 +14,6 @@ import { Button } from '@/components/ui/button'
 import { Inline } from '@/components/ui/stack'
 import { RemoveExperiment } from '@/components/remove-experiment'
 import { keys } from '@/lib/keys'
-import { proposalOf } from '@/lib/planning'
 import type { PlatformExperiment } from '@/types/api'
 
 const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' })
@@ -40,7 +39,7 @@ export function PlatformExperimentCard({
     () => fetchHypothesisStats(pe.id),
   )
 
-  const unit = budgetUnit(budgetKind(proposalOf(pe)?.accelerator_kind, []))
+  const unit = budgetUnit(pe.budget_kind)
   const live = pe.status === 'open' || pe.status === 'running'
   const daysLeft = live && !isZeroDate(pe.ends_at)
     ? Math.ceil((new Date(pe.ends_at!).getTime() - Date.now()) / 86_400_000)

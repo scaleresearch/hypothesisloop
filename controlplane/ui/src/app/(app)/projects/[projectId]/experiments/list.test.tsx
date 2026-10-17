@@ -43,7 +43,7 @@ function experiment(id: string, name: string, projectID: string, shared: boolean
   return {
     id, name, project_id: projectID, status: 'running', shared,
     editable: own ? ['name', 'description', 'duration_hours'] : [], actions: own ? ['remove', 'close', 'add_agent', 'add_idea'] : [],
-    budget_accelerator_hours: 100, max_agents: 4, signup_count: 3, stages: [], current_stage: 1, created_at: at,
+    budget_accelerator_hours: 100, budget_kind: 'accelerator', max_agents: 4, signup_count: 3, stages: [], current_stage: 1, created_at: at,
     description: '', metrics: [], researchers: [], coordinator_in_agentsandbox: false, max_agentsandboxes: 0, report_interval_seconds: 60, starts_at: at, updated_at: at,
   }
 }

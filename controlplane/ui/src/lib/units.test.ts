@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { budgetKind, budgetUnit, inFlight, occupancy, unitCount, unitRate } from './units'
+import { budgetUnit, inFlight, occupancy, unitCount, unitRate } from './units'
 
 describe('a count of a priced type', () => {
   it('says cores for the CPU type and is a bare number for an accelerator', () => {
@@ -47,13 +47,5 @@ describe('the unit of a budget', () => {
     expect(budgetUnit('cpu', 'long')).toBe('CPU core-hours')
     expect(budgetUnit('accelerator')).toBe('AccH')
     expect(budgetUnit(undefined, 'long')).toBe('accelerator-hours')
-  })
-
-  it('follows the kind an experiment was proposed for, and its jobs when nothing was proposed', () => {
-    expect(budgetKind('cpu', ['accelerator'])).toBe('cpu')
-    expect(budgetKind('accelerator', ['cpu'])).toBe('accelerator')
-    expect(budgetKind(undefined, ['cpu', 'cpu'])).toBe('cpu')
-    expect(budgetKind(undefined, ['cpu', 'accelerator'])).toBe('accelerator')
-    expect(budgetKind(undefined, [])).toBe('accelerator')
   })
 })

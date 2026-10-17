@@ -353,28 +353,42 @@ func (r *Repositories) MakeDefault(ctx context.Context, orgID string, installati
 	return nil
 }
 
-// Check asks GitHub whether a connected installation of orgID still works.
-func (r *Repositories) Check(ctx context.Context, orgID string, installationID int64) error {
+// InstallationCheck is what GitHub says now of a connected installation: working, or why not.
+type InstallationCheck struct {
+	Working bool   `json:"working" doc:"Whether the App is still installed on the account and has granted every permission the App asks for."`
+	Reason  string `json:"reason,omitempty" doc:"Why it does not work, absent when it does: installation_gone when GitHub removed it, installation_suspended when its owner suspended it, git_host_permission_missing when it has not granted every permission, which message names."`
+	Message string `json:"message,omitempty" doc:"What is wrong and who does what about it, absent when it works."`
+}
+
+// Check asks GitHub whether a connected installation of orgID still works. One GitHub refuses is
+// answered as such, since that is what the check asks: only a check that could not be made fails.
+func (r *Repositories) Check(ctx context.Context, orgID string, installationID int64) (InstallationCheck, error) {
 	const op = "check-github-installation"
 	if _, err := r.access.OrgMember(ctx, orgID); err != nil {
-		return err
+		return InstallationCheck{}, err
 	}
 	app, err := r.app()
 	if err != nil {
-		return err
+		return InstallationCheck{}, err
 	}
 	connected, err := r.store.ListGitHubInstallations(ctx, orgID)
 	if err != nil {
-		return r.refusal(op, err, http.StatusUnprocessableEntity)
+		return InstallationCheck{}, r.refusal(op, err, http.StatusUnprocessableEntity)
 	}
 	i := slices.IndexFunc(connected, func(one *domain.OrgGitHubInstallation) bool { return one.InstallationID == installationID })
 	if i < 0 {
-		return refusal.NotFound("GitHub installation")
+		return InstallationCheck{}, refusal.NotFound("GitHub installation")
 	}
-	if err := app.Check(ctx, connected[i]); err != nil {
-		return r.refusal(op, err, http.StatusUnprocessableEntity)
+	err = app.Check(ctx, connected[i])
+	if err == nil {
+		return InstallationCheck{Working: true}, nil
 	}
-	return nil
+	refused := r.refusal(op, err, http.StatusUnprocessableEntity)
+	var unusable *refusal.Refusal
+	if errors.As(refused, &unusable) && unusable.GetStatus() == http.StatusUnprocessableEntity {
+		return InstallationCheck{Reason: unusable.Reason, Message: unusable.Message}, nil
+	}
+	return InstallationCheck{}, refused
 }
 
 // List is one page of the repositories the installations of orgID cover whose owner/name holds

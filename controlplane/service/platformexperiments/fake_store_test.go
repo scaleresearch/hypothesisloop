@@ -19,3 +19,7 @@ func (fakeStore) AgentTypeCatalog(context.Context, string) (domain.AgentTypeCata
 func (fakeStore) ProjectAgentTypeCatalog(context.Context, string) (domain.AgentTypeCatalog, error) {
 	return agenttypes.Catalog(), nil
 }
+
+func (fakeStore) OnCoresOnly(context.Context, []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}

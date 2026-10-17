@@ -162,7 +162,6 @@ export function GoalInput({ projectID, onCreated, onConfigure }: {
           <Callout tone="warning" className="flex flex-wrap items-center justify-between gap-2">
             <Text>{unavailable.summary}</Text>
             <Button size="sm" loading={moving} onClick={() => void configure()}>Set it up myself</Button>
-            {unavailable.operator_detail && <Text variant="note" className="basis-full">Operator: {unavailable.operator_detail}</Text>}
           </Callout>
         </div>
       )}

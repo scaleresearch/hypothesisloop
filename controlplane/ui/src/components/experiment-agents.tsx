@@ -206,9 +206,6 @@ function AgentDetails({ agent, messages, catalog }: { agent: JoinedAgent; messag
       {agent.status_reason && agent.instance && (
         <Text variant="hint" className="max-w-md">{agent.status_reason.summary}</Text>
       )}
-      {agent.status_reason?.operator_detail && (
-        <Text variant="note" className="max-w-md">Operator: {agent.status_reason.operator_detail}</Text>
-      )}
       {messages.length > 0 && <Messages messages={messages} />}
     </Stack>
   )

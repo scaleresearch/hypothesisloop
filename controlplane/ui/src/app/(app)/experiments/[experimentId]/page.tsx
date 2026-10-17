@@ -30,8 +30,7 @@ import { Text } from '@/components/ui/text'
 import { runClock } from '@/lib/format'
 import { phaseOf } from '@/lib/phase'
 import { useRoster } from '@/lib/roster'
-import { budgetKind, budgetUnit } from '@/lib/units'
-import { proposalOf } from '@/lib/planning'
+import { budgetUnit } from '@/lib/units'
 import { About } from './_overview/about'
 import { overviewFigures } from './_overview/figures'
 import { Findings } from './_overview/findings'
@@ -74,7 +73,7 @@ function PlatformExperimentDetail({ id }: { id: string }) {
   ])).sort()
   const primary = results?.metrics[0]
   const hypothesisText = new Map((findings ?? []).map(h => [h.id, h.text]))
-  const unit = budgetUnit(budgetKind(proposalOf(pe)?.accelerator_kind, (experiments ?? []).map(exp => exp.accelerator_kind)))
+  const unit = budgetUnit(pe.budget_kind)
   const clock = runClock(pe)
   // One list: what is running first, then the newest of the rest.
   const running = reads.running ?? []
