@@ -6,6 +6,7 @@ import { Section } from '@/components/ui/section'
 import { Stack } from '@/components/ui/stack'
 import { Table, num } from '@/components/ui/table'
 import { Text } from '@/components/ui/text'
+import { formatMetric } from '@/lib/format'
 import type { MetricReference } from '@/types/api'
 
 const counts = {
@@ -25,10 +26,10 @@ export function ReferenceValues({ experimentId, references }: { experimentId: st
           <div key={r.metric}>
             <Text as="div" variant="note" tone="default" className="mb-1 font-medium">
               {r.metric} <span className="font-normal text-subtle">({r.direction})</span>
-              {r.best != null && <span className="font-normal">: best that counts {r.best.toFixed(4)}</span>}
+              {r.best != null && <span className="font-normal">: best that counts {formatMetric(r.best)}</span>}
               {r.beaten != null && r.leader != null && (
                 <span className="font-normal">
-                  {', '}{r.beaten ? 'beaten' : 'not beaten'} by the leader&apos;s {r.leader_metric} {r.leader.toFixed(4)}
+                  {', '}{r.beaten ? 'beaten' : 'not beaten'} by the leader&apos;s {r.leader_metric} {formatMetric(r.leader)}
                 </span>
               )}
             </Text>
@@ -48,8 +49,8 @@ export function ReferenceValues({ experimentId, references }: { experimentId: st
                       <td className="font-mono text-xs"><AgentLabel id={v.agent_id} /></td>
                       <td className={num}>
                         {v.experiment_id
-                          ? <TextLink href={jobPath(experimentId, v.experiment_id)} title={v.experiment_id}>{v.value.toFixed(4)}</TextLink>
-                          : v.value.toFixed(4)}
+                          ? <TextLink href={jobPath(experimentId, v.experiment_id)} title={v.experiment_id}>{formatMetric(v.value)}</TextLink>
+                          : formatMetric(v.value)}
                       </td>
                       <td><Badge tone={c.tone} title={c.title}>{c.label}</Badge></td>
                     </tr>

@@ -27,7 +27,7 @@ import { Code } from '@/components/ui/text'
 import { FormField } from '@/components/ui/form-field'
 import { LinkTr, RowAnchor, SortableTh, Table, num, quiet } from '@/components/ui/table'
 import { Pagination } from '@/components/ui/pagination'
-import { acceleratorLabel, formatAccH, relTime, shortId } from '@/lib/format'
+import { acceleratorLabel, formatAccH, formatDate, formatMetric, relTime, shortId } from '@/lib/format'
 import { budgetUnit } from '@/lib/units'
 import { statusTone } from '@/lib/colors'
 import { evictionCode, evictionCodeLabel, evictionDetailLines, faultBreakdown, notAdmittedLabel } from '@/lib/eviction'
@@ -289,7 +289,7 @@ function JobRow({ job, showExperiment, varied, connected, onCancel }: JobRowProp
 
   return (
     <LinkTr href={jobPath(job.platform_experiment_id, job.id)}>
-      <td className={quiet} title={`${job.id}\n${job.agent_name} · ${accelerator} · est. ${cost} · submitted ${new Date(job.created_at).toLocaleString()}`}>
+      <td className={quiet} title={`${job.id}\n${job.agent_name} · ${accelerator} · est. ${cost} · submitted ${formatDate(job.created_at)}`}>
         <RowAnchor>{shortId(job.id)}</RowAnchor>
       </td>
       {showExperiment && <td className="truncate text-xs"><ExperimentLink id={job.platform_experiment_id} /></td>}
@@ -311,9 +311,9 @@ function JobRow({ job, showExperiment, varied, connected, onCancel }: JobRowProp
         </Inline>
       </td>
       <td className="hidden truncate font-mono text-2xs 2xl:table-cell" title={job.accelerator_type}>{accelerator}</td>
-      <td className={clsx(num, 'truncate')} title={job.metric?.name}>{job.metric ? job.metric.value.toFixed(4) : '—'}</td>
+      <td className={clsx(num, 'truncate')} title={job.metric?.name}>{job.metric ? formatMetric(job.metric.value) : '—'}</td>
       <td className={clsx(num, 'hidden truncate xl:table-cell')} title={cost}>{cost}</td>
-      <td className={clsx(quiet, 'hidden xl:table-cell')} title={new Date(job.created_at).toLocaleString()}>{relTime(job.created_at)}</td>
+      <td className={clsx(quiet, 'hidden xl:table-cell')} title={formatDate(job.created_at)}>{relTime(job.created_at)}</td>
       {onCancel && (
         <td className="text-right">
           {job.actions.includes('cancel') && <Button variant="danger" size="sm" onClick={onCancel}>Cancel</Button>}

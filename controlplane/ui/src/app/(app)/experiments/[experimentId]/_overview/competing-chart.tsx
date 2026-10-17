@@ -8,6 +8,7 @@ import { Loading } from '@/components/ui/status-message'
 import { Pill } from '@/components/ui/text'
 import { chart, semantic } from '@/lib/colors'
 import { ChartBox, ExpandableChart } from './chart-frame'
+import { formatMetric } from '@/lib/format'
 import type { AgentMetricSeries, MetricDefinition, StagesStatus } from '@/types/api'
 
 export function CompetingAgentsChart({
@@ -107,7 +108,7 @@ export function CompetingAgentsChart({
         <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
         <XAxis dataKey="t" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => new Date(v).toLocaleTimeString()} tick={chart.tick} />
         <YAxis domain={['auto', 'auto']} tick={chart.tick} />
-        <Tooltip formatter={(v: number) => v.toFixed(4)} labelFormatter={(l) => new Date(l).toLocaleTimeString()} contentStyle={chart.tooltip.contentStyle} labelStyle={chart.tooltip.labelStyle} />
+        <Tooltip formatter={(v: number) => formatMetric(v)} labelFormatter={(l) => new Date(l).toLocaleTimeString()} contentStyle={chart.tooltip.contentStyle} labelStyle={chart.tooltip.labelStyle} />
         {(boundaries ?? []).map(b => (
           <ReferenceLine
             key={b.stage_index}

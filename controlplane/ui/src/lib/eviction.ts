@@ -42,6 +42,9 @@ const NOT_ADMITTED_REASON_LABELS: Record<string, string> = {
   exceeds_accelerator_share: 'Requests more cpu/memory/storage than its accelerators’ share of a node',
   exceeds_cluster_capacity: 'Asks for more than any connected cluster has when idle',
   no_cluster_for_architecture: 'No connected cluster has nodes of its image’s architecture',
+  org_compute_limit: 'Its org holds all the platform compute it may',
+  project_compute_limit: 'Its project holds all the platform compute it may',
+  exceeds_project_compute_limit: 'Needs more platform compute than its project may hold',
 }
 
 // notAdmittedLabel is the label of a job's not_admitted_reason, followed by the scheduler's own

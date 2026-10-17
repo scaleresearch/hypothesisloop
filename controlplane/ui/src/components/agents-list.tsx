@@ -23,7 +23,7 @@ import { ColumnTh, Table, num } from '@/components/ui/table'
 import { Loading, ErrorMessage, InlineError } from '@/components/ui/status-message'
 import { PlatformExperimentSelect } from '@/components/platform-experiment-select'
 import { Pagination } from '@/components/ui/pagination'
-import { formatAccH } from '@/lib/format'
+import { formatAccH, formatMetric } from '@/lib/format'
 import { budgetUnit } from '@/lib/units'
 import { useRouter } from 'next/navigation'
 import { experimentPath, jobPath, projectPath } from '@/lib/routes'
@@ -257,7 +257,7 @@ function AgentsListContent({ experimentFilter }: { experimentFilter: string }) {
                                 const standing = ranking?.standings.find(st => st.agent_id === a.id)
                                 return standing?.experiment_id ? (
                                   <TextLink href={jobPath(experimentFilter, standing.experiment_id)} onClick={e => e.stopPropagation()}>
-                                    #{standing.rank} · {standing.best.toFixed(4)}
+                                    #{standing.rank} · {formatMetric(standing.best)}
                                   </TextLink>
                                 ) : none
                               }}

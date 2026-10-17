@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from 'react'
 import useSWR from 'swr'
-import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { fetchExperimentMetrics, fetchExperimentsPage } from '@/lib/api/jobs'
 import { AgentLabel, useAgentName } from '@/components/agent-label'
 import { Badge } from '@/components/ui/badge'
@@ -10,79 +9,18 @@ import { Captioned } from '@/components/ui/captioned'
 import { InsetCard } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { EmptyState } from '@/components/ui/empty-state'
+import { MetricLineChart } from '@/components/metric-line-chart'
 import { TextLink } from '@/components/ui/link'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 import { Inline, Stack } from '@/components/ui/stack'
 import { ErrorMessage, Loading } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
-import { chart, seriesPalette } from '@/lib/colors'
 import { shortId } from '@/lib/format'
 import { keys } from '@/lib/keys'
 import { POLL } from '@/lib/poll'
 import { jobPath } from '@/lib/routes'
 import { ChartBox, ExpandableChart } from './chart-frame'
 import type { Experiment, MetricDataPoint } from '@/types/api'
-
-// Bounded-score metrics (roughly 0-1) get their own axis so they aren't flattened to a
-// hairline by unbounded metrics like seconds_per_subject/cv_seconds sitting in the tens+.
-// Kept as a simple name check rather than a generic auto-scaling heuristic.
-const BOUNDED_METRIC_RE = /auroc|accuracy|precision|recall|f1|auc/i
-
-function isBoundedMetric(name: string): boolean {
-  return BOUNDED_METRIC_RE.test(name)
-}
-
-// Shared chart body for the per-job card and the job picker. `trackedMetrics`
-// scopes the plot to the experiment's official tracked/ranking metrics rather than every
-// ad-hoc metric_name a job happens to report.
-function MetricLineChart({ points, trackedMetrics, height }: { points: MetricDataPoint[]; trackedMetrics: string[]; height: number }) {
-  const trackedSet = new Set(trackedMetrics)
-  const filtered = points.filter((p) => trackedSet.has(p.metric_name))
-  const metricNames = Array.from(new Set(filtered.map((p) => p.metric_name))).sort()
-  // One row per point; a point only sets its own metric's key, so unrelated metrics are left
-  // undefined for that row (a gap in their line, not a fake zero). Plotted over training progress:
-  // a job of a few seconds has no readable time axis.
-  const chartData = [...filtered]
-    .sort((a, b) => new Date(a.recorded_at as string).getTime() - new Date(b.recorded_at as string).getTime())
-    .map((p) => ({
-      frac: parseFloat((p.fraction_complete * 100).toFixed(1)),
-      [p.metric_name]: p.metric_value,
-    }))
-  if (chartData.length === 0) {
-    return <EmptyState>No data yet</EmptyState>
-  }
-  const hasBounded = metricNames.some(isBoundedMetric)
-  const hasUnbounded = metricNames.some((n) => !isBoundedMetric(n))
-  const axisOf = (name: string) => (isBoundedMetric(name) ? 'left' : 'right')
-  return (
-    <ChartBox height={height}>
-    <ResponsiveContainer width="100%" height="100%">
-      <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
-        <XAxis dataKey="frac" type="number" domain={[0, 100]} tickFormatter={(v) => `${v}%`} tick={chart.tick} />
-        {hasBounded && <YAxis yAxisId="left" domain={['auto', 'auto']} tick={chart.tick} width={40} />}
-        {hasUnbounded && <YAxis yAxisId="right" orientation="right" domain={['auto', 'auto']} tick={chart.tick} width={40} />}
-        <Tooltip formatter={(v: number) => v.toFixed(4)} labelFormatter={(l) => `${l}% of training`} contentStyle={chart.tooltip.contentStyle} labelStyle={chart.tooltip.labelStyle} />
-        <Legend wrapperStyle={chart.legend} />
-        {metricNames.map((name, i) => (
-          <Line
-            key={name}
-            yAxisId={axisOf(name)}
-            dataKey={name}
-            name={hasBounded && hasUnbounded ? `${name} (${axisOf(name)} axis)` : name}
-            stroke={seriesPalette[i % seriesPalette.length]}
-            dot={{ r: 2 }}
-            strokeWidth={1.5}
-            type="monotone"
-            connectNulls
-            isAnimationActive={false}
-          />
-        ))}
-      </LineChart>
-    </ResponsiveContainer>
-    </ChartBox>
-  )
-}
 
 function JobMetricMini({ jobId, trackedMetrics }: { jobId: string; trackedMetrics: string[] }) {
   // 48h-scale experiments move slowly enough that 10s polling here just repeats the same
@@ -97,7 +35,9 @@ function JobMetricMini({ jobId, trackedMetrics }: { jobId: string; trackedMetric
   if (!metrics) return <Loading />
   return (
     <ExpandableChart label={`Metrics of job ${jobId}`}>
-      <MetricLineChart points={metrics.filter(p => p.recorded_at)} trackedMetrics={trackedMetrics} height={400} />
+      <ChartBox height={400}>
+        <MetricLineChart points={metrics.filter(p => p.recorded_at && trackedMetrics.includes(p.metric_name))} />
+      </ChartBox>
     </ExpandableChart>
   )
 }
@@ -187,7 +127,9 @@ export function LiveMetricsPicker({ jobs }: { jobs: Experiment[] }) {
       {error && <ErrorMessage>Could not load the metrics of job {selectedJob.id}: {error.message}</ErrorMessage>}
       {metrics && (
         <ExpandableChart label={`Metrics of job ${selectedJob.id}`}>
-          <MetricLineChart points={points} trackedMetrics={Array.from(selected)} height={420} />
+          <ChartBox height={420}>
+            <MetricLineChart points={points.filter(p => selected.has(p.metric_name))} />
+          </ChartBox>
         </ExpandableChart>
       )}
     </Stack>

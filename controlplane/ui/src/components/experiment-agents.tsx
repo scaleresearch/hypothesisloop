@@ -26,7 +26,7 @@ import { DEFAULT_AGENT_TYPE, researcherTypes, typeName, useAgentTypes } from '@/
 import { useTenant } from '@/lib/tenant'
 import { errorMessage } from '@/lib/errors'
 import { Select } from '@/components/ui/select'
-import { relTime } from '@/lib/format'
+import { formatDate, relTime } from '@/lib/format'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import type { Tone } from '@/lib/colors'
 import { keys } from '@/lib/keys'
@@ -171,7 +171,7 @@ function Messages({ messages }: { messages: AgentMessage[] }) {
     <Stack gap="xs" aria-label="Messages">
       <Eyebrow>Messages</Eyebrow>
       {messages.map((m, i) => (
-        <Text key={i} variant="note" className="max-w-md" title={new Date(m.at).toLocaleString()}>
+        <Text key={i} variant="note" className="max-w-md" title={formatDate(m.at)}>
           From the {m.from}, {relTime(m.at)}: {m.text}
         </Text>
       ))}
@@ -194,10 +194,10 @@ function AgentDetails({ agent, messages, catalog }: { agent: JoinedAgent; messag
         ['Run by', agent.in_agentsandbox ? 'the platform' : 'its operator'],
         ['Type', <AgentTypeLabel key="type" agent={agent} catalog={catalog} />],
         ['Model', agent.model ?? 'default'],
-        ['Joined', new Date(agent.signed_up_at).toLocaleString()],
+        ['Joined', formatDate(agent.signed_up_at)],
       ]} />
       {agent.finished_at && (
-        <Text variant="note" title={new Date(agent.finished_at).toLocaleString()}>
+        <Text variant="note" title={formatDate(agent.finished_at)}>
           Finished {relTime(agent.finished_at)}: {agent.finished_reason}
         </Text>
       )}

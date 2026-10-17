@@ -10,7 +10,7 @@ import { MetricBar } from '@/components/ui/metric-bar'
 import { Section } from '@/components/ui/section'
 import { Table, num } from '@/components/ui/table'
 import { Text } from '@/components/ui/text'
-import { formatAccH } from '@/lib/format'
+import { formatAccH, formatMetric } from '@/lib/format'
 import { settings, variedKeys } from '@/lib/hypothesis-progress'
 import { hypothesisPath, jobPath } from '@/lib/routes'
 import { AgentJobsPanel } from './job-metrics'
@@ -158,9 +158,9 @@ function LeaderboardRow({ pe, agentId, standing, standingKeys, results, quota, s
                 title={`The job that set it: ${best.experiment_id}`}
                 onClick={e => e.stopPropagation()}
               >
-                {best.best.toFixed(4)}
+                {formatMetric(best.best)}
               </TextLink>
-            ) : best ? best.best.toFixed(4) : '—'}
+            ) : best ? formatMetric(best.best) : '—'}
           </td>
         )
       }) : <td className={num}>—</td>}

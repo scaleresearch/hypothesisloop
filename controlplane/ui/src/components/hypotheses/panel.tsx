@@ -16,7 +16,7 @@ import { Actor, Verdict } from '@/components/actor'
 import { linkGroups, objectiveFinding } from '@/lib/hypothesis-graph'
 import { semantic, statusColor } from '@/lib/colors'
 import { filedAfterVerdict } from '@/lib/hypothesis-progress'
-import { relTime } from '@/lib/format'
+import { formatMetric, relTime } from '@/lib/format'
 import { experimentPath, hypothesisPath, jobPath } from '@/lib/routes'
 import type { GraphNode, HypothesisGraph, LinkType, PlatformExperiment } from '@/types/api'
 
@@ -48,7 +48,7 @@ export function ObjectiveBar({ graph, pe }: { graph: HypothesisGraph; pe: Platfo
         {bestJob && (
           <Text as="div" variant="note" className="tabular-nums">
             Baseline job{' '}
-            <TextLink href={jobPath(graph.root, bestJob.id)}>{bestJob.metric.name} {bestJob.metric.value.toFixed(4)}</TextLink>
+            <TextLink href={jobPath(graph.root, bestJob.id)}>{bestJob.metric.name} {formatMetric(bestJob.metric.value)}</TextLink>
           </Text>
         )}
         {shown && (
@@ -109,7 +109,7 @@ export function HypothesisPanel({ graph, nodeByID, selected, onSelect }: Hypothe
         {bestJob && (
           <Text as="div" variant="code">
             <span className="text-muted">Best job </span>
-            <TextLink href={jobPath(graph.root, bestJob.id)}>{bestJob.metric.name} {bestJob.metric.value.toFixed(4)}</TextLink>
+            <TextLink href={jobPath(graph.root, bestJob.id)}>{bestJob.metric.name} {formatMetric(bestJob.metric.value)}</TextLink>
           </Text>
         )}
         {finding && (

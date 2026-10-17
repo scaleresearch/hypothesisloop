@@ -18,6 +18,7 @@ import { Inline, Stack } from '@/components/ui/stack'
 import { Callout, ErrorMessage, Loading } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
 import { keys } from '@/lib/keys'
+import { formatDate } from '@/lib/format'
 import type { OrgGitHubInstallation } from '@/types/api'
 
 const KIND = { User: 'Personal', Organization: 'Organization' } as const
@@ -124,7 +125,7 @@ export function OrgGitHub() {
                       : editsOrg ? <Button size="sm" loading={defaulting === installation.installation_id} disabled={defaulting !== null} onClick={() => void makeDefault(installation)}>Make default</Button> : null}
                   </td>
                 )}
-                <td title={new Date(installation.connected_at).toLocaleString()}>
+                <td title={formatDate(installation.connected_at)}>
                   <Actor actor={installation.connected_actor} self={installation.connected_actor.kind === 'user' && installation.connected_actor.id === me.user_id} />
                 </td>
                 {editsOrg && (

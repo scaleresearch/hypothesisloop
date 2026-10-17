@@ -6,7 +6,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { TextLink } from '@/components/ui/link'
 import { Section } from '@/components/ui/section'
 import { LinkTr, RowAnchor, Table, num } from '@/components/ui/table'
-import { formatAccH, relTime, shortId } from '@/lib/format'
+import { formatAccH, formatDate, formatMetric, relTime, shortId } from '@/lib/format'
 import { variedEnvByHypothesis, variedEnvSettings } from '@/lib/hypothesis-progress'
 import { experimentPath, jobPath } from '@/lib/routes'
 import { budgetUnit } from '@/lib/units'
@@ -50,9 +50,9 @@ export function JobsTable({ experimentId, jobs, total, rankingMetric }: {
                     <JobHypothesis job={exp} />
                     {varied && <span className="ml-2 font-mono text-2xs text-subtle">{varied}</span>}
                   </td>
-                  <td className={clsx(num, 'truncate')} title={exp.metric?.name}>{exp.metric?.value.toFixed(4) ?? '—'}</td>
+                  <td className={clsx(num, 'truncate')} title={exp.metric?.name}>{exp.metric ? formatMetric(exp.metric.value) : '—'}</td>
                   <td className={clsx(num, 'truncate')} title={cost}>{cost}</td>
-                  <td className="hidden truncate text-xs text-subtle xl:table-cell" title={new Date(exp.created_at).toLocaleString()}>{relTime(exp.created_at)}</td>
+                  <td className="hidden truncate text-xs text-subtle xl:table-cell" title={formatDate(exp.created_at)}>{relTime(exp.created_at)}</td>
                 </LinkTr>
               )
             })}

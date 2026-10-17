@@ -1,7 +1,7 @@
 'use client'
 
 import { clsx } from 'clsx'
-import { relTime } from '@/lib/format'
+import { formatDate, relTime } from '@/lib/format'
 import { useTick } from '@/lib/tick'
 import { Stack } from '@/components/ui/stack'
 import { Steps } from '@/components/ui/steps'
@@ -33,7 +33,7 @@ export function Activity({ activity, prominent = false, className }: { activity:
   return (
     <p className={clsx(prominent ? 'text-base font-medium' : 'text-xs', className)}>
       <span aria-live="polite">{activity.text}</span>{' '}
-      <time dateTime={activity.at} title={new Date(activity.at).toLocaleString()} className="whitespace-nowrap text-xs font-normal text-subtle">{relTime(activity.at)}</time>
+      <time dateTime={activity.at} title={formatDate(activity.at)} className="whitespace-nowrap text-xs font-normal text-subtle">{relTime(activity.at)}</time>
     </p>
   )
 }

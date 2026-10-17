@@ -69,3 +69,8 @@ export function headline(text: string, max = 120): string {
   const space = first.lastIndexOf(' ', max)
   return `${first.slice(0, space > max / 2 ? space : max).replace(/[\s,;:(–-]+$/, '')}…`
 }
+
+// Every metric value the UI shows, in a table, a sentence or a chart's tooltip.
+export function formatMetric(v: number): string {
+  return v.toFixed(4)
+}

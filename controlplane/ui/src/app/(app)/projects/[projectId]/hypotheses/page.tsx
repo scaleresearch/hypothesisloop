@@ -25,6 +25,7 @@ import { ErrorMessage, Loading } from '@/components/ui/status-message'
 import { keys } from '@/lib/keys'
 import { POLL } from '@/lib/poll'
 import { hypothesisStatusValues } from '@/types/api'
+import { formatMetric } from '@/lib/format'
 import type { HypothesisStats, MetricDefinition, PlatformExperiment } from '@/types/api'
 
 // The experiments a project holds are few; past this many the newest are listed and the rest named.
@@ -68,8 +69,8 @@ function Delta({ value, standing }: { value: number; standing?: Standing }) {
   const better = standing.direction === 'maximize' ? diff > 0 : diff < 0
   const tone = diff === 0 ? 'text-subtle' : better ? 'text-success' : 'text-danger'
   return (
-    <span className={clsx('font-mono text-2xs tabular-nums', tone)} title={`Baseline ${standing.metric} ${standing.baseline.toFixed(4)}`}>
-      {diff >= 0 ? '+' : '−'}{Math.abs(diff).toFixed(4)}
+    <span className={clsx('font-mono text-2xs tabular-nums', tone)} title={`Baseline ${standing.metric} ${formatMetric(standing.baseline)}`}>
+      {diff >= 0 ? '+' : '−'}{formatMetric(Math.abs(diff))}
     </span>
   )
 }
@@ -105,15 +106,15 @@ function BestLine({ standing }: { standing?: Standing }) {
   if (standing.best === undefined) {
     return (
       <Text as="span" variant="meta" tone="subtle">
-        {standing.baseline !== undefined ? `baseline ${standing.metric} ${standing.baseline.toFixed(4)}, no result yet` : 'no result yet'}
+        {standing.baseline !== undefined ? `baseline ${standing.metric} ${formatMetric(standing.baseline)}, no result yet` : 'no result yet'}
       </Text>
     )
   }
   return (
     <span className="inline-flex flex-wrap items-baseline gap-x-1.5 text-xs text-muted">
-      best <span className="font-mono tabular-nums text-foreground">{standing.best.toFixed(4)}</span>
+      best <span className="font-mono tabular-nums text-foreground">{formatMetric(standing.best)}</span>
       <Delta value={standing.best} standing={standing} />
-      {standing.baseline !== undefined && <span>vs baseline <span className="font-mono tabular-nums">{standing.baseline.toFixed(4)}</span></span>}
+      {standing.baseline !== undefined && <span>vs baseline <span className="font-mono tabular-nums">{formatMetric(standing.baseline)}</span></span>}
     </span>
   )
 }
@@ -232,7 +233,7 @@ function ExperimentScope({ pe, selected, onClick }: { pe: PlatformExperiment; se
         </span>
         {standing?.best !== undefined && (
           <span className="ml-auto inline-flex items-baseline gap-1.5">
-            <span className="font-mono tabular-nums text-foreground" title={`Best ${standing.metric}`}>{standing.best.toFixed(4)}</span>
+            <span className="font-mono tabular-nums text-foreground" title={`Best ${standing.metric}`}>{formatMetric(standing.best)}</span>
             <Delta value={standing.best} standing={standing} />
           </span>
         )}

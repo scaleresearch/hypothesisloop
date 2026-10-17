@@ -19,6 +19,7 @@ import { Inline, Stack } from '@/components/ui/stack'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { keys } from '@/lib/keys'
+import { formatDate } from '@/lib/format'
 import type { CreatedInvite, OrgInvite, OrgMember, OrgRole } from '@/types/api'
 
 const ROLES: OrgRole[] = ['owner', 'member']
@@ -32,10 +33,6 @@ const INVITE_ROLES: { value: OrgRole; label: string }[] = [
 type Change =
   | { kind: 'role'; member: OrgMember; role: OrgRole }
   | { kind: 'remove'; member: OrgMember }
-
-function when(at: string): string {
-  return new Date(at).toLocaleString()
-}
 
 /** The pending invites of the org: create one and read its link once, list them, revoke one. */
 function Invites({ onError }: { onError: (message: string) => void }) {
@@ -82,7 +79,7 @@ function Invites({ onError }: { onError: (message: string) => void }) {
           value={inviteLink(created.token)}
           note={<>
             Send it to the person yourself: the platform sends no email. Whoever opens it and signs in
-            joins {org.name} as {created.role === 'owner' ? 'an owner' : 'a member'}. It works once, until {when(created.expires_at)}.
+            joins {org.name} as {created.role === 'owner' ? 'an owner' : 'a member'}. It works once, until {formatDate(created.expires_at)}.
             This is the only time it is shown: if you lose it, revoke the invite and create another.
           </>}
           dismiss="I have sent it"
@@ -103,8 +100,8 @@ function Invites({ onError }: { onError: (message: string) => void }) {
               <tr key={invite.id}>
                 <td><Actor actor={invite.actor} self={invite.actor.kind === 'user' && invite.actor.id === me.user_id} /></td>
                 <td className="text-xs">{invite.role}</td>
-                <td className="text-xs text-muted">{when(invite.created_at)}</td>
-                <td className="text-xs text-muted">{when(invite.expires_at)}</td>
+                <td className="text-xs text-muted">{formatDate(invite.created_at)}</td>
+                <td className="text-xs text-muted">{formatDate(invite.expires_at)}</td>
                 <td className="text-right"><Button size="sm" variant="danger" onClick={() => setRevoking(invite)}>Revoke</Button></td>
               </tr>
             ))}
@@ -117,7 +114,7 @@ function Invites({ onError }: { onError: (message: string) => void }) {
       {revoking && (
         <ConfirmDialog
           open
-          title={`Revoke the invite ${revoking.actor.name} created ${when(revoking.created_at)}?`}
+          title={`Revoke the invite ${revoking.actor.name} created ${formatDate(revoking.created_at)}?`}
           confirmLabel="Revoke"
           onConfirm={() => revoke(revoking)}
           onClose={() => setRevoking(null)}
@@ -194,7 +191,7 @@ export function OrgMembers() {
                       )
                       : member.role}
                   </td>
-                  <td className="text-xs text-muted">{when(member.joined_at)}</td>
+                  <td className="text-xs text-muted">{formatDate(member.joined_at)}</td>
                   <td className="text-right">
                     {member.actions.includes('remove')
                       ? <Button size="sm" variant="danger" onClick={() => setChange({ kind: 'remove', member })}>{self ? 'Leave' : 'Remove'}</Button>

@@ -17,6 +17,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Code, Text } from '@/components/ui/text'
 import { keys } from '@/lib/keys'
+import { formatDate } from '@/lib/format'
 import type { APIKey, CreatedAPIKey } from '@/types/api'
 
 const WHOLE_ORG = ''
@@ -116,10 +117,10 @@ export function APIKeys() {
                   )}
                 </td>
                 <td className="text-xs">{scopeLabel(key)}</td>
-                <td className="text-xs text-muted">{new Date(key.created_at).toLocaleString()}</td>
+                <td className="text-xs text-muted">{formatDate(key.created_at)}</td>
                 <td className="text-xs">
                   {key.revoked_at
-                    ? <span className="text-muted">revoked {new Date(key.revoked_at).toLocaleString()}</span>
+                    ? <span className="text-muted">revoked {formatDate(key.revoked_at)}</span>
                     : <StatusLabel tone="success">active</StatusLabel>}
                 </td>
                 <td className="text-right">

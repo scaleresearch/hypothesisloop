@@ -6,8 +6,8 @@ import useSWR from 'swr'
 import { fetchAgentTypeVersions, restoreAgentType } from '@/lib/api/agent-types'
 import { APPLIES_LIVE, said } from '@/lib/agent-types'
 import { diffLines, foldUnchanged } from '@/lib/diff'
+import { formatDate, relTime } from '@/lib/format'
 import type { DiffLine } from '@/lib/diff'
-import { relTime } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -183,7 +183,7 @@ export function VersionHistory({ orgID, type, editable, onRestored }: {
           {versions.map(v => (
             <li key={v.version} className="flex flex-wrap items-baseline gap-x-3 text-xs">
               <span className="w-8 font-mono font-medium">v{v.version}</span>
-              <span className="text-muted" title={new Date(v.created_at).toLocaleString()}>
+              <span className="text-muted" title={formatDate(v.created_at)}>
                 {relTime(v.created_at)}{v.created_by ? ` by ${v.created_by.name}` : ' by the platform'}
               </span>
               {v.version === type.current_version && <span className="text-success">current</span>}

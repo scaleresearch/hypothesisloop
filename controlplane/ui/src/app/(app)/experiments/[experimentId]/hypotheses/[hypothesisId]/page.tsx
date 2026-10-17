@@ -19,7 +19,7 @@ import { LinkTr, RowAnchor, Table, num, quiet } from '@/components/ui/table'
 import { Code, Eyebrow, Text } from '@/components/ui/text'
 import { Badge } from '@/components/ui/badge'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
-import { acceleratorLabel, formatAccH, relTime, shortId } from '@/lib/format'
+import { acceleratorLabel, formatAccH, formatMetric, relTime, shortId } from '@/lib/format'
 import { budgetUnit } from '@/lib/units'
 import { AddCommentForm, AddLinkForm } from '@/components/hypotheses/human-idea'
 import { Actor, Verdict } from '@/components/actor'
@@ -189,7 +189,7 @@ export default function HypothesisDetailPage({ params }: { params: { experimentI
                         <span className="font-medium"><Actor actor={f.actor} agentID={f.agent_id} /></span>
                         <TextLink href={jobPath(experimentId, f.experiment_id)}>{shortId(f.experiment_id)}</TextLink>
                         {job && <Badge status={job.status}>{job.status}</Badge>}
-                        {job?.metric && <span title={`The last ${job.metric.name} this job reported`}>{job.metric.value.toFixed(4)}</span>}
+                        {job?.metric && <span title={`The last ${job.metric.name} this job reported`}>{formatMetric(job.metric.value)}</span>}
                       </span>
                       <Code className="text-subtle">
                         {filedAfterVerdict(data, f.created_at) && <span className="text-warning">after the verdict · </span>}
@@ -263,7 +263,7 @@ export default function HypothesisDetailPage({ params }: { params: { experimentI
                       {cost != null ? `${cost} ${budgetUnit(j.accelerator_kind)}` : '—'}
                     </td>
                     <td className={num}>
-                      {j.metric ? j.metric.value.toFixed(4) : <span className="text-muted">—</span>}
+                      {j.metric ? formatMetric(j.metric.value) : <span className="text-muted">—</span>}
                     </td>
                     <td className={quiet}>{relTime(j.submitted_at ?? j.created_at)}</td>
                   </LinkTr>

@@ -4,7 +4,7 @@ import { TextLink } from '@/components/ui/link'
 import { Section } from '@/components/ui/section'
 import { LinkTr, Table, num } from '@/components/ui/table'
 import { Text } from '@/components/ui/text'
-import { shortId } from '@/lib/format'
+import { formatMetric, shortId } from '@/lib/format'
 import { filedAfterVerdict } from '@/lib/hypothesis-progress'
 import { hypothesisPath, jobPath } from '@/lib/routes'
 import type { HypothesisEvidence, MetricDefinition } from '@/types/api'
@@ -50,7 +50,7 @@ export function Findings({ experimentId, findings, direction }: {
               <td className={num}>
                 {h.best_job ? (
                   <TextLink onClick={e => e.stopPropagation()} href={jobPath(experimentId, h.best_job.id)} title={h.best_job.id}>
-                    {h.best_job.metric.name} {h.best_job.metric.value.toFixed(4)}
+                    {h.best_job.metric.name} {formatMetric(h.best_job.metric.value)}
                   </TextLink>
                 ) : <span className="text-xs text-muted">—</span>}
               </td>

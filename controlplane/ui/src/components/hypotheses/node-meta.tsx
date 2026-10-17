@@ -4,6 +4,7 @@ import { Actor } from '@/components/actor'
 import { Text } from '@/components/ui/text'
 import { objectiveFinding } from '@/lib/hypothesis-graph'
 import { filedAfterVerdict } from '@/lib/hypothesis-progress'
+import { formatMetric } from '@/lib/format'
 import type { GraphNode, ObjectiveEvidence } from '@/types/api'
 
 const COUNT = 'inline-flex items-center gap-0.5'
@@ -23,7 +24,7 @@ export function NodeMeta({ item }: { item: GraphNode }) {
       <span className={COUNT} title={`${item.comment_count} comments`}><MessageSquare size={11} /> {item.comment_count}</span>
       {item.best_job && (
         <span className={clsx(COUNT, 'text-foreground')} title={`Best ${item.best_job.metric.name} of its jobs`}>
-          {item.best_job.metric.value.toFixed(4)}
+          {formatMetric(item.best_job.metric.value)}
         </span>
       )}
     </Text>
@@ -44,7 +45,7 @@ export function ObjectiveMeta({ objective }: { objective: ObjectiveEvidence }) {
       )}
       {objective.best_job && (
         <span className={clsx(COUNT, 'text-foreground')} title={`Best ${objective.best_job.metric.name} of the baseline's jobs`}>
-          baseline {objective.best_job.metric.value.toFixed(4)}
+          baseline {formatMetric(objective.best_job.metric.value)}
         </span>
       )}
     </Text>

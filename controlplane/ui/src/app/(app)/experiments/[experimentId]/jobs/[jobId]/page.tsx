@@ -3,9 +3,6 @@
 import useSWR from 'swr'
 import { experimentPath, hypothesisPath, jobPath } from '@/lib/routes'
 import { TextLink } from '@/components/ui/link'
-import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-} from 'recharts'
 import { fetchExperiment, fetchExperimentLogs, fetchExperimentMetrics } from '@/lib/api/jobs'
 import { PlatformExperimentName } from '@/components/platform-experiment-name'
 import { Section } from '@/components/ui/section'
@@ -21,8 +18,8 @@ import { Actor } from '@/components/actor'
 import { Branch } from '@/components/code-ref'
 import { BASELINE_JOB, measuresBaseline } from '@/components/job-hypothesis'
 import { Callout, Loading, ErrorMessage } from '@/components/ui/status-message'
-import { semantic, seriesPalette, chart } from '@/lib/colors'
-import { formatAccH, formatDuration } from '@/lib/format'
+import { MetricLineChart } from '@/components/metric-line-chart'
+import { formatAccH, formatDate, formatDuration, formatMetric } from '@/lib/format'
 import { budgetUnit } from '@/lib/units'
 import { notAdmittedLabel } from '@/lib/eviction'
 import { JobReason } from '@/components/job-reason'
@@ -68,38 +65,12 @@ export default function JobDetailPage({ params }: { params: { experimentId: stri
   const j = job
   const lastAttempt = LAST_ATTEMPT[j.status]
 
-  // Jobs report one or more metrics (the ranking metric plus any secondary ones the workload
-  // emits, e.g. val_loss alongside val_accuracy) — group by metric_name so each gets its
-  // own chart instead of interleaving unrelated scales on a single line.
+  // Each metric gets its own chart, the ranking metric first, so unrelated scales do not share one.
   const primaryMetricName = j.metric?.name
-  // The API appends one contiguous block per underlying series (metric_name, or per retry
-  // attempt if a retry changed agent_id) rather than a single time-ordered stream, so a job
-  // with a retry has two blocks for the same metric_name back to back. Sort each metric's
-  // points by when they were recorded before charting, or the connected line jumps backward
-  // in time at the block boundary and renders as several crossing lines instead of one.
-  const sortedMetrics = [...((metrics ?? []) as MetricDataPoint[])].sort(
-    (a, b) => new Date(a.recorded_at as any).getTime() - new Date(b.recorded_at as any).getTime(),
-  )
-  const seriesByMetric = new Map<string, { frac: number; value: number }[]>()
-  // metric_basis defaults to "raw" server-side; a metric whose points carry more than one
-  // basis (or any non-"raw" basis) changed what its value means mid-run, and that must be
-  // visible next to the chart, not silently plotted as one uniform line.
-  const basesByMetric = new Map<string, Set<string>>()
-  for (const p of sortedMetrics) {
-    const name = p.metric_name
-    if (!seriesByMetric.has(name)) seriesByMetric.set(name, [])
-    seriesByMetric.get(name)!.push({
-      frac: parseFloat((p.fraction_complete * 100).toFixed(1)),
-      value: p.metric_value,
-    })
-    if (!basesByMetric.has(name)) basesByMetric.set(name, new Set())
-    basesByMetric.get(name)!.add(p.metric_basis || 'raw')
-  }
-  const metricNames = Array.from(seriesByMetric.keys()).sort((a, b) => {
-    if (a === primaryMetricName) return -1
-    if (b === primaryMetricName) return 1
-    return a.localeCompare(b)
-  })
+  const pointsByMetric = new Map<string, MetricDataPoint[]>()
+  for (const p of metrics ?? []) pointsByMetric.set(p.metric_name, [...(pointsByMetric.get(p.metric_name) ?? []), p])
+  const metricNames = Array.from(pointsByMetric.keys()).sort((a, b) =>
+    a === primaryMetricName ? -1 : b === primaryMetricName ? 1 : a.localeCompare(b))
 
   const costEstimate = j.estimated_cost_acch != null ? formatAccH(j.estimated_cost_acch) : null
   const baseline = measuresBaseline(j)
@@ -164,7 +135,7 @@ export default function JobDetailPage({ params }: { params: { experimentId: stri
             {(j.metrics ?? []).map(m => (
               <Inline key={m.name} align="baseline" className="font-mono">
                 <span className={m.name === primaryMetricName ? 'text-2xl font-medium text-success' : 'text-lg font-medium'}>
-                  {m.value.toFixed(4)}
+                  {formatMetric(m.value)}
                 </span>
                 <Text as="span" variant="note">
                   {m.name}{m.basis !== 'raw' && ` · basis ${m.basis}`}
@@ -191,11 +162,11 @@ export default function JobDetailPage({ params }: { params: { experimentId: stri
           <Detail label="Accelerator">{`${j.accelerator_count}× ${j.accelerator_type}`}</Detail>
           <Detail label="Est. duration">{j.estimated_duration_hours != null ? formatDuration(j.estimated_duration_hours * 3_600_000) : '—'}</Detail>
           <Detail label="Est. cost">{costEstimate != null ? `${costEstimate} ${budgetUnit(j.accelerator_kind)}` : '—'}</Detail>
-          <Detail label="Submitted">{new Date(j.created_at).toLocaleString()}</Detail>
-          {j.submitted_at && <Detail label="Sent to cluster">{new Date(j.submitted_at).toLocaleString()}</Detail>}
+          <Detail label="Submitted">{formatDate(j.created_at)}</Detail>
+          {j.submitted_at && <Detail label="Sent to cluster">{formatDate(j.submitted_at)}</Detail>}
           {j.finished_at && (
             <Detail label="Finished">
-              {new Date(j.finished_at).toLocaleString()}
+              {formatDate(j.finished_at)}
               {j.submitted_at && <span className="text-muted"> · {formatDuration(new Date(j.finished_at).getTime() - new Date(j.submitted_at).getTime())} after it was sent</span>}
             </Detail>
           )}
@@ -216,20 +187,15 @@ export default function JobDetailPage({ params }: { params: { experimentId: stri
             <ErrorMessage>Could not read this job&apos;s metrics: {metricsError.message}</ErrorMessage>
           ) : metricNames.length > 0 ? (
             <div className={metricNames.length > 1 ? 'grid grid-cols-2 gap-4' : 'grid gap-4'}>
-              {metricNames.map((name, i) => {
-                const bases = Array.from(basesByMetric.get(name) ?? [])
-                const nonRaw = bases.filter(b => b !== 'raw')
-                const points = seriesByMetric.get(name) ?? []
-                // A Line needs 2+ points to draw a segment; a job that reports a metric only
-                // once (many one-shot diagnostics do) has exactly 1 point, and dot={false}
-                // would render nothing at all for it — real data, empty-looking chart. Show
-                // dots whenever there aren't enough points for the line itself to be visible.
-                const showDots = points.length < 2
+              {metricNames.map(name => {
+                const points = pointsByMetric.get(name)!
+                // A basis other than raw, or a change of basis mid-run, changes what the values mean.
+                const bases = Array.from(new Set(points.map(p => p.metric_basis || 'raw')))
                 return (
                 <div key={name}>
                   <Text as="div" variant="meta" mono className="mb-1">
                     {name}{name === primaryMetricName ? ' (ranking metric)' : ''}
-                    {nonRaw.length > 0 && (
+                    {bases.some(b => b !== 'raw') && (
                       <Pill
                         tone="danger"
                         className="ml-2"
@@ -239,35 +205,9 @@ export default function JobDetailPage({ params }: { params: { experimentId: stri
                       </Pill>
                     )}
                   </Text>
-                  <ResponsiveContainer width="100%" height={metricNames.length > 1 ? 200 : 260}>
-                    <LineChart data={seriesByMetric.get(name)} margin={{ top: 8, right: 16, left: 0, bottom: 14 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke={chart.grid} />
-                      <XAxis
-                        dataKey="frac"
-                        type="number"
-                        domain={[0, 100]}
-                        tickFormatter={(v) => `${v}%`}
-                        tick={chart.tick}
-                        stroke={chart.grid}
-                        label={{ value: 'Training progress', position: 'insideBottom', offset: -2, ...chart.tick }}
-                      />
-                      <YAxis domain={['auto', 'auto']} tick={chart.tick} stroke={chart.grid} />
-                      <Tooltip
-                        formatter={(v: number) => v.toFixed(4)}
-                        labelFormatter={(l) => `${l}% complete`}
-                        contentStyle={chart.tooltip.contentStyle}
-                        labelStyle={chart.tooltip.labelStyle}
-                      />
-                      <Line
-                        dataKey="value"
-                        name={name}
-                        stroke={name === primaryMetricName ? semantic.primary : seriesPalette[i % seriesPalette.length]}
-                        dot={showDots ? { r: 3 } : false}
-                        strokeWidth={2}
-                        type="monotone"
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
+                  <div style={{ height: metricNames.length > 1 ? 200 : 260 }}>
+                    <MetricLineChart points={points} primary={primaryMetricName} />
+                  </div>
                 </div>
               )})}
             </div>

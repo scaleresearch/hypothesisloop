@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createOrgInvite, fetchMe, fetchOrgInvites, fetchOrgMembers, removeOrgMember, revokeOrgInvite, setOrgMemberRole } from '@/lib/api/accounts'
 import { ApiError } from '@/lib/api/request'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
+import { formatDate } from '@/lib/format'
 import { OrgMembers } from '@/components/org-members'
 import type { ListedMember, Me, OrgInvite, OrgMember } from '@/types/api'
 
@@ -240,7 +241,7 @@ describe('inviting', () => {
     expect(revokeOrgInvite).not.toHaveBeenCalled()
 
     await userEvent.click((await row('inv_1')).getByRole('button', { name: 'Revoke' }))
-    expect(within(screen.getByRole('dialog')).getByText(`Revoke the invite Ada Lovelace created ${new Date(at).toLocaleString()}?`)).toBeTruthy()
+    expect(within(screen.getByRole('dialog')).getByText(`Revoke the invite Ada Lovelace created ${formatDate(at)}?`)).toBeTruthy()
     await confirm('Revoke')
     expect(revokeOrgInvite).toHaveBeenCalledExactlyOnceWith('inv_1')
     expect(await screen.findByText('No pending invites.')).toBeTruthy()
