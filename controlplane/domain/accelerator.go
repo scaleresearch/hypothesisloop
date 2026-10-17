@@ -153,6 +153,9 @@ const (
 	CapacityBurst      CapacityTier = "burst"
 )
 
+// CapacityTiers is every capacity tier.
+var CapacityTiers = []CapacityTier{CapacityGuaranteed, CapacityBurst}
+
 // ResourceType identifies one quota-tracked resource dimension. Accelerator-hours is the only
 // one: RAM and ephemeral-storage are hard physical-fit-checked at admission
 // (domain.Experiment.Footprint()/domain.Fits), never hours-budgeted or debited.

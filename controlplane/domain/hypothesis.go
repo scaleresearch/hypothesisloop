@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"slices"
 	"strings"
 	"time"
 )
@@ -99,15 +100,11 @@ const (
 	HypothesisInconclusive HypothesisStatus = "inconclusive"
 )
 
+// HypothesisStatuses is every status of a hypothesis, the open one first.
+var HypothesisStatuses = []HypothesisStatus{HypothesisOpen, HypothesisConfirmed, HypothesisRefuted, HypothesisInconclusive}
+
 // ValidHypothesisStatus reports whether s is one of the four recognized statuses.
-func ValidHypothesisStatus(s HypothesisStatus) bool {
-	switch s {
-	case HypothesisOpen, HypothesisConfirmed, HypothesisRefuted, HypothesisInconclusive:
-		return true
-	default:
-		return false
-	}
-}
+func ValidHypothesisStatus(s HypothesisStatus) bool { return slices.Contains(HypothesisStatuses, s) }
 
 // LinkType is how one hypothesis relates to another. builds_on (refines, extends or combines;
 // acyclic, and every hypothesis has at least one) may also point at the objective root, named by
@@ -120,15 +117,11 @@ const (
 	LinkRelated     LinkType = "related"
 )
 
+// LinkTypes is every link type.
+var LinkTypes = []LinkType{LinkBuildsOn, LinkContradicts, LinkRelated}
+
 // ValidLinkType reports whether t is one of the three link types.
-func ValidLinkType(t LinkType) bool {
-	switch t {
-	case LinkBuildsOn, LinkContradicts, LinkRelated:
-		return true
-	default:
-		return false
-	}
-}
+func ValidLinkType(t LinkType) bool { return slices.Contains(LinkTypes, t) }
 
 // LinkSpec is a link a caller asks for: from the hypothesis being written to To, a hypothesis id
 // or the platform experiment id meaning the objective root.

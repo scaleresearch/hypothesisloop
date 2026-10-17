@@ -25,7 +25,10 @@ const (
 	OrgRoleMember OrgRole = "member"
 )
 
-func ValidOrgRole(r OrgRole) bool { return r == OrgRoleOwner || r == OrgRoleMember }
+// OrgRoles is every role in an org.
+var OrgRoles = []OrgRole{OrgRoleOwner, OrgRoleMember}
+
+func ValidOrgRole(r OrgRole) bool { return slices.Contains(OrgRoles, r) }
 
 // Org owns projects, agents, API keys and clusters. Role is the asking user's own role and is
 // set only on a per-user listing.

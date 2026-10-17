@@ -18,6 +18,9 @@ const (
 	WaitsForPlatform Waiter = "platform"
 )
 
+// Waiters is everyone a platform experiment can wait for.
+var Waiters = []Waiter{WaitsForOwner, WaitsForCoordinator, WaitsForPlatform}
+
 // statusWaiters is, for every reason a platform experiment that is not closed answers as its
 // status_reason, and for the reason an agent of its roster adds, who acts on it. It is the one
 // place that says so.

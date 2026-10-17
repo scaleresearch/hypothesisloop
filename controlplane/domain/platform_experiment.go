@@ -3,6 +3,7 @@ package domain
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
@@ -21,16 +22,14 @@ const (
 	PlatformExpClosed  PlatformExperimentStatus = "closed"
 )
 
+// PlatformExperimentStatuses is every status of a platform experiment, in the order it goes through them.
+var PlatformExperimentStatuses = []PlatformExperimentStatus{PlatformExpDraft, PlatformExpOpen, PlatformExpRunning, PlatformExpClosed}
+
 // ValidPlatformExperimentStatus reports whether s is one of the recognized statuses. As with
 // ValidExperimentStatus, filtering on an unrecognized value would otherwise reach Postgres as a
 // bad enum literal and surface as a 500.
 func ValidPlatformExperimentStatus(s PlatformExperimentStatus) bool {
-	switch s {
-	case PlatformExpDraft, PlatformExpOpen, PlatformExpRunning, PlatformExpClosed:
-		return true
-	default:
-		return false
-	}
+	return slices.Contains(PlatformExperimentStatuses, s)
 }
 
 // MetricRole classifies what a declared MetricDefinition is for (experimentspec.MetricRole).
@@ -228,7 +227,7 @@ type PlatformExperiment struct {
 	// ClosedAt is when it closed and CloseReason why; ClosedBy is whose credential closed it,
 	// absent when the platform did at ClosesAt. A list carries the first two and no ClosedBy.
 	ClosedAt    *time.Time  `json:"closed_at,omitempty"`
-	CloseReason CloseReason `json:"close_reason,omitempty" enum:"end_time_reached,closed_by_request,planning_limit_reached,proposal_expired,baseline_limit_reached,agents_not_started,planner_stopped,repository_not_created" doc:"Absent while it is not closed, and on one closed before reasons were kept. status_reason says the same with a sentence. planner_stopped is a draft whose planner's machine ended with every restart spent before it answered: the platform restarts a planner that dies, with its session, as it does any agent, and closes the draft in the write that gives the machine up. repository_not_created is a draft or an experiment whose repository the platform could not create after the create answered, and its status_reason message says what the git host answered."`
+	CloseReason CloseReason `json:"close_reason,omitempty" doc:"Absent while it is not closed, and on one closed before reasons were kept. status_reason says the same with a sentence. planner_stopped is a draft whose planner's machine ended with every restart spent before it answered: the platform restarts a planner that dies, with its session, as it does any agent, and closes the draft in the write that gives the machine up. repository_not_created is a draft or an experiment whose repository the platform could not create after the create answered, and its status_reason message says what the git host answered."`
 	ClosedBy    *Actor      `json:"closed_by,omitempty"`
 	// RemovedAt is when it was removed, nil while it was not. A removed one is read by the
 	// platform's own loops alone and answered to nobody.
@@ -343,7 +342,7 @@ type StatusReason struct {
 	Summary        string     `json:"summary" doc:"One short plain sentence for a person: what is wrong or happening, what it affects, and who acts. What a UI shows."`
 	OperatorDetail string     `json:"operator_detail,omitempty" doc:"What the platform's operator checks, only in answers to staff and only where an operator acts."`
 	Since          *time.Time `json:"since,omitempty" doc:"When the condition began, where it is known."`
-	WaitsFor       Waiter     `json:"waits_for,omitempty" enum:"owner,coordinator,platform" doc:"Who acts to change the state, on every status but closed, which waits for nobody. owner: a person of its organisation, and nothing its agents or the platform do changes it (a proposal to accept, a budget below what the measured baseline needs, no researcher, a spent budget). coordinator: its hosted coordinator, and its owner where a person coordinates it, so a person is never told to wait for an agent that does not exist. platform: nobody, since the platform, an agent already at work or the clock brings the next state."`
+	WaitsFor       Waiter     `json:"waits_for,omitempty" doc:"Who acts to change the state, on every status but closed, which waits for nobody. owner: a person of its organisation, and nothing its agents or the platform do changes it (a proposal to accept, a budget below what the measured baseline needs, no researcher, a spent budget). coordinator: its hosted coordinator, and its owner where a person coordinates it, so a person is never told to wait for an agent that does not exist. platform: nobody, since the platform, an agent already at work or the clock brings the next state."`
 }
 
 // CloseReason is why a platform experiment closed. Nothing else closes one: a spent budget
@@ -374,6 +373,10 @@ const (
 	// experiment is answered to nobody, so no answer carries it.
 	CloseRemoved CloseReason = "removed"
 )
+
+// AnsweredCloseReasons is every reason an answer carries: all but CloseRemoved.
+var AnsweredCloseReasons = []CloseReason{CloseEndTimeReached, CloseByRequest, ClosePlanningLimitReached, CloseProposalExpired,
+	CloseBaselineLimitReached, CloseAgentsNotStarted, ClosePlannerStopped, CloseRepositoryNotCreated}
 
 // BaselineRaise is one re-declaration of a running platform experiment's baseline to a job that
 // measured the control in a stronger configuration.
@@ -446,6 +449,9 @@ const (
 	// request can ask for it.
 	SignupRolePlanner SignupRole = "planner"
 )
+
+// SignupRoles is every role of a signup.
+var SignupRoles = []SignupRole{SignupRoleCompetitor, SignupRoleBaseline, SignupRoleReviewer, SignupRolePlanner}
 
 // BaselineShare is the quota of an agent of role baseline of a platform experiment whose budget
 // is budget: half of it. No researcher can spend before the run starts, so measuring the

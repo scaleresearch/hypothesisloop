@@ -46,8 +46,8 @@ func ValidMetricRole(role MetricRole) bool {
 // value on any machine and in every run.
 type MetricDefinition struct {
 	Key              string     `json:"key"`
-	Direction        string     `json:"direction"` // "maximize" | "minimize"
-	Role             MetricRole `json:"role,omitempty"`
+	Direction        string     `json:"direction" enum:"maximize,minimize"`
+	Role             MetricRole `json:"role,omitempty" enum:"ranking,constraint,attribute,reference"`
 	Bound            *float64   `json:"bound,omitempty"`
 	TargetVsBaseline *float64   `json:"target_vs_baseline,omitempty" doc:"Optional, on a ranking metric: the goal as a change against the declared baseline's value, in fractions of its magnitude. 0.5 is 50% above the baseline, -0.3 is 30% below it. Positive for a metric to maximize, negative for one to minimize."`
 	Deterministic    bool       `json:"deterministic,omitempty" doc:"Optional: the same code and data give the same value on any machine and in every run, as an exact count or check does and a timing never does. Its values compare across machines and need no repeat."`

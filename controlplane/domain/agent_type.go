@@ -104,7 +104,7 @@ type AgentType struct {
 	OrgID          string     `json:"org_id,omitempty" doc:"The org that owns it, empty for a built-in type."`
 	Name           string     `json:"name"`
 	Description    string     `json:"description" doc:"One line on what agents of the type do, at most 200 characters. Empty when none was written."`
-	Role           AgentRole  `json:"role" enum:"researcher,baseline,coordinator,planner"`
+	Role           AgentRole  `json:"role"`
 	Builtin        bool       `json:"builtin" doc:"Seeded by the platform from its repository and read-only for everyone. Duplicate one to change it."`
 	CurrentVersion int        `json:"current_version" doc:"The version every agent of the type runs: an edit or a restore makes the next one current, and each live agent is told with agent.instructions."`
 	ArchivedAt     *time.Time `json:"archived_at,omitempty" doc:"When it was archived. An archived type takes no new agent; agents that run it keep running."`
@@ -137,11 +137,14 @@ const (
 	AgentTypeRestored  AgentTypeAction = "restore"
 )
 
+// AgentTypeActions is everything a change can do to an agent type.
+var AgentTypeActions = []AgentTypeAction{AgentTypeCreated, AgentTypeEdited, AgentTypeRenamed, AgentTypeDescribed, AgentTypeArchived, AgentTypeRestored}
+
 // AgentTypeEvent is one change of an agent type, as it is kept: none is ever changed or deleted.
 type AgentTypeEvent struct {
 	ID      int64           `json:"id"`
 	TypeID  string          `json:"agent_type"`
-	Action  AgentTypeAction `json:"action" enum:"create,edit,rename,describe,archive,restore"`
+	Action  AgentTypeAction `json:"action"`
 	Version int             `json:"version" doc:"The version the type was at after the change: the one an edit or a restore made."`
 	Detail  string          `json:"detail" doc:"The new name of a rename, the new description of a describe, the version a restore copied, the release that seeded a built-in edit; empty otherwise."`
 	By      *Actor          `json:"by,omitempty" doc:"Whose credential made the change: staff for the platform's seeding of a built-in type."`

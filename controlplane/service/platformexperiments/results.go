@@ -50,7 +50,7 @@ type ReferenceValue struct {
 // standings against the control say.
 type MetricReference struct {
 	Metric       string           `json:"metric"`
-	Direction    string           `json:"direction"`
+	Direction    string           `json:"direction" enum:"maximize,minimize"`
 	Values       []ReferenceValue `json:"values"`
 	Best         *float64         `json:"best,omitempty" doc:"The best of values whose constraints are met, in the reference's direction, absent while there is none."`
 	LeaderMetric string           `json:"leader_metric,omitempty" doc:"The first ranking metric, whose leader is set against this reference when both run in the same direction."`
@@ -61,7 +61,7 @@ type MetricReference struct {
 // MetricStandings is the full ranking on a single declared metric, best-first.
 type MetricStandings struct {
 	Metric    string          `json:"metric"`
-	Direction string          `json:"direction"`
+	Direction string          `json:"direction" enum:"maximize,minimize"`
 	Standings []AgentStanding `json:"standings"`
 	// Baseline is the declared baseline job's last value on the metric: the bar the standings
 	// are set against. A raise of the baseline moves it.

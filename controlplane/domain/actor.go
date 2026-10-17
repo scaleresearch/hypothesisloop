@@ -14,13 +14,16 @@ const (
 	ActorUnverified ActorKind = "unverified"
 )
 
+// ActorKinds is every kind of actor.
+var ActorKinds = []ActorKind{ActorUser, ActorKey, ActorAgent, ActorCoordinator, ActorStaff, ActorUnverified}
+
 // Actor is whose credential made a request: a signed-in person, an API key, an agent, the
 // coordinator of a platform experiment (ID is the experiment's), or a staff token no person
 // signed in with (ID is empty). It is made from the authenticated caller and never from what a
 // request says. Kind and ID are stored with a record; Name is looked up when the record is read,
 // so it is the name the actor carries now.
 type Actor struct {
-	Kind ActorKind `json:"kind" enum:"user,key,agent,coordinator,staff,unverified"`
+	Kind ActorKind `json:"kind"`
 	ID   string    `json:"id" doc:"The user, API key or agent, or the platform experiment of a coordinator. Empty for a staff token and for unverified."`
 	Name string    `json:"name" doc:"The name the actor carries now, its id when it has none."`
 }

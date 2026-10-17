@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
@@ -26,6 +27,9 @@ const (
 	StatusCancelled ExperimentStatus = "CANCELLED"
 )
 
+// ExperimentStatuses is every status a job is answered with.
+var ExperimentStatuses = []ExperimentStatus{StatusSubmitted, StatusQueued, StatusRunning, StatusCompleted, StatusFailed, StatusEvicted, StatusRejected, StatusCancelled}
+
 // AnsweredStatus is the status the API answers for a job stored with this status and eviction
 // reason, on a job, in a count, as a filter and in a watch event. It is the one place a cancel
 // is told apart.
@@ -39,15 +43,7 @@ func AnsweredStatus(stored ExperimentStatus, evictionReason string) ExperimentSt
 // ValidExperimentStatus reports whether s is one of the statuses a job is answered with. Callers
 // filtering on a status validate here first, so an unrecognized value is the client mistake it is
 // and no driver error.
-func ValidExperimentStatus(s ExperimentStatus) bool {
-	switch s {
-	case StatusSubmitted, StatusQueued, StatusRunning,
-		StatusCompleted, StatusFailed, StatusEvicted, StatusRejected, StatusCancelled:
-		return true
-	default:
-		return false
-	}
-}
+func ValidExperimentStatus(s ExperimentStatus) bool { return slices.Contains(ExperimentStatuses, s) }
 
 const (
 	// NotAdmittedAwaitingAdmission is the reason of a job the admission loop has not evaluated

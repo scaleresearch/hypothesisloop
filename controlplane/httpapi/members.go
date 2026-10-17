@@ -11,7 +11,7 @@ import (
 )
 
 type roleBody struct {
-	Role domain.OrgRole `json:"role" doc:"owner or member"`
+	Role string `json:"role" doc:"owner or member. Any other is refused with reason invalid_role."`
 }
 
 func (a accountsAPI) registerMembers(doc *Doc) {
@@ -82,7 +82,7 @@ func (a accountsAPI) setMemberRole(ctx context.Context, in *struct {
 	UserID string `path:"user_id"`
 	Body   roleBody
 }) (*struct{ Body domain.OrgMember }, error) {
-	member, err := a.accounts.SetMemberRole(ctx, in.ID, in.UserID, in.Body.Role)
+	member, err := a.accounts.SetMemberRole(ctx, in.ID, in.UserID, domain.OrgRole(in.Body.Role))
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +103,7 @@ func (a accountsAPI) createInvite(ctx context.Context, in *struct {
 	ID   string `path:"id"`
 	Body roleBody
 }) (*struct{ Body accounts.CreatedInvite }, error) {
-	invite, err := a.accounts.CreateInvite(ctx, in.ID, in.Body.Role)
+	invite, err := a.accounts.CreateInvite(ctx, in.ID, domain.OrgRole(in.Body.Role))
 	if err != nil {
 		return nil, err
 	}

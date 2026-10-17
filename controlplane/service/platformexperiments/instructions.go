@@ -24,7 +24,7 @@ type Instructions struct {
 	AgentType    string                   `json:"agent_type" doc:"The agent type it runs, by id."`
 	Version      int                      `json:"agent_type_version" doc:"The current version of the agent type, which it runs."`
 	RulesVersion int                      `json:"rules_version" doc:"The version of the platform's rules the prompt holds."`
-	Role         domain.AgentRole         `json:"role" enum:"researcher,baseline,coordinator,planner"`
+	Role         domain.AgentRole         `json:"role"`
 	Prompt       string                   `json:"prompt" doc:"The system prompt, with the platform's rules and the agent's assignment filled in. It still holds each of placeholders, which only the machine knows: the harness fills them, in one pass, before the prompt is used."`
 	Placeholders []string                 `json:"placeholders" doc:"The placeholders the prompt may still hold, each as {{name}}: hl_commands, the listing of the hl on the machine, and workdir, the directory the agent works in."`
 	Settings     domain.AgentTypeSettings `json:"settings" doc:"What it runs with: the version's settings, with the model and hyperparameters the agent was given, where it was given its own. A model neither names is the platform's default."`

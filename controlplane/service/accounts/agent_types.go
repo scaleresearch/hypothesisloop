@@ -70,7 +70,7 @@ type CreateAgentTypeBody struct {
 	From        string                    `json:"from,omitempty" doc:"Copy this agent type, a built-in one or the org's own: its role, prompt and settings, at its current version. With it, only name may be given."`
 	Name        string                    `json:"name,omitempty" doc:"Required without from. With from, the copy's name, \"Copy of\" the source's when left out."`
 	Description string                    `json:"description,omitempty" maxLength:"200" doc:"One line on what agents of the type do, at most 200 characters. With from, the copy has the source's."`
-	Role        domain.AgentRole          `json:"role,omitempty" enum:"researcher,baseline,coordinator,planner" doc:"Required without from, and fixed once made."`
+	Role        domain.AgentRole          `json:"role,omitempty" doc:"Required without from, and fixed once made."`
 	Prompt      string                    `json:"prompt,omitempty" doc:"Required without from. It must hold {{rules}} and {{hl_commands}}, and no placeholder its role has no value for."`
 	Settings    *domain.AgentTypeSettings `json:"settings,omitempty" doc:"Required without from."`
 }
