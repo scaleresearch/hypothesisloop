@@ -1,10 +1,17 @@
 package layers
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os/exec"
+	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/config"
 )
 
 const module = "github.com/scaleresearch/hypothesisloop/"
@@ -164,6 +171,47 @@ func TestContractImportsNothingOfTheControlPlane(t *testing.T) {
 			if within(strings.TrimPrefix(imported, module), "controlplane") {
 				t.Errorf("%s imports %s", strings.TrimPrefix(fields[0], module), strings.TrimPrefix(imported, module))
 			}
+		}
+	}
+}
+
+// A program reads the keys of the environment only through controlplane/config, so each reads its
+// own and refuses to start without one. infra/ is no part of this repository.
+func TestOnlyConfigReadsTheKeysOfTheEnvironment(t *testing.T) {
+	keys := map[string]bool{}
+	for _, key := range config.Keys {
+		keys[key.Name] = true
+	}
+	for _, line := range goListLines(t, "-f", `{{.ImportPath}}|{{.Dir}}|{{join .GoFiles " "}}`, module+"...") {
+		pkg, rest, _ := strings.Cut(strings.TrimPrefix(line, module), "|")
+		dir, files, _ := strings.Cut(rest, "|")
+		if pkg == "controlplane/config" || within(pkg, "infra") {
+			continue
+		}
+		for _, file := range strings.Fields(files) {
+			parsed, err := parser.ParseFile(token.NewFileSet(), filepath.Join(dir, file), nil, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ast.Inspect(parsed, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok || len(call.Args) == 0 {
+					return true
+				}
+				selector, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok || (selector.Sel.Name != "Getenv" && selector.Sel.Name != "LookupEnv") {
+					return true
+				}
+				if receiver, ok := selector.X.(*ast.Ident); !ok || receiver.Name != "os" {
+					return true
+				}
+				if literal, ok := call.Args[0].(*ast.BasicLit); ok {
+					if name, err := strconv.Unquote(literal.Value); err == nil && keys[name] {
+						t.Errorf("%s/%s reads %s, which only controlplane/config reads", pkg, file, name)
+					}
+				}
+				return true
+			})
 		}
 	}
 }

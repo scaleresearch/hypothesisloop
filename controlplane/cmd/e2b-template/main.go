@@ -1,7 +1,7 @@
 // e2b-template builds the E2B template the e2b adapter starts a sandbox of an image from at one
 // size (e2b.TemplateBuilder), and with prune deletes the templates of every other image tag. It
-// reads E2B_API_KEY and, for an image in a private registry, E2B_REGISTRY_USERNAME and
-// E2B_REGISTRY_PASSWORD.
+// reads SANDBOX_E2B_API_KEY and, for an image in a private registry, SANDBOX_E2B_REGISTRY_USERNAME
+// and SANDBOX_E2B_REGISTRY_PASSWORD.
 package main
 
 import (
@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/cloud/provider/e2b"
+	"github.com/scaleresearch/hypothesisloop/controlplane/config"
 )
 
 const usage = `usage: e2b-template <image> <cores> <memory-mib>
@@ -32,13 +33,16 @@ func main() {
 	if coresErr != nil || memoryErr != nil || cores <= 0 || memory <= 0 {
 		refuse(usage)
 	}
+	keys, err := config.LoadE2BTemplate()
+	if err != nil {
+		refuse(err.Error())
+	}
 	builder := e2b.TemplateBuilder{
-		APIKey:           os.Getenv("E2B_API_KEY"),
-		RegistryUsername: os.Getenv("E2B_REGISTRY_USERNAME"),
-		RegistryPassword: os.Getenv("E2B_REGISTRY_PASSWORD"),
+		APIKey:           keys.APIKey,
+		RegistryUsername: keys.RegistryUsername,
+		RegistryPassword: keys.RegistryPassword,
 		Out:              os.Stdout,
 	}
-	var err error
 	if prune {
 		var keep []e2b.TemplateOf
 		for _, image := range images {
