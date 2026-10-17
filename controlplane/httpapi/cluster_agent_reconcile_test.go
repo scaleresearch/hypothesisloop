@@ -98,7 +98,10 @@ func newReconcileWorldWith(t *testing.T, cluster string, wrap func(*reconcileSto
 	caller := authtest.As{Kind: auth.KindRuntime, ClusterName: cluster, OrgIDs: []string{"org-a"}}
 	router := authtest.Router(caller)
 	doc := NewDoc(router, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{Clusters: map[string]string{cluster: "org-a"}}), zap.NewNop())
-	RegisterClusterAgent(doc, clusterexchange.NewService(wrap(w.store), time.Minute, metricsdb.New(metrics.URL), 90*time.Second, data, time.Minute, nil, 100, "test-signing-secret-of-enough-length", "https://api.test/git", func(context.Context, string, string) (*domain.RegistryLogin, error) { return nil, nil }, zap.NewNop()))
+	RegisterClusterAgent(doc, clusterexchange.NewService(clusterexchange.Config{
+		Store: wrap(w.store), ConnectedWithin: time.Minute, Metrics: metricsdb.New(metrics.URL), ObservationCadence: 90 * time.Second, DataStore: data,
+		MaxCheckpointGrace: time.Minute, MaxLogLineChars: 100, SigningSecret: "test-signing-secret-of-enough-length", ProxyURL: "https://api.test/git", Logger: zap.NewNop(),
+	}))
 	w.router = router
 	return w
 }

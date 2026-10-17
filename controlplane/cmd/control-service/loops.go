@@ -7,7 +7,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
-	"github.com/scaleresearch/hypothesisloop/controlplane/clients/registrycred"
 	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
@@ -23,7 +22,7 @@ import (
 // newSchedulerParts builds the scheduler's handler and starts its background loops, returning
 // the handlers httpapi.NewRouter serves: the scheduler's on the shared API doc, the cluster-agents' under
 // its own prefix.
-func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, imageRegistry registrycred.Provider, pool *db.Pool, store *db.Store, graph *graphdb.Store, expQuotaSvc *platformexperiments.Service, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.ControlService, metrics *metricsdb.Store, dataStore *objectstore.Client, logger *zap.Logger) (*scheduler.Service, *clusterexchange.Service) {
+func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, imageRegistry platformexperiments.ImageRegistry, pool *db.Pool, store *db.Store, graph *graphdb.Store, expQuotaSvc *platformexperiments.Service, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.ControlService, metrics *metricsdb.Store, dataStore *objectstore.Client, logger *zap.Logger) (*scheduler.Service, *clusterexchange.Service) {
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
 
 	clusterReports, err := scheduler.NewClusterReports(store, metrics,
@@ -76,13 +75,20 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, imageRe
 	// incorrect, just N redundant sweeps racing over the same row. One owner.
 	// Cluster-agent-facing surface (Go cluster-agent binaries, not the research agent) gets its
 	// own Huma registration with its own openapi/explore docs, mounted under its own prefix.
-	clusterExchange := clusterexchange.NewService(store,
-		time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds)*time.Second, metrics, pcfg.Scheduler.ObservationCadence(), dataStore,
-		time.Duration(pcfg.Scheduler.MaxCheckpointGraceSeconds)*time.Second,
-		pcfg.AcceleratorTypeNames(), pcfg.Scheduler.MaxLogTailLineChars, pcfg.SigningSecret, pcfg.GitProxyURL(),
-		func(ctx context.Context, orgID, image string) (*domain.RegistryLogin, error) {
-			return registrycred.PullFor(ctx, imageRegistry, orgID, image)
-		}, logger)
+	clusterExchange := clusterexchange.NewService(clusterexchange.Config{
+		Store:                  store,
+		ConnectedWithin:        time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds) * time.Second,
+		Metrics:                metrics,
+		ObservationCadence:     pcfg.Scheduler.ObservationCadence(),
+		DataStore:              dataStore,
+		MaxCheckpointGrace:     time.Duration(pcfg.Scheduler.MaxCheckpointGraceSeconds) * time.Second,
+		PricedAcceleratorTypes: pcfg.AcceleratorTypeNames(),
+		MaxLogLineChars:        pcfg.Scheduler.MaxLogTailLineChars,
+		SigningSecret:          pcfg.SigningSecret,
+		ProxyURL:               pcfg.GitProxyURL(),
+		Pulls:                  imageRegistry,
+		Logger:                 logger,
+	})
 
 	// The sandbox launcher and the cloud compute clusters rent machines, so one replica runs them.
 	rented, err := newRented(pcfg, store, clusterExchange, metrics, logger)
@@ -95,7 +101,7 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, imageRe
 		Job:   time.Duration(pcfg.Scheduler.MaxCheckpointGraceSeconds+pcfg.Scheduler.MaxTerminationGracePeriodSeconds) * time.Second,
 		Agent: domain.AgentWindDown,
 	}, logger)
-	go db.RunAsLeader(runCtx, pool, db.SchedulerLockKey, 5*time.Second, logger, append([]func(context.Context){
+	leaderLoops := []func(context.Context){
 		func(ctx context.Context) { settlementReconciler.Start(ctx, pass) },
 		// Auto-close platform experiments past their ends_at deadline.
 		func(ctx context.Context) { expQuotaSvc.StartExpirySweep(ctx, 60*time.Second, pass) },
@@ -110,7 +116,13 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, imageRe
 		func(ctx context.Context) { watcher.Start(ctx, pass) },
 		func(ctx context.Context) { pruneChanges(ctx, store, logger) },
 		func(ctx context.Context) { dataKeySweep.Start(ctx, 5*time.Second, pass) },
-	}, rented...)...)
+	}
+	if imageRegistry != nil {
+		// A push login asked for wakes this pass on the leader; the interval covers one asked
+		// for on another replica and an org whose provisioning failed.
+		leaderLoops = append(leaderLoops, func(ctx context.Context) { expQuotaSvc.StartRegistryPass(ctx, 15*time.Second, pass) })
+	}
+	go db.RunAsLeader(runCtx, pool, db.SchedulerLockKey, 5*time.Second, logger, append(leaderLoops, rented...)...)
 
 	return schedulerSvc, clusterExchange
 }

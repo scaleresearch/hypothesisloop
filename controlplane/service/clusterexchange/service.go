@@ -42,9 +42,11 @@ type Store interface {
 	RemoveCluster(ctx context.Context, name string) (requeued []string, err error)
 }
 
-// ImagePulls mints the login a job's runtime pulls its image with (registrycred.PullFor), nil
-// for an image pulled without one.
-type ImagePulls func(ctx context.Context, orgID, image string) (*domain.RegistryLogin, error)
+// ImagePulls mints the login a job's runtime pulls its image with (registrycred).
+type ImagePulls interface {
+	// PullLogin is the login a job of orgID pulls image with, nil for an image pulled without one.
+	PullLogin(ctx context.Context, orgID, image string) (*domain.RegistryLogin, error)
+}
 
 // Service is the control plane's side of the exchange with cluster-agents.
 type Service struct {
@@ -77,20 +79,38 @@ type Service struct {
 	// proxyURL is where the control plane's git proxy serves repositories, which each job fetches
 	// its commit from with its token.
 	proxyURL string
-	// pulls mints each desired job's image pull login.
+	// pulls mints each desired job's image pull login, nil on a deployment that keeps no registry.
 	pulls ImagePulls
 }
 
-// NewService constructs a Service. connectedWithin is how recent a cluster's heartbeat must be
-// to count as reachable/connected.
-func NewService(store Store, connectedWithin time.Duration, metrics *metricsdb.Store, observationCadence time.Duration, dataStore *objectstore.Client, maxCheckpointGrace time.Duration, pricedAcceleratorTypes []string, maxLogLineChars int, signingSecret, proxyURL string, pulls ImagePulls, logger *zap.Logger) *Service {
-	priced := make(map[string]bool, len(pricedAcceleratorTypes))
-	for _, name := range pricedAcceleratorTypes {
+// Config is what a Service is built from.
+type Config struct {
+	Store Store
+	// ConnectedWithin is how recent a cluster's heartbeat must be to count as reachable.
+	ConnectedWithin    time.Duration
+	Metrics            *metricsdb.Store
+	ObservationCadence time.Duration
+	DataStore          *objectstore.Client
+	MaxCheckpointGrace time.Duration
+	// PricedAcceleratorTypes are the catalog's accelerator types.
+	PricedAcceleratorTypes []string
+	MaxLogLineChars        int
+	SigningSecret          string
+	ProxyURL               string
+	// Pulls is nil on a deployment that keeps no registry, whose images are pulled without a login.
+	Pulls  ImagePulls
+	Logger *zap.Logger
+}
+
+// NewService constructs a Service from cfg.
+func NewService(cfg Config) *Service {
+	priced := make(map[string]bool, len(cfg.PricedAcceleratorTypes))
+	for _, name := range cfg.PricedAcceleratorTypes {
 		priced[name] = true
 	}
-	return &Service{store: store, connectedWithin: connectedWithin, metrics: metrics, observationCadence: observationCadence,
-		dataStore: dataStore, maxCheckpointGrace: maxCheckpointGrace,
-		pricedAcceleratorTypes: priced, maxLogLineChars: maxLogLineChars, signingSecret: signingSecret, proxyURL: proxyURL, pulls: pulls, logger: logger}
+	return &Service{store: cfg.Store, connectedWithin: cfg.ConnectedWithin, metrics: cfg.Metrics, observationCadence: cfg.ObservationCadence,
+		dataStore: cfg.DataStore, maxCheckpointGrace: cfg.MaxCheckpointGrace,
+		pricedAcceleratorTypes: priced, maxLogLineChars: cfg.MaxLogLineChars, signingSecret: cfg.SigningSecret, proxyURL: cfg.ProxyURL, pulls: cfg.Pulls, logger: cfg.Logger}
 }
 
 // keepPricedAccelerators drops every accelerator type outside the priced catalog from report.

@@ -15,7 +15,7 @@ import (
 // Agents report every accelerator type their hardware publishes; capacity keeps only the priced
 // ones, matched exactly.
 func TestReconcileIngestKeepsOnlyPricedAcceleratorTypes(t *testing.T) {
-	h := NewService(nil, 0, nil, 0, nil, 0, []string{"nvidia.com/gpu.product=Tesla-T4"}, 10, "", "https://api.test/git", nil, nil)
+	h := NewService(Config{PricedAcceleratorTypes: []string{"nvidia.com/gpu.product=Tesla-T4"}, MaxLogLineChars: 10, ProxyURL: "https://api.test/git"})
 	report := clusterapi.ReconcileRequest{
 		AcceleratorAvailableByType: map[string]int64{"nvidia.com/gpu.product=Tesla-T4": 1, "nvidia.com/gpu.product=tesla-t4": 1, "nvidia.com/cuda.driver.major=550": 1},
 		AcceleratorTotalByType:     map[string]int64{"nvidia.com/gpu.product=Tesla-T4": 2, "nvidia.com/gpu.product=tesla-t4": 2, "nvidia.com/cuda.driver.major=550": 2},

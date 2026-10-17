@@ -113,6 +113,19 @@ func (a *Access) PlatformExperiment(ctx context.Context, platformExperimentID st
 	return a.within(ctx, "platform experiment", platformExperimentID)
 }
 
+// Spends refuses a caller whose run is over and whose token works only for its wind-down, in
+// which it files what it leaves and spends or starts nothing.
+func (a *Access) Spends(ctx context.Context) error {
+	p, err := principal(ctx)
+	if err != nil {
+		return err
+	}
+	if p.RunOver {
+		return forbidden("run over: the run of this " + string(p.Kind) + " token in platform experiment " + p.PlatformExperimentID + " has ended, and in its wind-down it spends and starts nothing")
+	}
+	return nil
+}
+
 // Writes says the principal may write the platform experiment: its scope admits it, without the
 // shared platform experiments and the prior runs a read also reaches.
 func (a *Access) Writes(ctx context.Context, platformExperimentID string) (bool, error) {

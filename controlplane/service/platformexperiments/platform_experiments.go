@@ -10,7 +10,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
-	"github.com/scaleresearch/hypothesisloop/controlplane/clients/registrycred"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
@@ -249,9 +248,12 @@ type Service struct {
 	planning Planning
 	// proxyURL is where the control plane's proxy serves repositories (WithGitProxy).
 	proxyURL string
-	// registry and images record and push the images jobs run in (WithImages).
-	registry registrycred.Provider
-	images   ImageResolver
+	// registry, orgRegistries and images record and push the images jobs run in (WithImages).
+	registry      ImageRegistry
+	orgRegistries OrgRegistries
+	images        ImageResolver
+	// registryWake wakes the registry pass for an org whose push login was just asked for.
+	registryWake chan struct{}
 }
 
 // IdleNotices reads the researchers of running platform experiments due an idle notice, and
@@ -326,6 +328,7 @@ func NewService(store Store, cfg domain.QuotaConfig, logger *zap.Logger, metrics
 		logger:         logger,
 		observedGapCap: observedGapCap,
 		repositoryWake: make(chan struct{}, 1),
+		registryWake:   make(chan struct{}, 1),
 	}
 	s.baseline = s.readBaseline
 	s.reachable = func(context.Context, string) (map[string][]domain.Cluster, error) {
@@ -347,6 +350,7 @@ type CreatePlatformExperimentRequest struct {
 	RepositoryAccount string    `json:"repository_account,omitempty" doc:"The account on the git host, one the org connected, on which the platform creates the repository when repository is left out. Required then only when the org connected several."`
 	Continues         string    `json:"continues,omitempty" doc:"The id of a closed platform experiment of the same project to carry on, which keeps its code in the repository this one names. Its baseline starts from the commit of that run's baseline job, so both are measured by the same harness. It keeps the metric keys and directions of that run: 422 invalid_metrics for others. Left out, it starts fresh. 422 invalid_continues for one that is no closed platform experiment of the project, keeps its code in another repository or declared no baseline."`
 	StartsAt          time.Time `json:"starts_at" required:"false" doc:"When its baseline begins to be measured, for a later start than this create. Left out, or past, it is this create."`
+	ModelBudgetUSD    *float64  `json:"model_budget_usd,omitempty" doc:"What its agents and coordinator may spend on model calls the platform makes for them, in US dollars at the platform's prices, at most quota.max_model_budget_usd (422 model_budget_too_high). Left out, the platform's default (quota.default_model_budget_usd). Once spent, every further model call is refused with 429 model_budget_spent until it is raised."`
 
 	// coordinator is CoordinatorInAgentSandbox resolved by CreateExperiment: which model.
 	coordinator *domain.AgentSandboxCoordinator
@@ -379,6 +383,7 @@ type PlatformExperimentPatch struct {
 	StartsAt                  *time.Time                 `json:"starts_at,omitempty" doc:"When its baseline begins to be measured, now when past. Stated, baseline_due_at moves with it."`
 	DurationHours             *float64                   `json:"duration_hours,omitempty" doc:"How long the run lasts from the moment it starts."`
 	BaselineJobID             *string                    `json:"baseline_job_id,omitempty" doc:"While the platform experiment is open, declares the baseline: the completed job of an agent of role baseline that measured it, with its finding filed. While it runs, raises the baseline to a stronger completed job of the experiment that ran the baseline's code_ref unchanged in a better configuration, with baseline_reason."`
+	ModelBudgetUSD            *float64                   `json:"model_budget_usd,omitempty" doc:"What its agents and coordinator may spend on model calls, in US dollars, at most quota.max_model_budget_usd (422 model_budget_too_high). Raised past what they spent, refused model calls are made again."`
 	BaselineReason            *string                    `json:"baseline_reason,omitempty" doc:"Why the baseline of a running platform experiment is raised to baseline_job_id: the configuration of the control that job measured. Required with baseline_job_id while it runs, and taken then only."`
 
 	// by is whose credential sent the patch, recorded with a raise of the baseline.
@@ -405,6 +410,7 @@ func (p PlatformExperimentPatch) carried(except ...string) []string {
 		{"duration_hours", p.DurationHours != nil},
 		{"baseline_job_id", p.BaselineJobID != nil},
 		{"baseline_reason", p.BaselineReason != nil},
+		{"model_budget_usd", p.ModelBudgetUSD != nil},
 	} {
 		if field.set && !slices.Contains(except, field.name) {
 			out = append(out, field.name)

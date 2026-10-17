@@ -33,9 +33,14 @@ import (
 // a node's pull, end well within it.
 const MinLifetime = 25 * time.Minute
 
-// tokenLifetime is how long a minted token lives, the longest Google grants without an org
-// policy that extends it.
-const tokenLifetime = time.Hour
+// pullLifetime is how long a pull token lives, the longest Google grants without an org policy
+// that extends it. A pull token is reused by every job of its org, until it has less than
+// MinLifetime left.
+const pullLifetime = time.Hour
+
+// pushLifetime is how long a push token lives. Each push login is minted for its request alone
+// and only while its run spends, so it outlives the run by at most this.
+const pushLifetime = MinLifetime + 5*time.Minute
 
 const cloudPlatformScope = "https://www.googleapis.com/auth/cloud-platform"
 
@@ -50,12 +55,8 @@ const (
 	readerRole = "roles/artifactregistry.reader"
 )
 
-// propagation bounds how long a service account just created takes to be known to a repository's
-// IAM policy, which Google states is eventually consistent.
-const propagation = 2 * time.Minute
-
-// minter returns a fresh access token of serviceAccount.
-type minter func(ctx context.Context, serviceAccount string) (*oauth2.Token, error)
+// minter returns a fresh access token of serviceAccount that lives lifetime.
+type minter func(ctx context.Context, serviceAccount string, lifetime time.Duration) (*oauth2.Token, error)
 
 // Registry is the Artifact Registry repositories of orgs in one project and location.
 type Registry struct {
@@ -90,12 +91,12 @@ func New(ctx context.Context, project, location string) (*Registry, error) {
 
 // impersonated mints a token of a service account as base, a new one on each call.
 func impersonated(base oauth2.TokenSource) minter {
-	return func(ctx context.Context, serviceAccount string) (*oauth2.Token, error) {
+	return func(ctx context.Context, serviceAccount string, lifetime time.Duration) (*oauth2.Token, error) {
 		// A stated lifetime makes the source mint once, here, and never again.
 		source, err := impersonate.CredentialsTokenSource(ctx, impersonate.CredentialsConfig{
 			TargetPrincipal: serviceAccount,
 			Scopes:          []string{cloudPlatformScope},
-			Lifetime:        tokenLifetime,
+			Lifetime:        lifetime,
 		}, option.WithTokenSource(base))
 		if err != nil {
 			return nil, err
@@ -140,50 +141,68 @@ func (r *Registry) Managed(image string) bool {
 	return strings.HasPrefix(image, r.host()+"/"+r.project+"/"+repositoryPrefix)
 }
 
-// IssuePush is a login that writes to and reads from the repository of orgID, which it creates
-// with its two service accounts when they are not there.
-func (r *Registry) IssuePush(ctx context.Context, orgID string) (domain.RegistryLogin, error) {
-	if err := r.provision(ctx, orgID); err != nil {
-		return domain.RegistryLogin{}, err
-	}
-	return r.login(ctx, r.pusher(orgID))
-}
-
-// IssuePull is a login that reads the repository of orgID. An org that never pushed has none.
-func (r *Registry) IssuePull(ctx context.Context, orgID string) (domain.RegistryLogin, error) {
-	return r.login(ctx, r.puller(orgID))
-}
-
-func (r *Registry) login(ctx context.Context, account string) (domain.RegistryLogin, error) {
-	token, err := r.token(ctx, account)
+// PushLogin is a login that writes to and reads from the repository of orgID, which Provision
+// made, minted for this call alone.
+func (r *Registry) PushLogin(ctx context.Context, orgID string) (domain.RegistryLogin, error) {
+	token, err := r.fresh(ctx, r.pusher(orgID), pushLifetime)
 	if err != nil {
 		return domain.RegistryLogin{}, err
 	}
-	return domain.RegistryLogin{Registry: r.host(), Username: username, Password: token.AccessToken, ExpiresAt: token.Expiry}, nil
+	return r.loginOf(token), nil
 }
 
-// token hands out one service account's token until it has less than MinLifetime left, so a
-// login is minted about once in tokenLifetime-MinLifetime and never more often.
+// PullLogin is the login a job of orgID pulls image with: a read-only one of the org's repository
+// for an image in it, and nil for any other, which is pulled without one.
+func (r *Registry) PullLogin(ctx context.Context, orgID, image string) (*domain.RegistryLogin, error) {
+	if !r.Holds(orgID, image) {
+		return nil, nil
+	}
+	token, err := r.token(ctx, r.puller(orgID))
+	if err != nil {
+		return nil, err
+	}
+	login := r.loginOf(token)
+	return &login, nil
+}
+
+func (r *Registry) loginOf(token *oauth2.Token) domain.RegistryLogin {
+	return domain.RegistryLogin{Registry: r.host(), Username: username, Password: token.AccessToken, ExpiresAt: token.Expiry}
+}
+
+// token hands out one puller's token until it has less than MinLifetime left, so it is minted
+// about once in pullLifetime-MinLifetime and never more often.
 func (r *Registry) token(ctx context.Context, account string) (*oauth2.Token, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if current := r.tokens[account]; current != nil && current.Expiry.Sub(r.now()) >= MinLifetime {
 		return current, nil
 	}
-	token, err := r.mint(ctx, account)
+	token, err := r.fresh(ctx, account, pullLifetime)
+	if err != nil {
+		return nil, err
+	}
+	r.tokens[account] = token
+	return token, nil
+}
+
+// fresh mints a token of account that lives lifetime, and refuses one that has less than
+// MinLifetime left.
+func (r *Registry) fresh(ctx context.Context, account string, lifetime time.Duration) (*oauth2.Token, error) {
+	token, err := r.mint(ctx, account, lifetime)
 	if err != nil {
 		return nil, fmt.Errorf("registrycred gcp: a token of %s: %w", account, err)
 	}
 	if left := token.Expiry.Sub(r.now()); left < MinLifetime {
 		return nil, fmt.Errorf("registrycred gcp: a fresh token of %s lives %s, less than %s", account, left.Round(time.Second), MinLifetime)
 	}
-	r.tokens[account] = token
 	return token, nil
 }
 
-// provision makes the repository of orgID and its two service accounts exist, the pusher a writer
-// of it and the puller a reader. Each step leaves what is there as it is.
-func (r *Registry) provision(ctx context.Context, orgID string) error {
+// Provision makes the repository of orgID and its two service accounts exist, the pusher a writer
+// of it and the puller a reader. Each step leaves what is there as it is, so a provisioning that
+// failed part way is finished by the next. IAM learns of a service account just created
+// eventually, so the binding of one may fail until it has.
+func (r *Registry) Provision(ctx context.Context, orgID string) error {
 	if err := r.ensureRepository(ctx, orgID); err != nil {
 		return err
 	}
@@ -192,18 +211,7 @@ func (r *Registry) provision(ctx context.Context, orgID string) error {
 			return err
 		}
 	}
-	deadline := r.now().Add(propagation)
-	for {
-		err := r.ensureBindings(ctx, orgID)
-		if err == nil || !unknownMember(err) || r.now().After(deadline) {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(5 * time.Second):
-		}
-	}
+	return r.ensureBindings(ctx, orgID)
 }
 
 func (r *Registry) ensureRepository(ctx context.Context, orgID string) error {
@@ -242,7 +250,8 @@ func (r *Registry) ensureRepository(ctx context.Context, orgID string) error {
 }
 
 // ensureAccount reads the account before it creates one: every create counts against a small
-// per-minute project quota, the refused ones included, and push logins are asked for often.
+// per-minute project quota, the refused ones included, and a provisioning is tried again until
+// it succeeds.
 func (r *Registry) ensureAccount(ctx context.Context, email, orgID string) error {
 	_, err := r.iam.Projects.ServiceAccounts.Get("projects/" + r.project + "/serviceAccounts/" + email).Context(ctx).Do()
 	if err == nil {
@@ -301,10 +310,4 @@ func bind(policy *artifactregistry.Policy, role, member string) bool {
 func hasStatus(err error, code int) bool {
 	var apiErr *googleapi.Error
 	return errors.As(err, &apiErr) && apiErr.Code == code
-}
-
-// unknownMember is a policy refused for naming a service account IAM does not know yet.
-func unknownMember(err error) bool {
-	var apiErr *googleapi.Error
-	return errors.As(err, &apiErr) && apiErr.Code == http.StatusBadRequest && strings.Contains(apiErr.Message, "does not exist")
 }

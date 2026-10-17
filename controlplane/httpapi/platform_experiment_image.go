@@ -6,6 +6,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
@@ -34,9 +35,12 @@ func registerExperimentImage(doc *Doc, experiments *platformexperiments.Service,
 	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "get-registry-credentials", Method: "POST", Path: "/platform-experiments/{id}/registry-credentials",
 		Summary: "Get a login that pushes the platform experiment's images", Tags: []string{"platform-experiments"},
-		Description: "A short-lived login to registry that pushes to and pulls from the repository of the platform experiment's org, good until expires_at, at least 25 minutes. " +
+		Description: "A short-lived login to registry that pushes to and pulls from the repository of the platform experiment's org, good until expires_at, at least 25 and at most 30 minutes, minted for this request alone. " +
 			"Tag an image <repository>:<short commit>-<label>, push it there directly and record it with PUT /platform-experiments/{id}/image. " +
-			"Nothing of the image passes through the platform. 409 no_registry on a deployment that keeps none. `hl image credentials` prints it as environment variables.",
+			"Nothing of the image passes through the platform. 409 no_registry on a deployment that keeps none. " +
+			"The first asked for in an org has its repository created, off the request: until it is, 503 registry_preparing, and the same request a minute later gets the login. " +
+			"503 registry_unavailable when the registry's provider failed to issue it: ask again in a minute. " +
+			"`hl image credentials` prints it as environment variables.",
 	}, a.credentials)
 }
 
@@ -45,7 +49,7 @@ type setImageRequest struct {
 	Architecture string `json:"architecture,omitempty" doc:"The architecture its jobs run on, one the image runs on. Needed only for an image that runs on several."`
 }
 
-// writer admits the caller to change platform experiment id while its run goes on.
+// writer admits the caller to change platform experiment id, which spends, while its run goes on.
 func (a experimentImageAPI) writer(ctx context.Context, id string) error {
 	if err := a.access.PlatformExperiment(ctx, id); err != nil {
 		return err
@@ -57,16 +61,13 @@ func (a experimentImageAPI) writer(ctx context.Context, id string) error {
 	if !writes {
 		return auth.Forbidden("read-only: this token reads platform experiment " + id + " and changes nothing of it")
 	}
-	if p, ok := auth.FromContext(ctx); ok && p.RunOver {
-		return auth.Forbidden("run over: the run of this " + string(p.Kind) + " token in platform experiment " + id + " has ended")
-	}
-	return nil
+	return a.access.Spends(ctx)
 }
 
 func (a experimentImageAPI) set(ctx context.Context, in *struct {
 	ID   string `path:"id"`
 	Body setImageRequest
-}) (*struct{ Body *domain.ExperimentImage }, error) {
+}) (*struct{ Body *platformapi.ExperimentImage }, error) {
 	if err := a.writer(ctx, in.ID); err != nil {
 		return nil, err
 	}
@@ -74,12 +75,14 @@ func (a experimentImageAPI) set(ctx context.Context, in *struct {
 	if err != nil {
 		return nil, refused(a.logger, "set platform experiment image", err)
 	}
-	return &struct{ Body *domain.ExperimentImage }{Body: image}, nil
+	return &struct{ Body *platformapi.ExperimentImage }{Body: image}, nil
 }
 
 func (a experimentImageAPI) credentials(ctx context.Context, in *struct {
 	ID string `path:"id"`
-}) (*struct{ Body *domain.RegistryCredential }, error) {
+}) (*struct {
+	Body *platformapi.RegistryCredential
+}, error) {
 	if err := a.writer(ctx, in.ID); err != nil {
 		return nil, err
 	}
@@ -87,5 +90,7 @@ func (a experimentImageAPI) credentials(ctx context.Context, in *struct {
 	if err != nil {
 		return nil, refused(a.logger, "get registry credentials", err)
 	}
-	return &struct{ Body *domain.RegistryCredential }{Body: credential}, nil
+	return &struct {
+		Body *platformapi.RegistryCredential
+	}{Body: credential}, nil
 }

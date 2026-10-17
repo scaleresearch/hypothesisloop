@@ -12,6 +12,9 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
 )
 
+// errNoPullLogin is a job whose image pull login could not be minted.
+var errNoPullLogin = errors.New("no pull login")
+
 // desiredJob is exp as a cluster's runtime is handed it: what a runtime builds a workload from,
 // and nothing it has no use for. A runtime may be another org's, so the hypothesis, the
 // objective, the theory and where the job sits in its org stay with the platform. This is the
@@ -23,9 +26,8 @@ import (
 // reading its platform experiment's, and nothing here calls the store. It is handed the token it
 // reports metrics and fetches its commit with, derived from its id, so every reconcile answers
 // with the same one, its platform experiment's repository through the git proxy, the launch
-// script every node runs, and a login that pulls its image when the image needs one. A login that
-// cannot be minted fails the whole answer, so a runtime acts on nothing rather than on a job it
-// cannot pull.
+// script every node runs, and a login that pulls its image when the image needs one, or
+// errNoPullLogin when that login cannot be minted.
 func (s *Service) desiredJob(ctx context.Context, exp *domain.Experiment) (*clusterapi.DesiredJob, error) {
 	token, err := auth.Mint(s.signingSecret, scope.Job(exp.ID))
 	if err != nil {
@@ -37,9 +39,12 @@ func (s *Service) desiredJob(ctx context.Context, exp *domain.Experiment) (*clus
 	if exp.Image == "" {
 		return nil, fmt.Errorf("job %s has no image", exp.ID)
 	}
-	pull, err := s.pulls(ctx, exp.OrgID, exp.Image)
-	if err != nil {
-		return nil, fmt.Errorf("the pull login of job %s: %w", exp.ID, err)
+	var pull *clusterapi.RegistryLogin
+	if s.pulls != nil {
+		var err error
+		if pull, err = s.pulls.PullLogin(ctx, exp.OrgID, exp.Image); err != nil {
+			return nil, fmt.Errorf("job %s: %w: %w", exp.ID, errNoPullLogin, err)
+		}
 	}
 	job := &clusterapi.DesiredJob{
 		ID:                     exp.ID,

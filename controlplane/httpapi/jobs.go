@@ -182,6 +182,9 @@ func registerJobs(doc *Doc, jobs *scheduler.Service, logger *zap.Logger) {
 func (a jobsAPI) submit(ctx context.Context, in *struct{ Body submitRequest }) (*struct{ Body *domain.Experiment }, error) {
 	req := in.Body
 	meta := req.Metadata
+	if err := a.access.Spends(ctx); err != nil {
+		return nil, err
+	}
 	var err error
 	if meta.PlatformExperimentID, meta.AgentID, err = a.access.Spender(ctx, meta.PlatformExperimentID, meta.AgentID); err != nil {
 		return nil, err

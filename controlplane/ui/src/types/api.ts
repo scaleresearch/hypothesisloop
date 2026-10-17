@@ -1660,7 +1660,7 @@ export interface paths {
         put?: never;
         /**
          * Get a login that pushes the platform experiment's images
-         * @description A short-lived login to registry that pushes to and pulls from the repository of the platform experiment's org, good until expires_at, at least 25 minutes. Tag an image <repository>:<short commit>-<label>, push it there directly and record it with PUT /platform-experiments/{id}/image. Nothing of the image passes through the platform. 409 no_registry on a deployment that keeps none. `hl image credentials` prints it as environment variables.
+         * @description A short-lived login to registry that pushes to and pulls from the repository of the platform experiment's org, good until expires_at, at least 25 and at most 30 minutes, minted for this request alone. Tag an image <repository>:<short commit>-<label>, push it there directly and record it with PUT /platform-experiments/{id}/image. Nothing of the image passes through the platform. 409 no_registry on a deployment that keeps none. The first asked for in an org has its repository created, off the request: until it is, 503 registry_preparing, and the same request a minute later gets the login. 503 registry_unavailable when the registry's provider failed to issue it: ask again in a minute. `hl image credentials` prints it as environment variables.
          */
         post: operations["get-registry-credentials"];
         delete?: never;
@@ -2651,6 +2651,11 @@ export interface components {
             /** Format: int64 */
             max_concurrent_accelerators?: number;
             metrics?: components["schemas"]["MetricDefinition"][];
+            /**
+             * Format: double
+             * @description What its agents and coordinator may spend on model calls the platform makes for them, in US dollars at the platform's prices, at most quota.max_model_budget_usd (422 model_budget_too_high). Left out, the platform's default (quota.default_model_budget_usd). Once spent, every further model call is refused with 429 model_budget_spent until it is raised.
+             */
+            model_budget_usd?: number;
             name?: string;
             /** @description The project it belongs to. Required, and fixed from then on. */
             project_id?: string;
@@ -3989,6 +3994,11 @@ export interface components {
             /** Format: int64 */
             max_concurrent_accelerators?: number;
             metrics?: components["schemas"]["MetricDefinition"][];
+            /**
+             * Format: double
+             * @description What its agents and coordinator may spend on model calls, in US dollars, at most quota.max_model_budget_usd (422 model_budget_too_high). Raised past what they spent, refused model calls are made again.
+             */
+            model_budget_usd?: number;
             /** @description Not empty. */
             name?: string;
             /** Format: int64 */

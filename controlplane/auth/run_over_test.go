@@ -7,6 +7,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 )
 
 // A token that still works after its run ended says so, for whatever must not outlive the
@@ -45,5 +46,18 @@ func TestATokenWhoseRunEndedSaysSo(t *testing.T) {
 		if err != nil || p.RunOver != tc.want {
 			t.Errorf("%s: got = %+v, %v, want RunOver = %v", name, p, err, tc.want)
 		}
+	}
+}
+
+// Spends lets a token whose run goes on spend, and refuses one in its wind-down.
+func TestOnlyATokenWhoseRunGoesOnSpends(t *testing.T) {
+	access := NewAccess(nil)
+	agent := Principal{Kind: KindAgent, PlatformExperimentID: "pe-a", AgentID: "agent-1"}
+	if err := access.Spends(WithPrincipal(context.Background(), agent)); err != nil {
+		t.Fatalf("an agent at work: %v", err)
+	}
+	agent.RunOver = true
+	if err := access.Spends(WithPrincipal(context.Background(), agent)); refusal.ReasonOf(err) != refusal.ReasonForbidden {
+		t.Fatalf("an agent in its wind-down: %v, want 403", err)
 	}
 }

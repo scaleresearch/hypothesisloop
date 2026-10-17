@@ -4,28 +4,22 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 )
 
 // RegistryLogin is a login to one registry host, good until its ExpiresAt.
 type RegistryLogin = clusterapi.RegistryLogin
 
-// ExperimentImage is the image a platform experiment's jobs run in: Image, repository@digest, of
-// one Architecture, recorded at SetAt. A job submitted later runs in it on a node of that
-// architecture.
-type ExperimentImage struct {
-	Image        string    `json:"image" doc:"The image, repository@digest. Every job submitted from now on runs in it."`
-	Architecture string    `json:"architecture" doc:"The CPU architecture it runs on, as image manifests name it (amd64, arm64). A job runs only on nodes of it."`
-	SetAt        time.Time `json:"set_at"`
-}
+// ExperimentImage is the image a platform experiment's jobs run in.
+type ExperimentImage = platformapi.ExperimentImage
 
-// RegistryCredential is a login that pushes to and pulls from Repository, where the images of
-// one platform experiment go: tag an image Repository:<tag> and push it.
-type RegistryCredential struct {
-	RegistryLogin
-	Repository string `json:"repository" doc:"Where this platform experiment's images are pushed: tag an image <repository>:<tag>, as <repository>:<short commit>-<label>."`
+// ResolvedImage is what a registry answers for an image reference: Pinned, the reference by
+// digest, and the linux architectures the image runs on.
+type ResolvedImage struct {
+	Pinned        string
+	Architectures []string
 }
 
 // ReasonNoExperimentImage refuses a job of a platform experiment that recorded no image.

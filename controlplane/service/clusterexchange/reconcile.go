@@ -156,14 +156,36 @@ func (s *Service) Reconcile(ctx context.Context, clusterName, agentVersion strin
 	if err != nil {
 		return clusterapi.ReconcileAnswer{}, auth.Internal(s.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
 	}
-	answer.Jobs = make([]*clusterapi.DesiredJob, len(exps))
-	for i, exp := range exps {
-		if answer.Jobs[i], err = s.desiredJob(ctx, exp); err != nil {
-			return clusterapi.ReconcileAnswer{}, auth.Internal(s.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
-		}
+	answer.Jobs, err = s.desiredJobs(ctx, clusterName, exps)
+	if errors.Is(err, errNoPullLogin) {
+		s.logger.Warn("cluster reconcile: a running job has no pull login", zap.String("cluster", clusterName), zap.Error(err))
+		return clusterapi.ReconcileAnswer{}, refusal.Refuse(http.StatusServiceUnavailable, "registry_unavailable", "the provider of the platform's container registry failed to issue the pull login of a running job here: reconcile again shortly")
+	}
+	if err != nil {
+		return clusterapi.ReconcileAnswer{}, auth.Internal(s.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
 	}
 	answer.CheckpointWindow = domain.CheckpointWindowGrants(undesired)
 	return answer, nil
+}
+
+// desiredJobs is exps as the runtime of clusterName is handed them. A job not running yet whose
+// pull login could not be minted is left out and asked for again by the next answer: at worst the
+// runtime takes down a workload that ran nothing. A running one left out would be killed, so its
+// failure fails the answer and the runtime keeps what it holds.
+func (s *Service) desiredJobs(ctx context.Context, clusterName string, exps []*domain.Experiment) ([]*clusterapi.DesiredJob, error) {
+	jobs := make([]*clusterapi.DesiredJob, 0, len(exps))
+	for _, exp := range exps {
+		job, err := s.desiredJob(ctx, exp)
+		if errors.Is(err, errNoPullLogin) && exp.Status != domain.StatusRunning {
+			s.logger.Warn("cluster reconcile: a job is left out until its pull login is minted", zap.String("cluster", clusterName), zap.String("experiment_id", exp.ID), zap.Error(err))
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, job)
+	}
+	return jobs, nil
 }
 
 // MaxReconcileBytes bounds one capacity report. Its size grows with nodes times the labels each

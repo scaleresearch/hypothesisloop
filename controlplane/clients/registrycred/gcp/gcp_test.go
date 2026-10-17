@@ -29,11 +29,14 @@ type fakeGoogle struct {
 	writes       []string
 	// creates counts every request to create a service account, the refused ones included.
 	creates int
+	// requests counts every request.
+	requests int
 }
 
 func (f *fakeGoogle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.requests++
 	path := strings.TrimPrefix(r.URL.Path, "/v1/")
 	reply := func(code int, v any) {
 		w.Header().Set("Content-Type", "application/json")
@@ -102,16 +105,17 @@ func (f *fakeGoogle) written() []string {
 	return slices.Clone(f.writes)
 }
 
-// minted mints a token of each account it is asked for, numbered, living lifetime from clock.
+// minted mints a token of each account it is asked for, numbered, living what it is asked for but
+// at most lifetime from clock.
 type minted struct {
 	clock    *time.Time
 	lifetime time.Duration
 	accounts []string
 }
 
-func (m *minted) mint(_ context.Context, account string) (*oauth2.Token, error) {
+func (m *minted) mint(_ context.Context, account string, lifetime time.Duration) (*oauth2.Token, error) {
 	m.accounts = append(m.accounts, account)
-	return &oauth2.Token{AccessToken: fmt.Sprintf("%s-%d", account, len(m.accounts)), Expiry: m.clock.Add(m.lifetime)}, nil
+	return &oauth2.Token{AccessToken: fmt.Sprintf("%s-%d", account, len(m.accounts)), Expiry: m.clock.Add(min(lifetime, m.lifetime))}, nil
 }
 
 func testRegistry(t *testing.T, google *fakeGoogle, m *minted) *Registry {
@@ -135,22 +139,25 @@ func newGoogle() *fakeGoogle {
 	return &fakeGoogle{repositories: map[string]bool{}, accounts: map[string]bool{}, policies: map[string]*artifactregistry.Policy{}}
 }
 
-// The first push login of an org creates its repository, its pusher and puller, and binds them as
-// writer and reader of it, beside whatever the policy already grants. Later ones find it all
-// there and change nothing.
-func TestTheFirstPushOfAnOrgProvisionsItsRepositoryAndAccounts(t *testing.T) {
+// Provisioning an org creates its repository, its pusher and puller, and binds them as writer and
+// reader of it, beside whatever the policy already grants. Doing it again finds it all there and
+// changes nothing, and a push login only mints the pusher's token.
+func TestProvisioningAnOrgCreatesItsRepositoryAndAccountsOnce(t *testing.T) {
 	now := time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)
 	google, m := newGoogle(), &minted{clock: &now, lifetime: time.Hour}
 	r := testRegistry(t, google, m)
 	repository := r.repositoryName("org-a")
 	google.policies[repository] = &artifactregistry.Policy{Bindings: []*artifactregistry.Binding{{Role: "roles/artifactregistry.admin", Members: []string{"user:ops@example.com"}}}}
 
-	push, err := r.IssuePush(context.Background(), "org-a")
+	if err := r.Provision(context.Background(), "org-a"); err != nil {
+		t.Fatal(err)
+	}
+	push, err := r.PushLogin(context.Background(), "org-a")
 	if err != nil {
 		t.Fatal(err)
 	}
 	pusher, puller := r.pusher("org-a"), r.puller("org-a")
-	if push.Registry != "europe-west4-docker.pkg.dev" || push.Username != "oauth2accesstoken" || push.Password != pusher+"-1" || !push.ExpiresAt.Equal(now.Add(time.Hour)) {
+	if push.Registry != "europe-west4-docker.pkg.dev" || push.Username != "oauth2accesstoken" || push.Password != pusher+"-1" || !push.ExpiresAt.Equal(now.Add(pushLifetime)) {
 		t.Fatalf("push login = %+v, want the pusher's token for the registry host", push)
 	}
 	pusherID, _, _ := strings.Cut(pusher, "@")
@@ -168,20 +175,33 @@ func TestTheFirstPushOfAnOrgProvisionsItsRepositoryAndAccounts(t *testing.T) {
 	}
 
 	before, creates := len(google.written()), google.creates
-	if _, err := r.IssuePush(context.Background(), "org-a"); err != nil {
+	if err := r.Provision(context.Background(), "org-a"); err != nil {
 		t.Fatal(err)
 	}
 	if got := google.written()[before:]; len(got) != 0 {
-		t.Fatalf("a second push login wrote %v", got)
+		t.Fatalf("a second provisioning wrote %v", got)
 	}
 	// Google counts a refused create against its per-minute quota of creates, so accounts that
 	// are there are read and never asked to be created again.
 	if google.creates != creates {
-		t.Fatalf("a second push login asked to create %d service accounts", google.creates-creates)
+		t.Fatalf("a second provisioning asked to create %d service accounts", google.creates-creates)
+	}
+	// A push login is minted for its call alone, so none outlives the run it was handed to by
+	// more than pushLifetime, and asks Google for nothing but the token.
+	requests := google.requests
+	again, err := r.PushLogin(context.Background(), "org-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if google.requests != requests {
+		t.Fatalf("a push login made %d requests to Google", google.requests-requests)
+	}
+	if again.Password == push.Password || again.ExpiresAt.Sub(now) > pushLifetime {
+		t.Fatalf("second push login = %+v, want a token of its own living at most %s", again, pushLifetime)
 	}
 
 	// Another org gets a repository and accounts of its own.
-	if _, err := r.IssuePush(context.Background(), "org-b"); err != nil {
+	if err := r.Provision(context.Background(), "org-b"); err != nil {
 		t.Fatal(err)
 	}
 	if r.repositoryName("org-b") == repository || r.pusher("org-b") == pusher || !google.repositories[r.repositoryName("org-b")] {
@@ -189,18 +209,28 @@ func TestTheFirstPushOfAnOrgProvisionsItsRepositoryAndAccounts(t *testing.T) {
 	}
 }
 
-// A pull login provisions nothing: an org that never pushed has nothing to pull.
-func TestAPullLoginIsThePullersTokenAndProvisionsNothing(t *testing.T) {
+// A job pulls an image of its org's repository with the puller's token, minted without a request
+// to Google, and every other image, a public one or one of another org, with none.
+func TestAPullLoginIsThePullersTokenForAnImageOfTheOrgsRepositoryOnly(t *testing.T) {
 	now := time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)
 	google, m := newGoogle(), &minted{clock: &now, lifetime: time.Hour}
 	r := testRegistry(t, google, m)
+	ctx := context.Background()
 
-	pull, err := r.IssuePull(context.Background(), "org-a")
-	if err != nil || pull.Password != r.puller("org-a")+"-1" {
+	for _, image := range []string{"docker.io/library/python@sha256:1", r.Repository("org-b", "pe-2") + "@sha256:2", "ghcr.io/acme/model@sha256:3"} {
+		if login, err := r.PullLogin(ctx, "org-a", image); login != nil || err != nil {
+			t.Errorf("%s: login %+v, %v, want none", image, login, err)
+		}
+	}
+	if len(m.accounts) != 0 {
+		t.Fatalf("minted for %v", m.accounts)
+	}
+	pull, err := r.PullLogin(ctx, "org-a", r.Repository("org-a", "pe-1")+"@sha256:4")
+	if err != nil || pull == nil || pull.Password != r.puller("org-a")+"-1" {
 		t.Fatalf("pull login = %+v, %v, want the puller's token", pull, err)
 	}
-	if len(google.written()) != 0 {
-		t.Fatalf("a pull login wrote %v", google.written())
+	if google.requests != 0 {
+		t.Fatalf("a pull login made %d requests to Google", google.requests)
 	}
 }
 
@@ -211,9 +241,10 @@ func TestATokenIsReusedUntilItHasLessThanMinLifetimeLeft(t *testing.T) {
 	google, m := newGoogle(), &minted{clock: &now, lifetime: time.Hour}
 	r := testRegistry(t, google, m)
 	ctx := context.Background()
+	image := func(orgID string) string { return r.Repository(orgID, "pe-1") + ":v1" }
 	pull := func() string {
 		t.Helper()
-		login, err := r.IssuePull(ctx, "org-a")
+		login, err := r.PullLogin(ctx, "org-a", image("org-a"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -228,7 +259,7 @@ func TestATokenIsReusedUntilItHasLessThanMinLifetimeLeft(t *testing.T) {
 	if again := pull(); again != first {
 		t.Fatalf("with exactly MinLifetime left: %s, want %s again", again, first)
 	}
-	if other, err := r.IssuePull(ctx, "org-b"); err != nil || other.Password == first {
+	if other, err := r.PullLogin(ctx, "org-b", image("org-b")); err != nil || other.Password == first {
 		t.Fatalf("org-b's pull login = %+v, %v, want a token of its own puller", other, err)
 	}
 	now = now.Add(time.Second)
@@ -242,7 +273,7 @@ func TestATokenIsReusedUntilItHasLessThanMinLifetimeLeft(t *testing.T) {
 	// A fresh token that lives less than MinLifetime is refused, never handed out.
 	m.lifetime = MinLifetime - time.Minute
 	now = now.Add(time.Hour)
-	if login, err := r.IssuePull(ctx, "org-a"); err == nil {
+	if login, err := r.PullLogin(ctx, "org-a", image("org-a")); err == nil {
 		t.Fatalf("handed out %+v, which lives %s", login, m.lifetime)
 	}
 }

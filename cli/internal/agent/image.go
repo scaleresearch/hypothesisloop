@@ -9,13 +9,8 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 	"github.com/scaleresearch/hypothesisloop/cli/internal/command"
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 )
-
-type experimentImage struct {
-	Image        string    `json:"image"`
-	Architecture string    `json:"architecture"`
-	SetAt        time.Time `json:"set_at"`
-}
 
 func ImageShow(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := command.NewFlags("image show", `usage: hl image show [--platform-experiment PE]
@@ -31,7 +26,7 @@ job's own.`, stderr)
 		return command.ParseExit(command.Misuse(fs, "--platform-experiment is required, and nothing else"))
 	}
 	var out struct {
-		Image *experimentImage `json:"image"`
+		Image *platformapi.ExperimentImage `json:"image"`
 	}
 	if err := c.Do("GET", "/platform-experiments/"+url.PathEscape(*pe), nil, &out); err != nil {
 		return command.Fail(stderr, err)
@@ -61,7 +56,7 @@ start and its command runs there. Prints what was recorded.`, stderr)
 	if *pe = c.Experiment(*pe); *pe == "" || ref == "" {
 		return command.ParseExit(command.Misuse(fs, "REF and --platform-experiment are required"))
 	}
-	var out experimentImage
+	var out platformapi.ExperimentImage
 	if err := c.Do("PUT", "/platform-experiments/"+url.PathEscape(*pe)+"/image", map[string]string{"image": ref, "architecture": *architecture}, &out); err != nil {
 		return command.Fail(stderr, err)
 	}
@@ -74,7 +69,8 @@ func ImageCredentials(c *apiclient.Client, args []string, stdout, stderr io.Writ
 
 A login that pushes the platform experiment's images, as export lines: eval "$(hl image credentials)".
 HL_IMAGE_REPOSITORY is where they go; tag an image $HL_IMAGE_REPOSITORY:<short commit>-<label>.
-The login lasts about an hour (HL_REGISTRY_EXPIRES_AT); ask again for a new one.
+The login lasts about half an hour (HL_REGISTRY_EXPIRES_AT); ask again for a new one. The first in an
+org is answered registry_preparing while its repository is created: ask again a minute later.
   printf %s "$HL_REGISTRY_PASSWORD" | sudo podman login -u "$HL_REGISTRY_USERNAME" --password-stdin "$HL_REGISTRY"`, stderr)
 	pe := command.ExperimentFlag(fs)
 	if err := fs.Parse(args); err != nil {
@@ -83,13 +79,7 @@ The login lasts about an hour (HL_REGISTRY_EXPIRES_AT); ask again for a new one.
 	if *pe = c.Experiment(*pe); *pe == "" || fs.NArg() > 0 {
 		return command.ParseExit(command.Misuse(fs, "--platform-experiment is required, and nothing else"))
 	}
-	var out struct {
-		Registry   string    `json:"registry"`
-		Username   string    `json:"username"`
-		Password   string    `json:"password"`
-		ExpiresAt  time.Time `json:"expires_at"`
-		Repository string    `json:"repository"`
-	}
+	var out platformapi.RegistryCredential
 	if err := c.Do("POST", "/platform-experiments/"+url.PathEscape(*pe)+"/registry-credentials", nil, &out); err != nil {
 		return command.Fail(stderr, err)
 	}

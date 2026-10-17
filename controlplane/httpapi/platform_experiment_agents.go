@@ -109,6 +109,9 @@ func (a experimentAgentsAPI) add(ctx context.Context, in *struct {
 	if err := a.access.PlatformExperiment(ctx, in.ID); err != nil {
 		return nil, err
 	}
+	if err := a.access.Spends(ctx); err != nil {
+		return nil, err
+	}
 	if in.Body.AgentID != "" {
 		if err := a.access.Agent(ctx, in.Body.AgentID); err != nil {
 			return nil, err

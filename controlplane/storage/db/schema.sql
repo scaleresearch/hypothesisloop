@@ -160,6 +160,21 @@ CREATE TABLE github_install_states (
 CREATE INDEX idx_github_install_states_expires ON github_install_states(expires_at);
 
 -- ---------------------------------------------------------------------------
+-- Container registry
+-- ---------------------------------------------------------------------------
+
+-- An org's repository in the platform's container registry, wanted since its first push login
+-- was asked for and provisioned by the registry pass. last_error is what its last failed
+-- provisioning answered.
+CREATE TABLE org_registries (
+    org_id         TEXT        PRIMARY KEY REFERENCES orgs(id),
+    requested_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    provisioned_at TIMESTAMPTZ,
+    last_error     TEXT        NOT NULL DEFAULT ''
+);
+CREATE INDEX idx_org_registries_unprovisioned ON org_registries(requested_at) WHERE provisioned_at IS NULL;
+
+-- ---------------------------------------------------------------------------
 -- Agent types and agents
 -- ---------------------------------------------------------------------------
 

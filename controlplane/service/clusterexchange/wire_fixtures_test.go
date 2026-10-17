@@ -1,7 +1,6 @@
 package clusterexchange
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -11,8 +10,6 @@ import (
 )
 
 const wireImage = "registry.test/org/repo@sha256:abababababababababababababababababababababababababababababababab"
-
-func noPull(context.Context, string, string) (*domain.RegistryLogin, error) { return nil, nil }
 
 // wireCase is one representative desired state of a cluster, as the store holds it.
 type wireCase struct {
@@ -26,7 +23,7 @@ func wireHandler(t *testing.T) *Service {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &Service{dataStore: store, signingSecret: "test-signing-secret-of-enough-length", proxyURL: "https://api.test/git", pulls: noPull}
+	return &Service{dataStore: store, signingSecret: "test-signing-secret-of-enough-length", proxyURL: "https://api.test/git"}
 }
 
 func wireCases() map[string]wireCase {

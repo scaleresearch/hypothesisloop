@@ -21,15 +21,11 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
+// Image is what a registry says of a reference.
+type Image = domain.ResolvedImage
+
 // maxManifestBytes bounds a manifest or an image config read.
 const maxManifestBytes = 4 << 20
-
-// Image is what a registry says of a reference: the image it names, repository@digest, and the
-// linux architectures it runs on.
-type Image struct {
-	Pinned        string
-	Architectures []string
-}
 
 // Resolver reads images from their registries, asking every time.
 type Resolver struct {
@@ -82,16 +78,16 @@ func publicOnly(_, address string, _ syscall.RawConn) error {
 
 // Resolve reads ref, a tag or a digest, with login for its registry host, or anonymously when
 // login is nil.
-func (r *Resolver) Resolve(ctx context.Context, ref string, login *domain.RegistryLogin) (Image, error) {
+func (r *Resolver) Resolve(ctx context.Context, ref string, login *domain.RegistryLogin) (domain.ResolvedImage, error) {
 	named, desc, fetcher, err := r.remote(ctx, ref, login)
 	if err != nil {
-		return Image{}, err
+		return domain.ResolvedImage{}, err
 	}
 	architectures, err := architectures(ctx, fetcher, desc)
 	if err != nil {
-		return Image{}, fmt.Errorf("imagedigest: %s: %w", named, err)
+		return domain.ResolvedImage{}, fmt.Errorf("imagedigest: %s: %w", named, err)
 	}
-	return Image{Pinned: named.Name() + "@" + desc.Digest.String(), Architectures: architectures}, nil
+	return domain.ResolvedImage{Pinned: named.Name() + "@" + desc.Digest.String(), Architectures: architectures}, nil
 }
 
 // Config reads the config of the linux image of architecture that ref names, with login as

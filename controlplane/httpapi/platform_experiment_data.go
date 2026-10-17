@@ -72,6 +72,9 @@ func (a experimentDataAPI) key(ctx context.Context, in *struct {
 	if err := a.access.ActAs(ctx, in.Body.AgentID); err != nil {
 		return nil, err
 	}
+	if err := a.access.Spends(ctx); err != nil {
+		return nil, err
+	}
 	if err := a.experiments.RequireActive(ctx, in.ID, in.Body.AgentID); err != nil {
 		return nil, err
 	}

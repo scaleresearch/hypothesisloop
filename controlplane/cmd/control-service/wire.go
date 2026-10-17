@@ -59,7 +59,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	imageRegistry := newImageRegistry(runCtx, pcfg, logger)
 
 	peSvc := platformexperiments.NewService(store, quotaCfg, logger, metrics, observedGapCap).WithDataStore(dataStore, pcfg.ObjectStore.MaxBytesPerAgent).WithRepositories(gitHost).
-		WithImages(imageRegistry, imagedigest.New(pcfg.PlainHTTPRegistries()...)).WithModelDefaults(modelDefaults(pcfg)).WithIdleNotice(store, time.Duration(pcfg.Agents.IdleNoticeMinutes)*time.Minute).WithPersonIdeas(graph)
+		WithImages(imageRegistry, store, imagedigest.New(pcfg.PlainHTTPRegistries()...)).WithModelDefaults(modelDefaults(pcfg)).WithIdleNotice(store, time.Duration(pcfg.Agents.IdleNoticeMinutes)*time.Minute).WithPersonIdeas(graph)
 	launch := platformexperiments.AgentLaunch{
 		AgentSandbox: pcfg.Sandbox != nil, DefaultModel: pcfg.Agents.DefaultModel, CoordinatorModel: pcfg.Agents.CoordinatorModel,
 		SigningSecret: pcfg.SigningSecret, MaxAgentSandboxes: pcfg.Agents.MaxAgentSandboxesPerPlatformExperiment,
@@ -123,7 +123,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 
 // newImageRegistry is the registry experiments push their images to and jobs pull them from,
 // nil on a deployment whose settings have no container_registry section.
-func newImageRegistry(ctx context.Context, pcfg *hypothesisloopcfg.ControlService, logger *zap.Logger) registrycred.Provider {
+func newImageRegistry(ctx context.Context, pcfg *hypothesisloopcfg.ControlService, logger *zap.Logger) platformexperiments.ImageRegistry {
 	r := pcfg.ContainerRegistry
 	if r == nil {
 		return nil
