@@ -63,7 +63,7 @@ func cloneAs(t *testing.T, experiment, role string) string {
 // colon in it, a brief of several lines, a gate, and the image and the type its jobs run on.
 const proposed = `{"id":"pe-1","budget_accelerator_hours":2,"max_agents":3,"duration_hours":4,"name":"ResNet-18: throughput\n","description":"GOAL: images per second.\n\nBASELINE\n  config: fp32\n  measured: not yet established\n",
 "metrics":[{"key":"images_per_s","direction":"maximize","role":"ranking"},{"key":"top1_agreement","direction":"maximize","role":"constraint","bound":0.99}],
-"proposal":{"accelerator_type":"nvidia.com/gpu.product=RTX-4090","image":"torch","cpu":"8","memory":"32Gi","metric_reason":"Throughput is what the goal asks for.\n","measurement":"Images per second over 200 batches.\n"}}`
+"proposal":{"accelerator_type":"nvidia.com/gpu.product=RTX-4090","cpu":"8","memory":"32Gi","metric_reason":"Throughput is what the goal asks for.\n","measurement":"Images per second over 200 batches.\n"}}`
 
 // hl repo check sent researchers to copy a missing file the baseline writes. It says how the
 // caller's role gets the file.

@@ -532,7 +532,7 @@ func TestHypothesisGetIsShortUnlessToldFull(t *testing.T) {
 			"links":           map[string]any{"out": []any{map[string]any{"type": "builds_on", "hypothesis_id": "hyp-0", "text": "a long parent text", "status": "confirmed", "actor": actor}}, "in": []any{}},
 			"implementations": []any{map[string]any{"agent_id": "a", "branch": "hl/pe-1/r1/bf16", "code_ref": "u@sha"}}, "base_ref": "u@base",
 			"jobs": []any{map[string]any{"id": "job-1", "agent_id": "a", "status": "COMPLETED", "theory": "a long theory", "created_at": "2026-10-06T00:00:00Z",
-				"metrics": []any{map[string]any{"name": "ips", "value": 1203.68, "basis": "raw"}}, "job": map[string]any{"image": "i", "env": map[string]any{"P": "bf16"}}}},
+				"metrics": []any{map[string]any{"name": "ips", "value": 1203.68, "basis": "raw"}}, "job": map[string]any{"env": map[string]any{"P": "bf16"}}}},
 			"job_count": 1,
 			"findings":  []any{map[string]any{"id": "f-1", "hypothesis_id": "hyp-1", "platform_experiment_id": "pe-1", "experiment_id": "job-1", "agent_id": "a", "actor": actor, "summary": "bf16 won", "created_at": "2026-10-06T00:01:00Z"}}, "finding_count": 1,
 			"comments": []any{map[string]any{"id": "c-1", "hypothesis_id": "hyp-1", "platform_experiment_id": "pe-1", "agent_id": "b", "actor": actor, "text": long, "created_at": "2026-10-06T00:02:00Z"},

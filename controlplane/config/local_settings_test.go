@@ -53,12 +53,12 @@ func TestTheLocalSettingsAsRenderedLoad(t *testing.T) {
 		t.Errorf("runtimes = %+v, want %+v: the dev registry serves plain HTTP", cfg.Runtimes, want)
 	}
 
-	// With a registry in .env the environments repository is the one beside it.
+	// With a registry in .env the settings name it.
 	registry := `lib_env_value() { case "$1" in UI_ORIGIN) echo ` + testUIOrigin + ` ;; CONTAINER_REGISTRY_PROVIDER) echo gcp ;; CONTAINER_REGISTRY_GCP_PROJECT) echo my-project ;;
 		CONTAINER_REGISTRY_GCP_LOCATION) echo europe-west1 ;; CONTAINER_REGISTRY_GCP_REPOSITORY) echo images ;; esac; } && lib_container_registry`
 	render(t, repo, dir, rendered, registry)
 	if cfg, err = LoadSettings(rendered); err != nil {
-		t.Fatalf("the rendered local settings with environments do not load: %v", err)
+		t.Fatalf("the rendered local settings with a registry do not load: %v", err)
 	}
 	want := GCPRegistryConfig{Project: "my-project", Location: "europe-west1"}
 	if got := cfg.ContainerRegistry; got == nil || got.Provider != RegistryProviderGCP || got.GCP == nil || *got.GCP != want {
@@ -75,13 +75,13 @@ func TestTheLocalSettingsAsRenderedLoad(t *testing.T) {
 const testUIOrigin = "http://ui.example.internal:5173"
 
 // render runs lib_render_settings as make does, with the key made in dir and what a developer's
-// .env adds left out except the environments variables set. The .env LOCAL_REACHABLE_ADDRESS is
+// .env adds left out except what overrides sets. The .env LOCAL_REACHABLE_ADDRESS is
 // read from is dir's, which holds none unless the test writes one.
-func render(t *testing.T, repo, dir, rendered, environments string) {
+func render(t *testing.T, repo, dir, rendered, overrides string) {
 	t.Helper()
 	// The tag is stated: computing it reads the git state of the tree, which is absent in an
 	// exported checkout and changes under a tree others are writing to.
-	script := `. localdev/lib/auth.sh && lib_env_value() { case "$1" in UI_ORIGIN) echo ` + testUIOrigin + ` ;; esac; } && HL_DEV_JWT_KEY="$1/key.pem" && HL_GIT_HOST_PROVIDER=plain && HL_IDENTITY_PROVIDER="" && LIB_NODE_REPO="$1" && ` + environments + ` && TAG=abc1234 lib_render_settings host.example.internal "$2"`
+	script := `. localdev/lib/auth.sh && lib_env_value() { case "$1" in UI_ORIGIN) echo ` + testUIOrigin + ` ;; esac; } && HL_DEV_JWT_KEY="$1/key.pem" && HL_GIT_HOST_PROVIDER=plain && HL_IDENTITY_PROVIDER="" && LIB_NODE_REPO="$1" && ` + overrides + ` && TAG=abc1234 lib_render_settings host.example.internal "$2"`
 	cmd := exec.Command("bash", "-c", script, "render", dir, rendered)
 	cmd.Dir = withoutEnv(t, repo, dir)
 	if out, err := cmd.CombinedOutput(); err != nil {

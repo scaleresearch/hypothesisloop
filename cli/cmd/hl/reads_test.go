@@ -37,7 +37,7 @@ func TestCapacityNamesTheOrgItIsToldAndAsksNothingElse(t *testing.T) {
 // A coordinator's script read d['env'] off hl job status after reading it off hl results and
 // died on a KeyError: a job's env is in one place in everything hl prints of a job.
 func TestEveryCommandThatPrintsAJobHasItsEnvUnderJob(t *testing.T) {
-	job := map[string]any{"id": "job-1", "status": "COMPLETED", "job": map[string]any{"image": "i", "env": map[string]any{"LR": "0.3"}}}
+	job := map[string]any{"id": "job-1", "status": "COMPLETED", "job": map[string]any{"env": map[string]any{"LR": "0.3"}}}
 	clitest.RecordingServer(t, func(_ int, r clitest.Recorded) any {
 		switch r.Path {
 		case "/experiments":

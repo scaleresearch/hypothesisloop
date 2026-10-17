@@ -211,9 +211,8 @@ type ServicesConfig struct {
 	MetricControllerPort int `yaml:"metric_controller_port"`
 }
 
-// GitProxyURL is the address agents, jobs and environment builds reach the control plane's git
-// proxy at: the API's /git. They push and fetch through it with their own token and never hold the
-// host's.
+// GitProxyURL is the address agents and jobs reach the control plane's git proxy at: the API's
+// /git. They push and fetch through it with their own token and never hold the host's.
 func (c *Settings) GitProxyURL() string {
 	return strings.TrimSuffix(c.Services.PublicAPIURL, "/") + "/git"
 }

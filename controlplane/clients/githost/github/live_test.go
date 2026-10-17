@@ -189,7 +189,7 @@ func TestLiveInstallationTokenIsLimitedToOneRepository(t *testing.T) {
 	}
 }
 
-// liveGit runs git with token as the password git is given, the way hl git-credential gives it.
+// liveGit runs git with token as its password, as the git proxy forwards git's requests with it.
 // The token travels in the environment of the child and appears in no argument and no output.
 func liveGit(t *testing.T, dir, token string, args ...string) (string, error) {
 	t.Helper()

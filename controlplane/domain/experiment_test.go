@@ -288,7 +288,7 @@ func TestAJobsCPUIsReadAsANumberOrAStringAndAnsweredAsTheString(t *testing.T) {
 		`{"cpu":4,"groups":[{"cpu":2}]}`:        "4 2",
 		`{"cpu":"500m","groups":[{"cpu":"1"}]}`: "500m 1",
 		`{"cpu":0.5,"groups":[{"cpu":"2"}]}`:    "0.5 2",
-		`{"image":"i","groups":[{}]}`:           " ",
+		`{"groups":[{}]}`:                       " ",
 	} {
 		var job JobSpec
 		if err := json.Unmarshal([]byte(body), &job); err != nil || job.CPU+" "+job.Groups[0].CPU != want {
@@ -296,7 +296,7 @@ func TestAJobsCPUIsReadAsANumberOrAStringAndAnsweredAsTheString(t *testing.T) {
 		}
 	}
 	var job JobSpec
-	if err := json.Unmarshal([]byte(`{"image":"i","cpu":true}`), &job); err == nil {
+	if err := json.Unmarshal([]byte(`{"cpu":true}`), &job); err == nil {
 		t.Error("cpu: true was accepted")
 	}
 	if err := json.Unmarshal([]byte(`{"cpu":4,"memory":"1Gi"}`), &job); err != nil || job.Memory != "1Gi" {

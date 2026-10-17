@@ -18,7 +18,7 @@ import (
 
 const testAPIURL = "http://metrics-service:8083"
 
-func TestBuildJobAddsConfiguredAcceleratorPodResources(t *testing.T) {
+func TestBuildJobAddsTheDesiredJobsPodResources(t *testing.T) {
 	c := &JobWorkloadClient{apiURL: testAPIURL}
 	exp := &clusterapi.DesiredJob{Image: testImage, Launch: "true",
 		Data: testDataAccess(), Token: "test-job-token", GitURL: "https://api.test/git/pe-1.git",

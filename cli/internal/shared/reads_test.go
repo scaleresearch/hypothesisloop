@@ -228,8 +228,8 @@ func TestJobListAndHypothesisGetPrintBriefJobsWithTheirMetricsAndTheEnvTheyVarie
 			"metric": map[string]any{"name": "acc", "value": 0.9, "basis": "raw"}, "phase_detail": map[string]any{}, "theory": "a > b",
 			"metrics": []any{map[string]any{"name": "acc", "value": 0.9, "basis": "raw"},
 				map[string]any{"name": "loss", "value": 0.2608416958176093, "basis": "per_token"}},
-			"estimated_cost_acch": 0.5, "created_at": "2026-10-04T00:00:00Z", "resolved_job": map[string]any{"image": "i"},
-			"job": map[string]any{"image": "i", "env": env},
+			"estimated_cost_acch": 0.5, "created_at": "2026-10-04T00:00:00Z", "resolved_job": map[string]any{"cpu": "1"},
+			"job": map[string]any{"env": env},
 			"ran_on": map[string]any{"node": "rtx4090-0", "machine": map[string]any{"instance_id": "54493630", "host_id": "16358",
 				"accelerator_model": "RTX 4090", "cpu_model": "AMD Ryzen", "price_per_hour_usd": 0.43}}}
 	}

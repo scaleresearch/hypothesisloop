@@ -87,14 +87,14 @@ func TestJobStatusPrintsOneCompactLinePerJob(t *testing.T) {
 		id := strings.TrimPrefix(r.Path, "/experiments/")
 		return map[string]any{"id": id, "status": "EVICTED",
 			"eviction_reason": "silent", "not_admitted_reason": "", "phase_detail": map[string]any{},
-			"hypothesis": "long text", "resolved_job": map[string]any{"image": "i"}, "job": map[string]any{"image": "i"}, "attempt_count": 0}
+			"hypothesis": "long text", "resolved_job": map[string]any{"cpu": "1"}, "job": map[string]any{"cpu": "1"}, "attempt_count": 0}
 	})
 	var stdout, stderr bytes.Buffer
 	if code := clitest.Run(JobStatus, []string{"job-1", "job-2"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit %d, stderr %s", code, stderr.String())
 	}
-	want := `{"attempt_count":0,"eviction_reason":"silent","id":"job-1","job":{"image":"i"},"status":"EVICTED"}` + "\n" +
-		`{"attempt_count":0,"eviction_reason":"silent","id":"job-2","job":{"image":"i"},"status":"EVICTED"}` + "\n"
+	want := `{"attempt_count":0,"eviction_reason":"silent","id":"job-1","job":{"cpu":"1"},"status":"EVICTED"}` + "\n" +
+		`{"attempt_count":0,"eviction_reason":"silent","id":"job-2","job":{"cpu":"1"},"status":"EVICTED"}` + "\n"
 	if len(*got) != 2 || stdout.String() != want {
 		t.Fatalf("stdout = %q, want %q", stdout.String(), want)
 	}
