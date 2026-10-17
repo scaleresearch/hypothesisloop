@@ -399,6 +399,19 @@ func TestARunningJobReportsTheSlotItOccupies(t *testing.T) {
 	}
 }
 
+// A job on cores reports the cores it was admitted to. Reported as no type, the control plane
+// never saw it running and evicted it at the stuck-pending timeout while it ran.
+func TestARunningJobOnCoresReportsCores(t *testing.T) {
+	e, p := newTestExecutor(t)
+	ctx := context.Background()
+	mustCreate(t, e, on(job(t, "exp-1", 0, 0), "cpu-0"))
+	p.Start("hl-job-t1-exp-1-a0-cpu-0")
+	acceleratorType, node, consistent, err := e.ResolveAdmittedAcceleratorType(ctx, "exp-1")
+	if acceleratorType != clusterapi.CPUType || node != "cpu-0" || !consistent || err != nil {
+		t.Fatalf("admitted = %q on %q, %v, %v", acceleratorType, node, consistent, err)
+	}
+}
+
 // Two jobs of one spec land on different rented machines, so a job says which one it has: the
 // instance always, and of the machine behind it what the provider tells.
 func TestAJobReportsTheMachineItsInstanceIsOn(t *testing.T) {

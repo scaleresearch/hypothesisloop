@@ -297,7 +297,7 @@ func (e *Executor) PollJobStatus(ctx context.Context, experimentID string) (agen
 }
 
 // ResolveAdmittedAcceleratorType reports the type and node of the slot experimentID's instance
-// occupies.
+// occupies: the type its units are priced under (Shape.units), cores for a shape with none.
 func (e *Executor) ResolveAdmittedAcceleratorType(ctx context.Context, experimentID string) (clusterapi.AcceleratorType, string, bool, error) {
 	v, err := e.current(ctx)
 	if err != nil {
@@ -308,7 +308,8 @@ func (e *Executor) ResolveAdmittedAcceleratorType(ctx context.Context, experimen
 		return "", "", true, nil
 	}
 	shape, _, _ := e.configured(i.slot())
-	return clusterapi.AcceleratorType(shape.AcceleratorType), i.slot(), true, nil
+	unit, _ := shape.units()
+	return clusterapi.AcceleratorType(unit), i.slot(), true, nil
 }
 
 // ReapTerminal destroys what no pass has a use for any more: every instance of one name beyond
