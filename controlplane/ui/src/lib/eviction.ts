@@ -21,7 +21,7 @@ const EVICTION_REASON_LABELS: Record<string, string> = {
   scale_up_timeout: 'Autoscaler did not deliver capacity in time',
   code_unreachable: 'Its code could not be fetched (platform fault, no cost)',
   no_offer: 'No machine was on offer to rent (platform fault, no cost)',
-  flavor_mismatch: 'Landed on a different accelerator type than reserved',
+  accelerator_type_mismatch: 'Landed on a different accelerator type than reserved',
 }
 
 // Human-readable labels for domain.NotAdmittedReason (domain/constants.go): why a QUEUED

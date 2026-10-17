@@ -274,7 +274,7 @@ func (w *JobWatcher) evictNotYetRunning(ctx context.Context, exp *domain.Experim
 
 // evictNotYetRunningWithFailover is evictNotYetRunning counted as a failover when triedClusterID
 // names the cluster that just failed to deliver capacity. Used by the scale-up-timeout and
-// flavor_mismatch paths (autoscaler.md). The store records the cluster in the job's tried list
+// accelerator_type_mismatch paths (autoscaler.md). The store records the cluster in the job's tried list
 // itself, for every infrastructure fault.
 func (w *JobWatcher) evictNotYetRunningWithFailover(ctx context.Context, exp *domain.Experiment, reason domain.EvictionReason, triedClusterID string) {
 	if triedClusterID != "" {

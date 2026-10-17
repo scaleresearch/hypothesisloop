@@ -58,7 +58,7 @@ var faultClasses = map[EvictionReason]FaultClass{
 	EvictionAcceleratorTypeUnobservable: FaultInfrastructure,
 	// The cluster placed the job on hardware other than what was reserved and billed. The
 	// submission asked for one thing and the environment delivered another.
-	EvictionFlavorMismatch: FaultInfrastructure,
+	EvictionAcceleratorTypeMismatch: FaultInfrastructure,
 	// Admitted against capacity the scheduler had confirmed, then never reached RUNNING. The
 	// job's own never-self-healing faults (bad image, bad config) are split off into
 	// EvictionUnschedulable above precisely so that what is left here is the environment failing

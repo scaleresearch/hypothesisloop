@@ -48,7 +48,7 @@ var (
 
 	// FailoversTotal counts every time a speculative attempt is abandoned and the cluster is
 	// appended to the job's tried_clusters list — labeled by why (autoscaler.md's
-	// scale_up_timeout / flavor_mismatch paths). A steady failover rate on one cluster is the
+	// scale_up_timeout / accelerator_type_mismatch paths). A steady failover rate on one cluster is the
 	// signal the design doc's "fan-out is not adopted, revisit if failover is common" call
 	// depends on.
 	FailoversTotal = prometheus.NewCounterVec(prometheus.CounterOpts{

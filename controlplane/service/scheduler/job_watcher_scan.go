@@ -186,7 +186,7 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 			if autoscalerEnabled[exp.ClusterName] {
 				triedClusterID = clusterIDs[exp.ClusterName]
 			}
-			w.evictNotYetRunningWithFailover(ctx, exp, domain.EvictionFlavorMismatch, triedClusterID)
+			w.evictNotYetRunningWithFailover(ctx, exp, domain.EvictionAcceleratorTypeMismatch, triedClusterID)
 			return nil
 		case runningTypeUnobservable:
 			return w.evictIfStuckPending(ctx, exp, waiting, clusterIDs, domain.EvictionAcceleratorTypeUnobservable)

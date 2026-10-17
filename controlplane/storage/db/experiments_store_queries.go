@@ -374,7 +374,7 @@ func (s *Store) RecentlyTriedClusters(ctx context.Context, ttl time.Duration) (m
 		FROM experiments, jsonb_array_elements(tried_clusters) AS t(entry)
 		WHERE updated_at > $1 AND tried_clusters <> '[]'::jsonb
 		  AND (t.entry->>'at')::timestamptz > $1
-		  AND COALESCE(t.entry->>'reason', '') IN ('', $2, $3)`, since, string(domain.EvictionScaleUpTimeout), string(domain.EvictionFlavorMismatch))
+		  AND COALESCE(t.entry->>'reason', '') IN ('', $2, $3)`, since, string(domain.EvictionScaleUpTimeout), string(domain.EvictionAcceleratorTypeMismatch))
 	if err != nil {
 		return nil, fmt.Errorf("experiments_store.RecentlyTriedClusters: %w", err)
 	}

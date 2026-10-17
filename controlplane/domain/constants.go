@@ -240,12 +240,12 @@ const (
 	// cluster does come back its agent reconciles the job away on its next pull; the accelerator
 	// is genuinely occupied until then, which is the unavoidable cost of an unreachable cluster.
 	EvictionClusterUnreachable EvictionReason = "cluster_unreachable"
-	// EvictionFlavorMismatch marks a job whose cluster reported it running on an accelerator type
+	// EvictionAcceleratorTypeMismatch marks a job whose cluster reported it running on an accelerator type
 	// other than the one reserved and billed for it. Unlike missing telemetry this cannot resolve
 	// itself by waiting — the placement already happened and is wrong — so it is terminal rather
 	// than retried. Only raised for an observation newer than the experiment's current
 	// submitted_at, so a stale sample from a previous admission can never trigger it.
-	EvictionFlavorMismatch EvictionReason = "flavor_mismatch"
+	EvictionAcceleratorTypeMismatch EvictionReason = "accelerator_type_mismatch"
 	// EvictionAcceleratorTypeUnobservable marks a job whose pod the runtime reports as Running but
 	// whose accelerator type never became readable, so the lifecycle could not be advanced to
 	// RUNNING. Deliberately not EvictionStuckPending: the pod did start and is burning real
