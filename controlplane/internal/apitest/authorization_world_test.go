@@ -19,6 +19,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
@@ -256,7 +257,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 	platformexperiments.RegisterPlanningHuma(doc, peHandler)
 	platformexperiments.RegisterShareHuma(doc, nil, peHandler.Answer, logger)
 	platformexperiments.RegisterDataUsageHuma(doc, platformexperiments.NewDataUsageHandler(nil, nil, nil, 0, zap.NewNop()))
-	platformexperiments.RegisterSessionsHuma(doc, nil, logger)
+	httpapi.RegisterSessions(doc, nil, logger)
 	platformexperiments.RegisterExperimentDraftsHuma(doc, nil, logger)
 	accounts.RegisterHuma(doc, accounts.NewHandler(nil, nil, nil, nil, nil, worldSecret, accounts.RuntimeAddresses{}, accounts.Limits{MaxOrgsPerUser: 3, MaxProjectsPerOrg: 10}, logger))
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(

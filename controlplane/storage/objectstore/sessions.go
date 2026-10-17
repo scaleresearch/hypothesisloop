@@ -2,7 +2,6 @@ package objectstore
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,9 +14,6 @@ import (
 // job's key reads whole: a session holds everything its agent said and saw, and the platform
 // hands it to that agent and to the org that owns the platform experiment, never to another agent.
 const sessionsPrefix = "sessions/"
-
-// ErrNoSession is returned for an agent or coordinator that has stored no session.
-var ErrNoSession = errors.New("objectstore: no session is stored")
 
 // sessionKey is where the session of an agent, or with no agentID of the coordinator, is kept.
 // Both ids become one path segment each, so neither may be anything but an identifier.
@@ -44,7 +40,7 @@ func (c *Client) PutSession(ctx context.Context, platformExperimentID, agentID s
 	return c.put(ctx, key, snapshot)
 }
 
-// GetSession returns the stored session, or ErrNoSession.
+// GetSession returns the stored session, or domain.ErrNoSession.
 func (c *Client) GetSession(ctx context.Context, platformExperimentID, agentID string, maxBytes int64) ([]byte, error) {
 	key, err := sessionKey(platformExperimentID, agentID)
 	if err != nil {
@@ -52,7 +48,7 @@ func (c *Client) GetSession(ctx context.Context, platformExperimentID, agentID s
 	}
 	body, found, err := c.get(ctx, key, maxBytes)
 	if err == nil && !found {
-		return nil, ErrNoSession
+		return nil, domain.ErrNoSession
 	}
 	return body, err
 }

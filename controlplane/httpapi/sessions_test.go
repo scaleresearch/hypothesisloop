@@ -1,4 +1,4 @@
-package platformexperiments
+package httpapi
 
 import (
 	"bytes"
@@ -14,8 +14,8 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
-	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
 )
 
 type memorySessions struct {
@@ -38,16 +38,16 @@ func (m *memorySessions) GetSession(_ context.Context, pe, agent string, _ int64
 	}
 	snapshot, found := m.stored[pe+"/"+agent]
 	if !found {
-		return nil, objectstore.ErrNoSession
+		return nil, domain.ErrNoSession
 	}
 	return snapshot, nil
 }
 
-func sessionCall(t *testing.T, store SessionStore, placement authtest.Placement, caller auth.Principal, method, path string, body []byte) (int, []byte) {
+func sessionCall(t *testing.T, store platformexperiments.SessionStore, placement authtest.Placement, caller auth.Principal, method, path string, body []byte) (int, []byte) {
 	t.Helper()
 	r := authtest.Router(authtest.As(caller))
 	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
-	RegisterSessionsHuma(doc, store, zap.NewNop())
+	RegisterSessions(doc, platformexperiments.NewSessions(store), zap.NewNop())
 	req := httptest.NewRequest(method, path, bytes.NewReader(body))
 	if body != nil {
 		req.Header.Set("Content-Type", "application/octet-stream")

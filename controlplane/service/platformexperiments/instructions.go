@@ -2,13 +2,12 @@ package platformexperiments
 
 import (
 	"context"
+	"errors"
 
-	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
@@ -32,53 +31,44 @@ type Instructions struct {
 	Digest       string                   `json:"digest" doc:"sha256 of prompt, settings and rules_version. The harness compares it with the one it runs, on agent.instructions and at the start of each connection, and applies a change at the next turn boundary."`
 }
 
-const instructionsDescription = "Only the token of the agent or coordinator they are for reads them, and the people and the API keys of the org that owns the platform experiment; every other agent and a coordinator asking for an agent's are refused with 403, and another org's platform experiment is not found. " +
-	"An edit or a restore of the agent type, and a new version of the platform's rules, tell every agent and coordinator whose run goes on with agent.instructions, and these answer the new version from then on."
+// ErrNoInstructions answers for an agent or a coordinator the platform experiment does not run.
+var ErrNoInstructions = errors.New("instructions not found")
 
-// RegisterInstructionsHuma registers where an agent and a coordinator read the instructions they
-// run with.
-func RegisterInstructionsHuma(doc *apidocs.Doc, store InstructionsStore, defaults domain.ModelDefaults, logger *zap.Logger) {
-	access := doc.Access
-	answer := func(platformExperimentID, agentID string, src *db.InstructionsSource, err error) (*struct{ Body Instructions }, error) {
-		if err != nil {
-			return nil, auth.Internal(logger, "read instructions failed", err, zap.String("platformExpID", platformExperimentID), zap.String("agentID", agentID))
-		}
-		if src == nil {
-			return nil, huma.Error404NotFound("instructions not found")
-		}
-		instructions, err := composeInstructions(platformExperimentID, agentID, src, defaults)
-		if err != nil {
-			return nil, auth.Internal(logger, "compose instructions failed", err, zap.String("platformExpID", platformExperimentID), zap.String("agentID", agentID))
-		}
-		return &struct{ Body Instructions }{Body: instructions}, nil
+// InstructionsService composes what an agent and a coordinator run with.
+type InstructionsService struct {
+	store    InstructionsStore
+	defaults domain.ModelDefaults
+	logger   *zap.Logger
+}
+
+func NewInstructionsService(store InstructionsStore, defaults domain.ModelDefaults, logger *zap.Logger) *InstructionsService {
+	return &InstructionsService{store: store, defaults: defaults, logger: logger}
+}
+
+// Agent is what agentID runs with in platformExperimentID, or ErrNoInstructions.
+func (s *InstructionsService) Agent(ctx context.Context, platformExperimentID, agentID string) (*Instructions, error) {
+	src, err := s.store.AgentInstructions(ctx, platformExperimentID, agentID)
+	return s.compose(platformExperimentID, agentID, src, err)
+}
+
+// Coordinator is what the coordinator of platformExperimentID runs with, or ErrNoInstructions.
+func (s *InstructionsService) Coordinator(ctx context.Context, platformExperimentID string) (*Instructions, error) {
+	src, err := s.store.CoordinatorInstructions(ctx, platformExperimentID)
+	return s.compose(platformExperimentID, "", src, err)
+}
+
+func (s *InstructionsService) compose(platformExperimentID, agentID string, src *db.InstructionsSource, err error) (*Instructions, error) {
+	if err != nil {
+		return nil, auth.Internal(s.logger, "read instructions failed", err, zap.String("platformExpID", platformExperimentID), zap.String("agentID", agentID))
 	}
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
-		OperationID: "get-agent-instructions", Method: "GET", Path: "/platform-experiments/{id}/agents/{agent_id}/instructions",
-		Summary: "Read the instructions an agent runs with", Tags: []string{"platform-experiments"},
-		Description: "The system prompt and settings of the current version of the agent's agent type. " + instructionsDescription,
-	}, func(ctx context.Context, in *struct {
-		ID      string `path:"id"`
-		AgentID string `path:"agent_id"`
-	}) (*struct{ Body Instructions }, error) {
-		if err := access.ReadInstructions(ctx, in.ID, in.AgentID); err != nil {
-			return nil, err
-		}
-		src, err := store.AgentInstructions(ctx, in.ID, in.AgentID)
-		return answer(in.ID, in.AgentID, src, err)
-	})
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
-		OperationID: "get-coordinator-instructions", Method: "GET", Path: "/platform-experiments/{id}/coordinator/instructions",
-		Summary: "Read the instructions the coordinator runs with", Tags: []string{"platform-experiments"},
-		Description: "The system prompt and settings of the current version of the agent type of the platform experiment's coordinator. " + instructionsDescription,
-	}, func(ctx context.Context, in *struct {
-		ID string `path:"id"`
-	}) (*struct{ Body Instructions }, error) {
-		if err := access.ReadInstructions(ctx, in.ID, ""); err != nil {
-			return nil, err
-		}
-		src, err := store.CoordinatorInstructions(ctx, in.ID)
-		return answer(in.ID, "", src, err)
-	})
+	if src == nil {
+		return nil, ErrNoInstructions
+	}
+	instructions, err := composeInstructions(platformExperimentID, agentID, src, s.defaults)
+	if err != nil {
+		return nil, auth.Internal(s.logger, "compose instructions failed", err, zap.String("platformExpID", platformExperimentID), zap.String("agentID", agentID))
+	}
+	return &instructions, nil
 }
 
 // composeInstructions fills the prompt of src with the platform's rules and the assignment of

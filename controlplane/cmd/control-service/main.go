@@ -269,11 +269,10 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		platformExperiments: peHandler,
 		hypotheses:          graph,
 		sharing:             db.NewPlatformExperimentsStore(pool),
-		instructions:        db.NewPlatformExperimentsStore(pool),
+		instructions:        platformexperiments.NewInstructionsService(db.NewPlatformExperimentsStore(pool), modelDefaults(pcfg), logger),
 		agentTypes:          accounts.NewAgentTypesHandler(db.NewAgentTypesStore(pool), logger),
-		models:              modelDefaults(pcfg),
 		dataUsage:           platformexperiments.NewDataUsageHandler(dataStore, store, peSvc, pcfg.DataStore.MaxBytesPerAgent, logger),
-		sessions:            dataStore,
+		sessions:            platformexperiments.NewSessions(dataStore),
 		drafts:              db.NewExperimentDraftsStore(pool),
 		accounts: accounts.NewHandler(db.NewAccountsStore(pool), store, connectedClusters, autoscaledClusters, clusterContacts, pcfg.Auth.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Services.PublicAPIURL, MetricsURL: pcfg.Runtimes.MetricsURL, Registry: pcfg.Runtimes.Registry, ImageTag: pcfg.Runtimes.ImageTag, RegistryPlainHTTP: pcfg.Runtimes.RegistryPlainHTTP},
 			accounts.Limits{MaxOrgsPerUser: pcfg.Accounts.MaxOrgsPerUser, MaxProjectsPerOrg: pcfg.Accounts.MaxProjectsPerOrg}, logger),
@@ -306,9 +305,8 @@ type routes struct {
 	hypotheses          platformexperiments.Hypotheses
 	sharing             platformexperiments.Sharing
 	dataUsage           *platformexperiments.DataUsageHandler
-	sessions            platformexperiments.SessionStore
-	instructions        platformexperiments.InstructionsStore
-	models              domain.ModelDefaults
+	sessions            *platformexperiments.Sessions
+	instructions        *platformexperiments.InstructionsService
 	drafts              platformexperiments.ExperimentDraftStore
 	accounts            *accounts.Handler
 	agentTypes          *accounts.AgentTypesHandler
@@ -372,8 +370,8 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 	platformexperiments.RegisterPlanningHuma(doc, h.platformExperiments)
 	platformexperiments.RegisterShareHuma(doc, h.sharing, h.platformExperiments.Answer, logger)
 	platformexperiments.RegisterDataUsageHuma(doc, h.dataUsage)
-	platformexperiments.RegisterSessionsHuma(doc, h.sessions, logger)
-	platformexperiments.RegisterInstructionsHuma(doc, h.instructions, h.models, logger)
+	httpapi.RegisterSessions(doc, h.sessions, logger)
+	httpapi.RegisterInstructions(doc, h.instructions)
 	platformexperiments.RegisterExperimentDraftsHuma(doc, h.drafts, logger)
 	accounts.RegisterHuma(doc, h.accounts)
 	accounts.RegisterAgentTypesHuma(doc, h.agentTypes)

@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // bucketServer keeps objects as an S3 endpoint does, and refuses a request that is not signed.
@@ -86,10 +88,10 @@ func TestASessionIsKeptOutsideEveryPrefixAnAgentOrAJobKeyReads(t *testing.T) {
 	if got, err := client.GetSession(ctx, "pe-1", "", 1<<20); err != nil || string(got) != "the coordinator's" {
 		t.Fatalf("the coordinator's: %q, %v", got, err)
 	}
-	if _, err := client.GetSession(ctx, "pe-1", "ag-2", 1<<20); !errors.Is(err, ErrNoSession) {
+	if _, err := client.GetSession(ctx, "pe-1", "ag-2", 1<<20); !errors.Is(err, domain.ErrNoSession) {
 		t.Fatalf("an agent that stored none: %v, want ErrNoSession", err)
 	}
-	if _, err := client.GetSession(ctx, "pe-1", "ag-1", 3); err == nil || errors.Is(err, ErrNoSession) {
+	if _, err := client.GetSession(ctx, "pe-1", "ag-1", 3); err == nil || errors.Is(err, domain.ErrNoSession) {
 		t.Fatalf("a session above the bound: %v, want an error", err)
 	}
 }
@@ -123,7 +125,7 @@ func TestASessionIsStoredOnlyUnderIdentifiers(t *testing.T) {
 		if err := client.PutSession(ctx, ids[0], ids[1], []byte("x")); err == nil {
 			t.Errorf("stored a session for %q / %q", ids[0], ids[1])
 		}
-		if _, err := client.GetSession(ctx, ids[0], ids[1], 10); err == nil || errors.Is(err, ErrNoSession) {
+		if _, err := client.GetSession(ctx, ids[0], ids[1], 10); err == nil || errors.Is(err, domain.ErrNoSession) {
 			t.Errorf("read a session for %q / %q: %v", ids[0], ids[1], err)
 		}
 	}
@@ -141,7 +143,7 @@ func TestAStoreThatRefusesASessionIsAnError(t *testing.T) {
 	if err := client.PutSession(context.Background(), "pe-1", "ag-1", []byte("x")); err == nil || !strings.Contains(err.Error(), "403") {
 		t.Fatalf("put with a key the store refuses: %v", err)
 	}
-	if _, err := client.GetSession(context.Background(), "pe-1", "ag-1", 10); err == nil || errors.Is(err, ErrNoSession) {
+	if _, err := client.GetSession(context.Background(), "pe-1", "ag-1", 10); err == nil || errors.Is(err, domain.ErrNoSession) {
 		t.Fatalf("get with a key the store refuses: %v", err)
 	}
 }
