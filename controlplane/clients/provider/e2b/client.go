@@ -95,6 +95,11 @@ func New(cfg Settings, key string, acceleratorTypes []string, log func(format st
 
 const vendor = "e2b"
 
+// architecture is the one the vendor's sandboxes have.
+const architecture = "amd64"
+
+func (p *Provider) Architectures() []string { return []string{architecture} }
+
 // hasStatus tells whether err is an answer with the given HTTP status, from the API or from a
 // sandbox's envd.
 func hasStatus(err error, status int) bool {

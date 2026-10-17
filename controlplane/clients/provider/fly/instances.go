@@ -46,7 +46,7 @@ func (p *Provider) List(ctx context.Context, namePrefix string) ([]provider.Inst
 		if !exists {
 			continue
 		}
-		listed = append(listed, provider.Instance{ID: found.ID, Name: name, State: state, StartedAt: found.CreatedAt})
+		listed = append(listed, provider.Instance{ID: found.ID, Name: name, State: state, StartedAt: found.CreatedAt, Architecture: architecture})
 	}
 	return listed, nil
 }
@@ -71,7 +71,7 @@ func (p *Provider) Get(ctx context.Context, id string) (provider.Instance, bool,
 	if !exists {
 		return provider.Instance{}, false, nil
 	}
-	return provider.Instance{ID: found.ID, Name: found.Config.Metadata[nameKey], State: state, StartedAt: found.CreatedAt}, true, nil
+	return provider.Instance{ID: found.ID, Name: found.Config.Metadata[nameKey], State: state, StartedAt: found.CreatedAt, Architecture: architecture}, true, nil
 }
 
 // stateOf maps a Machine's state. A Machine being destroyed is gone to a caller. One the vendor

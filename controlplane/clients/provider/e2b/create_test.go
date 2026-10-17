@@ -19,13 +19,14 @@ const agentTemplate = "hl-70f52c6a3a422ba0352a-2c-4096m"
 
 func agentSpec() provider.Spec {
 	return provider.Spec{
-		Name:        "hl-agent-pe1-a2",
-		Image:       "registry.example/agent:1",
-		Command:     []string{"uv", "run", "agent", "--note", `it's "quoted" $HOME`, ""},
-		Env:         map[string]string{"HL_TOKEN": "t = 'x' \"y\" $Z", "API_URL": "https://api.example"},
-		CPUMillis:   2000,
-		MemoryBytes: 4 << 30,
-		DiskBytes:   10 << 30,
+		Name:         "hl-agent-pe1-a2",
+		Image:        "registry.example/agent:1",
+		Architecture: "amd64",
+		Command:      []string{"uv", "run", "agent", "--note", `it's "quoted" $HOME`, ""},
+		Env:          map[string]string{"HL_TOKEN": "t = 'x' \"y\" $Z", "API_URL": "https://api.example"},
+		CPUMillis:    2000,
+		MemoryBytes:  4 << 30,
+		DiskBytes:    10 << 30,
 	}
 }
 

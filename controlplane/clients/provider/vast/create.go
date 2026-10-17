@@ -64,7 +64,7 @@ func (p *Provider) rentFirstAvailable(ctx context.Context, offers []offer, req c
 		id, err := p.rent(ctx, candidate, req)
 		p.held.settle(candidate.ID, id)
 		if err == nil {
-			p.log("rented instance %s for %s on machine %d at $%.4f/h", id, req.Label, candidate.MachineID, candidate.PricePerHour)
+			p.log("rented instance %s for %s on machine %d (%s) at $%.4f/h", id, req.Label, candidate.MachineID, candidate.Architecture, candidate.PricePerHour)
 			return id, nil
 		}
 		if !errors.Is(err, errOfferTaken) {

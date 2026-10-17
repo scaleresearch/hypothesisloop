@@ -66,7 +66,7 @@ func TestThePoolIsFilledForTheImageAgentsAreAskedForAtTheLaunchersSizeAndIsNever
 	pool := h.launcher.poolName(image1)
 	h.names(full("a"), pool, pool)
 	spec := h.rented.Spec(pool)
-	want := provider.Spec{Name: pool, Image: image1, CPUMillis: 2000, MemoryBytes: 4 << 30, DiskBytes: 20 << 30}
+	want := provider.Spec{Name: pool, Image: image1, Architecture: "amd64", CPUMillis: 2000, MemoryBytes: 4 << 30, DiskBytes: 20 << 30}
 	if !reflect.DeepEqual(spec, want) {
 		t.Fatalf("pool spec = %+v\nwant %+v", spec, want)
 	}

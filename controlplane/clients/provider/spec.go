@@ -8,15 +8,18 @@ import (
 var envNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // Validate is what every adapter asks of a spec before it spends anything: a name that meets
-// ValidateName, an image, a command, sizes, and environment names that are names. Vendors take
-// an environment as a map or as shell text, and a key that is no name is an option or a command
-// there.
+// ValidateName, an image and its architecture, a command, sizes, and environment names that are
+// names. Vendors take an environment as a map or as shell text, and a key that is no name is an
+// option or a command there.
 func (s Spec) Validate() error {
 	if err := ValidateName(s.Name); err != nil {
 		return err
 	}
 	if s.Image == "" {
 		return fmt.Errorf("spec %q has no image", s.Name)
+	}
+	if s.Architecture == "" {
+		return fmt.Errorf("spec %q names no architecture", s.Name)
 	}
 	if len(s.Command) == 0 || s.Command[0] == "" {
 		return fmt.Errorf("spec %q has no command", s.Name)

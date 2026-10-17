@@ -31,10 +31,10 @@ func TestFreeCapacityIsWhatTheVendorHasOnOfferWithinTheShapes(t *testing.T) {
 	if err != nil || available[h100] != 1 || total[h100] != 2 || byNode["h100-0"][h100] != 1 || byNode["h100-1"][h100] != 0 {
 		t.Fatalf("available %v of %v, by node %v, %v", available, total, byNode, err)
 	}
-	if labels["h100-0"][clusterapi.NodeSlotNoOfferLabel] != "" || labels["h100-1"][clusterapi.NodeSlotNoOfferLabel] != "shape h100: the shape's lower slots take the machines its market was last read to have" || labels["cpu-0"][clusterapi.NodeSlotNoOfferLabel] != "" {
+	if labels["h100-0"][clusterapi.NodeSlotNoOfferLabel] != "" || labels["h100-1"][clusterapi.NodeSlotNoOfferLabel] != "shape h100 on amd64: the shape's lower slots take the machines its market was last read to have" || labels["cpu-0"][clusterapi.NodeSlotNoOfferLabel] != "" {
 		t.Fatalf("labels %v, want only h100-1 without an offer", labels)
 	}
-	want := provider.Spec{AcceleratorType: h100, AcceleratorCount: 1, CPUMillis: 8000, MemoryBytes: 32 * gib, DiskBytes: 100 * gib}
+	want := provider.Spec{Architecture: "amd64", AcceleratorType: h100, AcceleratorCount: 1, CPUMillis: 8000, MemoryBytes: 32 * gib, DiskBytes: 100 * gib}
 	if !reflect.DeepEqual(asked[0], want) {
 		t.Fatalf("asked the market about %+v, want the shape as it is rented: %+v", asked[0], want)
 	}
@@ -92,7 +92,7 @@ func TestAShapeWithNothingToRentSaysWhyOnItsSlotsAndInTheLog(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, slot := range []string{"h100-0", "h100-1"} {
-			if got := labels[slot][clusterapi.NodeSlotNoOfferLabel]; got != "shape h100: no offer passes the filters" {
+			if got := labels[slot][clusterapi.NodeSlotNoOfferLabel]; got != "shape h100 on amd64: no offer passes the filters" {
 				t.Fatalf("slot %s says %q", slot, got)
 			}
 		}
@@ -100,7 +100,7 @@ func TestAShapeWithNothingToRentSaysWhyOnItsSlotsAndInTheLog(t *testing.T) {
 			t.Fatalf("the cpu slot, which has an offer, says %q", got)
 		}
 	}
-	lines := strings.Count(logged.String(), "shape h100 has nothing to rent: no offer passes the filters (4 offers of the size; left out by price 4)")
+	lines := strings.Count(logged.String(), "shape h100 on amd64 has nothing to rent: no offer passes the filters (4 offers of the size; left out by price 4)")
 	if lines != 1 || strings.Contains(logged.String(), "shape cpu ") {
 		t.Fatalf("log:\n%s\nwant the h100 shape's reason once", logged.String())
 	}
@@ -158,7 +158,7 @@ func TestAMarketThatDoesNotAnswerLeavesItsShapeNothingToRent(t *testing.T) {
 		return nil
 	}
 	available, _, _, labels, err := e.GetLiveAcceleratorCapacitySnapshot(context.Background())
-	if err != nil || available[h100] != 0 || labels["h100-0"][clusterapi.NodeSlotNoOfferLabel] != "shape h100: the provider's market could not be read: "+down.Error() {
+	if err != nil || available[h100] != 0 || labels["h100-0"][clusterapi.NodeSlotNoOfferLabel] != "shape h100 on amd64: the provider's market could not be read: "+down.Error() {
 		t.Fatalf("available %v, labels %v, %v, want the market's error on the shape's slots", available, labels, err)
 	}
 }
@@ -200,5 +200,67 @@ func TestAShapeCountsAsManyRentableSlotsAsItsMaxInstances(t *testing.T) {
 	}
 	if calls := p.Calls("Rentable"); calls != 1 {
 		t.Fatalf("%d market calls, want the one read standing", calls)
+	}
+}
+
+// A provider that rents two architectures deals each shape's open slots to them in turn while
+// each has a machine, and an architecture with none still names an offerless slot, so a job of it
+// is admitted to wait. A job is rented on its own architecture, which its slot then reports.
+func TestOpenSlotsAreDealtToEveryArchitectureTheProviderRents(t *testing.T) {
+	p := fake.New()
+	p.Rents = []string{"amd64", "arm64"}
+	e, err := New(testConfig(p))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	onOffer := map[string]int{"amd64": 1, "arm64": 1}
+	p.Market = func(spec provider.Spec) provider.Supply { return supplyOf(onOffer[spec.Architecture]) }
+
+	arch := func(labels map[string]map[string]string, slot string) string {
+		return labels[slot][clusterapi.NodeArchitectureLabel]
+	}
+	_, _, _, labels, err := e.GetLiveAcceleratorCapacitySnapshot(ctx)
+	if err != nil || arch(labels, "h100-0") != "amd64" || arch(labels, "h100-1") != "arm64" || arch(labels, "cpu-0") != "amd64" {
+		t.Fatalf("labels %v, %v, want h100-0 amd64, h100-1 arm64", labels, err)
+	}
+	if labels["h100-1"][clusterapi.NodeSlotNoOfferLabel] != "" {
+		t.Fatalf("h100-1 has an arm64 machine on offer and says %q", labels["h100-1"][clusterapi.NodeSlotNoOfferLabel])
+	}
+
+	exp := on(job(t, "exp-arm", 0, 1), "h100-1")
+	exp.ResolvedJob.NodeSelector[clusterapi.NodeArchitectureLabel] = "arm64"
+	mustCreate(t, e, exp)
+	if got := p.Spec(e.instanceName("exp-arm", 0, "h100", 1)).Architecture; got != "arm64" {
+		t.Fatalf("rented on %q, want arm64", got)
+	}
+	_, _, _, labels, err = e.GetLiveAcceleratorCapacitySnapshot(ctx)
+	if err != nil || arch(labels, "h100-1") != "arm64" {
+		t.Fatalf("the slot of the arm64 instance reports %v, %v", labels["h100-1"], err)
+	}
+}
+
+func TestAnArchitectureWithNothingToRentStillNamesAnOfferlessSlot(t *testing.T) {
+	p := fake.New()
+	p.Rents = []string{"amd64", "arm64"}
+	e, err := New(testConfig(p))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Market = func(spec provider.Spec) provider.Supply {
+		if spec.Architecture == "arm64" {
+			return supplyOf(0)
+		}
+		return supplyOf(2)
+	}
+	_, _, _, labels, err := e.GetLiveAcceleratorCapacitySnapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if labels["h100-0"][clusterapi.NodeArchitectureLabel] != "amd64" || labels["h100-0"][clusterapi.NodeSlotNoOfferLabel] != "" {
+		t.Fatalf("h100-0 %v, want a free amd64 slot", labels["h100-0"])
+	}
+	if labels["h100-1"][clusterapi.NodeArchitectureLabel] != "arm64" || labels["h100-1"][clusterapi.NodeSlotNoOfferLabel] != "shape h100 on arm64: no offer passes the filters" {
+		t.Fatalf("h100-1 %v, want an offerless arm64 slot saying why", labels["h100-1"])
 	}
 }

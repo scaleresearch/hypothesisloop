@@ -16,7 +16,7 @@ func TestGetReadsTheMachineItselfAsListWouldShowIt(t *testing.T) {
 	p := newTestProvider(t, api)
 
 	got, exists, err := p.Get(context.Background(), "9001")
-	want := provider.Instance{ID: "9001", Name: "hl-agent-pe1-a1", State: provider.StateRunning, StartedAt: time.Date(2026, 10, 5, 11, 0, 0, 0, time.UTC)}
+	want := provider.Instance{ID: "9001", Name: "hl-agent-pe1-a1", State: provider.StateRunning, StartedAt: time.Date(2026, 10, 5, 11, 0, 0, 0, time.UTC), Architecture: "amd64"}
 	if err != nil || !exists || !reflect.DeepEqual(got, want) {
 		t.Fatalf("Get = %+v, %v, %v, want %+v", got, exists, err, want)
 	}

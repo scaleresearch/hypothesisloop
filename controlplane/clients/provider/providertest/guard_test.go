@@ -18,7 +18,7 @@ func rentedOn(t *testing.T, names ...string) *fake.Provider {
 	t.Helper()
 	p := fake.New()
 	for _, name := range names {
-		if _, err := p.Create(context.Background(), provider.Spec{Name: name}); err != nil {
+		if _, err := p.Create(context.Background(), provider.Spec{Name: name, Architecture: "amd64"}); err != nil {
 			t.Fatal(err)
 		}
 	}

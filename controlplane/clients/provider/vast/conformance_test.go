@@ -26,10 +26,11 @@ import (
 func conformanceOptions() providertest.Options {
 	return providertest.Options{
 		Template: provider.Spec{
-			Image:       "alpine/curl:8.14.1",
-			CPUMillis:   1000,
-			MemoryBytes: 1 << 30,
-			DiskBytes:   8 << 30,
+			Image:        "alpine/curl:8.14.1",
+			Architecture: "amd64",
+			CPUMillis:    1000,
+			MemoryBytes:  1 << 30,
+			DiskBytes:    8 << 30,
 		},
 		OutboundURL:   "https://example.com/",
 		StartTimeout:  10 * time.Minute,

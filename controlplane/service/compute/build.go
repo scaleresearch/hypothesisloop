@@ -43,6 +43,11 @@ func (e *Executor) buildSpec(exp *clusterapi.DesiredJob) (provider.Spec, error) 
 		return provider.Spec{}, &agentexec.Unrunnable{Why: "the job asks for host_mounts, and a rented instance has no host of the platform's to mount from"}
 	}
 
+	arch := spec.NodeSelector[clusterapi.NodeArchitectureLabel]
+	if arch == "" {
+		return provider.Spec{}, fmt.Errorf("cloudcompute: experiment %s names no architecture in its node selector (%s)", exp.ID, clusterapi.NodeArchitectureLabel)
+	}
+
 	env, err := workloadenv.Merged(exp, spec, group, e.apiURL, func(url string) string { return url })
 	if err != nil {
 		return provider.Spec{}, fmt.Errorf("cloudcompute: %w", err)
@@ -62,6 +67,7 @@ func (e *Executor) buildSpec(exp *clusterapi.DesiredJob) (provider.Spec, error) 
 	return provider.Spec{
 		Image:            exp.Image,
 		ImageLogin:       login,
+		Architecture:     arch,
 		Command:          workloadenv.Command(exp, spec, group),
 		Env:              env,
 		AcceleratorType:  acceleratorType,

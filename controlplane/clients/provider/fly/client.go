@@ -89,6 +89,11 @@ func New(cfg Settings, token string, acceleratorTypes []string, log func(format 
 
 const vendor = "fly"
 
+// architecture is the one the vendor's Machines have.
+const architecture = "amd64"
+
+func (p *Provider) Architectures() []string { return []string{architecture} }
+
 // hasStatus tells whether err is the API's answer with one of the given HTTP statuses.
 func hasStatus(err error, statuses ...int) bool {
 	var failure *vendorapi.StatusError

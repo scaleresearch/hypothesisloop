@@ -97,7 +97,7 @@ func TestRentableOfNothingSaysWhenTheVendorHasNoOfferOfTheSize(t *testing.T) {
 	p := newTestProvider(t, api, gpuSettings())
 
 	supply, err := p.Rentable(context.Background(), gpuSpec(), 200)
-	if err != nil || supply.Count != 0 || supply.Why != "vast has no on-demand offer of its size (2 x RTX 4090, 4 cores, 16385 MB memory, 41 GB disk)" {
+	if err != nil || supply.Count != 0 || supply.Why != "vast has no on-demand offer of its size (2 x RTX 4090, amd64, 4 cores, 16385 MB memory, 41 GB disk)" {
 		t.Fatalf("Rentable = %+v, %v", supply, err)
 	}
 }

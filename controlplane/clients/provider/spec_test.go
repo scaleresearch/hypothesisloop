@@ -6,7 +6,7 @@ import (
 )
 
 func validSpec() Spec {
-	return Spec{Name: "hl-job-main-e1-a2", Image: "registry.example/job:1", Command: []string{"hl", "exec"},
+	return Spec{Name: "hl-job-main-e1-a2", Image: "registry.example/job:1", Architecture: "amd64", Command: []string{"hl", "exec"},
 		Env: map[string]string{"HL_TOKEN": "t", "_x1": ""}, CPUMillis: 1, MemoryBytes: 1, DiskBytes: 1}
 }
 
@@ -29,6 +29,7 @@ func TestSpecValidateRefusesWhatNoVendorCanRent(t *testing.T) {
 		"no name":                {func(s *Spec) { s.Name = "" }, "instance name"},
 		"name outside the set":   {func(s *Spec) { s.Name = "HL job" }, "instance name"},
 		"no image":               {func(s *Spec) { s.Image = "" }, "no image"},
+		"no architecture":        {func(s *Spec) { s.Architecture = "" }, "names no architecture"},
 		"no command":             {func(s *Spec) { s.Command = nil }, "no command"},
 		"empty executable":       {func(s *Spec) { s.Command = []string{"", "x"} }, "no command"},
 		"negative accelerators":  {func(s *Spec) { s.AcceleratorCount = -1 }, "-1 accelerators"},

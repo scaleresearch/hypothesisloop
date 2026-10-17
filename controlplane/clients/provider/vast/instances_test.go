@@ -96,7 +96,7 @@ func TestListReturnsAMarkedInstanceUnderItsOwnName(t *testing.T) {
 func TestListSaysWhatAnInstanceRunsOn(t *testing.T) {
 	api := newFakeAPI(t)
 	api.on(http.MethodGet, listPath, answer(200, instancesPage("",
-		`{"id":9001,"label":"hl-exp1-a0","actual_status":"running","start_date":`+fixtureStart+`,"machine_id":11230,"gpu_name":"RTX 4090","cpu_name":"AMD EPYC 7B13 64-Core Processor","dph_total":0.4544}`,
+		`{"id":9001,"label":"hl-exp1-a0","actual_status":"running","start_date":`+fixtureStart+`,"machine_id":11230,"gpu_name":"RTX 4090","cpu_name":"AMD EPYC 7B13 64-Core Processor","dph_total":0.4544,"cpu_arch":"amd64"}`,
 		instanceJSON(9002, "hl-exp2-a0", ""))))
 	p := newTestProvider(t, api, Settings{})
 
@@ -105,10 +105,10 @@ func TestListSaysWhatAnInstanceRunsOn(t *testing.T) {
 		t.Fatalf("List = %+v, %v", listed, err)
 	}
 	on := listed[0]
-	if on.Host != "11230" || on.AcceleratorModel != "RTX 4090" || on.CPUModel != "AMD EPYC 7B13 64-Core Processor" || on.PricePerHour != 0.4544 {
+	if on.Host != "11230" || on.AcceleratorModel != "RTX 4090" || on.CPUModel != "AMD EPYC 7B13 64-Core Processor" || on.PricePerHour != 0.4544 || on.Architecture != "amd64" {
 		t.Errorf("instance 9001 runs on %+v, want its machine, models and price", on)
 	}
-	if bare := listed[1]; bare.Host != "" || bare.AcceleratorModel != "" || bare.CPUModel != "" || bare.PricePerHour != 0 {
+	if bare := listed[1]; bare.Host != "" || bare.AcceleratorModel != "" || bare.CPUModel != "" || bare.PricePerHour != 0 || bare.Architecture != "" {
 		t.Errorf("instance 9002 runs on %+v, want nothing said", bare)
 	}
 }

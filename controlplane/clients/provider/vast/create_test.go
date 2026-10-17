@@ -24,6 +24,7 @@ func gpuSpec() provider.Spec {
 	return provider.Spec{
 		Name:             "hl-exp1-a2",
 		Image:            "registry.example/job:1",
+		Architecture:     "amd64",
 		Command:          []string{"hl", "exec", "--stop-grace", "30", "--", "python", "train.py", "--note", `two  spaces 'and' "quotes" $HOME`, ""},
 		Env:              map[string]string{"HYPOTHESISLOOP_TOKEN": "t = 'x' \"y\" $Z"},
 		AcceleratorType:  "nvidia.com/gpu.product=NVIDIA-GeForce-RTX-4090",
@@ -96,6 +97,7 @@ func TestCreateSearchesForTheSpecAndRentsTheCheapestOffer(t *testing.T) {
 		"reliability2":        map[string]any{"gte": 0.98},
 		"geolocation":         map[string]any{"in": []any{"SE", "NL"}},
 		"verified":            map[string]any{"eq": true},
+		"cpu_arch":            map[string]any{"eq": "amd64"},
 		"order":               []any{[]any{"dph_total", "asc"}},
 		"limit":               25.0,
 	}
@@ -583,5 +585,49 @@ func TestCreateNeverSearchesAHostTheSpecAvoids(t *testing.T) {
 	}
 	if api.total() != before {
 		t.Errorf("%d requests were sent for a spec the adapter cannot meet", api.total()-before)
+	}
+}
+
+// An arm64 job is rented only on an offer whose cpu_arch is arm64, which the vendor's search
+// filters on, and the offer it rents says so.
+func TestAnArm64SpecRentsOnlyAnArm64Offer(t *testing.T) {
+	api := newFakeAPI(t)
+	api.on(http.MethodGet, listPath, answer(200, instancesPage("", instanceJSON(9001, "hl-exp1-a2", ""))))
+	api.on(http.MethodPost, searchPath, answer(200, `{"offers":[{"id":7001,"machine_id":1,"dph_total":0.31,"cpu_arch":"arm64"}]}`))
+	api.on(http.MethodPut, rentPath, answer(200, `{"success":true,"new_contract":9001}`))
+	var logged strings.Builder
+	p := newTestProvider(t, api, gpuSettings())
+	p.log = func(format string, args ...any) { fmt.Fprintf(&logged, format+"\n", args...) }
+
+	spec := gpuSpec()
+	spec.Architecture = "arm64"
+	if _, err := p.Create(context.Background(), spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	search := api.sent(http.MethodPost, searchPath)
+	if len(search) != 1 || !reflect.DeepEqual(search[0].Body["cpu_arch"], map[string]any{"eq": "arm64"}) {
+		t.Fatalf("search = %+v, want one for cpu_arch arm64", search)
+	}
+	if !strings.Contains(logged.String(), "on machine 1 (arm64)") {
+		t.Errorf("log %q does not name the offer's architecture", logged.String())
+	}
+}
+
+func TestASpecOfAnArchitectureVastHasNoOffersOfIsRefusedBeforeAnySearch(t *testing.T) {
+	api := newFakeAPI(t)
+	p := newTestProvider(t, api, gpuSettings())
+	spec := gpuSpec()
+	spec.Architecture = "riscv64"
+	if _, err := p.Create(context.Background(), spec); err == nil || !strings.Contains(err.Error(), "amd64, arm64") {
+		t.Fatalf("Create = %v, want a refusal naming vast's architectures", err)
+	}
+	if _, err := p.Rentable(context.Background(), spec, 1); err == nil {
+		t.Fatal("Rentable of riscv64 answered")
+	}
+	if api.total() != 0 {
+		t.Fatalf("%d calls, want none", api.total())
+	}
+	if got := p.Architectures(); !reflect.DeepEqual(got, []string{"amd64", "arm64"}) {
+		t.Fatalf("Architectures = %v", got)
 	}
 }

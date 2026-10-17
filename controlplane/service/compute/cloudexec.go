@@ -64,12 +64,13 @@ type Executor struct {
 	shapes    []Shape
 	provider  provider.Provider
 	// market is the provider's Market capability, nil for a vendor that has none.
-	market    provider.Market
-	reads     marketReads
-	offerWait time.Duration
-	startup   time.Duration
-	log       func(format string, args ...any)
-	pass      *view
+	market        provider.Market
+	architectures []string
+	reads         marketReads
+	offerWait     time.Duration
+	startup       time.Duration
+	log           func(format string, args ...any)
+	pass          *view
 }
 
 var (
@@ -94,17 +95,22 @@ func New(cfg Config) (*Executor, error) {
 	}
 	rented := provider.Bounded(cfg.Provider)
 	market, _ := rented.(provider.Market)
+	architectures := rented.Architectures()
+	if len(architectures) == 0 {
+		return nil, fmt.Errorf("cloudcompute: the provider rents machines of no architecture")
+	}
 	return &Executor{
-		market:    market,
-		reads:     newMarketReads(cfg.Shapes),
-		clusterID: cfg.ClusterID,
-		prefix:    cfg.prefix(),
-		apiURL:    cfg.APIURL,
-		shapes:    append([]Shape(nil), cfg.Shapes...),
-		provider:  rented,
-		offerWait: cfg.OfferWait,
-		startup:   cfg.Startup,
-		log:       cfg.Log,
+		market:        market,
+		architectures: architectures,
+		reads:         newMarketReads(cfg.Shapes, architectures),
+		clusterID:     cfg.ClusterID,
+		prefix:        cfg.prefix(),
+		apiURL:        cfg.APIURL,
+		shapes:        append([]Shape(nil), cfg.Shapes...),
+		provider:      rented,
+		offerWait:     cfg.OfferWait,
+		startup:       cfg.Startup,
+		log:           cfg.Log,
 	}, nil
 }
 

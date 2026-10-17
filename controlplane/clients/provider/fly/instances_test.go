@@ -29,9 +29,9 @@ func TestListReturnsTheMachinesOfThePrefixUnderTheirNames(t *testing.T) {
 	}
 	started := time.Date(2026, 10, 5, 11, 0, 0, 0, time.UTC)
 	want := []provider.Instance{
-		{ID: "1", Name: "hl-agent-pe1-a1", State: provider.StateRunning, StartedAt: started},
-		{ID: "2", Name: "hl-agent-pe1-a1", State: provider.StateRunning, StartedAt: started},
-		{ID: "3", Name: long, State: provider.StateStarting, StartedAt: started},
+		{ID: "1", Name: "hl-agent-pe1-a1", State: provider.StateRunning, StartedAt: started, Architecture: "amd64"},
+		{ID: "2", Name: "hl-agent-pe1-a1", State: provider.StateRunning, StartedAt: started, Architecture: "amd64"},
+		{ID: "3", Name: long, State: provider.StateStarting, StartedAt: started, Architecture: "amd64"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("List\n got %+v\nwant %+v", got, want)

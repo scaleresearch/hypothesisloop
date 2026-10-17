@@ -147,6 +147,9 @@ func validateSpec(spec provider.Spec) error {
 	if err := spec.Validate(); err != nil {
 		return fmt.Errorf("e2b: %w", err)
 	}
+	if spec.Architecture != architecture {
+		return fmt.Errorf("e2b: spec %q runs on %s, and the vendor rents %s machines only", spec.Name, spec.Architecture, architecture)
+	}
 	if spec.ImageLogin != nil {
 		return fmt.Errorf("e2b: spec %q pulls its image with a login, and the vendor pulls only public images", spec.Name)
 	}

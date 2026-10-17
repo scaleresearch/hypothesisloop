@@ -147,6 +147,9 @@ func validateSpec(spec provider.Spec) error {
 	if err := spec.Validate(); err != nil {
 		return fmt.Errorf("fly: %w", err)
 	}
+	if spec.Architecture != architecture {
+		return fmt.Errorf("fly: spec %q runs on %s, and this adapter rents %s machines only", spec.Name, spec.Architecture, architecture)
+	}
 	if spec.ImageLogin != nil {
 		return fmt.Errorf("fly: spec %q pulls its image with a login, and this adapter pulls only public images", spec.Name)
 	}

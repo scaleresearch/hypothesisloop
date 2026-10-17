@@ -59,7 +59,7 @@ func (p *Provider) List(ctx context.Context, namePrefix string) ([]provider.Inst
 			readers <- struct{}{}
 			defer func() { <-readers }()
 			state, expired := p.stateOf(ctx, found)
-			listed[i] = provider.Instance{ID: found.SandboxID, Name: found.Metadata[nameKey], State: state, Expired: expired, StartedAt: found.StartedAt}
+			listed[i] = provider.Instance{ID: found.SandboxID, Name: found.Metadata[nameKey], State: state, Expired: expired, StartedAt: found.StartedAt, Architecture: architecture}
 		}()
 	}
 	reading.Wait()
@@ -81,7 +81,7 @@ func (p *Provider) Get(ctx context.Context, id string) (provider.Instance, bool,
 		return provider.Instance{}, false, err
 	}
 	state, expired := p.stateOf(ctx, found)
-	return provider.Instance{ID: found.SandboxID, Name: found.Metadata[nameKey], State: state, Expired: expired, StartedAt: found.StartedAt}, true, nil
+	return provider.Instance{ID: found.SandboxID, Name: found.Metadata[nameKey], State: state, Expired: expired, StartedAt: found.StartedAt, Architecture: architecture}, true, nil
 }
 
 // sandboxes returns the team's sandboxes whose name starts with namePrefix. The API filters on a

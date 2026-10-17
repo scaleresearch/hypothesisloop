@@ -398,7 +398,7 @@ func TestDuplicateInstancesOfOneAttemptAreReducedToTheLowestID(t *testing.T) {
 			exp := job(t, "exp-1", 0, 0)
 			const instance = "hl-job-t1-exp-1-a0-cpu-0"
 			for n := 0; n < 3; n++ {
-				if _, err := p.Create(ctx, provider.Spec{Name: instance}); err != nil {
+				if _, err := p.Create(ctx, provider.Spec{Name: instance, Architecture: "amd64"}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -434,7 +434,7 @@ func TestAnInstanceInNoConfiguredSlotIsDeletedUnlessItsJobIsDesired(t *testing.T
 	ctx := context.Background()
 	for name, slot := range map[string]string{"hl-job-t1-exp-old-a0-a100-0": "a100-0", "hl-job-t1-exp-old-a0-h100-5": "h100-5"} {
 		e, p := newTestExecutor(t)
-		if _, err := p.Create(ctx, provider.Spec{Name: name}); err != nil {
+		if _, err := p.Create(ctx, provider.Spec{Name: name, Architecture: "amd64"}); err != nil {
 			t.Fatal(err)
 		}
 		p.Start(name)
@@ -468,7 +468,7 @@ func TestAnInstanceUnderThePrefixThatNamesNoJobIsDestroyed(t *testing.T) {
 	exp := job(t, "exp-1", 0, 0)
 	mustCreate(t, e, exp)
 	for _, name := range []string{"hl-job-t1-something-unknown", "hl-job-t1-exp-1-ax-cpu-0", "hl-job-t1-"} {
-		if _, err := p.Create(ctx, provider.Spec{Name: name}); err != nil {
+		if _, err := p.Create(ctx, provider.Spec{Name: name, Architecture: "amd64"}); err != nil {
 			t.Fatal(err)
 		}
 		p.Start(name)

@@ -6,6 +6,7 @@ package fake
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -42,10 +43,22 @@ type Provider struct {
 	// Market, when set, is what the vendor has to rent of a spec right now. Unset, there is one
 	// for every instance asked about.
 	Market func(spec provider.Spec) provider.Supply
+
+	// Rents is what Architectures answers, amd64 from New. Create and Warm refuse any other.
+	Rents []string
 }
 
 func New() *Provider {
-	return &Provider{instances: map[string]*instance{}, calls: map[string]int{}}
+	return &Provider{instances: map[string]*instance{}, calls: map[string]int{}, Rents: []string{"amd64"}}
+}
+
+func (p *Provider) Architectures() []string { return slices.Clone(p.Rents) }
+
+func (p *Provider) rents(spec provider.Spec) error {
+	if !slices.Contains(p.Rents, spec.Architecture) {
+		return fmt.Errorf("fake: spec %q runs on %q, and the fake rents %v", spec.Name, spec.Architecture, p.Rents)
+	}
+	return nil
 }
 
 var (
@@ -82,10 +95,13 @@ func (p *Provider) Create(_ context.Context, spec provider.Spec) (string, error)
 	if err := provider.ValidateName(spec.Name); err != nil {
 		return "", fmt.Errorf("fake: %w", err)
 	}
+	if err := p.rents(spec); err != nil {
+		return "", err
+	}
 	p.created++
 	id := fmt.Sprintf("fake-%04d", p.created)
 	p.instances[id] = &instance{
-		Instance: provider.Instance{ID: id, Name: spec.Name, State: provider.StateStarting, StartedAt: time.Now()},
+		Instance: provider.Instance{ID: id, Name: spec.Name, State: provider.StateStarting, StartedAt: time.Now(), Architecture: spec.Architecture},
 		spec:     spec,
 	}
 	return id, nil
@@ -101,11 +117,14 @@ func (p *Provider) Warm(_ context.Context, spec provider.Spec) (string, error) {
 	if err := provider.ValidateName(spec.Name); err != nil {
 		return "", fmt.Errorf("fake: %w", err)
 	}
+	if err := p.rents(spec); err != nil {
+		return "", err
+	}
 	p.created++
 	id := fmt.Sprintf("fake-%04d", p.created)
 	p.instances[id] = &instance{
-		Instance: provider.Instance{ID: id, Name: spec.Name, State: provider.StateStarting, StartedAt: time.Now()},
-		spec:     provider.Spec{Name: spec.Name, Image: spec.Image, CPUMillis: spec.CPUMillis, MemoryBytes: spec.MemoryBytes, DiskBytes: spec.DiskBytes},
+		Instance: provider.Instance{ID: id, Name: spec.Name, State: provider.StateStarting, StartedAt: time.Now(), Architecture: spec.Architecture},
+		spec:     provider.Spec{Name: spec.Name, Image: spec.Image, Architecture: spec.Architecture, CPUMillis: spec.CPUMillis, MemoryBytes: spec.MemoryBytes, DiskBytes: spec.DiskBytes},
 		warm:     true,
 	}
 	return id, nil

@@ -14,7 +14,7 @@ import (
 func TestAVendorThatEchoesTheRequestNeverPutsASecretInAnError(t *testing.T) {
 	const token, password = "agent-token-0123456789", "registry-password-9876"
 	spec := provider.Spec{
-		Name: "agent-a", Image: "registry.example/agent:1", Command: []string{"run"},
+		Name: "agent-a", Image: "registry.example/agent:1", Architecture: "amd64", Command: []string{"run"},
 		CPUMillis: 1000, MemoryBytes: 1 << 30, DiskBytes: 1 << 30,
 		Env:        map[string]string{"HYPOTHESISLOOP_TOKEN": token, "ACCELERATOR_TYPE": "small"},
 		ImageLogin: &provider.ImageLogin{Registry: "registry.example", Username: "robot", Password: password},

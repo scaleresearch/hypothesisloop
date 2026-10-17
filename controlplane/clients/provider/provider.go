@@ -98,6 +98,9 @@ type Spec struct {
 	// arguments. Every element reaches the process as one argument, unchanged.
 	Command []string
 	Env     map[string]string
+	// Architecture is the CPU architecture Image runs on, as image manifests name it (amd64,
+	// arm64): the instance is rented on a machine of it, one of the provider's Architectures.
+	Architecture string
 
 	// AcceleratorType is a resource catalog string; an adapter translates it to the vendor's
 	// own naming. AcceleratorCount 0 asks for a CPU-only instance.
@@ -141,11 +144,16 @@ type Instance struct {
 	AcceleratorModel string
 	CPUModel         string
 	PricePerHour     float64
+	// Architecture is that of the machine's CPU, as image manifests name it.
+	Architecture string
 }
 
 // Provider rents and returns instances. Offer search, bidding, region choice and every other
 // vendor concept stay inside the adapter.
 type Provider interface {
+	// Architectures are the CPU architectures the vendor rents machines of, as image manifests
+	// name them (amd64, arm64).
+	Architectures() []string
 	// Create rents an instance for spec and returns once List shows it under spec.Name: a caller
 	// that finds no instance of a name creates one, so an instance missing from List for a moment
 	// after Create is rented twice. The command need not have started; that is StateStarting.

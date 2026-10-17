@@ -25,6 +25,7 @@ type instance struct {
 	GPUName      *string `json:"gpu_name"`
 	CPUName      *string `json:"cpu_name"`
 	PricePerHour float64 `json:"dph_total"`
+	Architecture *string `json:"cpu_arch"`
 }
 
 // host is the machine an instance is on, empty until the vendor names one.
@@ -101,7 +102,7 @@ func (p *Provider) instance(found instance) provider.Instance {
 		State:     state,
 		StartedAt: startedAt,
 		Host:      found.host(), AcceleratorModel: text(found.GPUName), CPUModel: text(found.CPUName),
-		PricePerHour: found.PricePerHour,
+		PricePerHour: found.PricePerHour, Architecture: text(found.Architecture),
 	}
 }
 

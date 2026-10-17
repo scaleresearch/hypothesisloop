@@ -90,7 +90,7 @@ func TestACapabilityIsFoundOnTheProviderAndSurvivesTheBoundingWrapper(t *testing
 	}
 
 	ctx := context.Background()
-	id, err := pausing.Create(ctx, provider.Spec{Name: "hl-a"})
+	id, err := pausing.Create(ctx, provider.Spec{Name: "hl-a", Architecture: "amd64"})
 	if err != nil {
 		t.Fatal(err)
 	}

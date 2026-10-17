@@ -74,9 +74,9 @@ func job(t *testing.T, id string, attempt, accelerators int) *clusterapi.Desired
 	exp.Image = testImage
 	resolved := *exp.ResolvedJob
 	resolved.Command, resolved.Args = []string{"python", "train.py"}, []string{"--epochs", "3"}
-	resolved.NodeSelector = map[string]string{clusterapi.NodeSlotLabel: "cpu-0"}
+	resolved.NodeSelector = map[string]string{clusterapi.NodeSlotLabel: "cpu-0", clusterapi.NodeArchitectureLabel: "amd64"}
 	if accelerators > 0 {
-		resolved.NodeSelector = map[string]string{clusterapi.NodeSlotLabel: "h100-0"}
+		resolved.NodeSelector = map[string]string{clusterapi.NodeSlotLabel: "h100-0", clusterapi.NodeArchitectureLabel: "amd64"}
 		exp.AcceleratorType, exp.AcceleratorCount = h100, accelerators
 		resolved.AcceleratorType, resolved.AcceleratorCount = h100, accelerators
 	}
@@ -86,7 +86,7 @@ func job(t *testing.T, id string, attempt, accelerators int) *clusterapi.Desired
 
 // on moves exp to another slot, as admission would have placed it.
 func on(exp *clusterapi.DesiredJob, slot string) *clusterapi.DesiredJob {
-	exp.ResolvedJob.NodeSelector = map[string]string{clusterapi.NodeSlotLabel: slot}
+	exp.ResolvedJob.NodeSelector = map[string]string{clusterapi.NodeSlotLabel: slot, clusterapi.NodeArchitectureLabel: exp.ResolvedJob.NodeSelector[clusterapi.NodeArchitectureLabel]}
 	return exp
 }
 
@@ -225,7 +225,7 @@ func TestAJobIsRentedInExactlyTheSlotItWasAdmittedTo(t *testing.T) {
 	}
 
 	unpinned := job(t, "exp-unpinned", 0, 0)
-	unpinned.ResolvedJob.NodeSelector = nil
+	delete(unpinned.ResolvedJob.NodeSelector, clusterapi.NodeSlotLabel)
 	tooLarge := job(t, "exp-large", 0, 0)
 	tooLarge.ResolvedJob.CPU = "6"
 	otherType := on(job(t, "exp-type", 0, 1), "cpu-0")
@@ -499,7 +499,7 @@ func TestInstancesOutsideTheNamespaceAreNeverListedCountedOrDestroyed(t *testing
 		"hl-exp-1-a0-h100-1",         // not the platform's naming at all
 	}
 	for _, name := range foreign {
-		if _, err := p.Create(ctx, provider.Spec{Name: name}); err != nil {
+		if _, err := p.Create(ctx, provider.Spec{Name: name, Architecture: "amd64"}); err != nil {
 			t.Fatal(err)
 		}
 		p.Start(name)

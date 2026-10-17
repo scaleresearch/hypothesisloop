@@ -168,13 +168,14 @@ func TestAMissingInstanceIsCreatedFromTheListAndTheLaunchersOwnConfig(t *testing
 
 	spec := h.rented.Spec(full("a"))
 	want := provider.Spec{
-		Name:        full("a"),
-		Image:       "registry.example.invalid/agent:1",
-		Command:     []string{"uv", "run", "agent"},
-		Env:         map[string]string{"AGENT_ID": "a", "HL_TOKEN": agentToken},
-		CPUMillis:   2000,
-		MemoryBytes: 4 << 30,
-		DiskBytes:   20 << 30,
+		Name:         full("a"),
+		Image:        "registry.example.invalid/agent:1",
+		Architecture: "amd64",
+		Command:      []string{"uv", "run", "agent"},
+		Env:          map[string]string{"AGENT_ID": "a", "HL_TOKEN": agentToken},
+		CPUMillis:    2000,
+		MemoryBytes:  4 << 30,
+		DiskBytes:    20 << 30,
 	}
 	if !reflect.DeepEqual(spec, want) {
 		t.Fatalf("spec = %+v\nwant   %+v", spec, want)
@@ -454,7 +455,7 @@ func TestTheLaunchDigestFollowsTheLaunchersOwnInputsAndHoldsNoSecret(t *testing.
 
 func rent(t *testing.T, rented *fake.Provider, name string) string {
 	t.Helper()
-	id, err := rented.Create(context.Background(), provider.Spec{Name: name})
+	id, err := rented.Create(context.Background(), provider.Spec{Name: name, Architecture: "amd64"})
 	if err != nil {
 		t.Fatal(err)
 	}

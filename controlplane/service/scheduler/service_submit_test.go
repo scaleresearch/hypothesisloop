@@ -705,6 +705,21 @@ func TestAJobOfAnArchitectureNoClusterHasIsRefusedAtSubmit(t *testing.T) {
 	}
 }
 
+// A rented cluster names on its slots every architecture its provider rents, an offerless slot
+// too, so a job of an architecture it has no machine of right now is accepted to wait for one.
+func TestAJobOfAnArchitectureARentedClusterCanProvideIsAccepted(t *testing.T) {
+	registered := map[string]domain.Cluster{"rented": {Name: "rented", OrgID: "org-a"}}
+	installed := map[string]domain.Footprint{"rented": domain.CapacityFootprint(32, map[string]int64{h100: 8}, 1<<40, 1<<42)}
+	slots := map[string]map[string]map[string]string{"rented": {
+		"h100-0": {domain.NodeSlotLabel: "h100-0", domain.NodeArchitectureLabel: "arm64"},
+		"h100-1": {domain.NodeSlotLabel: "h100-1", domain.NodeArchitectureLabel: testExperimentImage.Architecture, domain.NodeSlotNoOfferLabel: "shape h100 on amd64: no offer passes the filters"},
+	}}
+	s := &Service{credits: testCaps, codeHost: testCodeHost{}, store: clustersStore{registered: registered}, clusters: installedCapacity{installed: installed, labels: slots}, hypotheses: humanHypothesis("pe-1")}
+	if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.Is(err, errReachedScoring) {
+		t.Fatalf("an amd64 image on a cluster whose amd64 slot waits for an offer: got = %v, want it accepted", err)
+	}
+}
+
 type endingStore struct {
 	poolOnlyStore
 	status domain.PlatformExperimentStatus

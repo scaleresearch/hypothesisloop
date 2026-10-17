@@ -44,9 +44,9 @@ func TestListReturnsTheSandboxesOfThePrefixUnderTheirNames(t *testing.T) {
 	}
 	started := time.Date(2026, 10, 5, 11, 0, 0, 500000000, time.UTC)
 	want := []provider.Instance{
-		{ID: "sb1", Name: "hl-agent-pe1-a1", State: provider.StateRunning, StartedAt: started},
-		{ID: "sb2", Name: "hl-agent-pe1-a1", State: provider.StateExited, StartedAt: started},
-		{ID: "sb3", Name: long, State: provider.StateStarting, StartedAt: started},
+		{ID: "sb1", Name: "hl-agent-pe1-a1", State: provider.StateRunning, StartedAt: started, Architecture: "amd64"},
+		{ID: "sb2", Name: "hl-agent-pe1-a1", State: provider.StateExited, StartedAt: started, Architecture: "amd64"},
+		{ID: "sb3", Name: long, State: provider.StateStarting, StartedAt: started, Architecture: "amd64"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("List\n got %+v\nwant %+v", got, want)

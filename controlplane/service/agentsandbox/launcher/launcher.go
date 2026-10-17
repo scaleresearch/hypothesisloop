@@ -62,6 +62,9 @@ type Launcher struct {
 	provider     provider.Provider
 	warmer       provider.Warmer
 	launchDigest string
+	// architecture is the one machine architecture the provider rents, which the agents' image
+	// is taken to run on.
+	architecture string
 }
 
 func New(cfg Config) (*Launcher, error) {
@@ -71,8 +74,12 @@ func New(cfg Config) (*Launcher, error) {
 	if cfg.Provider == nil || cfg.Platform == nil || cfg.Log == nil {
 		return nil, errors.New("launcher: Provider, Platform and Log are required")
 	}
+	architectures := cfg.Provider.Architectures()
+	if len(architectures) != 1 {
+		return nil, fmt.Errorf("launcher: the provider rents machines of %v, and the agents' image is built for one architecture", architectures)
+	}
 	if sizer, sizes := cfg.Provider.(provider.Sizer); sizes {
-		size := provider.Spec{Name: "instance", CPUMillis: cfg.Size.CPUMillis, MemoryBytes: cfg.Size.MemoryBytes, DiskBytes: cfg.Size.DiskBytes}
+		size := provider.Spec{Name: "instance", Architecture: architectures[0], CPUMillis: cfg.Size.CPUMillis, MemoryBytes: cfg.Size.MemoryBytes, DiskBytes: cfg.Size.DiskBytes}
 		if err := sizer.CheckSize(size); err != nil {
 			return nil, fmt.Errorf("launcher: the instance size: %w", err)
 		}
@@ -83,7 +90,7 @@ func New(cfg Config) (*Launcher, error) {
 	}
 	l := &Launcher{
 		cfg: cfg, prefix: provider.AgentPrefix(cfg.Name), provider: provider.Bounded(cfg.Provider),
-		launchDigest: digest,
+		launchDigest: digest, architecture: architectures[0],
 	}
 	l.poolPrefix = l.prefix + poolSegment
 	l.warmer, _ = l.provider.(provider.Warmer)
@@ -515,13 +522,14 @@ func (l *Launcher) spec(i instance) provider.Spec {
 		env[name] = value
 	}
 	return provider.Spec{
-		Name:        i.name,
-		Image:       i.image,
-		Command:     append([]string(nil), l.cfg.Command...),
-		Env:         env,
-		CPUMillis:   l.cfg.Size.CPUMillis,
-		MemoryBytes: l.cfg.Size.MemoryBytes,
-		DiskBytes:   l.cfg.Size.DiskBytes,
+		Name:         i.name,
+		Image:        i.image,
+		Architecture: l.architecture,
+		Command:      append([]string(nil), l.cfg.Command...),
+		Env:          env,
+		CPUMillis:    l.cfg.Size.CPUMillis,
+		MemoryBytes:  l.cfg.Size.MemoryBytes,
+		DiskBytes:    l.cfg.Size.DiskBytes,
 	}
 }
 

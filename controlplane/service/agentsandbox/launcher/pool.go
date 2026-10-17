@@ -119,7 +119,7 @@ func (p *pass) keepPool(ctx context.Context, pool []provider.Instance, want *des
 		return
 	}
 	spec := provider.Spec{
-		Name: l.poolName(image), Image: image,
+		Name: l.poolName(image), Image: image, Architecture: l.architecture,
 		CPUMillis: l.cfg.Size.CPUMillis, MemoryBytes: l.cfg.Size.MemoryBytes, DiskBytes: l.cfg.Size.DiskBytes,
 	}
 	for ; kept < l.cfg.WarmPool; kept++ {

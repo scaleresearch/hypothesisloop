@@ -13,13 +13,14 @@ import (
 
 func agentSpec() provider.Spec {
 	return provider.Spec{
-		Name:        "hl-agent-pe1-a2",
-		Image:       "registry.example/agent:1",
-		Command:     []string{"uv", "run", "agent", "--note", `two  spaces 'and' "quotes" $HOME`, ""},
-		Env:         map[string]string{"HL_TOKEN": "t = 'x' \"y\" $Z"},
-		CPUMillis:   2000,
-		MemoryBytes: 4 << 30,
-		DiskBytes:   10<<30 + 1,
+		Name:         "hl-agent-pe1-a2",
+		Image:        "registry.example/agent:1",
+		Architecture: "amd64",
+		Command:      []string{"uv", "run", "agent", "--note", `two  spaces 'and' "quotes" $HOME`, ""},
+		Env:          map[string]string{"HL_TOKEN": "t = 'x' \"y\" $Z"},
+		CPUMillis:    2000,
+		MemoryBytes:  4 << 30,
+		DiskBytes:    10<<30 + 1,
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,14 +35,25 @@ type offer struct {
 	Geolocation  string  `json:"geolocation"`
 	Reliability  float64 `json:"reliability2"`
 	Verification string  `json:"verification"`
+	Architecture string  `json:"cpu_arch"`
 }
 
-// sizeQuery builds the search for the cheapest on-demand offers of the spec's size and
-// accelerator, before any of the settings' filters. The vendor rents no machine without a GPU (a
+// architectures are the values of an offer's cpu_arch. In October 2026 about 28 offers were
+// arm64 (GB10, GH200, GB300) beside thousands of amd64.
+var architectures = []string{"amd64", "arm64"}
+
+func (p *Provider) Architectures() []string { return slices.Clone(architectures) }
+
+// sizeQuery builds the search for the cheapest on-demand offers of the spec's size, accelerator
+// and architecture, before any of the settings' filters. The vendor rents no machine without a GPU (a
 // search for zero GPUs answers with nothing, or with storage offers that cannot be rented as
 // instances), so a CPU-only spec takes the cheapest offer of any GPU model.
 func (p *Provider) sizeQuery(spec provider.Spec) (map[string]any, error) {
+	if !slices.Contains(architectures, spec.Architecture) {
+		return nil, fmt.Errorf("vast: spec %q runs on %q, and vast's offers are of %s", spec.Name, spec.Architecture, strings.Join(architectures, ", "))
+	}
 	query := map[string]any{
+		"cpu_arch":            map[string]any{"eq": spec.Architecture},
 		"type":                "ondemand",
 		"rentable":            map[string]any{"eq": true},
 		"rented":              map[string]any{"eq": false},
@@ -338,7 +350,7 @@ func describeSize(spec provider.Spec, c Settings) string {
 			gpu = fmt.Sprintf("%d x %s", spec.AcceleratorCount, accelerator.GPUName)
 		}
 	}
-	return fmt.Sprintf("%s, %d cores, %d MB memory, %d GB disk", gpu, provider.CeilDiv(spec.CPUMillis, 1000), provider.CeilDiv(spec.MemoryBytes, bytesPerMB), diskGB(spec))
+	return fmt.Sprintf("%s, %s, %d cores, %d MB memory, %d GB disk", gpu, spec.Architecture, provider.CeilDiv(spec.CPUMillis, 1000), provider.CeilDiv(spec.MemoryBytes, bytesPerMB), diskGB(spec))
 }
 
 // cheapestPerMachine keeps the first offer of each machine, up to limit machines. offers come
