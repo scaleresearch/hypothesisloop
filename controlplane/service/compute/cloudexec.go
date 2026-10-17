@@ -33,8 +33,8 @@ type Shape struct {
 }
 
 type Config struct {
-	// ClusterID is the provider's name and the account on it, which is what stays the same when
-	// the cluster is renamed.
+	// ClusterID is the provider's name, the account on it and Namespace, which name the instances
+	// this cluster owns and stay the same when the cluster is renamed.
 	ClusterID string
 	// Namespace is part of every instance name. This executor lists, counts and destroys the
 	// instances of its namespace and no others, so several agents, and whatever else is rented

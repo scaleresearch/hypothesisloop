@@ -10,12 +10,14 @@ import (
 	"github.com/scaleresearch/hypothesisloop/contract/acceleratorname"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider/providertest"
+	"github.com/scaleresearch/hypothesisloop/controlplane/config"
 )
 
-// The conformance tests rent real instances and cost real money, a few cents a run. They run
-// when CLOUD_COMPUTE_VAST_API_KEY is set:
+// The conformance tests rent real instances and cost real money, a few cents a run. They run on
+// the account of the cluster local development rents vast.ai on, when its account key
+// (conformanceKey) is set:
 //
-//	CLOUD_COMPUTE_VAST_API_KEY=... go test ./controlplane/clients/provider/vast -run Conformance -v -timeout 45m
+//	CLOUD_COMPUTE_HYPOTHESISLOOP_VAST_API_KEY=... go test ./controlplane/clients/provider/vast -run Conformance -v -timeout 45m
 //
 // VAST_CONFORMANCE_GPU="<driver product name>=<vendor gpu name>", for example
 // "NVIDIA GeForce RTX 3060=RTX 3060", adds the run on that GPU, and VAST_CONFORMANCE_HOLD=1 the
@@ -38,10 +40,13 @@ func conformanceOptions() providertest.Options {
 	}
 }
 
+// conformanceKey is the account key of hypothesisloop-vast, the cluster localdev/dev.sh names.
+var conformanceKey = config.AccountKey(config.SectionCloudCompute, "hypothesisloop-vast")
+
 func conformanceProvider(t *testing.T, accelerators []Accelerator) *Provider {
 	t.Helper()
-	if os.Getenv("CLOUD_COMPUTE_VAST_API_KEY") == "" {
-		t.Skip("CLOUD_COMPUTE_VAST_API_KEY is not set")
+	if os.Getenv(conformanceKey.Name) == "" {
+		t.Skip(conformanceKey.Name + " is not set")
 	}
 	p, err := New(Settings{
 		AccountID:        "conformance",
@@ -50,7 +55,7 @@ func conformanceProvider(t *testing.T, accelerators []Accelerator) *Provider {
 		VerifiedOnly:     true,
 		Accelerators:     accelerators,
 		ExcludedMachines: excludedMachines(t),
-	}, os.Getenv("CLOUD_COMPUTE_VAST_API_KEY"), nil, t.Logf)
+	}, os.Getenv(conformanceKey.Name), nil, t.Logf)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
