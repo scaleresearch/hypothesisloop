@@ -2491,7 +2491,8 @@ export interface components {
             detail: string;
             /** Format: int64 */
             id: number;
-            kind: string;
+            /** @enum {string} */
+            kind: "experiment.status" | "experiment.blocked" | "quota.changed" | "stage.boundary" | "agent.cut" | "agent.finished" | "agent.replaced" | "agent.idle" | "agent.instructions" | "capacity.idle" | "agent.message" | "agent.activity" | "hypothesis.new" | "hypothesis.status" | "hypothesis.link" | "finding.new" | "comment.new" | "platform_experiment.status" | "platform_experiment.description" | "platform_experiment.goal" | "platform_experiment.proposal" | "platform_experiment.plan" | "platform_experiment.baseline" | "platform_experiment.removed" | "job.held" | "job.duplicate" | "job.underperforming" | "environment.status";
             /** Format: date-time */
             occurred_at: string;
             platform_experiment_id: string;
@@ -8927,6 +8928,7 @@ export const agentTypeActionValues: ReadonlyArray<FlattenedDeepRequired<componen
 export const agentTypeChangeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["AgentTypeChange"]> = ["create", "edit", "rename", "describe", "archive", "restore"];
 export const agentTypeSettingsEffortValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["AgentTypeSettings"]["effort"]> = ["low", "medium", "high", "xhigh", "max"];
 export const capacityTierValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CapacityTier"]> = ["guaranteed", "burst"];
+export const changeKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Change"]["kind"]> = ["experiment.status", "experiment.blocked", "quota.changed", "stage.boundary", "agent.cut", "agent.finished", "agent.replaced", "agent.idle", "agent.instructions", "capacity.idle", "agent.message", "agent.activity", "hypothesis.new", "hypothesis.status", "hypothesis.link", "finding.new", "comment.new", "platform_experiment.status", "platform_experiment.description", "platform_experiment.goal", "platform_experiment.proposal", "platform_experiment.plan", "platform_experiment.baseline", "platform_experiment.removed", "job.held", "job.duplicate", "job.underperforming", "environment.status"];
 export const closeReasonValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CloseReason"]> = ["end_time_reached", "closed_by_request", "planning_limit_reached", "proposal_expired", "baseline_limit_reached", "agents_not_started", "planner_stopped", "repository_not_created"];
 export const clusterActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ClusterAction"]> = ["enable", "edit", "remove", "share"];
 export const experimentActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ExperimentAction"]> = ["cancel"];

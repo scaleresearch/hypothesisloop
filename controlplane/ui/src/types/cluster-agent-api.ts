@@ -211,6 +211,8 @@ export interface components {
         AllClusters: {
             clusters: components["schemas"]["ClusterInfo"][];
         };
+        /** @enum {string} */
+        CapacityTier: "guaranteed" | "burst";
         ClusterInfo: {
             /** Format: int64 */
             accelerator_busy: number;
@@ -242,7 +244,7 @@ export interface components {
             agent_id: string;
             /** Format: int64 */
             attempt_count: number;
-            capacity_tier: string;
+            capacity_tier: components["schemas"]["CapacityTier"];
             code_ref: string;
             config_hash: string;
             data?: components["schemas"]["DataAccess"];
@@ -308,7 +310,8 @@ export interface components {
             accelerator_type?: string;
             args?: string[];
             command?: string[];
-            cpu?: string;
+            /** @description CPU for each node: a number of cores (4) or a quantity ("500m"). Always stated. Answered as a string. */
+            cpu?: string | number;
             env?: {
                 [key: string]: string;
             };
@@ -329,7 +332,7 @@ export interface components {
         };
         JobSpec: {
             /** Format: int64 */
-            accelerator_count: number;
+            accelerator_count?: number;
             accelerator_pod_resources?: {
                 [key: string]: string;
             };
@@ -340,7 +343,8 @@ export interface components {
             /** Format: int64 */
             checkpoint_grace_seconds?: number;
             command?: string[];
-            cpu?: string;
+            /** @description CPU for each node: a number of cores (4) or a quantity ("500m"). Always stated. Answered as a string. */
+            cpu?: string | number;
             env?: {
                 [key: string]: string;
             };
@@ -467,6 +471,7 @@ export interface components {
     pathItems: never;
 }
 export type AllClusters = components['schemas']['AllClusters'];
+export type CapacityTier = components['schemas']['CapacityTier'];
 export type ClusterInfo = components['schemas']['ClusterInfo'];
 export type DataAccess = components['schemas']['DataAccess'];
 export type DesiredJob = components['schemas']['DesiredJob'];
@@ -826,3 +831,12 @@ export interface operations {
         };
     };
 }
+type FlattenedDeepRequired<T> = {
+    [K in keyof T]-?: FlattenedDeepRequired<T[K] extends unknown[] | undefined | null ? Extract<T[K], unknown[]>[number] : T[K]>;
+};
+type ReadonlyArray<T> = [
+    Exclude<T, undefined>
+] extends [
+    unknown[]
+] ? Readonly<Exclude<T, undefined>> : Readonly<Exclude<T, undefined>[]>;
+export const capacityTierValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CapacityTier"]> = ["guaranteed", "burst"];

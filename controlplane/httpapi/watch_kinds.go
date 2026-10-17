@@ -46,7 +46,13 @@ func registerWatchKinds(doc *Doc) {
 		Extensions: map[string]any{"x-change-frame": map[string]string{"$ref": "#/components/schemas/Change"}},
 	}, listWatchKinds)
 	schemas := doc.API.OpenAPI().Components.Schemas
-	schemas.Map()["Change"] = huma.SchemaFromType(schemas, reflect.TypeFor[domain.Event]())
+	change := huma.SchemaFromType(schemas, reflect.TypeFor[domain.Event]())
+	kind := change.Properties["kind"]
+	for _, k := range domain.EventKinds {
+		kind.Enum = append(kind.Enum, k.Kind)
+	}
+	kind.PrecomputeMessages()
+	schemas.Map()["Change"] = change
 }
 
 func listWatchKinds(context.Context, *struct{}) (*struct{ Body []domain.EventKindDoc }, error) {

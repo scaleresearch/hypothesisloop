@@ -63,7 +63,7 @@ const READS = {
   'platform_experiment.plan': experiment,
   'platform_experiment.baseline': experiment,
   'platform_experiment.removed': (c: Change) => any(experiment(c), experimentTallies),
-} satisfies Record<string, (c: Change) => Reads>
+} satisfies Partial<Record<Change['kind'], (c: Change) => Reads>>
 
 /** The kinds a page's stream asks for: the ones it knows what to read again for. */
 export const LIVE_KINDS = Object.keys(READS)
