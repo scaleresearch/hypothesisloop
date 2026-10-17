@@ -196,7 +196,7 @@ func TestLoadRejectsRuntimeAddressesARuntimeCannotReach(t *testing.T) {
 		if !strings.Contains(text, edit[0]) {
 			t.Fatalf("%s: the production config has no %q", name, edit[0])
 		}
-		if err := loadText(t, strings.Replace(text, edit[0], edit[1], 1)); err == nil || !strings.Contains(err.Error(), "runtimes") && !strings.Contains(err.Error(), "job_images") && !strings.Contains(err.Error(), "metric_url") && !strings.Contains(err.Error(), "api_url") {
+		if err := loadText(t, strings.Replace(text, edit[0], edit[1], 1)); err == nil || !strings.Contains(err.Error(), "runtimes") && !strings.Contains(err.Error(), "metric_url") && !strings.Contains(err.Error(), "api_url") {
 			t.Errorf("%s: Load = %v, want it refused naming the address", name, err)
 		}
 	}
@@ -517,14 +517,59 @@ func TestTheGitProxyIsTheAPIsGitPath(t *testing.T) {
 	}
 }
 
-// A provider's key has one name in the environment, so two accounts on one provider are refused.
-func TestTwoCloudComputeAccountsOnOneProviderAreRefused(t *testing.T) {
-	two := productionConfig(t) + "\ncloud_compute:\n" + cluster + strings.Replace(cluster, "cluster_name: a", "cluster_name: b", 1)
-	if err := loadText(t, two); err == nil || !strings.Contains(err.Error(), "one account") {
-		t.Errorf("two vast accounts: got %v, want them refused", err)
+// A cluster_name names its account key one to one, so it is lowercase letters and digits joined
+// by single dashes, and listed once.
+func TestACloudComputeClusterNameIsOneItsAccountKeyCanBeMadeOf(t *testing.T) {
+	for _, name := range []string{"vast", "gcp-europe-west4", "a1"} {
+		if err := loadText(t, productionConfig(t)+"\ncloud_compute:\n"+strings.Replace(cluster, "cluster_name: a", "cluster_name: "+name, 1)); err != nil {
+			t.Errorf("cluster_name %s: %v", name, err)
+		}
 	}
-	if err := loadText(t, productionConfig(t)+"\ncloud_compute:\n"+cluster); err != nil {
-		t.Errorf("one vast account: %v", err)
+	for _, name := range []string{`""`, "Vast", "vast_b", "vast--b", "-vast", "vast-"} {
+		if err := loadText(t, productionConfig(t)+"\ncloud_compute:\n"+strings.Replace(cluster, "cluster_name: a", "cluster_name: "+name, 1)); err == nil || !strings.Contains(err.Error(), "CLOUD_COMPUTE_<CLUSTER_NAME>_API_KEY") {
+			t.Errorf("cluster_name %s: got %v, want it refused", name, err)
+		}
+	}
+	if err := loadText(t, productionConfig(t)+"\ncloud_compute:\n"+cluster+cluster); err == nil || !strings.Contains(err.Error(), "listed twice") {
+		t.Errorf("one cluster_name twice: got %v, want it refused", err)
+	}
+}
+
+// The committed cloud_compute example rents shapes of types the committed catalog prices.
+func TestTheCommittedCloudComputeExampleLoadsWithTheCommittedCatalog(t *testing.T) {
+	example, err := os.ReadFile(filepath.Join("..", "settings", "cloud-compute.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	filled := strings.ReplaceAll(string(example), Placeholder+"ACCOUNT-ID", "1")
+	if err := loadText(t, productionConfig(t)+"\n"+filled); err != nil {
+		t.Errorf("hypothesisloop.yaml with cloud-compute.yaml: %v", err)
+	}
+}
+
+// A catalog string is written as the runtimes report it, and a rented shape offers only a priced
+// type, or no job could ever be admitted to it.
+func TestAcceleratorTypesAreCanonicalAndEveryRentedShapeIsPriced(t *testing.T) {
+	const priced = "nvidia.com/gpu.product=NVIDIA-L40"
+	shape := func(acceleratorType string) string {
+		return "\ncloud_compute:\n" + cluster + "    shapes:\n      - name: gpu\n        accelerator_type: " + acceleratorType +
+			"\n        accelerators: 1\n        cpu: \"8\"\n        memory: 32Gi\n        storage: 100Gi\n        max_instances: 1\n"
+	}
+	if err := loadText(t, productionConfig(t)+shape(priced)); err != nil {
+		t.Fatalf("a shape of a priced type: %v", err)
+	}
+	for name, tc := range map[string]struct{ text, want string }{
+		"a catalog name in another casing": {strings.Replace(productionConfig(t), priced, "nvidia.com/gpu.product=NVIDIA-l40", 1),
+			`accelerator_types: accelerator type "nvidia.com/gpu.product=NVIDIA-l40" must be written "nvidia.com/gpu.product=NVIDIA-L40"`},
+		"a catalog name with no key": {strings.Replace(productionConfig(t), priced, "L40", 1), `accelerator type "L40" is not a key=value catalog string`},
+		"a shape of an unpriced type": {productionConfig(t) + shape("nvidia.com/gpu.product=NVIDIA-B200"),
+			`cloud_compute a shape "gpu": accelerator_type "nvidia.com/gpu.product=NVIDIA-B200" is not priced in accelerator_types`},
+		"a shape of a type in another casing": {productionConfig(t) + shape("nvidia.com/gpu.product=NVIDIA-l40"),
+			`cloud_compute a shape "gpu": accelerator type "nvidia.com/gpu.product=NVIDIA-l40" must be written`},
+	} {
+		if err := loadText(t, tc.text); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: got %v, want an error saying %q", name, err, tc.want)
+		}
 	}
 }
 

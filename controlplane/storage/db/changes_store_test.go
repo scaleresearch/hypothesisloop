@@ -377,7 +377,7 @@ func TestAJobThatWaitsLongerThanItWasToRunIsAnnouncedAsHeldOnce(t *testing.T) {
 	}
 }
 
-// A baseline job sat building its environment past the point it could end by
+// A baseline job sat queued past the point it could end by
 // baseline_due_at, and its agent, whose stream leaves out a queue reason that waiting clears,
 // slept through it. Such a job is announced to its agent once, as job.held baseline_late.
 func TestABaselineJobThatCannotEndByItsDeadlineIsAnnouncedOnce(t *testing.T) {
@@ -385,9 +385,9 @@ func TestABaselineJobThatCannotEndByItsDeadlineIsAnnouncedOnce(t *testing.T) {
 	ctx := context.Background()
 	agentID, peID, hypothesisID := seedRun(t, pool, "late", true)
 	store := NewStore(pool, 3)
-	queueJob(t, pool, jobOf(agentID, peID, hypothesisID, "late-job", "environment_building: the platform builds it"))
+	queueJob(t, pool, jobOf(agentID, peID, hypothesisID, "late-job", "queued: waiting for a machine"))
 	before := cursorNow(t, pool)
-	const first = "job late-job is QUEUED (environment_building): it cannot end by baseline_due_at"
+	const first = "job late-job is QUEUED (queued): it cannot end by baseline_due_at"
 	if err := store.MarkBaselineLate(ctx, "late-job", domain.HeldBaselineLate+": "+first); err != nil {
 		t.Fatal(err)
 	}

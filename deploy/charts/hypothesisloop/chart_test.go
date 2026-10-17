@@ -147,11 +147,6 @@ func googleCredentialFiles(release *Release, secretName string) map[string]strin
 func TestTheContainerRegistryOfTheValuesReachesTheConfigWithTheGoogleIdentityThatMintsItsTokens(t *testing.T) {
 	release := Render(t, External)
 	env := release.Env(t, "hypothesisloop-control-service", secretNames[External])
-	for name := range env {
-		if strings.HasPrefix(name, "HYPOTHESISLOOP_ENVIRONMENT_BUILDER") {
-			t.Errorf("control-service is handed %s", name)
-		}
-	}
 	files := googleCredentialFiles(release, secretNames[External])
 	if len(files) != 1 || files[env["GOOGLE_APPLICATION_CREDENTIALS"]] != "CONTAINER_REGISTRY_GCP_CREDENTIALS" {
 		t.Errorf("GOOGLE_APPLICATION_CREDENTIALS = %q among the mounted files %v, want the one file of Secret key CONTAINER_REGISTRY_GCP_CREDENTIALS", env["GOOGLE_APPLICATION_CREDENTIALS"], files)
@@ -218,11 +213,9 @@ func TestValuesTheChartCannotUseAreRefusedWithTheirName(t *testing.T) {
 		"no UI origin":                {InCluster, `auth.uiOrigin=""`, "auth.uiOrigin is required"},
 		"no agent image":              {InCluster, `agents.image=""`, "agents.image is required"},
 		"no API address":              {InCluster, `publicAPIURL=""`, "publicAPIURL is required"},
-		"an environment builder":      {InCluster, `environmentBuilder.address=tcp://builder.example.invalid:31234`, "environmentBuilder"},
 		"a registry with no project":  {External, `containerRegistry.gcp.project=""`, "containerRegistry.gcp.project is required"},
 		"a registry with no location": {External, `containerRegistry.gcp.location=""`, "containerRegistry.gcp.location is required"},
 		"accounts of no provider":     {External, `containerRegistry.provider=""`, "without containerRegistry.provider"},
-		"the removed environments":    {External, `environments.repository=x`, "environments"},
 		"no template repository":      {External, `gitHost.experimentTemplateRepository=""`, "gitHost.experimentTemplateRepository is required"},
 		"a sandbox of no provider":    {External, `sandbox.provider=null`, "sandbox"},
 		"the API address per reader":  {InCluster, `agents.apiURL=http://api.example.invalid`, "apiURL"},
