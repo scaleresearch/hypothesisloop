@@ -19,7 +19,7 @@ func (worldRepositories) Reachable(_ context.Context, _, repository string) (str
 
 func (worldRepositories) URL(repository string) string { return worldGitRoot + repository }
 
-func (worldRepositories) File(context.Context, string, string, string) ([]byte, error) {
+func (worldRepositories) File(context.Context, string, string, string, string) ([]byte, error) {
 	panic("the handler read a file from the git host")
 }
 
@@ -39,8 +39,12 @@ func (worldRepositories) CreatesOn(context.Context, string, string) (string, err
 	return "world", nil
 }
 
-func (worldRepositories) Create(_ context.Context, _, _, name, _ string, _ map[string]string) (string, error) {
-	return name, nil
+func (worldRepositories) Create(_ context.Context, _, repository, _ string) (string, string, error) {
+	return repository, "main", nil
+}
+
+func (worldRepositories) HasBranch(context.Context, string, string, string) (bool, error) {
+	return true, nil
 }
 
 // noEnvironments is a git host whose commits declare no environment.

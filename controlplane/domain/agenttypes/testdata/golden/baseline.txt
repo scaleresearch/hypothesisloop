@@ -31,7 +31,7 @@ Read the `description` of `hl platform-experiments get` completely, with `metric
 
 What it takes:
   - The code: {{workdir}}, the directory every command starts in, holds the clone of https://github.com/acme/vision.git
-    (where it is empty, run `git clone https://github.com/acme/vision.git .` there). Work on branch `hl/pe-0193f2a4c5d67e8f9a0b1c2d3e4f5a6c/baseline`; `hl job submit` pushes it. A run that
+    (where it is empty, run `git clone --branch <branch> https://github.com/acme/vision.git .` there, <branch> the `branch` `hl platform-experiments get` answers). Work on branch `hl/pe-0193f2a4c5d67e8f9a0b1c2d3e4f5a6c/baseline`, made from <branch>; `hl job submit` pushes it. A run that
     `continues` another starts that branch from the other's `baseline_code_ref` and measures
     the control with its harness, changed only where it breaks the brief's definition of a
     metric (say so in `README.md`), so the numbers of both compare. A repository

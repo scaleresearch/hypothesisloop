@@ -101,15 +101,15 @@ def start_staging(setup: RunSetup) -> None:
 _CLONE_TIMEOUT_S = 600
 
 
-def clone_workspace(repository_url: str, workdir: str) -> None:
-    """Clones the repository into an empty workdir before the CLI starts in it. The CLI caches
+def clone_workspace(repository_url: str, branch: str, workdir: str) -> None:
+    """Clones branch of the repository into an empty workdir before the CLI starts in it. The CLI caches
     that a directory is no git repository the first time it looks, for as long as it runs: an
     agent that cloned in its first turn had every `isolation: "worktree"` subagent refused with
     "not in a git repository". A clone that fails leaves workdir empty for the agent to clone."""
     if any(Path(workdir).iterdir()):
         return
     try:
-        done = subprocess.run(["git", "clone", repository_url, "."], cwd=workdir, text=True, capture_output=True,
+        done = subprocess.run(["git", "clone", "--branch", branch, repository_url, "."], cwd=workdir, text=True, capture_output=True,
                               timeout=_CLONE_TIMEOUT_S)
     except (OSError, subprocess.TimeoutExpired) as e:
         log.warning("cloning %s into %s failed: %s", repository_url, workdir, e)
@@ -151,9 +151,12 @@ async def prepare() -> RunSetup:
     if not git_url:
         raise SystemExit(f"agent: platform experiment {cfg.platform_experiment_id} names no git_url, the platform's git proxy its repository is reached through")
     git_through_platform(repository_url, git_url)
+    branch = platform_experiment.get("branch")
+    if not branch:
+        raise SystemExit(f"agent: platform experiment {cfg.platform_experiment_id} names no branch, the one an agent clones")
 
     if not config.plans(cfg) and not config.coordinates(cfg):
-        await asyncio.to_thread(clone_workspace, repository_url, workdir)
+        await asyncio.to_thread(clone_workspace, repository_url, branch, workdir)
     commands = await asyncio.to_thread(prompt.hl_commands, cfg)
     instructions.complete(answer, cfg, commands, workdir)
     return RunSetup(cfg=cfg, client=client, commands=commands, workdir=workdir, statedir=statedir)

@@ -3,12 +3,12 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { useSWRConfig } from 'swr'
 import { createExperimentDraft, deleteExperimentDraft, updateExperimentDraft } from '@/lib/api/drafts'
-import { createPlatformExperiment, fetchExperimentFile, NO_EXPERIMENT_FILE, updatePlatformExperiment } from '@/lib/api/platform-experiments'
+import { createPlatformExperiment, EXPERIMENT_FILE_ELSEWHERE, fetchExperimentFile, NO_EXPERIMENT_FILE, updatePlatformExperiment } from '@/lib/api/platform-experiments'
 import type { CreatePlatformExperimentRequest, PlatformExperimentPatch } from '@/types/api'
 import { ApiError } from '@/lib/api/request'
 import { isZeroDate } from '@/lib/format'
 import { useTenant } from '@/lib/tenant'
-import { repositoryFields } from '@/components/repository-select'
+import { codeFields, DEFAULT_BRANCH, namesRepository } from '@/components/repository-select'
 import { ConnectGitHubStep, useNeedsGitHub } from '@/components/connect-github-step'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
@@ -45,7 +45,7 @@ interface FormHandle {
 
 // Every field of the form the repository's experiment file fills, by the words the form names it with.
 const FILE_FIELDS = [
-  ['name', 'the name'], ['description', 'the brief'], ['metrics', 'the metrics'], ['budget_accelerator_hours', 'the budget'],
+  ['branch', 'the branch'], ['name', 'the name'], ['description', 'the brief'], ['metrics', 'the metrics'], ['budget_accelerator_hours', 'the budget'],
   ['max_agents', 'the max researchers'], ['duration_hours', 'the duration'], ['starting_agents', 'the starting agents'],
   ['report_interval_seconds', 'the report interval'], ['stages', 'the stage ladder'], ['max_concurrent_accelerators', 'the max concurrent accelerators'],
   ['agent_image', 'the agent image'], ['coordinator_model', 'the coordinator model'], ['default_quota_tier', 'the default quota tier'],
@@ -78,6 +78,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
     report_interval_seconds: initial?.report_interval_seconds ? String(initial.report_interval_seconds) : '',
     stages: initial?.stages?.length ? toDrafts(initial.stages) : null,
     repository: initial?.repository ?? '',
+    branch: initial?.branch ?? DEFAULT_BRANCH,
     agent_image: initial?.agent_image ?? '',
     coordinator_model: initial?.coordinator?.model ?? '',
     default_quota_tier: initial?.default_quota_tier ?? '',
@@ -173,16 +174,18 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
 
   // A repository may bring its own experiment spec, the one hl platform-experiments start reads.
   // Choosing it fills in every field it states, for the person to read and change before the
-  // whole body is sent. A name or a brief already typed stays.
-  async function chooseRepository(repository: string) {
-    set('repository', repository)
-    if (!repository) return setFromFile(null)
-    setFromFile({ repository, state: 'reading' })
+  // whole body is sent. A name or a brief already typed stays. It is read at the branch named,
+  // and again whenever the repository or the branch changes.
+  async function readFile(repository: string, branch: string) {
+    setForm(f => ({ ...f, repository, branch }))
+    if (!namesRepository(repository) || !branch.trim()) return setFromFile(null)
+    setFromFile({ repository, branch, state: 'reading' })
     try {
-      const file = await fetchExperimentFile(project.id, repository)
+      const file = await fetchExperimentFile(project.id, repository, branch.trim())
       const stated = (value: number | string | undefined, held: string) => value ? String(value) : held
       const next = (f: FormState): FormState => ({
         ...f,
+        branch: stated(file.branch, f.branch),
         name: f.name.trim() || file.name || '',
         description: f.description.trim() || file.description || '',
         metrics: file.metrics?.length ? file.metrics : f.metrics,
@@ -198,11 +201,12 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
         default_quota_tier: stated(file.default_quota_tier, f.default_quota_tier),
       })
       const filled = FILE_FIELDS.filter(([field]) => JSON.stringify(next(form)[field]) !== JSON.stringify(form[field])).map(([, words]) => words)
-      setForm(f => f.repository !== repository ? f : next(f))
-      setFromFile({ repository, state: 'filled', filled })
+      setForm(f => f.repository !== repository || f.branch !== branch ? f : next(f))
+      setFromFile({ repository, branch: stated(file.branch, branch), state: 'filled', filled })
     } catch (err: unknown) {
-      if (err instanceof ApiError && err.reason === NO_EXPERIMENT_FILE) return setFromFile({ repository, state: 'none' })
-      setFromFile({ repository, state: 'failed', message: errorMessage(err) })
+      if (err instanceof ApiError && err.reason === NO_EXPERIMENT_FILE) return setFromFile({ repository, branch, state: 'none' })
+      if (err instanceof ApiError && err.reason === EXPERIMENT_FILE_ELSEWHERE) return setFromFile({ repository, branch, state: 'elsewhere', message: err.message })
+      setFromFile({ repository, branch, state: 'failed', message: errorMessage(err) })
     }
   }
 
@@ -255,7 +259,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
         metrics: form.metrics,
         ...(form.report_interval_seconds.trim() !== '' ? { report_interval_seconds: Number(form.report_interval_seconds) } : {}),
         ...(form.stages ? { stages: toStages(form.stages) } : {}),
-        ...repositoryFields(form.repository),
+        ...codeFields(form.repository, form.branch),
         ...(form.agent_image.trim() ? { agent_image: form.agent_image.trim() } : {}),
         ...(form.coordinator_model.trim() ? { coordinator_model: form.coordinator_model.trim() } : {}),
         ...(form.default_quota_tier ? { default_quota_tier: form.default_quota_tier } : {}),
@@ -292,7 +296,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
   const at = STEPS.findIndex(s => s.id === step)
   const next = STEPS[at + 1]
   const back = STEPS[at - 1]
-  const fileNote = fromFile?.repository === form.repository ? fromFile : null
+  const fileNote = fromFile?.repository === form.repository && fromFile.branch === form.branch ? fromFile : null
   const stepProps = { form, set, isEdit, locked }
 
   return (
@@ -301,7 +305,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
 
       <Stack as="form" gap="xl" onSubmit={handleSubmit}>
         <div ref={panel} role="tabpanel" aria-label={STEPS[at].label} className="grid gap-6">
-          {step === '1' && <StepWhat {...stepProps} fileNote={fileNote} onRepository={r => void chooseRepository(r)} />}
+          {step === '1' && <StepWhat {...stepProps} fileNote={fileNote} onRead={(r, b) => void readFile(r, b)} />}
           {step === '2' && <StepMeasure {...stepProps} />}
           {step === '3' && <StepBudget {...stepProps} />}
         </div>

@@ -187,10 +187,12 @@ type PlatformExperiment struct {
 	Coordinator               *AgentSandboxCoordinator `json:"coordinator,omitempty"`
 
 	// Repository is the code the platform experiment works on, as the deployment's git host
-	// names it, and RepositoryURL the address it is cloned from. AgentImage is the image its sandboxed agents and
-	// coordinator run, empty for the platform's own. All fixed at creation.
+	// names it, RepositoryURL the address it is cloned from and Branch the branch its agents start
+	// from. AgentImage is the image its sandboxed agents and coordinator run, empty for the
+	// platform's own. All fixed at creation.
 	Repository    string `json:"repository,omitempty"`
 	RepositoryURL string `json:"repository_url,omitempty" doc:"The HTTPS address of the repository on the git host. A job's code_ref names it."`
+	Branch        string `json:"branch,omitempty" doc:"The branch of repository the agents clone and start from, and none of them pushes to. Set once repository is."`
 	// GitURL is where what the platform launches reaches the repository: the control plane's git
 	// proxy, with its own platform token. Set on a read of one platform experiment.
 	GitURL string `json:"git_url,omitempty" doc:"Where the agents, the coordinator and the jobs of the platform experiment clone, fetch and push repository_url: the platform's git proxy, which takes their own platform token as the password and refuses a push to any ref but the pusher's own branches. git config url.<git_url>.insteadOf <repository_url> sends git there."`

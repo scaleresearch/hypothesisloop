@@ -14,9 +14,11 @@ import (
 )
 
 // Repository is a repository an installation covers, named owner/name in GitHub's own casing.
+// DefaultBranch is said of one CreateFromTemplate made.
 type Repository struct {
-	FullName string
-	Private  bool
+	FullName      string
+	Private       bool
+	DefaultBranch string
 }
 
 var repositoryName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$`)
@@ -109,7 +111,7 @@ func (c *Client) CreateFromTemplate(ctx context.Context, installationID int64, t
 			return nil, err
 		}
 		if exists {
-			return &Repository{FullName: out.FullName, Private: true}, nil
+			return &Repository{FullName: out.FullName, Private: true, DefaultBranch: out.DefaultBranch}, nil
 		}
 	}
 }

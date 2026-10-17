@@ -282,17 +282,18 @@ def test_watch_nonexistent_experiment_is_refused_without_retry(api, run_id):
     )
 
 
-def test_usage_errors_exit_2(api):
+def test_usage_errors_exit_2(api, tmp_path):
     # -- hl usage errors exit 2 --
     register_gone = api.hl_expect("register", "--id", "jane")
     assert register_gone.returncode == 2 and "unknown command" in register_gone.stderr, (
         f"hl register exited {register_gone.returncode}: {register_gone.stderr}"
     )
     # One file makes one platform experiment: a file that lists several is refused before any request.
-    several = yaml.safe_dump({"experiments": [{"name": "one"}, {"name": "two"}]})
-    listed = api.hl_expect("platform-experiments", "create", "-", input=several)
+    (tmp_path / ".hypothesisloop").mkdir()
+    (tmp_path / ".hypothesisloop" / "experiment.yaml").write_text(yaml.safe_dump({"experiments": [{"name": "one"}, {"name": "two"}]}))
+    listed = api.hl_expect("platform-experiments", "start", str(tmp_path))
     assert listed.returncode == 2 and "experiments" in listed.stderr and not listed.stdout, (
-        f"hl platform-experiments create with an experiments list exited {listed.returncode}: {listed.stderr}"
+        f"hl platform-experiments start with an experiments list exited {listed.returncode}: {listed.stderr}"
     )
     watch_bad = api.hl_expect("watch")
     assert watch_bad.returncode == 2, (

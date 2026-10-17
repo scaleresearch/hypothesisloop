@@ -83,7 +83,8 @@ func registerPlanning(doc *Doc, experiments *platformexperiments.Service, logger
 			"repository_account says which account when the org connected several. 422 github_not_connected, repository_account_required and installation_not_connected as on POST /platform-experiments. " +
 			"A repository the platform creates is created after this answers: the draft is answered without repository and with status_reason repository_creating, and its planner starts once the repository is there. " +
 			"When GitHub does not create it the draft is closed with close_reason repository_not_created, and its status_reason message says what GitHub answered. " +
-			"On a deployment whose git host is plain, repository is a name under the host's root and is required: 422 repository_required without it, repository_not_reachable when it does not answer git. " +
+			"repository and branch are checked as on POST /platform-experiments, and a repository named that does not exist is created from the experiment template. " +
+			"On a deployment whose git host is plain, repository is a name under the host's root and is required: 422 repository_required without it. " +
 			"422 invalid_goal for a goal that is empty or over the length, invalid_continues for a continues that names no closed platform experiment of the project and repository with a declared baseline. 503 agentsandbox_not_configured when the deployment has no sandbox provider to run the planner on.",
 	}, a.createDraft)
 }
@@ -164,7 +165,8 @@ func (a planningAPI) putProposal(ctx context.Context, in *struct {
 type createDraftRequest struct {
 	ProjectID         string `json:"project_id"`
 	Goal              string `json:"goal" doc:"What you want to find out, in a sentence or two. At most 2000 bytes."`
-	Repository        string `json:"repository,omitempty" required:"false" doc:"owner/name on GitHub, covered by an installation the org connected. Left out, the platform creates a private repository on the GitHub account the org connected."`
+	Repository        string `json:"repository,omitempty" required:"false" doc:"owner/name on GitHub, covered by an installation the org connected, created from the experiment template when it does not exist. Left out, the platform creates a private repository on the GitHub account the org connected."`
+	Branch            string `json:"branch,omitempty" required:"false" doc:"The branch of repository its agents clone and start from. Required with repository, and refused without it: a repository the platform creates is worked on at its default branch."`
 	RepositoryAccount string `json:"repository_account,omitempty" required:"false" doc:"The connected GitHub account the new repository is created on. Required only when the org connected several."`
 	Continues         string `json:"continues,omitempty" required:"false" doc:"The id of a closed platform experiment of the same project to carry on, which keeps its code in the repository this one names. Its baseline starts from the commit of that run's baseline job, so both are measured by the same harness. It keeps the metric keys and directions of that run: 422 invalid_metrics for others. Left out, it starts fresh. 422 invalid_continues for one that is no closed platform experiment of the project, keeps its code in another repository or declared no baseline."`
 }
@@ -182,7 +184,7 @@ func (a planningAPI) createDraft(ctx context.Context, in *struct {
 	if err != nil {
 		return nil, err
 	}
-	pe, err := a.experiments.CreateDraft(ctx, in.Body.ProjectID, in.Body.Goal, in.Body.Continues, in.Body.Repository, in.Body.RepositoryAccount, caller.Actor())
+	pe, err := a.experiments.CreateDraft(ctx, in.Body.ProjectID, in.Body.Goal, in.Body.Continues, in.Body.Repository, in.Body.Branch, in.Body.RepositoryAccount, caller.Actor())
 	if err != nil {
 		return nil, err
 	}

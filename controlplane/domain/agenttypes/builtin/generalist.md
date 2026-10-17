@@ -51,7 +51,7 @@ allow one (a null result is refuted).
 
 How you work is yours. What the run expects of you:
   - The code: {{workdir}}, the directory every command starts in, holds the clone of {{repository_url}}
-    (where it is empty, run `git clone {{repository_url}} .` there). `hl hypothesis checkout ID` puts the clone on your branch of hypothesis ID, made
+    (where it is empty, run `git clone --branch <branch> {{repository_url}} .` there, <branch> the `branch` `hl platform-experiments get` answers). `hl hypothesis checkout ID` puts the clone on your branch of hypothesis ID, made
     from the code it builds on (the baseline's for a root child), after a restart too. Its
     harness, environment, `metrics.py` and `.hypothesisloop/job.yaml` stay as they are unless
     the idea is about them. Commit there; `hl job submit` pushes it.

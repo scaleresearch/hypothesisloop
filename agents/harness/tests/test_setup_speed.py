@@ -29,7 +29,7 @@ class PlannerOpeningTest(unittest.TestCase):
     # capacity, the clone, its README and .hypothesisloop/. The harness makes them.
     def test_the_draft_the_capacity_and_the_repository_open_a_fresh_plan(self):
         with tempfile.TemporaryDirectory() as origin, tempfile.TemporaryDirectory() as workdir:
-            git("init", "-q", cwd=origin)
+            git("init", "-q", "-b", "main", cwd=origin)
             os.makedirs(os.path.join(origin, ".hypothesisloop"))
             os.makedirs(os.path.join(origin, "src"))
             for path, text in {"README.md": "# Codec\nRun bench.py.\n", ".hypothesisloop/experiment.yaml": "name: codec\n", "src/codec.py": "x = 1\n"}.items():
@@ -37,7 +37,7 @@ class PlannerOpeningTest(unittest.TestCase):
                     f.write(text)
             git("add", ".", cwd=origin)
             git("commit", "-qm", "init", cwd=origin)
-            draft = json.dumps({"id": "pe-1", "status": "draft", "repository_url": "file://" + origin})
+            draft = json.dumps({"id": "pe-1", "status": "draft", "repository_url": "file://" + origin, "branch": "main"})
             real = seed._run
 
             def fake(command, cwd=None):

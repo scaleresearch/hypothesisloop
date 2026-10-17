@@ -59,10 +59,10 @@ func draftName(goal string) string {
 // CreateDraft creates a platform experiment in status draft from one sentence, with its planner:
 // an agent the platform runs, of role planner. The draft has the planning limit for an end and nothing of a run, no budget among it:
 // the planner proposes the rest and a person accepts it. A repository to be created is created
-// after this returns, by the repository pass it wakes (ProvideRepositories). repository and account
-// say where it keeps its code, as on a create.
-func (s *Service) CreateDraft(ctx context.Context, projectID, goal, continues, repository, account string, by domain.Actor) (*domain.PlatformExperiment, error) {
-	named, err := s.repositoryOf(ctx, projectID, repository, account)
+// after this returns, by the repository pass it wakes (ProvideRepositories). repository, branch and
+// account say where it keeps its code, as on a create.
+func (s *Service) CreateDraft(ctx context.Context, projectID, goal, continues, repository, branch, account string, by domain.Actor) (*domain.PlatformExperiment, error) {
+	named, err := s.repositoryOf(ctx, projectID, repository, branch, account)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +70,7 @@ func (s *Service) CreateDraft(ctx context.Context, projectID, goal, continues, r
 	if err != nil {
 		return nil, err
 	}
-	pe, err := s.createDraft(ctx, projectID, goal, continues, by, choice)
+	pe, err := s.createDraft(ctx, projectID, goal, continues, branch, by, choice)
 	var answered interface{ GetStatus() int }
 	if errors.As(err, &answered) {
 		return nil, err
@@ -81,7 +81,7 @@ func (s *Service) CreateDraft(ctx context.Context, projectID, goal, continues, r
 	return pe, nil
 }
 
-func (s *Service) createDraft(ctx context.Context, projectID, goal, continues string, by domain.Actor, repository RepositoryChoice) (*domain.PlatformExperiment, error) {
+func (s *Service) createDraft(ctx context.Context, projectID, goal, continues, branch string, by domain.Actor, repository RepositoryChoice) (*domain.PlatformExperiment, error) {
 	planning, launch := s.planning, s.launch
 	goal, err := checkGoal(goal)
 	if err != nil {
@@ -130,6 +130,7 @@ func (s *Service) createDraft(ctx context.Context, projectID, goal, continues st
 		MaxAgentSandboxes:     launch.MaxAgentSandboxes,
 		Repository:            repository.Named,
 		RepositoryURL:         repository.URL,
+		Branch:                branch,
 		RepositoryAccount:     repository.CreateOn,
 		CreatedAt:             now,
 		UpdatedAt:             now,

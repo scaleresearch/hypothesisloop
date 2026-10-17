@@ -1,8 +1,8 @@
 import { apiSend } from '@/lib/api/request'
 import type { AcceptRequest, PlatformExperiment } from '@/types/api'
 
-export function createDraft(projectID: string, goal: string, repository: { repository?: string; repository_account?: string } = {}): Promise<PlatformExperiment> {
-  return apiSend<PlatformExperiment>('POST', '/platform-experiments/drafts', { project_id: projectID, goal, ...repository })
+export function createDraft(projectID: string, goal: string, code: { repository?: string; repository_account?: string; branch?: string } = {}): Promise<PlatformExperiment> {
+  return apiSend<PlatformExperiment>('POST', '/platform-experiments/drafts', { project_id: projectID, goal, ...code })
 }
 
 /**

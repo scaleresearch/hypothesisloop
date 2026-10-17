@@ -203,6 +203,7 @@ func (s *Service) Create(ctx context.Context, req CreatePlatformExperimentReques
 		MaxAgentSandboxes:         req.maxAgentSandboxes,
 		Repository:                req.repository.Named,
 		RepositoryURL:             req.repository.URL,
+		Branch:                    req.Branch,
 		RepositoryAccount:         req.repository.CreateOn,
 		AgentImage:                req.AgentImage,
 		Continues:                 req.Continues,
@@ -298,9 +299,10 @@ func noPlatformExperiment(id string) error {
 }
 
 // CreateExperiment creates the platform experiment req asks for, for by: in the repository it
-// names or one the platform creates, and with the sandboxed agents its pool names.
+// names, created from the experiment template when it does not exist, or one the platform
+// creates, and with the sandboxed agents its pool names.
 func (s *Service) CreateExperiment(ctx context.Context, req CreatePlatformExperimentRequest, by domain.Actor) (*domain.PlatformExperiment, error) {
-	named, err := s.repositoryOf(ctx, req.ProjectID, req.Repository, req.RepositoryAccount)
+	named, err := s.repositoryOf(ctx, req.ProjectID, req.Repository, req.Branch, req.RepositoryAccount)
 	if err != nil {
 		return nil, err
 	}

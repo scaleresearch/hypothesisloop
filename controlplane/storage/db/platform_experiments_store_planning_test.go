@@ -147,13 +147,13 @@ func TestNoMachineIsWantedBeforeTheRepositoryIsRecorded(t *testing.T) {
 	if !awaiting(given.ID) || len(wanted()) != 0 {
 		t.Fatalf("a draft without its repository: awaiting %v, planners wanted %v, want it awaiting and none", awaiting(given.ID), wanted())
 	}
-	if err := pes.GiveRepository(ctx, given.ID, "acme/a-goal", "https://github.com/acme/a-goal.git"); err != nil {
+	if err := pes.GiveRepository(ctx, given.ID, "acme/a-goal", "https://github.com/acme/a-goal.git", "main"); err != nil {
 		t.Fatal(err)
 	}
 	if awaiting(given.ID) || !slices.Equal(wanted(), []string{planner}) {
 		t.Fatalf("a draft given its repository: awaiting %v, planners wanted %v, want its planner", awaiting(given.ID), wanted())
 	}
-	if err := pes.GiveRepository(ctx, given.ID, "acme/other", ""); !errors.Is(err, ErrRepositoryNotAwaited) {
+	if err := pes.GiveRepository(ctx, given.ID, "acme/other", "", "main"); !errors.Is(err, ErrRepositoryNotAwaited) {
 		t.Fatalf("giving a second repository: %v, want ErrRepositoryNotAwaited", err)
 	}
 
@@ -179,7 +179,7 @@ func TestNoMachineIsWantedBeforeTheRepositoryIsRecorded(t *testing.T) {
 	if err := pes.TellCoordinator(ctx, whole.ID, "baseline_required"); err != nil {
 		t.Fatal(err)
 	}
-	if err := pes.GiveRepository(ctx, whole.ID, "acme/whole", "https://github.com/acme/whole.git"); err != nil || coordinators() != 1 {
+	if err := pes.GiveRepository(ctx, whole.ID, "acme/whole", "https://github.com/acme/whole.git", "main"); err != nil || coordinators() != 1 {
 		t.Fatalf("given its repository: %v, %d coordinators wanted, want its coordinator", err, coordinators())
 	}
 

@@ -35,7 +35,7 @@ where a new method could reach the target. A seat that tunes, repeats another or
 it gets a new direction by message; before the run starts it is replaced instead (`agents
 remove`, then `agents add`).
 
-To read what the agents start from, run `git clone {{repository_url}} .` in {{workdir}}.
+To read what the agents start from, run `git clone --branch <branch> {{repository_url}} .` in {{workdir}}, <branch> the `branch` `hl platform-experiments get` answers.
 Each agent pushes a branch per hypothesis under `hl/{{platform_experiment_id}}/`. Your access is
 read-only, and nothing you write locally outlives your machine.
 

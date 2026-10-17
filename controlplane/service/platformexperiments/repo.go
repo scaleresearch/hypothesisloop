@@ -75,13 +75,7 @@ func (s *Service) ProvideRepositories(ctx context.Context) error {
 	}
 	for _, one := range pending {
 		pe := &domain.PlatformExperiment{ID: one.ID, Name: one.Name}
-		repository := one.Account + "/" + RepositoryName(pe)
-		created, err := s.repos.Create(ctx, one.ProjectID, repository, "Platform experiment "+pe.ID+": "+pe.Name)
-		// The name carries the experiment's id, so one that exists is what an earlier pass created
-		// and a restart left unrecorded.
-		if refusal.ReasonOf(err) == "repository_exists" {
-			created, err = s.repos.Reachable(ctx, one.ProjectID, repository)
-		}
+		created, branch, err := s.repos.Create(ctx, one.ProjectID, one.Account+"/"+RepositoryName(pe), "Platform experiment "+pe.ID+": "+pe.Name)
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -93,7 +87,7 @@ func (s *Service) ProvideRepositories(ctx context.Context) error {
 			}
 			continue
 		}
-		if err := s.store.GiveRepository(ctx, one.ID, created, s.repos.URL(created)); err != nil {
+		if err := s.store.GiveRepository(ctx, one.ID, created, s.repos.URL(created), branch); err != nil {
 			log.Error("provide_repositories: record the repository", zap.String("repository", created), zap.Error(err))
 			continue
 		}
@@ -136,52 +130,107 @@ func (s *Service) StartRepositoryPass(ctx context.Context, interval, passTimeout
 	}
 }
 
-// repositoryOf checks what a request says of its repository: the one it names must be reachable
-// and is returned as the git host names it, and an account is said only for one to be created.
-func (s *Service) repositoryOf(ctx context.Context, projectID, repository, account string) (string, error) {
+// repositoryOf checks what a request says of its repository and branch: the repository it names
+// is created from the experiment template when it does not exist (EnsureRepository) and returned
+// as the git host names it, and must have the branch. An account is said only for a repository
+// the platform creates later, which states no branch: its default one is recorded with it.
+func (s *Service) repositoryOf(ctx context.Context, projectID, repository, branch, account string) (string, error) {
 	if repository == "" {
+		if branch != "" {
+			return "", refusal.Refuse(http.StatusUnprocessableEntity, "invalid_request", "branch names a branch of the repository named, and none is: a repository the platform creates is worked on at its default branch")
+		}
 		return "", nil
 	}
 	if account != "" {
-		return "", refusal.Refuse(http.StatusUnprocessableEntity, "invalid_request", "repository_account says where a new repository is created and repository names an existing one: state one of them")
+		return "", refusal.Refuse(http.StatusUnprocessableEntity, "invalid_request", "repository_account says where a new repository is created and repository names one: state one of them")
 	}
-	return s.repos.Reachable(ctx, projectID, repository)
+	if err := experimentspec.ValidateBranch(branch); err != nil {
+		return "", refusal.Refuse(http.StatusUnprocessableEntity, "invalid_branch", err.Error()+": branch is required with repository")
+	}
+	named, err := s.EnsureRepository(ctx, projectID, repository)
+	if err != nil {
+		return "", err
+	}
+	has, err := s.repos.HasBranch(ctx, projectID, named, branch)
+	if err != nil {
+		return "", err
+	}
+	if !has {
+		return "", refusal.Refuse(http.StatusUnprocessableEntity, "branch_not_found", named+" has no branch "+branch+": push it, or name a branch it has")
+	}
+	return named, nil
 }
 
-// ExperimentFile is the spec a repository keeps at experimentspec.ExperimentFile, which a form shows before
-// anything is created.
+// EnsureRepository returns the repository as the git host names it, created from the experiment
+// template when the platform cannot reach it.
+func (s *Service) EnsureRepository(ctx context.Context, projectID, repository string) (string, error) {
+	named, err := s.repos.Reachable(ctx, projectID, repository)
+	if refusal.ReasonOf(err) != "repository_not_reachable" {
+		return named, err
+	}
+	created, _, err := s.repos.Create(ctx, projectID, repository, "")
+	if refusal.ReasonOf(err) == "repository_exists" {
+		return "", refusal.Refuse(http.StatusUnprocessableEntity, "repository_not_reachable", repository+" exists and the platform cannot reach it: its owner gives the platform access to it")
+	}
+	if err != nil {
+		return "", err
+	}
+	s.logger.Info("repository created from the experiment template", zap.String("project_id", projectID), zap.String("repository", created))
+	return created, nil
+}
+
+// RepositoryURL is where the repository is cloned from.
+func (s *Service) RepositoryURL(repository string) string { return s.repos.URL(repository) }
+
+// ExperimentFile is the experiment file of a repository with where it was read, which a form
+// shows before anything is created.
 type ExperimentFile struct {
-	experimentspec.Spec
-	Repository string `json:"repository" doc:"The repository read, as the git host names it."`
+	experimentspec.File
 }
 
-// ReadExperimentFile reads the experiment file of a repository the project's org reaches, and
-// creates nothing.
-func (s *Service) ReadExperimentFile(ctx context.Context, projectID, repository string) (*ExperimentFile, error) {
+// ReadExperimentFile reads the experiment file of a repository the project's org reaches at
+// branch, and creates nothing. It answers the file with where it was read: one that places the
+// experiment elsewhere is refused experiment_file_elsewhere.
+func (s *Service) ReadExperimentFile(ctx context.Context, projectID, repository, branch string) (*ExperimentFile, error) {
+	if err := experimentspec.ValidateBranch(branch); err != nil {
+		return nil, refusal.Refuse(http.StatusUnprocessableEntity, "invalid_branch", err.Error())
+	}
 	named, err := s.repos.Reachable(ctx, projectID, repository)
 	if err != nil {
 		return nil, err
 	}
-	data, err := s.repos.File(ctx, projectID, named, "", experimentspec.ExperimentFile)
+	at := experimentspec.ExperimentFile + " at " + branch + " of " + named
+	data, err := s.repos.File(ctx, projectID, named, branch, experimentspec.ExperimentFile)
 	if errors.Is(err, githost.ErrFileNotFound) {
-		return nil, refusal.Refuse(http.StatusUnprocessableEntity, "no_experiment_file", named+" has no "+experimentspec.ExperimentFile)
+		return nil, refusal.Refuse(http.StatusUnprocessableEntity, "no_experiment_file", named+" has no "+experimentspec.ExperimentFile+" at "+branch)
 	}
 	if err != nil {
 		return nil, err
 	}
-	spec, err := experimentspec.Parse(data)
+	file, err := experimentspec.Parse(data)
 	if err != nil {
-		return nil, refusal.Refuse(http.StatusUnprocessableEntity, "invalid_experiment_file", experimentspec.ExperimentFile+" of "+named+" cannot be used: "+err.Error())
+		return nil, refusal.Refuse(http.StatusUnprocessableEntity, "invalid_experiment_file", at+" cannot be used: "+err.Error())
 	}
-	return &ExperimentFile{Repository: named, Spec: spec}, nil
+	stated := file.Placement
+	if (stated.ProjectID != "" && stated.ProjectID != projectID) || (stated.Repository != "" && !strings.EqualFold(stated.Repository, named)) || (stated.Branch != "" && stated.Branch != branch) {
+		return nil, refusal.Refuse(http.StatusUnprocessableEntity, "experiment_file_elsewhere", fmt.Sprintf("%s places the experiment in project %q, repository %q, branch %q: read it there", at, stated.ProjectID, stated.Repository, stated.Branch))
+	}
+	file.Placement = experimentspec.Placement{ProjectID: projectID, Repository: named, Branch: branch}
+	return &ExperimentFile{File: file}, nil
 }
 
 // CheckRepository answers where a platform experiment of projectID naming repository on account
-// would keep its code, as its create would, and creates nothing.
+// would keep its code, and creates nothing: a repository named must be reachable.
 func (s *Service) CheckRepository(ctx context.Context, projectID, repository, account string) (RepositoryCheck, error) {
-	named, err := s.repositoryOf(ctx, projectID, repository, account)
-	if err != nil {
-		return RepositoryCheck{}, err
+	if repository != "" && account != "" {
+		return RepositoryCheck{}, refusal.Refuse(http.StatusUnprocessableEntity, "invalid_request", "repository_account says where a new repository is created and repository names one: state one of them")
+	}
+	named := ""
+	if repository != "" {
+		var err error
+		if named, err = s.repos.Reachable(ctx, projectID, repository); err != nil {
+			return RepositoryCheck{}, err
+		}
 	}
 	choice, err := s.chooseRepository(ctx, projectID, named, account)
 	if err != nil {

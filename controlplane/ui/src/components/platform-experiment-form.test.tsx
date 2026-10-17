@@ -253,13 +253,13 @@ describe('a repository that brings its own experiment', () => {
     show()
     await chooseRepository('acme/widgets')
     await waitFor(() => expect(name()).toHaveProperty('value', 'Widget compression'))
-    expect(fetchExperimentFile).toHaveBeenCalledExactlyOnceWith('prj_1', 'acme/widgets')
+    expect(fetchExperimentFile).toHaveBeenCalledExactlyOnceWith('prj_1', 'acme/widgets', 'main')
     await next()
     await next()
     await create()
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
     expect(sent()).toMatchObject({
-      name: 'Widget compression', description: 'Make widgets smaller.', report_interval_seconds: 10, repository: 'acme/widgets',
+      name: 'Widget compression', description: 'Make widgets smaller.', report_interval_seconds: 10, repository: 'acme/widgets', branch: 'main',
       budget_accelerator_hours: 3, max_agents: 4, duration_hours: 6,
       metrics: [{ key: 'compression_ratio', direction: 'maximize', role: 'ranking' }], stages: [{ length_pct: 100, evict_pct: 0, max_job_hours: 0 }],
     })

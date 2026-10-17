@@ -34,7 +34,7 @@ import requests
 import yaml
 
 from support import admin, vendors
-from support.api import API
+from support.api import API, SANDBOX_BRANCH
 from support.wait import Deadline, eventually
 
 pytestmark = [pytest.mark.real_providers, pytest.mark.exclusive, pytest.mark.timeout(3600)]
@@ -91,7 +91,7 @@ def test_a_sandboxed_experiment_runs_end_to_end_on_rented_machines_and_survives_
     # and metrics, which point at mlp/job.yaml there, and leaves the rest to the platform.
     stated = yaml.safe_load((Path(__file__).parent / "real_providers_experiment.yaml").read_text())
     created = org.post("/platform-experiments", {
-        "project_id": org.project_id, "repository": os.environ["TEST_GIT_HOST_GITHUB_REPOSITORY"],
+        "project_id": org.project_id, "repository": os.environ["TEST_GIT_HOST_GITHUB_REPOSITORY"], "branch": SANDBOX_BRANCH,
         "description": stated["description"], "metrics": stated["metrics"],
         "name": f"real-providers-{run_id}", "budget_accelerator_hours": 1, "max_agents": 3,
         "coordinator_in_agentsandbox": True, "duration_hours": 24,

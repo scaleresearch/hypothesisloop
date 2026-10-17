@@ -104,7 +104,7 @@ func (f *rosterStore) Reachable(_ context.Context, _, repository string) (string
 
 func (f *rosterStore) URL(string) string { return "" }
 
-func (f *rosterStore) File(context.Context, string, string, string) ([]byte, error) {
+func (f *rosterStore) File(context.Context, string, string, string, string) ([]byte, error) {
 	return nil, nil
 }
 
@@ -118,8 +118,12 @@ func (f *rosterStore) FileAt(context.Context, string, string, string, string) ([
 	return nil, githost.ErrFileNotFound
 }
 
-func (f *rosterStore) Create(context.Context, string, string, string, string, map[string]string) (string, error) {
-	return "", nil
+func (f *rosterStore) Create(context.Context, string, string, string) (string, string, error) {
+	return "", "", nil
+}
+
+func (f *rosterStore) HasBranch(context.Context, string, string, string) (bool, error) {
+	return true, nil
 }
 
 func (f *rosterStore) CreatesOn(context.Context, string, string) (string, error) { return "", nil }

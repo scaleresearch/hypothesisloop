@@ -127,8 +127,11 @@ func (s *Service) checkProposal(ctx context.Context, p *Proposal, draft *domain.
 	if err != nil {
 		return CreatePlatformExperimentRequest{}, err
 	}
-	spec, err := experimentspec.Parse(p.Experiment)
-	experiment := CreatePlatformExperimentRequest{Spec: spec}
+	file, err := experimentspec.Parse(p.Experiment)
+	if err == nil && file.Placement != (experimentspec.Placement{}) {
+		err = errors.New("project_id, repository and branch are the draft's and no part of a proposal")
+	}
+	experiment := CreatePlatformExperimentRequest{Spec: file.Spec}
 	decoded := err == nil
 	if !decoded {
 		refuse("invalid_experiment", "experiment: %s", err)

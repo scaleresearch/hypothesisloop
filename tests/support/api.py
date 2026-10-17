@@ -28,6 +28,10 @@ from .wait import Deadline, eventually
 REPO_ROOT = Path(__file__).resolve().parents[2]
 # The subprotocol GET /watch speaks, offered beside the token.
 WATCH_SUBPROTOCOL = "hypothesisloop.watch"
+
+# The branch of the sandbox repository a create names when the test names none: the default branch
+# of the experiment template the platform creates a repository from.
+SANDBOX_BRANCH = "main"
 # The statuses a job ends in (platformapi.EndedStatuses).
 ENDED = frozenset({"COMPLETED", "FAILED", "EVICTED", "REJECTED", "CANCELLED"})
 JOB_SPEC_PATH = REPO_ROOT / "tests" / "workloads" / "generic" / "job.yaml"
@@ -184,8 +188,8 @@ class API:
         self.repository: str | None = None
         self.session = requests.Session()
         self.session.headers["Authorization"] = f"Bearer {token}"
-        # Every platform experiment created through hl by this caller and the callers made from
-        # it, closed by conftest at session end.
+        # Every platform experiment created through create_platform_experiment by this caller and
+        # the callers made from it, closed by conftest at session end.
         self.created_platform_experiments: list[str] = []
         # The session's staff caller, which every other caller is made from.
         self.staff: API = self
@@ -204,8 +208,6 @@ class API:
         )
         if proc.returncode != 0:
             raise HLError(cmd, proc.returncode, proc.stdout + proc.stderr)
-        if args[:2] == ("platform-experiments", "create"):
-            self.created_platform_experiments.append(json.loads(proc.stdout)["id"])
         return proc.stdout
 
     # Whether the stack keeps its code on GitHub, the orgs the sandbox installation is already
@@ -215,11 +217,12 @@ class API:
     local_repository: Path | None = None
 
     def sandbox_repository(self) -> str:
-        """The repository a create names when the test names none. On a stack whose git host is
-        GitHub it is the sandbox one, since a create that names none would have the platform
-        create a new repository on github.com each time, and the installation that covers it is
-        connected to this caller's org first. On any other stack it is a bare repository made
-        once for the session in the directory the local git server serves (HL_E2E_GIT_ROOT)."""
+        """The repository a create names when the test names none, worked on at SANDBOX_BRANCH. On a
+        stack whose git host is GitHub it is the sandbox one, since a create that names none would
+        have the platform create a new repository on github.com each time, and the installation
+        that covers it is connected to this caller's org first. On any other stack it is one name
+        for the session under the directory the local git server serves (HL_E2E_GIT_ROOT), which
+        the first create that names it has the platform create from the experiment template."""
         if API._github_app is None:
             API._github_app = self.get("/github/app").status_code != 503
         if not API._github_app:
@@ -227,11 +230,8 @@ class API:
                 root = os.environ.get("HL_E2E_GIT_ROOT")
                 if not root:
                     raise RuntimeError(
-                        "this stack keeps its code on its own git server, where the platform creates no repository: "
-                        "set HL_E2E_GIT_ROOT to the directory that server serves (make e2e does)")
-                created = Path(root) / f"e2e-{uuid.uuid4().hex[:8]}.git"
-                subprocess.run(["git", "init", "-q", "--bare", str(created)], check=True)
-                API.local_repository = created
+                        "this stack keeps its code on its own git server: set HL_E2E_GIT_ROOT to the directory that server serves (make e2e does)")
+                API.local_repository = Path(root) / f"e2e-{uuid.uuid4().hex[:8]}.git"
             return API.local_repository.name
         installation, repository = os.environ.get("TEST_GIT_HOST_GITHUB_INSTALLATION"), os.environ.get("TEST_GIT_HOST_GITHUB_REPOSITORY")
         if not installation or not repository:
@@ -311,7 +311,7 @@ class API:
 
     def post(self, path: str, json_body: dict | None = None, **kw) -> requests.Response:
         if path in ("/platform-experiments", "/platform-experiments/drafts") and json_body is not None and "repository" not in json_body:
-            json_body = {**json_body, "repository": self.repository or self.sandbox_repository()}
+            json_body = {**json_body, "repository": self.repository or self.sandbox_repository(), "branch": SANDBOX_BRANCH}
         return self.session.post(self._url(path), json=json_body, timeout=30, **kw)
 
     def put(self, path: str, json_body: dict | None = None, **kw) -> requests.Response:
@@ -371,9 +371,12 @@ class API:
             body["stages"] = stages
         if max_concurrent_accelerators is not None:
             body["max_concurrent_accelerators"] = max_concurrent_accelerators
+        body["project_id"] = self.project_id
         body["repository"] = repository or self.repository or self.sandbox_repository()
-        out = self.hl("platform-experiments", "create", "-", input=yaml.safe_dump(body, sort_keys=False))
-        return json.loads(out)["id"]
+        body["branch"] = SANDBOX_BRANCH
+        pe_id = self.post_json("/platform-experiments", body)["id"]
+        self.created_platform_experiments.append(pe_id)
+        return pe_id
 
     # ---- clusters (autoscaler.md) -----------------------------------------------------------
 

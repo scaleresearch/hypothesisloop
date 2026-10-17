@@ -12,9 +12,9 @@ import { useGitHubApp } from '@/lib/github-connect'
 import { GOAL_EXAMPLES } from '@/lib/goal-examples'
 import { BriefGuide } from '@/components/brief-guide'
 import { InstallGitHub, useGitHub } from '@/components/connect-github-step'
-import { RepositorySelect, repositoryFields } from '@/components/repository-select'
+import { codeFields, DEFAULT_BRANCH, namesRepository, RepositorySelect } from '@/components/repository-select'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/input'
+import { Input, Textarea } from '@/components/ui/input'
 import { Inline } from '@/components/ui/stack'
 import { Callout, InlineError } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
@@ -95,6 +95,7 @@ export function GoalInput({ projectID, onCreated, onConfigure }: {
   const agentSandbox = useSWR(keys.agentSandbox(), fetchAgentSandbox, { refreshInterval: POLL.standing, onSuccess: h => { if (h.available) setRefused(null) } })
   const unavailable = agentSandbox.data && !agentSandbox.data.available ? agentSandbox.data.unavailable ?? null : refused
   const [repository, setRepository] = useState('')
+  const [branch, setBranch] = useState(DEFAULT_BRANCH)
   const box = useRef<HTMLTextAreaElement>(null)
   const placeholder = useTypedExamples(touched)
 
@@ -113,7 +114,7 @@ export function GoalInput({ projectID, onCreated, onConfigure }: {
     setSending(true)
     setError(null)
     try {
-      onCreated(await createDraft(projectID, goal.trim(), repositoryFields(repository)))
+      onCreated(await createDraft(projectID, goal.trim(), codeFields(repository, branch)))
     } catch (e) {
       const agentSandboxReason = agentSandboxRefusal(e)
       if (agentSandboxReason) {
@@ -128,7 +129,7 @@ export function GoalInput({ projectID, onCreated, onConfigure }: {
     setMoving(true)
     setError(null)
     try {
-      onConfigure(await formDraftFromGoal(projectID, goal.trim(), repository))
+      onConfigure(await formDraftFromGoal(projectID, goal.trim(), repository, branch))
     } catch (e) {
       setError(`Could not save your text as a draft: ${errorMessage(e)}`)
     }
@@ -171,6 +172,12 @@ export function GoalInput({ projectID, onCreated, onConfigure }: {
           <Field className="flex min-w-0 items-center gap-2 pl-2">
             <Label className="text-sm text-muted">Repository</Label>
             <RepositorySelect compact value={repository} onChange={setRepository} />
+          </Field>
+        )}
+        {(github === 'connected' || plainHost) && namesRepository(repository) && (
+          <Field className="flex items-center gap-2">
+            <Label className="text-sm text-muted">Branch</Label>
+            <Input mono className="w-32" value={branch} onChange={e => setBranch(e.target.value)} />
           </Field>
         )}
         {github === 'unconnected' && (

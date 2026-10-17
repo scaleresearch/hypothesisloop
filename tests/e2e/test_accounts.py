@@ -103,11 +103,10 @@ def test_an_api_key_runs_its_org_through_hl(orgs):
     assert bound.get_json(f"/platform-experiments/{pe_id}")["project_id"] == project["id"]
     assert pe_id in bound.hl("platform-experiments", "list")
     assert pe_id not in a.api.hl("platform-experiments", "list", "--project", a.project_id)
-    with pytest.raises(HLError, match="404"):
-        bound.hl("platform-experiments", "create", "--project", a.project_id, "-",
-                 input=json.dumps({"name": "outside", "description": "outside", "budget_accelerator_hours": 1, "max_agents": 1,
-                                   "report_interval_seconds": 10, "duration_hours": 24,
-                                   "metrics": [{"key": "val_accuracy", "direction": "maximize"}]}))
+    outside = bound.post("/platform-experiments", {"project_id": a.project_id, "name": "outside", "description": "outside",
+                                                   "budget_accelerator_hours": 1, "max_agents": 1, "report_interval_seconds": 10,
+                                                   "duration_hours": 24, "metrics": [{"key": "val_accuracy", "direction": "maximize"}]})
+    assert outside.status_code == 404, outside.text
 
     assert [p["id"] for p in bound.get_json(f"/orgs/{a.org_id}/projects")["projects"]] == [project["id"]]
     assert [p["id"] for p in bound.get_json("/me")["projects"]] == [project["id"]]

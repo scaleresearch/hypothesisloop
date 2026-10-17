@@ -3,12 +3,10 @@ package github
 import (
 	"crypto/rand"
 	"crypto/rsa"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/contract/repotemplate"
+	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
 	"github.com/scaleresearch/hypothesisloop/controlplane/config"
 )
 
@@ -26,8 +24,8 @@ import (
 //	TEST_GIT_HOST_GITHUB_KEY_FILE       a file holding its private key
 //	TEST_GIT_HOST_GITHUB_INSTALLATION   an installation of it, for the token checks
 //	TEST_GIT_HOST_GITHUB_REPOSITORY     owner/name of a sandbox repository that installation
-//	                                    covers, which the push check and the first-commit check
-//	                                    may each make a branch in and delete again
+//	                                    covers, which the push check may make a branch in and
+//	                                    delete again
 //	TEST_GIT_HOST_GITHUB_CREATE_INSTALLATION  an installation on an organisation or a personal
 //	                                    account, for the creation check, which also needs
 //	                                    TEST_GIT_HOST_GITHUB_CREATE=1
@@ -204,6 +202,8 @@ func liveGit(t *testing.T, dir, token string, args ...string) (string, error) {
 	return strings.ReplaceAll(string(out), token, "<token>"), err
 }
 
+const liveTemplate = "scaleresearch/hypothesisloop-experiment-template"
+
 // A read token clones and cannot push. A write token pushes a branch, and the branch is deleted.
 // Creating leaves a repository behind that the App cannot delete, so it runs only when asked to
 // by name: TEST_GIT_HOST_GITHUB_CREATE=1, on the installation
@@ -219,74 +219,25 @@ func TestLiveARepositoryIsCreatedAndCoveredByItsInstallation(t *testing.T) {
 		t.Fatalf("Installation(%d) = %v", installation, err)
 	}
 	name := "hl-live-create-" + strconv.FormatInt(client.now().Unix(), 10)
-	created, err := client.CreateRepository(t.Context(), installation, name, "Created by the platform's live check. Safe to delete.", map[string]string{"README.md": "Created by the platform's live check. Safe to delete.\n"})
+	created, err := client.CreateFromTemplate(t.Context(), installation, liveTemplate, name, "Created by the platform's live check. Safe to delete.")
 	if err != nil {
-		t.Fatalf("CreateRepository(%s) = %v", name, err)
+		t.Fatalf("CreateFromTemplate(%s) = %v", name, err)
 	}
 	t.Logf("created %s: delete it by hand", created.FullName)
 	token, err := client.Token(t.Context(), installation, created.FullName, Write)
 	if err != nil || token.Repository != created.FullName {
 		t.Fatalf("a write token for %s: got = %+v, %v, want one: the installation covers what it created", created.FullName, token != nil, err)
 	}
-}
-
-// The calls that give a created repository its first commit, made on a branch of the sandbox
-// that stands in for a new repository's default branch and is deleted again.
-func TestLiveFirstCommitReplacesWhatABranchHeld(t *testing.T) {
-	client := liveClient(t)
-	installation := liveID(t, "TEST_GIT_HOST_GITHUB_INSTALLATION")
-	name := os.Getenv("TEST_GIT_HOST_GITHUB_REPOSITORY")
-	if ValidRepository(name) != nil {
-		t.Skip("TEST_GIT_HOST_GITHUB_REPOSITORY is not set to owner/name")
-	}
-	write, err := client.Token(ctx, installation, name, Write)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var repository struct {
-		DefaultBranch string `json:"default_branch"`
-	}
-	var head struct {
-		Object struct {
-			SHA string `json:"sha"`
-		} `json:"object"`
-	}
-	if err := client.call(ctx, http.MethodGet, "/repos/"+name, write.Value, nil, &repository); err != nil {
-		t.Fatal(err)
-	}
-	if err := client.call(ctx, http.MethodGet, "/repos/"+name+"/git/ref/heads/"+repository.DefaultBranch, write.Value, nil, &head); err != nil {
-		t.Fatal(err)
-	}
-	suffix := make([]byte, 4)
-	rand.Read(suffix) //nolint:errcheck
-	branch := fmt.Sprintf("hl/live-check/%x", suffix)
-	if err := client.call(ctx, http.MethodPost, "/repos/"+name+"/git/refs", write.Value, map[string]string{"ref": "refs/heads/" + branch, "sha": head.Object.SHA}, nil); err != nil {
-		t.Fatalf("create branch %s in the sandbox: %v", branch, err)
-	}
-	t.Cleanup(func() {
-		if err := client.call(ctx, http.MethodDelete, "/repos/"+name+"/git/refs/heads/"+branch, write.Value, nil, nil); err != nil {
-			t.Errorf("delete branch %s from the sandbox: %v", branch, err)
+	for _, path := range []string{experimentspec.Readme, experimentspec.ExperimentFile, experimentspec.JobSpec, experimentspec.Environment} {
+		if _, err := client.File(t.Context(), token, "", path); err != nil {
+			t.Errorf("File(%s) on %s = %v, want the template's", path, created.FullName, err)
 		}
-	})
-
-	files := repotemplate.Files()
-	if err := client.firstCommit(ctx, write, branch, files); err != nil {
-		t.Fatalf("firstCommit on %s: %v", branch, err)
 	}
-	var commit struct {
-		Parents []json.RawMessage `json:"parents"`
-		Files   []json.RawMessage `json:"files"`
+	if found, err := client.HasBranch(t.Context(), token, created.DefaultBranch); err != nil || !found {
+		t.Errorf("HasBranch of the default branch %q = %v, %v, want true", created.DefaultBranch, found, err)
 	}
-	if err := client.call(ctx, http.MethodGet, "/repos/"+name+"/commits/"+url.PathEscape(branch), write.Value, nil, &commit); err != nil {
-		t.Fatal(err)
-	}
-	if len(commit.Parents) != 0 || len(commit.Files) != len(files) {
-		t.Fatalf("the branch's head has %d parents and %d files, want no parent and the %d files of the template", len(commit.Parents), len(commit.Files), len(files))
-	}
-	for path, want := range files {
-		if data, err := client.File(ctx, write, branch, path); err != nil || string(data) != want {
-			t.Errorf("File(%s) on %s = %d bytes, %v, want the template's %d", path, branch, len(data), err, len(want))
-		}
+	if found, err := client.HasBranch(t.Context(), token, "a-branch-nobody-made-7c1f"); err != nil || found {
+		t.Errorf("HasBranch of a branch nobody made = %v, %v, want false", found, err)
 	}
 }
 

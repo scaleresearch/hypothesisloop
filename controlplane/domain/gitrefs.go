@@ -7,10 +7,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/contract/gitrefs"
 )
 
-// DefaultBranch is the branch hl repo init gives a repository that has none, as its first and
-// empty commit. Once it exists no agent writes it.
-const DefaultBranch = "main"
-
 // BuildsGitPath is where under the git proxy an environment build reads the repository it is of.
 const BuildsGitPath = "builds"
 
@@ -37,18 +33,10 @@ type RefUpdate struct {
 // experiment platformExperimentID, "" when it may. An agent writes branches alone, and only its
 // own: a baseline agent the baseline branch and those beside it (IsBaselineAgentBranch), any
 // other agent hl/<platform experiment>/<AgentBranchName>/<anything>. Its own it may also delete.
-// A baseline agent also creates DefaultBranch on a repository that has none, as hl repo init
-// does, and nobody moves or deletes it.
 func RefusedRefUpdate(platformExperimentID string, role SignupRole, agentName string, update RefUpdate) string {
 	branch, ok := strings.CutPrefix(update.Ref, "refs/heads/")
 	if !ok {
 		return "only branches are pushed"
-	}
-	if branch == DefaultBranch {
-		if role == SignupRoleBaseline && update.Created && !update.Deleted {
-			return ""
-		}
-		return "the default branch " + DefaultBranch + " is no agent's"
 	}
 	switch role {
 	case SignupRoleBaseline:

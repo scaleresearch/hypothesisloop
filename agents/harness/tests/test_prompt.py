@@ -66,18 +66,18 @@ class CloneWorkspaceTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             origin, workdir = os.path.join(root, "origin"), os.path.join(root, "workspace")
             os.makedirs(workdir)
-            subprocess.run(["git", "init", "-q", origin], check=True)
+            subprocess.run(["git", "init", "-q", "-b", "main", origin], check=True)
             subprocess.run(["git", "-C", origin, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q",
                             "--allow-empty", "-m", "start"], check=True)
-            core.clone_workspace(origin, workdir)
+            core.clone_workspace(origin, "main", workdir)
             self.assertTrue(os.path.isdir(os.path.join(workdir, ".git")))
 
     def test_a_workdir_in_use_or_a_failed_clone_is_left_as_it_is(self):
         with tempfile.TemporaryDirectory() as workdir:
-            core.clone_workspace(os.path.join(workdir, "missing"), workdir)
+            core.clone_workspace(os.path.join(workdir, "missing"), "main", workdir)
             self.assertEqual(os.listdir(workdir), [])
             open(os.path.join(workdir, "work"), "w").close()
-            core.clone_workspace("https://git/x", workdir)
+            core.clone_workspace("https://git/x", "main", workdir)
             self.assertEqual(os.listdir(workdir), ["work"])
 
 

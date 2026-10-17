@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
+	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost/github"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
@@ -139,37 +139,13 @@ type fakeApp struct {
 	tokenErr error
 	fileErr  error
 	file     string
-	// created holds each repository created, as "installation name", committed the files of
-	// the last one, and createErr fails it.
+	// created holds each repository created, as "installation name", template the template the
+	// last one was generated from, and createErr fails it.
 	created   []string
-	committed map[string]string
+	template  string
 	createErr error
-	// fresh says a repository asked to StartFresh holds only GitHub's first commit.
-	fresh bool
 	// notGranted is what of the App's permissions an installation has not granted, by its id.
 	notGranted map[int64][]string
-}
-
-// CreateRepository creates on the account the installation is on.
-func (a *fakeApp) CreateRepository(_ context.Context, installationID int64, name, _ string, files map[string]string) (*github.Repository, error) {
-	if a.createErr != nil {
-		return nil, a.createErr
-	}
-	owner := "Acme"
-	if installationID == carol.ID {
-		owner = "carol"
-	}
-	a.created = append(a.created, fmt.Sprintf("%d %s", installationID, name))
-	a.committed = files
-	return &github.Repository{FullName: owner + "/" + name, Private: true}, nil
-}
-
-func (a *fakeApp) StartFresh(_ context.Context, token *github.Token, files map[string]string) error {
-	if !a.fresh || token.Value == "" {
-		return github.ErrNotFresh
-	}
-	a.committed = files
-	return nil
 }
 
 var (
@@ -177,6 +153,21 @@ var (
 	rival = github.Installation{ID: 200, AccountLogin: "rival", AccountType: github.AccountOrganization}
 	carol = github.Installation{ID: 300, AccountLogin: "carol", AccountType: github.AccountUser}
 )
+
+// CreateFromTemplate creates on the account the installation is on.
+func (a *fakeApp) CreateFromTemplate(_ context.Context, installationID int64, template, name, _ string) (*github.Repository, error) {
+	if a.createErr != nil {
+		return nil, a.createErr
+	}
+	i := slices.IndexFunc([]github.Installation{acme, rival, carol}, func(one github.Installation) bool { return one.ID == installationID })
+	a.created = append(a.created, fmt.Sprintf("%d %s", installationID, name))
+	a.template = template
+	return &github.Repository{FullName: []github.Installation{acme, rival, carol}[i].AccountLogin + "/" + name, Private: true, DefaultBranch: "main"}, nil
+}
+
+func (a *fakeApp) HasBranch(context.Context, *github.Token, string) (bool, error) {
+	return true, nil
+}
 
 func newFakeApp() *fakeApp {
 	return &fakeApp{
@@ -263,6 +254,8 @@ type githubWorld struct {
 	host          *github.Host
 }
 
+const experimentTemplate = "scaleresearch/hypothesisloop-experiment-template"
+
 // newGitHubWorld is the accounts world with the GitHub routes on it, and the GitHub host over the
 // same installations. withApp false is a deployment whose git host is a plain one and that has no
 // GitHub App.
@@ -272,7 +265,7 @@ func newGitHubWorld(t *testing.T, withApp bool) *githubWorld {
 	w.installations = &memInstallations{memStore: w.store, connected: map[string][]*domain.OrgGitHubInstallation{}, states: map[string]memState{}}
 	w.app.now = w.store.now
 	access := auth.NewAccess(placement{memStore: w.store})
-	w.host = github.NewHost(w.installations, w.app, zap.NewNop())
+	w.host = github.NewHost(w.installations, w.app, experimentTemplate, zap.NewNop())
 	app := accounts.GitHubApp(w.app)
 	if !withApp {
 		app = nil
@@ -776,27 +769,30 @@ func TestARepositoryIsReachableThroughTheInstallationsOfTheProjectsOrgAlone(t *t
 func TestARepositoryIsCreatedOnTheAccountTheProjectsOrgConnected(t *testing.T) {
 	ctx := context.Background()
 	w := newGitHubWorld(t, true)
-	if named, err := w.host.Create(ctx, w.projectA, "", "sweep-1a2b3c4d", "", firstFiles); named != "" || statusOf(err) != 422 || reasonOf(err) != github.ReasonGitHubNotConnected {
+	if named, _, err := w.host.Create(ctx, w.projectA, "acme/sweep-1a2b3c4d", ""); named != "" || statusOf(err) != 422 || reasonOf(err) != github.ReasonGitHubNotConnected {
 		t.Fatalf("for an org that connected no GitHub account: Create = %q, %v, want 422 github_not_connected", named, err)
 	}
 	w.connect(w.orgA, acme)
 	w.connect(w.orgB, rival)
-	named, err := w.host.Create(ctx, w.projectA, "", "sweep-1a2b3c4d", "", firstFiles)
-	if err != nil || named != "Acme/sweep-1a2b3c4d" || len(w.app.created) != 1 || w.app.created[0] != "100 sweep-1a2b3c4d" || !maps.Equal(w.app.committed, firstFiles) {
-		t.Fatalf("Create = %q, %v (created %v with %v), want it made through the org's own installation with the files given", named, err, w.app.created, w.app.committed)
+	named, branch, err := w.host.Create(ctx, w.projectA, "acme/sweep-1a2b3c4d", "what it is for")
+	if err != nil || named != "Acme/sweep-1a2b3c4d" || branch != "main" || !slices.Equal(w.app.created, []string{"100 sweep-1a2b3c4d"}) || w.app.template != experimentTemplate {
+		t.Fatalf("Create = %q, %q, %v (created %v from %q), want it made through the org's own installation from the experiment template", named, branch, err, w.app.created, w.app.template)
 	}
 	// With two accounts connected and none the default the request says which, and nothing is
 	// made on a guess.
 	w.connect(w.orgA, rival)
 	w.installations.connected[w.orgA][0].Default = false
-	if named, err := w.host.Create(ctx, w.projectA, "", "ambiguous", "", firstFiles); named != "" || statusOf(err) != 422 || reasonOf(err) != github.ReasonRepositoryAccountRequired || !strings.Contains(err.Error(), "Acme, rival") {
-		t.Fatalf("with two accounts and none named: Create = %q, %v, want 422 repository_account_required listing them", named, err)
+	if on, err := w.host.CreatesOn(ctx, w.projectA, ""); on != "" || statusOf(err) != 422 || reasonOf(err) != github.ReasonRepositoryAccountRequired || !strings.Contains(err.Error(), "Acme, rival") {
+		t.Fatalf("with two accounts and none named: CreatesOn = %q, %v, want 422 repository_account_required listing them", on, err)
 	}
-	if named, err := w.host.Create(ctx, w.projectA, "RIVAL", "on-rival", "", firstFiles); err != nil || len(w.app.created) != 2 || w.app.created[1] != "200 on-rival" {
+	if named, _, err := w.host.Create(ctx, w.projectA, "RIVAL/on-rival", ""); err != nil || named != "rival/on-rival" || len(w.app.created) != 2 || w.app.created[1] != "200 on-rival" {
 		t.Fatalf("naming the account: Create = %q, %v (created %v), want it made through that account's installation", named, err, w.app.created)
 	}
-	if named, err := w.host.Create(ctx, w.projectA, "elsewhere", "nowhere", "", firstFiles); named != "" || statusOf(err) != 422 || reasonOf(err) != github.ReasonInstallationNotConnected || len(w.app.created) != 2 {
+	if named, _, err := w.host.Create(ctx, w.projectA, "elsewhere/nowhere", ""); named != "" || statusOf(err) != 422 || reasonOf(err) != github.ReasonInstallationNotConnected || len(w.app.created) != 2 {
 		t.Fatalf("naming an account the org did not connect: Create = %q, %v, want 422 installation_not_connected", named, err)
+	}
+	if named, _, err := w.host.Create(ctx, w.projectA, "sweep", ""); named != "" || statusOf(err) != 422 || reasonOf(err) != github.ReasonInvalidRepository || len(w.app.created) != 2 {
+		t.Fatalf("a name with no account: Create = %q, %v, want 422 invalid_repository", named, err)
 	}
 	for name, tc := range map[string]struct {
 		project   string
@@ -812,51 +808,18 @@ func TestARepositoryIsCreatedOnTheAccountTheProjectsOrgConnected(t *testing.T) {
 		"a project that does not exist":   {"prj-missing", nil, 404, accounts.ReasonNotFound},
 	} {
 		w.app.createErr = tc.createErr
-		if named, err := w.host.Create(ctx, tc.project, "acme", "another", "", firstFiles); named != "" || statusOf(err) != tc.status || reasonOf(err) != tc.reason {
+		if named, _, err := w.host.Create(ctx, tc.project, "acme/another", ""); named != "" || statusOf(err) != tc.status || reasonOf(err) != tc.reason {
 			t.Errorf("%s: Create = %q, %v, want %d %s", name, named, err, tc.status, tc.reason)
 		}
 	}
 	// What GitHub takes for a create, and what it said of one it refused, reach the caller.
 	w.app.createErr = &github.CreationNotPermittedError{Accepted: "administration=write; repository_creation=write"}
-	if _, err := w.host.Create(ctx, w.projectA, "acme", "another", "", firstFiles); !strings.Contains(err.Error(), "administration=write; repository_creation=write") {
+	if _, _, err := w.host.Create(ctx, w.projectA, "acme/another", ""); !strings.Contains(err.Error(), "administration=write; repository_creation=write") {
 		t.Errorf("a create the installation may not make: %v, want the permissions GitHub takes for it", err)
 	}
 	w.app.createErr = &github.CreationFailedError{Status: 422, Message: "Repository creation failed."}
-	if _, err := w.host.Create(ctx, w.projectA, "acme", "another", "", firstFiles); !strings.Contains(err.Error(), "422") || !strings.Contains(err.Error(), "Repository creation failed.") {
+	if _, _, err := w.host.Create(ctx, w.projectA, "acme/another", ""); !strings.Contains(err.Error(), "422") || !strings.Contains(err.Error(), "Repository creation failed.") {
 		t.Errorf("a create GitHub refused: %v, want its status and its message", err)
-	}
-	// The repository GitHub made stays there, so the refusal names it and what to do with it.
-	w.app.createErr = &github.FirstCommitError{Repository: "Acme/another", Cause: errors.New("github: POST /repos/Acme/another/git/trees answered 409")}
-	_, err = w.host.Create(ctx, w.projectA, "acme", "another", "", firstFiles)
-	if statusOf(err) != 502 || reasonOf(err) != github.ReasonRepositoryNotCreated || !strings.Contains(err.Error(), "Acme/another") || !strings.Contains(err.Error(), "name it in repository") || strings.Contains(err.Error(), "409") {
-		t.Errorf("a first commit GitHub refused: Create = %v, want 502 repository_not_created naming the repository left behind and nothing GitHub said", err)
-	}
-
-	// A restart between the create and its record left the repository made and unrecorded: the
-	// same create finds it on the account, from the template, and takes it. One of the name that
-	// holds anything else is someone else's.
-	template := map[string]string{"README.md": "what this is\n", domain.ExperimentFile: "name: the template\n"}
-	w.app.createErr = github.ErrRepositoryExists
-	w.app.file = template[domain.ExperimentFile]
-	if named, err := w.host.Create(ctx, w.projectA, "acme", "model", "", template); err != nil || named != "Acme/Model" {
-		t.Errorf("a repository made before from the template: Create = %q, %v, want Acme/Model taken as it is", named, err)
-	}
-	w.app.file = "name: their own\n"
-	if named, err := w.host.Create(ctx, w.projectA, "acme", "model", "", template); named != "" || statusOf(err) != 409 || reasonOf(err) != github.ReasonRepositoryExists {
-		t.Errorf("a repository of the name with another experiment file: Create = %q, %v, want 409 repository_exists", named, err)
-	}
-	w.app.fileErr = github.ErrFileNotFound
-	if named, err := w.host.Create(ctx, w.projectA, "acme", "model", "", template); named != "" || statusOf(err) != 409 {
-		t.Errorf("a repository of the name with commits of its own and no experiment file: Create = %q, %v, want 409 repository_exists", named, err)
-	}
-	// Cut off between GitHub's create and the first commit, it holds GitHub's commit alone: it is
-	// taken, and the template written into it.
-	w.app.fresh, w.app.committed = true, nil
-	if named, err := w.host.Create(ctx, w.projectA, "acme", "model", "", template); err != nil || named != "Acme/Model" || !maps.Equal(w.app.committed, template) {
-		t.Errorf("a repository of the name holding GitHub's first commit alone: Create = %q, %v, committed %v, want Acme/Model with the template written", named, err, w.app.committed)
-	}
-	if last := w.app.mints[len(w.app.mints)-1]; last.access != github.Write {
-		t.Errorf("the template was written with a %s token, want write", last.access)
 	}
 }
 
@@ -866,7 +829,7 @@ func TestARepositoryIsCreatedOnAPersonalAccountThroughItsInstallation(t *testing
 	ctx := context.Background()
 	w := newGitHubWorld(t, true)
 	w.connect(w.orgA, carol)
-	if named, err := w.host.Create(ctx, w.projectA, "", "sweep", "", firstFiles); err != nil || named != "carol/sweep" || !slices.Equal(w.app.created, []string{"300 sweep"}) {
+	if named, _, err := w.host.Create(ctx, w.projectA, "carol/sweep", ""); err != nil || named != "carol/sweep" || !slices.Equal(w.app.created, []string{"300 sweep"}) {
 		t.Fatalf("Create on a personal account = %q, %v (created %v), want it made through carol's installation", named, err, w.app.created)
 	}
 	for name, tc := range map[string]struct {
@@ -880,7 +843,7 @@ func TestARepositoryIsCreatedOnAPersonalAccountThroughItsInstallation(t *testing
 		"github makes it elsewhere or public":          {&github.NotAsAskedError{Repository: "dave/sweep"}, 502, github.ReasonRepositoryNotCreated, []string{"dave/sweep"}},
 	} {
 		w.app.createErr = tc.createErr
-		named, err := w.host.Create(ctx, w.projectA, "", "sweep-2", "", firstFiles)
+		named, _, err := w.host.Create(ctx, w.projectA, "carol/sweep-2", "")
 		if named != "" || statusOf(err) != tc.status || reasonOf(err) != tc.reason || strings.Contains(fmt.Sprint(err), leak) {
 			t.Errorf("%s: Create = %q, %v, want %d %s", name, named, err, tc.status, tc.reason)
 			continue
@@ -906,12 +869,10 @@ func TestAnInstallationConnectedBeforeItsAccountTypeWasKeptIsReadAsStored(t *tes
 	if len(listed) != 1 || listed[0].AccountType != "" || len(w.app.looked) != 0 {
 		t.Fatalf("listed = %+v after asking GitHub about %v, want it as stored and GitHub not asked", listed, w.app.looked)
 	}
-	if named, err := w.host.Create(ctx, w.projectA, "", "sweep", "", firstFiles); err != nil || named != "carol/sweep" {
+	if named, _, err := w.host.Create(ctx, w.projectA, "carol/sweep", ""); err != nil || named != "carol/sweep" {
 		t.Fatalf("Create on an untyped account = %q, %v, want it created", named, err)
 	}
 }
-
-var firstFiles = map[string]string{"README.md": "what this is\n"}
 
 // What Create would refuse for the account alone is refused by CreatesOn, which the create of a
 // platform experiment and the wizard's check both call before anything is made: an installation
@@ -926,7 +887,7 @@ func TestWhereARepositoryWouldBeCreatedIsCheckedWithGitHubBeforeAnythingIsMade(t
 	w.app.notGranted[acme.ID] = []string{"administration:write"}
 	for name, check := range map[string]func() error{
 		"CreatesOn": func() error { _, err := w.host.CreatesOn(ctx, w.projectA, ""); return err },
-		"Create":    func() error { _, err := w.host.Create(ctx, w.projectA, "", "sweep", "", firstFiles); return err },
+		"Create":    func() error { _, _, err := w.host.Create(ctx, w.projectA, "acme/sweep", ""); return err },
 	} {
 		if err := check(); statusOf(err) != 422 || reasonOf(err) != github.ReasonPermissionMissing || !strings.Contains(err.Error(), "administration:write") {
 			t.Errorf("%s on an installation that may not create: %v, want 422 github_permission_missing naming what to grant", name, err)
@@ -936,7 +897,7 @@ func TestWhereARepositoryWouldBeCreatedIsCheckedWithGitHubBeforeAnythingIsMade(t
 	delete(w.app.covers, acme.ID)
 	for name, check := range map[string]func() error{
 		"CreatesOn": func() error { _, err := w.host.CreatesOn(ctx, w.projectA, "acme"); return err },
-		"Create":    func() error { _, err := w.host.Create(ctx, w.projectA, "acme", "sweep", "", firstFiles); return err },
+		"Create":    func() error { _, _, err := w.host.Create(ctx, w.projectA, "acme/sweep", ""); return err },
 	} {
 		if err := check(); statusOf(err) != 422 || reasonOf(err) != github.ReasonInstallationGone || !strings.Contains(err.Error(), "no longer installed on Acme") || !strings.Contains(err.Error(), "100") {
 			t.Errorf("%s on an installation GitHub removed: %v, want 422 installation_gone naming the account and the installation", name, err)
@@ -984,7 +945,7 @@ func TestTheOrgsDefaultAccountTakesANewRepositoryNoRequestPlaced(t *testing.T) {
 	if on, err := w.host.CreatesOn(ctx, w.projectA, ""); err != nil || on != "rival" {
 		t.Fatalf("CreatesOn with rival the default = %q, %v, want rival", on, err)
 	}
-	if named, err := w.host.Create(ctx, w.projectA, "acme", "on-acme", "", firstFiles); err != nil || named != "Acme/on-acme" {
+	if named, _, err := w.host.Create(ctx, w.projectA, "acme/on-acme", ""); err != nil || named != "Acme/on-acme" {
 		t.Fatalf("an account named beside the default: Create = %q, %v, want it made on the one named", named, err)
 	}
 }
@@ -994,10 +955,10 @@ func TestTheExperimentFileIsReadFromTheRepositoryNamed(t *testing.T) {
 	w.connect(w.orgA, acme)
 	w.app.file = "name: from the repository\n"
 	ctx := context.Background()
-	data, err := w.host.File(ctx, w.projectA, "acme/model", domain.ExperimentFile)
-	want := "ghs_minted_1@Acme/Model::" + domain.ExperimentFile
+	data, err := w.host.File(ctx, w.projectA, "acme/model", "main", domain.ExperimentFile)
+	want := "ghs_minted_1@Acme/Model:main:" + domain.ExperimentFile
 	if err != nil || string(data) != w.app.file || len(w.app.files) != 1 || w.app.files[0] != want {
-		t.Fatalf("base = %q, %v, read as %v, want the file at the head of the default branch with a token for that repository", data, err, w.app.files)
+		t.Fatalf("base = %q, %v, read as %v, want the file at the ref with a token for that repository", data, err, w.app.files)
 	}
 	if w.app.mints[0].access != github.Read {
 		t.Fatalf("the file was read with %s access, want read", w.app.mints[0].access)
@@ -1007,21 +968,24 @@ func TestTheExperimentFileIsReadFromTheRepositoryNamed(t *testing.T) {
 		status int
 		reason string
 	}{
-		"no such file":        {github.ErrFileNotFound, 422, github.ReasonNoExperimentFile},
-		"a directory":         {github.ErrNotAFile, 422, github.ReasonNoExperimentFile},
-		"too large":           {github.ErrFileTooLarge, 422, github.ReasonNoExperimentFile},
+		"a directory":         {github.ErrNotAFile, 422, github.ReasonUnreadableFile},
+		"too large":           {github.ErrFileTooLarge, 422, github.ReasonUnreadableFile},
 		"github rate limits":  {github.ErrRateLimited, 503, github.ReasonUnavailable},
 		"something unplanned": {errors.New("unexpected " + leak), 500, ""},
 	} {
 		w.app.fileErr = tc.err
-		_, err := w.host.File(ctx, w.projectA, "acme/model", domain.ExperimentFile)
+		_, err := w.host.File(ctx, w.projectA, "acme/model", "main", domain.ExperimentFile)
 		if statusOf(err) != tc.status || reasonOf(err) != tc.reason || strings.Contains(err.Error(), leak) {
 			t.Errorf("%s: %v, want %d %s without the failure's text", name, err, tc.status, tc.reason)
 		}
 	}
+	w.app.fileErr = github.ErrFileNotFound
+	if _, err := w.host.File(ctx, w.projectA, "acme/model", "main", domain.ExperimentFile); !errors.Is(err, githost.ErrFileNotFound) {
+		t.Errorf("no such file: %v, want githost.ErrFileNotFound", err)
+	}
 	w.app.fileErr = nil
 	read := len(w.app.files)
-	if _, err := w.host.File(ctx, w.projectA, "rival/secret", domain.ExperimentFile); reasonOf(err) != github.ReasonInstallationNotConnected || len(w.app.files) != read {
+	if _, err := w.host.File(ctx, w.projectA, "rival/secret", "main", domain.ExperimentFile); reasonOf(err) != github.ReasonInstallationNotConnected || len(w.app.files) != read {
 		t.Errorf("a repository the org does not reach: %v, read %d files, want installation_not_connected and none read", err, len(w.app.files)-read)
 	}
 }
@@ -1058,8 +1022,8 @@ func TestADeadInstallationIsNoChoiceForANewRepository(t *testing.T) {
 		t.Fatalf("one working and one removed, no default: CreatesOn = %q, %v, want rival", on, err)
 	}
 	w.installations.connected[w.orgA][0].Default = true
-	if _, err := w.host.Create(ctx, w.projectA, "", "sweep", "", firstFiles); err != nil || !slices.Equal(w.app.created, []string{"200 sweep"}) {
-		t.Fatalf("the default removed: Create = %v (created %v), want it made on rival", err, w.app.created)
+	if on, err := w.host.CreatesOn(ctx, w.projectA, ""); err != nil || on != "rival" {
+		t.Fatalf("the default removed: CreatesOn = %q, %v, want rival", on, err)
 	}
 	w.app.notGranted[rival.ID] = []string{"administration:write"}
 	if _, err := w.host.CreatesOn(ctx, w.projectA, ""); reasonOf(err) != github.ReasonInstallationGone {

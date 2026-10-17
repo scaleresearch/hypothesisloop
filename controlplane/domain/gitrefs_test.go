@@ -31,7 +31,7 @@ func TestAnAgentWritesItsOwnBranchesAndNothingElse(t *testing.T) {
 		{"the baseline branch", SignupRoleBaseline, "Baseline 1", RefUpdate{Ref: "refs/heads/hl/pe-1/baseline"}, true},
 		{"a branch beside the baseline", SignupRoleBaseline, "Baseline 1", RefUpdate{Ref: "refs/heads/hl/pe-1/baseline-check"}, true},
 		{"a researcher's branch by the baseline", SignupRoleBaseline, "Baseline 1", RefUpdate{Ref: "refs/heads/hl/pe-1/researcher-2/x"}, false},
-		{"the default branch created by the baseline", SignupRoleBaseline, "Baseline 1", RefUpdate{Ref: "refs/heads/main", Created: true}, true},
+		{"the default branch created by the baseline", SignupRoleBaseline, "Baseline 1", RefUpdate{Ref: "refs/heads/main", Created: true}, false},
 		{"the default branch moved by the baseline", SignupRoleBaseline, "Baseline 1", RefUpdate{Ref: "refs/heads/main"}, false},
 		{"a planner's push", SignupRolePlanner, "Planner 1", RefUpdate{Ref: "refs/heads/hl/pe-1/planner-1/x"}, false},
 		{"a researcher named into the baseline's place", SignupRoleCompetitor, "Baseline Check", RefUpdate{Ref: "refs/heads/hl/pe-1/baseline-check/x"}, false},

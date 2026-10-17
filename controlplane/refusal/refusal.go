@@ -83,7 +83,7 @@ func Conflict(reason, message string) *Refusal {
 func ReasonOf(err error) string {
 	var refused *Refusal
 	if errors.As(err, &refused) {
-		return refused.Reason
+		return string(refused.Reason)
 	}
 	return ""
 }

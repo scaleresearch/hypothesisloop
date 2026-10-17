@@ -23,8 +23,11 @@ export function fetchPlatformExperimentTimeseries(
 /** The reason the API gives for a repository that brings no experiment file. */
 export const NO_EXPERIMENT_FILE = 'no_experiment_file'
 
-export function fetchExperimentFile(projectID: string, repository: string): Promise<ExperimentFile> {
-  return apiFetch<ExperimentFile>(withQuery(`/projects/${projectID}/experiment-file`, { repository }))
+/** The reason the API gives for an experiment file that places the experiment in another project, repository or branch. */
+export const EXPERIMENT_FILE_ELSEWHERE = 'experiment_file_elsewhere'
+
+export function fetchExperimentFile(projectID: string, repository: string, branch: string): Promise<ExperimentFile> {
+  return apiFetch<ExperimentFile>(withQuery(`/projects/${projectID}/experiment-file`, { repository, branch }))
 }
 
 // The create's own repository checks, creating nothing: what it refuses, the create refuses.

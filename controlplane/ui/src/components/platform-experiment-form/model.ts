@@ -26,6 +26,8 @@ export interface FormState {
   // null is the platform's default ladder.
   stages: StageDraft[] | null
   repository: string
+  // The branch a named repository is worked on at.
+  branch: string
   agent_image: string
   // Empty is the platform's coordinator default.
   coordinator_model: string
@@ -147,7 +149,7 @@ export interface Problem {
 
 /** The step a problem of the create concerns, by the API's reason: the repository, the metrics, or the rest, on Budget and rules. */
 export function refusedStep(reason: string | undefined): StepID {
-  if (reason && /repositor|github|installation|experiment_file|unreadable_file/.test(reason)) return '1'
+  if (reason && /repositor|github|installation|experiment_file|unreadable_file|invalid_branch|branch_not_found/.test(reason)) return '1'
   if (reason && /metric/.test(reason)) return '2'
   return '3'
 }

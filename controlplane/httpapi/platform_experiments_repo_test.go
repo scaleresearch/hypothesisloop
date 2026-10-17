@@ -170,7 +170,7 @@ func TestACreateRequiresWhatOnlyTheCallerCanSay(t *testing.T) {
 	if err := svc.ProvideRepositories(context.Background()); err != nil || !strings.HasPrefix(store.created[2].Repository, "second-account/") {
 		t.Errorf("after the pass: repository %q, %v, want it made on second-account", store.created[2].Repository, err)
 	}
-	onAccount["repository"] = "acme/model"
+	onAccount["repository"], onAccount["branch"] = "acme/model", "main"
 	if rec := call("POST", "/platform-experiments", onAccount); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "invalid_request") || len(store.created) != 3 {
 		t.Errorf("an account beside a repository: got = %d %s, want 422 invalid_request", rec.Code, rec.Body)
 	}
@@ -320,22 +320,22 @@ func TestTheExperimentFileOfARepositoryIsReadWithoutCreatingAnything(t *testing.
 	repos := &fakeRepositories{files: map[string]string{"prj-a": experimentBase}}
 	store, call, _ := repoAPI(t, authtest.As(auth.Principal{Kind: auth.KindUser, OrgIDs: []string{"org-a"}}), repos)
 
-	rec := call("GET", "/projects/prj-a/experiment-file?repository=acme/model", nil)
+	rec := call("GET", "/projects/prj-a/experiment-file?repository=acme/model&branch=main", nil)
 	var file map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &file); err != nil || rec.Code != http.StatusOK {
 		t.Fatalf("got %d %s", rec.Code, rec.Body)
 	}
-	if file["repository"] != testRepository || file["name"] == "" || file["description"] == "" || len(file["metrics"].([]any)) == 0 {
-		t.Fatalf("file = %v, want the repository as GitHub names it and what the file states", file)
+	if file["repository"] != testRepository || file["branch"] != "main" || file["project_id"] != "prj-a" || file["name"] == "" || file["description"] == "" || len(file["metrics"].([]any)) == 0 {
+		t.Fatalf("file = %v, want where it was read, the repository as GitHub names it, and what the file states", file)
 	}
 	if file["budget_accelerator_hours"] != float64(40) || file["max_agents"] != float64(6) || file["duration_hours"] != float64(400) || len(store.created) != 0 {
 		t.Fatalf("file = %v, created %d: want what a run costs as the file states it, and a read creates nothing", file, len(store.created))
 	}
-	if rec := call("GET", "/projects/prj-b/experiment-file?repository=acme/model", nil); rec.Code != http.StatusNotFound || len(repos.asked) != 1 {
+	if rec := call("GET", "/projects/prj-b/experiment-file?repository=acme/model&branch=main", nil); rec.Code != http.StatusNotFound || len(repos.asked) != 1 {
 		t.Fatalf("another org's project: %d, asked GitHub %d times", rec.Code, len(repos.asked))
 	}
 	repos.files["prj-a"] = "nmae: typo\n"
-	if rec := call("GET", "/projects/prj-a/experiment-file?repository=acme/model", nil); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "invalid_experiment_file") {
+	if rec := call("GET", "/projects/prj-a/experiment-file?repository=acme/model&branch=main", nil); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "invalid_experiment_file") {
 		t.Fatalf("a file with an unknown key: %d %s", rec.Code, rec.Body)
 	}
 }
@@ -367,8 +367,10 @@ func TestTheRepositoryCheckAnswersAsTheCreateWouldAndCreatesNothing(t *testing.T
 		query, reason string
 		arrange       func()
 	}{
-		"a repository the org does not reach": {"?repository=rival/secret", "repository_not_reachable", nil},
-		"an account beside a repository":      {"?repository=acme/model&repository_account=acme", "invalid_request", nil},
+		"a repository the org does not reach": {"?repository=rival/secret", "repository_not_reachable", func() {
+			repos.notCreated = refusal.Refuse(http.StatusConflict, "repository_exists", "rival already has a repository of that name")
+		}},
+		"an account beside a repository": {"?repository=acme/model&repository_account=acme", "invalid_request", nil},
 		"an installation GitHub removed": {"", "installation_gone", func() {
 			repos.notOn = refusal.Refuse(http.StatusUnprocessableEntity, "installation_gone", "the GitHub App is no longer installed on acme")
 		}},
@@ -385,6 +387,9 @@ func TestTheRepositoryCheckAnswersAsTheCreateWouldAndCreatesNothing(t *testing.T
 			for _, pair := range strings.Split(strings.TrimPrefix(tc.query, "?"), "&") {
 				k, v, _ := strings.Cut(pair, "=")
 				body[k] = v
+			}
+			if body["repository"] != nil {
+				body["branch"] = "main"
 			}
 		}
 		if rec := call("POST", "/platform-experiments", body); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), tc.reason) {

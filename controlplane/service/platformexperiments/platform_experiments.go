@@ -126,7 +126,7 @@ type Store interface {
 	// RepositoriesToCreate, GiveRepository and FailRepository are the repository pass's: the
 	// platform experiments whose repository is to be created, and what became of each.
 	RepositoriesToCreate(ctx context.Context) ([]db.RepositoryToCreate, error)
-	GiveRepository(ctx context.Context, id, repository, url string) error
+	GiveRepository(ctx context.Context, id, repository, url, branch string) error
 	FailRepository(ctx context.Context, id, answer string) error
 	// SpawnAgent creates an agent in the experiment's org and signs it up, or does neither.
 	SpawnAgent(ctx context.Context, platformExpID string, agent *domain.Agent, signup domain.AgentSignup) error
@@ -347,11 +347,7 @@ func NewService(store Store, cfg domain.QuotaConfig, logger *zap.Logger, metrics
 // spec and where the experiment is placed.
 type CreatePlatformExperimentRequest struct {
 	experimentspec.Spec
-	// ProjectID places the platform experiment. Required on create, and fixed from then on.
-	ProjectID string `json:"project_id,omitempty"`
-	// Repository is the code the platform experiment works on, owner/name on GitHub, reachable
-	// through an installation its org connected. Fixed at creation.
-	Repository string `json:"repository,omitempty" doc:"owner/name on GitHub. An installation the org connected must cover it. Left out, the platform creates a private repository on the GitHub account the org connected, and the answer names it."`
+	experimentspec.Placement
 	// RepositoryAccount is the connected GitHub account a new repository is created on.
 	RepositoryAccount string    `json:"repository_account,omitempty" doc:"The GitHub account, one the org connected, on which the platform creates the repository when repository is left out. Required then only when the org connected several."`
 	Continues         string    `json:"continues,omitempty" doc:"The id of a closed platform experiment of the same project to carry on, which keeps its code in the repository this one names. Its baseline starts from the commit of that run's baseline job, so both are measured by the same harness. It keeps the metric keys and directions of that run: 422 invalid_metrics for others. Left out, it starts fresh. 422 invalid_continues for one that is no closed platform experiment of the project, keeps its code in another repository or declared no baseline."`

@@ -20,25 +20,23 @@ type fakeRepositories struct {
 	refusal error
 	checked []string
 	asked   []string
-	// created holds each repository made for an experiment that names none, as "project name",
-	// and committed the files the last one started from.
+	// created holds each repository made from the experiment template, as "project repository".
 	created    []string
-	committed  map[string]string
 	notCreated error
 	// notOn is what refuses an account before anything is created.
 	notOn error
 }
 
-func (f *fakeRepositories) Create(_ context.Context, projectID, account, name, _ string, files map[string]string) (string, error) {
+func (f *fakeRepositories) Create(_ context.Context, projectID, repository, _ string) (string, string, error) {
 	if f.notCreated != nil {
-		return "", f.notCreated
+		return "", "", f.notCreated
 	}
-	f.created = append(f.created, projectID+" "+name)
-	f.committed = files
-	if account == "" {
-		account = "acme"
-	}
-	return account + "/" + name, nil
+	f.created = append(f.created, projectID+" "+repository)
+	return repository, "main", nil
+}
+
+func (f *fakeRepositories) HasBranch(context.Context, string, string, string) (bool, error) {
+	return true, nil
 }
 
 // CreatesOn answers the account named, or acme, the only one the org connected, and notOn when
@@ -81,7 +79,7 @@ func (f *fakeRepositories) FileAt(context.Context, string, string, string, strin
 	return nil, githost.ErrFileNotFound
 }
 
-func (f *fakeRepositories) File(_ context.Context, projectID, repository, _ string) ([]byte, error) {
+func (f *fakeRepositories) File(_ context.Context, projectID, repository, _, _ string) ([]byte, error) {
 	f.asked = append(f.asked, projectID+" "+repository)
 	if f.refusal != nil {
 		return nil, f.refusal
@@ -144,10 +142,10 @@ func (s *createdStore) RepositoriesToCreate(context.Context) ([]db.RepositoryToC
 	return out, nil
 }
 
-func (s *createdStore) GiveRepository(_ context.Context, id, repository, url string) error {
+func (s *createdStore) GiveRepository(_ context.Context, id, repository, url, branch string) error {
 	for _, pe := range s.created {
 		if pe.ID == id && s.awaiting(pe) {
-			pe.Repository, pe.RepositoryURL = repository, url
+			pe.Repository, pe.RepositoryURL, pe.Branch = repository, url, branch
 			return nil
 		}
 	}

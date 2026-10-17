@@ -278,6 +278,7 @@ CREATE TABLE platform_experiments (
 
     repository                     TEXT             NOT NULL DEFAULT '',
     repository_url                 TEXT             NOT NULL DEFAULT '',
+    branch                         TEXT             NOT NULL DEFAULT '',
     repository_account             TEXT             NOT NULL DEFAULT '',
     repository_error               TEXT             NOT NULL DEFAULT '',
     agent_image                    TEXT             NOT NULL DEFAULT '',

@@ -32,11 +32,22 @@ func registerPlatformExperiments(doc *Doc, experiments *platformexperiments.Serv
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "get-experiment-file", Method: "GET", Path: "/projects/{id}/experiment-file",
 		Summary: "Read what a repository's experiment file states", Tags: []string{"platform-experiments"},
-		Description: "The experiment spec " + domain.ExperimentFile + " at the head of the default branch of repository states, keyed as the body of POST /platform-experiments " +
-			"without where the experiment is placed, and the repository as the git host names it. A form fills itself from it, and a person sends the whole body. Nothing is created. " +
-			"The org of the project must reach the repository, with the refusals of that create: 422 no_experiment_file when the repository has none, " +
-			"invalid_experiment_file when it cannot be used, and why. On a plain git host 422 experiment_file_unsupported.",
+		Description: "The experiment file " + domain.ExperimentFile + " at the head of branch of repository, keyed as the body of POST /platform-experiments, " +
+			"with project_id, repository and branch saying where it was read and the repository as the git host names it. A form fills itself from it, and a person sends the whole body. Nothing is created. " +
+			"The org of the project must reach the repository, with the refusals of that create: 422 invalid_branch for a branch git takes no name of or one under hl/, no_experiment_file when the branch holds none, " +
+			"invalid_experiment_file when it cannot be used, and why, and experiment_file_elsewhere when it places the experiment in another project, repository or branch, which the message names. " +
+			"On a plain git host 422 experiment_file_unsupported.",
 	}, a.getExperimentFile)
+
+	register(doc, auth.AudienceCoordinator, huma.Operation{
+		OperationID: "ensure-repository", Method: "POST", Path: "/projects/{id}/repositories",
+		Summary: "Create a repository from the experiment template unless it exists", Tags: []string{"platform-experiments"},
+		Description: "Answers repository as the git host names it, with repository_url, when the org of the project reaches it, and otherwise creates it from the deployment's experiment template " +
+			"(git_host.experiment_template_repository): its default branch holds one commit of the template's files. POST /platform-experiments does the same for the repository it names; " +
+			"this is for a client that pushes its own branch to the repository before it creates the experiment there. " +
+			"Refused with the reasons of that create: 422 invalid_repository, github_not_connected, installation_not_connected, installation_gone, installation_suspended, github_permission_missing, " +
+			"repository_creation_not_permitted, repository_not_reachable when it exists and the platform cannot reach it; 502 github_failed and repository_not_created when the git host did not create it.",
+	}, a.ensureRepository)
 
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "check-repository", Method: "GET", Path: "/projects/{id}/repository-check",
@@ -67,21 +78,22 @@ func registerPlatformExperiments(doc *Doc, experiments *platformexperiments.Serv
 			"it holds this platform experiment's coordinator token, is no agent of it, holds no quota and is not ranked. " + platformexperiments.CoordinatorWanted + " " +
 			"It is fixed from then on. " +
 			"repository is the code the platform experiment works on, owner/name on GitHub: agents clone it and push their branches to it, jobs check it out, and repository_url in the answer is where from. " +
-			"A platform experiment keeps its code in a repository: left out, the platform creates a private one on the GitHub account the org connected, named from the experiment and its id, " +
-			"whose one commit is the experiment template (README.md, " + domain.ExperimentFile + " and .hypothesisloop/job.yaml, the base job spec), " +
-			"after the create answered: the answer has no repository yet and status_reason repository_creating, no machine of it starts before the repository is recorded, and a read then names it in repository and repository_url. The installation covers a repository it created whichever repositories its owner selected. " +
+			"branch, required with repository, is the branch the agents clone and start from and none of them pushes to: 422 invalid_branch for one git takes no name of or one under hl/, branch_not_found for one the repository does not have. " +
+			"A repository named that the org's installation cannot reach is created from the experiment template (git_host.experiment_template_repository) before anything else, as POST /projects/{id}/repositories does: " +
+			"its default branch holds one commit of the template's files. " +
+			"Left out, the platform creates a private one on the GitHub account the org connected, named from the experiment and its id and generated from the experiment template, " +
+			"after the create answered: the answer has no repository yet and status_reason repository_creating, no machine of it starts before the repository is recorded, and a read then names it in repository, repository_url and branch, its default branch. " +
+			"branch is refused without repository (422 invalid_request). The installation covers a repository it created whichever repositories its owner selected. " +
 			"With several accounts connected, repository_account says which, and 422 repository_account_required lists them when it is left out; it is never stated with repository (422 invalid_request). " +
 			"422 github_not_connected when the org has connected no GitHub account, and installation_not_connected when repository_account is none it connected: those are answered before anything is created. " +
-			"On a GitHub organisation the installation creates the repository. On a person's own account GitHub creates one for its owner alone, so the platform creates it with the authorisation the owner connected the account with " +
-			"and adds it to the installation. When GitHub does not create it (the authorisation is gone, GitHub refuses the creation or its first commit, the name is taken by a repository that is not this experiment's), " +
+			"When GitHub does not create it (the authorisation is gone, GitHub refuses the creation, the name is taken), " +
 			"the platform experiment is closed with close_reason repository_not_created, and its status_reason message carries what GitHub answered. A repository the request names is never written to. " +
-			"Named, an installation of the platform's GitHub App that the org connected must cover it " +
+			"Named, an installation of the platform's GitHub App that the org connected must cover the account that owns it " +
 			"(GET /orgs/{id}/github-repositories lists what may be named): 422 invalid_repository when it is not owner/name, installation_not_connected when " +
-			"the org connected no installation on the account that owns it, repository_not_reachable when the installation does not cover it, " +
+			"the org connected no installation on the account that owns it, repository_not_reachable when it exists and the installation does not cover it, " +
 			"and installation_gone when the App was removed on GitHub. " +
 			"502 github_failed when GitHub answers 5xx or not at all for the installation, the message naming it and GitHub's answer. " +
-			"On a deployment whose git host is plain the platform creates none: repository is a name under the host's root, created there beforehand, " +
-			"422 repository_required without it, and repository_not_reachable when it does not answer git. " +
+			"On a deployment whose git host is plain, repository is a name under the host's root, created there from the template when it does not exist, and is required: 422 repository_required without it. " +
 			"agent_image is the image the sandboxed agents and the coordinator run, built FROM the platform's agent image so the harness is in it. Left out, " +
 			"it is the platform's own. 422 invalid_agent_image when it is no image reference. Both are fixed from then on. " +
 			"With coordinator_in_agentsandbox: true it also creates, in the same write, one sandboxed researcher for each place of researchers, of its entry's agent type, model and hyperparameters, whose machines are asked for when the run starts. While the run goes on the platform keeps them at work: it adds a new researcher in the place of one that finished or whose machine stopped with no restart left, with its agent type, model and hyperparameters, until less of the run is left than one trial of the baseline job (job_estimated_duration_hours, at least 15 minutes) or the budget its researchers left unspent holds no trial for one, and a stage boundary lowers the counts by the researchers it cuts, so none of them is replaced. agent.replaced tells each researcher added. " +
@@ -219,19 +231,43 @@ func registerPlatformExperiments(doc *Doc, experiments *platformexperiments.Serv
 func (a platformExperimentsAPI) getExperimentFile(ctx context.Context, in *struct {
 	ID         string `path:"id"`
 	Repository string `query:"repository" required:"true" doc:"owner/name on GitHub"`
+	Branch     string `query:"branch" required:"true" doc:"The branch the file is read at."`
 }) (*struct {
 	Body *platformexperiments.ExperimentFile
 }, error) {
 	if err := a.access.Project(ctx, in.ID); err != nil {
 		return nil, err
 	}
-	file, err := a.experiments.ReadExperimentFile(ctx, in.ID, in.Repository)
+	file, err := a.experiments.ReadExperimentFile(ctx, in.ID, in.Repository, in.Branch)
 	if err != nil {
 		return nil, err
 	}
 	return &struct {
 		Body *platformexperiments.ExperimentFile
 	}{Body: file}, nil
+}
+
+// EnsureRepositoryRequest is the body of POST /projects/{id}/repositories.
+type EnsureRepositoryRequest struct {
+	Repository string `json:"repository" doc:"owner/name on GitHub, or a name under the root of a plain git host."`
+}
+
+func (a platformExperimentsAPI) ensureRepository(ctx context.Context, in *struct {
+	ID   string `path:"id"`
+	Body EnsureRepositoryRequest
+}) (*struct {
+	Body platformexperiments.RepositoryCheck
+}, error) {
+	if err := a.access.Project(ctx, in.ID); err != nil {
+		return nil, err
+	}
+	named, err := a.experiments.EnsureRepository(ctx, in.ID, in.Body.Repository)
+	if err != nil {
+		return nil, err
+	}
+	return &struct {
+		Body platformexperiments.RepositoryCheck
+	}{Body: platformexperiments.RepositoryCheck{Repository: named, RepositoryURL: a.experiments.RepositoryURL(named)}}, nil
 }
 
 func (a platformExperimentsAPI) checkRepository(ctx context.Context, in *struct {

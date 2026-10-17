@@ -21,7 +21,7 @@ func TestPlatformExperimentBodiesRequireWhatEachMustCarry(t *testing.T) {
 		absent       []string
 	}{
 		{"post", "/platform-experiments", []string{"budget_accelerator_hours", "max_agents"}, []string{"from_repo"}},
-		{"patch", "/platform-experiments/{id}", nil, []string{"from_repo", "project_id", "repository", "agent_image", "stages", "default_quota_tier"}},
+		{"patch", "/platform-experiments/{id}", nil, []string{"from_repo", "project_id", "repository", "branch", "agent_image", "stages", "default_quota_tier"}},
 	} {
 		schema := bodySchema(t, spec, tc.method, tc.path)
 		var required []string

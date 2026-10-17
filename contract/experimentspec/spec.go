@@ -15,6 +15,8 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v4"
+
+	"github.com/scaleresearch/hypothesisloop/contract/gitrefs"
 )
 
 // MaxProseBytes caps the description and the summary: every read of the platform experiment
@@ -62,42 +64,87 @@ func (p Problems) Error() string {
 	return strings.Join(messages, "\n")
 }
 
-// placement is what the request that creates an experiment states and its spec never does, with
-// the flag of hl that sets each.
-var placement = map[string]string{
-	"project_id":         "--project",
-	"repository":         "--repository",
-	"repository_account": "--repository-account",
-	"continues":          "--continues",
-	"starts_at":          "--starts-at",
+// Placement is where a platform experiment is: the project it belongs to, the repository its
+// code is in and the branch its agents start from. An experiment file states it, and so does
+// the request that creates the experiment.
+type Placement struct {
+	ProjectID  string `json:"project_id,omitempty" doc:"The project it belongs to. Required, and fixed from then on."`
+	Repository string `json:"repository,omitempty" required:"false" doc:"The repository its code is in, as the git host names it: owner/name on GitHub. The platform creates it from the experiment template when it does not exist. Left out, the platform creates a private repository on the GitHub account the org connected, and the answer names it."`
+	Branch     string `json:"branch,omitempty" required:"false" doc:"The branch of repository its agents clone and start from, which none of them pushes to. Required with repository, and refused without it: a repository the platform creates is worked on at its default branch."`
 }
 
-// Parse reads a spec from YAML. A key the spec does not have is refused by name.
-func Parse(data []byte) (Spec, error) {
+// File is what an experiment file states: the experiment and where it is.
+type File struct {
+	Placement
+	Spec
+}
+
+// requestOnly is what the request that creates an experiment may state and its file never does,
+// with where it is stated.
+var requestOnly = map[string]string{
+	"repository_account": "the request, when the platform creates the repository",
+	"continues":          "the UI or the API",
+	"starts_at":          "the UI or the API",
+}
+
+// Parse reads an experiment file from YAML. A key it does not have is refused by name.
+func Parse(data []byte) (File, error) {
 	var doc any
 	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return Spec{}, fmt.Errorf("not YAML: %s", yamlProblem(data, err))
+		return File{}, fmt.Errorf("not YAML: %s", yamlProblem(data, err))
 	}
 	fields, ok := doc.(map[string]any)
 	if !ok || len(fields) == 0 {
-		return Spec{}, errors.New("an experiment spec is a YAML mapping of its keys")
+		return File{}, errors.New("an experiment spec is a YAML mapping of its keys")
 	}
-	for _, key := range slices.Sorted(maps.Keys(placement)) {
+	for _, key := range slices.Sorted(maps.Keys(requestOnly)) {
 		if _, ok := fields[key]; ok {
-			return Spec{}, fmt.Errorf("%s is set by the request (%s) and has no place in the experiment spec", key, placement[key])
+			return File{}, fmt.Errorf("%s is stated by %s and has no place in the experiment file", key, requestOnly[key])
 		}
 	}
 	encoded, err := json.Marshal(doc)
 	if err != nil {
-		return Spec{}, fmt.Errorf("not an experiment spec: %w", err)
+		return File{}, fmt.Errorf("not an experiment spec: %w", err)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(encoded))
 	decoder.DisallowUnknownFields()
-	var spec Spec
-	if err := decoder.Decode(&spec); err != nil {
-		return Spec{}, fmt.Errorf("not an experiment spec: %s", strings.TrimPrefix(err.Error(), "json: "))
+	var file File
+	if err := decoder.Decode(&file); err != nil {
+		return File{}, fmt.Errorf("not an experiment spec: %s", strings.TrimPrefix(err.Error(), "json: "))
 	}
-	return spec, nil
+	return file, nil
+}
+
+// Validate refuses a placement that does not say all of where an experiment is.
+func (p *Placement) Validate() error {
+	if p.ProjectID == "" || p.Repository == "" || p.Branch == "" {
+		return errors.New("project_id, repository and branch are required: the project the experiment belongs to, the repository its code is in and the branch its agents start from")
+	}
+	return ValidateBranch(p.Branch)
+}
+
+// ValidateBranch refuses what git does not take as a branch name, and a branch under gitrefs.Root,
+// where the platform's agents write theirs: an experiment starts from a branch of its own.
+func ValidateBranch(branch string) error {
+	refuse := func(why string) error {
+		return fmt.Errorf("branch %q is no branch an experiment starts from: %s", branch, why)
+	}
+	switch {
+	case branch == "" || len(branch) > 255:
+		return refuse("a branch name is 1 to 255 characters")
+	case strings.HasPrefix(branch, gitrefs.Root):
+		return refuse("branches under " + gitrefs.Root + " are the platform's agents' own")
+	case branch == "@" || strings.HasPrefix(branch, "-") || strings.HasPrefix(branch, ".") || strings.HasPrefix(branch, "/") || strings.HasSuffix(branch, "/") ||
+		strings.HasSuffix(branch, ".") || strings.HasSuffix(branch, ".lock") || strings.Contains(branch, "..") || strings.Contains(branch, "//") ||
+		strings.Contains(branch, "@{") || strings.Contains(branch, "/."):
+		return refuse("git takes no branch name of that form")
+	}
+	for _, r := range branch {
+		if r <= ' ' || r == 0x7f || strings.ContainsRune("~^:?*[\\", r) {
+			return refuse("git takes no branch name with spaces, control characters or any of ~^:?*[\\")
+		}
+	}
+	return nil
 }
 
 // yamlProblem is why data is not YAML, with where the parser stopped when it says: the line, the
@@ -115,18 +162,18 @@ func yamlProblem(data []byte, err error) string {
 	return said + ", where the line reads: " + strings.TrimSpace(lines[problem.Mark.Line-1])
 }
 
-// Load reads the spec of the repository at dir.
-func Load(dir string) (Spec, error) {
+// Load reads the experiment file of the repository at dir.
+func Load(dir string) (File, error) {
 	path := filepath.Join(dir, filepath.FromSlash(ExperimentFile))
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return Spec{}, err
+		return File{}, err
 	}
-	spec, err := Parse(data)
+	file, err := Parse(data)
 	if err != nil {
-		return Spec{}, fmt.Errorf("%s: %w", path, err)
+		return File{}, fmt.Errorf("%s: %w", path, err)
 	}
-	return spec, nil
+	return file, nil
 }
 
 // Trimmed is the spec with every text of it without the whitespace around it, which a value

@@ -73,9 +73,9 @@ func optionalTime(t time.Time) *time.Time {
 func insertPlatformExperiment(ctx context.Context, tx *Write, pe *domain.PlatformExperiment) error {
 	const q = `
 INSERT INTO platform_experiments (id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, coordinator_in_agentsandbox, coordinator_model, max_agentsandboxes, repository, repository_url, agent_image, goal, created_by_kind, created_by_id, duration_hours, repository_account, continues, researchers,
-                                  coordinator_agent_type)
+                                  branch, coordinator_agent_type)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NULLIF($19, ''), $20, $21, $22, $23, $24, $25, $26, $27, $28, NULLIF($29, ''), $30,
-        '` + domain.CoordinatorAgentType + `')`
+        $31, '` + domain.CoordinatorAgentType + `')`
 
 	metrics, err := json.Marshal(pe.Metrics)
 	if err != nil {
@@ -117,6 +117,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 		pe.CoordinatorInAgentSandbox, coordinator.Model, pe.MaxAgentSandboxes,
 		pe.Repository, pe.RepositoryURL, pe.AgentImage,
 		pe.Goal, string(createdBy.Kind), createdBy.ID, pe.DurationHours, pe.RepositoryAccount, pe.Continues, researchers,
+		pe.Branch,
 	)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.Create: %w", err)
@@ -207,7 +208,7 @@ ORDER BY wanted.n`, ids, string(domain.SignupRoleCompetitor))
 func (s *Store) GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
 	q := `
 SELECT pe.id, pe.project_id, pe.name, pe.description, pe.budget_accelerator_hours, pe.max_agents, pe.researchers, pe.metrics, pe.report_interval_seconds, pe.starts_at, pe.ends_at, pe.status, pe.stages, pe.current_stage, ` + summarySQL + `, pe.created_at, pe.updated_at, pe.max_concurrent_accelerators, pe.default_quota_tier, pe.shared,
-       ` + coordinatorColumns + `, pe.max_agentsandboxes, pe.repository, pe.repository_url, pe.agent_image, pe.goal, pe.goal_version, COALESCE(pe.continues, ''), pe.created_by_kind, pe.created_by_id, pe.proposal, pe.proposed_at, pe.declined_reason,
+       ` + coordinatorColumns + `, pe.max_agentsandboxes, pe.repository, pe.repository_url, pe.branch, pe.agent_image, pe.goal, pe.goal_version, COALESCE(pe.continues, ''), pe.created_by_kind, pe.created_by_id, pe.proposal, pe.proposed_at, pe.declined_reason,
        pe.baseline_job_id, pe.job_estimated_duration_hours, pe.closed_at, pe.close_reason, pe.closed_by_kind, pe.closed_by_id, pe.close_message, pe.removed_at, pe.repository_error, pe.repository_account, COALESCE(pe.researchers_held, ''),
        pe.duration_hours, pe.started_at, pe.planner_ends_at, pe.accepts_at, COALESCE(ci.activity, ''), ci.activity_at,
        pe.accepted_at, pe.accepted_by_kind, pe.accepted_by_id, pe.accepted_answers,
@@ -234,7 +235,7 @@ WHERE pe.id = $1`
 		&pe.CreatedAt, &pe.UpdatedAt, &pe.MaxConcurrentAccelerators, &pe.DefaultQuotaTier, &pe.Shared,
 		&pe.CoordinatorInAgentSandbox, &coordinator.Model, &coordinator.Instance.Name, &coordinator.Instance.Restarts,
 		&coordinator.Instance.Renewals, &coordinator.Instance.Stopped, &coordinator.Instance.ExitedAt, &coordinator.Instance.ExitLog,
-		&coordinator.Instance.SeenAt, &coordinator.Instance.AskedAt, &coordinator.Instance.Launch, &coordinator.Instance.Reported, &coordinator.Instance.ProgressAt, &coordinator.Instance.EndReason, &coordinator.Instance.Released, &pe.MaxAgentSandboxes, &pe.Repository, &pe.RepositoryURL, &pe.AgentImage,
+		&coordinator.Instance.SeenAt, &coordinator.Instance.AskedAt, &coordinator.Instance.Launch, &coordinator.Instance.Reported, &coordinator.Instance.ProgressAt, &coordinator.Instance.EndReason, &coordinator.Instance.Released, &pe.MaxAgentSandboxes, &pe.Repository, &pe.RepositoryURL, &pe.Branch, &pe.AgentImage,
 		&pe.Goal, &pe.GoalVersion, &pe.Continues, &createdBy.Kind, &createdBy.ID, &proposal, &answeredAt, &pe.DeclinedReason,
 		&pe.BaselineJobID, &pe.JobEstimatedDurationHours, &pe.ClosedAt, &pe.CloseReason, &closedBy.Kind, &closedBy.ID, &pe.CloseMessage, &pe.RemovedAt, &pe.RepositoryError, &pe.RepositoryAccount, &pe.ResearchersHeld,
 		&pe.DurationHours, &startedAt, &plannerEndsAt, &acceptsAt, &coordinatorActivity, &coordinatorActivityAt,
@@ -456,7 +457,7 @@ SELECT pe.id, pe.project_id, pe.name, pe.description, pe.budget_accelerator_hour
        pe.starts_at, pe.ends_at, pe.status,
        pe.stages, pe.current_stage, ` + summarySQL + `,
        pe.created_at, pe.updated_at, pe.max_concurrent_accelerators, pe.default_quota_tier, pe.shared,
-       pe.coordinator_in_agentsandbox, pe.max_agentsandboxes, pe.repository, pe.repository_url, pe.agent_image, pe.goal, pe.proposed_at, pe.proposal IS NOT NULL, pe.declined_reason, pe.baseline_job_id,
+       pe.coordinator_in_agentsandbox, pe.max_agentsandboxes, pe.repository, pe.repository_url, pe.branch, pe.agent_image, pe.goal, pe.proposed_at, pe.proposal IS NOT NULL, pe.declined_reason, pe.baseline_job_id,
        pe.duration_hours, pe.started_at, pe.closed_at, pe.close_reason,
        COUNT(es.agent_id) AS signup_count
 FROM platform_experiments pe
@@ -487,7 +488,7 @@ func (s *Store) queryPlatformExperiments(ctx context.Context, q string, args ...
 			&startsAt, &closesAt, &status,
 			&stagesRaw, &pe.CurrentStage, &pe.Summary,
 			&pe.CreatedAt, &pe.UpdatedAt, &pe.MaxConcurrentAccelerators, &pe.DefaultQuotaTier, &pe.Shared,
-			&pe.CoordinatorInAgentSandbox, &pe.MaxAgentSandboxes, &pe.Repository, &pe.RepositoryURL, &pe.AgentImage, &pe.Goal, &answeredAt, &proposed, &pe.DeclinedReason, &pe.BaselineJobID,
+			&pe.CoordinatorInAgentSandbox, &pe.MaxAgentSandboxes, &pe.Repository, &pe.RepositoryURL, &pe.Branch, &pe.AgentImage, &pe.Goal, &answeredAt, &proposed, &pe.DeclinedReason, &pe.BaselineJobID,
 			&pe.DurationHours, &startedAt, &pe.ClosedAt, &pe.CloseReason,
 			&pe.SignupCount,
 		); err != nil {

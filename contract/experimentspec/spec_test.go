@@ -18,7 +18,7 @@ stages:
 `
 
 func TestASpecIsParsedByTheKeysOfTheCreateBody(t *testing.T) {
-	spec, err := Parse([]byte(valid))
+	spec, err := Parse([]byte(valid + "project_id: prj_1\nrepository: acme/model\nbranch: main\n"))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -26,12 +26,16 @@ func TestASpecIsParsedByTheKeysOfTheCreateBody(t *testing.T) {
 		len(spec.Stages) != 1 || spec.Stages[0].LengthPct != 100 || spec.BudgetAcceleratorHours != 40 || spec.MaxAgents != 6 || spec.DurationHours != 400 {
 		t.Fatalf("spec = %+v", spec)
 	}
-	if err := spec.Validate(); err != nil {
+	if spec.Placement != (Placement{ProjectID: "prj_1", Repository: "acme/model", Branch: "main"}) {
+		t.Fatalf("placement = %+v", spec.Placement)
+	}
+	if err := spec.Spec.Validate(); err != nil {
 		t.Fatalf("validate: %v", err)
 	}
 	for name, file := range map[string]string{
-		"a project of its own choosing": valid + "project_id: prj_other\n",
-		"a repository":                  valid + "repository: acme/model\n",
+		"a repository account":          valid + "repository_account: acme\n",
+		"what it continues":             valid + "continues: pex_1\n",
+		"when it starts":                valid + "starts_at: 2026-01-01T00:00:00Z\n",
 		"from_repo":                     valid + "from_repo: true\n",
 		"a key the body does not have":  valid + "budget_acelerator_hours: 4\n",
 		"a list":                        "- name: a\n",

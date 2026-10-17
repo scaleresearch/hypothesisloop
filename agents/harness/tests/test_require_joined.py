@@ -48,6 +48,7 @@ class FakePlatform(BaseHTTPRequestHandler):
             body = {"id": "pe-1", "status": "running", "coordinator": {"model": "model-1"}}
             if FakePlatform.repository_url:
                 body["repository_url"] = FakePlatform.repository_url
+                body["branch"] = "main"
             if FakePlatform.git_url:
                 body["git_url"] = FakePlatform.git_url
             return self._reply(200, body)

@@ -91,23 +91,24 @@ func (h *Host) Reachable(ctx context.Context, projectID, repository string) (str
 }
 
 // Create generates the repository, owner/name, from the experiment template on owner, a GitHub
-// account the org of the project connected, and returns it as GitHub names it.
-func (h *Host) Create(ctx context.Context, projectID, repository, description string) (string, error) {
+// account the org of the project connected, and returns it as GitHub names it with its default
+// branch.
+func (h *Host) Create(ctx context.Context, projectID, repository, description string) (string, string, error) {
 	const op = "create-repository"
 	if err := ValidRepository(repository); err != nil {
-		return "", Refusal(h.logger, op, err, http.StatusUnprocessableEntity)
+		return "", "", Refusal(h.logger, op, err, http.StatusUnprocessableEntity)
 	}
 	owner, name, _ := strings.Cut(repository, "/")
 	orgID, chosen, err := h.createsOn(ctx, projectID, owner)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	created, err := h.app.CreateFromTemplate(ctx, chosen.InstallationID, h.template, name, description)
 	if err != nil {
-		return "", Refusal(h.logger, op, err, http.StatusUnprocessableEntity)
+		return "", "", Refusal(h.logger, op, err, http.StatusUnprocessableEntity)
 	}
 	h.logger.Info("repository created from the experiment template", zap.String("repository", created.FullName), zap.String("orgID", orgID))
-	return created.FullName, nil
+	return created.FullName, created.DefaultBranch, nil
 }
 
 // CreatesOn is what Create checks before it creates: what passes here is created unless GitHub

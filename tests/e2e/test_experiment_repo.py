@@ -3,7 +3,8 @@ an experiment may name, who reaches it through the platform's git proxy and what
 and what code a job may run.
 
 Every boundary around an org's installations holds whichever git host the deployment has. On a
-plain host one test names, clones and pushes a repository of the local git server. On GitHub a
+plain host one test has the platform create a repository on the local git server, and clones and
+pushes one. On GitHub a
 real connect needs a person to authorise the App in a browser, so the one test that clones and
 pushes has hl-admin connect the installation instead, which asks GitHub as the App that it
 exists. It runs only when the environment names a sandbox repository:
@@ -15,8 +16,10 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 import requests
@@ -194,17 +197,17 @@ def test_a_create_states_what_only_the_caller_can_and_an_update_only_what_change
 def test_a_repository_is_checked_after_the_project_and_must_be_one_the_org_reaches(orgs, run_id: str):
     a, b = orgs
     whole = {**RUN, "name": f"repo-named-{run_id}", "description": "names a repository", "report_interval_seconds": 10,
-             "metrics": [{"key": "val_accuracy", "direction": "maximize"}]}
+             "metrics": [{"key": "val_accuracy", "direction": "maximize"}], "branch": "main"}
     foreign = _call(a.api, "POST", "/platform-experiments", {**whole, "project_id": b.project_id, "repository": "acme/model"})
     assert foreign.status_code == 404 and foreign.json() == {"message": "project not found"}, foreign.text
 
-    named = _call(a.api, "POST", "/platform-experiments", {**whole, "project_id": a.project_id, "repository": "acme/model"})
-    if _call(a.api, "GET", "/github/app").status_code == 503:
-        assert named.status_code == 422 and named.json()["reason"] == "repository_not_reachable", named.text
-    else:
+    # On a plain host every name under its root is one the platform creates, so only GitHub's
+    # installations bound what an org reaches.
+    if _call(a.api, "GET", "/github/app").status_code != 503:
+        named = _call(a.api, "POST", "/platform-experiments", {**whole, "project_id": a.project_id, "repository": "acme/model"})
         assert named.status_code == 422 and named.json()["reason"] == "installation_not_connected", named.text
-        address = _call(a.api, "POST", "/platform-experiments", {**whole, "project_id": a.project_id, "repository": "https://github.com/acme/model"})
-        assert address.status_code == 422 and address.json()["reason"] == "invalid_repository", address.text
+    address = _call(a.api, "POST", "/platform-experiments", {**whole, "project_id": a.project_id, "repository": "https://github.com/acme/model"})
+    assert address.status_code == 422 and address.json()["reason"] == "invalid_repository", address.text
     listed = a.api.get_json("/platform-experiments", params={"project_id": a.project_id, "limit": 200})
     assert all(pe["name"] != whole["name"] for pe in listed), "a refused create left a platform experiment behind"
 
@@ -228,19 +231,28 @@ def test_on_a_plain_git_host_a_repository_is_named_and_an_agent_pushes_its_branc
     repository, address = read["repository"], read["repository_url"]
     assert address.endswith("/" + repository), read
 
-    # The platform creates no repository on such a host and reads no file from one.
+    # On such a host an experiment names its repository, which the platform creates from the
+    # experiment template when it does not exist, and the platform reads no file from one.
     whole = {**RUN, "project_id": a.project_id, "name": f"repo-plain-{run_id}", "description": "names a repository",
              "metrics": [{"key": "val_accuracy", "direction": "maximize"}]}
     # A repository is made for a platform experiment that could run, so the org is given a cluster.
     with a.api.clusters_shared():
         for body, reason in (
             (whole, "repository_required"),
-            ({**whole, "repository": f"no-such-{run_id}.git"}, "repository_not_reachable"),
-            ({**whole, "repository": address}, "invalid_repository"),
+            ({**whole, "repository": address, "branch": "main"}, "invalid_repository"),
         ):
             refused = _call(a.api, "POST", "/platform-experiments", body)
             assert refused.status_code == 422 and refused.json()["reason"] == reason, (reason, refused.text)
-    unread = _call(a.api, "GET", f"/projects/{a.project_id}/experiment-file?repository={repository}")
+    missing = f"created-{run_id}.git"
+    try:
+        for _ in range(2):
+            ensured = _call(a.api, "POST", f"/projects/{a.project_id}/repositories", {"repository": missing})
+            assert ensured.status_code == 200 and ensured.json()["repository"] == missing, ensured.text
+            assert ensured.json()["repository_url"].endswith("/" + missing), ensured.text
+    finally:
+        if os.environ.get("HL_E2E_GIT_ROOT"):
+            shutil.rmtree(Path(os.environ["HL_E2E_GIT_ROOT"]) / missing, ignore_errors=True)
+    unread = _call(a.api, "GET", f"/projects/{a.project_id}/experiment-file?repository={repository}&branch=main")
     assert unread.status_code == 422 and unread.json()["reason"] == "experiment_file_unsupported", unread.text
 
     # git reaches the repository through the proxy, and the clone's origin stays its address.
@@ -301,7 +313,7 @@ def test_an_agent_clones_and_pushes_its_branch_and_loses_access_when_github_is_d
         # Another org cannot name the repository: it connected nothing that covers it.
         named = _call(other.api, "POST", "/platform-experiments", {
             **RUN, "project_id": other.project_id, "name": f"repo-taken-{run_id}", "description": "another org's repository",
-            "report_interval_seconds": 10, "metrics": [{"key": "val_accuracy", "direction": "maximize"}], "repository": repo,
+            "report_interval_seconds": 10, "metrics": [{"key": "val_accuracy", "direction": "maximize"}], "repository": repo, "branch": "main",
         })
         assert named.status_code == 422 and named.json()["reason"] == "installation_not_connected", named.text
 

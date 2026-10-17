@@ -94,40 +94,40 @@ func (p *Plain) CreatesOn(context.Context, string, string) (string, error) {
 
 // Create pushes one commit of the template's files, with no history, to the repository as the
 // branch the template's HEAD names.
-func (p *Plain) Create(ctx context.Context, _, repository, _ string) (string, error) {
+func (p *Plain) Create(ctx context.Context, _, repository, _ string) (string, string, error) {
 	if err := p.validName(repository); err != nil {
-		return "", err
+		return "", "", err
 	}
 	if _, err := p.Reachable(ctx, "", repository); err == nil {
-		return "", refusal.Refuse(http.StatusConflict, "repository_exists", repository+" already exists under "+p.base.String())
+		return "", "", refusal.Refuse(http.StatusConflict, "repository_exists", repository+" already exists under "+p.base.String())
 	}
 	dir, err := os.MkdirTemp("", "hl-create-")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	defer os.RemoveAll(dir) //nolint:errcheck
 	template := p.URL(p.template)
 	head, err := p.git(ctx, dir, "ls-remote", "--symref", template, "HEAD")
 	if err != nil {
-		return "", notCreated(repository, err)
+		return "", "", notCreated(repository, err)
 	}
 	ref, _, _ := strings.Cut(strings.TrimPrefix(strings.SplitN(head, "\n", 2)[0], "ref: "), "\t")
 	if !strings.HasPrefix(ref, "refs/heads/") {
-		return "", notCreated(repository, fmt.Errorf("the experiment template %s names no branch as its HEAD", template))
+		return "", "", notCreated(repository, fmt.Errorf("the experiment template %s names no branch as its HEAD", template))
 	}
 	var commit string
 	for _, args := range [][]string{{"init", "--quiet", "--bare"}, {"fetch", "--quiet", "--depth=1", template, ref}} {
 		if _, err := p.git(ctx, dir, args...); err != nil {
-			return "", notCreated(repository, err)
+			return "", "", notCreated(repository, err)
 		}
 	}
 	if commit, err = p.git(ctx, dir, "commit-tree", "FETCH_HEAD^{tree}", "-m", "Start from the experiment template"); err != nil {
-		return "", notCreated(repository, err)
+		return "", "", notCreated(repository, err)
 	}
 	if _, err := p.git(ctx, dir, "push", "--quiet", p.URL(repository), commit+":"+ref); err != nil {
-		return "", notCreated(repository, err)
+		return "", "", notCreated(repository, err)
 	}
-	return repository, nil
+	return repository, strings.TrimPrefix(ref, "refs/heads/"), nil
 }
 
 func notCreated(repository string, err error) error {

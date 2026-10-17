@@ -14,8 +14,8 @@ export function agentSandboxRefusal(error: unknown): StatusReason | null {
 }
 
 /** Keeps a goal as a saved draft of the full form, its brief, for a person who sets the experiment up themselves. */
-export function formDraftFromGoal(projectID: string, goal: string, repository: string): Promise<ExperimentDraft> {
-  return createExperimentDraft(projectID, { form: { description: goal, repository }, step: '1', failure: '' })
+export function formDraftFromGoal(projectID: string, goal: string, repository: string, branch: string): Promise<ExperimentDraft> {
+  return createExperimentDraft(projectID, { form: { description: goal, repository, branch }, step: '1', failure: '' })
 }
 
 /** The experiment a proposal states, keyed as the create states it. */

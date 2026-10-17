@@ -2,7 +2,6 @@ package gitproxy
 
 import (
 	"context"
-	"crypto/sha1"
 	"fmt"
 	"io"
 	"net/http"
@@ -138,7 +137,7 @@ func newWorld(t *testing.T) *world {
 		backend.ServeHTTP(rw, r)
 	}))
 	t.Cleanup(host.Close)
-	plain, err := githost.NewPlain(host.URL, hostUser, hostPassword)
+	plain, err := githost.NewPlain(host.URL, hostUser, hostPassword, "experiment-template")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,13 +264,13 @@ func TestAResearcherPushesItsOwnBranchAndNothingElseThroughTheProxy(t *testing.T
 		ref  string
 		why  string
 	}{
-		"the default branch":               {[]string{"push", "origin", "HEAD:refs/heads/main"}, "refs/heads/main", "the default branch main is no agent's"},
+		"the default branch":               {[]string{"push", "origin", "HEAD:refs/heads/main"}, "refs/heads/main", "your branches are under hl/pe-1/researcher-2/"},
 		"another agent's branch":           {[]string{"push", "origin", "HEAD:refs/heads/hl/pe-1/researcher-3/x"}, "refs/heads/hl/pe-1/researcher-3/x", "your branches are under hl/pe-1/researcher-2/"},
 		"a force push to another's branch": {[]string{"push", "--force", "origin", "HEAD:refs/heads/" + theirs}, "refs/heads/" + theirs, "your branches are under hl/pe-1/researcher-2/"},
 		"a delete of another's branch":     {[]string{"push", "origin", ":refs/heads/" + theirs}, "refs/heads/" + theirs, "your branches are under hl/pe-1/researcher-2/"},
-		"a delete of the default branch":   {[]string{"push", "origin", ":refs/heads/main"}, "refs/heads/main", "the default branch main is no agent's"},
+		"a delete of the default branch":   {[]string{"push", "origin", ":refs/heads/main"}, "refs/heads/main", "your branches are under hl/pe-1/researcher-2/"},
 		"a tag":                            {[]string{"push", "origin", "HEAD:refs/tags/v1"}, "refs/tags/v1", "only branches are pushed"},
-		"a force push to main":             {[]string{"push", "--force", "origin", "HEAD:refs/heads/main"}, "refs/heads/main", "the default branch main is no agent's"},
+		"a force push to main":             {[]string{"push", "--force", "origin", "HEAD:refs/heads/main"}, "refs/heads/main", "your branches are under hl/pe-1/researcher-2/"},
 	} {
 		before := w.hostRef(c.ref)
 		out, err := w.git("tok-researcher-2", dir, c.args...)
@@ -307,7 +306,7 @@ func TestAResearcherPushesItsOwnBranchAndNothingElseThroughTheProxy(t *testing.T
 	w.noSecretLeaked()
 }
 
-func TestTheBaselineCreatesTheDefaultBranchOfAnEmptyRepositoryAndMovesItNever(t *testing.T) {
+func TestTheBaselineCreatesNoDefaultBranchOnAnEmptyRepository(t *testing.T) {
 	w := newWorld(t)
 	empty := filepath.Join(w.root, "host", repository)
 	if err := os.RemoveAll(empty); err != nil {
@@ -317,36 +316,15 @@ func TestTheBaselineCreatesTheDefaultBranchOfAnEmptyRepositoryAndMovesItNever(t 
 	w.run(empty, "config", "http.receivepack", "true")
 	dir := w.clone("tok-baseline", "baseline")
 	w.run(dir, "commit", "--quiet", "--allow-empty", "-m", "Start the repository")
-	if out, err := w.git("tok-baseline", dir, "push", "--quiet", "origin", "HEAD:refs/heads/main"); err != nil {
-		t.Fatalf("creating main on an empty repository: %v: %s", err, out)
+	if out, err := w.git("tok-baseline", dir, "push", "origin", "HEAD:refs/heads/main"); err == nil || !strings.Contains(out, "[remote rejected]") {
+		t.Errorf("creating main on an empty repository: %v: %s, want it rejected", err, out)
+	}
+	if w.hostRef("refs/heads/main") != "" {
+		t.Error("main was created")
 	}
 	w.commitOn(dir, "hl/pe-1/baseline")
 	if out, err := w.git("tok-baseline", dir, "push", "--quiet", "origin", "hl/pe-1/baseline"); err != nil {
 		t.Fatalf("pushing the baseline branch: %v: %s", err, out)
-	}
-	if out, err := w.git("tok-baseline", dir, "push", "origin", "HEAD:refs/heads/main"); err == nil || !strings.Contains(out, "[remote rejected]") {
-		t.Errorf("moving main: %v: %s, want it rejected", err, out)
-	}
-
-	// A push that claims main has no value to create it anew is refused by the host itself.
-	main := w.hostRef("refs/heads/main")
-	pack := []byte("PACK\x00\x00\x00\x02\x00\x00\x00\x00")
-	sum := sha1.Sum(pack)
-	body := pkts(zero+" "+w.hostRef("refs/heads/hl/pe-1/baseline")+" refs/heads/main\x00report-status", "") + string(pack) + string(sum[:])
-	request, err := http.NewRequest(http.MethodPost, w.proxy+"/git-receive-pack", strings.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
-	}
-	request.SetBasicAuth("hl", "tok-baseline")
-	request.Header.Set("Content-Type", "application/x-git-receive-pack-request")
-	resp, err := http.DefaultClient.Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	answer, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
-	if !strings.Contains(string(answer), "ng refs/heads/main") || w.hostRef("refs/heads/main") != main {
-		t.Errorf("a forged create of main: %s, want the host to refuse it", answer)
 	}
 	w.noSecretLeaked()
 }

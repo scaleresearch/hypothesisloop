@@ -4,9 +4,12 @@ package gitrefs
 
 import "strings"
 
+// Root is what the name of every branch the platform's agents write starts with.
+const Root = "hl/"
+
 // BranchPrefix is what the name of every git branch of a platform experiment starts with. An
 // agent's implementation of a hypothesis is one branch under it, and BaselineBranch another.
-func BranchPrefix(platformExperimentID string) string { return "hl/" + platformExperimentID + "/" }
+func BranchPrefix(platformExperimentID string) string { return Root + platformExperimentID + "/" }
 
 // BaselineBranch is the branch the baseline of a platform experiment is measured on.
 func BaselineBranch(platformExperimentID string) string {

@@ -22,10 +22,23 @@ const LISTED = 50
 // The value that stands for a new repository on one connected account, when there are several.
 const ON_ACCOUNT = '@'
 
-/** What a create sends for the value picked: a repository, the account a new one goes to, or neither. */
+/** The branch a named repository is worked on at until the person names another. */
+export const DEFAULT_BRANCH = 'main'
+
+/** Whether the value picked names a repository, which is worked on at a branch the person names. */
+export function namesRepository(value: string): boolean {
+  return value !== '' && !value.startsWith(ON_ACCOUNT)
+}
+
+/** What the repository check sends for the value picked: a repository, the account a new one goes to, or neither. */
 export function repositoryFields(value: string): { repository?: string; repository_account?: string } {
   if (value === '') return {}
   return value.startsWith(ON_ACCOUNT) ? { repository_account: value.slice(ON_ACCOUNT.length) } : { repository: value }
+}
+
+/** What a create sends for the value picked: a repository at its branch, the account a new one goes to, or neither. */
+export function codeFields(value: string, branch: string): { repository?: string; repository_account?: string; branch?: string } {
+  return namesRepository(value) ? { repository: value, branch: branch.trim() } : repositoryFields(value)
 }
 
 // GitHub's form for a new repository, private and on the connected account when there is one.

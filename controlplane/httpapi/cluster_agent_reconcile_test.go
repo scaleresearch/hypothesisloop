@@ -175,7 +175,7 @@ func newWorld(t *testing.T, cluster string, wrap func(*reconcileStore) clusterex
 		builds: map[string]bool{}, assigned: map[string][]*domain.Environment{}}}
 	var environments *clusterexchange.EnvironmentRegistry
 	if buildsEnvironments {
-		git, err := githost.NewPlain("https://git.test", "platform", "host-password")
+		git, err := githost.NewPlain("https://git.test", "platform", "host-password", "experiment-template")
 		if err != nil {
 			t.Fatal(err)
 		}

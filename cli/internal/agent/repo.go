@@ -259,12 +259,12 @@ func notReady(clone iofs.FS, experiment declaredExperiment, missing string) ([]s
 func experimentGap(data []byte, experiment declaredExperiment) string {
 	file, err := experimentspec.Parse(data)
 	if err == nil {
-		err = file.Validate()
+		err = file.Spec.Validate()
 	}
 	if err != nil {
 		return "is no valid experiment spec: " + strings.ReplaceAll(err.Error(), "\n", "; ") + ": state the platform experiment's spec, which hl platform-experiments get answers"
 	}
-	if another := notOf(file, experiment); another != "" {
+	if another := notOf(file.Spec, experiment); another != "" {
 		return another + ": the file is another experiment's, state this one's"
 	}
 	return ""

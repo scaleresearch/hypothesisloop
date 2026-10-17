@@ -23,10 +23,10 @@ type Provider interface {
 	// Create checks before it creates, asked of the host now, so a request is answered with it
 	// before anything is made. A host with no accounts refuses: there a repository is named.
 	CreatesOn(ctx context.Context, projectID, account string) (string, error)
-	// Create makes the repository, as Reachable names it, from the deployment's experiment
-	// template: its default branch holds one commit of the template's files. It refuses a
-	// repository that exists.
-	Create(ctx context.Context, projectID, repository, description string) (string, error)
+	// Create makes the repository from the deployment's experiment template and returns it, as
+	// Reachable names it, and its default branch, which holds one commit of the template's files.
+	// It refuses a repository that exists.
+	Create(ctx context.Context, projectID, repository, description string) (created, branch string, err error)
 	// HasBranch says whether the repository has a branch of that name.
 	HasBranch(ctx context.Context, projectID, repository, branch string) (bool, error)
 	// File reads a file of the repository at ref for a form to show: ErrFileNotFound when it

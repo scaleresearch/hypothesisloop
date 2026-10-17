@@ -29,7 +29,7 @@ Read the `description` of `hl platform-experiments get` completely, with `metric
 
 What it takes:
   - The code: {{workdir}}, the directory every command starts in, holds the clone of {{repository_url}}
-    (where it is empty, run `git clone {{repository_url}} .` there). Work on branch `hl/{{platform_experiment_id}}/baseline`; `hl job submit` pushes it. A run that
+    (where it is empty, run `git clone --branch <branch> {{repository_url}} .` there, <branch> the `branch` `hl platform-experiments get` answers). Work on branch `hl/{{platform_experiment_id}}/baseline`, made from <branch>; `hl job submit` pushes it. A run that
     `continues` another starts that branch from the other's `baseline_code_ref` and measures
     the control with its harness, changed only where it breaks the brief's definition of a
     metric (say so in `README.md`), so the numbers of both compare. A repository

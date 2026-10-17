@@ -57,7 +57,7 @@ func refused(err error) (int, string) {
 
 func newPlain(t *testing.T, baseURL, username, password string) *Plain {
 	t.Helper()
-	plain, err := NewPlain(baseURL, username, password)
+	plain, err := NewPlain(baseURL, username, password, "experiment-template")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,14 +128,14 @@ func TestAPlainHostIsReachedWithTheDeploymentsOneCredential(t *testing.T) {
 	}
 }
 
-func TestAPlainHostCreatesNoRepositoryAndReadsNoFile(t *testing.T) {
+func TestAPlainHostNamesNoAccountToCreateOnAndReadsNoFile(t *testing.T) {
 	plain := newPlain(t, "https://git.example/experiments", "", "")
 	ctx := context.Background()
-	named, err := plain.Create(ctx, "prj-a", "", "sweep-1a2b3c4d", "", map[string]string{"README.md": "x"})
-	if status, reason := refused(err); named != "" || status != 422 || reason != "repository_required" {
-		t.Errorf("Create = %q, %v, want 422 repository_required", named, err)
+	owner, err := plain.CreatesOn(ctx, "prj-a", "")
+	if status, reason := refused(err); owner != "" || status != 422 || reason != "repository_required" {
+		t.Errorf("CreatesOn = %q, %v, want 422 repository_required", owner, err)
 	}
-	data, err := plain.File(ctx, "prj-a", "model.git", "experiment.yaml")
+	data, err := plain.File(ctx, "prj-a", "model.git", "main", "experiment.yaml")
 	if status, reason := refused(err); data != nil || status != 422 || reason != "experiment_file_unsupported" {
 		t.Errorf("File = %q, %v, want 422 experiment_file_unsupported", data, err)
 	}
@@ -168,16 +168,18 @@ func TestAPlainHostServesOnlyTheRepositorysAddress(t *testing.T) {
 }
 
 func TestAPlainHostIsRefusedWithoutAWholeRootOrWithHalfACredential(t *testing.T) {
-	for name, tc := range map[string][3]string{
-		"no scheme":             {"git.example/experiments", "", ""},
-		"no host":               {"https:///experiments", "", ""},
-		"a credential in it":    {"https://user:pass@git.example", "", ""},
-		"a query":               {"https://git.example/?x=1", "", ""},
-		"a username alone":      {"https://git.example", "platform", ""},
-		"a password alone":      {"https://git.example", "", "secret"},
-		"nothing where it goes": {"", "", ""},
+	for name, tc := range map[string][4]string{
+		"no scheme":             {"git.example/experiments", "", "", "template"},
+		"no host":               {"https:///experiments", "", "", "template"},
+		"a credential in it":    {"https://user:pass@git.example", "", "", "template"},
+		"a query":               {"https://git.example/?x=1", "", "", "template"},
+		"a username alone":      {"https://git.example", "platform", "", "template"},
+		"a password alone":      {"https://git.example", "", "secret", "template"},
+		"nothing where it goes": {"", "", "", "template"},
+		"no template":           {"https://git.example", "", "", ""},
+		"a template out of it":  {"https://git.example", "", "", "../template"},
 	} {
-		if plain, err := NewPlain(tc[0], tc[1], tc[2]); err == nil {
+		if plain, err := NewPlain(tc[0], tc[1], tc[2], tc[3]); err == nil {
 			t.Errorf("%s: NewPlain = %+v, want it refused", name, plain)
 		}
 	}

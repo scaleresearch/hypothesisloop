@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -16,7 +15,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/hypothesisloop/contract/repotemplate"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
@@ -132,12 +130,11 @@ func TestADraftIsCreatedFromOneSentenceWithItsPlannerAndNothingOfARun(t *testing
 	if err := svc.ProvideRepositories(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if pe.Repository != "acme/"+platformexperiments.RepositoryName(pe) || pe.RepositoryURL != "https://github.com/"+pe.Repository+".git" || len(planningRepositories.created) != 1 ||
-		!maps.Equal(planningRepositories.committed, repotemplate.Files()) || planningRepositories.committed[domain.ExperimentFile] == "" {
-		t.Errorf("repository = %q (created %v), want one made for the draft from the template, which holds %s", pe.Repository, planningRepositories.created, domain.ExperimentFile)
+	if pe.Repository != "acme/"+platformexperiments.RepositoryName(pe) || pe.RepositoryURL != "https://github.com/"+pe.Repository+".git" || pe.Branch != "main" || len(planningRepositories.created) != 1 {
+		t.Errorf("repository = %q at %q (created %v), want one made for the draft from the experiment template at its default branch", pe.Repository, pe.Branch, planningRepositories.created)
 	}
-	if code, out := call("POST", "/platform-experiments/drafts", map[string]any{"project_id": "prj-a", "goal": goal, "repository": "acme/model"}); code != http.StatusCreated || out["repository"] != testRepository || len(planningRepositories.created) != 1 {
-		t.Errorf("naming a repository: got = %d %v, want it as GitHub spells it and none created", code, out["repository"])
+	if code, out := call("POST", "/platform-experiments/drafts", map[string]any{"project_id": "prj-a", "goal": goal, "repository": "acme/model", "branch": "main"}); code != http.StatusCreated || out["repository"] != testRepository || out["branch"] != "main" || len(planningRepositories.created) != 1 {
+		t.Errorf("naming a repository: got = %d %v at %v, want it as GitHub spells it at the branch named and none created", code, out["repository"], out["branch"])
 	}
 	store.created = store.created[:1]
 
@@ -1430,25 +1427,23 @@ type fakeRepositories struct {
 	refusal error
 	checked []string
 	asked   []string
-	// created holds each repository made for an experiment that names none, as "project name",
-	// and committed the files the last one started from.
+	// created holds each repository made from the experiment template, as "project repository".
 	created    []string
-	committed  map[string]string
 	notCreated error
 	// notOn is what refuses an account before anything is created.
 	notOn error
 }
 
-func (f *fakeRepositories) Create(_ context.Context, projectID, account, name, _ string, files map[string]string) (string, error) {
+func (f *fakeRepositories) Create(_ context.Context, projectID, repository, _ string) (string, string, error) {
 	if f.notCreated != nil {
-		return "", f.notCreated
+		return "", "", f.notCreated
 	}
-	f.created = append(f.created, projectID+" "+name)
-	f.committed = files
-	if account == "" {
-		account = "acme"
-	}
-	return account + "/" + name, nil
+	f.created = append(f.created, projectID+" "+repository)
+	return repository, "main", nil
+}
+
+func (f *fakeRepositories) HasBranch(context.Context, string, string, string) (bool, error) {
+	return true, nil
 }
 
 // CreatesOn answers the account named, or acme, the only one the org connected, and notOn when
@@ -1491,7 +1486,7 @@ func (f *fakeRepositories) FileAt(context.Context, string, string, string, strin
 	return nil, githost.ErrFileNotFound
 }
 
-func (f *fakeRepositories) File(_ context.Context, projectID, repository, _ string) ([]byte, error) {
+func (f *fakeRepositories) File(_ context.Context, projectID, repository, _, _ string) ([]byte, error) {
 	f.asked = append(f.asked, projectID+" "+repository)
 	if f.refusal != nil {
 		return nil, f.refusal
@@ -1554,10 +1549,10 @@ func (s *createdStore) RepositoriesToCreate(context.Context) ([]db.RepositoryToC
 	return out, nil
 }
 
-func (s *createdStore) GiveRepository(_ context.Context, id, repository, url string) error {
+func (s *createdStore) GiveRepository(_ context.Context, id, repository, url, branch string) error {
 	for _, pe := range s.created {
 		if pe.ID == id && s.awaiting(pe) {
-			pe.Repository, pe.RepositoryURL = repository, url
+			pe.Repository, pe.RepositoryURL, pe.Branch = repository, url, branch
 			return nil
 		}
 	}
@@ -1674,7 +1669,7 @@ func (s *createdStore) update(pe *domain.PlatformExperiment, status domain.Platf
 // run is a whole create body naming the repository acme/model, with more laid over it.
 func run(more map[string]any) map[string]any {
 	body := map[string]any{
-		"project_id": "prj-a", "repository": "acme/model", "name": "tune the model", "description": "beat the baseline in the README",
+		"project_id": "prj-a", "repository": "acme/model", "branch": "main", "name": "tune the model", "description": "beat the baseline in the README",
 		"budget_accelerator_hours": 5, "max_agents": 3, "duration_hours": 48, "report_interval_seconds": 30,
 		"metrics": []map[string]any{{"key": "val_accuracy", "direction": "maximize"}},
 		"stages":  []map[string]any{{"length_pct": 100, "evict_pct": 0}},

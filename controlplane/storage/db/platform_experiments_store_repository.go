@@ -43,10 +43,10 @@ ORDER BY pe.created_at`)
 
 // GiveRepository records the repository created for a platform experiment, from which its
 // machines are started. ErrRepositoryNotAwaited when it closed meanwhile.
-func (s *Store) GiveRepository(ctx context.Context, id, repository, url string) error {
+func (s *Store) GiveRepository(ctx context.Context, id, repository, url, branch string) error {
 	tag, err := s.pool.pool.Exec(ctx, `
-UPDATE platform_experiments pe SET repository = $2, repository_url = $3, updated_at = now()
-WHERE pe.id = $1 AND pe.status <> 'closed' AND `+awaitsRepository, id, repository, url)
+UPDATE platform_experiments pe SET repository = $2, repository_url = $3, branch = $4, updated_at = now()
+WHERE pe.id = $1 AND pe.status <> 'closed' AND `+awaitsRepository, id, repository, url, branch)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.GiveRepository: %w", err)
 	}

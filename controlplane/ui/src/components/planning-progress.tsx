@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { formatDate, formatDuration } from '@/lib/format'
 import { reasonOf } from '@/lib/phase'
 import { formDraftFromGoal, PLANNING_MOVES } from '@/lib/planning'
+import { DEFAULT_BRANCH } from '@/components/repository-select'
 import { projectPath } from '@/lib/routes'
 import { useTenant } from '@/lib/tenant'
 import { useTick } from '@/lib/tick'
@@ -42,7 +43,7 @@ function SetUpMyself({ pe }: { pe: PlatformExperiment }) {
     setMoving(true)
     setError(null)
     try {
-      const form = await formDraftFromGoal(project.id, pe.goal ?? '', pe.repository ?? '')
+      const form = await formDraftFromGoal(project.id, pe.goal ?? '', pe.repository ?? '', pe.branch || DEFAULT_BRANCH)
       router.push(`${projectPath(project.id, 'experiments')}?draft=${form.id}`)
     } catch (e) {
       setError(`Could not open the form: ${errorMessage(e)}`)

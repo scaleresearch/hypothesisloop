@@ -47,10 +47,10 @@ def _section(title: str, body: str) -> str:
     return f"=== {title}\n{body.strip()}"
 
 
-def _clone(url: str, workdir: str) -> None:
+def _clone(url: str, branch: str, workdir: str) -> None:
     if any(Path(workdir).iterdir()):
         return
-    _run(["git", "clone", "--depth", "1", url, "."], cwd=workdir)
+    _run(["git", "clone", "--depth", "1", "--branch", branch, url, "."], cwd=workdir)
 
 
 def _files(workdir: str) -> list[str]:
@@ -78,10 +78,11 @@ def planner(workdir: str) -> str:
         if command[1] == "platform-experiments":
             draft = output
     try:
-        url = json.loads(draft)["repository_url"] if draft else ""
-        if not url:
-            raise RuntimeError("the draft names no repository_url")
-        _clone(url, workdir)
+        read = json.loads(draft) if draft else {}
+        url, branch = read.get("repository_url", ""), read.get("branch", "")
+        if not url or not branch:
+            raise RuntimeError("the draft names no repository_url and branch")
+        _clone(url, branch, workdir)
         files = _files(workdir)
     except (OSError, ValueError, KeyError, RuntimeError, subprocess.TimeoutExpired) as e:
         failed.append(f"the repository was not read: {e}")

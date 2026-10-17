@@ -111,7 +111,7 @@ def api(preflight: None, run_id: str):
         client.close_platform_experiment(pe_id)
     for name, org_id in admin.added_clusters:
         client.session.delete(client._url(f"/orgs/{org_id}/clusters/{name}"), timeout=30)
-    if API.local_repository:
+    if API.local_repository and API.local_repository.exists():
         shutil.rmtree(API.local_repository)
 
 
