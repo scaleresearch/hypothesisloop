@@ -33,6 +33,9 @@ const (
 	QuotaTierBurstOnly  = experimentspec.QuotaTierBurstOnly
 )
 
+// QuotaTiers is every quota tier.
+var QuotaTiers = experimentspec.QuotaTiers
+
 // ResolveQuotaTier is the tier a signup is stored with: its explicit override, else the
 // experiment's default_quota_tier.
 func ResolveQuotaTier(override, experimentDefault QuotaTier) QuotaTier {

@@ -2643,7 +2643,7 @@ export interface components {
             continues?: string;
             coordinator_in_agentsandbox?: boolean;
             coordinator_model?: string;
-            default_quota_tier?: string;
+            default_quota_tier?: components["schemas"]["QuotaTier"];
             description?: string;
             /**
              * Format: double
@@ -2938,7 +2938,7 @@ export interface components {
             budget_accelerator_hours: number;
             coordinator_in_agentsandbox?: boolean;
             coordinator_model?: string;
-            default_quota_tier?: string;
+            default_quota_tier?: components["schemas"]["QuotaTier"];
             description?: string;
             /**
              * Format: double
@@ -3390,7 +3390,7 @@ export interface components {
             model_allowance?: components["schemas"]["ModelAllowance"];
             name: string;
             platform_experiment_id: string;
-            quota_tier?: string;
+            quota_tier?: components["schemas"]["QuotaTier"];
             /** @description The researcher the platform added in this one's place. A replaced researcher takes no place and is never started again. */
             replaced_by?: string;
             /** @description The researcher that finished or lost its machine whose place the platform added this one in, with its agent type, model and hyperparameters. */
@@ -3846,7 +3846,7 @@ export interface components {
             declined_at?: string;
             /** @description Why the draft's planner proposed nothing. It stays while a changed goal is planned and goes with the next proposal. */
             declined_reason?: string;
-            default_quota_tier?: string;
+            default_quota_tier?: components["schemas"]["QuotaTier"];
             description: string;
             /**
              * Format: double
@@ -4115,6 +4115,8 @@ export interface components {
             rows: unknown[][];
             truncated: boolean;
         };
+        /** @enum {string} */
+        QuotaTier: "guaranteed" | "burst_only";
         RanOn: {
             machine?: components["schemas"]["JobMachine"];
             node: string;
@@ -4889,6 +4891,7 @@ export type Proposal = components['schemas']['Proposal'];
 export type ProposalQuestion = components['schemas']['ProposalQuestion'];
 export type ProposedAgent = components['schemas']['ProposedAgent'];
 export type QueryResult = components['schemas']['QueryResult'];
+export type QuotaTier = components['schemas']['QuotaTier'];
 export type RanOn = components['schemas']['RanOn'];
 export type ReferenceValue = components['schemas']['ReferenceValue'];
 export type RefusedMessage = components['schemas']['RefusedMessage'];
@@ -9059,6 +9062,7 @@ export const orgMemberActionValues: ReadonlyArray<FlattenedDeepRequired<componen
 export const orgRoleValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["OrgRole"]> = ["owner", "member"];
 export const platformExperimentActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["PlatformExperimentAction"]> = ["close", "abandon", "remove", "accept", "add_agent", "add_idea"];
 export const platformExperimentStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["PlatformExperimentStatus"]> = ["draft", "open", "running", "closed"];
+export const quotaTierValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["QuotaTier"]> = ["guaranteed", "burst_only"];
 export const referenceValueConstraints_metValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ReferenceValue"]["constraints_met"]> = ["true", "false", "unknown"];
 export const signupActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SignupAction"]> = ["message", "remove", "show_token"];
 export const signupReplyEndedValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SignupReply"]["ended"]> = ["", "closed", "cut", "finished", "planned"];

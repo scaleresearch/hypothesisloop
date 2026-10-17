@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -135,7 +136,7 @@ func (c *Settings) build() error {
 	if c.Quota.DefaultMaxConcurrentAccelerators <= 0 {
 		return fmt.Errorf("quota default_max_concurrent_accelerators must be positive")
 	}
-	if tier := domain.QuotaTier(c.Quota.DefaultQuotaTier); tier != domain.QuotaTierGuaranteed && tier != domain.QuotaTierBurstOnly {
+	if !slices.Contains(domain.QuotaTiers, domain.QuotaTier(c.Quota.DefaultQuotaTier)) {
 		return fmt.Errorf("quota default_quota_tier must be guaranteed or burst_only")
 	}
 	if c.Quota.MaxPlatformExperimentDays <= 0 {

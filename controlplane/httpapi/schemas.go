@@ -38,6 +38,7 @@ var schemaAliases = []schemaAlias{
 	enum(domain.ClusterActions),
 	enum(domain.ActorKinds),
 	enum(domain.CapacityTiers),
+	enum(domain.QuotaTiers),
 	enum(domain.TypeKinds),
 	{reflect.TypeFor[refusal.Refusal](), reflect.TypeFor[platformapi.ErrorModel]()},
 	{reflect.TypeFor[domain.JobSpec](), reflect.TypeFor[jobSpec]()},
