@@ -7,11 +7,12 @@ import { checkRepository } from '@/lib/api/platform-experiments'
 import { ApiError } from '@/lib/api/request'
 import { useGitHubApp, useGitHubInstall } from '@/lib/github-connect'
 import { useTenant } from '@/lib/tenant'
-import { GitHubProblem, InstallProgress } from '@/components/github-status'
+import { GitHubProblem, GitHubSettingsLink, InstallProgress } from '@/components/github-status'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { inlineLinkClass } from '@/components/ui/link'
 import { SearchableSelect } from '@/components/ui/searchable-select'
+import { Inline } from '@/components/ui/stack'
 import { InlineError } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
 import { keys } from '@/lib/keys'
@@ -75,19 +76,22 @@ function accountOf(value: string, accounts: OrgGitHubInstallation[], unasked?: O
  * before anything is created.
  */
 function RepositoryCheckNote({ value, account, onInstall }: { value: string; account?: OrgGitHubInstallation; onInstall?: () => void }) {
-  const { project } = useTenant()
+  const { org, project } = useTenant()
   const { error, isValidating, mutate } = useSWR(keys.repositoryCheck(project.id, value), () => checkRepository(project.id, repositoryFields(value)))
   if (!error) return null
   return (
-    <GitHubProblem
-      reason={error instanceof ApiError ? error.reason : undefined}
-      message={error.message}
-      account={account?.account_login ?? ''}
-      installation={account}
-      onInstall={onInstall}
-      onRetry={() => void mutate()}
-      retrying={isValidating}
-    />
+    <Inline gap="sm">
+      <GitHubProblem
+        reason={error instanceof ApiError ? error.reason : undefined}
+        message={error.message}
+        account={account?.account_login ?? ''}
+        installation={account}
+        onInstall={onInstall}
+        onRetry={() => void mutate()}
+        retrying={isValidating}
+      />
+      <GitHubSettingsLink orgID={org.id} />
+    </Inline>
   )
 }
 
@@ -144,7 +148,8 @@ export function RepositorySelect({ value, onChange, compact = false }: {
           No GitHub account is connected to {org.name}.{' '}
           {onInstall
             ? <Button type="button" variant="link" size="sm" disabled={install.phase === 'waiting'} onClick={onInstall}>Install GitHub App</Button>
-            : 'An owner of the org installs the GitHub App.'}
+            : 'An owner of the org installs the GitHub App.'}{' '}
+          <GitHubSettingsLink orgID={org.id} />
         </Text>
         <InstallProgress install={install} onCancel={reset} />
       </>

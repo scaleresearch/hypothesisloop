@@ -4,7 +4,7 @@ import useSWR from 'swr'
 import { fetchGitHubInstallations } from '@/lib/api/github'
 import { useGitHubApp, useGitHubInstall } from '@/lib/github-connect'
 import { useTenant } from '@/lib/tenant'
-import { InstallProgress } from '@/components/github-status'
+import { GitHubSettingsLink, InstallProgress } from '@/components/github-status'
 import { Button } from '@/components/ui/button'
 import { Text } from '@/components/ui/text'
 import { keys } from '@/lib/keys'
@@ -30,16 +30,19 @@ export function useNeedsGitHub(): boolean {
 
 /**
  * Installs the GitHub App from where an experiment is created, in a new tab this page waits for,
- * without leaving the page. A member is told an owner does it.
+ * without leaving the page. A member is told an owner does it. Both are led to the org's GitHub settings.
  */
 export function InstallGitHub({ label = 'Install GitHub App' }: { label?: string }) {
   const { org } = useTenant()
   const editsOrg = org.actions.includes('edit')
   const { install, start, reset } = useGitHubInstall(org.id, typeof window === 'undefined' ? '/' : window.location.pathname + window.location.search)
-  if (!editsOrg) return <Text as="span" variant="note">An owner of {org.name} installs the GitHub App to start.</Text>
+  if (!editsOrg) {
+    return <Text as="span" variant="note">An owner of {org.name} installs the GitHub App to start. <GitHubSettingsLink orgID={org.id} /></Text>
+  }
   return (
     <>
       <Button type="button" variant="primary" disabled={install.phase === 'waiting'} onClick={start}>{label}</Button>
+      <GitHubSettingsLink orgID={org.id} />
       <InstallProgress install={install} onCancel={reset} />
     </>
   )

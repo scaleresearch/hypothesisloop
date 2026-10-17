@@ -2,10 +2,10 @@
 
 import type { ReactNode } from 'react'
 import type { Tone } from '@/lib/colors'
-import { installationSettingsURL, type Install } from '@/lib/github-connect'
+import { githubCardPath, installationSettingsURL, type Install } from '@/lib/github-connect'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { inlineLinkClass } from '@/components/ui/link'
+import { inlineLinkClass, TextLink } from '@/components/ui/link'
 import { Inline } from '@/components/ui/stack'
 import { InlineError, Spinner } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
@@ -19,6 +19,11 @@ export function StatusChip({ tone, label, explain }: { tone: Tone; label: string
       <span className="sr-only">: {explain}</span>
     </span>
   )
+}
+
+/** The GitHub section of the org's settings, where an owner manages the connection and a member sees it. */
+export function GitHubSettingsLink({ orgID }: { orgID: string }) {
+  return <TextLink inline href={githubCardPath(orgID)} className="text-xs">See the connection in settings</TextLink>
 }
 
 /** What fixes a GitHub problem: installing again from here, or the installation's page on GitHub. */
