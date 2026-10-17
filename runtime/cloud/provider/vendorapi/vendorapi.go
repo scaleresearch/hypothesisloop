@@ -14,12 +14,13 @@ const maxErrorBody = 512
 // ErrTooLarge is in the error of an answer that was longer than its caller allows.
 var ErrTooLarge = errors.New("answer is larger than anything asked for")
 
-// StatusError is a non-2xx answer.
+// StatusError is a non-2xx answer. Body is cut to maxErrorBody bytes.
 type StatusError struct {
 	Vendor string
 	Method string
 	Path   string
 	Status int
+	Header http.Header
 	Body   string
 }
 
@@ -38,7 +39,7 @@ func Do(client *http.Client, req *http.Request, vendor string, maxBody int64) ([
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
-		return nil, nil, &StatusError{Vendor: vendor, Method: req.Method, Path: req.URL.Path, Status: resp.StatusCode, Body: string(raw)}
+		return nil, nil, &StatusError{Vendor: vendor, Method: req.Method, Path: req.URL.Path, Status: resp.StatusCode, Header: resp.Header, Body: string(raw)}
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
 	if err != nil {

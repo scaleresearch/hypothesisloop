@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/provider"
+	"github.com/scaleresearch/hypothesisloop/runtime/cloud/provider/vendorapi"
 )
 
 var _ provider.Provider = (*Provider)(nil)
@@ -32,8 +33,10 @@ var _ provider.Provider = (*Provider)(nil)
 const (
 	defaultBaseURL = "https://console.vast.ai"
 	requestTimeout = 30 * time.Second
-	maxErrorBody   = 512
-	pollInterval   = time.Second
+	vendor         = "vast"
+	// maxAnswer bounds an answer: the largest is a page of 25 instances or offers.
+	maxAnswer    = 4 << 20
+	pollInterval = time.Second
 	// tooManyWait is how long a request the API answered with 429 and no time to wait is not
 	// sent again.
 	tooManyWait = time.Minute
@@ -120,16 +123,9 @@ func New(cfg Settings, key string, acceleratorTypes []string, log func(format st
 // statusError is a non-2xx answer from the API. Code is the API's own error name
 // ("no_such_instance") and Message its explanation, empty when the body carried none.
 type statusError struct {
-	Method  string
-	Path    string
-	Status  int
+	*vendorapi.StatusError
 	Code    string
 	Message string
-	Body    string
-}
-
-func (e *statusError) Error() string {
-	return fmt.Sprintf("vast: %s %s: HTTP %d: %s", e.Method, e.Path, e.Status, e.Body)
 }
 
 // call sends one authenticated JSON request and decodes a 2xx answer into out.
@@ -155,32 +151,28 @@ func (p *Provider) call(ctx context.Context, method, path string, body, out any)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := p.http.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("vast: %s %s: %w", method, path, err)
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("vast: read %s %s: %w", method, path, err)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+	raw, header, err := vendorapi.Do(p.http, req, vendor, maxAnswer)
+	var failed *vendorapi.StatusError
+	if errors.As(err, &failed) {
 		var failure struct {
 			Error      string  `json:"error"`
 			Message    string  `json:"msg"`
 			RetryAfter float64 `json:"retry_after"`
 		}
-		_ = json.Unmarshal(raw, &failure)
-		refused := &statusError{Method: method, Path: path, Status: resp.StatusCode, Code: failure.Error, Message: failure.Message, Body: truncate(raw)}
-		if resp.StatusCode == http.StatusTooManyRequests {
-			return nil, p.limit(key, refused, retryAfter(resp.Header, failure.RetryAfter))
+		_ = json.Unmarshal([]byte(failed.Body), &failure)
+		refused := &statusError{StatusError: failed, Code: failure.Error, Message: failure.Message}
+		if failed.Status == http.StatusTooManyRequests {
+			return nil, p.limit(key, refused, retryAfter(failed.Header, failure.RetryAfter))
 		}
 		return nil, refused
+	}
+	if err != nil {
+		return nil, err
 	}
 	if err := json.Unmarshal(raw, out); err != nil {
 		return nil, fmt.Errorf("vast: decode %s %s: %w", method, path, err)
 	}
-	return resp.Header, nil
+	return header, nil
 }
 
 // limit keeps the API's 429 to a request for wait, and says so once.
@@ -203,11 +195,4 @@ func retryAfter(header http.Header, inBody float64) time.Duration {
 		return time.Duration(inBody * float64(time.Second))
 	}
 	return tooManyWait
-}
-
-func truncate(raw []byte) string {
-	if len(raw) > maxErrorBody {
-		return string(raw[:maxErrorBody])
-	}
-	return string(raw)
 }
