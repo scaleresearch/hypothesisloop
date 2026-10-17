@@ -12,13 +12,13 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 )
 
-type experimentDraftBody struct {
+type experimentDraftRequest struct {
 	Form    json.RawMessage `json:"form" doc:"The form as the client holds it: a JSON object, stored and returned unread."`
 	Step    string          `json:"step" doc:"The step of the form the person was on."`
 	Failure string          `json:"failure,omitempty" required:"false" doc:"Why the last create from this draft was refused. Left out, none was."`
 }
 
-func (b *experimentDraftBody) form() ([]byte, error) {
+func (b *experimentDraftRequest) form() ([]byte, error) {
 	var object map[string]json.RawMessage
 	if err := json.Unmarshal(b.Form, &object); err != nil || object == nil {
 		return nil, huma.Error400BadRequest("form must be a JSON object")
@@ -65,7 +65,7 @@ func registerExperimentDrafts(doc *Doc, drafts *platformexperiments.Drafts) {
 
 func (a draftsAPI) create(ctx context.Context, in *struct {
 	ID   string `path:"id"`
-	Body experimentDraftBody
+	Body experimentDraftRequest
 }) (*struct{ Body *domain.ExperimentDraft }, error) {
 	if err := a.access.Project(ctx, in.ID); err != nil {
 		return nil, err
@@ -103,7 +103,7 @@ func (a draftsAPI) get(ctx context.Context, in *struct {
 func (a draftsAPI) put(ctx context.Context, in *struct {
 	ID      string `path:"id"`
 	DraftID string `path:"draft_id"`
-	Body    experimentDraftBody
+	Body    experimentDraftRequest
 }) (*struct{ Body *domain.ExperimentDraft }, error) {
 	if err := a.access.Project(ctx, in.ID); err != nil {
 		return nil, err

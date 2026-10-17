@@ -60,13 +60,13 @@ type EditedAgentType struct {
 	Propagation domain.Propagation `json:"propagation" doc:"The version now current and how many agents and coordinators whose run goes on were told with agent.instructions: each runs it from its next turn boundary. A change that leaves prompt and settings as they were makes no version and tells nobody."`
 }
 
-// RestoreAgentTypeBody names the version a restore copies.
-type RestoreAgentTypeBody struct {
+// RestoreAgentTypeRequest names the version a restore copies.
+type RestoreAgentTypeRequest struct {
 	Version int `json:"version" minimum:"1" doc:"The version whose prompt and settings the new version holds."`
 }
 
-// CreateAgentTypeBody makes an agent type: from scratch, or as a copy of one the org reads.
-type CreateAgentTypeBody struct {
+// CreateAgentTypeRequest makes an agent type: from scratch, or as a copy of one the org reads.
+type CreateAgentTypeRequest struct {
 	From        string                    `json:"from,omitempty" doc:"Copy this agent type, a built-in one or the org's own: its role, prompt and settings, at its current version. With it, only name may be given."`
 	Name        string                    `json:"name,omitempty" doc:"Required without from. With from, the copy's name, \"Copy of\" the source's when left out."`
 	Description string                    `json:"description,omitempty" maxLength:"200" doc:"One line on what agents of the type do, at most 200 characters. With from, the copy has the source's."`
@@ -75,8 +75,8 @@ type CreateAgentTypeBody struct {
 	Settings    *domain.AgentTypeSettings `json:"settings,omitempty" doc:"Required without from."`
 }
 
-// EditAgentTypeBody is the next version of an agent type.
-type EditAgentTypeBody struct {
+// EditAgentTypeRequest is the next version of an agent type.
+type EditAgentTypeRequest struct {
 	IfVersion   int                      `json:"if_version" doc:"The version the edit was made from: 409 version_conflict when it is no longer current."`
 	Name        string                   `json:"name" doc:"Its name, which no version holds: changing it alone makes no version."`
 	Description *string                  `json:"description,omitempty" maxLength:"200" doc:"Its description, one line of at most 200 characters, which no version holds either. Left out, it stays as it was."`
@@ -129,7 +129,7 @@ func (h *AgentTypes) Version(ctx context.Context, orgID, id string, n int) (*dom
 	return version, nil
 }
 
-func (h *AgentTypes) Create(ctx context.Context, orgID string, body CreateAgentTypeBody) (*domain.CurrentAgentType, error) {
+func (h *AgentTypes) Create(ctx context.Context, orgID string, body CreateAgentTypeRequest) (*domain.CurrentAgentType, error) {
 	caller, err := h.access.OrgAdmin(ctx, orgID)
 	if err != nil {
 		return nil, err
@@ -145,7 +145,7 @@ func (h *AgentTypes) Create(ctx context.Context, orgID string, body CreateAgentT
 	return created, nil
 }
 
-func (h *AgentTypes) Edit(ctx context.Context, orgID, id string, body EditAgentTypeBody) (*EditedAgentType, error) {
+func (h *AgentTypes) Edit(ctx context.Context, orgID, id string, body EditAgentTypeRequest) (*EditedAgentType, error) {
 	caller, err := h.access.OrgAdmin(ctx, orgID)
 	if err != nil {
 		return nil, err
@@ -207,7 +207,7 @@ func (h *AgentTypes) Archive(ctx context.Context, orgID, id string) (*domain.Cur
 }
 
 // newType is what a create makes: body's own, or a copy of the type it names in from.
-func (h *AgentTypes) newType(ctx context.Context, orgID string, body CreateAgentTypeBody) (string, string, domain.AgentRole, string, domain.AgentTypeSettings, error) {
+func (h *AgentTypes) newType(ctx context.Context, orgID string, body CreateAgentTypeRequest) (string, string, domain.AgentRole, string, domain.AgentTypeSettings, error) {
 	name := strings.TrimSpace(body.Name)
 	if body.From == "" {
 		role, err := domain.ParseAgentRole(string(body.Role))

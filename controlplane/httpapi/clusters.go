@@ -92,7 +92,7 @@ func (a accountsAPI) registerClusters(doc *Doc) {
 
 func (a accountsAPI) registerCluster(ctx context.Context, in *struct {
 	ID   string `path:"id"`
-	Body nameBody
+	Body nameRequest
 }) (*struct{ Body accounts.RegisteredCluster }, error) {
 	registered, err := a.accounts.RegisterCluster(ctx, in.ID, in.Body.Name)
 	if err != nil {

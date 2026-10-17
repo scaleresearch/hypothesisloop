@@ -12,7 +12,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 )
 
-type agentMessagesBody struct {
+type agentMessages struct {
 	Messages []domain.AgentMessage                `json:"messages" doc:"The messages sent, one for each agent sent to."`
 	Refused  []platformexperiments.RefusedMessage `json:"refused,omitempty" doc:"With all, each researcher not sent to because the sender sent it the most an hour allows. Absent when none was refused."`
 }
@@ -50,7 +50,7 @@ func registerMessages(doc *Doc, experiments *platformexperiments.Service, logger
 func (a messagesAPI) send(ctx context.Context, in *struct {
 	ID   string `path:"id"`
 	Body platformexperiments.SendMessageRequest
-}) (*struct{ Body agentMessagesBody }, error) {
+}) (*struct{ Body agentMessages }, error) {
 	if err := a.access.PlatformExperiment(ctx, in.ID); err != nil {
 		return nil, err
 	}
@@ -62,13 +62,13 @@ func (a messagesAPI) send(ctx context.Context, in *struct {
 	if err != nil {
 		return nil, refused(a.logger, "send message", err)
 	}
-	return &struct{ Body agentMessagesBody }{Body: agentMessagesBody{Messages: messages, Refused: refusedTo}}, nil
+	return &struct{ Body agentMessages }{Body: agentMessages{Messages: messages, Refused: refusedTo}}, nil
 }
 
 func (a messagesAPI) list(ctx context.Context, in *struct {
 	ID      string `path:"id"`
 	AgentID string `query:"agent_id" doc:"Only the messages to this agent."`
-}) (*struct{ Body agentMessagesBody }, error) {
+}) (*struct{ Body agentMessages }, error) {
 	if err := a.access.PlatformExperiment(ctx, in.ID); err != nil {
 		return nil, err
 	}
@@ -84,5 +84,5 @@ func (a messagesAPI) list(ctx context.Context, in *struct {
 	if err != nil {
 		return nil, refused(a.logger, "list messages", err)
 	}
-	return &struct{ Body agentMessagesBody }{Body: agentMessagesBody{Messages: messages}}, nil
+	return &struct{ Body agentMessages }{Body: agentMessages{Messages: messages}}, nil
 }

@@ -130,7 +130,7 @@ func (a agentTypesAPI) version(ctx context.Context, in *struct {
 
 func (a agentTypesAPI) create(ctx context.Context, in *struct {
 	ID   string `path:"id"`
-	Body accounts.CreateAgentTypeBody
+	Body accounts.CreateAgentTypeRequest
 }) (*agentTypeAnswer, error) {
 	created, err := a.types.Create(ctx, in.ID, in.Body)
 	if err != nil {
@@ -142,7 +142,7 @@ func (a agentTypesAPI) create(ctx context.Context, in *struct {
 func (a agentTypesAPI) edit(ctx context.Context, in *struct {
 	ID     string `path:"id"`
 	TypeID string `path:"type_id"`
-	Body   accounts.EditAgentTypeBody
+	Body   accounts.EditAgentTypeRequest
 }) (*struct{ Body accounts.EditedAgentType }, error) {
 	edited, err := a.types.Edit(ctx, in.ID, in.TypeID, in.Body)
 	if err != nil {
@@ -154,7 +154,7 @@ func (a agentTypesAPI) edit(ctx context.Context, in *struct {
 func (a agentTypesAPI) restore(ctx context.Context, in *struct {
 	ID     string `path:"id"`
 	TypeID string `path:"type_id"`
-	Body   accounts.RestoreAgentTypeBody
+	Body   accounts.RestoreAgentTypeRequest
 }) (*struct{ Body accounts.EditedAgentType }, error) {
 	restored, err := a.types.Restore(ctx, in.ID, in.TypeID, in.Body.Version)
 	if err != nil {

@@ -10,7 +10,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
 )
 
-type roleBody struct {
+type roleRequest struct {
 	Role string `json:"role" doc:"owner or member. Any other is refused with reason invalid_role."`
 }
 
@@ -80,7 +80,7 @@ func (a accountsAPI) listMembers(ctx context.Context, in *struct {
 func (a accountsAPI) setMemberRole(ctx context.Context, in *struct {
 	ID     string `path:"id"`
 	UserID string `path:"user_id"`
-	Body   roleBody
+	Body   roleRequest
 }) (*struct{ Body domain.OrgMember }, error) {
 	member, err := a.accounts.SetMemberRole(ctx, in.ID, in.UserID, domain.OrgRole(in.Body.Role))
 	if err != nil {
@@ -101,7 +101,7 @@ func (a accountsAPI) removeMember(ctx context.Context, in *struct {
 
 func (a accountsAPI) createInvite(ctx context.Context, in *struct {
 	ID   string `path:"id"`
-	Body roleBody
+	Body roleRequest
 }) (*struct{ Body accounts.CreatedInvite }, error) {
 	invite, err := a.accounts.CreateInvite(ctx, in.ID, domain.OrgRole(in.Body.Role))
 	if err != nil {

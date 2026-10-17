@@ -13,11 +13,11 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 )
 
-type joinedAgentsBody struct {
+type joinedAgents struct {
 	Agents []platformexperiments.JoinedAgent `json:"agents"`
 }
 
-type finishedAgentBody struct {
+type finishedAgent struct {
 	Agents         []platformexperiments.JoinedAgent    `json:"agents"`
 	OpenHypotheses []platformexperiments.OpenHypothesis `json:"open_hypotheses" doc:"The hypotheses still open that are the agent's verdict to give, newest first, at most 200: its own, then the ideas of people no agent owns that a completed job of its tested. Each stays open for good unless the agent gives its verdict (POST /hypotheses/{id}/status) while its token still works. Empty when it left none. Nothing is refused for them."`
 }
@@ -104,7 +104,7 @@ func registerExperimentAgents(doc *Doc, experiments *platformexperiments.Service
 func (a experimentAgentsAPI) add(ctx context.Context, in *struct {
 	ID   string `path:"id"`
 	Body platformexperiments.AddAgentRequest
-}) (*struct{ Body joinedAgentsBody }, error) {
+}) (*struct{ Body joinedAgents }, error) {
 	if err := a.access.PlatformExperiment(ctx, in.ID); err != nil {
 		return nil, err
 	}
@@ -117,7 +117,7 @@ func (a experimentAgentsAPI) add(ctx context.Context, in *struct {
 	if err != nil {
 		return nil, err
 	}
-	out := &struct{ Body joinedAgentsBody }{}
+	out := &struct{ Body joinedAgents }{}
 	if out.Body.Agents, err = a.experiments.Join(ctx, in.ID, in.Body, caller.Actor(), a.launch); err != nil {
 		return nil, refused(a.logger, "add agent", err)
 	}
@@ -136,7 +136,7 @@ func (a experimentAgentsAPI) add(ctx context.Context, in *struct {
 
 func (a experimentAgentsAPI) list(ctx context.Context, in *struct {
 	ID string `path:"id"`
-}) (*struct{ Body joinedAgentsBody }, error) {
+}) (*struct{ Body joinedAgents }, error) {
 	if err := a.access.PlatformExperiment(ctx, in.ID); err != nil {
 		return nil, err
 	}
@@ -144,7 +144,7 @@ func (a experimentAgentsAPI) list(ctx context.Context, in *struct {
 	if err != nil {
 		return nil, err
 	}
-	out := &struct{ Body joinedAgentsBody }{}
+	out := &struct{ Body joinedAgents }{}
 	out.Body.Agents, err = a.experiments.Roster(ctx, in.ID, caller.Actor())
 	if errors.Is(err, platformexperiments.ErrPlatformExperimentNotFound) {
 		return nil, huma.Error404NotFound("platform experiment not found")
@@ -182,7 +182,7 @@ func (a experimentAgentsAPI) finish(ctx context.Context, in *struct {
 	ID      string `path:"id"`
 	AgentID string `path:"agent_id"`
 	Body    finishAgentRequest
-}) (*struct{ Body finishedAgentBody }, error) {
+}) (*struct{ Body finishedAgent }, error) {
 	if err := a.access.PlatformExperiment(ctx, in.ID); err != nil {
 		return nil, err
 	}
@@ -193,7 +193,7 @@ func (a experimentAgentsAPI) finish(ctx context.Context, in *struct {
 	if caller.Kind != auth.KindAgent || caller.AgentID != in.AgentID || caller.PlatformExperimentID != in.ID {
 		return nil, huma.Error403Forbidden("an agent finishes itself, with its own token")
 	}
-	out := &struct{ Body finishedAgentBody }{}
+	out := &struct{ Body finishedAgent }{}
 	out.Body.Agents, out.Body.OpenHypotheses, err = a.experiments.Finish(ctx, a.graph, in.ID, in.AgentID, in.Body.Reason,
 		strings.TrimSpace(in.Body.Blocker), strings.TrimSpace(in.Body.BaselineJobID), caller.Actor())
 	if err != nil {

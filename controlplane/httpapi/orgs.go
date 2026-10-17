@@ -17,7 +17,7 @@ type accountsAPI struct {
 	accounts *accounts.Service
 }
 
-type nameBody struct {
+type nameRequest struct {
 	Name string `json:"name"`
 }
 
@@ -102,7 +102,7 @@ func (a accountsAPI) createOrg(ctx context.Context, in *struct {
 
 func (a accountsAPI) renameOrg(ctx context.Context, in *struct {
 	ID   string `path:"id"`
-	Body nameBody
+	Body nameRequest
 }) (*struct{ Body domain.Org }, error) {
 	org, err := a.accounts.RenameOrg(ctx, in.ID, in.Body.Name)
 	if err != nil {
@@ -127,7 +127,7 @@ func (a accountsAPI) listProjects(ctx context.Context, in *struct {
 
 func (a accountsAPI) createProject(ctx context.Context, in *struct {
 	ID   string `path:"id"`
-	Body nameBody
+	Body nameRequest
 }) (*struct{ Body domain.Project }, error) {
 	project, err := a.accounts.CreateProject(ctx, in.ID, in.Body.Name)
 	if err != nil {
@@ -138,7 +138,7 @@ func (a accountsAPI) createProject(ctx context.Context, in *struct {
 
 func (a accountsAPI) renameProject(ctx context.Context, in *struct {
 	ID   string `path:"id"`
-	Body nameBody
+	Body nameRequest
 }) (*struct{ Body domain.Project }, error) {
 	project, err := a.accounts.RenameProject(ctx, in.ID, in.Body.Name)
 	if err != nil {
