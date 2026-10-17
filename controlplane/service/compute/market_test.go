@@ -181,9 +181,8 @@ func TestAShapeCountsAsManyRentableSlotsAsItsMaxInstances(t *testing.T) {
 	}
 }
 
-// A provider that rents two architectures deals each shape's open slots to them in turn while
-// each has a machine, and an architecture with none still names an offerless slot, so a job of it
-// is admitted to wait. A job is rented on its own architecture, which its slot then reports.
+// A provider that rents two architectures deals each shape's open slots in turn to those the
+// market has machines of. A job is rented on its own architecture, which its slot then reports.
 func TestOpenSlotsAreDealtToEveryArchitectureTheProviderRents(t *testing.T) {
 	p := fake.New()
 	p.Rents = []string{"amd64", "arm64"}
@@ -218,19 +217,18 @@ func TestOpenSlotsAreDealtToEveryArchitectureTheProviderRents(t *testing.T) {
 	}
 }
 
-func TestAnArchitectureWithNothingToRentStillNamesAnOfferlessSlot(t *testing.T) {
+// A shape names only the architectures it can be rented on now: with no arm64 machine of it, its
+// slots are amd64, the ones beyond the amd64 machines offerless. With nothing to rent on any, it
+// names every architecture, each slot saying why.
+func TestAShapeNamesOnlyTheArchitecturesItCanBeRentedOn(t *testing.T) {
 	p := fake.New()
 	p.Rents = []string{"amd64", "arm64"}
 	e, err := New(testConfig(p))
 	if err != nil {
 		t.Fatal(err)
 	}
-	p.Market = func(spec provider.Spec) provider.Supply {
-		if spec.Architecture == "arm64" {
-			return supplyOf(0)
-		}
-		return supplyOf(2)
-	}
+	onOffer := map[string]int{"amd64": 1}
+	p.Market = func(spec provider.Spec) provider.Supply { return supplyOf(onOffer[spec.Architecture]) }
 	_, _, _, labels, err := e.GetLiveAcceleratorCapacitySnapshot(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -238,8 +236,18 @@ func TestAnArchitectureWithNothingToRentStillNamesAnOfferlessSlot(t *testing.T) 
 	if labels["h100-0"][clusterapi.NodeArchitectureLabel] != "amd64" || labels["h100-0"][clusterapi.NodeSlotNoOfferLabel] != "" {
 		t.Fatalf("h100-0 %v, want a free amd64 slot", labels["h100-0"])
 	}
-	if labels["h100-1"][clusterapi.NodeArchitectureLabel] != "arm64" || labels["h100-1"][clusterapi.NodeSlotNoOfferLabel] != "shape h100 on arm64: no offer passes the filters" {
-		t.Fatalf("h100-1 %v, want an offerless arm64 slot saying why", labels["h100-1"])
+	if labels["h100-1"][clusterapi.NodeArchitectureLabel] != "amd64" || labels["h100-1"][clusterapi.NodeSlotNoOfferLabel] == "" {
+		t.Fatalf("h100-1 %v, want an offerless amd64 slot", labels["h100-1"])
+	}
+
+	onOffer = map[string]int{}
+	_, _, _, labels, err = e.GetLiveAcceleratorCapacitySnapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if labels["h100-0"][clusterapi.NodeArchitectureLabel] != "amd64" || labels["h100-1"][clusterapi.NodeArchitectureLabel] != "arm64" ||
+		labels["h100-1"][clusterapi.NodeSlotNoOfferLabel] != "shape h100 on arm64: no offer passes the filters" {
+		t.Fatalf("nothing on offer: h100-0 %v, h100-1 %v, want both architectures named offerless", labels["h100-0"], labels["h100-1"])
 	}
 }
 

@@ -112,8 +112,15 @@ func (e *Executor) slotsAgainst(v *view, rentable map[string]onOffer) []slot {
 	var slots []slot
 	for _, shape := range e.shapes {
 		left := make(map[string]int, len(e.architectures))
+		var offered []string
 		for _, arch := range e.architectures {
 			left[arch] = rentable[marketKey(shape.Name, arch)].left
+			if rentable == nil || left[arch] > 0 {
+				offered = append(offered, arch)
+			}
+		}
+		if len(offered) == 0 {
+			offered = e.architectures
 		}
 		turn := 0
 		for n := 0; n < shape.MaxInstances; n++ {
@@ -123,9 +130,9 @@ func (e *Executor) slotsAgainst(v *view, rentable map[string]onOffer) []slot {
 				slots = append(slots, s)
 				continue
 			}
-			var offered bool
-			s.architecture, offered = e.deal(&turn, left, rentable == nil)
-			if !offered {
+			var free bool
+			s.architecture, free = deal(&turn, offered, left, rentable == nil)
+			if !free {
 				s.noOffer = rentable[marketKey(shape.Name, s.architecture)].why
 			}
 			slots = append(slots, s)
@@ -134,18 +141,22 @@ func (e *Executor) slotsAgainst(v *view, rentable map[string]onOffer) []slot {
 	return slots
 }
 
-// deal is the architecture of a shape's next slot that no instance holds, lowest index first:
-// each architecture the provider rents in turn, and the slot is offered while that architecture
-// has a machine left for it. Every architecture the provider rents is then on some slot while a
-// shape has as many slots no instance holds, so a job of any of them is admitted, to wait for its
-// machine when there is none.
-func (e *Executor) deal(turn *int, left map[string]int, unbounded bool) (arch string, offered bool) {
-	arch = e.architectures[*turn%len(e.architectures)]
-	*turn++
-	if unbounded || left[arch] > 0 {
-		left[arch]--
-		return arch, true
+// deal is the architecture of a shape's next slot that no instance holds, lowest index first: in
+// turn each of offered, the architectures the market has machines of for the shape (all the
+// provider rents when it has none of any), skipping one with no machine left while another has.
+// The slot is free when its architecture has a machine left, and offerless otherwise. A shape
+// then names an architecture only while it can be rented on it, or every one while none can.
+func deal(turn *int, offered []string, left map[string]int, unbounded bool) (arch string, free bool) {
+	for range offered {
+		arch = offered[*turn%len(offered)]
+		*turn++
+		if unbounded || left[arch] > 0 {
+			left[arch]--
+			return arch, true
+		}
 	}
+	arch = offered[*turn%len(offered)]
+	*turn++
 	return arch, false
 }
 
