@@ -88,10 +88,10 @@ def test_a_hosted_experiment_runs_end_to_end_on_rented_machines_and_survives_a_l
     deadline = Deadline.in_seconds(50 * MINUTE)
 
     # The repository's own experiment file is its CPU experiment, so this one states its brief
-    # and metrics, which point at mlp/job.yaml there, and takes the rest from the file.
+    # and metrics, which point at mlp/job.yaml there, and leaves the rest to the platform.
     stated = yaml.safe_load((Path(__file__).parent / "real_providers_experiment.yaml").read_text())
     created = org.post("/platform-experiments", {
-        "project_id": org.project_id, "from_repo": True, "repository": os.environ["TEST_GIT_HOST_GITHUB_REPOSITORY"],
+        "project_id": org.project_id, "repository": os.environ["TEST_GIT_HOST_GITHUB_REPOSITORY"],
         "description": stated["description"], "metrics": stated["metrics"],
         "name": f"real-providers-{run_id}", "budget_accelerator_hours": 1, "max_agents": 3,
         "coordinator_hosted": True, "duration_hours": 24,

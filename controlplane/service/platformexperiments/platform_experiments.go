@@ -2,12 +2,12 @@ package platformexperiments
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
@@ -339,49 +339,19 @@ func NewService(store Store, cfg domain.QuotaConfig, logger *zap.Logger, metrics
 }
 
 // CreatePlatformExperimentRequest is the body of POST /platform-experiments, and what a
-// platform experiment is created as by any way: the input of validate.
-//
-// name, description and metrics are not required by the schema, because with from_repo the
-// repository's experiment file may state them. validate requires them of every create.
+// platform experiment is created as by any way: the input of validate. It is the experiment's
+// spec and where the experiment is placed.
 type CreatePlatformExperimentRequest struct {
+	experimentspec.Spec
 	// ProjectID places the platform experiment. Required on create, and fixed from then on.
 	ProjectID string `json:"project_id,omitempty"`
-	// FromRepo takes every field the request leaves out from .hypothesisloop/experiment.yaml at
-	// the head of the default branch of the repository the request names.
-	FromRepo               bool                  `json:"from_repo,omitempty"`
-	Name                   string                `json:"name" required:"false"`
-	Description            string                `json:"description" required:"false"`
-	BudgetAcceleratorHours float64               `json:"budget_accelerator_hours"`
-	MaxAgents              int                   `json:"max_agents" doc:"How many researchers may be at work at once: the agents of role competitor, whatever their agent type, that have not finished, were not cut, were not replaced and still have a machine. One that ended leaves its place to another. The coordinator, a draft's planner and agents of role baseline, which measure the baseline before the run and are not ranked, never count, nor do reviewers. At least the total of researchers."`
-	Researchers            domain.ResearcherPool `json:"researchers,omitempty" doc:"Optional: the researchers it is to have at work, an entry each agent type and model, [{agent_type, model, hyperparameters, count}], at most max_agents in all. A model left out is the platform's default, which the answer shows. 422 invalid_agents for a count below 1, an agent type that is none, a model no agent can be started on, two entries of one agent type and model, or more than max_agents in all. With coordinator_hosted the platform creates them with the platform experiment, runs them and keeps their counts at work while the run goes on. The coordinator may add researchers beyond them, up to max_agents."`
-	// MaxConcurrentAccelerators bounds accelerators-in-flight for this experiment. Nil means
-	// "leave unset" on create (defers to quota.default_max_concurrent_accelerators) and "no
-	// change" on update; a present zero is rejected by domain validation, not treated as unset.
-	MaxConcurrentAccelerators *int                      `json:"max_concurrent_accelerators,omitempty"`
-	Metrics                   []domain.MetricDefinition `json:"metrics" required:"false"` // metric keys jobs must emit
-	ReportIntervalSeconds     int                       `json:"report_interval_seconds,omitempty" doc:"How often a job is expected to report. Left out, it is the platform's scheduler.default_report_interval_seconds."`
-	StartsAt                  time.Time                 `json:"starts_at" required:"false" doc:"When its baseline begins to be measured, for a later start than this create. Left out, or past, it is this create."`
-	DurationHours             float64                   `json:"duration_hours" required:"false" doc:"How long the run lasts, in hours from the moment it starts, at most quota.max_platform_experiment_days. Required: 422 invalid_length without it. The time it is open before, while its baseline is measured, is no part of it."`
-	// Stages is the elimination ladder, fixed at creation. Omit to get the platform default
-	// (config stages.default), as one stage when max_agents is below domain.MinResearchersForCut.
-	Stages []domain.Stage `json:"stages,omitempty"`
-	// DefaultQuotaTier controls signups that omit quota_tier: "guaranteed" or "burst_only". Omit
-	// to get the platform's (config quota.default_quota_tier).
-	DefaultQuotaTier string `json:"default_quota_tier,omitempty"`
-	// CoordinatorHosted has the platform run this platform experiment's coordinator, on
-	// CoordinatorModel or the platform's coordinator default model. It rents a machine, so neither is read
-	// from the experiment file.
-	CoordinatorHosted bool   `json:"coordinator_hosted,omitempty"`
-	CoordinatorModel  string `json:"coordinator_model,omitempty"`
 	// Repository is the code the platform experiment works on, owner/name on GitHub, reachable
-	// through an installation its org connected. AgentImage is the image its hosted agents and
-	// coordinator run, empty for the platform's own. Both are fixed at creation, and the image
-	// is not read from the experiment file.
+	// through an installation its org connected. Fixed at creation.
 	Repository string `json:"repository,omitempty" doc:"owner/name on GitHub. An installation the org connected must cover it. Left out, the platform creates a private repository on the GitHub account the org connected, and the answer names it."`
 	// RepositoryAccount is the connected GitHub account a new repository is created on.
-	RepositoryAccount string `json:"repository_account,omitempty" doc:"The GitHub account, one the org connected, on which the platform creates the repository when repository is left out. Required then only when the org connected several."`
-	AgentImage        string `json:"agent_image,omitempty" doc:"The image hosted agents and the coordinator run, built FROM the platform's agent image so the harness is in it. Empty is the platform's own."`
-	Continues         string `json:"continues,omitempty" doc:"The id of a closed platform experiment of the same project to carry on, which keeps its code in the repository this one names. Its baseline starts from the commit of that run's baseline job, so both are measured by the same harness. It keeps the metric keys and directions of that run: 422 invalid_metrics for others. Left out, it starts fresh. 422 invalid_continues for one that is no closed platform experiment of the project, keeps its code in another repository or declared no baseline."`
+	RepositoryAccount string    `json:"repository_account,omitempty" doc:"The GitHub account, one the org connected, on which the platform creates the repository when repository is left out. Required then only when the org connected several."`
+	Continues         string    `json:"continues,omitempty" doc:"The id of a closed platform experiment of the same project to carry on, which keeps its code in the repository this one names. Its baseline starts from the commit of that run's baseline job, so both are measured by the same harness. It keeps the metric keys and directions of that run: 422 invalid_metrics for others. Left out, it starts fresh. 422 invalid_continues for one that is no closed platform experiment of the project, keeps its code in another repository or declared no baseline."`
+	StartsAt          time.Time `json:"starts_at" required:"false" doc:"When its baseline begins to be measured, for a later start than this create. Left out, or past, it is this create."`
 
 	// coordinator is CoordinatorHosted resolved by CreateExperiment: which model.
 	coordinator *domain.HostedCoordinator
@@ -396,21 +366,6 @@ type CreatePlatformExperimentRequest struct {
 	// repository is where it keeps its code, as CreateExperiment resolved the request's repository
 	// and repository_account (chooseRepository).
 	repository RepositoryChoice
-
-	// raw is the body as it arrived. Which keys it carried is what tells a field left out from
-	// one stated as its zero value.
-	raw json.RawMessage
-}
-
-// createFields is the request without its own decoding.
-type createFields CreatePlatformExperimentRequest
-
-func (r *CreatePlatformExperimentRequest) UnmarshalJSON(data []byte) error {
-	if err := json.Unmarshal(data, (*createFields)(r)); err != nil {
-		return err
-	}
-	r.raw = append(json.RawMessage(nil), data...)
-	return nil
 }
 
 // PlatformExperimentPatch is the body of PATCH /platform-experiments/{id}: the fields that

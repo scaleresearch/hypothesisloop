@@ -1654,9 +1654,14 @@ func (s *createdStore) update(pe *domain.PlatformExperiment, status domain.Platf
 	return nil
 }
 
-// run is what a request with from_repo must always state itself.
+// run is a whole create body naming the repository acme/model, with more laid over it.
 func run(more map[string]any) map[string]any {
-	body := map[string]any{"project_id": "prj-a", "from_repo": true, "repository": "acme/model", "budget_accelerator_hours": 5, "max_agents": 3, "duration_hours": 48}
+	body := map[string]any{
+		"project_id": "prj-a", "repository": "acme/model", "name": "tune the model", "description": "beat the baseline in the README",
+		"budget_accelerator_hours": 5, "max_agents": 3, "duration_hours": 48, "report_interval_seconds": 30,
+		"metrics": []map[string]any{{"key": "val_accuracy", "direction": "maximize"}},
+		"stages":  []map[string]any{{"length_pct": 100, "evict_pct": 0}},
+	}
 	for key, value := range more {
 		body[key] = value
 	}

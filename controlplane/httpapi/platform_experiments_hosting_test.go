@@ -112,15 +112,6 @@ func TestCreateWithAHostedCoordinatorGivesItToTheConfiguredLauncher(t *testing.T
 	}
 }
 
-// The file is pushed to by any agent's token, and a coordinator rents a machine.
-func TestWhatThePlatformRunsIsNeverReadFromTheExperimentFile(t *testing.T) {
-	file := experimentBase + "coordinator_hosted: true\ncoordinator_model: model-of-the-file\n"
-	store, create := hostingAPI(t, &fakeRepositories{files: map[string]string{"prj-a": file}})
-	if code, out := create(run(nil)); code != http.StatusCreated || store.created[0].CoordinatorHosted {
-		t.Fatalf("got = %d %v, created %+v: want nothing hosted", code, out, store.created)
-	}
-}
-
 func TestCreateRefusesHostingItCannotStart(t *testing.T) {
 	whole := map[string]any{
 		"project_id": "prj-a", "name": "n", "description": "d", "budget_accelerator_hours": 5, "max_agents": 3, "duration_hours": 24,

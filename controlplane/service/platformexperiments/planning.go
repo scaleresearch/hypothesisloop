@@ -10,6 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -99,7 +100,7 @@ func (s *Service) createDraft(ctx context.Context, projectID, goal, continues st
 	}
 	now := time.Now().UTC()
 	// A draft states nothing of a run yet, so its ladder and its policies are the platform's.
-	settings := s.withSettings(CreatePlatformExperimentRequest{})
+	settings := s.withSettings(experimentspec.Spec{})
 	pe := &domain.PlatformExperiment{
 		ID:                    id,
 		ProjectID:             projectID,

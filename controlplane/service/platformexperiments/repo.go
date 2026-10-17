@@ -1,17 +1,15 @@
 package platformexperiments
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"go.uber.org/zap"
-	"gopkg.in/yaml.v3"
 
+	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
 	"github.com/scaleresearch/hypothesisloop/contract/repotemplate"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
@@ -143,103 +141,29 @@ func (s *Service) repositoryOf(ctx context.Context, projectID, repository, accou
 	return s.repos.Reachable(ctx, projectID, repository)
 }
 
-// neverFromTheFile are what one run costs and how long it lasts. Any agent's token can push to
-// the branch the file is read from, so these come from the request and from nowhere else.
-var neverFromTheFile = []string{"budget_accelerator_hours", "max_agents", "researchers", "duration_hours", "coordinator_hosted", "coordinator_model", "agent_image"}
-
-// fromRepo returns req laid over the experiment file of the repository it names: every field the
-// body carried is the request's, every other one the file's.
-func (s *Service) fromRepo(ctx context.Context, req CreatePlatformExperimentRequest) (CreatePlatformExperimentRequest, error) {
-	data, err := s.repos.File(ctx, req.ProjectID, req.Repository, domain.ExperimentFile)
-	if err != nil {
-		return req, err
-	}
-	merged, err := decodeExperimentBase(data)
-	if err != nil {
-		return req, invalidExperimentFile(req.Repository, err)
-	}
-	if err := json.Unmarshal(req.raw, (*createFields)(&merged)); err != nil {
-		return req, fmt.Errorf("lay the request over the experiment file: %w", err)
-	}
-	return merged, nil
-}
-
-func invalidExperimentFile(repository string, err error) error {
-	return refusal.Refuse(http.StatusUnprocessableEntity, "invalid_experiment_file", domain.ExperimentFile+" of "+repository+" cannot be used: "+err.Error())
-}
-
-// ExperimentFile is what a repository's experiment file states of a platform experiment: the
-// fields a create with from_repo would take from it. A form shows them before anything is
-// created.
+// ExperimentFile is the spec a repository keeps at experimentspec.File, which a form shows before
+// anything is created.
 type ExperimentFile struct {
-	Repository                string                    `json:"repository"`
-	Name                      string                    `json:"name,omitempty"`
-	Description               string                    `json:"description,omitempty"`
-	Metrics                   []domain.MetricDefinition `json:"metrics,omitempty"`
-	ReportIntervalSeconds     int                       `json:"report_interval_seconds,omitempty"`
-	Stages                    []domain.Stage            `json:"stages,omitempty"`
-	DefaultQuotaTier          string                    `json:"default_quota_tier,omitempty"`
-	MaxConcurrentAccelerators *int                      `json:"max_concurrent_accelerators,omitempty"`
+	experimentspec.Spec
+	Repository string `json:"repository" doc:"The repository read, as the git host names it."`
 }
 
-// experimentFile reads the experiment file of a repository the project's org reaches, by the
-// decoding a create with from_repo uses, so that what is shown is what such a create would take.
-func (s *Service) experimentFile(ctx context.Context, projectID, repository string) (*ExperimentFile, error) {
+// ReadExperimentFile reads the experiment file of a repository the project's org reaches, and
+// creates nothing.
+func (s *Service) ReadExperimentFile(ctx context.Context, projectID, repository string) (*ExperimentFile, error) {
 	named, err := s.repos.Reachable(ctx, projectID, repository)
 	if err != nil {
 		return nil, err
 	}
-	data, err := s.repos.File(ctx, projectID, named, domain.ExperimentFile)
+	data, err := s.repos.File(ctx, projectID, named, experimentspec.File)
 	if err != nil {
 		return nil, err
 	}
-	base, err := decodeExperimentBase(data)
+	spec, err := experimentspec.Parse(data)
 	if err != nil {
-		return nil, invalidExperimentFile(named, err)
+		return nil, refusal.Refuse(http.StatusUnprocessableEntity, "invalid_experiment_file", experimentspec.File+" of "+named+" cannot be used: "+err.Error())
 	}
-	return &ExperimentFile{
-		Repository: named, Name: base.Name, Description: base.Description, Metrics: base.Metrics,
-		ReportIntervalSeconds: base.ReportIntervalSeconds, Stages: base.Stages,
-		DefaultQuotaTier: base.DefaultQuotaTier, MaxConcurrentAccelerators: base.MaxConcurrentAccelerators,
-	}, nil
-}
-
-// decodeExperimentBase reads the experiment file: YAML shaped like the create body. It cannot
-// choose its project, what neverFromTheFile names is left out of it, and a key the body does not
-// have is an error, since a mistyped one would otherwise be dropped in silence.
-func decodeExperimentBase(data []byte) (CreatePlatformExperimentRequest, error) {
-	var base CreatePlatformExperimentRequest
-	var document map[string]any
-	if err := yaml.Unmarshal(data, &document); err != nil {
-		return base, fmt.Errorf("it is not a YAML mapping: %w", err)
-	}
-	if len(document) == 0 {
-		return base, fmt.Errorf("it is empty")
-	}
-	for _, key := range []string{"project_id", "from_repo", "repository"} {
-		if _, set := document[key]; set {
-			return base, fmt.Errorf("it must not set %s: the request does", key)
-		}
-	}
-	for _, key := range neverFromTheFile {
-		delete(document, key)
-	}
-	encoded, err := json.Marshal(document)
-	if err != nil {
-		return base, fmt.Errorf("it holds a value the create body cannot, such as a key that is not a string: %w", err)
-	}
-	decoder := json.NewDecoder(bytes.NewReader(encoded))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode((*createFields)(&base)); err != nil {
-		return base, fmt.Errorf("it is not shaped like the create body: %s", strings.TrimPrefix(err.Error(), "json: "))
-	}
-	return base, nil
-}
-
-// ReadExperimentFile reads the experiment file of repository, or of the project's own when it is
-// empty, and creates nothing.
-func (s *Service) ReadExperimentFile(ctx context.Context, projectID, repository string) (*ExperimentFile, error) {
-	return s.experimentFile(ctx, projectID, repository)
+	return &ExperimentFile{Repository: named, Spec: spec}, nil
 }
 
 // CheckRepository answers where a platform experiment of projectID naming repository on account

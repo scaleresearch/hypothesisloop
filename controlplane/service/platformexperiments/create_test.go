@@ -2,21 +2,19 @@ package platformexperiments
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
-	"go.uber.org/zap"
-	"gopkg.in/yaml.v3"
-
+	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
+	"go.uber.org/zap"
 )
 
 // platformexperimentstest.Settings is the platform settings a service of these tests applies and holds a create to.
@@ -36,10 +34,10 @@ func reaching(svc *Service, types ...domain.AcceleratorType) *Service {
 // takes from the settings is the same for all three.
 func TestValidateRefusesWithAReasonAndAppliesTheSettings(t *testing.T) {
 	valid := func() CreatePlatformExperimentRequest {
-		return CreatePlatformExperimentRequest{
+		return CreatePlatformExperimentRequest{Spec: experimentspec.Spec{
 			Name: "exp", Description: "the brief", BudgetAcceleratorHours: 10, DurationHours: 24, MaxAgents: 5,
 			Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}},
-		}
+		}}
 	}
 	svc := NewService(&createStore{}, platformexperimentstest.Settings, zap.NewNop(), nil, time.Minute)
 	spec, err := svc.validate(valid(), agenttypes.Catalog())
@@ -104,10 +102,10 @@ func TestAFieldNoBoundaryCanCutIsStoredWithTheLadderItRuns(t *testing.T) {
 	settings.DefaultStages = ladder
 	svc := NewService(&createStore{}, settings, zap.NewNop(), nil, time.Minute)
 	spec := func(researchers int, stages []domain.Stage) CreatePlatformExperimentRequest {
-		return CreatePlatformExperimentRequest{
+		return CreatePlatformExperimentRequest{Spec: experimentspec.Spec{
 			Name: "exp", Description: "the brief", BudgetAcceleratorHours: 10, DurationHours: 24, MaxAgents: researchers,
 			Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}}, Stages: stages,
-		}
+		}}
 	}
 	for _, researchers := range []int{2, domain.MinResearchersForCut} {
 		checked, err := svc.validate(spec(researchers, nil), agenttypes.Catalog())
@@ -150,10 +148,10 @@ func TestAPlatformExperimentNoClusterCouldRunIsRefusedWhereItComesIntoBeing(t *t
 		}
 	}
 
-	body := CreatePlatformExperimentRequest{
+	body := CreatePlatformExperimentRequest{Spec: experimentspec.Spec{
 		Name: "exp", Description: "the brief", BudgetAcceleratorHours: 10, DurationHours: 24, MaxAgents: 5,
 		Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}},
-	}
+	}}
 	store := &createStore{}
 	_, err := reaching(NewService(store, platformexperimentstest.Settings, zap.NewNop(), nil, time.Minute)).Create(context.Background(), body)
 	var refused *refusal.Refusal
@@ -184,27 +182,26 @@ func TestAPatchPassesWithNoCapacityReported(t *testing.T) {
 	}
 }
 
-// The example is what an operator copies, so the server must accept it as written.
-func TestTheExamplePlatformExperimentIsAccepted(t *testing.T) {
-	raw, err := os.ReadFile("../../settings/examples/experiment.yaml")
-	if err != nil {
-		t.Fatal(err)
+// Each example is what an operator starts as written, so the server must accept it.
+func TestTheExamplePlatformExperimentsAreAccepted(t *testing.T) {
+	examples, err := filepath.Glob("../../../examples/*/" + experimentspec.File)
+	if err != nil || len(examples) == 0 {
+		t.Fatalf("no example found: %v", err)
 	}
-	var fields map[string]any
-	if err := yaml.Unmarshal(raw, &fields); err != nil {
-		t.Fatal(err)
-	}
-	body, err := json.Marshal(fields)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var req CreatePlatformExperimentRequest
-	if err := json.Unmarshal(body, &req); err != nil {
-		t.Fatal(err)
-	}
-	svc := reaching(NewService(&createStore{}, platformexperimentstest.Settings, zap.NewNop(), nil, time.Minute), domain.CPUType)
-	if _, err := svc.Create(context.Background(), req); err != nil {
-		t.Fatalf("Create from the example: %v", err)
+	for _, file := range examples {
+		dir := filepath.Dir(filepath.Dir(file))
+		spec, err := experimentspec.Load(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := CreatePlatformExperimentRequest{Spec: spec, ProjectID: "prj-a"}
+		if spec.CoordinatorHosted {
+			req.coordinator = &domain.HostedCoordinator{}
+		}
+		svc := reaching(NewService(&createStore{}, platformexperimentstest.Settings, zap.NewNop(), nil, time.Minute), domain.CPUType)
+		if _, err := svc.Create(context.Background(), req); err != nil {
+			t.Errorf("Create from %s: %v", dir, err)
+		}
 	}
 }
 

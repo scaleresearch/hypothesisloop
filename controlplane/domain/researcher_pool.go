@@ -1,7 +1,6 @@
 package domain
 
 import (
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -30,16 +29,11 @@ func (p ResearcherPool) Total() int {
 	return total
 }
 
-// Check refuses a pool a person or a planner states: an entry for no researcher, an agent type
-// catalog holds no researcher type of (LookupAgentType), a model no agent can be started on,
-// hyperparameters too large, two entries of one agent type and model, and more researchers in all
-// than maxAgents.
-func (p ResearcherPool) Check(maxAgents int, catalog AgentTypeCatalog) error {
-	seen := map[PoolKey]bool{}
+// Check refuses a pool by what the platform's catalog says of it: an agent type catalog holds no
+// researcher type of (LookupAgentType), and a model no agent can be started on. Every other rule
+// of a pool is the spec's (experimentspec.Spec.Validate).
+func (p ResearcherPool) Check(catalog AgentTypeCatalog) error {
 	for i, e := range p {
-		if e.Count <= 0 {
-			return fmt.Errorf("researchers[%d]: count must be positive, got %d", i, e.Count)
-		}
 		agentType := e.AgentType
 		if agentType == "" {
 			agentType = DefaultAgentFlavor
@@ -52,17 +46,6 @@ func (p ResearcherPool) Check(maxAgents int, catalog AgentTypeCatalog) error {
 				return fmt.Errorf("researchers[%d]: %w", i, err)
 			}
 		}
-		if encoded, err := json.Marshal(e.Hyperparameters); err != nil || len(encoded) > MaxHyperparametersBytes {
-			return fmt.Errorf("researchers[%d]: hyperparameters must be a JSON object of at most %d bytes", i, MaxHyperparametersBytes)
-		}
-		key := PoolKey{AgentType: agentType, Model: e.Model}
-		if seen[key] {
-			return fmt.Errorf("researchers[%d]: a second entry of agent_type %s on model %q: state one entry with their count", i, agentType, e.Model)
-		}
-		seen[key] = true
-	}
-	if total := p.Total(); total > maxAgents {
-		return fmt.Errorf("researchers total %d, more than max_agents %d, the researchers that may be at work at once", total, maxAgents)
 	}
 	return nil
 }

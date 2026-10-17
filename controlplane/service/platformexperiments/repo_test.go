@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"strings"
-	"testing"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
@@ -12,53 +11,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
-
-const experimentBase = `
-name: tune the model
-description: beat the baseline in the README
-budget_accelerator_hours: 40
-max_agents: 6
-report_interval_seconds: 30
-duration_hours: 400
-metrics:
-  - key: val_accuracy
-    direction: maximize
-stages:
-  - length_pct: 100
-    evict_pct: 0
-`
-
-func TestTheExperimentFileIsShapedLikeTheCreateBody(t *testing.T) {
-	base, err := decodeExperimentBase([]byte(experimentBase))
-	if err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if base.Name != "tune the model" || base.ReportIntervalSeconds != 30 || len(base.Metrics) != 1 || base.Metrics[0].Key != "val_accuracy" ||
-		len(base.Stages) != 1 || base.Stages[0].LengthPct != 100 {
-		t.Fatalf("base = %+v", base)
-	}
-	// What a run costs and how long it lasts is never the file's to say.
-	if base.BudgetAcceleratorHours != 0 || base.MaxAgents != 0 || base.DurationHours != 0 {
-		t.Fatalf("base = %+v, want no budget, no agent count and no length taken from the file", base)
-	}
-	for name, file := range map[string]string{
-		"a project of its own choosing": experimentBase + "project_id: prj_other\n",
-		"from_repo":                     experimentBase + "from_repo: true\n",
-		"a key the body does not have":  experimentBase + "budget_acelerator_hours: 4\n",
-		"a list":                        "- name: a\n",
-		"not yaml":                      "name: [unclosed\n",
-		"a value of the wrong type":     "report_interval_seconds: often\n",
-		"empty":                         "",
-		"only a comment":                "# nothing yet\n",
-		"a key that is a number":        experimentBase + "7: seven\n",
-		"a nested key that is a number": "name: x\nmetrics:\n  - key: a\n    direction: maximize\n    1: one\n",
-		"a nested key that is a list":   "name: x\nstages:\n  - ? [a, b]\n    : c\n",
-	} {
-		if _, err := decodeExperimentBase([]byte(file)); err == nil {
-			t.Errorf("%s: the file was accepted", name)
-		}
-	}
-}
 
 // fakeRepositories is GitHub as the org of each project reaches it: files holds, by project, the
 // experiment file of the one repository its org's installation covers, acme/model, which GitHub

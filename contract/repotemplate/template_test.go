@@ -37,8 +37,8 @@ func TestTheMetricsHelperImportsOutsideAJobAndSaysWhyItReportsNothingThere(t *te
 	}
 }
 
-// The job spec is submitted as it is once its placeholders are filled in, and a create with
-// from_repo must not take an example for an experiment: the experiment file states nothing.
+// The job spec is submitted as it is once its placeholders are filled in, and the experiment file
+// states nothing until hl repo init writes it: an example is never taken for an experiment.
 func TestTheTemplateIsAJobSpecToFillInAndAnExperimentFileThatStatesNothing(t *testing.T) {
 	files := Files()
 	if len(files) != 6 || !strings.Contains(files[Gitignore], "__pycache__/") {

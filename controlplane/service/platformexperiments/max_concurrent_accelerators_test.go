@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -35,13 +36,13 @@ func TestCreatePlatformExperimentRoundTripsMaxConcurrentAccelerators(t *testing.
 	store := &createStore{}
 	svc := newSignupTestService(t, store)
 
-	pe, err := svc.Create(context.Background(), CreatePlatformExperimentRequest{
-		Name: "exp", Description: "the brief", BudgetAcceleratorHours: 10, StartsAt: time.Now(), DurationHours: 1,
+	pe, err := svc.Create(context.Background(), CreatePlatformExperimentRequest{Spec: experimentspec.Spec{
+		Name: "exp", Description: "the brief", BudgetAcceleratorHours: 10, DurationHours: 1,
 		MaxAgents: 5, ReportIntervalSeconds: 10,
 		Metrics:                   []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}},
 		Stages:                    []domain.Stage{{LengthPct: 100, EvictPct: 0}},
 		MaxConcurrentAccelerators: intPtr(4),
-	})
+	}, StartsAt: time.Now()})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -57,13 +58,13 @@ func TestCreatePlatformExperimentRejectsZeroMaxConcurrentAccelerators(t *testing
 	store := &createStore{}
 	svc := newSignupTestService(t, store)
 
-	_, err := svc.Create(context.Background(), CreatePlatformExperimentRequest{
-		Name: "exp", Description: "the brief", BudgetAcceleratorHours: 10, StartsAt: time.Now(), DurationHours: 1,
+	_, err := svc.Create(context.Background(), CreatePlatformExperimentRequest{Spec: experimentspec.Spec{
+		Name: "exp", Description: "the brief", BudgetAcceleratorHours: 10, DurationHours: 1,
 		MaxAgents: 5, ReportIntervalSeconds: 10,
 		Metrics:                   []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}},
 		Stages:                    []domain.Stage{{LengthPct: 100, EvictPct: 0}},
 		MaxConcurrentAccelerators: intPtr(0),
-	})
+	}, StartsAt: time.Now()})
 	if err == nil {
 		t.Fatal("Create accepted max_concurrent_accelerators=0")
 	}

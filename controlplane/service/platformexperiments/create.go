@@ -12,6 +12,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
@@ -25,9 +26,6 @@ var coordinatorReader = domain.Actor{Kind: domain.ActorCoordinator}
 // checkLength holds a platform experiment to a run of at most quota.max_platform_experiment_days.
 // Until its end it may rent machines.
 func (s *Service) checkLength(durationHours float64) error {
-	if durationHours <= 0 {
-		return refuseUpdate(422, "invalid_length", "duration_hours is required and must be positive: how long the run lasts from the moment it starts")
-	}
 	if length := time.Duration(durationHours * float64(time.Hour)); length > s.cfg.MaxRunLength {
 		return refuseUpdate(422, "run_too_long", "it would run %.1f days, and a platform experiment runs at most %g days (quota.max_platform_experiment_days): state a shorter duration_hours",
 			length.Hours()/24, s.cfg.MaxRunLength.Hours()/24)
@@ -38,7 +36,7 @@ func (s *Service) checkLength(durationHours float64) error {
 // withSettings returns spec with the platform's settings in the fields a request may leave to
 // them: scheduler.default_report_interval_seconds, stages.default as a run of max_agents
 // researchers has it (domain.RunStages) and quota.default_quota_tier.
-func (s *Service) withSettings(spec CreatePlatformExperimentRequest) CreatePlatformExperimentRequest {
+func (s *Service) withSettings(spec experimentspec.Spec) experimentspec.Spec {
 	if spec.ReportIntervalSeconds == 0 {
 		spec.ReportIntervalSeconds = s.cfg.DefaultReportIntervalSeconds
 	}
@@ -51,81 +49,43 @@ func (s *Service) withSettings(spec CreatePlatformExperimentRequest) CreatePlatf
 	return spec
 }
 
-// trimTexts returns spec with every text of it without the whitespace around it, which a value
-// written as a YAML block ends in. The description alone is more than one line: any other text
-// still holding a line break is refused, by its field.
-func trimTexts(spec CreatePlatformExperimentRequest) (CreatePlatformExperimentRequest, error) {
-	spec.Metrics = slices.Clone(spec.Metrics)
-	spec.Description = strings.TrimSpace(spec.Description)
-	lines := map[string]*string{"name": &spec.Name, "default_quota_tier": &spec.DefaultQuotaTier}
-	for i := range spec.Metrics {
-		metric := &spec.Metrics[i]
-		lines[fmt.Sprintf("metrics[%d].key", i)] = &metric.Key
-		lines[fmt.Sprintf("metrics[%d].direction", i)] = &metric.Direction
-		lines[fmt.Sprintf("metrics[%d].role", i)] = (*string)(&metric.Role)
-	}
-	for _, field := range slices.Sorted(maps.Keys(lines)) {
-		*lines[field] = strings.TrimSpace(*lines[field])
-		if strings.ContainsAny(*lines[field], "\r\n") {
-			return spec, refuseUpdate(422, "invalid_experiment", "%s is one line and holds a line break: state it on a single line", field)
-		}
-	}
-	return spec, nil
+// specReasons is the refusal reason of a problem of the spec, by its key: invalid_experiment for
+// a key it does not name.
+var specReasons = map[string]string{
+	"metrics":                  "invalid_metrics",
+	"stages":                   "invalid_stages",
+	"budget_accelerator_hours": "invalid_cost",
+	"max_agents":               "invalid_agents",
+	"researchers":              "invalid_agents",
+	"duration_hours":           "invalid_length",
+	"agent_image":              "invalid_agent_image",
 }
 
 // validate is the one check of what a platform experiment is, whoever states it: a create, a
-// planner's proposal, the person accepting one or a patch of an existing one. It returns spec as it is stored,
-// with the platform's settings where spec leaves a field to them, and refuses with every problem it finds.
-func (s *Service) validate(spec CreatePlatformExperimentRequest, catalog domain.AgentTypeCatalog) (CreatePlatformExperimentRequest, error) {
-	spec, err := trimTexts(s.withSettings(spec))
-	if err != nil {
-		return spec, err
-	}
+// planner's proposal, the person accepting one or a patch of an existing one. The spec's own rules
+// come first (experimentspec.Spec.Validate), then those of the platform's settings and catalog. It
+// returns req as it is stored, trimmed and with the platform's settings where it leaves a field to
+// them, and refuses with every problem it finds.
+func (s *Service) validate(req CreatePlatformExperimentRequest, catalog domain.AgentTypeCatalog) (CreatePlatformExperimentRequest, error) {
 	var problems refusal.Problems
-	refuse := func(reason, format string, args ...any) {
-		problems = append(problems, refusal.Refuse(422, reason, fmt.Sprintf(format, args...)))
-	}
-	if spec.Name == "" || spec.Description == "" {
-		refuse("invalid_experiment", "name and description are required: the description is the brief every agent works from")
-	}
-	if len(spec.Description) > domain.MaxProseBytes {
-		refuse("invalid_experiment", "%s", tooLong("description", len(spec.Description)))
-	}
-	if err := domain.ValidateMetricDefinitions(spec.Metrics); err != nil {
-		refuse("invalid_metrics", "metrics: %s", err)
-	} else if err := domain.RequireRankingMetric(spec.Metrics); err != nil {
-		refuse("invalid_metrics", "metrics: %s", err)
-	}
-	if spec.ReportIntervalSeconds <= 0 {
-		refuse("invalid_experiment", "report_interval_seconds must be positive: how often a job really reports")
-	}
-	if err := domain.ValidateStages(spec.Stages); err != nil {
-		refuse("invalid_stages", "stages: %s", err)
-	}
-	if tier := domain.QuotaTier(spec.DefaultQuotaTier); tier != domain.QuotaTierGuaranteed && tier != domain.QuotaTierBurstOnly {
-		refuse("invalid_experiment", "default_quota_tier must be \"guaranteed\" or \"burst_only\"")
-	}
-	if spec.MaxConcurrentAccelerators != nil && *spec.MaxConcurrentAccelerators <= 0 {
-		refuse("invalid_experiment", "max_concurrent_accelerators must be positive")
-	}
-	if spec.BudgetAcceleratorHours <= 0 {
-		refuse("invalid_cost", "budget_accelerator_hours is required and must be positive: the cap on everything the run spends, in accelerator-hours, and in CPU core-hours for work on cores (hypothesisloop.dev/cpu=core costs 1 an hour per core)")
-	}
-	if spec.MaxAgents <= 0 {
-		refuse("invalid_agents", "max_agents is required and must be positive: how many researchers (agents of role competitor) may be at work at once")
-	} else if len(spec.Stages) > 1 && spec.MaxAgents < domain.MinResearchersForCut {
-		refuse("invalid_stages", "stages: %d stages for at most %d researchers, and a run of fewer than %d has one stage since no boundary cuts: state one stage or leave stages out",
-			len(spec.Stages), spec.MaxAgents, domain.MinResearchersForCut)
-	}
-	if spec.MaxAgents > 0 {
-		if err := spec.Researchers.Check(spec.MaxAgents, catalog); err != nil {
-			refuse("invalid_agents", "%s: researchers is the researchers it is to have at work, [{agent_type, model, hyperparameters, count}]", err)
+	var broken experimentspec.Problems
+	if errors.As(req.Spec.Validate(), &broken) {
+		for _, problem := range broken {
+			reason, ok := specReasons[problem.Key]
+			if !ok {
+				reason = "invalid_experiment"
+			}
+			problems = append(problems, refusal.Refuse(422, reason, problem.Message))
 		}
 	}
-	if err := problems.Add(s.checkLength(spec.DurationHours)); err != nil {
-		return spec, err
+	req.Spec = s.withSettings(req.Spec.Trimmed())
+	if err := domain.ResearcherPool(req.Researchers).Check(catalog); err != nil {
+		problems = append(problems, refusal.Refuse(422, "invalid_agents", err.Error()+": researchers is the researchers it is to have at work, [{agent_type, model, hyperparameters, count}]"))
 	}
-	return spec, problems.Err()
+	if err := problems.Add(s.checkLength(req.DurationHours)); err != nil {
+		return req, err
+	}
+	return req, problems.Err()
 }
 
 // requireReachable refuses a platform experiment coming into being where nothing could run it:
@@ -338,33 +298,13 @@ func noPlatformExperiment(id string) error {
 }
 
 // CreateExperiment creates the platform experiment req asks for, for by: in the repository it
-// names or one the platform creates, with what the experiment file states under req when it asks
-// from_repo, and with the hosted agents its pool names.
+// names or one the platform creates, and with the hosted agents its pool names.
 func (s *Service) CreateExperiment(ctx context.Context, req CreatePlatformExperimentRequest, by domain.Actor) (*domain.PlatformExperiment, error) {
 	named, err := s.repositoryOf(ctx, req.ProjectID, req.Repository, req.RepositoryAccount)
 	if err != nil {
 		return nil, err
 	}
 	req.Repository = named
-	// Never the experiment file's to state, so it is held before the repository is read.
-	if err := s.checkLength(req.DurationHours); err != nil {
-		return nil, err
-	}
-	if err := domain.ValidateAgentImage(req.AgentImage); err != nil {
-		return nil, refusal.Refuse(http.StatusUnprocessableEntity, "invalid_agent_image", err.Error())
-	}
-	if req.FromRepo {
-		if req.Repository == "" {
-			return nil, refusal.Refuse(http.StatusUnprocessableEntity, "no_repository", "from_repo reads "+domain.ExperimentFile+" of the repository the request names, and it names none: set repository")
-		}
-		named := req.Repository
-		body, err := s.fromRepo(ctx, req)
-		body.Repository = named
-		if err != nil {
-			return nil, err
-		}
-		req = body
-	}
 	catalog, err := s.store.ProjectAgentTypeCatalog(ctx, req.ProjectID)
 	if err != nil {
 		return nil, auth.Internal(s.logger, "create platform experiment", err)
@@ -386,11 +326,6 @@ func (s *Service) CreateExperiment(ctx context.Context, req CreatePlatformExperi
 		return nil, err
 	}
 	pe, err := s.Create(ctx, hosting)
-	// What is wrong with a body laid over the experiment file may be the file's doing.
-	var refused *refusal.Refusal
-	if req.FromRepo && errors.As(err, &refused) {
-		return nil, refusal.Refuse(refused.GetStatus(), refused.Reason, "with "+domain.ExperimentFile+" of the repository under the request: "+refused.Message)
-	}
 	var answered interface{ GetStatus() int }
 	if errors.As(err, &answered) {
 		return nil, err

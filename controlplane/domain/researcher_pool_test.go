@@ -81,15 +81,12 @@ func TestAPoolIsCheckedAndResolved(t *testing.T) {
 		ok   bool
 	}{
 		"none, which is allowed":   {nil, true},
-		"within max_agents":        {ResearcherPool{{Count: 2}, {AgentType: "data-search", Count: 1}}, true},
-		"above max_agents":         {ResearcherPool{{Count: 4}}, false},
+		"known agent types":        {ResearcherPool{{Count: 2}, {AgentType: "data-search", Count: 1}}, true},
 		"an unknown agent type":    {ResearcherPool{{AgentType: "poet", Count: 1}}, false},
 		"a type of another role":   {ResearcherPool{{AgentType: "baseline", Count: 1}}, false},
-		"a count of none":          {ResearcherPool{{Count: 0}}, false},
-		"one agent type twice":     {ResearcherPool{{Count: 1}, {AgentType: "generalist", Count: 1}}, false},
 		"a model no agent can run": {ResearcherPool{{Model: "two words", Count: 1}}, false},
 	} {
-		if err := c.pool.Check(3, testCatalog()); (err == nil) != c.ok {
+		if err := c.pool.Check(testCatalog()); (err == nil) != c.ok {
 			t.Errorf("%s: got = %v, want ok %v", name, err, c.ok)
 		}
 	}

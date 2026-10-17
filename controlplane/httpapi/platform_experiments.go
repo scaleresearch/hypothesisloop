@@ -32,10 +32,10 @@ func registerPlatformExperiments(doc *Doc, experiments *platformexperiments.Serv
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "get-experiment-file", Method: "GET", Path: "/projects/{id}/experiment-file",
 		Summary: "Read what a repository's experiment file states", Tags: []string{"platform-experiments"},
-		Description: "What " + domain.ExperimentFile + " at the head of the default branch of repository states of a platform experiment: name, description, metrics, " +
-			"report_interval_seconds and stages, as POST /platform-experiments with from_repo would take them. Nothing is created. " +
+		Description: "The experiment spec " + domain.ExperimentFile + " at the head of the default branch of repository states, keyed as the body of POST /platform-experiments " +
+			"without where the experiment is placed, and the repository as the git host names it. A form fills itself from it, and a person sends the whole body. Nothing is created. " +
 			"The org of the project must reach the repository, with the refusals of that create: 422 no_experiment_file when the repository has none, " +
-			"invalid_experiment_file when it cannot be used, and why.",
+			"invalid_experiment_file when it cannot be used, and why. On a plain git host 422 experiment_file_unsupported.",
 	}, a.getExperimentFile)
 
 	register(doc, auth.AudienceCoordinator, huma.Operation{
@@ -63,13 +63,9 @@ func registerPlatformExperiments(doc *Doc, experiments *platformexperiments.Serv
 			"The platform starts the run, and nothing else does: once a baseline is declared (PATCH baseline_job_id), at starts_at or at once without one or with one past. Until then it is open and GET /platform-experiments/{id} says in status_reason what it waits for. " +
 			"What it is created as is checked by the rules a draft's proposal is checked by, and refused with 422 and the same reasons: invalid_experiment, invalid_metrics, invalid_stages, invalid_cost, invalid_agents, invalid_length, run_too_long, " +
 			"and accelerator_unreachable when no cluster the org's jobs can be placed on reports capacity now (GET /resource-catalog/capacity lists none): nothing of it could run. " +
-			"With from_repo: true every field the body leaves out is read from " + domain.ExperimentFile + " at the head of the default branch of " +
-			"repository, which the same body names (422 no_repository without it, no_experiment_file when the file is not there), a YAML file shaped like this body. What the body carries wins. budget_accelerator_hours, max_agents and duration_hours " +
-			"are never read from the file: any agent's token can push to that branch, so what a run costs and how " +
-			"long it lasts is stated by whoever creates it. A file that cannot be used answers 422 invalid_experiment_file and names the file. " +
 			"coordinator_hosted: true has the platform run the coordinator as one more machine beside the agents', on coordinator_model or the platform's coordinator default: " +
 			"it holds this platform experiment's coordinator token, is no agent of it, holds no quota and is not ranked. " + platformexperiments.CoordinatorWanted + " " +
-			"It is not read from the file, and is fixed from then on. " +
+			"It is fixed from then on. " +
 			"repository is the code the platform experiment works on, owner/name on GitHub: agents clone it and push their branches to it, jobs check it out, and repository_url in the answer is where from. " +
 			"A platform experiment keeps its code in a repository: left out, the platform creates a private one on the GitHub account the org connected, named from the experiment and its id, " +
 			"whose one commit is the experiment template (README.md, " + domain.ExperimentFile + " and .hypothesisloop/job.yaml, the base job spec), " +
@@ -84,10 +80,10 @@ func registerPlatformExperiments(doc *Doc, experiments *platformexperiments.Serv
 			"the org connected no installation on the account that owns it, repository_not_reachable when the installation does not cover it, " +
 			"and installation_gone when the App was removed on GitHub. " +
 			"502 github_failed when GitHub answers 5xx or not at all for the installation, the message naming it and GitHub's answer. " +
-			"On a deployment whose git host is plain the platform creates none and reads no experiment file: repository is a name under the host's root, created there beforehand, " +
-			"422 repository_required without it, repository_not_reachable when it does not answer git, and 422 experiment_file_unsupported with from_repo. " +
+			"On a deployment whose git host is plain the platform creates none: repository is a name under the host's root, created there beforehand, " +
+			"422 repository_required without it, and repository_not_reachable when it does not answer git. " +
 			"agent_image is the image the hosted agents and the coordinator run, built FROM the platform's agent image so the harness is in it. Left out, " +
-			"it is the platform's own. 422 invalid_agent_image when it is no image reference. Neither is read from the file and both are fixed from then on. " +
+			"it is the platform's own. 422 invalid_agent_image when it is no image reference. Both are fixed from then on. " +
 			"With coordinator_hosted: true it also creates, in the same write, one hosted researcher for each place of researchers, of its entry's agent type, model and hyperparameters, whose machines are asked for when the run starts. While the run goes on the platform keeps them at work: it adds a new researcher in the place of one that finished or whose machine stopped with no restart left, with its agent type, model and hyperparameters, until less of the run is left than one trial of the baseline job (job_estimated_duration_hours, at least 15 minutes) or the budget its researchers left unspent holds no trial for one, and a stage boundary lowers the counts by the researchers it cuts, so none of them is replaced. agent.replaced tells each researcher added. " +
 			"It also creates one hosted agent of role baseline, named by its role, as accepting a draft does: its machine is asked for at once, it measures the baseline, and the platform declares the job it leaves when it finishes, so status_reason reads baseline_measuring from the first answer and nobody adds a baseline agent. 409 max_hosted_reached where the platform's limit holds no machine for it beside the coordinator's. " +
 			"Without coordinator_hosted this call creates the experiment and no agent, and the platform adds none: every researcher, and any other agent, joins by its own POST /platform-experiments/{id}/agents. " +

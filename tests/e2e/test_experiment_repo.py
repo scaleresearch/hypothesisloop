@@ -170,14 +170,14 @@ def test_a_job_runs_only_a_commit_of_its_experiments_repository(api: API, experi
 
 @pytest.mark.exclusive
 def test_a_create_states_what_only_the_caller_can_and_an_update_only_what_changes(orgs, run):
-    """A create without from_repo states its name, description and metrics, one with it names the
-    repository, and an update changes the fields it names and no others."""
+    """A create states its name, description and metrics and nothing reads them from a repository,
+    and an update changes the fields it names and no others."""
     a, _ = orgs
     pe_id, agent = run
     partial = _call(a.api, "POST", "/platform-experiments", {**RUN, "project_id": a.project_id, "name": "only a name"})
     assert partial.status_code == 422 and partial.json()["reason"] == "invalid_experiment" and "description" in partial.json()["message"], partial.text
-    unnamed = _call(a.api, "POST", "/platform-experiments", {**RUN, "project_id": a.project_id, "from_repo": True})
-    assert unnamed.status_code == 422 and unnamed.json()["reason"] == "no_repository", unnamed.text
+    from_repo = _call(a.api, "POST", "/platform-experiments", {**RUN, "project_id": a.project_id, "from_repo": True})
+    assert from_repo.status_code == 422 and "from_repo" in from_repo.text, from_repo.text
     before = agent.get_json(f"/platform-experiments/{pe_id}")
     assert _call(a.api, "PATCH", f"/platform-experiments/{pe_id}", {"from_repo": True, "name": "x"}).status_code == 422
     assert _call(a.api, "PATCH", f"/platform-experiments/{pe_id}", {}).status_code == 422
@@ -195,7 +195,7 @@ def test_a_repository_is_checked_after_the_project_and_must_be_one_the_org_reach
     a, b = orgs
     whole = {**RUN, "name": f"repo-named-{run_id}", "description": "names a repository", "report_interval_seconds": 10,
              "metrics": [{"key": "val_accuracy", "direction": "maximize"}]}
-    foreign = _call(a.api, "POST", "/platform-experiments", {**RUN, "project_id": b.project_id, "from_repo": True, "repository": "acme/model"})
+    foreign = _call(a.api, "POST", "/platform-experiments", {**whole, "project_id": b.project_id, "repository": "acme/model"})
     assert foreign.status_code == 404 and foreign.json() == {"error": "project not found"}, foreign.text
 
     named = _call(a.api, "POST", "/platform-experiments", {**whole, "project_id": a.project_id, "repository": "acme/model"})
@@ -237,10 +237,11 @@ def test_on_a_plain_git_host_a_repository_is_named_and_an_agent_pushes_its_branc
             (whole, "repository_required"),
             ({**whole, "repository": f"no-such-{run_id}.git"}, "repository_not_reachable"),
             ({**whole, "repository": address}, "invalid_repository"),
-            ({**RUN, "project_id": a.project_id, "repository": repository, "from_repo": True}, "experiment_file_unsupported"),
         ):
             refused = _call(a.api, "POST", "/platform-experiments", body)
             assert refused.status_code == 422 and refused.json()["reason"] == reason, (reason, refused.text)
+    unread = _call(a.api, "GET", f"/projects/{a.project_id}/experiment-file?repository={repository}")
+    assert unread.status_code == 422 and unread.json()["reason"] == "experiment_file_unsupported", unread.text
 
     # git reaches the repository through the proxy, and the clone's origin stays its address.
     cloned = agent.git(read, tmp_path, "clone", address, "work")

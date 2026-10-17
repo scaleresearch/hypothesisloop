@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
@@ -65,10 +64,12 @@ func repoAPI(t *testing.T, caller authtest.As, repos *fakeRepositories) (*create
 
 var ownerOfA = authtest.As{Kind: auth.KindUser, UserID: "u-1", OrgIDs: []string{"org-a"}}
 
-func TestCreateFromRepoTakesWhatTheRequestLeavesOutFromTheFile(t *testing.T) {
+// A create naming a repository stores it as GitHub names it, and never reads its experiment file:
+// the body is the whole experiment.
+func TestACreateNamingARepositoryKeepsItAsGitHubNamesIt(t *testing.T) {
 	repos := &fakeRepositories{files: map[string]string{"prj-a": experimentBase}}
 	store, call, _ := repoAPI(t, ownerOfA, repos)
-	rec := call("POST", "/platform-experiments", run(map[string]any{"description": "the request's brief"}))
+	rec := call("POST", "/platform-experiments", run(nil))
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("got = %d %s, want 201", rec.Code, rec.Body)
 	}
@@ -76,20 +77,12 @@ func TestCreateFromRepoTakesWhatTheRequestLeavesOutFromTheFile(t *testing.T) {
 		t.Fatalf("created = %d, want one", len(store.created))
 	}
 	pe := store.created[0]
-	if pe.ProjectID != "prj-a" || pe.Name != "tune the model" || pe.ReportIntervalSeconds != 30 || len(pe.Metrics) != 1 {
-		t.Fatalf("created = %+v, want the file's name, cadence and metrics", pe)
+	if pe.ProjectID != "prj-a" || pe.Name != "tune the model" || pe.ReportIntervalSeconds != 30 || len(pe.Metrics) != 1 ||
+		pe.BudgetAcceleratorHours != 5 || pe.MaxAgents != 3 || pe.DurationHours != 48 {
+		t.Fatalf("created = %+v, want the body as it was sent", pe)
 	}
-	// The file says 40 hours, 6 agents and a run of 400 hours. None of it is read.
-	if pe.BudgetAcceleratorHours != 5 || pe.MaxAgents != 3 || pe.DurationHours != 48 {
-		t.Fatalf("created = %+v, want the request's budget, agent count and length", pe)
-	}
-	// A field the body carries wins over the file.
-	if pe.Description != "the request's brief" {
-		t.Fatalf("description = %q, want the one the request stated", pe.Description)
-	}
-	// The file is read from the repository as GitHub names it, which is also what is stored.
-	if len(repos.asked) != 1 || repos.asked[0] != "prj-a "+testRepository {
-		t.Fatalf("the file was read for %v, want the request's project and repository once", repos.asked)
+	if len(repos.asked) != 0 {
+		t.Fatalf("the experiment file was read for %v, want it never read on a create", repos.asked)
 	}
 	if pe.Repository != testRepository || pe.RepositoryURL != "https://github.com/Acme/Model.git" {
 		t.Fatalf("created with repository %q at %q, want GitHub's own spelling and its clone address", pe.Repository, pe.RepositoryURL)
@@ -99,30 +92,9 @@ func TestCreateFromRepoTakesWhatTheRequestLeavesOutFromTheFile(t *testing.T) {
 	}
 }
 
-// Any agent's token can push to the branch the file is read from, so the file cannot raise what
-// a run costs: without them in the body the request is refused before the repository is read.
-func TestCreateFromRepoNeverTakesTheCostOfARunFromTheFile(t *testing.T) {
-	for _, field := range []string{"budget_accelerator_hours", "duration_hours"} {
-		repos := &fakeRepositories{files: map[string]string{"prj-a": experimentBase}}
-		store, call, _ := repoAPI(t, ownerOfA, repos)
-		body := run(nil)
-		delete(body, field)
-		rec := call("POST", "/platform-experiments", body)
-		if rec.Code != http.StatusUnprocessableEntity || len(store.created) != 0 || len(repos.asked) != 0 {
-			t.Errorf("without %s: got = %d %s, read %v, want 422 before the repository is read", field, rec.Code, rec.Body, repos.asked)
-		}
-	}
-	repos := &fakeRepositories{files: map[string]string{"prj-a": experimentBase}}
-	store, call, _ := repoAPI(t, ownerOfA, repos)
-	if rec := call("POST", "/platform-experiments", run(map[string]any{"budget_accelerator_hours": 0})); rec.Code != http.StatusUnprocessableEntity || len(store.created) != 0 {
-		t.Errorf("a zero budget in the request: got = %d %s, want 422 and the file's 40 hours left unread", rec.Code, rec.Body)
-	}
-}
-
-// Without from_repo nothing can supply a field the body leaves out, so what only the caller can
-// say is required. The rest is the platform's setting: the report interval is, there is no start
-// time, and the length is a duration or an end.
-func TestCreateWithoutFromRepoRequiresWhatOnlyTheCallerCanSay(t *testing.T) {
+// What only the caller can say is required. The rest is the platform's setting: the report
+// interval is, there is no start time, and the length is a duration or an end.
+func TestACreateRequiresWhatOnlyTheCallerCanSay(t *testing.T) {
 	whole := func() map[string]any {
 		return map[string]any{
 			"project_id": "prj-a", "name": "by hand", "description": "the brief", "budget_accelerator_hours": 5, "max_agents": 3, "duration_hours": 2,
@@ -206,7 +178,7 @@ func TestCreateWithoutFromRepoRequiresWhatOnlyTheCallerCanSay(t *testing.T) {
 
 // The project is checked before GitHub is asked anything, so a repository cannot be probed
 // through another org's installation.
-func TestCreateFromRepoChecksTheProjectFirst(t *testing.T) {
+func TestACreateChecksTheProjectFirst(t *testing.T) {
 	repos := &fakeRepositories{files: map[string]string{"prj-b": experimentBase}}
 	store, call, _ := repoAPI(t, ownerOfA, repos)
 	for _, project := range []string{"prj-b", "prj-missing"} {
@@ -217,39 +189,6 @@ func TestCreateFromRepoChecksTheProjectFirst(t *testing.T) {
 	}
 	if len(repos.asked) != 0 || len(repos.checked) != 0 || len(store.created) != 0 {
 		t.Fatalf("GitHub was asked for another org: checked %v, read %v", repos.checked, repos.asked)
-	}
-}
-
-// A file that cannot be read as the body and a merged body the service refuses are the same
-// mistake to the caller: one status, and the answer names the file.
-func TestCreateFromRepoRefusals(t *testing.T) {
-	names := func(body string) bool { return strings.Contains(body, domain.ExperimentFile) }
-	for name, tc := range map[string]struct {
-		file      string
-		refusal   error
-		more      map[string]any
-		want      int
-		namesFile bool
-	}{
-		"the repository has no such file":       {"", refusal.Refuse(422, "no_experiment_file", "the repository has none"), nil, http.StatusUnprocessableEntity, false},
-		"no app on this deployment":             {"", huma.Error503ServiceUnavailable("this deployment has no GitHub App configured"), nil, http.StatusServiceUnavailable, false},
-		"an empty file":                         {"", nil, nil, http.StatusUnprocessableEntity, true},
-		"a file that is not the body":           {"nmae: typo\n", nil, nil, http.StatusUnprocessableEntity, true},
-		"a file that picks its project":         {experimentBase + "project_id: prj-b\n", nil, nil, http.StatusUnprocessableEntity, true},
-		"a file with a numeric key":             {experimentBase + "7: seven\n", nil, nil, http.StatusUnprocessableEntity, true},
-		"a file with no name":                   {strings.Replace(experimentBase, "name: tune the model", "", 1), nil, nil, http.StatusUnprocessableEntity, true},
-		"a file with no ranking metric":         {strings.Replace(experimentBase, "direction: maximize", "direction: maximize\n    role: attribute", 1), nil, nil, http.StatusUnprocessableEntity, true},
-		"a file with a bad ladder":              {strings.Replace(experimentBase, "length_pct: 100", "length_pct: 50", 1), nil, nil, http.StatusUnprocessableEntity, true},
-		"a request that spoils the merged body": {experimentBase, nil, map[string]any{"default_quota_tier": "gold"}, http.StatusUnprocessableEntity, true},
-	} {
-		t.Run(name, func(t *testing.T) {
-			repos := &fakeRepositories{files: map[string]string{"prj-a": tc.file}, refusal: tc.refusal}
-			store, call, _ := repoAPI(t, ownerOfA, repos)
-			rec := call("POST", "/platform-experiments", run(tc.more))
-			if rec.Code != tc.want || len(store.created) != 0 || names(rec.Body.String()) != tc.namesFile {
-				t.Fatalf("got = %d %s, created %d, want %d, nothing created, the file named: %v", rec.Code, rec.Body, len(store.created), tc.want, tc.namesFile)
-			}
-		})
 	}
 }
 
@@ -375,9 +314,8 @@ func TestARunningExperimentTakesANewDuration(t *testing.T) {
 	}
 }
 
-// A person picking a repository in the form is shown what its experiment file states before
-// anything is created: the same reading a create with from_repo makes, without what the file
-// may not state.
+// A person picking a repository in the form is shown the whole spec its experiment file states
+// before anything is created, and the form sends it back as the body.
 func TestTheExperimentFileOfARepositoryIsReadWithoutCreatingAnything(t *testing.T) {
 	repos := &fakeRepositories{files: map[string]string{"prj-a": experimentBase}}
 	store, call, _ := repoAPI(t, authtest.As(auth.Principal{Kind: auth.KindUser, OrgIDs: []string{"org-a"}}), repos)
@@ -390,8 +328,8 @@ func TestTheExperimentFileOfARepositoryIsReadWithoutCreatingAnything(t *testing.
 	if file["repository"] != testRepository || file["name"] == "" || file["description"] == "" || len(file["metrics"].([]any)) == 0 {
 		t.Fatalf("file = %v, want the repository as GitHub names it and what the file states", file)
 	}
-	if _, stated := file["budget_accelerator_hours"]; stated || len(store.created) != 0 {
-		t.Fatalf("file = %v, created %d: what a run costs is never the file's, and a read creates nothing", file, len(store.created))
+	if file["budget_accelerator_hours"] != float64(40) || file["max_agents"] != float64(6) || file["duration_hours"] != float64(400) || len(store.created) != 0 {
+		t.Fatalf("file = %v, created %d: want what a run costs as the file states it, and a read creates nothing", file, len(store.created))
 	}
 	if rec := call("GET", "/projects/prj-b/experiment-file?repository=acme/model", nil); rec.Code != http.StatusNotFound || len(repos.asked) != 1 {
 		t.Fatalf("another org's project: %d, asked GitHub %d times", rec.Code, len(repos.asked))

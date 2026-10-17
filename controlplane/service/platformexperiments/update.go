@@ -10,6 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
@@ -131,13 +132,13 @@ func (s *Service) Update(ctx context.Context, id string, patch PlatformExperimen
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.Update: %w", err)
 	}
-	checked, err := s.validate(CreatePlatformExperimentRequest{
+	checked, err := s.validate(CreatePlatformExperimentRequest{Spec: experimentspec.Spec{
 		Name: patched.Name, Description: authored,
 		BudgetAcceleratorHours: patched.BudgetAcceleratorHours, MaxAgents: patched.MaxAgents, Researchers: patched.Researchers,
 		MaxConcurrentAccelerators: patched.MaxConcurrentAccelerators, Metrics: patched.Metrics,
-		ReportIntervalSeconds: patched.ReportIntervalSeconds, StartsAt: patched.StartsAt, DurationHours: patched.DurationHours,
+		ReportIntervalSeconds: patched.ReportIntervalSeconds, DurationHours: patched.DurationHours,
 		Stages: patched.Stages, DefaultQuotaTier: string(patched.DefaultQuotaTier),
-	}, catalog)
+	}, StartsAt: patched.StartsAt}, catalog)
 	if err != nil {
 		return nil, err
 	}

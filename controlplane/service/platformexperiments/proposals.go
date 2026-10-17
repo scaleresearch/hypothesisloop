@@ -14,6 +14,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
@@ -124,7 +125,8 @@ func (s *Service) checkProposal(ctx context.Context, p *Proposal, draft *domain.
 	if err != nil {
 		return CreatePlatformExperimentRequest{}, err
 	}
-	experiment, err := decodeExperimentBase(p.Experiment)
+	spec, err := experimentspec.Parse(p.Experiment)
+	experiment := CreatePlatformExperimentRequest{Spec: spec}
 	decoded := err == nil
 	if !decoded {
 		refuse("invalid_experiment", "experiment: %s", err)

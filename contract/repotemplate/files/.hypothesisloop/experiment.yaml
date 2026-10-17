@@ -1,10 +1,8 @@
 # The experiment spec: one platform experiment, keyed like the body of POST /platform-experiments.
-# `hl repo init` writes name, description and metrics from the platform experiment. To prepare a
-# repository by hand, uncomment and fill in. Where the experiment is placed (project, repository,
-# repository_account, continues, starts_at) is stated by the request and refused here. A create
-# with from_repo takes what a run costs and what it runs (budget_accelerator_hours, max_agents,
-# researchers, duration_hours, coordinator_hosted, coordinator_model, agent_image) from the
-# request alone.
+# `hl repo init` writes it whole from the platform experiment. To prepare a repository by hand,
+# uncomment and fill in, and `hl platform-experiments start DIR --repository R` creates the
+# experiment from it. Where the experiment is placed (project, repository, repository_account,
+# continues, starts_at) is stated by the request and refused here.
 #
 # name: a few words                     # required, one line
 # description: |                        # required, at most 32768 bytes
