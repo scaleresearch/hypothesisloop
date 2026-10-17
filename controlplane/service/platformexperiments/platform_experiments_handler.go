@@ -412,3 +412,28 @@ func buildClusterCapacity(available, total map[string]map[string]int64, podResou
 	sort.Slice(clusters, func(i, j int) bool { return clusters[i].ClusterName < clusters[j].ClusterName })
 	return clusters
 }
+
+// Answer is the body of every route that answers one platform experiment, so each of them says
+// where it stands (Describe) as its reader is to read it.
+func (h *PlatformExperimentsHandler) Answer(ctx context.Context, pe *domain.PlatformExperiment) (*struct{ Body *domain.PlatformExperiment }, error) {
+	reader, err := h.caller(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.svc.Describe(ctx, pe, reader); err != nil {
+		return nil, auth.Internal(h.logger, "describe platform experiment", err, zap.String("id", pe.ID))
+	}
+	atWork, err := h.svc.store.ResearchersAtWork(ctx, pe.ID)
+	if err != nil {
+		return nil, auth.Internal(h.logger, "count researchers at work", err, zap.String("id", pe.ID))
+	}
+	counts := pe.Researchers.AtWorkOf(atWork)
+	pe.ResearchersAtWork = &counts
+	if pe.Repository != "" {
+		if h.proxyURL == "" {
+			return nil, auth.Internal(h.logger, "describe platform experiment", errors.New("no git proxy address to name its repository at"), zap.String("id", pe.ID))
+		}
+		pe.GitURL = domain.GitProxyURL(h.proxyURL, pe.ID)
+	}
+	return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
+}
