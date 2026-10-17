@@ -1,5 +1,5 @@
 .PHONY: registry-up prune-images controlplane-up controlplane-down controlplane-destroy \
-	dev dev-api dev-status dev-down tunnels tunnels-down dev-rented staff-token token runtime-token \
+	dev dev-api dev-status dev-down tunnels tunnels-down staff-token token runtime-token \
 	k3s-up k3s-down k3s-dev-nodes-up k3s-dev-nodes-down full-stop full-start reload stack-not-held \
 	tt-up tt-down tt-status tt-stop tt-start tt-dev-nodes-up tt-dev-nodes-down \
 	nvidia-up nvidia-down nvidia-status \
@@ -40,8 +40,11 @@ controlplane-up: registry-up render-settings local-images
 
 # The control plane and the UI as host processes against the compose datastores: starts in
 # seconds, and a code change needs no image build. Every process runs detached with its log in
-# localdev/.run, so the target returns and one process can be restarted alone. Runtimes on the
-# local cluster still pull images (make reload).
+# localdev/.run, so the target returns and one process can be restarted alone. control-service
+# rents hosted agents and jobs on the providers .env names, through the tunnels (started here when
+# down) and with the images under IMAGE_TAG, which must be in the registry, pushed again after a
+# change to them. Hosted agents and jobs placed on the cloud cluster rent machines, which cost
+# money; starting the stack rents none.
 dev: render-settings
 	bash localdev/dev.sh up
 
@@ -64,14 +67,6 @@ tunnels:
 
 tunnels-down:
 	bash localdev/local-tunnels/tunnels.sh down
-
-# make dev, with settings that have control-service rent hosted agents and jobs on the providers
-# .env names, naming the running tunnels and the images under IMAGE_TAG, which must be in the
-# registry, pushed again after a change to them. Needs
-# `make tunnels` first. From here hosted agents and jobs placed on the cloud cluster rent
-# machines, which cost money.
-dev-rented: render-settings
-	bash localdev/dev.sh rented
 
 # Every request to the control plane carries a token. These two print the ones local work needs,
 # derived from the signing secret in localdev/.run/signing-secret (localdev/lib/auth.sh).

@@ -7,7 +7,7 @@ It rents machines and spends model tokens, so it is no part of the suite: it car
 real_providers marker, which every default selection leaves out, and it skips unless the
 environment says where it runs:
 
-    API_URL, HL_TOKEN                 the dev stack that rents (make dev-rented) and its staff token,
+    API_URL, HL_TOKEN                 the dev stack (make dev) and its staff token,
                                       used here only to make the org and connect the repository
     TEST_GIT_HOST_GITHUB_INSTALLATIONthe installation of the platform's GitHub App that covers
     TEST_GIT_HOST_GITHUB_REPOSITORY  the repository, which must hold .hypothesisloop/experiment.yaml,

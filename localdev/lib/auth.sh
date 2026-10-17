@@ -90,7 +90,7 @@ esac
 
 # The container registry CONTAINER_REGISTRY_PROVIDER in .env names, read from that provider's own
 # keys. lib_container_registry sets HL_REGISTRY, the address the deployment's images are pushed
-# under, which make dev-rented runs them from; HL_ENVIRONMENTS_REPOSITORY, where local
+# under, which make dev runs them from; HL_ENVIRONMENTS_REPOSITORY, where local
 # development's environments are built to; and HL_ENVIRONMENTS_PROVIDER, the lines of the settings'
 # environments section after repository: the provider that hands out the logins to it and its own
 # section. With no provider all three are empty, and the local control plane builds no environments.
