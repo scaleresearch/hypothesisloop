@@ -13,9 +13,10 @@
 //     Machine is billed for its root filesystem only.
 //   - The signal call reaches the Machine's main process and nothing follows it. The vendor's
 //     stop kills after a timeout, so Stop does not use it.
-//   - Nothing of the account is inside a Machine: its API socket answers unauthorized. Machines
-//     of one organization do share a private network and its DNS.
-//   - A token for the one app does everything here; no call is made above the app.
+//   - A Machine's API socket answers unauthorized for other Machines and for the account. It
+//     lists its app's secrets, writes its own metadata, suspends itself and mints an OIDC token
+//     naming its app and itself. Machines of one app share a private network, so each Machine
+//     has an app of its own (apps.go), which holds no secrets.
 package fly
 
 import (
@@ -58,6 +59,8 @@ type Provider struct {
 	http        *http.Client
 	poll        time.Duration
 	confirm     time.Duration
+	// suffix makes the random part of a new app's name.
+	suffix func() string
 }
 
 // New refuses any accelerator type: the adapter rents CPU-only Machines, so a shape that asks
@@ -84,6 +87,7 @@ func New(cfg Settings, token string, acceleratorTypes []string, log func(format 
 		http:        &http.Client{Timeout: requestTimeout},
 		poll:        pollInterval,
 		confirm:     confirmWindow,
+		suffix:      randomSuffix,
 	}, nil
 }
 
@@ -106,10 +110,6 @@ func hasStatus(err error, statuses ...int) bool {
 		}
 	}
 	return false
-}
-
-func (p *Provider) machinesPath(suffix string) string {
-	return p.machinesURL + "/v1/apps/" + p.cfg.App + "/machines" + suffix
 }
 
 // call sends one authenticated JSON request and decodes a 2xx answer into out. A nil out is for

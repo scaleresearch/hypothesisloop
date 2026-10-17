@@ -24,11 +24,14 @@ func agentSpec() provider.Spec {
 	}
 }
 
-// creatable wires the two calls of a Create that succeeds: the Machine is made and is listed
-// straight after.
+// creatable wires the calls of a Create that succeeds: the app and its Machine are made and are
+// listed straight after, and the app can be deleted.
 func creatable(api *fakeAPI, name string) {
+	api.on(http.MethodPost, appsPath, answer(201, `{"id":"jlyv9rzm3wvw18xr"}`))
 	api.on(http.MethodPost, machinesPath, answer(200, `{"id":"9001","state":"created"}`))
+	listsTheApp(api)
 	api.on(http.MethodGet, machinesPath, answer(200, machines(machineJSON("9001", name, "created", 0))))
+	api.on(http.MethodDelete, appPath, answer(202, ``))
 }
 
 func TestCreateMakesAMachineThatRunsTheCommandOnceAndStaysWhenItEnds(t *testing.T) {
@@ -40,8 +43,13 @@ func TestCreateMakesAMachineThatRunsTheCommandOnceAndStaysWhenItEnds(t *testing.
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if id != "9001" {
-		t.Fatalf("id = %q, want the machine id 9001", id)
+	if id != testID {
+		t.Fatalf("id = %q, want the app and the machine id, %s", id, testID)
+	}
+	apps := api.sent(http.MethodPost, appsPath)
+	wantApp := map[string]any{"app_name": testApp, "org_slug": testOrg, "network": testApp}
+	if len(apps) != 1 || !reflect.DeepEqual(apps[0].Body, wantApp) {
+		t.Errorf("app creates = %+v, want one of an app on a network of its own, %v", apps, wantApp)
 	}
 	made := api.sent(http.MethodPost, machinesPath)
 	if len(made) != 1 {
@@ -56,8 +64,7 @@ func TestCreateMakesAMachineThatRunsTheCommandOnceAndStaysWhenItEnds(t *testing.
 			"image": "registry.example/agent:1",
 			"init": map[string]any{"exec": []any{"/bin/sh", "-c", supervisor(), "hl-supervisor",
 				"uv", "run", "agent", "--note", `two  spaces 'and' "quotes" $HOME`, ""}},
-			"env":          map[string]any{"HL_TOKEN": "t = 'x' \"y\" $Z"},
-			"metadata":     map[string]any{"hl_name": "hl-agent-pe1-a2"},
+			"env":          map[string]any{"HL_TOKEN": "t = 'x' \"y\" $Z", nameEnv: "hl-agent-pe1-a2"},
 			"guest":        map[string]any{"cpu_kind": "shared", "cpus": 2.0, "memory_mb": 4096.0},
 			"rootfs":       map[string]any{"size_gb": 11.0},
 			"restart":      map[string]any{"policy": "no"},
@@ -69,7 +76,7 @@ func TestCreateMakesAMachineThatRunsTheCommandOnceAndStaysWhenItEnds(t *testing.
 	}
 }
 
-func TestCreateSendsAnEmptyEnvAsAnObject(t *testing.T) {
+func TestCreateSendsTheNameAloneForAnEmptyEnv(t *testing.T) {
 	api := newFakeAPI(t)
 	creatable(api, "hl-agent-pe1-a2")
 	p := newTestProvider(t, api)
@@ -80,8 +87,8 @@ func TestCreateSendsAnEmptyEnvAsAnObject(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 	config := api.sent(http.MethodPost, machinesPath)[0].Body["config"].(map[string]any)
-	if !reflect.DeepEqual(config["env"], map[string]any{}) {
-		t.Errorf("env = %v, want an empty object", config["env"])
+	if !reflect.DeepEqual(config["env"], map[string]any{nameEnv: "hl-agent-pe1-a2"}) {
+		t.Errorf("env = %v, want the instance name alone", config["env"])
 	}
 }
 
@@ -106,6 +113,7 @@ func TestCreateRefusesBeforeSpendingAnything(t *testing.T) {
 			s.ImageLogin = &provider.ImageLogin{Registry: "r", Username: "u", Password: "p"}
 		}, "only public images"},
 		"not a variable name":  {func(s *provider.Spec) { s.Env = map[string]string{"A B": "1"} }, "not an environment variable name"},
+		"the name's variable":  {func(s *provider.Spec) { s.Env = map[string]string{nameEnv: "hl-agent-x"} }, "holds the instance name"},
 		"more cores than sold": {func(s *provider.Spec) { s.CPUMillis = 9000 }, "8 cores"},
 		"more disk than held":  {func(s *provider.Spec) { s.DiskBytes = 51 << 30 }, "at most 50 GB"},
 	}
@@ -128,7 +136,8 @@ func TestCreateRefusesBeforeSpendingAnything(t *testing.T) {
 }
 
 // The API pulls the image before it answers a create, so an image that cannot be pulled, a
-// region with no capacity and a rate limit are all an answer to the one request.
+// region with no capacity and a rate limit are all an answer to the one request, and the app made
+// for the Machine is deleted.
 func TestCreateReportsARefusalAndLeavesNothing(t *testing.T) {
 	cases := map[string]struct {
 		status int
@@ -138,27 +147,45 @@ func TestCreateReportsARefusalAndLeavesNothing(t *testing.T) {
 		"no capacity":                 {412, `{"error":"insufficient resources to create new machine with existing volume"}`},
 		"rate limited":                {429, `{"error":"rate limit exceeded"}`},
 		"server error":                {503, `unavailable`},
-		"app that does not exist":     {404, `{"error":"app not found"}`},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			api := newFakeAPI(t)
+			creatable(api, "hl-agent-pe1-a2")
 			api.on(http.MethodPost, machinesPath, answer(tc.status, tc.body))
 			p := newTestProvider(t, api)
 
 			_, err := p.Create(context.Background(), agentSpec())
-			if err == nil || !strings.Contains(err.Error(), tc.body) {
-				t.Fatalf("err = %v, want one carrying the vendor's answer", err)
+			if err == nil || !strings.Contains(err.Error(), tc.body) || !strings.Contains(err.Error(), "it was destroyed") {
+				t.Fatalf("err = %v, want one carrying the vendor's answer and the app's deletion", err)
 			}
-			if api.total() != 1 {
-				t.Errorf("requests = %d, want the one create and no retry", api.total())
+			if api.total() != 3 {
+				t.Errorf("requests = %d, want the app's create, the machine's and the app's delete, and no retry", api.total())
+			}
+			if len(api.sent(http.MethodDelete, appPath)) != 1 {
+				t.Error("the app made for the machine was not deleted")
 			}
 		})
 	}
 }
 
+func TestCreateMakesNoMachineWhenTheAppIsRefused(t *testing.T) {
+	api := newFakeAPI(t)
+	api.on(http.MethodPost, appsPath, answer(422, `{"error":"Name has already been taken"}`))
+	p := newTestProvider(t, api)
+
+	_, err := p.Create(context.Background(), agentSpec())
+	if err == nil || !strings.Contains(err.Error(), "already been taken") {
+		t.Fatalf("err = %v, want one carrying the vendor's answer", err)
+	}
+	if api.total() != 1 {
+		t.Errorf("requests = %d, want the app's create alone", api.total())
+	}
+}
+
 func TestCreateWithoutAnIDIsAnError(t *testing.T) {
 	api := newFakeAPI(t)
+	creatable(api, "hl-agent-pe1-a2")
 	api.on(http.MethodPost, machinesPath, answer(200, `{}`))
 	p := newTestProvider(t, api)
 
@@ -176,7 +203,7 @@ func TestCreateIsNotConfirmedByAnotherMachineOfTheSameName(t *testing.T) {
 	))
 	p := newTestProvider(t, api)
 
-	if id, err := p.Create(context.Background(), agentSpec()); err != nil || id != "9001" {
+	if id, err := p.Create(context.Background(), agentSpec()); err != nil || id != testID {
 		t.Fatalf("Create = %q, %v", id, err)
 	}
 	if got := len(api.sent(http.MethodGet, machinesPath)); got != 2 {
@@ -197,10 +224,10 @@ func TestCreateReadsTheListAgainAfterAListThatFailed(t *testing.T) {
 				answer(200, machines(machineJSON("9001", "hl-agent-pe1-a2", "created", 0)))))
 			p := newTestProvider(t, api)
 
-			if id, err := p.Create(context.Background(), agentSpec()); err != nil || id != "9001" {
+			if id, err := p.Create(context.Background(), agentSpec()); err != nil || id != testID {
 				t.Fatalf("Create = %q, %v, want the machine: one refused list says nothing about it", id, err)
 			}
-			if got := len(api.sent(http.MethodDelete, machinesPath+"/9001")); got != 0 {
+			if got := len(api.sent(http.MethodDelete, appPath)); got != 0 {
 				t.Errorf("destroys = %d: a machine that exists was destroyed over a list that failed", got)
 			}
 		})
@@ -217,7 +244,7 @@ func TestCreateDestroysAMachineItCouldNotConfirmInTheWholeWindow(t *testing.T) {
 			api := newFakeAPI(t)
 			creatable(api, "hl-agent-pe1-a2")
 			api.on(http.MethodGet, machinesPath, list)
-			api.on(http.MethodDelete, machinesPath+"/9001", answer(200, `{"ok":true}`))
+			api.on(http.MethodDelete, appPath, answer(202, ``))
 			p := newTestProvider(t, api)
 
 			_, err := p.Create(context.Background(), agentSpec())
@@ -227,8 +254,8 @@ func TestCreateDestroysAMachineItCouldNotConfirmInTheWholeWindow(t *testing.T) {
 			if got := len(api.sent(http.MethodGet, machinesPath)); got < 3 {
 				t.Errorf("lists = %d, want the list read again for the whole window", got)
 			}
-			if got := api.sent(http.MethodDelete, machinesPath+"/9001"); len(got) != 1 || got[0].Query != "force=true" {
-				t.Errorf("destroys = %+v, want one, forced", got)
+			if got := api.sent(http.MethodDelete, appPath); len(got) != 1 {
+				t.Errorf("destroys = %+v, want one of the app", got)
 			}
 		})
 	}
@@ -238,11 +265,11 @@ func TestCreateSaysWhenTheMachineItCannotConfirmMayStillBeRented(t *testing.T) {
 	api := newFakeAPI(t)
 	creatable(api, "hl-agent-pe1-a2")
 	api.on(http.MethodGet, machinesPath, answer(500, `oops`))
-	api.on(http.MethodDelete, machinesPath+"/9001", answer(500, `oops`))
+	api.on(http.MethodDelete, appPath, answer(500, `oops`))
 	p := newTestProvider(t, api)
 
 	_, err := p.Create(context.Background(), agentSpec())
-	if err == nil || !strings.Contains(err.Error(), "may still be rented") || !strings.Contains(err.Error(), "9001") {
+	if err == nil || !strings.Contains(err.Error(), "may still be rented") || !strings.Contains(err.Error(), testID) {
 		t.Fatalf("err = %v, want one naming the machine that may still be rented", err)
 	}
 }
@@ -251,7 +278,7 @@ func TestCreateGivesUpOnAMachineThatNeverAppearsInTheList(t *testing.T) {
 	api := newFakeAPI(t)
 	creatable(api, "hl-agent-pe1-a2")
 	api.on(http.MethodGet, machinesPath, answer(200, machines()))
-	api.on(http.MethodDelete, machinesPath+"/9001", answer(200, `{"ok":true}`))
+	api.on(http.MethodDelete, appPath, answer(202, ``))
 	p := newTestProvider(t, api)
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -260,7 +287,7 @@ func TestCreateGivesUpOnAMachineThatNeverAppearsInTheList(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "is not in the list") {
 		t.Fatalf("err = %v, want one saying the machine is not in the list", err)
 	}
-	if got := len(api.sent(http.MethodDelete, machinesPath+"/9001")); got != 1 {
+	if got := len(api.sent(http.MethodDelete, appPath)); got != 1 {
 		t.Errorf("destroys = %d, want 1: the caller's context ended and the machine must still go", got)
 	}
 }

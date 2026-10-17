@@ -42,7 +42,11 @@ func (p *Provider) Logs(ctx context.Context, id string, tail int) ([]string, err
 	if tail <= 0 {
 		return nil, fmt.Errorf("fly: logs of machine %s: tail must be positive, got %d", id, tail)
 	}
-	entries, err := p.logEntries(ctx, id, logPage)
+	app, machineID, err := p.splitID(id)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := p.logEntries(ctx, app, machineID, logPage)
 	if err != nil {
 		return nil, err
 	}
@@ -59,10 +63,10 @@ func (p *Provider) Logs(ctx context.Context, id string, tail int) ([]string, err
 
 // logEntries returns the last limit entries of the Machine's log, oldest first. The log of a
 // Machine that never wrote, or that the app never had, is empty.
-func (p *Provider) logEntries(ctx context.Context, id string, limit int) ([]string, error) {
-	query := url.Values{"instance": {id}, "limit": {strconv.Itoa(limit)}}
+func (p *Provider) logEntries(ctx context.Context, app, machineID string, limit int) ([]string, error) {
+	query := url.Values{"instance": {machineID}, "limit": {strconv.Itoa(limit)}}
 	var page logAnswer
-	if _, err := p.call(ctx, http.MethodGet, p.logsURL+"/api/v1/apps/"+p.cfg.App+"/logs?"+query.Encode(), nil, &page); err != nil {
+	if _, err := p.call(ctx, http.MethodGet, p.logsURL+"/api/v1/apps/"+url.PathEscape(app)+"/logs?"+query.Encode(), nil, &page); err != nil {
 		return nil, err
 	}
 	entries := make([]string, len(page.Data))

@@ -15,8 +15,8 @@ func TestGetReadsTheMachineItselfAsListWouldShowIt(t *testing.T) {
 	api.on(http.MethodGet, machinesPath+"/9001", answer(200, machineJSON("9001", "hl-agent-pe1-a1", "started", 0)))
 	p := newTestProvider(t, api)
 
-	got, exists, err := p.Get(context.Background(), "9001")
-	want := provider.Instance{ID: "9001", Name: "hl-agent-pe1-a1", State: provider.StateRunning, StartedAt: time.Date(2026, 10, 5, 11, 0, 0, 0, time.UTC), Architecture: "amd64"}
+	got, exists, err := p.Get(context.Background(), testID)
+	want := provider.Instance{ID: testID, Name: "hl-agent-pe1-a1", State: provider.StateRunning, StartedAt: time.Date(2026, 10, 5, 11, 0, 0, 0, time.UTC), Architecture: "amd64"}
 	if err != nil || !exists || !reflect.DeepEqual(got, want) {
 		t.Fatalf("Get = %+v, %v, %v, want %+v", got, exists, err, want)
 	}
@@ -37,7 +37,7 @@ func TestGetSaysAMachineIsGoneOnlyWhenTheVendorDoes(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			api := newFakeAPI(t)
 			api.on(http.MethodGet, machinesPath+"/9001", read)
-			if _, exists, err := newTestProvider(t, api).Get(context.Background(), "9001"); err != nil || exists {
+			if _, exists, err := newTestProvider(t, api).Get(context.Background(), testID); err != nil || exists {
 				t.Fatalf("Get = %v, %v, want gone", exists, err)
 			}
 		})
@@ -49,7 +49,7 @@ func TestGetSaysAMachineIsGoneOnlyWhenTheVendorDoes(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			api := newFakeAPI(t)
 			api.on(http.MethodGet, machinesPath+"/9001", read)
-			if _, exists, err := newTestProvider(t, api).Get(context.Background(), "9001"); err == nil || exists {
+			if _, exists, err := newTestProvider(t, api).Get(context.Background(), testID); err == nil || exists {
 				t.Fatalf("Get = %v, %v, want an error that says neither", exists, err)
 			}
 		})

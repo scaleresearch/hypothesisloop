@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/url"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider"
 )
@@ -29,8 +28,12 @@ var _ provider.Pauser = (*Provider)(nil)
 // from, which a destroyed one is for a while. A Machine that is gone is not an error here, so a
 // 409 is followed by a read of the Machine.
 func (p *Provider) Pause(ctx context.Context, id string) error {
-	path := p.machinesPath("/" + url.PathEscape(id))
-	_, err := p.call(ctx, http.MethodPost, path+"/suspend", nil, nil)
+	app, machineID, err := p.splitID(id)
+	if err != nil {
+		return err
+	}
+	path := p.machinePath(app, machineID, "")
+	_, err = p.call(ctx, http.MethodPost, path+"/suspend", nil, nil)
 	if hasStatus(err, http.StatusNotFound) {
 		return nil
 	}
@@ -51,9 +54,13 @@ func (p *Provider) Pause(ctx context.Context, id string) error {
 // that has ended a second time. So the Machine is read first, and one whose command ended is
 // refused: it is exited, and a caller that wants its command again rents another.
 func (p *Provider) Resume(ctx context.Context, id string) error {
-	path := p.machinesPath("/" + url.PathEscape(id))
+	app, machineID, err := p.splitID(id)
+	if err != nil {
+		return err
+	}
+	path := p.machinePath(app, machineID, "")
 	var found machine
-	_, err := p.call(ctx, http.MethodGet, path, nil, &found)
+	_, err = p.call(ctx, http.MethodGet, path, nil, &found)
 	if hasStatus(err, http.StatusNotFound) {
 		return fmt.Errorf("fly: machine %s is gone and cannot be resumed: %w", id, err)
 	}

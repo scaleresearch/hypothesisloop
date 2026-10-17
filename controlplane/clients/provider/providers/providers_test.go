@@ -118,7 +118,7 @@ func TestTheShippedProviderSectionsBuildTheirAdapters(t *testing.T) {
 // with the setting that is missing, before anything is rented.
 func TestAVendorNamedWithoutASettingsSectionIsRefusedAtStartup(t *testing.T) {
 	for name, want := range map[string]string{
-		"fly": `fly: app ""`,
+		"fly": `fly: org ""`,
 		"e2b": "e2b: lifetime_seconds",
 	} {
 		for form, text := range map[string]string{"no settings key": "name: " + name, "an empty settings key": "name: " + name + "\nsettings:"} {

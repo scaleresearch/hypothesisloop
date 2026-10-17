@@ -2,10 +2,13 @@ package fly
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
+	"slices"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider"
@@ -17,46 +20,88 @@ type machine struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Config    struct {
-		Metadata map[string]string `json:"metadata"`
+		Env  map[string]string `json:"env"`
+		Init machineInit       `json:"init"`
 	} `json:"config"`
 }
 
-// List reads every Machine of the app in one call: the API filters on a whole metadata value and
-// has no prefix match, and without a page size it answers with all of them.
+// listParallel bounds the apps whose Machines are read at once. Each app is its own budget of
+// the API's rate limit.
+const listParallel = 8
+
+// List reads the organization's apps and the Machines of each of this adapter's, side by side.
+// One read that fails fails the list, since the Machine it would show is not known to be gone.
 func (p *Provider) List(ctx context.Context, namePrefix string) ([]provider.Instance, error) {
+	apps, err := p.apps(ctx)
+	if err != nil {
+		return nil, err
+	}
+	found := make([][]provider.Instance, len(apps))
+	failures := make([]error, len(apps))
+	slots := make(chan struct{}, listParallel)
+	var reading sync.WaitGroup
+	for i, app := range apps {
+		reading.Add(1)
+		go func() {
+			defer reading.Done()
+			slots <- struct{}{}
+			defer func() { <-slots }()
+			found[i], failures[i] = p.appInstances(ctx, app, namePrefix)
+		}()
+	}
+	reading.Wait()
+	if err := errors.Join(failures...); err != nil {
+		return nil, err
+	}
+	listed := []provider.Instance{}
+	for _, instances := range found {
+		listed = append(listed, instances...)
+	}
+	sort.Slice(listed, func(a, b int) bool { return listed[a].ID < listed[b].ID })
+	return listed, nil
+}
+
+// appInstances reads the Machines of one app. An app deleted since the app list was read has
+// none.
+func (p *Provider) appInstances(ctx context.Context, app, namePrefix string) ([]provider.Instance, error) {
 	var machines []machine
-	header, err := p.call(ctx, http.MethodGet, p.machinesPath(""), nil, &machines)
+	header, err := p.call(ctx, http.MethodGet, p.appPath(app)+"/machines", nil, &machines)
 	if hasStatus(err, http.StatusNotFound) {
-		return nil, fmt.Errorf("fly: app %q does not exist, or the token is for another app; the adapter does not create it: %w", p.cfg.App, err)
+		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
 	now, err := http.ParseTime(header.Get("Date"))
 	if err != nil {
-		return nil, fmt.Errorf("fly: the machine list carries no usable Date: %w", err)
+		return nil, fmt.Errorf("fly: the machine list of app %s carries no usable Date: %w", app, err)
 	}
 	listed := []provider.Instance{}
 	for _, found := range machines {
-		name, named := found.Config.Metadata[nameKey]
+		name, named := found.Config.Env[nameEnv]
 		if !named || !strings.HasPrefix(name, namePrefix) {
 			continue
 		}
-		state, exists := p.stateOf(ctx, found, now)
+		state, exists := p.stateOf(ctx, app, found, now)
 		if !exists {
 			continue
 		}
-		listed = append(listed, provider.Instance{ID: found.ID, Name: name, State: state, StartedAt: found.CreatedAt, Architecture: architecture})
+		listed = append(listed, provider.Instance{ID: instanceID(app, found.ID), Name: name, State: state, StartedAt: found.CreatedAt, Architecture: architecture})
 	}
 	return listed, nil
 }
 
 // Get reads the Machine from its host's own record. The list is a copy that trails it: on
 // 2026-10-09 it left out running Machines for over a minute. The API answers 404 for an id it
-// never had, and a destroyed Machine for a while after.
+// never had, and a destroyed Machine for a while after. An id outside this adapter's apps names
+// no Machine of it, which is gone to the caller as one the vendor never had.
 func (p *Provider) Get(ctx context.Context, id string) (provider.Instance, bool, error) {
+	app, machineID, err := p.splitID(id)
+	if err != nil {
+		return provider.Instance{}, false, nil
+	}
 	var found machine
-	header, err := p.call(ctx, http.MethodGet, p.machinesPath("/"+url.PathEscape(id)), nil, &found)
+	header, err := p.call(ctx, http.MethodGet, p.machinePath(app, machineID, ""), nil, &found)
 	if hasStatus(err, http.StatusNotFound) {
 		return provider.Instance{}, false, nil
 	}
@@ -67,11 +112,11 @@ func (p *Provider) Get(ctx context.Context, id string) (provider.Instance, bool,
 	if err != nil {
 		return provider.Instance{}, false, fmt.Errorf("fly: the machine read carries no usable Date: %w", err)
 	}
-	state, exists := p.stateOf(ctx, found, now)
+	state, exists := p.stateOf(ctx, app, found, now)
 	if !exists {
 		return provider.Instance{}, false, nil
 	}
-	return provider.Instance{ID: found.ID, Name: found.Config.Metadata[nameKey], State: state, StartedAt: found.CreatedAt, Architecture: architecture}, true, nil
+	return provider.Instance{ID: id, Name: found.Config.Env[nameEnv], State: state, StartedAt: found.CreatedAt, Architecture: architecture}, true, nil
 }
 
 // stateOf maps a Machine's state. A Machine being destroyed is gone to a caller. One the vendor
@@ -85,8 +130,8 @@ func (p *Provider) Get(ctx context.Context, id string) (provider.Instance, bool,
 //
 // A warm Machine is stopped once its image is ready and has written nothing, so no log is read
 // for it. One that failed is exited, and one in any other state went on as any Machine does.
-func (p *Provider) stateOf(ctx context.Context, found machine, now time.Time) (state provider.State, exists bool) {
-	if found.Config.Metadata[warmKey] != "" {
+func (p *Provider) stateOf(ctx context.Context, app string, found machine, now time.Time) (state provider.State, exists bool) {
+	if slices.Equal(found.Config.Init.Exec, idle) {
 		switch found.State {
 		case "stopped":
 			return provider.StateWarm, true
@@ -104,14 +149,14 @@ func (p *Provider) stateOf(ctx context.Context, found machine, now time.Time) (s
 	case "suspended":
 		return provider.StatePaused, true
 	case "stopped", "failed":
-		if p.outputComplete(ctx, found, now) {
+		if p.outputComplete(ctx, app, found, now) {
 			return provider.StateExited, true
 		}
 		return provider.StateRunning, true
 	case "destroying", "destroyed":
 		return "", false
 	}
-	p.log("machine %s (%s) has state %q, which this adapter does not know; reporting it as unknown", found.ID, found.Config.Metadata[nameKey], found.State)
+	p.log("machine %s (%s) has state %q, which this adapter does not know; reporting it as unknown", found.ID, found.Config.Env[nameEnv], found.State)
 	return provider.StateUnknown, true
 }
 
@@ -121,11 +166,11 @@ func (p *Provider) stateOf(ctx context.Context, found machine, now time.Time) (s
 // it ran out of memory, the image has no shell), which writes no mark and nothing more either.
 // The end mark of an earlier start of the Machine says nothing of this one, so only what follows
 // the newest start mark is searched.
-func (p *Provider) outputComplete(ctx context.Context, found machine, now time.Time) bool {
+func (p *Provider) outputComplete(ctx context.Context, app string, found machine, now time.Time) bool {
 	if now.Sub(found.UpdatedAt) > logSettle {
 		return true
 	}
-	entries, err := p.logEntries(ctx, found.ID, endMarkWindow)
+	entries, err := p.logEntries(ctx, app, found.ID, endMarkWindow)
 	if err != nil {
 		p.log("machine %s stopped and its log could not be read for the end mark; reporting it as running: %v", found.ID, err)
 		return false
@@ -139,21 +184,11 @@ func (p *Provider) outputComplete(ctx context.Context, found machine, now time.T
 	return false
 }
 
-// Destroy deletes the Machine whatever its state. The API answers 200 for a Machine it deleted
-// before and 404 for an id it never had.
+// Destroy deletes the Machine's app, and the Machine with it, whatever its state.
 func (p *Provider) Destroy(ctx context.Context, id string) error {
-	var destroyed struct {
-		OK bool `json:"ok"`
-	}
-	_, err := p.call(ctx, http.MethodDelete, p.machinesPath("/"+url.PathEscape(id))+"?force=true", nil, &destroyed)
-	if hasStatus(err, http.StatusNotFound) {
-		return nil
-	}
+	app, _, err := p.splitID(id)
 	if err != nil {
 		return err
 	}
-	if !destroyed.OK {
-		return fmt.Errorf("fly: destroying machine %s was refused", id)
-	}
-	return nil
+	return p.deleteApp(ctx, app)
 }

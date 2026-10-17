@@ -30,7 +30,7 @@ func TestLogsKeepsTheCommandsLinesAndDropsTheVendorsOwn(t *testing.T) {
 	)))
 	p := newTestProvider(t, api)
 
-	got, err := p.Logs(context.Background(), "9001", 100)
+	got, err := p.Logs(context.Background(), testID, 100)
 	if err != nil {
 		t.Fatalf("Logs: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestLogsReturnsTheLastTailLines(t *testing.T) {
 	api.on(http.MethodGet, logsPath, answer(200, logJSON("hl-out|1", "hl-out|2", shutdownLine, "hl-out|3", "hl-ended")))
 	p := newTestProvider(t, api)
 
-	got, err := p.Logs(context.Background(), "9001", 2)
+	got, err := p.Logs(context.Background(), testID, 2)
 	if err != nil || !reflect.DeepEqual(got, []string{"2", "3"}) {
 		t.Fatalf("Logs = %q, %v, want the last two lines, oldest first", got, err)
 	}
@@ -67,7 +67,7 @@ func TestLogsOfAMachineStartedAgainAreThoseOfItsNewestStart(t *testing.T) {
 	)))
 	p := newTestProvider(t, api)
 
-	got, err := p.Logs(context.Background(), "9001", 100)
+	got, err := p.Logs(context.Background(), testID, 100)
 	if err != nil || !reflect.DeepEqual(got, []string{"second run", "hl-started"}) {
 		t.Fatalf("Logs = %q, %v, want the lines of the second start alone, a line of the command that reads like the mark among them", got, err)
 	}
@@ -83,7 +83,7 @@ func TestLogsOfARunThatStartsInsideAFullReadAreTheWholeRun(t *testing.T) {
 	api.on(http.MethodGet, logsPath, answer(200, logJSON(entries...)))
 	p := newTestProvider(t, api)
 
-	got, err := p.Logs(context.Background(), "9001", 100)
+	got, err := p.Logs(context.Background(), testID, 100)
 	if err != nil || !reflect.DeepEqual(got, []string{"one", "two"}) {
 		t.Fatalf("Logs = %q, %v, want both lines and no error: nothing of this run is further back", got, err)
 	}
@@ -111,7 +111,7 @@ func TestLogsFindsTheTailAmongTheVendorsLines(t *testing.T) {
 	api.on(http.MethodGet, logsPath, chatty(3000))
 	p := newTestProvider(t, api)
 
-	got, err := p.Logs(context.Background(), "9001", 100)
+	got, err := p.Logs(context.Background(), testID, 100)
 	if err != nil {
 		t.Fatalf("Logs: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestLogsRefusesATailOneReadCannotHold(t *testing.T) {
 	api.on(http.MethodGet, logsPath, chatty(3000))
 	p := newTestProvider(t, api)
 
-	got, err := p.Logs(context.Background(), "9001", 200)
+	got, err := p.Logs(context.Background(), testID, 200)
 	if err == nil || !strings.Contains(err.Error(), "hold 166 lines of the command, and 200 were asked for") {
 		t.Fatalf("Logs = %d lines, %v, want an error: a short answer would pass for the whole output", len(got), err)
 	}
@@ -142,7 +142,7 @@ func TestLogsOfAShortLogIsTheWholeLog(t *testing.T) {
 	api.on(http.MethodGet, logsPath, chatty(30))
 	p := newTestProvider(t, api)
 
-	got, err := p.Logs(context.Background(), "9001", 100)
+	got, err := p.Logs(context.Background(), testID, 100)
 	if err != nil || len(got) != 10 {
 		t.Fatalf("Logs = %d lines, %v, want the 10 the command wrote", len(got), err)
 	}
@@ -158,7 +158,7 @@ func TestLogsOfSomethingThatNeverWroteIsEmpty(t *testing.T) {
 			api.on(http.MethodGet, logsPath, answer(200, body))
 			p := newTestProvider(t, api)
 
-			got, err := p.Logs(context.Background(), "9001", 10)
+			got, err := p.Logs(context.Background(), testID, 10)
 			if err != nil || got == nil || len(got) != 0 {
 				t.Fatalf("Logs = %#v, %v, want an empty list", got, err)
 			}
@@ -179,7 +179,7 @@ func TestLogsReportsEveryFailure(t *testing.T) {
 			api.on(http.MethodGet, logsPath, handler)
 			p := newTestProvider(t, api)
 
-			if got, err := p.Logs(context.Background(), "9001", 10); err == nil {
+			if got, err := p.Logs(context.Background(), testID, 10); err == nil {
 				t.Fatalf("Logs = %q with no error", got)
 			}
 			if api.total() != 1 {

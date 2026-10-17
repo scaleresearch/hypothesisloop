@@ -6,7 +6,7 @@ import (
 )
 
 func TestNewRefusesIncompleteSettings(t *testing.T) {
-	valid := Settings{App: testApp, Region: "ams", CPUKind: "performance"}
+	valid := testSettings("performance")
 	for token, want := range map[string]string{"": `starting with "FlyV1 "`, "fm2_no-scheme": `starting with "FlyV1 "`} {
 		if _, err := New(valid, token, nil, t.Logf); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("token %q: err = %v, want one about %q", token, err, want)
@@ -16,12 +16,15 @@ func TestNewRefusesIncompleteSettings(t *testing.T) {
 		mutate func(*Settings)
 		want   string
 	}{
-		"no app":             {func(c *Settings) { c.App = "" }, "app"},
-		"app that is a path": {func(c *Settings) { c.App = "a/../b" }, "app"},
-		"no region":          {func(c *Settings) { c.Region = "" }, "region"},
-		"region by its name": {func(c *Settings) { c.Region = "Amsterdam" }, "region"},
-		"no cpu kind":        {func(c *Settings) { c.CPUKind = "" }, "cpu_kind"},
-		"unknown cpu kind":   {func(c *Settings) { c.CPUKind = "burstable" }, "cpu_kind"},
+		"no org":                    {func(c *Settings) { c.Org = "" }, "org"},
+		"org that is a path":        {func(c *Settings) { c.Org = "a/../b" }, "org"},
+		"no app prefix":             {func(c *Settings) { c.AppPrefix = "" }, "app_prefix"},
+		"app prefix that is a path": {func(c *Settings) { c.AppPrefix = "a/../b" }, "app_prefix"},
+		"app prefix too long":       {func(c *Settings) { c.AppPrefix = strings.Repeat("a", 41) }, "app_prefix"},
+		"no region":                 {func(c *Settings) { c.Region = "" }, "region"},
+		"region by its name":        {func(c *Settings) { c.Region = "Amsterdam" }, "region"},
+		"no cpu kind":               {func(c *Settings) { c.CPUKind = "" }, "cpu_kind"},
+		"unknown cpu kind":          {func(c *Settings) { c.CPUKind = "burstable" }, "cpu_kind"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -38,7 +41,7 @@ func TestNewRefusesIncompleteSettings(t *testing.T) {
 }
 
 func TestNewRefusesAnyAcceleratorType(t *testing.T) {
-	valid := Settings{App: testApp, Region: "ams", CPUKind: "shared"}
+	valid := testSettings("shared")
 
 	_, err := New(valid, testToken, []string{"nvidia.com/gpu.product=NVIDIA-H200"}, t.Logf)
 	if err == nil || !strings.Contains(err.Error(), "NVIDIA-H200") {

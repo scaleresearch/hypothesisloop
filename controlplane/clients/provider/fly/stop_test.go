@@ -15,7 +15,7 @@ func TestStopSignalsTheMachineWithSIGTERMAndNothingElse(t *testing.T) {
 	p := newTestProvider(t, api)
 
 	for range 3 {
-		if err := p.Stop(context.Background(), "9001"); err != nil {
+		if err := p.Stop(context.Background(), testID); err != nil {
 			t.Fatalf("Stop: %v", err)
 		}
 	}
@@ -43,7 +43,7 @@ func TestStopOfAMachineWithNothingToSignalIsNotAnError(t *testing.T) {
 			api.on(http.MethodPost, signalPath, handler)
 			p := newTestProvider(t, api)
 
-			if err := p.Stop(context.Background(), "9001"); err != nil {
+			if err := p.Stop(context.Background(), testID); err != nil {
 				t.Fatalf("Stop: %v", err)
 			}
 		})
@@ -63,7 +63,7 @@ func TestStopReportsEveryOtherFailure(t *testing.T) {
 			api.on(http.MethodPost, signalPath, handler)
 			p := newTestProvider(t, api)
 
-			if err := p.Stop(context.Background(), "9001"); err == nil {
+			if err := p.Stop(context.Background(), testID); err == nil {
 				t.Fatal("no error")
 			}
 			if api.total() != 1 {

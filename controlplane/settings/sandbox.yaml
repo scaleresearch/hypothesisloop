@@ -59,25 +59,28 @@ sandbox:
     memory: 16Gi
     storage: 50Gi
 
-  # One Fly.io organization. SANDBOX_FLY_API_KEY is a deploy token for the app below, as
-  # `fly tokens create deploy -a <app>` prints it, "FlyV1 " and the token. Use a deploy token and no
-  # wider one: it is all the adapter needs, and a token for the organization can create and destroy
-  # machines in every app of it.
+  # One Fly.io organization. SANDBOX_FLY_API_KEY is a token for it, as `fly tokens create org -o
+  # <org>` prints it, "FlyV1 " and the token. Every machine runs in an app of its own, on a private
+  # network of its own, which the adapter creates with it and deletes with it: machines of one app
+  # reach each other's ports, and an agent's machine runs what its agent writes. The token can
+  # create and delete every app of the organization, so give the sandboxes an organization of their
+  # own.
   #
   # A machine ends when its command does. What the command left running with its output open is
   # given five seconds to finish writing and is then stopped with the machine. The Machines API
   # allows one request a second per action and app, with bursts of three: a list of the instances
-  # is one request, and a machine that stopped in the last two minutes adds one log read to it.
+  # is one request for the organization's apps and one for each machine's app, and a machine that
+  # stopped in the last two minutes adds one log read to it.
   # Reading an instance's output is one request to the log API, which gives the last 500 entries,
   # more than the agent's tail of 100 lines. A warm Machine is created stopped, its image pulled
   # onto its host; starting an agent in one is an update, a wait for it and a start, about four
   # seconds, where a create of a 0.9 GB image took seventeen.
   fly:
-    # The one Fly app that holds every machine. It must exist: `fly apps create <name> -o <org>`.
-    # The adapter does not create it, and every pass fails with the app's name until it does.
-    # Give it a network of its own (`--network <name>`): machines on one network reach each
-    # other's ports, and an app created without one shares the organization's default network.
-    app: REPLACE-WITH-FLY-APP
+    # The slug of the organization (`fly orgs list`).
+    org: REPLACE-WITH-FLY-ORG
+    # 1 to 40 lowercase letters, digits and dashes that start the name of every app the adapter
+    # creates, <app_prefix>-<16 random hex digits>. App names are unique across Fly.io.
+    app_prefix: REPLACE-WITH-FLY-APP-PREFIX
     # Three-letter code of the region machines are placed in (`fly platform regions`).
     region: ams
     # shared or performance. A spec gets the smallest machine of this kind that holds its cpu

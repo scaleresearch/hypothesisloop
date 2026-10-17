@@ -7,16 +7,12 @@ import (
 	"net/url"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider"
-	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider/vendorapi"
 )
 
 var _ provider.Warmer = (*Provider)(nil)
 
-// warmKey is the metadata key that marks a Machine Warm created and no StartWarm has given a
-// spec. StartWarm replaces the whole metadata, which drops it.
-const warmKey = "hl_warm"
-
-// idle is what a warm Machine runs should anything start it before StartWarm does: nothing.
+// idle is what a warm Machine runs should anything start it before StartWarm does: nothing. It
+// is also what marks a Machine warm, as StartWarm replaces it and the Machine cannot (apps.go).
 var idle = []string{"/bin/sh", "-c", "exit 0"}
 
 // replaceWaitSeconds bounds the wait for an update to finish replacing a Machine, inside the
@@ -40,21 +36,7 @@ func (p *Provider) Warm(ctx context.Context, spec provider.Spec) (string, error)
 	}
 	req.SkipLaunch = true
 	req.Config.Init.Exec = idle
-	req.Config.Metadata[warmKey] = "1"
-	var created struct {
-		ID string `json:"id"`
-	}
-	if _, err := p.call(ctx, http.MethodPost, p.machinesPath(""), req, &created); err != nil {
-		return "", err
-	}
-	if created.ID == "" {
-		return "", fmt.Errorf("fly: warming a machine for %q answered without an id", spec.Name)
-	}
-	if err := p.awaitListed(ctx, created.ID, spec.Name); err != nil {
-		destroy := func(ctx context.Context) error { return p.Destroy(ctx, created.ID) }
-		return "", vendorapi.GiveBack(ctx, destroy, requestTimeout, err)
-	}
-	return created.ID, nil
+	return p.rent(ctx, req, spec.Name)
 }
 
 // StartWarm updates the Machine to the config Create would have made for spec, waits for the
@@ -65,7 +47,11 @@ func (p *Provider) StartWarm(ctx context.Context, id string, spec provider.Spec)
 		return err
 	}
 	req.SkipLaunch = true
-	path := p.machinesPath("/" + url.PathEscape(id))
+	app, machineID, err := p.splitID(id)
+	if err != nil {
+		return err
+	}
+	path := p.machinePath(app, machineID, "")
 	var updated struct {
 		InstanceID string `json:"instance_id"`
 	}

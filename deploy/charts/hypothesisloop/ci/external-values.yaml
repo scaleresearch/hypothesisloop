@@ -79,7 +79,8 @@ sandbox:
   create_pause_milliseconds: 1000
   warm_pool_size: 4
   fly:
-    app: agents-example
+    org: example
+    app_prefix: agents-example
     region: ams
     cpu_kind: shared
   instance:

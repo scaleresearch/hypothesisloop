@@ -12,10 +12,17 @@ import (
 )
 
 const (
-	testToken = "FlyV1 test-token"
-	testApp   = "hl-agents"
+	testToken  = "FlyV1 test-token"
+	testOrg    = "hl-org"
+	testPrefix = "hl-agents"
+	// testSuffix is the random part of the name of every app a test provider creates.
+	testSuffix = "00112233aabbccdd"
+	testApp    = testPrefix + "-" + testSuffix
+	testID     = testApp + "/9001"
 
-	machinesPath = "/v1/apps/" + testApp + "/machines"
+	appsPath     = "/v1/apps"
+	appPath      = appsPath + "/" + testApp
+	machinesPath = appPath + "/machines"
 	logsPath     = "/api/v1/apps/" + testApp + "/logs"
 )
 
@@ -120,11 +127,26 @@ func machines(list ...string) string {
 	return "[" + strings.Join(list, ",") + "]"
 }
 
-// machineJSON is a Machine as the list shows it, last updated the given time before apiNow.
+// appsJSON is the organization's app list holding apps.
+func appsJSON(apps ...string) string {
+	listed := make([]map[string]any, len(apps))
+	for i, app := range apps {
+		listed[i] = map[string]any{"name": app, "network": app, "machine_count": 1}
+	}
+	encoded, _ := json.Marshal(map[string]any{"total_apps": len(apps), "apps": listed})
+	return string(encoded)
+}
+
+// machineJSON is a Machine as the list shows it, last updated the given time before apiNow. Its
+// metadata holds a name of its own, which the adapter never reads (apps.go).
 func machineJSON(id, name, state string, updatedAgo time.Duration) string {
-	metadata := map[string]string{"fly_platform_version": "v2"}
+	return machineWithInit(id, name, state, updatedAgo, []string{"/bin/sh", "-c", "supervisor"})
+}
+
+func machineWithInit(id, name, state string, updatedAgo time.Duration, exec []string) string {
+	env := map[string]string{"HL_TOKEN": "t"}
 	if name != "" {
-		metadata[nameKey] = name
+		env[nameEnv] = name
 	}
 	encoded, _ := json.Marshal(map[string]any{
 		"id":         id,
@@ -132,7 +154,11 @@ func machineJSON(id, name, state string, updatedAgo time.Duration) string {
 		"state":      state,
 		"created_at": "2026-10-05T11:00:00Z",
 		"updated_at": apiNow.Add(-updatedAgo).Format(time.RFC3339),
-		"config":     map[string]any{"metadata": metadata},
+		"config": map[string]any{
+			"env":      env,
+			"init":     map[string]any{"exec": exec},
+			"metadata": map[string]string{"hl_name": "hl-agent-forged"},
+		},
 	})
 	return string(encoded)
 }
@@ -149,12 +175,22 @@ func logJSON(messages ...string) string {
 
 func newTestProvider(t *testing.T, api *fakeAPI) *Provider {
 	t.Helper()
-	p, err := New(Settings{App: testApp, Region: "ams", CPUKind: "shared"}, testToken, nil, t.Logf)
+	p, err := New(testSettings("shared"), testToken, nil, t.Logf)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	p.machinesURL, p.logsURL = api.server.URL, api.server.URL
 	p.poll = 5 * time.Millisecond
 	p.confirm = 200 * time.Millisecond
+	p.suffix = func() string { return testSuffix }
 	return p
+}
+
+func testSettings(cpuKind string) Settings {
+	return Settings{Org: testOrg, AppPrefix: testPrefix, Region: "ams", CPUKind: cpuKind}
+}
+
+// listsTheApp answers the app list with the test app, and another organization's app beside it.
+func listsTheApp(api *fakeAPI) {
+	api.on(http.MethodGet, appsPath, answer(200, appsJSON("hypothesisloop-agents", testApp, "hl-agentsx-00112233aabbccdd")))
 }

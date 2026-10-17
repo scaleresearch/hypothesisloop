@@ -17,7 +17,7 @@ func TestPauseSuspendsTheMachineAndNeverStopsIt(t *testing.T) {
 	api.on(http.MethodPost, suspendPath, answer(200, `{"ok":true}`))
 	p := newTestProvider(t, api)
 
-	if err := p.Pause(context.Background(), "9001"); err != nil {
+	if err := p.Pause(context.Background(), testID); err != nil {
 		t.Fatalf("Pause: %v", err)
 	}
 	if sent := api.sent(http.MethodPost, suspendPath); len(sent) != 1 || api.total() != 1 || sent[0].Auth != testToken {
@@ -33,10 +33,10 @@ func TestPauseOfAMachineThatIsGoneIsNotAnErrorAndARefusalIs(t *testing.T) {
 	))
 	p := newTestProvider(t, api)
 
-	if err := p.Pause(context.Background(), "9001"); err != nil {
+	if err := p.Pause(context.Background(), testID); err != nil {
 		t.Fatalf("Pause of a machine that is gone: %v", err)
 	}
-	if err := p.Pause(context.Background(), "9001"); err == nil || !strings.Contains(err.Error(), "cannot be suspended") {
+	if err := p.Pause(context.Background(), testID); err == nil || !strings.Contains(err.Error(), "cannot be suspended") {
 		t.Fatalf("Pause the vendor refused: err = %v, want the vendor's words", err)
 	}
 }
@@ -47,7 +47,7 @@ func TestPauseRefusedForAMachineBeingDestroyedIsNotAnErrorAndForALivingOneIs(t *
 		api := newFakeAPI(t)
 		api.on(http.MethodPost, suspendPath, refusal)
 		api.on(http.MethodGet, machinesPath+"/9001", answer(200, machineJSON("9001", "hl-a", state, 0)))
-		err := newTestProvider(t, api).Pause(context.Background(), "9001")
+		err := newTestProvider(t, api).Pause(context.Background(), testID)
 		if (err != nil) != wantErr {
 			t.Errorf("Pause refused for a %s machine: err = %v", state, err)
 		}
@@ -66,12 +66,12 @@ func TestResumeStartsTheMachineAndSaysWhenItIsGone(t *testing.T) {
 	p := newTestProvider(t, api)
 
 	for _, was := range []string{"suspended", "running"} {
-		if err := p.Resume(context.Background(), "9001"); err != nil {
+		if err := p.Resume(context.Background(), testID); err != nil {
 			t.Fatalf("Resume of a %s machine: %v", was, err)
 		}
 	}
 	for _, gone := range []string{"between the read and the start", "at the read"} {
-		if err := p.Resume(context.Background(), "9001"); err == nil || !strings.Contains(err.Error(), "is gone") {
+		if err := p.Resume(context.Background(), testID); err == nil || !strings.Contains(err.Error(), "is gone") {
 			t.Fatalf("Resume of a machine that is gone %s: err = %v", gone, err)
 		}
 	}
@@ -88,7 +88,7 @@ func TestResumeNeverStartsAMachineWhoseCommandHasEnded(t *testing.T) {
 		api.on(http.MethodGet, machinesPath+"/9001", answer(200, machineJSON("9001", "hl-a", state, 0)))
 		p := newTestProvider(t, api)
 
-		if err := p.Resume(context.Background(), "9001"); err == nil || !strings.Contains(err.Error(), "its command has ended") {
+		if err := p.Resume(context.Background(), testID); err == nil || !strings.Contains(err.Error(), "its command has ended") {
 			t.Fatalf("Resume of a %s machine: err = %v, want a refusal", state, err)
 		}
 		if api.total() != 1 {

@@ -4,15 +4,17 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider/vendorapi"
 )
 
-// nameKey is the metadata key a Machine carries its instance name under. The Machine's own name
-// is left to the vendor: it must be unique in the app, and an instance name need not be.
-const nameKey = "hl_name"
+// nameEnv is the variable of a Machine's env that holds its instance name, where the Machine
+// cannot change it (apps.go). The Machine's own name is fixed at create, and a warm Machine takes
+// another instance name when it starts.
+const nameEnv = "HL_INSTANCE_NAME"
 
 type createRequest struct {
 	Region string        `json:"region"`
@@ -23,12 +25,11 @@ type createRequest struct {
 }
 
 type machineConfig struct {
-	Image    string            `json:"image"`
-	Init     machineInit       `json:"init"`
-	Env      map[string]string `json:"env"`
-	Metadata map[string]string `json:"metadata"`
-	Guest    guest             `json:"guest"`
-	Rootfs   machineRootfs     `json:"rootfs"`
+	Image  string            `json:"image"`
+	Init   machineInit       `json:"init"`
+	Env    map[string]string `json:"env"`
+	Guest  guest             `json:"guest"`
+	Rootfs machineRootfs     `json:"rootfs"`
 	// Restart "no" and AutoDestroy false are what keep a Machine whose command ended in the
 	// list, stopped, with its logs readable: the end of its output is how a caller learns why
 	// it ended, and a Machine the vendor destroyed could not be told from one it took away.
@@ -54,20 +55,34 @@ func (p *Provider) Create(ctx context.Context, spec provider.Spec) (string, erro
 	if err != nil {
 		return "", err
 	}
+	return p.rent(ctx, req, spec.Name)
+}
+
+// rent creates an app and req's Machine in it, and holds until the Machine is listed. The app
+// goes again when its Machine is not made or not confirmed.
+func (p *Provider) rent(ctx context.Context, req createRequest, name string) (string, error) {
+	app, err := p.createApp(ctx)
+	if err != nil {
+		return "", err
+	}
+	giveBack := func(cause error) error {
+		deleteApp := func(ctx context.Context) error { return p.deleteApp(ctx, app) }
+		return vendorapi.GiveBack(ctx, deleteApp, requestTimeout, cause)
+	}
 	var created struct {
 		ID string `json:"id"`
 	}
-	if _, err := p.call(ctx, http.MethodPost, p.machinesPath(""), req, &created); err != nil {
-		return "", err
+	if _, err := p.call(ctx, http.MethodPost, p.appPath(app)+"/machines", req, &created); err != nil {
+		return "", giveBack(err)
 	}
-	if created.ID == "" {
-		return "", fmt.Errorf("fly: creating a machine for %q answered without an id", spec.Name)
+	if !machineIDPattern.MatchString(created.ID) {
+		return "", giveBack(fmt.Errorf("fly: creating a machine for %q answered without an id", name))
 	}
-	if err := p.awaitListed(ctx, created.ID, spec.Name); err != nil {
-		destroy := func(ctx context.Context) error { return p.Destroy(ctx, created.ID) }
-		return "", vendorapi.GiveBack(ctx, destroy, requestTimeout, err)
+	id := instanceID(app, created.ID)
+	if err := p.awaitListed(ctx, id, name); err != nil {
+		return "", giveBack(err)
 	}
-	return created.ID, nil
+	return id, nil
 }
 
 // newCreateRequest hands the argv over as JSON strings end to end, so no shell ever parses it.
@@ -83,26 +98,34 @@ func (p *Provider) newCreateRequest(spec provider.Spec) (createRequest, error) {
 	if err != nil {
 		return createRequest{}, err
 	}
-	env := spec.Env
-	if env == nil {
-		env = map[string]string{}
+	env := map[string]string{nameEnv: spec.Name}
+	for key, value := range spec.Env {
+		env[key] = value
 	}
 	return createRequest{
 		Region: p.cfg.Region,
 		Config: machineConfig{
-			Image:    spec.Image,
-			Init:     machineInit{Exec: supervised(spec.Command)},
-			Env:      env,
-			Metadata: map[string]string{nameKey: spec.Name},
-			Guest:    size,
-			Rootfs:   machineRootfs{SizeGB: disk},
-			Restart:  machineRestart{Policy: "no"},
+			Image:   spec.Image,
+			Init:    machineInit{Exec: supervised(spec.Command)},
+			Env:     env,
+			Guest:   size,
+			Rootfs:  machineRootfs{SizeGB: disk},
+			Restart: machineRestart{Policy: "no"},
 		},
 	}, nil
 }
 
+// listed reads the app list and the Machines of id's app alone.
 func (p *Provider) listed(ctx context.Context, id, name string) (bool, error) {
-	instances, err := p.List(ctx, name)
+	app, _, err := p.splitID(id)
+	if err != nil {
+		return false, err
+	}
+	apps, err := p.apps(ctx)
+	if err != nil || !slices.Contains(apps, app) {
+		return false, err
+	}
+	instances, err := p.appInstances(ctx, app, name)
 	if err != nil {
 		return false, err
 	}
@@ -149,6 +172,9 @@ func validateSpec(spec provider.Spec) error {
 	}
 	if spec.Architecture != architecture {
 		return fmt.Errorf("fly: spec %q runs on %s, and this adapter rents %s machines only", spec.Name, spec.Architecture, architecture)
+	}
+	if _, set := spec.Env[nameEnv]; set {
+		return fmt.Errorf("fly: spec %q sets %s, which holds the instance name", spec.Name, nameEnv)
 	}
 	if spec.ImageLogin != nil {
 		return fmt.Errorf("fly: spec %q pulls its image with a login, and this adapter pulls only public images", spec.Name)
