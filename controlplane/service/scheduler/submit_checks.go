@@ -49,8 +49,7 @@ func branchOfExperiment(exp *domain.Experiment, measuresBaseline bool) error {
 		}
 		return nil
 	}
-	prefix := gitrefs.BranchPrefix(exp.PlatformExperimentID)
-	if len(exp.Branch) > len(prefix) && strings.HasPrefix(exp.Branch, prefix) && !strings.ContainsAny(exp.Branch, " \t\n") {
+	if gitrefs.IsExperimentBranch(exp.PlatformExperimentID, exp.Branch) {
 		return nil
 	}
 	return &AdmissionError{Reason: ReasonBranchNotOfExperiment, Message: fmt.Sprintf("branch %q is no branch of platform experiment %s: a job runs a commit pushed on a branch under %s, which hl hypothesis checkout HYPOTHESIS_ID makes and hl job submit pushes and states", exp.Branch, exp.PlatformExperimentID, prefix)}

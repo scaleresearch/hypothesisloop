@@ -45,24 +45,14 @@ func RefusedRefUpdate(platformExperimentID string, role SignupRole, agentName st
 		}
 		return fmt.Sprintf("a baseline agent pushes %s and branches beside it, %s-<name>", gitrefs.BaselineBranch(platformExperimentID), gitrefs.BaselineBranch(platformExperimentID))
 	case SignupRoleCompetitor, SignupRoleReviewer:
-		own := AgentBranchPrefix(platformExperimentID, agentName)
+		own := gitrefs.AgentBranchPrefix(platformExperimentID, agentName)
 		if own == "" {
 			return fmt.Sprintf("agent name %q makes no branch name", agentName)
 		}
-		if len(branch) > len(own) && strings.HasPrefix(branch, own) {
+		if gitrefs.IsUnder(own, branch) {
 			return ""
 		}
 		return "your branches are under " + own + ", which hl hypothesis checkout puts you on"
 	}
 	return "a " + string(role) + " pushes nothing"
-}
-
-// AgentBranchPrefix is what every branch a researcher or reviewer named agentName writes starts
-// with, empty for a name that makes no branch name or one in the baseline's place.
-func AgentBranchPrefix(platformExperimentID, agentName string) string {
-	segment := gitrefs.AgentBranchName(agentName)
-	if segment == "" || segment == "baseline" || strings.HasPrefix(segment, "baseline-") {
-		return ""
-	}
-	return gitrefs.BranchPrefix(platformExperimentID) + segment + "/"
 }

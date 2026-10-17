@@ -21,15 +21,15 @@ const titleSlugLength = 40
 // hl/<platform experiment>/<agent name>/<start of the hypothesis's text>-<end of its id>. The
 // end of the id tells apart two hypotheses that begin alike.
 func implementationBranch(platformExperiment, agentName, text, hypothesisID string) (string, error) {
-	agent, id := gitrefs.Slug(agentName, 0), gitrefs.Slug(strings.ReplaceAll(hypothesisID, "-", ""), 0)
-	if agent == "" || len(id) < 6 {
+	own, id := gitrefs.AgentBranchPrefix(platformExperiment, agentName), gitrefs.Slug(strings.ReplaceAll(hypothesisID, "-", ""), 0)
+	if own == "" || len(id) < 6 {
 		return "", fmt.Errorf("agent name %q and hypothesis id %q make no branch name", agentName, hypothesisID)
 	}
 	title := id[len(id)-6:]
 	if words := gitrefs.Slug(text, titleSlugLength); words != "" {
 		title = words + "-" + title
 	}
-	return gitrefs.BranchPrefix(platformExperiment) + agent + "/" + title, nil
+	return own + title, nil
 }
 
 func HypothesisCheckout(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
