@@ -29,7 +29,9 @@ _AGENT_ROLES = (RESEARCHER, BASELINE, PLANNER)
 def token_scope(token: str) -> tuple[str, str, str]:
     """What a token the platform derived says of its holder: ("agent", platform experiment, agent)
     or ("coordinator", platform experiment, ""). It is hls_<scope>.<mac>, the scope being
-    base64url of agent:<pe>/<agent> or coordinator:<pe>. The platform alone verifies it."""
+    base64url of agent:<pe>/<agent> or coordinator:<pe>, read as contract/scope.Parse reads those
+    two kinds: an agent's subject splits at its first /, and a coordinator's is whole. The platform
+    alone verifies it."""
     scope = ""
     if token.startswith(platform.DERIVED_TOKEN_PREFIX) and "." in token:
         part = token[len(platform.DERIVED_TOKEN_PREFIX):].split(".", 1)[0]
@@ -37,12 +39,13 @@ def token_scope(token: str) -> tuple[str, str, str]:
             scope = base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)).decode()
         except (binascii.Error, UnicodeDecodeError):
             scope = ""
-    kind, _, rest = scope.partition(":")
-    pe, _, agent = rest.partition("/")
-    if kind == platform.SCOPE_AGENT and pe and agent:
-        return kind, pe, agent
-    if kind == platform.SCOPE_COORDINATOR and pe and not agent:
-        return kind, pe, ""
+    kind, _, subject = scope.partition(":")
+    if kind == platform.SCOPE_AGENT:
+        pe, _, agent = subject.partition("/")
+        if pe and agent:
+            return kind, pe, agent
+    if kind == platform.SCOPE_COORDINATOR and subject:
+        return kind, subject, ""
     raise SystemExit("agent: HL_TOKEN is neither an agent's token nor a coordinator's. An agent gets its token when "
                      "it is added with `hl platform-experiments agents add`.")
 
