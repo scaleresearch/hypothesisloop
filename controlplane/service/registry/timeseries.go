@@ -45,15 +45,11 @@ func (s *Service) platformExperimentSeries(ctx context.Context, gauge, platformE
 
 	out := make([]*domain.AgentMetricSeries, 0, len(result))
 	for _, r := range result {
-		basis := r.Labels["metric_basis"]
-		if basis == "" {
-			basis = "raw"
-		}
 		series := &domain.AgentMetricSeries{
 			AgentID:      r.Labels["agent_id"],
 			ExperimentID: r.Labels["job_id"],
 			MetricName:   r.Labels["metric_name"],
-			MetricBasis:  basis,
+			MetricBasis:  r.Labels["metric_basis"],
 			Points:       make([]domain.MetricSeriesPoint, 0, len(r.Points)),
 		}
 		for _, p := range r.Points {
@@ -143,9 +139,6 @@ func latestAttemptOnly(experimentID string, valueResult []metricsdb.RangeSeries,
 		metricName := r.Labels["metric_name"]
 		agentID := r.Labels["agent_id"]
 		basis := r.Labels["metric_basis"]
-		if basis == "" {
-			basis = "raw"
-		}
 		fractions := fractionByAgentTS[agentID+"\x00"+metricName]
 
 		sr := &series{agentID: agentID, metricName: metricName}

@@ -40,7 +40,7 @@ func TestPopulateJobMetricsSetsTheLastValueOnEveryDeclaredMetric(t *testing.T) {
 	server, queries := jobMetricServer(t, strings.Join([]string{sample("job-a", "auroc", "raw", "0.90"),
 		sample("job-b", "auroc", "rescaled", "0.99"), sample("job-b", "auroc", "raw", "0.50"), sample("job-other", "auroc", "raw", "0.10"),
 		sample("job-a", "loss", "raw", "0.20"),
-		sample("job-a", "train_seconds", "raw", "7.88"), sample("job-a", "kind", "", "2"),
+		sample("job-a", "train_seconds", "raw", "7.88"), sample("job-a", "kind", "raw", "2"),
 		sample("job-b", "kind", "per_token", "3"), sample("job-b", "kind", "bucketed", "4")}, ","))
 	defer server.Close()
 

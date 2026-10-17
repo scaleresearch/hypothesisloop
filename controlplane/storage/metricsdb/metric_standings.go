@@ -100,7 +100,7 @@ func (s *Store) judgeConstraints(ctx context.Context, pe *domain.PlatformExperim
 func judgeConstraint(metric domain.MetricDefinition, samples []VectorSample, completed map[string]bool, unrankable map[string]string, broken map[string]bool) {
 	reported, violated := map[string]bool{}, map[string]float64{}
 	for _, sm := range samples {
-		if basis := sm.Labels["metric_basis"]; basis != "" && basis != platformapi.BasisRaw {
+		if sm.Labels["metric_basis"] != platformapi.BasisRaw {
 			continue
 		}
 		job := sm.Labels["job_id"]
@@ -146,14 +146,11 @@ func (s *Store) LastPerJobOnMetric(ctx context.Context, pe *domain.PlatformExper
 		return nil, fmt.Errorf("metricsdb.LastPerJobOnMetric: %s: %w", metric.Key, err)
 	}
 	var out []JobValue
-	seen := map[string]bool{}
 	for _, sm := range samples {
 		job := sm.Labels["job_id"]
-		// A job's samples from before metric_basis existed carry none: one value per job stands.
-		if basis := sm.Labels["metric_basis"]; !completed[job] || seen[job] || (basis != "" && basis != platformapi.BasisRaw) {
+		if !completed[job] || sm.Labels["metric_basis"] != platformapi.BasisRaw {
 			continue
 		}
-		seen[job] = true
 		out = append(out, JobValue{AgentID: sm.Labels["agent_id"], ExperimentID: job, Value: sm.Value})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -232,11 +229,7 @@ func bestOf(metric domain.MetricDefinition, samples []VectorSample, rankable map
 		if agentID == "" {
 			return nil, nil, fmt.Errorf("metricsdb.BestPerAgentOnMetric: %s: result missing agent_id", metric.Key)
 		}
-		// Two label-distinct series can both mean "raw": samples written before this label
-		// existed carry no metric_basis at all ("") alongside samples written after that
-		// explicitly say "raw". Both are eligible and must be merged with the same
-		// direction-aware aggregation as everything else, not treated as a conflict.
-		if basis := sm.Labels["metric_basis"]; basis != "" && basis != platformapi.BasisRaw {
+		if sm.Labels["metric_basis"] != platformapi.BasisRaw {
 			nonRaw[agentID] = true
 			continue
 		}

@@ -61,15 +61,6 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 		if maxHours := pe.CurrentMaxJobHours(); maxHours > 0 {
 			maxJobHoursByPE[pe.ID] = maxHours
 		}
-		// Stage ranking reads this contract per boundary; fail fast on a bad one rather
-		// than at the cut, where it would silently skew a cut. Create/Update already
-		// reject a bad contract before an experiment can ever reach here — this is
-		// defense against a row written before that validation existed.
-		if err := domain.ValidateMetricDefinitions(pe.Metrics); err != nil {
-			c.logger.Error("stages: invalid metric contract", zap.String("pe", pe.ID), zap.Error(err))
-			errs = append(errs, fmt.Errorf("stages: platform experiment %s has invalid metric contract: %w", pe.ID, err))
-			continue
-		}
 		if err := c.advanceStages(ctx, pe, exps, obs, now); err != nil {
 			c.logger.Error("stages: advance", zap.String("pe", pe.ID), zap.Error(err))
 			errs = append(errs, fmt.Errorf("stages: advance %s: %w", pe.ID, err))

@@ -37,12 +37,12 @@ func TestBestPerAgentOnMetricPicksTheBestAcrossMultipleJobsOfOneAgent(t *testing
 	// doc comment) — the exact shape confirmed against live GreptimeDB data, where a single
 	// agent had seven concurrent job series for one metric.
 	body := `{"status":"success","data":{"resultType":"vector","result":[` +
-		`{"metric":{"agent_id":"a1","job_id":"job-low"},"value":[1,"0.10"]},` +
-		`{"metric":{"agent_id":"a1","job_id":"job-high"},"value":[1,"0.90"]},` +
-		`{"metric":{"agent_id":"a1","job_id":"job-mid"},"value":[1,"0.50"]},` +
-		`{"metric":{"agent_id":"a1","job_id":"job-failed"},"value":[1,"0.99"]},` +
-		`{"metric":{"agent_id":"a3","job_id":"job-still-running"},"value":[1,"0.95"]},` +
-		`{"metric":{"agent_id":"a2","job_id":"job-only"},"value":[1,"0.30"]}` +
+		`{"metric":{"agent_id":"a1","job_id":"job-low","metric_basis":"raw"},"value":[1,"0.10"]},` +
+		`{"metric":{"agent_id":"a1","job_id":"job-high","metric_basis":"raw"},"value":[1,"0.90"]},` +
+		`{"metric":{"agent_id":"a1","job_id":"job-mid","metric_basis":"raw"},"value":[1,"0.50"]},` +
+		`{"metric":{"agent_id":"a1","job_id":"job-failed","metric_basis":"raw"},"value":[1,"0.99"]},` +
+		`{"metric":{"agent_id":"a3","job_id":"job-still-running","metric_basis":"raw"},"value":[1,"0.95"]},` +
+		`{"metric":{"agent_id":"a2","job_id":"job-only","metric_basis":"raw"},"value":[1,"0.30"]}` +
 		`]}}`
 	server, gotQuery := vectorServer(t, body)
 	defer server.Close()
@@ -73,8 +73,8 @@ func TestBestPerAgentOnMetricPicksTheLowerJobIDOnAnExactTie(t *testing.T) {
 	// Two jobs of one agent hit the identical best value — the winner must be deterministic
 	// (see betterOn's doc comment), not dependent on GreptimeDB's own result ordering.
 	body := `{"status":"success","data":{"resultType":"vector","result":[` +
-		`{"metric":{"agent_id":"a1","job_id":"job-z"},"value":[1,"0.87"]},` +
-		`{"metric":{"agent_id":"a1","job_id":"job-a"},"value":[1,"0.87"]}` +
+		`{"metric":{"agent_id":"a1","job_id":"job-z","metric_basis":"raw"},"value":[1,"0.87"]},` +
+		`{"metric":{"agent_id":"a1","job_id":"job-a","metric_basis":"raw"},"value":[1,"0.87"]}` +
 		`]}}`
 	server, gotQuery := vectorServer(t, body)
 	defer server.Close()
@@ -95,7 +95,7 @@ func TestBestPerAgentOnMetricPicksTheLowerJobIDOnAnExactTie(t *testing.T) {
 func TestBestPerAgentOnMetricExcludesNonRawBasisFromRanking(t *testing.T) {
 	body := `{"status":"success","data":{"resultType":"vector","result":[` +
 		`{"metric":{"agent_id":"a1","job_id":"job-1","metric_basis":"rescaled"},"value":[1,"999"]},` +
-		`{"metric":{"agent_id":"a2","job_id":"job-2"},"value":[1,"0.5"]}` +
+		`{"metric":{"agent_id":"a2","job_id":"job-2","metric_basis":"raw"},"value":[1,"0.5"]}` +
 		`]}}`
 	server, gotQuery := vectorServer(t, body)
 	defer server.Close()
@@ -148,7 +148,7 @@ func TestAJobThatBreaksAConstraintOrReportsNoneRanksNowhere(t *testing.T) {
 			_, _ = w.Write([]byte(vector(
 				`{"metric":{"job_id":"job-fp16","metric_basis":"raw"},"value":[1,"0.998"]}`,
 				`{"metric":{"job_id":"job-bf16","metric_basis":"raw"},"value":[1,"0.9844"]}`,
-				`{"metric":{"job_id":"job-ok"},"value":[1,"1"]}`,
+				`{"metric":{"job_id":"job-ok","metric_basis":"raw"},"value":[1,"1"]}`,
 				`{"metric":{"job_id":"job-rescaled","metric_basis":"per_batch"},"value":[1,"1"]}`,
 				`{"metric":{"job_id":"job-broken","metric_basis":"raw"},"value":[1,"0.5"]}`)))
 			return

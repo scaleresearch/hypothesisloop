@@ -64,7 +64,7 @@ func (s *Service) readBaseline(ctx context.Context, pe *domain.PlatformExperimen
 	}
 	// In timestamp order, so the last one of a key stands.
 	for _, sample := range samples.Values {
-		if basis := sample.Labels["metric_basis"]; basis != "" && basis != platformapi.BasisRaw {
+		if sample.Labels["metric_basis"] != platformapi.BasisRaw {
 			continue
 		}
 		out.Reported[sample.Labels["metric_name"]] = sample.Value
