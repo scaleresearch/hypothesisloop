@@ -4,8 +4,8 @@
 // class, so the digest an agent reads never lists an operation its token is refused on.
 //
 // Every error is answered as the API's one error body, platformapi.ErrorModel (see init). A
-// request that cannot be read at all, a body that is not JSON or a content type the operation does
-// not take, is 400 invalid_request. A request that reads and breaks a rule, a value missing or
+// body that is not JSON is 400 invalid_request, and a content type the operation does not take 415
+// unsupported_media_type: neither can be read. A request that reads and breaks a rule, a value missing or
 // invalid, is 422, its problems naming each field (see invalid).
 package httpapi
 
