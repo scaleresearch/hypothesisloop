@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // A hypothesis has one implementation per agent and branch its jobs ran on, each at the commit of

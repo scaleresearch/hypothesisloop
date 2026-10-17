@@ -1,4 +1,4 @@
-package workload
+package domain
 
 import "github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 

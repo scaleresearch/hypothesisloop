@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // An org's two clusters and the platform's shared one. The names sort against the priorities, so

@@ -12,7 +12,7 @@ import (
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // ErrSimilar is a registration refused because it reads close to existing hypotheses the caller

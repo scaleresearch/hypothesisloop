@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 func TestAnOrgConnectsSeveralInstallationsAndFindsOneByItsAccount(t *testing.T) {

@@ -7,8 +7,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler/placement"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 const testDisbalanceTolerance = 1.0

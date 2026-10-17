@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
 
 // checkSilence returns true when no real observation (node-agent heartbeat or job-reported
@@ -55,7 +54,7 @@ func (c *Controller) checkSilence(ctx context.Context, exp *domain.Experiment, n
 	// be acted on: the cluster is not reporting (nothing can be concluded about this job), or the
 	// cluster is reporting and this job is not in what it reports. Both branches need the same
 	// snapshot facts, and only these branches do — the common case above never pays for the query.
-	if !found || phase == workload.JobPhaseGone {
+	if !found || phase == domain.JobPhaseGone {
 		presence, err := c.observed.ClusterSnapshotPresence(ctx, exp.ID, exp.ClusterName, exp.CreatedAt, now)
 		if err != nil {
 			return false, "", fmt.Errorf("silence snapshot presence: %w", err)
@@ -90,7 +89,7 @@ func (c *Controller) checkSilence(ctx context.Context, exp *domain.Experiment, n
 		// samples still inside the window below.
 		return true, domain.EvictionWorkloadGone, nil
 	}
-	if phase == workload.JobPhasePending {
+	if phase == domain.JobPhasePending {
 		// Pending/recreating — quiet is expected here, not evidence of a hung process, for as
 		// long as a placed job is given to start. A job that ran and has read pending with no
 		// sign of life for longer than that is not coming back: its machine is held, and on
@@ -105,7 +104,7 @@ func (c *Controller) checkSilence(ctx context.Context, exp *domain.Experiment, n
 		}
 		return false, "", nil
 	}
-	if phase != workload.JobPhaseRunning {
+	if phase != domain.JobPhaseRunning {
 		// Succeeded/Failed are terminalized by the job watcher's own faster poll, not here:
 		// one path per outcome.
 		return false, "", nil

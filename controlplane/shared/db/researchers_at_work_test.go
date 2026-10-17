@@ -7,8 +7,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/agenttypes"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // Every agent says whether it is at work and why not, and the platform experiment counts those at

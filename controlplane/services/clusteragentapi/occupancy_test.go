@@ -3,7 +3,7 @@ package clusteragentapi
 import (
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 func TestAClustersOccupancyCountsCoresApartFromDevices(t *testing.T) {

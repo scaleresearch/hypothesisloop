@@ -3,7 +3,7 @@ package graphdb
 import (
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // Texts from the dummy demo agent runs: a reworded duplicate and a seed restated as its own child

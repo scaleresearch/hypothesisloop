@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 const settledL40 = "nvidia.com/gpu.product=NVIDIA-L40"

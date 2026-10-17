@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // One type's unit is a CPU core (domain.CPUType). These tests hold what that changes at

@@ -7,9 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
 
 // DesiredFootprints is the desired state ClusterReports subtracts from installed capacity.
@@ -61,13 +60,13 @@ var (
 // claimed again between two snapshots was read as ended by the report that requeued it. A stored
 // phase names no attempt, and one could not tell the two apart anyway, since a preempted job
 // keeps its attempt. The window is cut to whole seconds, so it never reaches back past the claim.
-func (b *ClusterReports) LatestJobPhase(ctx context.Context, exp *domain.Experiment) (workload.JobPhase, bool, error) {
+func (b *ClusterReports) LatestJobPhase(ctx context.Context, exp *domain.Experiment) (domain.JobPhase, bool, error) {
 	if exp.SubmittedAt == nil {
-		return workload.JobPhasePending, false, fmt.Errorf("scheduler: experiment %s has no submission time to read its phase against", exp.ID)
+		return domain.JobPhasePending, false, fmt.Errorf("scheduler: experiment %s has no submission time to read its phase against", exp.ID)
 	}
 	window := min(b.connectedWithin, time.Since(*exp.SubmittedAt).Truncate(time.Second))
 	if window <= 0 {
-		return workload.JobPhasePending, false, nil
+		return domain.JobPhasePending, false, nil
 	}
 	return metricsdb.LatestJobPhase(ctx, b.metricsDBURL, exp.ID, exp.ClusterName, window)
 }

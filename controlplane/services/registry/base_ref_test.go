@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // lineage is the graph and the jobs reduced to what a base commit is read from.

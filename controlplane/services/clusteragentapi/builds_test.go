@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 const pushedDigest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"

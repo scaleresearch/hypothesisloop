@@ -6,9 +6,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
 
 // fakeObserved answers the controller's metrics-store reads from plain fields, one field per
@@ -33,7 +32,7 @@ type fakeObserved struct {
 	// lastSeenAgo, when set, is how long ago the job last showed life, and decides IsAlive.
 
 	lastSeenAgo time.Duration
-	phase       workload.JobPhase
+	phase       domain.JobPhase
 	phaseFound  bool
 
 	presence metricsdb.SnapshotPresence
@@ -89,7 +88,7 @@ func (f fakeObserved) FirstObserved(_ context.Context, _ string, _, _ time.Time,
 	return f.firstObserved, f.observedOK, f.fail("FirstObserved")
 }
 
-func (f fakeObserved) LatestJobPhase(_ context.Context, _, _ string, _ time.Duration) (workload.JobPhase, bool, error) {
+func (f fakeObserved) LatestJobPhase(_ context.Context, _, _ string, _ time.Duration) (domain.JobPhase, bool, error) {
 	return f.phase, f.phaseFound, f.fail("LatestJobPhase")
 }
 

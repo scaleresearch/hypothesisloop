@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 func (w *twoOrgs) setEnabled(t *testing.T, cluster, org string, enabled bool) *domain.Cluster {

@@ -18,8 +18,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // JobStatusStore is the persistence interface needed by JobWatcher.
@@ -63,7 +62,7 @@ type QuotaSettler interface {
 type JobReports interface {
 	// LatestJobPhase's found=false means the job's cluster has reported no status within the
 	// liveness window, which every job is in between its placement and its runtime's next report.
-	LatestJobPhase(ctx context.Context, exp *domain.Experiment) (phase workload.JobPhase, found bool, err error)
+	LatestJobPhase(ctx context.Context, exp *domain.Experiment) (phase domain.JobPhase, found bool, err error)
 	// GetAdmittedAcceleratorType's found=false means no sample of this admission names a type yet.
 	GetAdmittedAcceleratorType(ctx context.Context, exp *domain.Experiment) (acceleratorType domain.AcceleratorType, found bool, err error)
 	// LatestPhaseDetail is the runtime's latest explanation for why a job has not started (see

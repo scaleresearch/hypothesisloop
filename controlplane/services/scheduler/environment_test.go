@@ -11,8 +11,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // declared is a repository whose commits declare the environment files held by commit, and none

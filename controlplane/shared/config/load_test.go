@@ -1,7 +1,6 @@
 package config
 
 import (
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"os"
 	"path/filepath"
 	"slices"
@@ -9,6 +8,8 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 const (

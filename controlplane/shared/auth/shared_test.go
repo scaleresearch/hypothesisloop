@@ -5,9 +5,9 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // Org B holds two platform experiments. Staff shared pe-show; pe-b is its own.

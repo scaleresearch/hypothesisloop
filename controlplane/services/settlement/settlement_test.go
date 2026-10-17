@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // aliveServer answers ObserveSpan with a job observed continuously for (points-1) x step,

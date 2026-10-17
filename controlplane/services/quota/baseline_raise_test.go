@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // runningOnBaseline is pe-1 running on the baseline measuredBaseline declared.

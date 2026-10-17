@@ -7,8 +7,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // memStore is Accounts and Clusters in memory, refusing what the database refuses.

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // oneExperimentStore answers GetExperiment with a single fixed row — the only thing GetTimeseries

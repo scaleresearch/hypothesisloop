@@ -18,7 +18,7 @@ identical contract, this workload is a drop-in for the same HYPOTHESISLOOP_* env
 
 Metric contract: this workload pushes its real measurements under their own names, in their
 own units — nothing is normalized or rescaled. A platform experiment's MetricDefinition.Key
-is a free-form Prometheus metric name (controlplane/shared/domain/platform_experiment.go),
+is a free-form Prometheus metric name (controlplane/domain/platform_experiment.go),
 so a benchmark workload ranks on benchmark numbers directly; there is no fixed metric
 vocabulary to fork or repurpose.
 

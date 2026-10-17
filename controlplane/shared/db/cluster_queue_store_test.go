@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // The checkpoint-window grant is derived from this query, and a preemption clears cluster_name in

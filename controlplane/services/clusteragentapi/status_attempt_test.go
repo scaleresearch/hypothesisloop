@@ -5,8 +5,7 @@ import (
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // The upgrade path: a cluster-agent that predates the attempt field pushes a report without one.
@@ -18,9 +17,9 @@ func TestAStatusReportWithNoAttemptIsRecordedAsUnknownNotZero(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"experiment_id":"exp-1","phase":"running"}`), &rep); err != nil {
 		t.Fatal(err)
 	}
-	if got := reportedAttempt(rep); got != workload.AttemptUnknown {
+	if got := reportedAttempt(rep); got != domain.AttemptUnknown {
 		t.Fatalf("recorded attempt = %d, want %d (AttemptUnknown) — an old agent's silence became a number",
-			got, workload.AttemptUnknown)
+			got, domain.AttemptUnknown)
 	}
 }
 

@@ -4,8 +4,8 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler/placement"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // A node of 16 cores and 4 chips that runs jobs on cores beside jobs on chips. A job's share of

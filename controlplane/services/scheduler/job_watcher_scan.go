@@ -11,8 +11,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // Start repeatedly derives lifecycle work from PostgreSQL desired state and the latest backend
@@ -150,9 +149,9 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 	}
 
 	switch phase {
-	case workload.JobPhaseSucceeded:
+	case domain.JobPhaseSucceeded:
 		return w.onFinished(ctx, exp, domain.StatusCompleted, "")
-	case workload.JobPhaseFailed:
+	case domain.JobPhaseFailed:
 		// A process the environment failed is no failure of the job: it goes back to the queue
 		// on the infrastructure allowance, and ends EVICTED and refunded once that is spent.
 		if eviction, environment := (domain.PhaseDetail{Reason: reason, Message: message}).EvictionOfFailure(); environment {
@@ -165,7 +164,7 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 			return fmt.Errorf("read log tail: %w", err)
 		}
 		return w.onFinished(ctx, exp, domain.StatusFailed, withLastOutput(domain.PhaseDetail{Reason: reason, Message: message}.FailureCause(), tail))
-	case workload.JobPhaseRunning:
+	case domain.JobPhaseRunning:
 		if exp.Status == domain.StatusRunning {
 			// The cluster agent continuously writes actual accelerator type into the metrics store.
 			return nil
@@ -194,7 +193,7 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 		default:
 			return fmt.Errorf("unknown running outcome %d", outcome)
 		}
-	case workload.JobPhaseGone:
+	case domain.JobPhaseGone:
 		if exp.Status == domain.StatusRunning {
 			// Desired state remains authoritative and the cluster agent independently retries
 			// creation. A RUNNING job whose workload has genuinely vanished is the controller's
@@ -206,7 +205,7 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 		// only fires while scheduledNodes < Nodes(), so a fully-bound job that then vanishes
 		// (scheduledNodes already caught up before Gone was observed) still needs this bound.
 		return w.evictIfStuckPending(ctx, exp, waiting, clusterIDs, domain.EvictionStuckPending)
-	case workload.JobPhasePending:
+	case domain.JobPhasePending:
 		// An unbound job is under the placement deadline above. A bound one the runtime reports
 		// as pending is starting, which includes pulling its image, and gets the start timeout.
 		if exp.Status != domain.StatusRunning && bound {

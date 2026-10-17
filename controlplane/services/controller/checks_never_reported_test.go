@@ -7,9 +7,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
 
 // silenceController wires just enough controller for checkSilence: a 30s silence window
@@ -70,7 +69,7 @@ func liveJob() fakeObserved {
 		firstObserved: time.Now().UTC().Add(-30 * time.Minute),
 		observedOK:    true,
 		alive:         true,
-		phase:         workload.JobPhaseRunning,
+		phase:         domain.JobPhaseRunning,
 		phaseFound:    true,
 		presence:      metricsdb.SnapshotPresence{Reported: true, SnapshotAge: 5 * time.Second},
 	}
@@ -300,7 +299,7 @@ func TestCheckSilenceWaitsWhenAFreshClusterHasNoReportForTheJob(t *testing.T) {
 // Acting on the first absence turns a normal reschedule into a terminated experiment.
 func TestCheckSilenceWaitsForAnAbsenceToBeConfirmedAcrossSnapshots(t *testing.T) {
 	obs := liveJob()
-	obs.phase = workload.JobPhaseGone
+	obs.phase = domain.JobPhaseGone
 	obs.presence = metricsdb.SnapshotPresence{
 		Reported:        true,
 		SnapshotAge:     3 * time.Second,
@@ -318,7 +317,7 @@ func TestCheckSilenceWaitsForAnAbsenceToBeConfirmedAcrossSnapshots(t *testing.T)
 // and the quota stays stranded until someone notices.
 func TestCheckSilenceEvictsAWorkloadTheClusterConfirmsIsGone(t *testing.T) {
 	obs := liveJob()
-	obs.phase = workload.JobPhaseGone
+	obs.phase = domain.JobPhaseGone
 	obs.presence = metricsdb.SnapshotPresence{
 		Reported:        true,
 		SnapshotAge:     3 * time.Second,
@@ -336,7 +335,7 @@ func TestCheckSilenceEvictsAWorkloadTheClusterConfirmsIsGone(t *testing.T) {
 // trainer. This is the case the phase check exists for.
 func TestCheckSilenceSparesAJobThatIsNotYetRunning(t *testing.T) {
 	obs := liveJob()
-	obs.phase = workload.JobPhasePending
+	obs.phase = domain.JobPhasePending
 	obs.lastSeenAgo = 2 * time.Minute
 
 	if evict, reason := silence(t, obs, declared); evict {

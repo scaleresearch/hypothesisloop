@@ -10,8 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 const cloneSaid = "command exited with code 75: hl-clone: could not fetch the code: 4 tries failed"
@@ -19,7 +18,7 @@ const cloneSaid = "command exited with code 75: hl-clone: could not fetch the co
 func TestAJobWhoseCodeWasUnreachableIsRequeuedAndNeverFailed(t *testing.T) {
 	for _, status := range []domain.ExperimentStatus{domain.StatusSubmitted, domain.StatusRunning} {
 		store := &lifecycleStore{infraCeiling: 3}
-		backend := &scaleUpBackend{phase: workload.JobPhaseFailed, scheduledNodes: 1, reason: domain.PhaseReasonCodeUnreachable, message: cloneSaid}
+		backend := &scaleUpBackend{phase: domain.JobPhaseFailed, scheduledNodes: 1, reason: domain.PhaseReasonCodeUnreachable, message: cloneSaid}
 		w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop())
 		exp := scaleUpExperiment(1, 0)
 		exp.Status = status
@@ -39,7 +38,7 @@ func TestAJobWhoseCodeWasUnreachableIsRequeuedAndNeverFailed(t *testing.T) {
 
 func TestAJobWhoseCodeStaysUnreachableEndsEvictedWithThatReason(t *testing.T) {
 	store := &lifecycleStore{infraCeiling: 0}
-	backend := &scaleUpBackend{phase: workload.JobPhaseFailed, scheduledNodes: 1, reason: domain.PhaseReasonCodeUnreachable, message: cloneSaid}
+	backend := &scaleUpBackend{phase: domain.JobPhaseFailed, scheduledNodes: 1, reason: domain.PhaseReasonCodeUnreachable, message: cloneSaid}
 	w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop())
 
 	if err := w.reconcileOne(context.Background(), scaleUpExperiment(1, 0), nil, nil); err != nil {
@@ -52,7 +51,7 @@ func TestAJobWhoseCodeStaysUnreachableEndsEvictedWithThatReason(t *testing.T) {
 
 func TestAJobWhoseOwnCommandFailedIsFailed(t *testing.T) {
 	store := &lifecycleStore{infraCeiling: 3}
-	backend := &scaleUpBackend{phase: workload.JobPhaseFailed, scheduledNodes: 1, reason: domain.PhaseReasonContainerFailed, message: "command exited with code 1: boom"}
+	backend := &scaleUpBackend{phase: domain.JobPhaseFailed, scheduledNodes: 1, reason: domain.PhaseReasonContainerFailed, message: "command exited with code 1: boom"}
 	w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop())
 
 	exp := scaleUpExperiment(1, 0)
@@ -75,7 +74,7 @@ func TestAFailedJobsUpdateCarriesItsLastLinesOfOutput(t *testing.T) {
 	}
 	tail = append(tail, "qemu: uncaught target signal 11 (Segmentation fault) - core dumped", "error: could not compile `job`", "", "Caused by:", rustc, "command failed (101): cargo run")
 	store := &lifecycleStore{infraCeiling: 3}
-	backend := &scaleUpBackend{phase: workload.JobPhaseFailed, scheduledNodes: 1, reason: domain.PhaseReasonContainerFailed, message: "container exited with code 101", logTail: tail}
+	backend := &scaleUpBackend{phase: domain.JobPhaseFailed, scheduledNodes: 1, reason: domain.PhaseReasonContainerFailed, message: "container exited with code 101", logTail: tail}
 	w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop())
 
 	exp := scaleUpExperiment(1, 0)
@@ -110,7 +109,7 @@ func TestAFailedJobsUpdateCarriesItsLastLinesOfOutput(t *testing.T) {
 func TestAJobThatFoundNoMachineToRentGoesBackToTheQueue(t *testing.T) {
 	said := "no machine to rent for shape rtx4090 in 3m0s of asking"
 	store := &lifecycleStore{infraCeiling: 3}
-	backend := &scaleUpBackend{phase: workload.JobPhasePending, reason: domain.PhaseReasonNoOffer, message: said}
+	backend := &scaleUpBackend{phase: domain.JobPhasePending, reason: domain.PhaseReasonNoOffer, message: said}
 	w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop())
 
 	if err := w.reconcileOne(context.Background(), scaleUpExperiment(1, 0), nil, nil); err != nil {
@@ -125,7 +124,7 @@ func TestAJobThatFoundNoMachineToRentGoesBackToTheQueue(t *testing.T) {
 // phase detail alone had it.
 func TestAnEvictionSaysWhatTheRuntimeSaid(t *testing.T) {
 	store := &lifecycleStore{infraCeiling: 3}
-	backend := &scaleUpBackend{phase: workload.JobPhasePending, reason: domain.PhaseReasonImagePullFailed, message: "manifest unknown"}
+	backend := &scaleUpBackend{phase: domain.JobPhasePending, reason: domain.PhaseReasonImagePullFailed, message: "manifest unknown"}
 	w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop())
 	if err := w.reconcileOne(context.Background(), scaleUpExperiment(1, 0), nil, nil); err != nil {
 		t.Fatal(err)

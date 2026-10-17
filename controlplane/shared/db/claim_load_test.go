@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 var claimLoadL40 = domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: strings.ToLower("nvidia.com/gpu.product=NVIDIA-L40")}

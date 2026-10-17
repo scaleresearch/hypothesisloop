@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // nextStage is the boundary a running platform experiment has ahead: when the stage after the

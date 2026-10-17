@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // AcceleratorTypeConfig defines one priced type: its identity, its exchange rate and what every

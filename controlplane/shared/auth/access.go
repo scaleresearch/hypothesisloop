@@ -6,7 +6,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // Placement is what Access reads to place a resource in an org. *db.AccountsStore and

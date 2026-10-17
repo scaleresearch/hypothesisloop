@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // AgentBest is one agent's best value on one metric, and the job that produced it.

@@ -15,12 +15,11 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
 
 // Proposal is what a draft's planner proposes: the experiment as its file would state it, and
@@ -178,7 +177,7 @@ func (h *PlatformExperimentsHandler) checkProposal(ctx context.Context, p *Propo
 		}
 	}
 	p.CPU, p.Memory, p.Storage = strings.TrimSpace(p.CPU), strings.TrimSpace(p.Memory), strings.TrimSpace(p.Storage)
-	if err := workload.CheckNodeRequest(p.CPU, p.Memory, p.Storage); err != nil {
+	if err := domain.CheckNodeRequest(p.CPU, p.Memory, p.Storage); err != nil {
 		refuse("invalid_resources", "%s", err)
 	}
 	for i, agent := range p.Agents {

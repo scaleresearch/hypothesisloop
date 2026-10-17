@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // sessionsPrefix lies outside every platform experiment's prefix, which each agent's and each

@@ -11,8 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 const (
@@ -165,9 +164,9 @@ func ClusterSnapshotPresence(ctx context.Context, dbURL, experimentID, clusterNa
 
 // LatestJobPhase returns the most recent phase observed within window. found=false means no
 // complete cluster snapshot exists; callers decide whether absence is expected for their state.
-func LatestJobPhase(ctx context.Context, dbURL, experimentID, clusterName string, window time.Duration) (workload.JobPhase, bool, error) {
+func LatestJobPhase(ctx context.Context, dbURL, experimentID, clusterName string, window time.Duration) (domain.JobPhase, bool, error) {
 	if window <= 0 {
-		return workload.JobPhasePending, false, fmt.Errorf("metricsdb.LatestJobPhase: freshness window must be positive")
+		return domain.JobPhasePending, false, fmt.Errorf("metricsdb.LatestJobPhase: freshness window must be positive")
 	}
 	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "''") + "'" }
 	seconds := int64(math.Ceil(window.Seconds()))
@@ -182,33 +181,33 @@ func LatestJobPhase(ctx context.Context, dbURL, experimentID, clusterName string
 	)
 	snapshotValue, phaseValue, observedAtValue, found, err := queryJobStatusSnapshot(ctx, dbURL, query)
 	if err != nil {
-		return workload.JobPhasePending, false, err
+		return domain.JobPhasePending, false, err
 	}
 	if !found {
-		return workload.JobPhasePending, false, nil
+		return domain.JobPhasePending, false, nil
 	}
 	if phaseValue == nil && observedAtValue == nil {
-		return workload.JobPhaseGone, true, nil
+		return domain.JobPhaseGone, true, nil
 	}
 	if phaseValue == nil || observedAtValue == nil {
-		return workload.JobPhasePending, false, fmt.Errorf("metricsdb.LatestJobPhase: incomplete phase observation for %s", experimentID)
+		return domain.JobPhasePending, false, fmt.Errorf("metricsdb.LatestJobPhase: incomplete phase observation for %s", experimentID)
 	}
 	if *observedAtValue != snapshotValue {
-		return workload.JobPhasePending, false, fmt.Errorf("metricsdb.LatestJobPhase: observation timestamp for %s disagrees with its snapshot", experimentID)
+		return domain.JobPhasePending, false, fmt.Errorf("metricsdb.LatestJobPhase: observation timestamp for %s disagrees with its snapshot", experimentID)
 	}
 	switch int(*phaseValue) {
 	case 1:
-		return workload.JobPhasePending, true, nil
+		return domain.JobPhasePending, true, nil
 	case 2:
-		return workload.JobPhaseRunning, true, nil
+		return domain.JobPhaseRunning, true, nil
 	case 3:
-		return workload.JobPhaseSucceeded, true, nil
+		return domain.JobPhaseSucceeded, true, nil
 	case 4:
-		return workload.JobPhaseFailed, true, nil
+		return domain.JobPhaseFailed, true, nil
 	case 5:
-		return workload.JobPhaseGone, true, nil
+		return domain.JobPhaseGone, true, nil
 	default:
-		return workload.JobPhasePending, false, fmt.Errorf("metricsdb.LatestJobPhase: invalid value %v", *phaseValue)
+		return domain.JobPhasePending, false, fmt.Errorf("metricsdb.LatestJobPhase: invalid value %v", *phaseValue)
 	}
 }
 

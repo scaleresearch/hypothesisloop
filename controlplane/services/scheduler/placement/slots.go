@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // Slots are nodes that hold one job each (domain.NodeSlotLabel). Nothing below changes how

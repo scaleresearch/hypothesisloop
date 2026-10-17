@@ -8,8 +8,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // seatStore is createdStore with the quotas of its researchers, and the hours each used.

@@ -3,7 +3,7 @@ package scheduler
 import (
 	"context"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // namesByID is the naming of actors for a store a test stands in: each by its id.

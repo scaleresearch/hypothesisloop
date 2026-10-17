@@ -6,8 +6,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler/placement"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // noOfferReason is the not_admitted_reason of a job that waits for a machine to come on offer:

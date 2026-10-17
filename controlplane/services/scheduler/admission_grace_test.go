@@ -6,7 +6,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 var testGraceLimits = domain.GraceLimits{DefaultShutdownSeconds: 5, MaxShutdownSeconds: 30, MaxCheckpointSeconds: 600}

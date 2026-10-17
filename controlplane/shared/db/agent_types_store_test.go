@@ -10,8 +10,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/agenttypes"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 const testPrompt = "{{rules}}\n{{hl_commands}}\nYou are {{agent_id}} in {{platform_experiment_id}}."

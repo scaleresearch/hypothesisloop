@@ -19,15 +19,14 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
 
 // Store is the desired-state persistence interface the handler needs.
@@ -937,7 +936,7 @@ func rejectReport(rep clusterapi.StatusReport, placement domain.Placement, clust
 	if placement.ClusterName != clusterName {
 		return "dropping status report for an experiment this cluster no longer owns", false
 	}
-	if attempt := reportedAttempt(rep); attempt != workload.AttemptUnknown && attempt != placement.AttemptCount {
+	if attempt := reportedAttempt(rep); attempt != domain.AttemptUnknown && attempt != placement.AttemptCount {
 		return "dropping status report from a superseded attempt", false
 	}
 	if placement.Slot != "" && rep.AdmittedNode != "" && rep.AdmittedNode != placement.Slot {
@@ -946,11 +945,11 @@ func rejectReport(rep clusterapi.StatusReport, placement domain.Placement, clust
 	return "", true
 }
 
-// reportedAttempt is the generation a report belongs to, or workload.AttemptUnknown when the
+// reportedAttempt is the generation a report belongs to, or domain.AttemptUnknown when the
 // cluster-agent named none.
 func reportedAttempt(rep clusterapi.StatusReport) int {
 	if rep.Attempt == nil {
-		return workload.AttemptUnknown
+		return domain.AttemptUnknown
 	}
 	return *rep.Attempt
 }

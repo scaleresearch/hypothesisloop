@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // hl made each job's id, twelve hex digits of its own, and a submit that stated none was refused.

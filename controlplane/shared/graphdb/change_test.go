@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 func registerAs(t *testing.T, s *Store, pe, text string, links []domain.LinkSpec) *domain.Hypothesis {

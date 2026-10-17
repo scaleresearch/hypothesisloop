@@ -3,8 +3,8 @@ package quota
 import (
 	"context"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/agenttypes"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // fakeStore is what the stores of these tests are made from: the built-in agent types are the

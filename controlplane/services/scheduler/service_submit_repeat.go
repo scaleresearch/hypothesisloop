@@ -6,7 +6,7 @@ import (
 	"maps"
 	"strings"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // ReasonRunsNoChange refuses a job that runs what its hypothesis builds on, unchanged.

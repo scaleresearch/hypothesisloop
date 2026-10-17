@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 const branchEnvironment = "ARG BASE\nFROM ${BASE}\nRUN apt-get install -y rustc\n"

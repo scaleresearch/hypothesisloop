@@ -3,7 +3,7 @@ package placement
 import (
 	"sort"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // FitsWhenIdle reports whether a cluster with nothing running on it holds exp: its installed

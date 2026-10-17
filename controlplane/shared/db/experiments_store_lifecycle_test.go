@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 func TestAJobTheAdmissionLoopHasNotSeenIsAwaitingAdmission(t *testing.T) {

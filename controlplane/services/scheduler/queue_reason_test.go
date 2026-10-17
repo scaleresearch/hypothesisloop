@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 func reasonCode(stored string) string {
@@ -21,7 +21,7 @@ func reasonCode(stored string) string {
 // added there is one this test knows of without being told.
 func notAdmittedCodes(t *testing.T) map[string]string {
 	t.Helper()
-	file, err := parser.ParseFile(token.NewFileSet(), "../../shared/domain/constants.go", nil, 0)
+	file, err := parser.ParseFile(token.NewFileSet(), "../../domain/constants.go", nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

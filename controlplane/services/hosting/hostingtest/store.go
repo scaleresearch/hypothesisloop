@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // Store is the decider's store in memory, with the conditions the database's own

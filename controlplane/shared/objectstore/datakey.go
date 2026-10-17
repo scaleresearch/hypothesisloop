@@ -6,7 +6,7 @@ import (
 	"encoding/base32"
 	"fmt"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // NewDataKey draws a fresh key for a job or an agent. A job's is created in the store once at

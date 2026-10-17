@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // GET /resource-catalog/capacity used to answer 200 with an empty cluster list when the handler

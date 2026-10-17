@@ -11,7 +11,7 @@ import (
 
 	"github.com/prometheus/prometheus/promql/parser"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // greptimeMaxRangeDuration is the largest `[Ns]` range-vector literal GreptimeDB's PromQL query

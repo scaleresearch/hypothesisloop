@@ -13,8 +13,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/scaleresearch/hypothesisloop/contract/repotemplate"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // RepositoryName is the name of the repository the platform creates for a platform experiment:

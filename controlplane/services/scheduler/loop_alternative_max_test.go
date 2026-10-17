@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // smallFirstTypeWorkload is cluster-a with one node of two h100 and eight l40, all free.

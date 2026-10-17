@@ -9,14 +9,13 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // scaleUpBackend is the minimal JobReports fake needed to drive reconcileOne/
 // checkScaleUpDeadline through the watcher's public entry points.
 type scaleUpBackend struct {
-	phase             workload.JobPhase
+	phase             domain.JobPhase
 	scheduledNodes    int32
 	schedulingReason  string
 	autoscalerEnabled map[string]bool
@@ -41,7 +40,7 @@ func (b *scaleUpBackend) LogTail(_ context.Context, _ *domain.Experiment, n int)
 	return b.logTail[max(0, len(b.logTail)-n):], nil
 }
 
-func (b *scaleUpBackend) LatestJobPhase(context.Context, *domain.Experiment) (workload.JobPhase, bool, error) {
+func (b *scaleUpBackend) LatestJobPhase(context.Context, *domain.Experiment) (domain.JobPhase, bool, error) {
 	return b.phase, !b.phaseUnreported, b.phaseErr
 }
 func (b *scaleUpBackend) GetAdmittedAcceleratorType(context.Context, *domain.Experiment) (domain.AcceleratorType, bool, error) {
@@ -80,7 +79,7 @@ func scaleUpExperiment(nodes int, submittedAgo time.Duration) *domain.Experiment
 func TestScaleUpDeadlinePastTimeoutRequeuesOnTheInfrastructureAllowance(t *testing.T) {
 	store := &lifecycleStore{infraCeiling: 1}
 	backend := &scaleUpBackend{
-		phase: workload.JobPhasePending, scheduledNodes: 0,
+		phase: domain.JobPhasePending, scheduledNodes: 0,
 		autoscalerEnabled: map[string]bool{"cluster-a": true},
 		clusterIDs:        map[string]string{"cluster-a": "cid-a"},
 	}
@@ -105,7 +104,7 @@ func TestScaleUpDeadlinePastTimeoutRequeuesOnTheInfrastructureAllowance(t *testi
 func TestScaleUpDeadlineWithTheAllowanceSpentEndsTheJob(t *testing.T) {
 	store := &lifecycleStore{infraCeiling: 2, infraRequeues: 2}
 	backend := &scaleUpBackend{
-		phase: workload.JobPhasePending, scheduledNodes: 0,
+		phase: domain.JobPhasePending, scheduledNodes: 0,
 		autoscalerEnabled: map[string]bool{"cluster-a": true},
 		clusterIDs:        map[string]string{"cluster-a": "cid-a"},
 	}
@@ -125,7 +124,7 @@ func TestScaleUpDeadlineWithTheAllowanceSpentEndsTheJob(t *testing.T) {
 func TestScaleUpDeadlineNotYetPastDoesNotEvict(t *testing.T) {
 	store := &lifecycleStore{}
 	backend := &scaleUpBackend{
-		phase: workload.JobPhasePending, scheduledNodes: 0,
+		phase: domain.JobPhasePending, scheduledNodes: 0,
 		autoscalerEnabled: map[string]bool{"cluster-a": true},
 		clusterIDs:        map[string]string{"cluster-a": "cid-a"},
 	}
@@ -145,7 +144,7 @@ func TestScaleUpDeadlineNotYetPastDoesNotEvict(t *testing.T) {
 func TestScaleUpEarlyExitOnTerminalSchedulingReason(t *testing.T) {
 	store := &lifecycleStore{infraCeiling: 1}
 	backend := &scaleUpBackend{
-		phase: workload.JobPhasePending, scheduledNodes: 0,
+		phase: domain.JobPhasePending, scheduledNodes: 0,
 		schedulingReason:  "NotTriggerScaleUp: max node group size reached",
 		autoscalerEnabled: map[string]bool{"cluster-a": true},
 		clusterIDs:        map[string]string{"cluster-a": "cid-a"},
@@ -167,7 +166,7 @@ func TestScaleUpDeadlinePhaseIndependentPartialGangWhileRunning(t *testing.T) {
 	store := &lifecycleStore{infraCeiling: 1}
 	backend := &scaleUpBackend{
 		// Aggregate phase already reads Running (one landed rank), but only 2 of 3 ranks bound.
-		phase: workload.JobPhaseRunning, scheduledNodes: 2,
+		phase: domain.JobPhaseRunning, scheduledNodes: 2,
 		autoscalerEnabled: map[string]bool{"cluster-a": true},
 		clusterIDs:        map[string]string{"cluster-a": "cid-a"},
 	}
@@ -188,7 +187,7 @@ func TestScaleUpDeadlinePhaseIndependentPartialGangWhileRunning(t *testing.T) {
 // the placement deadline with part of the gang never placed.
 func TestAPartialGangStaysSubmittedWhileItsPhaseReadsRunning(t *testing.T) {
 	store := &lifecycleStore{}
-	backend := &scaleUpBackend{phase: workload.JobPhaseRunning, scheduledNodes: 2}
+	backend := &scaleUpBackend{phase: domain.JobPhaseRunning, scheduledNodes: 2}
 	w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).WithStuckPendingTimeout(10 * time.Minute)
 
 	if err := w.reconcileOne(context.Background(), scaleUpExperiment(3, time.Minute), nil, nil); err != nil {
@@ -206,7 +205,7 @@ func TestARunningJobIsNotHeldToThePlacementDeadline(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			store := &lifecycleStore{}
 			backend := &scaleUpBackend{
-				phase: workload.JobPhaseRunning, scheduledNodes: 2, phaseDetailFound: &found,
+				phase: domain.JobPhaseRunning, scheduledNodes: 2, phaseDetailFound: &found,
 				autoscalerEnabled: map[string]bool{"cluster-a": true},
 				clusterIDs:        map[string]string{"cluster-a": "cid-a"},
 			}
@@ -229,7 +228,7 @@ func TestARunningJobIsNotHeldToThePlacementDeadline(t *testing.T) {
 func TestScaleUpDeadlineNonAutoscalerClusterFallsBackToStuckPending(t *testing.T) {
 	store := &lifecycleStore{}
 	backend := &scaleUpBackend{
-		phase: workload.JobPhasePending, scheduledNodes: 0,
+		phase: domain.JobPhasePending, scheduledNodes: 0,
 		autoscalerEnabled: map[string]bool{}, // cluster-a not autoscaler-enabled
 		clusterIDs:        map[string]string{"cluster-a": "cid-a"},
 	}
@@ -249,7 +248,7 @@ func TestScaleUpDeadlineNonAutoscalerClusterFallsBackToStuckPending(t *testing.T
 func TestScaleUpDeadlineDisabledWithoutOptIn(t *testing.T) {
 	store := &lifecycleStore{}
 	backend := &scaleUpBackend{
-		phase: workload.JobPhasePending, scheduledNodes: 0,
+		phase: domain.JobPhasePending, scheduledNodes: 0,
 		autoscalerEnabled: map[string]bool{"cluster-a": true},
 		clusterIDs:        map[string]string{"cluster-a": "cid-a"},
 	}
@@ -275,7 +274,7 @@ func TestScaleUpDeadlineAppliesWhenPhaseDetailNeverFound(t *testing.T) {
 	notFound := false
 	store := &lifecycleStore{infraCeiling: 1}
 	backend := &scaleUpBackend{
-		phase: workload.JobPhasePending, phaseDetailFound: &notFound,
+		phase: domain.JobPhasePending, phaseDetailFound: &notFound,
 		autoscalerEnabled: map[string]bool{"cluster-a": true},
 		clusterIDs:        map[string]string{"cluster-a": "cid-a"},
 	}
@@ -298,7 +297,7 @@ func TestScaleUpDeadlineNotYetPastWhenPhaseDetailNeverFound(t *testing.T) {
 	notFound := false
 	store := &lifecycleStore{}
 	backend := &scaleUpBackend{
-		phase: workload.JobPhasePending, phaseDetailFound: &notFound,
+		phase: domain.JobPhasePending, phaseDetailFound: &notFound,
 		autoscalerEnabled: map[string]bool{"cluster-a": true},
 		clusterIDs:        map[string]string{"cluster-a": "cid-a"},
 	}
@@ -342,9 +341,9 @@ func TestAJobIsNotStuckPendingWhileItsCheckpointWindowMayStillBeRunning(t *testi
 		{submittedAgo: 12 * time.Minute, wantEvicted: false},
 		{submittedAgo: 16 * time.Minute, wantEvicted: true},
 	} {
-		for _, phase := range []workload.JobPhase{workload.JobPhaseGone, workload.JobPhasePending} {
+		for _, phase := range []domain.JobPhase{domain.JobPhaseGone, domain.JobPhasePending} {
 			store := &lifecycleStore{}
-			found := phase == workload.JobPhasePending
+			found := phase == domain.JobPhasePending
 			backend := &scaleUpBackend{phase: phase, phaseDetailFound: &found}
 			w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).WithStuckPendingTimeout(5 * time.Minute)
 			exp := scaleUpExperiment(1, tc.submittedAgo)
@@ -390,7 +389,7 @@ func TestABoundJobThatNeverStartsIsEvictedAtItsDeadline(t *testing.T) {
 		{name: "running job reading pending", submittedAgo: time.Hour, status: domain.StatusRunning, wantEvicted: false},
 	} {
 		store := &lifecycleStore{}
-		backend := &scaleUpBackend{phase: workload.JobPhasePending, phaseUnreported: tc.unreported, phaseErr: tc.phaseErr, scheduledNodes: 1}
+		backend := &scaleUpBackend{phase: domain.JobPhasePending, phaseUnreported: tc.unreported, phaseErr: tc.phaseErr, scheduledNodes: 1}
 		w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).
 			WithStuckPendingTimeout(5 * time.Minute).WithStartTimeout(30 * time.Minute)
 		exp := scaleUpExperiment(1, tc.submittedAgo)

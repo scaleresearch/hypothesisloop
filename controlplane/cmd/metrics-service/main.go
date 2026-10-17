@@ -15,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/controller"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/metricsingest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
@@ -22,7 +23,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/leaderelection"
 )
 

@@ -12,8 +12,8 @@ import (
 
 	"github.com/golang/snappy"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 type placedOn map[string]string

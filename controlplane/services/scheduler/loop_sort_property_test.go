@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // Queue order decides who gets scarce capacity, so the sort comparators are as load-bearing as the

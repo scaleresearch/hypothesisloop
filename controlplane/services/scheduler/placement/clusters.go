@@ -3,7 +3,7 @@ package placement
 import (
 	"sort"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // ClusterAndFootprint picks a concrete (cluster, flavor) pair for an unpinned job. It

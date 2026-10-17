@@ -3,13 +3,12 @@ package metricsdb
 import (
 	"context"
 	"fmt"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
 
 func TestRecordJobStatusesRejectsInvalidPhaseWithoutWriting(t *testing.T) {
@@ -56,7 +55,7 @@ func TestLatestJobPhaseUsesNewerCompleteSnapshotToProveGone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !found || phase != workload.JobPhaseGone {
+	if !found || phase != domain.JobPhaseGone {
 		t.Fatalf("LatestJobPhase = (%v, %v), want (gone, true)", phase, found)
 	}
 }
@@ -71,7 +70,7 @@ func TestLatestJobPhaseKeepsJobReportedInCurrentSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !found || phase != workload.JobPhaseRunning {
+	if !found || phase != domain.JobPhaseRunning {
 		t.Fatalf("LatestJobPhase = (%v, %v), want (running, true)", phase, found)
 	}
 }

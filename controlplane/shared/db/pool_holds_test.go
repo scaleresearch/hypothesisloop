@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // A researcher that ended before submitting a job, or within domain.ReplacementMinRun of joining,

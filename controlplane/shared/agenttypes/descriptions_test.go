@@ -3,7 +3,7 @@ package agenttypes
 import (
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 func TestEachBuiltinHasAValidDescription(t *testing.T) {

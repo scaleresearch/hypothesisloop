@@ -3,7 +3,7 @@ package placement
 import (
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 var cpuKey = domain.ResourceKey{Kind: domain.ResourceKindCPU}

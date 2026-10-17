@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // The run's health series, one per agent, labelled platform_experiment_id, agent_id and role, and

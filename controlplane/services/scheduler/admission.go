@@ -7,9 +7,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/resource"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
 
 // codeRefPattern requires an immutable pointer — a full commit SHA, never a branch name or
@@ -120,7 +119,7 @@ func asksForCoresOnly(job domain.JobSpec) bool {
 // whose cpu is its count and needs no rule of its own.
 func countSetsCores(job *domain.JobSpec) error {
 	shape := func(field string, count *int, cpu string) error {
-		switch cores, err := workload.ParseCPUCores(cpu); {
+		switch cores, err := domain.ParseCPUCores(cpu); {
 		case err != nil:
 			return fmt.Errorf("%s.cpu: %w", field, err)
 		case cores < 1 || cores != float64(int(cores)):
@@ -274,7 +273,7 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	// group: the cap checks sum over groups, where one group's negative silently cancels
 	// another's real demand.
 	for _, group := range exp.Job.NodeGroups() {
-		if err := workload.CheckNodeRequest(group.CPU, group.Memory, group.Storage); err != nil {
+		if err := domain.CheckNodeRequest(group.CPU, group.Memory, group.Storage); err != nil {
 			return &AdmissionError{Reason: ReasonMalformed, Message: "job." + err.Error()}
 		}
 	}
@@ -284,21 +283,21 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 		return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.accelerator_count %d is over the most accelerators one job may ask for, %d", exp.AcceleratorCount, caps.MaxAcceleratorCountPerJob)}
 	}
 	nodes := exp.Job.Nodes()
-	cpu, err := totalOverGroups(exp.Job, workload.ParseCPUCores, func(g domain.JobGroup) string { return g.CPU })
+	cpu, err := totalOverGroups(exp.Job, domain.ParseCPUCores, func(g domain.JobGroup) string { return g.CPU })
 	if err != nil {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "job.cpu: " + err.Error()}
 	}
 	if cpu > caps.MaxCPUCoresPerJob {
 		return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.cpu %g cores (x%d nodes) is over the most cores one job may ask for, %g", cpu/float64(nodes), nodes, caps.MaxCPUCoresPerJob)}
 	}
-	memory, err := totalOverGroups(exp.Job, workload.ParseMemoryGB, func(g domain.JobGroup) string { return g.Memory })
+	memory, err := totalOverGroups(exp.Job, domain.ParseMemoryGB, func(g domain.JobGroup) string { return g.Memory })
 	if err != nil {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "job.memory: " + err.Error()}
 	}
 	if memory > caps.MaxRAMGBPerJob {
 		return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.memory %.2fGB (x%d nodes) exceeds per-job max %.2fGB", memory/float64(nodes), nodes, caps.MaxRAMGBPerJob)}
 	}
-	storage, err := totalOverGroups(exp.Job, workload.ParseStorageGB, func(g domain.JobGroup) string { return g.Storage })
+	storage, err := totalOverGroups(exp.Job, domain.ParseStorageGB, func(g domain.JobGroup) string { return g.Storage })
 	if err != nil {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "job.storage: " + err.Error()}
 	}

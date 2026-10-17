@@ -3,8 +3,8 @@ package quota
 import (
 	"net/http"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
 // reasonHostingNotConfigured is why hosting is unavailable on a deployment with no sandbox

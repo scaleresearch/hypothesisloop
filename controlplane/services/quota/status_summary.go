@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // summarize sets on why, the status_reason of pe whose roster is signups, the sentence a person

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 func TestADescriptionIsKeptOnCreateAndEditAndCopiedWithTheType(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // LauncherCoordinator is a hosted coordinator as its launcher's desired state names it. Ending

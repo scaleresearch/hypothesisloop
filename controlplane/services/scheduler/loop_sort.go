@@ -5,7 +5,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // completionBucket quantizes a completion fraction to a 0.01 grid so "close enough" comparisons

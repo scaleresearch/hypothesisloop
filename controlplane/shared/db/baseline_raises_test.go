@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // A raise of the baseline writes the experiment and its history together, is told to every agent

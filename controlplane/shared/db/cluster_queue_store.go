@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // ClusterQueueStore backs the desired-state feed and job-status reports cluster-agents

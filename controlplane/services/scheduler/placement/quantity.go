@@ -1,8 +1,9 @@
 package placement
 
 import (
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 	"k8s.io/apimachinery/pkg/api/resource"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // QuantityValue parses a JobSpec-style quantity string into the canonical unit

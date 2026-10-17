@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // AcceleratorKey is the key a node's free accelerators of a type are under: the type in lower

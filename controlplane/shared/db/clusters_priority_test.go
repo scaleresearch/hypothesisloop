@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // An org orders the clusters it registered in one step, a refused order changes nothing, and a

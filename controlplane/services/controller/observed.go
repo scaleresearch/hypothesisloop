@@ -6,9 +6,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/metricsdb"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
 )
 
 // ObservedState is everything the controller reads back from the metrics store: what has actually
@@ -29,7 +28,7 @@ type ObservedState interface {
 	IsAlive(ctx context.Context, experimentID string, window time.Duration) (bool, error)
 	ObservedElapsedHours(ctx context.Context, experimentID string, createdAt, now time.Time, gapCap time.Duration) (float64, error)
 	FirstObserved(ctx context.Context, experimentID string, createdAt, now time.Time, gapCap time.Duration) (time.Time, bool, error)
-	LatestJobPhase(ctx context.Context, experimentID, clusterName string, window time.Duration) (workload.JobPhase, bool, error)
+	LatestJobPhase(ctx context.Context, experimentID, clusterName string, window time.Duration) (domain.JobPhase, bool, error)
 	ClusterSnapshotPresence(ctx context.Context, experimentID, clusterName string, createdAt, now time.Time) (metricsdb.SnapshotPresence, error)
 	AnyDeclaredMetricChanged(ctx context.Context, experimentID string, metricKeys []string, window time.Duration) (reported, changed bool, err error)
 	AnyDeclaredMetricReported(ctx context.Context, experimentID string, metricKeys []string, window time.Duration) (bool, error)
@@ -56,7 +55,7 @@ func (o metricsDBObserver) FirstObserved(ctx context.Context, experimentID strin
 	return metricsdb.FirstObserved(ctx, o.url, experimentID, createdAt, now, gapCap)
 }
 
-func (o metricsDBObserver) LatestJobPhase(ctx context.Context, experimentID, clusterName string, window time.Duration) (workload.JobPhase, bool, error) {
+func (o metricsDBObserver) LatestJobPhase(ctx context.Context, experimentID, clusterName string, window time.Duration) (domain.JobPhase, bool, error) {
 	return metricsdb.LatestJobPhase(ctx, o.url, experimentID, clusterName, window)
 }
 

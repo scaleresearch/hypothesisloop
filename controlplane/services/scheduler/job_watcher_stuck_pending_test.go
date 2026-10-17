@@ -8,8 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/workload"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // settingsStore is lifecycleStore with clusters' settings and a list of SUBMITTED experiments.
@@ -62,10 +61,10 @@ var errPhase = errors.New("no snapshot")
 func TestAClustersOwnStuckPendingTimeoutReplacesTheGlobalOne(t *testing.T) {
 	const global = 5 * time.Minute
 	ways := map[string]JobReports{
-		"never placed":                       &scaleUpBackend{phase: workload.JobPhasePending, scheduledNodes: 0, clusterIDs: clusterA},
-		"placed, then gone":                  &scaleUpBackend{phase: workload.JobPhaseGone, scheduledNodes: 1, clusterIDs: clusterA},
-		"placed, phase unreadable":           &scaleUpBackend{phase: workload.JobPhasePending, scheduledNodes: 1, phaseErr: errPhase, clusterIDs: clusterA},
-		"running on a type not yet observed": unobservableBackend{&scaleUpBackend{phase: workload.JobPhaseRunning, scheduledNodes: 1, clusterIDs: clusterA}},
+		"never placed":                       &scaleUpBackend{phase: domain.JobPhasePending, scheduledNodes: 0, clusterIDs: clusterA},
+		"placed, then gone":                  &scaleUpBackend{phase: domain.JobPhaseGone, scheduledNodes: 1, clusterIDs: clusterA},
+		"placed, phase unreadable":           &scaleUpBackend{phase: domain.JobPhasePending, scheduledNodes: 1, phaseErr: errPhase, clusterIDs: clusterA},
+		"running on a type not yet observed": unobservableBackend{&scaleUpBackend{phase: domain.JobPhaseRunning, scheduledNodes: 1, clusterIDs: clusterA}},
 	}
 	for way, backend := range ways {
 		for name, tc := range map[string]struct {
@@ -108,14 +107,14 @@ func TestAStuckPendingDeadlineCountsFromTheWaitTheRuntimeReports(t *testing.T) {
 	for name, tc := range map[string]struct {
 		reason        string
 		firstReported map[string]time.Time
-		phase         workload.JobPhase
+		phase         domain.JobPhase
 		evicted       bool
 	}{
-		"machine rented late and starting":          {domain.PhaseReasonInstanceStarting, map[string]time.Time{domain.PhaseReasonWaitingForOffer: ago(7 * time.Minute), domain.PhaseReasonInstanceStarting: ago(2 * time.Minute)}, workload.JobPhasePending, false},
-		"its machine is being replaced":             {domain.PhaseReasonInstanceStarting, map[string]time.Time{domain.PhaseReasonInstanceStarting: ago(2 * time.Minute)}, workload.JobPhaseGone, false},
-		"starting for longer than the timeout":      {domain.PhaseReasonInstanceStarting, map[string]time.Time{domain.PhaseReasonInstanceStarting: ago(6 * time.Minute)}, workload.JobPhasePending, true},
-		"back to a wait first reported long ago":    {domain.PhaseReasonWaitingForOffer, map[string]time.Time{domain.PhaseReasonWaitingForOffer: ago(7 * time.Minute), domain.PhaseReasonInstanceStarting: ago(2 * time.Minute)}, workload.JobPhasePending, true},
-		"no reason reported: counts from admission": {"", map[string]time.Time{"": ago(time.Minute)}, workload.JobPhasePending, true},
+		"machine rented late and starting":          {domain.PhaseReasonInstanceStarting, map[string]time.Time{domain.PhaseReasonWaitingForOffer: ago(7 * time.Minute), domain.PhaseReasonInstanceStarting: ago(2 * time.Minute)}, domain.JobPhasePending, false},
+		"its machine is being replaced":             {domain.PhaseReasonInstanceStarting, map[string]time.Time{domain.PhaseReasonInstanceStarting: ago(2 * time.Minute)}, domain.JobPhaseGone, false},
+		"starting for longer than the timeout":      {domain.PhaseReasonInstanceStarting, map[string]time.Time{domain.PhaseReasonInstanceStarting: ago(6 * time.Minute)}, domain.JobPhasePending, true},
+		"back to a wait first reported long ago":    {domain.PhaseReasonWaitingForOffer, map[string]time.Time{domain.PhaseReasonWaitingForOffer: ago(7 * time.Minute), domain.PhaseReasonInstanceStarting: ago(2 * time.Minute)}, domain.JobPhasePending, true},
+		"no reason reported: counts from admission": {"", map[string]time.Time{"": ago(time.Minute)}, domain.JobPhasePending, true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			store := &settingsStore{lifecycleStore: &lifecycleStore{}}
@@ -137,7 +136,7 @@ func TestAStuckPendingDeadlineCountsFromTheWaitTheRuntimeReports(t *testing.T) {
 func TestAStuckPendingOverrideLeavesTheScaleUpDeadlineAlone(t *testing.T) {
 	store := &settingsStore{lifecycleStore: &lifecycleStore{infraCeiling: 1}, settings: stuckPendingOverride(900)}
 	backend := &scaleUpBackend{
-		phase: workload.JobPhasePending, scheduledNodes: 0,
+		phase: domain.JobPhasePending, scheduledNodes: 0,
 		autoscalerEnabled: map[string]bool{"cluster-a": true},
 		clusterIDs:        map[string]string{"cluster-a": "cid-a"},
 	}
@@ -159,8 +158,8 @@ func TestAStuckPendingOverrideLeavesTheScaleUpDeadlineAlone(t *testing.T) {
 // a cluster that stays away is the controller's to act on.
 func TestAJobOnAClusterReportingNoIDIsNotJudgedThisPass(t *testing.T) {
 	for way, backend := range map[string]*scaleUpBackend{
-		"never placed":      {phase: workload.JobPhasePending, scheduledNodes: 0},
-		"placed, then gone": {phase: workload.JobPhaseGone, scheduledNodes: 1},
+		"never placed":      {phase: domain.JobPhasePending, scheduledNodes: 0},
+		"placed, then gone": {phase: domain.JobPhaseGone, scheduledNodes: 1},
 	} {
 		for _, waited := range []time.Duration{6 * time.Minute, time.Hour} {
 			t.Run(way+"/"+waited.String(), func(t *testing.T) {
@@ -187,7 +186,7 @@ func TestADisconnectedClustersOverrideIsNotReplacedByTheGlobalTimeout(t *testing
 		lifecycleStore: &lifecycleStore{}, settings: stuckPendingOverride(900),
 		submitted: []*domain.Experiment{scaleUpExperiment(1, 6*time.Minute)},
 	}
-	backend := &scaleUpBackend{phase: workload.JobPhasePending, scheduledNodes: 0, clusterIDs: map[string]string{}}
+	backend := &scaleUpBackend{phase: domain.JobPhasePending, scheduledNodes: 0, clusterIDs: map[string]string{}}
 	w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).WithStuckPendingTimeout(5 * time.Minute)
 	if err := w.scanAndWatch(context.Background()); err != nil || store.transitioned {
 		t.Fatalf("disconnected: err %v, evicted %v", err, store.terminalReasons)
@@ -209,8 +208,8 @@ func TestADisconnectedClustersOverrideIsNotReplacedByTheGlobalTimeout(t *testing
 func TestAnUnreadableTimeoutEvictsNothing(t *testing.T) {
 	unreadable := errors.New("unavailable")
 	for way, phase := range map[string]*scaleUpBackend{
-		"never placed":      {phase: workload.JobPhasePending, scheduledNodes: 0, clusterIDs: clusterA},
-		"placed, then gone": {phase: workload.JobPhaseGone, scheduledNodes: 1, clusterIDs: clusterA},
+		"never placed":      {phase: domain.JobPhasePending, scheduledNodes: 0, clusterIDs: clusterA},
+		"placed, then gone": {phase: domain.JobPhaseGone, scheduledNodes: 1, clusterIDs: clusterA},
 	} {
 		t.Run(way+"/cluster settings", func(t *testing.T) {
 			store := &settingsStore{lifecycleStore: &lifecycleStore{}, settingsErr: unreadable}
@@ -251,7 +250,7 @@ func TestAFinishedJobIsTerminalisedWithUnreadableSettings(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			store := &settingsStore{lifecycleStore: &lifecycleStore{}, settingsErr: unreadable}
-			backend := idsBackend{scaleUpBackend: &scaleUpBackend{phase: workload.JobPhaseSucceeded, scheduledNodes: tc.scheduledNodes, clusterIDs: clusterA}, idsErr: unreadable}
+			backend := idsBackend{scaleUpBackend: &scaleUpBackend{phase: domain.JobPhaseSucceeded, scheduledNodes: tc.scheduledNodes, clusterIDs: clusterA}, idsErr: unreadable}
 			w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).WithStuckPendingTimeout(5 * time.Minute)
 			exp := scaleUpExperiment(1, time.Minute)
 			exp.Status = tc.status
@@ -266,7 +265,7 @@ func TestAFinishedJobIsTerminalisedWithUnreadableSettings(t *testing.T) {
 // A RUNNING job is past every stuck-pending check, so its cluster's settings are not read for it.
 func TestARunningJobDoesNotReadItsClustersSettings(t *testing.T) {
 	store := &settingsStore{lifecycleStore: &lifecycleStore{}, settingsErr: errors.New("must not be read")}
-	backend := idsBackend{scaleUpBackend: &scaleUpBackend{phase: workload.JobPhaseRunning, scheduledNodes: 1}, idsErr: errors.New("must not be read")}
+	backend := idsBackend{scaleUpBackend: &scaleUpBackend{phase: domain.JobPhaseRunning, scheduledNodes: 1}, idsErr: errors.New("must not be read")}
 	w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).WithStuckPendingTimeout(5 * time.Minute)
 	exp := scaleUpExperiment(1, time.Hour)
 	exp.Status = domain.StatusRunning
@@ -291,7 +290,7 @@ func TestAPassAppliesTheOverrideWithoutTheScaleUpOptIn(t *testing.T) {
 				lifecycleStore: &lifecycleStore{}, settings: tc.settings,
 				submitted: []*domain.Experiment{scaleUpExperiment(1, 6*time.Minute)},
 			}
-			backend := &scaleUpBackend{phase: workload.JobPhasePending, scheduledNodes: 0, clusterIDs: clusterA}
+			backend := &scaleUpBackend{phase: domain.JobPhasePending, scheduledNodes: 0, clusterIDs: clusterA}
 			w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).WithStuckPendingTimeout(5 * time.Minute)
 
 			if err := w.scanAndWatch(context.Background()); err != nil {
@@ -317,7 +316,7 @@ func TestUnreadableClusterIDsDoNotEndAPassWithoutTheScaleUpOptIn(t *testing.T) {
 	}
 	backend := &phaseByJobBackend{
 		idsBackend: idsBackend{scaleUpBackend: &scaleUpBackend{scheduledNodes: 1}, idsErr: errors.New("metrics store unavailable")},
-		phases:     map[string]workload.JobPhase{"exp-su": workload.JobPhaseGone, "exp-finished": workload.JobPhaseSucceeded},
+		phases:     map[string]domain.JobPhase{"exp-su": domain.JobPhaseGone, "exp-finished": domain.JobPhaseSucceeded},
 	}
 	w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).WithStuckPendingTimeout(5 * time.Minute)
 
@@ -331,9 +330,9 @@ func TestUnreadableClusterIDsDoNotEndAPassWithoutTheScaleUpOptIn(t *testing.T) {
 
 type phaseByJobBackend struct {
 	idsBackend
-	phases map[string]workload.JobPhase
+	phases map[string]domain.JobPhase
 }
 
-func (b *phaseByJobBackend) LatestJobPhase(_ context.Context, exp *domain.Experiment) (workload.JobPhase, bool, error) {
+func (b *phaseByJobBackend) LatestJobPhase(_ context.Context, exp *domain.Experiment) (domain.JobPhase, bool, error) {
 	return b.phases[exp.ID], true, nil
 }

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // Two links that each close no cycle but together close one through three hypotheses touch no
