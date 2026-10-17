@@ -591,7 +591,7 @@ func TestRepositoriesAreReadFromGitHubOnEveryCallAcrossTheOrgsInstallations(t *t
 		t.Fatalf("GitHub not answering: %s", message)
 	}
 	w.app.listErr[200] = errors.New("unexpected " + leak)
-	w.refused("member", "GET", path, nil, http.StatusInternalServerError, "")
+	w.refused("member", "GET", path, nil, http.StatusInternalServerError, refusal.ReasonInternal)
 }
 
 func TestADeploymentWithoutAnAppAnswersSoAfterTheAccessCheck(t *testing.T) {
@@ -934,7 +934,7 @@ func TestTheOrgsDefaultAccountTakesANewRepositoryNoRequestPlaced(t *testing.T) {
 		t.Fatalf("several accounts and no default: %v, want repository_account_required saying a default may be set", err)
 	}
 	path := func(id int64) string { return fmt.Sprintf("/orgs/%s/github-installations/%d/default", w.orgA, id) }
-	w.refused("member", "PUT", path(rival.ID), nil, http.StatusForbidden, "")
+	w.refused("member", "PUT", path(rival.ID), nil, http.StatusForbidden, refusal.ReasonForbidden)
 	w.refused("owner", "PUT", path(carol.ID), nil, http.StatusNotFound, accounts.ReasonNotFound)
 	w.ok("owner", "PUT", path(rival.ID), nil, http.StatusNoContent, nil)
 	var listed []domain.OrgGitHubInstallation
@@ -971,7 +971,7 @@ func TestTheExperimentFileIsReadFromTheRepositoryNamed(t *testing.T) {
 		"a directory":         {github.ErrNotAFile, 422, github.ReasonUnreadableFile},
 		"too large":           {github.ErrFileTooLarge, 422, github.ReasonUnreadableFile},
 		"github rate limits":  {github.ErrRateLimited, 503, github.ReasonUnavailable},
-		"something unplanned": {errors.New("unexpected " + leak), 500, ""},
+		"something unplanned": {errors.New("unexpected " + leak), 500, refusal.ReasonInternal},
 	} {
 		w.app.fileErr = tc.err
 		_, err := w.host.File(ctx, w.projectA, "acme/model", "main", domain.ExperimentFile)
@@ -996,17 +996,25 @@ func TestAConnectedInstallationIsCheckedWithGitHubOnRequest(t *testing.T) {
 	w := newGitHubWorld(t, true)
 	w.connect(w.orgA, acme)
 	path := fmt.Sprintf("/orgs/%s/github-installations/%d/check", w.orgA, acme.ID)
-	w.ok("member", "GET", path, nil, http.StatusNoContent, nil)
+	check := func() accounts.InstallationCheck {
+		t.Helper()
+		var got accounts.InstallationCheck
+		w.ok("member", "GET", path, nil, http.StatusOK, &got)
+		return got
+	}
+	if got := check(); !got.Working || got.Reason != "" || got.Message != "" {
+		t.Errorf("a working installation: %+v, want working and nothing else", got)
+	}
 	w.app.notGranted[acme.ID] = []string{"administration:write"}
-	if message := w.refused("member", "GET", path, nil, http.StatusUnprocessableEntity, githost.ReasonPermissionMissing); !strings.Contains(message, "administration:write") {
-		t.Errorf("an installation that has not granted creation: %s, want what it has not granted", message)
+	if got := check(); got.Working || got.Reason != githost.ReasonPermissionMissing || !strings.Contains(got.Message, "administration:write") {
+		t.Errorf("an installation that has not granted creation: %+v, want %s naming what it has not granted", got, githost.ReasonPermissionMissing)
 	}
 	delete(w.app.covers, acme.ID)
-	if message := w.refused("member", "GET", path, nil, http.StatusUnprocessableEntity, github.ReasonInstallationGone); !strings.Contains(message, "installs the App again") {
-		t.Errorf("an installation GitHub removed: %s, want what to do", message)
+	if got := check(); got.Working || got.Reason != github.ReasonInstallationGone || got.Message == "" {
+		t.Errorf("an installation GitHub removed: %+v, want %s with what to do", got, github.ReasonInstallationGone)
 	}
 	w.refused("member", "GET", fmt.Sprintf("/orgs/%s/github-installations/%d/check", w.orgA, rival.ID), nil, http.StatusNotFound, accounts.ReasonNotFound)
-	w.refused("member", "GET", fmt.Sprintf("/orgs/%s/github-installations/%d/check", w.orgB, acme.ID), nil, http.StatusNotFound, "")
+	w.refused("member", "GET", fmt.Sprintf("/orgs/%s/github-installations/%d/check", w.orgB, acme.ID), nil, http.StatusNotFound, refusal.ReasonNotFound)
 }
 
 // An installation GitHub removed is no choice for a new repository: with one working account left

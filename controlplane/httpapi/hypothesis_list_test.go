@@ -74,6 +74,14 @@ func (s *listStore) Working(context.Context, []string) (map[string][]domain.Hypo
 
 func (s *listStore) NameActors(context.Context, []*domain.Actor) error { return nil }
 
+func (s *listStore) NewestFindings(context.Context, []string) (map[string]*domain.HypothesisFinding, error) {
+	return nil, nil
+}
+
+func (s *listStore) FindingSummaries(context.Context, []string) (map[string]string, error) {
+	return nil, nil
+}
+
 func listHypotheses(t *testing.T, graph *listGraph, query string) (*httptest.ResponseRecorder, []string) {
 	t.Helper()
 	r := authtest.Router(authtest.Staff)

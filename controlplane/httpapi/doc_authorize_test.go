@@ -127,7 +127,11 @@ func TestARequestWithoutAUsableTokenNeverReachesTheHandler(t *testing.T) {
 		if seen.Kind != "" {
 			t.Errorf("%s: the handler ran as %+v", name, *seen)
 		}
-		if !strings.Contains(recorder.Body.String(), `"error"`) {
+		var refused struct {
+			Reason  string `json:"reason"`
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &refused); err != nil || refused.Reason == "" || refused.Message == "" {
 			t.Errorf("%s: body %q is not the API's error envelope", name, recorder.Body.String())
 		}
 		if strings.Contains(recorder.Body.String(), "pq:") {
