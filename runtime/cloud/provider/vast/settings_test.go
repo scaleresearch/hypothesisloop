@@ -51,6 +51,7 @@ func TestErrorsNeverCarryTheAPIKey(t *testing.T) {
 
 func TestNewRefusesAnAcceleratorTypeTheSettingsCannotRent(t *testing.T) {
 	settings := Settings{
+		AccountID:       "1",
 		MaxPricePerHour: 0.5,
 		Accelerators:    []Accelerator{{Product: "NVIDIA GeForce RTX 4090", GPUName: "RTX 4090"}},
 	}

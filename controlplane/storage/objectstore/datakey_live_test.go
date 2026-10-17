@@ -29,6 +29,9 @@ func liveStore(t *testing.T) *Client {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := client.EnsureBucket(context.Background()); err != nil {
+		t.Fatalf("ensure bucket: %v", err)
+	}
 	return client
 }
 

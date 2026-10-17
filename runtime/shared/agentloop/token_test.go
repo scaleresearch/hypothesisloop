@@ -36,8 +36,8 @@ func TestBothCallsToTheControlPlaneCarryTheRuntimeToken(t *testing.T) {
 	}
 }
 
-// A refused runtime keeps asking, since the fix is somebody else's to make, and says each time
-// what the control plane told it.
+// A runtime refused for any cause but its cluster's removal keeps asking, since the fix is somebody
+// else's to make, and says each time what the control plane told it.
 func TestARefusalIsLoggedWithTheControlPlanesReasonAndTheLoopGoesOn(t *testing.T) {
 	var mu sync.Mutex
 	asked := 0
@@ -46,7 +46,7 @@ func TestARefusalIsLoggedWithTheControlPlanesReasonAndTheLoopGoesOn(t *testing.T
 		asked++
 		mu.Unlock()
 		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"reason":"cluster_not_registered","message":"cluster test is not registered"}`))
+		_, _ = w.Write([]byte(`{"reason":"unauthenticated","message":"the token names no cluster"}`))
 	}))
 	defer server.Close()
 
@@ -71,7 +71,7 @@ func TestARefusalIsLoggedWithTheControlPlanesReasonAndTheLoopGoesOn(t *testing.T
 	for _, where := range []string{"reconcile: ", "push status: "} {
 		found := false
 		for _, line := range logged {
-			found = found || (strings.HasPrefix(line, where) && strings.Contains(line, "401") && strings.Contains(line, "cluster test is not registered"))
+			found = found || (strings.HasPrefix(line, where) && strings.Contains(line, "401") && strings.Contains(line, "the token names no cluster"))
 		}
 		if !found {
 			t.Errorf("no %q line carries the status and the reason: %q", where, logged)
