@@ -17,7 +17,7 @@ TIMEOUT = 30
 
 
 def _fly_headers() -> dict[str, str]:
-    token = os.environ["SANDBOX_FLY_API_TOKEN"]
+    token = os.environ["SANDBOX_FLY_API_KEY"]
     return {"Authorization": token if " " in token else f"Bearer {token}"}
 
 

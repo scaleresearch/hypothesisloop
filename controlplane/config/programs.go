@@ -9,7 +9,7 @@ type ControlService struct {
 	ModelToken, DataStoreSecret                          string
 	// GitHubKey is set on a github git host, and GitPassword on a plain one with a username.
 	GitHubKey, GitPassword string
-	// SandboxSecret is the sandbox provider's key, empty with no sandbox or a provider that takes none.
+	// SandboxSecret is the sandbox provider's key, empty with no sandbox.
 	SandboxSecret string
 	// CloudComputeSecrets is the provider's key of each cloud_compute entry, by cluster name.
 	CloudComputeSecrets map[string]string
@@ -27,10 +27,10 @@ func LoadControlService() (*ControlService, error) {
 		CloudComputeSecrets: map[string]string{},
 	}
 	if s.Sandbox != nil {
-		c.SandboxSecret = env[sandboxKeys[s.Sandbox.Provider.Name]]
+		c.SandboxSecret = env[sandboxKey(s.Sandbox.Provider.Name)]
 	}
 	for _, cc := range s.CloudCompute {
-		c.CloudComputeSecrets[cc.ClusterName] = env[cloudComputeKeys[cc.Provider.Name]]
+		c.CloudComputeSecrets[cc.ClusterName] = env[cloudComputeKey(cc.Provider.Name)]
 	}
 	return c, nil
 }

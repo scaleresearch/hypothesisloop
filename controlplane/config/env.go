@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 )
 
 // Key is one variable of the environment a program reads: where its settings file is, or a secret
@@ -25,28 +26,34 @@ var (
 	DataStoreMinIOSecretAccessKey = Key{"DATA_STORE_MINIO_SECRET_ACCESS_KEY", "the secret key of data_store.access_key_id"}
 	GitHostGitHubAppPrivateKey    = Key{"GIT_HOST_GITHUB_APP_PRIVATE_KEY", "the PEM GitHub issued for the App of git_host.github"}
 	GitHostPlainPassword          = Key{"GIT_HOST_PLAIN_PASSWORD", "the password of git_host.plain.username"}
-	SandboxFlyAPIToken            = Key{"SANDBOX_FLY_API_TOKEN", "a deploy token of the sandbox's Fly app, as `fly tokens create deploy` prints it"}
-	SandboxE2BAPIKey              = Key{"SANDBOX_E2B_API_KEY", "the API key of the sandbox's E2B team"}
+	SandboxE2BAPIKey              = sandboxKey("e2b")
 	SandboxE2BRegistryUsername    = Key{"SANDBOX_E2B_REGISTRY_USERNAME", "the login to the private registry of the image a template is built from"}
 	SandboxE2BRegistryPassword    = Key{"SANDBOX_E2B_REGISTRY_PASSWORD", "the password of SANDBOX_E2B_REGISTRY_USERNAME"}
-	CloudComputeVastAPIKey        = Key{"CLOUD_COMPUTE_VAST_API_KEY", "the API key of the vast.ai account of the cloud_compute entries on vast"}
 )
 
 // Keys is every key a program reads.
 var Keys = []Key{
 	SettingsPath, DatabaseURL, MetricsDBURL, GraphDBURL, AuthSigningSecret, ModelAnthropicOAuthToken,
-	DataStoreMinIOSecretAccessKey, GitHostGitHubAppPrivateKey, GitHostPlainPassword, SandboxFlyAPIToken,
-	SandboxE2BAPIKey, SandboxE2BRegistryUsername, SandboxE2BRegistryPassword, CloudComputeVastAPIKey,
+	DataStoreMinIOSecretAccessKey, GitHostGitHubAppPrivateKey, GitHostPlainPassword,
+	SandboxE2BAPIKey, SandboxE2BRegistryUsername, SandboxE2BRegistryPassword,
 }
 
 // The key of each provider that has one, by the provider's name in the settings. A provider that
 // is not listed takes none.
 var (
-	modelKeys        = map[string]Key{ModelProviderAnthropic: ModelAnthropicOAuthToken}
-	dataStoreKeys    = map[string]Key{DataStoreProviderMinIO: DataStoreMinIOSecretAccessKey}
-	sandboxKeys      = map[string]Key{"fly": SandboxFlyAPIToken, "e2b": SandboxE2BAPIKey}
-	cloudComputeKeys = map[string]Key{"vast": CloudComputeVastAPIKey}
+	modelKeys     = map[string]Key{ModelProviderAnthropic: ModelAnthropicOAuthToken}
+	dataStoreKeys = map[string]Key{DataStoreProviderMinIO: DataStoreMinIOSecretAccessKey}
 )
+
+// sandboxKey and cloudComputeKey are the account key of a rented provider, by its name in the
+// settings: SANDBOX_<NAME>_API_KEY and CLOUD_COMPUTE_<NAME>_API_KEY.
+func sandboxKey(provider string) Key {
+	return Key{"SANDBOX_" + strings.ToUpper(provider) + "_API_KEY", "the API key of the " + provider + " account the sandbox rents machines on"}
+}
+
+func cloudComputeKey(provider string) Key {
+	return Key{"CLOUD_COMPUTE_" + strings.ToUpper(provider) + "_API_KEY", "the API key of the " + provider + " account of the cloud_compute entries on " + provider}
+}
 
 // Program is a process that loads the settings file.
 type Program string
@@ -67,12 +74,10 @@ func (s *Settings) Needs(p Program) []Key {
 		keys := []Key{DatabaseURL, MetricsDBURL, GraphDBURL, AuthSigningSecret, modelKeys[s.Models.Provider], dataStoreKeys[s.DataStore.Provider]}
 		keys = append(keys, s.gitHostKeys()...)
 		if s.Sandbox != nil {
-			if key, ok := sandboxKeys[s.Sandbox.Provider.Name]; ok {
-				keys = append(keys, key)
-			}
+			keys = append(keys, sandboxKey(s.Sandbox.Provider.Name))
 		}
 		for _, cc := range s.CloudCompute {
-			if key, ok := cloudComputeKeys[cc.Provider.Name]; ok && !slices.Contains(keys, key) {
+			if key := cloudComputeKey(cc.Provider.Name); !slices.Contains(keys, key) {
 				keys = append(keys, key)
 			}
 		}

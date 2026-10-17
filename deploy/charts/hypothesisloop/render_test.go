@@ -36,7 +36,7 @@ var Secret = map[string]string{
 	"GIT_HOST_PLAIN_PASSWORD":            "made-up-git-password",
 	"ENVIRONMENTS_GCP_CREDENTIALS":       `{"type": "made-up-google-credentials"}`,
 	"CLOUD_COMPUTE_VAST_API_KEY":         "made-up-vast-api-key",
-	"SANDBOX_FLY_API_TOKEN":              "FlyV1 made-up-fly-token",
+	"SANDBOX_FLY_API_KEY":              "FlyV1 made-up-fly-token",
 	"SANDBOX_E2B_API_KEY":                "made-up-e2b-api-key",
 	"MODEL_ANTHROPIC_OAUTH_TOKEN":        "made-up-claude-subscription-token",
 }

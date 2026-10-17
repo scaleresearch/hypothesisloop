@@ -171,7 +171,7 @@ inputs() {
   local missing=() key tunnels provider_keys
   sandbox_provider="$(lib_env_value SANDBOX_PROVIDER)"
   case "${sandbox_provider}" in
-    fly) provider_keys="SANDBOX_FLY_APP SANDBOX_FLY_API_TOKEN" ;;
+    fly) provider_keys="SANDBOX_FLY_APP SANDBOX_FLY_API_KEY" ;;
     e2b) provider_keys="SANDBOX_E2B_API_KEY" ;;
     *)
       echo "dev: .env sets SANDBOX_PROVIDER to '${sandbox_provider}', and hosted agents run on fly or e2b" >&2

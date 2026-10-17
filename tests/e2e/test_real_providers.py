@@ -13,7 +13,7 @@ environment says where it runs:
     TEST_GIT_HOST_GITHUB_REPOSITORY  the repository, which must hold .hypothesisloop/experiment.yaml,
                                       mlp/job.yaml and a workload that reports val_accuracy
     SANDBOX_PROVIDER                  fly or e2b, as the stack's launcher is configured
-    SANDBOX_FLY_APP, SANDBOX_FLY_API_TOKEN
+    SANDBOX_FLY_APP, SANDBOX_FLY_API_KEY
                                       for fly
     SANDBOX_E2B_API_KEY               for e2b
     CLOUD_COMPUTE_VAST_API_KEY        the account the cloud cluster rents jobs on
@@ -40,7 +40,7 @@ from support.wait import Deadline, eventually
 pytestmark = [pytest.mark.real_providers, pytest.mark.exclusive, pytest.mark.timeout(3600)]
 
 NEEDED = {
-    "fly": ("SANDBOX_FLY_APP", "SANDBOX_FLY_API_TOKEN"),
+    "fly": ("SANDBOX_FLY_APP", "SANDBOX_FLY_API_KEY"),
     "e2b": ("SANDBOX_E2B_API_KEY",),
 }
 # domain.AgentProgressLimit on the stack that rents (agents.progress_limit_seconds), and the quarter

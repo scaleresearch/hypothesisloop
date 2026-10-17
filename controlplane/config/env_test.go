@@ -13,8 +13,8 @@ var madeUp = map[Key]string{
 	DatabaseURL: "postgres://test.example.invalid/hypothesisloop", MetricsDBURL: "http://metrics.example.invalid:4000",
 	GraphDBURL: "bolt://graph.example.invalid:7687", AuthSigningSecret: "a-signing-secret-only-this-test-knows",
 	ModelAnthropicOAuthToken: "a-model-credential", DataStoreMinIOSecretAccessKey: "a-store-secret",
-	GitHostGitHubAppPrivateKey: "a-pem", GitHostPlainPassword: "a-git-password", SandboxFlyAPIToken: "FlyV1 a-token",
-	SandboxE2BAPIKey: "an-e2b-key", CloudComputeVastAPIKey: "a-vast-key",
+	GitHostGitHubAppPrivateKey: "a-pem", GitHostPlainPassword: "a-git-password", sandboxKey("fly"): "FlyV1 a-token",
+	SandboxE2BAPIKey: "an-e2b-key", cloudComputeKey("vast"): "a-vast-key",
 }
 
 // inEnvironment sets SettingsPath to settings written from text and every key of madeUp.
@@ -66,7 +66,7 @@ func TestEachProgramNeedsItsOwnKeysAndAProvidersKeyOnlyWithThatProvider(t *testi
 		}},
 		"the GitHub App and rented machines": {withoutGitHost(t) + githubHost + rents, map[Program][]Key{
 			ProgramControlService: {DatabaseURL, MetricsDBURL, GraphDBURL, AuthSigningSecret, ModelAnthropicOAuthToken, DataStoreMinIOSecretAccessKey,
-				GitHostGitHubAppPrivateKey, SandboxFlyAPIToken, CloudComputeVastAPIKey},
+				GitHostGitHubAppPrivateKey, sandboxKey("fly"), cloudComputeKey("vast")},
 			ProgramMetricsService: {DatabaseURL, MetricsDBURL, AuthSigningSecret},
 			ProgramAdmin:          {DatabaseURL, AuthSigningSecret, GitHostGitHubAppPrivateKey},
 		}},
@@ -123,9 +123,9 @@ func TestALoaderReadsItsOwnKeysAndIgnoresTheOthers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.SigningSecret != madeUp[AuthSigningSecret] || c.GitHubKey != madeUp[GitHostGitHubAppPrivateKey] || c.SandboxSecret != madeUp[SandboxFlyAPIToken] ||
+	if c.SigningSecret != madeUp[AuthSigningSecret] || c.GitHubKey != madeUp[GitHostGitHubAppPrivateKey] || c.SandboxSecret != madeUp[sandboxKey("fly")] ||
 		c.ModelToken != madeUp[ModelAnthropicOAuthToken] || c.DataStoreSecret != madeUp[DataStoreMinIOSecretAccessKey] || c.GraphDBURL != madeUp[GraphDBURL] ||
-		c.CloudComputeSecrets["a"] != madeUp[CloudComputeVastAPIKey] {
+		c.CloudComputeSecrets["a"] != madeUp[cloudComputeKey("vast")] {
 		t.Errorf("control-service = %+v, want the environment's keys", c)
 	}
 	t.Setenv(ModelAnthropicOAuthToken.Name, "")

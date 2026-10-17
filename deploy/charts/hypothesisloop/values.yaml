@@ -41,7 +41,7 @@ images:
 #                                    (a service account key or a workload identity federation
 #                                    config), which may mint the tokens of environments.gcp.pusher
 #                                    and environments.gcp.puller
-#   SANDBOX_FLY_API_TOKEN, SANDBOX_E2B_API_KEY, CLOUD_COMPUTE_VAST_API_KEY
+#   SANDBOX_FLY_API_KEY, SANDBOX_E2B_API_KEY, CLOUD_COMPUTE_VAST_API_KEY
 #                                    the key of each provider sandbox and cloudCompute name
 #
 # Each process is handed the keys it reads and no other.

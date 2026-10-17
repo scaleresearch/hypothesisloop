@@ -37,13 +37,7 @@ from the values and every secret from the Secret, under the same name.
 {{ include "hypothesisloop.secretEnv" (dict "keys" (list "DATABASE_URL" "AUTH_SIGNING_SECRET") "root" .) }}
 {{- end -}}
 
-{{/* The key of each provider that takes one, by the provider's name in the settings. */}}
-{{- define "hypothesisloop.providerKeys" -}}
-{{- toJson (dict "sandbox" (dict "fly" "SANDBOX_FLY_API_TOKEN" "e2b" "SANDBOX_E2B_API_KEY") "cloudCompute" (dict "vast" "CLOUD_COMPUTE_VAST_API_KEY")) -}}
-{{- end -}}
-
 {{- define "hypothesisloop.controlServiceEnv" -}}
-{{- $providerKeys := include "hypothesisloop.providerKeys" . | fromJson -}}
 {{- $keys := list "DATABASE_URL" "AUTH_SIGNING_SECRET" "MODEL_ANTHROPIC_OAUTH_TOKEN" "DATA_STORE_MINIO_SECRET_ACCESS_KEY" -}}
 {{- if eq .Values.gitHost.provider "github" -}}
 {{- $keys = append $keys "GIT_HOST_GITHUB_APP_PRIVATE_KEY" -}}
@@ -51,14 +45,10 @@ from the values and every secret from the Secret, under the same name.
 {{- $keys = append $keys "GIT_HOST_PLAIN_PASSWORD" -}}
 {{- end -}}
 {{- with .Values.sandbox -}}
-{{- with get $providerKeys.sandbox .provider.name -}}
-{{- $keys = append $keys . -}}
-{{- end -}}
+{{- $keys = append $keys (printf "SANDBOX_%s_API_KEY" (upper .provider.name)) -}}
 {{- end -}}
 {{- range .Values.cloudCompute -}}
-{{- with get $providerKeys.cloudCompute .provider.name -}}
-{{- $keys = append $keys . -}}
-{{- end -}}
+{{- $keys = append $keys (printf "CLOUD_COMPUTE_%s_API_KEY" (upper .provider.name)) -}}
 {{- end -}}
 - name: METRICS_DB_URL
   value: {{ include "hypothesisloop.metricsDBURL" . | quote }}

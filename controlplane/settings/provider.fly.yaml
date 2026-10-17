@@ -1,6 +1,6 @@
 # The provider section of the sandbox settings (sandbox.yaml) for one Fly.io organization.
 #
-# control-service rents with SANDBOX_FLY_API_TOKEN from its environment: a deploy token for the app
+# control-service rents with SANDBOX_FLY_API_KEY from its environment: a deploy token for the app
 # below, as `fly tokens create deploy -a <app>` prints it, "FlyV1 " and the token. Use a deploy
 # token and no wider one: it is all the adapter needs, and a token for the organization can create
 # and destroy machines in every app of it.
