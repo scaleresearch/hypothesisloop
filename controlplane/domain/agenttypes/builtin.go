@@ -6,6 +6,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
@@ -21,6 +22,10 @@ var files embed.FS
 // of a built-in's name, description, prompt or settings, or of the rules: TestReleaseNamesWhatItSeeds
 // keeps the digest of each.
 const Release = 8
+
+// researcherFocus marks where builtin/researcher.md, the body every researcher shares, takes the
+// researcher's own builtin/<id>.md.
+const researcherFocus = "{{focus}}"
 
 var builtins = []struct {
 	id, name string
@@ -54,12 +59,12 @@ func Builtins() ([]domain.BuiltinAgentType, error) {
 		if err := domain.ValidateBuiltinAgentTypeID(b.id); err != nil {
 			return nil, fmt.Errorf("agenttypes: %w", err)
 		}
-		prompt, err := files.ReadFile("builtin/" + b.id + ".md")
+		prompt, err := builtinPrompt(b.id, b.role)
 		if err != nil {
-			return nil, fmt.Errorf("agenttypes: %w", err)
+			return nil, err
 		}
 		builtin := domain.BuiltinAgentType{
-			ID: b.id, Name: b.name, Description: descriptions[b.id], Role: b.role, Prompt: string(prompt),
+			ID: b.id, Name: b.name, Description: descriptions[b.id], Role: b.role, Prompt: prompt,
 			Settings: domain.AgentTypeSettings{MaxSubagents: 4, Effort: b.effort, Hyperparameters: map[string]any{}},
 		}
 		if err := domain.ValidateAgentTypeDescription(builtin.Description); err != nil {
@@ -74,4 +79,23 @@ func Builtins() ([]domain.BuiltinAgentType, error) {
 		out = append(out, builtin)
 	}
 	return out, nil
+}
+
+// builtinPrompt is builtin/<id>.md, which for a researcher is its focus set into builtin/researcher.md.
+func builtinPrompt(id string, role domain.AgentRole) (string, error) {
+	own, err := files.ReadFile("builtin/" + id + ".md")
+	if err != nil {
+		return "", fmt.Errorf("agenttypes: %w", err)
+	}
+	if role != domain.AgentRoleResearcher {
+		return string(own), nil
+	}
+	body, err := files.ReadFile("builtin/researcher.md")
+	if err != nil {
+		return "", fmt.Errorf("agenttypes: %w", err)
+	}
+	if n := strings.Count(string(body), researcherFocus); n != 1 {
+		return "", fmt.Errorf("agenttypes: builtin/researcher.md holds %s %d times, want once", researcherFocus, n)
+	}
+	return strings.Replace(string(body), researcherFocus, strings.TrimSpace(string(own)), 1), nil
 }
