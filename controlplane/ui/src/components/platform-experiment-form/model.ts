@@ -1,5 +1,5 @@
 import { DEFAULT_AGENT_TYPE } from '@/lib/agent-types'
-import type { MetricDefinition, ResearcherPoolEntry, Stage } from '@/types/api'
+import type { MetricDefinition, QuotaTier, ResearcherPoolEntry, Stage } from '@/types/api'
 import type { EditableField } from '@/lib/editable'
 
 // What a new experiment starts from. The stage ladder and the report interval are left out, so
@@ -31,8 +31,8 @@ export interface FormState {
   agent_image: string
   // Empty is the platform's coordinator default.
   coordinator_model: string
-  // Empty is the platform's default: guaranteed or burst_only.
-  default_quota_tier: string
+  // Empty is the platform's default.
+  default_quota_tier: QuotaTier | ''
 }
 
 export type SetField = <K extends keyof FormState>(field: K, value: FormState[K]) => void
@@ -79,20 +79,7 @@ export function toStartingAgents(researchers: ResearcherPoolEntry[]): StartingAg
   }))
 }
 
-/** Mirrors what the API holds starting agents to, so the form says it before the API does. */
-export function startingAgentsError(rows: StartingAgentDraft[] | null, maxAgents: number): string | null {
-  if (!rows) return null
-  if (rows.some(r => !Number.isInteger(Number(r.count)) || Number(r.count) < 1)) return 'Every starting agent row needs a count of at least 1.'
-  const keys = rows.map(r => `${r.agent_type}/${r.model.trim()}`)
-  if (new Set(keys).size !== keys.length) return 'Two starting agent rows name the same type and model: give one row their count.'
-  const total = rows.reduce((sum, r) => sum + Number(r.count), 0)
-  if (total > maxAgents) return `${total} starting agents, more than the ${maxAgents} researchers allowed at once.`
-  return null
-}
-
 export const ONE_STAGE: StageDraft[] = [{ length_pct: '100', evict_pct: '0', max_job_hours: '' }]
-
-export const MAX_STAGES = 8
 
 export function toDrafts(stages: Stage[]): StageDraft[] {
   return stages.map(s => ({
@@ -102,29 +89,13 @@ export function toDrafts(stages: Stage[]): StageDraft[] {
   }))
 }
 
-// An empty max_job_hours means "no limit" and parses to 0; an empty length/evict is a genuine
-// gap that stagesError reports.
+// An empty max_job_hours means "no limit" and parses to 0.
 export function toStages(drafts: StageDraft[]): Stage[] {
   return drafts.map(s => ({
     length_pct: Number(s.length_pct),
     evict_pct: Number(s.evict_pct),
     max_job_hours: s.max_job_hours.trim() === '' ? 0 : Number(s.max_job_hours),
   }))
-}
-
-// stagesError mirrors domain.ValidateStages so the form rejects a bad ladder before the API does.
-export function stagesError(stages: StageDraft[]): string | null {
-  if (stages.length === 0) return 'Add at least one stage.'
-  if (stages.length > MAX_STAGES) return 'At most 8 stages.'
-  if (stages.some(s => s.length_pct.trim() === '' || s.evict_pct.trim() === '')) return 'Every stage needs a length % and an evict %.'
-  if (stages.some(s => !Number.isFinite(Number(s.length_pct)) || !Number.isFinite(Number(s.evict_pct)))) return 'Stage percentages must be numbers.'
-  const total = stages.reduce((s, x) => s + Number(x.length_pct), 0)
-  if (stages.some(s => Number(s.length_pct) <= 0)) return 'Every stage must be longer than 0%.'
-  if (stages.some(s => Number(s.evict_pct) < 0 || Number(s.evict_pct) >= 100)) return 'Evict % must be between 0 and 99.'
-  if (stages.some(s => s.max_job_hours.trim() !== '' && (!Number.isFinite(Number(s.max_job_hours)) || Number(s.max_job_hours) < 0))) return 'Max job hours must be a positive number, or empty for no limit.'
-  if (total < 99.999 || total > 100.001) return `Stage lengths must add up to 100% (now ${round2(total)}%).`
-  if (Number(stages[stages.length - 1].evict_pct) !== 0) return 'The final stage evicts 0%: nothing follows it.'
-  return null
 }
 
 // Length totals are summed from free-typed decimals; 33.33+33.33+33.34 must read as 100, not

@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Eyebrow, Text } from '@/components/ui/text'
-import { MAX_STAGES, round2, stagesError } from '@/components/platform-experiment-form/model'
+import { round2 } from '@/components/platform-experiment-form/model'
 import type { StageDraft } from '@/components/platform-experiment-form/model'
 
 // A new stage takes half of the last one's length, so the ladder still adds up to 100%, and the
@@ -18,9 +18,8 @@ function withStageAdded(stages: StageDraft[]): StageDraft[] {
   ]
 }
 
-/** A custom stage ladder, one row per stage, with its total and what the API will refuse of it. */
+/** A custom stage ladder, one row per stage, with its total. */
 export function StagesEditor({ stages, onChange }: { stages: StageDraft[]; onChange: (s: StageDraft[]) => void }) {
-  const err = stagesError(stages)
   const total = round2(stages.reduce((s, x) => s + Number(x.length_pct || 0), 0))
 
   function setStage(i: number, patch: Partial<StageDraft>) {
@@ -78,15 +77,12 @@ export function StagesEditor({ stages, onChange }: { stages: StageDraft[]; onCha
       <Inline gap="md">
         <Button
           type="button" size="sm"
-          disabled={stages.length >= MAX_STAGES}
           onClick={() => onChange(withStageAdded(stages))}
         >+ Add stage</Button>
-        <Text as="span" variant="note" tone={Math.abs(total - 100) < 0.001 ? 'success' : 'warning'} className="tabular-nums">
+        <Text as="span" variant="note" className="tabular-nums">
           Total {total}%
         </Text>
       </Inline>
-
-      {err && <Text variant="note" tone="warning">{err}</Text>}
     </Stack>
   )
 }

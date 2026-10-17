@@ -1,5 +1,6 @@
 import { budgetUnit } from '@/lib/units'
-import type { TypeKind } from '@/types/api'
+import { quotaTierValues } from '@/types/api'
+import type { QuotaTier, TypeKind } from '@/types/api'
 import { Disclosure } from '@/components/ui/disclosure'
 import { FieldGroup, FormField } from '@/components/ui/form-field'
 import { InfoTip } from '@/components/ui/info-tip'
@@ -13,6 +14,8 @@ import { LOCKED, ONE_STAGE, ONE_STARTING_AGENT } from '@/components/platform-exp
 import type { StepProps } from '@/components/platform-experiment-form/model'
 
 const PLATFORM_DEFAULT = "Empty is the platform's default."
+
+const tierLabel = (tier: QuotaTier) => tier.charAt(0).toUpperCase() + tier.slice(1).replace(/_/g, ' ')
 
 /** Step 3: researchers, budget, the stage ladder, and the settings most leave alone. */
 export function StepBudget({ form, set, isEdit, locked, budgetKind }: StepProps & { budgetKind?: TypeKind }) {
@@ -29,7 +32,7 @@ export function StepBudget({ form, set, isEdit, locked, budgetKind }: StepProps 
           </FieldGroup>
         ) : (
           <FormField label="Max researchers" hint="The most at work at once. The coordinator may add researchers up to it.">
-            <Input type="number" min={1} max={500} step={1} value={form.max_agents} onChange={e => set('max_agents', e.target.value)} />
+            <Input type="number" min={1} step={1} value={form.max_agents} onChange={e => set('max_agents', e.target.value)} />
           </FormField>
         )}
         <FormField
@@ -53,7 +56,7 @@ export function StepBudget({ form, set, isEdit, locked, budgetKind }: StepProps 
               value={form.starting_agents ? 'custom' : 'default'}
               onChange={v => set('starting_agents', v === 'custom' ? [ONE_STARTING_AGENT] : null)}
             />
-            {form.starting_agents && <StartingAgentsEditor rows={form.starting_agents} maxAgents={researchers} onChange={rows => set('starting_agents', rows)} />}
+            {form.starting_agents && <StartingAgentsEditor rows={form.starting_agents} onChange={rows => set('starting_agents', rows)} />}
           </Stack>
         </FieldGroup>
       )}
@@ -103,7 +106,7 @@ export function StepBudget({ form, set, isEdit, locked, budgetKind }: StepProps 
               <Segmented
                 label="Default quota tier"
                 size="sm"
-                options={[{ value: '', label: 'Platform default' }, { value: 'guaranteed', label: 'Guaranteed' }, { value: 'burst_only', label: 'Burst only' }]}
+                options={[{ value: '' as const, label: 'Platform default' }, ...quotaTierValues.map(tier => ({ value: tier, label: tierLabel(tier) }))]}
                 value={form.default_quota_tier}
                 onChange={v => set('default_quota_tier', v)}
               />

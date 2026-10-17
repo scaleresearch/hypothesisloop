@@ -31,7 +31,7 @@ function experiment(status: `${PlatformExperimentStatus}`, reason: string, more:
 function agent(role: JoinedAgent['role'], more: Partial<JoinedAgent> = {}): JoinedAgent {
   return {
     platform_experiment_id: 'pe-1', agent_id: `ag-${role}`, name: role === 'baseline' ? 'Baseline 1' : 'Planner 1', role, in_agentsandbox: true, agent_type: role === 'planner' ? 'planner' : 'generalist', model: '', hyperparameters: null,
-    actor: { kind: 'coordinator', id: 'pe-1', name: 'coordinator' }, at_work: false, signed_up_at: at, instance: { state: 'running', restarts: 0, stopped: false }, actions: [], ...more,
+    actor: { kind: 'coordinator', id: 'pe-1', name: 'coordinator' }, at_work: false, ended: '', signed_up_at: at, instance: { state: 'running', restarts: 0, stopped: false }, actions: [], ...more,
   }
 }
 
@@ -168,6 +168,9 @@ describe('the proposal of an accepted experiment', () => {
     baseline_minutes: 30,
     goal_version: 1,
     agents: [{}, {}],
+    cpu: '4',
+    memory: '16Gi',
+    storage: '20Gi',
     accelerator_type: 'rtx-4090',
     image: 'pytorch',
     metric_reason: 'Validation loss on held-out text is the goal itself.',

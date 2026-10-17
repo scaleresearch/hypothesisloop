@@ -1,6 +1,7 @@
-import type { Experiment, ExperimentStats, ExperimentStatus } from '@/types/api'
+import { endedStatusValues } from '@/types/api'
+import type { Experiment, ExperimentStats } from '@/types/api'
 
-const TERMINAL: ReadonlySet<string> = new Set<ExperimentStatus>(['COMPLETED', 'FAILED', 'EVICTED', 'REJECTED', 'CANCELLED'])
+const TERMINAL: ReadonlySet<string> = new Set(endedStatusValues)
 
 // Job activity is separate from the verdict: a hypothesis whose jobs all ended is still open until
 // its owner rules on it. jobsByHypothesis is the stats endpoint's group_by=hypothesis, which has a

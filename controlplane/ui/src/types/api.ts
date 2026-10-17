@@ -2780,10 +2780,16 @@ export interface components {
             name: string;
             /** @description The org that owns it, empty for a built-in type. */
             org_id?: string;
+            /** @description The placeholders a prompt of the type's role may hold, each a name written {{name}} in the prompt. */
+            placeholders: string[];
             /** @description The version now current and how many agents and coordinators whose run goes on were told with agent.instructions: each runs it from its next turn boundary. A change that leaves prompt and settings as they were makes no version and tells nobody. */
             propagation: components["schemas"]["Propagation"];
+            /** @description Those of placeholders every prompt holds. */
+            required_placeholders: string[];
             role: components["schemas"]["AgentRole"];
         };
+        /** @enum {string} */
+        EndedStatus: "COMPLETED" | "FAILED" | "EVICTED" | "REJECTED" | "CANCELLED";
         EnsureRepositoryRequest: {
             /** @description owner/name on GitHub, or a name under the root of a plain git host. */
             repository: string;
@@ -3363,6 +3369,11 @@ export interface components {
             /** @description Why the platform cut it other than at a stage boundary: max_agents_lowered for one of the newest researchers above a max_agents lowered below those at work. Absent for a stage cut and an agent that was not cut. */
             cut_reason?: string;
             /**
+             * @description Why the agent's run here is over, the empty string while it goes on, as GET /platform-experiments/{id}/signups/{agent_id} answers it.
+             * @enum {string}
+             */
+            ended: "" | "closed" | "cut" | "finished" | "planned";
+            /**
              * @description Why it no longer holds a place among the researchers: finished, cut (at a stage boundary or by a lowered max_agents), replaced (the platform added a researcher in its place) or stopped (its machine stopped with no restart left). Absent while it holds one, and for an agent whose run is over only with the close.
              * @enum {string}
              */
@@ -3482,6 +3493,10 @@ export interface components {
             name: string;
             /** @description The org that owns it, empty for a built-in type. */
             org_id?: string;
+            /** @description The placeholders a prompt of the type's role may hold, each a name written {{name}} in the prompt. */
+            placeholders: string[];
+            /** @description Those of placeholders every prompt holds. */
+            required_placeholders: string[];
             role: components["schemas"]["AgentRole"];
         };
         ListedCluster: {
@@ -4570,6 +4585,8 @@ export interface components {
         StagesStatus: {
             active_agents: string[];
             advances: components["schemas"]["StageAdvance"][];
+            /** @description The progress at which each stage but the last ends, in order. */
+            boundaries_progress: number[];
             /** Format: int64 */
             current_stage: number;
             cut_agents: components["schemas"]["AgentCut"][];
@@ -4687,6 +4704,8 @@ export interface components {
         WatchFrame: {
             subscription: components["schemas"]["Subscription"];
         } | components["schemas"]["Change"] | components["schemas"]["Progress"];
+        /** @enum {integer} */
+        WatchPingSeconds: 20;
         /** @enum {string} */
         WatchSubprotocol: "hypothesisloop.watch";
         WithdrawnCluster: {
@@ -4794,6 +4813,7 @@ export type DeclineRequest = components['schemas']['DeclineRequest'];
 export type EditAgentTypeRequest = components['schemas']['EditAgentTypeRequest'];
 export type EditHypothesisRequest = components['schemas']['EditHypothesisRequest'];
 export type EditedAgentType = components['schemas']['EditedAgentType'];
+export type EndedStatus = components['schemas']['EndedStatus'];
 export type EnsureRepositoryRequest = components['schemas']['EnsureRepositoryRequest'];
 export type EnvironmentAnswer = components['schemas']['EnvironmentAnswer'];
 export type EnvironmentRequest = components['schemas']['EnvironmentRequest'];
@@ -4942,6 +4962,7 @@ export type UpdateClusterRequest = components['schemas']['UpdateClusterRequest']
 export type VerdictRequest = components['schemas']['VerdictRequest'];
 export type Waiter = components['schemas']['Waiter'];
 export type WatchFrame = components['schemas']['WatchFrame'];
+export type WatchPingSeconds = components['schemas']['WatchPingSeconds'];
 export type WatchSubprotocol = components['schemas']['WatchSubprotocol'];
 export type WithdrawnCluster = components['schemas']['WithdrawnCluster'];
 export type $defs = Record<string, never>;
@@ -9045,10 +9066,12 @@ export const capacityTierValues: ReadonlyArray<FlattenedDeepRequired<components>
 export const changeKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Change"]["kind"]> = ["experiment.status", "experiment.blocked", "quota.changed", "stage.boundary", "agent.cut", "agent.finished", "agent.replaced", "agent.idle", "agent.instructions", "capacity.idle", "agent.message", "agent.activity", "hypothesis.new", "hypothesis.status", "hypothesis.link", "finding.new", "comment.new", "platform_experiment.status", "platform_experiment.description", "platform_experiment.goal", "platform_experiment.proposal", "platform_experiment.plan", "platform_experiment.baseline", "platform_experiment.removed", "job.held", "job.duplicate", "job.underperforming", "environment.status"];
 export const closeReasonValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CloseReason"]> = ["end_time_reached", "closed_by_request", "planning_limit_reached", "proposal_expired", "baseline_limit_reached", "agents_not_started", "planner_stopped", "repository_not_created"];
 export const clusterActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ClusterAction"]> = ["enable", "edit", "remove", "share"];
+export const endedStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["EndedStatus"]> = ["COMPLETED", "FAILED", "EVICTED", "REJECTED", "CANCELLED"];
 export const experimentActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ExperimentAction"]> = ["cancel"];
 export const experimentStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ExperimentStatus"]> = ["SUBMITTED", "QUEUED", "RUNNING", "COMPLETED", "FAILED", "EVICTED", "REJECTED", "CANCELLED"];
 export const hypothesisActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["HypothesisAction"]> = ["edit", "remove", "link", "comment"];
 export const hypothesisStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["HypothesisStatus"]> = ["open", "confirmed", "refuted", "inconclusive"];
+export const joinedAgentEndedValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["JoinedAgent"]["ended"]> = ["", "closed", "cut", "finished", "planned"];
 export const joinedAgentEnded_reasonValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["JoinedAgent"]["ended_reason"]> = ["finished", "cut", "replaced", "stopped"];
 export const linkTypeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["LinkType"]> = ["builds_on", "contradicts", "related"];
 export const meKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Me"]["kind"]> = ["user", "key", "staff"];
@@ -9071,4 +9094,5 @@ export const similarHypothesisReasonValues: ReadonlyArray<FlattenedDeepRequired<
 export const situationMetricDirectionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SituationMetric"]["direction"]> = ["maximize", "minimize"];
 export const typeKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["TypeKind"]> = ["accelerator", "cpu"];
 export const waiterValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Waiter"]> = ["owner", "coordinator", "platform"];
+export const watchPingSecondsValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["WatchPingSeconds"]> = [20];
 export const watchSubprotocolValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["WatchSubprotocol"]> = ["hypothesisloop.watch"];

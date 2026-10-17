@@ -38,10 +38,11 @@ import { variedEnvByHypothesis, variedEnvSettings } from '@/lib/hypothesis-progr
 import { BASELINE_JOB, JobHypothesis, measuresBaseline } from '@/components/job-hypothesis'
 import { keys } from '@/lib/keys'
 import { POLL } from '@/lib/poll'
+import { endedStatusValues } from '@/types/api'
 import type { Experiment, ExperimentStatus } from '@/types/api'
 
-// The statuses of a job that has not ended, which burst compute may still preempt.
-const LIVE = new Set<ExperimentStatus>(['SUBMITTED', 'QUEUED', 'RUNNING'])
+// The statuses a job ends in. Burst compute may still preempt a job in any other.
+const ENDED: ReadonlySet<string> = new Set(endedStatusValues)
 const PAGE_SIZE = 25
 
 type SortKey = 'created_at' | 'status'
@@ -281,7 +282,7 @@ function JobRow({ job, showExperiment, varied, connected, onCancel }: JobRowProp
   const about = [
     status === 'QUEUED' && job.not_admitted_reason && notAdmittedLabel(job.not_admitted_reason, job.not_admitted_message),
     job.eviction_reason && [evictionCodeLabel(evictionCode(job.eviction_reason)), evictionDetailLines(job.eviction_reason)[0]].filter(Boolean).join(': '),
-    job.capacity_tier === 'burst' && LIVE.has(job.status) && 'Burst compute, can be preempted',
+    job.capacity_tier === 'burst' && !ENDED.has(job.status) && 'Burst compute, can be preempted',
     job.cluster_name && `On ${job.cluster_name}${connected === undefined ? '' : connected ? ', connected' : ', disconnected'}`,
   ].filter(Boolean).join('\n')
   const tested = [measuresBaseline(job) ? BASELINE_JOB : job.hypothesis, job.branch && `branch ${job.branch}`, varied].filter(Boolean).join('\n')

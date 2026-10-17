@@ -161,19 +161,6 @@ describe('a new platform experiment', () => {
     expect(sent()).toMatchObject({ researchers: [{ agent_type: 'at-lr', count: 1 }] })
   })
 
-  it('says starting agents beyond max researchers before the API does', async () => {
-    show()
-    await userEvent.type(name(), 'Run')
-    await userEvent.type(screen.getByLabelText('Brief'), 'The brief')
-    await next()
-    await next()
-    await userEvent.click(within(screen.getByRole('group', { name: 'Starting agents choice' })).getByRole('button', { name: 'Custom' }))
-    await userEvent.clear(await screen.findByLabelText('Starting agent 1 count'))
-    await userEvent.type(screen.getByLabelText('Starting agent 1 count'), '5')
-    expect(await screen.findByText('5 starting agents, more than the 2 researchers allowed at once.')).toBeTruthy()
-    expect(createPlatformExperiment).not.toHaveBeenCalled()
-  })
-
   it('adds a common metric or a typed key from one control, a typed key maximizing', async () => {
     show()
     await userEvent.type(name(), 'Run')

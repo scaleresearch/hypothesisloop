@@ -4,12 +4,6 @@ import type { StagesStatus } from '@/types/api'
 
 const percent = (share: number) => Math.round(share * 100)
 
-// Where each stage but the last ends, as a share of the run.
-function boundaries(stages: StagesStatus['stages']): number[] {
-  let at = 0
-  return stages.slice(0, -1).map(stage => (at += stage.length_pct / 100))
-}
-
 function sentence({ stages, current_stage: current, progress, next_boundary_progress: next, cut_agents: cut }: StagesStatus): string {
   const parts = [`${percent(progress)}% of the run is done.`]
   if (stages.length > 1) parts.unshift(`Stage ${current} of ${stages.length}.`)
@@ -50,7 +44,7 @@ export function RunProgress({ status }: { status: StagesStatus }) {
         className="relative h-1.5 overflow-hidden rounded-full bg-track"
       >
         <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${done}%` }} />
-        {boundaries(status.stages).map((at, i) => (
+        {status.boundaries_progress.map((at, i) => (
           <span
             key={i}
             className="absolute inset-y-0 w-0.5 bg-surface"

@@ -74,23 +74,12 @@ describe('editing an org\'s agent type', () => {
     expect(prompt().value).toBe('{{rules}} {{hl_commands}} {{workdir}}')
   })
 
-  it('says what the API would refuse in the prompt as it is typed, and holds the save', async () => {
-    show()
-    await screen.findByRole('textbox', { name: 'Prompt' })
-    setPrompt('No rules here {{secret}}')
-    expect(screen.getByText('{{secret}} has no value in a researcher prompt.')).toBeTruthy()
-    expect(screen.getByText('{{rules}} is required.')).toBeTruthy()
-    expect(screen.getByText('{{hl_commands}} is required.')).toBeTruthy()
-    expect(screen.getByText('3 problems to fix before saving.')).toBeTruthy()
-    expect((screen.getByRole('button', { name: 'Save as v4' }) as HTMLButtonElement).disabled).toBe(true)
-  })
-
   it('asks before a new version, saying it applies in real time, then saves from the version it was made on', async () => {
     const saved = agentType('at-lr', 'LR sweeper', 'researcher', { current_version: 4 })
     vi.mocked(editAgentType).mockImplementation(async () => { type = saved; return edited(saved, 2) })
     show()
     await screen.findByRole('textbox', { name: 'Prompt' })
-    await choose(screen.getByLabelText('Max subagents'), '6')
+    fireEvent.change(screen.getByLabelText('Max subagents'), { target: { value: '6' } })
     expect(screen.getByText('Saving makes v4.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Save as v4' }))
     const dialog = within(screen.getByRole('dialog'))

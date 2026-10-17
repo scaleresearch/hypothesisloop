@@ -198,7 +198,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
         max_concurrent_accelerators: stated(file.max_concurrent_accelerators, f.max_concurrent_accelerators),
         agent_image: stated(file.agent_image, f.agent_image),
         coordinator_model: stated(file.coordinator_model, f.coordinator_model),
-        default_quota_tier: stated(file.default_quota_tier, f.default_quota_tier),
+        default_quota_tier: file.default_quota_tier || f.default_quota_tier,
       })
       const filled = FILE_FIELDS.filter(([field]) => JSON.stringify(next(form)[field]) !== JSON.stringify(form[field])).map(([, words]) => words)
       setForm(f => f.repository !== repository || f.branch !== branch ? f : next(f))

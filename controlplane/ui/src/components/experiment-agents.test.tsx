@@ -32,7 +32,7 @@ const me: Me = {
 }
 
 function signup(id: string, sandboxed: boolean, agentType = ''): JoinedAgent {
-  return { platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, in_agentsandbox: sandboxed, agent_type: agentType, model: '', hyperparameters: null, at_work: true, signed_up_at: at, actions: [] }
+  return { platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, in_agentsandbox: sandboxed, agent_type: agentType, model: '', hyperparameters: null, at_work: true, ended: '', signed_up_at: at, actions: [] }
 }
 
 // As the API answers an agent to the experiment's owner.
@@ -100,7 +100,7 @@ describe('messaging an agent', () => {
   })
 
   it('offers no message to an agent that finished or in a closed experiment', async () => {
-    roster = [{ ...signup('ag-old', true), finished_at: at, finished_reason: 'quota spent' }, signup('ag-2', true)]
+    roster = [{ ...signup('ag-old', true), ended: 'finished', finished_at: at, finished_reason: 'quota spent' }, signup('ag-2', true)]
     const { unmount } = show('running')
     expect(await screen.findAllByRole('button', { name: 'Message' })).toHaveLength(1)
     unmount()
@@ -261,7 +261,7 @@ describe('agent types in the roster', () => {
   })
 
   it('says a researcher was cut when max researchers was lowered', async () => {
-    roster = [{ ...signup('ag-1', true, 'generalist'), cut_reason: 'max_agents_lowered' }]
+    roster = [{ ...signup('ag-1', true, 'generalist'), ended: 'cut', cut_reason: 'max_agents_lowered' }]
     show('running')
     expect(await screen.findByText('Cut, max researchers lowered')).toBeTruthy()
   })

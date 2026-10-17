@@ -7,7 +7,7 @@ import type { PlatformExperimentPatch } from '@/types/api'
 import { DEFAULT_AGENT_TYPE, describeType, researcherTypes, typeName, useAgentTypes } from '@/lib/agent-types'
 import { relTime } from '@/lib/format'
 import {
-  atWorkByKey, cutByMax, poolKey, poolProblem, researchersAtWork, toPool, toRows,
+  atWorkByKey, cutByMax, poolKey, researchersAtWork, toPool, toRows,
 } from '@/lib/researcher-pool'
 import type { PoolRow } from '@/lib/researcher-pool'
 import { useRoster } from '@/lib/roster'
@@ -84,7 +84,6 @@ function PoolEditor({ pe, atWork, onDone }: { pe: PlatformExperiment; atWork: Jo
   const running = pe.status === 'running'
   const cut = running && Number.isInteger(maxN) ? cutByMax(atWork, maxN) : []
   const remaining = atWork.slice(0, atWork.length - cut.length)
-  const problem = poolProblem(maxN, poolChanged ? rows : null, remaining, id => typeName(id, catalog))
   const total = rows.reduce((s, r) => s + (Number(r.count) || 0), 0)
 
   function setRow(i: number, patch: Partial<PoolRow>) {
@@ -153,7 +152,7 @@ function PoolEditor({ pe, atWork, onDone }: { pe: PlatformExperiment; atWork: Jo
                     onChange={e => setRow(i, { model: e.target.value })}
                   />
                   <Input
-                    className="w-full min-w-0" type="number" min={Math.max(1, working)} step={1} value={r.count}
+                    className="w-full min-w-0" type="number" min={1} step={1} value={r.count}
                     aria-label={`Pool entry ${i + 1} count`}
                     onChange={e => setRow(i, { count: e.target.value })}
                   />
@@ -175,14 +174,13 @@ function PoolEditor({ pe, atWork, onDone }: { pe: PlatformExperiment; atWork: Jo
         )}
       </Stack>
 
-      {problem && <ErrorMessage>{problem}</ErrorMessage>}
       {error && <ErrorMessage>{error}</ErrorMessage>}
       <Inline gap="xs" className="justify-end">
         <Button onClick={onDone} disabled={busy}>Cancel</Button>
         <Button
           variant="primary"
           loading={busy}
-          disabled={!!problem || (!maxChanged && !poolChanged)}
+          disabled={!maxChanged && !poolChanged}
           onClick={() => cut.length > 0 ? setConfirming(true) : void save()}
         >Save</Button>
       </Inline>

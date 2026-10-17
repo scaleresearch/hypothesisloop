@@ -57,7 +57,9 @@ func NewAgentTypes(store AgentTypeStore, access *auth.Access, logger *zap.Logger
 // ListedAgentType is an agent type with what the caller may do to it.
 type ListedAgentType struct {
 	domain.CurrentAgentType
-	Actions []domain.AgentTypeAction `json:"actions" doc:"What the caller may do to the agent type now, each a write the API accepts from them: edit, archive, duplicate (create one with from) and restore. Archive is listed while a platform experiment still names the type, and refused then as agent_type_in_use."`
+	Actions              []domain.AgentTypeAction `json:"actions" doc:"What the caller may do to the agent type now, each a write the API accepts from them: edit, archive, duplicate (create one with from) and restore. Archive is listed while a platform experiment still names the type, and refused then as agent_type_in_use."`
+	Placeholders         []string                 `json:"placeholders" doc:"The placeholders a prompt of the type's role may hold, each a name written {{name}} in the prompt."`
+	RequiredPlaceholders []string                 `json:"required_placeholders" doc:"Those of placeholders every prompt holds."`
 }
 
 // agentTypeActions is what caller, holding role in the org, may do to t by the rules the writes
@@ -86,7 +88,7 @@ func (h *AgentTypes) listed(ctx context.Context, caller auth.Principal, orgID st
 	}
 	out := make([]ListedAgentType, len(types))
 	for i, t := range types {
-		out[i] = ListedAgentType{CurrentAgentType: t, Actions: agentTypeActions(caller, role, t)}
+		out[i] = ListedAgentType{CurrentAgentType: t, Actions: agentTypeActions(caller, role, t), Placeholders: domain.AgentPlaceholders(t.Role), RequiredPlaceholders: domain.RequiredPlaceholders}
 	}
 	return out, nil
 }

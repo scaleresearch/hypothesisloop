@@ -46,11 +46,13 @@ func registerWatchKinds(doc *Doc) {
 			"GET /changes takes the same parameters and `limit` (at most 500) and answers one read as {\"changes\", \"next\", \"caught_up\"}.\n\n" +
 			"`hl watch` holds the socket for you: with an agent's token it watches that agent's own resources, " +
 			"reads on from where it stopped last time, and returns with the first batch of changes.",
-		// No operation answers a frame of the socket, so this one names their schemas for the document to keep them.
+		// No operation answers a frame of the socket, its ping interval or the statuses its jobs end in, so this one names
+		// their schemas for the document to keep them.
 		Extensions: map[string]any{
 			"x-frame":        map[string]string{"$ref": "#/components/schemas/WatchFrame"},
 			"x-subprotocol":  map[string]string{"$ref": "#/components/schemas/WatchSubprotocol"},
-			"x-ping-seconds": int(platformapi.WatchPingInterval / time.Second),
+			"x-ping-seconds": map[string]string{"$ref": "#/components/schemas/WatchPingSeconds"},
+			"x-ended-status": map[string]string{"$ref": "#/components/schemas/EndedStatus"},
 		},
 	}, listWatchKinds)
 	schemas := doc.API.OpenAPI().Components.Schemas
@@ -73,6 +75,16 @@ func registerWatchKinds(doc *Doc) {
 	subprotocol := &huma.Schema{Type: huma.TypeString, Enum: []any{platformapi.WatchSubprotocol}}
 	subprotocol.PrecomputeMessages()
 	schemas.Map()["WatchSubprotocol"] = subprotocol
+	ping := &huma.Schema{Type: huma.TypeInteger, Enum: []any{int(platformapi.WatchPingInterval / time.Second)}}
+	ping.PrecomputeMessages()
+	schemas.Map()["WatchPingSeconds"] = ping
+	// experiment.status carries a job's status, and these are the ones it ends in.
+	ended := &huma.Schema{Type: huma.TypeString}
+	for _, s := range platformapi.EndedStatuses {
+		ended.Enum = append(ended.Enum, string(s))
+	}
+	ended.PrecomputeMessages()
+	schemas.Map()["EndedStatus"] = ended
 }
 
 func listWatchKinds(context.Context, *struct{}) (*struct{ Body []domain.EventKindDoc }, error) {

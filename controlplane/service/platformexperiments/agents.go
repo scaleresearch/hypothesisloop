@@ -52,6 +52,7 @@ type JoinedAgent struct {
 	// not started, or its machine is asked for and not running.
 	StatusReason *domain.StatusReason  `json:"status_reason,omitempty" doc:"Why the agent is not at work yet. On an agent that waits for its open platform experiment to start, every one but those of role baseline: reason is the platform experiment's own (baseline_measuring, baseline_required and the others of its status_reason), and message says the agent takes no turn and, when the platform runs it, has no machine asked for until the start. Its instance reads waiting until then. On a sandboxed agent whose machine is asked for and not running yet, its instance reading requested or starting: instance_starting, and message says how long ago the machine was asked for. That is a start in progress and no failure. On an agent that waited for the start of a platform experiment that closed before its run started, and had no machine asked for it: never_launched, with no waits_for, and message gives the close_reason and why it closed. Its instance reads stopped with no end_reason."`
 	Token        string                `json:"token,omitempty"`
+	RunEnd       domain.RunEnd         `json:"ended" enum:",closed,cut,finished,planned" doc:"Why the agent's run here is over, the empty string while it goes on, as GET /platform-experiments/{id}/signups/{agent_id} answers it."`
 	Actions      []domain.SignupAction `json:"actions" doc:"What the reader may do to the agent now, each a write the API accepts from them: message (POST /platform-experiments/{id}/messages naming it), remove (DELETE /platform-experiments/{id}/agents/{agent_id}, which still refuses an agent with a job queued or running) and show_token (POST /platform-experiments/{id}/agents with its agent_id, which answers the token of an agent the platform does not run). Empty for a reader who writes nothing of the platform experiment."`
 	// The fields below say what an agent of an open or running platform experiment has going,
 	// absent once its run ended (withWork).
@@ -72,7 +73,7 @@ func (s *Service) roster(ctx context.Context, platformExpID string, signups []do
 	out := make([]JoinedAgent, len(signups))
 	now := time.Now()
 	for i, signup := range signups {
-		out[i] = JoinedAgent{AgentSignup: signup, StatusReason: instanceStarting(signup, now), Actions: []domain.SignupAction{}}
+		out[i] = JoinedAgent{AgentSignup: signup, RunEnd: signup.Ended, StatusReason: instanceStarting(signup, now), Actions: []domain.SignupAction{}}
 		if why := out[i].StatusReason; why != nil {
 			var err error
 			if why.WaitsFor, err = domain.WaitsFor(why.Reason, false); err != nil {

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import useSWR, { useSWRConfig } from 'swr'
 import { archiveAgentType, editAgentType, fetchAgentType } from '@/lib/api/agent-types'
 import { ApiError } from '@/lib/api/request'
-import { APPLIES_LIVE, describeType, descriptionProblem, nameProblem, promptProblems, roleOf, said } from '@/lib/agent-types'
+import { APPLIES_LIVE, describeType, roleOf, said } from '@/lib/agent-types'
 import { relTime } from '@/lib/format'
 import { agentTypesPath } from '@/lib/routes'
 import { useTenant } from '@/lib/tenant'
@@ -117,7 +117,7 @@ function Editor({ type, editable, onSaved, onReload }: {
   const { settings, problems: settingsProblems } = fromDraft(settingsDraft)
   const newVersion = prompt !== type.current.prompt || !sameSettings(settings, { ...type.current.settings, model: type.current.settings.model ?? '', hyperparameters: type.current.settings.hyperparameters ?? {} })
   const dirty = newVersion || name.trim() !== type.name || description.trim() !== type.description
-  const problems = [nameProblem(name), descriptionProblem(description), ...promptProblems(type.role, prompt), ...Object.values(settingsProblems)].filter(Boolean)
+  const problems = Object.values(settingsProblems)
   const r = roleOf(type.role)
 
   function discard() {
@@ -151,13 +151,13 @@ function Editor({ type, editable, onSaved, onReload }: {
     <>
       <Section title="Name and role">
         <div className="grid grid-cols-1 gap-x-6 gap-y-4 md:grid-cols-2">
-          <FormField label="Name" error={editable ? nameProblem(name) : undefined}>
+          <FormField label="Name">
             <Input value={name} readOnly={!editable} onChange={e => setName(e.target.value)} />
           </FormField>
           <FormField label="Role" hint="Fixed once made.">
             <Input value={r.label} readOnly disabled />
           </FormField>
-          <FormField label="Description" className="md:col-span-2" error={editable ? descriptionProblem(description) : undefined} hint="One line on what agents of this type do.">
+          <FormField label="Description" className="md:col-span-2" hint="One line on what agents of this type do.">
             <Input value={description} readOnly={!editable} onChange={e => setDescription(e.target.value)} />
           </FormField>
         </div>
@@ -168,7 +168,7 @@ function Editor({ type, editable, onSaved, onReload }: {
           : <SettingsFacts role={type.role} settings={type.current.settings} />}
       </Section>
       <Section title="Prompt" note={`v${type.current_version}`}>
-        <PromptEditor role={type.role} value={prompt} onChange={setPrompt} readOnly={!editable} />
+        <PromptEditor placeholders={type.placeholders} required={type.required_placeholders} value={prompt} onChange={setPrompt} readOnly={!editable} />
       </Section>
 
       {editable && (dirty || error) && (

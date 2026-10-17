@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { cutByMax, poolProblem, researchersAtWork, toPool, toRows } from '@/lib/researcher-pool'
+import { cutByMax, researchersAtWork, toPool } from '@/lib/researcher-pool'
 import type { JoinedAgent } from '@/types/api'
 
 function researcher(id: string, joined: string, more: Partial<JoinedAgent> = {}): JoinedAgent {
   return {
     platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' },
-    in_agentsandbox: true, agent_type: 'generalist', model: 'm', hyperparameters: null, at_work: true, signed_up_at: `2026-01-01T0${joined}:00:00Z`, actions: [], ...more,
+    in_agentsandbox: true, agent_type: 'generalist', model: 'm', hyperparameters: null, at_work: true, ended: '', signed_up_at: `2026-01-01T0${joined}:00:00Z`, actions: [], ...more,
   }
 }
 
@@ -29,26 +29,7 @@ describe('the researchers at work, as the platform says', () => {
   })
 })
 
-describe('checking a change of the pool as the API does', () => {
-  const name = (id: string) => id
-  const atWork = [researcher('a', '1'), researcher('b', '2', { agent_type: 'data-search' })]
-
-  it('passes a change of max alone, and refuses a max below 1', () => {
-    expect(poolProblem(1, null, atWork, name)).toBeNull()
-    expect(poolProblem(0, null, atWork, name)).toMatch(/at least 1/)
-  })
-
-  it('refuses a pool above max, two entries of one type and model, and an entry below its researchers at work', () => {
-    const rows = toRows([{ agent_type: 'generalist', model: 'm', count: 2 }, { agent_type: 'data-search', model: 'm', count: 1 }])
-    expect(poolProblem(3, rows, atWork, name)).toBeNull()
-    expect(poolProblem(2, rows, atWork, name)).toBe('The pool wants 3 researchers, more than the max of 2.')
-    expect(poolProblem(5, [...rows, rows[0]], atWork, name)).toMatch(/same type and model/)
-    const fewer = [{ ...rows[0] }, { ...rows[1], count: '0' }]
-    expect(poolProblem(5, fewer, atWork, name)).toMatch(/count of at least 1/)
-    const below = toRows([{ agent_type: 'generalist', model: 'm', count: 1 }])
-    expect(poolProblem(5, below, [...atWork, researcher('c', '3')], name)).toBe('2 generalist researchers on m are at work: keep at least 2. Lower max researchers to cut the newest.')
-  })
-
+describe('sending the pool', () => {
   it('sends rows as entries, an empty model left out', () => {
     expect(toPool([{ agent_type: 'at-lr', model: ' ', count: '2' }])).toEqual([{ agent_type: 'at-lr', count: 2 }])
   })

@@ -3,14 +3,15 @@
 import { useEffect } from 'react'
 import { useSWRConfig } from 'swr'
 import { fetchChanges, watchURL, WATCH_SUBPROTOCOL, type After } from '@/lib/api/changes'
+import { watchPingSecondsValues } from '@/types/api'
 import type { Change, WatchFrame } from '@/types/api'
 import { ApiError } from '@/lib/api/request'
 import { accessToken, endSession } from '@/lib/auth'
 import { LIVE_KINDS, readsOf, type Reads } from '@/lib/live'
 
-// The server repeats its progress frame every 20 s on an idle stream, so a socket silent for
-// longer than two of those lost its path.
-const SILENCE_MS = 50_000
+// The server repeats its progress frame on an idle stream at the interval it publishes, so a
+// socket silent for two of those and a little lost its path.
+const SILENCE_MS = 2 * watchPingSecondsValues[0] * 1000 + 5_000
 const FIRST_RETRY_MS = 1_000
 const LAST_RETRY_MS = 30_000
 const POLICY_VIOLATION = 1008

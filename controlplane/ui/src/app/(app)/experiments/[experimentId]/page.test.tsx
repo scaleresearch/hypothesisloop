@@ -30,7 +30,7 @@ vi.mock('@/lib/api/quotas', () => ({ fetchPlatformExperimentQuotas: vi.fn() }))
 
 const at = '2026-01-01T00:00:00Z'
 // A self-run agent of the experiment, as the API lists it to one who writes nothing of it.
-const self: JoinedAgent = { platform_experiment_id: 'pe-x', agent_id: 'ag-self', name: 'ag-self', role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, in_agentsandbox: false, agent_type: 'generalist', model: '', hyperparameters: null, at_work: true, signed_up_at: at, actions: [] }
+const self: JoinedAgent = { platform_experiment_id: 'pe-x', agent_id: 'ag-self', name: 'ag-self', role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, in_agentsandbox: false, agent_type: 'generalist', model: '', hyperparameters: null, at_work: true, ended: '', signed_up_at: at, actions: [] }
 const me: Me = {
   kind: 'user',
   user_id: 'u1',
@@ -62,7 +62,7 @@ beforeEach(() => {
   vi.mocked(fetchPlatformExperimentResults).mockResolvedValue({ platform_experiment_id: 'pe-x', name: 'Vision benchmark', status: 'running', metrics: [], bests: [], references: [] })
   vi.mocked(fetchExperimentsPage).mockResolvedValue({ items: [], total: 0 })
   vi.mocked(fetchExperimentStats).mockResolvedValue({ total: 0, by_status: {} } as never)
-  vi.mocked(fetchStages).mockResolvedValue({ stages: [], current_stage: 1, progress: 0, next_boundary_progress: 1, advances: [], active_agents: [], cut_agents: [] })
+  vi.mocked(fetchStages).mockResolvedValue({ stages: [], current_stage: 1, progress: 0, next_boundary_progress: 1, boundaries_progress: [], advances: [], active_agents: [], cut_agents: [] })
   vi.mocked(fetchHypothesisStats).mockResolvedValue({ total: 0, by_status: {} })
   vi.mocked(fetchFindings).mockResolvedValue([])
   vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([self])

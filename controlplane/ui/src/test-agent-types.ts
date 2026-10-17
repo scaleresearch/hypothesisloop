@@ -17,6 +17,8 @@ export function agentType(id: string, name: string, role: AgentRole, more: Parti
   const version = more.current_version ?? 1
   return seenBy('owner', {
     id, name, description: '', role, builtin, current_version: version, created_at: at, actions: [],
+    placeholders: ['rules', 'hl_commands', 'workdir', 'platform_experiment_id', 'repository_url', 'agent_id', 'agent_type', 'hyperparameters'],
+    required_placeholders: ['rules', 'hl_commands'],
     ...(builtin ? {} : { org_id: 'org_a', created_by: { kind: 'user', id: 'u1', name: 'Ada' } }),
     current: {
       agent_type: id, version, prompt: RESEARCHER_PROMPT, digest: `digest-${id}-${version}`, created_at: at,

@@ -107,11 +107,14 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
 }
 
 // One short word on where an agent is, and the longer story behind it for its title.
-function statusOf(agent: JoinedAgent, closed: boolean): { label: string; tone: Tone; detail?: string } {
+function statusOf(agent: JoinedAgent): { label: string; tone: Tone; detail?: string } {
   const detail = [agent.finished_reason, agent.activity?.text, agent.status_reason?.summary].filter(Boolean).join(' ') || undefined
-  if (agent.finished_at) return { label: `Finished ${relTime(agent.finished_at)}`, tone: 'neutral', detail }
-  if (agent.cut_reason === 'max_agents_lowered') return { label: 'Cut, max researchers lowered', tone: 'neutral', detail }
-  if (closed) return { label: 'Stopped, experiment closed', tone: 'neutral', detail }
+  switch (agent.ended) {
+    case 'finished': return { label: `Finished ${relTime(agent.finished_at!)}`, tone: 'neutral', detail }
+    case 'cut': return { label: agent.cut_reason === 'max_agents_lowered' ? 'Cut, max researchers lowered' : 'Cut at a stage boundary', tone: 'neutral', detail }
+    case 'closed': return { label: 'Stopped, experiment closed', tone: 'neutral', detail }
+    case 'planned': return { label: 'Answered the draft', tone: 'neutral', detail }
+  }
   if (!agent.instance) return { label: agent.in_agentsandbox ? 'Not reported yet' : 'Run by its operator', tone: 'neutral', detail }
   switch (agent.instance.state) {
     case 'running': return { label: 'Running', tone: 'success', detail }
@@ -298,7 +301,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
               </thead>
               <tbody>
                 {agents.map(agent => {
-                  const status = statusOf(agent, pe.status === 'closed')
+                  const status = statusOf(agent)
                   const expanded = open === agent.agent_id
                   const sent = messagesTo(agent)
                   return (

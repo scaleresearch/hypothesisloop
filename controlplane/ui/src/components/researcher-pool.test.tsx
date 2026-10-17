@@ -25,7 +25,7 @@ const me: Me = {
 function researcher(id: string, hour: number, agentType = 'generalist'): JoinedAgent {
   return {
     platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' },
-    in_agentsandbox: true, agent_type: agentType, model: 'm', hyperparameters: null, at_work: true, signed_up_at: `2026-01-01T0${hour}:00:00Z`, actions: [],
+    in_agentsandbox: true, agent_type: agentType, model: 'm', hyperparameters: null, at_work: true, ended: '', signed_up_at: `2026-01-01T0${hour}:00:00Z`, actions: [],
   }
 }
 

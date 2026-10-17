@@ -29,7 +29,7 @@ import uuid
 import pytest
 
 from conftest import make_agent
-from support.api import branch
+from support.api import ENDED, branch
 from support.stages import BUDGET, REPORT_INTERVAL_SECONDS, STAGES, cross_first_boundary_ranked
 from support.wait import eventually
 
@@ -55,7 +55,7 @@ def _wait_completed(api, job, deadline):
         f"{job} to complete",
         lambda: api.experiment(job),
         accept=lambda e: e["status"] == "COMPLETED",
-        reject=lambda e: e["status"] in ("FAILED", "EVICTED", "REJECTED"),
+        reject=lambda e: e["status"] in ENDED,
         deadline=deadline,
     )
     assert final["status"] == "COMPLETED", f"{job} ended as {final['status']}"

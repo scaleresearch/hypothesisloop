@@ -111,10 +111,19 @@ func (s *Service) Stages(ctx context.Context, id string) (*StagesStatus, error) 
 		CurrentStage:         pe.CurrentStage,
 		Progress:             progress,
 		NextBoundaryProgress: domain.BoundaryProgress(pe.Stages, pe.CurrentStage),
+		BoundariesProgress:   boundariesProgress(pe.Stages),
 		Advances:             advances,
 		ActiveAgents:         activeAgents,
 		CutAgents:            cuts,
 	}, nil
+}
+
+func boundariesProgress(stages []domain.Stage) []float64 {
+	out := []float64{}
+	for i := 1; i < len(stages); i++ {
+		out = append(out, domain.BoundaryProgress(stages, i))
+	}
+	return out
 }
 
 // StagesStatus is the response body for GET /platform-experiments/{id}/stages.
@@ -125,8 +134,9 @@ type StagesStatus struct {
 	CurrentStage int            `json:"current_stage"`
 	// Progress is max(budget_consumed / total_budget, elapsed / duration) — the single clock
 	// driving every boundary.
-	Progress             float64 `json:"progress"`
-	NextBoundaryProgress float64 `json:"next_boundary_progress"`
+	Progress             float64   `json:"progress"`
+	NextBoundaryProgress float64   `json:"next_boundary_progress"`
+	BoundariesProgress   []float64 `json:"boundaries_progress" doc:"The progress at which each stage but the last ends, in order."`
 	// Advances records each boundary already crossed and when.
 	Advances     []domain.StageAdvance `json:"advances"`
 	ActiveAgents []string              `json:"active_agents"`

@@ -9,17 +9,15 @@ import { Select } from '@/components/ui/select'
 import { Inline, Stack } from '@/components/ui/stack'
 import { ErrorMessage, Loading } from '@/components/ui/status-message'
 import { Eyebrow, Text } from '@/components/ui/text'
-import { startingAgentsError } from '@/components/platform-experiment-form/model'
 import type { StartingAgentDraft } from '@/components/platform-experiment-form/model'
 
-/** The agents a new experiment starts with, one row per agent type and model, with what the API will refuse of them. */
-export function StartingAgentsEditor({ rows, maxAgents, onChange }: { rows: StartingAgentDraft[]; maxAgents: number; onChange: (rows: StartingAgentDraft[]) => void }) {
+/** The agents a new experiment starts with, one row per agent type and model. */
+export function StartingAgentsEditor({ rows, onChange }: { rows: StartingAgentDraft[]; onChange: (rows: StartingAgentDraft[]) => void }) {
   const { org } = useTenant()
   const { data: catalog, error } = useAgentTypes(org.id)
   const types = researcherTypes(catalog)
   // A row added is of a type no row names yet, since two rows of one type and model are one row.
   const unused = types.find(t => !rows.some(r => r.agent_type === t.id && r.model.trim() === ''))
-  const problem = startingAgentsError(rows, maxAgents)
 
   function setRow(i: number, patch: Partial<StartingAgentDraft>) {
     onChange(rows.map((r, idx) => idx === i ? { ...r, ...patch } : r))
@@ -71,7 +69,6 @@ export function StartingAgentsEditor({ rows, maxAgents, onChange }: { rows: Star
           )
         })}
       </div>
-      {problem && <Text variant="note" tone="warning">{problem}</Text>}
       <Inline className="justify-between">
         <Button type="button" size="sm" disabled={!unused} title={unused ? undefined : 'Every agent type has a row: raise a count, or set a model to start one type on another model.'} onClick={() => unused && onChange([...rows, { agent_type: unused.id, count: '1', model: '' }])}>+ Add agents</Button>
         <TextLink href={agentTypesPath(org.id)} target="_blank" className="text-xs">Manage agent types</TextLink>
