@@ -42,7 +42,7 @@ const clusterHostsJob = `EXISTS (
 // fault gets (RequeueInfrastructureFault): the attempt advances so the next placement is a new
 // desired state, and it is counted as not the job's own, so no retry is spent. The allowance for
 // such requeues is not checked. It bounds a broken environment, and this is one decision.
-const requeueWithdrawn = `
+var requeueWithdrawn = `
 UPDATE experiments e SET
 	status = 'QUEUED',
 	eviction_reason = '` + string(domain.EvictionClusterWithdrawn) + `',
@@ -56,7 +56,7 @@ UPDATE experiments e SET
 	not_admitted_reason = '` + domain.QueueReasonAwaitingAdmission + `',
 	quota_settled_at = NULL,
 	updated_at = NOW()
-WHERE e.cluster_name = $1 AND e.status IN ('SUBMITTED', 'RUNNING')
+WHERE e.cluster_name = $1 AND e.status IN ` + placedSQL + `
   AND ($2 = '' OR $2 <> (
 	SELECT p.org_id FROM platform_experiments pe JOIN projects p ON p.id = pe.project_id
 	WHERE pe.id = e.platform_experiment_id))` + jobReturning

@@ -30,6 +30,12 @@ const (
 // ExperimentStatuses is every status a job is answered with.
 var ExperimentStatuses = platformapi.ExperimentStatuses
 
+// PlacedStatuses are the statuses of a job placed on a cluster, whose workload should exist there.
+var PlacedStatuses = []ExperimentStatus{StatusSubmitted, StatusRunning}
+
+// UnstartedStatuses are the statuses of a job that waits to run: queued, or placed and not running.
+var UnstartedStatuses = []ExperimentStatus{StatusQueued, StatusSubmitted}
+
 // ExperimentAction is something the reader of a job may do to it now.
 type ExperimentAction string
 

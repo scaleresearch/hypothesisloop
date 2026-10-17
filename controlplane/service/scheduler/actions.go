@@ -16,6 +16,4 @@ func JobActions(exp *domain.Experiment, caller auth.Principal, writes bool) []do
 }
 
 // cancels says a job in status is cancelled: it has not ended.
-func cancels(status domain.ExperimentStatus) bool {
-	return status == domain.StatusQueued || status == domain.StatusSubmitted || status == domain.StatusRunning
-}
+func cancels(status domain.ExperimentStatus) bool { return !status.Ended() }

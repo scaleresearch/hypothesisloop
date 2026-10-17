@@ -40,10 +40,6 @@ func (w *JobWatcher) Start(ctx context.Context, passTimeout time.Duration) {
 // stateless pass over every desired-running experiment. A single experiment's reconcile error
 // (e.g. a stuck job whose backend poll fails) must not stop the pass from reaching the rest.
 func (w *JobWatcher) scanAndWatch(ctx context.Context) error {
-	statuses := []domain.ExperimentStatus{
-		domain.StatusSubmitted,
-		domain.StatusRunning,
-	}
 	// Which connected cluster reports which id, read once for the pass: every stuck-pending
 	// decision in it needs the id to find its cluster's timeout, and reading it per job cost one
 	// cluster-wide metrics query for every job still waiting to start.
@@ -57,7 +53,7 @@ func (w *JobWatcher) scanAndWatch(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("autoscaler capability: %w", err)
 	}
-	for _, status := range statuses {
+	for _, status := range domain.PlacedStatuses {
 		exps, err := w.store.ListExperimentsWithStatus(ctx, status)
 		if err != nil {
 			return err

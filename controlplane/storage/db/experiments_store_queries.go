@@ -33,7 +33,7 @@ ORDER BY created_at ASC`
 // never total minus a separately live-reported "actual usage" number.
 func (s *Store) SumDesiredFootprintByCluster(ctx context.Context) (map[string]domain.Footprint, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments
-WHERE status IN ('RUNNING', 'SUBMITTED') AND cluster_name != ''`
+WHERE status IN ` + placedSQL + ` AND cluster_name != ''`
 
 	rows, err := s.pool.pool.Query(ctx, q)
 	if err != nil {
@@ -77,7 +77,7 @@ ORDER BY created_at ASC`
 // alone undercounts a node's already-claimed capacity whenever such jobs exist.
 func (s *Store) ListCapacityClaimedExperiments(ctx context.Context) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments
-WHERE status IN ('RUNNING', 'SUBMITTED')
+WHERE status IN ` + placedSQL + `
 ORDER BY created_at ASC`
 
 	rows, err := s.pool.pool.Query(ctx, q)
@@ -152,7 +152,7 @@ type AgentJobs struct {
 func (s *Store) AgentJobsByAgent(ctx context.Context, platformExpID string) (map[string]AgentJobs, error) {
 	rows, err := s.pool.pool.Query(ctx, `SELECT agent_id, COUNT(*),
        bool_or(status = 'COMPLETED'),
-       bool_or(status IN ('SUBMITTED', 'RUNNING'))
+       bool_or(status IN `+placedSQL+`)
 FROM experiments WHERE platform_experiment_id = $1 GROUP BY agent_id`, platformExpID)
 	if err != nil {
 		return nil, fmt.Errorf("experiments_store.AgentJobsByAgent: %w", err)
@@ -228,7 +228,7 @@ ORDER BY updated_at ASC`
 // experiment.
 func (s *Store) GetAgentQueuedExperiments(ctx context.Context, agentID, platformExpID string) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments
-WHERE agent_id = $1 AND platform_experiment_id = $2 AND status IN ('QUEUED', 'SUBMITTED')
+WHERE agent_id = $1 AND platform_experiment_id = $2 AND status IN ` + unstartedSQL + `
 ORDER BY queued_at ASC`
 	rows, err := s.pool.pool.Query(ctx, q, agentID, platformExpID)
 	if err != nil {

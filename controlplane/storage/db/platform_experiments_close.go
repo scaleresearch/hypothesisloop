@@ -135,8 +135,7 @@ RETURNING pe.duration_hours IS DISTINCT FROM old.duration_hours`, id, endsAt, du
 
 // unsettledJobsSQL says a job of pe still runs, waits to, or ended and its cost is not yet
 // written to the metrics store (quota_settled_at): what pe spent is not yet whole.
-const unsettledJobsSQL = `EXISTS (SELECT 1 FROM experiments e WHERE e.platform_experiment_id = pe.id
-    AND (e.status IN ` + unfinishedSQL + ` OR e.quota_settled_at IS NULL))`
+var unsettledJobsSQL = `EXISTS (SELECT 1 FROM experiments e WHERE e.platform_experiment_id = pe.id AND ` + reservedSQL + `)`
 
 // JobsSettled says every job of the platform experiment id ended and its cost was written, so
 // what it spent is whole.

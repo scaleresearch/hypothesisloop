@@ -29,13 +29,13 @@ func TestRecentlyUndesiredWorkloadsIsNotNarrowedByAClusterTheTerminationJustClea
 // to write, advance or clear. Without the time bound every experiment ever finished reads as
 // "recently undesired" and a grant would outlive the window it grants.
 func TestRecentlyUndesiredWorkloadsIsBoundedByStatusAndTime(t *testing.T) {
-	if !strings.Contains(recentlyUndesiredWorkloadsQuery, "status <> ALL($2)") {
+	if !strings.Contains(recentlyUndesiredWorkloadsQuery, "status NOT IN "+placedSQL) {
 		t.Fatalf("query does not exclude the desired statuses: %s", recentlyUndesiredWorkloadsQuery)
 	}
 	if !strings.Contains(recentlyUndesiredWorkloadsQuery, "eviction_reason IS NOT NULL") {
 		t.Fatalf("query returns rows no termination was written to: %s", recentlyUndesiredWorkloadsQuery)
 	}
-	if !strings.Contains(recentlyUndesiredWorkloadsQuery, "updated_at > now() - $3::interval") {
+	if !strings.Contains(recentlyUndesiredWorkloadsQuery, "updated_at > now() - $2::interval") {
 		t.Fatalf("query is not time-bounded, so a grant would never expire: %s", recentlyUndesiredWorkloadsQuery)
 	}
 }

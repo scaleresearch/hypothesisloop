@@ -168,8 +168,8 @@ WHERE id = $1 AND status = 'SUBMITTED'`
 // call for a job of one that has not ended writes, and announces job.underperforming, so the
 // advisory is sent once per job.
 func (s *Store) MarkUnderperforming(ctx context.Context, id, metricName string) error {
-	const q = `UPDATE experiments SET underperforming_metric = $2
-WHERE id = $1 AND underperforming_metric IS NULL AND status NOT IN ` + endedSQL
+	q := `UPDATE experiments SET underperforming_metric = $2
+WHERE id = $1 AND underperforming_metric IS NULL AND status IN ` + unfinishedSQL
 	announce := func(w *Write, j jobWritten) {
 		w.Change(j.change(platformapi.EventJobUnderperforming, j.underperformingMetric, ""))
 	}
@@ -218,8 +218,8 @@ func (s *Store) MarkBaselineLate(ctx context.Context, id, reason string) error {
 	if err := sentenced(reason); err != nil {
 		return fmt.Errorf("experiments_store.MarkBaselineLate: %w", err)
 	}
-	const q = `UPDATE experiments SET held_reason = $2
-WHERE id = $1 AND status IN ('QUEUED', 'SUBMITTED') AND split_part(COALESCE(held_reason, ''), ': ', 1) <> $3`
+	q := `UPDATE experiments SET held_reason = $2
+WHERE id = $1 AND status IN ` + unstartedSQL + ` AND split_part(COALESCE(held_reason, ''), ': ', 1) <> $3`
 	if _, err := s.writeJob(ctx, (*Write).jobHeld, q, id, reason, domain.HeldBaselineLate); err != nil {
 		return fmt.Errorf("experiments_store.MarkBaselineLate: %w", err)
 	}
@@ -291,7 +291,7 @@ func (s *Store) RequeuePreempted(ctx context.Context, id string, remainingHours,
 // resume where it stopped, so only its remaining hours are re-reserved; a retried gang starts
 // from step zero, so the full original estimate is exactly what the next attempt needs.
 func (s *Store) RequeueForRetry(ctx context.Context, id string, maxAttemptsBefore int) (bool, error) {
-	const q = `UPDATE experiments SET
+	q := `UPDATE experiments SET
 		status = 'QUEUED',
 		attempt_count = attempt_count + 1,
 		submitted_at = NULL,
@@ -301,7 +301,7 @@ func (s *Store) RequeueForRetry(ctx context.Context, id string, maxAttemptsBefor
 		resolved_job_spec = NULL,
 		not_admitted_reason = '` + domain.QueueReasonAwaitingAdmission + `',
 		updated_at = NOW()
-	WHERE id = $1 AND status IN ('SUBMITTED', 'RUNNING') AND attempt_count - infra_requeue_count < $2`
+	WHERE id = $1 AND status IN ` + placedSQL + ` AND attempt_count - infra_requeue_count < $2`
 	moved, err := s.writeJob(ctx, (*Write).jobStatus, q, id, maxAttemptsBefore)
 	if err != nil {
 		return false, fmt.Errorf("experiments_store.RequeueForRetry: %w", err)

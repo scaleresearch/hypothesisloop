@@ -125,15 +125,11 @@ func (s *Store) AddDesiredQuotaUsage(ctx context.Context, platformExpID string, 
 	if len(quotas) == 0 {
 		return nil
 	}
-	const q = `
+	q := `
 SELECT agent_id, capacity_tier,
        COALESCE(SUM(estimated_cost_acch), 0)
 FROM experiments
-WHERE platform_experiment_id = $1
-  AND (
-      status IN ` + unfinishedSQL + `
-      OR (status IN ` + endedSQL + ` AND quota_settled_at IS NULL)
-  )
+WHERE platform_experiment_id = $1 AND ` + reservedSQL + `
 GROUP BY agent_id, capacity_tier`
 	rows, err := s.pool.pool.Query(ctx, q, platformExpID)
 	if err != nil {

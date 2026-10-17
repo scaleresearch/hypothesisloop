@@ -117,7 +117,7 @@ func lateBaselineJobs(jobs []*domain.Experiment, due, now time.Time) string {
 // started running and, run from now for the estimated_duration_hours its agent stated, would end
 // after due. Nothing when it would not.
 func lateBaselineJob(job *domain.Experiment, due, now time.Time) string {
-	if (job.Status != domain.StatusQueued && job.Status != domain.StatusSubmitted) || job.EstimatedDurationHours <= 0 {
+	if !slices.Contains(domain.UnstartedStatuses, job.Status) || job.EstimatedDurationHours <= 0 {
 		return ""
 	}
 	runs := time.Duration(job.EstimatedDurationHours * float64(time.Hour))

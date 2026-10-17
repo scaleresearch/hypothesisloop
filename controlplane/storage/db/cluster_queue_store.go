@@ -22,21 +22,14 @@ import (
 // service/controller's eviction paths, all of which do the status update first specifically
 // so this table stays the only source of truth for "should a Job exist."
 
-// desiredStatuses are the experiment statuses that should have a running Job. Anything not
-// in this set (QUEUED, COMPLETED, FAILED, EVICTED, REJECTED) should not.
-var desiredStatuses = []string{
-	string(domain.StatusSubmitted),
-	string(domain.StatusRunning),
-}
-
 // ListDesiredWorkloads returns every experiment in clusterName that should currently have a
 // Job running — the cluster-agent's whole "what should exist" view. Read-only; needs no
 // locking, since it's not claiming anything, just reporting current truth.
 func (s *Store) ListDesiredWorkloads(ctx context.Context, clusterName string) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments
-WHERE cluster_name = $1 AND status = ANY($2)
+WHERE cluster_name = $1 AND status IN ` + placedSQL + `
 ORDER BY id`
-	rows, err := s.pool.pool.Query(ctx, q, clusterName, desiredStatuses)
+	rows, err := s.pool.pool.Query(ctx, q, clusterName)
 	if err != nil {
 		return nil, fmt.Errorf("db.ListDesiredWorkloads: %w", err)
 	}
@@ -55,11 +48,11 @@ ORDER BY id`
 	return out, nil
 }
 
-// recentlyUndesiredWorkloadsQuery is a package-level constant so its shape can be asserted on
+// recentlyUndesiredWorkloadsQuery is package-level so its shape can be asserted on
 // without a database. It narrows by last_cluster, which the claim writes and nothing clears, and
 // never by cluster_name, which the very write it is looking for has just cleared.
-const recentlyUndesiredWorkloadsQuery = `SELECT` + experimentColumns + `FROM experiments
-WHERE last_cluster = $1 AND status <> ALL($2) AND eviction_reason IS NOT NULL AND updated_at > now() - $3::interval
+var recentlyUndesiredWorkloadsQuery = `SELECT` + experimentColumns + `FROM experiments
+WHERE last_cluster = $1 AND status NOT IN ` + placedSQL + ` AND eviction_reason IS NOT NULL AND updated_at > now() - $2::interval
 ORDER BY id`
 
 // ListRecentlyUndesiredWorkloads returns every experiment last placed on clusterName that a
@@ -77,7 +70,7 @@ ORDER BY id`
 // holds no capacity any more. last_cluster is where it ran, so a cluster is told of its own
 // terminations and learns nothing of jobs that ran anywhere else.
 func (s *Store) ListRecentlyUndesiredWorkloads(ctx context.Context, clusterName string, within time.Duration) ([]*domain.Experiment, error) {
-	rows, err := s.pool.pool.Query(ctx, recentlyUndesiredWorkloadsQuery, clusterName, desiredStatuses, within.String())
+	rows, err := s.pool.pool.Query(ctx, recentlyUndesiredWorkloadsQuery, clusterName, within.String())
 	if err != nil {
 		return nil, fmt.Errorf("db.ListRecentlyUndesiredWorkloads: %w", err)
 	}
