@@ -57,11 +57,6 @@ func (e *AgentTypeLimit) Error() string {
 	return fmt.Sprintf("the agent type had %d versions made in the last hour, the most it may: edit it again later", e.Limit)
 }
 
-type rowsQuerier interface {
-	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
-	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
-}
-
 // liveSignupSQL is whether the run of signup s goes on: it did not end (runEndSQL), its machine
 // was not given up on and nobody was added in its place.
 const liveSignupSQL = `(` + runEndSQL + `) = '' AND NOT ` + stoppedSQL + ` AND NOT ` + replacedSQL
@@ -115,7 +110,7 @@ func storedBy(a domain.Actor) *domain.Actor {
 
 // readCatalog is the agent types the agents of org orgID may run as, built-in ones first, with
 // their current versions: archived ones too, which LookupAgentType passes over.
-func readCatalog(ctx context.Context, q rowsQuerier, orgID string) (domain.AgentTypeCatalog, error) {
+func readCatalog(ctx context.Context, q queryer, orgID string) (domain.AgentTypeCatalog, error) {
 	rows, err := q.Query(ctx, `SELECT `+currentAgentTypeColumns+currentAgentTypeFrom+`
 WHERE t.org_id IS NULL OR t.org_id = $1 ORDER BY t.org_id NULLS FIRST, t.created_at, t.id`, orgID)
 	if err != nil {
@@ -143,7 +138,7 @@ func (s *Store) Get(ctx context.Context, orgID, id string) (*domain.CurrentAgent
 	return t, nil
 }
 
-func getAgentType(ctx context.Context, q rowsQuerier, orgID, id string, lock bool) (*domain.CurrentAgentType, error) {
+func getAgentType(ctx context.Context, q queryer, orgID, id string, lock bool) (*domain.CurrentAgentType, error) {
 	query := `SELECT ` + currentAgentTypeColumns + currentAgentTypeFrom + ` WHERE t.id = $1 AND (t.org_id IS NULL OR t.org_id = $2)`
 	if lock {
 		query += ` FOR UPDATE OF t`
@@ -196,7 +191,7 @@ func (s *Store) Version(ctx context.Context, orgID, id string, n int) (*domain.A
 	return v, nil
 }
 
-func readVersion(ctx context.Context, q rowsQuerier, orgID, id string, n int) (*domain.AgentTypeVersion, error) {
+func readVersion(ctx context.Context, q queryer, orgID, id string, n int) (*domain.AgentTypeVersion, error) {
 	v, err := scanAgentTypeVersion(q.QueryRow(ctx, `SELECT `+agentTypeVersionColumns+`
 WHERE v.type_id = $1 AND v.version = $2 AND (t.org_id IS NULL OR t.org_id = $3)`, id, n, orgID))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -559,7 +554,7 @@ func archiveTx(ctx context.Context, tx *Write, current *domain.CurrentAgentType,
 // typeID, or the role's built-in one for none, when it is a built-in or one of the experiment's
 // org, of that role and not archived, its row locked FOR SHARE until the write that names it
 // commits, so an archive waits for it and then sees it. ErrUnknownAgentType for any other.
-func agentTypeTx(ctx context.Context, q rowQuerier, platformExpID, typeID string, role domain.AgentRole) (string, error) {
+func agentTypeTx(ctx context.Context, q queryer, platformExpID, typeID string, role domain.AgentRole) (string, error) {
 	if typeID == "" {
 		typeID = domain.AgentTypeOfRole(role)
 	}

@@ -23,6 +23,9 @@ import (
 
 // JobStatusStore is the persistence interface needed by JobWatcher.
 type JobStatusStore interface {
+	clusterSettings
+	terminations
+	jobRows
 	ListExperimentsWithStatus(ctx context.Context, status domain.ExperimentStatus) ([]*domain.Experiment, error)
 	// MarkStarted transitions SUBMITTED -> RUNNING. Returns false (no error) if the
 	// experiment already left that state (e.g. cancelled/evicted concurrently) — the caller
@@ -33,33 +36,24 @@ type JobStatusStore interface {
 	// different state — used to prevent double-refunds when natural completion and controller
 	// eviction race.
 	TransitionStatus(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (bool, error)
-	// GetExperiment is the job as it is stored now, nil when there is none.
-	GetExperiment(ctx context.Context, id string) (*domain.Experiment, error)
-	// ResolveTermination atomically sets status and eviction_reason together in one UPDATE,
-	// guarded on from. Used by evictNeverStarted so an eviction can never persist a status
-	// change with its reason lost (e.g. a crash between the two separate writes).
-	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (domain.Termination, error)
 	// RequeueForRetry returns a failed gang that is still SUBMITTED or RUNNING to QUEUED for a
 	// fresh whole-gang attempt and spends one of its max_retries, both in one guarded UPDATE.
 	// Returns false when the budget is exhausted or another writer got there first — see retryGang for why gangs are the only
 	// jobs whose retry the control plane decides.
 	RequeueForRetry(ctx context.Context, id string, maxAttemptsBefore int) (bool, error)
-	// MarkQuotaSettled records that a terminal experiment's final observed usage has been
-	// durably written — see service/settlement. Only called after that write succeeds.
-	MarkQuotaSettled(ctx context.Context, id string) error
-	// GetClusterSettings returns clusterID's operator overrides (scale_up_timeout_seconds,
-	// max_speculative_accelerators), or nil if none were ever set.
-	GetClusterSettings(ctx context.Context, clusterID string) (*domain.ClusterSettings, error)
 }
 
-// QuotaSettler durably writes a terminal experiment's final observed usage across every
-// resource dimension — see service/settlement.Settler. Idempotent and safe to retry.
+// QuotaSettler durably writes an experiment's observed usage so far across every resource
+// dimension (service/settlement.Settler): an absolute, idempotent set of what the metrics store
+// observed, meaningful for a job that runs again as for one that ended. Safe to retry.
 type QuotaSettler interface {
 	Settle(ctx context.Context, exp *domain.Experiment) error
 }
 
 // JobReports is what JobWatcher reads of what clusters report about jobs.
 type JobReports interface {
+	clusterIDs
+	autoscalers
 	// LatestJobPhase's found=false means the job's cluster has reported no status within the
 	// liveness window, which every job is in between its placement and its runtime's next report.
 	LatestJobPhase(ctx context.Context, exp *domain.Experiment) (phase domain.JobPhase, found bool, err error)
@@ -75,12 +69,6 @@ type JobReports interface {
 	// LogTail is up to the last n lines of output exp's runtime last reported, empty when it
 	// reported none.
 	LogTail(ctx context.Context, exp *domain.Experiment, n int) ([]string, error)
-	// GetAutoscalerCapability reports, per cluster (by cluster_name), whether it sits behind a
-	// native autoscaler.
-	GetAutoscalerCapability(ctx context.Context) (map[string]bool, error)
-	// GetClusterIDs reports each connected cluster's runtime-derived stable identity, keyed by
-	// cluster_name.
-	GetClusterIDs(ctx context.Context) (map[string]string, error)
 }
 
 // JobWatcher performs periodic stateless passes over durable desired state and drives lifecycle

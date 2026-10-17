@@ -17,24 +17,29 @@ import (
 // ever cached in this process's memory.
 // Cluster and job observations are queried from metrics storage and never cached here.
 type Store interface {
+	jobControl
 	ListRunningExperiments(ctx context.Context) ([]*domain.Experiment, error)
-	GetAgentRunningExperiments(ctx context.Context, agentID, platformExpID string) ([]*domain.Experiment, error)
-	// GetAgentQueuedExperiments returns QUEUED and SUBMITTED experiments for an agent.
-	// Both are pre-run: their reservations must be returned when the budget is exhausted.
-	GetAgentQueuedExperiments(ctx context.Context, agentID, platformExpID string) ([]*domain.Experiment, error)
 	// ListActiveByPlatformExperiment returns all non-terminal jobs (QUEUED, SUBMITTED,
 	// RUNNING) for a platform experiment. Used by close-eviction reconciliation.
 	ListActiveByPlatformExperiment(ctx context.Context, platformExpID string) ([]*domain.Experiment, error)
-	// ResolveTermination atomically transitions status and records the reason in one DB
-	// transaction — see db.Store.ResolveTermination. Does not write usage; the caller settles
-	// separately (see Controller.settleAndMark) so that write can be retried independently.
-	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (domain.Termination, error)
 	// MarkQuotaSettled records that a terminal experiment's final observed usage has been
 	// durably written — see service/settlement. Only called after that write succeeds.
 	MarkQuotaSettled(ctx context.Context, id string) error
 	// StatusSilenceCeiling is the status_silence_ceiling_seconds the cluster named name sets in
 	// place of the controller's own, nil where it sets none.
 	StatusSilenceCeiling(ctx context.Context, name string) (*int, error)
+}
+
+// jobControl is the jobs of an agent that have not ended, and the one write that ends one.
+type jobControl interface {
+	GetAgentRunningExperiments(ctx context.Context, agentID, platformExpID string) ([]*domain.Experiment, error)
+	// GetAgentQueuedExperiments returns QUEUED and SUBMITTED experiments for an agent.
+	// Both are pre-run: their reservations must be returned when the budget is exhausted.
+	GetAgentQueuedExperiments(ctx context.Context, agentID, platformExpID string) ([]*domain.Experiment, error)
+	// ResolveTermination atomically transitions status and records the reason in one DB
+	// transaction — see db.Store.ResolveTermination. Does not write usage; the caller settles
+	// separately (see Controller.settleAndMark) so that write can be retried independently.
+	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (domain.Termination, error)
 }
 
 // QuotaService reads agent quota state. Refunds no longer go through here — every

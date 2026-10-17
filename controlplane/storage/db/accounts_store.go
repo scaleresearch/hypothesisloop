@@ -88,12 +88,8 @@ func userActor(id, name string) domain.Actor {
 	return domain.Actor{Kind: domain.ActorUser, ID: id, Name: name}
 }
 
-type rowQuerier interface {
-	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
-}
-
 // readUserHome returns a nil user when there is none.
-func readUserHome(ctx context.Context, q rowQuerier, userID string) (*domain.User, []string, error) {
+func readUserHome(ctx context.Context, q queryer, userID string) (*domain.User, []string, error) {
 	user := &domain.User{ID: userID}
 	var orgIDs []string
 	err := q.QueryRow(ctx, `

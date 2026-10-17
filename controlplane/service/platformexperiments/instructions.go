@@ -14,6 +14,8 @@ import (
 // InstructionsStore reads what an agent's and a coordinator's instructions are composed from.
 // *db.Store is the one in use.
 type InstructionsStore interface {
+	// AgentInstructions and CoordinatorInstructions are what the instructions of an agent and of
+	// the coordinator are composed from, nil for none.
 	AgentInstructions(ctx context.Context, platformExpID, agentID string) (*db.InstructionsSource, error)
 	CoordinatorInstructions(ctx context.Context, platformExpID string) (*db.InstructionsSource, error)
 }

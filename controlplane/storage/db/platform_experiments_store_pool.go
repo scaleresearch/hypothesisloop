@@ -42,14 +42,9 @@ func poolJSON(pool domain.ResearcherPool) ([]byte, error) {
 	return json.Marshal(pool)
 }
 
-// querier is a pool or a transaction.
-type querier interface {
-	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
-}
-
 // researchersAtWork counts the researchers at work of platform experiment platformExpID
 // (researcherAtWorkSQL) by agent type and model.
-func researchersAtWork(ctx context.Context, q querier, platformExpID string) (map[domain.PoolKey]int, error) {
+func researchersAtWork(ctx context.Context, q queryer, platformExpID string) (map[domain.PoolKey]int, error) {
 	rows, err := q.Query(ctx, `
 SELECT `+signupKeySQL+`, count(*) FROM experiment_signups s
 WHERE s.platform_experiment_id = $1 AND `+researcherAtWorkSQL+`
@@ -337,7 +332,7 @@ ORDER BY 7, s.agent_id`, platformExpID, domain.ReplacementMinRun.Seconds())
 
 // recentReplacements counts the researchers of platform experiment platformExpID added in the
 // places of others in the last hour, by agent type and model.
-func recentReplacements(ctx context.Context, q querier, platformExpID string) (map[domain.PoolKey]int, error) {
+func recentReplacements(ctx context.Context, q queryer, platformExpID string) (map[domain.PoolKey]int, error) {
 	rows, err := q.Query(ctx, `
 SELECT `+signupKeySQL+`, count(*) FROM experiment_signups s
 WHERE s.platform_experiment_id = $1 AND s.replaces <> '' AND s.signed_up_at > now() - interval '1 hour'

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
@@ -66,11 +65,6 @@ func optionalTime(t time.Time) *time.Time {
 		return nil
 	}
 	return &t
-}
-
-// execer is a pool or a transaction.
-type execer interface {
-	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 }
 
 // insertPlatformExperiment inserts pe, whose coordinator runs the built-in coordinator type, and

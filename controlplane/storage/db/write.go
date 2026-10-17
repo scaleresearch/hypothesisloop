@@ -10,6 +10,13 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
+// queryer is the pool or a transaction, which a read shared by both runs on.
+type queryer interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 // Write is one transaction of the store's writes: every statement of a write that takes more
 // than one, or that announces a change, runs through it, so the write and its changes commit
 // whole or not at all.

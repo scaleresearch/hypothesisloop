@@ -14,6 +14,7 @@ import (
 
 // StagesStore is the persistence interface for the stage ladder.
 type StagesStore interface {
+	jobControl
 	// Platform experiment queries. ListPlatformExperimentsByStatus, never the agent-facing paged
 	// list: a reconcile pass acts on every platform experiment in the status or on none of them,
 	// and a page boundary silently stops a ladder advancing (see the store's doc comment).
@@ -43,13 +44,6 @@ type StagesStore interface {
 	// are released alongside it (see applyCut).
 	ListAgentQuotas(ctx context.Context, platformExpID string) ([]*domain.AgentQuota, error)
 	AddDesiredQuotaUsage(ctx context.Context, platformExpID string, quotas []*domain.AgentQuota) error
-
-	// Job control for cut agents.
-	GetAgentRunningExperiments(ctx context.Context, agentID, platformExpID string) ([]*domain.Experiment, error)
-	GetAgentQueuedExperiments(ctx context.Context, agentID, platformExpID string) ([]*domain.Experiment, error)
-	// ResolveTermination atomically transitions status and records the reason. Does not write
-	// usage; the caller settles separately (see Controller.settleAndMark).
-	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (domain.Termination, error)
 }
 
 // advanceStages advances a running platform experiment's ladder by at most one stage per tick,

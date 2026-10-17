@@ -26,6 +26,9 @@ import (
 
 // LoopStore is the persistence interface required by the scheduler loop.
 type LoopStore interface {
+	clusterSettings
+	admissionReads
+	terminations
 	ListQueuedExperiments(ctx context.Context) ([]*domain.Experiment, error)
 	ListSubmittedExperiments(ctx context.Context) ([]*domain.Experiment, error)
 	ListRunningExperiments(ctx context.Context) ([]*domain.Experiment, error)
@@ -40,21 +43,11 @@ type LoopStore interface {
 	// MarkHeldJobs tells the owner of every job that has waited longer than its estimated
 	// duration and longer than minimum why it is held, once per job.
 	MarkHeldJobs(ctx context.Context, minimum time.Duration) error
-	IsAgentCut(ctx context.Context, platformExpID, agentID string) (bool, error)
-	// GetPlatformExperiment supplies the current stage, whose max_job_hours gates admission of
-	// jobs queued before the ladder moved.
-	GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error)
 	// ListCapacityClaimedExperiments returns every experiment that has already claimed
 	// accelerator capacity toward the nodes it landed on — RUNNING and SUBMITTED, not
 	// just RUNNING — see resolutionCache.loadClaimed for why the narrower RUNNING-only view
 	// undercounts "installed" capacity when a job's per-accelerator share is measured.
 	ListCapacityClaimedExperiments(ctx context.Context) ([]*domain.Experiment, error)
-	// GetClusterSettings returns the operator overrides for clusterID (scale_up_timeout_seconds,
-	// max_speculative_accelerators), or nil if none were ever set — see domain.ClusterSettings.
-	GetClusterSettings(ctx context.Context, clusterID string) (*domain.ClusterSettings, error)
-	// RegisteredClusters returns every registered cluster by name, with its org and whether the
-	// platform shares it: what eligibleClusters decides placement by org against.
-	RegisteredClusters(ctx context.Context) (map[string]domain.Cluster, error)
 	// RecentlyTriedClusters returns the cluster_ids ANY experiment failed a speculative scale-up
 	// attempt on within ttl — the cross-job half of the tried-cluster backoff (autoscaler.md line
 	// 109): a job never speculates onto a node group another job just watched fail to deliver.
@@ -62,7 +55,6 @@ type LoopStore interface {
 	// AssignEnvironment is the environment a job's commit declares, which it waits for, with its
 	// build assigned to one of live and kept by one of holding (db.Store.AssignEnvironment).
 	AssignEnvironment(ctx context.Context, key string, live, holding []string, lease time.Duration) (*domain.Environment, error)
-	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (domain.Termination, error)
 	// EndQueuedSettled ends a queued job and releases its hold in one write (db.Store.EndQueuedSettled).
 	EndQueuedSettled(ctx context.Context, id string, to domain.ExperimentStatus, reason string) (bool, error)
 }
@@ -72,7 +64,7 @@ type LoopStore interface {
 // already burned are written as observed usage at requeue time (see Loop.settleStint), so the two
 // figures together always cover the whole job.
 type LoopQuotaStore interface {
-	GetAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error)
+	agentQuotas
 	ReserveAdmittedAcceleratorType(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, acceleratorCount int) error
 }
 
@@ -94,6 +86,8 @@ type ObservedState interface {
 // ClusterCapacity is what the loop reads of the clusters' capacity: live reports net of desired
 // footprint. Placing a job is its ClaimSubmitted row alone, which the cluster reconciles against.
 type ClusterCapacity interface {
+	clusterIDs
+	InstalledCapacity
 	// GetAcceleratorTypeCapacity returns per connected cluster what can be claimed now (available) and
 	// what is free once every job already told to stop is gone (desiredFree). The loop
 	// enumerates clusters from these maps.
@@ -103,28 +97,10 @@ type ClusterCapacity interface {
 	// placement.Reserve, which must prove a job fits one node in every dimension.
 	GetNodeResourceCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error)
 	GetNodeLabels(ctx context.Context) (map[string]map[string]map[string]string, error)
-	// GetNodeTotalCapacity reports each node's TOTAL installed capacity (not just what's
-	// currently free — see GetNodeResourceCapacity) for CPU/memory/storage, keyed the same way:
-	// cluster -> node -> domain.NodeResource* -> canonical units. Used to compute a job's
-	// proportional share of the node it lands on (see resolveClusterLocalResources).
-	GetNodeTotalCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error)
-	// GetMultiNodeCapability reports which clusters can run a job spanning more than one node.
-	// A cluster absent from the map is treated as single-node only.
-	GetMultiNodeCapability(ctx context.Context) (map[string]bool, error)
-	// GetAutoscalerCapability reports which clusters sit behind a native autoscaler.
-	// A cluster absent from the map is treated as not-autoscaled.
-	GetAutoscalerCapability(ctx context.Context) (map[string]bool, error)
-	// GetClusterIDs reports each connected cluster's runtime-derived stable identity, keyed by
-	// cluster_name. A cluster absent from the map has not yet reported one.
-	GetClusterIDs(ctx context.Context) (map[string]string, error)
 	// GetLiveClusters reports true for the clusters that reported within the connected window,
 	// those an environment's build may be assigned to, and false for those that reported only
 	// within domain.EnvironmentBuildHold, which keep the builds they hold.
 	GetLiveClusters(ctx context.Context) (map[string]bool, error)
-	// GetTotalCapacity reports each cluster's installed capacity — the per-accelerator
-	// CPU/memory share the disbalance evictor measures requests against. Clusters without a
-	// fresh report are absent, never zero-filled. Only read when that evictor is enabled.
-	GetTotalCapacity(ctx context.Context) (map[string]domain.Footprint, error)
 }
 
 // ExperimentEvictor terminates a RUNNING experiment through the platform's one canonical
@@ -132,14 +108,6 @@ type ClusterCapacity interface {
 // interface, like Reprioritizer, so the loop never grows its own second accounting path.
 type ExperimentEvictor interface {
 	EvictExperiment(ctx context.Context, id string, reason domain.EvictionReason) error
-}
-
-// LoopQuotaSettler durably writes an experiment's observed usage so far — see
-// service/settlement.Settler, the same implementation every other accounting path uses. An
-// absolute, idempotent set of what the metrics store has actually observed, so it is meaningful
-// for a job that is still going to run again, not only for a terminal one.
-type LoopQuotaSettler interface {
-	Settle(ctx context.Context, exp *domain.Experiment) error
 }
 
 // Reprioritizer recomputes priority scores for all queued experiments. Implemented by *Service.
@@ -188,7 +156,7 @@ type Loop struct {
 	// settler writes a preemption victim's already-burned hours as observed usage when it is
 	// requeued. Required: without it those hours are in no figure at all — the requeued row only
 	// reserves the shortened remainder — and the agent can re-admit against budget it has spent.
-	settler LoopQuotaSettler
+	settler QuotaSettler
 
 	// pendingEvictions tracks disbalance victims whose termination request has been issued but
 	// whose freed capacity a fresh GetAcceleratorTypeCapacity/GetAcceleratorCapacityByNode read cannot yet
@@ -230,7 +198,7 @@ func NewLoop(store LoopStore, quota LoopQuotaStore, clusters ClusterCapacity, gr
 
 // WithQuotaSettler wires the settler used to record a preemption victim's consumed hours as
 // observed usage at requeue time.
-func (l *Loop) WithQuotaSettler(s LoopQuotaSettler) *Loop {
+func (l *Loop) WithQuotaSettler(s QuotaSettler) *Loop {
 	l.settler = s
 	return l
 }
