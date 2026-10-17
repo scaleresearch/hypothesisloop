@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
@@ -38,11 +39,12 @@ func (s *Service) HypothesisActions(ctx context.Context, h *domain.Hypothesis, r
 	changer := Changer{UserID: r.Caller.UserID, OrgOwner: r.OrgOwner}
 	edits, removes := ChangeRefusal(h, changer, false) == nil, ChangeRefusal(h, changer, true) == nil
 	if edits || removes {
-		jobs, linked, err := s.record(ctx, h)
-		if err != nil {
+		var inRecord *InRecordError
+		switch err := s.untouched(ctx, h, ""); {
+		case errors.As(err, &inRecord):
+		case err != nil:
 			return nil, fmt.Errorf("registry.HypothesisActions: %w", err)
-		}
-		if len(jobs) == 0 && len(linked) == 0 {
+		default:
 			if edits {
 				actions = append(actions, domain.HypothesisActionEdit)
 			}
