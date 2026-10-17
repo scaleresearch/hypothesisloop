@@ -1,4 +1,4 @@
-package accounts
+package httpapi
 
 import (
 	"net/http"
@@ -6,10 +6,11 @@ import (
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
 )
 
 func TestADescriptionIsKeptOnCreateAndEditAndCopiedWithTheType(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	var list []domain.CurrentAgentType
 	w.ok("member", "GET", "/orgs/"+w.orgA+"/agent-types", nil, http.StatusOK, &list)
 	for _, ty := range list {
@@ -27,7 +28,7 @@ func TestADescriptionIsKeptOnCreateAndEditAndCopiedWithTheType(t *testing.T) {
 	if read.Description != "Tunes the rate." {
 		t.Errorf("read: got description %q", read.Description)
 	}
-	var edited EditedAgentType
+	var edited accounts.EditedAgentType
 	w.ok("owner", "PUT", "/orgs/"+w.orgA+"/agent-types/"+made.ID, name{"if_version": 1, "name": "Mine", "description": "Tunes the batch size.", "prompt": ownPrompt, "settings": ownSettings()}, http.StatusOK, &edited)
 	if edited.Description != "Tunes the batch size." {
 		t.Errorf("edited: got description %q", edited.Description)
@@ -44,7 +45,7 @@ func TestADescriptionIsKeptOnCreateAndEditAndCopiedWithTheType(t *testing.T) {
 }
 
 func TestADescriptionOfMoreThanOneLineOrTwoHundredCharactersIsRefused(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	for what, description := range map[string]string{
 		"two lines": "one\ntwo",
 		"too long":  strings.Repeat("x", domain.MaxAgentTypeDescriptionLength+1),

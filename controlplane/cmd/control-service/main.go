@@ -270,11 +270,11 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		hypotheses:          graph,
 		sharing:             platformexperiments.NewSharing(db.NewPlatformExperimentsStore(pool), logger),
 		instructions:        platformexperiments.NewInstructionsService(db.NewPlatformExperimentsStore(pool), modelDefaults(pcfg), logger),
-		agentTypes:          accounts.NewAgentTypesHandler(db.NewAgentTypesStore(pool), logger),
+		agentTypes:          accounts.NewAgentTypes(db.NewAgentTypesStore(pool), gate.access, logger),
 		sessions:            platformexperiments.NewSessions(dataStore),
 		drafts:              platformexperiments.NewDrafts(db.NewExperimentDraftsStore(pool), logger),
-		accounts: accounts.NewHandler(db.NewAccountsStore(pool), store, connectedClusters, autoscaledClusters, clusterContacts, pcfg.Auth.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Services.PublicAPIURL, MetricsURL: pcfg.Runtimes.MetricsURL, Registry: pcfg.Runtimes.Registry, ImageTag: pcfg.Runtimes.ImageTag, RegistryPlainHTTP: pcfg.Runtimes.RegistryPlainHTTP},
-			accounts.Limits{MaxOrgsPerUser: pcfg.Accounts.MaxOrgsPerUser, MaxProjectsPerOrg: pcfg.Accounts.MaxProjectsPerOrg}, logger),
+		accounts: accounts.NewService(db.NewAccountsStore(pool), store, connectedClusters, autoscaledClusters, clusterContacts, pcfg.Auth.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Services.PublicAPIURL, MetricsURL: pcfg.Runtimes.MetricsURL, Registry: pcfg.Runtimes.Registry, ImageTag: pcfg.Runtimes.ImageTag, RegistryPlainHTTP: pcfg.Runtimes.RegistryPlainHTTP},
+			accounts.Limits{MaxOrgsPerUser: pcfg.Accounts.MaxOrgsPerUser, MaxProjectsPerOrg: pcfg.Accounts.MaxProjectsPerOrg}, gate.access, logger),
 		repositories: repos,
 		scheduler:    jobs,
 		registry:     registrySvc,
@@ -307,8 +307,8 @@ type routes struct {
 	sessions            *platformexperiments.Sessions
 	instructions        *platformexperiments.InstructionsService
 	drafts              *platformexperiments.Drafts
-	accounts            *accounts.Handler
-	agentTypes          *accounts.AgentTypesHandler
+	accounts            *accounts.Service
+	agentTypes          *accounts.AgentTypes
 	repositories        *accounts.Repositories
 	scheduler           *scheduler.Service
 	registry            *registry.Service
@@ -377,9 +377,9 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 	httpapi.RegisterSessions(doc, h.sessions, logger)
 	httpapi.RegisterInstructions(doc, h.instructions)
 	httpapi.RegisterExperimentDrafts(doc, h.drafts)
-	accounts.RegisterHuma(doc, h.accounts)
-	accounts.RegisterAgentTypesHuma(doc, h.agentTypes)
-	accounts.RegisterRepositoriesHuma(doc, h.repositories)
+	httpapi.RegisterAccounts(doc, h.accounts)
+	httpapi.RegisterAgentTypes(doc, h.agentTypes)
+	httpapi.RegisterRepositories(doc, h.repositories)
 	httpapi.RegisterJobs(doc, h.scheduler, logger)
 	httpapi.RegisterModelUsage(doc, h.experiments, logger)
 	httpapi.RegisterRegistry(doc, h.registry, logger)

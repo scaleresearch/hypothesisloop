@@ -1,4 +1,4 @@
-package accounts
+package httpapi
 
 import (
 	"bytes"
@@ -18,15 +18,16 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
 const testSigningSecret = "accounts-test-signing-secret"
 
-var testLimits = Limits{MaxOrgsPerUser: 3, MaxProjectsPerOrg: 10}
+var testLimits = accounts.Limits{MaxOrgsPerUser: 3, MaxProjectsPerOrg: 10}
 
-var testRuntimeAddresses = RuntimeAddresses{APIURL: "https://api.test.invalid", MetricsURL: "https://metrics.test.invalid", Registry: "registry.test.invalid/images", ImageTag: "abc1234"}
+var testRuntimeAddresses = accounts.RuntimeAddresses{APIURL: "https://api.test.invalid", MetricsURL: "https://metrics.test.invalid", Registry: "registry.test.invalid/images", ImageTag: "abc1234"}
 
 // world is two orgs on one API. org A has an owner, a member, a second project, four API keys,
 // a pending invite and a cluster; org B has its own owner, key and cluster. Each caller is a token named after
@@ -48,7 +49,7 @@ type world struct {
 	memberKey            string
 	inviteA, inviteToken string
 	// contacts is each cluster's last contact as the metrics store answers it.
-	contacts map[string]Contact
+	contacts map[string]accounts.Contact
 }
 
 // tokens resolves a token to the principal of that name, and refuses a revoked API key as the
@@ -93,7 +94,7 @@ func (a tokens) Authenticate(_ context.Context, token string) (auth.Principal, e
 	return p, nil
 }
 
-func newWorld(t *testing.T) *world {
+func newAccountsWorld(t *testing.T) *world {
 	t.Helper()
 	ctx := context.Background()
 	w := &world{t: t, store: newMemStore(), clusterA: "cluster-a", clusterB: "cluster-b"}
@@ -158,12 +159,12 @@ func newWorld(t *testing.T) *world {
 	doc := apidocs.New(router, "test", "1.0.0", "", auth.NewAccess(placement{memStore: w.store}), zap.NewNop())
 	connected := func(context.Context) (map[string]bool, error) { return map[string]bool{w.clusterA: true}, nil }
 	autoscalers := func(context.Context) (map[string]bool, error) { return map[string]bool{}, nil }
-	contacts := func(context.Context) (map[string]Contact, error) { return w.contacts, nil }
-	RegisterHuma(doc, NewHandler(w.store, w.store, connected, autoscalers, contacts, testSigningSecret, testRuntimeAddresses, testLimits, zap.NewNop()))
+	contacts := func(context.Context) (map[string]accounts.Contact, error) { return w.contacts, nil }
+	RegisterAccounts(doc, accounts.NewService(w.store, w.store, connected, autoscalers, contacts, testSigningSecret, testRuntimeAddresses, testLimits, doc.Access, zap.NewNop()))
 	w.agentTypes = newMemAgentTypes()
 	ownType, _ := w.agentTypes.Create(ctx, w.orgA, "Own", "", domain.AgentRoleResearcher, ownPrompt, domain.AgentTypeSettings{MaxSubagents: 2, Effort: "high"}, domain.Actor{Kind: domain.ActorUser, ID: "u-owner"})
 	w.ownType = ownType.ID
-	RegisterAgentTypesHuma(doc, NewAgentTypesHandler(w.agentTypes, zap.NewNop()))
+	RegisterAgentTypes(doc, accounts.NewAgentTypes(w.agentTypes, doc.Access, zap.NewNop()))
 	w.router = router
 	return w
 }
@@ -378,7 +379,7 @@ func TestWhoMayCallWhat(t *testing.T) {
 				label = "no token"
 			}
 			t.Run(op.name+"/"+label, func(t *testing.T) {
-				w := newWorld(t)
+				w := newAccountsWorld(t)
 				if _, known := w.callers[caller]; !known && caller != "" {
 					t.Fatalf("no caller named %q", caller)
 				}
@@ -393,8 +394,8 @@ func TestWhoMayCallWhat(t *testing.T) {
 				}
 			})
 		}
-		if len(op.want) != len(newWorld(t).callers)+1 {
-			t.Errorf("%s: %d callers expected, %d exist", op.name, len(op.want), len(newWorld(t).callers)+1)
+		if len(op.want) != len(newAccountsWorld(t).callers)+1 {
+			t.Errorf("%s: %d callers expected, %d exist", op.name, len(op.want), len(newAccountsWorld(t).callers)+1)
 		}
 	}
 }
@@ -410,8 +411,8 @@ func snapshot(t *testing.T, s *memStore) string {
 }
 
 func TestMeShowsWhatTheCallerReaches(t *testing.T) {
-	w := newWorld(t)
-	ids := func(me Me) (orgs, projects []string) {
+	w := newAccountsWorld(t)
+	ids := func(me accounts.Me) (orgs, projects []string) {
 		for _, org := range me.Orgs {
 			orgs = append(orgs, org.ID)
 		}
@@ -433,7 +434,7 @@ func TestMeShowsWhatTheCallerReaches(t *testing.T) {
 		"project-key": {auth.KindKey, []string{w.orgA}, []string{w.projectA}, ""},
 		"staff":       {auth.KindStaff, []string{w.orgA, w.orgB}, []string{w.projectA, w.projectB, w.projectA2}, ""},
 	} {
-		var me Me
+		var me accounts.Me
 		w.ok(caller, "GET", "/me", nil, http.StatusOK, &me)
 		orgs, projects := ids(me)
 		if me.Kind != want.kind || strings.Join(orgs, ",") != strings.Join(want.orgs, ",") || strings.Join(projects, ",") != strings.Join(want.projects, ",") {
@@ -443,7 +444,7 @@ func TestMeShowsWhatTheCallerReaches(t *testing.T) {
 			t.Errorf("%s: role = %q, want = %q", caller, me.Orgs[0].Role, want.role)
 		}
 	}
-	var key, me Me
+	var key, me accounts.Me
 	w.ok("project-key", "GET", "/me", nil, http.StatusOK, &key)
 	if key.KeyID != "k-prj" || key.ProjectID != w.projectA || key.UserID != "" {
 		t.Errorf("a project key's me: got = %+v, want key k-prj bound to %s", key, w.projectA)
@@ -455,7 +456,7 @@ func TestMeShowsWhatTheCallerReaches(t *testing.T) {
 }
 
 func TestAnOrgIsCreatedForItsOwner(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	var org domain.Org
 	w.ok("member", "POST", "/orgs", name{"name": "  second home  "}, http.StatusCreated, &org)
 	if org.Name != "second home" || org.Role != domain.OrgRoleOwner {
@@ -486,7 +487,7 @@ func TestAnOrgIsCreatedForItsOwner(t *testing.T) {
 }
 
 func TestRenamesKeepIdsAndRefuseATakenProjectName(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	var org domain.Org
 	w.ok("owner", "PATCH", "/orgs/"+w.orgA, name{"name": "org b"}, http.StatusOK, &org)
 	if org.ID != w.orgA || org.Name != "org b" {
@@ -522,7 +523,7 @@ func TestRenamesKeepIdsAndRefuseATakenProjectName(t *testing.T) {
 }
 
 func TestAProjectKeySeesItsProjectOnly(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	var listed struct {
 		Projects []domain.Project `json:"projects"`
 	}
@@ -537,8 +538,8 @@ func TestAProjectKeySeesItsProjectOnly(t *testing.T) {
 }
 
 func TestAKeysSecretIsReturnedOnceAndNeverListed(t *testing.T) {
-	w := newWorld(t)
-	var created CreatedAPIKey
+	w := newAccountsWorld(t)
+	var created accounts.CreatedAPIKey
 	rec := w.call("owner", "POST", "/orgs/"+w.orgA+"/api-keys", name{"name": "ci", "project_id": w.projectA2})
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create: got = %d %s, want = 201", rec.Code, rec.Body)
@@ -580,9 +581,9 @@ func TestAKeysSecretIsReturnedOnceAndNeverListed(t *testing.T) {
 }
 
 // mint creates a key as caller and makes its token a caller of the same name as the key.
-func (w *world) mint(caller, keyName, projectID string) CreatedAPIKey {
+func (w *world) mint(caller, keyName, projectID string) accounts.CreatedAPIKey {
 	w.t.Helper()
-	var created CreatedAPIKey
+	var created accounts.CreatedAPIKey
 	body := name{"name": keyName}
 	if projectID != "" {
 		body["project_id"] = projectID
@@ -606,7 +607,7 @@ func (w *world) listedKeys(caller string) []string {
 }
 
 func TestAKeyReachesOnlyTheKeysMintedFromIt(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	child := w.mint("org-key", "child", "")
 	grandchild := w.mint("child", "grandchild", w.projectA2)
 	if child.MintedBy != "k-org" || grandchild.MintedBy != child.ID {
@@ -647,7 +648,7 @@ func TestAKeyReachesOnlyTheKeysMintedFromIt(t *testing.T) {
 }
 
 func TestAKeyCannotMintAWiderKey(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	for _, wider := range []name{{"name": "org-wide"}, {"name": "other project", "project_id": w.projectA2}} {
 		if rec := w.call("project-key", "POST", "/orgs/"+w.orgA+"/api-keys", wider); rec.Code != http.StatusForbidden {
 			t.Fatalf("a project key minting %v: got = %d %s, want = 403", wider, rec.Code, rec.Body)
@@ -666,7 +667,7 @@ func TestAKeyCannotMintAWiderKey(t *testing.T) {
 }
 
 func TestRevokingAKeyEndsItAndEveryKeyMintedFromIt(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	child := w.mint("org-key", "child", "")
 	grandchild := w.mint("child", "grandchild", w.projectA)
 	sibling := w.mint("org-key", "sibling", "")
@@ -702,18 +703,18 @@ func TestRevokingAKeyEndsItAndEveryKeyMintedFromIt(t *testing.T) {
 }
 
 func TestRegisteringAClusterReturnsItsRuntimeToken(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	want, err := auth.Mint(testSigningSecret, auth.RuntimeScope("gpu-east"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, caller := range []string{"owner", "org-key", "owner"} {
-		var registered RegisteredCluster
+		var registered accounts.RegisteredCluster
 		w.ok(caller, "POST", "/orgs/"+w.orgA+"/clusters", name{"name": "gpu-east"}, http.StatusOK, &registered)
 		if registered.RuntimeToken != want || registered.OrgID != w.orgA || registered.Shared {
 			t.Fatalf("registered by %s: got = %+v, want the derived token, owned by %s and not shared", caller, registered, w.orgA)
 		}
-		if got := (RuntimeAddresses{APIURL: registered.APIURL, MetricsURL: registered.MetricsURL, Registry: registered.Registry, ImageTag: registered.ImageTag}); got != testRuntimeAddresses {
+		if got := (accounts.RuntimeAddresses{APIURL: registered.APIURL, MetricsURL: registered.MetricsURL, Registry: registered.Registry, ImageTag: registered.ImageTag}); got != testRuntimeAddresses {
 			t.Fatalf("registered by %s: got = %+v, want what runtimes are configured to install with, %+v", caller, got, testRuntimeAddresses)
 		}
 	}
@@ -721,9 +722,9 @@ func TestRegisteringAClusterReturnsItsRuntimeToken(t *testing.T) {
 	// The commands are complete and hold no token: each asks for it when it runs, so it is in no
 	// scrollback and no shell history. What the platform fills in is one shell word each, and a
 	// comma, which helm splits a --set-string value on, is escaped.
-	tricky := RegisteredCluster{ClusterView: ClusterView{Name: "gpu-east"}, RuntimeToken: want, APIURL: "https://api.example/a?ids=1,2&c=$(id)", MetricsURL: "https://metrics.example/it's",
+	tricky := accounts.RegisteredCluster{ClusterView: accounts.ClusterView{Name: "gpu-east"}, RuntimeToken: want, APIURL: "https://api.example/a?ids=1,2&c=$(id)", MetricsURL: "https://metrics.example/it's",
 		Registry: "registry.example/images", ImageTag: "abc1234"}
-	commands := attachCommands(tricky)
+	commands := accounts.AttachCommandsFor(tricky)
 	wantKubernetes := `sh -c '[ -t 0 ] && { printf "Runtime token: " >&2; trap "stty echo" EXIT; stty -echo; }; IFS= read -r token; [ -t 0 ] && echo >&2; printf %s "$token" | "$@"' sh \
   helm upgrade --install hypothesisloop-cluster-agent 'oci://registry.example/images/charts/hypothesisloop-cluster-agent' \
   --version '0.1.0+abc1234' \
@@ -745,11 +746,11 @@ func TestRegisteringAClusterReturnsItsRuntimeToken(t *testing.T) {
 	if commands.BareMetal != wantBareMetal {
 		t.Fatalf("bare-metal command: got = %q, want = %q", commands.BareMetal, wantBareMetal)
 	}
-	var registered RegisteredCluster
+	var registered accounts.RegisteredCluster
 	w.ok("owner", "POST", "/orgs/"+w.orgA+"/clusters", name{"name": "gpu-east"}, http.StatusOK, &registered)
 	plain := registered
-	plain.Attach = AttachCommands{}
-	if registered.Attach != attachCommands(plain) || !strings.Contains(registered.Attach.BareMetal, "--cluster 'gpu-east' --api-url 'https://api.test.invalid'") || strings.Contains(registered.Attach.Kubernetes+registered.Attach.BareMetal, "hls_") {
+	plain.Attach = accounts.AttachCommands{}
+	if registered.Attach != accounts.AttachCommandsFor(plain) || !strings.Contains(registered.Attach.BareMetal, "--cluster 'gpu-east' --api-url 'https://api.test.invalid'") || strings.Contains(registered.Attach.Kubernetes+registered.Attach.BareMetal, "hls_") {
 		t.Fatalf("attach commands answered: %+v, want the two built from the answer, without the token", registered.Attach)
 	}
 
@@ -774,10 +775,10 @@ func TestRegisteringAClusterReturnsItsRuntimeToken(t *testing.T) {
 }
 
 func TestClustersAreListedForTheirOrgWithConnectivity(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	w.ok("owner", "POST", "/orgs/"+w.orgA+"/clusters", name{"name": "idle"}, http.StatusOK, nil)
 	var listed struct {
-		Clusters []ListedCluster `json:"clusters"`
+		Clusters []accounts.ListedCluster `json:"clusters"`
 	}
 	rec := w.call("member", "GET", "/orgs/"+w.orgA+"/clusters", nil)
 	if rec.Code != http.StatusOK {
@@ -799,15 +800,15 @@ func TestClustersAreListedForTheirOrgWithConnectivity(t *testing.T) {
 // cluster left on an old install, or pointed at an address that stopped answering, is otherwise
 // only connected: false.
 func TestAClusterIsListedWithItsLastContactLastErrorAndAgentVersion(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	seen := time.Date(2026, 10, 12, 8, 0, 0, 0, time.UTC)
-	w.contacts = map[string]Contact{w.clusterA: {At: seen, AgentVersion: "old1234"}, w.clusterB: {At: seen, AgentVersion: testRuntimeAddresses.ImageTag}}
+	w.contacts = map[string]accounts.Contact{w.clusterA: {At: seen, AgentVersion: "old1234"}, w.clusterB: {At: seen, AgentVersion: testRuntimeAddresses.ImageTag}}
 	refused := seen.Add(time.Hour)
 	w.store.clusters[w.clusterA].LastError, w.store.clusters[w.clusterA].LastErrorAt = "cluster_id x is the identity of another registered cluster", &refused
-	list := func(caller, orgID string) ListedCluster {
+	list := func(caller, orgID string) accounts.ListedCluster {
 		t.Helper()
 		var listed struct {
-			Clusters []ListedCluster `json:"clusters"`
+			Clusters []accounts.ListedCluster `json:"clusters"`
 		}
 		w.ok(caller, "GET", "/orgs/"+orgID+"/clusters", nil, http.StatusOK, &listed)
 		if len(listed.Clusters) == 0 {
@@ -828,7 +829,7 @@ func TestAClusterIsListedWithItsLastContactLastErrorAndAgentVersion(t *testing.T
 	// owner alone is told.
 	w.ok("staff", "PATCH", "/orgs/"+w.orgA+"/clusters/"+w.clusterA, map[string]any{"shared": true}, http.StatusOK, nil)
 	var listed struct {
-		Clusters []ListedCluster `json:"clusters"`
+		Clusters []accounts.ListedCluster `json:"clusters"`
 	}
 	w.ok("outsider", "GET", "/orgs/"+w.orgB+"/clusters", nil, http.StatusOK, &listed)
 	for _, c := range listed.Clusters {
@@ -842,13 +843,13 @@ func TestAClusterIsListedWithItsLastContactLastErrorAndAgentVersion(t *testing.T
 // of one priority share a place, the platform's shared ones come after the org's own, and one the
 // org turned off has none.
 func TestAListedClusterStatesItsPlaceInTheOrder(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	w.ok("owner", "POST", "/orgs/"+w.orgA+"/clusters", name{"name": "second"}, http.StatusOK, nil)
 	w.ok("staff", "PATCH", "/orgs/"+w.orgB+"/clusters/"+w.clusterB, map[string]any{"shared": true}, http.StatusOK, nil)
 	places := func() map[string]int {
 		t.Helper()
 		var listed struct {
-			Clusters []ListedCluster `json:"clusters"`
+			Clusters []accounts.ListedCluster `json:"clusters"`
 		}
 		w.ok("member", "GET", "/orgs/"+w.orgA+"/clusters", nil, http.StatusOK, &listed)
 		out := map[string]int{}
@@ -874,22 +875,22 @@ func TestAListedClusterStatesItsPlaceInTheOrder(t *testing.T) {
 }
 
 func TestASharedClusterIsListedToEveryOrgWithoutItsOwnerOrItsSettingsKey(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	w.store.clusters[w.clusterA].ReportedID = "id-of-a"
 	w.store.clusters[w.clusterB].ReportedID = "id-of-b"
-	list := func(caller, orgID string) (map[string]ListedCluster, string) {
+	list := func(caller, orgID string) (map[string]accounts.ListedCluster, string) {
 		t.Helper()
 		rec := w.call(caller, "GET", "/orgs/"+orgID+"/clusters", nil)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s lists clusters of %s: got = %d %s, want = 200", caller, orgID, rec.Code, rec.Body)
 		}
 		var listed struct {
-			Clusters []ListedCluster `json:"clusters"`
+			Clusters []accounts.ListedCluster `json:"clusters"`
 		}
 		if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
 			t.Fatal(err)
 		}
-		byName := map[string]ListedCluster{}
+		byName := map[string]accounts.ListedCluster{}
 		for _, c := range listed.Clusters {
 			byName[c.Name] = c
 		}
@@ -933,7 +934,7 @@ func TestASharedClusterIsListedToEveryOrgWithoutItsOwnerOrItsSettingsKey(t *test
 }
 
 func TestAnOrgThatDoesNotExistIsNotFoundForStaffToo(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	for _, c := range []struct {
 		method, path string
 		body         any
@@ -955,9 +956,9 @@ func TestAnOrgThatDoesNotExistIsNotFoundForStaffToo(t *testing.T) {
 }
 
 func TestEndingTheSharingNamesTheJobsItRequeued(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	w.store.placed[w.clusterA] = map[string]string{"job-of-a": w.orgA, "job-of-b": w.orgB, "job-of-b-2": w.orgB}
-	var cluster WithdrawnCluster
+	var cluster accounts.WithdrawnCluster
 	w.ok("staff", "PATCH", "/orgs/"+w.orgA+"/clusters/"+w.clusterA, map[string]any{"shared": true}, http.StatusOK, &cluster)
 	if !cluster.Shared || len(cluster.Requeued) != 0 || len(w.store.placed[w.clusterA]) != 3 {
 		t.Fatalf("sharing: got = %+v with %d jobs left placed, want it shared and every job left where it is", cluster, len(w.store.placed[w.clusterA]))
@@ -972,7 +973,7 @@ func TestEndingTheSharingNamesTheJobsItRequeued(t *testing.T) {
 }
 
 func TestRemovingAClusterEndsItAndFreesItsName(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	w.store.placed[w.clusterA] = map[string]string{"job-1": w.orgA, "job-2": w.orgB}
 	for _, path := range []string{"/orgs/" + w.orgB + "/clusters/" + w.clusterA, "/orgs/" + w.orgA + "/clusters/" + w.clusterB, "/orgs/" + w.orgA + "/clusters/never-registered"} {
 		for _, caller := range []string{"owner", "outsider", "staff"} {
@@ -985,7 +986,7 @@ func TestRemovingAClusterEndsItAndFreesItsName(t *testing.T) {
 		t.Fatal("a refused removal changed the clusters")
 	}
 
-	var removed WithdrawnCluster
+	var removed accounts.WithdrawnCluster
 	w.ok("org-key", "DELETE", "/orgs/"+w.orgA+"/clusters/"+w.clusterA, nil, http.StatusOK, &removed)
 	if removed.Name != w.clusterA || strings.Join(removed.Requeued, ",") != "job-1,job-2" {
 		t.Fatalf("removed: got = %+v, want %s with both of its jobs requeued", removed, w.clusterA)
@@ -996,7 +997,7 @@ func TestRemovingAClusterEndsItAndFreesItsName(t *testing.T) {
 	if rec := w.call("owner", "DELETE", "/orgs/"+w.orgA+"/clusters/"+w.clusterA, nil); rec.Code != http.StatusNotFound {
 		t.Fatalf("remove it again: got = %d %s, want = 404", rec.Code, rec.Body)
 	}
-	var registered RegisteredCluster
+	var registered accounts.RegisteredCluster
 	w.ok("outsider", "POST", "/orgs/"+w.orgB+"/clusters", name{"name": w.clusterA}, http.StatusOK, &registered)
 	if registered.OrgID != w.orgB {
 		t.Fatalf("the freed name registered by another org: got = %+v, want it of %s", registered, w.orgB)
@@ -1004,7 +1005,7 @@ func TestRemovingAClusterEndsItAndFreesItsName(t *testing.T) {
 }
 
 func TestForgettingAClustersIdentityIsItsOwnersAlone(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	w.store.clusters[w.clusterA].ReportedID = "id-of-a"
 	for caller, want := range map[string]int{"outsider": http.StatusNotFound, "foreign-key": http.StatusNotFound, "member": http.StatusForbidden, "runtime": http.StatusForbidden} {
 		if rec := w.call(caller, "DELETE", "/orgs/"+w.orgA+"/clusters/"+w.clusterA+"/identity", nil); rec.Code != want {
@@ -1017,7 +1018,7 @@ func TestForgettingAClustersIdentityIsItsOwnersAlone(t *testing.T) {
 	if w.store.clusters[w.clusterA].ReportedID != "id-of-a" || len(w.store.clearedIDs) != 0 {
 		t.Fatal("a refused request cleared the identity")
 	}
-	var cluster ClusterView
+	var cluster accounts.ClusterView
 	w.ok("owner", "DELETE", "/orgs/"+w.orgA+"/clusters/"+w.clusterA+"/identity", nil, http.StatusOK, &cluster)
 	if cluster.ClusterID != "" || cluster.Name != w.clusterA || len(w.store.clearedIDs) != 1 || w.store.clearedIDs[0] != "id-of-a" {
 		t.Fatalf("forgotten: got = %+v, cleared %v, want %s with no identity", cluster, w.store.clearedIDs, w.clusterA)
@@ -1032,14 +1033,14 @@ func (failingStore) ListProjects(context.Context, []string) ([]*domain.Project, 
 }
 
 func TestAFailureOfThePlatformIsAnsweredWithoutItsText(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	router := authtest.Router(tokens{w})
 	doc := apidocs.New(router, "test", "1.0.0", "", auth.NewAccess(placement{memStore: w.store}), zap.NewNop())
 	connected := func(context.Context) (map[string]bool, error) {
 		return nil, errors.New("metrics store at 10.0.0.7 refused the connection")
 	}
-	contacts := func(context.Context) (map[string]Contact, error) { return nil, nil }
-	RegisterHuma(doc, NewHandler(failingStore{w.store}, w.store, connected, connected, contacts, testSigningSecret, testRuntimeAddresses, testLimits, zap.NewNop()))
+	contacts := func(context.Context) (map[string]accounts.Contact, error) { return nil, nil }
+	RegisterAccounts(doc, accounts.NewService(failingStore{w.store}, w.store, connected, connected, contacts, testSigningSecret, testRuntimeAddresses, testLimits, doc.Access, zap.NewNop()))
 	w.router = router
 	for _, path := range []string{"/me", "/orgs/" + w.orgA + "/projects", "/orgs/" + w.orgA + "/clusters"} {
 		rec := w.call("owner", "GET", path, nil)
@@ -1058,7 +1059,7 @@ func TestAFailureOfThePlatformIsAnsweredWithoutItsText(t *testing.T) {
 }
 
 func TestANameHoldsNoControlCharacterWhateverItNames(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	for _, bad := range []string{"nul\x00byte", "two\nlines", "bell\a", strings.Repeat("a", domain.MaxNameLength+1), "   "} {
 		for _, r := range []request{
 			{"POST", "/orgs", name{"name": bad}},
@@ -1081,10 +1082,10 @@ func TestANameHoldsNoControlCharacterWhateverItNames(t *testing.T) {
 // The scheduler settings are fields of the named cluster: its org's owners change the ones a
 // request names, 0 puts one back on the default, and only those who know the cluster read them.
 func TestAClustersSettingsAreChangedByNameOneFieldAtATime(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	path := "/orgs/" + w.orgA + "/clusters/" + w.clusterA
 	w.ok("owner", "PATCH", path, map[string]any{"scale_up_timeout_seconds": 600, "max_speculative_accelerators": 8}, http.StatusOK, nil)
-	var cluster ClusterView
+	var cluster accounts.ClusterView
 	w.ok("org-key", "PATCH", path, map[string]any{"max_speculative_accelerators": 0, "stuck_pending_timeout_seconds": 900}, http.StatusOK, &cluster)
 	if cluster.ScaleUpTimeoutSeconds == nil || *cluster.ScaleUpTimeoutSeconds != 600 || cluster.MaxSpeculativeAccelerators != nil || cluster.StuckPendingTimeoutSeconds == nil || *cluster.StuckPendingTimeoutSeconds != 900 {
 		t.Fatalf("after two changes: got = %+v, want the first timeout kept, the cap cleared and the second timeout set", cluster.ClusterSettings)
@@ -1109,8 +1110,8 @@ func TestAClustersSettingsAreChangedByNameOneFieldAtATime(t *testing.T) {
 }
 
 func TestOnlyStaffShareAClusterAndOnlyUnderItsOwnOrg(t *testing.T) {
-	w := newWorld(t)
-	var cluster ClusterView
+	w := newAccountsWorld(t)
+	var cluster accounts.ClusterView
 	w.ok("staff", "PATCH", "/orgs/"+w.orgA+"/clusters/"+w.clusterA, map[string]any{"shared": true}, http.StatusOK, &cluster)
 	if !cluster.Shared || cluster.OrgID != w.orgA {
 		t.Fatalf("shared cluster: got = %+v, want it shared and still of %s", cluster, w.orgA)
@@ -1132,13 +1133,13 @@ func TestOnlyStaffShareAClusterAndOnlyUnderItsOwnOrg(t *testing.T) {
 // An org decides which of the clusters open to it its jobs use, its own or a shared one, and
 // decides it for itself alone.
 func TestAnOrgTurnsAClusterOffAndOnForItsOwnJobs(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	w.store.clusters[w.clusterA].ReportedID = "id-of-a"
 	w.ok("staff", "PATCH", "/orgs/"+w.orgA+"/clusters/"+w.clusterA, map[string]any{"shared": true}, http.StatusOK, nil)
 	enabled := func(caller, orgID string) map[string]bool {
 		t.Helper()
 		var listed struct {
-			Clusters []ListedCluster `json:"clusters"`
+			Clusters []accounts.ListedCluster `json:"clusters"`
 		}
 		w.ok(caller, "GET", "/orgs/"+orgID+"/clusters", nil, http.StatusOK, &listed)
 		out := map[string]bool{}
@@ -1154,7 +1155,7 @@ func TestAnOrgTurnsAClusterOffAndOnForItsOwnJobs(t *testing.T) {
 	// Org b turns the shared cluster of org a off, twice. It is told neither whose it is nor the
 	// key of its settings.
 	for range 2 {
-		var view ClusterView
+		var view accounts.ClusterView
 		rec := w.call("outsider", "POST", "/orgs/"+w.orgB+"/clusters/"+w.clusterA+"/disable", nil)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("disable a shared cluster: got = %d %s, want = 200", rec.Code, rec.Body)
@@ -1180,7 +1181,7 @@ func TestAnOrgTurnsAClusterOffAndOnForItsOwnJobs(t *testing.T) {
 	}
 
 	// An org turns its own cluster off too, with an API key of the whole org, and on again.
-	var own ClusterView
+	var own accounts.ClusterView
 	w.ok("org-key", "POST", "/orgs/"+w.orgA+"/clusters/"+w.clusterA+"/disable", nil, http.StatusOK, &own)
 	if own.Enabled || own.OrgID != w.orgA || own.ClusterID != "id-of-a" {
 		t.Fatalf("an org's own cluster turned off: got = %+v, want it off, with its owner and settings key", own)
@@ -1204,7 +1205,7 @@ func TestAnOrgTurnsAClusterOffAndOnForItsOwnJobs(t *testing.T) {
 }
 
 func TestTurningAClusterOffIsItsOrgsAdministratorsAlone(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	for _, verb := range []string{"disable", "enable"} {
 		for name, tc := range map[string]struct {
 			caller, org, cluster string
@@ -1234,12 +1235,12 @@ func TestTurningAClusterOffIsItsOrgsAdministratorsAlone(t *testing.T) {
 // The org that registered clusters orders them in one step. The platform's shared cluster comes
 // after all of them and nobody orders it.
 func TestAnOrgOrdersTheClustersItRegistered(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	path := "/orgs/" + w.orgA + "/clusters/order"
 	w.ok("owner", "POST", "/orgs/"+w.orgA+"/clusters", name{"name": "zz-last-by-name"}, http.StatusOK, nil)
 	w.ok("staff", "PATCH", "/orgs/"+w.orgB+"/clusters/"+w.clusterB, map[string]any{"shared": true}, http.StatusOK, nil)
 	var listed struct {
-		Clusters []ListedCluster `json:"clusters"`
+		Clusters []accounts.ListedCluster `json:"clusters"`
 	}
 	names := func() string {
 		out := make([]string, len(listed.Clusters))
@@ -1274,21 +1275,5 @@ func TestAnOrgOrdersTheClustersItRegistered(t *testing.T) {
 	}
 	if strings.Contains(w.call("member", "GET", "/orgs/"+w.orgA+"/clusters", nil).Body.String(), `"priority"`) {
 		t.Fatal("the list answers the number the order is kept as")
-	}
-}
-
-func TestLineageFollowsMintedByThroughAnyDepth(t *testing.T) {
-	keys := []*domain.APIKey{
-		{ID: "root"}, {ID: "child", MintedBy: "root"}, {ID: "grandchild", MintedBy: "child"},
-		{ID: "other"}, {ID: "others-child", MintedBy: "other"},
-	}
-	for root, want := range map[string]string{"root": "root,child,grandchild", "child": "child,grandchild", "grandchild": "grandchild", "other": "other,others-child", "missing": ""} {
-		ids := []string{}
-		for _, k := range lineage(keys, root) {
-			ids = append(ids, k.ID)
-		}
-		if got := strings.Join(ids, ","); got != want {
-			t.Errorf("lineage of %s: got = %q, want = %q", root, got, want)
-		}
 	}
 }

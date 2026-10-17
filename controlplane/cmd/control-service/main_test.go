@@ -22,7 +22,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/modelproxy"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/watch"
-	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 )
 
@@ -57,9 +56,6 @@ func testRouter(t *testing.T) chi.Router {
 		platformExperiments: platformExperiments,
 		hypotheses:          noHypotheses{},
 		launch:              launch,
-		accounts:            &accounts.Handler{},
-		agentTypes:          &accounts.AgentTypesHandler{},
-		repositories:        &accounts.Repositories{},
 		watch:               &watch.Handler{},
 		modelProxy:          modelProxy,
 	}, zap.NewNop())

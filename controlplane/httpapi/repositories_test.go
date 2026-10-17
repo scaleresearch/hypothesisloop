@@ -1,4 +1,4 @@
-package accounts
+package httpapi
 
 import (
 	"context"
@@ -21,6 +21,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost/github"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
@@ -259,7 +260,7 @@ type githubWorld struct {
 	*world
 	installations *memInstallations
 	app           *fakeApp
-	svc           *Repositories
+	svc           *accounts.Repositories
 	host          *github.Host
 }
 
@@ -268,19 +269,19 @@ type githubWorld struct {
 // GitHub App.
 func newGitHubWorld(t *testing.T, withApp bool) *githubWorld {
 	t.Helper()
-	w := &githubWorld{world: newWorld(t), app: newFakeApp()}
+	w := &githubWorld{world: newAccountsWorld(t), app: newFakeApp()}
 	w.installations = &memInstallations{memStore: w.store, connected: map[string][]*domain.OrgGitHubInstallation{}, states: map[string]memState{}}
 	w.app.now = w.store.now
 	access := auth.NewAccess(placement{memStore: w.store})
 	w.host = github.NewHost(w.installations, w.app, zap.NewNop())
-	app := GitHubApp(w.app)
+	app := accounts.GitHubApp(w.app)
 	if !withApp {
 		app = nil
 	}
-	w.svc = NewRepositories(w.installations, app, access, zap.NewNop())
+	w.svc = accounts.NewRepositories(w.installations, app, access, zap.NewNop())
 	router := authtest.Router(tokens{w.world})
 	doc := apidocs.New(router, "test", "1.0.0", "", access, zap.NewNop())
-	RegisterRepositoriesHuma(doc, w.svc)
+	RegisterRepositories(doc, w.svc)
 	w.router = router
 	return w
 }
@@ -299,7 +300,7 @@ func (w *githubWorld) connect(orgID string, installation github.Installation) {
 // begin starts an install for orgID as caller and returns its state.
 func (w *githubWorld) begin(caller, orgID string) string {
 	w.t.Helper()
-	var started InstallStart
+	var started accounts.InstallStart
 	w.ok(caller, "POST", "/orgs/"+orgID+"/github-install-states", map[string]any{"return_to": "/projects/p-1/experiments?new=1"}, http.StatusCreated, &started)
 	return started.State
 }
@@ -382,13 +383,13 @@ func TestWhoMayReachAnOrgsGitHub(t *testing.T) {
 // org's default as its first, and the person returned to the page they left.
 func TestAnInstallConnectsTheInstallationGitHubHandsBack(t *testing.T) {
 	w := newGitHubWorld(t, true)
-	var started InstallStart
+	var started accounts.InstallStart
 	w.ok("owner", "POST", "/orgs/"+w.orgA+"/github-install-states", map[string]any{"return_to": "/projects/p-1/experiments?new=1"}, http.StatusCreated, &started)
 	if started.State == "" || started.InstallURL != "https://github.test/apps/hypothesisloop/installations/new?state="+started.State || started.ExpiresAt.Before(w.store.clock.Add(14*time.Minute)) || started.ExpiresAt.After(w.store.clock.Add(16*time.Minute)) {
 		t.Fatalf("started = %+v, want a state, the install page carrying it, good for 15 minutes", started)
 	}
 	w.store.clock = w.store.clock.Add(time.Minute)
-	var finished InstallFinished
+	var finished accounts.InstallFinished
 	w.ok("owner", "POST", "/github/installations", finishBody(started.State, rival.ID), http.StatusCreated, &finished)
 	want := domain.OrgGitHubInstallation{OrgID: w.orgA, InstallationID: rival.ID, AccountLogin: "rival", AccountType: github.AccountOrganization, ConnectedActor: domain.Actor{Kind: domain.ActorUser, ID: "u-owner", Name: "Owner"}, Default: true}
 	if finished.Installation != nil {
@@ -430,22 +431,22 @@ func TestAnInstallIsRefusedUnlessItsStateAndItsInstallationProveIt(t *testing.T)
 		reason  string
 		says    string
 	}{
-		"a made-up state": {func(w *githubWorld) map[string]any { return finishBody("state-forged", acme.ID) }, "owner", 422, ReasonInstallStateInvalid, "Install GitHub App again"},
+		"a made-up state": {func(w *githubWorld) map[string]any { return finishBody("state-forged", acme.ID) }, "owner", 422, accounts.ReasonInstallStateInvalid, "Install GitHub App again"},
 		"a state used before": {func(w *githubWorld) map[string]any {
 			state := w.begin("owner", w.orgA)
 			w.ok("owner", "POST", "/github/installations", finishBody(state, rival.ID), http.StatusCreated, nil)
 			return finishBody(state, acme.ID)
-		}, "owner", 422, ReasonInstallStateInvalid, ""},
+		}, "owner", 422, accounts.ReasonInstallStateInvalid, ""},
 		"a state run out": {func(w *githubWorld) map[string]any {
 			state := w.begin("owner", w.orgA)
 			w.store.clock = w.store.clock.Add(15 * time.Minute)
 			return finishBody(state, acme.ID)
-		}, "owner", 422, ReasonInstallStateInvalid, ""},
-		"another person's state": {func(w *githubWorld) map[string]any { return finishBody(w.begin("owner", w.orgA), acme.ID) }, "org-key", 422, ReasonInstallStateInvalid, ""},
+		}, "owner", 422, accounts.ReasonInstallStateInvalid, ""},
+		"another person's state": {func(w *githubWorld) map[string]any { return finishBody(w.begin("owner", w.orgA), acme.ID) }, "org-key", 422, accounts.ReasonInstallStateInvalid, ""},
 		"an installation last changed before the state was issued": {func(w *githubWorld) map[string]any {
 			w.app.changed[acme.ID] = w.store.now().Add(-2 * time.Minute)
 			return finishBody(w.begin("owner", w.orgA), acme.ID)
-		}, "owner", 422, ReasonInstallationNotNew, "Acme"},
+		}, "owner", 422, accounts.ReasonInstallationNotNew, "Acme"},
 		"an installation that does not exist": {func(w *githubWorld) map[string]any { return finishBody(w.begin("owner", w.orgA), 999) }, "owner", 422, github.ReasonInstallationGone, "install"},
 		"a suspended installation": {func(w *githubWorld) map[string]any {
 			w.app.installationErr = github.ErrInstallationSuspended
@@ -455,8 +456,8 @@ func TestAnInstallIsRefusedUnlessItsStateAndItsInstallationProveIt(t *testing.T)
 			w.app.notGranted[acme.ID] = []string{"administration:write"}
 			return finishBody(w.begin("owner", w.orgA), acme.ID)
 		}, "owner", 422, github.ReasonPermissionMissing, "administration:write"},
-		"no installation": {func(w *githubWorld) map[string]any { return finishBody(w.begin("owner", w.orgA), 0) }, "owner", 422, ReasonInvalidRequest, ""},
-		"no state":        {func(w *githubWorld) map[string]any { return finishBody("", acme.ID) }, "owner", 422, ReasonInvalidRequest, ""},
+		"no installation": {func(w *githubWorld) map[string]any { return finishBody(w.begin("owner", w.orgA), 0) }, "owner", 422, accounts.ReasonInvalidRequest, ""},
+		"no state":        {func(w *githubWorld) map[string]any { return finishBody("", acme.ID) }, "owner", 422, accounts.ReasonInvalidRequest, ""},
 		"github rate limits": {func(w *githubWorld) map[string]any {
 			w.app.installationErr = fmt.Errorf("%w (%s)", github.ErrRateLimited, leak)
 			return finishBody(w.begin("owner", w.orgA), acme.ID)
@@ -479,7 +480,7 @@ func TestAnInstallIsRefusedUnlessItsStateAndItsInstallationProveIt(t *testing.T)
 
 	w := newGitHubWorld(t, true)
 	for _, returnTo := range []string{"", "settings", "//evil.example", "/\\evil.example", "/a\nb"} {
-		w.refused("owner", "POST", "/orgs/"+w.orgA+"/github-install-states", map[string]any{"return_to": returnTo}, http.StatusUnprocessableEntity, ReasonInvalidRequest)
+		w.refused("owner", "POST", "/orgs/"+w.orgA+"/github-install-states", map[string]any{"return_to": returnTo}, http.StatusUnprocessableEntity, accounts.ReasonInvalidRequest)
 	}
 	// An owner who is a member no more by the time GitHub returns connects nothing.
 	state := w.begin("owner", w.orgA)
@@ -517,8 +518,8 @@ func TestInstallationsAreListedPagedAndDisconnected(t *testing.T) {
 	}
 
 	w.ok("owner", "DELETE", path+"/100", nil, http.StatusNoContent, nil)
-	w.refused("owner", "DELETE", path+"/100", nil, http.StatusNotFound, ReasonNotFound)
-	w.refused("owner", "DELETE", path+"/999", nil, http.StatusNotFound, ReasonNotFound)
+	w.refused("owner", "DELETE", path+"/100", nil, http.StatusNotFound, accounts.ReasonNotFound)
+	w.refused("owner", "DELETE", path+"/999", nil, http.StatusNotFound, accounts.ReasonNotFound)
 	if len(w.installations.connected[w.orgA]) != 1 || len(w.installations.connected[w.orgB]) != 1 {
 		t.Fatalf("after disconnecting one: %d of org a and %d of org b, want one each", len(w.installations.connected[w.orgA]), len(w.installations.connected[w.orgB]))
 	}
@@ -536,9 +537,9 @@ func TestRepositoriesAreReadFromGitHubOnEveryCallAcrossTheOrgsInstallations(t *t
 	}
 	w.connect(w.orgA, acme)
 	w.connect(w.orgA, rival)
-	var found []Repository
+	var found []accounts.Repository
 	rec = w.call("member", "GET", path, nil)
-	want := []Repository{{"Acme/Model", 100, true}, {"acme/other", 100, false}, {"rival/secret", 200, true}}
+	want := []accounts.Repository{{Repository: "Acme/Model", InstallationID: 100, Private: true}, {Repository: "acme/other", InstallationID: 100, Private: false}, {Repository: "rival/secret", InstallationID: 200, Private: true}}
 	if err := json.Unmarshal(rec.Body.Bytes(), &found); err != nil || !slices.Equal(found, want) || rec.Header().Get("X-Total-Count") != "3" {
 		t.Fatalf("repositories = %s (total %q), want %+v sorted by name", rec.Body, rec.Header().Get("X-Total-Count"), want)
 	}
@@ -565,7 +566,7 @@ func TestRepositoriesAreReadFromGitHubOnEveryCallAcrossTheOrgsInstallations(t *t
 		"?limit=200&q=other": {[]string{"acme/other"}, "1"},
 	} {
 		rec := w.call("member", "GET", path+query, nil)
-		var page []Repository
+		var page []accounts.Repository
 		_ = json.Unmarshal(rec.Body.Bytes(), &page)
 		names := []string{}
 		for _, repo := range page {
@@ -614,10 +615,10 @@ func TestADeploymentWithoutAnAppAnswersSoAfterTheAccessCheck(t *testing.T) {
 		status                     int
 		reason                     string
 	}{
-		{"the app", "owner", "GET", "/github/app", nil, 503, ReasonGitHubNotConfigured},
-		{"start an install", "owner", "POST", org + "/github-install-states", map[string]any{"return_to": "/settings"}, 503, ReasonGitHubNotConfigured},
-		{"finish an install", "owner", "POST", "/github/installations", finishBody("state-1", 100), 503, ReasonGitHubNotConfigured},
-		{"repositories", "member", "GET", org + "/github-repositories", nil, 503, ReasonGitHubNotConfigured},
+		{"the app", "owner", "GET", "/github/app", nil, 503, accounts.ReasonGitHubNotConfigured},
+		{"start an install", "owner", "POST", org + "/github-install-states", map[string]any{"return_to": "/settings"}, 503, accounts.ReasonGitHubNotConfigured},
+		{"finish an install", "owner", "POST", "/github/installations", finishBody("state-1", 100), 503, accounts.ReasonGitHubNotConfigured},
+		{"repositories", "member", "GET", org + "/github-repositories", nil, 503, accounts.ReasonGitHubNotConfigured},
 	} {
 		message := w.refused(tc.caller, tc.method, tc.path, tc.body, tc.status, tc.reason)
 		if tc.status == 503 && !strings.Contains(message, "no GitHub App configured") {
@@ -760,7 +761,7 @@ func TestARepositoryIsReachableThroughTheInstallationsOfTheProjectsOrgAlone(t *t
 		"a repository the installation does not cover":       {w.projectA, "acme/unlisted", 422, github.ReasonRepositoryNotReachable},
 		"a name that is no repository":                       {w.projectA, "https://github.com/acme/model", 422, github.ReasonInvalidRepository},
 		"a path out of the api":                              {w.projectA, "acme/../../app", 422, github.ReasonInvalidRepository},
-		"a project that does not exist":                      {"prj-missing", "acme/model", 404, ReasonNotFound},
+		"a project that does not exist":                      {"prj-missing", "acme/model", 404, accounts.ReasonNotFound},
 	} {
 		named, err := w.host.Reachable(ctx, tc.project, tc.repository)
 		if named != "" || statusOf(err) != tc.status || reasonOf(err) != tc.reason {
@@ -812,7 +813,7 @@ func TestARepositoryIsCreatedOnTheAccountTheProjectsOrgConnected(t *testing.T) {
 		"github rate limits":              {w.projectA, github.ErrRateLimited, 503, github.ReasonUnavailable},
 		"github refuses for its own":      {w.projectA, &github.CreationFailedError{Status: 422, Message: "Repository creation failed."}, 502, github.ReasonRepositoryNotCreated},
 		"the App was removed on GitHub":   {w.projectA, github.ErrInstallationGone, 422, github.ReasonInstallationGone},
-		"a project that does not exist":   {"prj-missing", nil, 404, ReasonNotFound},
+		"a project that does not exist":   {"prj-missing", nil, 404, accounts.ReasonNotFound},
 	} {
 		w.app.createErr = tc.createErr
 		if named, err := w.host.Create(ctx, tc.project, "acme", "another", "", firstFiles); named != "" || statusOf(err) != tc.status || reasonOf(err) != tc.reason {
@@ -977,7 +978,7 @@ func TestTheOrgsDefaultAccountTakesANewRepositoryNoRequestPlaced(t *testing.T) {
 	}
 	path := func(id int64) string { return fmt.Sprintf("/orgs/%s/github-installations/%d/default", w.orgA, id) }
 	w.refused("member", "PUT", path(rival.ID), nil, http.StatusForbidden, "")
-	w.refused("owner", "PUT", path(carol.ID), nil, http.StatusNotFound, ReasonNotFound)
+	w.refused("owner", "PUT", path(carol.ID), nil, http.StatusNotFound, accounts.ReasonNotFound)
 	w.ok("owner", "PUT", path(rival.ID), nil, http.StatusNoContent, nil)
 	var listed []domain.OrgGitHubInstallation
 	w.ok("member", "GET", "/orgs/"+w.orgA+"/github-installations", nil, http.StatusOK, &listed)
@@ -1044,7 +1045,7 @@ func TestAConnectedInstallationIsCheckedWithGitHubOnRequest(t *testing.T) {
 	if message := w.refused("member", "GET", path, nil, http.StatusUnprocessableEntity, github.ReasonInstallationGone); !strings.Contains(message, "installs the App again") {
 		t.Errorf("an installation GitHub removed: %s, want what to do", message)
 	}
-	w.refused("member", "GET", fmt.Sprintf("/orgs/%s/github-installations/%d/check", w.orgA, rival.ID), nil, http.StatusNotFound, ReasonNotFound)
+	w.refused("member", "GET", fmt.Sprintf("/orgs/%s/github-installations/%d/check", w.orgA, rival.ID), nil, http.StatusNotFound, accounts.ReasonNotFound)
 	w.refused("member", "GET", fmt.Sprintf("/orgs/%s/github-installations/%d/check", w.orgB, acme.ID), nil, http.StatusNotFound, "")
 }
 

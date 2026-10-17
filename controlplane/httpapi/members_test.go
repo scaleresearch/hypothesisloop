@@ -1,4 +1,4 @@
-package accounts
+package httpapi
 
 import (
 	"encoding/json"
@@ -9,6 +9,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
 )
 
 // refusedWith makes a request that must be refused with the status and the reason.
@@ -22,11 +23,11 @@ func (w *world) refusedWith(caller, method, path string, body any, status int, r
 }
 
 func TestAnInviteBringsAPersonIntoTheOrgOnce(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	w.store.users["u-new"] = true
 	w.callers["newcomer"] = auth.Principal{Kind: auth.KindUser, UserID: "u-new", Name: "New"}
 
-	var created CreatedInvite
+	var created accounts.CreatedInvite
 	w.ok("owner", "POST", "/orgs/"+w.orgA+"/invites", name{"role": "member"}, http.StatusCreated, &created)
 	if !strings.HasPrefix(created.ID, "inv-") || !strings.HasPrefix(created.Token, "hli_") || created.OrgID != w.orgA ||
 		created.Role != domain.OrgRoleMember || created.Actor.ID != "u-owner" {
@@ -56,8 +57,8 @@ func TestAnInviteBringsAPersonIntoTheOrgOnce(t *testing.T) {
 	if joined.OrgID != w.orgA || joined.UserID != "u-new" || joined.Role != domain.OrgRoleMember {
 		t.Fatalf("accepted: got = %+v, want u-new a member of %s", joined, w.orgA)
 	}
-	w.refusedWith("outsider", "POST", "/invites/accept", name{"token": created.Token}, http.StatusConflict, ReasonInviteUsed)
-	w.refusedWith("owner", "DELETE", "/invites/"+created.ID, nil, http.StatusConflict, ReasonInviteUsed)
+	w.refusedWith("outsider", "POST", "/invites/accept", name{"token": created.Token}, http.StatusConflict, accounts.ReasonInviteUsed)
+	w.refusedWith("owner", "DELETE", "/invites/"+created.ID, nil, http.StatusConflict, accounts.ReasonInviteUsed)
 
 	rec = w.call("member", "GET", "/orgs/"+w.orgA+"/members?limit=2&offset=1", nil)
 	var members []domain.OrgMember
@@ -70,15 +71,15 @@ func TestAnInviteBringsAPersonIntoTheOrgOnce(t *testing.T) {
 }
 
 func TestAnInviteThatCannotBeAcceptedSaysWhy(t *testing.T) {
-	w := newWorld(t)
-	w.refusedWith("outsider", "POST", "/invites/accept", name{"token": "hli_never-issued"}, http.StatusNotFound, ReasonNotFound)
-	w.refusedWith("owner", "POST", "/invites/accept", name{"token": w.inviteToken}, http.StatusConflict, ReasonAlreadyMember)
+	w := newAccountsWorld(t)
+	w.refusedWith("outsider", "POST", "/invites/accept", name{"token": "hli_never-issued"}, http.StatusNotFound, accounts.ReasonNotFound)
+	w.refusedWith("owner", "POST", "/invites/accept", name{"token": w.inviteToken}, http.StatusConflict, accounts.ReasonAlreadyMember)
 	if got := w.store.invites[w.inviteA]; got.AcceptedAt != nil {
 		t.Fatal("an accept by someone already in the org used the invite up")
 	}
 
 	w.store.invites[w.inviteA].ExpiresAt = w.store.clock.Add(-time.Second)
-	w.refusedWith("outsider", "POST", "/invites/accept", name{"token": w.inviteToken}, http.StatusConflict, ReasonInviteExpired)
+	w.refusedWith("outsider", "POST", "/invites/accept", name{"token": w.inviteToken}, http.StatusConflict, accounts.ReasonInviteExpired)
 	var pending []domain.OrgInvite
 	w.ok("owner", "GET", "/orgs/"+w.orgA+"/invites", nil, http.StatusOK, &pending)
 	if len(pending) != 0 {
@@ -88,33 +89,33 @@ func TestAnInviteThatCannotBeAcceptedSaysWhy(t *testing.T) {
 	w.store.invites[w.inviteA].ExpiresAt = w.store.clock.Add(time.Hour)
 	w.ok("owner", "DELETE", "/invites/"+w.inviteA, nil, http.StatusNoContent, nil)
 	w.ok("owner", "DELETE", "/invites/"+w.inviteA, nil, http.StatusNoContent, nil)
-	w.refusedWith("outsider", "POST", "/invites/accept", name{"token": w.inviteToken}, http.StatusConflict, ReasonInviteRevoked)
+	w.refusedWith("outsider", "POST", "/invites/accept", name{"token": w.inviteToken}, http.StatusConflict, accounts.ReasonInviteRevoked)
 	if _, member := w.store.roles[w.orgA]["u-other"]; member {
 		t.Fatal("a refused accept made a member")
 	}
 }
 
 func TestABodyOrPageThatIsInvalidIsRefusedWithItsReason(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	before := snapshot(t, w.store)
-	w.refusedWith("owner", "POST", "/orgs/"+w.orgA+"/invites", name{"role": "admin"}, http.StatusUnprocessableEntity, ReasonInvalidRole)
-	w.refusedWith("owner", "PATCH", "/orgs/"+w.orgA+"/members/u-member", name{"role": ""}, http.StatusUnprocessableEntity, ReasonInvalidRole)
+	w.refusedWith("owner", "POST", "/orgs/"+w.orgA+"/invites", name{"role": "admin"}, http.StatusUnprocessableEntity, accounts.ReasonInvalidRole)
+	w.refusedWith("owner", "PATCH", "/orgs/"+w.orgA+"/members/u-member", name{"role": ""}, http.StatusUnprocessableEntity, accounts.ReasonInvalidRole)
 	for _, query := range []string{"limit=201", "limit=-1", "offset=-1"} {
-		w.refusedWith("owner", "GET", "/orgs/"+w.orgA+"/members?"+query, nil, http.StatusUnprocessableEntity, ReasonInvalidPage)
-		w.refusedWith("owner", "GET", "/orgs/"+w.orgA+"/invites?"+query, nil, http.StatusUnprocessableEntity, ReasonInvalidPage)
+		w.refusedWith("owner", "GET", "/orgs/"+w.orgA+"/members?"+query, nil, http.StatusUnprocessableEntity, accounts.ReasonInvalidPage)
+		w.refusedWith("owner", "GET", "/orgs/"+w.orgA+"/invites?"+query, nil, http.StatusUnprocessableEntity, accounts.ReasonInvalidPage)
 	}
-	w.refusedWith("owner", "PATCH", "/orgs/"+w.orgA+"/members/u-other", name{"role": "owner"}, http.StatusNotFound, ReasonNotFound)
-	w.refusedWith("owner", "DELETE", "/orgs/"+w.orgA+"/members/u-other", nil, http.StatusNotFound, ReasonNotFound)
+	w.refusedWith("owner", "PATCH", "/orgs/"+w.orgA+"/members/u-other", name{"role": "owner"}, http.StatusNotFound, accounts.ReasonNotFound)
+	w.refusedWith("owner", "DELETE", "/orgs/"+w.orgA+"/members/u-other", nil, http.StatusNotFound, accounts.ReasonNotFound)
 	if snapshot(t, w.store) != before {
 		t.Fatal("a refused request changed the store")
 	}
 }
 
 func TestAnOrgKeepsAnOwnerAndAMemberMayLeave(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	members := "/orgs/" + w.orgA + "/members/"
-	w.refusedWith("owner", "DELETE", members+"u-owner", nil, http.StatusConflict, ReasonLastOwner)
-	w.refusedWith("owner", "PATCH", members+"u-owner", name{"role": "member"}, http.StatusConflict, ReasonLastOwner)
+	w.refusedWith("owner", "DELETE", members+"u-owner", nil, http.StatusConflict, accounts.ReasonLastOwner)
+	w.refusedWith("owner", "PATCH", members+"u-owner", name{"role": "member"}, http.StatusConflict, accounts.ReasonLastOwner)
 
 	if rec := w.call("member", "DELETE", members+"u-owner", nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("a member removing the owner: got = %d %s, want = 403", rec.Code, rec.Body)
@@ -133,13 +134,13 @@ func TestAnOrgKeepsAnOwnerAndAMemberMayLeave(t *testing.T) {
 	if _, still := w.store.roles[w.orgA]["u-owner"]; still {
 		t.Fatal("the one who left is still a member")
 	}
-	w.refusedWith("member", "DELETE", members+"u-member", nil, http.StatusConflict, ReasonLastOwner)
+	w.refusedWith("member", "DELETE", members+"u-member", nil, http.StatusConflict, accounts.ReasonLastOwner)
 }
 
 // A member holds keys of one project and ends only their own.
 func TestAMemberMintsProjectKeysAndEndsTheirOwn(t *testing.T) {
-	w := newWorld(t)
-	var created CreatedAPIKey
+	w := newAccountsWorld(t)
+	var created accounts.CreatedAPIKey
 	w.ok("member", "POST", "/orgs/"+w.orgA+"/api-keys", name{"name": "mine", "project_id": w.projectA2}, http.StatusCreated, &created)
 	if created.Actor.ID != "u-member" || created.ProjectID != w.projectA2 {
 		t.Fatalf("a member's key: got = %+v, want it made by u-member for %s", created.APIKey, w.projectA2)

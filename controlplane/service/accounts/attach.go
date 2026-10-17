@@ -12,7 +12,8 @@ type AttachCommands struct {
 	BareMetal  string `json:"bare_metal" doc:"Run on the node. Installs the node's agent as a systemd unit, which starts jobs as containers with docker or podman."`
 }
 
-func attachCommands(registered RegisteredCluster) AttachCommands {
+// AttachCommandsFor are the commands that attach registered.
+func AttachCommandsFor(registered RegisteredCluster) AttachCommands {
 	return AttachCommands{Kubernetes: kubernetesCommand(registered), BareMetal: bareMetalCommand(registered)}
 }
 

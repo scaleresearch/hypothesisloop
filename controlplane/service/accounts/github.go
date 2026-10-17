@@ -10,14 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost/github"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
@@ -95,13 +93,13 @@ var errNoApp = refusal.Refuse(http.StatusServiceUnavailable, ReasonGitHubNotConf
 func gitHubRefusal(logger *zap.Logger, op string, err error, gone int) error {
 	switch {
 	case errors.Is(err, db.ErrOrgNotFound):
-		return notFound("org")
+		return refusal.NotFound("org")
 	case errors.Is(err, db.ErrGitHubInstallationNotFound):
-		return notFound("GitHub installation")
+		return refusal.NotFound("GitHub installation")
 	case errors.Is(err, db.ErrPlatformExperimentNotFound):
-		return notFound("platform experiment")
+		return refusal.NotFound("platform experiment")
 	case errors.Is(err, db.ErrGitHubInstallStateInvalid):
-		return invalid(ReasonInstallStateInvalid, "this return from GitHub does not match an install you started in the last 15 minutes, or it was used already: press Install GitHub App again")
+		return refusal.Invalid(ReasonInstallStateInvalid, "this return from GitHub does not match an install you started in the last 15 minutes, or it was used already: press Install GitHub App again")
 	}
 	return github.Refusal(logger, op, err, gone)
 }
@@ -125,7 +123,7 @@ func (r *Repositories) beginInstall(ctx context.Context, orgID, returnTo string)
 		return nil, err
 	}
 	if !inApp(returnTo) {
-		return nil, invalid(ReasonInvalidRequest, "return_to is a path of the UI: one leading slash, no second, no backslash or control character")
+		return nil, refusal.Invalid(ReasonInvalidRequest, "return_to is a path of the UI: one leading slash, no second, no backslash or control character")
 	}
 	actor := p.Actor()
 	if actor.ID == "" {
@@ -169,7 +167,7 @@ func (r *Repositories) finishInstall(ctx context.Context, state string, installa
 		return nil, err
 	}
 	if state == "" || installationID <= 0 {
-		return nil, invalid(ReasonInvalidRequest, "state and installation_id are required, as GitHub handed them back from the install")
+		return nil, refusal.Invalid(ReasonInvalidRequest, "state and installation_id are required, as GitHub handed them back from the install")
 	}
 	started, err := r.store.TakeGitHubInstallState(ctx, state, p.Actor())
 	if err != nil {
@@ -193,7 +191,7 @@ func (r *Repositories) finishInstall(ctx context.Context, state string, installa
 		return &InstallFinished{OrgID: started.OrgID, ReturnTo: started.ReturnTo, Installation: connected[i]}, nil
 	}
 	if live.ChangedAt.Before(started.IssuedAt.Add(-clockSkew)) {
-		return nil, invalid(ReasonInstallationNotNew, "GitHub says the App on "+live.AccountLogin+" was last changed before this install started, so nothing shows it was you who just installed it. "+
+		return nil, refusal.Invalid(ReasonInstallationNotNew, "GitHub says the App on "+live.AccountLogin+" was last changed before this install started, so nothing shows it was you who just installed it. "+
 			"On GitHub, change which repositories the App can reach there, or uninstall it and press Install GitHub App again")
 	}
 	installation := &domain.OrgGitHubInstallation{OrgID: started.OrgID, InstallationID: live.ID, AccountLogin: live.AccountLogin, AccountType: live.AccountType, ConnectedActor: p.Actor()}
@@ -257,198 +255,113 @@ func (r *Repositories) repositories(ctx context.Context, orgID, q string) ([]Rep
 	return out, nil
 }
 
-// RegisterRepositoriesHuma registers the GitHub operations on the shared API document.
-func RegisterRepositoriesHuma(doc *apidocs.Doc, r *Repositories) {
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
-		OperationID: "get-github-app", Method: "GET", Path: "/github/app",
-		Summary: "The platform's GitHub App", Tags: []string{"github"},
-		Description: "The GitHub addresses a browser needs for an org's repositories. new_repository_url is where a person creates a repository themselves. " +
-			"install_url is the App's install page; connecting an installation starts at POST /orgs/{id}/github-install-states, whose install_url carries the state. " +
-			"Answers 503 github_not_configured on a deployment that has no GitHub App.",
-	}, func(ctx context.Context, _ *struct{}) (*struct{ Body github.App }, error) {
-		if _, err := r.access.Account(ctx); err != nil {
-			return nil, err
-		}
-		app, err := r.app()
-		if err != nil {
-			return nil, err
-		}
-		return &struct{ Body github.App }{Body: app.App()}, nil
-	})
+// GitHubAddresses are the GitHub addresses of the platform's App a browser needs.
+type GitHubAddresses = github.App
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
-		OperationID: "create-github-install-state", Method: "POST", Path: "/orgs/{id}/github-install-states", DefaultStatus: http.StatusCreated,
-		Summary: "Start installing the platform's GitHub App for an org", Tags: []string{"github"},
-		Description: "For an owner of the org, as a user or an API key. Answers a state good once, for the caller, for 15 minutes, and install_url, GitHub's install page of the App carrying it. " +
-			"The person installs the App there on their own GitHub account or an organisation, or changes the repositories of an installation they made before. " +
-			"GitHub then sends them to the App's setup URL with state, installation_id and setup_action, and POST /github/installations connects the installation. " +
-			"return_to is the page of the UI the install starts from, handed back when it finishes. 422 invalid_request when it is not a path of the UI. 503 github_not_configured.",
-	}, func(ctx context.Context, in *struct {
-		ID   string `path:"id"`
-		Body struct {
-			ReturnTo string `json:"return_to" doc:"A path of the UI, as /settings."`
-		}
-	}) (*struct{ Body *InstallStart }, error) {
-		started, err := r.beginInstall(ctx, in.ID, in.Body.ReturnTo)
-		if err != nil {
-			return nil, gitHubRefusal(r.logger, "create-github-install-state", err, http.StatusUnprocessableEntity)
-		}
-		return &struct{ Body *InstallStart }{Body: started}, nil
-	})
-
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
-		OperationID: "create-github-installation", Method: "POST", Path: "/github/installations", DefaultStatus: http.StatusCreated,
-		Summary: "Connect the GitHub App installation an install made or changed", Tags: []string{"github"},
-		Description: "For the user or API key that started the install, while still an owner of its org. state and installation_id are what GitHub handed back to the setup URL. " +
-			"The state is taken once whatever the outcome. The installation is asked of GitHub as the App: it must exist, not be suspended, have granted every permission the App asks for, " +
-			"and have been made or changed after the state was issued. An installation the org connected before is answered as it is; a new one is connected, and is the org's default for new repositories when it is the org's first. " +
-			"account_type says whether the account is a person's own (User) or an organisation. " +
-			"422 install_state_invalid (made up, used, expired or another person's), installation_not_new (last changed before the install started), installation_gone, installation_suspended, " +
-			"github_permission_missing naming each permission missing as name:level. 502 github_failed, 503 github_not_configured.",
-	}, func(ctx context.Context, in *struct {
-		Body struct {
-			State          string `json:"state" doc:"The state of POST /orgs/{id}/github-install-states, as GitHub handed it back."`
-			InstallationID int64  `json:"installation_id" doc:"The installation GitHub handed back."`
-		}
-	}) (*struct{ Body *InstallFinished }, error) {
-		finished, err := r.finishInstall(ctx, in.Body.State, in.Body.InstallationID)
-		if err != nil {
-			return nil, gitHubRefusal(r.logger, "create-github-installation", err, http.StatusUnprocessableEntity)
-		}
-		return &struct{ Body *InstallFinished }{Body: finished}, nil
-	})
-
-	type installationsPage struct {
-		TotalCount int `header:"X-Total-Count" doc:"The installations the org connected, ignoring limit and offset."`
-		Body       []*domain.OrgGitHubInstallation
+// App is the platform's GitHub App, as a browser needs its addresses.
+func (r *Repositories) App(ctx context.Context) (GitHubAddresses, error) {
+	if _, err := r.access.Account(ctx); err != nil {
+		return github.App{}, err
 	}
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
-		OperationID: "list-github-installations", Method: "GET", Path: "/orgs/{id}/github-installations",
-		Summary: "List the GitHub App installations an org connected", Tags: []string{"github"},
-		Description: "For any member of the org, oldest first. What was recorded at connect: GitHub is not asked, so an installation removed there " +
-			"since still shows, and a platform experiment that names a repository of it is refused its git credential. " +
-			"account_type is User for a person's own account and Organization, and absent on an installation connected before " +
-			"the type was kept, until it is connected again.",
-	}, func(ctx context.Context, in *struct {
-		ID string `path:"id"`
-		Page
-	}) (*installationsPage, error) {
-		const op = "list-github-installations"
-		if _, err := r.access.OrgMember(ctx, in.ID); err != nil {
-			return nil, err
-		}
-		limit, offset, err := in.bounds()
-		if err != nil {
-			return nil, err
-		}
-		installations, err := r.store.ListGitHubInstallations(ctx, in.ID)
-		if err != nil {
-			return nil, gitHubRefusal(r.logger, op, err, http.StatusConflict)
-		}
-		return &installationsPage{TotalCount: len(installations), Body: pageOf(installations, limit, offset)}, nil
-	})
-
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
-		OperationID: "delete-github-installation", Method: "DELETE", Path: "/orgs/{id}/github-installations/{installation_id}", DefaultStatus: http.StatusNoContent,
-		Summary: "Disconnect a GitHub App installation from an org", Tags: []string{"github"},
-		Description: "For an owner of the org. No git credential is minted through it from then on: a platform experiment that names a repository of " +
-			"it keeps running, its agents and jobs can no longer clone, fetch or push once the credential they hold runs out, within the hour, and " +
-			"their next credential call answers 409 installation_not_connected. The App stays installed on GitHub: removing it there is the account " +
-			"owner's own step. 404 not_found when the org had not connected it.",
-	}, func(ctx context.Context, in *struct {
-		ID             string `path:"id"`
-		InstallationID int64  `path:"installation_id"`
-	}) (*struct{}, error) {
-		if err := r.disconnect(ctx, in.ID, in.InstallationID); err != nil {
-			return nil, gitHubRefusal(r.logger, "delete-github-installation", err, http.StatusConflict)
-		}
-		return &struct{}{}, nil
-	})
-
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
-		OperationID: "make-github-installation-default", Method: "PUT", Path: "/orgs/{id}/github-installations/{installation_id}/default", DefaultStatus: http.StatusNoContent,
-		Summary: "Make a GitHub installation where an org's new repositories are created", Tags: []string{"github"},
-		Description: "For an owner of the org. A platform experiment or draft that names neither repository nor repository_account has its repository created on this installation's account, " +
-			"in place of the default before. With one installation connected that one is used whether or not it is the default; with several and none the default, " +
-			"such a create is refused 422 repository_account_required. Disconnecting the default leaves none. 404 not_found when the org has not connected it.",
-	}, func(ctx context.Context, in *struct {
-		ID             string `path:"id"`
-		InstallationID int64  `path:"installation_id"`
-	}) (*struct{}, error) {
-		const op = "make-github-installation-default"
-		if _, err := r.access.OrgAdmin(ctx, in.ID); err != nil {
-			return nil, err
-		}
-		if err := r.store.MakeGitHubInstallationDefault(ctx, in.ID, in.InstallationID); err != nil {
-			return nil, gitHubRefusal(r.logger, op, err, http.StatusConflict)
-		}
-		return &struct{}{}, nil
-	})
-
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
-		OperationID: "check-github-installation", Method: "GET", Path: "/orgs/{id}/github-installations/{installation_id}/check", DefaultStatus: http.StatusNoContent,
-		Summary: "Check with GitHub that a connected installation still works", Tags: []string{"github"},
-		Description: "For any member of the org. Asks GitHub now whether the App is still installed on the account and has granted every permission the App asks for (app-manifest.json), " +
-			"the check a create runs on the account it creates on. 204 when it has. 422 installation_gone when GitHub removed it, installation_suspended when its owner suspended it, github_permission_missing naming what it has not granted, " +
-			"each with what to do. 404 not_found when the org has not connected it. 502 github_failed, 503 github_not_configured.",
-	}, func(ctx context.Context, in *struct {
-		ID             string `path:"id"`
-		InstallationID int64  `path:"installation_id"`
-	}) (*struct{}, error) {
-		const op = "check-github-installation"
-		if _, err := r.access.OrgMember(ctx, in.ID); err != nil {
-			return nil, err
-		}
-		app, err := r.app()
-		if err != nil {
-			return nil, err
-		}
-		connected, err := r.store.ListGitHubInstallations(ctx, in.ID)
-		if err != nil {
-			return nil, gitHubRefusal(r.logger, op, err, http.StatusUnprocessableEntity)
-		}
-		i := slices.IndexFunc(connected, func(one *domain.OrgGitHubInstallation) bool { return one.InstallationID == in.InstallationID })
-		if i < 0 {
-			return nil, notFound("GitHub installation")
-		}
-		if _, err := github.Installed(ctx, app, connected[i]); err != nil {
-			return nil, gitHubRefusal(r.logger, op, err, http.StatusUnprocessableEntity)
-		}
-		return &struct{}{}, nil
-	})
-
-	type repositoriesPage struct {
-		TotalCount int `header:"X-Total-Count" doc:"The repositories that match, ignoring limit and offset."`
-		Body       []Repository
+	app, err := r.app()
+	if err != nil {
+		return github.App{}, err
 	}
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
-		OperationID: "list-github-repositories", Method: "GET", Path: "/orgs/{id}/github-repositories",
-		Summary: "List the repositories an org's GitHub installations cover", Tags: []string{"github"},
-		Description: "For any member of the org: what a platform experiment of the org may name as its repository, sorted by name. q keeps the " +
-			"repositories whose owner/name contains it, whatever the casing. Nothing is kept between calls: each one asks GitHub for every " +
-			"repository of every connected installation, a hundred to a request, and pages the result here, so X-Total-Count is exact and a call " +
-			"costs as many GitHub requests as the installations hold hundreds of repositories. An installation removed on GitHub is left out. " +
-			"502 github_failed when GitHub answers 5xx or not at all for an installation, the message naming it and GitHub's answer. " +
-			"503 github_not_configured.",
-	}, func(ctx context.Context, in *struct {
-		ID string `path:"id"`
-		Q  string `query:"q" doc:"Text the repository's owner/name must contain."`
-		Page
-	}) (*repositoriesPage, error) {
-		const op = "list-github-repositories"
-		if _, err := r.access.OrgMember(ctx, in.ID); err != nil {
-			return nil, err
-		}
-		limit, offset, err := in.bounds()
-		if err != nil {
-			return nil, err
-		}
-		found, err := r.repositories(ctx, in.ID, in.Q)
-		if err != nil {
-			return nil, gitHubRefusal(r.logger, op, err, http.StatusConflict)
-		}
-		return &repositoriesPage{TotalCount: len(found), Body: pageOf(found, limit, offset)}, nil
-	})
+	return app.App(), nil
+}
+
+// BeginInstall starts an install of the App for orgID; see beginInstall.
+func (r *Repositories) BeginInstall(ctx context.Context, orgID, returnTo string) (*InstallStart, error) {
+	started, err := r.beginInstall(ctx, orgID, returnTo)
+	if err != nil {
+		return nil, gitHubRefusal(r.logger, "create-github-install-state", err, http.StatusUnprocessableEntity)
+	}
+	return started, nil
+}
+
+// FinishInstall connects the installation an install made or changed; see finishInstall.
+func (r *Repositories) FinishInstall(ctx context.Context, state string, installationID int64) (*InstallFinished, error) {
+	finished, err := r.finishInstall(ctx, state, installationID)
+	if err != nil {
+		return nil, gitHubRefusal(r.logger, "create-github-installation", err, http.StatusUnprocessableEntity)
+	}
+	return finished, nil
+}
+
+// Installations is one page of the installations orgID connected, and how many there are.
+func (r *Repositories) Installations(ctx context.Context, orgID string, page Page) ([]*domain.OrgGitHubInstallation, int, error) {
+	if _, err := r.access.OrgMember(ctx, orgID); err != nil {
+		return nil, 0, err
+	}
+	limit, offset, err := page.bounds()
+	if err != nil {
+		return nil, 0, err
+	}
+	installations, err := r.store.ListGitHubInstallations(ctx, orgID)
+	if err != nil {
+		return nil, 0, gitHubRefusal(r.logger, "list-github-installations", err, http.StatusConflict)
+	}
+	return pageOf(installations, limit, offset), len(installations), nil
+}
+
+// Disconnect takes an installation away from orgID.
+func (r *Repositories) Disconnect(ctx context.Context, orgID string, installationID int64) error {
+	if err := r.disconnect(ctx, orgID, installationID); err != nil {
+		return gitHubRefusal(r.logger, "delete-github-installation", err, http.StatusConflict)
+	}
+	return nil
+}
+
+// MakeDefault makes the installation where the new repositories of orgID are created.
+func (r *Repositories) MakeDefault(ctx context.Context, orgID string, installationID int64) error {
+	if _, err := r.access.OrgAdmin(ctx, orgID); err != nil {
+		return err
+	}
+	if err := r.store.MakeGitHubInstallationDefault(ctx, orgID, installationID); err != nil {
+		return gitHubRefusal(r.logger, "make-github-installation-default", err, http.StatusConflict)
+	}
+	return nil
+}
+
+// Check asks GitHub whether a connected installation of orgID still works.
+func (r *Repositories) Check(ctx context.Context, orgID string, installationID int64) error {
+	const op = "check-github-installation"
+	if _, err := r.access.OrgMember(ctx, orgID); err != nil {
+		return err
+	}
+	app, err := r.app()
+	if err != nil {
+		return err
+	}
+	connected, err := r.store.ListGitHubInstallations(ctx, orgID)
+	if err != nil {
+		return gitHubRefusal(r.logger, op, err, http.StatusUnprocessableEntity)
+	}
+	i := slices.IndexFunc(connected, func(one *domain.OrgGitHubInstallation) bool { return one.InstallationID == installationID })
+	if i < 0 {
+		return refusal.NotFound("GitHub installation")
+	}
+	if _, err := github.Installed(ctx, app, connected[i]); err != nil {
+		return gitHubRefusal(r.logger, op, err, http.StatusUnprocessableEntity)
+	}
+	return nil
+}
+
+// List is one page of the repositories the installations of orgID cover whose owner/name holds
+// q, and how many match.
+func (r *Repositories) List(ctx context.Context, orgID, q string, page Page) ([]Repository, int, error) {
+	if _, err := r.access.OrgMember(ctx, orgID); err != nil {
+		return nil, 0, err
+	}
+	limit, offset, err := page.bounds()
+	if err != nil {
+		return nil, 0, err
+	}
+	found, err := r.repositories(ctx, orgID, q)
+	if err != nil {
+		return nil, 0, gitHubRefusal(r.logger, "list-github-repositories", err, http.StatusConflict)
+	}
+	return pageOf(found, limit, offset), len(found), nil
 }
 
 func pageOf[T any](all []T, limit, offset int) []T {

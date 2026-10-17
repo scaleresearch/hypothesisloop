@@ -50,14 +50,6 @@ func NewHost(store InstallationStore, app AppClient, logger *zap.Logger) *Host {
 
 func (h *Host) URL(repository string) string { return CloneURL(repository) }
 
-func notFound(what string) *refusal.Refusal {
-	return refusal.Refuse(http.StatusNotFound, "not_found", what+" not found")
-}
-
-func invalid(reason, message string) *refusal.Refusal {
-	return refusal.Refuse(http.StatusUnprocessableEntity, reason, message)
-}
-
 // token mints a token for a repository through the installation the org of the project
 // connected on the account that owns it.
 func (h *Host) token(ctx context.Context, projectID, repository string, access Access) (*Token, error) {
@@ -66,7 +58,7 @@ func (h *Host) token(ctx context.Context, projectID, repository string, access A
 		return nil, err
 	}
 	if project == nil {
-		return nil, notFound("project")
+		return nil, refusal.NotFound("project")
 	}
 	if err := ValidRepository(repository); err != nil {
 		return nil, err
@@ -164,7 +156,7 @@ func (h *Host) createsOn(ctx context.Context, projectID, account string) (string
 		return "", nil, Refusal(h.logger, op, err, http.StatusUnprocessableEntity)
 	}
 	if project == nil {
-		return "", nil, notFound("project")
+		return "", nil, refusal.NotFound("project")
 	}
 	installations, err := h.store.ListGitHubInstallations(ctx, project.OrgID)
 	if err != nil {
@@ -215,7 +207,7 @@ func (h *Host) createsOn(ctx context.Context, projectID, account string) (string
 	case 1:
 		return project.OrgID, working[0], nil
 	}
-	return "", nil, invalid(ReasonRepositoryAccountRequired, "the org has connected several working GitHub accounts ("+strings.Join(logins, ", ")+") and made none the default for new repositories: say in repository_account which one the new repository is created on, or an owner of the org makes one the default in Settings, GitHub, or name a repository")
+	return "", nil, refusal.Invalid(ReasonRepositoryAccountRequired, "the org has connected several working GitHub accounts ("+strings.Join(logins, ", ")+") and made none the default for new repositories: say in repository_account which one the new repository is created on, or an owner of the org makes one the default in Settings, GitHub, or name a repository")
 }
 
 // unusable says GitHub removed or suspended an installation or it lacks a permission the App
@@ -248,9 +240,9 @@ func (h *Host) FileAt(ctx context.Context, projectID, repository, ref, path stri
 	case errors.Is(err, ErrFileNotFound):
 		return nil, githost.ErrFileNotFound
 	case errors.Is(err, ErrNotAFile):
-		return nil, invalid(ReasonUnreadableFile, path+" at "+ref+" is not a file")
+		return nil, refusal.Invalid(ReasonUnreadableFile, path+" at "+ref+" is not a file")
 	case errors.Is(err, ErrFileTooLarge):
-		return nil, invalid(ReasonUnreadableFile, path+" at "+ref+" is larger than the platform reads from a repository")
+		return nil, refusal.Invalid(ReasonUnreadableFile, path+" at "+ref+" is larger than the platform reads from a repository")
 	case err != nil:
 		return nil, Refusal(h.logger, op, err, http.StatusUnprocessableEntity)
 	}

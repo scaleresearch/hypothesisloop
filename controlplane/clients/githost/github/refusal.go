@@ -92,15 +92,15 @@ func Refusal(logger *zap.Logger, op string, err error, gone int) error {
 		logger.Error("github created a repository that is not the private one asked for", zap.String("operation", op), zap.Error(err))
 		return refusal.Refuse(http.StatusBadGateway, ReasonRepositoryNotCreated, "GitHub created the repository "+notAsAsked.Repository+", which is not the private repository asked for on the GitHub account the org connected, so nothing else was created. It is left on GitHub: its owner deletes it there, or makes it private and adds it to the installation, and the request names it in repository on the next try")
 	case errors.Is(err, ErrInvalidRepository):
-		return invalid(ReasonInvalidRepository, "repository must be owner/name, as in the repository's address on GitHub")
+		return refusal.Invalid(ReasonInvalidRepository, "repository must be owner/name, as in the repository's address on GitHub")
 	case errors.Is(err, ErrNoInstallation):
-		return invalid(ReasonGitHubNotConnected, "a platform experiment keeps its code in a GitHub repository, and the org has connected no GitHub account: an owner of the org installs the GitHub App on a GitHub account in Settings, GitHub, and the experiment then names a repository there or the platform creates one")
+		return refusal.Invalid(ReasonGitHubNotConnected, "a platform experiment keeps its code in a GitHub repository, and the org has connected no GitHub account: an owner of the org installs the GitHub App on a GitHub account in Settings, GitHub, and the experiment then names a repository there or the platform creates one")
 	case errors.As(err, &notPermitted):
 		accepted := ""
 		if notPermitted.Accepted != "" {
 			accepted = " GitHub takes for it one of the permissions " + strconv.Quote(notPermitted.Accepted) + "."
 		}
-		return invalid(ReasonRepositoryCreationNotPermitted, "GitHub does not let the platform's GitHub App create a repository on the GitHub account the org connected."+accepted+" The owner of the account accepts the App's permissions on GitHub and lets the App create repositories there, or creates a private repository on it, adds it to the installation when that covers selected repositories only, and the request names it in repository")
+		return refusal.Invalid(ReasonRepositoryCreationNotPermitted, "GitHub does not let the platform's GitHub App create a repository on the GitHub account the org connected."+accepted+" The owner of the account accepts the App's permissions on GitHub and lets the App create repositories there, or creates a private repository on it, adds it to the installation when that covers selected repositories only, and the request names it in repository")
 	case errors.Is(err, ErrRepositoryExists):
 		return refusal.Refuse(http.StatusConflict, ReasonRepositoryExists, "the GitHub account the org connected already has a repository of the name this platform experiment's would take: create it again, or name a repository")
 	case errors.As(err, &failed):
@@ -123,11 +123,11 @@ func Refusal(logger *zap.Logger, op string, err error, gone int) error {
 	case errors.Is(err, ErrPermissionNotGranted):
 		return refusal.Refuse(gone, ReasonPermissionMissing, "the GitHub App installation has not granted the access the App asks for: its owner accepts the App's permissions on GitHub (the account's Settings, Applications, Configure)")
 	case errors.Is(err, ErrFileNotFound):
-		return invalid(ReasonNoExperimentFile, "the repository has no "+domain.ExperimentFile+" on its default branch")
+		return refusal.Invalid(ReasonNoExperimentFile, "the repository has no "+domain.ExperimentFile+" on its default branch")
 	case errors.Is(err, ErrNotAFile):
-		return invalid(ReasonNoExperimentFile, domain.ExperimentFile+" on the repository's default branch is not a file")
+		return refusal.Invalid(ReasonNoExperimentFile, domain.ExperimentFile+" on the repository's default branch is not a file")
 	case errors.Is(err, ErrFileTooLarge):
-		return invalid(ReasonNoExperimentFile, domain.ExperimentFile+" is larger than the platform reads from a repository")
+		return refusal.Invalid(ReasonNoExperimentFile, domain.ExperimentFile+" is larger than the platform reads from a repository")
 	case errors.Is(err, ErrRateLimited):
 		logger.Warn("github is rate limiting the platform", zap.String("operation", op))
 		return refusal.Refuse(http.StatusServiceUnavailable, ReasonUnavailable, "GitHub is rate limiting the platform: try again shortly")

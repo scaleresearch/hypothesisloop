@@ -1,4 +1,4 @@
-package accounts
+package httpapi
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
@@ -154,7 +155,7 @@ func ownSettings() name {
 }
 
 func TestAnOrgsOwnerCopiesABuiltinAndEditsTheCopy(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	var copied domain.CurrentAgentType
 	w.ok("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"from": "generalist"}, http.StatusCreated, &copied)
 	generalist := w.agentTypes.types["generalist"]
@@ -162,24 +163,24 @@ func TestAnOrgsOwnerCopiesABuiltinAndEditsTheCopy(t *testing.T) {
 		copied.Current.Prompt != generalist.Current.Prompt || copied.Current.Settings.MaxSubagents != 4 || copied.CreatedBy == nil || copied.CreatedBy.ID != "u-owner" {
 		t.Fatalf("copy: got = %+v, want the generalist's prompt and settings in a type of org a made by its owner", copied)
 	}
-	var edited EditedAgentType
+	var edited accounts.EditedAgentType
 	w.ok("owner", "PUT", "/orgs/"+w.orgA+"/agent-types/"+copied.ID, name{"if_version": 1, "name": "Tuner", "prompt": ownPrompt, "settings": ownSettings()}, http.StatusOK, &edited)
 	if edited.CurrentVersion != 2 || edited.Name != "Tuner" || edited.Current.Prompt != ownPrompt || edited.Current.Settings.MaxSubagents != 3 || edited.Propagation.Version != 2 {
 		t.Fatalf("edit: got = %+v", edited)
 	}
-	w.refusedWith("owner", "PUT", "/orgs/"+w.orgA+"/agent-types/"+copied.ID, name{"if_version": 1, "name": "Tuner", "prompt": ownPrompt, "settings": ownSettings()}, http.StatusConflict, ReasonVersionConflict)
+	w.refusedWith("owner", "PUT", "/orgs/"+w.orgA+"/agent-types/"+copied.ID, name{"if_version": 1, "name": "Tuner", "prompt": ownPrompt, "settings": ownSettings()}, http.StatusConflict, accounts.ReasonVersionConflict)
 	var versions []domain.AgentTypeVersion
 	w.ok("member", "GET", "/orgs/"+w.orgA+"/agent-types/"+copied.ID+"/versions", nil, http.StatusOK, &versions)
 	if len(versions) != 2 {
 		t.Errorf("versions: got = %+v, want two", versions)
 	}
 	w.ok("outsider", "GET", "/orgs/"+w.orgB+"/agent-types/"+copied.ID+"/versions/1", nil, http.StatusNotFound, nil)
-	w.refusedWith("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"from": "generalist", "prompt": ownPrompt}, http.StatusUnprocessableEntity, ReasonInvalidAgentType)
+	w.refusedWith("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"from": "generalist", "prompt": ownPrompt}, http.StatusUnprocessableEntity, accounts.ReasonInvalidAgentType)
 	w.ok("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"from": copied.ID, "name": "Again"}, http.StatusCreated, nil)
 }
 
 func TestAPromptOrSettingsAnAgentCannotRunWithAreRefused(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	for what, body := range map[string]name{
 		"no rules":               {"name": "x", "role": "researcher", "prompt": "{{hl_commands}}", "settings": ownSettings()},
 		"a placeholder of none":  {"name": "x", "role": "researcher", "prompt": ownPrompt + "{{flavor_brief}}", "settings": ownSettings()},
@@ -189,8 +190,8 @@ func TestAPromptOrSettingsAnAgentCannotRunWithAreRefused(t *testing.T) {
 		"no name":                {"role": "researcher", "prompt": ownPrompt, "settings": ownSettings()},
 		"too many subagents":     {"name": "x", "role": "researcher", "prompt": ownPrompt, "settings": name{"max_subagents": 11, "effort": "high"}},
 	} {
-		if rec := w.call("owner", "POST", "/orgs/"+w.orgA+"/agent-types", body); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), ReasonInvalidAgentType) {
-			t.Errorf("%s: got = %d %s, want 422 %s", what, rec.Code, rec.Body, ReasonInvalidAgentType)
+		if rec := w.call("owner", "POST", "/orgs/"+w.orgA+"/agent-types", body); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), accounts.ReasonInvalidAgentType) {
+			t.Errorf("%s: got = %d %s, want 422 %s", what, rec.Code, rec.Body, accounts.ReasonInvalidAgentType)
 		}
 	}
 	var made domain.CurrentAgentType
@@ -203,10 +204,10 @@ func TestAPromptOrSettingsAnAgentCannotRunWithAreRefused(t *testing.T) {
 // An org makes researcher and baseline types only: a coordinator or a planner runs its built-in
 // type, whether asked for from scratch or as a copy.
 func TestAnOrgMakesNoCoordinatorOrPlannerType(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	for _, role := range []string{"coordinator", "planner"} {
-		w.refusedWith("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"name": "x", "role": role, "prompt": "{{rules}}\n{{hl_commands}}", "settings": ownSettings()}, http.StatusUnprocessableEntity, ReasonInvalidAgentType)
-		w.refusedWith("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"from": role}, http.StatusUnprocessableEntity, ReasonInvalidAgentType)
+		w.refusedWith("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"name": "x", "role": role, "prompt": "{{rules}}\n{{hl_commands}}", "settings": ownSettings()}, http.StatusUnprocessableEntity, accounts.ReasonInvalidAgentType)
+		w.refusedWith("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"from": role}, http.StatusUnprocessableEntity, accounts.ReasonInvalidAgentType)
 	}
 	w.ok("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"from": "baseline"}, http.StatusCreated, nil)
 }
@@ -214,18 +215,18 @@ func TestAnOrgMakesNoCoordinatorOrPlannerType(t *testing.T) {
 // A restore makes the next version hold an earlier one's prompt and settings; each change is kept
 // and every member reads them.
 func TestAnOwnerRestoresAnEarlierVersionAndEveryChangeIsKept(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	var made domain.CurrentAgentType
 	w.ok("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"name": "Mine", "role": "researcher", "prompt": ownPrompt, "settings": ownSettings()}, http.StatusCreated, &made)
 	w.ok("owner", "PUT", "/orgs/"+w.orgA+"/agent-types/"+made.ID, name{"if_version": 1, "name": "Mine", "prompt": ownPrompt + " Two.", "settings": ownSettings()}, http.StatusOK, nil)
-	var restored EditedAgentType
+	var restored accounts.EditedAgentType
 	w.ok("owner", "POST", "/orgs/"+w.orgA+"/agent-types/"+made.ID+"/restore", name{"version": 1}, http.StatusOK, &restored)
 	if restored.CurrentVersion != 3 || restored.Current.Prompt != ownPrompt || restored.Propagation.Version != 3 || restored.Propagation.Told != 1 {
 		t.Fatalf("restore: got = %+v, want version 3 holding version 1", restored)
 	}
 	w.ok("owner", "POST", "/orgs/"+w.orgA+"/agent-types/"+made.ID+"/restore", name{"version": 9}, http.StatusNotFound, nil)
 	w.ok("owner", "POST", "/orgs/"+w.orgA+"/agent-types/"+made.ID+"/restore", name{"version": 0}, http.StatusUnprocessableEntity, nil)
-	w.refusedWith("owner", "POST", "/orgs/"+w.orgA+"/agent-types/generalist/restore", name{"version": 1}, http.StatusForbidden, ReasonBuiltinReadOnly)
+	w.refusedWith("owner", "POST", "/orgs/"+w.orgA+"/agent-types/generalist/restore", name{"version": 1}, http.StatusForbidden, accounts.ReasonBuiltinReadOnly)
 	w.ok("member", "POST", "/orgs/"+w.orgA+"/agent-types/"+made.ID+"/restore", name{"version": 1}, http.StatusForbidden, nil)
 	w.ok("outsider", "POST", "/orgs/"+w.orgA+"/agent-types/"+made.ID+"/restore", name{"version": 1}, http.StatusNotFound, nil)
 	w.ok("owner", "POST", "/orgs/"+w.orgA+"/agent-types/"+made.ID+"/archive", nil, http.StatusOK, nil)
@@ -246,7 +247,7 @@ func TestAnOwnerRestoresAnEarlierVersionAndEveryChangeIsKept(t *testing.T) {
 // Only an org's administrators change its types: a member is refused every write and reads, and to
 // another org's people the org is not found.
 func TestOnlyAnOrgsAdministratorsChangeItsTypes(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	var made domain.CurrentAgentType
 	w.ok("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"name": "Mine", "role": "researcher", "prompt": ownPrompt, "settings": ownSettings()}, http.StatusCreated, &made)
 	base := "/orgs/" + w.orgA + "/agent-types"
@@ -261,18 +262,18 @@ func TestOnlyAnOrgsAdministratorsChangeItsTypes(t *testing.T) {
 		w.ok("member", "GET", path, nil, http.StatusOK, nil)
 		w.ok("outsider", "GET", path, nil, http.StatusNotFound, nil)
 	}
-	w.refusedWith("owner", "PUT", base+"/generalist", edit, http.StatusForbidden, ReasonBuiltinReadOnly)
-	w.refusedWith("owner", "POST", base+"/generalist/archive", nil, http.StatusForbidden, ReasonBuiltinReadOnly)
+	w.refusedWith("owner", "PUT", base+"/generalist", edit, http.StatusForbidden, accounts.ReasonBuiltinReadOnly)
+	w.refusedWith("owner", "POST", base+"/generalist/archive", nil, http.StatusForbidden, accounts.ReasonBuiltinReadOnly)
 }
 
 // The limits on an org's types and on the versions of one are refused with what they are.
 func TestTheLimitsOnAnOrgsTypesAreRefusedClearly(t *testing.T) {
-	w := newWorld(t)
+	w := newAccountsWorld(t)
 	var made domain.CurrentAgentType
 	w.ok("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"name": "Mine", "role": "researcher", "prompt": ownPrompt, "settings": ownSettings()}, http.StatusCreated, &made)
 	w.agentTypes.limit = &db.AgentTypeLimit{Types: true, Limit: domain.MaxOrgAgentTypes}
-	w.refusedWith("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"from": "generalist"}, http.StatusConflict, ReasonAgentTypeLimit)
+	w.refusedWith("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"from": "generalist"}, http.StatusConflict, accounts.ReasonAgentTypeLimit)
 	w.agentTypes.limit = &db.AgentTypeLimit{Limit: domain.MaxAgentTypeEditsAnHour}
-	w.refusedWith("owner", "PUT", "/orgs/"+w.orgA+"/agent-types/"+made.ID, name{"if_version": 1, "name": "x", "prompt": ownPrompt, "settings": ownSettings()}, http.StatusTooManyRequests, ReasonEditRateLimited)
-	w.refusedWith("owner", "POST", "/orgs/"+w.orgA+"/agent-types/"+made.ID+"/restore", name{"version": 1}, http.StatusTooManyRequests, ReasonEditRateLimited)
+	w.refusedWith("owner", "PUT", "/orgs/"+w.orgA+"/agent-types/"+made.ID, name{"if_version": 1, "name": "x", "prompt": ownPrompt, "settings": ownSettings()}, http.StatusTooManyRequests, accounts.ReasonEditRateLimited)
+	w.refusedWith("owner", "POST", "/orgs/"+w.orgA+"/agent-types/"+made.ID+"/restore", name{"version": 1}, http.StatusTooManyRequests, accounts.ReasonEditRateLimited)
 }

@@ -3,6 +3,7 @@ package refusal
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 )
@@ -63,4 +64,19 @@ func (p Problems) Err() error {
 		messages[i] = fmt.Sprintf("(%d) %s: %s", i+1, problem.Reason, problem.Message)
 	}
 	return &Refusal{status: p[0].status, Reason: p[0].Reason, Message: fmt.Sprintf("%d problems: %s", len(p), strings.Join(messages, "; ")), Problems: p}
+}
+
+// NotFound refuses what with 404 not_found.
+func NotFound(what string) *Refusal {
+	return Refuse(http.StatusNotFound, "not_found", what+" not found")
+}
+
+// Invalid refuses with 422 and reason.
+func Invalid(reason, message string) *Refusal {
+	return Refuse(http.StatusUnprocessableEntity, reason, message)
+}
+
+// Conflict refuses with 409 and reason.
+func Conflict(reason, message string) *Refusal {
+	return Refuse(http.StatusConflict, reason, message)
 }

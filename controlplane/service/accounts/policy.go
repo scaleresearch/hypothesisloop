@@ -2,11 +2,11 @@ package accounts
 
 import (
 	"context"
-
-	"github.com/danielgtaylor/huma/v2"
+	"net/http"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 )
 
 // policy says what an API key reaches among projects and keys. Who reads and who administers an
@@ -65,7 +65,7 @@ func (pol policy) createOrg(ctx context.Context, requestedOwner string) (ownerUs
 	case p.Kind == auth.KindStaff && requestedOwner != "":
 		return requestedOwner, nil
 	case p.UserID == "":
-		return "", huma.Error400BadRequest("owner_user_id is required: this token is no person")
+		return "", refusal.Reject(http.StatusBadRequest, "owner_user_id is required: this token is no person")
 	case requestedOwner != "" && requestedOwner != p.UserID:
 		return "", auth.Forbidden("forbidden: you can create an org only for yourself")
 	default:
