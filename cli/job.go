@@ -177,19 +177,6 @@ Every other field: $HL_REFERENCE/experiment-submission.yaml.`, stderr)
 	if body["submission_key"], err = submissionKey(body, *repeat); err != nil {
 		return fail(stderr, fmt.Errorf("job submit: %w", err))
 	}
-	// The reply repeats the submitted spec; only what the platform decided is printed, and
-	// whether the job's commit contains the run's best.
-	type submitted struct {
-		ID             string  `json:"id"`
-		Status         string  `json:"status,omitempty"`
-		CodeRef        string  `json:"code_ref,omitempty"`
-		Branch         string  `json:"branch,omitempty"`
-		CapacityTier   string  `json:"capacity_tier,omitempty"`
-		EstimatedHours float64 `json:"estimated_duration_hours,omitempty"`
-		EstimatedCost  float64 `json:"estimated_cost_acch,omitempty"`
-		SameHypothesis string  `json:"same_hypothesis,omitempty"`
-		NotOnBest      string  `json:"not_on_best,omitempty"`
-	}
 	var answer struct {
 		submitted
 		RunBest *runBest `json:"run_best"`
@@ -302,6 +289,20 @@ type jobBrief struct {
 	Theory             string          `json:"theory"`
 	EstimatedCost      float64         `json:"estimated_cost_acch"`
 	CreatedAt          string          `json:"created_at"`
+}
+
+// submitted is what hl job submit prints of the reply, which repeats the submitted spec: only
+// what the platform decided, and whether the job's commit contains the run's best.
+type submitted struct {
+	ID             string  `json:"id"`
+	Status         string  `json:"status,omitempty"`
+	CodeRef        string  `json:"code_ref,omitempty"`
+	Branch         string  `json:"branch,omitempty"`
+	CapacityTier   string  `json:"capacity_tier,omitempty"`
+	EstimatedHours float64 `json:"estimated_duration_hours,omitempty"`
+	EstimatedCost  float64 `json:"estimated_cost_acch,omitempty"`
+	SameHypothesis string  `json:"same_hypothesis,omitempty"`
+	NotOnBest      string  `json:"not_on_best,omitempty"`
 }
 
 // jobResult is what hl hypothesis get prints of a job unless told --full.
