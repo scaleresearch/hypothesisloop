@@ -414,10 +414,10 @@ WHERE platform_experiment_id = $1 GROUP BY 1`
 }
 
 // agentAtWork is the condition that the agent of agentRef in the platform experiment of peRef has
-// not ended: it neither finished nor was cut, and the platform experiment is not closed.
+// not ended: its run is not over (runEndSQL), and the platform experiment is not closed, which
+// also holds for a job no signup submitted.
 func agentAtWork(peRef, agentRef string) string {
-	return `NOT EXISTS (SELECT 1 FROM experiment_signups fin WHERE fin.platform_experiment_id = ` + peRef + ` AND fin.agent_id = ` + agentRef + ` AND fin.finished_at IS NOT NULL)
-	AND NOT EXISTS (SELECT 1 FROM platform_experiment_cuts cut WHERE cut.platform_experiment_id = ` + peRef + ` AND cut.agent_id = ` + agentRef + `)
+	return `NOT EXISTS (SELECT 1 FROM experiment_signups s WHERE s.platform_experiment_id = ` + peRef + ` AND s.agent_id = ` + agentRef + ` AND (` + runEndSQL + `) <> '')
 	AND NOT EXISTS (SELECT 1 FROM platform_experiments shut WHERE shut.id = ` + peRef + ` AND shut.status = 'closed')`
 }
 

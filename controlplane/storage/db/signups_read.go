@@ -61,12 +61,25 @@ WHERE platform_experiment_id = $1 AND agent_id = $2 AND finished_at IS NOT NULL)
 	return finished, nil
 }
 
+// The moments the run of signup s ended for each reason that ends one, NULL for a reason that
+// did not: its platform experiment closed, it was cut, it finished, or it is a planner whose
+// answer is stored and whose planner_ends_at passed.
+const (
+	runClosedAtSQL   = `(SELECT ended.closed_at FROM platform_experiments ended WHERE ended.id = s.platform_experiment_id AND ended.status = 'closed')`
+	runCutAtSQL      = `(SELECT cut.cut_at FROM platform_experiment_cuts cut WHERE cut.platform_experiment_id = s.platform_experiment_id AND cut.agent_id = s.agent_id)`
+	runFinishedAtSQL = `s.finished_at`
+	runPlannedAtSQL  = `(SELECT planned.planner_ends_at FROM platform_experiments planned WHERE planned.id = s.platform_experiment_id AND s.role = '` + string(domain.SignupRolePlanner) + `' AND planned.planner_ends_at <= now())`
+)
+
 // runEndSQL is why the run of signup s is over, a domain.RunEnd, empty while it goes on.
-const runEndSQL = `CASE WHEN (SELECT ended.status = 'closed' FROM platform_experiments ended WHERE ended.id = s.platform_experiment_id) THEN '` + string(domain.RunEndClosed) + `'
-            WHEN EXISTS (SELECT 1 FROM platform_experiment_cuts cut WHERE cut.platform_experiment_id = s.platform_experiment_id AND cut.agent_id = s.agent_id) THEN '` + string(domain.RunEndCut) + `'
-            WHEN s.finished_at IS NOT NULL THEN '` + string(domain.RunEndFinished) + `'
-            WHEN s.role = '` + string(domain.SignupRolePlanner) + `' AND (SELECT planned.planner_ends_at <= now() FROM platform_experiments planned WHERE planned.id = s.platform_experiment_id) THEN '` + string(domain.RunEndPlanned) + `'
+const runEndSQL = `CASE WHEN ` + runClosedAtSQL + ` IS NOT NULL THEN '` + string(domain.RunEndClosed) + `'
+            WHEN ` + runCutAtSQL + ` IS NOT NULL THEN '` + string(domain.RunEndCut) + `'
+            WHEN ` + runFinishedAtSQL + ` IS NOT NULL THEN '` + string(domain.RunEndFinished) + `'
+            WHEN ` + runPlannedAtSQL + ` IS NOT NULL THEN '` + string(domain.RunEndPlanned) + `'
             ELSE '' END`
+
+// runEndedAtSQL is when the run of signup s ended, the first of its ends, NULL while it goes on.
+const runEndedAtSQL = `LEAST(` + runClosedAtSQL + `, ` + runCutAtSQL + `, ` + runFinishedAtSQL + `, ` + runPlannedAtSQL + `)`
 
 // replacedSQL is whether the platform added a researcher in the place of signup s.
 const replacedSQL = `EXISTS (SELECT 1 FROM experiment_signups r WHERE r.platform_experiment_id = s.platform_experiment_id AND r.replaces = s.agent_id)`
@@ -76,11 +89,11 @@ const replacedSQL = `EXISTS (SELECT 1 FROM experiment_signups r WHERE r.platform
 // left. Each takes one of the places max_agents counts, and only they do: the one count of the
 // researchers a platform experiment has, for a signup and for a change of max_agents alike.
 const researcherAtWorkSQL = `s.role = '` + string(domain.SignupRoleCompetitor) + `' AND s.finished_at IS NULL AND NOT ` + stoppedSQL + `
-  AND NOT EXISTS (SELECT 1 FROM platform_experiment_cuts c WHERE c.platform_experiment_id = s.platform_experiment_id AND c.agent_id = s.agent_id)
+  AND ` + runCutAtSQL + ` IS NULL
   AND NOT ` + replacedSQL
 
 // endedReasonSQL is why signup s no longer holds a place among the researchers, empty while it does.
-const endedReasonSQL = `CASE WHEN EXISTS (SELECT 1 FROM platform_experiment_cuts c WHERE c.platform_experiment_id = s.platform_experiment_id AND c.agent_id = s.agent_id) THEN '` + string(domain.RunEndCut) + `'
+const endedReasonSQL = `CASE WHEN ` + runCutAtSQL + ` IS NOT NULL THEN '` + string(domain.RunEndCut) + `'
             WHEN ` + replacedSQL + ` THEN '` + domain.EndedReplaced + `'
             WHEN s.finished_at IS NOT NULL THEN '` + string(domain.RunEndFinished) + `'
             WHEN ` + stoppedSQL + ` THEN '` + domain.EndedStopped + `'
@@ -94,11 +107,7 @@ var agentSignupColumns = `s.platform_experiment_id, s.agent_id, COALESCE(a.name,
        ` + instanceColumns + `,
        s.finished_at, s.finished_reason, s.added_by_kind, s.added_by_id, s.replaces,
        COALESCE((SELECT r.agent_id FROM experiment_signups r WHERE r.platform_experiment_id = s.platform_experiment_id AND r.replaces = s.agent_id), ''),
-       ` + domain.InstanceReleasedSQL(`LEAST(
-           s.finished_at,
-           (SELECT ended.closed_at FROM platform_experiments ended WHERE ended.id = s.platform_experiment_id),
-           (SELECT cut.cut_at FROM platform_experiment_cuts cut WHERE cut.platform_experiment_id = s.platform_experiment_id AND cut.agent_id = s.agent_id),
-           (SELECT planned.planner_ends_at FROM platform_experiments planned WHERE planned.id = s.platform_experiment_id AND s.role = '`+string(domain.SignupRolePlanner)+`'))`) + `,
+       ` + domain.InstanceReleasedSQL(runEndedAtSQL) + `,
        ` + runEndSQL + `,
        COALESCE((SELECT cut.reason FROM platform_experiment_cuts cut WHERE cut.platform_experiment_id = s.platform_experiment_id AND cut.agent_id = s.agent_id), ''),
        (` + researcherAtWorkSQL + `), ` + endedReasonSQL

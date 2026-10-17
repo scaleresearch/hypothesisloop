@@ -18,3 +18,8 @@ type AgentStanding struct {
 	PlannerAnsweredAt *time.Time
 	FinishedAt        *time.Time
 }
+
+// RunOver is whether the agent's run ended, for any of the reasons that end one.
+func (s AgentStanding) RunOver() bool {
+	return s.ClosedAt != nil || s.CutAt != nil || s.PlannerAnsweredAt != nil || s.FinishedAt != nil
+}

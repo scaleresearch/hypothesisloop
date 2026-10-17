@@ -63,8 +63,7 @@ func (s *Store) SendAgentMessages(ctx context.Context, platformExpID string, to 
 		from := domain.MessageFrom(sender)
 		// The signups are locked so that two sends to one agent count each other.
 		rows, err := tx.Query(ctx, `
-SELECT s.agent_id, s.finished_at IS NOT NULL OR EXISTS (
-           SELECT 1 FROM platform_experiment_cuts c WHERE c.platform_experiment_id = s.platform_experiment_id AND c.agent_id = s.agent_id),
+SELECT s.agent_id, (`+runEndSQL+`) <> '',
        (SELECT array_agg(m.created_at ORDER BY m.created_at) FROM agent_messages m
         WHERE m.platform_experiment_id = s.platform_experiment_id AND m.agent_id = s.agent_id AND m.sender = $5
           AND m.created_at > now() - interval '1 hour')

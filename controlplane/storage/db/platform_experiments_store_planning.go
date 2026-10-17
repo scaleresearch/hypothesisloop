@@ -356,11 +356,8 @@ func (s *Store) AgentStanding(ctx context.Context, platformExpID, agentID string
 	t := &domain.Tenancy{PlatformExperimentID: platformExpID}
 	var out domain.AgentStanding
 	err := s.pool.pool.QueryRow(ctx, `
-SELECT pe.project_id, p.org_id, pe.shared, ARRAY(`+priorRuns+`), pe.closed_at,
-       s.agent_id IS NOT NULL,
-       (SELECT cut.cut_at FROM platform_experiment_cuts cut WHERE cut.platform_experiment_id = pe.id AND cut.agent_id = $2),
-       CASE WHEN s.role = '`+string(domain.SignupRolePlanner)+`' AND pe.planner_ends_at <= now() THEN pe.planner_ends_at END,
-       s.finished_at
+SELECT pe.project_id, p.org_id, pe.shared, ARRAY(`+priorRuns+`), `+runClosedAtSQL+`,
+       s.agent_id IS NOT NULL, `+runCutAtSQL+`, `+runPlannedAtSQL+`, `+runFinishedAtSQL+`
 FROM platform_experiments pe JOIN projects p ON p.id = pe.project_id
 LEFT JOIN experiment_signups s ON s.platform_experiment_id = pe.id AND s.agent_id = $2
 WHERE pe.id = $1 AND pe.removed_at IS NULL`, platformExpID, agentID).Scan(&t.ProjectID, &t.OrgID, &t.Shared, &t.PriorRuns, &out.ClosedAt,

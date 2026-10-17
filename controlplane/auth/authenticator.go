@@ -157,7 +157,7 @@ func (a *Authenticator) derived(ctx context.Context, token string) (Principal, e
 			return Principal{}, unauthenticated("agent %s finished in platform experiment %s", p.AgentID, p.PlatformExperimentID)
 		}
 		p = p.within(standing.Tenancy)
-		p.RunOver = standing.ClosedAt != nil || standing.CutAt != nil || standing.PlannerAnsweredAt != nil || standing.FinishedAt != nil
+		p.RunOver = standing.RunOver()
 	}
 	return p, nil
 }
