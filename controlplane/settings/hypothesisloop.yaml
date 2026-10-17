@@ -117,13 +117,13 @@ models:
 # here.
 #
 #   limit_minutes         how long the planner has to propose, from the goal and again from each
-#              revision. A draft with no proposal by then is closed and its machine released.
+#              change of it. A draft with no proposal by then is closed and its machine released.
 #   proposed_for_days     how long a proposal waits for a person before the draft is closed.
 #   planner_kept_minutes  how long the planner's machine is kept after its answer, so that a
-#              revision asked for in that time is answered by the planner that is still there,
+#              goal changed in that time is answered by the planner that is still there,
 #              with nothing to boot. It ends earlier at the planning limit the machine was
 #              rented with, and with the accept. After it no machine runs while the answer
-#              waits, and a revision starts one.
+#              waits, and a changed goal starts one.
 #   baseline_limit_minutes  the longest a platform experiment may stay open, counted from its
 #              starts_at (its creation or acceptance, or a later one stated). One created whole
 #              has all of it; an accepted draft has the baseline_minutes its planner estimated
@@ -137,7 +137,7 @@ models:
 #              baseline written from nothing writes its harness, waits for its environment to
 #              build and measures once, and a shorter window closes the run before it starts.
 #   auto_accept_seconds  how long a proposal waits before the platform accepts it as proposed,
-#              unless a person accepts it sooner, holds it to edit it, revises it or closes
+#              unless a person accepts it sooner, holds it to edit it, changes the goal or closes
 #              it. Its baseline agent's machine starts with the proposal, so measuring begins
 #              as the proposal is accepted. 0 leaves every proposal to a person.
 planning:

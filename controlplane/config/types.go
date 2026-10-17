@@ -319,7 +319,7 @@ type AnthropicModelsConfig struct {
 // PlanningConfig bounds a draft: a platform experiment being planned from one sentence by an
 // agent the platform runs, before a person accepts its proposal. The platform pays for its machine.
 type PlanningConfig struct {
-	// LimitMinutes is how long a planner has to propose, from the goal or from a revision.
+	// LimitMinutes is how long a planner has to propose, from the goal and again from each change of it.
 	LimitMinutes int `yaml:"limit_minutes"`
 	// BaselineLimitMinutes is how long a platform experiment, accepted from a draft or created
 	// whole, may stay open: one not running by then is closed. The run's length counts from its
@@ -331,11 +331,11 @@ type PlanningConfig struct {
 	MinBaselineMinutes int `yaml:"min_baseline_minutes"`
 	// ProposedForDays is how long a proposal waits for a person before the draft is closed.
 	ProposedForDays int `yaml:"proposed_for_days"`
-	// PlannerKeptMinutes is how long a planner's machine is kept after its answer, so that a
-	// revision asked for in that time reaches the planner that is still there.
+	// PlannerKeptMinutes is how long a planner's machine is kept after its answer, so that a goal
+	// changed in that time reaches the planner that is still there.
 	PlannerKeptMinutes int `yaml:"planner_kept_minutes"`
 	// AutoAcceptSeconds is how long a proposal waits before the platform accepts it as proposed,
-	// unless a person accepts it sooner, holds it to edit it, revises it or closes it. 0 leaves
+	// unless a person accepts it sooner, holds it to edit it, changes the goal or closes it. 0 leaves
 	// every proposal to a person.
 	AutoAcceptSeconds int `yaml:"auto_accept_seconds"`
 }

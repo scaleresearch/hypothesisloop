@@ -323,7 +323,7 @@ func (c *Config) build() error {
 		return fmt.Errorf("planning proposed_for_days is required and positive: how long a proposal waits for a person")
 	}
 	if c.Planning.PlannerKeptMinutes <= 0 {
-		return fmt.Errorf("planning planner_kept_minutes is required and positive: how long a planner's machine is kept after its answer for a revision asked for soon")
+		return fmt.Errorf("planning planner_kept_minutes is required and positive: how long a planner's machine is kept after its answer for a goal changed soon")
 	}
 	if c.Planning.AutoAcceptSeconds < 0 {
 		return fmt.Errorf("planning auto_accept_seconds is 0 or positive: how long a proposal waits before the platform accepts it as proposed, 0 for never")
