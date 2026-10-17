@@ -40,7 +40,7 @@ func registerExperimentImage(doc *Doc, experiments *platformexperiments.Service,
 			"Nothing of the image passes through the platform. 409 no_registry on a deployment that keeps none. " +
 			"The first asked for in an org has its repository created, off the request: until it is, 503 registry_preparing, and the same request a minute later gets the login. " +
 			"503 registry_unavailable when the registry's provider failed to issue it: ask again in a minute. " +
-			"`hl image credentials` prints it as environment variables.",
+			"In a sandbox hl answers podman as its credential helper, which asks for one with the sandbox's token on every push, so nobody logs in.",
 	}, a.credentials)
 }
 
