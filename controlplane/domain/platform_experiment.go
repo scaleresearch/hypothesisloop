@@ -461,13 +461,10 @@ func BaselineShare(budget float64) float64 {
 	return RoundHours(budget / 2)
 }
 
-// ParseSignupRole resolves a requested role. An empty string is the competitor default, so every
-// caller written before roles existed keeps meaning what it meant. Anything else unrecognized is
-// an error: defaulting a typo to competitor would silently rank an agent nobody meant to rank.
+// ParseSignupRole resolves a requested role. Anything unrecognized is an error: defaulting a typo
+// to competitor would silently rank an agent nobody meant to rank.
 func ParseSignupRole(s string) (SignupRole, error) {
 	switch SignupRole(s) {
-	case "":
-		return SignupRoleCompetitor, nil
 	case SignupRoleCompetitor, SignupRoleBaseline, SignupRoleReviewer:
 		return SignupRole(s), nil
 	}
