@@ -163,6 +163,12 @@ lib_render_settings() {
     echo "render-settings: .env sets IDENTITY_PROVIDER=${HL_IDENTITY_PROVIDER}; it is empty or supabase" >&2
     return 1
   fi
+  local ui_origin
+  ui_origin="$(lib_env_value UI_ORIGIN)"
+  if [[ -z "${ui_origin}" ]]; then
+    echo "render-settings: .env does not set UI_ORIGIN, the one browser origin allowed to call the API (.env.example says what it is)" >&2
+    return 1
+  fi
   # The local runtimes install the images `make images` pushes to the dev registry, under the
   # tag of this tree (make's own TAG when make runs this).
   local image_tag="${TAG:-}"
@@ -175,7 +181,7 @@ lib_render_settings() {
   sed -e "s|REPLACE-WITH-AGENT-IMAGE|${host_address}:5000/hypothesisloop-harness-base:${image_tag}|g" \
       -e "s|REPLACE-WITH-HOST-ADDRESS|${host_address}|g" \
       -e "s|REPLACE-WITH-IMAGE-TAG|${image_tag}|g" \
-      -e "s|REPLACE-WITH-UI-ORIGIN|http://localhost:3000|g" \
+      -e "s|REPLACE-WITH-UI-ORIGIN|${ui_origin}|g" \
       -e "s|^  registry_plain_http: false$|  registry_plain_http: true|" \
       -e "s|^  identity_providers: \[\]$|  identity_providers: [${providers}]|" \
       "${LIB_AUTH_REPO}/controlplane/settings/hypothesisloop.yaml" > "${output}"
