@@ -9,22 +9,19 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 type planningAPI struct {
-	experiments *platformexperiments.PlatformExperimentsService
-	access      *auth.Access
-	logger      *zap.Logger
+	platformExperimentsAPI
 }
 
 // RegisterPlanning registers the way from one sentence to a running platform experiment: a
 // draft, the planner's proposal, and the person's acceptance.
 func RegisterPlanning(doc *apidocs.Doc, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
-	a := planningAPI{experiments: experiments, access: doc.Access, logger: logger}
+	a := planningAPI{platformExperimentsAPI{experiments: experiments, access: doc.Access, logger: logger}}
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "put-decline", Method: "PUT", Path: "/platform-experiments/{id}/decline",
 		Summary: "Decline to propose, with the reason", Tags: []string{"platform-experiments"},
@@ -117,7 +114,7 @@ func (a planningAPI) putDecline(ctx context.Context, in *struct {
 	if err != nil {
 		return nil, planningRefusal(err)
 	}
-	return a.experiments.Answer(ctx, pe)
+	return a.answer(ctx, pe)
 }
 
 func (a planningAPI) reviseDraft(ctx context.Context, in *struct {
@@ -141,7 +138,7 @@ func (a planningAPI) reviseDraft(ctx context.Context, in *struct {
 	if err != nil {
 		return nil, err
 	}
-	return a.experiments.Answer(ctx, pe)
+	return a.answer(ctx, pe)
 }
 
 func (a planningAPI) acceptDraft(ctx context.Context, in *struct {
@@ -159,7 +156,7 @@ func (a planningAPI) acceptDraft(ctx context.Context, in *struct {
 	if err != nil {
 		return nil, planningRefusal(err)
 	}
-	return a.experiments.Answer(ctx, pe)
+	return a.answer(ctx, pe)
 }
 
 func (a planningAPI) holdDraft(ctx context.Context, in *struct {
@@ -172,7 +169,7 @@ func (a planningAPI) holdDraft(ctx context.Context, in *struct {
 	if err != nil {
 		return nil, err
 	}
-	return a.experiments.Answer(ctx, pe)
+	return a.answer(ctx, pe)
 }
 
 func (a planningAPI) putProposal(ctx context.Context, in *struct {
@@ -191,7 +188,7 @@ func (a planningAPI) putProposal(ctx context.Context, in *struct {
 	if err != nil {
 		return nil, planningRefusal(err)
 	}
-	return a.experiments.Answer(ctx, pe)
+	return a.answer(ctx, pe)
 }
 
 func (a planningAPI) createDraft(ctx context.Context, in *struct {
@@ -217,7 +214,7 @@ func (a planningAPI) createDraft(ctx context.Context, in *struct {
 	if err != nil {
 		return nil, err
 	}
-	return a.experiments.Answer(ctx, pe)
+	return a.answer(ctx, pe)
 }
 
 // planningRefusal answers the planner check and a draft that is gone as the API always has.

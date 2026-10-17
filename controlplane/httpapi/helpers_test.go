@@ -15,6 +15,8 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
+	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 // testExperiments is the platform experiments service over store, with nothing else wired.
@@ -62,4 +64,43 @@ func (catalogStore) AgentTypeCatalog(context.Context, string) (domain.AgentTypeC
 
 func (catalogStore) ProjectAgentTypeCatalog(context.Context, string) (domain.AgentTypeCatalog, error) {
 	return agenttypes.Catalog(), nil
+}
+
+// fakeStore is what the stores of these tests are made from: the built-in agent types are the
+// catalog of every platform experiment and project, and every other method is left to whoever
+// embeds it.
+type fakeStore struct {
+	platformexperiments.PlatformExperimentsStore
+}
+
+func (fakeStore) AgentTypeCatalog(context.Context, string) (domain.AgentTypeCatalog, error) {
+	return agenttypes.Catalog(), nil
+}
+
+func (fakeStore) ProjectAgentTypeCatalog(context.Context, string) (domain.AgentTypeCatalog, error) {
+	return agenttypes.Catalog(), nil
+}
+
+// registerPlatformExperiments registers the platform experiment operations and their budget reads.
+func registerPlatformExperiments(doc *apidocs.Doc, peh *platformexperiments.PlatformExperimentsService) {
+	RegisterPlatformExperiments(doc, peh, zap.NewNop())
+	RegisterPlatformExperimentBudget(doc, peh, zap.NewNop())
+}
+
+// platformexperimentstest.Settings is the platform settings a service of these tests applies and holds a create to.
+var testPlanning = platformexperiments.Planning{Limit: 30 * time.Minute, ProposedFor: 7 * 24 * time.Hour, PlannerKept: 10 * time.Minute, AutoAccept: 30 * time.Second}
+
+// reaching has the org of every project reach the given accelerator types and no other.
+func reaching(svc *platformexperiments.PlatformExperimentsService, types ...domain.AcceleratorType) *platformexperiments.PlatformExperimentsService {
+	reachable := map[string][]domain.Cluster{}
+	for _, t := range types {
+		reachable[string(t)] = []domain.Cluster{{Name: "k3s"}}
+	}
+	svc.WithReachable(func(context.Context, string) (map[string][]domain.Cluster, error) { return reachable, nil })
+	return svc
+}
+
+func newSignupTestService(t *testing.T, store platformexperiments.PlatformExperimentsStore) *platformexperiments.PlatformExperimentsService {
+	t.Helper()
+	return reaching(platformexperiments.NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), platformexperimentstest.NoUsage(t), 3*time.Minute), domain.CPUType)
 }

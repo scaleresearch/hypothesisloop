@@ -3,10 +3,12 @@ package platformexperiments
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
@@ -384,7 +386,7 @@ type CreatePlatformExperimentRequest struct {
 	AgentImage        string `json:"agent_image,omitempty" doc:"The image hosted agents and the coordinator run, built FROM the platform's agent image so the harness is in it. Empty is the platform's own."`
 	Continues         string `json:"continues,omitempty" doc:"The id of a closed platform experiment of the same project to carry on, which keeps its code in the repository this one names. Its baseline starts from the commit of that run's baseline job, so both are measured by the same harness. It keeps the metric keys and directions of that run: 422 invalid_metrics for others. Left out, it starts fresh. 422 invalid_continues for one that is no closed platform experiment of the project, keeps its code in another repository or declared no baseline."`
 
-	// coordinator is CoordinatorHosted resolved by the handler: which model.
+	// coordinator is CoordinatorHosted resolved by CreateExperiment: which model.
 	coordinator *domain.HostedCoordinator
 	// agents and signups are the agents created with it (hostedAgents), none without a hosted
 	// coordinator.
@@ -394,7 +396,7 @@ type CreatePlatformExperimentRequest struct {
 	maxHosted int
 	// createdBy is whose credential the request came with.
 	createdBy *domain.Actor
-	// repository is where it keeps its code, as the handler resolved the request's repository
+	// repository is where it keeps its code, as CreateExperiment resolved the request's repository
 	// and repository_account (chooseRepository).
 	repository RepositoryChoice
 
@@ -477,4 +479,119 @@ func (s *PlatformExperimentsService) stageProgress(ctx context.Context, pe *doma
 		return 0, fmt.Errorf("stages: observed usage for %s: %w", pe.ID, err)
 	}
 	return domain.StageProgress(consumed, pe.BudgetAcceleratorHours, pe.StartedAt, pe.EndsAt, time.Now().UTC()), nil
+}
+
+// MaxListLimit is the largest page List answers.
+const MaxListLimit = db.MaxPlatformExperimentListLimit
+
+// ValidListSort says whether List sorts by sort.
+func ValidListSort(sort string) bool {
+	return domain.ValidSortField(sort, db.PlatformExperimentSortFields)
+}
+
+// ListQuery is what List reads: the platform experiments in Scope, and the shared ones with
+// WithShared, of Status and holding Search, one page sorted by Sort. Shared, when set, keeps
+// only the shared ones or only the others.
+type ListQuery struct {
+	Scope      domain.TenantScope
+	WithShared bool
+	Status     string
+	Search     string
+	Limit      int
+	Offset     int
+	Sort       string
+	Shared     *bool
+}
+
+// List is one page of the platform experiments q reads, and how many it matches in all.
+func (s *PlatformExperimentsService) List(ctx context.Context, q ListQuery) ([]*domain.PlatformExperiment, int, error) {
+	filter := db.PlatformExperimentsFilter{
+		Scope:      q.Scope,
+		WithShared: q.WithShared,
+		Status:     q.Status,
+		Search:     q.Search,
+		Limit:      q.Limit,
+		Offset:     q.Offset,
+		Sort:       q.Sort,
+		Shared:     q.Shared,
+	}
+	pes, err := s.store.ListPlatformExperiments(ctx, filter)
+	if err != nil {
+		return nil, 0, auth.Internal(s.logger, "list platform experiments", err)
+	}
+	total, err := s.store.CountPlatformExperiments(ctx, filter)
+	if err != nil {
+		return nil, 0, auth.Internal(s.logger, "list platform experiments", err)
+	}
+	if pes == nil {
+		pes = []*domain.PlatformExperiment{}
+	}
+	return pes, total, nil
+}
+
+// Get reads the platform experiment id with its signed up agents, the prior runs of it reaches
+// says its reader reaches, its spend and the names of who acted on it.
+func (s *PlatformExperimentsService) Get(ctx context.Context, id string, reaches func(id string) bool) (*domain.PlatformExperiment, error) {
+	pe, err := s.store.GetPlatformExperiment(ctx, id)
+	if err != nil {
+		return nil, auth.Internal(s.logger, "get platform experiment", err, zap.String("id", id))
+	}
+	if pe == nil || pe.RemovedAt != nil {
+		return nil, ErrPlatformExperimentNotFound
+	}
+	signups, err := s.store.ListSignups(ctx, id)
+	if err != nil {
+		return nil, auth.Internal(s.logger, "get platform experiment", err, zap.String("id", id))
+	}
+	pe.SignedUpAgents = signups
+	pe.SignupCount = len(signups)
+	prior, err := s.store.PriorRuns(ctx, id)
+	if err != nil {
+		return nil, auth.Internal(s.logger, "get platform experiment", err, zap.String("id", id))
+	}
+	reached := prior[:0]
+	for _, id := range prior {
+		if reaches(id) {
+			reached = append(reached, id)
+		}
+	}
+	if pe.PriorRuns, err = s.PriorRuns(ctx, reached); err != nil {
+		return nil, auth.Internal(s.logger, "get platform experiment", err, zap.String("id", id))
+	}
+	if err := s.Spend(ctx, pe); err != nil {
+		return nil, auth.Internal(s.logger, "get platform experiment", err, zap.String("id", id))
+	}
+	if err := s.nameActors(ctx, pe); err != nil {
+		return nil, auth.Internal(s.logger, "get platform experiment", err, zap.String("id", id))
+	}
+	return pe, nil
+}
+
+// ErrNotSignedUp is an agent read on a platform experiment it is not signed up to.
+var ErrNotSignedUp = errors.New("agent is not signed up to this platform experiment")
+
+// AgentSignup reads the signup of agentID to the platform experiment id.
+func (s *PlatformExperimentsService) AgentSignup(ctx context.Context, id, agentID string) (*domain.AgentSignup, error) {
+	signup, err := s.store.GetAgentSignup(ctx, id, agentID)
+	if err != nil {
+		return nil, auth.Internal(s.logger, "get platform experiment signup", err, zap.String("id", id))
+	}
+	if signup == nil {
+		return nil, ErrNotSignedUp
+	}
+	return signup, nil
+}
+
+// ResearchersAtWork counts the researchers at work of the platform experiment id by agent type
+// and model.
+func (s *PlatformExperimentsService) ResearchersAtWork(ctx context.Context, id string) (map[domain.PoolKey]int, error) {
+	return s.store.ResearchersAtWork(ctx, id)
+}
+
+// GitURL is where the platform experiment id's repository is served by the control plane's proxy.
+func (s *PlatformExperimentsService) GitURL(id string) (string, error) {
+	if s.proxyURL == "" {
+		return "", errors.New("no git proxy address to name its repository at")
+	}
+	return domain.GitProxyURL(s.proxyURL, id), nil
 }

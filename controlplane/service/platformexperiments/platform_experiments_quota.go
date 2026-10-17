@@ -2,13 +2,18 @@ package platformexperiments
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
+	"go.uber.org/zap"
 )
 
 // GetAgentQuota returns an agent's allocation and current usage for a platform experiment, merging
@@ -287,4 +292,39 @@ func (s *PlatformExperimentsService) ReserveAdmittedFlavor(ctx context.Context, 
 
 func (s *PlatformExperimentsService) SetObservedUsage(ctx context.Context, exp *domain.Experiment, amounts map[domain.ResourceType]float64) error {
 	return s.usage.SetObservedBatch(ctx, exp.AgentID, exp.PlatformExperimentID, exp.ID, exp.CapacityTier, amounts)
+}
+
+// ErrNoQuota is an agent with no quota in an open platform experiment, of none or of no
+// platform experiment that is open.
+var ErrNoQuota = errors.New("no quota")
+
+// AgentQuota is the quota of agentID in the platform experiment id, read by reader. An agent with
+// none is refused with why: a planner has none, and an agent of an open platform experiment is
+// granted one when it starts.
+func (s *PlatformExperimentsService) AgentQuota(ctx context.Context, agentID, id string, reader auth.Principal) (*AgentQuotaView, error) {
+	aq, err := s.QuotaView(ctx, agentID, id)
+	if err != nil {
+		return nil, auth.Internal(s.logger, "get agent quota", err, zap.String("id", id))
+	}
+	if aq != nil {
+		return aq, nil
+	}
+	pe, err := s.store.GetPlatformExperiment(ctx, id)
+	if err != nil {
+		return nil, auth.Internal(s.logger, "get agent quota", err, zap.String("id", id))
+	}
+	signup, err := s.store.GetAgentSignup(ctx, id, agentID)
+	if err != nil {
+		return nil, auth.Internal(s.logger, "get agent quota", err, zap.String("id", id))
+	}
+	if signup != nil && signup.Role == domain.SignupRolePlanner {
+		return nil, refusal.Refuse(http.StatusNotFound, "planner_has_no_quota", "agent "+agentID+" is the planner of platform experiment "+id+": a planner submits no job, so it has no quota and needs none. The run's budget is the budget_accelerator_hours its proposal states (hl platform-experiments propose --help), sized against hl capacity, and it is shared among the researchers when the run starts")
+	}
+	if pe == nil || pe.Status != domain.PlatformExpOpen {
+		return nil, ErrNoQuota
+	}
+	if err := s.Describe(ctx, pe, reader); err != nil {
+		return nil, auth.Internal(s.logger, "get agent quota", err, zap.String("id", id))
+	}
+	return nil, refusal.Refuse(http.StatusNotFound, "quota_not_granted", "agent "+agentID+" holds no quota yet: it is granted when the platform experiment starts. "+pe.StatusReason.Message)
 }

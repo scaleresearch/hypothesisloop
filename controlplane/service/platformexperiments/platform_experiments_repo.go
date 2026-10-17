@@ -235,3 +235,23 @@ func decodeExperimentBase(data []byte) (CreatePlatformExperimentRequest, error) 
 	}
 	return base, nil
 }
+
+// ReadExperimentFile reads the experiment file of repository, or of the project's own when it is
+// empty, and creates nothing.
+func (s *PlatformExperimentsService) ReadExperimentFile(ctx context.Context, projectID, repository string) (*ExperimentFile, error) {
+	return s.experimentFile(ctx, projectID, repository)
+}
+
+// CheckRepository answers where a platform experiment of projectID naming repository on account
+// would keep its code, as its create would, and creates nothing.
+func (s *PlatformExperimentsService) CheckRepository(ctx context.Context, projectID, repository, account string) (RepositoryCheck, error) {
+	named, err := s.repositoryOf(ctx, projectID, repository, account)
+	if err != nil {
+		return RepositoryCheck{}, err
+	}
+	choice, err := s.chooseRepository(ctx, projectID, named, account)
+	if err != nil {
+		return RepositoryCheck{}, err
+	}
+	return RepositoryCheck{Repository: choice.Named, RepositoryURL: choice.URL, RepositoryAccount: choice.CreateOn}, nil
+}

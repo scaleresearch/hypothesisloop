@@ -65,9 +65,9 @@ func openAPISpec(t *testing.T) map[string]any {
 	launch := platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: "contract-test-signing-secret", MaxHosted: 20}
 	platformExperiments := platformexperiments.NewPlatformExperimentsService(nil, domain.QuotaConfig{}, zap.NewNop(), "", time.Minute).WithRepositories(worldRepositories{}).WithPlanning(worldPlanning).WithAgentLaunch(launch)
 	httpapi.RegisterAgents(doc, nil)
-	platformexperiments.RegisterHuma(doc, platformExperiments)
+	httpapi.RegisterPlatformExperiments(doc, platformExperiments, zap.NewNop())
 	httpapi.RegisterSituation(doc, nil, zap.NewNop())
-	platformexperiments.RegisterBudgetHuma(doc, platformExperiments)
+	httpapi.RegisterPlatformExperimentBudget(doc, platformExperiments, zap.NewNop())
 	httpapi.RegisterMessages(doc, nil, zap.NewNop())
 	httpapi.RegisterExperimentAgents(doc, nil, struct{ platformexperiments.Hypotheses }{}, launch, zap.NewNop())
 	httpapi.RegisterPlanning(doc, platformExperiments, zap.NewNop())

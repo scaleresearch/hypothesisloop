@@ -105,3 +105,8 @@ func hostedAgents(catalog domain.AgentTypeCatalog, researchers []ProposedAgent, 
 	}
 	return agents, signups, nil
 }
+
+// Hosting says whether the platform runs agents itself.
+func (s *PlatformExperimentsService) Hosting() Hosting {
+	return hostingOf(s.launch.Hosting)
+}

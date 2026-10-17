@@ -8,8 +8,6 @@ import (
 	"sort"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
@@ -30,16 +28,6 @@ func (s *PlatformExperimentsService) WithPlanning(planning Planning) *PlatformEx
 	}
 	s.planning = planning
 	return s
-}
-
-// caller is whose credential the request came with. Every route is authenticated before its
-// handler runs, so a request that reaches one with none is the platform's own failure.
-func (s *PlatformExperimentsService) caller(ctx context.Context) (auth.Principal, error) {
-	caller, ok := auth.FromContext(ctx)
-	if !ok {
-		return auth.Principal{}, auth.Internal(s.logger, "read the caller", errors.New("the request reached its handler with no principal"))
-	}
-	return caller, nil
 }
 
 // WithJobImages attaches the images the deployment offers a job to run in.
@@ -390,31 +378,6 @@ func buildClusterCapacity(available, total map[string]map[string]int64, podResou
 	return clusters
 }
 
-// Answer is the body of every route that answers one platform experiment, so each of them says
-// where it stands (Describe) as its reader is to read it.
-func (s *PlatformExperimentsService) Answer(ctx context.Context, pe *domain.PlatformExperiment) (*struct{ Body *domain.PlatformExperiment }, error) {
-	reader, err := s.caller(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.Describe(ctx, pe, reader); err != nil {
-		return nil, auth.Internal(s.logger, "describe platform experiment", err, zap.String("id", pe.ID))
-	}
-	atWork, err := s.store.ResearchersAtWork(ctx, pe.ID)
-	if err != nil {
-		return nil, auth.Internal(s.logger, "count researchers at work", err, zap.String("id", pe.ID))
-	}
-	counts := pe.Researchers.AtWorkOf(atWork)
-	pe.ResearchersAtWork = &counts
-	if pe.Repository != "" {
-		if s.proxyURL == "" {
-			return nil, auth.Internal(s.logger, "describe platform experiment", errors.New("no git proxy address to name its repository at"), zap.String("id", pe.ID))
-		}
-		pe.GitURL = domain.GitProxyURL(s.proxyURL, pe.ID)
-	}
-	return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
-}
-
 // WithAgentLaunch attaches what joining needs beyond the store.
 func (s *PlatformExperimentsService) WithAgentLaunch(launch AgentLaunch) *PlatformExperimentsService {
 	s.launch = launch
@@ -429,4 +392,14 @@ func (s *PlatformExperimentsService) refusal(op string, err error) error {
 		return refused
 	}
 	return auth.Internal(s.logger, op+" failed", err)
+}
+
+// ResourceCapacity is the live capacity of the clusters orgID's jobs can be placed on, or of
+// every cluster with every, and the images the deployment offers a job to run in.
+func (s *PlatformExperimentsService) ResourceCapacity(ctx context.Context, orgID string, every bool) ([]ClusterCapacity, []domain.JobImage, error) {
+	clusters, err := s.liveCapacity(ctx, orgID, every)
+	if err != nil {
+		return nil, nil, err
+	}
+	return clusters, s.jobImages, nil
 }

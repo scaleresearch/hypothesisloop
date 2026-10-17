@@ -4,24 +4,26 @@ import (
 	"context"
 
 	"github.com/danielgtaylor/huma/v2"
+	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
-// experimentAnswer is how a route answers one platform experiment.
-type experimentAnswer func(context.Context, *domain.PlatformExperiment) (*struct{ Body *domain.PlatformExperiment }, error)
-
 type sharingAPI struct {
 	sharing *platformexperiments.Sharing
-	answer  experimentAnswer
+	answer  func(context.Context, *domain.PlatformExperiment) (*struct{ Body *domain.PlatformExperiment }, error)
 }
 
 // RegisterSharing registers how staff share a platform experiment with every account and take
 // that back. The staff audience is the whole rule: what sharing lets a caller reach is
-// auth.Access's.
-func RegisterSharing(doc *apidocs.Doc, sharing *platformexperiments.Sharing, answer experimentAnswer) {
+// auth.Access's. A platform experiment is answered as its own routes answer it.
+func RegisterSharing(doc *apidocs.Doc, sharing *platformexperiments.Sharing, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
+	registerSharing(doc, sharing, platformExperimentsAPI{experiments: experiments, access: doc.Access, logger: logger}.answer)
+}
+
+func registerSharing(doc *apidocs.Doc, sharing *platformexperiments.Sharing, answer func(context.Context, *domain.PlatformExperiment) (*struct{ Body *domain.PlatformExperiment }, error)) {
 	a := sharingAPI{sharing: sharing, answer: answer}
 	apidocs.Register(doc, apidocs.AudienceStaff, huma.Operation{
 		OperationID: "share-platform-experiment", Method: "POST", Path: "/platform-experiments/{id}/share",

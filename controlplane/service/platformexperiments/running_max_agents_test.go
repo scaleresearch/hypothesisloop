@@ -106,3 +106,11 @@ func TestARunningExperimentTakesAMaxAgentsItsUnspentHoursHold(t *testing.T) {
 		}
 	}
 }
+
+// runningOnBaseline is pe-1 running on the baseline measuredBaseline declared.
+func runningOnBaseline() *domain.PlatformExperiment {
+	pe := openExperiment()
+	pe.Status = domain.PlatformExpRunning
+	pe.Description, pe.BaselineJobID, pe.JobEstimatedDurationHours = "Train train.py and report val_loss."+theMeasuredBlock, "job-1", 0.3
+	return pe
+}

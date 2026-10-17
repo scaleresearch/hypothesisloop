@@ -1,4 +1,4 @@
-package platformexperiments
+package httpapi
 
 import (
 	"context"
@@ -8,15 +8,17 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"go.uber.org/zap"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
+	"go.uber.org/zap"
 )
 
 type noExperimentStore struct{ fakeStore }
@@ -33,7 +35,7 @@ func TestQuotasOfAnUnknownPlatformExperimentAreNotFound(t *testing.T) {
 	r := authtest.Router(authtest.Staff)
 	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	svc := newSignupTestService(t, noExperimentStore{})
-	registerHuma(doc, svc.WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning))
+	registerPlatformExperiments(doc, svc.WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning))
 
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, authtest.Authorize(httptest.NewRequest(http.MethodGet, "/platform-experiments/unknown/quotas", nil)))
@@ -62,7 +64,7 @@ func TestThePlatformExperimentListRefusesAPageOverTheMaximum(t *testing.T) {
 	var read []int
 	r := authtest.Router(authtest.Staff)
 	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	registerHuma(doc, newSignupTestService(t, pagedExperiments{limits: &read}).WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning))
+	registerPlatformExperiments(doc, newSignupTestService(t, pagedExperiments{limits: &read}).WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning))
 
 	for _, list := range []string{"/platform-experiments"} {
 		for _, query := range []string{"limit=201", "limit=100000", "limit=-1", "offset=-1"} {
@@ -117,7 +119,7 @@ func TestCloseAndSummaryAnswerThePlatformExperimentAndRefuseByReason(t *testing.
 	placement := authtest.Placement{PlatformExperiments: map[string]domain.Tenancy{"pe-1": {PlatformExperimentID: "pe-1", ProjectID: "prj-a", OrgID: "org-a"}}}
 	r := authtest.Router(authtest.As(waitingPerson))
 	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
-	registerHuma(doc, svc.WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning))
+	registerPlatformExperiments(doc, svc.WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning))
 
 	if code, out := call(t, r, "PUT", "/platform-experiments/pe-1/summary", `{"summary":"what was found"}`); code != http.StatusOK || out["id"] != "pe-1" || out["summary"] != "what was found" {
 		t.Errorf("a summary: got = %d %v, want 200 and the platform experiment with it", code, out)
@@ -176,9 +178,8 @@ func TestResultsTheMetricsStoreRefusesAreAnInternalErrorAndNotNotFound(t *testin
 	defer metricsDB.Close()
 	r := authtest.Router(authtest.Staff)
 	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	svc := newSignupTestService(t, constraintResultsStore{})
-	svc.metricsDBURL = metricsDB.URL
-	registerHuma(doc, svc.WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning))
+	svc := reaching(platformexperiments.NewPlatformExperimentsService(constraintResultsStore{}, platformexperimentstest.Settings, zap.NewNop(), metricsDB.URL, 3*time.Minute), domain.CPUType)
+	registerPlatformExperiments(doc, svc.WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning))
 
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, authtest.Authorize(httptest.NewRequest(http.MethodGet, "/platform-experiments/pe-1/results", nil)))

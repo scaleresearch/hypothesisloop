@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"go.uber.org/zap"
 )
 
 // nextStage is the boundary a running platform experiment has ahead: when the stage after the
@@ -60,4 +62,73 @@ func (s *PlatformExperimentsService) nextStage(ctx context.Context, pe *domain.P
 		return nil, nil
 	}
 	return &nextStage{startsAt: startsAt, credit: credit, standing: standing}, nil
+}
+
+// Stages is where the platform experiment id stands on its ladder: the boundaries crossed, the
+// agents still in and those cut.
+func (s *PlatformExperimentsService) Stages(ctx context.Context, id string) (*StagesStatusResponse, error) {
+	pe, err := s.store.GetPlatformExperiment(ctx, id)
+	if err != nil {
+		return nil, auth.Internal(s.logger, "get stages", err, zap.String("id", id))
+	}
+	if pe == nil {
+		return nil, ErrPlatformExperimentNotFound
+	}
+	cuts, err := s.store.ListCutAgents(ctx, id)
+	if err != nil {
+		return nil, auth.Internal(s.logger, "get stages", err, zap.String("id", id))
+	}
+	if cuts == nil {
+		cuts = []domain.AgentCut{}
+	}
+	cutSet := make(map[string]bool, len(cuts))
+	for _, c := range cuts {
+		cutSet[c.AgentID] = true
+	}
+	advances, err := s.store.ListStageAdvances(ctx, id)
+	if err != nil {
+		return nil, auth.Internal(s.logger, "get stages", err, zap.String("id", id))
+	}
+	if advances == nil {
+		advances = []domain.StageAdvance{}
+	}
+	allSignups, err := s.store.ListParticipants(ctx, id)
+	if err != nil {
+		return nil, auth.Internal(s.logger, "get stages", err, zap.String("id", id))
+	}
+	activeAgents := []string{}
+	for _, a := range allSignups {
+		if !cutSet[a] {
+			activeAgents = append(activeAgents, a)
+		}
+	}
+	progress, err := s.stageProgress(ctx, pe)
+	if err != nil {
+		return nil, auth.Internal(s.logger, "get stages", err, zap.String("id", id))
+	}
+	return &StagesStatusResponse{
+		Stages:               pe.Stages,
+		CurrentStage:         pe.CurrentStage,
+		Progress:             progress,
+		NextBoundaryProgress: domain.BoundaryProgress(pe.Stages, pe.CurrentStage),
+		Advances:             advances,
+		ActiveAgents:         activeAgents,
+		CutAgents:            cuts,
+	}, nil
+}
+
+// StagesStatusResponse is the response body for GET /platform-experiments/{id}/stages.
+// Boundaries are published ahead so agents can plan. The cut line is not here; the standings
+// are public at GET /platform-experiments/{id}/results.
+type StagesStatusResponse struct {
+	Stages       []domain.Stage `json:"stages"`
+	CurrentStage int            `json:"current_stage"`
+	// Progress is max(budget_consumed / total_budget, elapsed / duration) — the single clock
+	// driving every boundary.
+	Progress             float64 `json:"progress"`
+	NextBoundaryProgress float64 `json:"next_boundary_progress"`
+	// Advances records each boundary already crossed and when.
+	Advances     []domain.StageAdvance `json:"advances"`
+	ActiveAgents []string              `json:"active_agents"`
+	CutAgents    []domain.AgentCut     `json:"cut_agents"`
 }

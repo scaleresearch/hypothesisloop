@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
@@ -241,4 +243,33 @@ func (s *PlatformExperimentsService) SetSummary(ctx context.Context, id, summary
 		return nil, fmt.Errorf("platform_experiments.SetSummary: %w", err)
 	}
 	return s.stored(ctx, id)
+}
+
+// Patch changes the platform experiment id as patch says, for caller. A coordinator's token is
+// handed to a machine the platform rents, so it changes the brief and declares the baseline, and
+// nothing a run's cost or length follows from.
+func (s *PlatformExperimentsService) Patch(ctx context.Context, id string, patch PlatformExperimentPatch, caller auth.Principal) (*domain.PlatformExperiment, error) {
+	if caller.Kind == auth.KindCoordinator {
+		if others := patch.carried("description", "baseline_job_id", "baseline_reason"); len(others) > 0 {
+			return nil, refusal.Refuse(http.StatusForbidden, "coordinator_changes_description_only", "a coordinator's token changes the description and the baseline (baseline_job_id, baseline_reason) and nothing else, and the body also carries: "+strings.Join(others, ", ")+". Leave them out")
+		}
+	}
+	by := caller.Actor()
+	patch.by = &by
+	if patch.Researchers != nil {
+		catalog, err := s.store.AgentTypeCatalog(ctx, id)
+		if err != nil {
+			return nil, s.refusal("update platform experiment", err)
+		}
+		resolved, err := s.resolvedPool(catalog, *patch.Researchers)
+		if err != nil {
+			return nil, err
+		}
+		patch.Researchers = &resolved
+	}
+	pe, err := s.Update(ctx, id, patch)
+	if err != nil {
+		return nil, s.refusal("update platform experiment", err)
+	}
+	return pe, nil
 }

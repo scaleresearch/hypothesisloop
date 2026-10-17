@@ -12,6 +12,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 )
@@ -334,4 +335,68 @@ func tooLong(field string, size int) string {
 
 func noPlatformExperiment(id string) error {
 	return refusal.Refuse(http.StatusNotFound, "not_found", "no platform experiment "+id)
+}
+
+// CreateExperiment creates the platform experiment req asks for, for by: in the repository it
+// names or one the platform creates, with what the experiment file states under req when it asks
+// from_repo, and with the hosted agents its pool names.
+func (s *PlatformExperimentsService) CreateExperiment(ctx context.Context, req CreatePlatformExperimentRequest, by domain.Actor) (*domain.PlatformExperiment, error) {
+	named, err := s.repositoryOf(ctx, req.ProjectID, req.Repository, req.RepositoryAccount)
+	if err != nil {
+		return nil, err
+	}
+	req.Repository = named
+	// Never the experiment file's to state, so it is held before the repository is read.
+	if err := s.checkLength(req.DurationHours); err != nil {
+		return nil, err
+	}
+	if err := domain.ValidateAgentImage(req.AgentImage); err != nil {
+		return nil, refusal.Refuse(http.StatusUnprocessableEntity, "invalid_agent_image", err.Error())
+	}
+	if req.FromRepo {
+		if req.Repository == "" {
+			return nil, refusal.Refuse(http.StatusUnprocessableEntity, "no_repository", "from_repo reads "+domain.ExperimentFile+" of the repository the request names, and it names none: set repository")
+		}
+		named := req.Repository
+		body, err := s.fromRepo(ctx, req)
+		body.Repository = named
+		if err != nil {
+			return nil, err
+		}
+		req = body
+	}
+	catalog, err := s.store.ProjectAgentTypeCatalog(ctx, req.ProjectID)
+	if err != nil {
+		return nil, auth.Internal(s.logger, "create platform experiment", err)
+	}
+	if req.Researchers, err = s.resolvedPool(catalog, req.Researchers); err != nil {
+		return nil, err
+	}
+	hosting, err := withHosting(req, s.launch)
+	if err != nil {
+		return nil, s.refusal("create platform experiment", err)
+	}
+	hosting.createdBy = &by
+	if hosting.CoordinatorHosted {
+		if hosting.agents, hosting.signups, err = hostedAgents(catalog, poolAgents(hosting.Researchers), by, time.Now().UTC()); err != nil {
+			return nil, s.refusal("create platform experiment", err)
+		}
+	}
+	if hosting.repository, err = s.chooseRepository(ctx, req.ProjectID, hosting.Repository, req.RepositoryAccount); err != nil {
+		return nil, err
+	}
+	pe, err := s.Create(ctx, hosting)
+	// What is wrong with a body laid over the experiment file may be the file's doing.
+	var refused *refusal.Refusal
+	if req.FromRepo && errors.As(err, &refused) {
+		return nil, refusal.Refuse(refused.GetStatus(), refused.Reason, "with "+domain.ExperimentFile+" of the repository under the request: "+refused.Message)
+	}
+	var answered interface{ GetStatus() int }
+	if errors.As(err, &answered) {
+		return nil, err
+	}
+	if err != nil {
+		return nil, auth.Internal(s.logger, "create platform experiment", err)
+	}
+	return pe, nil
 }

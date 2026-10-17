@@ -19,7 +19,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
@@ -35,27 +34,6 @@ func measuredBaseline() *platformexperiments.Baseline {
 			AcceleratorType: "h100", AcceleratorCount: 2, EstimatedDurationHours: 5},
 		OwnerRole: domain.SignupRoleBaseline, Finding: true, Reported: map[string]float64{"val_loss": 1.8, "exact_match": 1}, ObservedHours: 0.2,
 	}
-}
-
-// fakeStore is what the stores of these tests are made from: the built-in agent types are the
-// catalog of every platform experiment and project, and every other method is left to whoever
-// embeds it.
-type fakeStore struct {
-	platformexperiments.PlatformExperimentsStore
-}
-
-func (fakeStore) AgentTypeCatalog(context.Context, string) (domain.AgentTypeCatalog, error) {
-	return agenttypes.Catalog(), nil
-}
-
-func (fakeStore) ProjectAgentTypeCatalog(context.Context, string) (domain.AgentTypeCatalog, error) {
-	return agenttypes.Catalog(), nil
-}
-
-// registerHuma registers the platform experiment operations this package still holds.
-func registerHuma(doc *apidocs.Doc, peh *platformexperiments.PlatformExperimentsService) {
-	platformexperiments.RegisterHuma(doc, peh)
-	platformexperiments.RegisterBudgetHuma(doc, peh)
 }
 
 // planningRouter is the planning routes and the ones a draft passes through, over store.
@@ -80,7 +58,7 @@ func planningRouter(t *testing.T, store platformexperiments.PlatformExperimentsS
 	if drafts, ok := store.(*draftStore); ok {
 		svc.WithReachable(func(context.Context, string) (map[string][]domain.Cluster, error) { return drafts.reachable, nil })
 	}
-	registerHuma(doc, handler)
+	registerPlatformExperiments(doc, handler)
 	RegisterPlanning(doc, handler, zap.NewNop())
 	return svc, func(method, path string, body any) (int, map[string]any) {
 		t.Helper()
@@ -1424,9 +1402,6 @@ func TestTheReadOfAPlatformExperimentListsThePriorRunsItsCallerReaches(t *testin
 	}
 }
 
-// platformexperimentstest.Settings is the platform settings a service of these tests applies and holds a create to.
-var testPlanning = platformexperiments.Planning{Limit: 30 * time.Minute, ProposedFor: 7 * 24 * time.Hour, PlannerKept: 10 * time.Minute, AutoAccept: 30 * time.Second}
-
 const hostingMaxHosted = 4
 
 // fakeRepositories is GitHub as the org of each project reaches it: files holds, by project, the
@@ -1702,4 +1677,29 @@ type plannerListed struct{ *draftStore }
 
 func (s plannerListed) ListAgentSignups(_ context.Context, id string) ([]domain.AgentSignup, error) {
 	return []domain.AgentSignup{s.signups[id]}, nil
+}
+
+// A declaration the platform makes is refused as a coordinator's is. The finish still stands, the
+// experiment says what the declaration was refused for, and the owner's change that clears it is
+// the request that declares the job and starts the run.
+func TestADeclarationThePlatformIsRefusedWaitsForTheOwnerAndIsMadeByTheirChange(t *testing.T) {
+	finished := time.Now().UTC()
+	pe := openExperiment()
+	pe.BudgetAcceleratorHours, pe.BaselineDueAt = 1, time.Now().UTC().Add(time.Hour)
+	measured := measuredBaseline()
+	store, patch := declareAPI(t, pe, measured, auth.Principal(ownerOfA))
+	store.researchers = []string{"ag-1", "ag-2"}
+	store.baselines = []domain.AgentSignup{{AgentID: "ag-baseline", Name: "Baseline 1", Role: domain.SignupRoleBaseline, FinishedAt: &finished}}
+	store.left = []*domain.Experiment{measured.Job}
+
+	code, out := patch(map[string]any{"description": "Train train.py and report val_loss, on the small split."})
+	why, _ := out["status_reason"].(map[string]any)
+	if code != http.StatusOK || out["status"] != "open" || store.created[0].BaselineJobID != "" || why["reason"] != "budget_below_baseline" ||
+		!strings.Contains(why["message"].(string), "the platform did not declare job job-1") {
+		t.Fatalf("a change that clears nothing: got = %d %v, want it open, nothing declared and budget_below_baseline", code, out["status_reason"])
+	}
+	code, out = patch(map[string]any{"budget_accelerator_hours": 8})
+	if code != http.StatusOK || out["status"] != "running" || store.created[0].BaselineJobID != "job-1" || store.started != 1 {
+		t.Fatalf("the owner raising the budget: got = %d %v with baseline %q and %d starts, want job-1 declared and the run started", code, out, store.created[0].BaselineJobID, store.started)
+	}
 }

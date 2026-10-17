@@ -2,16 +2,9 @@ package platformexperiments
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"slices"
-	"strings"
-	"testing"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
-	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
@@ -124,12 +117,6 @@ func (f *rosterStore) ListSignups(context.Context, string) ([]string, error) {
 		ids = append(ids, s.AgentID)
 	}
 	return ids, nil
-}
-
-// machines is what the platform rents for the experiment at once, with more of them added.
-func (f *rosterStore) machines(more ...domain.AgentSignup) int {
-	measuring, others := f.rented(more...)
-	return measuring + others
 }
 
 // rented counts the machines as the store does: an agent that finished holds none, and those
@@ -297,48 +284,6 @@ func (f *rosterStore) RemoveAgent(_ context.Context, _, agentID string, _ func(c
 	}
 	return domain.ErrNotSignedUp
 }
-
-var agentsTestPlacement = authtest.Placement{
-	PlatformExperiments: map[string]domain.Tenancy{
-		"pe-1": {PlatformExperimentID: "pe-1", ProjectID: "project-a", OrgID: "org-a"},
-	},
-	Agents: map[string]string{"veteran": "org-a", "dana": "org-a", "outsider": "org-b"},
-}
-
-func call(t *testing.T, r http.Handler, method, path, body string) (int, map[string]any) {
-	t.Helper()
-	var req *http.Request
-	if body == "" {
-		req = httptest.NewRequest(method, path, nil)
-	} else {
-		req = httptest.NewRequest(method, path, strings.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-	}
-	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, authtest.Authorize(req))
-	out := map[string]any{}
-	if rec.Body.Len() > 0 {
-		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-			t.Fatalf("%s %s: body %q is not JSON: %v", method, path, rec.Body, err)
-		}
-	}
-	return rec.Code, out
-}
-
-func joined(t *testing.T, body map[string]any) []map[string]any {
-	t.Helper()
-	list, ok := body["agents"].([]any)
-	if !ok {
-		t.Fatalf("answer has no agents list: %v", body)
-	}
-	out := make([]map[string]any, len(list))
-	for i, a := range list {
-		out[i] = a.(map[string]any)
-	}
-	return out
-}
-
-var staff = auth.Principal{Kind: auth.KindStaff}
 
 // FinishAgent refuses as the store does: an agent finishes in a running platform experiment, and
 // one of role baseline also in an open one.

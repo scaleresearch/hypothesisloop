@@ -11,7 +11,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
@@ -367,27 +366,26 @@ func TestOnlyAJobHoldingTheConstraintsMakesADeclarationWeak(t *testing.T) {
 	}
 }
 
-// A declaration the platform makes is refused as a coordinator's is. The finish still stands, the
-// experiment says what the declaration was refused for, and the owner's change that clears it is
-// the request that declares the job and starts the run.
-func TestADeclarationThePlatformIsRefusedWaitsForTheOwnerAndIsMadeByTheirChange(t *testing.T) {
-	finished := time.Now().UTC()
-	pe := openExperiment()
-	pe.BudgetAcceleratorHours, pe.BaselineDueAt = 1, time.Now().UTC().Add(time.Hour)
-	measured := measuredBaseline()
-	store, patch := declareAPI(t, pe, measured, auth.Principal(ownerOfA))
-	store.researchers = []string{"ag-1", "ag-2"}
-	store.baselines = []domain.AgentSignup{{AgentID: "ag-baseline", Name: "Baseline 1", Role: domain.SignupRoleBaseline, FinishedAt: &finished}}
-	store.left = []*domain.Experiment{measured.Job}
-
-	code, out := patch(map[string]any{"description": "Train train.py and report val_loss, on the small split."})
-	why, _ := out["status_reason"].(map[string]any)
-	if code != http.StatusOK || out["status"] != "open" || store.created[0].BaselineJobID != "" || why["reason"] != "budget_below_baseline" ||
-		!strings.Contains(why["message"].(string), "the platform did not declare job job-1") {
-		t.Fatalf("a change that clears nothing: got = %d %v, want it open, nothing declared and budget_below_baseline", code, out["status_reason"])
-	}
-	code, out = patch(map[string]any{"budget_accelerator_hours": 8})
-	if code != http.StatusOK || out["status"] != "running" || store.created[0].BaselineJobID != "job-1" || store.started != 1 {
-		t.Fatalf("the owner raising the budget: got = %d %v with baseline %q and %d starts, want job-1 declared and the run started", code, out, store.created[0].BaselineJobID, store.started)
-	}
+// summarizedStore is statusStore with the write of a summary, which fails while broken is set.
+type summarizedStore struct {
+	statusStore
+	broken error
 }
+
+func (s *summarizedStore) SetPlatformExperimentSummary(_ context.Context, id, summary string) error {
+	if s.broken != nil {
+		return s.broken
+	}
+	for _, pe := range s.created {
+		if pe.ID == id {
+			if record := s.records[id]; record != "" {
+				summary = strings.TrimLeft(summary+"\n\n"+record, "\n")
+			}
+			pe.Summary = summary
+			return nil
+		}
+	}
+	return db.ErrPlatformExperimentNotFound
+}
+
+func (s *summarizedStore) NameActors(context.Context, []*domain.Actor) error { return nil }

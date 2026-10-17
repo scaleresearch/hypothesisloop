@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
@@ -368,4 +369,15 @@ func runEnded(instance *domain.AgentInstance, finishedAt *time.Time, finishedRea
 		return ended + ", and none ran after it"
 	}
 	return "did not finish: its machine was " + instance.Shown() + " at the close"
+}
+
+// CheckCoordinatorModel refuses a coordinator model a reopen names that is no model.
+func (s *PlatformExperimentsService) CheckCoordinatorModel(model string) error {
+	if s.launch.CoordinatorModel == "" {
+		return auth.Internal(s.logger, "reopen platform experiment failed", errors.New("the handler has no agent launch settings"))
+	}
+	if err := domain.ValidateModel(model); err != nil {
+		return refuseSignup(400, "invalid_request", "coordinator_model: %s", err)
+	}
+	return nil
 }

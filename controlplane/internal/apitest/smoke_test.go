@@ -39,9 +39,9 @@ func TestSmoke(t *testing.T) {
 	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", agenttypes.PlatformRules, auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	peHandler := platformexperiments.NewPlatformExperimentsService(nil, domain.QuotaConfig{}, zap.NewNop(), "", time.Minute).WithRepositories(worldRepositories{}).WithPlanning(worldPlanning)
 	httpapi.RegisterAgents(doc, nil)
-	platformexperiments.RegisterHuma(doc, peHandler)
+	httpapi.RegisterPlatformExperiments(doc, peHandler, zap.NewNop())
 	httpapi.RegisterSituation(doc, nil, nil)
-	platformexperiments.RegisterBudgetHuma(doc, peHandler)
+	httpapi.RegisterPlatformExperimentBudget(doc, peHandler, zap.NewNop())
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(
 		scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{})))
 	registry.RegisterHuma(doc, registry.NewHandler(nil, nil))

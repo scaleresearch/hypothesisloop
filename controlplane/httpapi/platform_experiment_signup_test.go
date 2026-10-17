@@ -1,15 +1,14 @@
-package platformexperiments
+package httpapi
 
 import (
 	"net/http"
 	"testing"
 
-	"go.uber.org/zap"
-
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
+	"go.uber.org/zap"
 )
 
 // hl hypothesis checkout names an agent's branch after the agent, and read the name from the
@@ -22,7 +21,7 @@ func TestAnAgentReadsItsOwnNameInItsSignup(t *testing.T) {
 
 	r := authtest.Router(authtest.As(dana))
 	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(agentsTestPlacement), zap.NewNop())
-	registerHuma(doc, newSignupTestService(t, store).WithRepositories(store).WithPlanning(testPlanning))
+	registerPlatformExperiments(doc, newSignupTestService(t, store).WithRepositories(store).WithPlanning(testPlanning))
 
 	if code, out := call(t, r, "GET", "/platform-experiments/pe-1/signups/dana", ""); code != http.StatusOK || out["name"] != "Researcher 1" {
 		t.Errorf("an agent reading its own signup: got = %d %v, want = 200 with name Researcher 1", code, out)
