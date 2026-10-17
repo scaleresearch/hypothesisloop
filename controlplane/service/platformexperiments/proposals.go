@@ -68,7 +68,7 @@ type ProposalQuestion struct {
 
 // ProposedAgent is one researcher of a proposal, as POST /platform-experiments/{id}/agents takes it.
 type ProposedAgent struct {
-	Flavor          string         `json:"flavor,omitempty"`
+	AgentType       string         `json:"agent_type,omitempty"`
 	Model           string         `json:"model,omitempty"`
 	Hyperparameters map[string]any `json:"hyperparameters,omitempty"`
 }
@@ -93,7 +93,7 @@ func MaxProposedResearchers(maxHosted int) int {
 func proposedPool(catalog domain.AgentTypeCatalog, agents []ProposedAgent) (domain.ResearcherPool, error) {
 	keys := make([]domain.PoolKey, 0, len(agents))
 	for i, agent := range agents {
-		choice, err := domain.ResolveAgentLaunch(catalog, domain.AgentRoleResearcher, agent.Flavor, agent.Model, agent.Hyperparameters)
+		choice, err := domain.ResolveAgentLaunch(catalog, domain.AgentRoleResearcher, agent.AgentType, agent.Model, agent.Hyperparameters)
 		if err != nil {
 			return nil, refusedProposal("invalid_agents", "agents[%d]: %s", i, err)
 		}
@@ -107,7 +107,7 @@ func poolAgents(pool domain.ResearcherPool) []ProposedAgent {
 	var agents []ProposedAgent
 	for _, e := range pool {
 		for range e.Count {
-			agents = append(agents, ProposedAgent{Flavor: e.AgentType, Model: e.Model, Hyperparameters: e.Hyperparameters})
+			agents = append(agents, ProposedAgent{AgentType: e.AgentType, Model: e.Model, Hyperparameters: e.Hyperparameters})
 		}
 	}
 	return agents
@@ -183,7 +183,7 @@ func (s *Service) checkProposal(ctx context.Context, p *Proposal, draft *domain.
 		refuse("invalid_resources", "%s", err)
 	}
 	for i, agent := range p.Agents {
-		if _, err := domain.ResolveAgentLaunch(catalog, domain.AgentRoleResearcher, agent.Flavor, agent.Model, agent.Hyperparameters); err != nil {
+		if _, err := domain.ResolveAgentLaunch(catalog, domain.AgentRoleResearcher, agent.AgentType, agent.Model, agent.Hyperparameters); err != nil {
 			refuse("invalid_agents", "agents[%d]: %s", i, err)
 		}
 	}

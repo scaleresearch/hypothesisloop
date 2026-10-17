@@ -165,7 +165,7 @@ func registerPlatformExperiments(doc *Doc, experiments *platformexperiments.Serv
 	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "get-platform-experiment-signup", Method: "GET", Path: "/platform-experiments/{id}/signups/{agent_id}",
 		Summary: "Read an agent's signup", Tags: []string{"platform-experiments"},
-		Description: "What an agent was signed up as: its name, its role, which decides whether it is ranked and cut, and the flavor, " +
+		Description: "What an agent was signed up as: its name, its role, which decides whether it is ranked and cut, and the agent type, " +
 			"model and hyperparameters it runs with. An agent started with its token alone reads its own here. " +
 			"404 if that agent is not signed up to this platform experiment — not signed up is not a role.",
 	}, a.getPlatformExperimentSignup)
@@ -394,7 +394,7 @@ func (a platformExperimentsAPI) getPlatformExperimentSignup(ctx context.Context,
 		return nil, err
 	}
 	return &struct{ Body signupReply }{Body: signupReply{
-		AgentID: signup.AgentID, Name: signup.Name, Role: string(signup.Role), Flavor: signup.AgentType,
+		AgentID: signup.AgentID, Name: signup.Name, Role: string(signup.Role), AgentType: signup.AgentType,
 		Model: signup.Model, Hyperparameters: signup.Hyperparameters, FinishedAt: signup.FinishedAt, Ended: signup.Ended, CutReason: signup.CutReason,
 	}}, nil
 }
@@ -522,7 +522,7 @@ type signupReply struct {
 	AgentID         string         `json:"agent_id"`
 	Name            string         `json:"name" doc:"The name the agent's branches carry: hl/<platform experiment>/<name>/..."`
 	Role            string         `json:"role"`
-	Flavor          string         `json:"flavor" doc:"The agent type it runs, by id."`
+	AgentType       string         `json:"agent_type" doc:"The agent type it runs, by id."`
 	Model           string         `json:"model" doc:"Its own model, empty when it runs on its agent type's. What it runs with is its instructions: GET /platform-experiments/{id}/agents/{agent_id}/instructions."`
 	Hyperparameters map[string]any `json:"hyperparameters" doc:"Its own hyperparameters, null when it runs with its agent type's."`
 	FinishedAt      *time.Time     `json:"finished_at,omitempty" doc:"When the agent said it has nothing left to do."`

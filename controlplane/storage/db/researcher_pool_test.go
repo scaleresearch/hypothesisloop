@@ -28,11 +28,11 @@ func poolRun(t *testing.T, pool *Pool, maxAgents int, researchers domain.Researc
 	return pe, pes
 }
 
-func spawnResearcher(t *testing.T, pes *Store, pe, flavor string) string {
+func spawnResearcher(t *testing.T, pes *Store, pe, agentType string) string {
 	t.Helper()
 	id, _ := domain.NewID(domain.AgentIDPrefix)
 	agent := &domain.Agent{ID: id, Name: "r-" + id, CreatedAt: time.Now().UTC()}
-	if err := pes.SpawnAgent(context.Background(), pe, agent, domain.AgentSignup{Actor: testActor, AgentID: id, Role: domain.SignupRoleCompetitor, Hosted: true, AgentType: flavor, Model: "model-1"}); err != nil {
+	if err := pes.SpawnAgent(context.Background(), pe, agent, domain.AgentSignup{Actor: testActor, AgentID: id, Role: domain.SignupRoleCompetitor, Hosted: true, AgentType: agentType, Model: "model-1"}); err != nil {
 		t.Fatalf("spawn: got = %v, want = nil", err)
 	}
 	qid, _ := domain.NewID(domain.AgentQuotaIDPrefix)

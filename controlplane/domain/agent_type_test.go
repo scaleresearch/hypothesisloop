@@ -43,7 +43,7 @@ func TestAPromptHoldsWhatItsRoleFillsAndNothingElse(t *testing.T) {
 		"literal braces":                    {AgentRoleResearcher, base + `{"lr": 1} and {a}`, ""},
 		"no rules":                          {AgentRoleResearcher, "{{hl_commands}}", "must hold {{rules}}"},
 		"no command listing":                {AgentRolePlanner, "{{rules}}", "must hold {{hl_commands}}"},
-		"an unknown placeholder":            {AgentRoleResearcher, base + "{{flavor_brief}}", "{{flavor_brief}}"},
+		"an unknown placeholder":            {AgentRoleResearcher, base + "{{agent_type_brief}}", "{{agent_type_brief}}"},
 		"a coordinator has no agent id":     {AgentRoleCoordinator, base + "{{agent_id}}", "{{agent_id}}"},
 		"a baseline has no hyperparameters": {AgentRoleBaseline, base + "{{hyperparameters}}", "{{hyperparameters}}"},
 		"a malformed placeholder":           {AgentRoleResearcher, base + "{{ workdir }}", "outside a placeholder"},

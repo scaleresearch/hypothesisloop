@@ -34,7 +34,7 @@ func (s baselineStore) GetPlatformExperiment(_ context.Context, id string) (*dom
 }
 
 func (baselineStore) GetAgentSignup(_ context.Context, _, agentID string) (*domain.AgentSignup, error) {
-	return &domain.AgentSignup{AgentID: agentID, Role: domain.SignupRoleBaseline, AgentType: domain.DefaultAgentFlavor}, nil
+	return &domain.AgentSignup{AgentID: agentID, Role: domain.SignupRoleBaseline, AgentType: domain.DefaultAgentType}, nil
 }
 
 // A baseline job that states no estimate was sized from a read of the quota that counts a running

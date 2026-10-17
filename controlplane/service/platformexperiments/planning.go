@@ -136,7 +136,7 @@ func (s *Service) createDraft(ctx context.Context, projectID, goal, continues st
 	planner := &domain.Agent{ID: plannerID, Name: "Planner", CreatedAt: now}
 	signup := domain.AgentSignup{
 		AgentID: plannerID, Role: domain.SignupRolePlanner, QuotaTier: domain.QuotaTierGuaranteed,
-		Hosted: true, AgentType: domain.PlannerFlavor, Model: launch.DefaultModel,
+		Hosted: true, AgentType: domain.PlannerAgentType, Model: launch.DefaultModel,
 		Actor: &by,
 	}
 	if err := s.store.CreateDraft(ctx, pe, planner, signup); err != nil {

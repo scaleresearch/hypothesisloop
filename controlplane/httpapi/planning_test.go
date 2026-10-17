@@ -121,7 +121,7 @@ func TestADraftIsCreatedFromOneSentenceWithItsPlannerAndNothingOfARun(t *testing
 	// Its one agent is the planner, which the platform runs and never ranks or cuts.
 	planner, signup := store.planners[pe.ID], store.signups[pe.ID]
 	if planner == nil || planner.Name != "Planner" || signup.AgentID != planner.ID || !signup.Hosted ||
-		signup.AgentType != domain.PlannerFlavor || signup.Role != domain.SignupRolePlanner || signup.Model != "platform-model-1" || out["signup_count"] != float64(1) {
+		signup.AgentType != domain.PlannerAgentType || signup.Role != domain.SignupRolePlanner || signup.Model != "platform-model-1" || out["signup_count"] != float64(1) {
 		t.Errorf("planner %+v signed up as %+v, want a hosted planner of role baseline on the platform's model", planner, signup)
 	}
 	// A draft has a repository: the one named, or a new one the repository pass makes after the
@@ -340,7 +340,7 @@ func (s *draftStore) GetAgentSignup(_ context.Context, platformExperimentID, age
 		}
 	}
 	if agentID == "ag-researcher" {
-		return &domain.AgentSignup{AgentID: agentID, AgentType: domain.DefaultAgentFlavor}, nil
+		return &domain.AgentSignup{AgentID: agentID, AgentType: domain.DefaultAgentType}, nil
 	}
 	return nil, nil
 }
@@ -402,7 +402,7 @@ func aProposal(more map[string]any) map[string]any {
 			"metrics": []map[string]any{{"key": "val_loss", "direction": "minimize"}},
 		},
 		"goal_version":             1,
-		"budget_accelerator_hours": 6, "duration_hours": 4, "baseline_minutes": 30, "agents": []map[string]any{{"flavor": "hyperparameter-search"}, {}},
+		"budget_accelerator_hours": 6, "duration_hours": 4, "baseline_minutes": 30, "agents": []map[string]any{{"agent_type": "hyperparameter-search"}, {}},
 		"accelerator_type": "rtx-4090",
 		"image":            "torch",
 		"metric_reason":    "Validation loss on held-out text is the goal itself.",
@@ -424,7 +424,7 @@ func draftWithPlanner() *draftStore {
 		statusStore: statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{{
 			ID: "pe-draft", ProjectID: "prj-a", Status: domain.PlatformExpDraft, Goal: "g", GoalVersion: 1, MaxHosted: draftMaxHosted, PlanningEndsAt: time.Now().Add(time.Minute),
 		}}}},
-		signups:   map[string]domain.AgentSignup{"pe-draft": {AgentID: "ag-planner", Role: domain.SignupRolePlanner, AgentType: domain.PlannerFlavor, Hosted: true}},
+		signups:   map[string]domain.AgentSignup{"pe-draft": {AgentID: "ag-planner", Role: domain.SignupRolePlanner, AgentType: domain.PlannerAgentType, Hosted: true}},
 		reachable: map[string][]domain.Cluster{"rtx-4090": {{Name: "rented"}}},
 	}
 }
@@ -492,7 +492,7 @@ func TestAProposalIsStoredOnlyFromThePlannerAndOnlyWhenItHoldsTogether(t *testin
 		"more time for the baseline than allowed": {map[string]any{"baseline_minutes": 91}, "invalid_baseline_minutes"},
 		"nobody to run it":                        {map[string]any{"agents": []map[string]any{}}, "invalid_agents"},
 		"more machines than it gets":              {map[string]any{"agents": []map[string]any{{}, {}, {}, {}}}, "invalid_agents"},
-		"a planner among the agents":              {map[string]any{"agents": []map[string]any{{"flavor": "planner"}}}, "invalid_agents"},
+		"a planner among the agents":              {map[string]any{"agents": []map[string]any{{"agent_type": "planner"}}}, "invalid_agents"},
 		"no reason for the metric":                {map[string]any{"metric_reason": ""}, "missing_explanation"},
 		"no reason for the size":                  {map[string]any{"sizing_reason": " "}, "missing_explanation"},
 		"a measurement that is a paper":           {map[string]any{"measurement": strings.Repeat("x", platformexperiments.MaxProposalTextBytes+1)}, "too_long"},
@@ -595,7 +595,7 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 	_, call := planningRouter(t, store, planner)
 	before := time.Now()
 	code, out := call("POST", "/platform-experiments/pe-draft/accept", map[string]any{
-		"budget_accelerator_hours": 3, "duration_hours": 2, "baseline_minutes": 25, "agents": []map[string]any{{"flavor": "architecture-search", "hyperparameters": map[string]any{"depth": 4}}, {}, {}},
+		"budget_accelerator_hours": 3, "duration_hours": 2, "baseline_minutes": 25, "agents": []map[string]any{{"agent_type": "architecture-search", "hyperparameters": map[string]any{"depth": 4}}, {}, {}},
 	})
 	if code != http.StatusOK {
 		t.Fatalf("accept: got = %d %v, want 200", code, out)
@@ -635,8 +635,8 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 	if measures := store.baselines[0]; measures.Role != domain.SignupRoleBaseline || !measures.Hosted || measures.AgentType != "baseline" || len(measures.Hyperparameters) != 0 {
 		t.Errorf("the baseline agent runs as %+v, want a hosted one of the built-in baseline type and no hyperparameters", measures)
 	}
-	if first := store.acceptedSignups[0]; first.AgentType != "architecture-search" || first.Hyperparameters["depth"] != float64(4) || store.acceptedSignups[1].AgentType != domain.DefaultAgentFlavor {
-		t.Errorf("signups %+v, want the flavors and hyperparameters the person stated", store.acceptedSignups)
+	if first := store.acceptedSignups[0]; first.AgentType != "architecture-search" || first.Hyperparameters["depth"] != float64(4) || store.acceptedSignups[1].AgentType != domain.DefaultAgentType {
+		t.Errorf("signups %+v, want the agent types and hyperparameters the person stated", store.acceptedSignups)
 	}
 
 	// Accepting is refused by state, so a second press and a lost answer do no harm.

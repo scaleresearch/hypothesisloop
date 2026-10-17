@@ -48,7 +48,7 @@ type querier interface {
 }
 
 // researchersAtWork counts the researchers at work of platform experiment platformExpID
-// (researcherAtWorkSQL) by flavor and model.
+// (researcherAtWorkSQL) by agent type and model.
 func researchersAtWork(ctx context.Context, q querier, platformExpID string) (map[domain.PoolKey]int, error) {
 	rows, err := q.Query(ctx, `
 SELECT `+signupKeySQL+`, count(*) FROM experiment_signups s
@@ -192,7 +192,7 @@ SELECT `+signupKeySQL+` FROM experiment_signups s
 WHERE s.platform_experiment_id = $1 AND s.agent_id = ANY($2) AND s.role = '`+string(domain.SignupRoleCompetitor)+`'
 ORDER BY s.agent_id`, platformExpID, agentIDs)
 	if err != nil {
-		return nil, fmt.Errorf("read researchers' flavors: %w", err)
+		return nil, fmt.Errorf("read researchers' agent types: %w", err)
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.PoolKey, error) {
 		var key domain.PoolKey

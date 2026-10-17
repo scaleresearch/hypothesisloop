@@ -22,7 +22,7 @@ type AddAgentRequest struct {
 	Role            string         `json:"role,omitempty" doc:"\"competitor\" (default), \"baseline\" or \"reviewer\"."`
 	QuotaTier       string         `json:"quota_tier,omitempty" doc:"\"guaranteed\" or \"burst_only\"; omitted, the platform experiment's default_quota_tier applies."`
 	Hosted          bool           `json:"hosted,omitempty" doc:"true: the platform runs the agent. false (default): its token is returned and you run it."`
-	Flavor          string         `json:"flavor,omitempty" doc:"Which specialization the agent runs, which it reads from its signup: generalist (default), hyperparameter-search, architecture-search or data-search."`
+	AgentType       string         `json:"agent_type,omitempty" doc:"Which specialization the agent runs, which it reads from its signup: generalist (default), hyperparameter-search, architecture-search or data-search."`
 	Hyperparameters map[string]any `json:"hyperparameters,omitempty" doc:"A small JSON object the agent reads from its signup, at most 4096 bytes as JSON."`
 	Model           string         `json:"model,omitempty" doc:"The model the agent runs on, which it reads from its signup. Omitted, the platform's default applies and is what the answer shows."`
 }
@@ -193,7 +193,7 @@ func (s *Service) AddAgent(ctx context.Context, platformExpID string, req AddAge
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
 	}
-	choice, err := domain.ResolveAgentLaunch(catalog, domain.RoleOfSignup(role), req.Flavor, req.Model, req.Hyperparameters)
+	choice, err := domain.ResolveAgentLaunch(catalog, domain.RoleOfSignup(role), req.AgentType, req.Model, req.Hyperparameters)
 	if err != nil {
 		return nil, refuseSignup(400, "invalid_request", "%s", err)
 	}

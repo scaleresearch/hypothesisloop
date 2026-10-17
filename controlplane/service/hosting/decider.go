@@ -162,7 +162,7 @@ func (h *Decider) Reconcile(ctx context.Context, observed hostingapi.Observed) (
 	for _, coordinator := range coordinators {
 		pe, image := coordinator.PlatformExperimentID, h.imageOf(coordinator.AgentImage)
 		all = append(all, kept{
-			platformExperimentID: pe, role: domain.CoordinatorHealthRole, agentType: domain.CoordinatorFlavor, instance: coordinator.Instance, ending: coordinator.Ending,
+			platformExperimentID: pe, role: domain.CoordinatorHealthRole, agentType: domain.CoordinatorAgentType, instance: coordinator.Instance, ending: coordinator.Ending,
 			launch: launchOf(image, observed.LaunchDigest),
 			describe: func(ended int) (hostingapi.Instance, error) {
 				return coordinatorInstanceFor(pe, ended, image, h.cfg.APIURL, h.cfg.SigningSecret, observed.LaunchDigest)

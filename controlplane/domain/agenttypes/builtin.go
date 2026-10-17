@@ -29,13 +29,13 @@ var builtins = []struct {
 	role     domain.AgentRole
 	effort   string
 }{
-	{domain.DefaultAgentFlavor, "Generalist", domain.AgentRoleResearcher, "high"},
+	{domain.DefaultAgentType, "Generalist", domain.AgentRoleResearcher, "high"},
 	{"hyperparameter-search", "Hyperparameter search", domain.AgentRoleResearcher, "high"},
 	{"architecture-search", "Architecture search", domain.AgentRoleResearcher, "high"},
 	{"data-search", "Data search", domain.AgentRoleResearcher, "high"},
 	{"baseline", "Baseline", domain.AgentRoleBaseline, "medium"},
-	{domain.PlannerFlavor, "Planner", domain.AgentRolePlanner, "medium"},
-	{domain.CoordinatorFlavor, "Coordinator", domain.AgentRoleCoordinator, "high"},
+	{domain.PlannerAgentType, "Planner", domain.AgentRolePlanner, "medium"},
+	{domain.CoordinatorAgentType, "Coordinator", domain.AgentRoleCoordinator, "high"},
 }
 
 // Builtins is every built-in agent type, each checked as an org's would be on save.

@@ -7,7 +7,7 @@ import (
 
 func TestAgentLaunchValuesAreCheckedAndLeftToTheTypeWhenOmitted(t *testing.T) {
 	catalog := testCatalog()
-	for _, ok := range []struct{ flavor, model, wantFlavor string }{
+	for _, ok := range []struct{ agentType, model, wantAgentType string }{
 		{"", "", "generalist"},
 		{"generalist", "claude-sonnet-5", "generalist"},
 		{"data-search", "claude-opus-5[1m]", "data-search"},
@@ -15,17 +15,17 @@ func TestAgentLaunchValuesAreCheckedAndLeftToTheTypeWhenOmitted(t *testing.T) {
 		{"hyperparameter-search", "", "hyperparameter-search"},
 		{"at-custom", "", "at-custom"},
 	} {
-		choice, err := ResolveAgentLaunch(catalog, AgentRoleResearcher, ok.flavor, ok.model, map[string]any{"batch_size": 64})
-		if err != nil || choice.AgentType != ok.wantFlavor || choice.Model != ok.model {
-			t.Errorf("flavor %q model %q resolved to %+v, %v", ok.flavor, ok.model, choice, err)
+		choice, err := ResolveAgentLaunch(catalog, AgentRoleResearcher, ok.agentType, ok.model, map[string]any{"batch_size": 64})
+		if err != nil || choice.AgentType != ok.wantAgentType || choice.Model != ok.model {
+			t.Errorf("agent type %q model %q resolved to %+v, %v", ok.agentType, ok.model, choice, err)
 		}
 	}
 	for _, bad := range [][2]string{
-		{"Generalist", ""}, {"../etc", ""}, {"a b", ""}, {"no-such-flavor", ""}, {"generalist.md", ""}, {"planner", ""}, {"at-archived", ""},
+		{"Generalist", ""}, {"../etc", ""}, {"a b", ""}, {"no-such-type", ""}, {"generalist.md", ""}, {"planner", ""}, {"at-archived", ""},
 		{"", "model with space"}, {"", "$(id)"}, {"", "-leading"}, {"", strings.Repeat("m", 129)}, {"", "a\nb"},
 	} {
 		if _, err := ResolveAgentLaunch(catalog, AgentRoleResearcher, bad[0], bad[1], nil); err == nil {
-			t.Errorf("flavor %q model %q accepted", bad[0], bad[1])
+			t.Errorf("agent type %q model %q accepted", bad[0], bad[1])
 		}
 	}
 	if choice, err := ResolveAgentLaunch(catalog, AgentRoleBaseline, "", "", nil); err != nil || choice.AgentType != "baseline" {

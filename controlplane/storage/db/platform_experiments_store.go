@@ -80,7 +80,7 @@ func insertPlatformExperiment(ctx context.Context, tx *Write, pe *domain.Platfor
 INSERT INTO platform_experiments (id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, coordinator_hosted, coordinator_model, max_hosted, repository, repository_url, agent_image, goal, created_by_kind, created_by_id, duration_hours, repository_account, continues, researchers,
                                   coordinator_agent_type)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NULLIF($19, ''), $20, $21, $22, $23, $24, $25, $26, $27, $28, NULLIF($29, ''), $30,
-        '` + domain.CoordinatorFlavor + `')`
+        '` + domain.CoordinatorAgentType + `')`
 
 	metrics, err := json.Marshal(pe.Metrics)
 	if err != nil {

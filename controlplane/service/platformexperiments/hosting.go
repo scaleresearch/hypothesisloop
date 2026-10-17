@@ -89,7 +89,7 @@ func hostedAgents(catalog domain.AgentTypeCatalog, researchers []ProposedAgent, 
 		if i == len(researchers) {
 			role = domain.SignupRoleBaseline
 		}
-		choice, err := domain.ResolveAgentLaunch(catalog, domain.RoleOfSignup(role), asked.Flavor, asked.Model, asked.Hyperparameters)
+		choice, err := domain.ResolveAgentLaunch(catalog, domain.RoleOfSignup(role), asked.AgentType, asked.Model, asked.Hyperparameters)
 		if err != nil {
 			return nil, nil, refusedProposal("invalid_agents", "agents[%d]: %s", i, err)
 		}

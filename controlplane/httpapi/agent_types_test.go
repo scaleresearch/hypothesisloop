@@ -183,7 +183,7 @@ func TestAPromptOrSettingsAnAgentCannotRunWithAreRefused(t *testing.T) {
 	w := newAccountsWorld(t)
 	for what, body := range map[string]name{
 		"no rules":               {"name": "x", "role": "researcher", "prompt": "{{hl_commands}}", "settings": ownSettings()},
-		"a placeholder of none":  {"name": "x", "role": "researcher", "prompt": ownPrompt + "{{flavor_brief}}", "settings": ownSettings()},
+		"a placeholder of none":  {"name": "x", "role": "researcher", "prompt": ownPrompt + "{{agent_type_brief}}", "settings": ownSettings()},
 		"a coordinator agent id": {"name": "x", "role": "coordinator", "prompt": ownPrompt, "settings": ownSettings()},
 		"no role":                {"name": "x", "prompt": ownPrompt, "settings": ownSettings()},
 		"no settings":            {"name": "x", "role": "researcher", "prompt": ownPrompt},

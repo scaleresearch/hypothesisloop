@@ -24,7 +24,7 @@ type AgentSignup struct {
 	Hosted bool `json:"hosted"`
 	// AgentType is the id of the agent type it runs, fixed when it joins: it runs the type's current
 	// version. Model, empty, and Hyperparameters, nil, are the type's, read whenever it is served.
-	AgentType       string         `json:"flavor" doc:"The agent type it runs, by id. It runs the type's current version, told with agent.instructions when that changes."`
+	AgentType       string         `json:"agent_type" doc:"The agent type it runs, by id. It runs the type's current version, told with agent.instructions when that changes."`
 	Hyperparameters map[string]any `json:"hyperparameters" doc:"Its own hyperparameters, null when it runs with its agent type's."`
 	Model           string         `json:"model" doc:"Its own model, empty when it runs on its agent type's or, for a type that names none, the platform's default."`
 	SignedUpAt      time.Time      `json:"signed_up_at"`
@@ -37,7 +37,7 @@ type AgentSignup struct {
 	FinishedReason string     `json:"finished_reason,omitempty"`
 	// Replaces is the researcher whose place the platform added this one in, keeping its
 	// platform experiment's researchers, and ReplacedBy the one added in this one's place.
-	Replaces   string `json:"replaces,omitempty" doc:"The researcher that finished or lost its machine whose place the platform added this one in, with its flavor, model and hyperparameters."`
+	Replaces   string `json:"replaces,omitempty" doc:"The researcher that finished or lost its machine whose place the platform added this one in, with its agent type, model and hyperparameters."`
 	ReplacedBy string `json:"replaced_by,omitempty" doc:"The researcher the platform added in this one's place. A replaced researcher takes no place and is never started again."`
 	// Ended is why the agent's run in the platform experiment is over, empty while it goes on.
 	// A hosted agent's machine is told to stop for this and for nothing else, and the agent
@@ -310,13 +310,13 @@ type HostedCoordinator struct {
 	Activity *AgentActivity `json:"activity,omitempty"`
 }
 
-// CoordinatorFlavor is what the harness is started as to coordinate. It is no flavor an agent
-// can join with.
-const CoordinatorFlavor = "coordinator"
+// CoordinatorAgentType is what the harness is started as to coordinate. No agent can join
+// with it.
+const CoordinatorAgentType = "coordinator"
 
-// PlannerFlavor is what the harness of a draft's planner is started as. It is no member of
-// AgentFlavors: the platform signs the planner up, with role SignupRolePlanner.
-const PlannerFlavor = "planner"
+// PlannerAgentType is what the harness of a draft's planner is started as. No agent joins
+// with it: the platform signs the planner up, with role SignupRolePlanner.
+const PlannerAgentType = "planner"
 
 // SharesBudget says the agent is given a share of the budget when its platform experiment
 // starts: every role but baseline, whose quota is its own from the moment it joins, and planner.
@@ -360,8 +360,8 @@ const MaxAgentInstanceLogBytes = 4 << 10
 // to the agent's launcher and in the agent's environment.
 const MaxHyperparametersBytes = experimentspec.MaxHyperparametersBytes
 
-// DefaultAgentFlavor is the agent type a researcher runs as when it joins without naming one.
-const DefaultAgentFlavor = "generalist"
+// DefaultAgentType is the agent type a researcher runs as when it joins without naming one.
+const DefaultAgentType = "generalist"
 
 const maxModelLength = 128
 

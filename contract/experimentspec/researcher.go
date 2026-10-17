@@ -10,7 +10,7 @@ type ResearcherPoolEntry struct {
 }
 
 // PoolKey is what tells the entries of a pool apart, and which entry a researcher is one of: its
-// agent type, which a signup holds as its flavor, and its model, empty for the type's.
+// agent type and its model, empty for the type's.
 type PoolKey struct {
 	AgentType string
 	Model     string

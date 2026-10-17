@@ -24,7 +24,7 @@ func createTestDraft(t *testing.T, pool *Pool) (peID, plannerID string) {
 	}
 	planner := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Name: "Planner", CreatedAt: now}
 	signup := domain.AgentSignup{Actor: testActor, AgentID: planner.ID, Role: domain.SignupRolePlanner, QuotaTier: domain.QuotaTierGuaranteed,
-		Hosted: true, AgentType: domain.PlannerFlavor, Model: "model-1"}
+		Hosted: true, AgentType: domain.PlannerAgentType, Model: "model-1"}
 	if err := NewStore(pool, 3).CreateDraft(context.Background(), pe, planner, signup); err != nil {
 		t.Fatalf("create draft: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestADraftIsStoredWithItsGoalItsCreatorAndItsPlanner(t *testing.T) {
 		t.Fatalf("got = %+v (created by %+v), %v", got, got.Actor, err)
 	}
 	signup, err := pes.GetAgentSignup(ctx, pe, planner)
-	if err != nil || signup == nil || signup.Name != "Planner" || signup.AgentType != domain.PlannerFlavor || signup.Role != domain.SignupRolePlanner || !signup.Hosted {
+	if err != nil || signup == nil || signup.Name != "Planner" || signup.AgentType != domain.PlannerAgentType || signup.Role != domain.SignupRolePlanner || !signup.Hosted {
 		t.Fatalf("planner signed up as %+v, %v", signup, err)
 	}
 	// A planner runs no job, so it holds no quota, and no finding is filed for a job yet.
@@ -118,7 +118,7 @@ func TestNoMachineIsWantedBeforeTheRepositoryIsRecorded(t *testing.T) {
 			Metrics: []domain.MetricDefinition{}, ReportIntervalSeconds: 30, Stages: []domain.Stage{{LengthPct: 100}}, CreatedAt: now, UpdatedAt: now, MaxHosted: 5, RepositoryAccount: "acme"}
 		planner := &domain.Agent{ID: "ag-" + uuid.New().String()[:12], Name: "Planner", CreatedAt: now}
 		if err := pes.CreateDraft(ctx, pe, planner, domain.AgentSignup{Actor: testActor, AgentID: planner.ID, Role: domain.SignupRolePlanner, QuotaTier: domain.QuotaTierGuaranteed,
-			Hosted: true, AgentType: domain.PlannerFlavor, Model: "model-1"}); err != nil {
+			Hosted: true, AgentType: domain.PlannerAgentType, Model: "model-1"}); err != nil {
 			t.Fatal(err)
 		}
 		return pe, planner.ID

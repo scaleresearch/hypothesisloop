@@ -556,7 +556,7 @@ ORDER BY pe.id`, id)
 // commits, so an archive waits for it and then sees it. ErrUnknownAgentType for any other.
 func agentTypeTx(ctx context.Context, q rowQuerier, platformExpID, typeID string, role domain.AgentRole) (string, error) {
 	if typeID == "" {
-		typeID = domain.DefaultAgentType(role)
+		typeID = domain.AgentTypeOfRole(role)
 	}
 	var found string
 	err := q.QueryRow(ctx, `

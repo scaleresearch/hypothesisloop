@@ -203,13 +203,13 @@ func TestAnOrgsTypeIsItsAloneAndABuiltinIsNobodys(t *testing.T) {
 	if _, err := store.Events(ctx, other, custom.ID); !errors.Is(err, ErrAgentTypeNotFound) {
 		t.Errorf("another org reads its events: got = %v, want ErrAgentTypeNotFound", err)
 	}
-	if _, _, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: domain.DefaultAgentFlavor, IfVersion: 1, Name: "x", Prompt: testPrompt, Settings: testTypeSettings()}); !errors.Is(err, ErrAgentTypeBuiltin) {
+	if _, _, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: domain.DefaultAgentType, IfVersion: 1, Name: "x", Prompt: testPrompt, Settings: testTypeSettings()}); !errors.Is(err, ErrAgentTypeBuiltin) {
 		t.Errorf("an org edits a built-in: got = %v, want ErrAgentTypeBuiltin", err)
 	}
-	if _, _, err := store.Restore(ctx, orgID, domain.DefaultAgentFlavor, 1, *testActor); !errors.Is(err, ErrAgentTypeBuiltin) {
+	if _, _, err := store.Restore(ctx, orgID, domain.DefaultAgentType, 1, *testActor); !errors.Is(err, ErrAgentTypeBuiltin) {
 		t.Errorf("an org restores a built-in: got = %v, want ErrAgentTypeBuiltin", err)
 	}
-	if _, err := store.Archive(ctx, orgID, domain.DefaultAgentFlavor, *testActor); !errors.Is(err, ErrAgentTypeBuiltin) {
+	if _, err := store.Archive(ctx, orgID, domain.DefaultAgentType, *testActor); !errors.Is(err, ErrAgentTypeBuiltin) {
 		t.Errorf("an org archives a built-in: got = %v, want ErrAgentTypeBuiltin", err)
 	}
 	var conflict *AgentTypeVersionConflict

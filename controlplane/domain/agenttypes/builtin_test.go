@@ -64,11 +64,11 @@ func TestEveryRoleHasABuiltinDefault(t *testing.T) {
 			researchers = append(researchers, t.ID)
 		}
 	}
-	if !slices.Contains(researchers, domain.DefaultAgentFlavor) {
-		t.Fatalf("the default type %q is no built-in researcher", domain.DefaultAgentFlavor)
+	if !slices.Contains(researchers, domain.DefaultAgentType) {
+		t.Fatalf("the default type %q is no built-in researcher", domain.DefaultAgentType)
 	}
 	for _, role := range domain.AgentRoles {
-		if _, err := domain.LookupAgentType(Catalog(), domain.DefaultAgentType(role), role); err != nil {
+		if _, err := domain.LookupAgentType(Catalog(), domain.AgentTypeOfRole(role), role); err != nil {
 			t.Errorf("role %s has no built-in default: %v", role, err)
 		}
 	}
@@ -84,7 +84,7 @@ func TestTheBuiltinPromptsKeepWhatRunsTaught(t *testing.T) {
 	for id, said := range map[string][]string{
 		// A researcher gated every job on a green local suite and an offline check, and submitted
 		// one job in an hour with most of its capacity free.
-		domain.DefaultAgentFlavor: {
+		domain.DefaultAgentType: {
 			"no offline estimate, local measurement, audit or test suite stands in for one",
 			"a local build that runs is the only check before submitting",
 			"A subagent submits as soon as its code builds",
@@ -102,7 +102,7 @@ func TestTheBuiltinPromptsKeepWhatRunsTaught(t *testing.T) {
 			// The CLI caches that its directory is no git repository: the harness clones first.
 			"{{workdir}}, the directory every command starts in, holds the clone of {{repository_url}}",
 		},
-		domain.PlannerFlavor: {
+		domain.PlannerAgentType: {
 			// A planner proposed a copy with an A100 sed into it for a brief that said CPU only.
 			"`hl platform-experiments propose --check FILE`",
 			"stores nothing and lists every problem at once, and `propose` only the final one",

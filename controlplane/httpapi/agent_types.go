@@ -30,7 +30,7 @@ func registerAgentTypes(doc *Doc, types *accounts.AgentTypes) {
 		OperationID: "list-agent-types", Method: "GET", Path: "/orgs/{id}/agent-types", Tags: []string{"agent-types"},
 		Summary: "List the agent types an org's agents may run as",
 		Description: "The built-in agent types, read-only for everyone, and the org's own, archived ones included, each with its current version and how many agents and coordinators whose run goes on run it now. " +
-			"An agent type is a role (researcher, baseline, coordinator or planner), a system prompt and settings: researchers, pool entries and added agents name one by id as agent_type (flavor on a signup).",
+			"An agent type is a role (researcher, baseline, coordinator or planner), a system prompt and settings: researchers, pool entries and added agents name one by id as agent_type.",
 	}, a.list)
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "get-agent-type", Method: "GET", Path: "/orgs/{id}/agent-types/{type_id}", Tags: []string{"agent-types"},

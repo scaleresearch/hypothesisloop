@@ -221,7 +221,7 @@ func TestAnAgentWhoseTypeModelOrHyperparametersChangeKeepsItsMachine(t *testing.
 		t.Fatal(err)
 	}
 	for what, edit := range map[string]func(*domain.AgentSignup){
-		"flavor":          func(a *domain.AgentSignup) { a.AgentType = "data-search" },
+		"agent type":      func(a *domain.AgentSignup) { a.AgentType = "data-search" },
 		"model":           func(a *domain.AgentSignup) { a.Model = "another-model" },
 		"no model":        func(a *domain.AgentSignup) { a.Model = "" },
 		"hyperparameters": func(a *domain.AgentSignup) { a.Hyperparameters = map[string]any{"batch_size": float64(32)} },
@@ -645,7 +645,7 @@ func TestARunningMachinesHarnessStateGoesToTheRunsHealth(t *testing.T) {
 	want := []domain.HarnessState{
 		{PlatformExperimentID: "pe-1", AgentID: "ag-1", Role: "competitor", Subagents: 3, TurnSince: time.Unix(1759990000, 0).UTC(), InstructionsDigest: "0123456789ab",
 			AgentType: "data-search", AgentTypeVersion: 4, Model: domain.RateLimit{Rejected: true, Utilization: &full, ResetsAt: &resets}},
-		{PlatformExperimentID: "pe-1", Role: domain.CoordinatorHealthRole, AgentType: domain.CoordinatorFlavor, TurnWaiting: true, TurnSince: time.Unix(1759999000, 0).UTC()},
+		{PlatformExperimentID: "pe-1", Role: domain.CoordinatorHealthRole, AgentType: domain.CoordinatorAgentType, TurnWaiting: true, TurnSince: time.Unix(1759999000, 0).UTC()},
 	}
 	if got := metrics.Written(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("written %+v, want %+v", got, want)

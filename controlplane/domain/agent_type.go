@@ -49,17 +49,17 @@ func RoleOfSignup(r SignupRole) AgentRole {
 	}
 }
 
-// DefaultAgentType is the built-in type an agent of role runs as when it names none.
-func DefaultAgentType(role AgentRole) string {
+// AgentTypeOfRole is the built-in type an agent of role runs as when it names none.
+func AgentTypeOfRole(role AgentRole) string {
 	switch role {
 	case AgentRoleBaseline:
 		return "baseline"
 	case AgentRolePlanner:
-		return PlannerFlavor
+		return PlannerAgentType
 	case AgentRoleCoordinator:
-		return CoordinatorFlavor
+		return CoordinatorAgentType
 	default:
-		return DefaultAgentFlavor
+		return DefaultAgentType
 	}
 }
 
@@ -502,7 +502,7 @@ type AgentLaunchChoice struct {
 // What it leaves out stays out, and is the type's.
 func ResolveAgentLaunch(catalog AgentTypeCatalog, role AgentRole, agentType, model string, hyperparameters map[string]any) (AgentLaunchChoice, error) {
 	if agentType == "" {
-		agentType = DefaultAgentType(role)
+		agentType = AgentTypeOfRole(role)
 	}
 	if _, err := LookupAgentType(catalog, agentType, role); err != nil {
 		return AgentLaunchChoice{}, err

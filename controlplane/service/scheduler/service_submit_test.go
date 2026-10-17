@@ -113,7 +113,7 @@ func (poolOnlyStore) GetPlatformExperiment(_ context.Context, id string) (*domai
 	return &domain.PlatformExperiment{ID: id, Status: domain.PlatformExpRunning, Repository: "repo.git", RepositoryURL: "https://example.com/repo.git"}, nil
 }
 func (poolOnlyStore) GetAgentSignup(_ context.Context, _, agentID string) (*domain.AgentSignup, error) {
-	return &domain.AgentSignup{AgentID: agentID, Role: domain.SignupRoleCompetitor, AgentType: domain.DefaultAgentFlavor}, nil
+	return &domain.AgentSignup{AgentID: agentID, Role: domain.SignupRoleCompetitor, AgentType: domain.DefaultAgentType}, nil
 }
 func (poolOnlyStore) IsAgentCut(_ context.Context, _, _ string) (bool, error) { return false, nil }
 func (poolOnlyStore) IsAgentFinished(_ context.Context, _, _ string) (bool, error) {
@@ -265,9 +265,9 @@ func (s unstartedStore) GetAgentSignup(context.Context, string, string) (*domain
 // accepted. Open, a platform experiment takes the one job there is to run before the start, the
 // baseline's, from an agent that was added to measure it, and tells everyone else to wait.
 func TestBeforeTheStartOnlyTheJobThatMeasuresTheBaselineIsAccepted(t *testing.T) {
-	researcher := &domain.AgentSignup{Role: domain.SignupRoleCompetitor, AgentType: domain.DefaultAgentFlavor}
-	baseline := &domain.AgentSignup{Role: domain.SignupRoleBaseline, AgentType: domain.DefaultAgentFlavor}
-	planner := &domain.AgentSignup{Role: domain.SignupRolePlanner, AgentType: domain.PlannerFlavor}
+	researcher := &domain.AgentSignup{Role: domain.SignupRoleCompetitor, AgentType: domain.DefaultAgentType}
+	baseline := &domain.AgentSignup{Role: domain.SignupRoleBaseline, AgentType: domain.DefaultAgentType}
+	planner := &domain.AgentSignup{Role: domain.SignupRolePlanner, AgentType: domain.PlannerAgentType}
 	caller := auth.WithPrincipal(context.Background(), auth.Principal{Kind: auth.KindAgent, AgentID: "agent-1"})
 	for name, store := range map[string]unstartedStore{
 		"a draft's planner":           {status: domain.PlatformExpDraft, signup: planner},
@@ -318,7 +318,7 @@ func baselineSubmission() *domain.Experiment {
 // The baseline is the objective's own measurement and no claim. Its job states no hypothesis and
 // no theory and is kept on the objective, so no hypothesis stays open under it for the run.
 func TestTheBaselinesJobTestsNoHypothesisAndIsKeptOnTheObjective(t *testing.T) {
-	baseline := &domain.AgentSignup{Role: domain.SignupRoleBaseline, AgentType: domain.DefaultAgentFlavor}
+	baseline := &domain.AgentSignup{Role: domain.SignupRoleBaseline, AgentType: domain.DefaultAgentType}
 	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpOpen, domain.PlatformExpRunning} {
 		s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, environments: declared{}, store: unstartedStore{status: status, signup: baseline}, hypotheses: oneHypothesis{}}
 		exp := baselineSubmission()
@@ -792,7 +792,7 @@ func (s endingStore) GetPlatformExperiment(_ context.Context, id string) (*domai
 }
 
 func (endingStore) GetAgentSignup(_ context.Context, _, agentID string) (*domain.AgentSignup, error) {
-	return &domain.AgentSignup{AgentID: agentID, Role: domain.SignupRoleBaseline, AgentType: domain.DefaultAgentFlavor}, nil
+	return &domain.AgentSignup{AgentID: agentID, Role: domain.SignupRoleBaseline, AgentType: domain.DefaultAgentType}, nil
 }
 
 // The platform closes a platform experiment some seconds after its end and evicts what runs

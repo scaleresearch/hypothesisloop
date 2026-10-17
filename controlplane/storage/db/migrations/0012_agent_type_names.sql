@@ -1,5 +1,12 @@
--- The word flavor is gone: an eviction for landing on an accelerator type other than the one
--- reserved is accelerator_type_mismatch, wherever the reason was kept.
+-- The word flavor is gone. A proposed researcher names its agent type as agent_type, and an
+-- eviction for landing on an accelerator type other than the one reserved is
+-- accelerator_type_mismatch, wherever the reason was kept.
+UPDATE platform_experiments SET proposal = jsonb_set(proposal, '{agents}', (
+    SELECT jsonb_agg(CASE WHEN a.agent ? 'flavor'
+                          THEN (a.agent - 'flavor') || jsonb_build_object('agent_type', a.agent->'flavor') ELSE a.agent END
+                     ORDER BY a.n)
+    FROM jsonb_array_elements(proposal->'agents') WITH ORDINALITY AS a(agent, n)))
+WHERE jsonb_path_exists(proposal, '$.agents[*].flavor');
 UPDATE experiments SET eviction_reason = regexp_replace(eviction_reason, '^flavor_mismatch', 'accelerator_type_mismatch')
 WHERE eviction_reason ~ '^flavor_mismatch(:|$)';
 UPDATE experiments SET infra_requeue_reason = regexp_replace(infra_requeue_reason, '^flavor_mismatch', 'accelerator_type_mismatch')

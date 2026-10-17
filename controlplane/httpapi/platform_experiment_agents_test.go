@@ -359,7 +359,7 @@ var (
 func TestHostedAgentsAreCreatedForTheConfiguredLauncherAndHandedNoToken(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 5)
 	r := agentsRouter(t, store, staff)
-	agents := addEach(t, r, 3, `{"hosted":true,"flavor":"hyperparameter-search","model":"claude-sonnet-5","hyperparameters":{"batch_size":64}}`)
+	agents := addEach(t, r, 3, `{"hosted":true,"agent_type":"hyperparameter-search","model":"claude-sonnet-5","hyperparameters":{"batch_size":64}}`)
 	if len(agents) != 3 || len(store.signups) != 3 {
 		t.Fatalf("agents = %d, signups = %d, want 3 and 3", len(agents), len(store.signups))
 	}
@@ -374,7 +374,7 @@ func TestHostedAgentsAreCreatedForTheConfiguredLauncherAndHandedNoToken(t *testi
 			t.Errorf("a hosted agent was handed its token: %v", a)
 		}
 		want := map[string]any{
-			"hosted": true, "flavor": "hyperparameter-search", "model": "claude-sonnet-5",
+			"hosted": true, "agent_type": "hyperparameter-search", "model": "claude-sonnet-5",
 			"role": "competitor", "hyperparameters": map[string]any{"batch_size": float64(64)}, "platform_experiment_id": "pe-1",
 		}
 		for key, value := range want {
@@ -431,7 +431,7 @@ func TestARegisteredAgentJoinsByIDAndJoiningAgainReturnsTheSameTokenAndChangesNo
 	store.agents["veteran"] = &domain.Agent{ID: "veteran", Name: "Veteran", OrgID: "org-a"}
 	r := agentsRouter(t, store, staff)
 
-	code, first := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"agent_id":"veteran","role":"baseline","quota_tier":"burst_only","flavor":"baseline"}`)
+	code, first := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"agent_id":"veteran","role":"baseline","quota_tier":"burst_only","agent_type":"baseline"}`)
 	if code != http.StatusCreated {
 		t.Fatalf("status = %d: %v", code, first)
 	}
@@ -463,21 +463,21 @@ func TestJoiningIsRefusedWithAReasonTheCallerCanActOn(t *testing.T) {
 		wantCode   int
 		wantReason string
 	}{
-		"running, nothing left":  {domain.PlatformExpRunning, "pe-1", `{}`, 409, "no_share_left"},
-		"running, a reviewer":    {domain.PlatformExpRunning, "pe-1", `{"role":"reviewer"}`, 409, "signup_closed"},
-		"closed":                 {domain.PlatformExpClosed, "pe-1", `{"hosted":true}`, 409, "signup_closed"},
-		"registered, running":    {domain.PlatformExpRunning, "pe-1", `{"agent_id":"dana"}`, 409, "no_share_left"},
-		"field full":             {domain.PlatformExpOpen, "pe-1", `{}` + "\x00" + `{}` + "\x00" + `{}`, 409, "max_agents_reached"},
-		"registered, full":       {domain.PlatformExpOpen, "pe-1", `{}` + "\x00" + `{}` + "\x00" + `{"agent_id":"dana"}`, 409, "max_agents_reached"},
-		"no such experiment":     {domain.PlatformExpOpen, "pe-none", `{}`, 404, "experiment_not_found"},
-		"no such agent":          {domain.PlatformExpOpen, "pe-1", `{"agent_id":"ghost"}`, 404, "agent_not_found"},
-		"unknown role":           {domain.PlatformExpOpen, "pe-1", `{"role":"judge"}`, 400, "unknown_role"},
-		"unknown tier":           {domain.PlatformExpOpen, "pe-1", `{"quota_tier":"gold"}`, 400, "invalid_request"},
-		"name with agent_id":     {domain.PlatformExpOpen, "pe-1", `{"agent_id":"dana","name":"x"}`, 400, "invalid_request"},
-		"flavor not an id":       {domain.PlatformExpOpen, "pe-1", `{"flavor":"../x"}`, 400, "invalid_request"},
-		"unknown flavor":         {domain.PlatformExpOpen, "pe-1", `{"flavor":"prompt-search"}`, 400, "invalid_request"},
-		"unknown flavor, hosted": {domain.PlatformExpOpen, "pe-1", `{"flavor":"prompt-search","hosted":true}`, 400, "invalid_request"},
-		"model with a space":     {domain.PlatformExpOpen, "pe-1", `{"model":"a b"}`, 400, "invalid_request"},
+		"running, nothing left":      {domain.PlatformExpRunning, "pe-1", `{}`, 409, "no_share_left"},
+		"running, a reviewer":        {domain.PlatformExpRunning, "pe-1", `{"role":"reviewer"}`, 409, "signup_closed"},
+		"closed":                     {domain.PlatformExpClosed, "pe-1", `{"hosted":true}`, 409, "signup_closed"},
+		"registered, running":        {domain.PlatformExpRunning, "pe-1", `{"agent_id":"dana"}`, 409, "no_share_left"},
+		"field full":                 {domain.PlatformExpOpen, "pe-1", `{}` + "\x00" + `{}` + "\x00" + `{}`, 409, "max_agents_reached"},
+		"registered, full":           {domain.PlatformExpOpen, "pe-1", `{}` + "\x00" + `{}` + "\x00" + `{"agent_id":"dana"}`, 409, "max_agents_reached"},
+		"no such experiment":         {domain.PlatformExpOpen, "pe-none", `{}`, 404, "experiment_not_found"},
+		"no such agent":              {domain.PlatformExpOpen, "pe-1", `{"agent_id":"ghost"}`, 404, "agent_not_found"},
+		"unknown role":               {domain.PlatformExpOpen, "pe-1", `{"role":"judge"}`, 400, "unknown_role"},
+		"unknown tier":               {domain.PlatformExpOpen, "pe-1", `{"quota_tier":"gold"}`, 400, "invalid_request"},
+		"name with agent_id":         {domain.PlatformExpOpen, "pe-1", `{"agent_id":"dana","name":"x"}`, 400, "invalid_request"},
+		"agent type not an id":       {domain.PlatformExpOpen, "pe-1", `{"agent_type":"../x"}`, 400, "invalid_request"},
+		"unknown agent type":         {domain.PlatformExpOpen, "pe-1", `{"agent_type":"prompt-search"}`, 400, "invalid_request"},
+		"unknown agent type, hosted": {domain.PlatformExpOpen, "pe-1", `{"agent_type":"prompt-search","hosted":true}`, 400, "invalid_request"},
+		"model with a space":         {domain.PlatformExpOpen, "pe-1", `{"model":"a b"}`, 400, "invalid_request"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			store := newRosterStore(tc.status, 2)
@@ -753,14 +753,14 @@ func TestAnAgentNamingNoModelIsStoredRunningItsTypes(t *testing.T) {
 	if code != http.StatusCreated {
 		t.Fatalf("status = %d: %v", code, body)
 	}
-	if a := joined(t, body)[0]; a["flavor"] != "generalist" || a["model"] != "" {
-		t.Errorf("an agent that named neither: flavor %v, model %v, want the default type and its model", a["flavor"], a["model"])
+	if a := joined(t, body)[0]; a["agent_type"] != "generalist" || a["model"] != "" {
+		t.Errorf("an agent that named neither: agent type %v, model %v, want the default type and its model", a["agent_type"], a["model"])
 	}
 	if s := store.signups[0]; s.AgentType != "generalist" || s.Model != "" || s.Hyperparameters != nil {
-		t.Errorf("stored signup: flavor %q, model %q", s.AgentType, s.Model)
+		t.Errorf("stored signup: agent type %q, model %q", s.AgentType, s.Model)
 	}
-	code, body = call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"flavor":"data-search","model":"another-model"}`)
-	if a := joined(t, body)[0]; code != http.StatusCreated || a["flavor"] != "data-search" || a["model"] != "another-model" {
+	code, body = call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"agent_type":"data-search","model":"another-model"}`)
+	if a := joined(t, body)[0]; code != http.StatusCreated || a["agent_type"] != "data-search" || a["model"] != "another-model" {
 		t.Errorf("an agent that named both: %d %v", code, a)
 	}
 }
@@ -992,10 +992,10 @@ func TestTheRosterAnswersWhatEachHostedAgentIsDoing(t *testing.T) {
 	}
 }
 
-// Nobody asks for a planner: it is no flavor a request can name.
+// Nobody asks for a planner: it is no agent type a request can name.
 func TestNobodyAsksForAPlanner(t *testing.T) {
 	open := &rosterStore{pe: &domain.PlatformExperiment{ID: "pe-1", ProjectID: "prj-a", Status: domain.PlatformExpOpen, MaxAgents: 5, MaxHosted: rosterMaxHosted, Repository: "acme/model"}, agents: map[string]*domain.Agent{}}
-	if code, body := call(t, agentsRouter(t, open, staff), "POST", "/platform-experiments/pe-1/agents", `{"hosted":true,"flavor":"planner"}`); code != http.StatusBadRequest || len(open.signups) != 0 {
+	if code, body := call(t, agentsRouter(t, open, staff), "POST", "/platform-experiments/pe-1/agents", `{"hosted":true,"agent_type":"planner"}`); code != http.StatusBadRequest || len(open.signups) != 0 {
 		t.Errorf("an agent asked for as a planner: got = %d %v, want 400 and nobody joined", code, body)
 	}
 }

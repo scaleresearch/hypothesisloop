@@ -36,7 +36,7 @@ func (p ResearcherPool) Check(catalog AgentTypeCatalog) error {
 	for i, e := range p {
 		agentType := e.AgentType
 		if agentType == "" {
-			agentType = DefaultAgentFlavor
+			agentType = DefaultAgentType
 		}
 		if _, err := LookupAgentType(catalog, agentType, AgentRoleResearcher); err != nil {
 			return fmt.Errorf("researchers[%d]: %w", i, err)
