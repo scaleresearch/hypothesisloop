@@ -11,6 +11,8 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -53,8 +55,12 @@ func (c *JobWorkloadClient) CreateWorkload(ctx context.Context, exp *clusterapi.
 	// that starts before the name its peers are told to dial exists resolves nothing and dies in
 	// the rendezvous.
 	if jobs[0].Spec.Template.Spec.Subdomain != "" {
-		if err := c.ensureHeadlessService(ctx, exp, jobs[0]); err != nil {
+		svc, err := c.ensureHeadlessService(ctx, exp, jobs[0])
+		if err != nil {
 			return fmt.Errorf("workload: ensure headless service: %w", err)
+		}
+		if err := c.ensurePeerPolicy(ctx, exp, svc); err != nil {
+			return fmt.Errorf("workload: ensure peer network policy: %w", err)
 		}
 	}
 	for _, job := range jobs {
@@ -138,7 +144,7 @@ func existingJobMatchesDesired(existing, desired *batchv1.Job, experimentID stri
 // pods need for the rendezvous name (see HYPOTHESISLOOP_MASTER_ADDR in BuildJob) — named after
 // the experiment and selecting its pods by experiment-id label alone, so ONE Service covers every
 // node of every group and any node can resolve any other.
-func (c *JobWorkloadClient) ensureHeadlessService(ctx context.Context, exp *clusterapi.DesiredJob, job *batchv1.Job) error {
+func (c *JobWorkloadClient) ensureHeadlessService(ctx context.Context, exp *clusterapi.DesiredJob, job *batchv1.Job) (*corev1.Service, error) {
 	labels := map[string]string{
 		workloadkeys.ManagedBy:    workloadkeys.ManagedByValue,
 		workloadkeys.ExperimentID: exp.ID,
@@ -159,22 +165,74 @@ func (c *JobWorkloadClient) ensureHeadlessService(ctx context.Context, exp *clus
 			Selector:  map[string]string{workloadkeys.ExperimentID: exp.ID},
 		},
 	}
-	_, err := c.kube.CoreV1().Services(HypothesisLoopNamespace).Create(ctx, svc, metav1.CreateOptions{})
+	created, err := c.kube.CoreV1().Services(HypothesisLoopNamespace).Create(ctx, svc, metav1.CreateOptions{})
 	if errors.IsAlreadyExists(err) {
 		existing, getErr := c.kube.CoreV1().Services(HypothesisLoopNamespace).Get(ctx, svc.Name, metav1.GetOptions{})
 		if getErr != nil {
-			return getErr
+			return nil, getErr
 		}
 		if existing.Annotations[DesiredSpecHashAnnotation] == job.Annotations[DesiredSpecHashAnnotation] && existing.DeletionTimestamp == nil &&
 			existing.Labels[workloadkeys.ManagedBy] == workloadkeys.ManagedByValue && existing.Labels[workloadkeys.ExperimentID] == exp.ID {
-			return nil
+			return existing, nil
 		}
 		if deleteErr := c.kube.CoreV1().Services(HypothesisLoopNamespace).Delete(ctx, svc.Name, metav1.DeleteOptions{}); deleteErr != nil && !errors.IsNotFound(deleteErr) {
-			return fmt.Errorf("delete drifted headless Service: %w", deleteErr)
+			return nil, fmt.Errorf("delete drifted headless Service: %w", deleteErr)
 		}
-		return fmt.Errorf("drifted headless Service %s removed; retry creation", svc.Name)
+		return nil, fmt.Errorf("drifted headless Service %s removed; retry creation", svc.Name)
 	}
-	return err
+	return created, err
+}
+
+// peerPolicy lets a distributed job's pods reach each other through the namespace's policy
+// (the chart's hypothesisloop-jobs-isolation), which lets no pod reach another. It is owned by
+// the job's headless Service, so the garbage collector removes it with the Service.
+func peerPolicy(exp *clusterapi.DesiredJob, svc *corev1.Service) *networkingv1.NetworkPolicy {
+	peers := []networkingv1.NetworkPolicyPeer{{PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{workloadkeys.ExperimentID: exp.ID}}}}
+	return &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      svc.Name,
+			Namespace: HypothesisLoopNamespace,
+			Labels: map[string]string{
+				workloadkeys.ManagedBy:    workloadkeys.ManagedByValue,
+				workloadkeys.ExperimentID: exp.ID,
+			},
+			OwnerReferences: []metav1.OwnerReference{{APIVersion: "v1", Kind: "Service", Name: svc.Name, UID: svc.UID}},
+		},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{workloadkeys.ExperimentID: exp.ID}},
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress},
+			Ingress:     []networkingv1.NetworkPolicyIngressRule{{From: peers}},
+			Egress:      []networkingv1.NetworkPolicyEgressRule{{To: peers}},
+		},
+	}
+}
+
+// peerPolicyMatches is whether policy is the one peerPolicy builds for exp under svc.
+func peerPolicyMatches(policy *networkingv1.NetworkPolicy, exp *clusterapi.DesiredJob, svc *corev1.Service) bool {
+	owners := policy.OwnerReferences
+	return policy.DeletionTimestamp == nil && policy.Labels[workloadkeys.ManagedBy] == workloadkeys.ManagedByValue &&
+		policy.Labels[workloadkeys.ExperimentID] == exp.ID && len(owners) == 1 && owners[0].UID == svc.UID &&
+		equality.Semantic.DeepEqual(policy.Spec, peerPolicy(exp, svc).Spec)
+}
+
+func (c *JobWorkloadClient) ensurePeerPolicy(ctx context.Context, exp *clusterapi.DesiredJob, svc *corev1.Service) error {
+	policies := c.kube.NetworkingV1().NetworkPolicies(HypothesisLoopNamespace)
+	want := peerPolicy(exp, svc)
+	_, err := policies.Create(ctx, want, metav1.CreateOptions{})
+	if !errors.IsAlreadyExists(err) {
+		return err
+	}
+	existing, err := policies.Get(ctx, want.Name, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	if peerPolicyMatches(existing, exp, svc) {
+		return nil
+	}
+	if err := policies.Delete(ctx, want.Name, metav1.DeleteOptions{}); err != nil && !errors.IsNotFound(err) {
+		return fmt.Errorf("delete drifted NetworkPolicy: %w", err)
+	}
+	return fmt.Errorf("drifted NetworkPolicy %s removed; retry creation", want.Name)
 }
 
 // ListManagedJobs returns the experiment IDs of every Job this client manages in the current
@@ -308,7 +366,17 @@ func (c *JobWorkloadClient) WorkloadMatchesDesired(ctx context.Context, exp *clu
 		service.Labels[workloadkeys.ManagedBy] != workloadkeys.ManagedByValue || service.Labels[workloadkeys.ExperimentID] != exp.ID)) {
 		return false, nil
 	}
-	return true, nil
+	if !wantsService {
+		return true, nil
+	}
+	policy, err := c.kube.NetworkingV1().NetworkPolicies(HypothesisLoopNamespace).Get(ctx, service.Name, metav1.GetOptions{})
+	if errors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("workload: get peer NetworkPolicy: %w", err)
+	}
+	return peerPolicyMatches(policy, exp, service), nil
 }
 
 // ListManagedAuxiliaryWorkloads returns experiment IDs referenced by managed headless Services,

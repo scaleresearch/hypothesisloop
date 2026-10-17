@@ -2,14 +2,18 @@ package k8sexec
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadenv"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
 
 func TestExistingJobMatchesDesiredRequiresHashAndIdentity(t *testing.T) {
@@ -138,5 +142,54 @@ func TestPlacementIsResolvedForTheJobAdmissionResolved(t *testing.T) {
 	exp := &clusterapi.DesiredJob{Image: testImage, Launch: "true", ID: "resolved-placement", AcceleratorType: "unqualified-type", Job: submitted, ResolvedJob: &resolved}
 	if _, err := c.resolvePlacementFor(context.Background(), exp); err == nil {
 		t.Fatal("a job resolved to hold an accelerator was given the empty placement without any resolution attempt")
+	}
+}
+
+// The namespace's policy lets no pod reach a job's, so a distributed job's pods reach each other
+// only through a policy of the job's own, which admits its pods and no other, and goes with its
+// headless Service.
+func TestADistributedJobsPodsReachEachOtherAndNoOtherPod(t *testing.T) {
+	ctx := context.Background()
+	c := pullTestClient(t)
+	exp := pullTestExperiment("exp-peers", testImage, nil)
+	exp.Job.NumNodes = 2
+	if err := c.CreateWorkload(ctx, exp); err != nil {
+		t.Fatal(err)
+	}
+	policies := c.kube.NetworkingV1().NetworkPolicies(HypothesisLoopNamespace)
+	policy, err := policies.Get(ctx, jobName(exp.ID), metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownPods := map[string]string{workloadkeys.ExperimentID: exp.ID}
+	if !reflect.DeepEqual(policy.Spec.PodSelector.MatchLabels, ownPods) {
+		t.Errorf("the policy selects %v, want the job's pods", policy.Spec.PodSelector.MatchLabels)
+	}
+	if len(policy.Spec.Ingress) != 1 || len(policy.Spec.Ingress[0].From) != 1 || len(policy.Spec.Ingress[0].Ports) != 0 ||
+		!reflect.DeepEqual(policy.Spec.Ingress[0].From[0], networkingv1.NetworkPolicyPeer{PodSelector: &metav1.LabelSelector{MatchLabels: ownPods}}) {
+		t.Errorf("ingress = %+v, want from the job's own pods alone", policy.Spec.Ingress)
+	}
+	if len(policy.Spec.Egress) != 1 || !reflect.DeepEqual(policy.Spec.Egress[0].To, policy.Spec.Ingress[0].From) {
+		t.Errorf("egress = %+v, want to the job's own pods alone", policy.Spec.Egress)
+	}
+	if owners := policy.OwnerReferences; len(owners) != 1 || owners[0].Kind != "Service" || owners[0].Name != jobName(exp.ID) {
+		t.Errorf("owners = %+v, want the job's headless Service", owners)
+	}
+	if matches, err := c.WorkloadMatchesDesired(ctx, exp); err != nil || !matches {
+		t.Fatalf("WorkloadMatchesDesired = %v, %v with the policy in place", matches, err)
+	}
+	if err := policies.Delete(ctx, policy.Name, metav1.DeleteOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if matches, err := c.WorkloadMatchesDesired(ctx, exp); err != nil || matches {
+		t.Fatalf("WorkloadMatchesDesired = %v, %v with the policy gone, want a workload whose pods cannot reach each other replaced", matches, err)
+	}
+
+	single := pullTestExperiment("exp-single", testImage, nil)
+	if err := c.CreateWorkload(ctx, single); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := policies.Get(ctx, jobName(single.ID), metav1.GetOptions{}); !errors.IsNotFound(err) {
+		t.Fatalf("get the policy of a single-node job: %v, want none: it has no peers to reach", err)
 	}
 }

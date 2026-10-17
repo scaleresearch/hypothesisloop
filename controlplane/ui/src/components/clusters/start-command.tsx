@@ -44,8 +44,8 @@ function InstallGuide({ kind, registered }: { kind: Kind; registered: Registered
         <GuidePart title="What it installs">
           <ul className={guideList}>
             <li>In the namespace <Code>hypothesisloop</Code>: the cluster-agent Deployment, the node-agent DaemonSet on every node, and the Secret <Code>hypothesisloop-runtime-token</Code>.</li>
-            <li>The namespace <Code>hypothesisloop-jobs</Code>, where each job runs as a Kubernetes Job, and the PriorityClasses <Code>hypothesisloop-jobs-guaranteed</Code> and <Code>hypothesisloop-jobs-burst</Code>.</li>
-            <li>Permissions to create and delete Jobs, pods, Services, Secrets and ResourceClaimTemplates in <Code>hypothesisloop-jobs</Code> only, and to read nodes, pods and DRA devices.</li>
+            <li>The namespace <Code>hypothesisloop-jobs</Code>, where each job runs as a Kubernetes Job, and the PriorityClasses <Code>hypothesisloop-jobs-guaranteed</Code> and <Code>hypothesisloop-jobs-burst</Code>, and a NetworkPolicy that lets no pod reach a job and keeps jobs from other pods, the cluster&apos;s Service CIDR and the cloud&apos;s metadata endpoint.</li>
+            <li>Permissions to create and delete Jobs, pods, Services, NetworkPolicies, Secrets and ResourceClaimTemplates in <Code>hypothesisloop-jobs</Code> only, and to read nodes, pods and DRA devices.</li>
           </ul>
         </GuidePart>
         <GuidePart title="Steps">

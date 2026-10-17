@@ -17,3 +17,31 @@ globalDefault: false
 preemptionPolicy: {{ if $.Values.jobs.preemptLowerPriorityPods }}PreemptLowerPriority{{ else }}Never{{ end }}
 description: HypothesisLoop jobs of the {{ $tier }} capacity tier.
 {{- end }}
+---
+# Every pod in the namespace is a job's. No pod reaches one: a distributed job's pods reach each
+# other through the NetworkPolicy the agent creates beside its headless Service. A job reaches
+# DNS and every address but the link-local range, where clouds serve instance metadata and
+# credentials, and this cluster's pod and Service CIDRs, where other orgs' jobs and the
+# cluster's own services are.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hypothesisloop-jobs-isolation
+  namespace: hypothesisloop-jobs
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  egress:
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 169.254.0.0/16
+              {{- range .Values.jobs.network.clusterCIDRs }}
+              - {{ . }}
+              {{- end }}

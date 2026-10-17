@@ -30,6 +30,10 @@ jobs:
   # Whether a job's pod may evict pods of lower priority to get a node. false makes job pods
   # wait for room, so they never evict another workload of a cluster this runtime shares.
   preemptLowerPriorityPods: false
+  network:
+    # This cluster's pod and Service CIDRs (IPv4). A job reaches no address in them but DNS and
+    # its own job's other pods. The defaults are k3s's: set the cluster's own on any other.
+    clusterCIDRs: ["10.42.0.0/16", "10.43.0.0/16"]
 
 nodeAgent:
   # Node labels the node-agent DaemonSet is limited to, for a cluster where only some nodes run

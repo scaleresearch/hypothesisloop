@@ -2,14 +2,18 @@ package clusteragent
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/util/yaml"
 )
 
@@ -191,6 +195,60 @@ func TestTheChartInstallsTheNamespaceAndPriorityClassesJobsName(t *testing.T) {
 		if class["preemptionPolicy"] != "PreemptLowerPriority" {
 			t.Errorf("%s: preemptionPolicy = %v with preemption asked for", metadata(class, "name"), class["preemptionPolicy"])
 		}
+	}
+}
+
+// A job runs code of any org. It must not reach another org's job, the cluster's own services
+// or the cloud's instance metadata, where a node's credentials are served, and no pod may reach it.
+func TestJobsReachNoPodNorTheMetadataEndpoint(t *testing.T) {
+	isolation := func(set ...string) networkingv1.NetworkPolicy {
+		t.Helper()
+		policies := ofKind(render(t, set...), "NetworkPolicy")
+		if len(policies) != 1 {
+			t.Fatalf("the chart rendered %d NetworkPolicies, want the jobs namespace's one", len(policies))
+		}
+		raw, err := json.Marshal(policies[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var policy networkingv1.NetworkPolicy
+		if err := json.Unmarshal(raw, &policy); err != nil {
+			t.Fatal(err)
+		}
+		return policy
+	}
+	policy := isolation()
+	if policy.Namespace != jobsNamespace || len(policy.Spec.PodSelector.MatchLabels) != 0 || len(policy.Spec.PodSelector.MatchExpressions) != 0 {
+		t.Fatalf("the policy selects %v in %q, want every pod of %s", policy.Spec.PodSelector, policy.Namespace, jobsNamespace)
+	}
+	if !slices.Equal(policy.Spec.PolicyTypes, []networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress}) || len(policy.Spec.Ingress) != 0 {
+		t.Fatalf("policy types %v with ingress %v, want both types and no ingress allowed", policy.Spec.PolicyTypes, policy.Spec.Ingress)
+	}
+	var blocks []networkingv1.IPBlock
+	for _, rule := range policy.Spec.Egress {
+		if len(rule.To) == 0 {
+			for _, port := range rule.Ports {
+				if port.Port == nil || port.Port.IntValue() != 53 {
+					t.Errorf("a job reaches every address on port %v, want only DNS's", port.Port)
+				}
+			}
+			continue
+		}
+		for _, peer := range rule.To {
+			if peer.IPBlock == nil || peer.PodSelector != nil || peer.NamespaceSelector != nil {
+				t.Errorf("a job reaches %+v, want address blocks only", peer)
+				continue
+			}
+			blocks = append(blocks, *peer.IPBlock)
+		}
+	}
+	want := []networkingv1.IPBlock{{CIDR: "0.0.0.0/0", Except: []string{"169.254.0.0/16", "10.42.0.0/16", "10.43.0.0/16"}}}
+	if !reflect.DeepEqual(blocks, want) {
+		t.Errorf("a job reaches %+v, want %+v", blocks, want)
+	}
+	other := isolation("jobs.network.clusterCIDRs={10.0.0.0/14,10.4.0.0/19}")
+	if except := other.Spec.Egress[1].To[0].IPBlock.Except; !slices.Equal(except, []string{"169.254.0.0/16", "10.0.0.0/14", "10.4.0.0/19"}) {
+		t.Errorf("with the cluster's own CIDRs a job is kept from %v", except)
 	}
 }
 

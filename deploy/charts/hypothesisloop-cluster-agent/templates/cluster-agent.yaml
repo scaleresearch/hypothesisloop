@@ -36,6 +36,10 @@ rules:
     # One ResourceClaimTemplate per job that asks for a DRA device.
     resources: ["resourceclaimtemplates"]
     verbs: ["get", "list", "create", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    # One NetworkPolicy per multi-node job, letting its pods reach each other.
+    resources: ["networkpolicies"]
+    verbs: ["get", "create", "delete"]
   - apiGroups: [""]
     # One image pull Secret per job whose image is in its org's private repository, holding the
     # control plane's short-lived read-only login to it.
