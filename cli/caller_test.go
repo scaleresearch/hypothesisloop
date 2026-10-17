@@ -198,15 +198,15 @@ func TestTheProposeExampleIsSentAsTheAPIReadsIt(t *testing.T) {
 	t.Setenv("HL_TOKEN", derivedToken("agent:pe-env/ag-1"))
 	var help bytes.Buffer
 	cmdPlatformExperimentsPropose(nil, []string{"-h"}, &help, &help)
-	_, example, _ := strings.Cut(help.String(), "\n\n  experiment:")
-	example, _, _ = strings.Cut("  experiment:"+example, "\n\nThe proposal is checked")
+	_, example, _ := strings.Cut(help.String(), "\n\n  goal_version:")
+	example, _, _ = strings.Cut("  goal_version:"+example, "\n\nThe proposal is checked")
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"platform-experiments", "propose", writeFile(t, example)}, &stdout, &stderr); code != 0 {
 		t.Fatalf("propose the help's example: exit %d, stderr %s", code, stderr.String())
 	}
 	body := (*got)[0].Body
-	if body["cpu"] != "8" || body["memory"] != "32Gi" || body["storage"] != "100Gi" {
-		t.Errorf("sent cpu %#v, memory %#v, storage %#v, want the strings \"8\", \"32Gi\" and \"100Gi\"", body["cpu"], body["memory"], body["storage"])
+	if body["cpu"] != "8" || body["memory"] != "32Gi" || body["storage"] != "100Gi" || body["goal_version"] != float64(1) {
+		t.Errorf("sent cpu %#v, memory %#v, storage %#v, goal_version %#v, want the strings \"8\", \"32Gi\" and \"100Gi\" and 1", body["cpu"], body["memory"], body["storage"], body["goal_version"])
 	}
 }
 
