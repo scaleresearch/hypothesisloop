@@ -14,8 +14,8 @@ REAL_SITUATION = updates.situation
 REAL_STANDING = updates.standing
 S = "\n\n" + SITUATION
 
-COMPLETED = '{"kind":"experiment.status","subject":"exp-1","value":"COMPLETED","detail":"","agent_id":"agent-a","position":5,"cursor":5}'
-COMMENT = '{"kind":"comment.new","subject":"hyp-1","value":"agent","detail":"","agent_id":"agent-b","position":6,"cursor":6}'
+COMPLETED = '{"kind":"experiment.status","subject":"exp-1","value":"COMPLETED","detail":"","agent_id":"agent-a","id":5}'
+COMMENT = '{"kind":"comment.new","subject":"hyp-1","value":"agent","detail":"","agent_id":"agent-b","id":6}'
 
 
 ENV = {**os.environ, "HL_TOKEN": "hls_" + base64.urlsafe_b64encode(b"agent:pe-1/agent-a").decode().rstrip("=") + ".mac"}
@@ -116,7 +116,7 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
     async def test_a_status_reason_that_waits_for_the_coordinator_wakes_it_and_names_the_reason(self):
         coordinator = {**os.environ, "HL_TOKEN": "hls_" + base64.urlsafe_b64encode(b"coordinator:pe-1").decode().rstrip("=") + ".mac"}
         done = ('{"kind":"platform_experiment.status","subject":"pe-1","value":"running","detail":"researchers_done",'
-                '"agent_id":"","position":9,"cursor":9}')
+                '"agent_id":"","id":9}')
         command, counter = fake_hl('[ "$1" = platform-experiments ] && { echo \'{"status": "running"}\'; exit 0; }\n'
                                    f'echo "$*" >> "$0.args"\necho \'{done}\'\n')
         events = await updates.next_batch(coordinator, lambda: False, 10, command=command, coalesce_s=0)
@@ -338,10 +338,10 @@ class DrainTest(unittest.IsolatedAsyncioTestCase):
     # A batch the harness took and never handed over, as when the CLI started a turn first or the
     # session died, is read again: the cursor its watch saved moves into place only once delivered.
     async def test_the_cursor_moves_only_once_what_was_read_is_delivered(self):
-        command, _ = fake_hl(f"echo \"$RUNS\" > \"$HL_STATE_DIR/watch-pe-1-agent-a.json\"\necho '{COMPLETED}'\n")
+        command, _ = fake_hl(f"echo \"$RUNS\" > \"$HL_STATE_DIR/changes-pe-1-agent-a.json\"\necho '{COMPLETED}'\n")
         state = os.path.join(tempfile.mkdtemp(), ".hl-state")
         env = {**ENV, "HL_STATE_DIR": state}
-        cursor = os.path.join(state, "watch-pe-1-agent-a.json")
+        cursor = os.path.join(state, "changes-pe-1-agent-a.json")
 
         await updates.drain(updates.taking(env, "waiting"), command=command)
         self.assertFalse(os.path.exists(cursor))
@@ -351,13 +351,13 @@ class DrainTest(unittest.IsolatedAsyncioTestCase):
         with open(cursor) as f:
             self.assertEqual(f.read().strip(), "2")
         taken = updates.taking(env, "draining")
-        with open(os.path.join(taken["HL_STATE_DIR"], "watch-pe-1-agent-a.json")) as f:
+        with open(os.path.join(taken["HL_STATE_DIR"], "changes-pe-1-agent-a.json")) as f:
             self.assertEqual(f.read().strip(), "2", "a read starts from the cursor delivered")
 
     # A turn the CLI starts by itself can drain while the wait holds a batch it took before: the
     # batch is the drain's to hand over, and the wait's cursor, now behind, never moves back.
     async def test_a_cursor_never_moves_back_over_a_batch_another_reader_delivered(self):
-        command, _ = fake_hl(f"echo \"$RUNS\" > \"$HL_STATE_DIR/watch-pe-1-agent-a.json\"\necho '{COMPLETED}'\n")
+        command, _ = fake_hl(f"echo \"$RUNS\" > \"$HL_STATE_DIR/changes-pe-1-agent-a.json\"\necho '{COMPLETED}'\n")
         state = os.path.join(tempfile.mkdtemp(), ".hl-state")
         env = {**ENV, "HL_STATE_DIR": state}
 
@@ -370,7 +370,7 @@ class DrainTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(updates.delivered(draining))
         self.assertTrue(updates.superseded(waiting))
         self.assertFalse(updates.delivered(waiting))
-        with open(os.path.join(state, "watch-pe-1-agent-a.json")) as f:
+        with open(os.path.join(state, "changes-pe-1-agent-a.json")) as f:
             self.assertEqual(f.read().strip(), "3")
 
 
@@ -414,7 +414,7 @@ class HookTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_waiting_updates_reach_the_agent_once_with_repeats_collapsed(self):
         event = {"kind": "job.underperforming", "subject": "job-1", "value": "val_accuracy", "agent_id": "agent-a"}
-        self.waiting = [event, dict(event, position=2)]
+        self.waiting = [event, dict(event, id=2)]
         self.assertEqual(await self.call(), {"hookSpecificOutput": {
             "hookEventName": "PostToolUse",
             "additionalContext": "Platform updates:\njob.underperforming job-1 val_accuracy" + S}})
@@ -591,18 +591,18 @@ class RereadTest(unittest.TestCase):
 class FormatTest(unittest.TestCase):
     def test_one_compact_line_per_event_naming_only_other_actors(self):
         events = [{"kind": "experiment.status", "subject": "exp-1", "value": "COMPLETED", "detail": "",
-                   "agent_id": "agent-a", "position": 5, "cursor": 5},
+                   "agent_id": "agent-a", "id": 5},
                   {"kind": "hypothesis.link", "subject": "hyp-2", "value": "builds_on", "detail": "hyp-1",
-                   "agent_id": "agent-b", "position": 6, "cursor": 6}]
+                   "agent_id": "agent-b", "id": 6}]
         self.assertEqual(updates.message(events, "agent-a"),
                          "Platform updates:\nexperiment.status exp-1 COMPLETED\nhypothesis.link hyp-2 builds_on hyp-1 by agent-b")
 
     def test_a_held_or_blocked_job_is_one_line_with_the_job_the_code_and_the_sentence(self):
         sentence = "cluster k3s-1 is short of 8 cores, held by 2 jobs of this platform experiment and 1 of others"
         held = {"kind": "job.held", "subject": "exp-1", "value": "capacity_unavailable", "detail": sentence,
-                "agent_id": "agent-a", "position": 7, "cursor": 7}
+                "agent_id": "agent-a", "id": 7}
         blocked = {"kind": "experiment.blocked", "subject": "exp-2", "value": "no_cluster_for_image",
-                   "detail": "no cluster runs image torch", "agent_id": "agent-a", "position": 8, "cursor": 8}
+                   "detail": "no cluster runs image torch", "agent_id": "agent-a", "id": 8}
         self.assertEqual(updates.message([held, blocked], "agent-a"), "Platform updates:\n"
                          f"job.held exp-1 capacity_unavailable {sentence}\n"
                          "experiment.blocked exp-2 no_cluster_for_image no cluster runs image torch")
@@ -612,7 +612,7 @@ class FormatTest(unittest.TestCase):
     # direction in the lab notebook and reached no researcher without one.
     def test_a_message_wakes_its_agent_and_is_told_as_what_it_says(self):
         sent = {"kind": "agent.message", "subject": "agent-a", "value": "coordinator", "detail": "leave the lr line, try warmup",
-                "agent_id": "agent-a", "position": 9, "cursor": 9}
+                "agent_id": "agent-a", "id": 9}
         self.assertEqual(updates.event_line(sent, "agent-a"), "message from the coordinator: leave the lr line, try warmup")
         self.assertEqual(updates.event_line(dict(sent, value="owner"), ""), "message to agent-a from the owner: leave the lr line, try warmup")
         self.assertIn("agent.message", updates.WAKES["agent"])
@@ -630,7 +630,7 @@ class FormatTest(unittest.TestCase):
         detail = ("the environment commit cccccccccccc declares in .hypothesisloop/Dockerfile did not build on pytorch: "
                   "`hl env status` at that commit prints the end of its output. Fix the file, commit and build again")
         ended = {"kind": "environment.status", "subject": "90aa96c4" * 8, "value": "failed", "detail": detail,
-                 "agent_id": "agent-a", "position": 10, "cursor": 10}
+                 "agent_id": "agent-a", "id": 10}
         self.assertEqual(updates.event_line(ended, "agent-a"), f"environment failed: {detail}")
         self.assertIn("environment.status", updates.WAKES["agent"])
 
@@ -953,7 +953,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
             if len(waits) == 1:
                 state = os.path.join(setup.statedir, ".hl-state")
                 os.makedirs(state)
-                with open(os.path.join(state, "watch-pe-1-agent-a.json"), "w") as f:
+                with open(os.path.join(state, "changes-pe-1-agent-a.json"), "w") as f:
                     f.write("2")
                 return [{"kind": "comment.new", "subject": "hyp-1", "value": "agent", "agent_id": "agent-b"}]
             stop_flag[0] = True

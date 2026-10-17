@@ -1,9 +1,11 @@
 """Platform updates about the agent's own resources, delivered by the harness.
 
 The harness runs `hl watch` whenever the agent ends its turn, and briefly after each of its tool
-calls: the platform holds whatever happened while the agent worked and replays it from the cursor
-hl saved, so a batch waits server-side instead of in this process, survives a restart, and is
-delivered once whichever of the two hands it over, which is when its cursor moves. An event is a
+calls: the platform holds every change for a week, and hl reads on from the id of the last change
+it saved as its cursor, so a batch waits server-side instead of in this process, survives a
+restart, and is delivered once whichever of the two hands it over, which is when its cursor moves.
+A cursor older than what the platform holds is handed over as one watch.reset line, which always
+wakes: what happened in between is read from the situation. An event is a
 pointer; a job that ended is handed over with the machine it ran on and its metrics, so that
 learning of it costs no call. What stands around the batch (time, capacity, budget, standings,
 jobs and subagents in flight) comes as the situation with every prompt that starts a turn.
@@ -69,6 +71,8 @@ WAKES = {
 }
 # A message to one agent from the coordinator or the owner, told as what it says.
 MESSAGE = "agent.message"
+# What hl prints, in place of the changes, when the platform no longer holds those after its cursor.
+RESET = "watch.reset"
 # A person asked a draft's planner to change its answer. The event is a pointer: what was asked is
 # read from the draft (core.revising), and whoever hands a batch over says it in place of the event.
 REVISION = "platform_experiment.revision"
@@ -391,6 +395,8 @@ def event_line(event: dict, agent_id: str) -> str:
         return f"message{to} from the {event.get('value', '')}: {event.get('detail', '')}"
     if event.get("kind") == ENVIRONMENT:
         return f"environment {event.get('value', '')}: {event.get('detail', '')}"
+    if event.get("kind") == RESET:
+        return f"updates were reset, {event.get('detail', '')}"
     parts = [event.get("kind", ""), event.get("subject", ""), event.get("value", ""), event.get("detail", "")]
     if event.get("machine"):
         parts.append(f"on {event['machine']}")
