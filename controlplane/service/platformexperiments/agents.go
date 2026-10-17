@@ -215,7 +215,7 @@ func (s *Service) AddAgent(ctx context.Context, platformExpID string, req AddAge
 			return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
 		}
 	}
-	if !member && !takesSignup(pe.Status, role) {
+	if !member && !domain.TakesSignup(pe.Status, role) {
 		return nil, enrolRefused(db.ErrSignupClosed, pe, req.Name)
 	}
 	var late *db.LateJoin

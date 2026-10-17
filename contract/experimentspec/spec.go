@@ -23,8 +23,30 @@ import (
 // answers both whole, and every agent reads it often.
 const MaxProseBytes = 32 << 10
 
+// ProseTooLong says why text, the description or the summary named field, is refused for its
+// length, "" when it is within MaxProseBytes.
+func ProseTooLong(field, text string) string {
+	if len(text) <= MaxProseBytes {
+		return ""
+	}
+	return fmt.Sprintf("%s is %d bytes and at most %d are kept, since every read of the platform experiment answers it whole: shorten it, and keep the detail in the repository and name the path", field, len(text), MaxProseBytes)
+}
+
 // MaxHyperparametersBytes caps the hyperparameters a researcher is started with, as JSON.
 const MaxHyperparametersBytes = 4 << 10
+
+// ValidateHyperparameters refuses hyperparameters that cannot be encoded as JSON or exceed
+// MaxHyperparametersBytes encoded.
+func ValidateHyperparameters(h map[string]any) error {
+	encoded, err := json.Marshal(h)
+	if err != nil {
+		return fmt.Errorf("hyperparameters cannot be encoded: %w", err)
+	}
+	if len(encoded) > MaxHyperparametersBytes {
+		return fmt.Errorf("hyperparameters are %d bytes as JSON, the limit is %d", len(encoded), MaxHyperparametersBytes)
+	}
+	return nil
+}
 
 // Spec is what a platform experiment is. Its keys are those of the create body, and its docs
 // are that body's.
@@ -214,8 +236,8 @@ func (spec *Spec) Validate() error {
 	if s.Name == "" || s.Description == "" {
 		refuse("name", "name and description are required: the description is the brief every agent works from")
 	}
-	if len(s.Description) > MaxProseBytes {
-		refuse("description", "description is %d bytes and at most %d are kept, since every read of the platform experiment answers it whole: shorten it, and keep the detail in the repository and name the path", len(s.Description), MaxProseBytes)
+	if why := ProseTooLong("description", s.Description); why != "" {
+		refuse("description", "%s", why)
 	}
 	if err := ValidateMetricDefinitions(s.Metrics); err != nil {
 		refuse("metrics", "metrics: %s", err)
@@ -268,8 +290,8 @@ func (s *Spec) researcherProblems() []string {
 		if e.Count <= 0 {
 			problems = append(problems, fmt.Sprintf("researchers[%d]: count must be positive, got %d", i, e.Count))
 		}
-		if encoded, err := json.Marshal(e.Hyperparameters); err != nil || len(encoded) > MaxHyperparametersBytes {
-			problems = append(problems, fmt.Sprintf("researchers[%d]: hyperparameters must be a JSON object of at most %d bytes", i, MaxHyperparametersBytes))
+		if err := ValidateHyperparameters(e.Hyperparameters); err != nil {
+			problems = append(problems, fmt.Sprintf("researchers[%d]: %s", i, err))
 		}
 		if seen[e.Key()] {
 			problems = append(problems, fmt.Sprintf("researchers[%d]: a second entry of agent_type %q on model %q: state one entry with their count", i, e.AgentType, e.Model))

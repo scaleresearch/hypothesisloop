@@ -256,8 +256,8 @@ func (s *Service) SetSummary(ctx context.Context, id, summary string) (*domain.P
 	if i := strings.Index(summary, closeRecordHeading); i >= 0 {
 		summary = strings.TrimRight(summary[:i], " \n")
 	}
-	if len(summary) > domain.MaxProseBytes {
-		return nil, refuseUpdate(422, "too_long", "%s", tooLong("summary", len(summary)))
+	if why := experimentspec.ProseTooLong("summary", summary); why != "" {
+		return nil, refuseUpdate(422, "too_long", "%s", why)
 	}
 	err := s.store.SetPlatformExperimentSummary(ctx, id, summary)
 	if errors.Is(err, db.ErrPlatformExperimentNotFound) {

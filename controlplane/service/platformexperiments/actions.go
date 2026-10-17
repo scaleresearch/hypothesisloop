@@ -80,7 +80,7 @@ func actions(pe *domain.PlatformExperiment, caller auth.Principal) []domain.Plat
 	if acceptable(pe) == nil {
 		actions = append(actions, domain.PlatformExpActionAccept)
 	}
-	if takesSignup(pe.Status, domain.SignupRoleCompetitor) {
+	if domain.TakesSignup(pe.Status, domain.SignupRoleCompetitor) {
 		actions = append(actions, domain.PlatformExpActionAddAgent)
 	}
 	return actions
@@ -142,12 +142,6 @@ func acceptable(pe *domain.PlatformExperiment) error {
 		return invalidTransition("draft %s has no proposal to accept yet: its planner is still working", pe.ID)
 	}
 	return nil
-}
-
-// takesSignup says an agent of role joins a platform experiment in status: any while it is open,
-// and once it runs a researcher only.
-func takesSignup(status domain.PlatformExperimentStatus, role domain.SignupRole) bool {
-	return status == domain.PlatformExpOpen || status == domain.PlatformExpRunning && role == domain.SignupRoleCompetitor
 }
 
 // notEditable refuses the fields of pe that no PATCH changes in its status.

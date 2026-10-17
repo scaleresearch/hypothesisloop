@@ -443,6 +443,12 @@ const MaxGoalBytes = 2000
 // SignupRole is the API's own (platformapi).
 type SignupRole = platformapi.SignupRole
 
+// TakesSignup says an agent of role joins a platform experiment in status: any while it is open,
+// and once it runs a researcher only.
+func TakesSignup(status PlatformExperimentStatus, role SignupRole) bool {
+	return status == PlatformExpOpen || status == PlatformExpRunning && role == SignupRoleCompetitor
+}
+
 const (
 	SignupRoleCompetitor = platformapi.SignupRoleCompetitor
 	SignupRoleBaseline   = platformapi.SignupRoleBaseline

@@ -293,11 +293,6 @@ func (s *Service) stored(ctx context.Context, id string) (*domain.PlatformExperi
 	return pe, nil
 }
 
-// tooLong says why a description or a summary of size bytes is refused.
-func tooLong(field string, size int) string {
-	return fmt.Sprintf("%s is %d bytes and at most %d are kept, since every read of the platform experiment answers it whole: shorten it, and keep the detail in the repository and name the path", field, size, domain.MaxProseBytes)
-}
-
 func noPlatformExperiment(id string) error {
 	return refusal.Refuse(http.StatusNotFound, "not_found", "no platform experiment "+id)
 }

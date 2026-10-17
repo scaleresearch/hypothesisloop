@@ -286,8 +286,8 @@ type AgentInstance struct {
 const (
 	InstanceWaiting   = "waiting"
 	InstanceRequested = "requested"
-	InstanceStarting  = "starting"
-	InstanceRunning   = "running"
+	InstanceStarting  = string(agentsandbox.InstanceStarting)
+	InstanceRunning   = string(agentsandbox.InstanceRunning)
 	InstanceStopped   = "stopped"
 )
 

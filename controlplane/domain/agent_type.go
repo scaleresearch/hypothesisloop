@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
 )
 
 // AgentRole is what an agent type is for: the part of a run its agents play. A type's role is
@@ -195,18 +197,7 @@ func (s AgentTypeSettings) Validate() error {
 	if !slices.Contains(agentEfforts, s.Effort) {
 		return fmt.Errorf("effort must be one of %s, got %q", strings.Join(agentEfforts, ", "), s.Effort)
 	}
-	return validateHyperparameters(s.Hyperparameters)
-}
-
-func validateHyperparameters(h map[string]any) error {
-	encoded, err := json.Marshal(h)
-	if err != nil {
-		return fmt.Errorf("hyperparameters cannot be encoded: %w", err)
-	}
-	if len(encoded) > MaxHyperparametersBytes {
-		return fmt.Errorf("hyperparameters are %d bytes as JSON, the limit is %d", len(encoded), MaxHyperparametersBytes)
-	}
-	return nil
+	return experimentspec.ValidateHyperparameters(s.Hyperparameters)
 }
 
 // ValidateModel refuses a model name no agent can be started on.
@@ -527,7 +518,7 @@ func ResolveAgentLaunch(catalog AgentTypeCatalog, role AgentRole, agentType, mod
 			return AgentLaunchChoice{}, err
 		}
 	}
-	if err := validateHyperparameters(hyperparameters); err != nil {
+	if err := experimentspec.ValidateHyperparameters(hyperparameters); err != nil {
 		return AgentLaunchChoice{}, err
 	}
 	return AgentLaunchChoice{AgentType: agentType, Model: model, Hyperparameters: hyperparameters}, nil

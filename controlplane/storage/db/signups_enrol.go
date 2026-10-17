@@ -186,11 +186,12 @@ WHERE pe.id=$1 FOR UPDATE OF pe`, platformExpID).Scan(&status, &maxAgents, &maxA
 		}
 		return 0, fmt.Errorf("platform_experiments_store.Signup: lock experiment: %w", err)
 	}
-	running := late != nil
-	if running && (status != string(domain.PlatformExpRunning) || slices.ContainsFunc(signups, func(signup domain.AgentSignup) bool { return signup.Role != domain.SignupRoleCompetitor })) {
-		return 0, ErrSignupClosed
+	// A late join is to a running platform experiment, any other to an open one.
+	running, joins := late != nil, domain.PlatformExpOpen
+	if running {
+		joins = domain.PlatformExpRunning
 	}
-	if !running && status != string(domain.PlatformExpOpen) {
+	if status != string(joins) || slices.ContainsFunc(signups, func(signup domain.AgentSignup) bool { return !domain.TakesSignup(joins, signup.Role) }) {
 		return 0, ErrSignupClosed
 	}
 	if running && late.Pool {
