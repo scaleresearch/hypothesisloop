@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -49,7 +48,7 @@ func (s *signupKeys) GetPlatformExperiment(_ context.Context, id string) (*domai
 func (s *signupKeys) IsAgentCut(context.Context, string, string) (bool, error) { return false, nil }
 
 func experimentsWithData(store platformexperiments.PlatformExperimentsStore, client *objectstore.Client) *platformexperiments.PlatformExperimentsService {
-	return platformexperiments.NewPlatformExperimentsService(store, domain.QuotaConfig{}, zap.NewNop(), "", 3*time.Minute).WithDataStore(client, 0)
+	return testExperiments(store).WithDataStore(client, 0)
 }
 
 func dataKeyRouter(t *testing.T, keys *signupKeys, storeStatus int) (http.Handler, *int) {

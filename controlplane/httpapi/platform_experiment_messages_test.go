@@ -1,4 +1,4 @@
-package platformexperiments
+package httpapi
 
 import (
 	"context"
@@ -12,12 +12,13 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
 type messageStore struct {
-	fakeStore
+	platformexperiments.PlatformExperimentsStore
 	to      []string
 	text    string
 	sender  domain.Actor
@@ -53,7 +54,7 @@ func messagesRouter(t *testing.T, store *messageStore, caller auth.Principal) ht
 	t.Helper()
 	r := authtest.Router(authtest.As(caller))
 	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(agentsTestPlacement), zap.NewNop())
-	registerMessagesHuma(doc, NewPlatformExperimentsHandler(newSignupTestService(t, store), nil, testPlanning, zap.NewNop()))
+	RegisterMessages(doc, testExperiments(store), zap.NewNop())
 	return r
 }
 

@@ -364,6 +364,7 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 	// registered here, so /openapi.json and /explore describe all of it in one place.
 	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", agenttypes.PlatformRules, gate.access, logger)
 	platformexperiments.RegisterHuma(doc, h.quota, h.platformExperiments)
+	httpapi.RegisterMessages(doc, h.experiments, logger)
 	platformexperiments.RegisterAgentsHuma(doc, h.platformExperiments, h.hypotheses)
 	platformexperiments.RegisterPlanningHuma(doc, h.platformExperiments)
 	httpapi.RegisterSharing(doc, h.sharing, h.platformExperiments.Answer)

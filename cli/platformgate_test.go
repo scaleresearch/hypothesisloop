@@ -46,6 +46,7 @@ func platformRoutes(caller auth.Principal) http.Handler {
 	experiments := platformexperiments.NewPlatformExperimentsHandler(nil, struct{ githost.Provider }{}, platformexperiments.Planning{Limit: time.Minute, ProposedFor: time.Minute, PlannerKept: time.Minute}, logger).
 		WithAgentLaunch(platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model", SigningSecret: "secret", MaxHosted: 1})
 	platformexperiments.RegisterHuma(doc, platformexperiments.NewHandler(nil, logger), experiments)
+	httpapi.RegisterMessages(doc, nil, logger)
 	platformexperiments.RegisterAgentsHuma(doc, experiments, struct{ platformexperiments.Hypotheses }{})
 	platformexperiments.RegisterPlanningHuma(doc, experiments)
 	httpapi.RegisterExperimentData(doc, nil, logger)
