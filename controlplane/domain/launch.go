@@ -18,13 +18,15 @@ const JobCodeDir = "/workspace/code"
 // since the command never ran, and one that answers without the commit with 1.
 //
 // SIGTERM is passed to every process of the script's group, which is everything the command
-// started however many shells stand between, and the command keeps jobenv.StopGrace seconds
-// before it is killed. The last line, once the command has ended, is the exit line
-// (clusterapi.FindExitLine).
+// started however many shells stand between, and the command keeps jobenv.StopGrace seconds to
+// end. Past them the script prints the exit line with 137 and kills the whole group, itself
+// included: a shell without a terminal cannot give the command a group of its own. The last line,
+// once the command has ended, is the exit line (clusterapi.FindExitLine).
 var LaunchScript = `set -u
 started=$(date +%s)
+line() { printf '\n` + clusterapi.ExitLinePrefix + ` code=%d started=%d ended=%d\n' "$1" "$started" "$(date +%s)"; }
 finish() {
-	printf '\n` + clusterapi.ExitLinePrefix + ` code=%d started=%d ended=%d\n' "$1" "$started" "$(date +%s)"
+	line "$1"
 	exit "$1"
 }
 say() { echo "launch: $*" >&2; }
@@ -33,9 +35,16 @@ stop() {
 	trap '' TERM
 	[ -n "$pid" ] || finish 143
 	kill -s TERM 0
-	(sleep "$` + jobenv.StopGrace + `"; kill -s KILL "$pid" 2>/dev/null) &
+	(sleep "$` + jobenv.StopGrace + `"; kill -s ALRM $$) &
+}
+overdue() {
+	trap '' ALRM
+	say "the command did not end within ${` + jobenv.StopGrace + `}s of SIGTERM, so every process of the job is killed"
+	line 137
+	kill -s KILL 0
 }
 trap stop TERM
+trap overdue ALRM
 fetch() { git -c "http.extraHeader=Authorization: Bearer $` + jobenv.Token + `" "$@"; }
 commit=${` + jobenv.CodeRef + `##*@}
 mkdir -p ` + JobCodeDir + ` && git -C ` + JobCodeDir + ` init -q || { say "could not make a git repository at ` + JobCodeDir + `: the image's user must be able to create it"; finish 1; }
