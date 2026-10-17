@@ -57,11 +57,11 @@ type RepositoryCheck struct {
 // chooseRepository is where a create keeps its code: named, which repositoryOf checked, or the
 // account a new one is created on, which the git host refuses here when it would refuse the
 // creation for the account alone.
-func (h *PlatformExperimentsHandler) chooseRepository(ctx context.Context, projectID, named, account string) (RepositoryChoice, error) {
+func (s *PlatformExperimentsService) chooseRepository(ctx context.Context, projectID, named, account string) (RepositoryChoice, error) {
 	if named != "" {
-		return RepositoryChoice{Named: named, URL: h.repos.URL(named)}, nil
+		return RepositoryChoice{Named: named, URL: s.repos.URL(named)}, nil
 	}
-	on, err := h.repos.CreatesOn(ctx, projectID, account)
+	on, err := s.repos.CreatesOn(ctx, projectID, account)
 	return RepositoryChoice{CreateOn: on}, err
 }
 
@@ -133,14 +133,14 @@ func (s *PlatformExperimentsService) StartRepositoryPass(ctx context.Context, in
 
 // repositoryOf checks what a request says of its repository: the one it names must be reachable
 // and is returned as the git host names it, and an account is said only for one to be created.
-func (h *PlatformExperimentsHandler) repositoryOf(ctx context.Context, projectID, repository, account string) (string, error) {
+func (s *PlatformExperimentsService) repositoryOf(ctx context.Context, projectID, repository, account string) (string, error) {
 	if repository == "" {
 		return "", nil
 	}
 	if account != "" {
 		return "", refusal.Refuse(http.StatusUnprocessableEntity, "invalid_request", "repository_account says where a new repository is created and repository names an existing one: state one of them")
 	}
-	return h.repos.Reachable(ctx, projectID, repository)
+	return s.repos.Reachable(ctx, projectID, repository)
 }
 
 // neverFromTheFile are what one run costs and how long it lasts. Any agent's token can push to
@@ -149,8 +149,8 @@ var neverFromTheFile = []string{"budget_accelerator_hours", "max_agents", "resea
 
 // fromRepo returns req laid over the experiment file of the repository it names: every field the
 // body carried is the request's, every other one the file's.
-func (h *PlatformExperimentsHandler) fromRepo(ctx context.Context, req CreatePlatformExperimentRequest) (CreatePlatformExperimentRequest, error) {
-	data, err := h.repos.File(ctx, req.ProjectID, req.Repository, domain.ExperimentFile)
+func (s *PlatformExperimentsService) fromRepo(ctx context.Context, req CreatePlatformExperimentRequest) (CreatePlatformExperimentRequest, error) {
+	data, err := s.repos.File(ctx, req.ProjectID, req.Repository, domain.ExperimentFile)
 	if err != nil {
 		return req, err
 	}
@@ -184,12 +184,12 @@ type ExperimentFile struct {
 
 // experimentFile reads the experiment file of a repository the project's org reaches, by the
 // decoding a create with from_repo uses, so that what is shown is what such a create would take.
-func (h *PlatformExperimentsHandler) experimentFile(ctx context.Context, projectID, repository string) (*ExperimentFile, error) {
-	named, err := h.repos.Reachable(ctx, projectID, repository)
+func (s *PlatformExperimentsService) experimentFile(ctx context.Context, projectID, repository string) (*ExperimentFile, error) {
+	named, err := s.repos.Reachable(ctx, projectID, repository)
 	if err != nil {
 		return nil, err
 	}
-	data, err := h.repos.File(ctx, projectID, named, domain.ExperimentFile)
+	data, err := s.repos.File(ctx, projectID, named, domain.ExperimentFile)
 	if err != nil {
 		return nil, err
 	}

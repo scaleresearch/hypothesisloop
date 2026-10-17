@@ -11,65 +11,41 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
-	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
-// PlatformExperimentsHandler exposes the Platform Experiment lifecycle over
-// HTTP. Routes are registered via RegisterHuma (see huma_api.go).
-type PlatformExperimentsHandler struct {
-	svc    *PlatformExperimentsService
-	logger *zap.Logger
-	// jobImages is the images the deployment offers a job to run in.
-	jobImages []domain.JobImage
-
-	// Live-capacity lookup (GET /resource-catalog/capacity) — set via WithLiveCapacity.
-	metricsDBURL      string
-	capacityFreshness time.Duration
-	clusters          ClusterRegistry
-	podResources      domain.PodResources
-
-	// Set via WithAgentLaunch.
-	launch AgentLaunch
-	// What bounds a draft, from the settings file's planning section.
-	planning Planning
-	// repos is the git host platform experiments keep their code on.
-	repos githost.Provider
-	// proxyURL is where the control plane's proxy serves their repositories. Set via WithGitProxy.
-	proxyURL string
-}
-
 // WithGitProxy is where the control plane's proxy serves repositories: a platform experiment's
 // answer names its repository there, the address what the platform launches clones and pushes.
-func (h *PlatformExperimentsHandler) WithGitProxy(proxyURL string) *PlatformExperimentsHandler {
-	h.proxyURL = proxyURL
-	return h
+func (s *PlatformExperimentsService) WithGitProxy(proxyURL string) *PlatformExperimentsService {
+	s.proxyURL = proxyURL
+	return s
 }
 
-// NewPlatformExperimentsHandler constructs the handler.
-func NewPlatformExperimentsHandler(svc *PlatformExperimentsService, repos githost.Provider, planning Planning, logger *zap.Logger) *PlatformExperimentsHandler {
+// WithPlanning sets what bounds a draft, from the settings file's planning section.
+func (s *PlatformExperimentsService) WithPlanning(planning Planning) *PlatformExperimentsService {
 	if planning.Limit <= 0 || planning.ProposedFor <= 0 || planning.PlannerKept <= 0 {
-		panic("quota: NewPlatformExperimentsHandler requires every planning setting")
+		panic("quota: WithPlanning requires every planning setting")
 	}
-	return &PlatformExperimentsHandler{svc: svc, repos: repos, logger: logger, planning: planning}
+	s.planning = planning
+	return s
 }
 
 // caller is whose credential the request came with. Every route is authenticated before its
 // handler runs, so a request that reaches one with none is the platform's own failure.
-func (h *PlatformExperimentsHandler) caller(ctx context.Context) (auth.Principal, error) {
+func (s *PlatformExperimentsService) caller(ctx context.Context) (auth.Principal, error) {
 	caller, ok := auth.FromContext(ctx)
 	if !ok {
-		return auth.Principal{}, auth.Internal(h.logger, "read the caller", errors.New("the request reached its handler with no principal"))
+		return auth.Principal{}, auth.Internal(s.logger, "read the caller", errors.New("the request reached its handler with no principal"))
 	}
 	return caller, nil
 }
 
 // WithJobImages attaches the images the deployment offers a job to run in.
-func (h *PlatformExperimentsHandler) WithJobImages(images []domain.JobImage) *PlatformExperimentsHandler {
-	h.jobImages = images
-	return h
+func (s *PlatformExperimentsService) WithJobImages(images []domain.JobImage) *PlatformExperimentsService {
+	s.jobImages = images
+	return s
 }
 
 // ClusterRegistry says whose each registered cluster is and whether the platform shares it, and
@@ -83,14 +59,14 @@ type ClusterRegistry interface {
 // per-flavor capacity reports land in, the freshness window past which a cluster's last
 // report is treated as stale, and the registry that says which clusters a caller may see. The
 // service checks a platform experiment against the same read.
-func (h *PlatformExperimentsHandler) WithLiveCapacity(metricsDBURL string, freshness time.Duration, clusters ClusterRegistry, podResources domain.PodResources) *PlatformExperimentsHandler {
-	h.podResources = podResources
-	h.metricsDBURL = metricsDBURL
-	h.capacityFreshness = freshness
-	h.clusters = clusters
-	h.svc.reachable = h.reachableTypes
-	h.svc.placement = h.placementOf
-	return h
+func (s *PlatformExperimentsService) WithLiveCapacity(metricsDBURL string, freshness time.Duration, clusters ClusterRegistry, podResources domain.PodResources) *PlatformExperimentsService {
+	s.podResources = podResources
+	s.capacityURL = metricsDBURL
+	s.capacityFreshness = freshness
+	s.clusters = clusters
+	s.reachable = s.reachableTypes
+	s.placement = s.placementOf
+	return s
 }
 
 // ClusterCapacity is one cluster's live capacity, per accelerator type.
@@ -171,52 +147,52 @@ var ErrLiveCapacityUnconfigured = errors.New("resource-catalog/capacity: metrics
 // liveCapacity reads the live accelerator capacity of the clusters jobs of orgID can be placed
 // on, or of every cluster that reports when every is set, which is staff's view. It fails fast
 // if this handler was never wired to a metrics DB.
-func (h *PlatformExperimentsHandler) liveCapacity(ctx context.Context, orgID string, every bool) ([]ClusterCapacity, error) {
-	if h.metricsDBURL == "" {
+func (s *PlatformExperimentsService) liveCapacity(ctx context.Context, orgID string, every bool) ([]ClusterCapacity, error) {
+	if s.capacityURL == "" {
 		return nil, ErrLiveCapacityUnconfigured
 	}
-	available, total, err := metricsdb.LiveClusterAcceleratorAvailableAndTotal(ctx, h.metricsDBURL, h.capacityFreshness)
+	available, total, err := metricsdb.LiveClusterAcceleratorAvailableAndTotal(ctx, s.capacityURL, s.capacityFreshness)
 	if err != nil {
 		return nil, err
 	}
-	clusters := buildClusterCapacity(available, total, h.podResources)
-	cpuAvailable, err := metricsdb.LiveClusterCPUCapacity(ctx, h.metricsDBURL, h.capacityFreshness)
+	clusters := buildClusterCapacity(available, total, s.podResources)
+	cpuAvailable, err := metricsdb.LiveClusterCPUCapacity(ctx, s.capacityURL, s.capacityFreshness)
 	if err != nil {
 		return nil, err
 	}
-	cpuTotal, err := metricsdb.LiveClusterCPUTotalCapacity(ctx, h.metricsDBURL, h.capacityFreshness)
+	cpuTotal, err := metricsdb.LiveClusterCPUTotalCapacity(ctx, s.capacityURL, s.capacityFreshness)
 	if err != nil {
 		return nil, err
 	}
-	memoryAvailable, err := metricsdb.LiveClusterRAMCapacity(ctx, h.metricsDBURL, h.capacityFreshness)
+	memoryAvailable, err := metricsdb.LiveClusterRAMCapacity(ctx, s.capacityURL, s.capacityFreshness)
 	if err != nil {
 		return nil, err
 	}
-	memoryTotal, err := metricsdb.LiveClusterRAMTotalCapacity(ctx, h.metricsDBURL, h.capacityFreshness)
+	memoryTotal, err := metricsdb.LiveClusterRAMTotalCapacity(ctx, s.capacityURL, s.capacityFreshness)
 	if err != nil {
 		return nil, err
 	}
 	clusters = withResources(clusters, cpuAvailable, cpuTotal, memoryAvailable, memoryTotal)
-	registered, err := h.clusters.RegisteredClusters(ctx)
+	registered, err := s.clusters.RegisteredClusters(ctx)
 	if err != nil {
 		return nil, err
 	}
 	withJobImages(registered, clusters)
-	withOfferedImages(h.jobImages, clusters)
-	nodeLabels, err := metricsdb.LiveClusterNodeLabels(ctx, h.metricsDBURL, h.capacityFreshness)
+	withOfferedImages(s.jobImages, clusters)
+	nodeLabels, err := metricsdb.LiveClusterNodeLabels(ctx, s.capacityURL, s.capacityFreshness)
 	if err != nil {
 		return nil, err
 	}
 	withOnDemand(clusters, nodeLabels)
-	nodeTotal, err := metricsdb.LiveClusterNodeTotalCapacity(ctx, h.metricsDBURL, h.capacityFreshness)
+	nodeTotal, err := metricsdb.LiveClusterNodeTotalCapacity(ctx, s.capacityURL, s.capacityFreshness)
 	if err != nil {
 		return nil, err
 	}
-	nodeFree, err := metricsdb.LiveClusterNodeResourceCapacity(ctx, h.metricsDBURL, h.capacityFreshness)
+	nodeFree, err := metricsdb.LiveClusterNodeResourceCapacity(ctx, s.capacityURL, s.capacityFreshness)
 	if err != nil {
 		return nil, err
 	}
-	nodeAcceleratorsFree, err := metricsdb.LiveClusterNodeAcceleratorCapacity(ctx, h.metricsDBURL, h.capacityFreshness)
+	nodeAcceleratorsFree, err := metricsdb.LiveClusterNodeAcceleratorCapacity(ctx, s.capacityURL, s.capacityFreshness)
 	if err != nil {
 		return nil, err
 	}
@@ -231,12 +207,12 @@ func (h *PlatformExperimentsHandler) liveCapacity(ctx context.Context, orgID str
 
 // reachableTypes are the accelerator types jobs of the org of projectID can be placed on now,
 // each with the clusters that have it and the one image such a cluster runs, if it runs one only.
-func (h *PlatformExperimentsHandler) reachableTypes(ctx context.Context, projectID string) (map[string][]domain.Cluster, error) {
-	orgID, err := h.clusters.ProjectOrg(ctx, projectID)
+func (s *PlatformExperimentsService) reachableTypes(ctx context.Context, projectID string) (map[string][]domain.Cluster, error) {
+	orgID, err := s.clusters.ProjectOrg(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
-	clusters, err := h.liveCapacity(ctx, orgID, false)
+	clusters, err := s.liveCapacity(ctx, orgID, false)
 	if err != nil {
 		return nil, err
 	}
@@ -416,41 +392,41 @@ func buildClusterCapacity(available, total map[string]map[string]int64, podResou
 
 // Answer is the body of every route that answers one platform experiment, so each of them says
 // where it stands (Describe) as its reader is to read it.
-func (h *PlatformExperimentsHandler) Answer(ctx context.Context, pe *domain.PlatformExperiment) (*struct{ Body *domain.PlatformExperiment }, error) {
-	reader, err := h.caller(ctx)
+func (s *PlatformExperimentsService) Answer(ctx context.Context, pe *domain.PlatformExperiment) (*struct{ Body *domain.PlatformExperiment }, error) {
+	reader, err := s.caller(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if err := h.svc.Describe(ctx, pe, reader); err != nil {
-		return nil, auth.Internal(h.logger, "describe platform experiment", err, zap.String("id", pe.ID))
+	if err := s.Describe(ctx, pe, reader); err != nil {
+		return nil, auth.Internal(s.logger, "describe platform experiment", err, zap.String("id", pe.ID))
 	}
-	atWork, err := h.svc.store.ResearchersAtWork(ctx, pe.ID)
+	atWork, err := s.store.ResearchersAtWork(ctx, pe.ID)
 	if err != nil {
-		return nil, auth.Internal(h.logger, "count researchers at work", err, zap.String("id", pe.ID))
+		return nil, auth.Internal(s.logger, "count researchers at work", err, zap.String("id", pe.ID))
 	}
 	counts := pe.Researchers.AtWorkOf(atWork)
 	pe.ResearchersAtWork = &counts
 	if pe.Repository != "" {
-		if h.proxyURL == "" {
-			return nil, auth.Internal(h.logger, "describe platform experiment", errors.New("no git proxy address to name its repository at"), zap.String("id", pe.ID))
+		if s.proxyURL == "" {
+			return nil, auth.Internal(s.logger, "describe platform experiment", errors.New("no git proxy address to name its repository at"), zap.String("id", pe.ID))
 		}
-		pe.GitURL = domain.GitProxyURL(h.proxyURL, pe.ID)
+		pe.GitURL = domain.GitProxyURL(s.proxyURL, pe.ID)
 	}
 	return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
 }
 
 // WithAgentLaunch attaches what joining needs beyond the store.
-func (h *PlatformExperimentsHandler) WithAgentLaunch(launch AgentLaunch) *PlatformExperimentsHandler {
-	h.launch = launch
-	return h
+func (s *PlatformExperimentsService) WithAgentLaunch(launch AgentLaunch) *PlatformExperimentsService {
+	s.launch = launch
+	return s
 }
 
 // refusal answers a refusal as it is; anything else is the platform's own failure, logged and
 // answered without detail.
-func (h *PlatformExperimentsHandler) refusal(op string, err error) error {
+func (s *PlatformExperimentsService) refusal(op string, err error) error {
 	var refused *refusal.Refusal
 	if errors.As(err, &refused) {
 		return refused
 	}
-	return auth.Internal(h.logger, op+" failed", err)
+	return auth.Internal(s.logger, op+" failed", err)
 }

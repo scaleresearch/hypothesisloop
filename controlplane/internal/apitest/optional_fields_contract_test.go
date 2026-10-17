@@ -3,11 +3,13 @@ package apitest
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
@@ -61,14 +63,14 @@ func openAPISpec(t *testing.T) map[string]any {
 	r := authtest.Router(authtest.Staff)
 	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", agenttypes.PlatformRules, auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	launch := platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: "contract-test-signing-secret", MaxHosted: 20}
-	platformExperiments := platformexperiments.NewPlatformExperimentsHandler(nil, worldRepositories{}, worldPlanning, nil).WithAgentLaunch(launch)
+	platformExperiments := platformexperiments.NewPlatformExperimentsService(nil, domain.QuotaConfig{}, zap.NewNop(), "", time.Minute).WithRepositories(worldRepositories{}).WithPlanning(worldPlanning).WithAgentLaunch(launch)
 	httpapi.RegisterAgents(doc, nil)
 	platformexperiments.RegisterHuma(doc, platformExperiments)
 	httpapi.RegisterSituation(doc, nil, zap.NewNop())
 	platformexperiments.RegisterBudgetHuma(doc, platformExperiments)
 	httpapi.RegisterMessages(doc, nil, zap.NewNop())
 	httpapi.RegisterExperimentAgents(doc, nil, struct{ platformexperiments.Hypotheses }{}, launch, zap.NewNop())
-	platformexperiments.RegisterPlanningHuma(doc, platformExperiments)
+	httpapi.RegisterPlanning(doc, platformExperiments, zap.NewNop())
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(
 		scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{})))
 	registry.RegisterHuma(doc, registry.NewHandler(nil, nil))

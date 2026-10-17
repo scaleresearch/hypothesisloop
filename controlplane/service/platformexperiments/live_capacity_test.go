@@ -8,8 +8,11 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
+	"go.uber.org/zap"
 )
 
 // GET /resource-catalog/capacity used to answer 200 with an empty cluster list when the handler
@@ -19,7 +22,7 @@ import (
 // starvation nobody can diagnose from the API. Fail fast instead (important.md: "no fallbacks -
 // one path or error, fail fast").
 func TestLiveCapacityFailsFastWhenUnconfigured(t *testing.T) {
-	h := NewPlatformExperimentsHandler(nil, &fakeRepositories{}, testPlanning, nil)
+	h := NewPlatformExperimentsService(nil, platformexperimentstest.Settings, zap.NewNop(), "", time.Minute).WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning)
 	// Deliberately never call WithLiveCapacity.
 
 	clusters, err := h.liveCapacity(context.Background(), "org-a", false)

@@ -19,7 +19,7 @@ import (
 )
 
 // RegisterHuma registers the platform experiment operations on the shared Huma doc.
-func RegisterHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
+func RegisterHuma(doc *apidocs.Doc, peh *PlatformExperimentsService) {
 	access := doc.Access
 
 	// ---- platform experiments ----
@@ -92,7 +92,7 @@ func RegisterHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
 			"are never read from the file: any agent's token can push to that branch, so what a run costs and how " +
 			"long it lasts is stated by whoever creates it. A file that cannot be used answers 422 invalid_experiment_file and names the file. " +
 			"coordinator_hosted: true has the platform run the coordinator as one more machine beside the agents', on coordinator_model or the platform's coordinator default: " +
-			"it holds this platform experiment's coordinator token, is no agent of it, holds no quota and is not ranked. " + coordinatorWanted + " " +
+			"it holds this platform experiment's coordinator token, is no agent of it, holds no quota and is not ranked. " + CoordinatorWanted + " " +
 			"It is not read from the file, and is fixed from then on. " +
 			"repository is the code the platform experiment works on, owner/name on GitHub: agents clone it and push their branches to it, jobs check it out, and repository_url in the answer is where from. " +
 			"A platform experiment keeps its code in a repository: left out, the platform creates a private one on the GitHub account the org connected, named from the experiment and its id, " +
@@ -133,7 +133,7 @@ func RegisterHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
 		}
 		in.Body.Repository = named
 		// Never the experiment file's to state, so it is held before the repository is read.
-		if err := peh.svc.checkLength(in.Body.DurationHours); err != nil {
+		if err := peh.checkLength(in.Body.DurationHours); err != nil {
 			return nil, err
 		}
 		if err := domain.ValidateAgentImage(in.Body.AgentImage); err != nil {
@@ -151,7 +151,7 @@ func RegisterHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
 			}
 			in.Body = body
 		}
-		catalog, err := peh.svc.store.ProjectAgentTypeCatalog(ctx, in.Body.ProjectID)
+		catalog, err := peh.store.ProjectAgentTypeCatalog(ctx, in.Body.ProjectID)
 		if err != nil {
 			return nil, auth.Internal(peh.logger, "create platform experiment", err)
 		}
@@ -176,7 +176,7 @@ func RegisterHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
 		if hosting.repository, err = peh.chooseRepository(ctx, in.Body.ProjectID, hosting.Repository, in.Body.RepositoryAccount); err != nil {
 			return nil, err
 		}
-		pe, err := peh.svc.Create(ctx, hosting)
+		pe, err := peh.Create(ctx, hosting)
 		// What is wrong with a body laid over the experiment file may be the file's doing.
 		var refused *refusal.Refusal
 		if in.Body.FromRepo && errors.As(err, &refused) {
@@ -253,11 +253,11 @@ func RegisterHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
 			only := in.Shared == "true"
 			filter.Shared = &only
 		}
-		pes, err := peh.svc.store.ListPlatformExperiments(ctx, filter)
+		pes, err := peh.store.ListPlatformExperiments(ctx, filter)
 		if err != nil {
 			return nil, auth.Internal(peh.logger, "list platform experiments", err)
 		}
-		total, err := peh.svc.store.CountPlatformExperiments(ctx, filter)
+		total, err := peh.store.CountPlatformExperiments(ctx, filter)
 		if err != nil {
 			return nil, auth.Internal(peh.logger, "list platform experiments", err)
 		}
@@ -282,7 +282,7 @@ func RegisterHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
 		if err := access.Experiment(ctx, in.ID); err != nil {
 			return nil, err
 		}
-		cost, err := peh.svc.JobCost(ctx, in.ID)
+		cost, err := peh.JobCost(ctx, in.ID)
 		if err != nil {
 			return nil, auth.Internal(peh.logger, "get job cost", err, zap.String("id", in.ID))
 		}
@@ -306,20 +306,20 @@ func RegisterHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
 		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
 			return nil, err
 		}
-		pe, err := peh.svc.store.GetPlatformExperiment(ctx, in.ID)
+		pe, err := peh.store.GetPlatformExperiment(ctx, in.ID)
 		if err != nil {
 			return nil, auth.Internal(peh.logger, "get platform experiment", err, zap.String("id", in.ID))
 		}
 		if pe == nil || pe.RemovedAt != nil {
 			return nil, huma.Error404NotFound("platform experiment not found")
 		}
-		signups, err := peh.svc.store.ListSignups(ctx, in.ID)
+		signups, err := peh.store.ListSignups(ctx, in.ID)
 		if err != nil {
 			return nil, auth.Internal(peh.logger, "get platform experiment", err, zap.String("id", in.ID))
 		}
 		pe.SignedUpAgents = signups
 		pe.SignupCount = len(signups)
-		prior, err := peh.svc.store.PriorRuns(ctx, in.ID)
+		prior, err := peh.store.PriorRuns(ctx, in.ID)
 		if err != nil {
 			return nil, auth.Internal(peh.logger, "get platform experiment", err, zap.String("id", in.ID))
 		}
@@ -329,10 +329,10 @@ func RegisterHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
 				reached = append(reached, id)
 			}
 		}
-		if pe.PriorRuns, err = peh.svc.PriorRuns(ctx, reached); err != nil {
+		if pe.PriorRuns, err = peh.PriorRuns(ctx, reached); err != nil {
 			return nil, auth.Internal(peh.logger, "get platform experiment", err, zap.String("id", in.ID))
 		}
-		if err := peh.svc.Spend(ctx, pe); err != nil {
+		if err := peh.Spend(ctx, pe); err != nil {
 			return nil, auth.Internal(peh.logger, "get platform experiment", err, zap.String("id", in.ID))
 		}
 		if err := peh.nameActors(ctx, pe); err != nil {
@@ -354,7 +354,7 @@ func RegisterHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
 			"A max_agents lowered below the researchers (agents of role competitor) at work of a running one cuts the newest of them, the count a join is held to: each winds down as a cut researcher does, told by agent.cut with detail max_agents_lowered, and nobody is added in its place; researchers the body does not state are lowered to it from the last entry. " +
 			"Before the run starts 409 max_agents_below_researchers refuses one under the researchers signed up, which the message gives. 409 researchers_below_at_work for researchers that want fewer of an agent type and model than are at work. researchers above max_agents in all is 422 invalid_agents. " +
 			"run_too_long for a duration_hours over the platform's quota.max_platform_experiment_days. A starts_at in the body moves baseline_due_at with it, a starts_at past being now. " +
-			"`baseline_job_id` declares the baseline while the experiment is open, and nothing else is needed in the body. The platform makes this declaration itself, by the same check, when an agent of role baseline finishes naming the job (baseline_job_id of its finish) or, naming none, the baseline agents that finished left exactly one COMPLETED job that reports the ranking metric, and again in the patch that clears what that declaration was refused for (a raised budget_accelerator_hours): a caller declares only where a choice is needed, between several jobs or after a redo. The platform writes what it holds of the job into the description, a block that begins `" + measuredBaselineHeader + "` and states job, code_ref, env (the job's settings, when it has any) and measured (the last value the job reported on each metric but the references), then a line for each value a COMPLETED job reported on a reference, its job and whether that job met the constraints (only one that did counts), and the references no completed job reported, as not measured, and keeps that block through every later patch of the description. With a researcher joined and no starts_at ahead the run starts in this same request and the answer reads running; otherwise it starts with the request that adds the researcher, or at starts_at. The start closes signup and gives each agent present, those of role baseline apart, its share of the first stage's part of the budget, less what measuring the baseline spent. The start also settles `stages`: a boundary cuts nobody from fewer than 5 researchers (role competitor), so a run started with fewer has one stage of its whole length, with the last declared stage's max_job_hours, and each researcher holds its whole share from the start. With 5 or more the ladder is as declared. status_reason in the answer says what an open experiment still waits for: no_researchers until one joined, budget_spent when the baseline left nothing to share. The job is read from the platform's own records and the declaration refused with 422: " +
+			"`baseline_job_id` declares the baseline while the experiment is open, and nothing else is needed in the body. The platform makes this declaration itself, by the same check, when an agent of role baseline finishes naming the job (baseline_job_id of its finish) or, naming none, the baseline agents that finished left exactly one COMPLETED job that reports the ranking metric, and again in the patch that clears what that declaration was refused for (a raised budget_accelerator_hours): a caller declares only where a choice is needed, between several jobs or after a redo. The platform writes what it holds of the job into the description, a block that begins `" + MeasuredBaselineHeader + "` and states job, code_ref, env (the job's settings, when it has any) and measured (the last value the job reported on each metric but the references), then a line for each value a COMPLETED job reported on a reference, its job and whether that job met the constraints (only one that did counts), and the references no completed job reported, as not measured, and keeps that block through every later patch of the description. With a researcher joined and no starts_at ahead the run starts in this same request and the answer reads running; otherwise it starts with the request that adds the researcher, or at starts_at. The start closes signup and gives each agent present, those of role baseline apart, its share of the first stage's part of the budget, less what measuring the baseline spent. The start also settles `stages`: a boundary cuts nobody from fewer than 5 researchers (role competitor), so a run started with fewer has one stage of its whole length, with the last declared stage's max_job_hours, and each researcher holds its whole share from the start. With 5 or more the ladder is as declared. status_reason in the answer says what an open experiment still waits for: no_researchers until one joined, budget_spent when the baseline left nothing to share. The job is read from the platform's own records and the declaration refused with 422: " +
 			"no_baseline (no job of an agent of role baseline of this platform experiment), baseline_not_completed, baseline_not_on_branch (the job ran a branch other than the baseline branch), baseline_without_finding, " +
 			"baseline_missing_metric (a declared metric the job never reported, a reference apart: one left out is listed in the block as not measured), " +
 			"baseline_breaks_constraint (the job's value does not hold a constraint's bound), budget_below_baseline (the budget does not hold one trial for each of max_agents: the job again at job_estimated_duration_hours). " +
@@ -388,7 +388,7 @@ func RegisterHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
 		by := caller.Actor()
 		in.Body.by = &by
 		if in.Body.Researchers != nil {
-			catalog, err := peh.svc.store.AgentTypeCatalog(ctx, in.ID)
+			catalog, err := peh.store.AgentTypeCatalog(ctx, in.ID)
 			if err != nil {
 				return nil, peh.refusal("update platform experiment", err)
 			}
@@ -398,7 +398,7 @@ func RegisterHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
 			}
 			in.Body.Researchers = &resolved
 		}
-		pe, err := peh.svc.Update(ctx, in.ID, in.Body)
+		pe, err := peh.Update(ctx, in.ID, in.Body)
 		if err != nil {
 			return nil, peh.refusal("update platform experiment", err)
 		}
@@ -419,7 +419,7 @@ func RegisterHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
 		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
 			return nil, err
 		}
-		signup, err := peh.svc.store.GetAgentSignup(ctx, in.ID, in.AgentID)
+		signup, err := peh.store.GetAgentSignup(ctx, in.ID, in.AgentID)
 		if err != nil {
 			return nil, auth.Internal(peh.logger, "get platform experiment signup", err, zap.String("id", in.ID))
 		}
@@ -462,7 +462,7 @@ func RegisterHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
 			return nil, err
 		}
 		by := caller.Actor()
-		pe, err := peh.svc.Close(ctx, in.ID, &by, message, topResults)
+		pe, err := peh.Close(ctx, in.ID, &by, message, topResults)
 		if err != nil {
 			return nil, peh.refusal("close platform experiment", err)
 		}
@@ -487,7 +487,7 @@ func RegisterHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
 		if err != nil {
 			return nil, err
 		}
-		if err := peh.svc.Remove(ctx, in.ID, caller.Actor()); err != nil {
+		if err := peh.Remove(ctx, in.ID, caller.Actor()); err != nil {
 			return nil, peh.refusal("remove platform experiment", err)
 		}
 		return &struct{}{}, nil
@@ -523,7 +523,7 @@ func RegisterHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
 			}
 			model = in.Body.CoordinatorModel
 		}
-		pe, err := peh.svc.Reopen(ctx, in.ID, in.Body.EndsAt, model)
+		pe, err := peh.Reopen(ctx, in.ID, in.Body.EndsAt, model)
 		if err != nil {
 			return nil, peh.refusal("reopen platform experiment", err)
 		}
@@ -544,7 +544,7 @@ func RegisterHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
 		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
 			return nil, err
 		}
-		results, err := peh.svc.Results(ctx, in.ID)
+		results, err := peh.Results(ctx, in.ID)
 		if errors.Is(err, ErrPlatformExperimentNotFound) {
 			return nil, huma.Error404NotFound(err.Error())
 		}
@@ -558,7 +558,7 @@ func RegisterHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
 
 // RegisterBudgetHuma registers the reads of a platform experiment's health, quotas, stages and
 // capacity, and its summary.
-func RegisterBudgetHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
+func RegisterBudgetHuma(doc *apidocs.Doc, peh *PlatformExperimentsService) {
 	access := doc.Access
 
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
@@ -573,7 +573,7 @@ func RegisterBudgetHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
 		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
 			return nil, err
 		}
-		health, err := peh.svc.Health(ctx, in.ID)
+		health, err := peh.Health(ctx, in.ID)
 		if errors.Is(err, ErrPlatformExperimentNotFound) {
 			return nil, huma.Error404NotFound(err.Error())
 		}
@@ -598,7 +598,7 @@ func RegisterBudgetHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
 		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
 			return nil, err
 		}
-		pe, err := peh.svc.SetSummary(ctx, in.ID, in.Body.Summary)
+		pe, err := peh.SetSummary(ctx, in.ID, in.Body.Summary)
 		if err != nil {
 			return nil, peh.refusal("set platform experiment summary", err)
 		}
@@ -615,7 +615,7 @@ func RegisterBudgetHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
 		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
 			return nil, err
 		}
-		quotas, err := peh.svc.ListQuotas(ctx, in.ID)
+		quotas, err := peh.ListQuotas(ctx, in.ID)
 		if errors.Is(err, ErrPlatformExperimentNotFound) {
 			return nil, huma.Error404NotFound(err.Error())
 		}
@@ -640,16 +640,16 @@ func RegisterBudgetHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
 		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
 			return nil, err
 		}
-		aq, err := peh.svc.QuotaView(ctx, in.AgentID, in.ID)
+		aq, err := peh.QuotaView(ctx, in.AgentID, in.ID)
 		if err != nil {
 			return nil, auth.Internal(peh.logger, "get agent quota", err, zap.String("id", in.ID))
 		}
 		if aq == nil {
-			pe, err := peh.svc.store.GetPlatformExperiment(ctx, in.ID)
+			pe, err := peh.store.GetPlatformExperiment(ctx, in.ID)
 			if err != nil {
 				return nil, auth.Internal(peh.logger, "get agent quota", err, zap.String("id", in.ID))
 			}
-			signup, err := peh.svc.store.GetAgentSignup(ctx, in.ID, in.AgentID)
+			signup, err := peh.store.GetAgentSignup(ctx, in.ID, in.AgentID)
 			if err != nil {
 				return nil, auth.Internal(peh.logger, "get agent quota", err, zap.String("id", in.ID))
 			}
@@ -663,7 +663,7 @@ func RegisterBudgetHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
 			if err != nil {
 				return nil, err
 			}
-			if err := peh.svc.Describe(ctx, pe, reader); err != nil {
+			if err := peh.Describe(ctx, pe, reader); err != nil {
 				return nil, auth.Internal(peh.logger, "get agent quota", err, zap.String("id", in.ID))
 			}
 			return nil, refusal.Refuse(http.StatusNotFound, "quota_not_granted", "agent "+in.AgentID+" holds no quota yet: it is granted when the platform experiment starts. "+pe.StatusReason.Message)
@@ -681,14 +681,14 @@ func RegisterBudgetHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
 		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
 			return nil, err
 		}
-		pe, err := peh.svc.store.GetPlatformExperiment(ctx, in.ID)
+		pe, err := peh.store.GetPlatformExperiment(ctx, in.ID)
 		if err != nil {
 			return nil, auth.Internal(peh.logger, "get stages", err, zap.String("id", in.ID))
 		}
 		if pe == nil {
 			return nil, huma.Error404NotFound("platform experiment not found")
 		}
-		cuts, err := peh.svc.store.ListCutAgents(ctx, in.ID)
+		cuts, err := peh.store.ListCutAgents(ctx, in.ID)
 		if err != nil {
 			return nil, auth.Internal(peh.logger, "get stages", err, zap.String("id", in.ID))
 		}
@@ -699,14 +699,14 @@ func RegisterBudgetHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
 		for _, c := range cuts {
 			cutSet[c.AgentID] = true
 		}
-		advances, err := peh.svc.store.ListStageAdvances(ctx, in.ID)
+		advances, err := peh.store.ListStageAdvances(ctx, in.ID)
 		if err != nil {
 			return nil, auth.Internal(peh.logger, "get stages", err, zap.String("id", in.ID))
 		}
 		if advances == nil {
 			advances = []domain.StageAdvance{}
 		}
-		allSignups, err := peh.svc.store.ListParticipants(ctx, in.ID)
+		allSignups, err := peh.store.ListParticipants(ctx, in.ID)
 		if err != nil {
 			return nil, auth.Internal(peh.logger, "get stages", err, zap.String("id", in.ID))
 		}
@@ -716,7 +716,7 @@ func RegisterBudgetHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
 				activeAgents = append(activeAgents, a)
 			}
 		}
-		progress, err := peh.svc.stageProgress(ctx, pe)
+		progress, err := peh.stageProgress(ctx, pe)
 		if err != nil {
 			return nil, auth.Internal(peh.logger, "get stages", err, zap.String("id", in.ID))
 		}

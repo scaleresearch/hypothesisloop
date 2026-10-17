@@ -203,10 +203,10 @@ type PlatformExperimentsService struct {
 	dataStore      *objectstore.Client
 	// maxDataBytesPerAgent is the durable-data ceiling admission refuses a submit on, 0 for none.
 	maxDataBytesPerAgent int64
-	// baseline reads what a declared baseline job did; readBaseline unless a test sets another.
+	// baseline reads what a declared baseline job did; readBaseline unless WithBaselineRead sets another.
 	baseline baselineReader
 	// reachable reads the accelerator types jobs of a project's org can be placed on now, each
-	// with the clusters that have it. The handler's WithLiveCapacity sets it, and until then it
+	// with the clusters that have it. WithLiveCapacity or WithReachable sets it, and until then it
 	// answers ErrLiveCapacityUnconfigured.
 	reachable func(ctx context.Context, projectID string) (map[string][]domain.Cluster, error)
 	// repos is the git host the repository pass creates a draft's repository on, and
@@ -225,8 +225,22 @@ type PlatformExperimentsService struct {
 	// personIdeas counts the open ideas of people (WithPersonIdeas).
 	personIdeas PersonIdeas
 	// placement reads the live capacity jobs of a project's org can be placed on, node by node.
-	// The handler's WithLiveCapacity sets it, and until then it answers ErrLiveCapacityUnconfigured.
+	// WithLiveCapacity sets it, and until then it answers ErrLiveCapacityUnconfigured.
 	placement func(ctx context.Context, projectID string) (*Placement, error)
+	// jobImages is the images the deployment offers a job to run in (WithJobImages).
+	jobImages []domain.JobImage
+	// capacityURL, capacityFreshness, clusters and podResources are what the live capacity is
+	// read from (WithLiveCapacity).
+	capacityURL       string
+	capacityFreshness time.Duration
+	clusters          ClusterRegistry
+	podResources      domain.PodResources
+	// launch is what a hosted agent is launched with (WithAgentLaunch).
+	launch AgentLaunch
+	// planning is what bounds a draft (WithPlanning).
+	planning Planning
+	// proxyURL is where the control plane's proxy serves repositories (WithGitProxy).
+	proxyURL string
 }
 
 // IdleNotices reads the researchers of running platform experiments due an idle notice, and
@@ -274,6 +288,20 @@ func (s *PlatformExperimentsService) WithEnvironments(environments Environments)
 // WithRepositories wires the git host the repository pass creates drafts' repositories on.
 func (s *PlatformExperimentsService) WithRepositories(repos githost.Provider) *PlatformExperimentsService {
 	s.repos = repos
+	return s
+}
+
+// WithReachable reads the accelerator types a project's org can place jobs on from reachable in
+// place of the live capacity, for a caller that has no metrics DB to read it from.
+func (s *PlatformExperimentsService) WithReachable(reachable func(ctx context.Context, projectID string) (map[string][]domain.Cluster, error)) *PlatformExperimentsService {
+	s.reachable = reachable
+	return s
+}
+
+// WithBaselineRead reads what a declared baseline job did from read in place of the metrics DB
+// and the graph.
+func (s *PlatformExperimentsService) WithBaselineRead(read func(ctx context.Context, pe *domain.PlatformExperiment, jobID string) (*Baseline, error)) *PlatformExperimentsService {
+	s.baseline = read
 	return s
 }
 

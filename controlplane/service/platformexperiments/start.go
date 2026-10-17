@@ -34,7 +34,7 @@ func (s *PlatformExperimentsService) heldToBaseline(ctx context.Context, pe *dom
 			return "", err
 		}
 	}
-	pe.JobEstimatedDurationHours = baselineHeadroom * baseline.ObservedHours
+	pe.JobEstimatedDurationHours = BaselineHeadroom * baseline.ObservedHours
 	if err := budgetCoversTrials(pe, baseline.Job); err != nil {
 		return "", err
 	}

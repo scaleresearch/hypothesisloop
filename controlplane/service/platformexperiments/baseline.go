@@ -36,11 +36,11 @@ type Baseline struct {
 	References []MetricReference
 }
 
-// baselineHeadroom is how far over the baseline's observed hours the estimate of a job that
+// BaselineHeadroom is how far over the baseline's observed hours the estimate of a job that
 // states none is set. A job holds its whole estimate of its agent's quota until it ends: an
 // estimate of 2.2 times the run let one job at a time fit a researcher's share, and one under
 // the run reserves less than the job spends.
-const baselineHeadroom = 1.5
+const BaselineHeadroom = 1.5
 
 // baselineReader reads the Baseline of the job a declaration names, nil when there is no such job.
 type baselineReader func(ctx context.Context, pe *domain.PlatformExperiment, jobID string) (*Baseline, error)
@@ -292,10 +292,10 @@ func inEnvironment(env *domain.Environment, image string) bool {
 	return image != "" && (image == env.Image || image == env.LoadedImage)
 }
 
-// measuredBaselineHeader opens the block of the description the platform writes: what the
+// MeasuredBaselineHeader opens the block of the description the platform writes: what the
 // declared baseline job is, from the platform's own records. The brief is all a researcher reads,
 // and a coordinator that copied these lines into it by hand got one of them wrong and waited.
-const measuredBaselineHeader = "MEASURED BASELINE (written by the platform from the declared job)"
+const MeasuredBaselineHeader = "MEASURED BASELINE (written by the platform from the declared job)"
 
 // baselineBlock is the block for baseline, with the last value it reported on each of metrics
 // in declared order but the references, the target of each metric that declares one, the
@@ -308,7 +308,7 @@ func baselineBlock(baseline *Baseline, metrics []domain.MetricDefinition) string
 			measured = append(measured, fmt.Sprintf("%s = %g", metric.Key, value))
 		}
 	}
-	lines := []string{measuredBaselineHeader, "job: " + baseline.Job.ID, "code_ref: " + baseline.Job.CodeRef}
+	lines := []string{MeasuredBaselineHeader, "job: " + baseline.Job.ID, "code_ref: " + baseline.Job.CodeRef}
 	if env := baseline.Job.Job.Env; len(env) > 0 {
 		settings := make([]string, 0, len(env))
 		for _, key := range slices.Sorted(maps.Keys(env)) {
@@ -359,7 +359,7 @@ func baselineBlock(baseline *Baseline, metrics []domain.MetricDefinition) string
 // wrote into it, empty when it holds none. The block runs from its header to the next empty line.
 func splitMeasuredBaseline(description string) (authored, block string) {
 	lines := strings.Split(description, "\n")
-	start := slices.IndexFunc(lines, func(line string) bool { return strings.TrimSpace(line) == measuredBaselineHeader })
+	start := slices.IndexFunc(lines, func(line string) bool { return strings.TrimSpace(line) == MeasuredBaselineHeader })
 	if start < 0 {
 		return description, ""
 	}

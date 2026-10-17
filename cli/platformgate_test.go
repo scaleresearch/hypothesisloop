@@ -16,6 +16,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
@@ -44,15 +45,15 @@ func platformRoutes(caller auth.Principal) http.Handler {
 	r.Use(auth.Gate(authtest.As(caller), logger, map[string]string{"/watch": registry.WatchSubprotocol}))
 	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", "", auth.NewAccess(authtest.Placement{}), logger)
 	launch := platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model", SigningSecret: "secret", MaxHosted: 1}
-	experiments := platformexperiments.NewPlatformExperimentsHandler(nil, struct{ githost.Provider }{}, platformexperiments.Planning{Limit: time.Minute, ProposedFor: time.Minute, PlannerKept: time.Minute}, logger).
-		WithAgentLaunch(launch)
+	experiments := platformexperiments.NewPlatformExperimentsService(nil, domain.QuotaConfig{}, logger, "", time.Minute).WithRepositories(struct{ githost.Provider }{}).
+		WithPlanning(platformexperiments.Planning{Limit: time.Minute, ProposedFor: time.Minute, PlannerKept: time.Minute}).WithAgentLaunch(launch)
 	httpapi.RegisterAgents(doc, nil)
 	platformexperiments.RegisterHuma(doc, experiments)
 	httpapi.RegisterSituation(doc, nil, logger)
 	platformexperiments.RegisterBudgetHuma(doc, experiments)
 	httpapi.RegisterMessages(doc, nil, logger)
 	httpapi.RegisterExperimentAgents(doc, nil, struct{ platformexperiments.Hypotheses }{}, launch, logger)
-	platformexperiments.RegisterPlanningHuma(doc, experiments)
+	httpapi.RegisterPlanning(doc, experiments, logger)
 	httpapi.RegisterExperimentData(doc, nil, logger)
 	httpapi.RegisterSessions(doc, nil, logger)
 	accounts.RegisterHuma(doc, accounts.NewHandler(nil, nil, nil, nil, nil, "secret", accounts.RuntimeAddresses{}, accounts.Limits{MaxOrgsPerUser: 1, MaxProjectsPerOrg: 1}, logger))

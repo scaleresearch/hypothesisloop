@@ -22,7 +22,7 @@ func TestAnAgentReadsItsOwnNameInItsSignup(t *testing.T) {
 
 	r := authtest.Router(authtest.As(dana))
 	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(agentsTestPlacement), zap.NewNop())
-	registerHuma(doc, NewPlatformExperimentsHandler(newSignupTestService(t, store), store, testPlanning, zap.NewNop()))
+	registerHuma(doc, newSignupTestService(t, store).WithRepositories(store).WithPlanning(testPlanning))
 
 	if code, out := call(t, r, "GET", "/platform-experiments/pe-1/signups/dana", ""); code != http.StatusOK || out["name"] != "Researcher 1" {
 		t.Errorf("an agent reading its own signup: got = %d %v, want = 200 with name Researcher 1", code, out)

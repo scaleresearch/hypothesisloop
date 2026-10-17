@@ -181,20 +181,20 @@ type Placement struct {
 }
 
 // placementOf reads the live capacity jobs of the org of projectID can be placed on.
-func (h *PlatformExperimentsHandler) placementOf(ctx context.Context, projectID string) (*Placement, error) {
-	orgID, err := h.clusters.ProjectOrg(ctx, projectID)
+func (s *PlatformExperimentsService) placementOf(ctx context.Context, projectID string) (*Placement, error) {
+	orgID, err := s.clusters.ProjectOrg(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
-	clusters, err := h.liveCapacity(ctx, orgID, false)
+	clusters, err := s.liveCapacity(ctx, orgID, false)
 	if err != nil {
 		return nil, err
 	}
-	accelerators, err := metricsdb.LiveClusterNodeAcceleratorCapacity(ctx, h.metricsDBURL, h.capacityFreshness)
+	accelerators, err := metricsdb.LiveClusterNodeAcceleratorCapacity(ctx, s.metricsDBURL, s.capacityFreshness)
 	if err != nil {
 		return nil, err
 	}
-	resources, err := metricsdb.LiveClusterNodeResourceCapacity(ctx, h.metricsDBURL, h.capacityFreshness)
+	resources, err := metricsdb.LiveClusterNodeResourceCapacity(ctx, s.metricsDBURL, s.capacityFreshness)
 	if err != nil {
 		return nil, err
 	}

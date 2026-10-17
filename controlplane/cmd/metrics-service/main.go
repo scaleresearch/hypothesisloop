@@ -117,7 +117,7 @@ func newControllerServer(authenticator *auth.Authenticator, pool *db.Pool, store
 	ctrl = ctrl.WithStagesStore(peFullStore, metricsDBURL)
 	// Each pass keeps the researchers of every running platform experiment at work as its pool
 	// says, launched as the control service launches the researchers it creates.
-	ctrl = ctrl.WithResearcherKeeper(platformexperiments.NewResearcherKeeper(peSvc, platformexperiments.AgentLaunch{
+	ctrl = ctrl.WithResearcherKeeper(peSvc.WithAgentLaunch(platformexperiments.AgentLaunch{
 		Hosting: pcfg.Sandbox != nil, DefaultModel: pcfg.Agents.DefaultModel,
 	}))
 

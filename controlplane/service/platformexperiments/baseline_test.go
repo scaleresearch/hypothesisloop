@@ -66,7 +66,7 @@ func jobsAPI(t *testing.T, pe *domain.PlatformExperiment, jobs []*Baseline, call
 	}
 	router := authtest.Router(authtest.As(caller))
 	doc := apidocs.New(router, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
-	registerHuma(doc, NewPlatformExperimentsHandler(svc, &fakeRepositories{}, testPlanning, zap.NewNop()))
+	registerHuma(doc, svc.WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning))
 	return store, func(body map[string]any) (int, map[string]any) {
 		t.Helper()
 		var payload bytes.Buffer
@@ -87,7 +87,7 @@ var theCoordinator = auth.Principal{Kind: auth.KindCoordinator, OrgIDs: []string
 
 // theMeasuredBlock is what the platform writes into the brief of an experiment whose baseline is
 // measuredBaseline.
-const theMeasuredBlock = "\n\n" + measuredBaselineHeader + "\njob: job-1\ncode_ref: git://seed@abc\nmeasured: val_loss = 1.8, exact_match = 1"
+const theMeasuredBlock = "\n\n" + MeasuredBaselineHeader + "\njob: job-1\ncode_ref: git://seed@abc\nmeasured: val_loss = 1.8, exact_match = 1"
 
 // A baseline was something only a draft's planner could give an experiment, inside its proposal.
 // It is declared on the open experiment, by its coordinator or its owner, and the platform reads

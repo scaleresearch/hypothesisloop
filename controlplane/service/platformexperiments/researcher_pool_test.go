@@ -170,7 +170,7 @@ func TestKeepResearchersReplacesWhoEndedAndNobodyElse(t *testing.T) {
 		svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), platformexperimentstest.NoUsage(t), time.Minute)
 		pe := &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpRunning, CoordinatorHosted: c.hosted, EndsAt: now.Add(c.endsIn), JobEstimatedDurationHours: 0.5,
 			Actor: &domain.Actor{Kind: domain.ActorUser, ID: "user-1"}}
-		if err := svc.KeepResearchers(context.Background(), pe, AgentLaunch{Hosting: true, DefaultModel: "model-1"}, now); err != nil {
+		if err := svc.WithAgentLaunch(AgentLaunch{Hosting: true, DefaultModel: "model-1"}).KeepResearchers(context.Background(), pe, now); err != nil {
 			t.Errorf("%s: got = %v, want nil", name, err)
 			continue
 		}
@@ -194,7 +194,7 @@ func TestKeepResearchersFillsAPlaceThePoolGained(t *testing.T) {
 	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), platformexperimentstest.NoUsage(t), time.Minute)
 	now := time.Now().UTC()
 	pe := &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpRunning, CoordinatorHosted: true, EndsAt: now.Add(time.Hour)}
-	if err := svc.KeepResearchers(context.Background(), pe, AgentLaunch{Hosting: true, DefaultModel: "model-1"}, now); err != nil {
+	if err := svc.WithAgentLaunch(AgentLaunch{Hosting: true, DefaultModel: "model-1"}).KeepResearchers(context.Background(), pe, now); err != nil {
 		t.Fatal(err)
 	}
 	if len(store.joined) != 2 || store.joined[0].Replaces != "" || store.joined[0].Hyperparameters["from"] != "entry" {
@@ -222,7 +222,7 @@ func TestKeepResearchersHoldsThePlacesOfEarlyEndsAndAboveTheLimitAndSaysWhy(t *t
 	pe := &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpRunning, CoordinatorHosted: true, EndsAt: now.Add(10 * time.Hour)}
 	keep := func() {
 		t.Helper()
-		if err := svc.KeepResearchers(context.Background(), pe, AgentLaunch{Hosting: true, DefaultModel: "model-1"}, now); err != nil {
+		if err := svc.WithAgentLaunch(AgentLaunch{Hosting: true, DefaultModel: "model-1"}).KeepResearchers(context.Background(), pe, now); err != nil {
 			t.Fatal(err)
 		}
 	}

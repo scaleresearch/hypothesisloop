@@ -220,18 +220,18 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		Hosting: pcfg.Sandbox != nil, DefaultModel: pcfg.Agents.DefaultModel, CoordinatorModel: pcfg.Agents.CoordinatorModel,
 		SigningSecret: pcfg.Auth.SigningSecret, MaxHosted: pcfg.Agents.MaxHostedPerPlatformExperiment,
 	}
-	peHandler := platformexperiments.NewPlatformExperimentsHandler(peSvc, gitHost, platformexperiments.Planning{
+	peSvc = peSvc.WithPlanning(platformexperiments.Planning{
 		Limit:       time.Duration(pcfg.Planning.LimitMinutes) * time.Minute,
 		ProposedFor: time.Duration(pcfg.Planning.ProposedForDays) * 24 * time.Hour,
 		PlannerKept: time.Duration(pcfg.Planning.PlannerKeptMinutes) * time.Minute,
 		AutoAccept:  time.Duration(pcfg.Planning.AutoAcceptSeconds) * time.Second,
-	}, logger).
+	}).
 		WithJobImages(pcfg.OfferedJobImages()).
 		WithGitProxy(pcfg.GitHost.ProxyURL).
 		WithLiveCapacity(metricsDBURL, connectedWithin, store, domain.NewPodResources(pcfg.PodResourcesByName)).
 		WithAgentLaunch(launch)
 
-	schedulerHandler, clusterAgentHandler := newSchedulerParts(runCtx, gitHost, environmentsSvc, pool, store, graph, peSvc, peHandler, quotaCfg, pcfg, metricsDBURL, dataStore, logger)
+	schedulerHandler, clusterAgentHandler := newSchedulerParts(runCtx, gitHost, environmentsSvc, pool, store, graph, peSvc, quotaCfg, pcfg, metricsDBURL, dataStore, logger)
 	// The change stream: one LISTEN connection for this process, fanned out to whatever /watch
 	// connections are open. Nothing is persisted for it and nothing is held between connections
 	// — see service/registry/watch.go.
@@ -265,7 +265,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 
 	r := newRouter(gate, pcfg.Auth.UIOrigin, routes{
 		agents:              accounts.NewAgents(store, logger),
-		platformExperiments: peHandler,
+		platformExperiments: peSvc,
 		hypotheses:          graph,
 		sharing:             platformexperiments.NewSharing(db.NewPlatformExperimentsStore(pool), logger),
 		instructions:        platformexperiments.NewInstructionsService(db.NewPlatformExperimentsStore(pool), modelDefaults(pcfg), logger),
@@ -300,7 +300,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 // routes is everything the API serves.
 type routes struct {
 	agents              *accounts.Agents
-	platformExperiments *platformexperiments.PlatformExperimentsHandler
+	platformExperiments *platformexperiments.PlatformExperimentsService
 	hypotheses          platformexperiments.Hypotheses
 	sharing             *platformexperiments.Sharing
 	sessions            *platformexperiments.Sessions
@@ -370,7 +370,7 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 	platformexperiments.RegisterBudgetHuma(doc, h.platformExperiments)
 	httpapi.RegisterMessages(doc, h.experiments, logger)
 	httpapi.RegisterExperimentAgents(doc, h.experiments, h.hypotheses, h.launch, logger)
-	platformexperiments.RegisterPlanningHuma(doc, h.platformExperiments)
+	httpapi.RegisterPlanning(doc, h.platformExperiments, logger)
 	httpapi.RegisterSharing(doc, h.sharing, h.platformExperiments.Answer)
 	httpapi.RegisterExperimentData(doc, h.experiments, logger)
 	httpapi.RegisterSessions(doc, h.sessions, logger)
@@ -397,7 +397,7 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 // newSchedulerParts builds the scheduler's handler and starts its background loops, returning
 // the handlers newRouter serves: the scheduler's on the shared API doc, the cluster-agents' under
 // its own prefix.
-func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environmentsSvc *environments.Service, pool *db.Pool, store *db.Store, graph *graphdb.Store, expQuotaSvc *platformexperiments.PlatformExperimentsService, peHandler *platformexperiments.PlatformExperimentsHandler, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL string, dataStore *objectstore.Client, logger *zap.Logger) (*scheduler.Handler, *clusterexchange.Handler) {
+func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environmentsSvc *environments.Service, pool *db.Pool, store *db.Store, graph *graphdb.Store, expQuotaSvc *platformexperiments.PlatformExperimentsService, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL string, dataStore *objectstore.Client, logger *zap.Logger) (*scheduler.Handler, *clusterexchange.Handler) {
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
 
 	clusterReports, err := scheduler.NewClusterReports(store, metricsDBURL,
@@ -479,7 +479,7 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environ
 		// another replica and one left by a restart.
 		func(ctx context.Context) { expQuotaSvc.StartRepositoryPass(ctx, 5*time.Second, pass) },
 		// A proposal is accepted by itself planning.auto_accept_seconds after it is made.
-		func(ctx context.Context) { peHandler.StartAutoAccept(ctx, 2*time.Second, pass) },
+		func(ctx context.Context) { expQuotaSvc.StartAutoAccept(ctx, 2*time.Second, pass) },
 		func(ctx context.Context) { schedulerLoop.Start(ctx, pass) },
 		func(ctx context.Context) { watcher.Start(ctx, pass) },
 	}, rented...)...)

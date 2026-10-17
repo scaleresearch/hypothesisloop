@@ -47,7 +47,7 @@ func TestARunningExperimentsBaselineIsRaisedToAStrongerJobOfTheControl(t *testin
 		store, patch := jobsAPI(t, runningOnBaseline(), []*Baseline{measuredBaseline(), strongerControl()}, c.caller)
 		code, out := patch(raise)
 		stored := store.created[0]
-		wantBrief := "Train train.py and report val_loss.\n\n" + measuredBaselineHeader + "\njob: job-2\ncode_ref: git://seed@abc\nenv: CODER=rans\nmeasured: val_loss = 1.6, exact_match = 1"
+		wantBrief := "Train train.py and report val_loss.\n\n" + MeasuredBaselineHeader + "\njob: job-2\ncode_ref: git://seed@abc\nenv: CODER=rans\nmeasured: val_loss = 1.6, exact_match = 1"
 		if code != http.StatusOK || stored.BaselineJobID != "job-2" || stored.Description != wantBrief || stored.JobEstimatedDurationHours != 0.3 || stored.Status != domain.PlatformExpRunning {
 			t.Fatalf("%s: got = %d %v, stored %q, brief %q, estimate %g, want job-2 with its block and the estimate kept", name, code, out, stored.BaselineJobID, stored.Description, stored.JobEstimatedDurationHours)
 		}
@@ -67,7 +67,7 @@ func TestARunningExperimentsBaselineIsRaisedToAStrongerJobOfTheControl(t *testin
 	// A brief rewritten in the same request keeps what its author wrote, with the new block.
 	store, patch := jobsAPI(t, runningOnBaseline(), []*Baseline{measuredBaseline(), strongerControl()}, theCoordinator)
 	if code, out := patch(map[string]any{"baseline_job_id": "job-2", "baseline_reason": raiseReason, "description": "Start from the rANS coder."}); code != http.StatusOK ||
-		!strings.HasPrefix(store.created[0].Description, "Start from the rANS coder.\n\n"+measuredBaselineHeader+"\njob: job-2") {
+		!strings.HasPrefix(store.created[0].Description, "Start from the rANS coder.\n\n"+MeasuredBaselineHeader+"\njob: job-2") {
 		t.Errorf("raised with a new brief: got = %d %v, brief %q", code, out, store.created[0].Description)
 	}
 

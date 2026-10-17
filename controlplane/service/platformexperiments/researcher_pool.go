@@ -16,30 +16,12 @@ import (
 // resolvedPool is pool as it is stored: each entry's agent type and model filled as a joining
 // agent's are, entries that come to name one agent type and model merged. 422 invalid_agents for
 // an entry no agent can be started as; validate holds the rest, max_agents among it.
-func (h *PlatformExperimentsHandler) resolvedPool(catalog domain.AgentTypeCatalog, pool domain.ResearcherPool) (domain.ResearcherPool, error) {
+func (s *PlatformExperimentsService) resolvedPool(catalog domain.AgentTypeCatalog, pool domain.ResearcherPool) (domain.ResearcherPool, error) {
 	resolved, err := pool.Resolved(catalog)
 	if err != nil {
 		return nil, refuseUpdate(422, "invalid_agents", "%s", err)
 	}
 	return resolved, nil
-}
-
-// ResearcherKeeper keeps the researchers of running platform experiments at work, as their pools
-// say (KeepResearchers), with what a hosted researcher is launched with.
-type ResearcherKeeper struct {
-	svc    *PlatformExperimentsService
-	launch AgentLaunch
-}
-
-// NewResearcherKeeper returns the keeper of svc's platform experiments' researchers, which it
-// launches as launch says.
-func NewResearcherKeeper(svc *PlatformExperimentsService, launch AgentLaunch) *ResearcherKeeper {
-	return &ResearcherKeeper{svc: svc, launch: launch}
-}
-
-// KeepResearchers is KeepResearchers of the keeper's service.
-func (k *ResearcherKeeper) KeepResearchers(ctx context.Context, pe *domain.PlatformExperiment, now time.Time) error {
-	return k.svc.KeepResearchers(ctx, pe, k.launch, now)
 }
 
 // KeepResearchers adds to the running pe, whose coordinator the platform hosts and so whose
@@ -57,7 +39,8 @@ func (k *ResearcherKeeper) KeepResearchers(ctx context.Context, pe *domain.Platf
 // model account refuses its calls now, and stops at the first one the budget its researchers
 // left unspent holds no trial for (db.ErrNoShareLeft): each is given its quota as any researcher
 // that joins a running platform experiment is (lateShare).
-func (s *PlatformExperimentsService) KeepResearchers(ctx context.Context, pe *domain.PlatformExperiment, launch AgentLaunch, now time.Time) error {
+func (s *PlatformExperimentsService) KeepResearchers(ctx context.Context, pe *domain.PlatformExperiment, now time.Time) error {
+	launch := s.launch
 	if pe.Status != domain.PlatformExpRunning || !pe.CoordinatorHosted {
 		return nil
 	}

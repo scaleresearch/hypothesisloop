@@ -18,8 +18,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/graphdb"
 )
 
-const agentsTestSecret = "a-signing-secret-only-this-test-knows"
-
 // rosterStore is a platform experiment's roster in memory, with the store's own refusals.
 type rosterStore struct {
 	fakeStore

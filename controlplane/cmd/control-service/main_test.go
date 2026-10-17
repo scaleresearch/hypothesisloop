@@ -19,6 +19,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/modelproxy"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
@@ -48,8 +49,8 @@ func testRouter(t *testing.T) chi.Router {
 	t.Helper()
 	unreachable := authtest.As{Kind: auth.KindStaff}
 	launch := platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model", CoordinatorModel: "model", SigningSecret: "secret", MaxHosted: 1}
-	platformExperiments := platformexperiments.NewPlatformExperimentsHandler(nil, noRepositories{}, platformexperiments.Planning{Limit: time.Minute, ProposedFor: time.Minute, PlannerKept: time.Minute}, zap.NewNop()).
-		WithAgentLaunch(launch)
+	platformExperiments := platformexperiments.NewPlatformExperimentsService(nil, domain.QuotaConfig{}, zap.NewNop(), "", time.Minute).WithRepositories(noRepositories{}).
+		WithPlanning(platformexperiments.Planning{Limit: time.Minute, ProposedFor: time.Minute, PlannerKept: time.Minute}).WithAgentLaunch(launch)
 	modelProxy, err := modelproxy.New(noOneHosted{}, modelproxy.MetricsDB{}, "https://model.example.invalid", "credential", zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
