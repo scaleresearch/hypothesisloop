@@ -351,7 +351,7 @@ const MaxAgentInstanceRestarts = 3
 const AgentInstanceRestartWindow = 6 * time.Hour
 
 // AgentProgressIntervalSeconds is how often a healthy agent's harness prints its progress
-// marker (agents/experimentator, progress.py), and MinAgentProgressLimitSeconds the shortest
+// marker (agents/harness, progress.py), and MinAgentProgressLimitSeconds the shortest
 // silence the platform may be configured to give up on.
 const (
 	AgentProgressIntervalSeconds = 15

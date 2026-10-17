@@ -121,7 +121,7 @@ render_settings() {
       -e "s|http://REPLACE-WITH-HOST-ADDRESS:8081|http://${HOST}:${API_PORT}|g" \
       -e "s|http://REPLACE-WITH-HOST-ADDRESS:8084|http://${HOST}:${METRICS_PORT}|g" \
       -e "s|http://REPLACE-WITH-HOST-ADDRESS:9000|http://${HOST}:${STORE_PORT}|g" \
-      -e "s|REPLACE-WITH-AGENT-IMAGE|${HOST}:5000/hypothesisloop-experimentator-base:graph-1k|g" \
+      -e "s|REPLACE-WITH-AGENT-IMAGE|${HOST}:5000/hypothesisloop-harness-base:graph-1k|g" \
       -e "s|REPLACE-WITH-HOST-ADDRESS|${HOST}|g" \
       -e "s|REPLACE-WITH-IMAGE-TAG|graph-1k|g" \
       -e "s|REPLACE-WITH-UI-ORIGIN|http://localhost:${UI_PORT}|g" \

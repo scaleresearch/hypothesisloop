@@ -39,7 +39,7 @@ if [[ "${tag}" != "$(git rev-parse --short HEAD)" ]]; then
   exit 1
 fi
 
-read -r -a images <<<"${IMAGES:-experimentator-base job-base job cluster-agent node-agent bare-agent chart}"
+read -r -a images <<<"${IMAGES:-harness-base job-base job cluster-agent node-agent bare-agent chart}"
 for entry in "$@"; do
   images+=("${entry%%=*}-base" "${entry%%=*}")
 done

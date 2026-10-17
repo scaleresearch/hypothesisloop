@@ -1,6 +1,6 @@
 .PHONY: $(addprefix locked-,images ui-image tt-hardware-image)
 .PHONY: dev build test agent-test lint check images job-images images-remote \
-	experimentator-base-image check-tag ui-image check-ui-build-args registry-up prune-images \
+	harness-base-image check-tag ui-image check-ui-build-args registry-up prune-images \
 	helm-prepare helm-lint chart-push \
 	controlplane-up controlplane-down controlplane-destroy render-settings \
 	cluster-agent-up cluster-agent-down staff-token token runtime-token \
@@ -422,11 +422,11 @@ locked-ui-image: check-tag check-ui-build-args $(if $(filter $(LOCAL_REGISTRY),$
 	podman push --tls-verify=$(REGISTRY_TLS_VERIFY) "$(REGISTRY)/hypothesisloop-ui:latest"
 	$(MAKE) prune-images TAGS="$(TAG)"
 
-# The image every hosted agent runs (agents/experimentator/Dockerfile.base's header): the agent
+# The image every hosted agent runs (agents/harness/Dockerfile.base's header): the agent
 # harness, git/Claude Code plumbing, and cli/reference as HL_REFERENCE. Root build context so it
 # can bake in cli/reference and hl-clone.
-experimentator-base-image:
-	podman build -f agents/experimentator/Dockerfile.base -t localhost/hypothesisloop-experimentator-base .
+harness-base-image:
+	podman build -f agents/harness/Dockerfile.base -t localhost/hypothesisloop-harness-base .
 
 # Stages the one file the helm chart renders verbatim (never edited in the chart itself, so
 # there is exactly one source of truth for platform config) — run before any helm
@@ -462,7 +462,7 @@ test:
 AGENT_TEST_BIN := $(CURDIR)/bin/agent-test
 agent-test:
 	go build -o $(AGENT_TEST_BIN)/hl ./cli
-	cd agents/experimentator && PATH="$(AGENT_TEST_BIN):$$PATH" uv run pytest tests
+	cd agents/harness && PATH="$(AGENT_TEST_BIN):$$PATH" uv run pytest tests
 
 # The GitHub client's checks against github.com itself, as the App .env names
 # (controlplane/clients/githost/github/live_test.go). The token checks and the push check use the

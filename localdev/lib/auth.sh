@@ -172,7 +172,7 @@ lib_render_settings() {
       return 1
     }
   fi
-  sed -e "s|REPLACE-WITH-AGENT-IMAGE|${host_address}:5000/hypothesisloop-experimentator-base:${image_tag}|g" \
+  sed -e "s|REPLACE-WITH-AGENT-IMAGE|${host_address}:5000/hypothesisloop-harness-base:${image_tag}|g" \
       -e "s|REPLACE-WITH-HOST-ADDRESS|${host_address}|g" \
       -e "s|REPLACE-WITH-IMAGE-TAG|${image_tag}|g" \
       -e "s|REPLACE-WITH-UI-ORIGIN|http://localhost:3000|g" \

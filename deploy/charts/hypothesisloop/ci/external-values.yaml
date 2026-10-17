@@ -21,7 +21,7 @@ auth:
           "y": x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0
   uiOrigin: https://ui.example.invalid
 agents:
-  image: registry.example.invalid/hypothesisloop-experimentator-base:test
+  image: registry.example.invalid/hypothesisloop-harness-base:test
 publicAPIURL: https://api.example.invalid
 postgres:
   enabled: false

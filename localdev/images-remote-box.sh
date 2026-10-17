@@ -40,7 +40,7 @@ image() {
 spec() {
   args=() context=. dockerfile=""
   case "$1" in
-    experimentator-base) dockerfile=agents/experimentator/Dockerfile.base ;;
+    harness-base) dockerfile=agents/harness/Dockerfile.base ;;
     job-base) dockerfile=runtime/job/build/Dockerfile.job-base ;;
     job) dockerfile=runtime/job/build/Dockerfile.job; args=(--build-arg "BASE=$(image job-base)") ;;
     control-service | metrics-service) dockerfile="controlplane/build/Dockerfile.$1" ;;

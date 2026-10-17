@@ -9,7 +9,7 @@ secretName: hypothesisloop
 auth:
   uiOrigin: http://ui.example.invalid:30300
 agents:
-  image: registry.example.invalid/hypothesisloop-experimentator-base:test
+  image: registry.example.invalid/hypothesisloop-harness-base:test
 publicAPIURL: http://api.example.invalid:30081
 runtimes:
   metricsURL: http://metrics.example.invalid:30084

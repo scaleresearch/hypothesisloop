@@ -28,7 +28,7 @@ func withoutGitHost(t *testing.T) string {
 	}
 	rendered := strings.ReplaceAll(string(b), Placeholder+"HOST-ADDRESS", "host.example.invalid")
 	rendered = strings.ReplaceAll(rendered, Placeholder+"UI-ORIGIN", "http://localhost:3000")
-	rendered = strings.ReplaceAll(rendered, Placeholder+"AGENT-IMAGE", "registry.example.invalid/hypothesisloop-experimentator-base:abc1234")
+	rendered = strings.ReplaceAll(rendered, Placeholder+"AGENT-IMAGE", "registry.example.invalid/hypothesisloop-harness-base:abc1234")
 	return strings.ReplaceAll(rendered, Placeholder+"IMAGE-TAG", "abc1234")
 }
 
@@ -141,13 +141,13 @@ func TestLoadRefusesTheCommittedFileUntilItsPlaceholdersAreFilledIn(t *testing.T
 		"  endpoint: http://host.example.invalid:9000",
 		"  registry: host.example.invalid:5000",
 		"  image_tag: abc1234",
-		"  image: registry.example.invalid/hypothesisloop-experimentator-base:abc1234",
+		"  image: registry.example.invalid/hypothesisloop-harness-base:abc1234",
 	} {
 		if !strings.Contains(rendered, line) {
 			t.Fatalf("the settings file has no %q", line)
 		}
 		unfilled := strings.Replace(rendered, line, strings.NewReplacer("host.example.invalid", Placeholder+"HOST-ADDRESS", "abc1234", Placeholder+"IMAGE-TAG",
-			"registry.example.invalid/hypothesisloop-experimentator-base:abc1234", Placeholder+"AGENT-IMAGE").Replace(line), 1)
+			"registry.example.invalid/hypothesisloop-harness-base:abc1234", Placeholder+"AGENT-IMAGE").Replace(line), 1)
 		if err := loadText(t, unfilled); err == nil || !strings.Contains(err.Error(), "placeholder") {
 			t.Errorf("one value left unfilled (%q): Load = %v, want it refused as a placeholder", line, err)
 		}
@@ -245,7 +245,7 @@ func TestLoadRejectsRuntimeImagesANodeCannotPull(t *testing.T) {
 
 func TestLoadRejectsAnIncompleteAgentsSection(t *testing.T) {
 	for name, edit := range map[string][2]string{
-		"no image":                 {"  image: registry.example.invalid/hypothesisloop-experimentator-base:abc1234", `  image: ""`},
+		"no image":                 {"  image: registry.example.invalid/hypothesisloop-harness-base:abc1234", `  image: ""`},
 		"misspelled agents key":    {"  default_model: claude-sonnet-5", "  default_model: claude-sonnet-5\n  launchers: [main]"},
 		"no default model":         {"  default_model: claude-sonnet-5\n", ""},
 		"no coordinator model":     {"  coordinator_model: claude-opus-5-5\n", ""},

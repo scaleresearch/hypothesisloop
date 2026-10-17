@@ -121,7 +121,7 @@ render_settings() {
     hosted=(-e "s|http://${host}:8081|${public_api}|"
             -e "s|http://${host}:8084|${public_metrics}|"
             -e "s|http://${host}:9000|${public_store}|"
-            -e "s|^  image: ${host}:5000/hypothesisloop-experimentator-base:.*$|  image: ${registry}/hypothesisloop-experimentator-base:${tag}|"
+            -e "s|^  image: ${host}:5000/hypothesisloop-harness-base:.*$|  image: ${registry}/hypothesisloop-harness-base:${tag}|"
             -e "s|^  registry: ${host}:5000$|  registry: ${registry}|"
             -e "s|^  registry_plain_http: true$|  registry_plain_http: false|"
             -e "s|^  image_tag: .*$|  image_tag: ${tag}|")
@@ -129,7 +129,7 @@ render_settings() {
       hosted+=(-e "s|^    base_url: http://${host}:${HL_GIT_PORT}$|    base_url: ${public_git}|")
       values+=("    base_url: ${public_git}")
     fi
-    values+=("  public_api_url: ${public_api}" "  metrics_url: ${public_metrics}" "  endpoint: ${public_store}" "  image: ${registry}/hypothesisloop-experimentator-base:${tag}"
+    values+=("  public_api_url: ${public_api}" "  metrics_url: ${public_metrics}" "  endpoint: ${public_store}" "  image: ${registry}/hypothesisloop-harness-base:${tag}"
              "  registry: ${registry}" "  image_tag: ${tag}" "  registry_plain_http: false")
   fi
   sed -e 's|http://minio:9000|http://localhost:9000|' ${hosted[@]+"${hosted[@]}"} "${rendered}" > "${settings}"

@@ -11,7 +11,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// The golden prompts are what the experimentator composed itself before its prompts moved to the
+// The golden prompts are what the harness composed itself before its prompts moved to the
 // platform: served with the same assignment, a built-in says the same until one is edited on
 // purpose, golden file and all.
 func TestEachBuiltinComposesToWhatTheHarnessComposed(t *testing.T) {

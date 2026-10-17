@@ -10,7 +10,7 @@
 # Builder stage for the Go `hl` CLI (cli/) -- the platform's own client. The agent uses it (not
 # raw curl) for everything a human would do through it too: hl platform-experiments, hl hypothesis
 # query/submit/link, hl job submit job.yaml, hl watch. Built from the repo root
-# (build context — see Makefile `experimentator-base-image`), same module as the controlplane.
+# (build context — see Makefile `harness-base-image`), same module as the controlplane.
 FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS hl-builder
 ARG TARGETOS TARGETARCH
 WORKDIR /src
@@ -94,7 +94,7 @@ RUN uv venv --seed --no-cache --python /usr/local/bin/python3 $AGENT_VENV
 WORKDIR /opt/hypothesisloop-agent
 # Every module is compiled to bytecode here: a machine that boots compiles what it imports
 # otherwise, which took two of the harness's first four seconds on a Fly machine.
-COPY --chown=agent:agent agents/experimentator/pyproject.toml agents/experimentator/uv.lock .
+COPY --chown=agent:agent agents/harness/pyproject.toml agents/harness/uv.lock .
 RUN uv sync --no-dev --locked --no-cache --compile-bytecode --no-install-project
 
 # The harness itself is installed once its source is there. Installed before, it was recorded as
@@ -102,7 +102,7 @@ RUN uv sync --no-dev --locked --no-cache --compile-bytecode --no-install-project
 # again before the harness started. `uv run` still builds it again on every boot (1.4 seconds
 # measured), so nothing runs it: the entrypoint and the launcher's command start the
 # environment's python directly.
-COPY --chown=agent:agent agents/experimentator/src/ src/
+COPY --chown=agent:agent agents/harness/src/ src/
 RUN uv sync --no-dev --locked --no-cache --compile-bytecode \
  && .venv/bin/python3 -m compileall -q src
 # No prompt in the image: the platform serves each agent its instructions, rules included (instructions.py).

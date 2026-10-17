@@ -2,9 +2,9 @@
 job script that wants the same behavior).
 
 The job process's only integration point with the platform is pushing its own metrics --
-logs and debug comments are collected and relayed by the supervising runtime/experimentator
+logs and debug comments are collected and relayed by the supervising runtime/harness
 agent instead, never self-reported by the job (the runtime already reads pod stdout live and
-the experimentator agent already observes and comments on job status from the outside; a job
+the harness agent already observes and comments on job status from the outside; a job
 duplicating either of those paths is a stale, harder-to-trust second copy of state the platform
 already has). So this module intentionally does exactly one thing: post_metric().
 

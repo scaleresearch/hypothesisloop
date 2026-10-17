@@ -67,7 +67,7 @@ func NewRouter(h Handlers) chi.Router {
 	// /watch is a WebSocket upgrade, so it is mounted on the router rather than registered on
 	// the Huma doc below: Huma owns the response for every operation registered with it, and an
 	// upgrade needs the raw connection. Its vocabulary is GET /watch/kinds, registered below, and
-	// `hl watch` is its client, which the experimentator harness runs for an agent between turns.
+	// `hl watch` is its client, which the agent harness runs for an agent between turns.
 	r.Get("/watch", h.Watch.ServeHTTP)
 	r.Get("/changes", h.Watch.ServeChanges)
 	// git's smart HTTP is no JSON API, so it is mounted beside the documented operations.

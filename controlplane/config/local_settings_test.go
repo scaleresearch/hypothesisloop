@@ -37,7 +37,7 @@ func TestTheLocalSettingsAsRenderedLoad(t *testing.T) {
 	if want := (PlainGitConfig{BaseURL: "http://host.example.internal:8085", AllowHTTP: true, Username: "hypothesisloop"}); cfg.GitHost.Provider != GitHostProviderPlain || cfg.GitHost.Plain == nil || *cfg.GitHost.Plain != want {
 		t.Errorf("git host = %s, want the git server of this machine", cfg.GitHost.Provider)
 	}
-	if cfg.Agents.Image != "host.example.internal:5000/hypothesisloop-experimentator-base:abc1234" || cfg.Agents.DefaultModel == "" || cfg.Agents.BootLimitSeconds <= 0 {
+	if cfg.Agents.Image != "host.example.internal:5000/hypothesisloop-harness-base:abc1234" || cfg.Agents.DefaultModel == "" || cfg.Agents.BootLimitSeconds <= 0 {
 		t.Errorf("agents = %+v, want every key set", cfg.Agents)
 	}
 	if cfg.Environments != nil {
