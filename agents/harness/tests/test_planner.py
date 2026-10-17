@@ -1,10 +1,11 @@
+import asyncio
 import os
 import tempfile
 import unittest
 from unittest import mock
 from types import SimpleNamespace
 
-from conftest import SITUATION
+from conftest import SITUATION, FakePlatform
 from hypothesisloop_agent import core, prompt, updates
 
 
@@ -30,10 +31,9 @@ class CommandsListedTest(unittest.TestCase):
         self.assertEqual(listed(baseline_agent()), [[], ["job", "submit"], ["job", "summary"], ["platform-experiments", "agents", "finish"]])
 
 
-class RunEndedTest(unittest.TestCase):
+class RunEndedTest(unittest.IsolatedAsyncioTestCase):
     def reason(self, cfg, signup, platform_experiment=None):
-        client = SimpleNamespace(get_platform_experiment=lambda _id: platform_experiment, get_signup=lambda *_: signup)
-        return core.stop_reason(SimpleNamespace(cfg=cfg, client=client), [False])
+        return asyncio.run(core.stop_reason(SimpleNamespace(cfg=cfg, client=FakePlatform(platform_experiment, signup)), [False]))
 
     # The planner's machine is rented while it plans and no longer: it stops by itself once the
     # platform says its answer is stored, and a change of the goal, which takes that back, lets it
@@ -45,25 +45,25 @@ class RunEndedTest(unittest.TestCase):
 
     # A baseline agent read baseline_due_at once, ten minutes ahead, and never again: it wrote a
     # careful harness and the experiment closed with no job submitted.
-    def test_a_baseline_agent_is_told_its_clock_with_every_prompt(self):
-        import asyncio
+    async def test_a_baseline_agent_is_told_its_clock_with_every_prompt(self):
         from datetime import datetime, timedelta, timezone
-        from hypothesisloop_agent.claude import run
+        from hypothesisloop_agent.claude import prompts
         due = (datetime.now(timezone.utc) + timedelta(minutes=9, seconds=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         def setup(cfg, platform_experiment):
-            return SimpleNamespace(cfg=cfg, client=SimpleNamespace(get_platform_experiment=lambda _id: platform_experiment))
+            return SimpleNamespace(cfg=cfg, client=FakePlatform(platform_experiment), workdir=tempfile.mkdtemp())
+
+        async def turn(setup, prompt):
+            return await prompts.turn_start(setup, {}, prompt)
 
         clock = f"baseline_due_at is {due}, 9 minutes from now."
         measuring = setup(baseline_agent(), {"status": "open", "baseline_due_at": due})
-        self.assertEqual(run._first_prompt(measuring, None, None), "Begin.\n\n" + clock)
-        job = [{"kind": "experiment.status", "subject": "job-1", "value": "FAILED"}]
-        self.assertTrue(asyncio.run(run._told(measuring, {}, job)).endswith("\n\n" + clock + "\n\n" + SITUATION))
-        self.assertEqual(asyncio.run(run._told(measuring, {}, [])), "")
+        self.assertEqual(await turn(measuring, "Begin."), "Begin.\n\n" + clock + "\n\n" + SITUATION)
         told = "Platform updates:\nexperiment.status job-1 FAILED"
-        self.assertEqual(asyncio.run(run._told(setup(baseline_agent(), {"status": "running"}), {}, job)), told + "\n\n" + SITUATION)
-        self.assertEqual(asyncio.run(run._told(setup(planner(), {}), {}, job)), told, "a planner has no run to read the situation of")
-        self.assertEqual(run._first_prompt(setup(planner(), {"status": "draft", "baseline_due_at": due}), None, None), "Begin.")
+        self.assertEqual(await turn(measuring, told), told + "\n\n" + clock + "\n\n" + SITUATION)
+        self.assertEqual(await turn(setup(baseline_agent(), {"status": "running"}), told), told + "\n\n" + SITUATION)
+        self.assertEqual(await turn(setup(planner(), {"status": "draft", "baseline_due_at": due}), told), told,
+                         "a planner has no run to read the situation of")
 
     # Researchers once finished in twenty minutes and their machines idled to the end time.
     def test_a_researcher_stops_once_it_finished_and_not_before(self):

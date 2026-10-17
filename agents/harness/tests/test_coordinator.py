@@ -1,3 +1,4 @@
+import asyncio
 import os
 import shutil
 import tempfile
@@ -5,9 +6,11 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
+from conftest import FakePlatform
 from hypothesisloop_agent import config, core, prompt, updates
-from hypothesisloop_agent.claude import run
-from test_require_joined import AGENT_TOKEN, FakePlatform, PlatformCase, derived
+from hypothesisloop_agent.claude import shutdown
+from test_require_joined import AGENT_TOKEN, PlatformCase, derived
+from test_require_joined import FakePlatform as HTTPPlatform
 from test_updates import COMPLETED, fake_hl
 
 COORDINATOR_TOKEN = derived("coordinator:pe-1")
@@ -25,6 +28,15 @@ class LaunchEnvironmentTest(unittest.TestCase):
         self.assertFalse(config.coordinates(cfg))
         self.assertEqual(cfg.agent_id, "agent-a")
 
+    # contract/scope.Parse reads a coordinator's subject whole and splits an agent's at its first /:
+    # a coordinator scope holding a / was refused, and an agent id holding one cut short.
+    def test_a_token_is_read_as_the_platform_reads_its_scope(self):
+        self.assertEqual(config.token_scope(derived("coordinator:pe-1/part")), ("coordinator", "pe-1/part", ""))
+        self.assertEqual(config.token_scope(derived("agent:pe-1/agent-a/b")), ("agent", "pe-1", "agent-a/b"))
+        for scope in ("coordinator:", "agent:pe-1", "agent:/agent-a", "agent:pe-1/"):
+            with self.assertRaises(SystemExit, msg=scope):
+                config.token_scope(derived(scope))
+
 
 class StartupTest(PlatformCase):
     def setUp(self):
@@ -32,32 +44,34 @@ class StartupTest(PlatformCase):
         self.workdir = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.workdir)
 
-    def prepare(self):
+    async def prepare(self):
         env = {**LAUNCH_ENV, "API_URL": self.url, "AGENT_WORKDIR": self.workdir, "AGENT_STATE_DIR": self.workdir,
                "AGENT_VENV": "/agent/.venv", "PATH": "/usr/bin"}
         with mock.patch.dict(os.environ, env, clear=True), \
-                mock.patch.object(prompt, "hl_commands", return_value="usage: hl") as commands:
-            setup = core.prepare()
+                mock.patch.object(prompt, "hl_commands", return_value="usage: hl") as commands, \
+                mock.patch.object(core, "clone_workspace") as clone:
+            setup = await core.prepare()
+        clone.assert_not_called()
         commands.assert_called_once_with(setup.cfg)
         return setup
 
-    def test_a_coordinator_starts_on_its_token_alone_and_never_asks_for_a_signup(self):
+    async def test_a_coordinator_starts_on_its_token_alone_and_never_asks_for_a_signup(self):
         # The roster is what only a coordinator's token reads.
-        FakePlatform.joined = {"agents"}
-        setup = self.prepare()
-        self.assertEqual(FakePlatform.calls[0], ("GET", "/platform-experiments/pe-1/agents"))
-        self.assertFalse([path for _, path in FakePlatform.calls if "/signups/" in path])
-        self.assertNotIn("POST", [method for method, _ in FakePlatform.calls])
-        self.assertEqual(FakePlatform.tokens, {"Bearer " + COORDINATOR_TOKEN})
+        HTTPPlatform.joined = {"agents"}
+        setup = await self.prepare()
+        self.assertEqual(HTTPPlatform.calls[0], ("GET", "/platform-experiments/pe-1/agents"))
+        self.assertFalse([path for _, path in HTTPPlatform.calls if "/signups/" in path])
+        self.assertNotIn("POST", [method for method, _ in HTTPPlatform.calls])
+        self.assertEqual(HTTPPlatform.tokens, {"Bearer " + COORDINATOR_TOKEN})
         self.assertEqual(setup.cfg.role, "coordinator")
-        self.assertIn(("GET", "/platform-experiments/pe-1/coordinator/instructions"), FakePlatform.calls)
+        self.assertIn(("GET", "/platform-experiments/pe-1/coordinator/instructions"), HTTPPlatform.calls)
 
-    def test_a_token_that_does_not_coordinate_fails_startup_without_showing_itself(self):
-        FakePlatform.joined = set()
+    async def test_a_token_that_does_not_coordinate_fails_startup_without_showing_itself(self):
+        HTTPPlatform.joined = set()
         for status in (401, 403, 404):
-            FakePlatform.status_for_strangers = status
+            HTTPPlatform.status_for_strangers = status
             with self.assertRaises(SystemExit) as refused:
-                self.prepare()
+                await self.prepare()
             self.assertIn("does not coordinate platform experiment pe-1", str(refused.exception))
             self.assertNotIn(COORDINATOR_TOKEN, str(refused.exception))
 
@@ -87,15 +101,17 @@ class BriefingTest(unittest.TestCase):
 
 class WatchTest(unittest.IsolatedAsyncioTestCase):
     def test_the_token_says_whether_the_watch_is_a_coordinators_of_the_whole_experiment(self):
-        env = updates.watch_env("http://api", COORDINATOR_TOKEN, "/tmp/w")
+        with mock.patch.dict(os.environ, {"API_URL": "http://api", "HL_TOKEN": COORDINATOR_TOKEN}):
+            env = updates.watch_env(config.Config(), "/tmp/w")
         self.assertEqual(updates.watch_command(env), ["hl", "watch", "--all", "--decisions"])
-        own = updates.watch_env("http://api", AGENT_TOKEN, "/tmp/w")
+        with mock.patch.dict(os.environ, {"API_URL": "http://api", "HL_TOKEN": AGENT_TOKEN}):
+            own = updates.watch_env(config.Config(), "/tmp/w")
         self.assertEqual((own["HL_TOKEN"], updates.watch_command(own)), (AGENT_TOKEN, ["hl", "watch"]))
 
     async def test_an_ended_job_reaches_a_coordinator_with_its_machine_and_no_read_as_an_agent(self):
         command, _ = fake_hl(f"echo '{COMPLETED}'\n", status='{"id":"exp-1","ran_on":"node n1"}', stats="{}", quota="{}")
-        events = await updates.drain({**os.environ, "HL_TOKEN": COORDINATOR_TOKEN}, command)
-        self.assertEqual(updates.message(events, ""), "Platform updates:\nexperiment.status exp-1 COMPLETED on node n1 by agent-a")
+        events = await updates.drain({**os.environ, "HL_TOKEN": COORDINATOR_TOKEN, updates._AGENT_ID: ""}, command)
+        self.assertEqual(updates.message(events, ""), "Platform updates:\nexperiment.status exp-1 COMPLETED {} on node n1 by agent-a")
         with open(command[0] + ".reads") as f:
             self.assertEqual(f.read(), "job wait exp-1\n")
 
@@ -122,8 +138,8 @@ class WatchTest(unittest.IsolatedAsyncioTestCase):
              "you were cut from the platform experiment, for a reason the platform names something_new."),
         ):
             setup = SimpleNamespace(cfg=SimpleNamespace(agent_id="ag-1", role=role, platform_experiment_id="pe-1"),
-                                    client=SimpleNamespace(get_platform_experiment=lambda _id, e=experiment: e, get_signup=lambda *_, s=signup: s))
-            prompt = run._shutdown_prompt(setup)
+                                    client=FakePlatform(experiment, signup))
+            prompt = asyncio.run(shutdown._prompt(setup))
             self.assertTrue(prompt.startswith("You are being stopped"), prompt)
             self.assertIn(want, prompt)
             self.assertNotIn("owner", prompt)
@@ -133,8 +149,8 @@ class WatchTest(unittest.IsolatedAsyncioTestCase):
         closed = {"status": "closed", "closed_at": "2026-01-01T02:48:05Z", "close_reason": "baseline_limit_reached"}
         for role, verdicts in (("baseline", False), ("researcher", True)):
             setup = SimpleNamespace(cfg=SimpleNamespace(agent_id="ag-1", role=role, platform_experiment_id="pe-1"),
-                                    client=SimpleNamespace(get_platform_experiment=lambda _id: closed, get_signup=lambda *_: {"ended": "closed"}))
-            prompt = run._shutdown_prompt(setup)
+                                    client=FakePlatform(closed, {"ended": "closed"}))
+            prompt = asyncio.run(shutdown._prompt(setup))
             self.assertIn("File what your finished jobs showed as their summaries", prompt)
             self.assertEqual("verdict" in prompt, verdicts, prompt)
 
@@ -149,8 +165,8 @@ class WatchTest(unittest.IsolatedAsyncioTestCase):
             (closed, {}, "coordinator"),
         ):
             setup = SimpleNamespace(cfg=SimpleNamespace(agent_id="ag-1", role=role, platform_experiment_id="pe-1"),
-                                    client=SimpleNamespace(get_platform_experiment=lambda _id, e=experiment: e, get_signup=lambda *_, s=signup: s))
-            self.assertIsNone(run._shutdown_prompt(setup), role)
+                                    client=FakePlatform(experiment, signup))
+            self.assertIsNone(asyncio.run(shutdown._prompt(setup)), role)
 
 
 if __name__ == "__main__":

@@ -12,8 +12,10 @@ from unittest import mock
 from claude_agent_sdk import (AssistantMessage, RateLimitEvent, RateLimitInfo, ResultMessage, StreamEvent, SystemMessage,
                               TextBlock, UserMessage)
 
-from hypothesisloop_agent.claude import run
-from conftest import SITUATION, served
+from hypothesisloop_agent import api_client, core, updates
+from hypothesisloop_agent.claude import cli, connection, hooks, rotation, run, shutdown, store as store_module, stream, transcripts, turns
+from hypothesisloop_agent.claude.store import Store
+from conftest import SITUATION, FakePlatform, connect, served
 from test_require_joined import AGENT_TOKEN
 
 # What closes every prompt of a role in a run.
@@ -50,13 +52,13 @@ class HangingClient:
 
 def _setup():
     return SimpleNamespace(commands="usage: hl", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
-                           client=SimpleNamespace(get_platform_experiment=lambda _id: {"status": "running"}, get_signup=lambda *_: {}),
+                           client=FakePlatform(),
                            cfg=SimpleNamespace(agent_id="agent-a", role="researcher", api_url="http://x", token=AGENT_TOKEN, platform_experiment_id="pe-1"))
 
 
 # A machine stopped while its agent's run goes on is told exactly that, ahead of what to do with its turn.
 LAST = ("You are being stopped while your run on the platform goes on: the platform ended nothing of yours. "
-        "Only this machine is being stopped, and the platform does not say why. " + run._SHUTDOWN_PROMPT + S)
+        "Only this machine is being stopped, and the platform does not say why. " + shutdown._SHUTDOWN_PROMPT + S)
 
 
 def _result():
@@ -91,13 +93,13 @@ class StoppableClient(HangingClient):
 class StopTest(unittest.IsolatedAsyncioTestCase):
     async def stop_mid_turn(self, hangs: bool) -> StoppableClient:
         stop_flag = [False]
-        with mock.patch.object(run, "ClaudeSDKClient", StoppableClient), \
-                mock.patch.object(run.updates, "drain", mock.AsyncMock(return_value=[])), \
+        with mock.patch.object(connection, "ClaudeSDKClient", StoppableClient), \
+                mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[])), \
                 mock.patch.object(StoppableClient, "hangs", hangs), \
-                mock.patch.object(run, "_SHUTDOWN_TURN_S", 0.05), \
-                mock.patch.object(run.asyncio, "sleep", mock.AsyncMock(side_effect=lambda _: stop_flag.__setitem__(0, True))), \
+                mock.patch.object(shutdown, "_SHUTDOWN_TURN_S", 0.05), \
+                mock.patch.object(asyncio, "sleep", mock.AsyncMock(side_effect=lambda _: stop_flag.__setitem__(0, True))), \
                 contextlib.redirect_stdout(io.StringIO()):
-            await asyncio.wait_for(run._run_one_session(_setup(), None, stop_flag), timeout=5)
+            await asyncio.wait_for(connect(_setup(), None, stop_flag), timeout=5)
         return HangingClient.instances[-1]
 
     async def test_a_stop_interrupts_the_turn_and_gives_one_last_turn(self):
@@ -115,11 +117,11 @@ class StopTest(unittest.IsolatedAsyncioTestCase):
     # turn to file summaries the platform had already checked it did not owe.
     async def stop_after_finishing(self, client_class, sleep) -> StoppableClient:
         setup = _setup()
-        setup.client.get_signup = lambda *_: {"ended": "finished"}
-        with mock.patch.object(run, "ClaudeSDKClient", client_class), \
-                mock.patch.object(run.asyncio, "sleep", sleep), \
+        setup.client.signup = {"ended": "finished"}
+        with mock.patch.object(connection, "ClaudeSDKClient", client_class), \
+                mock.patch.object(asyncio, "sleep", sleep), \
                 contextlib.redirect_stdout(io.StringIO()):
-            await asyncio.wait_for(run._run_one_session(setup, None, self.stop_flag), timeout=5)
+            await asyncio.wait_for(connect(setup, None, self.stop_flag), timeout=5)
         return HangingClient.instances[-1]
 
     async def test_a_stop_after_the_agent_finished_lets_its_turn_end_and_gives_no_other(self):
@@ -127,7 +129,7 @@ class StopTest(unittest.IsolatedAsyncioTestCase):
         given_time = asyncio.Event()
 
         async def sleep(seconds):
-            if seconds == run._SHUTDOWN_TURN_S:
+            if seconds == shutdown._SHUTDOWN_TURN_S:
                 given_time.set()
                 await asyncio.Event().wait()
             self.stop_flag[0] = True
@@ -166,12 +168,12 @@ class IdleStopTest(unittest.IsolatedAsyncioTestCase):
             return waiting
 
         setup = _setup()
-        with mock.patch.object(run, "ClaudeSDKClient", IdleClient), \
-                mock.patch.object(run.updates, "next_batch", stopped_while_waiting), \
-                mock.patch.object(run.updates, "jobs_in_flight", mock.AsyncMock(return_value=1)), \
-                mock.patch.object(run.updates, "drain", mock.AsyncMock(return_value=finished_since)), \
+        with mock.patch.object(connection, "ClaudeSDKClient", IdleClient), \
+                mock.patch.object(updates, "next_batch", stopped_while_waiting), \
+                mock.patch.object(updates, "jobs_in_flight", mock.AsyncMock(return_value=1)), \
+                mock.patch.object(updates, "drain", mock.AsyncMock(return_value=finished_since)), \
                 contextlib.redirect_stdout(io.StringIO()):
-            await asyncio.wait_for(run._run_one_session(setup, None, stop_flag), timeout=5)
+            await asyncio.wait_for(connect(setup, None, stop_flag), timeout=5)
         return HangingClient.instances[-1].queries
 
     async def test_a_stop_between_turns_gives_one_last_turn(self):
@@ -184,28 +186,23 @@ class IdleStopTest(unittest.IsolatedAsyncioTestCase):
         async def nothing(env, stopped, idle_s):
             return []
 
-        def get_signup(*_):
-            if isinstance(signup, Exception):
-                raise signup
-            return signup
-
         setup = _setup()
         setup.cfg.role = role
-        setup.client = SimpleNamespace(get_platform_experiment=lambda _id: experiment, get_signup=get_signup)
-        with mock.patch.object(run, "ClaudeSDKClient", IdleClient), \
-                mock.patch.object(run.updates, "next_batch", nothing), \
-                mock.patch.object(run.updates, "drain", mock.AsyncMock(return_value=[])), \
+        setup.client = FakePlatform(experiment, signup)
+        with mock.patch.object(connection, "ClaudeSDKClient", IdleClient), \
+                mock.patch.object(updates, "next_batch", nothing), \
+                mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[])), \
                 contextlib.redirect_stdout(io.StringIO()):
-            await asyncio.wait_for(run._run_one_session(setup, None, [False]), timeout=5)
+            await asyncio.wait_for(connect(setup, None, [False]), timeout=5)
         return HangingClient.instances[-1].queries
 
     async def test_a_run_the_platform_ended_gets_its_last_turn_with_no_signal(self):
         closed = {"status": "closed", "closed_at": "2026-01-01T02:48:05Z", "close_reason": "end_time_reached"}
         self.assertEqual(await self.run_ends_while_idle("coordinator", {}, closed), [
             "Begin." + S, "You are being stopped because the platform experiment reached its end time and the platform closed it at "
-                      "2026-01-01T02:48:05Z. " + run._COORDINATOR_SHUTDOWN_PROMPT + S])
+                      "2026-01-01T02:48:05Z. " + shutdown._COORDINATOR_SHUTDOWN_PROMPT + S])
         self.assertEqual(await self.run_ends_while_idle("researcher", {"ended": "cut"}, {"status": "running"}), [
-            "Begin." + S, "You are being stopped because you were cut from the platform experiment at a stage boundary. " + run._SHUTDOWN_PROMPT + S])
+            "Begin." + S, "You are being stopped because you were cut from the platform experiment at a stage boundary. " + shutdown._SHUTDOWN_PROMPT + S])
 
     # In a live run the close arrived as an update, was handed over as a turn of its own and cut by the
     # stop four seconds later, and only then did the last turn start. A batch that comes with the
@@ -220,19 +217,19 @@ class IdleStopTest(unittest.IsolatedAsyncioTestCase):
 
         setup = _setup()
         setup.cfg.role = "coordinator"
-        setup.client = SimpleNamespace(get_platform_experiment=lambda _id: experiment, get_signup=lambda *_: {})
-        with mock.patch.object(run, "ClaudeSDKClient", IdleClient), \
-                mock.patch.object(run.updates, "next_batch", the_close), \
-                mock.patch.object(run.updates, "drain", mock.AsyncMock(return_value=[closed_event])), \
+        setup.client = FakePlatform(experiment)
+        with mock.patch.object(connection, "ClaudeSDKClient", IdleClient), \
+                mock.patch.object(updates, "next_batch", the_close), \
+                mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[closed_event])), \
                 contextlib.redirect_stdout(io.StringIO()):
-            await asyncio.wait_for(run._run_one_session(setup, None, [False]), timeout=5)
+            await asyncio.wait_for(connect(setup, None, [False]), timeout=5)
         self.assertEqual(HangingClient.instances[-1].queries, [
             "Begin." + S, "You are being stopped because the platform experiment reached its end time and the platform closed it at "
-                      "2026-01-01T02:48:05Z. " + run._COORDINATOR_SHUTDOWN_PROMPT + "\n\nPlatform updates:\n"
+                      "2026-01-01T02:48:05Z. " + shutdown._COORDINATOR_SHUTDOWN_PROMPT + "\n\nPlatform updates:\n"
                       "platform_experiment.status pe-1 closed" + S])
 
     async def test_a_refused_token_gets_no_last_turn(self):
-        refused = run.core.api_client.APIError("GET", "http://api/x", 401, "unauthenticated")
+        refused = api_client.APIError("GET", "http://api/x", 401, "unauthenticated")
         self.assertEqual(await self.run_ends_while_idle("researcher", refused, {"status": "running"}), ["Begin." + S])
 
     async def test_the_last_turn_opens_with_what_finished_since_the_last_delivery(self):
@@ -256,12 +253,12 @@ class ReviewTest(unittest.IsolatedAsyncioTestCase):
 
         setup = _setup()
         setup.cfg.role = role
-        with mock.patch.object(run, "ClaudeSDKClient", IdleClient), \
-                mock.patch.object(run.updates, "next_batch", next_batch), \
-                mock.patch.object(run.updates, "jobs_in_flight", mock.AsyncMock(return_value=1)), \
-                mock.patch.object(run.updates, "drain", mock.AsyncMock(return_value=[])), \
+        with mock.patch.object(connection, "ClaudeSDKClient", IdleClient), \
+                mock.patch.object(updates, "next_batch", next_batch), \
+                mock.patch.object(updates, "jobs_in_flight", mock.AsyncMock(return_value=1)), \
+                mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[])), \
                 contextlib.redirect_stdout(io.StringIO()):
-            await asyncio.wait_for(run._run_one_session(setup, None, stop_flag), timeout=5)
+            await asyncio.wait_for(connect(setup, None, stop_flag), timeout=5)
         return waits, HangingClient.instances[-1].queries
 
     # A lead rested from 16:00 to the close while a nudge that doubled waited. A coordinator
@@ -269,8 +266,8 @@ class ReviewTest(unittest.IsolatedAsyncioTestCase):
     async def test_a_coordinator_is_reviewed_at_a_fixed_interval_and_an_update_is_its_wake(self):
         comment = {"kind": "comment.new", "subject": "hyp-1", "value": "human"}
         waits, queries = await self.waits("coordinator", [[], [], [comment], [], []])
-        self.assertEqual(waits, [run.updates.REVIEW_S] * 5)
-        review = run.updates.REVIEW_PROMPT.format(minutes=20) + S
+        self.assertEqual(waits, [updates.REVIEW_S] * 5)
+        review = updates.REVIEW_PROMPT.format(minutes=20) + S
         self.assertEqual(queries[1:5], [review, review, "Platform updates:\ncomment.new hyp-1 human" + S, review])
 
     # Free places are the platform's to tell (capacity.idle): a coordinator that leaves them is
@@ -279,28 +276,11 @@ class ReviewTest(unittest.IsolatedAsyncioTestCase):
         idle = {"run": {"minutes_left": 200}, "objective": [{"gap_to_target_pct": 27.3}],
                 "capacity": {"fits_now": 8, "jobs_in_flight_run": {"queued": 0, "running": 0}}}
         comment = {"kind": "comment.new", "subject": "hyp-1", "value": "human"}
-        with mock.patch.object(run.updates, "standing", mock.AsyncMock(return_value=idle)):
+        with mock.patch.object(updates, "standing", mock.AsyncMock(return_value=idle)):
             waits, queries = await self.waits("coordinator", [[], [comment], []])
-        review = run.updates.review_prompt(20, idle) + S
-        self.assertEqual(waits, [run.updates.REVIEW_S] * 3)
+        review = updates.review_prompt(20, idle) + S
+        self.assertEqual(waits, [updates.REVIEW_S] * 3)
         self.assertEqual(queries[1:3], [review, "Platform updates:\ncomment.new hyp-1 human" + S])
-
-    # While the model allowance is paced a coordinator reviews less often, and every wake says how
-    # the allowance stands.
-    async def test_a_paced_coordinator_reviews_later_and_is_told_why(self):
-        idle = {"run": {"minutes_left": 200}, "objective": [{"gap_to_target_pct": 27.3}],
-                "capacity": {"fits_now": 8, "jobs_in_flight_run": {"queued": 0, "running": 0}}}
-        allowance = run.pacing.Allowance()
-        allowance.read("five_hour", 0.8, time.time() + 2 * 3600)
-        with mock.patch.object(run.updates, "standing", mock.AsyncMock(return_value=idle)), \
-                mock.patch.object(run, "_allowance", allowance):
-            waits, queries = await self.waits("coordinator", [[], []])
-            note = allowance.note(coordinator=True, subagents=2)
-        self.assertEqual(waits, [run.pacing.REVIEW_S] * 2)
-        self.assertIn("used 80% of its five_hour window with 60% of its time gone", note)
-        self.assertIn(f"Your regular review comes every {run.pacing.REVIEW_S // 60} minutes", note)
-        self.assertEqual(queries[:2], ["Begin.\n\n" + note + S,
-                                       run.updates.review_prompt(run.pacing.REVIEW_S // 60, idle) + "\n\n" + note + S])
 
     # The platform's agent.idle, kept in its store, is the one timer of an agent.
     async def test_an_agent_waits_for_an_update_with_no_limit_of_its_own(self):
@@ -330,16 +310,17 @@ class ContextOverflowTest(unittest.IsolatedAsyncioTestCase):
                                     session_id="s-1", result="Prompt is too long")
 
         setup = _setup()
-        with mock.patch.object(run, "ClaudeSDKClient", OverflowingClient), \
+        with mock.patch.object(connection, "ClaudeSDKClient", OverflowingClient), \
                 mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": home}), \
                 contextlib.redirect_stdout(io.StringIO()), self.assertLogs("llm_agent"):
-            self.assertEqual(await asyncio.wait_for(run._run_one_session(setup, "s-1", [False]), timeout=5), False)
-            resume_id, prompt = run._restart_state(setup)
+            store = Store(setup)
+            self.assertEqual(await asyncio.wait_for(connect(setup, "s-1", [False], store), timeout=5), False)
+            resume_id, prompt = store.restart_state()
             self.assertIsNone(resume_id)
             self.assertIn("job exp-7 runs lr 3e-4", prompt)
             self.assertNotIn("a subagent's", prompt)
-            self.assertEqual(run._transcript_files("s-1"), ["projects/p/s-1.jsonl"], "a subagent's transcript is stored with no session")
-            run._delete_retired_transcripts()
+            self.assertEqual(transcripts.files("s-1"), ["projects/p/s-1.jsonl"], "a subagent's transcript is stored with no session")
+            store.delete_retired()
         self.assertEqual(os.listdir(os.path.join(home, "projects/p")), [])
 
     # Measured on the bundled CLI: a subagent that ends as the handoff's prompt is sent starts a
@@ -352,7 +333,7 @@ class ContextOverflowTest(unittest.IsolatedAsyncioTestCase):
         turns = [[AssistantMessage(content=[TextBlock(text="worked")], model="m", usage={"input_tokens": 10_000_000}),
                   result("worked")],
                  [SystemMessage("task_notification", {"task_id": "sub-1", "status": "completed"}), result("sub-1 done")],
-                 [UserMessage(content=run._COMPACTION_PROMPT), result("where things stand")]]
+                 [UserMessage(content=rotation.COMPACTION_PROMPT), result("where things stand")]]
 
         class RotatingClient(StoppableClient):
             async def receive_response(self):
@@ -360,10 +341,11 @@ class ContextOverflowTest(unittest.IsolatedAsyncioTestCase):
                     yield message
 
         setup = _setup()
-        with mock.patch.object(run, "ClaudeSDKClient", RotatingClient), \
+        store = Store(setup)
+        with mock.patch.object(connection, "ClaudeSDKClient", RotatingClient), \
                 contextlib.redirect_stdout(io.StringIO()), self.assertLogs("llm_agent"):
-            self.assertEqual(await asyncio.wait_for(run._run_one_session(setup, None, [False]), timeout=5), True)
-        self.assertEqual(run._load_handoff(setup), "where things stand")
+            self.assertEqual(await asyncio.wait_for(connect(setup, None, [False], store), timeout=5), True)
+        self.assertEqual(store.handoff(), "where things stand")
 
     # A rotation ends the CLI and every subagent at work with it, whose ideas the lead then
     # started again. Past the rotation point it waits for them, up to the ceiling, and the next
@@ -382,10 +364,10 @@ class ContextOverflowTest(unittest.IsolatedAsyncioTestCase):
                     result("worked")]
 
         # sub-2 completes during the handoff's turn and is not started again.
-        turns = [turn(450_000), turn(run._CONTEXT_CEILING_TOKENS),
+        turns = [turn(450_000), turn(rotation._CONTEXT_CEILING_TOKENS),
                  [SystemMessage("background_tasks_changed", {"tasks": [
                      {"task_id": "sub-1", "task_type": "local_agent", "description": "lr warmup on hyp-1"}]}),
-                  UserMessage(content=run._COMPACTION_PROMPT), result("where things stand")]]
+                  UserMessage(content=rotation.COMPACTION_PROMPT), result("where things stand")]]
 
         class RotatingClient(StoppableClient):
             async def receive_response(self):
@@ -394,38 +376,39 @@ class ContextOverflowTest(unittest.IsolatedAsyncioTestCase):
 
         comment = [{"kind": "comment.new", "subject": "hyp-1", "value": "human"}]
         setup = _setup()
-        with mock.patch.object(run, "ClaudeSDKClient", RotatingClient), \
-                mock.patch.object(run.updates, "next_batch", mock.AsyncMock(return_value=comment)), \
-                mock.patch.object(run.updates, "drain", mock.AsyncMock(return_value=[])), \
+        store = Store(setup)
+        with mock.patch.object(connection, "ClaudeSDKClient", RotatingClient), \
+                mock.patch.object(updates, "next_batch", mock.AsyncMock(return_value=comment)), \
+                mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[])), \
                 contextlib.redirect_stdout(io.StringIO()), self.assertLogs("llm_agent") as logged:
-            self.assertEqual(await asyncio.wait_for(run._run_one_session(setup, None, [False]), timeout=5), True)
+            self.assertEqual(await asyncio.wait_for(connect(setup, None, [False], store), timeout=5), True)
         self.assertIn("rotation deferred: 3 subagents live", "\n".join(logged.output))
-        self.assertEqual(HangingClient.instances[-1].queries[1:], ["Platform updates:\ncomment.new hyp-1 human" + S, run._COMPACTION_PROMPT])
-        self.assertEqual(run._load_handoff(setup), "where things stand\n\n" + run._STOPPED_SUBAGENTS.format(
+        self.assertEqual(HangingClient.instances[-1].queries[1:], ["Platform updates:\ncomment.new hyp-1 human" + S, rotation.COMPACTION_PROMPT])
+        self.assertEqual(store.handoff(), "where things stand\n\n" + rotation._STOPPED_SUBAGENTS.format(
             tasks="- lr warmup on hyp-1"))
-        self.assertIn("Start each again with Agent", run._restart_state(setup)[1])
+        self.assertIn("Start each again with Agent", store.restart_state()[1])
 
     # Subagents, which never rotate, re-read 400-450K on every call when the CLI compacted only near
     # the model's 1M window. It compacts every session past the configured window, and a lead with
     # no subagent live rotates with the platform's handoff before that.
     def test_the_cli_compacts_sessions_past_a_bounded_window(self):
-        window = run._AUTO_COMPACT_WINDOW_TOKENS
-        self.assertEqual(run.CLI_ENV["CLAUDE_CODE_AUTO_COMPACT_WINDOW"], str(window))
+        window = cli.AUTO_COMPACT_WINDOW_TOKENS
+        self.assertEqual(cli.CLI_ENV["CLAUDE_CODE_AUTO_COMPACT_WINDOW"], str(window))
         self.assertGreaterEqual(window, 100_000)
-        self.assertLess(run._CONTEXT_COMPACTION_THRESHOLD_TOKENS, window - 33_000)
+        self.assertLess(rotation._CONTEXT_COMPACTION_THRESHOLD_TOKENS, window - 33_000)
 
     def test_the_rotation_point_follows_a_smaller_context_window(self):
         def result(model_usage):
             return ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1,
                                  session_id="s-1", model_usage=model_usage)
 
-        threshold, ceiling = run._CONTEXT_COMPACTION_THRESHOLD_TOKENS, run._CONTEXT_CEILING_TOKENS
-        self.assertEqual(run._rotation_limits(result(None), "claude-x"), (threshold, ceiling))
-        self.assertEqual(run._rotation_limits(result({"claude-x-2026": {"contextWindow": 1_000_000},
+        threshold, ceiling = rotation._CONTEXT_COMPACTION_THRESHOLD_TOKENS, rotation._CONTEXT_CEILING_TOKENS
+        self.assertEqual(rotation.limits(result(None), "claude-x"), (threshold, ceiling))
+        self.assertEqual(rotation.limits(result({"claude-x-2026": {"contextWindow": 1_000_000},
                                                       "claude-h": {"contextWindow": 200_000}}), "claude-x"), (threshold, ceiling))
-        with mock.patch.object(run, "_CONTEXT_CEILING_TOKENS", 120_000):
-            self.assertEqual(run._rotation_limits(result({"claude-x": {"contextWindow": 1_000_000}}), "claude-x"), (120_000, 120_000))
-        self.assertEqual(run._rotation_limits(result({"claude-x-2026": {"contextWindow": 200_000}}), "claude-x"), (150_000, 180_000))
+        with mock.patch.object(rotation, "_CONTEXT_CEILING_TOKENS", 120_000):
+            self.assertEqual(rotation.limits(result({"claude-x": {"contextWindow": 1_000_000}}), "claude-x"), (120_000, 120_000))
+        self.assertEqual(rotation.limits(result({"claude-x-2026": {"contextWindow": 200_000}}), "claude-x"), (150_000, 180_000))
 
 
 # A researcher ran 3 to 10 subagents at once, and its session grew past its rotation since some
@@ -435,7 +418,8 @@ class SubagentCapTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.now = 0.0
         self.background = {}
-        self.hooks = run._subagent_hooks(run.Subagents(self.background, clock=lambda: self.now))
+        self.running = SimpleNamespace(current=None)
+        self.hooks = hooks._subagent_hooks(hooks.Subagents(self.background, clock=lambda: self.now), self.running)
 
     async def start(self, use: str) -> dict:
         [hook] = self.hooks["PreToolUse"].hooks
@@ -448,61 +432,47 @@ class SubagentCapTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await hook({"hook_event_name": event, "tool_name": "Agent", "tool_response": response}, use, {}), {})
 
     def listed(self, *ids: str) -> None:
-        run._note_background(SystemMessage("background_tasks_changed", {"tasks": [
+        stream.note_background(SystemMessage("background_tasks_changed", {"tasks": [
             {"task_id": i, "task_type": "local_agent"} for i in ids] + [{"task_id": "b-1", "task_type": "local_bash"}]}),
             self.background)
 
     async def test_starts_past_the_cap_are_refused_until_one_ends(self):
-        with mock.patch.object(run, "_running", served(_setup().cfg, max_subagents=3)):
-            for use in ("t-1", "t-2", "t-3"):
-                self.assertEqual(await self.start(use), {}, use)
-            told = (await self.start("t-4"))["hookSpecificOutput"]
-            self.assertEqual(told["permissionDecision"], "deny")
-            self.assertEqual(told["permissionDecisionReason"], run.SUBAGENT_CAP.format(live=3, why=""))
-            for use, agent in (("t-1", "a-1"), ("t-2", "a-2"), ("t-3", "a-3")):
-                await self.returned(use, {"isAsync": True, "status": "async_launched", "agentId": agent})
-            self.listed("a-1", "a-2", "a-3")
-            self.assertIn("deny", str(await self.start("t-5")), "each listed once, a command not counted")
-            self.listed("a-1", "a-3")
-            self.assertEqual(await self.start("t-6"), {})
-
-    # Three agents on one account spent its five-hour window in three hours. While its use runs
-    # ahead of the window's pace, fewer subagents start and the refusal says why.
-    async def test_fewer_start_while_the_model_allowance_runs_ahead_of_its_pace(self):
-        allowance = run.pacing.Allowance()
-        with mock.patch.object(run, "_running", served(_setup().cfg, max_subagents=4)), mock.patch.object(run, "_allowance", allowance):
-            await self.start("t-1")
-            await self.start("t-2")
-            allowance.read("five_hour", 0.65, time.time() + 3 * 3600)
-            told = (await self.start("t-3"))["hookSpecificOutput"]["permissionDecisionReason"]
-            self.assertTrue(told.startswith("2 of your subagents are at work, the most that run at once while the model "
-                                            "allowance runs ahead of its pace (65% of its five_hour window used, 40% of it gone)"), told)
-            allowance.read("five_hour", 0.45, time.time() + 3 * 3600)
-            self.assertEqual(await self.start("t-3"), {})
+        self.running.current = served(_setup().cfg, max_subagents=3)
+        for use in ("t-1", "t-2", "t-3"):
+            self.assertEqual(await self.start(use), {}, use)
+        told = (await self.start("t-4"))["hookSpecificOutput"]
+        self.assertEqual(told["permissionDecision"], "deny")
+        self.assertEqual(told["permissionDecisionReason"], hooks.SUBAGENT_CAP.format(live=3))
+        for use, agent in (("t-1", "a-1"), ("t-2", "a-2"), ("t-3", "a-3")):
+            await self.returned(use, {"isAsync": True, "status": "async_launched", "agentId": agent})
+        self.listed("a-1", "a-2", "a-3")
+        self.assertIn("deny", str(await self.start("t-5")), "each listed once, a command not counted")
+        self.listed("a-1", "a-3")
+        self.assertEqual(await self.start("t-6"), {})
 
     async def test_a_start_that_failed_or_ran_in_the_foreground_counts_no_more(self):
-        with mock.patch.object(run, "_running", served(_setup().cfg, max_subagents=2)):
-            await self.start("t-1")
-            await self.start("t-2")
-            await self.returned("t-1", None)
-            await self.returned("t-2", {"status": "completed", "content": []})
-            self.assertEqual(await self.start("t-3"), {})
-            await self.returned("t-3", {"status": "async_launched", "agentId": "a-3"})
-            await self.start("t-4")
-            self.assertIn("deny", str(await self.start("t-5")))
-            self.now += run._STARTING_S
-            self.assertEqual(await self.start("t-5"), {}, "a start the CLI never listed counts for a while only")
+        self.running.current = served(_setup().cfg, max_subagents=2)
+        await self.start("t-1")
+        await self.start("t-2")
+        await self.returned("t-1", None)
+        await self.returned("t-2", {"status": "completed", "content": []})
+        self.assertEqual(await self.start("t-3"), {})
+        await self.returned("t-3", {"status": "async_launched", "agentId": "a-3"})
+        await self.start("t-4")
+        self.assertIn("deny", str(await self.start("t-5")))
+        self.now += hooks._STARTING_S
+        self.assertEqual(await self.start("t-5"), {}, "a start the CLI never listed counts for a while only")
 
 
 class TurnWatchdogTest(unittest.IsolatedAsyncioTestCase):
     async def test_silent_cli_ends_session_with_turn_stalled(self):
         setup = _setup()
-        with mock.patch.object(run, "ClaudeSDKClient", HangingClient), \
-                mock.patch.object(run, "_TURN_SILENCE_TIMEOUT_S", 0.05), \
+        with mock.patch.object(connection, "ClaudeSDKClient", HangingClient), \
+                mock.patch.object(stream, "TURN_SILENCE_TIMEOUT_S", 0.05), \
                 contextlib.redirect_stdout(io.StringIO()) as out:
-            with self.assertRaises(run.TurnStalled):
+            with self.assertRaises(turns.TurnStalled):
                 await asyncio.wait_for(
-                    run._run_one_session(setup, None, [False]), timeout=5)
+                    connect(setup, None, [False]), timeout=5)
         self.assertTrue(HangingClient.instances[-1].disconnected)
         self.assertIn("agent-a say   pulling metrics", out.getvalue())
 
@@ -545,20 +515,20 @@ class StallingClient:
 class CallStallTest(unittest.IsolatedAsyncioTestCase):
     async def receive(self, client):
         received = []
-        with mock.patch.object(run, "_CALL_STALL_S", 0.05):
-            async for message in run._receive_turn(client):
+        with mock.patch.object(turns, "_CALL_STALL_S", 0.05):
+            async for message in turns.receive(client):
                 received.append(message)
         return received
 
     async def test_a_stalled_call_is_interrupted_and_asked_for_again_once(self):
         client = StallingClient(stalls=1)
         received = await self.receive(client)
-        self.assertEqual(client.queries, [run._STALL_PROMPT])
+        self.assertEqual(client.queries, [turns._STALL_PROMPT])
         self.assertEqual([m.content[0].text for m in received if isinstance(m, AssistantMessage)], ["answered"])
         self.assertEqual(sum(isinstance(m, ResultMessage) for m in received), 1)
 
     async def test_a_call_that_stalls_again_ends_the_session(self):
-        with self.assertRaises(run.TurnStalled):
+        with self.assertRaises(turns.TurnStalled):
             await self.receive(StallingClient(stalls=2))
 
     # message_start comes with the first token, after the prefill of the whole context: resumed
@@ -589,23 +559,17 @@ class CallStallTest(unittest.IsolatedAsyncioTestCase):
 
 
 class ReconnectTest(unittest.IsolatedAsyncioTestCase):
-    def setUp(self):
-        # A machine of its own: no session in flight from another test, and a model home.
-        for patcher in (mock.patch.object(run, "_live_session_id", None),
-                        mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": tempfile.mkdtemp()})):
-            patcher.start()
-            self.addCleanup(patcher.stop)
-
     async def test_a_raised_session_is_followed_by_what_it_left_on_disk_and_a_good_turn_resets_the_backoff(self):
         setup = _setup()
+        store = Store(setup)
         stop_flag = [False]
         resumed, sleeps = [], []
 
-        async def session(setup, resume_id, stop_flag_, initial_prompt, on_good_turn):
+        async def session(setup, store, running, resume_id, stop_flag_, initial_prompt, on_good_turn):
             resumed.append(resume_id)
             if len(resumed) == 1:
-                run._save_resume_id(setup, "s-2")
-                raise run.ProcessError("the CLI exited", exit_code=1)
+                store.save_resume_id("s-2")
+                raise turns.ProcessError("the CLI exited", exit_code=1)
             if len(resumed) == 2:
                 raise Exception("the SDK's own word for a CLI that died mid-stream")
             on_good_turn()
@@ -624,14 +588,14 @@ class ReconnectTest(unittest.IsolatedAsyncioTestCase):
         async def never(setup, stop_flag):
             await asyncio.Event().wait()
 
-        with mock.patch.object(run, "_run_one_session", session), \
-                mock.patch.object(run.core, "until_lost", never), \
-                mock.patch.object(run, "_SESSION_STORE_INTERVAL_S", 1), \
-                mock.patch.object(run.core, "install_signal_handler", lambda: stop_flag), \
-                mock.patch.object(run.asyncio, "sleep", sleep), \
+        with mock.patch.object(connection, "run", session), \
+                mock.patch.object(core, "until_lost", never), \
+                mock.patch.object(store_module, "_STORE_INTERVAL_S", 1), \
+                mock.patch.object(core, "install_signal_handler", lambda: stop_flag), \
+                mock.patch.object(asyncio, "sleep", sleep), \
                 mock.patch.object(run, "_pause", pause), \
                 self.assertLogs("llm_agent"):
-            await asyncio.wait_for(run._run(setup), timeout=5)
+            await asyncio.wait_for(run._run(setup, store), timeout=5)
         self.assertEqual(resumed, [None, "s-2", "s-2", "s-2"])
         self.assertEqual(sleeps, [30, 60, 30])
 
@@ -644,16 +608,16 @@ class ReconnectTest(unittest.IsolatedAsyncioTestCase):
             order.append("the CLI exited")
             return False
 
-        async def store(setup):
+        async def save():
             order.append("stored")
 
         answers = [{}, {"ended": "planned"}, {"ended": "planned"}]
         setup = _setup()
-        setup.client.get_signup = lambda *_: answers.pop(0) if len(answers) > 1 else answers[0]
-        with mock.patch.object(run, "_run_one_session", session), \
-                mock.patch.object(run, "_store_session", store), \
-                self.assertLogs("llm_agent"):
-            await asyncio.wait_for(run._run_until_stopped(setup, [False]), timeout=5)
+        setup.client.signup = lambda: answers.pop(0) if len(answers) > 1 else answers[0]
+        store = Store(setup)
+        store.save = save
+        with mock.patch.object(connection, "run", session), self.assertLogs("llm_agent"):
+            await asyncio.wait_for(run._run_until_stopped(setup, store, [False]), timeout=5)
         self.assertEqual(order, ["the CLI exited", "stored"])
 
     # A bug in the harness once read as a flaky connection and was retried for the whole run.
@@ -661,30 +625,32 @@ class ReconnectTest(unittest.IsolatedAsyncioTestCase):
         async def session(*_):
             raise KeyError("session_id")
 
-        with mock.patch.object(run, "_run_one_session", session), \
-                mock.patch.object(run.core, "install_signal_handler", lambda: [False]), \
+        setup = _setup()
+        with mock.patch.object(connection, "run", session), \
+                mock.patch.object(core, "install_signal_handler", lambda: [False]), \
                 self.assertRaises(KeyError):
-            await asyncio.wait_for(run._run(_setup()), timeout=5)
+            await asyncio.wait_for(run._run(setup, Store(setup)), timeout=5)
 
     def test_a_handoff_opens_the_next_session_only_while_no_session_id_is_saved(self):
         setup = _setup()
-        with open(run._handoff_file(setup), "w") as f:
+        store = Store(setup)
+        with open(os.path.join(setup.statedir, store_module._HANDOFF_FILE), "w") as f:
             f.write("state so far")
-        self.assertEqual(run._restart_state(setup),
-                         (None, "Continue this experiment from the following handoff:\n\nstate so far"))
-        run._save_resume_id(setup, "s-3")
-        self.assertEqual(run._restart_state(setup), ("s-3", None))
+        self.assertEqual(store.restart_state(), (None, "Continue this experiment from the following handoff:\n\nstate so far"))
+        store.save_resume_id("s-3")
+        self.assertEqual(store.restart_state(), ("s-3", None))
 
     def test_the_session_in_flight_is_resumed_over_the_one_saved_once_its_transcript_holds_the_turn(self):
         setup = _setup()
-        run._save_resume_id(setup, "s-saved")
-        with mock.patch.object(run, "_live_session_id", "s-live"):
-            self.assertEqual(run._restart_state(setup), ("s-saved", None), "a session in flight with no transcript")
-            transcript = os.path.join(os.environ["CLAUDE_CONFIG_DIR"], "projects", "p", "s-live.jsonl")
-            os.makedirs(os.path.dirname(transcript))
-            with open(transcript, "w") as f:
-                f.write("the turn so far\n")
-            self.assertEqual(run._restart_state(setup), ("s-live", None))
+        store = Store(setup)
+        store.save_resume_id("s-saved")
+        store.seen(SimpleNamespace(session_id="s-live"))
+        self.assertEqual(store.restart_state(), ("s-saved", None), "a session in flight with no transcript")
+        transcript = os.path.join(os.environ["CLAUDE_CONFIG_DIR"], "projects", "p", "s-live.jsonl")
+        os.makedirs(os.path.dirname(transcript))
+        with open(transcript, "w") as f:
+            f.write("the turn so far\n")
+        self.assertEqual(store.restart_state(), ("s-live", None))
 
 
 def _refusal(resets_at: float) -> RateLimitEvent:
@@ -707,27 +673,27 @@ class RefusedClient(HangingClient):
 # provider states, spend no restart and no reconnect on the way, and resume.
 class RateLimitTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        for patcher in (mock.patch.object(run, "_rate_limit", None), mock.patch.object(run, "_limit_since", None),
-                        mock.patch.object(run, "_allowance", run.pacing.Allowance()),
-                        mock.patch.object(run._progress, "_model", {}),
-                        mock.patch.object(run, "_live_session_id", None),
-                        mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": tempfile.mkdtemp()})):
+        for patcher in (mock.patch.object(stream, "_rate_limit", None), mock.patch.object(stream, "limit_since", None),
+                        mock.patch.object(stream.progress, "_model", {})):
             patcher.start()
             self.addCleanup(patcher.stop)
 
     async def test_a_refused_turn_ends_the_session_and_the_run_loop_waits_until_the_reset(self):
         resets_at = time.time() + 3 * 86400
-        with mock.patch.object(run, "ClaudeSDKClient", RefusedClient), mock.patch.object(RefusedClient, "resets_at", resets_at), \
+        with mock.patch.object(connection, "ClaudeSDKClient", RefusedClient), mock.patch.object(RefusedClient, "resets_at", resets_at), \
                 contextlib.redirect_stdout(io.StringIO()), self.assertLogs("llm_agent"):
-            self.assertFalse(await asyncio.wait_for(run._run_one_session(_setup(), None, [False]), timeout=5))
-        self.assertEqual(run._refused_until(), int(resets_at))
+            self.assertFalse(await asyncio.wait_for(connect(_setup(), None, [False]), timeout=5))
+        self.assertEqual(stream.refused_until(), int(resets_at))
 
         setup, stop_flag, openings, pauses = _setup(), [False], [], []
+        store = Store(setup)
 
-        async def session(setup, resume_id, stop_flag_, initial_prompt, on_good_turn):
-            openings.append(run._first_prompt(setup, "s-1", None))
+        async def session(setup, store, running, resume_id, stop_flag_, initial_prompt, on_good_turn):
+            from hypothesisloop_agent.claude import prompts
+
+            openings.append(await prompts.opening(setup, store, "s-1", None))
             if len(openings) == 2:
-                run._settled_on_this_machine()
+                stream.limit_lifted()
                 stop_flag[0] = True
             return False
 
@@ -735,39 +701,20 @@ class RateLimitTest(unittest.IsolatedAsyncioTestCase):
             pauses.append(seconds)
 
         said = []
-        with mock.patch.object(run, "_run_one_session", session), mock.patch.object(run, "_pause", pause), \
-                mock.patch.object(run._progress, "doing", said.append), self.assertLogs("llm_agent"):
-            await asyncio.wait_for(run._run_until_stopped(setup, stop_flag), timeout=5)
+        with mock.patch.object(connection, "run", session), mock.patch.object(run, "_pause", pause), \
+                mock.patch.object(stream.progress, "doing", said.append), self.assertLogs("llm_agent"):
+            await asyncio.wait_for(run._run_until_stopped(setup, store, stop_flag), timeout=5)
         [waited] = pauses
         self.assertAlmostEqual(waited, 3 * 86400, delta=60)
         self.assertIn("paused until", said[-1])
         self.assertIn("seven_day limit", said[-1])
         self.assertNotIn("refused your calls", openings[0])
         self.assertIn("refused your calls", openings[1])
-        self.assertIsNone(run._limit_since, "a good turn after the wait still says it")
-
-    # The CLI says a window's use by itself only near its limit: it is asked at a turn's end, at
-    # most every _USAGE_READ_S, and what it answers is what the platform shows of the agent.
-    async def test_the_accounts_usage_is_asked_of_the_cli_now_and_then(self):
-        resets = time.time() + 3 * 3600
-        asked = []
-
-        async def control(request, timeout):
-            asked.append(request)
-            return {"rate_limits": {"five_hour": {"utilization": 85, "resets_at": time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(resets))}}}
-
-        client = SimpleNamespace(_query=SimpleNamespace(_send_control_request=control))
-        with mock.patch.object(run, "_usage_read_at", None):
-            await run._read_usage(client)
-            await run._read_usage(client)
-            await run._read_usage(SimpleNamespace())
-        self.assertEqual(asked, [{"subtype": "get_usage"}])
-        self.assertEqual(run._allowance.pacing().window, "five_hour")
-        self.assertEqual(run._progress._model, {"model_status": "allowed", "model_type": "five_hour", "model_utilization": 0.85, "model_resets_at": int(resets)})
+        self.assertIsNone(stream.limit_since, "a good turn after the wait still says it")
 
     async def test_a_reset_that_has_passed_refuses_nothing(self):
-        run._rate_limit = _refusal(time.time() - 1).rate_limit_info
-        self.assertIsNone(run._refused_until())
+        stream._rate_limit = _refusal(time.time() - 1).rate_limit_info
+        self.assertIsNone(stream.refused_until())
 
     async def test_a_stop_ends_a_wait_at_once(self):
         stop_flag = [False]

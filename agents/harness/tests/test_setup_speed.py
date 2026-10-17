@@ -7,8 +7,9 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
+from conftest import FakePlatform, connect
 from hypothesisloop_agent import api_client, core, seed
-from hypothesisloop_agent.claude import run
+from hypothesisloop_agent.claude import cli, prompts
 
 
 def planner():
@@ -22,6 +23,11 @@ def baseline_agent():
 def git(*args, cwd):
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True,
                    env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"})
+
+
+def opening(setup, resume_id) -> str:
+    """What opens a connection of setup on a machine it ran on, after no wait for a limit."""
+    return asyncio.run(prompts.opening(setup, SimpleNamespace(on_new_machine=False), resume_id, None))
 
 
 class PlannerOpeningTest(unittest.TestCase):
@@ -88,21 +94,22 @@ class PlannerOpeningTest(unittest.TestCase):
                 raise Started(kwargs["cwd"])
 
             setup = SimpleNamespace(cfg=SimpleNamespace(**vars(planner()), api_url="http://api", token="t"),
-                                    client=None, commands="usage: hl", workdir=workdir, statedir=root)
-            with mock.patch.object(run, "ClaudeAgentOptions", options), self.assertRaises(Started) as started:
-                asyncio.run(run._run_one_session(setup, None, [False]))
+                                    client=FakePlatform(), commands="usage: hl", workdir=workdir, statedir=root)
+            with mock.patch.object(cli, "ClaudeAgentOptions", options), mock.patch.object(seed, "planner", lambda workdir: ""), \
+                    self.assertRaises(Started) as started:
+                asyncio.run(connect(setup, None, [False]))
             self.assertEqual(started.exception.args[0], workdir)
 
     # Only a session that starts fresh is opened with them: a resumed one has read them.
     def test_only_a_fresh_session_is_opened_with_its_roles_reads(self):
         pe = {"status": "draft", "status_reason": {"reason": "planning"}, "proposal": {"repo_map": "bench.py: the harness"}}
-        client = SimpleNamespace(get_platform_experiment=lambda _id: pe)
+        client = FakePlatform(pe)
         with mock.patch.object(seed, "planner", lambda workdir: "READS"):
-            self.assertEqual(run._opening(SimpleNamespace(cfg=planner(), client=client, workdir="/w"), None, None), "Begin.\n\nREADS")
-            self.assertEqual(run._opening(SimpleNamespace(cfg=planner(), client=client, workdir="/w"), "s-1", None), "Continue where you left off.")
-        opened = run._opening(SimpleNamespace(cfg=baseline_agent(), client=client, workdir="/w"), None, None)
+            self.assertEqual(opening(SimpleNamespace(cfg=planner(), client=client, workdir="/w"), None), "Begin.\n\nREADS")
+            self.assertEqual(opening(SimpleNamespace(cfg=planner(), client=client, workdir="/w"), "s-1"), "Continue where you left off.")
+        opened = opening(SimpleNamespace(cfg=baseline_agent(), client=client, workdir="/w"), None)
         self.assertTrue(opened.startswith("Your goal is the control") and opened.endswith("\n\n=== The planner's map of the repository\nbench.py: the harness"), opened)
-        self.assertEqual(run._opening(SimpleNamespace(cfg=baseline_agent(), client=client, workdir="/w"), "s-1", None), "Continue where you left off.")
+        self.assertEqual(opening(SimpleNamespace(cfg=baseline_agent(), client=client, workdir="/w"), "s-1"), "Continue where you left off.")
 
     # Baseline agents built the environment 9.5 to 14.5 min in. A fresh baseline
     # session opens with its goal, the slowest part first, and the planner's pins.
@@ -115,8 +122,8 @@ class PlannerOpeningTest(unittest.TestCase):
         bare = seed.baseline("")
         self.assertNotIn("map", bare)
         self.assertIn("the repository's pin files state", bare)
-        open_pe = SimpleNamespace(get_platform_experiment=lambda _id: {"status": "open", "baseline_due_at": None})
-        self.assertEqual(run._opening(SimpleNamespace(cfg=baseline_agent(), client=open_pe, workdir="/w"), None, None), bare)
+        open_pe = FakePlatform({"status": "open", "baseline_due_at": None})
+        self.assertEqual(opening(SimpleNamespace(cfg=baseline_agent(), client=open_pe, workdir="/w"), None), bare)
 
 
 class ToolsTest(unittest.TestCase):
@@ -131,9 +138,10 @@ class ToolsTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as root:
             setup = SimpleNamespace(cfg=SimpleNamespace(**vars(planner()), api_url="http://api", token="t"),
-                                    client=None, commands="usage: hl", workdir=root, statedir=root)
-            with mock.patch.object(run, "ClaudeAgentOptions", options), self.assertRaises(Started) as started:
-                asyncio.run(run._run_one_session(setup, None, [False]))
+                                    client=FakePlatform(), commands="usage: hl", workdir=root, statedir=root)
+            with mock.patch.object(cli, "ClaudeAgentOptions", options), mock.patch.object(seed, "planner", lambda workdir: ""), \
+                    self.assertRaises(Started) as started:
+                asyncio.run(connect(setup, None, [False]))
         given = started.exception.args[0]
         self.assertEqual(given["env"]["ENABLE_TOOL_SEARCH"], "false")
         self.assertFalse({"WebSearch", "WebFetch"} & set(given["disallowed_tools"]))
@@ -146,7 +154,7 @@ class UntilAcceptedTest(unittest.TestCase):
         statuses = iter([{"status": "draft"}, api_client.APIError("GET", "/pe", 503, "down"), {"status": "draft"}, {"status": "open"}])
         read = []
 
-        def get(_id):
+        async def get(_id):
             read.append(_id)
             answer = next(statuses)
             if isinstance(answer, Exception):
@@ -160,12 +168,12 @@ class UntilAcceptedTest(unittest.TestCase):
         self.assertEqual(said, [1])
 
     def test_no_other_agent_waits_and_a_stop_ends_the_wait(self):
-        never = SimpleNamespace(get_platform_experiment=lambda _id: self.fail("read"))
+        never = FakePlatform(lambda: self.fail("read"))
         asyncio.run(core.until_accepted(SimpleNamespace(cfg=planner(), client=never), [False], poll_s=0))
         asyncio.run(core.until_accepted(SimpleNamespace(cfg=baseline_agent(), client=never), [True], poll_s=0))
         stop = [False]
 
-        def get(_id):
+        async def get(_id):
             stop[0] = True
             return {"status": "draft"}
 

@@ -11,9 +11,11 @@ from unittest import mock
 from claude_agent_sdk import ResultMessage, SystemMessage, UserMessage
 
 import conftest
-from conftest import served
-from hypothesisloop_agent import api_client, config, instructions
-from hypothesisloop_agent.claude import run
+from conftest import FakePlatform, connect, served
+from hypothesisloop_agent import api_client, config, instructions, updates
+from hypothesisloop_agent.claude import cli, connection, hooks, prompts, rotation
+from hypothesisloop_agent.claude.running import PROMPT_REPLACED, Running
+from hypothesisloop_agent.claude.store import Store
 from test_require_joined import derived, served as answer
 from test_turn_watchdog import S, HangingClient, StoppableClient, _setup
 
@@ -22,7 +24,7 @@ OWN = {"kind": "agent.instructions", "subject": "agent-a", "agent_id": "agent-a"
 
 def _handoff():
     """The turn that answers the handoff's prompt, which the CLI says again as the turn starts."""
-    return [UserMessage(content=run._INSTRUCTIONS_ROTATION), _result("where things stand")]
+    return [UserMessage(content=rotation.INSTRUCTIONS_ROTATION), _result("where things stand")]
 
 
 def _result(text="worked"):
@@ -64,8 +66,12 @@ def _config(scope: str) -> config.Config:
 class FetchTest(unittest.TestCase):
     def fetch(self, cfg, served_answer):
         asked = []
-        client = SimpleNamespace(get_json=lambda path: asked.append(path) or served_answer)
-        return conftest.FETCH(client, cfg, "usage: hl", "/agent/workspace"), asked
+
+        async def get_json(path):
+            asked.append(path)
+            return served_answer
+
+        return asyncio.run(conftest.FETCH(SimpleNamespace(get_json=get_json), cfg, "usage: hl", "/agent/workspace")), asked
 
     def test_an_agent_and_a_coordinator_read_their_own_instructions_filled_for_the_machine(self):
         agent = _config("agent:pe-1/ag-1")
@@ -73,7 +79,7 @@ class FetchTest(unittest.TestCase):
         self.assertEqual(asked, ["/platform-experiments/pe-1/agents/ag-1/instructions"])
         self.assertEqual(got, instructions.Instructions(
             agent_type="generalist", version=1, role="planner", prompt="Work in /agent/workspace with:\nusage: hl",
-            model="model-1", max_subagents=4, pacing_subagents=2, effort="high", hyperparameters={"batch_size": 64},
+            model="model-1", max_subagents=4, effort="high", hyperparameters={"batch_size": 64},
             digest="digest-1"))
         self.assertEqual(agent.role, "planner")
         coordinator = _config("coordinator:pe-1")
@@ -95,11 +101,6 @@ class FetchTest(unittest.TestCase):
         kept = served(SimpleNamespace(role="researcher"), hyperparameters={"lr": 0.1})
         instructions.save(statedir, kept)
         self.assertEqual(instructions.load(statedir), kept)
-
-
-def settings(client) -> list:
-    """What the client was sent to change in the session: it is also asked for the account's usage."""
-    return [c for c in client.controls if c["subtype"] != "get_usage"]
 
 
 class InstructedClient(StoppableClient):
@@ -131,14 +132,15 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
         patched.start()
         self.addCleanup(patched.stop)
 
-    async def run_session(self, fetched: list, batches: list, turns: list, resume_id=None, setup=None):
+    async def run_session(self, fetched: list, batches: list, turns: list, resume_id=None, setup=None, running=None):
         """One session whose fetches answer fetched in turn and whose waits return batches in turn,
         the last of which stops it."""
         stop_flag = [False]
         setup = setup or _setup()
         reads = list(fetched)
+        self.store, self.running = Store(setup), running or Running(setup)
 
-        def fetch(client, cfg, commands, workdir):
+        async def fetch(client, cfg, commands, workdir):
             self.assertEqual((commands, workdir), (setup.commands, setup.workdir))
             if isinstance(reads[0], Exception):
                 raise reads.pop(0)
@@ -151,25 +153,26 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
             return batch
 
         InstructedClient.turns = list(turns)
-        with mock.patch.object(run, "ClaudeSDKClient", InstructedClient), \
+        with mock.patch.object(connection, "ClaudeSDKClient", InstructedClient), \
                 mock.patch.object(instructions, "fetch", fetch), \
-                mock.patch.object(run.updates, "next_batch", next_batch), \
-                mock.patch.object(run.updates, "jobs_in_flight", mock.AsyncMock(return_value=1)), \
-                mock.patch.object(run.updates, "drain", mock.AsyncMock(return_value=[])), \
+                mock.patch.object(updates, "next_batch", next_batch), \
+                mock.patch.object(updates, "jobs_in_flight", mock.AsyncMock(return_value=1)), \
+                mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[])), \
                 contextlib.redirect_stdout(io.StringIO()), self.assertLogs("llm_agent") as logged:
-            rotated = await asyncio.wait_for(run._run_one_session(setup, resume_id, stop_flag), timeout=5)
+            rotated = await asyncio.wait_for(
+                connection.run(setup, self.store, self.running, resume_id, stop_flag, None, lambda: None), timeout=5)
         self.logged = "\n".join(logged.output)
         self.setup = setup
         return rotated, HangingClient.instances[-1]
 
     async def test_a_session_runs_with_the_prompt_model_effort_and_limits_it_is_served(self):
         setup = _setup()
-        first = served(setup.cfg, prompt="be a researcher", model="claude-x", effort="max", max_subagents=7, pacing_subagents=3)
+        first = served(setup.cfg, prompt="be a researcher", model="claude-x", effort="max", max_subagents=7)
         _, client = await self.run_session([first], [[]], [], setup=setup)
         options = client.options
         self.assertEqual((options.system_prompt, options.model, options.effort),
-                         ("be a researcher" + run._FILE_TOOLS_NOTE, "claude-x", "max"))
-        self.assertEqual(run._subagent_cap(), (7, ""))
+                         ("be a researcher" + cli.FILE_TOOLS_NOTE, "claude-x", "max"))
+        self.assertEqual(self.running.current.max_subagents, 7)
         self.assertEqual(instructions.load(setup.statedir), first)
 
     # An edit of the subagent limits or the effort reaches the agent at the next turn boundary, in
@@ -177,13 +180,12 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
     async def test_new_limits_and_effort_apply_in_the_session_at_the_turn_boundary(self):
         setup = _setup()
         first = served(setup.cfg)
-        edited = served(setup.cfg, version=2, digest="digest-2", effort="low", max_subagents=6, pacing_subagents=1)
+        edited = served(setup.cfg, version=2, digest="digest-2", effort="low", max_subagents=6)
         comment = {"kind": "comment.new", "subject": "hyp-1", "value": "human"}
         rotated, client = await self.run_session([first, edited], [[OWN], [comment], []], setup=setup, turns=[])
         self.assertFalse(rotated)
-        self.assertEqual(settings(client), [{"subtype": "apply_flag_settings", "settings": {"effortLevel": "low"}}])
-        self.assertEqual(run._running, edited)
-        self.assertEqual(run._subagent_cap(), (6, ""))
+        self.assertEqual(client.controls, [{"subtype": "apply_flag_settings", "settings": {"effortLevel": "low"}}])
+        self.assertEqual(self.running.current, edited)
         self.assertEqual(instructions.load(setup.statedir), edited)
         # The event is the harness's: the agent is told nothing of it, and the wait goes on to the
         # next batch.
@@ -199,8 +201,8 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
             edited = served(setup.cfg, version=2, digest="digest-2", effort=after)
             rotated, client = await self.run_session([first, edited], [[OWN], []], [[_result()], _handoff()], setup=setup)
             self.assertTrue(rotated, (before, after))
-            self.assertEqual(settings(client), [])
-            self.assertEqual(client.queries[1:], [run._INSTRUCTIONS_ROTATION])
+            self.assertEqual(client.controls, [])
+            self.assertEqual(client.queries[1:], [rotation.INSTRUCTIONS_ROTATION])
         for before, after in (("high", "xhigh"), ("max", "max")):
             self.assertFalse(served(setup.cfg, effort=before).needs_new_session(served(setup.cfg, digest="d2", effort=after, max_subagents=5)))
 
@@ -216,12 +218,12 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
         turns = [[subagents, _result()], _handoff()]
         rotated, client = await self.run_session([first, edited], [[OWN], []], turns, setup=setup)
         self.assertTrue(rotated)
-        self.assertEqual(client.queries[1:], [run._INSTRUCTIONS_ROTATION])
-        self.assertEqual(run._load_handoff(setup), "where things stand\n\n" + run._STOPPED_SUBAGENTS.format(
+        self.assertEqual(client.queries[1:], [rotation.INSTRUCTIONS_ROTATION])
+        self.assertEqual(self.store.handoff(), "where things stand\n\n" + rotation._STOPPED_SUBAGENTS.format(
             tasks="- lr warmup on hyp-1"))
-        self.assertEqual(settings(client), [])
+        self.assertEqual(client.controls, [])
         # The next connection starts fresh, and runs what the platform serves then.
-        self.assertEqual(run._restart_state(setup)[0], None)
+        self.assertEqual(self.store.restart_state()[0], None)
 
     # A new prompt on the same model ends the connection at the boundary, with no handoff, and the
     # next resumes the session, its whole history kept, with the new prompt in place of the one
@@ -234,15 +236,15 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
         rotated, client = await self.run_session([first, edited], [[OWN], []], [[_result()]], setup=setup)
         self.assertTrue(rotated)
         self.assertEqual(client.queries[1:], [])
-        self.assertIsNone(run._load_handoff(setup))
-        self.assertEqual(run._restart_state(setup), ("s-1", None))
+        self.assertIsNone(self.store.handoff())
+        self.assertEqual(self.store.restart_state(), ("s-1", None))
         self.assertEqual(len(_lines(transcript)), 5)
 
         rotated, client = await self.run_session([edited], [[]], [], resume_id="s-1", setup=setup)
         self.assertFalse(rotated)
         self.assertEqual((client.options.system_prompt, client.options.effort, client.options.resume),
-                         ("the new prompt" + run._FILE_TOOLS_NOTE, "low", "s-1"))
-        self.assertTrue(client.queries[0].startswith(run._PROMPT_REPLACED + "\n\nContinue where you left off."), client.queries[0])
+                         ("the new prompt" + cli.FILE_TOOLS_NOTE, "low", "s-1"))
+        self.assertTrue(client.queries[0].startswith(PROMPT_REPLACED + "\n\nContinue where you left off."), client.queries[0])
         self.assertEqual(instructions.load(setup.statedir), edited)
         lines = _lines(transcript)
         self.assertEqual([line["uuid"] for line in lines if "uuid" in line], ["u-1", "a-1"])
@@ -256,27 +258,20 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
     # harness only reads.
     async def test_a_new_version_swaps_the_prompt_in_place_keeping_history_and_leaves_jobs_alone(self):
         setup = _setup()
-        platform_calls = []
-
-        def read(name):
-            def call(*args):
-                platform_calls.append(name)
-                return {"status": "running"} if name == "get_platform_experiment" else {}
-            return call
-
-        setup.client = SimpleNamespace(get_platform_experiment=read("get_platform_experiment"), get_signup=read("get_signup"))
+        setup.client = FakePlatform()
         transcript = _transcript(self.home)
         first = served(setup.cfg)
         edited = served(setup.cfg, version=2, digest="digest-2", prompt="the prompt of version 2")
         rotated, _ = await self.run_session([first, edited], [[OWN], []], [[_result()]], setup=setup)
         self.assertTrue(rotated)
-        self.assertIsNone(run._load_handoff(setup))
+        self.assertIsNone(self.store.handoff())
         rotated, client = await self.run_session([edited], [[]], [], resume_id="s-1", setup=setup)
         self.assertFalse(rotated)
-        self.assertEqual((client.options.system_prompt, client.options.resume), ("the prompt of version 2" + run._FILE_TOOLS_NOTE, "s-1"))
+        self.assertEqual((client.options.system_prompt, client.options.resume), ("the prompt of version 2" + cli.FILE_TOOLS_NOTE, "s-1"))
         self.assertEqual([line["uuid"] for line in _lines(transcript) if "uuid" in line], ["u-1", "a-1"])
-        self.assertEqual(run._running.version, 2)
-        self.assertTrue(set(platform_calls) <= {"get_platform_experiment", "get_signup"}, platform_calls)
+        self.assertEqual(self.running.current.version, 2)
+        # FakePlatform answers reads and session stores alone: any other call would have failed.
+        self.assertEqual(set(setup.client.stored), {"/platform-experiments/pe-1/agents/agent-a/session"})
 
     # A transcript that records no prompt cannot be resumed with another: a CLI that stopped
     # recording one would resume with whatever it keeps instead. That session is handed off.
@@ -286,9 +281,9 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
         edited = served(setup.cfg, version=2, digest="digest-2", prompt="the new prompt")
         rotated, client = await self.run_session([first, edited], [[OWN], []], [[_result()], _handoff()], setup=setup)
         self.assertTrue(rotated)
-        self.assertEqual(client.queries[1:], [run._INSTRUCTIONS_ROTATION])
+        self.assertEqual(client.queries[1:], [rotation.INSTRUCTIONS_ROTATION])
         self.assertIn("the transcript of session s-1 records no system prompt to replace: handing off to a fresh session", self.logged)
-        self.assertEqual(run._restart_state(setup)[0], None)
+        self.assertEqual(self.store.restart_state()[0], None)
 
     # The event can arrive while a turn is under way: the hook keeps it from the agent and the
     # change applies once the turn ends.
@@ -296,13 +291,20 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
         setup = _setup()
         _transcript(self.home)
         first, edited = served(setup.cfg), served(setup.cfg, version=2, digest="digest-2", prompt="the new prompt")
-        hook = run._updates_hook(setup, {"HL_STATE_DIR": os.path.join(setup.statedir, ".hl-state")}, asyncio.Lock())
-        with mock.patch.object(run.updates, "drain", mock.AsyncMock(return_value=[OWN])), \
-                mock.patch.object(run, "_running", first), contextlib.redirect_stdout(io.StringIO()):
+        running = Running(setup)
+
+        async def connected(resume_id):
+            running.current = first
+            return False
+
+        running.connect = connected
+        await running.connect(None)
+        hook = hooks._updates_hook(setup, SimpleNamespace(on_new_machine=False), running,
+                                   {"HL_STATE_DIR": os.path.join(setup.statedir, ".hl-state")}, asyncio.Lock())
+        with mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[OWN])), contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(await hook({"hook_event_name": "PostToolUse"}, "tool-1", {}), {})
-        self.assertTrue(run._instructions_told)
-        with mock.patch.object(run, "_connection_instructions", lambda setup, resume_id: (first, False)):
-            rotated, client = await self.run_session([edited], [[]], [[_result()]], setup=setup)
+        self.assertTrue(running.told)
+        rotated, client = await self.run_session([edited], [[]], [[_result()]], setup=setup, running=running)
         self.assertTrue(rotated)
         self.assertEqual(client.queries[1:], [])
         self.assertIn("its prompt with them: resuming the session with it", self.logged)
@@ -317,7 +319,7 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
         newest = served(setup.cfg, version=2, digest="digest-2", prompt="the new prompt")
         rotated, client = await self.run_session([newest], [[]], [], resume_id="s-1", setup=setup)
         self.assertFalse(rotated)
-        self.assertEqual((client.options.system_prompt, client.options.effort), ("the new prompt" + run._FILE_TOOLS_NOTE, "high"))
+        self.assertEqual((client.options.system_prompt, client.options.effort), ("the new prompt" + cli.FILE_TOOLS_NOTE, "high"))
         self.assertIn("resuming session s-1 with the new system prompt of generalist version 2", self.logged)
         self.assertFalse(any(line.get("type") == "attachment" for line in _lines(transcript)))
 
@@ -327,9 +329,9 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
         newest = served(setup.cfg, version=2, digest="digest-2", prompt="the new prompt", model="claude-y")
         rotated, client = await self.run_session([newest], [[]], [[_result()], _handoff()],
                                                  resume_id="s-1", setup=setup)
-        self.assertEqual((client.options.system_prompt, client.options.effort), ("the old prompt" + run._FILE_TOOLS_NOTE, "medium"))
+        self.assertEqual((client.options.system_prompt, client.options.effort), ("the old prompt" + cli.FILE_TOOLS_NOTE, "medium"))
         self.assertTrue(rotated)
-        self.assertEqual(client.queries[1:], [run._INSTRUCTIONS_ROTATION])
+        self.assertEqual(client.queries[1:], [rotation.INSTRUCTIONS_ROTATION])
         self.assertIn("version 2 (digest digest-2) applies at the first turn boundary", self.logged)
 
     async def test_a_read_that_fails_at_the_boundary_is_tried_again_at_the_next(self):
@@ -341,7 +343,7 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
         rotated, client = await self.run_session([first, away, edited], [[OWN], [comment], []], [], setup=setup)
         self.assertFalse(rotated)
         self.assertIn("reading them at the next turn boundary", self.logged)
-        self.assertEqual(run._running, edited)
+        self.assertEqual(self.running.current, edited)
 
     # A coordinator steers researchers whose type was edited, and its own type is its alone.
     async def test_a_coordinator_is_told_of_its_researchers_instructions_and_not_of_its_own(self):
@@ -349,27 +351,30 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
         setup.cfg.agent_id = setup.cfg.role = "coordinator"
         theirs = {"kind": "agent.instructions", "subject": "ag-7", "agent_id": "ag-7", "value": "2", "detail": "generalist"}
         own = {"kind": "agent.instructions", "subject": "coordinator", "agent_id": "coordinator", "value": "3", "detail": "coordinator"}
-        with mock.patch.object(run, "_running", served(setup.cfg)):
-            told = await run._told(setup, {}, [theirs, own])
-        self.assertTrue(told.startswith("Platform updates:\nagent.instructions ag-7 2 generalist by ag-7"), told)
-        self.assertNotIn("coordinator", told.split("\n\n")[0])
-        self.assertTrue(run._instructions_told)
+        running = Running(setup)
+        told = await prompts.told(setup, SimpleNamespace(on_new_machine=False), running, [theirs, own])
+        self.assertEqual(told, "Platform updates:\nagent.instructions ag-7 2 generalist by ag-7")
+        self.assertTrue(running.told)
 
     async def test_the_instructions_a_session_runs_with_travel_with_it(self):
         setup = _setup()
         stored = []
-        sessions = SimpleNamespace(save=lambda files, transcripts: stored.append(files))
-        with mock.patch.object(run, "_sessions", sessions), mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": tempfile.mkdtemp()}):
-            await run._store_session(setup)
+
+        async def save(files, transcripts):
+            stored.append(files)
+
+        store = Store(setup)
+        store._sessions = SimpleNamespace(save=save)
+        await store.save()
         self.assertIn(instructions.FILE, stored[0])
 
 
 class WakeTest(unittest.TestCase):
     def test_an_edit_wakes_an_agent_and_a_coordinator_waiting_between_turns(self):
-        self.assertIn(instructions.EVENT, run.updates.WAKES["agent"])
+        self.assertIn(instructions.EVENT, updates.WAKES["agent"])
         # A coordinator wakes for its own edit only: its researchers' are read in the situation.
-        self.assertIn(f"{instructions.EVENT}@{config.COORDINATOR}", run.updates.WAKES["coordinator"])
-        self.assertNotIn(instructions.EVENT, run.updates.WAKES["coordinator"])
+        self.assertIn(f"{instructions.EVENT}@{config.COORDINATOR}", updates.WAKES["coordinator"])
+        self.assertNotIn(instructions.EVENT, updates.WAKES["coordinator"])
 
 
 if __name__ == "__main__":

@@ -1,60 +1,58 @@
-import io
 import unittest
-import urllib.error
-from unittest import mock
 
-from hypothesisloop_agent import api_client
+import httpx
 
-
-class Answer(io.BytesIO):
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        return False
+from hypothesisloop_agent import api_client, platform
 
 
-def http_error(status: int) -> urllib.error.HTTPError:
-    return urllib.error.HTTPError("http://api/x", status, "", {}, io.BytesIO(b"from the gateway"))
+def client_answering(*answers) -> tuple[api_client.PlatformClient, list[httpx.Request]]:
+    """A PlatformClient whose requests get answers in turn: an httpx.Response, or an exception raised."""
+    sent, left = [], list(answers)
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        answer = left.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    client = api_client.PlatformClient("http://api", "token")
+    client._http = httpx.AsyncClient(base_url="http://api", transport=httpx.MockTransport(handle))
+    return client, sent
 
 
-class SendTest(unittest.TestCase):
-    def send(self, method, *answers):
-        with mock.patch.object(api_client.urllib.request, "urlopen", side_effect=list(answers)) as urlopen, \
-                mock.patch.object(api_client.time, "sleep") as sleep:
-            try:
-                return api_client._send(method, "http://api/x", "token"), urlopen.call_count, sleep.call_args_list
-            except api_client.APIError as e:
-                return e, urlopen.call_count, sleep.call_args_list
+class SendTest(unittest.IsolatedAsyncioTestCase):
+    async def test_every_call_is_made_once_and_its_failure_reaches_the_caller_as_it_came(self):
+        for method in ("GET", "PUT"):
+            for failure, status in ((httpx.ReadTimeout("The read operation timed out"), 0),
+                                    (httpx.Response(503, text="from the gateway"), 503),
+                                    (httpx.Response(500, json={"reason": "internal"}), 500)):
+                client, sent = client_answering(failure, httpx.Response(200, content=b"{}"))
+                with self.assertRaises(api_client.APIError) as raised:
+                    await client._send(method, "/x", content=b"" if method == "PUT" else None)
+                self.assertEqual((raised.exception.status, len(sent)), (status, 1), (method, failure))
+        client, _ = client_answering(httpx.ReadTimeout("The read operation timed out"))
+        with self.assertRaises(api_client.APIError) as raised:
+            await client._send("GET", "/x")
+        self.assertIn("ReadTimeout: The read operation timed out", str(raised.exception))
 
-    # The sandboxed coordinator died of a read that timed out through the public tunnel.
-    def test_a_get_that_times_out_or_meets_a_gateway_is_asked_again_with_backoff(self):
-        body, calls, sleeps = self.send("GET", TimeoutError("The read operation timed out"),
-                                        ConnectionResetError("reset"), http_error(502), http_error(504), Answer(b"{}"))
-        self.assertEqual((body, calls), (b"{}", 5))
-        self.assertEqual([c.args[0] for c in sleeps], [1.0, 2.0, 4.0, 8.0])
+    async def test_an_answer_is_its_body(self):
+        client, _ = client_answering(httpx.Response(200, json={"status": "running"}))
+        self.assertEqual(await client.get_json("/x"), {"status": "running"})
 
-    def test_a_get_that_keeps_failing_says_why_and_how_often_it_was_asked(self):
-        error, calls, _ = self.send("GET", *[http_error(503) for _ in range(5)])
-        self.assertEqual((error.status, calls), (503, 5))
-        self.assertIn("from the gateway", str(error))
-        self.assertIn("gave up after 5 attempts", str(error))
-        error, _, _ = self.send("GET", *[TimeoutError("The read operation timed out")] * 5)
-        self.assertEqual(error.status, 0)
-        self.assertIn("TimeoutError: The read operation timed out", str(error))
 
-    def test_a_refusal_or_a_server_error_is_not_asked_again(self):
-        for status in (401, 404, 500):
-            error, calls, _ = self.send("GET", http_error(status), Answer(b"{}"))
-            self.assertEqual((error.status, calls), (status, 1))
-            self.assertNotIn("gave up", str(error))
+class UnreachableTest(unittest.TestCase):
+    def test_no_answer_or_a_gateway_page_is_unreachable_and_an_answer_of_the_platform_is_not(self):
+        def error(status, body):
+            return api_client.APIError("GET", "/x", status, body)
 
-    def test_a_write_is_never_asked_again(self):
-        for method in ("POST", "PUT", "PATCH", "DELETE"):
-            for failure in (TimeoutError("timed out"), http_error(503)):
-                error, calls, sleeps = self.send(method, failure, Answer(b"{}"))
-                self.assertIsInstance(error, api_client.APIError)
-                self.assertEqual((calls, sleeps), (1, []))
+        self.assertTrue(error(0, "ConnectError: connection refused").unreachable)
+        for status in sorted(platform.GATEWAY_STATUSES):
+            self.assertTrue(error(status, "<html><body>502 Bad Gateway</body></html>").unreachable, status)
+            self.assertFalse(error(status, '{"reason": "unavailable", "message": "draining"}').unreachable, status)
+        self.assertFalse(error(500, "<html>internal</html>").unreachable)
+        self.assertFalse(error(500, '{"reason": "internal"}').unreachable)
+        self.assertFalse(error(401, "unauthenticated").unreachable)
 
 
 if __name__ == "__main__":

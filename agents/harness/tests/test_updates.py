@@ -6,7 +6,7 @@ import tempfile
 import time
 import unittest
 
-from conftest import SITUATION, served
+from conftest import SITUATION, FakePlatform, connect
 from hypothesisloop_agent import outage, updates
 
 # The read itself, which conftest stubs for every test.
@@ -18,7 +18,8 @@ COMPLETED = '{"kind":"experiment.status","subject":"exp-1","value":"COMPLETED","
 COMMENT = '{"kind":"comment.new","subject":"hyp-1","value":"agent","detail":"","agent_id":"agent-b","id":6}'
 
 
-ENV = {**os.environ, "HL_TOKEN": "hls_" + base64.urlsafe_b64encode(b"agent:pe-1/agent-a").decode().rstrip("=") + ".mac"}
+ENV = {**os.environ, "HL_TOKEN": "hls_" + base64.urlsafe_b64encode(b"agent:pe-1/agent-a").decode().rstrip("=") + ".mac",
+       updates._AGENT_ID: "agent-a"}
 
 
 def fake_hl(script: str, status: str = "", stats: str = "", quota: str = "", read_exit: int = 0, quota_refusal: str = "") -> tuple[list[str], str]:
@@ -102,7 +103,7 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
     # heard of none until the agent gave up. Woken by every job that ended, it was woken by the
     # one that completed too, before the agent's finish it has to wait for.
     async def test_a_coordinator_of_an_open_experiment_is_woken_by_a_job_that_failed_and_of_a_running_one_is_not(self):
-        coordinator = {**os.environ, "HL_TOKEN": "hls_" + base64.urlsafe_b64encode(b"coordinator:pe-1").decode().rstrip("=") + ".mac"}
+        coordinator = {**os.environ, "HL_TOKEN": "hls_" + base64.urlsafe_b64encode(b"coordinator:pe-1").decode().rstrip("=") + ".mac", updates._AGENT_ID: ""}
         for status, wakes in (("open", updates.WAKES["coordinator"] + ("experiment.status=FAILED",)), ("running", updates.WAKES["coordinator"])):
             command, counter = fake_hl('[ "$1" = platform-experiments ] && { echo \'{\n "status": "%s"\n}\'; exit 0; }\n'
                                        'echo "$*" >> "$0.args"\nexit 0\n' % status)
@@ -114,7 +115,7 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
     # good: nothing it wakes on was sent. The platform sends the status event again when the
     # status_reason begins to wait for the coordinator, with the reason as its detail.
     async def test_a_status_reason_that_waits_for_the_coordinator_wakes_it_and_names_the_reason(self):
-        coordinator = {**os.environ, "HL_TOKEN": "hls_" + base64.urlsafe_b64encode(b"coordinator:pe-1").decode().rstrip("=") + ".mac"}
+        coordinator = {**os.environ, "HL_TOKEN": "hls_" + base64.urlsafe_b64encode(b"coordinator:pe-1").decode().rstrip("=") + ".mac", updates._AGENT_ID: ""}
         done = ('{"kind":"platform_experiment.status","subject":"pe-1","value":"running","detail":"researchers_done",'
                 '"agent_id":"","id":9}')
         command, counter = fake_hl('[ "$1" = platform-experiments ] && { echo \'{"status": "running"}\'; exit 0; }\n'
@@ -128,7 +129,7 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
     # within a minute. What follows the waking event closely comes in the same wake; an agent's
     # batch, a message among it, comes at once.
     async def test_a_coordinators_batch_holds_what_arrives_soon_after_the_event_that_woke_it(self):
-        coordinator = {**os.environ, "HL_TOKEN": "hls_" + base64.urlsafe_b64encode(b"coordinator:pe-1").decode().rstrip("=") + ".mac"}
+        coordinator = {**os.environ, "HL_TOKEN": "hls_" + base64.urlsafe_b64encode(b"coordinator:pe-1").decode().rstrip("=") + ".mac", updates._AGENT_ID: ""}
         finished = COMMENT.replace("comment.new", "agent.finished")
         script = ('[ "$1" = platform-experiments ] && { echo \'{"status": "running"}\'; exit 0; }\n'
                   f'echo "$*" >> "$0.args"\n[ "$2" = --no-wait ] && {{ echo \'{finished}\'; exit 0; }}\necho \'{COMMENT}\'\n')
@@ -146,7 +147,7 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
     # A platform experiment that could not be read was taken as running, so a coordinator of an
     # open one waited without the wake for a failed job and nothing said so.
     async def test_a_wait_that_cannot_be_set_up_is_a_poll_that_failed(self):
-        coordinator = {**os.environ, "HL_TOKEN": "hls_" + base64.urlsafe_b64encode(b"coordinator:pe-1").decode().rstrip("=") + ".mac"}
+        coordinator = {**os.environ, "HL_TOKEN": "hls_" + base64.urlsafe_b64encode(b"coordinator:pe-1").decode().rstrip("=") + ".mac", updates._AGENT_ID: ""}
         refused, counter = fake_hl('[ "$1" = platform-experiments ] && { [ -e "$0.asked" ] || { touch "$0.asked"; exit 1; }; echo \'{"status": "open"}\'; exit 0; }\n'
                                    f'echo "$*" >> "$0.args"\necho \'{COMMENT}\'\n')
         events = await updates.next_batch(coordinator, lambda: False, 10, command=refused, retry_s=0.1, coalesce_s=0)
@@ -377,7 +378,7 @@ class HookTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         from unittest import mock
 
-        from hypothesisloop_agent.claude import run
+        from hypothesisloop_agent.claude import hooks
 
         self.waiting = []
         self.drains = 0
@@ -395,14 +396,11 @@ class HookTest(unittest.IsolatedAsyncioTestCase):
 
         self.draft = {"status": "draft", "status_reason": {"reason": "proposed"}}
         self.cfg = SimpleNamespace(agent_id="agent-a", role="researcher")
-        self.setup = SimpleNamespace(cfg=self.cfg, client=SimpleNamespace(get_platform_experiment=lambda _id: self.draft),
-                                     workdir=tempfile.mkdtemp())
+        self.setup = SimpleNamespace(cfg=self.cfg, client=FakePlatform(experiment=lambda: self.draft), workdir=tempfile.mkdtemp())
         self.cfg.platform_experiment_id = "pe-1"
-        running = mock.patch.object(run, "_running", served(self.cfg))
-        running.start()
-        self.addCleanup(running.stop)
         self.handing = asyncio.Lock()
-        self.hook = run._updates_hook(self.setup, {"HL_STATE_DIR": os.path.join(tempfile.mkdtemp(), ".hl-state")}, self.handing)
+        self.hook = hooks._updates_hook(self.setup, SimpleNamespace(on_new_machine=False), SimpleNamespace(not_own=lambda events: events),
+                                        {"HL_STATE_DIR": os.path.join(tempfile.mkdtemp(), ".hl-state")}, self.handing)
 
     async def call(self, **hook_input):
         from contextlib import redirect_stdout
@@ -416,19 +414,19 @@ class HookTest(unittest.IsolatedAsyncioTestCase):
         self.waiting = [event, dict(event, id=2)]
         self.assertEqual(await self.call(), {"hookSpecificOutput": {
             "hookEventName": "PostToolUse",
-            "additionalContext": "Platform updates:\njob.underperforming job-1 val_accuracy" + S}})
+            "additionalContext": "Platform updates:\njob.underperforming job-1 val_accuracy"}})
         self.assertEqual(await self.call(), {})
 
     async def test_an_update_handed_over_lets_every_job_be_read_again(self):
-        from hypothesisloop_agent.claude import run
+        from hypothesisloop_agent.claude import hooks
 
-        run._forget_job_reads()
-        self.assertIsNone(run._repeated_read("hl job status job-1", 0))
+        hooks.forget_job_reads()
+        self.assertIsNone(hooks._repeated_read("hl job status job-1", 0))
         await self.call()
-        self.assertIsNotNone(run._repeated_read("hl job status job-1", 1))
+        self.assertIsNotNone(hooks._repeated_read("hl job status job-1", 1))
         self.waiting = [{"kind": "experiment.status", "subject": "job-1", "value": "RUNNING", "agent_id": "agent-a"}]
         await self.call()
-        self.assertIsNone(run._repeated_read("hl job status job-1", 2))
+        self.assertIsNone(hooks._repeated_read("hl job status job-1", 2))
 
     async def test_parallel_tool_calls_share_one_drain(self):
         self.waiting = [{"kind": "comment.new", "subject": "hyp-1", "value": "human"}]
@@ -451,9 +449,9 @@ class HookTest(unittest.IsolatedAsyncioTestCase):
 # named ... Spawn a new one or use the agent ID", and sent it again under the agent's id.
 class UndeliveredMessageTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        from hypothesisloop_agent.claude import run
+        from hypothesisloop_agent.claude import hooks
 
-        self.harness = run
+        self.harness = hooks
 
     async def call(self, **hook_input):
         return await self.harness._undelivered_hook({"tool_name": "SendMessage", **hook_input}, "tool-1", {"signal": None})
@@ -478,9 +476,9 @@ class UndeliveredMessageTest(unittest.IsolatedAsyncioTestCase):
 # submit had said the result arrives as an update when it ends its turn.
 class WaitTest(unittest.IsolatedAsyncioTestCase):
     async def call(self, command):
-        from hypothesisloop_agent.claude import run
+        from hypothesisloop_agent.claude import hooks
 
-        return await run._wait_hook({"tool_name": "Bash", "tool_input": {"command": command}}, "tool-1", {"signal": None})
+        return await hooks._wait_hook({"tool_name": "Bash", "tool_input": {"command": command}}, "tool-1", {"signal": None})
 
     async def test_a_command_that_waits_is_refused_with_how_to_wait(self):
         for command in ("sleep 90; hl job status job-1", "sleep 2m && hl job logs job-1", "sleep 20; sleep 15",
@@ -490,41 +488,41 @@ class WaitTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("To wait, reply with no command in it", told["permissionDecisionReason"])
 
     async def test_a_backgrounded_command_is_refused_and_a_subagent_may_wait_for_its_jobs(self):
-        from hypothesisloop_agent.claude import run
+        from hypothesisloop_agent.claude import cli, hooks
 
-        told = (await run._wait_hook({"tool_name": "Bash", "tool_input": {"command": "make", "run_in_background": True}},
+        told = (await hooks._wait_hook({"tool_name": "Bash", "tool_input": {"command": "make", "run_in_background": True}},
                                      "tool-1", {}))["hookSpecificOutput"]
-        self.assertEqual((told["permissionDecision"], told["permissionDecisionReason"]), ("deny", run.BACKGROUND_COMMAND))
-        told = (await run._wait_hook({"tool_name": "Bash", "agent_id": "sub-1", "tool_input": {"command": "make", "run_in_background": True}},
+        self.assertEqual((told["permissionDecision"], told["permissionDecisionReason"]), ("deny", hooks.BACKGROUND_COMMAND))
+        told = (await hooks._wait_hook({"tool_name": "Bash", "agent_id": "sub-1", "tool_input": {"command": "make", "run_in_background": True}},
                                      "tool-1", {}))["hookSpecificOutput"]
-        self.assertEqual((told["permissionDecision"], told["permissionDecisionReason"]), ("deny", run.SUBAGENT_BACKGROUND_COMMAND))
+        self.assertEqual((told["permissionDecision"], told["permissionDecisionReason"]), ("deny", hooks.SUBAGENT_BACKGROUND_COMMAND))
         for command in ("hl job wait job-1", "sleep 90; hl job status job-1"):
-            self.assertEqual(await run._wait_hook({"tool_name": "Bash", "agent_id": "sub-1", "tool_input": {"command": command}},
+            self.assertEqual(await hooks._wait_hook({"tool_name": "Bash", "agent_id": "sub-1", "tool_input": {"command": command}},
                                                   "tool-1", {}), {}, command)
 
     # Measured on the bundled CLI: a subagent is given TaskStop too, and its call reaches the hook with its agent_id.
     async def test_the_agent_stops_a_subagent_and_a_subagent_stops_nothing(self):
-        from hypothesisloop_agent.claude import run
+        from hypothesisloop_agent.claude import cli, hooks
 
-        self.assertNotIn("TaskStop", run.DISALLOWED_TOOLS)
+        self.assertNotIn("TaskStop", cli.DISALLOWED_TOOLS)
         stop = {"tool_name": "TaskStop", "tool_input": {"task_id": "a1"}}
-        self.assertEqual(await run._task_stop_hook(stop, "tool-1", {}), {})
-        told = (await run._task_stop_hook({**stop, "agent_id": "sub-1"}, "tool-1", {}))["hookSpecificOutput"]
-        self.assertEqual((told["permissionDecision"], told["permissionDecisionReason"]), ("deny", run.SUBAGENT_TASK_STOP))
+        self.assertEqual(await hooks._task_stop_hook(stop, "tool-1", {}), {})
+        told = (await hooks._task_stop_hook({**stop, "agent_id": "sub-1"}, "tool-1", {}))["hookSpecificOutput"]
+        self.assertEqual((told["permissionDecision"], told["permissionDecisionReason"]), ("deny", hooks.SUBAGENT_TASK_STOP))
 
     # A subagent's interim messages each started a turn of its lead over the lead's whole context.
     async def test_the_agent_messages_a_subagent_and_a_subagent_reports_only_at_its_end(self):
-        from hypothesisloop_agent.claude import run
+        from hypothesisloop_agent.claude import cli, hooks
 
         send = {"tool_name": "SendMessage", "tool_input": {"to": "a1", "message": "the best moved"}}
-        self.assertEqual(await run._subagent_message_hook(send, "tool-1", {}), {})
-        told = (await run._subagent_message_hook({**send, "agent_id": "sub-1"}, "tool-1", {}))["hookSpecificOutput"]
-        self.assertEqual((told["permissionDecision"], told["permissionDecisionReason"]), ("deny", run.SUBAGENT_MESSAGE))
+        self.assertEqual(await hooks._subagent_message_hook(send, "tool-1", {}), {})
+        told = (await hooks._subagent_message_hook({**send, "agent_id": "sub-1"}, "tool-1", {}))["hookSpecificOutput"]
+        self.assertEqual((told["permissionDecision"], told["permissionDecisionReason"]), ("deny", hooks.SUBAGENT_MESSAGE))
 
     async def test_a_short_pause_and_a_command_that_only_names_sleep_run(self):
-        from hypothesisloop_agent.claude import run
+        from hypothesisloop_agent.claude import cli, hooks
 
-        run._forget_job_reads()
+        hooks.forget_job_reads()
         for command in ("sleep 5 && curl -s localhost:8000", "grep -n sleep src/train.py", "hl job status job-1"):
             self.assertEqual(await self.call(command), {}, command)
 
@@ -533,10 +531,10 @@ class WaitTest(unittest.IsolatedAsyncioTestCase):
 # a model call, in commands that changed between reads.
 class RereadTest(unittest.TestCase):
     def setUp(self):
-        from hypothesisloop_agent.claude import run
+        from hypothesisloop_agent.claude import cli, hooks
 
-        self.run = run
-        run._forget_job_reads()
+        self.run = hooks
+        hooks.forget_job_reads()
 
     def test_a_job_read_again_soon_with_nothing_delivered_between_is_refused_however_the_command_dresses_it(self):
         self.assertIsNone(self.run._repeated_read("hl job status job-1 2>&1; echo ---; hl job metrics job-1 2>&1", 0))
@@ -551,7 +549,7 @@ class RereadTest(unittest.TestCase):
         self.assertIsNone(self.run._repeated_read("hl job status job-2", 5))
         self.assertIsNone(self.run._repeated_read("hl job status job-1; hl job status job-3", 6))
         self.assertIsNone(self.run._repeated_read("hl job status job-1", 6 + self.run._REREAD_S))
-        self.run._forget_job_reads()
+        self.run.forget_job_reads()
         self.assertIsNone(self.run._repeated_read("hl job status job-1", 7 + self.run._REREAD_S))
         self.assertIsNone(self.run._repeated_read("hl job list --status RUNNING", 8 + self.run._REREAD_S))
         self.assertIsNone(self.run._repeated_read("hl job list --status RUNNING", 9 + self.run._REREAD_S))
@@ -628,7 +626,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
 
         from claude_agent_sdk import ResultMessage
 
-        from hypothesisloop_agent.claude import run
+        from hypothesisloop_agent.claude import connection, shutdown
 
         stop_flag = [False]
         sent = []
@@ -660,15 +658,15 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
             return [{"kind": "experiment.status", "subject": "exp-1", "value": "COMPLETED", "agent_id": "agent-a"}]
 
         setup = SimpleNamespace(commands="usage: hl", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
-                                client=SimpleNamespace(get_platform_experiment=lambda _id: {"status": "running"}, get_signup=lambda *_: {}),
+                                client=FakePlatform(),
                                 cfg=SimpleNamespace(agent_id="agent-a", role="researcher", api_url="http://x", token=ENV["HL_TOKEN"], platform_experiment_id="pe-1"))
-        with mock.patch.object(run, "ClaudeSDKClient", Client), \
+        with mock.patch.object(connection, "ClaudeSDKClient", Client), \
                 mock.patch.object(updates, "next_batch", one_batch), \
                 mock.patch.object(updates, "jobs_in_flight", mock.AsyncMock(return_value=1)), \
                 mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[])), \
                 redirect_stdout(StringIO()) as out:
-            await asyncio.wait_for(run._run_one_session(setup, None, stop_flag), timeout=5)
-        self.assertEqual(sent, ["Begin." + S, "Platform updates:\nexperiment.status exp-1 COMPLETED" + S, run._shutdown_prompt(setup) + S])
+            await asyncio.wait_for(connect(setup, None, stop_flag), timeout=5)
+        self.assertEqual(sent, ["Begin." + S, "Platform updates:\nexperiment.status exp-1 COMPLETED" + S, await shutdown._prompt(setup) + S])
         self.assertIn("agent-a event experiment.status exp-1 COMPLETED", out.getvalue())
         self.assertEqual(os.listdir(setup.workdir), [], "the harness wrote into the directory the agent clones into")
         self.assertIn(".claude_session_id", os.listdir(setup.statedir))
@@ -684,7 +682,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
 
         from claude_agent_sdk import ResultMessage
 
-        from hypothesisloop_agent.claude import run
+        from hypothesisloop_agent.claude import connection, shutdown
 
         stop_flag = [False]
         sent = []
@@ -717,14 +715,14 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
 
         read = mock.AsyncMock(side_effect=in_flight)
         setup = SimpleNamespace(commands="usage: hl", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
-                                client=SimpleNamespace(get_platform_experiment=lambda _id: {"status": "running"}, get_signup=lambda *_: {}),
+                                client=FakePlatform(),
                                 cfg=cfg)
-        with mock.patch.object(run, "ClaudeSDKClient", Client), \
+        with mock.patch.object(connection, "ClaudeSDKClient", Client), \
                 mock.patch.object(updates, "next_batch", next_batch), \
                 mock.patch.object(updates, "jobs_in_flight", read), \
                 mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[])), \
                 redirect_stdout(StringIO()):
-            await asyncio.wait_for(run._run_one_session(setup, None, stop_flag), timeout=5)
+            await asyncio.wait_for(connect(setup, None, stop_flag), timeout=5)
         return sent[:-1], read.await_count
 
     # A researcher whose last job ended waited 10 minutes for agent.idle, or 30 for the harness's
@@ -761,7 +759,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
 
         from claude_agent_sdk import ResultMessage, SystemMessage
 
-        from hypothesisloop_agent.claude import run
+        from hypothesisloop_agent.claude import connection, shutdown
 
         stop_flag = [False]
         sent = []
@@ -805,16 +803,16 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
             return []
 
         setup = SimpleNamespace(commands="usage: hl", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
-                                client=SimpleNamespace(get_platform_experiment=lambda _id: {"status": "running"}, get_signup=lambda *_: {}),
+                                client=FakePlatform(),
                                 cfg=SimpleNamespace(agent_id="agent-a", role="researcher", api_url="http://x",
                                                     token=ENV["HL_TOKEN"], platform_experiment_id="pe-1"))
         read = mock.AsyncMock(return_value=1)
-        with mock.patch.object(run, "ClaudeSDKClient", Client), \
+        with mock.patch.object(connection, "ClaudeSDKClient", Client), \
                 mock.patch.object(updates, "next_batch", next_batch), \
                 mock.patch.object(updates, "jobs_in_flight", read), \
                 mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[])), \
                 redirect_stdout(StringIO()):
-            await asyncio.wait_for(run._run_one_session(setup, None, stop_flag), timeout=5)
+            await asyncio.wait_for(connect(setup, None, stop_flag), timeout=5)
         self.assertEqual((sent[:-1], len(waits), read.await_count), (["Begin." + S], 2, 1))
 
     # A resumed session whose subagents stopped with the last process answers the opening with an
@@ -828,7 +826,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
 
         from claude_agent_sdk import ResultMessage, SystemMessage
 
-        from hypothesisloop_agent.claude import run
+        from hypothesisloop_agent.claude import connection, shutdown
 
         stop_flag = [False]
         sent, read_turns, own_turns = [], [], []
@@ -869,19 +867,19 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
             return []
 
         setup = SimpleNamespace(commands="usage: hl", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
-                                client=SimpleNamespace(get_platform_experiment=lambda _id: {"status": "running"}, get_signup=lambda *_: {}),
+                                client=FakePlatform(),
                                 cfg=SimpleNamespace(agent_id="agent-a", role="researcher", api_url="http://x",
                                                     token=ENV["HL_TOKEN"], platform_experiment_id="pe-1"))
         delivered = mock.Mock()
-        with mock.patch.object(run, "ClaudeSDKClient", Client), \
+        with mock.patch.object(connection, "ClaudeSDKClient", Client), \
                 mock.patch.object(updates, "next_batch", next_batch), \
                 mock.patch.object(updates, "delivered", delivered), \
                 mock.patch.object(updates, "jobs_in_flight", mock.AsyncMock(return_value=1)), \
                 mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[update])), \
                 redirect_stdout(StringIO()):
-            await asyncio.wait_for(run._run_one_session(setup, "s", stop_flag), timeout=5)
+            await asyncio.wait_for(connect(setup, "s", stop_flag), timeout=5)
         self.assertEqual(len(read_turns), 3, "the opening's turn, the CLI's own and the last")
-        self.assertEqual(sent[1:], [run._shutdown_prompt(setup) + "\n\nPlatform updates:\ncomment.new hyp-1 agent by agent-b" + S])
+        self.assertEqual(sent[1:], [await shutdown._prompt(setup) + "\n\nPlatform updates:\ncomment.new hyp-1 agent by agent-b" + S])
         self.assertEqual([call.args[0]["HL_STATE_DIR"].rsplit(".", 1)[1] for call in delivered.call_args_list], ["closing"])
 
     # A turn under way, whose start the wait missed by an instant, drained and handed over what
@@ -894,7 +892,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
 
         from claude_agent_sdk import ResultMessage
 
-        from hypothesisloop_agent.claude import run
+        from hypothesisloop_agent.claude import connection, shutdown
 
         stop_flag = [False]
         sent, read_turns = [], []
@@ -922,7 +920,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
                 yield
 
         setup = SimpleNamespace(commands="usage: hl", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
-                                client=SimpleNamespace(get_platform_experiment=lambda _id: {"status": "running"}, get_signup=lambda *_: {}),
+                                client=FakePlatform(),
                                 cfg=SimpleNamespace(agent_id="agent-a", role="researcher", api_url="http://x",
                                                     token=ENV["HL_TOKEN"], platform_experiment_id="pe-1"))
         waits = []
@@ -938,14 +936,14 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
             stop_flag[0] = True
             return []
 
-        with mock.patch.object(run, "ClaudeSDKClient", Client), \
+        with mock.patch.object(connection, "ClaudeSDKClient", Client), \
                 mock.patch.object(updates, "next_batch", next_batch), \
                 mock.patch.object(updates, "jobs_in_flight", mock.AsyncMock(return_value=1)), \
                 mock.patch.object(updates, "drain", mock.AsyncMock(return_value=[])), \
                 redirect_stdout(StringIO()):
-            await asyncio.wait_for(run._run_one_session(setup, None, stop_flag), timeout=5)
+            await asyncio.wait_for(connect(setup, None, stop_flag), timeout=5)
         self.assertEqual(len(read_turns), 3, "the opening's turn, the one under way and the last")
-        self.assertEqual(sent, ["Begin." + S, run._shutdown_prompt(setup) + S])
+        self.assertEqual(sent, ["Begin." + S, await shutdown._prompt(setup) + S])
 
     async def test_a_coordinator_has_no_jobs_of_its_own_to_be_told_of(self):
         from types import SimpleNamespace
@@ -955,7 +953,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
         cfg = SimpleNamespace(agent_id="", role="coordinator", api_url="http://x",
                               token=ENV["HL_TOKEN"], platform_experiment_id="pe-1")
         update = [{"kind": "comment.new", "subject": "hyp-1", "value": "agent", "agent_id": "agent-b"}]
-        with mock.patch("hypothesisloop_agent.claude.run._told", mock.AsyncMock(return_value="told")):
+        with mock.patch("hypothesisloop_agent.claude.prompts.told", mock.AsyncMock(return_value="told")):
             sent, reads = await self._turn_ends(cfg, [], [update, []])
-        self.assertEqual((sent[1:], reads), (["told"], 0))
+        self.assertEqual((sent[1:], reads), (["told" + S], 0))
 

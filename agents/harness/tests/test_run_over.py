@@ -7,11 +7,13 @@ from hypothesisloop_agent import api_client, core, outage
 
 REFUSED = api_client.APIError("GET", "http://api/x", 401, '{"message":"unauthenticated: agent ag-1 finished in platform experiment pe-1"}')
 DOWN = api_client.APIError("GET", "http://api/x", 0, "connection refused")
+GATEWAY = api_client.APIError("GET", "http://api/x", 502, "<html>502 Bad Gateway</html>")
+BROKEN = api_client.APIError("GET", "http://api/x", 500, '{"reason":"internal","message":"internal error"}')
 
 
 def setup(answer):
     """A researcher whose signup read answers with answer(), a dict or an error to raise."""
-    def get_signup(*_):
+    async def get_signup(*_):
         result = answer()
         if isinstance(result, Exception):
             raise result
@@ -27,35 +29,51 @@ def no_outage():
     outage._since, outage._over, outage._suspected = None, None, False
 
 
-class RunOverTest(unittest.TestCase):
+class RunOverTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         no_outage()
         self.addCleanup(no_outage)
 
-    def test_a_refused_token_is_a_run_that_is_over(self):
-        reason = core.run_over(setup(lambda: REFUSED))
+    async def test_a_refused_token_is_a_run_that_is_over(self):
+        reason = await core.run_over(setup(lambda: REFUSED))
         self.assertEqual(reason, 'the platform refuses this token, so its run is over ({"message":"unauthenticated: agent ag-1 finished in platform experiment pe-1"})')
         self.assertTrue(core.lost_platform(reason))
-        self.assertEqual(core.stop_reason(setup(lambda: REFUSED), [False]), reason)
+        self.assertEqual(await core.stop_reason(setup(lambda: REFUSED), [False]), reason)
 
-    def test_an_outage_is_waited_out_up_to_the_limit_and_an_answer_ends_it(self):
-        answers = [DOWN, DOWN, {}, DOWN]
+    async def test_an_outage_is_waited_out_up_to_the_limit_and_an_answer_ends_it(self):
+        answers = [DOWN, GATEWAY, {}, DOWN]
         agent = setup(lambda: answers.pop(0))
         with self.assertLogs("llm_agent", "WARNING") as logged:
-            self.assertIsNone(core.run_over(agent))
-            self.assertIsNone(core.run_over(agent))
+            self.assertIsNone(await core.run_over(agent))
+            self.assertIsNone(await core.run_over(agent))
         self.assertEqual(len(logged.records), 1)
         self.assertTrue(outage.under_way())
         self.assertEqual(outage.over(), [])
-        self.assertIsNone(core.run_over(agent))
+        self.assertIsNone(await core.run_over(agent))
         self.assertFalse(outage.under_way())
         self.assertEqual([e["kind"] for e in outage.over()], ["platform.reachable"])
         self.assertEqual(outage.over(), [])
         with self.assertLogs("llm_agent", "WARNING"):
-            self.assertIsNone(core.run_over(agent))
+            self.assertIsNone(await core.run_over(agent))
 
-    def test_a_run_the_platform_ended_is_no_lost_platform(self):
-        reason = core.run_over(setup(lambda: {"ended": "cut"}))
+    # A refusal the platform itself answered is an answer: asked again at the next read, it
+    # starts no outage and ends one under way.
+    async def test_a_server_error_in_json_starts_no_outage_and_ends_one(self):
+        with self.assertLogs("llm_agent", "WARNING"):
+            self.assertIsNone(await core.run_over(setup(lambda: BROKEN)))
+        self.assertFalse(outage.under_way())
+        self.assertEqual(outage.over(), [])
+        answers = [DOWN, BROKEN]
+        agent = setup(lambda: answers.pop(0))
+        with self.assertLogs("llm_agent", "WARNING"):
+            await core.run_over(agent)
+            self.assertTrue(outage.under_way())
+            self.assertIsNone(await core.run_over(agent))
+        self.assertFalse(outage.under_way())
+        self.assertEqual([e["kind"] for e in outage.over()], ["platform.reachable"])
+
+    async def test_a_run_the_platform_ended_is_no_lost_platform(self):
+        reason = await core.run_over(setup(lambda: {"ended": "cut"}))
         self.assertEqual(reason, "the platform ended the run: cut")
         self.assertFalse(core.lost_platform(reason))
         self.assertFalse(core.lost_platform(None))

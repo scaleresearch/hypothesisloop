@@ -11,7 +11,8 @@ from unittest import mock
 from claude_agent_sdk import ResultMessage
 
 from hypothesisloop_agent import config, core, platform
-from hypothesisloop_agent.claude import run
+from conftest import FakePlatform, connect
+from hypothesisloop_agent.claude import cli, connection, results, shutdown
 from test_require_joined import AGENT_TOKEN
 
 # What a launcher hands a machine, and all of it: where the platform is and the agent's token.
@@ -48,12 +49,12 @@ class StopSignalTest(unittest.TestCase):
     def test_the_last_turn_fits_inside_the_wind_down_with_a_launcher_pass_to_spare(self):
         # The token works and the machine stays the wind-down after the close or the cut, and the
         # signal arrives one launcher pass, 30 s, into it.
-        self.assertLessEqual(run._SHUTDOWN_TURN_S, platform.AGENT_WIND_DOWN_S - 30)
+        self.assertLessEqual(shutdown._SHUTDOWN_TURN_S, platform.AGENT_WIND_DOWN_S - 30)
 
     def test_the_coordinators_last_turn_fits_inside_its_own_wind_down(self):
         # The coordinator writes the final summary in its wind-down.
-        self.assertLessEqual(run._COORDINATOR_SHUTDOWN_TURN_S, platform.COORDINATOR_WIND_DOWN_S - 60)
-        self.assertGreater(run._COORDINATOR_SHUTDOWN_TURN_S, run._SHUTDOWN_TURN_S)
+        self.assertLessEqual(shutdown._COORDINATOR_SHUTDOWN_TURN_S, platform.COORDINATOR_WIND_DOWN_S - 60)
+        self.assertGreater(shutdown._COORDINATOR_SHUTDOWN_TURN_S, shutdown._SHUTDOWN_TURN_S)
 
 
 class ErrorTurnClient:
@@ -86,13 +87,13 @@ class ErrorTurnClient:
 class RefusedCredentialTest(unittest.IsolatedAsyncioTestCase):
     async def session(self, result: str, status: int | None = None):
         setup = SimpleNamespace(commands="usage: hl", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
-                                client=SimpleNamespace(get_signup=lambda *_: {}),
+                                client=FakePlatform(),
                                 cfg=SimpleNamespace(agent_id="ag-1", role="researcher", api_url="http://x", token=AGENT_TOKEN, platform_experiment_id="pe-1"))
-        with mock.patch.object(run, "ClaudeSDKClient", ErrorTurnClient), \
+        with mock.patch.object(connection, "ClaudeSDKClient", ErrorTurnClient), \
                 mock.patch.object(ErrorTurnClient, "result", result), \
                 mock.patch.object(ErrorTurnClient, "status", status), \
                 contextlib.redirect_stdout(io.StringIO()):
-            return await asyncio.wait_for(run._run_one_session(setup, None, [False]), timeout=5)
+            return await asyncio.wait_for(connect(setup, None, [False]), timeout=5)
 
     async def test_a_refused_credential_ends_the_agent_with_the_providers_words(self):
         for refusal in ("Not logged in · Please run /login", "Invalid API key · Fix external API key",
@@ -123,7 +124,7 @@ class RefusedCredentialTest(unittest.IsolatedAsyncioTestCase):
     # The machine holds no model credential: the CLI reaches the model through the platform with
     # the agent's own token, and nothing else in its environment names a credential.
     async def test_the_cli_makes_its_model_calls_through_the_platform_with_the_agents_own_token(self):
-        with mock.patch.dict(os.environ, LAUNCH_ENV, clear=True):
+        with mock.patch.dict(os.environ, {**LAUNCH_ENV, "CLAUDE_CONFIG_DIR": os.environ["CLAUDE_CONFIG_DIR"]}, clear=True):
             await self.session("API Error: 500 Internal server error", 500)
         env = ErrorTurnClient.options.env
         self.assertEqual(env["ANTHROPIC_BASE_URL"], "http://x/model/anthropic")
@@ -131,15 +132,15 @@ class RefusedCredentialTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"], "1")
         for key in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "MODEL_ANTHROPIC_OAUTH_TOKEN"):
             self.assertNotIn(key, env)
-        self.assertEqual(run.model_env(SimpleNamespace(api_url="https://api.example/", token="t"))["ANTHROPIC_BASE_URL"],
+        self.assertEqual(cli.model_env(SimpleNamespace(api_url="https://api.example/", token="t"))["ANTHROPIC_BASE_URL"],
                          "https://api.example/model/anthropic")
 
     def test_a_context_that_overflowed_is_no_refused_request(self):
         overflow = ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=True, num_turns=1,
                                  session_id="s-1", result="Prompt is too long", api_error_status=400)
-        self.assertFalse(run.request_refused(overflow))
+        self.assertFalse(results.request_refused(overflow))
 
     def test_only_the_providers_refusal_of_the_credential_counts(self):
-        self.assertFalse(run.credential_refused(None))
-        self.assertFalse(run.credential_refused("rate_limit_error: too many requests"))
-        self.assertTrue(run.credential_refused("NOT LOGGED IN"))
+        self.assertFalse(results.credential_refused(None))
+        self.assertFalse(results.credential_refused("rate_limit_error: too many requests"))
+        self.assertTrue(results.credential_refused("NOT LOGGED IN"))

@@ -10,8 +10,11 @@ from unittest import mock
 from claude_agent_sdk import AssistantMessage, StreamEvent, TextBlock
 
 from hypothesisloop_agent import progress
+from conftest import FakePlatform
 from test_require_joined import AGENT_TOKEN
-from hypothesisloop_agent.claude import run
+from hypothesisloop_agent import core
+from hypothesisloop_agent.claude import connection, run, stream, turns
+from hypothesisloop_agent.claude.store import Store
 
 
 class Clock:
@@ -133,6 +136,28 @@ class ProgressTest(unittest.TestCase):
         self.assertEqual(self.lines, ["hl-progress 1", "hl-progress 2"])
 
 
+# The launcher parses the state line with the keys contract/agentsandbox defines, which platform.py
+# renders: a key or a turn value written here by hand would read as nothing there.
+class StateLineTest(unittest.TestCase):
+    def test_the_state_line_is_written_in_the_platforms_keys_with_the_digest_cut_to_its_length(self):
+        from hypothesisloop_agent import platform
+
+        digest = "f" * 64
+        model = {platform.STATE_MODEL_STATUS: "allowed", platform.STATE_MODEL_TYPE: "five_hour",
+                 platform.STATE_MODEL_UTILIZATION: 0.5, platform.STATE_MODEL_RESETS_AT: None}
+        line = progress.state_line(2, True, 1760000000.9, digest, 7, model)
+        prefix, *pairs = line.split(" ")
+        self.assertEqual(prefix, platform.STATE_PREFIX)
+        self.assertEqual(dict(pair.split("=", 1) for pair in pairs), {
+            platform.STATE_SUBAGENTS: "2", platform.STATE_TURN: platform.TURN_WORKING, platform.STATE_SINCE: "1760000000",
+            platform.STATE_INSTRUCTIONS_DIGEST: digest[:platform.INSTRUCTIONS_DIGEST_LENGTH], platform.STATE_VERSION: "7",
+            platform.STATE_MODEL_STATUS: "allowed", platform.STATE_MODEL_TYPE: "five_hour", platform.STATE_MODEL_UTILIZATION: "0.5"})
+        self.assertEqual(len(digest[:platform.INSTRUCTIONS_DIGEST_LENGTH]), platform.INSTRUCTIONS_DIGEST_LENGTH)
+        waiting = progress.state_line(0, False, 5, "", 0, {})
+        self.assertEqual(waiting, f"{platform.STATE_PREFIX} {platform.STATE_SUBAGENTS}=0 {platform.STATE_TURN}={platform.TURN_WAITING} "
+                                  f"{platform.STATE_SINCE}=5")
+
+
 class SilentClient:
     """Answers with one message and then nothing, as a model session that hung does."""
 
@@ -158,18 +183,16 @@ class BeatInTheRunLoopTest(unittest.IsolatedAsyncioTestCase):
         printed = []
         beating = progress.Progress(quiet_limit_s=0.15, emit=printed.append)
         setup = SimpleNamespace(commands="usage: hl", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
-                                client=SimpleNamespace(get_signup=lambda *_: {}),
+                                client=FakePlatform(),
                                 cfg=SimpleNamespace(agent_id="agent-a", role="researcher", api_url="http://x", token=AGENT_TOKEN,
                                                     platform_experiment_id="pe-1"))
-        with mock.patch.object(run, "ClaudeSDKClient", SilentClient), \
-                mock.patch.object(run, "_progress", beating), \
+        with mock.patch.object(connection, "ClaudeSDKClient", SilentClient), \
+                mock.patch.object(stream, "progress", beating), \
                 mock.patch.object(progress, "INTERVAL_S", 0.02), \
-                mock.patch.object(run.core, "stop_reason", lambda *a: None), \
-                mock.patch.object(run.core, "install_signal_handler", lambda: [False]), \
-                mock.patch.object(run, "_live_session_id", None), \
-                mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": tempfile.mkdtemp()}), \
+                mock.patch.object(core, "stop_reason", mock.AsyncMock(return_value=None)), \
+                mock.patch.object(core, "install_signal_handler", lambda: [False]), \
                 contextlib.redirect_stdout(io.StringIO()):
-            task = asyncio.ensure_future(run._run(setup))
+            task = asyncio.ensure_future(run._run(setup, Store(setup)))
             await asyncio.sleep(0.1)
             alive = len(printed)
             await asyncio.sleep(0.3)
@@ -211,8 +234,8 @@ class StreamedCallTest(unittest.IsolatedAsyncioTestCase):
         clock = Clock()
         awaited = progress.Progress(quiet_limit_s=1000, clock=clock, emit=lambda line: None)
         waited = []
-        with mock.patch.object(run, "_progress", awaited):
-            async for message in run._receive_turn(StreamingClient(clock)):
+        with mock.patch.object(stream, "progress", awaited):
+            async for message in turns.receive(StreamingClient(clock)):
                 if isinstance(message, AssistantMessage):
                     waited.append(awaited.waited())
         self.assertEqual(waited, [100, 60])
