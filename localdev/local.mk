@@ -13,11 +13,11 @@ registry-up:
 # The local stack's own build, apart from publish: the images the compose control plane and the
 # local cluster run, and the workload the e2e tests' jobs run, pushed to the dev registry under
 # TAG. publish cannot serve here: its UI image needs a sign-in service the local stack does not
-# build against (local development serves the UI with `npm run dev`), its framework job images
-# pull gigabytes, and nothing local installs a published chart.
+# build against (local development serves the UI with `npm run dev`), and nothing local installs
+# a published chart.
 # IMAGE_TAG_FILE hands TAG to the e2e tests, whose jobs must pin it. It is written only by a push
 # to the dev registry: the tests pull from there.
-LOCAL_IMAGES := control-service metrics-service node-agent cluster-agent bare-agent job-base job workload
+LOCAL_IMAGES := control-service metrics-service node-agent cluster-agent bare-agent workload
 locked-local-images: check-tag $(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),registry-up)
 	$(GO_VENDOR)
 	$(MAKE) -j1 --no-print-directory $(addprefix image-,$(LOCAL_IMAGES)) || { rm -rf vendor; exit 1; }

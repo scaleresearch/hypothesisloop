@@ -8,7 +8,7 @@ HypothesisLoop runtime {{ if .Release.IsUpgrade }}upgraded{{ else }}installed{{ 
 
 Installed:
   - namespace {{ .Release.Namespace }}: Deployment hypothesisloop-cluster-agent, DaemonSet hypothesisloop-node-agent,
-    Secret hypothesisloop-runtime-token{{ if .Values.builder.enabled }}, the builder's cache volume hypothesisloop-builder-cache{{ end }}
+    Secret hypothesisloop-runtime-token
 {{- if .Values.insecureRegistry.enabled }}
   - DaemonSet hypothesisloop-insecure-registry, which has every node's containerd pull from
     {{ regexReplaceAll "/.*$" .Values.images.registry "" }} over plain HTTP ({{ .Values.insecureRegistry.hostsDir }})

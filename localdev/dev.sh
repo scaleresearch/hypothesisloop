@@ -134,7 +134,7 @@ render_settings() {
 }
 
 # The sandbox and cloud_compute sections are the examples the core ships, each with the provider
-# .env names and its values from .env (lib_rented), and this deployment's images in them, appended
+# .env names and its values from .env (lib_rented), appended
 # to the settings. The provider's key reaches control-service through its environment file.
 render_compute() {
   local value sandbox cloud
@@ -142,10 +142,9 @@ render_compute() {
   cloud="$(lib_rented controlplane/settings/cloud-compute.yaml "${cloud_provider}")"
   {
     printf '%s\n\n' "${sandbox}"
-    sed -e "s|^  - cluster_name: .*$|  - cluster_name: ${cloud_cluster}|" \
-        -e "s|^    job_image: .*$|    job_image: ${registry}/hypothesisloop-job:${tag}|" <<<"${cloud}"
+    sed -e "s|^  - cluster_name: .*$|  - cluster_name: ${cloud_cluster}|" <<<"${cloud}"
   } > "${rented}"
-  for value in "  provider: ${sandbox_provider}" "  - cluster_name: ${cloud_cluster}" "    provider: ${cloud_provider}" "    job_image: ${registry}/hypothesisloop-job:${tag}"; do
+  for value in "  provider: ${sandbox_provider}" "  - cluster_name: ${cloud_cluster}" "    provider: ${cloud_provider}"; do
     grep -qF -- "${value}" "${rented}" || { echo "dev: controlplane/settings/sandbox.yaml or cloud-compute.yaml changed shape, '${value}' was not rendered" >&2; exit 1; }
   done
 }

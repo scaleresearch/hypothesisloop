@@ -191,12 +191,16 @@ func (e *Executor) configured(name string) (shape Shape, index int, ok bool) {
 	return Shape{}, 0, false
 }
 
+// rentedArchitecture is that of every machine the providers rent.
+const rentedArchitecture = "amd64"
+
 // labels are the node labels of a slot: the one that makes it a slot and names it, so admission
-// sizes one job to it and says which slot it placed the job on, for a slot with accelerators
-// how many it has and the label its type stands for, as a device plugin would publish it, and
-// for an offerless slot that it is one, so a job waiting for it is told what it waits for.
+// sizes one job to it and says which slot it placed the job on, its architecture, for a slot with
+// accelerators how many it has and the label its type stands for, as a device plugin would
+// publish it, and for an offerless slot that it is one, so a job waiting for it is told what it
+// waits for.
 func (s slot) labels() map[string]string {
-	labels := map[string]string{clusterapi.NodeSlotLabel: s.name}
+	labels := map[string]string{clusterapi.NodeSlotLabel: s.name, clusterapi.NodeArchitectureLabel: rentedArchitecture}
 	if s.offerless() {
 		labels[clusterapi.NodeSlotNoOfferLabel] = s.noOffer
 	}

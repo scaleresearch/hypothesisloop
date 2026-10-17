@@ -52,16 +52,15 @@ The git host gitHost.provider names, with its section.
 {{- fail (printf "gitHost.provider is %q: it is github or plain" $gitHost.provider) }}
 {{- end }}
 {{- /*
-The registry containerRegistry.provider names, with its section and the environments repository.
+The registry containerRegistry.provider names, with its section.
 */ -}}
 {{- with .Values.containerRegistry }}
 {{- if eq .provider "gcp" }}
-{{- $raw = printf "%s\ncontainer_registry:\n  provider: gcp\n  gcp:\n    pusher: %s\n    puller: %s\n  environments_repository: %s\n" (trimSuffix "\n" $raw)
-  (toJson (required "containerRegistry.gcp.pusher is required with containerRegistry.provider gcp: the service account that writes to the repository" .gcp.pusher))
-  (toJson (required "containerRegistry.gcp.puller is required with containerRegistry.provider gcp: the service account that reads it" .gcp.puller))
-  (toJson (required "containerRegistry.environmentsRepository is required with containerRegistry.provider: the repository environment images are pushed to" .environmentsRepository)) }}
-{{- else if or .environmentsRepository .gcp.pusher .gcp.puller }}
-{{- fail "containerRegistry.environmentsRepository or a provider's section is set without containerRegistry.provider" }}
+{{- $raw = printf "%s\ncontainer_registry:\n  provider: gcp\n  gcp:\n    project: %s\n    location: %s\n" (trimSuffix "\n" $raw)
+  (toJson (required "containerRegistry.gcp.project is required with containerRegistry.provider gcp: the Google Cloud project the repositories are kept in" .gcp.project))
+  (toJson (required "containerRegistry.gcp.location is required with containerRegistry.provider gcp: the Artifact Registry location, such as europe-west1" .gcp.location)) }}
+{{- else if or .gcp.project .gcp.location }}
+{{- fail "a containerRegistry provider's section is set without containerRegistry.provider" }}
 {{- end }}
 {{- end }}
 {{- /*

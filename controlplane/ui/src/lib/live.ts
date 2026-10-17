@@ -33,8 +33,7 @@ const experiment = (c: Change) => any(
   named('platform-experiments', 'platform-experiments-running', 'platform-experiment-search'),
 )
 
-// The kinds the page follows, and what each makes it read again. environment.status is left out:
-// no page shows an environment.
+// The kinds the page follows, and what each makes it read again.
 const READS = {
   'experiment.status': job,
   'experiment.blocked': job,

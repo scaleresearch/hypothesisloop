@@ -38,7 +38,7 @@ type jobBrief struct {
 	NotAdmittedReason  string          `json:"not_admitted_reason"`
 	NotAdmittedMessage string          `json:"not_admitted_message"`
 	EvictionReason     string          `json:"eviction_reason"`
-	EnvironmentKey     string          `json:"environment_key"`
+	Image              string          `json:"image"`
 	PhaseDetail        json.RawMessage `json:"phase_detail"`
 	Theory             string          `json:"theory"`
 	EstimatedCost      float64         `json:"estimated_cost_acch"`
@@ -215,17 +215,16 @@ func JobStatus(c *apiclient.Client, args []string, stdout, stderr io.Writer) int
 One line per job, its whole record: hypothesis_id, or "objective":true on a baseline agent's
 job, which tests no hypothesis; status (QUEUED, SUBMITTED, RUNNING, then COMPLETED, FAILED,
 EVICTED, REJECTED or CANCELLED), metrics (one value each, as in hl job list), finished_at,
-summary, phase_detail, environment_key and the spec under job, its settings as job.env.
+summary, phase_detail, image (repository@digest) and the spec under job, its settings as job.env.
 eviction_reason says why the last attempt ended, as code or "code: detail": for a FAILED job
-how its process ended (container_failed, oom_killed), environment_failed for a REJECTED
-one whose environment did not build.
+how its process ended (container_failed, oom_killed).
 ran_on is where it ran: node, and under machine, for a rented one, instance_id, host_id (the
 physical machine, stable across rentals), accelerator_model, cpu_model and price_per_hour_usd.
 Two jobs of one spec on different machines are not the same measurement.
 A COMPLETED job of an experiment with a constraint metric carries rankable. False means it is
 in no standing: not_rankable_reason names the constraint it broke or did not report.
 While QUEUED, not_admitted_reason is the code of what the job waits for: awaiting_admission for
-the scheduler's first look at it, environment_building for its environment, capacity_unavailable for room on a cluster. not_admitted_message is its
+the scheduler's first look at it, capacity_unavailable for room on a cluster. not_admitted_message is its
 sentence.`, stderr)
 	ids, err := command.ParseOperands(fs, args, "id", "experiment")
 	if err != nil {

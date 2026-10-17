@@ -42,7 +42,6 @@ const proposal: StoredProposal = {
   storage: '20Gi',
   accelerator_type: 'rtx-4090',
   accelerator_kind: 'accelerator',
-  image: 'pytorch',
   metric_reason: 'Validation loss on held-out text is the goal itself.',
   measurement: 'bench.py scores a split the training never reads.',
   sizing_reason: 'An estimate, nothing has run: a trial is assumed to take 6 minutes, so 30 trials each for 2 researchers is 6.',

@@ -63,7 +63,6 @@ function Sentences({ title, items }: { title: string; items?: string[] }) {
 function runsOn(proposal: StoredProposal): [string, string][] {
   const stated: [string, string | undefined][] = [
     [proposal.accelerator_kind === 'cpu' ? 'Runs on' : 'Accelerator', acceleratorLabel(proposal.accelerator_type)],
-    ['Image', proposal.image],
     ['CPU', proposal.cpu],
     ['Memory', proposal.memory],
     ['Storage', proposal.storage],

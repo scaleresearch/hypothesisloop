@@ -88,30 +88,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/environments": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Read the environment a commit declares, building nothing
-         * @description Answers the environment the .hypothesisloop/Dockerfile of commit code_ref on image is, as POST /environments answers it, and starts no build: one that failed stays failed. An agent that reads it building is told as environment.status once it is loaded or ends, as POST /environments says. 404 environment_not_requested while nothing asked for its build; 422 no_environment_file and invalid_environment_file as POST /environments answers them.
-         */
-        get: operations["get-environment"];
-        put?: never;
-        /**
-         * Build the environment a commit declares, ahead of its job
-         * @description Starts building the .hypothesisloop/Dockerfile of commit code_ref on image, the build a job of that commit naming that image waits for (environment_key), so the job finds it built or building when it is submitted. Asking again is safe: it answers the one environment as it is then, and builds again one that failed. An agent that asks while it builds is told as environment.status on its event stream once a cluster loaded it (loaded: submit its jobs then), or else once the build ends, ready or failed; a failure is told either way. 422 no_environment_file for a commit without the file, invalid_environment_file for one the platform does not build, no_environment_builder while no cluster the org may use builds, unknown_job_image and code_ref_not_in_repository as a submit answers them.
-         */
-        post: operations["build-environment"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/experiments": {
         parameters: {
             query?: never;
@@ -127,7 +103,7 @@ export interface paths {
         put?: never;
         /**
          * Submit one job
-         * @description Submit {metadata, job}. The platform issues the job's id, job-<32 hex>, and answers it as id. AcceleratorType/count are derived from the job spec. submission_key makes the submit safe to repeat when its answer was lost: a second submit of the same agent with the same key creates nothing, holds nothing more of the quota and is answered 202 with the job the first created, as it is then, so its status may no longer be QUEUED. The key is the caller's to choose and to change when it means another job. metadata.agent_id is whose job it is and whose quota it spends, and metadata.platform_experiment_id where it runs. An agent's token says both: it may leave them out, and stating another is refused. Who submitted it is the caller, answered as actor. metadata.estimated_duration_hours is what the job holds of its agent's quota until it ends, answered on the job as it was applied. A stated one is never replaced; left out, it is the platform experiment's job_estimated_duration_hours, which the platform measured on its baseline job, and 422 required where it measured none. Nothing is measured before the job of an agent of role baseline: left out there, it is the largest that agent's quota admits now, within the stage's per-job limit and the time left until baseline_due_at, and what the job does not spend is given back when it ends. metadata.code_ref is the platform experiment's repository at a commit, repository_url@<40-character sha>, with no credential in it: 422 code_ref_not_in_repository for any other address. metadata.branch is the git branch that commit was pushed on, one agent's implementation of the hypothesis, under hl/<platform_experiment_id>/: 422 branch_not_of_experiment for any other. What ran is code_ref, and the branch says which line of work it belongs to. job.image is required of every job, 422 required: the name of one of the platform's job images (GET /resource-catalog/capacity, job_images), stored as that image's whole address, or the whole address of another image, registry host first: 422 unknown_job_image for anything else, such as a bare name of an image on a public registry, with the names that are valid. 422 no_cluster_for_image where the image keeps the job off every cluster that takes the org's jobs, with which image runs where: a cluster with one job image runs the jobs that name it and no other. 422 experiment_not_started before the platform starts the run, when only the job of an agent of role baseline is accepted: on an open platform experiment the message is its status_reason, the reason and the caller's own next step as GET /platform-experiments/{id} words them. job.cpu, job.memory and job.storage, or each group's, are what one node of the job holds, each stated as a quantity (cpu: 2, memory: 8Gi, storage: 4Gi): 422 required, naming the field in problems, where one is left out or is max. A job holds what it states and nothing is sized from the node it lands on. 422 exceeds_cluster_capacity where the job asks for more than every cluster that runs it has with nothing else on it, with what it asks for and what each cluster has: no wait admits such a job. A cluster that scales up may yet hold it. One that reports nothing now is named and not judged, and where none is judged the job is queued. metadata.hypothesis_id and metadata.theory are required of every job but that of an agent of role baseline. The baseline is the objective's own measurement: that job states neither, 422 baseline_tests_no_hypothesis when it names a hypothesis, its branch is hl/<platform_experiment_id>/baseline, and it is answered with objective true and no hypothesis_id: it belongs to the objective, which is no hypothesis to look up. Any agent may run its own implementation of any hypothesis of the platform experiment, whoever registered it. same_hypothesis on the answer names the jobs of other agents that test the same hypothesis, queued, running or completed within the hour: the job is queued all the same, and whoever steers the run is told it as job.duplicate. run_best on the answer names the run's best job on the first ranking metric, its value, commit and branch, where it ran another commit than this job: whether this job's commit contains it is git's to say, which hl job submit asks the submitter's checkout. The job is queued all the same. Two fields have a default, answered on the job as applied: metadata.capacity_tier left out is guaranteed, and job.max_retries left out is 0. 503 object_store_unavailable while the platform's object store does not answer: a submit measures the agent's durable data there and creates the job's data key in it, so nothing was stored and the same submit is repeated later. Rejections return {reason,message}; an accepted job remains QUEUED until current capacity fits. Every not_admitted_reason comes with its sentence in not_admitted_message.
+         * @description Submit {metadata, job}. The platform issues the job's id, job-<32 hex>, and answers it as id. AcceleratorType/count are derived from the job spec. submission_key makes the submit safe to repeat when its answer was lost: a second submit of the same agent with the same key creates nothing, holds nothing more of the quota and is answered 202 with the job the first created, as it is then, so its status may no longer be QUEUED. The key is the caller's to choose and to change when it means another job. metadata.agent_id is whose job it is and whose quota it spends, and metadata.platform_experiment_id where it runs. An agent's token says both: it may leave them out, and stating another is refused. Who submitted it is the caller, answered as actor. metadata.estimated_duration_hours is what the job holds of its agent's quota until it ends, answered on the job as it was applied. A stated one is never replaced; left out, it is the platform experiment's job_estimated_duration_hours, which the platform measured on its baseline job, and 422 required where it measured none. Nothing is measured before the job of an agent of role baseline: left out there, it is the largest that agent's quota admits now, within the stage's per-job limit and the time left until baseline_due_at, and what the job does not spend is given back when it ends. metadata.code_ref is the platform experiment's repository at a commit, repository_url@<40-character sha>, with no credential in it: 422 code_ref_not_in_repository for any other address. metadata.branch is the git branch that commit was pushed on, one agent's implementation of the hypothesis, under hl/<platform_experiment_id>/: 422 branch_not_of_experiment for any other. What ran is code_ref, and the branch says which line of work it belongs to. The job runs in the image its platform experiment records at the submit (PUT /platform-experiments/{id}/image), answered on the job as image, repository@digest, and only on nodes of that image's architecture: 422 no_experiment_image while none is recorded. job.command, or each group's, is required, 422 malformed: every node fetches the job's commit into /workspace/code and runs the command there. 422 experiment_not_started before the platform starts the run, when only the job of an agent of role baseline is accepted: on an open platform experiment the message is its status_reason, the reason and the caller's own next step as GET /platform-experiments/{id} words them. job.cpu, job.memory and job.storage, or each group's, are what one node of the job holds, each stated as a quantity (cpu: 2, memory: 8Gi, storage: 4Gi): 422 required, naming the field in problems, where one is left out or is max. A job holds what it states and nothing is sized from the node it lands on. 422 exceeds_cluster_capacity where the job asks for more than every cluster that runs it has with nothing else on it, with what it asks for and what each cluster has: no wait admits such a job. A cluster that scales up may yet hold it. One that reports nothing now is named and not judged, and where none is judged the job is queued. metadata.hypothesis_id and metadata.theory are required of every job but that of an agent of role baseline. The baseline is the objective's own measurement: that job states neither, 422 baseline_tests_no_hypothesis when it names a hypothesis, its branch is hl/<platform_experiment_id>/baseline, and it is answered with objective true and no hypothesis_id: it belongs to the objective, which is no hypothesis to look up. Any agent may run its own implementation of any hypothesis of the platform experiment, whoever registered it. same_hypothesis on the answer names the jobs of other agents that test the same hypothesis, queued, running or completed within the hour: the job is queued all the same, and whoever steers the run is told it as job.duplicate. run_best on the answer names the run's best job on the first ranking metric, its value, commit and branch, where it ran another commit than this job: whether this job's commit contains it is git's to say, which hl job submit asks the submitter's checkout. The job is queued all the same. Two fields have a default, answered on the job as applied: metadata.capacity_tier left out is guaranteed, and job.max_retries left out is 0. 503 object_store_unavailable while the platform's object store does not answer: a submit measures the agent's durable data there and creates the job's data key in it, so nothing was stored and the same submit is repeated later. Rejections return {reason,message}; an accepted job remains QUEUED until current capacity fits. Every not_admitted_reason comes with its sentence in not_admitted_message.
          */
         post: operations["submit-experiment"];
         delete?: never;
@@ -230,26 +206,6 @@ export interface paths {
         get: operations["list-experiment-data"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/experiments/{id}/image-credentials": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * The image a job runs in, with a login that pulls it
-         * @description Answers the image job {id} runs in, so a machine without its hardware can run code in it (hl env stage): the environment its commit declares, with a short-lived login to the registry that holds it, or its job image, pulled without one. 409 environment_not_ready while that environment builds or is pushed, environment_failed once it failed; 403 run_over once the caller's run has ended.
-         */
-        post: operations["create-job-image-credential"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1232,7 +1188,7 @@ export interface paths {
         head?: never;
         /**
          * Change fields of a platform experiment
-         * @description Takes only the fields that change; a field left out keeps its value, and a body with none answers 422 nothing_to_change. editable on GET /platform-experiments/{id} lists the fields the caller may change now, and a body that carries another answers 409 not_editable and names it. `goal`, what the owner asked, changes until the experiment closes, on one made from a sentence, and alone: a body that carries another field beside it is 422 goal_alone, one empty or over 2000 bytes 422 invalid_goal, and the goal it has 422 nothing_to_change. A draft is then planned again from it: the proposal or decline stays readable, proposed_at, declined_at and accepts_at are cleared so nothing is accepted by itself, status_reason reads revising, planning_ends_at is the planning limit from now, and the planner is told with platform_experiment.goal, started again where its machine was released. An open or running one tells its coordinator with platform_experiment.goal, which brings the description in line. Only a person's credential changes the goal. While the experiment is open every other field of the body can change, `metrics` among them, so a mis-specified ranking metric is fixed in place. Once it runs only `name`, `description`, `duration_hours`, `max_agents`, `researchers` and the baseline (`baseline_job_id` with `baseline_reason`) do, because admission and the stage ladder have acted on the rest. A max_agents of a running one changes the places nobody took: a researcher added in one is given an even part, with the researchers at work, of what all researchers left unspent, and a max_agents raised so far that the hours its researchers left unspent, split over max_agents, would not hold one trial of the baseline each (the job again at job_estimated_duration_hours) is 422 budget_below_baseline. A duration_hours of a running one moves the end of its run, still counted from its start, and one that ends it before now is 422 invalid_length. A new description or duration_hours reaches every agent of it as platform_experiment.description. A draft's plan comes from its planner and is edited in the accept, and a closed one changes nothing: 409 not_editable. The experiment as patched is checked like a create and refused with the same 422: invalid_experiment (an empty name or description among them), invalid_metrics, invalid_cost, invalid_agents, invalid_length, A max_agents lowered below the researchers (agents of role competitor) at work of a running one cuts the newest of them, the count a join is held to: each winds down as a cut researcher does, told by agent.cut with detail max_agents_lowered, and nobody is added in its place; researchers the body does not state are lowered to it from the last entry. Before the run starts 409 max_agents_below_researchers refuses one under the researchers signed up, which the message gives. 409 researchers_below_at_work for researchers that want fewer of an agent type and model than are at work. researchers above max_agents in all is 422 invalid_agents. run_too_long for a duration_hours over the platform's quota.max_platform_experiment_days. A starts_at in the body moves baseline_due_at with it, a starts_at past being now. `baseline_job_id` declares the baseline while the experiment is open, and nothing else is needed in the body. The platform makes this declaration itself, by the same check, when an agent of role baseline finishes naming the job (baseline_job_id of its finish) or, naming none, the baseline agents that finished left exactly one COMPLETED job that reports the ranking metric, and again in the patch that clears what that declaration was refused for (a raised budget_accelerator_hours): a caller declares only where a choice is needed, between several jobs or after a redo. The platform writes what it holds of the job into the description, a block that begins `MEASURED BASELINE (written by the platform from the declared job)` and states job, code_ref, env (the job's settings, when it has any) and measured (the last value the job reported on each metric but the references), then a line for each value a COMPLETED job reported on a reference, its job and whether that job met the constraints (only one that did counts), and the references no completed job reported, as not measured, and keeps that block through every later patch of the description. With a researcher joined and no starts_at ahead the run starts in this same request and the answer reads running; otherwise it starts with the request that adds the researcher, or at starts_at. The start closes signup and gives each agent present, those of role baseline apart, its share of the first stage's part of the budget, less what measuring the baseline spent. The start also settles `stages`: a boundary cuts nobody from fewer than 5 researchers (role competitor), so a run started with fewer has one stage of its whole length, with the last declared stage's max_job_hours, and each researcher holds its whole share from the start. With 5 or more the ladder is as declared. status_reason in the answer says what an open experiment still waits for: no_researchers until one joined, budget_spent when the baseline left nothing to share. The job is read from the platform's own records and the declaration refused with 422: no_baseline (no job of an agent of role baseline of this platform experiment), baseline_not_completed, baseline_not_on_branch (the job ran a branch other than the baseline branch), baseline_without_finding, baseline_missing_metric (a declared metric the job never reported, a reference apart: one left out is listed in the block as not measured), baseline_breaks_constraint (the job's value does not hold a constraint's bound), budget_below_baseline (the budget does not hold one trial for each of max_agents: the job again at job_estimated_duration_hours). Stored, the experiment answers baseline_job_id and job_estimated_duration_hours, one and a half times the hours the job was observed running, which is the estimated_duration_hours of every later job that states none. An open experiment that has a baseline is held to it by every later patch, with the same refusals, so its metrics and budget cannot leave the baseline behind. While it runs, `baseline_job_id` with `baseline_reason` raises the baseline to a stronger COMPLETED job of the experiment that ran the baseline's commit unchanged (its code_ref equals the current baseline's, only its arguments or environment differ) and so measured the control in a better configuration it already has, with baseline_reason saying which configuration, whoever ran it on whichever branch. A job of any other commit is refused with 422 baseline_code_differs, naming the commit it ran and the baseline's. The job is held to the same checks as a declaration, but for the agent's role and the branch: baseline_not_completed, baseline_without_finding, baseline_missing_metric, baseline_breaks_constraint, and baseline_environment_differs or baseline_not_in_environment when it did not run in the environment the head of the baseline branch declares (a job of another branch whose commit declares the same file ran in it), with no_baseline for a job that is not the experiment's, and 422 baseline_not_stronger when it is not strictly better than the baseline on the first ranking metric. 422 baseline_reason_required without a reason, baseline_job_required for a reason with no job, baseline_unchanged for the baseline itself, and 409 baseline_not_running for a baseline_reason on an experiment that is not running (while it is open the baseline agent's job is declared; a closed one changes nothing). A raise rewrites the measured baseline block of the description from the new job, keeps job_estimated_duration_hours, and is recorded in baseline_raises (from, to, reason, who, when), in the record of the close and as platform_experiment.baseline to every agent, whose detail says the values before and after. Standings in results are set against the new baseline from then on, and a verdict already given against the old one stays as recorded. 422 invalid_experiment for a report_interval_seconds of 0 or less. A change of budget_accelerator_hours writes the quota of every agent of role baseline again, as half the budget. A coordinator's token changes `description`, `baseline_job_id` and `baseline_reason` only: a body that carries any other field answers 403 coordinator_changes_description_only. Its owner raises max_agents, and the coordinator then adds researchers in the places that gives; researchers, which the platform keeps where it runs them, are its owner's to change too. The project, the repository, the agent image, the stages and the default quota tier are fixed at creation and are no fields of this body.
+         * @description Takes only the fields that change; a field left out keeps its value, and a body with none answers 422 nothing_to_change. editable on GET /platform-experiments/{id} lists the fields the caller may change now, and a body that carries another answers 409 not_editable and names it. `goal`, what the owner asked, changes until the experiment closes, on one made from a sentence, and alone: a body that carries another field beside it is 422 goal_alone, one empty or over 2000 bytes 422 invalid_goal, and the goal it has 422 nothing_to_change. A draft is then planned again from it: the proposal or decline stays readable, proposed_at, declined_at and accepts_at are cleared so nothing is accepted by itself, status_reason reads revising, planning_ends_at is the planning limit from now, and the planner is told with platform_experiment.goal, started again where its machine was released. An open or running one tells its coordinator with platform_experiment.goal, which brings the description in line. Only a person's credential changes the goal. While the experiment is open every other field of the body can change, `metrics` among them, so a mis-specified ranking metric is fixed in place. Once it runs only `name`, `description`, `duration_hours`, `max_agents`, `researchers` and the baseline (`baseline_job_id` with `baseline_reason`) do, because admission and the stage ladder have acted on the rest. A max_agents of a running one changes the places nobody took: a researcher added in one is given an even part, with the researchers at work, of what all researchers left unspent, and a max_agents raised so far that the hours its researchers left unspent, split over max_agents, would not hold one trial of the baseline each (the job again at job_estimated_duration_hours) is 422 budget_below_baseline. A duration_hours of a running one moves the end of its run, still counted from its start, and one that ends it before now is 422 invalid_length. A new description or duration_hours reaches every agent of it as platform_experiment.description. A draft's plan comes from its planner and is edited in the accept, and a closed one changes nothing: 409 not_editable. The experiment as patched is checked like a create and refused with the same 422: invalid_experiment (an empty name or description among them), invalid_metrics, invalid_cost, invalid_agents, invalid_length, A max_agents lowered below the researchers (agents of role competitor) at work of a running one cuts the newest of them, the count a join is held to: each winds down as a cut researcher does, told by agent.cut with detail max_agents_lowered, and nobody is added in its place; researchers the body does not state are lowered to it from the last entry. Before the run starts 409 max_agents_below_researchers refuses one under the researchers signed up, which the message gives. 409 researchers_below_at_work for researchers that want fewer of an agent type and model than are at work. researchers above max_agents in all is 422 invalid_agents. run_too_long for a duration_hours over the platform's quota.max_platform_experiment_days. A starts_at in the body moves baseline_due_at with it, a starts_at past being now. `baseline_job_id` declares the baseline while the experiment is open, and nothing else is needed in the body. The platform makes this declaration itself, by the same check, when an agent of role baseline finishes naming the job (baseline_job_id of its finish) or, naming none, the baseline agents that finished left exactly one COMPLETED job that reports the ranking metric, and again in the patch that clears what that declaration was refused for (a raised budget_accelerator_hours): a caller declares only where a choice is needed, between several jobs or after a redo. The platform writes what it holds of the job into the description, a block that begins `MEASURED BASELINE (written by the platform from the declared job)` and states job, code_ref, env (the job's settings, when it has any) and measured (the last value the job reported on each metric but the references), then a line for each value a COMPLETED job reported on a reference, its job and whether that job met the constraints (only one that did counts), and the references no completed job reported, as not measured, and keeps that block through every later patch of the description. With a researcher joined and no starts_at ahead the run starts in this same request and the answer reads running; otherwise it starts with the request that adds the researcher, or at starts_at. The start closes signup and gives each agent present, those of role baseline apart, its share of the first stage's part of the budget, less what measuring the baseline spent. The start also settles `stages`: a boundary cuts nobody from fewer than 5 researchers (role competitor), so a run started with fewer has one stage of its whole length, with the last declared stage's max_job_hours, and each researcher holds its whole share from the start. With 5 or more the ladder is as declared. status_reason in the answer says what an open experiment still waits for: no_researchers until one joined, budget_spent when the baseline left nothing to share. The job is read from the platform's own records and the declaration refused with 422: no_baseline (no job of an agent of role baseline of this platform experiment), baseline_not_completed, baseline_not_on_branch (the job ran a branch other than the baseline branch), baseline_without_finding, baseline_missing_metric (a declared metric the job never reported, a reference apart: one left out is listed in the block as not measured), baseline_breaks_constraint (the job's value does not hold a constraint's bound), budget_below_baseline (the budget does not hold one trial for each of max_agents: the job again at job_estimated_duration_hours). Stored, the experiment answers baseline_job_id and job_estimated_duration_hours, one and a half times the hours the job was observed running, which is the estimated_duration_hours of every later job that states none. An open experiment that has a baseline is held to it by every later patch, with the same refusals, so its metrics and budget cannot leave the baseline behind. While it runs, `baseline_job_id` with `baseline_reason` raises the baseline to a stronger COMPLETED job of the experiment that ran the baseline's commit unchanged (its code_ref equals the current baseline's, only its arguments or environment differ) and so measured the control in a better configuration it already has, with baseline_reason saying which configuration, whoever ran it on whichever branch. A job of any other commit is refused with 422 baseline_code_differs, naming the commit it ran and the baseline's. The job is held to the same checks as a declaration, but for the agent's role and the branch: baseline_not_completed, baseline_without_finding, baseline_missing_metric, and baseline_breaks_constraint, with no_baseline for a job that is not the experiment's, and 422 baseline_not_stronger when it is not strictly better than the baseline on the first ranking metric. 422 baseline_reason_required without a reason, baseline_job_required for a reason with no job, baseline_unchanged for the baseline itself, and 409 baseline_not_running for a baseline_reason on an experiment that is not running (while it is open the baseline agent's job is declared; a closed one changes nothing). A raise rewrites the measured baseline block of the description from the new job, keeps job_estimated_duration_hours, and is recorded in baseline_raises (from, to, reason, who, when), in the record of the close and as platform_experiment.baseline to every agent, whose detail says the values before and after. Standings in results are set against the new baseline from then on, and a verdict already given against the old one stays as recorded. 422 invalid_experiment for a report_interval_seconds of 0 or less. A change of budget_accelerator_hours writes the quota of every agent of role baseline again, as half the budget. A coordinator's token changes `description`, `baseline_job_id` and `baseline_reason` only: a body that carries any other field answers 403 coordinator_changes_description_only. Its owner raises max_agents, and the coordinator then adds researchers in the places that gives; researchers, which the platform keeps where it runs them, are its owner's to change too. The project, the repository, the agent image, the stages and the default quota tier are fixed at creation and are no fields of this body.
          */
         patch: operations["update-platform-experiment"];
         trace?: never;
@@ -1248,7 +1204,7 @@ export interface paths {
         put?: never;
         /**
          * Accept a draft's proposal
-         * @description Makes a proposed draft an open platform experiment in one write: its name, description, metrics, report interval, stages and policies are the proposal's; its budget, its length, the minutes its baseline has and its researchers are the ones this body states, whatever the proposal proposed, because an agent wrote the proposal. name, when the body states one, replaces the proposal's name and nothing else of it (422 invalid_experiment for one that is no name). answers holds one answer for each of the proposal's questions, in their order, as the person confirmed or changed it: each question and its answer are added to the end of the description, a line each, so every agent reads the decisions as made. 422 invalid_answers when it does not hold one non-empty answer for each question. proposal stays on the platform experiment as it was proposed, for anyone who reads it, beside accepted_at, accepted_by (absent when the platform accepted it by itself) and accepted_answers. The budget caps everything the platform experiment spends, the baseline included: what measuring it cost is taken from the budget, the rest is shared among the researchers, and an agent's burst hours run on idle capacity and come out of its share, never on top of it. The platform hosts its coordinator, each researcher and one agent of role baseline, named by its role, which the proposal signed up so that its machine starts while the proposal is read, and which is created here for a proposal that signed none up. The coordinator's machine is asked for once the plan is accepted and the experiment is open, so it supervises the baseline and can change the lineup before the start, and is kept until the experiment closes. starts_at is now and it is open until baseline_due_at, baseline_minutes from now, and one not running by then is closed with close_reason baseline_limit_reached. The run lasts duration_hours from the moment it starts, and measuring the baseline takes nothing from it. Nothing has run yet: the baseline agent measures the baseline, the platform declares the job it leaves when it finishes and starts the run, and no researcher's machine is started before. Where that agent leaves no job, or several, the coordinator adds another or declares one (PATCH /platform-experiments/{id}, baseline_job_id), and status_reason says so. The platform makes the same accept by itself at accepts_at, at the proposal's own budget, length, baseline_minutes and researchers, for the person who created the draft, unless a person accepted, held or closed it or changed its goal first; one the check refuses then waits for a person. A proposal with questions has no accepts_at and waits for a person to answer them. 409 invalid_transition for anything but a draft with a proposal, which a change of its goal takes back until its planner answers again; 422 with the proposal's reasons when the stated cost, baseline_minutes or agents do not pass its check, accelerator_unreachable among them when the proposal's accelerator_type is on no cluster the org's jobs can be placed on now, and no_cluster_for_image when none that has it runs the proposal's image any more; 503 agentsandbox_not_configured when nothing could run it. A draft's own planner cannot accept it.
+         * @description Makes a proposed draft an open platform experiment in one write: its name, description, metrics, report interval, stages and policies are the proposal's; its budget, its length, the minutes its baseline has and its researchers are the ones this body states, whatever the proposal proposed, because an agent wrote the proposal. name, when the body states one, replaces the proposal's name and nothing else of it (422 invalid_experiment for one that is no name). answers holds one answer for each of the proposal's questions, in their order, as the person confirmed or changed it: each question and its answer are added to the end of the description, a line each, so every agent reads the decisions as made. 422 invalid_answers when it does not hold one non-empty answer for each question. proposal stays on the platform experiment as it was proposed, for anyone who reads it, beside accepted_at, accepted_by (absent when the platform accepted it by itself) and accepted_answers. The budget caps everything the platform experiment spends, the baseline included: what measuring it cost is taken from the budget, the rest is shared among the researchers, and an agent's burst hours run on idle capacity and come out of its share, never on top of it. The platform hosts its coordinator, each researcher and one agent of role baseline, named by its role, which the proposal signed up so that its machine starts while the proposal is read, and which is created here for a proposal that signed none up. The coordinator's machine is asked for once the plan is accepted and the experiment is open, so it supervises the baseline and can change the lineup before the start, and is kept until the experiment closes. starts_at is now and it is open until baseline_due_at, baseline_minutes from now, and one not running by then is closed with close_reason baseline_limit_reached. The run lasts duration_hours from the moment it starts, and measuring the baseline takes nothing from it. Nothing has run yet: the baseline agent measures the baseline, the platform declares the job it leaves when it finishes and starts the run, and no researcher's machine is started before. Where that agent leaves no job, or several, the coordinator adds another or declares one (PATCH /platform-experiments/{id}, baseline_job_id), and status_reason says so. The platform makes the same accept by itself at accepts_at, at the proposal's own budget, length, baseline_minutes and researchers, for the person who created the draft, unless a person accepted, held or closed it or changed its goal first; one the check refuses then waits for a person. A proposal with questions has no accepts_at and waits for a person to answer them. 409 invalid_transition for anything but a draft with a proposal, which a change of its goal takes back until its planner answers again; 422 with the proposal's reasons when the stated cost, baseline_minutes or agents do not pass its check, accelerator_unreachable among them when the proposal's accelerator_type is on no cluster the org's jobs can be placed on now; 503 agentsandbox_not_configured when nothing could run it. A draft's own planner cannot accept it.
          */
         post: operations["accept-draft"];
         delete?: never;
@@ -1549,6 +1505,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/platform-experiments/{id}/image": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Record the image the platform experiment's jobs run in
+         * @description image is any image a node pulls: a public one, or one pushed to this platform experiment's repository (POST /platform-experiments/{id}/registry-credentials). The platform asks its registry which image the reference names and records it by digest, with the architecture it runs on: architecture, or the one the image runs on when that is one; 422 image_architecture names them when it runs on several. Every job submitted from then on runs in it, on nodes of that architecture, and records the digest; a job submitted before keeps its own. It needs sh and git: each job's commit is fetched into /workspace/code at start and its command runs there. Recorded while the platform experiment is open or running. 422 image_unresolved when the registry does not answer for it, image_of_another_org for one in another org's repository.
+         */
+        put: operations["set-platform-experiment-image"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/platform-experiments/{id}/messages": {
         parameters: {
             query?: never;
@@ -1623,7 +1599,7 @@ export interface paths {
         get?: never;
         /**
          * Propose the platform experiment a draft becomes
-         * @description Written by a draft's planner and by nobody else, while the platform experiment is a draft (409 not_a_draft after). experiment is the experiment as its file would state it; budget_accelerator_hours, duration_hours, baseline_minutes and agents are proposed, and the person who accepts states them. A proposal defines the experiment and runs nothing: its description states the objective and the measure and nothing measured yet, its numbers are estimates, and the baseline is measured once it is accepted, before any researcher starts, by the baseline agent the proposal signs up, whose machine starts with it. The proposal is checked before it is stored, its experiment and its cost by the rules of POST /platform-experiments, and refused with 422 and a reason the planner can act on: invalid_experiment, invalid_metrics, invalid_stages, invalid_cost, invalid_agents, invalid_length, run_too_long (duration_hours over the platform's quota.max_platform_experiment_days), invalid_baseline_minutes (under planning.min_baseline_minutes, or over planning.baseline_limit_minutes), missing_explanation, too_long, accelerator_unreachable for an accelerator_type no cluster this org's jobs can be placed on has now, naming every type that is, and for image the two refusals a job submit gives: unknown_job_image for one that is neither a job image the platform offers nor a whole registry address, and no_cluster_for_image for one no cluster that has the type runs. Stored, it replaces the one before, marks the draft proposed (proposed_at), is told as platform_experiment.proposal proposed, and the planner's machine is released: GET /platform-experiments/{id} shows the proposal, and the platform accepts it as proposed at accepts_at (planning.auto_accept_seconds from now) unless a person accepts it sooner, holds it, changes its goal or closes it. A proposal with questions, or one made with no auto-accept configured, has no accepts_at and waits for a person to accept it, and its baseline agent's machine starts with the accept. goal_version is the draft's goal_version the proposal was planned from: 409 goal_changed once the draft has another goal, so a proposal for a goal the person changed is never stored nor accepted by itself. A refusal lists every problem the check found, each in problems with its reason and message, the first also as the refusal's own reason. With check=true the proposal is checked exactly so and nothing is stored: 422 with every problem, or 200 with the draft as it stands, so a planner tries variants with check and proposes only the one it means.
+         * @description Written by a draft's planner and by nobody else, while the platform experiment is a draft (409 not_a_draft after). experiment is the experiment as its file would state it; budget_accelerator_hours, duration_hours, baseline_minutes and agents are proposed, and the person who accepts states them. A proposal defines the experiment and runs nothing: its description states the objective and the measure and nothing measured yet, its numbers are estimates, and the baseline is measured once it is accepted, before any researcher starts, by the baseline agent the proposal signs up, whose machine starts with it. The proposal is checked before it is stored, its experiment and its cost by the rules of POST /platform-experiments, and refused with 422 and a reason the planner can act on: invalid_experiment, invalid_metrics, invalid_stages, invalid_cost, invalid_agents, invalid_length, run_too_long (duration_hours over the platform's quota.max_platform_experiment_days), invalid_baseline_minutes (under planning.min_baseline_minutes, or over planning.baseline_limit_minutes), missing_explanation, too_long, accelerator_unreachable for an accelerator_type no cluster this org's jobs can be placed on has now, naming every type that is. Stored, it replaces the one before, marks the draft proposed (proposed_at), is told as platform_experiment.proposal proposed, and the planner's machine is released: GET /platform-experiments/{id} shows the proposal, and the platform accepts it as proposed at accepts_at (planning.auto_accept_seconds from now) unless a person accepts it sooner, holds it, changes its goal or closes it. A proposal with questions, or one made with no auto-accept configured, has no accepts_at and waits for a person to accept it, and its baseline agent's machine starts with the accept. goal_version is the draft's goal_version the proposal was planned from: 409 goal_changed once the draft has another goal, so a proposal for a goal the person changed is never stored nor accepted by itself. A refusal lists every problem the check found, each in problems with its reason and message, the first also as the refusal's own reason. With check=true the proposal is checked exactly so and nothing is stored: 422 with every problem, or 200 with the draft as it stands, so a planner tries variants with check and proposes only the one it means.
          */
         put: operations["put-proposal"];
         post?: never;
@@ -1667,6 +1643,26 @@ export interface paths {
         get: operations["get-agent-quota"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/platform-experiments/{id}/registry-credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get a login that pushes the platform experiment's images
+         * @description A short-lived login to registry that pushes to and pulls from the repository of the platform experiment's org, good until expires_at, at least 25 minutes. Tag an image <repository>:<short commit>-<label>, push it there directly and record it with PUT /platform-experiments/{id}/image. Nothing of the image passes through the platform. 409 no_registry on a deployment that keeps none. `hl image credentials` prints it as environment variables.
+         */
+        post: operations["get-registry-credentials"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2040,7 +2036,6 @@ export interface components {
             acch_per_hour?: number;
             /** Format: int64 */
             available: number;
-            job_images?: string[];
             kind: components["schemas"]["TypeKind"];
             /** Format: int64 */
             per_node_available: number;
@@ -2515,7 +2510,7 @@ export interface components {
             /** Format: int64 */
             id: number;
             /** @enum {string} */
-            kind: "experiment.status" | "experiment.blocked" | "quota.changed" | "stage.boundary" | "agent.cut" | "agent.finished" | "agent.replaced" | "agent.idle" | "agent.instructions" | "capacity.idle" | "agent.message" | "agent.activity" | "hypothesis.new" | "hypothesis.status" | "hypothesis.link" | "finding.new" | "comment.new" | "platform_experiment.status" | "platform_experiment.description" | "platform_experiment.goal" | "platform_experiment.proposal" | "platform_experiment.plan" | "platform_experiment.baseline" | "platform_experiment.removed" | "job.held" | "job.duplicate" | "job.underperforming" | "environment.status";
+            kind: "experiment.status" | "experiment.blocked" | "quota.changed" | "stage.boundary" | "agent.cut" | "agent.finished" | "agent.replaced" | "agent.idle" | "agent.instructions" | "capacity.idle" | "agent.message" | "agent.activity" | "hypothesis.new" | "hypothesis.status" | "hypothesis.link" | "finding.new" | "comment.new" | "platform_experiment.status" | "platform_experiment.description" | "platform_experiment.goal" | "platform_experiment.proposal" | "platform_experiment.plan" | "platform_experiment.baseline" | "platform_experiment.removed" | "job.held" | "job.duplicate" | "job.underperforming";
             /** Format: date-time */
             occurred_at: string;
             platform_experiment_id: string;
@@ -2549,9 +2544,9 @@ export interface components {
         ClusterAction: "enable" | "edit" | "remove" | "share";
         ClusterCapacity: {
             accelerators: components["schemas"]["AcceleratorCapacity"][];
+            /** @description The architectures of the cluster's nodes (amd64, arm64). A job runs only on nodes of its platform experiment's image's architecture. */
+            architectures?: string[];
             cluster_name: string;
-            job_image?: string;
-            job_image_carries?: string;
             /** @description On a cluster that rents on demand: why it has no machine to rent now for some of its slots, as its runtime words it, such as which of the provider filters leave out every offer of a shape. A job that needs such a slot waits until one comes on offer. */
             no_offer?: string[];
             on_demand?: boolean;
@@ -2790,32 +2785,6 @@ export interface components {
             /** @description owner/name on GitHub, or a name under the root of a plain git host. */
             repository: string;
         };
-        EnvironmentAnswer: {
-            /** @description The image it is built on. */
-            base: string;
-            /** @description Once failed: file, an instruction of the file failed, or platform. */
-            fault?: string;
-            /** @description Once ready, the image its jobs run in. */
-            image?: string;
-            /** @description The environment, as environment_key of every job of the commit that names the image. */
-            key: string;
-            /** @description Once loaded, the cluster that runs its jobs before the push ends. */
-            loaded_cluster?: string;
-            /** @description Once loaded, the node of loaded_cluster that holds it. */
-            loaded_node?: string;
-            /** @description Where the build is, in a sentence, and once the file failed the end of its output. */
-            message: string;
-            /** @description building; loaded, built and held on a node of loaded_cluster while it is pushed, so a job that fits there runs there now and any other once the push ends; ready, pushed, so a job runs in it on any cluster; or failed. */
-            state: string;
-        };
-        EnvironmentRequest: {
-            /** @description The commit whose .hypothesisloop/Dockerfile is built: the platform experiment's repository_url@<40-character sha>, as metadata.code_ref of a job. */
-            code_ref: string;
-            /** @description The image it is built on: job.image of the job that is to run in it, a job image name or a whole address. */
-            image: string;
-            /** @description The platform experiment whose repository holds the commit. Absent with an agent's token, it is that agent's. */
-            platform_experiment_id?: string;
-        };
         ErrorModel: {
             /** @description What was refused, or what failed, in a sentence. */
             message: string;
@@ -2852,8 +2821,6 @@ export interface components {
             /** Format: date-time */
             created_at: string;
             data_ref: string;
-            /** @description The environment the job's commit declares in .hypothesisloop/Dockerfile, built on job.image. The job waits (environment_building) until it is built and runs in it. Absent when the commit declares none. */
-            environment_key?: string;
             /** Format: double */
             estimated_cost_acch: number;
             /** Format: double */
@@ -2865,6 +2832,8 @@ export interface components {
             /** @description The hypothesis the job tests. Absent on a baseline agent's job, which tests none: see objective. */
             hypothesis_id?: string;
             id: string;
+            /** @description The image the job runs in, repository@digest: the image its platform experiment recorded when it was submitted (PUT /platform-experiments/{id}/image). */
+            image: string;
             /** Format: int64 */
             infra_requeue_count: number;
             /** @description Why the platform last requeued the job for a fault of its own, as code or code: detail, kept while its next attempts are queued and run: stuck_pending: admitted and not running within 5m0s, its runtime reporting create_failed: and what the cluster refused. Absent on a job never requeued so. */
@@ -2973,6 +2942,14 @@ export interface components {
             /** @description Optional: the researchers it is to have at work, an entry each agent type and model, [{agent_type, model, hyperparameters, count}], at most max_agents in all. A model left out is the platform's default, which the answer shows. 422 invalid_agents for a count below 1, an agent type that is none, a model no agent can be started on, two entries of one agent type and model, or more than max_agents in all. With coordinator_in_agentsandbox the platform creates them with the platform experiment, runs them and keeps their counts at work while the run goes on. The coordinator may add researchers beyond them, up to max_agents. */
             researchers?: components["schemas"]["ResearcherPoolEntry"][];
             stages?: components["schemas"]["Stage"][];
+        };
+        ExperimentImage: {
+            /** @description The CPU architecture it runs on, as image manifests name it (amd64, arm64). A job runs only on nodes of it. */
+            architecture: string;
+            /** @description The image, repository@digest. Every job submitted from now on runs in it. */
+            image: string;
+            /** Format: date-time */
+            set_at: string;
         };
         ExperimentStats: {
             by_capacity_tier: {
@@ -3183,14 +3160,6 @@ export interface components {
             agent_id: string;
             name: string;
         };
-        ImageCredential: {
-            /** @description The environment image is, absent for a job that declares none. */
-            environment_key?: string;
-            /** @description The image the job runs in: its environment's once it declares one, else job.image. */
-            image: string;
-            /** @description A login to the registry host registry that pulls image, good until expires_at. Absent for a job image, which is pulled anonymously. */
-            login?: components["schemas"]["RegistryLogin"];
-        };
         Implementation: {
             agent_id: string;
             branch: string;
@@ -3301,16 +3270,6 @@ export interface components {
             replicas: number;
             storage?: string;
         };
-        JobImage: {
-            /** @description What is installed in it. */
-            carries: string;
-            /** @description Its whole address, which job.image takes as well and a job that named it is stored with. */
-            image: string;
-            /** @description What the image is called here, which job.image takes. */
-            name: string;
-            /** @description The accelerator types it suits, as prefixes of their names. Absent: every type. */
-            suits?: string[];
-        };
         JobMachine: {
             accelerator_model?: string;
             cpu_model?: string;
@@ -3351,7 +3310,6 @@ export interface components {
             host_mounts?: {
                 [key: string]: string;
             };
-            image?: string;
             /** Format: int64 */
             max_retries?: number;
             memory?: string;
@@ -3586,8 +3544,6 @@ export interface components {
         };
         LiveCapacity: {
             clusters: components["schemas"]["ClusterCapacity"][];
-            /** @description The images the deployment offers a job to run in, each with what it carries. A capacity line names the ones that suit its type. A job names one of these by its name, or any other image by its full registry address, host first: 422 unknown_job_image otherwise, and no_cluster_for_image for one no cluster could run. */
-            job_images: components["schemas"]["JobImage"][];
         };
         Me: {
             key_id?: string;
@@ -3839,7 +3795,7 @@ export interface components {
             agents_due_at?: string;
             /**
              * Format: date-time
-             * @description On an open platform experiment: when the platform closes it, with close_reason baseline_limit_reached, if it is not running by then. starts_at plus the minutes its baseline was given: the ones accepted for a draft, at most planning.baseline_limit_minutes, and that limit for one created whole. It moves out by the time a job of the baseline waits on the platform, for its environment to be built or for its cluster to start it, at most the 90 minutes the platform spends on one build, so that time is not the baseline agent's.
+             * @description On an open platform experiment: when the platform closes it, with close_reason baseline_limit_reached, if it is not running by then. starts_at plus the minutes its baseline was given: the ones accepted for a draft, at most planning.baseline_limit_minutes, and that limit for one created whole. It moves out by the time a job of the baseline waits for its cluster to start it, at most 90 minutes, so that time is not the baseline agent's.
              */
             baseline_due_at?: string;
             /** @description The completed job that measured the baseline. Absent until one is declared with PATCH /platform-experiments/{id}. Raised while the run goes on to a stronger job that measured the control (baseline_raises). */
@@ -3893,7 +3849,7 @@ export interface components {
              * @description When the run ends and the platform closes it: starts_at, the start of the run, plus duration_hours. Absent until the run starts.
              */
             ends_at?: string;
-            /** @description Where the agents, the coordinator and the jobs of the platform experiment clone, fetch and push repository_url: the platform's git proxy, which takes their own platform token as the password and refuses a push to any ref but the pusher's own branches. git config url.<git_url>.insteadOf <repository_url> sends git there. */
+            /** @description Where the agents, the coordinator and the jobs of the platform experiment clone, fetch and push repository_url: the platform's git proxy, which takes their own platform token as an Authorization: Bearer header (git config http.<git_url>.extraHeader) and refuses a push to any ref but the pusher's own branches. git config url.<git_url>.insteadOf <repository_url> sends git there. */
             git_url?: string;
             /** @description What its owner asked, which a draft is planned from. Its owner changes it with PATCH /platform-experiments/{id} until it closes: a draft is planned again from it, and the coordinator of an open or running one brings the description in line with it. Absent on one created whole. */
             goal?: string;
@@ -3903,6 +3859,8 @@ export interface components {
              */
             goal_version?: number;
             id: string;
+            /** @description The image every job submitted from now on runs in, recorded with PUT /platform-experiments/{id}/image (hl image set). Absent until one is: a job is refused (no_experiment_image) until then. */
+            image?: components["schemas"]["ExperimentImage"];
             /**
              * Format: double
              * @description The estimated_duration_hours of a job that states none: one and a half times the hours the baseline job was observed running. Absent without a baseline, and for one too short to be observed alive.
@@ -4113,8 +4071,6 @@ export interface components {
              * @description The goal_version of the draft the proposal was planned from. 409 goal_changed once the draft has another goal: read it and propose for it.
              */
             goal_version: number;
-            /** @description The image the run's jobs name as job.image, checked as a submit checks it: a job image the platform offers, by name, or the whole address of another, which a cluster that has accelerator_type runs. */
-            image: string;
             /** @description How it is measured, in plain words: the harness, the data it never trains on, the repeats. */
             measurement: string;
             /** @description What the run's jobs state as job.memory: a quantity such as 32Gi. Checked as a submit checks it. */
@@ -4258,11 +4214,13 @@ export interface components {
             status_changed_at: string | null;
             text: string;
         };
-        RegistryLogin: {
+        RegistryCredential: {
             /** Format: date-time */
             expires_at: string;
             password: string;
             registry: string;
+            /** @description Where this platform experiment's images are pushed: tag an image <repository>:<tag>, as <repository>:<short commit>-<label>. */
+            repository: string;
             username: string;
         };
         ReopenRequest: {
@@ -4367,6 +4325,12 @@ export interface components {
             coordinator?: boolean;
             /** @description What the agent is told, at most 1500 bytes. */
             text: string;
+        };
+        SetImageRequest: {
+            /** @description The architecture its jobs run on, one the image runs on. Needed only for an image that runs on several. */
+            architecture?: string;
+            /** @description The image, by tag or digest, registry host first for one not on Docker Hub. */
+            image: string;
         };
         /** @enum {string} */
         SignupAction: "message" | "remove" | "show_token";
@@ -4832,8 +4796,6 @@ export type EditHypothesisRequest = components['schemas']['EditHypothesisRequest
 export type EditedAgentType = components['schemas']['EditedAgentType'];
 export type EndedStatus = components['schemas']['EndedStatus'];
 export type EnsureRepositoryRequest = components['schemas']['EnsureRepositoryRequest'];
-export type EnvironmentAnswer = components['schemas']['EnvironmentAnswer'];
-export type EnvironmentRequest = components['schemas']['EnvironmentRequest'];
 export type ErrorModel = components['schemas']['ErrorModel'];
 export type EventKindDoc = components['schemas']['EventKindDoc'];
 export type Experiment = components['schemas']['Experiment'];
@@ -4841,6 +4803,7 @@ export type ExperimentAction = components['schemas']['ExperimentAction'];
 export type ExperimentDraft = components['schemas']['ExperimentDraft'];
 export type ExperimentDraftRequest = components['schemas']['ExperimentDraftRequest'];
 export type ExperimentFile = components['schemas']['ExperimentFile'];
+export type ExperimentImage = components['schemas']['ExperimentImage'];
 export type ExperimentStats = components['schemas']['ExperimentStats'];
 export type ExperimentStatus = components['schemas']['ExperimentStatus'];
 export type FinishAgentRequest = components['schemas']['FinishAgentRequest'];
@@ -4861,7 +4824,6 @@ export type HypothesisStats = components['schemas']['HypothesisStats'];
 export type HypothesisStatus = components['schemas']['HypothesisStatus'];
 export type HypothesisWithJobs = components['schemas']['HypothesisWithJobs'];
 export type HypothesisWorker = components['schemas']['HypothesisWorker'];
-export type ImageCredential = components['schemas']['ImageCredential'];
 export type Implementation = components['schemas']['Implementation'];
 export type InFlight = components['schemas']['InFlight'];
 export type InstallFinished = components['schemas']['InstallFinished'];
@@ -4871,7 +4833,6 @@ export type Instructions = components['schemas']['Instructions'];
 export type JobCost = components['schemas']['JobCost'];
 export type JobCounts = components['schemas']['JobCounts'];
 export type JobGroup = components['schemas']['JobGroup'];
-export type JobImage = components['schemas']['JobImage'];
 export type JobMachine = components['schemas']['JobMachine'];
 export type JobMetric = components['schemas']['JobMetric'];
 export type JobSpec = components['schemas']['JobSpec'];
@@ -4938,7 +4899,7 @@ export type RegisterAgentRequest = components['schemas']['RegisterAgentRequest']
 export type RegisterHypothesisRequest = components['schemas']['RegisterHypothesisRequest'];
 export type RegisteredCluster = components['schemas']['RegisteredCluster'];
 export type RegisteredHypothesis = components['schemas']['RegisteredHypothesis'];
-export type RegistryLogin = components['schemas']['RegistryLogin'];
+export type RegistryCredential = components['schemas']['RegistryCredential'];
 export type ReopenRequest = components['schemas']['ReopenRequest'];
 export type Repository = components['schemas']['Repository'];
 export type RepositoryCheck = components['schemas']['RepositoryCheck'];
@@ -4951,6 +4912,7 @@ export type RunBest = components['schemas']['RunBest'];
 export type RunHealth = components['schemas']['RunHealth'];
 export type RunSummaryRequest = components['schemas']['RunSummaryRequest'];
 export type SendMessageRequest = components['schemas']['SendMessageRequest'];
+export type SetImageRequest = components['schemas']['SetImageRequest'];
 export type SignupAction = components['schemas']['SignupAction'];
 export type SignupReply = components['schemas']['SignupReply'];
 export type SignupRole = components['schemas']['SignupRole'];
@@ -5143,75 +5105,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["APIKey"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "get-environment": {
-        parameters: {
-            query: {
-                /** @description The platform experiment whose repository holds the commit. Absent with an agent's token, it is that agent's. */
-                platform_experiment_id?: string;
-                /** @description The commit, as code_ref of POST /environments. */
-                code_ref: string;
-                /** @description The image it is built on, as image of POST /environments. */
-                image: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvironmentAnswer"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "build-environment": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EnvironmentRequest"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvironmentAnswer"];
                 };
             };
             /** @description Error */
@@ -5466,37 +5359,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Object"][];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "create-job-image-credential": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ImageCredential"];
                 };
             };
             /** @description Error */
@@ -8199,6 +8061,41 @@ export interface operations {
             };
         };
     };
+    "set-platform-experiment-image": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetImageRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExperimentImage"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "list-platform-experiment-messages": {
         parameters: {
             query?: {
@@ -8425,6 +8322,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentQuotaView"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "get-registry-credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegistryCredential"];
                 };
             };
             /** @description Error */
@@ -9084,7 +9012,7 @@ export const agentTypeActionValues: ReadonlyArray<FlattenedDeepRequired<componen
 export const agentTypeChangeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["AgentTypeChange"]> = ["create", "edit", "rename", "describe", "archive", "restore"];
 export const agentTypeSettingsEffortValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["AgentTypeSettings"]["effort"]> = ["low", "medium", "high", "xhigh", "max"];
 export const capacityTierValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CapacityTier"]> = ["guaranteed", "burst"];
-export const changeKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Change"]["kind"]> = ["experiment.status", "experiment.blocked", "quota.changed", "stage.boundary", "agent.cut", "agent.finished", "agent.replaced", "agent.idle", "agent.instructions", "capacity.idle", "agent.message", "agent.activity", "hypothesis.new", "hypothesis.status", "hypothesis.link", "finding.new", "comment.new", "platform_experiment.status", "platform_experiment.description", "platform_experiment.goal", "platform_experiment.proposal", "platform_experiment.plan", "platform_experiment.baseline", "platform_experiment.removed", "job.held", "job.duplicate", "job.underperforming", "environment.status"];
+export const changeKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Change"]["kind"]> = ["experiment.status", "experiment.blocked", "quota.changed", "stage.boundary", "agent.cut", "agent.finished", "agent.replaced", "agent.idle", "agent.instructions", "capacity.idle", "agent.message", "agent.activity", "hypothesis.new", "hypothesis.status", "hypothesis.link", "finding.new", "comment.new", "platform_experiment.status", "platform_experiment.description", "platform_experiment.goal", "platform_experiment.proposal", "platform_experiment.plan", "platform_experiment.baseline", "platform_experiment.removed", "job.held", "job.duplicate", "job.underperforming"];
 export const closeReasonValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CloseReason"]> = ["end_time_reached", "closed_by_request", "planning_limit_reached", "proposal_expired", "baseline_limit_reached", "agents_not_started", "planner_stopped", "repository_not_created"];
 export const clusterActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ClusterAction"]> = ["enable", "edit", "remove", "share"];
 export const endedStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["EndedStatus"]> = ["COMPLETED", "FAILED", "EVICTED", "REJECTED", "CANCELLED"];

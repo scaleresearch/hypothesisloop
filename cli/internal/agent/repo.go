@@ -132,16 +132,13 @@ DIR; any other agent gets it with the baseline's commit (hl hypothesis checkout 
 }
 
 // declaredExperiment is what a clone's files are held to: the platform experiment's name and
-// metrics, and the image of the proposal it was accepted from, when it has one.
+// metrics.
 type declaredExperiment struct {
 	ID      string                            `json:"id"`
 	Name    string                            `json:"name"`
 	Metrics []experimentspec.MetricDefinition `json:"metrics"`
 	// Continues is the run this one carries on, whose files a clone of its baseline holds.
 	Continues string `json:"continues"`
-	Proposal  struct {
-		Image string `json:"image"`
-	} `json:"proposal"`
 }
 
 // notOf is how file differs from experiment in what names an experiment, its name and its
@@ -232,7 +229,7 @@ func notReady(clone iofs.FS, experiment declaredExperiment, missing string) ([]s
 	}{
 		{"readme", experimentspec.Readme, nil},
 		{"experiment", experimentspec.ExperimentFile, func(data []byte) string { return experimentGap(data, experiment) }},
-		{"job-spec", experimentspec.JobSpec, func(data []byte) string { return jobSpecGap(data, experiment) }},
+		{"job-spec", experimentspec.JobSpec, jobSpecGap},
 	} {
 		data, err := iofs.ReadFile(clone, item.path)
 		var gap string
@@ -272,19 +269,7 @@ func experimentGap(data []byte, experiment declaredExperiment) string {
 	return ""
 }
 
-// imageGap is what a job that names no image is told: the image of the experiment's proposal
-// when it has one, the one source of it.
-func imageGap(job map[string]any, experiment declaredExperiment) string {
-	if image, _ := job["image"].(string); strings.TrimSpace(image) != "" {
-		return ""
-	}
-	if experiment.Proposal.Image == "" {
-		return "states no job.image: every job names the image it runs in, a job_image of hl capacity"
-	}
-	return fmt.Sprintf("states no job.image: every job names the image it runs in, and platform experiment %s was proposed with image: %s", experiment.ID, experiment.Proposal.Image)
-}
-
-func jobSpecGap(data []byte, experiment declaredExperiment) string {
+func jobSpecGap(data []byte) string {
 	var file struct {
 		Metadata struct {
 			Estimate *float64 `yaml:"estimated_duration_hours"`
@@ -300,8 +285,8 @@ func jobSpecGap(data []byte, experiment declaredExperiment) string {
 	if _, set := file.Job["secret_env"]; set {
 		return "sets job.secret_env: a committed file holds no secret, pass --secret-env NAME at submit"
 	}
-	if gap := imageGap(file.Job, experiment); gap != "" {
-		return gap
+	if _, set := file.Job["image"]; set {
+		return "states job.image: every job runs in the image its platform experiment records (hl image show, hl image set)"
 	}
 	if file.Metadata.Estimate != nil {
 		return fmt.Sprintf("states metadata.estimated_duration_hours %g: every job submitted from this file would hold that in place of the estimate the platform measures on the baseline job. Leave it out, and state it for one submit with --estimated-duration-hours", *file.Metadata.Estimate)

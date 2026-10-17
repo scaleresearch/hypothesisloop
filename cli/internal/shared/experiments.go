@@ -75,9 +75,7 @@ no_baseline (JOB is no baseline agent's job here), baseline_not_completed,
 baseline_not_on_branch (JOB ran a branch other than hl/PE/baseline),
 baseline_without_finding (no summary filed), baseline_missing_metric, baseline_breaks_constraint
 and budget_below_baseline (the budget does not hold one trial per researcher at JOB's
-estimate); the last two are the owner's to change. baseline_environment_differs and
-baseline_not_in_environment: JOB did not run in the environment the head of the baseline branch
-declares in .hypothesisloop/Dockerfile.
+estimate); the last two are the owner's to change.
 
 --baseline-job JOB --reason TEXT raises the baseline while the run goes on, to a stronger
 COMPLETED job of the experiment that ran the baseline's code unchanged in a better configuration

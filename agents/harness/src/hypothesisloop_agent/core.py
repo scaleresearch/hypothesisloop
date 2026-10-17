@@ -64,38 +64,19 @@ def own_python() -> None:
     os.environ["PATH"] = os.path.join(venv, "bin") + os.pathsep + os.environ["PATH"]
 
 
-def git_through_platform(repository_url: str, git_url: str) -> None:
+def git_through_platform(repository_url: str, git_url: str, token: str) -> None:
     """Sends every git this process starts, the agent's included, to the platform's git proxy for
     the repository, through the environment and no file: url.<git_url>.insteadOf rewrites the
-    repository's address, and HL_GIT_URL is the one address the image's `hl git-credential`
-    answers, with the agent's own token. The agent holds no credential of the git host, and the
-    proxy refuses a push to any ref but the agent's own branches. The origin a clone records stays
-    repository_url, which a job's code_ref names."""
+    repository's address, and http.<git_url>.extraHeader sends the agent's own token to that
+    address alone. The agent holds no credential of the git host, and the proxy refuses a push to
+    any ref but the agent's own branches. The origin a clone records stays repository_url, which a
+    job's code_ref names."""
     n = int(os.environ.get("GIT_CONFIG_COUNT", "0"))
-    os.environ[f"GIT_CONFIG_KEY_{n}"] = f"url.{git_url}.insteadOf"
-    os.environ[f"GIT_CONFIG_VALUE_{n}"] = repository_url
-    os.environ["GIT_CONFIG_COUNT"] = str(n + 1)
-    os.environ["HL_GIT_URL"] = git_url
-
-
-_staging: list[subprocess.Popen] = []
-_STAGE_TIMEOUT_S = 24 * 3600
-
-
-def start_staging(setup: RunSetup) -> None:
-    """Starts `hl env stage` in the background for an agent with jobs, so that `hl env run` has the
-    image its jobs run in without the agent waiting for it. It waits for an environment still being
-    built or pushed for as long as a session can last, and `hl env run` waits for it in turn and
-    says why when it failed. Its output is in env-stage.log of the state directory.
-    A Fly machine's /dev/fuse is root's alone, and `hl env run` mounts its views of the image
-    through it as a user, which a distribution's default allows."""
-    if not config.submits_jobs(setup.cfg):
-        return
-    if os.path.exists("/dev/fuse"):
-        subprocess.run(["sudo", "chmod", "0666", "/dev/fuse"], check=True)
-    with open(os.path.join(setup.statedir, "env-stage.log"), "ab") as out:
-        _staging.append(subprocess.Popen(["hl", "env", "stage", "--timeout", str(_STAGE_TIMEOUT_S)], stdin=subprocess.DEVNULL, stdout=out,
-                                         stderr=subprocess.STDOUT, cwd=setup.statedir, start_new_session=True))
+    for key, value in ((f"url.{git_url}.insteadOf", repository_url), (f"http.{git_url}.extraHeader", f"Authorization: Bearer {token}")):
+        os.environ[f"GIT_CONFIG_KEY_{n}"] = key
+        os.environ[f"GIT_CONFIG_VALUE_{n}"] = value
+        n += 1
+    os.environ["GIT_CONFIG_COUNT"] = str(n)
 
 
 _CLONE_TIMEOUT_S = 600
@@ -150,7 +131,7 @@ async def prepare() -> RunSetup:
     git_url = platform_experiment.get("git_url")
     if not git_url:
         raise SystemExit(f"agent: platform experiment {cfg.platform_experiment_id} names no git_url, the platform's git proxy its repository is reached through")
-    git_through_platform(repository_url, git_url)
+    git_through_platform(repository_url, git_url, cfg.token)
     branch = platform_experiment.get("branch")
     if not branch:
         raise SystemExit(f"agent: platform experiment {cfg.platform_experiment_id} names no branch, the one an agent clones")

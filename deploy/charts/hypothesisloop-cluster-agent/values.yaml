@@ -36,41 +36,6 @@ nodeAgent:
   # jobs. Empty runs it on every node.
   nodeSelector: {}
 
-builder:
-  # true makes this cluster build the environments of the orgs whose jobs it runs: rootless
-  # BuildKit runs beside the cluster-agent, which drives it over a unix socket in the pod and
-  # reports the cluster as one that builds.
-  enabled: false
-  image: docker.io/moby/buildkit:v0.33.1-rootless@sha256:f8a833b2de9d68e27f0815e4a737abdfaf8a2e4c615650557df11025101557b4
-  # What the builder holds of its node. The cluster reports its capacity without it, so jobs are
-  # never placed on it, and a build has that share when jobs compete with it.
-  requests:
-    cpu: "4"
-    memory: 8Gi
-  # The most memory the daemon and every RUN it runs hold together. A RUN past it is killed and
-  # its build fails as the file's, with the kill in its output; the node's jobs keep theirs.
-  limits:
-    memory: 8Gi
-  # The layer cache, a volume that outlives the pod, so a build again on the same base pulls
-  # nothing again. An empty storageClassName takes the cluster's default class. The daemon prunes
-  # the least recently used layers once the cache holds more than maxUsedGB or its disk has less
-  # than minFreeGB free, never below reservedGB. A local-path volume does not hold the cache to
-  # size, so these are what bound it: maxUsedGB stays under size.
-  cache:
-    size: 100Gi
-    storageClassName: ""
-    reservedGB: 10
-    minFreeGB: 20
-    maxUsedGB: 80
-  # The containerd socket of the node the cluster-agent runs on, as a path on that node (k3s:
-  # /run/k3s/containerd/containerd.sock). Set, each environment built is also loaded into that
-  # node's images, so a job placed there starts without pulling back what was just pushed; a job
-  # on any other node pulls it as before. That socket is root on its node. Empty loads nothing.
-  nodeImages:
-    containerdSocket: ""
-    # The snapshotter the node's kubelet makes containers with, when not containerd's default.
-    snapshotter: ""
-
 images:
   # Registry the agents' images are pulled from, as every node in this cluster reaches it
   # (host[:port][/path]). It holds hypothesisloop-cluster-agent and hypothesisloop-node-agent.

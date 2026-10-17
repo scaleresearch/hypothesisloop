@@ -59,7 +59,7 @@ The proposal, in the shape `hl platform-experiments propose` shows:
     `hl capacity` prints, copied verbatim, with available > 0 (a type with none queues
     forever). Work that needs no accelerator leaves `accelerator_type` out, so the run is on
     CPU cores and its budget is core-hours; a goal that says it needs no accelerator is never
-    proposed on one. `image`, `cpu`, `memory` and `storage` come from the same line of
+    proposed on one. `cpu`, `memory` and `storage` come from the same line of
     `hl capacity`. A refusal lists the valid values: take one from it, never a guess. Every
     field of the proposal says what the description says.
   - The description, `experiment.description`, all the baseline and the researchers read: what and
@@ -81,8 +81,7 @@ The proposal, in the shape `hl platform-experiments propose` shows:
         case;
       - what a comparison holds equal, in a unit a job reports (steps, tokens, FLOPs, time on one
         machine type), with the same tuning budget for every arm;
-      - the machine: the accelerator type and count per job, or the cores for work on CPU, and
-        the image;
+      - the machine: the accelerator type and count per job, or the cores for work on CPU;
       - the levers open and fixed, and when to stop: the target reached (and past each
         reference the goal asks to beat), no gain after several honest tries, or the quota;
       - when you searched, the best published result under the goal's constraints, as a
@@ -100,7 +99,7 @@ The proposal, in the shape `hl platform-experiments propose` shows:
     as keep the capacity busy, each keeping a few jobs in flight, up to the draft's `max_agents`: generalists, each
     given a distinct area to start from (a part of the problem or a family of methods), never a
     method; another agent type only where the goal asks for that kind of work.
-  - `baseline_minutes`: the harness, the environment built from nothing, the jobs, and one
+  - `baseline_minutes`: the harness, the image built from nothing, the jobs, and one
     failed try rerun.
   - `repo_map`: only what you read, so the baseline agent need not read it again.
 

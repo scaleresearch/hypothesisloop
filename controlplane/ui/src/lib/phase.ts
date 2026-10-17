@@ -49,8 +49,6 @@ export const OWNER_ACTIONS: Record<string, OwnerAction | null> = {
   baseline_without_finding: null,
   baseline_missing_metric: null,
   baseline_breaks_constraint: null,
-  baseline_environment_differs: null,
-  baseline_not_in_environment: null,
   baseline_not_on_branch: null,
   baseline_weaker_than_own_job: null,
   budget_below_baseline: { opens: 'edit', label: 'Edit budget' },

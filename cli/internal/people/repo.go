@@ -27,7 +27,8 @@ remote. It holds the files every experiment's repository holds:
 
   .hypothesisloop/experiment.yaml   the experiment spec, with its project_id, repository and branch
   .hypothesisloop/job.yaml          the base job spec, submitted unedited for every trial
-  .hypothesisloop/Dockerfile        system packages and toolchains
+  .hypothesisloop/Dockerfile        the image jobs run in, built FROM a base image (hl image)
+  pyproject.toml, uv.lock           the Python dependencies the image installs with uv
   README.md                         what is measured, how one trial runs, what to vary, what must not change
   metrics.py                        how a job reports a metric: post_metric(fraction_complete, value, "key")
   .gitignore                        bytecode caches, virtual environments and editor files

@@ -107,12 +107,12 @@ def planner(workdir: str) -> str:
     return "\n\n".join([_OPENING.format(workdir=workdir), *sections])
 
 
-# Baseline agents built the environment 9.5 to 14.5 min in, and the control
-# waited for it. The opening says the run waits on the goal and what usually takes longest.
+# The image is what usually takes longest, and the control waits for it. The opening says the
+# run waits on the goal and what to start first.
 _BASELINE_OPENING = (
     "Your goal is the control and each reference measured and your branch ready for researchers, "
     "who wait for it to start. Start what is slowest first, often the "
-    "environment build from the toolchain and dependency pins {source}, and do the rest alongside "
+    "experiment's image from the toolchain and dependency pins {source}, and do the rest alongside "
     "it, with subagents where parallel work is faster.")
 _FROM_MAP = "the planner's map below names"
 _FROM_REPOSITORY = "the repository's pin files state"

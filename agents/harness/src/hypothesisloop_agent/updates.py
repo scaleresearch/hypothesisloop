@@ -44,10 +44,7 @@ _DRAIN_S = 5
 # status_reason began to wait for the coordinator (platform_experiment.status, sent again with
 # the reason as its detail, as when the last researcher's machine stops for good). An agent has
 # to learn the same of its own jobs ending, and at once of a message the coordinator or the owner
-# sent it (agent.message), which wakes no coordinator: its stream echoes the ones it sent. An agent
-# that built an environment ahead of its job learns its build was loaded on a cluster, where its
-# jobs run before the upload ends, or ended (environment.status) the same way: told to end its
-# turn while it built, nothing else would wake it. The owner changing the goal
+# sent it (agent.message), which wakes no coordinator: its stream echoes the ones it sent. The owner changing the goal
 # (platform_experiment.goal) wakes whoever acts on it: a draft's planner, which plans again, or the
 # coordinator, which brings the description in line; one addressed to a planner is its own and reaches no
 # researcher. A coordinator is woken too by the owner changing fields of the plan
@@ -79,7 +76,7 @@ WAKES = {
         platform.EVENT_JOB_UNDERPERFORMING, platform.EVENT_AGENT_CUT, platform.EVENT_AGENT_IDLE, platform.EVENT_AGENT_MESSAGE,
         platform.EVENT_STAGE_BOUNDARY, platform.EVENT_COMMENT_NEW, platform.EVENT_PLATFORM_EXPERIMENT_STATUS,
         platform.EVENT_PLATFORM_EXPERIMENT_DESCRIPTION, platform.EVENT_PLATFORM_EXPERIMENT_BASELINE,
-        platform.EVENT_PLATFORM_EXPERIMENT_GOAL, platform.EVENT_ENVIRONMENT_STATUS, platform.EVENT_AGENT_INSTRUCTIONS),
+        platform.EVENT_PLATFORM_EXPERIMENT_GOAL, platform.EVENT_AGENT_INSTRUCTIONS),
 }
 # A message to one agent from the coordinator or the owner, told as what it says.
 MESSAGE = platform.EVENT_AGENT_MESSAGE
@@ -88,9 +85,6 @@ RESET = platform.WATCH_RESET
 # The owner changed the goal. The event is a pointer whose value is the new goal_version: a planner
 # is told the goal itself, read from the draft (core.revising), in place of the event.
 GOAL = platform.EVENT_PLATFORM_EXPERIMENT_GOAL
-# A build an agent asked for, loaded on a cluster or ended. Its subject is the environment's key,
-# which says nothing to the agent: the detail names the commit and image it asked with.
-ENVIRONMENT = platform.EVENT_ENVIRONMENT_STATUS
 # What wakes a coordinator besides, while its platform experiment is open: a job that failed then
 # is a baseline agent's, and one that failed for what the description says is the coordinator's to
 # repair. Three failed in a row before a coordinator heard of any, from the agent giving up. One
@@ -113,8 +107,7 @@ COALESCE_S = 90
 # Said to an agent at every end of a turn with no job of its own submitted, queued or running and
 # no subagent at work: it would otherwise wait for an update that cannot come.
 NOTHING_IN_FLIGHT = ("The platform holds no job of yours submitted, queued or running and no subagent of yours is at work, so no update of "
-                     "your own is coming. A job submitted while its environment builds waits for that build on the "
-                     "platform. Put work in flight, or end your run with "
+                     "your own is coming. Put work in flight, or end your run with "
                      "`hl platform-experiments agents finish --reason TEXT`.")
 # A situation read that takes longer is given up, and the prompt says so in its place.
 _SITUATION_S = 30
@@ -393,8 +386,6 @@ def event_line(event: dict, agent_id: str) -> str:
     if event.get("kind") == MESSAGE:
         to = "" if event.get("agent_id") == agent_id else f" to {event.get('subject', '')}"
         return f"message{to} from the {event.get('value', '')}: {event.get('detail', '')}"
-    if event.get("kind") == ENVIRONMENT:
-        return f"environment {event.get('value', '')}: {event.get('detail', '')}"
     if event.get("kind") == RESET:
         return f"updates were reset, {event.get('detail', '')}"
     if event.get("kind") == GOAL:

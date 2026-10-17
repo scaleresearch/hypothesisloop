@@ -91,16 +91,15 @@ esac
 # The container registry CONTAINER_REGISTRY_PROVIDER in .env names, read from that provider's own
 # keys. lib_container_registry sets HL_REGISTRY, the address the deployment's images are pushed
 # under, which make dev runs them from, and HL_CONTAINER_REGISTRY, the settings' container_registry
-# section: the provider that hands out the logins, its own section, and the repository local
-# development's environments are built to. With no provider both are empty, and the local control
-# plane builds no environments.
+# section: the registry experiments push the images their jobs run in to. With no provider both
+# are empty, and the local control plane keeps no registry.
 #
 #   gcp  Google Artifact Registry: the repository CONTAINER_REGISTRY_GCP_REPOSITORY in
-#        CONTAINER_REGISTRY_GCP_LOCATION of CONTAINER_REGISTRY_GCP_PROJECT. Environments go to the
-#        private repository <repository>-environments beside it, whose env-pusher and env-puller
-#        service accounts the control plane mints tokens of with this machine's application
-#        default credentials (gcloud auth application-default login), whose account must be
-#        allowed to mint them.
+#        CONTAINER_REGISTRY_GCP_LOCATION of CONTAINER_REGISTRY_GCP_PROJECT. Each org's images go to
+#        a private repository of its own in the same project and location, which the control
+#        plane keeps with this machine's application default credentials (gcloud auth
+#        application-default login), whose account needs the roles the container_registry
+#        section of controlplane/settings/hypothesisloop.yaml names.
 lib_container_registry() {
   local provider key project
   HL_REGISTRY="" HL_CONTAINER_REGISTRY=""
@@ -116,7 +115,7 @@ lib_container_registry() {
       done
       project="$(lib_env_value CONTAINER_REGISTRY_GCP_PROJECT)"
       HL_REGISTRY="$(lib_env_value CONTAINER_REGISTRY_GCP_LOCATION)-docker.pkg.dev/${project}/$(lib_env_value CONTAINER_REGISTRY_GCP_REPOSITORY)"
-      HL_CONTAINER_REGISTRY="$(printf 'container_registry:\n  provider: gcp\n  gcp:\n    pusher: env-pusher@%s.iam.gserviceaccount.com\n    puller: env-puller@%s.iam.gserviceaccount.com\n  environments_repository: %s-environments/environment' "${project}" "${project}" "${HL_REGISTRY}")"
+      HL_CONTAINER_REGISTRY="$(printf 'container_registry:\n  provider: gcp\n  gcp:\n    project: %s\n    location: %s' "${project}" "$(lib_env_value CONTAINER_REGISTRY_GCP_LOCATION)")"
       ;;
     *)
       echo "auth: .env sets CONTAINER_REGISTRY_PROVIDER=${provider}; it is empty or gcp" >&2

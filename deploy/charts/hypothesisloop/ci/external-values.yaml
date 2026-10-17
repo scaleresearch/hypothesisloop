@@ -39,9 +39,8 @@ ui:
 containerRegistry:
   provider: gcp
   gcp:
-    pusher: env-pusher@made-up-project.iam.gserviceaccount.com
-    puller: env-puller@made-up-project.iam.gserviceaccount.com
-  environmentsRepository: europe-west1-docker.pkg.dev/made-up-project/hypothesisloop-environments/environment
+    project: made-up-project
+    location: europe-west1
 gitHost:
   provider: github
   experimentTemplateRepository: made-up-org/experiment-template
@@ -51,7 +50,6 @@ gitHost:
 cloudCompute:
   - cluster_name: vast
     provider: vast
-    job_image: registry.example.invalid/hypothesisloop-job:test
     namespace: main
     reconcile_interval_seconds: 10
     status_interval_seconds: 30

@@ -40,8 +40,8 @@ images:
 #   CONTAINER_REGISTRY_GCP_CREDENTIALS  only with containerRegistry.provider gcp: control-service's
 #                                    own Google identity, as an application default credentials
 #                                    file (a service account key or a workload identity
-#                                    federation config), which may mint the tokens of
-#                                    containerRegistry.gcp.pusher and containerRegistry.gcp.puller
+#                                    federation config), with the roles the container_registry
+#                                    section of hypothesisloop.yaml names
 #   SANDBOX_<PROVIDER>_API_KEY, CLOUD_COMPUTE_<PROVIDER>_API_KEY
 #                                    the account key of the provider sandbox and each cloudCompute
 #                                    entry name, such as SANDBOX_FLY_API_KEY and
@@ -95,18 +95,16 @@ gitHost:
     # GIT_HOST_PLAIN_PASSWORD. Left empty for a host that asks for no credential.
     username: ""
 
-# The registry provider whose logins control-service hands out for environment images, and the
-# repository they are pushed to: the container_registry section of hypothesisloop.yaml, which
-# explains each value. With provider empty the deployment builds no environments. With it set,
-# environmentsRepository is required, and so is that provider's section:
-#   gcp  Google Artifact Registry: the two service accounts, pusher and puller, and the Secret's
-#        CONTAINER_REGISTRY_GCP_CREDENTIALS, which mints their tokens.
+# The registry experiments push the images their jobs run in to: the container_registry section of
+# hypothesisloop.yaml, which explains each value. With provider empty the deployment keeps no
+# registry. With it set, that provider's section is required:
+#   gcp  Google Artifact Registry: the project and location the repositories are kept in, and the
+#        Secret's CONTAINER_REGISTRY_GCP_CREDENTIALS, which keeps them and mints their logins.
 containerRegistry:
   provider: ""
   gcp:
-    pusher: ""
-    puller: ""
-  environmentsRepository: ""
+    project: ""
+    location: ""
 
 # Required: the one address this API is reached at from outside the control plane, by sandboxed
 # agents and by every cluster's runtime. services.public_api_url of hypothesisloop.yaml.

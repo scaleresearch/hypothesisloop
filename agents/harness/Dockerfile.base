@@ -30,27 +30,27 @@ FROM python:3.13-slim
 # that is the trace from a submitted job back to its source.
 # build-essential, pkg-config, cmake: an agent compiles and tests a harness here before a job runs
 # it. Twice a baseline agent found no C compiler or linker.
-# sudo: what else its .hypothesisloop/Dockerfile installs, the agent installs here itself.
-# bubblewrap: hl env run runs a command inside the image a job runs in, staged by hl env stage,
-# and fuse-overlayfs gives each working tree a copy-on-write view of it. fusermount3 unmounts
+# sudo: what else the experiment's image installs, the agent installs here itself.
+# podman: the agent builds the image its jobs run in and pushes it (hl image credentials), as
+# root through sudo. A sandbox's root filesystem is itself an overlay, which the kernel's overlay
+# does not stack on, so image layers are mounted with fuse-overlayfs; containers share the
+# machine's network, since a sandbox gives no namespace a bridge of its own. fusermount3 unmounts
 # through /etc/mtab, which the base image lacks.
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates git \
-    build-essential pkg-config cmake sudo bubblewrap fuse-overlayfs \
+    build-essential pkg-config cmake sudo podman fuse-overlayfs \
     && rm -rf /var/lib/apt/lists/* \
     && ln -sf /proc/self/mounts /etc/mtab
+RUN mkdir -p /etc/containers \
+ && printf '[containers]\nnetns = "host"\n\n[engine]\ncgroup_manager = "cgroupfs"\nevents_logger = "file"\n' > /etc/containers/containers.conf \
+ && printf 'unqualified-search-registries = ["docker.io"]\nshort-name-mode = "permissive"\n' > /etc/containers/registries.conf \
+ && printf '[storage]\ndriver = "overlay"\nrunroot = "/run/containers/storage"\ngraphroot = "/var/lib/containers/storage"\n\n[storage.options.overlay]\nmount_program = "/usr/bin/fuse-overlayfs"\n' > /etc/containers/storage.conf
 COPY --from=uv /uv /uvx /usr/local/bin/
 
-# Non-interactive git auth, baked so the agent never handles a credential of the git host: the
-# harness sends git for the repository to the platform's git proxy (git_url), and git asks `hl
-# git-credential` (the hl copied in below) on whichever host it talks to. It answers the proxy's
-# address alone, with the agent's own platform token; the proxy reaches the git host itself and
-# refuses a push to any ref but the agent's own branches. Nothing is stored. useHttpPath makes git
-# name the repository, so the helper stays silent for every other address.
-# Plus a default commit identity so commits don't fail on a fresh container, and a first push of
-# a new branch that needs no -u.
-RUN git config --system credential.helper '!hl git-credential' \
- && git config --system credential.useHttpPath true \
- && git config --system user.name  "hypothesisloop-agent" \
+# The harness sends git for the repository to the platform's git proxy (git_url) with the agent's
+# own token (core.git_through_platform), so the agent never handles a credential of the git host.
+# A default commit identity so commits don't fail on a fresh container, and a first push of a new
+# branch that needs no -u.
+RUN git config --system user.name  "hypothesisloop-agent" \
  && git config --system user.email "agent@hypothesisloop.local" \
  && git config --system init.defaultBranch main \
  && git config --system push.autoSetupRemote true
@@ -71,9 +71,6 @@ RUN useradd --home-dir /agent --shell /bin/bash agent \
 # The fully commented job and hypothesis files that hl job submit --help and hl hypothesis submit --help name.
 ENV HL_REFERENCE=/opt/hl-reference
 COPY cli/reference $HL_REFERENCE
-# An agent reads the code a job ran with `hl-clone <code_ref> <dir>`, so it is a command here as
-# it is in the job image.
-COPY runtime/job/hl-clone /usr/local/bin/hl-clone
 
 # The `hl` CLI, built in the hl-builder stage above: the one way the agent acts on the platform.
 COPY --from=hl-builder /out/hl /usr/local/bin/hl

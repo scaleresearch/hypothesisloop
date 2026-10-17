@@ -64,106 +64,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/{name}/builds/{key}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Report the outcome of an assigned environment build
-         * @description outcome pushed makes the environment ready in the image the repository holds under digest; file fails it with log_tail as the file's fault; platform frees the build to be assigned again. Recorded only while the build of key is assigned to this cluster at attempt and still building; otherwise 409. file is the exception: the file is the key's, so it fails a build still building at attempt or a later one, wherever it was assigned again.
-         */
-        post: operations["cluster-build-report"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/{name}/builds/{key}/credential": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * The push login of an assigned environment build
-         * @description A login that writes to the environment repository for at least 25 minutes, handed out only while the build of key is assigned to this cluster at attempt and still building; otherwise 409.
-         */
-        post: operations["cluster-build-credential"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/{name}/builds/{key}/git-credential": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * A read of the repository an assigned environment build is of
-         * @description The git proxy address the repository whose environment file this is is read at, the repository's own address, and a platform token that reads that repository alone through the proxy, read-only, while the build of key is assigned to this cluster at attempt and still building. The build mounts them as the git config secret git-credentials of a RUN that asks for it, never into a layer. Handed out only while the build is assigned and building; otherwise 409. 404 for an environment of no repository: the build then mounts no secret.
-         */
-        post: operations["cluster-build-git-credential"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/{name}/builds/{key}/loaded": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Report an assigned environment build held on one node
-         * @description The image of the build, the repository's under digest, is in the image store of node while its push goes on: a job that waits for the environment and fits on that node is placed there, pinned to it, and runs the image from there before it is pushed. The outcome is still reported once the push ends. Recorded only while the build of key is assigned to this cluster at attempt and still building; otherwise 409.
-         */
-        post: operations["cluster-build-loaded"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/{name}/builds/{key}/progress": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Report the step an assigned environment build is at
-         * @description step, one line of at most 512 bytes, replaces the last one reported, and the jobs waiting for the environment show it. Recorded only while the build of key is assigned to this cluster at attempt and still building; otherwise 409.
-         */
-        post: operations["cluster-build-progress"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/{name}/reconcile": {
         parameters: {
             query?: never;
@@ -175,7 +75,7 @@ export interface paths {
         put?: never;
         /**
          * Exchange actual capacity for desired workloads
-         * @description Atomically records one complete actual-capacity snapshot in metrics storage, keeping only priced accelerator types, then returns the complete PostgreSQL desired workload set for this cluster, plus the ids of workloads whose termination earns them their declared checkpoint window, the environment builds assigned to this cluster (builds, recorded as building only for a runtime that reports builds true), and registry_pull, a login that reads environment images, when a listed workload runs in one. The version the agent sends in X-Hypothesisloop-Agent-Version is kept with the snapshot, and a refusal of the request is kept as the cluster's last error until one is accepted.
+         * @description Atomically records one complete actual-capacity snapshot in metrics storage, keeping only priced accelerator types, then returns the complete PostgreSQL desired workload set for this cluster, plus the ids of workloads whose termination earns them their declared checkpoint window. Each workload names the image it runs in by digest, with image_pull, a read-only login that pulls it, when the image needs one, and the launch script every node runs. The version the agent sends in X-Hypothesisloop-Agent-Version is kept with the snapshot, and a refusal of the request is kept as the cluster's last error until one is accepted.
          */
         post: operations["cluster-reconcile"];
         delete?: never;
@@ -249,12 +149,14 @@ export interface components {
             config_hash: string;
             data?: components["schemas"]["DataAccess"];
             data_ref: string;
-            environment_key?: string;
             /** Format: double */
             estimated_duration_hours: number;
             git_url?: string;
             id: string;
+            image: string;
+            image_pull?: components["schemas"]["RegistryLogin"];
             job: components["schemas"]["JobSpec"];
+            launch: string;
             project_id: string;
             resolved_job?: components["schemas"]["JobSpec"];
             /** Format: date-time */
@@ -263,43 +165,6 @@ export interface components {
         };
         DetachAnswer: {
             requeued: string[];
-        };
-        EnvironmentBuild: {
-            /** Format: int64 */
-            attempt: number;
-            base: string;
-            cache_scope: string;
-            dockerfile: string;
-            key: string;
-            repository: string;
-            tools?: string;
-        };
-        EnvironmentBuildCredentialRequest: {
-            /** Format: int64 */
-            attempt: number;
-        };
-        EnvironmentBuildLoaded: {
-            /** Format: int64 */
-            attempt: number;
-            digest: string;
-            node: string;
-        };
-        EnvironmentBuildProgress: {
-            /** Format: int64 */
-            attempt: number;
-            step: string;
-        };
-        EnvironmentBuildReport: {
-            /** Format: int64 */
-            attempt: number;
-            digest?: string;
-            log_tail?: string;
-            outcome: string;
-        };
-        EnvironmentGitCredential: {
-            proxy_url: string;
-            repository_url: string;
-            token: string;
         };
         ErrorModel: {
             /** @description What was refused, or what failed, in a sentence. */
@@ -360,7 +225,6 @@ export interface components {
             host_mounts?: {
                 [key: string]: string;
             };
-            image?: string;
             /** Format: int64 */
             max_retries?: number;
             memory?: string;
@@ -387,10 +251,8 @@ export interface components {
             reason: string;
         };
         ReconcileAnswer: {
-            builds: components["schemas"]["EnvironmentBuild"][];
             checkpoint_window: string[];
             experiments: components["schemas"]["DesiredJob"][];
-            registry_pull?: components["schemas"]["RegistryLogin"];
         };
         ReconcileRequest: {
             accelerator_available_by_node: {
@@ -405,14 +267,11 @@ export interface components {
                 [key: string]: number;
             };
             autoscaler_enabled: boolean;
-            builds?: boolean;
             cluster_id: string;
             /** Format: double */
             cpu_available_cores: number;
             /** Format: double */
             cpu_total_cores: number;
-            job_image?: string;
-            job_image_default?: boolean;
             multi_node_capable: boolean;
             node_labels_by_node: {
                 [key: string]: {
@@ -488,12 +347,6 @@ export type ClusterInfo = components['schemas']['ClusterInfo'];
 export type DataAccess = components['schemas']['DataAccess'];
 export type DesiredJob = components['schemas']['DesiredJob'];
 export type DetachAnswer = components['schemas']['DetachAnswer'];
-export type EnvironmentBuild = components['schemas']['EnvironmentBuild'];
-export type EnvironmentBuildCredentialRequest = components['schemas']['EnvironmentBuildCredentialRequest'];
-export type EnvironmentBuildLoaded = components['schemas']['EnvironmentBuildLoaded'];
-export type EnvironmentBuildProgress = components['schemas']['EnvironmentBuildProgress'];
-export type EnvironmentBuildReport = components['schemas']['EnvironmentBuildReport'];
-export type EnvironmentGitCredential = components['schemas']['EnvironmentGitCredential'];
 export type ErrorModel = components['schemas']['ErrorModel'];
 export type JobGroup = components['schemas']['JobGroup'];
 export type JobMachine = components['schemas']['JobMachine'];
@@ -578,180 +431,6 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
-        responses: {
-            /** @description No Content */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "cluster-build-report": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                name: string;
-                key: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EnvironmentBuildReport"];
-            };
-        };
-        responses: {
-            /** @description No Content */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "cluster-build-credential": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                name: string;
-                key: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EnvironmentBuildCredentialRequest"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RegistryLogin"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "cluster-build-git-credential": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                name: string;
-                key: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EnvironmentBuildCredentialRequest"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvironmentGitCredential"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "cluster-build-loaded": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                name: string;
-                key: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EnvironmentBuildLoaded"];
-            };
-        };
-        responses: {
-            /** @description No Content */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "cluster-build-progress": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                name: string;
-                key: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EnvironmentBuildProgress"];
-            };
-        };
         responses: {
             /** @description No Content */
             204: {

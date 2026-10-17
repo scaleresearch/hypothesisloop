@@ -65,12 +65,6 @@ func summarize(why *domain.StatusReason, pe *domain.PlatformExperiment, signups 
 		"baseline_missing_metric": func() string {
 			return "The baseline job didn't report every metric of the experiment. " + next("fix the measurement and run it again")
 		},
-		"baseline_environment_differs": func() string {
-			return "The baseline job ran in another environment than the researchers will. " + next("run it again from the branch's latest commit")
-		},
-		"baseline_not_in_environment": func() string {
-			return "The baseline job didn't run in the environment its commit declares. " + next("run it again")
-		},
 		"baseline_weaker_than_own_job": func() string {
 			return "Another job of the baseline agent measured better than the declared one, and the baseline must be the strongest. " + next("declare that configuration's job")
 		},

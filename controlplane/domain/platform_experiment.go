@@ -200,7 +200,7 @@ type PlatformExperiment struct {
 	Branch        string `json:"branch,omitempty" doc:"The branch of repository the agents clone and start from, and none of them pushes to. Set once repository is."`
 	// GitURL is where what the platform launches reaches the repository: the control plane's git
 	// proxy, with its own platform token. Set on a read of one platform experiment.
-	GitURL string `json:"git_url,omitempty" doc:"Where the agents, the coordinator and the jobs of the platform experiment clone, fetch and push repository_url: the platform's git proxy, which takes their own platform token as the password and refuses a push to any ref but the pusher's own branches. git config url.<git_url>.insteadOf <repository_url> sends git there."`
+	GitURL string `json:"git_url,omitempty" doc:"Where the agents, the coordinator and the jobs of the platform experiment clone, fetch and push repository_url: the platform's git proxy, which takes their own platform token as an Authorization: Bearer header (git config http.<git_url>.extraHeader) and refuses a push to any ref but the pusher's own branches. git config url.<git_url>.insteadOf <repository_url> sends git there."`
 	// RepositoryAccount is the account the platform creates the repository on, for one created
 	// without naming its repository: the repository pass creates it after the create answered
 	// (AwaitsRepository). Empty for one that named its repository.

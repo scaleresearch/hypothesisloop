@@ -192,24 +192,15 @@ whole number, and no accelerator_type, and holds that many cores; a proposal for
 leaves accelerator_type out too, or states hypothesisloop.dev/cpu=core. It runs only on a
 cluster that prints that line. The accelerator_type strings printed here are the only ones a
 job spec or a proposal takes, copied verbatim; a type with none available queues and never
-errors. Last, one line per
-image the deployment offers a job to run in: job_image is its name and what job.image takes,
-image its registry address, carries what is installed. A type's line names in job_images the
-ones that suit it, so a job there names one of those and installs no framework. job.image is
-such a name or the full registry address of an image of your own, host first, and anything
-else is refused at submit (unknown_job_image), as is a job no cluster could run with its image
-(no_cluster_for_image). Every job names one: a line without only_job_image is of a cluster that runs the
-image a job names, and a line with it is of a cluster that runs that image and no other, so a
-job meant for it names that image; job_image_carries says what is installed in it. A package a
-job needs goes into the environment, .hypothesisloop/Dockerfile, and installs nothing at runtime. A line with
+errors. architectures names those of the cluster's nodes: a job runs only on nodes of its
+platform experiment's image's architecture (hl image show), so pick an image of the
+architecture of the hardware you mean to run on. A line with
 on_demand is of a cluster that rents a machine when a job needs one: nothing stands by, total is
 the most it rents at once and available is what it may still rent, so a job there starts after
 its machine is rented. A line with no_offer is of such a cluster that has no machine to rent now
 for some of its slots, and says why in its runtime's words, such as which of its provider's
 filters leave out every offer of a shape: a job that needs such a slot waits until one comes on
-offer. An image in a registry that only the platform's own machine reaches (a loopback or
-host.containers.internal address) is warned about on stderr: no cluster on another machine can
-pull it.
+offer.
 
 The clusters are the ones one org's jobs can be placed on: its own and the shared ones. An API
 key and an agent token have one org and need no --org. A person in several orgs names one.`, stderr)
@@ -221,16 +212,14 @@ key and an agent token have one org and need no --org. A person in several orgs 
 		return command.ParseExit(command.Misuse(fs, "unexpected argument %q", fs.Arg(0)))
 	}
 	var out struct {
-		JobImages []json.RawMessage `json:"job_images"`
-		Clusters  []struct {
-			Name         string            `json:"cluster_name"`
-			JobImage     string            `json:"job_image"`
-			Carries      string            `json:"job_image_carries"`
-			OnDemand     bool              `json:"on_demand"`
-			NoOffer      []string          `json:"no_offer"`
-			Resources    json.RawMessage   `json:"resources"`
-			PerNode      json.RawMessage   `json:"per_node"`
-			Accelerators []json.RawMessage `json:"accelerators"`
+		Clusters []struct {
+			Name          string            `json:"cluster_name"`
+			Architectures []string          `json:"architectures"`
+			OnDemand      bool              `json:"on_demand"`
+			NoOffer       []string          `json:"no_offer"`
+			Resources     json.RawMessage   `json:"resources"`
+			PerNode       json.RawMessage   `json:"per_node"`
+			Accelerators  []json.RawMessage `json:"accelerators"`
 		} `json:"clusters"`
 	}
 	path := "/resource-catalog/capacity"
@@ -242,11 +231,8 @@ key and an agent token have one org and need no --org. A person in several orgs 
 	}
 	for _, cl := range out.Clusters {
 		prefix := []string{"cluster", cl.Name}
-		if cl.JobImage != "" {
-			prefix = append(prefix, "only_job_image", cl.JobImage)
-		}
-		if cl.Carries != "" {
-			prefix = append(prefix, "job_image_carries", cl.Carries)
+		if len(cl.Architectures) > 0 {
+			prefix = append(prefix, "architectures", strings.Join(cl.Architectures, ","))
 		}
 		if cl.OnDemand {
 			prefix = append(prefix, "on_demand", "true")
@@ -273,23 +259,6 @@ key and an agent token have one org and need no --org. A person in several orgs 
 			if err := printPrefixed(stdout, json.RawMessage("{}"), append(prefix, "no_offer", why)...); err != nil {
 				return command.Fail(stderr, err)
 			}
-		}
-	}
-	for _, image := range out.JobImages {
-		line, err := command.CompactJSON(json.RawMessage(strings.Replace(string(image), `"name":`, `"job_image":`, 1)))
-		if err != nil {
-			return command.Fail(stderr, fmt.Errorf("response is not JSON: %w", err))
-		}
-		fmt.Fprintln(stdout, string(line))
-	}
-	for _, raw := range out.JobImages {
-		var image struct {
-			Name  string `json:"name"`
-			Image string `json:"image"`
-		}
-		if json.Unmarshal(raw, &image) == nil && command.LocalOnly(image.Image) {
-			fmt.Fprintf(stderr, "hl: warning: job_image %s is in a registry only the platform's own machine reaches (%s): a cluster on any other machine cannot pull it. "+
-				"On a local stack, set LOCAL_REACHABLE_ADDRESS in .env (.env.example) and run make dev again\n", image.Name, image.Image)
 		}
 	}
 	if len(out.Clusters) == 0 {

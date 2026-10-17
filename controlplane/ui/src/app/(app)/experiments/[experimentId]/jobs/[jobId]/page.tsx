@@ -277,10 +277,10 @@ export default function JobDetailPage({ params }: { params: { experimentId: stri
       </Section>
 
       {/* Lineage */}
-      {(j.job?.image || j.code_ref || j.config_hash || j.data_ref) && (
+      {(j.image || j.code_ref || j.config_hash || j.data_ref) && (
         <Section title="What it ran">
           <DetailList>
-            {j.job?.image && <Detail label="Image">{j.job.image}</Detail>}
+            {j.image && <Detail label="Image">{j.image}</Detail>}
             {j.branch && <Detail label="Branch"><Branch branch={j.branch} codeRef={j.code_ref} platformExperimentID={j.platform_experiment_id} /></Detail>}
             {j.code_ref && <Detail label="Code (git commit)">{j.code_ref}</Detail>}
             {j.config_hash && <Detail label="Configuration checksum">{j.config_hash}</Detail>}

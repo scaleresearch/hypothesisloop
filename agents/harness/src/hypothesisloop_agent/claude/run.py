@@ -110,7 +110,6 @@ async def _main() -> None:
     started = time.monotonic()
     setup = await core.prepare()
     try:
-        core.start_staging(setup)
         store = Store(setup)
         await store.restore()
         # With the line the CLI connects with, this says where a slow start went: what precedes

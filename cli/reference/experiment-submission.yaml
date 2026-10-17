@@ -11,7 +11,7 @@
 #               ...) that have nothing to do with how the job executes.
 #
 # Most of this file is optional. The least a request states is metadata.hypothesis_id and
-# metadata.theory, and in job an image, a command, cpu, memory and storage, with
+# metadata.theory, and in job a command, cpu, memory and storage, with
 # accelerator_type and accelerator_count for a job on an accelerator.
 #
 # An experiment's repository commits the job section alone, as .hypothesisloop/job.yaml
@@ -26,15 +26,10 @@
 
 job:
   # --- What to run -------------------------------------------------------------------
-  # Required: the name of a job image the deployment offers, as hl capacity lists them
-  # (job_images, each with what it carries and the accelerator types it suits), or any other
-  # image by its full registry address, host first. Anything else is refused with 422
-  # unknown_job_image, and an image no cluster could run with no_cluster_for_image. Name an
-  # offered image and declare a framework it does not carry, torch for CUDA included, in
-  # .hypothesisloop/Dockerfile.
-  image: python
-  # hl-clone checks out the commit the job was submitted from and prints its directory.
-  command: ["bash", "-c", "dir=$(hl-clone) && cd \"$dir\" && exec python train.py"]
+  # Required. Every node fetches the commit the job was submitted from into /workspace/code and
+  # runs the command there, in the image the platform experiment records (hl image show, hl image
+  # set), on nodes of its architecture. The job names no image.
+  command: ["python", "train.py"]
   env:
     MY_APP_CONFIG: "whatever-your-training-code-needs"
   # secret_env: environment variables the job needs and nobody may read back, such as a token for
@@ -123,7 +118,7 @@ job:
   # --port=$HYPOTHESISLOOP_MASTER_PORT` then submits the job locally; every other rank runs
   # `ray start --address=$HYPOTHESISLOOP_MASTER_ADDR:$HYPOTHESISLOOP_MASTER_PORT --block` (a
   # worker that just joins the cluster and blocks). A simple shell entrypoint branching on
-  # `[ "$HYPOTHESISLOOP_RANK" = "0" ]` covers both roles from one image/command.
+  # `[ "$HYPOTHESISLOOP_RANK" = "0" ]` covers both roles from one command.
   num_nodes: 1
 
   # topology: placement requirements for a distributed run — only meaningful when num_nodes > 1.

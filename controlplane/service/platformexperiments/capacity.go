@@ -58,6 +58,8 @@ type ClusterCapacity struct {
 	// NoOffer is why the runtime of a cluster that rents on demand has no machine to rent for
 	// some of its slots now, one line per reason as the runtime words it (domain.NodeSlotNoOfferLabel).
 	NoOffer []string `json:"no_offer,omitempty" doc:"On a cluster that rents on demand: why it has no machine to rent now for some of its slots, as its runtime words it, such as which of the provider filters leave out every offer of a shape. A job that needs such a slot waits until one comes on offer."`
+	// Architectures are those of the cluster's nodes (domain.NodeArchitectureLabel).
+	Architectures []string `json:"architectures,omitempty" doc:"The architectures of the cluster's nodes (amd64, arm64). A job runs only on nodes of its platform experiment's image's architecture."`
 	// Resources is the cluster's cores and memory, which is all a job that asks for no
 	// accelerator needs to know. Absent for a cluster that reported none in the window.
 	Resources *ResourceCapacity `json:"resources,omitempty"`
@@ -227,12 +229,16 @@ func withResources(clusters []ClusterCapacity, cpuAvailable, cpuTotal map[string
 	return clusters
 }
 
-// withOnDemand marks the clusters whose nodes are slots, each a machine the runtime may rent, and
-// says why the runtime has nothing to rent for the slots it has none for.
+// withOnDemand marks the clusters whose nodes are slots, each a machine the runtime may rent,
+// says why the runtime has nothing to rent for the slots it has none for, and names the
+// architectures of their nodes.
 func withOnDemand(clusters []ClusterCapacity, nodeLabels map[string]map[string]map[string]string) {
 	for i := range clusters {
-		noOffer := map[string]bool{}
+		noOffer, architectures := map[string]bool{}, map[string]bool{}
 		for _, labels := range nodeLabels[clusters[i].ClusterName] {
+			if arch := labels[domain.NodeArchitectureLabel]; arch != "" {
+				architectures[arch] = true
+			}
 			if labels[domain.NodeSlotLabel] != "" {
 				clusters[i].OnDemand = true
 			}
@@ -241,6 +247,7 @@ func withOnDemand(clusters []ClusterCapacity, nodeLabels map[string]map[string]m
 			}
 		}
 		clusters[i].NoOffer = slices.Sorted(maps.Keys(noOffer))
+		clusters[i].Architectures = slices.Sorted(maps.Keys(architectures))
 	}
 }
 

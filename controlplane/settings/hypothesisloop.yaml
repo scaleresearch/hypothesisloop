@@ -124,11 +124,11 @@ models:
 #              baseline is declared (PATCH baseline_job_id), and its duration_hours count from
 #              then. One not running by its baseline_due_at is closed with close_reason
 #              baseline_limit_reached and its machines are released. baseline_due_at moves out
-#              by the time a job of the baseline waits for the platform to build its
-#              environment or to start it, at most 90 minutes in all.
+#              by the time a job of the baseline waits for the platform to start it, at most
+#              90 minutes in all.
 #   min_baseline_minutes  the fewest baseline_minutes a proposal or an accept may state: a
-#              baseline written from nothing writes its harness, waits for its environment to
-#              build and measures once, and a shorter window closes the run before it starts.
+#              baseline written from nothing writes its harness, builds its image and measures
+#              once, and a shorter window closes the run before it starts.
 #   auto_accept_seconds  how long a proposal waits before the platform accepts it as proposed,
 #              unless a person accepts it sooner, holds it to edit it, changes the goal or closes
 #              it. Its baseline agent's machine starts with the proposal, so measuring begins
@@ -170,68 +170,34 @@ runtimes:
   image_tag: REPLACE-WITH-IMAGE-TAG
   registry_plain_http: false
 
-# The images the deployment offers a job to run in, so that an agent need not install a
-# framework into a bare image on every run. `hl capacity` lists them and names, on each
-# accelerator type's line, the ones that suit it. A job may name any other image.
+# The registry experiments push the images their jobs run in to. Each org gets its own private
+# repository, which the control service creates with the two service accounts that reach it, one
+# that writes and one that only reads, the first time the org needs them. An agent asks for a
+# short-lived push login (POST /platform-experiments/{id}/registry-credentials, hl image
+# credentials), pushes its image directly and records it (hl image set); each reconcile answer
+# carries a read-only login for a job whose image is in its org's repository. A job may run in any
+# public image without one.
 #
-#   name        what the image is called in `hl capacity`.
-#   repository  an image this deployment builds and pushes: its name under runtimes.registry,
-#               at runtimes.image_tag. `make publish` builds the bare one and the others,
-#               each the upstream image named below with hl, hl-clone, git and uv added
-#               (runtime/job/build/Dockerfile.job).
-#   image       a whole reference instead, for an image built elsewhere. One of the two.
-#   environment_base  beside repository, the same image without hl and hl-clone, under
-#               runtimes.registry at runtimes.image_tag (runtime/job/build/Dockerfile.job-base). An
-#               environment of a job on the image is built on it and gets hl and hl-clone from
-#               the image last, so what its file installs stays cached while only they change.
-#               Left out, an environment is built on the image itself.
-#   carries     what is installed, which is what an agent chooses by.
-#   suits       prefixes of accelerator type names. Left out: every type.
-job_images:
-  - name: python
-    repository: hypothesisloop-job
-    environment_base: hypothesisloop-job-base
-    carries: Python 3.13, uv, git, hl, hl-clone. No framework. On NVIDIA, torch from PyPI declared in .hypothesisloop/Dockerfile brings its own CUDA and cuDNN; the host provides the driver.
-  # From ghcr.io/tenstorrent/tt-metal/tt-metalium-ubuntu-22.04-release-amd64:v0.77.0, which ships
-  # no torch: the Makefile adds the CPU build at the version named here.
-  - name: tenstorrent
-    repository: hypothesisloop-job-tenstorrent
-    environment_base: hypothesisloop-job-tenstorrent-base
-    carries: tt-metal and ttnn v0.77.0 with device firmware, PyTorch 2.11.0 (CPU build) and numpy 1.26, Python 3.10 in /opt/venv, uv, git, hl, hl-clone. python3 is that venv, so import torch and ttnn work as is. Do not install torch again or run in a new venv, either downloads it at every job start. Add other packages with uv pip install.
-    suits: ["tenstorrent.com/"]
-
-# Environments: a repository's .hypothesisloop/Dockerfile, beginning ARG BASE and FROM ${BASE}, is
-# built once per org, content and base by a cluster that builds and is open to the org, which the
-# control plane assigns each build to, and pushed here. A job runs in the one its commit declares,
-# built on its job image. Agents run agents.image and build nothing. While no such cluster is
-# registered, a job that declares an environment is refused with no_environment_builder.
-#
-# Left out, as here, the deployment builds no environments: no cluster counts as building, so every
-# such job is refused. To switch it on, add the container_registry section: the registry's
-# provider, that provider's own section, and the repository environments are pushed to. A
-# deployment's chart gets them from its values, and local development's render from .env
-# (localdev/lib/auth.sh):
+# Left out, as here, the deployment keeps no registry, and a job runs only in an image any node
+# pulls without a login. To switch it on, add the container_registry section. A deployment's chart
+# gets it from its values, and local development's render from .env (localdev/lib/auth.sh):
 #
 #   container_registry:
 #     provider: gcp
 #     gcp:
-#       pusher: env-pusher@my-project.iam.gserviceaccount.com
-#       puller: env-puller@my-project.iam.gserviceaccount.com
-#     environments_repository: europe-west1-docker.pkg.dev/my-project/hypothesisloop-environments/environment
+#       project: my-project
+#       location: europe-west1
 #
-#   environments_repository  the whole address every environment image is pushed to, by digest
-#               and with no tag, in a repository that no one reads without a login.
-#   provider    the registry that holds it, which decides how the control service mints the
-#               logins: a cluster is handed a push login for each build it is assigned, and a pull
-#               login in each reconcile answer that lists a job running in an environment, which
-#               the job's image is pulled with. One of:
-#     gcp       Google Artifact Registry. pusher is the service account with write on the
-#               repository, and puller the one with read. The control service mints their tokens
-#               as its own Google identity: its application default credentials
-#               (GOOGLE_APPLICATION_CREDENTIALS, which the chart mounts from the secret
+#   provider    the registry, which decides how the control service keeps the repositories and
+#               mints the logins. One of:
+#     gcp       Google Artifact Registry in project, at location. Artifact Registry grants roles
+#               on a whole repository at the narrowest, so a login reaches every image of its org.
+#               The control service acts as its own Google identity: its application default
+#               credentials (GOOGLE_APPLICATION_CREDENTIALS, which the chart mounts from the secret
 #               CONTAINER_REGISTRY_GCP_CREDENTIALS, the service account it runs as, or gcloud auth
-#               application-default login), which holds roles/iam.serviceAccountTokenCreator on
-#               both. It does not start without them.
+#               application-default login), which holds roles/artifactregistry.admin,
+#               roles/iam.serviceAccountAdmin and roles/iam.serviceAccountTokenCreator in the
+#               project. A project of its own keeps those roles away from anything else.
 
 # The git host platform experiments keep their code on. Required: this file names none, and each
 # deployment adds the section when it renders the file. provider names the host, and the section
@@ -253,11 +219,11 @@ job_images:
 #   app_id, app_slug   the App's number and the name in its URL. The PEM GitHub issued for the App,
 #                      which signs the request for every token, is GIT_HOST_GITHUB_APP_PRIVATE_KEY.
 #
-# Agents, jobs and environment builds reach the host through this API's git proxy, at
+# Agents and jobs reach the host through this API's git proxy, at
 # services.public_api_url with /git after it. Every clone, fetch and push of theirs goes through it
 # with their own token: the proxy mints the host's credential for each request and refuses a push
 # to any ref but the pusher's own branches, so no agent or job ever holds a credential of the
-# host, and an environment build reads its repository there with a token of that build alone.
+# host.
 #
 # The App asks for the permissions controlplane/clients/githost/github/app-manifest.json states, and
 # an installation that has not granted all of them is refused, naming those it lacks.
@@ -280,8 +246,7 @@ job_images:
 #              is GIT_HOST_PLAIN_PASSWORD.
 #
 # The plain credential is deployment-wide: it reads and writes whatever that account reaches on the
-# host. The proxy uses it, so no agent, coordinator or job is handed it; an environment build's RUN
-# that asks for the repository's secret still reads it.
+# host. The proxy uses it, so no agent, coordinator or job is handed it.
 
 # Durable data between jobs — checkpoints and datasets one job produces and another needs.
 #

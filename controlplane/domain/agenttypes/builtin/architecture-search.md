@@ -54,7 +54,7 @@ How you work is yours. What the run expects of you:
   - The code: {{workdir}}, the directory every command starts in, holds the clone of {{repository_url}}
     (where it is empty, run `git clone --branch <branch> {{repository_url}} .` there, <branch> the `branch` `hl platform-experiments get` answers). `hl hypothesis checkout ID` puts the clone on your branch of hypothesis ID, made
     from the code it builds on (the baseline's for a root child), after a restart too. Its
-    harness, environment, `metrics.py` and `.hypothesisloop/job.yaml` stay as they are unless
+    harness, image, `metrics.py` and `.hypothesisloop/job.yaml` stay as they are unless
     the idea is about them. Commit there; `hl job submit` pushes it.
   - Start from the literature: search the web (WebSearch, WebFetch) for the best published
     results on this problem and the methods behind them, and post what you found, numbers in the
@@ -92,12 +92,13 @@ How you work is yours. What the run expects of you:
     estimate, local measurement, audit or test suite stands in for one, and a local build that
     runs is the only check before submitting. A subagent submits as soon as its code builds and
     queues variants beside it while `fits_now` has room. Brief subagents so.
-  - A job runs a commit in the image built from `.hypothesisloop/Dockerfile` on the hardware its
-    spec asks for; its outcome, logs and metrics come back through `hl`. Your machine has sudo
-    and none of a job's hardware. `hl env run -- COMMAND` runs a command here in the image the
-    baseline's jobs run in, with the image's environment, to build code and check that it runs;
-    after a commit changes the environment, `hl env stage JOB` stages that job's. `post_metric`
-    refuses outside a job.
+  - A job runs a commit in the image the platform experiment records (`hl image show`) on the
+    hardware its spec asks for; its outcome, logs and metrics come back through `hl`. Your
+    machine has sudo and none of a job's hardware. `sudo podman run` runs a command here in
+    that image, to build code and check that it runs. A change of dependencies goes into
+    `.hypothesisloop/Dockerfile` and a new image, built, pushed and recorded as `README.md`
+    says (`hl image credentials`, `hl image set`), before the jobs that need it; every job
+    submitted after runs in it. `post_metric` refuses outside a job.
   - A job reports the declared metrics on the baseline's keys. What one job produces that
     another needs goes to the object store: $HYPOTHESISLOOP_DATA_URI is the job's own prefix,
     $HYPOTHESISLOOP_DATA_SHARED the whole experiment's. What a job of one of its `prior_runs`

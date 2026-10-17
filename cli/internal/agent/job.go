@@ -51,25 +51,20 @@ a person or an API key states --agent and --platform-experiment.
 Code: commit first (uncommitted changes to tracked files are refused). HEAD must be on a branch
 under hl/PE/ (hl hypothesis checkout ID puts you on yours). The submit fills an empty
 metadata.code_ref with <origin url>@<HEAD sha> and metadata.branch with that branch, and pushes
-the branch itself. What a job ran is its code_ref. A commit holding .hypothesisloop/Dockerfile
-runs in the environment built from it: QUEUED as environment_building until built, REJECTED
-as environment_failed with the build's output when the file failed, EVICTED as
-environment_unbuilt at no cost when the platform could not build it (submit again).
+the branch itself. What a job ran is its code_ref. Every node fetches that commit into
+/workspace/code and runs the command there, in the image the platform experiment records
+(hl image show), on nodes of its architecture. The job records the image's digest.
 
-Refusals: required (job.image, job.cpu, job.memory, job.storage or
-metadata.estimated_duration_hours left out, the field named in problems); unknown_job_image (neither a name from hl capacity nor a full
-address); no_cluster_for_image; no_environment_builder (the commit declares an environment and
-no cluster your org may use builds);
-exceeds_cluster_capacity (more than any cluster has idle, with both figures);
+Refusals: required (job.cpu, job.memory, job.storage or metadata.estimated_duration_hours left
+out, the field named in problems); malformed (no job.command); no_experiment_image (none recorded:
+hl image set); exceeds_cluster_capacity (more than any cluster has idle, with both figures);
 experiment_not_started (before the start only a baseline agent's job is taken; see status_reason
 of hl platform-experiments get); experiment_closed.
 
   metadata:
     hypothesis_id: hyp-456        # from 'hl hypothesis submit'
   job:
-    image: python                 # a job_image name from 'hl capacity', or a full address, host first
-    command: ["bash", "-c", "dir=$(hl-clone) && cd \"$dir\" && exec python train.py"]
-                                  # hl-clone checks out the commit you submit from and prints where
+    command: ["python", "train.py"]   # runs in /workspace/code, the commit you submit from
     accelerator_type: ...         # a job on CPU leaves these two out and holds its cpu, whole cores
     accelerator_count: 1
     cpu: 2                        # per node, like memory and storage, and in each group of a

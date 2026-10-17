@@ -7,15 +7,13 @@
 # images make publish or make local-images pushed to REGISTRY under TAG.
 # RUNTIME_TOKEN comes from the environment and reaches helm on stdin, so neither this recipe's
 # echo nor a process list shows it.
-# BUILDER=true also builds environments there. BUILDER_NODE_IMAGES, the builder node's containerd
-# socket, also loads each build into that node.
 # INSECURE_REGISTRY=true has every node pull from REGISTRY over plain HTTP, the default while
 # REGISTRY_TLS_VERIFY=false, as with the dev registry. For a cluster on another machine, name the
 # dev registry as that machine reaches it: REGISTRY=<LOCAL_REACHABLE_ADDRESS>:5000.
 # HELM_FLAGS=--dry-run=server has the API server check every object and installs nothing.
 # cluster-agent-check runs the chart's test: from a pod of the cluster, a node pulls both images,
 # the API and the metrics service answer and the API takes the token.
-# Usage: RUNTIME_TOKEN="$$(make -s runtime-token CLUSTER=<name>)" make cluster-agent-up CLUSTER=<name> API_URL=... METRICS_URL=... [REGISTRY=...] [TAG=...] [KUBECONFIG_PATH=...] [KUBE_CONTEXT=...] [BUILDER=true [BUILDER_NODE_IMAGES=<containerd socket>]] [INSECURE_REGISTRY=true|false] [HELM_FLAGS=--dry-run=server]
+# Usage: RUNTIME_TOKEN="$$(make -s runtime-token CLUSTER=<name>)" make cluster-agent-up CLUSTER=<name> API_URL=... METRICS_URL=... [REGISTRY=...] [TAG=...] [KUBECONFIG_PATH=...] [KUBE_CONTEXT=...] [INSECURE_REGISTRY=true|false] [HELM_FLAGS=--dry-run=server]
 #        make cluster-agent-check [KUBECONFIG_PATH=...] [KUBE_CONTEXT=...]
 #        make cluster-agent-down [KUBECONFIG_PATH=...] [KUBE_CONTEXT=...]
 INSECURE_REGISTRY ?= $(if $(filter false,$(REGISTRY_TLS_VERIFY)),true,false)
@@ -26,8 +24,8 @@ KUBE_FLAGS = $(if $(KUBECONFIG_PATH),--kubeconfig $(KUBECONFIG_PATH)) $(if $(KUB
 define cluster_agent_install
 printf 'runtimeToken: "%s"\n' "$$RUNTIME_TOKEN" | helm upgrade --install hypothesisloop-cluster-agent deploy/charts/hypothesisloop-cluster-agent \
   $(KUBE_FLAGS) -n hypothesisloop --create-namespace --take-ownership --wait --timeout 5m \
-  --set-string clusterName=$(1),apiURL=$(2),metricsURL=$(3),images.registry=$(4),images.tag=$(TAG),kubeContext=$(KUBE_CONTEXT),builder.nodeImages.containerdSocket=$(BUILDER_NODE_IMAGES) \
-  --set builder.enabled=$(or $(BUILDER),false),insecureRegistry.enabled=$(5) --values - $(HELM_FLAGS)
+  --set-string clusterName=$(1),apiURL=$(2),metricsURL=$(3),images.registry=$(4),images.tag=$(TAG),kubeContext=$(KUBE_CONTEXT) \
+  --set insecureRegistry.enabled=$(5) --values - $(HELM_FLAGS)
 endef
 
 cluster-agent-up:
@@ -55,20 +53,8 @@ $(REGISTRY_LOGIN)
 $(CONTAINER_ENGINE) push $(if $(filter podman,$(CONTAINER_ENGINE)),--tls-verify=$(REGISTRY_TLS_VERIFY)) "$(REGISTRY)/hypothesisloop-$(1):$(TAG)"
 endef
 
-# Every image the product runs, in build order: job is job-base with the platform's tools, and
-# each framework job image of bases.mk is its own -base the same way.
-include runtime/job/build/bases.mk
-define framework_job
-IMAGE_DOCKERFILE_$(word 1,$(1))-base := runtime/job/build/Dockerfile.job-base
-IMAGE_ARGS_$(word 1,$(1))-base := --build-arg BASE=$(word 2,$(1)) --build-arg TORCH_CPU=$(word 3,$(1))
-IMAGE_DOCKERFILE_$(word 1,$(1)) := runtime/job/build/Dockerfile.job
-IMAGE_ARGS_$(word 1,$(1)) = --build-arg BASE=$$(REGISTRY)/hypothesisloop-$(word 1,$(1))-base:$$(TAG)
-FRAMEWORK_JOB_IMAGES += $(word 1,$(1))-base $(word 1,$(1))
-endef
-$(foreach entry,$(JOB_IMAGE_BASES),$(eval $(call framework_job,$(subst =, ,$(entry)))))
-
-PRODUCT_IMAGES := control-service metrics-service ui harness-base node-agent cluster-agent bare-agent \
-	job-base job $(FRAMEWORK_JOB_IMAGES)
+# Every image the product runs.
+PRODUCT_IMAGES := control-service metrics-service ui harness-base node-agent cluster-agent bare-agent
 IMAGE_DOCKERFILE_control-service := controlplane/build/Dockerfile.control-service
 IMAGE_DOCKERFILE_metrics-service := controlplane/build/Dockerfile.metrics-service
 IMAGE_DOCKERFILE_harness-base := agents/harness/Dockerfile.base
@@ -78,9 +64,6 @@ IMAGE_DOCKERFILE_cluster-agent := runtime/k8s/build/Dockerfile.cluster-agent
 IMAGE_ARGS_cluster-agent = --build-arg VERSION=$(TAG)
 IMAGE_DOCKERFILE_bare-agent := runtime/bare-metal/build/Dockerfile.bare-agent
 IMAGE_ARGS_bare-agent = --build-arg VERSION=$(TAG)
-IMAGE_DOCKERFILE_job-base := runtime/job/build/Dockerfile.job-base
-IMAGE_DOCKERFILE_job := runtime/job/build/Dockerfile.job
-IMAGE_ARGS_job = --build-arg BASE=$(REGISTRY)/hypothesisloop-job-base:$(TAG)
 IMAGE_DOCKERFILE_ui := controlplane/build/Dockerfile.ui
 IMAGE_CONTEXT_ui := controlplane/ui
 

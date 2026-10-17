@@ -37,8 +37,8 @@ rules:
     resources: ["resourceclaimtemplates"]
     verbs: ["get", "list", "create", "delete"]
   - apiGroups: [""]
-    # One image pull Secret per job that runs in an environment, holding the control plane's
-    # short-lived login to the private environments repository.
+    # One image pull Secret per job whose image is in its org's private repository, holding the
+    # control plane's short-lived read-only login to it.
     resources: ["secrets"]
     verbs: ["get", "list", "create", "update", "delete"]
 ---
@@ -102,18 +102,8 @@ metadata:
 spec:
   # Every replica independently reconciles (the reconcile exchange is idempotent, and
   # Job create/delete are idempotent), so no leader election is needed. One is enough for most
-  # deployments, and the only count with the builder, whose cache one daemon owns.
+  # deployments.
   replicas: 1
-  {{- if .Values.builder.enabled }}
-  # The old pod goes before the new one starts. Recreate would do the same, and an upgrade to it
-  # from an install without the builder is refused: server-side apply keeps the rollingUpdate
-  # the API server defaulted, which Recreate forbids.
-  strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 0
-      maxUnavailable: 1
-  {{- end }}
   selector:
     matchLabels:
       app: hypothesisloop-cluster-agent
@@ -123,49 +113,6 @@ spec:
         app: hypothesisloop-cluster-agent
     spec:
       serviceAccountName: hypothesisloop-cluster-agent
-      {{- if .Values.builder.enabled }}
-      # The cache volume and the socket are the rootless daemon's user's, and that group reaches
-      # them.
-      securityContext:
-        fsGroup: 1000
-      # A sidecar: started, and ready, before the agent, which reports this cluster as one that
-      # builds as soon as it runs.
-      initContainers:
-        - name: buildkitd
-          image: {{ .Values.builder.image }}
-          restartPolicy: Always
-          args:
-            - --addr=unix:///run/buildkit/buildkitd.sock
-            # Unprivileged, the daemon cannot mount a /proc of its own for a RUN, so a RUN shares
-            # the daemon's process namespace.
-            - --oci-worker-no-process-sandbox
-            # Reserved, free and most used, in MB (values.yaml builder.cache).
-            - --oci-worker-gc-keepstorage={{ mul (required "builder.cache.reservedGB is required" .Values.builder.cache.reservedGB) 1000 }},{{ mul (required "builder.cache.minFreeGB is required" .Values.builder.cache.minFreeGB) 1000 }},{{ mul (required "builder.cache.maxUsedGB is required" .Values.builder.cache.maxUsedGB) 1000 }}
-          resources:
-            requests:
-              cpu: {{ required "builder.requests.cpu is required" .Values.builder.requests.cpu | quote }}
-              memory: {{ required "builder.requests.memory is required" .Values.builder.requests.memory | quote }}
-            limits:
-              memory: {{ required "builder.limits.memory is required" .Values.builder.limits.memory | quote }}
-          startupProbe:
-            exec:
-              command: ["buildctl", "--addr=unix:///run/buildkit/buildkitd.sock", "debug", "workers"]
-            periodSeconds: 2
-            failureThreshold: 60
-          securityContext:
-            runAsUser: 1000
-            runAsGroup: 1000
-            # rootlesskit makes the user namespace the daemon and every RUN live in.
-            seccompProfile:
-              type: Unconfined
-            appArmorProfile:
-              type: Unconfined
-          volumeMounts:
-            - name: buildkit-socket
-              mountPath: /run/buildkit
-            - name: buildkit-cache
-              mountPath: /home/user/.local/share/buildkit
-      {{- end }}
       containers:
         - name: cluster-agent
           image: {{ required "images.registry is required" .Values.images.registry }}/hypothesisloop-cluster-agent:{{ .Values.images.tag | default .Chart.AppVersion }}
@@ -186,63 +133,23 @@ spec:
             # never heuristically detected. See autoscaler.md.
             - name: AUTOSCALER_ENABLED
               value: {{ .Values.autoscalerEnabled | quote }}
-            {{- if .Values.builder.enabled }}
-            # The daemon this cluster builds environments on. Set, the agent reports that it builds.
-            - name: HYPOTHESISLOOP_BUILDS
-              value: unix:///run/buildkit/buildkitd.sock
-            {{- with .Values.builder.nodeImages.containerdSocket }}
-            # Where each environment built is loaded, so a job on this node does not pull it.
-            - name: HYPOTHESISLOOP_NODE_IMAGES
-              value: /run/node-containerd/containerd.sock
-            # The node loaded into, reported as soon as a build is there, so a job is placed on it
-            # while the push goes on.
-            - name: HYPOTHESISLOOP_NODE_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: spec.nodeName
-            # Under the memory limit below, so the Go runtime collects before the kernel kills.
-            - name: GOMEMLIMIT
-              value: "900MiB"
-            {{- end }}
-            {{- with .Values.builder.nodeImages.snapshotter }}
-            - name: HYPOTHESISLOOP_NODE_SNAPSHOTTER
-              value: {{ . | quote }}
-            {{- end }}
-            {{- end }}
           resources:
             requests:
               cpu: "10m"
               memory: "32Mi"
             # See node-agent.yaml's resources comment: a tight cpu limit starves
-            # the container's own startup handshake, not just its steady-state work. A build's
-            # session and output stream are the agent's to hold, and a load streams the whole image
-            # through it before the push starts.
-            # A load holds the export stream and containerd's import at once, which 128Mi cannot.
+            # the container's own startup handshake, not just its steady-state work.
             limits:
-              cpu: {{ if and .Values.builder.enabled .Values.builder.nodeImages.containerdSocket }}"1"{{ else }}"300m"{{ end }}
-              memory: {{ if and .Values.builder.enabled .Values.builder.nodeImages.containerdSocket }}"1Gi"{{ else if .Values.builder.enabled }}"128Mi"{{ else }}"64Mi"{{ end }}
-          # Loading into the node takes its containerd socket, which only root reaches.
+              cpu: "300m"
+              memory: "64Mi"
           securityContext:
-            {{- if and .Values.builder.enabled .Values.builder.nodeImages.containerdSocket }}
-            runAsUser: 0
-            {{- else }}
             runAsNonRoot: true
             runAsUser: 65532
             runAsGroup: 65532
-            {{- end }}
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
-          {{- if .Values.builder.enabled }}
-          volumeMounts:
-            - name: buildkit-socket
-              mountPath: /run/buildkit
-            {{- if .Values.builder.nodeImages.containerdSocket }}
-            - name: node-containerd
-              mountPath: /run/node-containerd/containerd.sock
-            {{- end }}
-          {{- end }}
       # Runs on a node kept free of workloads (local development's no-workload taint) or on a
       # control-plane node, so it has somewhere to run before any workload node is attached.
       # Never a toleration of every taint, as node-agent.yaml has: that covers
@@ -253,17 +160,3 @@ spec:
           operator: Exists
         - key: node-role.kubernetes.io/control-plane
           operator: Exists
-      {{- if .Values.builder.enabled }}
-      volumes:
-        - name: buildkit-socket
-          emptyDir: {}
-        - name: buildkit-cache
-          persistentVolumeClaim:
-            claimName: hypothesisloop-builder-cache
-        {{- with .Values.builder.nodeImages.containerdSocket }}
-        - name: node-containerd
-          hostPath:
-            path: {{ . | quote }}
-            type: Socket
-        {{- end }}
-      {{- end }}

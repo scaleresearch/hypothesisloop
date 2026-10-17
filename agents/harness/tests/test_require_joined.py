@@ -211,11 +211,12 @@ class StartupTest(PlatformCase):
         with mock.patch.dict(os.environ, self.environment(GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="core.pager", GIT_CONFIG_VALUE_0="cat"), clear=True), \
                 mock.patch.object(prompt, "hl_commands", return_value="usage: hl"), mock.patch.object(core, "clone_workspace"):
             await core.prepare()
-            self.assertEqual(os.environ["GIT_CONFIG_COUNT"], "2")
+            self.assertEqual(os.environ["GIT_CONFIG_COUNT"], "3")
             self.assertEqual((os.environ["GIT_CONFIG_KEY_0"], os.environ["GIT_CONFIG_VALUE_0"]), ("core.pager", "cat"))
             self.assertEqual(os.environ["GIT_CONFIG_KEY_1"], "url.https://api.example.invalid/git/pe-1.git.insteadOf")
             self.assertEqual(os.environ["GIT_CONFIG_VALUE_1"], "https://github.com/acme/model.git")
-            self.assertEqual(os.environ["HL_GIT_URL"], "https://api.example.invalid/git/pe-1.git")
+            self.assertEqual(os.environ["GIT_CONFIG_KEY_2"], "http.https://api.example.invalid/git/pe-1.git.extraHeader")
+            self.assertEqual(os.environ["GIT_CONFIG_VALUE_2"], "Authorization: Bearer " + AGENT_TOKEN)
         FakePlatform.git_url = ""
         with self.assertRaises(SystemExit) as refused:
             await self.prepare()
