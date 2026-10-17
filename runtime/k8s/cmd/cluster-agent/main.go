@@ -10,7 +10,7 @@
 //
 // cluster-agent check, run with CLUSTER_NAME, API_URL, METRICS_URL and RUNTIME_TOKEN, asks the
 // API's and the metrics service's /healthz and whether the API takes the token, changes nothing
-// and exits 1 when any fails. install.sh --dry-run runs it in a pod of the cluster.
+// and exits 1 when any fails. The chart's helm test runs it in a pod of the cluster.
 //
 //	CLUSTER_NAME          — this cluster's stable identity
 //	API_URL               — base URL of the control-plane API

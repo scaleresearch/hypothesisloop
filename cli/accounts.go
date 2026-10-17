@@ -429,8 +429,8 @@ and --set-string kubeContext=CONTEXT for the notes it prints to name it too). It
 runtime's chart from the registry into the namespace hypothesisloop, or upgrades it, and adds
 the namespace hypothesisloop-jobs where jobs run. To preview, add helm's own flag
 --dry-run=server at the end: the API server checks every object and nothing is installed. It
-does not check that the cluster reaches the platform or pulls the images; install.sh --dry-run
-from a checkout does (docs/install-cluster.md). Pods resolve the addresses with the cluster's
+does not check that the cluster reaches the platform or pulls the images; after the install,
+helm test hypothesisloop-cluster-agent -n hypothesisloop --logs does. Pods resolve the addresses with the cluster's
 DNS, so a platform on a tailnet is named by its IP. A registry of plain HTTP, as a local
 stack's is, makes the command pull the chart over HTTP and set insecureRegistry, which has
 every node's containerd pull from it over HTTP. helm uninstall hypothesisloop-cluster-agent -n

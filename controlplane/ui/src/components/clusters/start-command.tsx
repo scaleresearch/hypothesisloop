@@ -50,7 +50,7 @@ function InstallGuide({ kind, registered }: { kind: Kind; registered: Registered
         </GuidePart>
         <GuidePart title="Steps">
           <ol className="list-decimal space-y-1 pl-5 text-xs text-muted">
-            <li>To preview every object first, add helm&apos;s own flag <Code>--dry-run=server</Code> at the end of the command. It does not check that the cluster reaches the platform or pulls the images: <Code>install.sh --dry-run</Code> from a checkout does.</li>
+            <li>To preview every object first, add helm&apos;s own flag <Code>--dry-run=server</Code> at the end of the command. It does not check that the cluster reaches the platform or pulls the images: after the install, <Code>helm test hypothesisloop-cluster-agent -n hypothesisloop --logs</Code> does.</li>
             <li>Run the command and paste the runtime token when it asks.</li>
             <li>Check <Code>kubectl -n hypothesisloop get pods</Code>. The cluster shows Connected in the list below within a minute.</li>
           </ol>

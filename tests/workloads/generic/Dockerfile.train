@@ -7,11 +7,11 @@ COPY train.py .
 # FAIL_RANK set, so the gang-failure scenarios exercise the code path that provably formed the
 # process group rather than a near-copy that might diverge from it.
 COPY train_distributed.py .
-# The durable-data fixture (tests/scenarios/multi-stage-chain.sh). It speaks S3 over stdlib HTTP
+# The durable-data fixture (tests/e2e/test_multi_stage_chain.py). It speaks S3 over stdlib HTTP
 # with its own SigV4 signer because this image has no SDK and no aws/mc binary — and adding one
 # would mean the chain scenario proved a client library rather than the platform's scoping.
 COPY data_stage.py .
-# The termination-policy fixture (tests/scenarios/preemption-requeue.sh). It imports data_stage's
+# The termination-policy fixture (tests/e2e/test_preemption_requeue.py). It imports data_stage's
 # signer rather than carrying a second one — one prefix, one credential shape, one place a signing
 # mistake can live.
 COPY checkpoint_train.py .

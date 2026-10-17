@@ -6,7 +6,7 @@ of the build's output, and the same file submitted again is built again.
 The platform reads the file from GitHub alone, so the module needs the sandbox repository
 (TEST_GIT_HOST_GITHUB_INSTALLATION, TEST_GIT_HOST_GITHUB_REPOSITORY): each test pushes its
 experiment's baseline branch there and deletes it at the end. A build needs a connected cluster that builds for org
-default (install.sh BUILDER=true). The local k3s of make e2e builds nothing, so there the build
+default (the chart's builder.enabled=true). The local k3s of make e2e builds nothing, so there the build
 tests skip. Where another cluster builds, such as a Tenstorrent host's, localdev/e2e.sh refuses the stack,
 and the module runs with what make tt-e2e gives the suite, while nothing else uses that cluster:
 
@@ -79,7 +79,7 @@ class Run:
         """Submits a job of code_ref, skipping the test when no cluster builds for the org."""
         job_id, r = self.submit(code_ref, overrides)
         if r.status_code == 422 and r.json().get("reason") == "no_environment_builder":
-            pytest.skip("no cluster that builds environments is open to org default (install.sh BUILDER=true)")
+            pytest.skip("no cluster that builds environments is open to org default (the chart's builder.enabled=true)")
         assert r.status_code == 202, r.text
         return job_id
 
