@@ -9,7 +9,7 @@ import (
 // experiment.
 func JobActions(exp *domain.Experiment, caller auth.Principal, writes bool) []domain.ExperimentAction {
 	actions := []domain.ExperimentAction{}
-	if writes && auth.AudienceAgent.Admits(caller, "") && (caller.Kind != auth.KindAgent || caller.AgentID == exp.AgentID) && cancels(exp.Status) {
+	if writes && auth.AudienceAgent.Admits(caller, "") && caller.Owns(exp.AgentID) && cancels(exp.Status) {
 		actions = append(actions, domain.ExperimentActionCancel)
 	}
 	return actions

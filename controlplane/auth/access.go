@@ -203,7 +203,11 @@ func admitted(ctx context.Context, p Principal, tenancy *domain.Tenancy, what st
 
 func ownedBy(ctx context.Context, tenancy *domain.Tenancy, what string) error {
 	p, _ := FromContext(ctx)
-	if p.Kind == KindAgent && (tenancy == nil || tenancy.AgentID != p.AgentID) {
+	owner := ""
+	if tenancy != nil {
+		owner = tenancy.AgentID
+	}
+	if !p.Owns(owner) {
 		return forbidden("this " + what + " belongs to another agent")
 	}
 	return nil

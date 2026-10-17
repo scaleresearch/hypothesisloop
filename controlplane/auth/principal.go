@@ -80,6 +80,12 @@ func (p Principal) Scope() domain.TenantScope {
 	return domain.TenantScope{OrgIDs: p.OrgIDs, ProjectID: p.ProjectID, PlatformExperimentID: p.PlatformExperimentID}
 }
 
+// Owns says the principal acts on what belongs to the agent agentID, empty for what no agent
+// owns: an agent's token on its own agent's alone, every other on anything it reaches.
+func (p Principal) Owns(agentID string) bool {
+	return p.Kind != KindAgent || p.AgentID == agentID
+}
+
 // Actor is whose credential this is, as a record of what it did names it. It is the only place
 // an actor is made, so no record names one a request merely claimed. Staff who signed in are the
 // person they are; a job is the agent it runs for. A runtime authors no record and has none.
