@@ -94,6 +94,18 @@ func run(args []string, stdout io.Writer) error {
 			return err
 		}
 		return withStore(cfg, func(ctx context.Context, store *db.Store) error {
+			if shared {
+				cluster, err := store.GetCluster(ctx, args[2])
+				if err != nil {
+					return err
+				}
+				if cluster == nil {
+					return fmt.Errorf("no cluster %s", args[2])
+				}
+				if err := cluster.Shareable(); err != nil {
+					return err
+				}
+			}
 			_, requeued, err := store.UpdateCluster(ctx, args[2], &shared, domain.ClusterSettings{})
 			if err != nil {
 				return err

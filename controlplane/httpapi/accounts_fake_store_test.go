@@ -15,6 +15,8 @@ import (
 type memStore struct {
 	clock    time.Time
 	sequence int
+	// orgIDs are the ids CreateOrg hands out before it makes its own.
+	orgIDs   []string
 	users    map[string]bool
 	staff    map[string]bool
 	// placed is the jobs on each cluster, job id -> org; clearedIDs the identities forgotten.
@@ -71,6 +73,9 @@ func (s *memStore) CreateOrg(_ context.Context, name, ownerUserID string, maxOwn
 		return nil, db.ErrMaxOrgsReached
 	}
 	org := &domain.Org{ID: s.id("org"), Name: name, CreatedAt: s.now()}
+	if len(s.orgIDs) > 0 {
+		org.ID, s.orgIDs = s.orgIDs[0], s.orgIDs[1:]
+	}
 	s.orgs[org.ID] = org
 	s.roles[org.ID] = map[string]domain.OrgRole{}
 	s.join(org.ID, ownerUserID, domain.OrgRoleOwner)

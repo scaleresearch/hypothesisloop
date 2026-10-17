@@ -661,6 +661,10 @@ func (h *Service) SetClusterEnabled(ctx context.Context, orgID, name string, ena
 	return &view, nil
 }
 
+// ReasonClusterNotShareable refuses sharing a cluster of an org other than the platform's
+// (domain.Cluster.Shareable).
+const ReasonClusterNotShareable = "cluster_not_shareable"
+
 // UpdateCluster changes the cluster's settings, or whether every org shares it.
 func (h *Service) UpdateCluster(ctx context.Context, orgID, name string, shared *bool, settings domain.ClusterSettings) (*WithdrawnCluster, error) {
 	if shared != nil {
@@ -668,8 +672,14 @@ func (h *Service) UpdateCluster(ctx context.Context, orgID, name string, shared 
 			return nil, err
 		}
 	}
-	if _, err := h.access.ClusterOf(ctx, orgID, name); err != nil {
+	cluster, err := h.access.ClusterOf(ctx, orgID, name)
+	if err != nil {
 		return nil, err
+	}
+	if shared != nil && *shared {
+		if err := cluster.Shareable(); err != nil {
+			return nil, refusal.Invalid(ReasonClusterNotShareable, err.Error()).On("shared")
+		}
 	}
 	if shared == nil && settings.Empty() {
 		return nil, refusal.Invalid(refusal.ReasonInvalidRequest, "name what changes: shared, scale_up_timeout_seconds, max_speculative_accelerators, stuck_pending_timeout_seconds or status_silence_ceiling_seconds")

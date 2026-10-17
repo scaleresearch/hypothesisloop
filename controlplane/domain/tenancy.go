@@ -267,6 +267,21 @@ func (c Cluster) OpenTo(orgID string) bool {
 	return c.Shared || c.OrgID == orgID
 }
 
+// PlatformOrgID is the org the control plane seeds, which the platform's own clusters are
+// registered to.
+const PlatformOrgID = "default"
+
+// Shareable refuses sharing a cluster of any org but the platform's. A cluster's runtime token
+// reads the secret_env, data keys and pull logins of every job placed on it, and the org that
+// holds the cluster can register it again for that token, so an org's own cluster serves that
+// org alone.
+func (c Cluster) Shareable() error {
+	if c.OrgID != PlatformOrgID {
+		return fmt.Errorf("cluster %s is org %s's own and serves that org alone: only a cluster of the platform's org %s serves other orgs", c.Name, c.OrgID, PlatformOrgID)
+	}
+	return nil
+}
+
 // EnabledFor reports whether orgID left the cluster on for its jobs, which is the default.
 func (c Cluster) EnabledFor(orgID string) bool {
 	return !slices.Contains(c.DisabledOrgs, orgID)

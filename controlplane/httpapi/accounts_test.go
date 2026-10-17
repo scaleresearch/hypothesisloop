@@ -105,6 +105,8 @@ func newAccountsWorld(t *testing.T) *world {
 	for _, user := range []string{"u-owner", "u-member", "u-other", "u-staff"} {
 		w.store.users[user] = true
 	}
+	// Org a is the platform's, so its clusters are the ones that may be shared.
+	w.store.orgIDs = []string{domain.PlatformOrgID}
 	orgA, _ := w.store.CreateOrg(ctx, "org a", "u-owner", 0)
 	orgB, _ := w.store.CreateOrg(ctx, "org b", "u-other", 0)
 	w.orgA, w.orgB = orgA.ID, orgB.ID
@@ -851,31 +853,31 @@ func TestAClusterIsListedWithItsLastContactLastErrorAndAgentVersion(t *testing.T
 // org turned off has none.
 func TestAListedClusterStatesItsPlaceInTheOrder(t *testing.T) {
 	w := newAccountsWorld(t)
-	w.ok("owner", "POST", "/orgs/"+w.orgA+"/clusters", name{"name": "second"}, http.StatusOK, nil)
-	w.ok("staff", "PATCH", "/orgs/"+w.orgB+"/clusters/"+w.clusterB, map[string]any{"shared": true}, http.StatusOK, nil)
+	w.ok("outsider", "POST", "/orgs/"+w.orgB+"/clusters", name{"name": "second"}, http.StatusOK, nil)
+	w.ok("staff", "PATCH", "/orgs/"+w.orgA+"/clusters/"+w.clusterA, map[string]any{"shared": true}, http.StatusOK, nil)
 	places := func() map[string]int {
 		t.Helper()
 		var listed struct {
 			Clusters []accounts.ListedCluster `json:"clusters"`
 		}
-		w.ok("member", "GET", "/orgs/"+w.orgA+"/clusters", nil, http.StatusOK, &listed)
+		w.ok("outsider", "GET", "/orgs/"+w.orgB+"/clusters", nil, http.StatusOK, &listed)
 		out := map[string]int{}
 		for _, c := range listed.Clusters {
 			out[c.Name] = c.Place
 		}
 		return out
 	}
-	want := map[string]int{w.clusterA: 1, "second": 1, w.clusterB: 2}
+	want := map[string]int{w.clusterB: 1, "second": 1, w.clusterA: 2}
 	if got := places(); !maps.Equal(got, want) {
 		t.Fatalf("two own clusters of the default priority and a shared one: got = %v, want = %v", got, want)
 	}
-	w.ok("owner", "PUT", "/orgs/"+w.orgA+"/clusters/order", map[string]any{"names": []string{"second", w.clusterA}}, http.StatusOK, nil)
-	want = map[string]int{"second": 1, w.clusterA: 2, w.clusterB: 3}
+	w.ok("outsider", "PUT", "/orgs/"+w.orgB+"/clusters/order", map[string]any{"names": []string{"second", w.clusterB}}, http.StatusOK, nil)
+	want = map[string]int{"second": 1, w.clusterB: 2, w.clusterA: 3}
 	if got := places(); !maps.Equal(got, want) {
 		t.Fatalf("after ordering: got = %v, want = %v", got, want)
 	}
-	w.ok("owner", "POST", "/orgs/"+w.orgA+"/clusters/second/disable", nil, http.StatusOK, nil)
-	want = map[string]int{"second": 0, w.clusterA: 1, w.clusterB: 2}
+	w.ok("outsider", "POST", "/orgs/"+w.orgB+"/clusters/second/disable", nil, http.StatusOK, nil)
+	want = map[string]int{"second": 0, w.clusterB: 1, w.clusterA: 2}
 	if got := places(); !maps.Equal(got, want) {
 		t.Fatalf("with second turned off: got = %v, want = %v", got, want)
 	}
@@ -1133,6 +1135,24 @@ func TestOnlyStaffShareAClusterAndOnlyUnderItsOwnOrg(t *testing.T) {
 	}
 }
 
+// An org's own cluster serves that org alone: whoever holds it can register it again for its
+// runtime token, which reads what every job placed on it carries. Only the platform's are shared.
+func TestOnlyAClusterOfThePlatformsOrgIsShared(t *testing.T) {
+	w := newAccountsWorld(t)
+	path := "/orgs/" + w.orgB + "/clusters/" + w.clusterB
+	for _, caller := range []string{"staff", "staff-user"} {
+		rec := w.call(caller, "PATCH", path, map[string]any{"shared": true})
+		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), accounts.ReasonClusterNotShareable) {
+			t.Fatalf("%s sharing org b's cluster: got = %d %s, want = 422 %s", caller, rec.Code, rec.Body, accounts.ReasonClusterNotShareable)
+		}
+	}
+	if w.store.clusters[w.clusterB].Shared {
+		t.Fatal("a refused request shared the cluster")
+	}
+	w.ok("staff", "PATCH", path, map[string]any{"shared": false}, http.StatusOK, nil)
+	w.ok("staff", "PATCH", "/orgs/"+w.orgA+"/clusters/"+w.clusterA, map[string]any{"shared": true}, http.StatusOK, nil)
+}
+
 // An org decides which of the clusters open to it its jobs use, its own or a shared one, and
 // decides it for itself alone.
 func TestAnOrgTurnsAClusterOffAndOnForItsOwnJobs(t *testing.T) {
@@ -1239,9 +1259,9 @@ func TestTurningAClusterOffIsItsOrgsAdministratorsAlone(t *testing.T) {
 // after all of them and nobody orders it.
 func TestAnOrgOrdersTheClustersItRegistered(t *testing.T) {
 	w := newAccountsWorld(t)
-	path := "/orgs/" + w.orgA + "/clusters/order"
-	w.ok("owner", "POST", "/orgs/"+w.orgA+"/clusters", name{"name": "zz-last-by-name"}, http.StatusOK, nil)
-	w.ok("staff", "PATCH", "/orgs/"+w.orgB+"/clusters/"+w.clusterB, map[string]any{"shared": true}, http.StatusOK, nil)
+	path := "/orgs/" + w.orgB + "/clusters/order"
+	w.ok("outsider", "POST", "/orgs/"+w.orgB+"/clusters", name{"name": "zz-last-by-name"}, http.StatusOK, nil)
+	w.ok("staff", "PATCH", "/orgs/"+w.orgA+"/clusters/"+w.clusterA, map[string]any{"shared": true}, http.StatusOK, nil)
 	var listed struct {
 		Clusters []accounts.ListedCluster `json:"clusters"`
 	}
@@ -1252,31 +1272,31 @@ func TestAnOrgOrdersTheClustersItRegistered(t *testing.T) {
 		}
 		return strings.Join(out, ",")
 	}
-	want := "zz-last-by-name," + w.clusterA + "," + w.clusterB
-	for _, caller := range []string{"owner", "org-key", "staff"} {
-		w.ok(caller, "PUT", path, map[string]any{"names": []string{"zz-last-by-name", w.clusterA}}, http.StatusOK, &listed)
+	want := "zz-last-by-name," + w.clusterB + "," + w.clusterA
+	for _, caller := range []string{"outsider", "foreign-key", "staff"} {
+		w.ok(caller, "PUT", path, map[string]any{"names": []string{"zz-last-by-name", w.clusterB}}, http.StatusOK, &listed)
 		if names() != want {
 			t.Fatalf("ordered by %s: got = %s, want = %s", caller, names(), want)
 		}
 	}
 	for what, order := range map[string][]string{
-		"one left out": {w.clusterA}, "one twice": {w.clusterA, w.clusterA, "zz-last-by-name"}, "none": {},
-		"the shared one": {w.clusterA, "zz-last-by-name", w.clusterB}, "a name nobody has": {w.clusterA, "zz-last-by-name", "never-registered"},
+		"one left out": {w.clusterB}, "one twice": {w.clusterB, w.clusterB, "zz-last-by-name"}, "none": {},
+		"the shared one": {w.clusterB, "zz-last-by-name", w.clusterA}, "a name nobody has": {w.clusterB, "zz-last-by-name", "never-registered"},
 	} {
-		if rec := w.call("owner", "PUT", path, map[string]any{"names": order}); rec.Code != http.StatusUnprocessableEntity {
+		if rec := w.call("outsider", "PUT", path, map[string]any{"names": order}); rec.Code != http.StatusUnprocessableEntity {
 			t.Errorf("%s: got = %d %s, want = 422", what, rec.Code, rec.Body)
 		}
 	}
-	for caller, status := range map[string]int{"member": http.StatusForbidden, "project-key": http.StatusForbidden, "outsider": http.StatusNotFound} {
-		if rec := w.call(caller, "PUT", path, map[string]any{"names": []string{w.clusterA, "zz-last-by-name"}}); rec.Code != status {
+	for caller, status := range map[string]int{"member": http.StatusNotFound, "project-key": http.StatusNotFound, "owner": http.StatusNotFound} {
+		if rec := w.call(caller, "PUT", path, map[string]any{"names": []string{w.clusterB, "zz-last-by-name"}}); rec.Code != status {
 			t.Errorf("%s: got = %d %s, want = %d", caller, rec.Code, rec.Body, status)
 		}
 	}
-	w.ok("member", "GET", "/orgs/"+w.orgA+"/clusters", nil, http.StatusOK, &listed)
+	w.ok("outsider", "GET", "/orgs/"+w.orgB+"/clusters", nil, http.StatusOK, &listed)
 	if names() != want {
 		t.Fatalf("after the refused orders: got = %s, want = %s", names(), want)
 	}
-	if strings.Contains(w.call("member", "GET", "/orgs/"+w.orgA+"/clusters", nil).Body.String(), `"priority"`) {
+	if strings.Contains(w.call("outsider", "GET", "/orgs/"+w.orgB+"/clusters", nil).Body.String(), `"priority"`) {
 		t.Fatal("the list answers the number the order is kept as")
 	}
 }
