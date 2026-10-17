@@ -7,7 +7,7 @@
 	k3s-up k3s-down k3s-dev-nodes-up k3s-dev-nodes-down e2e \
 	full-stop full-start reload stack-not-held \
 	tt-up tt-down tt-status tt-stop tt-start tt-dev-nodes-up tt-dev-nodes-down tt-hardware-image tt-e2e \
-	git-repository
+	git-repository dev-api dev-status dev-down tunnels tunnels-down dev-hosted test-github-live
 
 # ---- Control plane: one instance, runs anywhere (the brain) -----------------
 COMPOSE_FILE := localdev/controlplane/docker-compose.yml
@@ -43,7 +43,7 @@ TAG := $(shell bash localdev/lib/image-tag.sh)
 endif
 export HOST_ADDRESS REGISTRY_PUBLISH_IP REGISTRY_REACHABLE_IP REGISTRY TAG
 REGISTRY_TLS_VERIFY ?= false
-# Run before every push. A registry whose login expires logs in here (set by the deployment tooling); the
+# Run before every push. A registry whose login expires sets the command that logs in to it; the
 # dev registry takes none.
 REGISTRY_LOGIN ?= true
 # The platform every image is built for: the container engine's own unless set (linux/amd64 for
@@ -135,8 +135,8 @@ tunnels-down:
 	bash localdev/local-tunnels/tunnels.sh down
 
 # make dev, with settings that have control-service rent hosted agents and jobs on the providers
-# .env names, naming the running tunnels and the images under IMAGE_TAG, which the maintainers'
-# deployment tooling (not in this repository) pushes after a change to them. Needs
+# .env names, naming the running tunnels and the images under IMAGE_TAG, which must be in the
+# registry, pushed again after a change to them. Needs
 # `make tunnels` first. From here hosted agents and jobs placed on the cloud cluster rent
 # machines, which cost money.
 dev-hosted: render-settings
@@ -369,8 +369,7 @@ locked-images: check-tag $(if $(filter $(LOCAL_REGISTRY),$(REGISTRY)),registry-u
 	$(MAKE) prune-images TAGS="$(TAG)"
 
 # The job images that carry a framework, built and pushed to $(REGISTRY), which a local cluster
-# pulls them from. Apart from `images` because each pulls gigabytes. The deployment's registry
-# gets them from the maintainers' deployment tooling.
+# pulls them from. Apart from `images` because each pulls gigabytes.
 include runtime/job/build/bases.mk
 
 job-images: check-tag
