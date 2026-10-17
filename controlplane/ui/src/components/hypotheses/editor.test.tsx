@@ -66,7 +66,7 @@ function Harness({ view, graph: start = initial }: { view: 'graph' | 'outline'; 
   const common = { graph, rootLabel: 'Vision benchmark', selected, hits: new Set<string>(), filters: { status: '', owner: '' }, onSelect: setSelected }
   const resolved = resolveTenant({
     kind: 'user', user_id: 'u1',
-    orgs: [{ id: 'org_a', name: 'Ada', role: 'member', created_at: at }],
+    orgs: [{ id: 'org_a', name: 'Ada', role: 'member', created_at: at, actions: ['create_api_key'] }],
     projects: [{ id: 'prj_1', org_id: 'org_a', name: 'default', created_at: at }],
   }, '')
   if (resolved.state !== 'selected') throw new Error('no tenant')

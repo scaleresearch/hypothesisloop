@@ -56,9 +56,10 @@ function InstallationState({ installation, onInstall }: { installation: OrgGitHu
  * member reads the list.
  */
 export function OrgGitHub() {
-  const { me, org, administers } = useTenant()
+  const { me, org } = useTenant()
+  const editsOrg = org.actions.includes('edit')
   const { data, error, mutate } = useSWR(keys.githubInstallations(org.id), () => fetchGitHubInstallations(org.id))
-  const app = useGitHubApp(administers)
+  const app = useGitHubApp(editsOrg)
   const { install, start, reset } = useGitHubInstall(org.id, githubCardPath(org.id))
   const [disconnecting, setDisconnecting] = useState<OrgGitHubInstallation | null>(null)
   const [defaulting, setDefaulting] = useState<number | null>(null)
@@ -84,15 +85,15 @@ export function OrgGitHub() {
   }
 
   const unconfigured = app.error instanceof ApiError && app.error.reason === GITHUB_NOT_CONFIGURED
-  const canInstall = administers && app.data != null
+  const canInstall = editsOrg && app.data != null
   const installations = data?.items
 
   return (
     <Stack>
-      {administers && unconfigured && (
+      {editsOrg && unconfigured && (
         <Callout tone="neutral">This deployment has no GitHub App configured, so no GitHub account can be connected.</Callout>
       )}
-      {administers && app.error && !unconfigured && <ErrorMessage>GitHub cannot be connected right now: {app.error.message}</ErrorMessage>}
+      {editsOrg && app.error && !unconfigured && <ErrorMessage>GitHub cannot be connected right now: {app.error.message}</ErrorMessage>}
       {actionError && <ErrorMessage>{actionError}</ErrorMessage>}
 
       {error && <ErrorMessage>Could not load the GitHub accounts of {org.name}: {error.message}</ErrorMessage>}
@@ -100,13 +101,13 @@ export function OrgGitHub() {
       {installations && installations.length === 0 && (
         <EmptyState>
           No GitHub account is connected to {org.name}, and an experiment needs one: it keeps its code in a repository there.
-          {administers ? '' : ' An owner installs the GitHub App here.'}
+          {editsOrg ? '' : ' An owner installs the GitHub App here.'}
         </EmptyState>
       )}
       {installations && installations.length > 0 && (
         <Table aria-label="Connected GitHub accounts">
           <thead>
-            <tr><th>GitHub account</th><th>Kind</th><th>On GitHub</th>{installations.length > 1 && <th>New repositories</th>}<th>Connected by</th>{administers && <th />}</tr>
+            <tr><th>GitHub account</th><th>Kind</th><th>On GitHub</th>{installations.length > 1 && <th>New repositories</th>}<th>Connected by</th>{editsOrg && <th />}</tr>
           </thead>
           <tbody>
             {installations.map(installation => (
@@ -117,13 +118,13 @@ export function OrgGitHub() {
                 {installations.length > 1 && (
                   <td>
                     {installation.default ? <Badge tone="accent">Default</Badge>
-                      : administers ? <Button size="sm" loading={defaulting === installation.installation_id} disabled={defaulting !== null} onClick={() => void makeDefault(installation)}>Make default</Button> : null}
+                      : editsOrg ? <Button size="sm" loading={defaulting === installation.installation_id} disabled={defaulting !== null} onClick={() => void makeDefault(installation)}>Make default</Button> : null}
                   </td>
                 )}
                 <td title={new Date(installation.connected_at).toLocaleString()}>
                   <Actor actor={installation.connected_actor} self={installation.connected_actor.kind === 'user' && installation.connected_actor.id === me.user_id} />
                 </td>
-                {administers && (
+                {editsOrg && (
                   <td className="text-right"><Button size="sm" variant="danger" onClick={() => setDisconnecting(installation)}>Disconnect</Button></td>
                 )}
               </tr>

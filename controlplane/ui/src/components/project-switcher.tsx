@@ -67,7 +67,8 @@ function CreateByName({ what, create }: { what: string; create: (name: string) =
  * open in one project and a filter on its experiments mean nothing in another.
  */
 export function ProjectSwitcher() {
-  const { me, org, project, administers } = useTenant()
+  const { me, org, project } = useTenant()
+  const editsOrg = org.actions.includes('edit')
   const router = useRouter()
   const section = sectionOf(usePathname()) ?? 'experiments'
   const refreshMe = useRefreshMe()
@@ -117,7 +118,7 @@ export function ProjectSwitcher() {
           onChange={id => { if (id && id !== project.id) selectProject(projectsOf(org.id).find(p => p.id === id) as Project) }}
         />
       </Stack>
-      {administers && <CreateByName what="project" create={newProject} />}
+      {editsOrg && <CreateByName what="project" create={newProject} />}
     </Stack>
   )
 }

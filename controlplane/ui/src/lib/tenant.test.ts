@@ -9,8 +9,8 @@ const twoOrgs: Me = {
   user_id: 'u1',
   name: 'Ada',
   orgs: [
-    { id: 'org_a', name: 'Ada', role: 'owner', created_at: at },
-    { id: 'org_b', name: 'Lab', role: 'member', created_at: at },
+    { id: 'org_a', name: 'Ada', role: 'owner', created_at: at, actions: ['edit', 'create_api_key'] },
+    { id: 'org_b', name: 'Lab', role: 'member', created_at: at, actions: ['create_api_key'] },
   ],
   projects: [
     { id: 'prj_b1', org_id: 'org_b', name: 'default', created_at: at },
@@ -30,11 +30,6 @@ describe('resolveTenant', () => {
     expect(resolved).toMatchObject({ state: 'selected', tenant: { org: { id: 'org_b' }, project: { id: 'prj_b1' } } })
   })
 
-  it('lets an owner administer and a member not', () => {
-    expect(resolveTenant(twoOrgs, 'prj_a2')).toMatchObject({ tenant: { administers: true, staff: false } })
-    expect(resolveTenant(twoOrgs, 'prj_b1')).toMatchObject({ tenant: { administers: false, staff: false } })
-  })
-
   it('reports a project the caller does not reach, and never substitutes another', () => {
     expect(resolveTenant(twoOrgs, 'prj_gone')).toEqual({ state: 'unavailable', what: 'project', id: 'prj_gone' })
   })
@@ -48,13 +43,13 @@ describe('resolveTenant', () => {
     expect(resolveTenant({ kind: 'user', orgs: [], projects: [] }, '')).toEqual({ state: 'none' })
   })
 
-  it('lets staff administer an org they do not belong to, and lands them in their own', () => {
+  it('selects for staff an org they do not belong to, and lands them in their own', () => {
     const staff: Me = {
       kind: 'staff',
       user_id: 'u9',
       orgs: [
-        { id: 'org_x', name: 'Customer', created_at: at },
-        { id: 'org_s', name: 'Staff home', role: 'owner', created_at: at },
+        { id: 'org_x', name: 'Customer', created_at: at, actions: ['edit', 'create_api_key'] },
+        { id: 'org_s', name: 'Staff home', role: 'owner', created_at: at, actions: ['edit', 'create_api_key'] },
       ],
       projects: [
         { id: 'prj_x', org_id: 'org_x', name: 'default', created_at: at },
@@ -62,13 +57,13 @@ describe('resolveTenant', () => {
       ],
     }
     expect(resolveTenant(staff, '')).toMatchObject({ tenant: { project: { id: 'prj_s' }, staff: true } })
-    expect(resolveTenant(staff, 'prj_x')).toMatchObject({ tenant: { org: { id: 'org_x' }, staff: true, administers: true } })
+    expect(resolveTenant(staff, 'prj_x')).toMatchObject({ tenant: { org: { id: 'org_x' }, staff: true } })
   })
 
   it('lands a staff token that is no person in the first org there is', () => {
     const token: Me = {
       kind: 'staff',
-      orgs: [{ id: 'org_x', name: 'Customer', created_at: at }],
+      orgs: [{ id: 'org_x', name: 'Customer', created_at: at, actions: ['edit', 'create_api_key'] }],
       projects: [{ id: 'prj_x', org_id: 'org_x', name: 'default', created_at: at }],
     }
     expect(resolveTenant(token, '')).toMatchObject({ tenant: { project: { id: 'prj_x' } } })

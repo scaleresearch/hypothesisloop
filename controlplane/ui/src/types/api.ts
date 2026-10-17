@@ -2471,6 +2471,15 @@ export interface components {
             metric: components["schemas"]["JobMetric"];
             summary?: string;
         };
+        CallerOrg: {
+            /** @description What the caller may do to the org now, each a write the API accepts from them: edit (rename it, and change its projects, members, invites, GitHub installations, clusters and agent types) and create_api_key (POST /orgs/{id}/api-keys, a member's bound to a project). */
+            actions: components["schemas"]["OrgAction"][];
+            /** Format: date-time */
+            created_at: string;
+            id: string;
+            name: string;
+            role?: components["schemas"]["OrgRole"];
+        };
         /** @enum {string} */
         CapacityTier: "guaranteed" | "burst";
         Change: {
@@ -3480,7 +3489,7 @@ export interface components {
             /** @description What this caller may create, absent for staff, who are held to no limit. How much of each is used is read from orgs and projects beside it. */
             limits?: components["schemas"]["Limits"];
             name?: string;
-            orgs: components["schemas"]["Org"][];
+            orgs: components["schemas"]["CallerOrg"][];
             /** @description The one project an API key is bound to, absent when it reaches its whole org. */
             project_id?: string;
             projects: components["schemas"]["Project"][];
@@ -3643,6 +3652,8 @@ export interface components {
         OrgAPIKeys: {
             api_keys: components["schemas"]["APIKey"][];
         };
+        /** @enum {string} */
+        OrgAction: "edit" | "create_api_key";
         OrgGitHubInstallation: {
             account_login: string;
             /**
@@ -4645,6 +4656,7 @@ export type AttachCommands = components['schemas']['AttachCommands'];
 export type BaselineRaise = components['schemas']['BaselineRaise'];
 export type BeginInstallRequest = components['schemas']['BeginInstallRequest'];
 export type BestJob = components['schemas']['BestJob'];
+export type CallerOrg = components['schemas']['CallerOrg'];
 export type CapacityTier = components['schemas']['CapacityTier'];
 export type Change = components['schemas']['Change'];
 export type CheckOutRequest = components['schemas']['CheckOutRequest'];
@@ -4740,6 +4752,7 @@ export type OpenHypothesis = components['schemas']['OpenHypothesis'];
 export type OrderClustersRequest = components['schemas']['OrderClustersRequest'];
 export type Org = components['schemas']['Org'];
 export type OrgAPIKeys = components['schemas']['OrgAPIKeys'];
+export type OrgAction = components['schemas']['OrgAction'];
 export type OrgGitHubInstallation = components['schemas']['OrgGitHubInstallation'];
 export type OrgInvite = components['schemas']['OrgInvite'];
 export type OrgMember = components['schemas']['OrgMember'];
@@ -8879,6 +8892,7 @@ export const metricDefinitionDirectionValues: ReadonlyArray<FlattenedDeepRequire
 export const metricDefinitionRoleValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["MetricDefinition"]["role"]> = ["ranking", "constraint", "attribute", "reference"];
 export const metricReferenceDirectionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["MetricReference"]["direction"]> = ["maximize", "minimize"];
 export const metricStandingsDirectionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["MetricStandings"]["direction"]> = ["maximize", "minimize"];
+export const orgActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["OrgAction"]> = ["edit", "create_api_key"];
 export const orgGitHubInstallationAccount_typeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["OrgGitHubInstallation"]["account_type"]> = ["User", "Organization"];
 export const orgRoleValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["OrgRole"]> = ["owner", "member"];
 export const platformExperimentActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["PlatformExperimentAction"]> = ["close", "abandon", "remove", "accept", "add_agent", "add_idea"];

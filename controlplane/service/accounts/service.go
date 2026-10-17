@@ -131,9 +131,15 @@ type Me struct {
 	Name      string            `json:"name,omitempty"`
 	KeyID     string            `json:"key_id,omitempty"`
 	ProjectID string            `json:"project_id,omitempty" doc:"The one project an API key is bound to, absent when it reaches its whole org."`
-	Orgs      []*domain.Org     `json:"orgs"`
+	Orgs      []*CallerOrg      `json:"orgs"`
 	Projects  []*domain.Project `json:"projects"`
 	Limits    *Limits           `json:"limits,omitempty" doc:"What this caller may create, absent for staff, who are held to no limit. How much of each is used is read from orgs and projects beside it."`
+}
+
+// CallerOrg is an org as GET /me lists it, with what the caller may do to it.
+type CallerOrg struct {
+	*domain.Org
+	Actions []domain.OrgAction `json:"actions" doc:"What the caller may do to the org now, each a write the API accepts from them: edit (rename it, and change its projects, members, invites, GitHub installations, clusters and agent types) and create_api_key (POST /orgs/{id}/api-keys, a member's bound to a project)."`
 }
 
 // CreatedAPIKey is an API key at the one moment its token exists outside the caller's hands.
@@ -331,9 +337,10 @@ func (h *Service) me(ctx context.Context) (*Me, error) {
 		limits := h.limits
 		me.Limits = &limits
 	}
+	var orgs []*domain.Org
 	switch p.Kind {
 	case auth.KindStaff:
-		if me.Orgs, err = h.accounts.ListAllOrgs(ctx); err != nil {
+		if orgs, err = h.accounts.ListAllOrgs(ctx); err != nil {
 			return nil, err
 		}
 		if p.UserID != "" {
@@ -345,23 +352,25 @@ func (h *Service) me(ctx context.Context) (*Me, error) {
 			for _, org := range own {
 				roles[org.ID] = org.Role
 			}
-			for _, org := range me.Orgs {
+			for _, org := range orgs {
 				org.Role = roles[org.ID]
 			}
 		}
 	case auth.KindKey:
 		me.ProjectID = p.ProjectID
-		if me.Orgs, err = h.accounts.ListOrgs(ctx, p.OrgIDs); err != nil {
+		if orgs, err = h.accounts.ListOrgs(ctx, p.OrgIDs); err != nil {
 			return nil, err
 		}
 	default:
-		if me.Orgs, err = h.accounts.ListUserOrgs(ctx, p.UserID); err != nil {
+		if orgs, err = h.accounts.ListUserOrgs(ctx, p.UserID); err != nil {
 			return nil, err
 		}
 	}
-	orgIDs := make([]string, len(me.Orgs))
-	for i, org := range me.Orgs {
+	orgIDs := make([]string, len(orgs))
+	me.Orgs = make([]*CallerOrg, len(orgs))
+	for i, org := range orgs {
 		orgIDs[i] = org.ID
+		me.Orgs[i] = &CallerOrg{Org: org, Actions: orgActions(p, org)}
 	}
 	projects, err := h.accounts.ListProjects(ctx, orgIDs)
 	if err != nil {

@@ -30,6 +30,16 @@ var OrgRoles = []OrgRole{OrgRoleOwner, OrgRoleMember}
 
 func ValidOrgRole(r OrgRole) bool { return slices.Contains(OrgRoles, r) }
 
+// OrgAction is something the caller may do to an org now.
+type OrgAction string
+
+const (
+	OrgActionEdit         OrgAction = "edit"
+	OrgActionCreateAPIKey OrgAction = "create_api_key"
+)
+
+var OrgActions = []OrgAction{OrgActionEdit, OrgActionCreateAPIKey}
+
 // Org owns projects, agents, API keys and clusters. Role is the asking user's own role and is
 // set only on a per-user listing.
 type Org struct {

@@ -16,7 +16,7 @@ const me: Me = {
   kind: 'user',
   user_id: 'u1',
   name: 'Ada',
-  orgs: [{ id: 'org_a', name: 'Ada', role: 'owner', created_at: at }],
+  orgs: [{ id: 'org_a', name: 'Ada', role: 'owner', created_at: at, actions: ['edit', 'create_api_key'] }],
   projects: [
     { id: 'prj_1', org_id: 'org_a', name: 'default', created_at: at },
     { id: 'prj_2', org_id: 'org_a', name: 'vision', created_at: at },
@@ -26,8 +26,8 @@ const me: Me = {
 // What the API lists: the keys, never a token.
 let stored: APIKey[]
 
-function show() {
-  const resolved = resolveTenant(me, '')
+function show(as: Me = me) {
+  const resolved = resolveTenant(as, '')
   if (resolved.state !== 'selected') throw new Error('no tenant')
   return render(
     <SWRConfig value={{ provider: () => new Map() }}>
@@ -112,6 +112,20 @@ describe('creating an API key', () => {
     expect(createAPIKey).toHaveBeenCalledExactlyOnceWith('org_a', 'vision-bot', 'prj_2')
     const row = (await screen.findByRole('cell', { name: 'vision-bot' })).closest('tr')!
     expect(within(row).getByText('project vision')).toBeTruthy()
+  })
+
+  it('binds a member\'s key to a project, the only kind the API lets a member make', async () => {
+    show({ ...me, orgs: [{ ...me.orgs[0], role: 'member', actions: ['create_api_key'] }] })
+    await userEvent.click(screen.getByLabelText('Key reach'))
+    expect(screen.queryByRole('option', { name: 'Whole organization' })).toBeNull()
+    await userEvent.click(screen.getByRole('option', { name: 'Project default only' }))
+    await create('laptop')
+    expect(createAPIKey).toHaveBeenCalledExactlyOnceWith('org_a', 'laptop', 'prj_1')
+  })
+
+  it('is not offered to a caller the API lets make none', () => {
+    show({ ...me, orgs: [{ ...me.orgs[0], actions: [] }] })
+    expect(screen.queryByRole('button', { name: 'Create API key' })).toBeNull()
   })
 
   it('needs a name', async () => {

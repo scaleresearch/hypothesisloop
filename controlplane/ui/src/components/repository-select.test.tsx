@@ -23,10 +23,10 @@ vi.mock('@/lib/api/platform-experiments', async importActual => ({
 const at = '2026-01-01T00:00:00Z'
 const me: Me = {
   kind: 'user', user_id: 'u1', name: 'Ada',
-  orgs: [{ id: 'org_a', name: 'Lab', role: 'member', created_at: at }],
+  orgs: [{ id: 'org_a', name: 'Lab', role: 'member', created_at: at, actions: ['create_api_key'] }],
   projects: [{ id: 'prj_1', org_id: 'org_a', name: 'default', created_at: at }],
 }
-const owner: Me = { ...me, orgs: [{ ...me.orgs[0], role: 'owner' }] }
+const owner: Me = { ...me, orgs: [{ ...me.orgs[0], role: 'owner', actions: ['edit', 'create_api_key'] }] }
 const repositories: Repository[] = [
   { repository: 'acme/widgets', installation_id: 7, private: true },
   { repository: 'acme/open', installation_id: 7, private: false },

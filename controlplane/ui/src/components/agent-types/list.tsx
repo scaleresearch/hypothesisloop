@@ -64,10 +64,10 @@ function NewTypeDialog({ catalog, onClose }: { catalog: CurrentAgentType[]; onCl
   )
 }
 
-function RoleGroup({ role, types, administers, duplicate, busy }: {
+function RoleGroup({ role, types, editsOrg, duplicate, busy }: {
   role: AgentRole
   types: CurrentAgentType[]
-  administers: boolean
+  editsOrg: boolean
   duplicate: (t: CurrentAgentType) => void
   busy: string | null
 }) {
@@ -82,7 +82,7 @@ function RoleGroup({ role, types, administers, duplicate, busy }: {
         <thead>
           <tr>
             <th>Type</th><th className="w-64">Settings</th><th className="w-20 text-right">Version</th>
-            {administers && <th className="w-28" />}
+            {editsOrg && <th className="w-28" />}
           </tr>
         </thead>
         <tbody>
@@ -98,7 +98,7 @@ function RoleGroup({ role, types, administers, duplicate, busy }: {
               </td>
               <td className="whitespace-nowrap text-xs text-muted">{settingsLine(t)}</td>
               <td className={num}>v{t.current_version}</td>
-              {administers && (
+              {editsOrg && (
                 <td className="text-right">
                   {ORG_ROLES.includes(t.role) && <Button size="sm" loading={busy === t.id} onClick={() => duplicate(t)}>Duplicate</Button>}
                 </td>
@@ -113,7 +113,8 @@ function RoleGroup({ role, types, administers, duplicate, busy }: {
 
 /** Every agent type of the org, grouped by role, with duplicate and new for its owners. */
 export function AgentTypesList() {
-  const { org, administers } = useTenant()
+  const { org } = useTenant()
+  const editsOrg = org.actions.includes('edit')
   const { data: catalog, error } = useAgentTypes(org.id)
   const { create, busy, error: createError } = useCreateAgentType(org.id)
   const [adding, setAdding] = useState(false)
@@ -121,9 +122,9 @@ export function AgentTypesList() {
   return (
     <Page
       title="Agent types"
-      actions={administers && catalog && <Button variant="primary" size="sm" onClick={() => setAdding(true)}>New type</Button>}
+      actions={editsOrg && catalog && <Button variant="primary" size="sm" onClick={() => setAdding(true)}>New type</Button>}
     >
-      {!administers && (
+      {!editsOrg && (
         <Text tone="muted" role="note">
           Only an owner of {org.name} can create, edit or archive agent types.
         </Text>
@@ -138,7 +139,7 @@ export function AgentTypesList() {
             key={role}
             role={role}
             types={types}
-            administers={administers}
+            editsOrg={editsOrg}
             busy={busy}
             duplicate={t => void create({ from: t.id }, t.id)}
           />

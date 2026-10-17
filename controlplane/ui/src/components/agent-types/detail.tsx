@@ -28,10 +28,10 @@ import { keys } from '@/lib/keys'
 import type { CurrentAgentType, EditedAgentType } from '@/types/api'
 
 // Why the person cannot edit the type, or null when they can.
-function readOnlyReason(t: CurrentAgentType, administers: boolean, orgName: string): string | null {
+function readOnlyReason(t: CurrentAgentType, editsOrg: boolean, orgName: string): string | null {
   if (t.builtin) return 'Built-in types are read-only for everyone. Duplicate it to get a copy you can edit.'
   if (t.archived_at) return `Archived ${relTime(t.archived_at)}. It takes no new agents and can no longer be edited. Duplicate it to start a new type from it.`
-  if (!administers) return `Only an owner of ${orgName} can edit agent types.`
+  if (!editsOrg) return `Only an owner of ${orgName} can edit agent types.`
   return null
 }
 
@@ -218,7 +218,8 @@ function Editor({ type, editable, onSaved, onReload }: {
 /** One agent type: what it is, its editor for an owner, and its versions. */
 export function AgentTypeDetail({ typeID }: { typeID: string }) {
   const router = useRouter()
-  const { org, administers } = useTenant()
+  const { org } = useTenant()
+  const editsOrg = org.actions.includes('edit')
   const { mutate } = useSWRConfig()
   const { data: type, error, mutate: mutateType } = useSWR(keys.agentType(org.id, typeID), () => fetchAgentType(org.id, typeID))
   const { create, busy: duplicating, error: duplicateError } = useCreateAgentType(org.id)
@@ -242,7 +243,7 @@ export function AgentTypeDetail({ typeID }: { typeID: string }) {
   }
   if (!type) return <Page title="Agent type" back={back}><Loading /></Page>
 
-  const reason = readOnlyReason(type, administers, org.name)
+  const reason = readOnlyReason(type, editsOrg, org.name)
   return (
     <Page
       back={back}
@@ -259,7 +260,7 @@ export function AgentTypeDetail({ typeID }: { typeID: string }) {
           <span>{describeType(type)}</span>
         </Stack>
       }
-      actions={administers && (
+      actions={editsOrg && (
         <Inline gap="sm">
           <Button size="sm" loading={duplicating === type.id} onClick={() => void create({ from: type.id }, type.id)}>Duplicate</Button>
           {!type.builtin && !type.archived_at && <Button size="sm" variant="danger" onClick={() => setArchiving(true)}>Archive</Button>}

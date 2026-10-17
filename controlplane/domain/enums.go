@@ -47,6 +47,7 @@ func (SignupAction) Schema(r huma.Registry) *huma.Schema    { return enumSchema(
 func (AgentRole) Schema(r huma.Registry) *huma.Schema       { return enumSchema(r, AgentRoles) }
 func (AgentTypeAction) Schema(r huma.Registry) *huma.Schema { return enumSchema(r, AgentTypeActions) }
 func (OrgRole) Schema(r huma.Registry) *huma.Schema         { return enumSchema(r, OrgRoles) }
+func (OrgAction) Schema(r huma.Registry) *huma.Schema       { return enumSchema(r, OrgActions) }
 func (ActorKind) Schema(r huma.Registry) *huma.Schema       { return enumSchema(r, ActorKinds) }
 func (CapacityTier) Schema(r huma.Registry) *huma.Schema    { return enumSchema(r, CapacityTiers) }
 func (TypeKind) Schema(r huma.Registry) *huma.Schema        { return enumSchema(r, TypeKinds) }

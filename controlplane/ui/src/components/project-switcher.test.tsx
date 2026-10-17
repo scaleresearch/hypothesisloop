@@ -22,9 +22,9 @@ const me: Me = {
   user_id: 'u1',
   name: 'Ada',
   orgs: [
-    { id: 'org_a', name: 'Ada', role: 'owner', created_at: at },
-    { id: 'org_b', name: 'Lab', role: 'member', created_at: at },
-    { id: 'org_empty', name: 'No projects', role: 'member', created_at: at },
+    { id: 'org_a', name: 'Ada', role: 'owner', created_at: at, actions: ['edit', 'create_api_key'] },
+    { id: 'org_b', name: 'Lab', role: 'member', created_at: at, actions: ['create_api_key'] },
+    { id: 'org_empty', name: 'No projects', role: 'member', created_at: at, actions: ['create_api_key'] },
   ],
   projects: [
     { id: 'prj_a1', org_id: 'org_a', name: 'default', created_at: at },
@@ -137,7 +137,7 @@ describe('creating an organization', () => {
   const created = { id: 'org_new', name: 'Robotics', role: 'owner' as const, created_at: at }
   const after: Me = {
     ...me,
-    orgs: [...me.orgs, created],
+    orgs: [...me.orgs, { ...created, actions: ['edit', 'create_api_key'] }],
     projects: [...me.projects, { id: 'prj_new', org_id: 'org_new', name: 'default', created_at: at }],
   }
 
@@ -220,7 +220,7 @@ describe('two orgs with the same name', () => {
   it('are told apart by the end of their ids', async () => {
     const twins: Me = {
       ...me,
-      orgs: [...me.orgs, { id: 'org_01aaaa-zzz999', name: 'Lab', role: 'owner', created_at: at }],
+      orgs: [...me.orgs, { id: 'org_01aaaa-zzz999', name: 'Lab', role: 'owner', created_at: at, actions: ['edit', 'create_api_key'] }],
       projects: [...me.projects, { id: 'prj_t', org_id: 'org_01aaaa-zzz999', name: 'default', created_at: at }],
     }
     show('prj_a1', <ProjectSwitcher />, twins)

@@ -6,16 +6,18 @@ import { createAgentType, fetchAgentTypes } from '@/lib/api/agent-types'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { AgentTypesList } from '@/components/agent-types/list'
 import { CATALOG, agentType } from '@/test-agent-types'
-import type { Me } from '@/types/api'
+import type { Me, OrgAction, OrgRole } from '@/types/api'
 
 const navigation = vi.hoisted(() => ({ push: vi.fn() }))
 vi.mock('next/navigation', () => ({ useRouter: () => navigation }))
 vi.mock('@/lib/api/agent-types', () => ({ fetchAgentTypes: vi.fn(), createAgentType: vi.fn() }))
 
 const at = '2026-01-01T00:00:00Z'
-const me = (role: 'owner' | 'member'): Me => ({
+// What the API lets each role do to the org.
+const orgActions: Record<OrgRole, OrgAction[]> = { owner: ['edit', 'create_api_key'], member: ['create_api_key'] }
+const me = (role: OrgRole): Me => ({
   kind: 'user', user_id: 'u1', name: 'Ada',
-  orgs: [{ id: 'org_a', name: 'Lab', role, created_at: at }],
+  orgs: [{ id: 'org_a', name: 'Lab', role, created_at: at, actions: orgActions[role] }],
   projects: [{ id: 'prj_1', org_id: 'org_a', name: 'default', created_at: at }],
 })
 

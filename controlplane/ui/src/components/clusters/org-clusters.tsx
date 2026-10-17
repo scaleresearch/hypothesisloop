@@ -30,7 +30,8 @@ import type { ListedCluster } from '@/types/api'
  * Advanced changes a cluster's scheduler settings or removes it. Staff share one there too.
  */
 export function OrgClusters() {
-  const { org, administers, staff } = useTenant()
+  const { org, staff } = useTenant()
+  const editsOrg = org.actions.includes('edit')
   const { data, error, mutate } = useSWR(keys.orgClusters(org.id), () => fetchOrgClusters(org.id), { refreshInterval: POLL.live })
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
@@ -51,7 +52,7 @@ export function OrgClusters() {
     : own
   const shown = [...shownOwn, ...others]
   const tied = (c: ListedCluster) => !!c.place && shown.filter(o => o.place === c.place).length > 1
-  const columns = administers ? 6 : 5
+  const columns = editsOrg ? 6 : 5
 
   async function change(cluster: string, act: () => Promise<unknown>) {
     setSwitching(cluster)
@@ -98,7 +99,7 @@ export function OrgClusters() {
   }
 
   function row(c: ListedCluster, index?: number) {
-    const orders = administers && index !== undefined
+    const orders = editsOrg && index !== undefined
     return (
       <Fragment key={c.name}>
         <tr
@@ -125,12 +126,12 @@ export function OrgClusters() {
             <Switch
               label={`Use ${c.name} for the jobs of ${org.name}`}
               checked={c.enabled}
-              disabled={!administers || switching !== ''}
+              disabled={!editsOrg || switching !== ''}
               onChange={enabled => change(c.name, () => setClusterEnabled(org.id, c.name, enabled))}
             />
             {!c.enabled && <Text as="div" variant="meta" className="whitespace-nowrap">Off: no new jobs go here.</Text>}
           </td>
-          {administers && (
+          {editsOrg && (
             <td>
               {c.owned && (
                 <Inline>
@@ -141,7 +142,7 @@ export function OrgClusters() {
             </td>
           )}
         </tr>
-        {administers && c.owned && advanced === c.name && (
+        {editsOrg && c.owned && advanced === c.name && (
           <tr>
             <td colSpan={columns} aria-label={`Advanced settings of ${c.name}`}>
               <Stack start className="py-1">
@@ -170,7 +171,7 @@ export function OrgClusters() {
 
   return (
     <Stack>
-      {administers && (
+      {editsOrg && (
         <Inline as="form" onSubmit={add}>
           <Input
             fieldSize="sm"
@@ -193,7 +194,7 @@ export function OrgClusters() {
       {data && data.length === 0 && (
         <EmptyState>
           No cluster is registered for {org.name}, and the platform provides none.
-          {!administers && ' An owner adds one here.'}
+          {!editsOrg && ' An owner adds one here.'}
         </EmptyState>
       )}
       {data && data.length > 0 && (
@@ -207,12 +208,12 @@ export function OrgClusters() {
                 <th>Status</th>
                 <th>Provided by</th>
                 <th title={`Whether jobs of ${org.name} are placed on the cluster`}>Use for jobs</th>
-                {administers && <th />}
+                {editsOrg && <th />}
               </tr>
             </thead>
             <tbody>
               <tr>
-                <th colSpan={columns} scope="colgroup" className="bg-surface-inset py-2 text-foreground">Clusters of {org.name}, tried first, in the order {administers ? 'you set' : 'an owner sets'}</th>
+                <th colSpan={columns} scope="colgroup" className="bg-surface-inset py-2 text-foreground">Clusters of {org.name}, tried first, in the order {editsOrg ? 'you set' : 'an owner sets'}</th>
               </tr>
               {shownOwn.length === 0 && (
                 <tr>

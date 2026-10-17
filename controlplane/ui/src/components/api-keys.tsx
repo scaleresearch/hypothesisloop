@@ -25,15 +25,17 @@ const WHOLE_ORG = ''
 export function APIKeys() {
   const { me, org } = useTenant()
   const { data: apiKeys, error: listError, mutate } = useSWR(keys.apiKeys(org.id), () => fetchAPIKeys(org.id))
+  const projects = me.projects.filter(p => p.org_id === org.id)
+  // A key of the whole org is made by whoever changes the org; anyone else's is bound to a project.
+  const wholeOrg = org.actions.includes('edit')
   const [name, setName] = useState('')
-  const [scope, setScope] = useState(WHOLE_ORG)
+  const [scope, setScope] = useState(wholeOrg ? WHOLE_ORG : projects[0]?.id ?? WHOLE_ORG)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   // The token exists here and nowhere else: no read of the API returns it again.
   const [created, setCreated] = useState<CreatedAPIKey | null>(null)
   const [revoking, setRevoking] = useState<APIKey | null>(null)
 
-  const projects = me.projects.filter(p => p.org_id === org.id)
   const scopeLabel = (key: APIKey) =>
     key.project_id ? `project ${projects.find(p => p.id === key.project_id)?.name ?? key.project_id}` : 'whole organization'
 
@@ -59,7 +61,7 @@ export function APIKeys() {
 
   return (
     <Stack>
-      <Inline as="form" onSubmit={create}>
+      {org.actions.includes('create_api_key') && <Inline as="form" onSubmit={create}>
         <Input
           fieldSize="sm"
           className="w-56"
@@ -74,12 +76,12 @@ export function APIKeys() {
           value={scope}
           onChange={setScope}
           options={[
-            { value: WHOLE_ORG, label: 'Whole organization' },
+            ...(wholeOrg ? [{ value: WHOLE_ORG, label: 'Whole organization' }] : []),
             ...projects.map(p => ({ value: p.id, label: `Project ${p.name} only` })),
           ]}
         />
         <Button size="sm" variant="primary" type="submit" loading={busy} disabled={name.trim() === ''}>Create API key</Button>
-      </Inline>
+      </Inline>}
       {error && <ErrorMessage>{error}</ErrorMessage>}
 
       {created && (

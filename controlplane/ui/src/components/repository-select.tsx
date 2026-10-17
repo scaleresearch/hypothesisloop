@@ -94,11 +94,12 @@ export function RepositorySelect({ value, onChange, compact = false }: {
   onChange: (repository: string) => void
   compact?: boolean
 }) {
-  const { org, administers } = useTenant()
+  const { org } = useTenant()
+  const editsOrg = org.actions.includes('edit')
   const [q, setQ] = useState('')
   const app = useGitHubApp()
   const { install, start, reset } = useGitHubInstall(org.id, typeof window === 'undefined' ? '/' : window.location.pathname + window.location.search)
-  const onInstall = administers && app.data ? start : undefined
+  const onInstall = editsOrg && app.data ? start : undefined
   const installations = useSWR(app.data ? keys.githubInstallations(org.id) : null, () => fetchGitHubInstallations(org.id))
   const connected = (installations.data?.total ?? 0) > 0
   const listedAccounts = installations.data?.items ?? []

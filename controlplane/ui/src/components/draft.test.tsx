@@ -48,7 +48,7 @@ const proposal: StoredProposal = {
 const me: Me = {
   kind: 'user',
   user_id: 'u1',
-  orgs: [{ id: 'org_a', name: 'Ada', role: 'owner', created_at: '2026-01-01T00:00:00Z' }],
+  orgs: [{ id: 'org_a', name: 'Ada', role: 'owner', created_at: '2026-01-01T00:00:00Z', actions: ['edit', 'create_api_key'] }],
   projects: [{ id: 'prj_1', org_id: 'org_a', name: 'default', created_at: '2026-01-01T00:00:00Z' }],
 }
 const resolved = resolveTenant(me, 'prj_1')

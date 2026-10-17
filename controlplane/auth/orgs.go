@@ -77,8 +77,21 @@ func (a *Access) OrgAdmin(ctx context.Context, orgID string) (Principal, error) 
 	return p, a.administers(ctx, p, orgID)
 }
 
-// administers is the rule itself, for a principal already known to reach the org.
+// administers is Administers for a principal already known to reach the org, its role read.
 func (a *Access) administers(ctx context.Context, p Principal, orgID string) error {
+	var role domain.OrgRole
+	if p.Kind == KindUser {
+		var err error
+		if role, _, err = a.placement.OrgRole(ctx, orgID, p.UserID); err != nil {
+			return err
+		}
+	}
+	return Administers(p, role)
+}
+
+// Administers is the rule itself: whether p, which reaches an org and holds role in it, empty for
+// none, changes it.
+func Administers(p Principal, role domain.OrgRole) error {
 	switch p.Kind {
 	case KindStaff:
 		return nil
@@ -88,10 +101,6 @@ func (a *Access) administers(ctx context.Context, p Principal, orgID string) err
 		}
 		return nil
 	case KindUser:
-		role, _, err := a.placement.OrgRole(ctx, orgID, p.UserID)
-		if err != nil {
-			return err
-		}
 		if role != domain.OrgRoleOwner {
 			return forbidden("forbidden: only an owner of the org may change it")
 		}

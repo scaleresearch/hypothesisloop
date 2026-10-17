@@ -33,9 +33,10 @@ export function useNeedsGitHub(): boolean {
  * without leaving the page. A member is told an owner does it.
  */
 export function InstallGitHub({ label = 'Install GitHub App' }: { label?: string }) {
-  const { org, administers } = useTenant()
+  const { org } = useTenant()
+  const editsOrg = org.actions.includes('edit')
   const { install, start, reset } = useGitHubInstall(org.id, typeof window === 'undefined' ? '/' : window.location.pathname + window.location.search)
-  if (!administers) return <Text as="span" variant="note">An owner of {org.name} installs the GitHub App to start.</Text>
+  if (!editsOrg) return <Text as="span" variant="note">An owner of {org.name} installs the GitHub App to start.</Text>
   return (
     <>
       <Button type="button" variant="primary" disabled={install.phase === 'waiting'} onClick={start}>{label}</Button>

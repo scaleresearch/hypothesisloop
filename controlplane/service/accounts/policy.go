@@ -89,10 +89,28 @@ func (pol policy) mintKey(ctx context.Context, orgID, projectID string) (auth.Pr
 	if p, err = pol.access.KeyMinter(ctx, orgID, projectID); err != nil {
 		return p, err
 	}
-	if p.UserID == "" {
+	if !mintsKeys(p) {
 		return p, auth.Forbidden("forbidden: an API key is created by a signed-in person or minted from another key")
 	}
 	return p, nil
+}
+
+// mintsKeys says p makes API keys at all: a signed-in person, or a key minting from itself.
+func mintsKeys(p auth.Principal) bool {
+	return p.Kind == auth.KindKey || p.UserID != ""
+}
+
+// orgActions is what p may do to org, in which it holds org.Role, by the rules the writes refuse
+// by: change it and what it owns, and create API keys, a member only ones bound to a project.
+func orgActions(p auth.Principal, org *domain.Org) []domain.OrgAction {
+	actions := []domain.OrgAction{}
+	if auth.Administers(p, org.Role) == nil {
+		actions = append(actions, domain.OrgActionEdit)
+	}
+	if mintsKeys(p) {
+		actions = append(actions, domain.OrgActionCreateAPIKey)
+	}
+	return actions
 }
 
 // reachableKeys narrows an org's keys to the ones the caller may see: all of them for a person

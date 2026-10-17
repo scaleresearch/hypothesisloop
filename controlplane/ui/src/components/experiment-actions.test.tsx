@@ -36,7 +36,7 @@ const self: JoinedAgent = { platform_experiment_id: 'pe-x', agent_id: 'ag-self',
 const me: Me = {
   kind: 'user',
   user_id: 'u1',
-  orgs: [{ id: 'org_a', name: 'Ada', role: 'owner', created_at: at }],
+  orgs: [{ id: 'org_a', name: 'Ada', role: 'owner', created_at: at, actions: ['edit', 'create_api_key'] }],
   projects: [{ id: 'prj_1', org_id: 'org_a', name: 'default', created_at: at }],
 }
 const pe = {

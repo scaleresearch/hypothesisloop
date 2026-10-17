@@ -4,17 +4,15 @@ import { createContext, useContext } from 'react'
 import { useSWRConfig } from 'swr'
 import { fetchMe } from '@/lib/api/accounts'
 import { keys } from '@/lib/keys'
-import type { Me, Org, PlatformExperiment, Project } from '@/types/api'
+import type { CallerOrg, Me, PlatformExperiment, Project } from '@/types/api'
 
 /** The signed-in caller and the org and project every page is showing. */
 export interface Tenant {
   me: Me
-  org: Org
+  org: CallerOrg
   project: Project
   /** Platform operators see every org and the views across all of them. */
   staff: boolean
-  /** Whether the caller may change the org: rename it, add projects, keys and clusters. */
-  administers: boolean
 }
 
 export type TenantResolution =
@@ -35,8 +33,7 @@ function homeProject(me: Me): Project | undefined {
 function selected(me: Me, project: Project): TenantResolution {
   const org = me.orgs.find(o => o.id === project.org_id)
   if (!org) throw new Error(`project ${project.id} belongs to org ${project.org_id}, which GET /me did not list`)
-  const staff = me.kind === 'staff'
-  return { state: 'selected', tenant: { me, org, project, staff, administers: staff || org.role === 'owner' } }
+  return { state: 'selected', tenant: { me, org, project, staff: me.kind === 'staff' } }
 }
 
 /** Picks the project the URL names, or with none named the caller's home project. */

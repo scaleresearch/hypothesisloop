@@ -17,7 +17,7 @@ const owner: Me = {
   kind: 'user',
   user_id: 'u1',
   name: 'Ada',
-  orgs: [{ id: 'org_a', name: 'Ada', role: 'owner', created_at: at }],
+  orgs: [{ id: 'org_a', name: 'Ada', role: 'owner', created_at: at, actions: ['edit', 'create_api_key'] }],
   projects: [
     { id: 'prj_1', org_id: 'org_a', name: 'default', created_at: at },
     { id: 'prj_2', org_id: 'org_a', name: 'vision', created_at: at },
@@ -111,7 +111,7 @@ describe('creating a project', () => {
 
 describe('a member of the org', () => {
   it('sees its members and where its clusters are, and that the rest is an owner\'s, with nothing to change', () => {
-    show({ ...owner, orgs: [{ ...owner.orgs[0], role: 'member' }] })
+    show({ ...owner, orgs: [{ ...owner.orgs[0], role: 'member', actions: ['create_api_key'] }] })
     expect(screen.getByText(/Only an owner can rename it or manage its projects, API keys and GitHub accounts/)).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Compute Resources' }).getAttribute('href')).toBe('/orgs/org_a/clusters')
     expect(screen.getByText('members')).toBeTruthy()
@@ -132,7 +132,7 @@ describe('your organizations', () => {
   // A person's home org, which they own, and one they were invited into as a member.
   const invited: Me = {
     ...owner,
-    orgs: [owner.orgs[0], { id: 'org_lab', name: 'Lab', role: 'member', created_at: at }],
+    orgs: [owner.orgs[0], { id: 'org_lab', name: 'Lab', role: 'member', created_at: at, actions: ['create_api_key'] }],
     projects: [...owner.projects, { id: 'prj_lab', org_id: 'org_lab', name: 'default', created_at: at }],
   }
   const rows = () => within(screen.getByRole('table', { name: 'Your organizations' })).getAllByRole('row').slice(1)

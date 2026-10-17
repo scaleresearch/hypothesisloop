@@ -16,10 +16,10 @@ vi.mock('@/lib/api/github', async importActual => ({
 const at = '2026-01-01T00:00:00Z'
 const owner: Me = {
   kind: 'user', user_id: 'u1', name: 'Ada',
-  orgs: [{ id: 'org_a', name: 'Lab', role: 'owner', created_at: at }],
+  orgs: [{ id: 'org_a', name: 'Lab', role: 'owner', created_at: at, actions: ['edit', 'create_api_key'] }],
   projects: [{ id: 'prj_1', org_id: 'org_a', name: 'default', created_at: at }],
 }
-const member: Me = { ...owner, user_id: 'u2', orgs: [{ ...owner.orgs[0], role: 'member' }] }
+const member: Me = { ...owner, user_id: 'u2', orgs: [{ ...owner.orgs[0], role: 'member', actions: ['create_api_key'] }] }
 const app = { slug: 'hl', install_url: 'https://github.test/apps/hl/installations/new', new_repository_url: 'https://github.test/new' }
 const acme: OrgGitHubInstallation = { org_id: 'org_a', installation_id: 7, account_login: 'acme', account_type: 'Organization', connected_actor: { kind: 'user', id: 'u1', name: 'Ada' }, connected_at: at, default: false }
 const ada: OrgGitHubInstallation = { ...acme, installation_id: 9, account_login: 'ada', account_type: 'User' }

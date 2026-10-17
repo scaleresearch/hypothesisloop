@@ -25,8 +25,8 @@ const me: Me = {
   user_id: 'u2',
   name: 'Bob',
   orgs: [
-    { id: 'org_b', name: 'Bob', role: 'owner', created_at: at },
-    { id: 'org_a', name: 'Lab', role: 'member', created_at: at },
+    { id: 'org_b', name: 'Bob', role: 'owner', created_at: at, actions: ['edit', 'create_api_key'] },
+    { id: 'org_a', name: 'Lab', role: 'member', created_at: at, actions: ['create_api_key'] },
   ],
   projects: [
     { id: 'prj_b', org_id: 'org_b', name: 'default', created_at: at },

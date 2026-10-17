@@ -118,7 +118,8 @@ function Projects() {
 }
 
 export default function SettingsPage() {
-  const { me, org, administers } = useTenant()
+  const { me, org } = useTenant()
+  const editsOrg = org.actions.includes('edit')
   const where = org.role ? `, where you are ${org.role}` : ''
   return (
     <Page title="Settings" description={`Settings of ${org.name}${where}.`}>
@@ -126,13 +127,13 @@ export default function SettingsPage() {
         <YourOrgs />
       </Section>
 
-      {!administers && (
+      {!editsOrg && (
         <Text tone="muted">
           You are a member of {org.name}. Only an owner can rename it or manage its projects, API keys and GitHub accounts.
         </Text>
       )}
 
-      {administers && (
+      {editsOrg && (
         <>
           <Organization />
           <Projects />

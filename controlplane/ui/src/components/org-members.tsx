@@ -133,7 +133,8 @@ function Invites({ onError }: { onError: (message: string) => void }) {
  * The people of the org and, for an owner, the controls over them: roles, removal, invites.
  */
 export function OrgMembers() {
-  const { me, org, administers } = useTenant()
+  const { me, org } = useTenant()
+  const editsOrg = org.actions.includes('edit')
   const router = useRouter()
   const refreshMe = useRefreshMe()
   const { data, error: listError, mutate } = useSWR(keys.orgMembers(org.id), () => fetchOrgMembers(org.id))
@@ -164,7 +165,7 @@ export function OrgMembers() {
     <Stack>
       <Text tone="muted">
         An owner changes everything in {org.name}. A member reads everything in it and runs experiments.
-        {!administers && ' Only an owner can invite people, change a role or remove someone.'}
+        {!editsOrg && ' Only an owner can invite people, change a role or remove someone.'}
       </Text>
       {error && <ErrorMessage>{error}</ErrorMessage>}
       {listError && <ErrorMessage>Could not load members: {listError.message}</ErrorMessage>}
@@ -182,7 +183,7 @@ export function OrgMembers() {
                 <tr key={member.user_id}>
                   <td><Person id={member.user_id} name={member.name} self={self} /></td>
                   <td className="text-xs">
-                    {administers
+                    {editsOrg
                       ? (
                         <Select
                           fieldSize="sm"
@@ -205,7 +206,7 @@ export function OrgMembers() {
                       )
                       : self
                       ? <Button size="sm" variant="danger" onClick={() => setChange({ kind: 'remove', member })}>Leave</Button>
-                      : administers && <Button size="sm" variant="danger" onClick={() => setChange({ kind: 'remove', member })}>Remove</Button>}
+                      : editsOrg && <Button size="sm" variant="danger" onClick={() => setChange({ kind: 'remove', member })}>Remove</Button>}
                   </td>
                 </tr>
               )
@@ -217,7 +218,7 @@ export function OrgMembers() {
         <Text variant="hint">Showing the first {data.items.length} of {data.total} members.</Text>
       )}
       {change && <Question change={change} onConfirm={() => apply(change)} onClose={() => setChange(null)} />}
-      {administers && <Invites onError={setError} />}
+      {editsOrg && <Invites onError={setError} />}
     </Stack>
   )
 }
