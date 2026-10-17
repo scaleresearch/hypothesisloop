@@ -17,7 +17,7 @@ import (
 // A hand-written RFC 6455 server, roughly a hundred lines of it, because the repository vendors
 // its dependencies and no WebSocket library is vendored — and `go mod vendor` cannot reach the
 // network here to add one. What /watch needs of the protocol is small and fixed: accept the
-// handshake, write text frames, answer pings, notice a close. That is all this implements. It is
+// handshake, write text frames, notice a close. That is all this implements. It is
 // server-side only: it never masks what it writes and always unmasks what it reads, per the spec.
 
 const wsGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -25,7 +25,6 @@ const wsGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 const (
 	wsOpText   = 0x1
 	wsOpClose  = 0x8
-	wsOpPing   = 0x9
 	wsFinalBit = 0x80
 	wsMaskBit  = 0x80
 	// A control frame's payload is capped at 125 bytes by the protocol, and this server has no
@@ -108,13 +107,6 @@ func headerContainsToken(h http.Header, name, token string) bool {
 // reading — a suspended container, a dropped route — cannot block the writer forever.
 func (c *wsConn) WriteText(payload []byte, deadline time.Duration) error {
 	return c.writeFrame(wsOpText, payload, deadline)
-}
-
-// WritePing is how a broken connection is discovered on an otherwise idle stream: a job can sit
-// RUNNING for an hour with nothing to report, and neither side would otherwise learn that the
-// path between them died.
-func (c *wsConn) WritePing(deadline time.Duration) error {
-	return c.writeFrame(wsOpPing, nil, deadline)
 }
 
 func (c *wsConn) writeFrame(opcode byte, payload []byte, deadline time.Duration) error {

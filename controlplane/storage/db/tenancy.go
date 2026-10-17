@@ -19,7 +19,15 @@ func tenantClause(scope domain.TenantScope, peColumn string, args []any) (string
 	if scope.Unrestricted() {
 		return "", args
 	}
-	conds := []string{"tpe.removed_at IS NULL"}
+	conds, args := tenantConds(scope, args)
+	return peColumn + ` IN (SELECT tpe.id FROM platform_experiments tpe JOIN projects tp ON tp.id = tpe.project_id WHERE tpe.removed_at IS NULL AND ` +
+		strings.Join(conds, " AND ") + `)`, args
+}
+
+// tenantConds are the conditions on a platform experiment tpe, joined to its project as tp, that
+// place it inside scope, a restricted one, numbered after args.
+func tenantConds(scope domain.TenantScope, args []any) ([]string, []any) {
+	var conds []string
 	if !scope.AllOrgs {
 		args = append(args, scope.OrgIDs)
 		conds = append(conds, fmt.Sprintf("tp.org_id = ANY($%d)", len(args)))
@@ -32,8 +40,7 @@ func tenantClause(scope domain.TenantScope, peColumn string, args []any) (string
 		args = append(args, scope.PlatformExperimentID)
 		conds = append(conds, fmt.Sprintf("tpe.id = $%d", len(args)))
 	}
-	return peColumn + ` IN (SELECT tpe.id FROM platform_experiments tpe JOIN projects tp ON tp.id = tpe.project_id WHERE ` +
-		strings.Join(conds, " AND ") + `)`, args
+	return conds, args
 }
 
 // PlatformExperimentTenancy places a platform experiment and reports when it closed, nil while

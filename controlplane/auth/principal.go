@@ -66,6 +66,12 @@ type BuildRef struct {
 	Attempt int
 }
 
+// HoldsAccount reports a principal of a person or an org: a user, an API key or staff. A token the
+// platform derived for an agent, a coordinator or a job holds none.
+func (p Principal) HoldsAccount() bool {
+	return p.Kind == KindUser || p.Kind == KindKey || p.Kind == KindStaff
+}
+
 // Scope is the part of the platform this principal may see.
 func (p Principal) Scope() domain.TenantScope {
 	if p.Kind == KindStaff {

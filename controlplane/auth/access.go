@@ -72,11 +72,7 @@ func WithRead(ctx context.Context, platformExperimentID string) context.Context 
 // or a job stays within its own platform experiment.
 func readsShared(ctx context.Context, p Principal) bool {
 	_, reading := ctx.Value(readKey{}).(read)
-	return reading && holdsAccount(p)
-}
-
-func holdsAccount(p Principal) bool {
-	return p.Kind == KindUser || p.Kind == KindKey || p.Kind == KindStaff
+	return reading && p.HoldsAccount()
 }
 
 // readsPriorRun reports whether the request reads a prior run of the caller's own platform
@@ -289,7 +285,7 @@ func (a *Access) ReadSession(ctx context.Context, platformExperimentID, agentID 
 	if err != nil {
 		return err
 	}
-	if !ownsSession(p, platformExperimentID, agentID) && !holdsAccount(p) {
+	if !ownsSession(p, platformExperimentID, agentID) && !p.HoldsAccount() {
 		return forbidden("a session is read only by the agent or the coordinator it belongs to, with its own token, and by the org that owns the platform experiment")
 	}
 	return nil
@@ -303,7 +299,7 @@ func (a *Access) ReadInstructions(ctx context.Context, platformExperimentID, age
 	if err != nil {
 		return err
 	}
-	if !ownsSession(p, platformExperimentID, agentID) && !holdsAccount(p) {
+	if !ownsSession(p, platformExperimentID, agentID) && !p.HoldsAccount() {
 		return forbidden("instructions are read only by the agent or the coordinator they are for, with its own token, and by the org that owns the platform experiment")
 	}
 	return nil

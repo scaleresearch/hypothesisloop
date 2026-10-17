@@ -17,6 +17,7 @@ var announcedInserts = map[string]bool{
 	"experiments": true, "agent_quotas": true, "hypothesis_findings": true, "hypothesis_comments": true,
 	"platform_experiment_stage_advances": true, "platform_experiment_cuts": true,
 	"baseline_raises": true, "agent_messages": true, "platform_rules": true,
+	"platform_experiments": true, "experiment_signups": true, "hosted_instances": true,
 }
 
 // announcedUpdates are the columns, per table, a write of which is a change GET /watch delivers. An
@@ -28,6 +29,7 @@ var announcedUpdates = map[string][]string{
 	"experiment_signups":   {"finished_at", "idle_noticed_at"},
 	"environment_waiters":  {"loaded"},
 	"agent_types":          {"current_version"},
+	"hosted_instances":     {"state", "activity"},
 }
 
 // appendOnly are the tables no write updates or deletes.
@@ -84,8 +86,7 @@ func writesIn(sql string) []sqlWrite {
 	var writes []sqlWrite
 	for _, m := range insertInto.FindAllStringSubmatchIndex(sql, -1) {
 		table := strings.ToLower(sql[m[2]:m[3]])
-		announced := announcedInserts[table] || (table == "experiment_signups" && strings.Contains(statement(sql, m[1]), "replaces"))
-		writes = append(writes, sqlWrite{what: "inserts into " + table, announced: announced})
+		writes = append(writes, sqlWrite{what: "inserts into " + table, announced: announcedInserts[table]})
 	}
 	for _, m := range updateSet.FindAllStringSubmatchIndex(sql, -1) {
 		table := strings.ToLower(sql[m[2]:m[3]])
@@ -101,17 +102,9 @@ func writesIn(sql string) []sqlWrite {
 	}
 	for _, m := range deleteFrom.FindAllStringSubmatchIndex(sql, -1) {
 		table := strings.ToLower(sql[m[2]:m[3]])
-		writes = append(writes, sqlWrite{what: "deletes from " + table, announced: table == "environment_waiters", appendOnly: appendOnly[table]})
+		writes = append(writes, sqlWrite{what: "deletes from " + table, announced: table == "environment_waiters" || table == "experiment_signups", appendOnly: appendOnly[table]})
 	}
 	return writes
-}
-
-// statement is sql from from to the end of its statement.
-func statement(sql string, from int) string {
-	if end := strings.Index(sql[from:], ";"); end >= 0 {
-		return sql[from : from+end]
-	}
-	return sql[from:]
 }
 
 // setClause is the SET list at the start of rest, up to the WHERE, FROM or RETURNING outside

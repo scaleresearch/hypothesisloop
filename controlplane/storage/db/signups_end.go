@@ -73,6 +73,7 @@ WHERE s.platform_experiment_id=$1 AND s.agent_id=$2 FOR UPDATE OF s`, platformEx
 		if _, err := tx.Exec(ctx, `DELETE FROM experiment_signups WHERE platform_experiment_id=$1 AND agent_id=$2`, platformExpID, agentID); err != nil {
 			return fmt.Errorf("platform_experiments_store.RemoveAgent: %w", err)
 		}
+		tx.agentActivity(platformExpID, agentID, domain.ActivityLeft)
 		// Where the platform runs the researchers, the pool is what it runs: a researcher removed
 		// before the start lowers its entry, or the platform would add another in its place.
 		if platformRuns && len(keys) > 0 {

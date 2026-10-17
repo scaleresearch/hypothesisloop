@@ -20,9 +20,11 @@ import (
 )
 
 // Changes is the change stream as the store holds it (db.Store): the changes of a platform
-// experiment after an id, the newest id, and a wake-up on every append.
+// experiment, or of the platform experiments a project's listing holds, after an id, the newest
+// id, and a wake-up on every append.
 type Changes interface {
 	After(ctx context.Context, platformExperimentID string, after int64, limit int) ([]domain.Event, int64, bool, error)
+	ProjectAfter(ctx context.Context, scope domain.TenantScope, withShared bool, after int64, limit int) ([]domain.Event, int64, bool, error)
 	Head(ctx context.Context) (int64, error)
 	Listen(ctx context.Context, woke func()) error
 }
@@ -37,7 +39,8 @@ const (
 	// pageSize is how many changes one read takes.
 	pageSize = 500
 	// watchPingInterval keeps an idle stream honest: a job can sit RUNNING for an hour with
-	// nothing to say, and without this neither end would notice the path between them died.
+	// nothing to say, and without this neither end would notice the path between them died. Each
+	// tick writes the last progress frame again: a browser sees no ping.
 	watchPingInterval = 20 * time.Second
 	watchWriteTimeout = 10 * time.Second
 	// listenRetryDelay is how long the one LISTEN waits before it is established again after its
@@ -82,6 +85,7 @@ func (h *hub) wake() {
 // Subscription is what one stream is subscribed to, derived from the filter the server matches
 // against, never from what the client asked for.
 type Subscription struct {
+	ProjectID            string   `json:"project_id,omitempty"`
 	PlatformExperimentID string   `json:"platform_experiment_id"`
 	ExperimentID         string   `json:"experiment_id"`
 	AgentID              string   `json:"agent_id"`
@@ -99,6 +103,7 @@ func describe(filter domain.EventFilter, after int64) Subscription {
 	}
 	sort.Strings(kinds)
 	return Subscription{
+		ProjectID:            filter.ProjectID,
 		PlatformExperimentID: filter.PlatformExperimentID,
 		ExperimentID:         filter.ExperimentID,
 		AgentID:              filter.AgentID,
@@ -179,8 +184,8 @@ func (h *Handler) admit(ctx context.Context, principal auth.Principal) (context.
 }
 
 // stillAdmitted asks again what the upgrade asked: a stream outlives the request that opened
-// it, and the token may have died or lost the platform experiment since.
-func (h *Handler) stillAdmitted(ctx context.Context, platformExperimentID string) error {
+// it, and the token may have died or lost the project or the platform experiment since.
+func (h *Handler) stillAdmitted(ctx context.Context, filter domain.EventFilter) error {
 	principal, err := auth.Recheck(ctx)
 	if err != nil {
 		return err
@@ -189,13 +194,20 @@ func (h *Handler) stillAdmitted(ctx context.Context, platformExperimentID string
 	if err != nil {
 		return err
 	}
-	return h.access.PlatformExperiment(ctx, platformExperimentID)
+	if filter.ProjectID != "" {
+		return h.access.Project(ctx, filter.ProjectID)
+	}
+	return h.access.PlatformExperiment(ctx, filter.PlatformExperimentID)
 }
 
-// subscription is a request's filter and where it reads on from, admitted for its caller.
+// subscription is a request's filter and where it reads on from, admitted for its caller. A
+// project's carries the platform experiments its listing holds for the caller, as scope and
+// withShared.
 type subscription struct {
-	filter domain.EventFilter
-	after  int64
+	filter     domain.EventFilter
+	after      int64
+	scope      domain.TenantScope
+	withShared bool
 }
 
 // open admits the caller of r and resolves what it subscribes to, answering the refusal itself.
@@ -219,6 +231,14 @@ func (h *Handler) open(w http.ResponseWriter, r *http.Request) (context.Context,
 	if principal.Kind == auth.KindAgent {
 		filter.AgentID = principal.AgentID
 	}
+	if filter.ProjectID != "" {
+		scope, withShared, err := h.project(ctx, principal, filter.ProjectID)
+		if err != nil {
+			auth.WriteError(w, h.logger, err)
+			return nil, subscription{}, false
+		}
+		return h.fromHead(ctx, w, subscription{filter: filter, after: after, scope: scope, withShared: withShared})
+	}
 	if filter.ExperimentID != "" {
 		if err := h.access.Experiment(ctx, filter.ExperimentID); err != nil {
 			auth.WriteError(w, h.logger, err)
@@ -241,19 +261,39 @@ func (h *Handler) open(w http.ResponseWriter, r *http.Request) (context.Context,
 		auth.WriteError(w, h.logger, err)
 		return nil, subscription{}, false
 	}
-	if after == head {
-		if after, err = h.changes.Head(ctx); err != nil {
+	return h.fromHead(ctx, w, subscription{filter: filter, after: after})
+}
+
+// project admits an account to the stream of a project, the platform experiments its listing
+// holds for the caller (Access.PlatformExperimentListScope), and answers which those are.
+func (h *Handler) project(ctx context.Context, principal auth.Principal, projectID string) (domain.TenantScope, bool, error) {
+	if !principal.HoldsAccount() {
+		return domain.TenantScope{}, false, auth.Forbidden("forbidden: a " + string(principal.Kind) + " token watches only its own platform experiment")
+	}
+	if err := h.access.Project(ctx, projectID); err != nil {
+		return domain.TenantScope{}, false, err
+	}
+	return h.access.PlatformExperimentListScope(ctx, projectID)
+}
+
+// fromHead resolves a subscription's after=head to the newest change id, answering a failure
+// itself.
+func (h *Handler) fromHead(ctx context.Context, w http.ResponseWriter, sub subscription) (context.Context, subscription, bool) {
+	if sub.after == head {
+		var err error
+		if sub.after, err = h.changes.Head(ctx); err != nil {
 			auth.WriteError(w, h.logger, auth.Internal(h.logger, "watch: head", err))
 			return nil, subscription{}, false
 		}
 	}
-	return ctx, subscription{filter: filter, after: after}, true
+	return ctx, sub, true
 }
 
-// read reads one page of the changes after after that filter admits. A read and a stream go
+// read reads one page of the changes after after that sub admits. A read and a stream go
 // through it alike, for a backlog and for what is appended live.
-func (h *Handler) read(ctx context.Context, filter domain.EventFilter, after int64, limit int) (Page, error) {
-	changes, next, caughtUp, err := h.changes.After(ctx, filter.PlatformExperimentID, after, limit)
+func (h *Handler) read(ctx context.Context, sub subscription, after int64, limit int) (Page, error) {
+	filter := sub.filter
+	changes, next, caughtUp, err := h.scoped(ctx, sub, after, limit)
 	if err != nil {
 		return Page{}, err
 	}
@@ -268,6 +308,15 @@ func (h *Handler) read(ctx context.Context, filter domain.EventFilter, after int
 		return Page{}, err
 	}
 	return Page{Changes: kept, Next: next, CaughtUp: caughtUp}, nil
+}
+
+// scoped reads the changes of sub's project or platform experiment after after, for Matches to
+// filter.
+func (h *Handler) scoped(ctx context.Context, sub subscription, after int64, limit int) ([]domain.Event, int64, bool, error) {
+	if sub.filter.ProjectID != "" {
+		return h.changes.ProjectAfter(ctx, sub.scope, sub.withShared, after, limit)
+	}
+	return h.changes.After(ctx, sub.filter.PlatformExperimentID, after, limit)
 }
 
 // concerning completes Matches for an agent filter: a hypothesis change stays only when it
@@ -331,7 +380,7 @@ func (h *Handler) ServeChanges(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = parsed
 	}
-	page, err := h.read(ctx, sub.filter, sub.after, limit)
+	page, err := h.read(ctx, sub, sub.after, limit)
 	if err != nil {
 		h.writeReadError(w, sub.after, err)
 		return
@@ -356,7 +405,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	woke := h.hub.subscribe()
 	defer h.hub.unsubscribe(woke)
 
-	page, err := h.read(ctx, sub.filter, sub.after, pageSize)
+	page, err := h.read(ctx, sub, sub.after, pageSize)
 	if err != nil {
 		h.writeReadError(w, sub.after, err)
 		return
@@ -393,39 +442,39 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if err := writeJSON(conn, progress{Next: page.Next, CaughtUp: page.CaughtUp}); err != nil {
+		stand := progress{Next: page.Next, CaughtUp: page.CaughtUp}
+		if err := writeJSON(conn, stand); err != nil {
 			return
 		}
-		after := page.Next
-		if page.CaughtUp && !h.wait(ctx, conn, sub.filter.PlatformExperimentID, woke, ping.C, peerGone) {
+		if page.CaughtUp && !h.wait(ctx, conn, sub.filter, stand, woke, ping.C, peerGone) {
 			return
 		}
-		if page, err = h.read(ctx, sub.filter, after, pageSize); err != nil {
-			h.logger.Info("watch: closing a stream that could not read on", zap.Int64("after", after), zap.Error(err))
+		if page, err = h.read(ctx, sub, stand.Next, pageSize); err != nil {
+			h.logger.Info("watch: closing a stream that could not read on", zap.Int64("after", stand.Next), zap.Error(err))
 			return
 		}
 	}
 }
 
-// wait holds a caught-up stream until a change is appended, pinging it and asking its token
-// again meanwhile, and says whether to read on.
-func (h *Handler) wait(ctx context.Context, conn *wsConn, platformExperimentID string, woke <-chan struct{}, ping <-chan time.Time, peerGone <-chan struct{}) bool {
+// wait holds a caught-up stream until a change is appended, writing its progress frame stand
+// again and asking its token again meanwhile, and says whether to read on.
+func (h *Handler) wait(ctx context.Context, conn *wsConn, filter domain.EventFilter, stand progress, woke <-chan struct{}, ping <-chan time.Time, peerGone <-chan struct{}) bool {
 	for {
 		select {
 		case <-woke:
 			return true
 		case <-ping:
-			if err := h.stillAdmitted(ctx, platformExperimentID); err != nil {
+			if err := h.stillAdmitted(ctx, filter); err != nil {
 				var refusal *auth.Error
 				if errors.As(err, &refusal) {
 					h.logger.Info("watch: closing a stream whose token is no longer admitted",
-						zap.String("platform_experiment_id", platformExperimentID), zap.String("reason", refusal.Message))
+						zap.String("project_id", filter.ProjectID), zap.String("platform_experiment_id", filter.PlatformExperimentID), zap.String("reason", refusal.Message))
 					return false
 				}
 				// The platform's own failure says nothing about the caller: ask again next tick.
 				h.logger.Warn("watch: could not re-check a stream's token", zap.Error(err))
 			}
-			if err := conn.WritePing(watchWriteTimeout); err != nil {
+			if err := writeJSON(conn, stand); err != nil {
 				return false
 			}
 		case <-peerGone:
@@ -462,6 +511,7 @@ const head = -1
 func parseWatchQuery(r *http.Request) (domain.EventFilter, int64, error) {
 	q := r.URL.Query()
 	filter := domain.EventFilter{
+		ProjectID:            q.Get("project_id"),
 		PlatformExperimentID: q.Get("platform_experiment_id"),
 		ExperimentID:         q.Get("experiment_id"),
 		AgentID:              q.Get("agent_id"),
@@ -479,8 +529,11 @@ func parseWatchQuery(r *http.Request) (domain.EventFilter, int64, error) {
 		}
 		filter.Decisions = decisions
 	}
-	if filter.PlatformExperimentID == "" && filter.ExperimentID == "" {
-		return filter, 0, errWatch("one of platform_experiment_id or experiment_id is required")
+	if filter.ProjectID != "" && (filter.PlatformExperimentID != "" || filter.ExperimentID != "") {
+		return filter, 0, errWatch("project_id is not combined with platform_experiment_id or experiment_id")
+	}
+	if filter.ProjectID == "" && filter.PlatformExperimentID == "" && filter.ExperimentID == "" {
+		return filter, 0, errWatch("one of project_id, platform_experiment_id or experiment_id is required")
 	}
 	kinds, err := parseKinds(q.Get("kinds"))
 	if err != nil {

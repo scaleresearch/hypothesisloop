@@ -42,3 +42,12 @@ func (w *Write) runStatus(id, status, closeMessage string) {
 func (w *Write) runChange(id, kind, value, detail string) {
 	w.Change(domain.Change{Kind: kind, Subject: id, Value: value, Detail: detail, PlatformExperimentID: id})
 }
+
+// agentActivity announces that what the run's page shows of an agent changed, as value says: of
+// the coordinator for no agentID.
+func (w *Write) agentActivity(platformExpID, agentID, value string) {
+	if agentID == "" {
+		agentID = domain.CoordinatorRecipient
+	}
+	w.Change(domain.Change{Kind: domain.EventAgentActivity, Subject: agentID, Value: value, PlatformExperimentID: platformExpID, AgentID: agentID})
+}

@@ -59,6 +59,7 @@ VALUES ($1, $2, NOW(), $3, COALESCE(NULLIF($4, ''), (SELECT default_quota_tier F
 			signup.Hosted, agentType, hyperparameters, model, string(addedBy.Kind), addedBy.ID); err != nil {
 			return fmt.Errorf("platform_experiments_store.CreateDraft: sign the planner up: %w", err)
 		}
+		tx.agentActivity(pe.ID, signup.AgentID, domain.ActivitySignedUp)
 		return nil
 	})
 }
@@ -194,6 +195,7 @@ VALUES ($1, $2, NOW(), $3, COALESCE(NULLIF($4, ''), (SELECT default_quota_tier F
 		signup.Hosted, agentType, hyperparameters, model, string(addedBy.Kind), addedBy.ID); err != nil {
 		return fmt.Errorf("sign the baseline agent up: %w", err)
 	}
+	tx.agentActivity(id, signup.AgentID, domain.ActivitySignedUp)
 	return nil
 }
 

@@ -44,6 +44,14 @@ func (c Change) Validate() error {
 	return fmt.Errorf("change of %s: %q is no event kind", c.Subject, c.Kind)
 }
 
+// The values of agent.activity: what of an agent's row on the run's page changed.
+const (
+	ActivitySignedUp = "signed_up"
+	ActivityLeft     = "left"
+	ActivityMachine  = "machine"
+	ActivitySaid     = "activity"
+)
+
 // IdleNew and IdleContinues are the values of agent.idle and capacity.idle: the first notice of a
 // stretch, and each after it.
 const (

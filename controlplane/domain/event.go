@@ -61,6 +61,11 @@ const (
 	// the owner to the coordinator (CoordinatorRecipient), with its text: the one kind that
 	// carries what was said, since it is said to its reader alone.
 	EventAgentMessage = "agent.message"
+	// EventAgentActivity says what the run's page shows of one agent changed where no other kind
+	// tells it: it signed up or left, its machine moved, or its machine said something new of what
+	// it does. It is for whoever watches the run's page, so no agent's stream and no decisions
+	// stream carries it.
+	EventAgentActivity = "agent.activity"
 	// EventPlatformExperimentStatus and EventPlatformExperimentDescription describe the run
 	// itself: whether it is still open, and whether the brief still says what it said. The
 	// description event deliberately carries no text — see EventKinds.
@@ -149,6 +154,9 @@ var EventKinds = []EventKindDoc{
 			"detail says, as the platform knows them at the notice: how many places are free and for how long, the run's jobs queued and running, the minutes left in the run, and how far its best is short of or past the target. An agent filter carries none."},
 	{Kind: EventAgentMessage, Subject: "agent id, the one it was sent to, or coordinator", Value: "coordinator or owner: who it is from",
 		Description: "A direct message to this agent from its platform experiment's coordinator or owner (POST /platform-experiments/{id}/messages), or from the owner to the hosted coordinator, whose subject and agent_id are coordinator. detail is the text, direction to act on. GET /platform-experiments/{id}/messages reads every one sent."},
+	{Kind: EventAgentActivity, Subject: "agent id, or coordinator", Value: "signed_up, left, machine or activity",
+		Description: "What the run's page shows of this agent changed: it signed up (signed_up) or was removed (left), the machine the platform runs for it was asked for, reported in another state or ended (machine), or that machine said something new of what its agent does (activity). " +
+			"A pointer that carries nothing: GET /platform-experiments/{id}/agents has the agent and its machine. A machine's progress is not told."},
 	{Kind: EventHypothesisNew, Subject: "hypothesis id", Value: "the kind of who registered it: agent, coordinator, user, key or staff",
 		Description: "An idea entered the shared pool. agent_id is whose it is, empty on one no agent owns. The value says whether a person (user, key, staff), the coordinator or an agent registered it; the claim itself and who registered it come from GET /hypotheses/{id}."},
 	{Kind: EventHypothesisStatus, Subject: "hypothesis id", Value: "open, confirmed, refuted, inconclusive",
@@ -202,6 +210,9 @@ func DefaultKinds() map[string]bool {
 
 // EventFilter scopes a subscription. Empty fields do not filter.
 type EventFilter struct {
+	// ProjectID scopes a subscription to the platform experiments a listing of the project holds
+	// for its caller. The read applies it, since a change names no project.
+	ProjectID            string
 	PlatformExperimentID string
 	ExperimentID         string
 	AgentID              string
@@ -265,6 +276,8 @@ func agentScope(kind string) string {
 		return "advances only; your own cut is agent.cut"
 	case kind == EventCapacityIdle:
 		return "none: it is for whoever steers the run"
+	case kind == EventAgentActivity:
+		return "none: it is for whoever watches the run's page"
 	default:
 		return "every one"
 	}
@@ -280,7 +293,8 @@ func agentScope(kind string) string {
 // Whether a hypothesis event concerns one of the agent's hypotheses is a graph question, answered
 // by the graph (graphdb.Store.ConcernsAgent); Matches only drops the agent's own echo. Without an agent the stream is
 // the whole platform experiment, or with Decisions what of it may need a decision: a job that
-// was queued, admitted or started is on its way and asks nothing of anyone.
+// was queued, admitted or started is on its way and asks nothing of anyone. What the run's page
+// shows of an agent (agent.activity) asks nothing of anyone either.
 func (f EventFilter) Matches(e Event) bool {
 	if len(f.Kinds) > 0 && !f.Kinds[e.Kind] {
 		return false
@@ -295,6 +309,8 @@ func (f EventFilter) Matches(e Event) bool {
 		switch {
 		case !f.Decisions:
 			return true
+		case e.Kind == EventAgentActivity:
+			return false
 		case e.Kind == EventExperimentStatus:
 			return ExperimentStatus(e.Value).IsTerminal()
 		case e.Kind == EventExperimentBlocked:

@@ -126,6 +126,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.Create: %w", err)
 	}
+	tx.runStatus(pe.ID, string(pe.Status), "")
 	if err := poolTypesTx(ctx, tx, pe.ID, pe.Researchers); err != nil {
 		return fmt.Errorf("platform_experiments_store.Create: %w", err)
 	}

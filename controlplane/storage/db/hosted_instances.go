@@ -95,7 +95,8 @@ func (s *Store) Hosted(ctx context.Context, platformExpID, agentID string) (bool
 // budget is whole and a stopped one is asked for again. restarts counts every one, ever. It
 // records nothing for an agent or coordinator the platform does not run.
 func (s *Store) AskInstance(ctx context.Context, platformExpID, agentID, name, launch string) error {
-	_, err := s.pool.pool.Exec(ctx, `
+	return s.write(ctx, func(w *Write) error {
+		tag, err := w.Exec(ctx, `
 INSERT INTO hosted_instances AS i (platform_experiment_id, agent_id, name, launch, asked_at)
 SELECT $1, $2, $3, $4, now()
 WHERE `+hostedSQL+`
@@ -104,10 +105,14 @@ SET name = $3, asked_at = now(), seen_at = NULL, launch = $4, machine = '',
     state = '', progress = '', progress_at = NULL, activity = '', activity_at = NULL,
     restarted_at = CASE WHEN i.launch = $4 THEN i.restarted_at ELSE '{}' END,
     stopped = i.stopped AND i.launch = $4`, platformExpID, agentID, name, launch)
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.AskInstance: %w", err)
-	}
-	return nil
+		if err != nil {
+			return fmt.Errorf("platform_experiments_store.AskInstance: %w", err)
+		}
+		if tag.RowsAffected() > 0 {
+			w.agentActivity(platformExpID, agentID, domain.ActivityMachine)
+		}
+		return nil
+	})
 }
 
 // ObserveInstance records what the launcher reports of the machine asked for under name while
@@ -124,18 +129,39 @@ func (s *Store) ObserveInstance(ctx context.Context, platformExpID, agentID, nam
 	if machine == "" {
 		return fmt.Errorf("platform_experiments_store.ObserveInstance: %s is reported with no machine id", name)
 	}
-	const stamp = `($5::text IS NOT NULL AND $5 <> progress AND (progress_at IS NULL OR progress_at <= now() - make_interval(secs => $6)))`
-	const said = `($7 <> '' AND $7 <> activity)`
-	_, err := s.pool.pool.Exec(ctx, `
-UPDATE hosted_instances
-SET seen_at = COALESCE(seen_at, now()), state = $4, machine = $8,
-    progress = CASE WHEN `+stamp+` THEN $5 ELSE progress END,
-    progress_at = CASE WHEN `+stamp+` THEN now() ELSE progress_at END,
-    activity_at = CASE WHEN `+said+` THEN now() ELSE activity_at END,
-    activity = CASE WHEN `+said+` THEN $7 ELSE activity END
-WHERE platform_experiment_id = $1 AND agent_id = $2 AND name = $3 AND name <> ''
-  AND (seen_at IS NULL OR state <> $4 OR machine <> $8 OR `+stamp+` OR `+said+`)`,
-		platformExpID, agentID, name, state, progress, progressLimit.Seconds()/progressStampsPerLimit, activity, machine)
+	const stamp = `($5::text IS NOT NULL AND $5 <> i.progress AND (i.progress_at IS NULL OR i.progress_at <= now() - make_interval(secs => $6)))`
+	const said = `($7 <> '' AND $7 <> i.activity)`
+	// was is the row before this write. A new state or a new sentence is announced; a progress
+	// stamp and a new machine id are not, as they tick while the machine works.
+	err := s.write(ctx, func(w *Write) error {
+		var moved, spoke bool
+		err := w.QueryRow(ctx, `
+UPDATE hosted_instances i
+SET seen_at = COALESCE(i.seen_at, now()), state = $4, machine = $8,
+    progress = CASE WHEN `+stamp+` THEN $5 ELSE i.progress END,
+    progress_at = CASE WHEN `+stamp+` THEN now() ELSE i.progress_at END,
+    activity_at = CASE WHEN `+said+` THEN now() ELSE i.activity_at END,
+    activity = CASE WHEN `+said+` THEN $7 ELSE i.activity END
+FROM hosted_instances was
+WHERE was.platform_experiment_id = i.platform_experiment_id AND was.agent_id = i.agent_id
+  AND i.platform_experiment_id = $1 AND i.agent_id = $2 AND i.name = $3 AND i.name <> ''
+  AND (i.seen_at IS NULL OR i.state <> $4 OR i.machine <> $8 OR `+stamp+` OR `+said+`)
+RETURNING was.state <> $4, $7 <> '' AND $7 <> was.activity`,
+			platformExpID, agentID, name, state, progress, progressLimit.Seconds()/progressStampsPerLimit, activity, machine).Scan(&moved, &spoke)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if moved {
+			w.agentActivity(platformExpID, agentID, domain.ActivityMachine)
+		}
+		if spoke {
+			w.agentActivity(platformExpID, agentID, domain.ActivitySaid)
+		}
+		return nil
+	})
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.ObserveInstance: %w", err)
 	}
@@ -205,6 +231,7 @@ WHERE pe.id = $1 AND pe.status = 'draft' AND pe.proposed_at IS NULL
 				return fmt.Errorf("platform_experiments_store.EndInstance: close the draft of a stopped planner: %w", err)
 			}
 		}
+		tx.agentActivity(platformExpID, agentID, domain.ActivityMachine)
 		recorded = true
 		return nil
 	}); err != nil {
@@ -231,25 +258,48 @@ func (s *Store) ReleaseInstances(ctx context.Context, windDown, coordinatorWindD
 	}
 	const released = `name = '', machine = '', state = '', exited_at = now(), end_reason = '` + string(InstanceReleased) + `',
     activity = '', activity_at = NULL`
-	if _, err := s.pool.pool.Exec(ctx, `
+	return s.write(ctx, func(w *Write) error {
+		if err := releaseTx(ctx, w, `
 UPDATE hosted_instances i
 SET `+released+`, exit_log = $2::jsonb ->> (`+runEndSQL+`)
 FROM experiment_signups s
 WHERE s.platform_experiment_id = i.platform_experiment_id AND s.agent_id = i.agent_id
   AND s.hosted AND i.name <> ''
   AND (s.platform_experiment_id, s.agent_id) NOT IN (SELECT s.platform_experiment_id, s.agent_id`+launcherAgentsFrom+`)`,
-		windDown.Seconds(), because); err != nil {
-		return fmt.Errorf("platform_experiments_store.ReleaseInstances: agents: %w", err)
-	}
-	if _, err := s.pool.pool.Exec(ctx, `
+			windDown.Seconds(), because); err != nil {
+			return fmt.Errorf("platform_experiments_store.ReleaseInstances: agents: %w", err)
+		}
+		if err := releaseTx(ctx, w, `
 UPDATE hosted_instances i
 SET `+released+`, exit_log = $2
 FROM platform_experiments pe
 WHERE pe.id = i.platform_experiment_id AND i.agent_id = ''
   AND pe.coordinator_hosted AND i.name <> ''
   AND pe.id NOT IN (SELECT pe.id`+launcherCoordinatorsWhere+`)`,
-		coordinatorWindDown.Seconds(), domain.RunEndClosed.ReleasedBecause()); err != nil {
-		return fmt.Errorf("platform_experiments_store.ReleaseInstances: coordinators: %w", err)
+			coordinatorWindDown.Seconds(), domain.RunEndClosed.ReleasedBecause()); err != nil {
+			return fmt.Errorf("platform_experiments_store.ReleaseInstances: coordinators: %w", err)
+		}
+		return nil
+	})
+}
+
+// releaseTx runs q, an update of the machines it releases, and announces each.
+func releaseTx(ctx context.Context, w *Write, q string, args ...any) error {
+	rows, err := w.Query(ctx, q+` RETURNING i.platform_experiment_id, i.agent_id`, args...)
+	if err != nil {
+		return err
+	}
+	type machine struct{ platformExpID, agentID string }
+	released, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (machine, error) {
+		var m machine
+		err := row.Scan(&m.platformExpID, &m.agentID)
+		return m, err
+	})
+	if err != nil {
+		return err
+	}
+	for _, m := range released {
+		w.agentActivity(m.platformExpID, m.agentID, domain.ActivityMachine)
 	}
 	return nil
 }

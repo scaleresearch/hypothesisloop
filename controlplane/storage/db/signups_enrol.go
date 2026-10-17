@@ -280,6 +280,7 @@ RETURNING COALESCE((SELECT CASE WHEN gone.finished_at IS NOT NULL THEN 'it finis
 		if err != nil {
 			return 0, fmt.Errorf("platform_experiments_store.Signup: %w", err)
 		}
+		tx.agentActivity(platformExpID, signup.AgentID, domain.ActivitySignedUp)
 		if signup.Replaces != "" {
 			tx.Change(domain.Change{Kind: domain.EventAgentReplaced, Subject: signup.AgentID, Value: signup.Replaces, Detail: why,
 				PlatformExperimentID: platformExpID, AgentID: signup.AgentID})

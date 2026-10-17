@@ -89,6 +89,12 @@ func (f *fakeChanges) After(_ context.Context, platformExperimentID string, afte
 	return out, f.head, true, nil
 }
 
+// ProjectAfter is the store's to scope (db.Store.ProjectAfter): the fake places no platform
+// experiment in a project.
+func (f *fakeChanges) ProjectAfter(context.Context, domain.TenantScope, bool, int64, int) ([]domain.Event, int64, bool, error) {
+	return nil, 0, false, errors.New("fakeChanges: no project scope")
+}
+
 func (f *fakeChanges) Head(context.Context) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

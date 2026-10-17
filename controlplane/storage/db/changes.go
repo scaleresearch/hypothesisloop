@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -100,14 +101,36 @@ func (s *Store) Around(ctx context.Context, platformExperimentID string, fn func
 // id of any platform experiment, and caughtUp says nothing more is held. An after above the
 // newest id is ErrChangeUnknown, one below the oldest held ErrChangesPruned.
 func (s *Store) After(ctx context.Context, platformExperimentID string, after int64, limit int) (changes []domain.Event, next int64, caughtUp bool, err error) {
+	return s.changesAfter(ctx, "changes.After", `platform_experiment_id = $1`, []any{platformExperimentID}, after, limit)
+}
+
+// ProjectAfter is After for the platform experiments inside scope, a restricted one, and with
+// withShared those staff shared. A removed platform experiment stays in: the change that removed
+// it is the last of its stream, and a listing that showed it learns so from it.
+func (s *Store) ProjectAfter(ctx context.Context, scope domain.TenantScope, withShared bool, after int64, limit int) (changes []domain.Event, next int64, caughtUp bool, err error) {
+	if scope.Unrestricted() {
+		return nil, 0, false, errors.New("changes.ProjectAfter: an unrestricted scope is no project's")
+	}
+	conds, args := tenantConds(scope, nil)
+	within := strings.Join(conds, " AND ")
+	if withShared {
+		within = "(" + within + ") OR tpe.shared"
+	}
+	return s.changesAfter(ctx, "changes.ProjectAfter",
+		`platform_experiment_id IN (SELECT tpe.id FROM platform_experiments tpe JOIN projects tp ON tp.id = tpe.project_id WHERE `+within+`)`, args, after, limit)
+}
+
+// changesAfter reads the changes where admits, a predicate on changes numbered from $1 by args,
+// for After and ProjectAfter.
+func (s *Store) changesAfter(ctx context.Context, op, where string, args []any, after int64, limit int) (changes []domain.Event, next int64, caughtUp bool, err error) {
 	tx, err := s.pool.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
-		return nil, 0, false, fmt.Errorf("changes.After: begin: %w", err)
+		return nil, 0, false, fmt.Errorf("%s: begin: %w", op, err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 	var oldest, head int64
 	if err := tx.QueryRow(ctx, `SELECT COALESCE(min(id), 0), COALESCE(max(id), 0) FROM changes`).Scan(&oldest, &head); err != nil {
-		return nil, 0, false, fmt.Errorf("changes.After: bounds: %w", err)
+		return nil, 0, false, fmt.Errorf("%s: bounds: %w", op, err)
 	}
 	if after > head {
 		return nil, 0, false, fmt.Errorf("%w: %d", ErrChangeUnknown, after)
@@ -115,19 +138,20 @@ func (s *Store) After(ctx context.Context, platformExperimentID string, after in
 	if after > 0 && after < oldest-1 {
 		return nil, 0, false, fmt.Errorf("%w: changes after %d", ErrChangesPruned, after)
 	}
-	rows, err := tx.Query(ctx, `SELECT id, kind, subject, value, detail, agent_id, occurred_at FROM changes
-WHERE platform_experiment_id = $1 AND id > $2 ORDER BY id LIMIT $3`, platformExperimentID, after, limit)
+	args = append(args, after, limit)
+	rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT id, kind, subject, value, detail, platform_experiment_id, agent_id, occurred_at FROM changes
+WHERE %s AND id > $%d ORDER BY id LIMIT $%d`, where, len(args)-1, len(args)), args...)
 	if err != nil {
-		return nil, 0, false, fmt.Errorf("changes.After: %w", err)
+		return nil, 0, false, fmt.Errorf("%s: %w", op, err)
 	}
 	changes, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.Event, error) {
-		e := domain.Event{PlatformExperimentID: platformExperimentID}
-		err := row.Scan(&e.ID, &e.Kind, &e.Subject, &e.Value, &e.Detail, &e.AgentID, &e.OccurredAt)
+		var e domain.Event
+		err := row.Scan(&e.ID, &e.Kind, &e.Subject, &e.Value, &e.Detail, &e.PlatformExperimentID, &e.AgentID, &e.OccurredAt)
 		e.OccurredAt = e.OccurredAt.UTC()
 		return e, err
 	})
 	if err != nil {
-		return nil, 0, false, fmt.Errorf("changes.After: %w", err)
+		return nil, 0, false, fmt.Errorf("%s: %w", op, err)
 	}
 	if len(changes) == limit {
 		return changes, changes[len(changes)-1].ID, false, nil
