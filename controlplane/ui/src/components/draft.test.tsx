@@ -41,6 +41,7 @@ const proposal: StoredProposal = {
   memory: '16Gi',
   storage: '20Gi',
   accelerator_type: 'rtx-4090',
+  accelerator_kind: 'accelerator',
   image: 'pytorch',
   metric_reason: 'Validation loss on held-out text is the goal itself.',
   measurement: 'bench.py scores a split the training never reads.',

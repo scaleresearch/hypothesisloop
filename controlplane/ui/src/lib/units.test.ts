@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { budgetKind, budgetUnit, CPU_TYPE, inFlight, kindOf, occupancy, unitCount, unitRate } from './units'
+import { budgetKind, budgetUnit, inFlight, occupancy, unitCount, unitRate } from './units'
 
 describe('a count of a priced type', () => {
   it('says cores for the CPU type and is a bare number for an accelerator', () => {
@@ -42,20 +42,18 @@ describe('occupancy of one kind', () => {
 })
 
 describe('the unit of a budget', () => {
-  const gpu = 'nvidia.com/gpu.product=NVIDIA-L40'
-
-  it('is CPU hours for the CPU type, in any casing, and accelerator-hours for every other', () => {
-    expect(budgetUnit(kindOf(CPU_TYPE))).toBe('CPU hours')
-    expect(budgetUnit(kindOf('HypothesisLoop.dev/CPU=core'), 'long')).toBe('CPU core-hours')
-    expect(budgetUnit(kindOf(gpu))).toBe('AccH')
-    expect(budgetUnit(kindOf(undefined), 'long')).toBe('accelerator-hours')
+  it('is CPU hours for cores and accelerator-hours for devices or no kind', () => {
+    expect(budgetUnit('cpu')).toBe('CPU hours')
+    expect(budgetUnit('cpu', 'long')).toBe('CPU core-hours')
+    expect(budgetUnit('accelerator')).toBe('AccH')
+    expect(budgetUnit(undefined, 'long')).toBe('accelerator-hours')
   })
 
-  it('follows the type an experiment was proposed for, and its jobs when nothing was proposed', () => {
-    expect(budgetKind(CPU_TYPE, [gpu])).toBe('cpu')
-    expect(budgetKind(gpu, [CPU_TYPE])).toBe('accelerator')
-    expect(budgetKind(undefined, [CPU_TYPE, CPU_TYPE])).toBe('cpu')
-    expect(budgetKind(undefined, [CPU_TYPE, gpu])).toBe('accelerator')
+  it('follows the kind an experiment was proposed for, and its jobs when nothing was proposed', () => {
+    expect(budgetKind('cpu', ['accelerator'])).toBe('cpu')
+    expect(budgetKind('accelerator', ['cpu'])).toBe('accelerator')
+    expect(budgetKind(undefined, ['cpu', 'cpu'])).toBe('cpu')
+    expect(budgetKind(undefined, ['cpu', 'accelerator'])).toBe('accelerator')
     expect(budgetKind(undefined, [])).toBe('accelerator')
   })
 })

@@ -23,7 +23,7 @@ import { BASELINE_JOB, measuresBaseline } from '@/components/job-hypothesis'
 import { Callout, Loading, ErrorMessage } from '@/components/ui/status-message'
 import { semantic, seriesPalette, chart } from '@/lib/colors'
 import { formatAccH, formatDuration } from '@/lib/format'
-import { budgetUnit, kindOf } from '@/lib/units'
+import { budgetUnit } from '@/lib/units'
 import { notAdmittedLabel } from '@/lib/eviction'
 import { JobReason } from '@/components/job-reason'
 import { graphHref } from '@/lib/hypothesis-graph'
@@ -190,7 +190,7 @@ export default function JobDetailPage({ params }: { params: { experimentId: stri
           <Detail label="Capacity tier"><TierBadge tier={j.capacity_tier} /></Detail>
           <Detail label="Accelerator">{`${j.accelerator_count}× ${j.accelerator_type}`}</Detail>
           <Detail label="Est. duration">{j.estimated_duration_hours != null ? formatDuration(j.estimated_duration_hours * 3_600_000) : '—'}</Detail>
-          <Detail label="Est. cost">{costEstimate != null ? `${costEstimate} ${budgetUnit(kindOf(j.accelerator_type))}` : '—'}</Detail>
+          <Detail label="Est. cost">{costEstimate != null ? `${costEstimate} ${budgetUnit(j.accelerator_kind)}` : '—'}</Detail>
           <Detail label="Submitted">{new Date(j.created_at).toLocaleString()}</Detail>
           {j.submitted_at && <Detail label="Sent to cluster">{new Date(j.submitted_at).toLocaleString()}</Detail>}
           {j.finished_at && (

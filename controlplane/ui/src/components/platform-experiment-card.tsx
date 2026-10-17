@@ -3,7 +3,6 @@
 import useSWR from 'swr'
 import { clsx } from 'clsx'
 import { fetchHypothesisStats } from '@/lib/api/hypotheses'
-import { fetchPlatformExperiment } from '@/lib/api/platform-experiments'
 import { useRouter } from 'next/navigation'
 import { experimentPath } from '@/lib/routes'
 import { formatAccH, isZeroDate } from '@/lib/format'
@@ -15,7 +14,6 @@ import { Button } from '@/components/ui/button'
 import { Inline } from '@/components/ui/stack'
 import { RemoveExperiment } from '@/components/remove-experiment'
 import { keys } from '@/lib/keys'
-import { POLL } from '@/lib/poll'
 import { proposalOf } from '@/lib/planning'
 import type { PlatformExperiment } from '@/types/api'
 
@@ -37,18 +35,12 @@ export function PlatformExperimentCard({
   const href = experimentPath(pe.id)
   const started = pe.status !== 'draft'
 
-  // The list carries no spend: a read of the one experiment does.
-  const { data: spent, error: spentError } = useSWR<PlatformExperiment>(
-    started ? keys.experiment(pe.id) : null,
-    () => fetchPlatformExperiment(pe.id),
-    { refreshInterval: POLL.reports },
-  )
   const { data: verdicts, error: verdictsError } = useSWR(
     started ? keys.hypothesisStats(pe.id) : null,
     () => fetchHypothesisStats(pe.id),
   )
 
-  const unit = budgetUnit(budgetKind(proposalOf(pe)?.accelerator_type, []))
+  const unit = budgetUnit(budgetKind(proposalOf(pe)?.accelerator_kind, []))
   const live = pe.status === 'open' || pe.status === 'running'
   const daysLeft = live && !isZeroDate(pe.ends_at)
     ? Math.ceil((new Date(pe.ends_at!).getTime() - Date.now()) / 86_400_000)
@@ -56,15 +48,11 @@ export function PlatformExperimentCard({
 
   // A figure whose read failed says so, and one still in flight is left out, so neither reads as none.
   const figures: { text: string; title?: string }[] = []
-  if (spentError) {
-    figures.push({ text: 'compute spent unknown', title: `Could not load: ${spentError.message}` })
-  } else if (!started || spent) {
-    const used = spent?.consumed_accelerator_hours ?? 0
-    if (live && pe.budget_accelerator_hours > 0) {
-      figures.push({ text: used > 0 ? `${formatAccH(used)} of ${pe.budget_accelerator_hours} ${unit}` : `${pe.budget_accelerator_hours} ${unit}` })
-    } else if (used > 0) {
-      figures.push({ text: `${formatAccH(used)} ${unit} spent` })
-    }
+  const used = pe.consumed_accelerator_hours ?? 0
+  if (live && pe.budget_accelerator_hours > 0) {
+    figures.push({ text: used > 0 ? `${formatAccH(used)} of ${pe.budget_accelerator_hours} ${unit}` : `${pe.budget_accelerator_hours} ${unit}` })
+  } else if (used > 0) {
+    figures.push({ text: `${formatAccH(used)} ${unit} spent` })
   }
   if (live && pe.signup_count > 0) figures.push({ text: `${pe.signup_count} ${pe.signup_count === 1 ? 'agent' : 'agents'}` })
   if (verdictsError) {

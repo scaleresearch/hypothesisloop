@@ -24,7 +24,7 @@ export function formDraftFromGoal(projectID: string, goal: string, repository: s
 export type ProposedExperiment = Required<Pick<CreatePlatformExperimentRequest, 'name' | 'description' | 'metrics'>> &
   Pick<CreatePlatformExperimentRequest, 'report_interval_seconds' | 'stages'>
 
-/** What a draft's planner proposed, stored with the type its jobs are sized for, CPU_TYPE where it named none. */
+/** What a draft's planner proposed, stored with the type its jobs are sized for, the CPU type where it named none. */
 export type StoredProposal = Omit<Proposal, 'experiment' | 'accelerator_type'> & { experiment: ProposedExperiment; accelerator_type: string }
 
 /** The proposal of pe, which the API answers as the planner's PUT stored it. */

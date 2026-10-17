@@ -74,6 +74,7 @@ type Experiment struct {
 	// Agents should check for duplicate submissions before submitting (GET /experiments?status=QUEUED&status=RUNNING).
 	Theory                 string           `json:"theory,omitempty"`
 	AcceleratorType        AcceleratorType  `json:"accelerator_type"`
+	AcceleratorKind        TypeKind         `json:"accelerator_kind" doc:"What accelerator_type counts: accelerator for devices, cpu for the cores of hypothesisloop.dev/cpu=core, whose cost is CPU core-hours."`
 	AcceleratorCount       int              `json:"accelerator_count"`
 	EstimatedDurationHours float64          `json:"estimated_duration_hours"`
 	EstimatedCostAccH      float64          `json:"estimated_cost_acch"` // cost in accelerator-hours (AccH), H100-equivalent
@@ -192,11 +193,12 @@ func (e *Experiment) OnObjective() bool {
 }
 
 // Answer is the job as an answer states it: one on the objective with objective and no
-// hypothesis_id.
+// hypothesis_id, and the kind of its accelerator type.
 func (e Experiment) Answer() *Experiment {
 	if e.OnObjective() {
 		e.HypothesisID, e.Objective = "", true
 	}
+	e.AcceleratorKind = e.AcceleratorType.Kind()
 	return &e
 }
 

@@ -1,21 +1,13 @@
 import type { TypeKind } from '@/types/api'
 
-// A priced type counts devices or, for the one CPU type, cores. Counts of the two are shown apart
-// and a count of cores says so.
+// A priced type counts devices or, for the one CPU type, cores, as the API's accelerator_kind
+// says. Counts of the two are shown apart and a count of cores says so.
 
-// The type every runtime offers its cores as (domain.CPUType). A job that states cpu and no
-// accelerator holds that many units of it.
-export const CPU_TYPE = 'hypothesisloop.dev/cpu=core'
-
-export function kindOf(acceleratorType: string | undefined): TypeKind {
-  return acceleratorType?.toLowerCase() === CPU_TYPE ? 'cpu' : 'accelerator'
-}
-
-// What an experiment's budget is spent on: the type its proposal was sized for, and with no
-// proposal cores only when it has jobs and every one of them runs on cores.
-export function budgetKind(proposedType: string | undefined, jobTypes: string[]): TypeKind {
-  if (proposedType) return kindOf(proposedType)
-  return jobTypes.length > 0 && jobTypes.every(type => kindOf(type) === 'cpu') ? 'cpu' : 'accelerator'
+// What an experiment's budget is spent on: the kind of type its proposal was sized for, and with
+// no proposal cores only when it has jobs and every one of them runs on cores.
+export function budgetKind(proposedKind: TypeKind | undefined, jobKinds: TypeKind[]): TypeKind {
+  if (proposedKind) return proposedKind
+  return jobKinds.length > 0 && jobKinds.every(kind => kind === 'cpu') ? 'cpu' : 'accelerator'
 }
 
 // The unit a budget, what is used of it and what is left are read in. A core for an hour costs

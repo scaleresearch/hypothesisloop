@@ -74,7 +74,7 @@ function PlatformExperimentDetail({ id }: { id: string }) {
   ])).sort()
   const primary = results?.metrics[0]
   const hypothesisText = new Map((findings ?? []).map(h => [h.id, h.text]))
-  const unit = budgetUnit(budgetKind(proposalOf(pe)?.accelerator_type, (experiments ?? []).map(exp => exp.accelerator_type)))
+  const unit = budgetUnit(budgetKind(proposalOf(pe)?.accelerator_kind, (experiments ?? []).map(exp => exp.accelerator_kind)))
   const clock = runClock(pe)
   // One list: what is running first, then the newest of the rest.
   const running = reads.running ?? []

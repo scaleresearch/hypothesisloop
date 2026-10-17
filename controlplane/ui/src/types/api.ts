@@ -2831,6 +2831,8 @@ export interface components {
         Experiment: {
             /** Format: int64 */
             accelerator_count: number;
+            /** @description What accelerator_type counts: accelerator for devices, cpu for the cores of hypothesisloop.dev/cpu=core, whose cost is CPU core-hours. */
+            accelerator_kind: components["schemas"]["TypeKind"];
             accelerator_type: string;
             /** @description What the reader may do to the job now, each a write the API accepts from them: cancel (POST /experiments/{id}/cancel of one queued, submitted or running). Empty for a reader who writes nothing of its platform experiment. */
             actions: components["schemas"]["ExperimentAction"][];
@@ -3843,7 +3845,7 @@ export interface components {
             closed_by?: components["schemas"]["Actor"];
             /**
              * Format: double
-             * @description What it has spent of budget_accelerator_hours: what its jobs that ended were billed, the baseline's among them. A running job's cost joins when the job ends. On a read of one platform experiment that is no draft, and the whole spend once it is closed.
+             * @description What it has spent of budget_accelerator_hours: what its jobs that ended were billed, the baseline's among them. A running job's cost joins when the job ends. On every platform experiment that is no draft, listed or read, and the whole spend once it is closed.
              */
             consumed_accelerator_hours?: number;
             /** @description The closed platform experiment of the same project and repository this one carries on, fixed at creation. Absent on one that starts fresh. Its baseline starts from the commit of that run's baseline job (that run's baseline_job_id), so the two are measured by the same harness. It is one of prior_runs, read as every prior run is. */
@@ -4065,6 +4067,8 @@ export interface components {
             version: number;
         };
         Proposal: {
+            /** @description What accelerator_type counts, which the platform sets: accelerator for devices, cpu for CPU cores, whose budget is CPU core-hours. */
+            readonly accelerator_kind: components["schemas"]["TypeKind"];
             /** @description The type the run's jobs are sized for, one of the accelerator_type strings GET /resource-catalog/capacity lists (hl capacity), copied verbatim. Left out for work that needs no accelerator: the run is then on CPU cores, hypothesisloop.dev/cpu=core, which is what is stored, and its budget is CPU core-hours. 422 accelerator_unreachable names every type that is listed now. */
             accelerator_type?: string;
             /** @description The researchers proposed, one entry each. */

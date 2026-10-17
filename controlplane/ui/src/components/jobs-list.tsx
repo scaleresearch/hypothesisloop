@@ -28,7 +28,7 @@ import { FormField } from '@/components/ui/form-field'
 import { LinkTr, RowAnchor, SortableTh, Table, num, quiet } from '@/components/ui/table'
 import { Pagination } from '@/components/ui/pagination'
 import { acceleratorLabel, formatAccH, relTime, shortId } from '@/lib/format'
-import { budgetUnit, kindOf } from '@/lib/units'
+import { budgetUnit } from '@/lib/units'
 import { statusTone } from '@/lib/colors'
 import { evictionCode, evictionCodeLabel, evictionDetailLines, faultBreakdown, notAdmittedLabel } from '@/lib/eviction'
 import { experimentPath, jobPath, projectPath, withQuery } from '@/lib/routes'
@@ -278,7 +278,7 @@ interface JobRowProps {
 function JobRow({ job, showExperiment, varied, connected, onCancel }: JobRowProps) {
   const status = job.status ?? 'UNKNOWN'
   const accelerator = `${job.accelerator_count}× ${acceleratorLabel(job.accelerator_type)}`
-  const cost = job.estimated_cost_acch != null ? `${formatAccH(job.estimated_cost_acch)} ${budgetUnit(kindOf(job.accelerator_type))}` : '—'
+  const cost = job.estimated_cost_acch != null ? `${formatAccH(job.estimated_cost_acch)} ${budgetUnit(job.accelerator_kind)}` : '—'
   const about = [
     status === 'QUEUED' && job.not_admitted_reason && notAdmittedLabel(job.not_admitted_reason, job.not_admitted_message),
     job.eviction_reason && [evictionCodeLabel(evictionCode(job.eviction_reason)), evictionDetailLines(job.eviction_reason)[0]].filter(Boolean).join(': '),

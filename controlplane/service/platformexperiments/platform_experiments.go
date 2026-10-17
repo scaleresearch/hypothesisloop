@@ -457,7 +457,8 @@ type ListQuery struct {
 	Shared     *bool
 }
 
-// List is one page of the platform experiments q reads, and how many it matches in all.
+// List is one page of the platform experiments q reads, each with its spend, and how many it
+// matches in all.
 func (s *Service) List(ctx context.Context, q ListQuery) ([]*domain.PlatformExperiment, int, error) {
 	filter := db.PlatformExperimentsFilter{
 		Scope:      q.Scope,
@@ -479,6 +480,9 @@ func (s *Service) List(ctx context.Context, q ListQuery) ([]*domain.PlatformExpe
 	}
 	if pes == nil {
 		pes = []*domain.PlatformExperiment{}
+	}
+	if err := s.spendEach(ctx, pes); err != nil {
+		return nil, 0, auth.Internal(s.logger, "list platform experiments", err)
 	}
 	return pes, total, nil
 }

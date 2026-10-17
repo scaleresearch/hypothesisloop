@@ -5,7 +5,7 @@ import { abandonDraft, acceptDraft, holdDraft } from '@/lib/api/planning'
 import { ApiError } from '@/lib/api/request'
 import { useSecondsUntil } from '@/lib/auto-accept'
 import { acceleratorLabel, formatAccH, formatDate } from '@/lib/format'
-import { budgetUnit, kindOf } from '@/lib/units'
+import { budgetUnit } from '@/lib/units'
 import { actorLabel } from '@/components/actor'
 import { Button } from '@/components/ui/button'
 import { Captioned } from '@/components/ui/captioned'
@@ -62,7 +62,7 @@ function Sentences({ title, items }: { title: string; items?: string[] }) {
 /** What one node of the run's jobs asks for, of what the planner stated. */
 function runsOn(proposal: StoredProposal): [string, string][] {
   const stated: [string, string | undefined][] = [
-    [kindOf(proposal.accelerator_type) === 'cpu' ? 'Runs on' : 'Accelerator', acceleratorLabel(proposal.accelerator_type)],
+    [proposal.accelerator_kind === 'cpu' ? 'Runs on' : 'Accelerator', acceleratorLabel(proposal.accelerator_type)],
     ['Image', proposal.image],
     ['CPU', proposal.cpu],
     ['Memory', proposal.memory],
@@ -152,7 +152,7 @@ export function ProposalForm({ draft, proposal, editable, accepting, accepted = 
   const errorOf = (field: Stated) => refusal?.field === field ? refusal.message : null
 
   const { metrics, stages, report_interval_seconds: reportEvery } = proposal.experiment
-  const unit = budgetUnit(kindOf(proposal.accelerator_type), 'long')
+  const unit = budgetUnit(proposal.accelerator_kind, 'long')
   const count = Number(researchers)
   // The researchers proposed keep what the planner gave them; one added beyond them is a generalist.
   // A count that is no whole number sends none, which the API refuses with why.

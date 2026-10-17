@@ -131,6 +131,8 @@ function PlatformExperimentsPageContent() {
       limit: PAGE_SIZE,
       offset: page * PAGE_SIZE,
     }),
+    // Read again for what each one has spent.
+    { refreshInterval: POLL.reports },
   )
   // The sidebar reads the same key, so this is one request for both.
   const { data: clusters } = useSWR(keys.orgClusters(org.id), () => fetchOrgClusters(org.id), { refreshInterval: POLL.reports })

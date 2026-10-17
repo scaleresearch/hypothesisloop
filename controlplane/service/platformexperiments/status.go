@@ -27,6 +27,35 @@ func (s *Service) Spend(ctx context.Context, pe *domain.PlatformExperiment) erro
 	return nil
 }
 
+// spendEach is Spend of each of pes, in one read of the metrics store.
+func (s *Service) spendEach(ctx context.Context, pes []*domain.PlatformExperiment) error {
+	var ids []string
+	var earliest time.Time
+	for _, pe := range pes {
+		if pe.Status == domain.PlatformExpDraft {
+			continue
+		}
+		ids = append(ids, pe.ID)
+		if earliest.IsZero() || pe.CreatedAt.Before(earliest) {
+			earliest = pe.CreatedAt
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	spent, err := s.metrics.TotalObservedAccHOf(ctx, earliest, ids)
+	if err != nil {
+		return fmt.Errorf("platform_experiments.spendEach: %w", err)
+	}
+	for _, pe := range pes {
+		if pe.Status != domain.PlatformExpDraft {
+			consumed := spent[pe.ID]
+			pe.ConsumedAcceleratorHours = &consumed
+		}
+	}
+	return nil
+}
+
 // draftReason is where a draft stands with its planner.
 func draftReason(pe *domain.PlatformExperiment) *domain.StatusReason {
 	switch {

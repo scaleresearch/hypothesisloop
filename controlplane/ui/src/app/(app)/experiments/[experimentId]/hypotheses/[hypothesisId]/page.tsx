@@ -20,7 +20,7 @@ import { Code, Eyebrow, Text } from '@/components/ui/text'
 import { Badge } from '@/components/ui/badge'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { acceleratorLabel, formatAccH, relTime, shortId } from '@/lib/format'
-import { budgetUnit, kindOf } from '@/lib/units'
+import { budgetUnit } from '@/lib/units'
 import { AddCommentForm, AddLinkForm } from '@/components/hypotheses/human-idea'
 import { Actor, Verdict } from '@/components/actor'
 import { AgentLabel, AgentNames } from '@/components/agent-label'
@@ -260,7 +260,7 @@ export default function HypothesisDetailPage({ params }: { params: { experimentI
                     </td>
                     <td className="font-mono text-2xs">{j.accelerator_count}× {acceleratorLabel(j.accelerator_type)}</td>
                     <td className={num}>
-                      {cost != null ? `${cost} ${budgetUnit(kindOf(j.accelerator_type))}` : '—'}
+                      {cost != null ? `${cost} ${budgetUnit(j.accelerator_kind)}` : '—'}
                     </td>
                     <td className={num}>
                       {j.metric ? j.metric.value.toFixed(4) : <span className="text-muted">—</span>}

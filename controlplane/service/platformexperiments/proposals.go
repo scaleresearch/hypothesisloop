@@ -43,6 +43,7 @@ type Proposal struct {
 	Agents                 []ProposedAgent `json:"agents" doc:"The researchers proposed, one entry each."`
 
 	AcceleratorType domain.AcceleratorType `json:"accelerator_type,omitempty" doc:"The type the run's jobs are sized for, one of the accelerator_type strings GET /resource-catalog/capacity lists (hl capacity), copied verbatim. Left out for work that needs no accelerator: the run is then on CPU cores, hypothesisloop.dev/cpu=core, which is what is stored, and its budget is CPU core-hours. 422 accelerator_unreachable names every type that is listed now."`
+	AcceleratorKind domain.TypeKind        `json:"accelerator_kind" readOnly:"true" doc:"What accelerator_type counts, which the platform sets: accelerator for devices, cpu for CPU cores, whose budget is CPU core-hours."`
 	Image           string                 `json:"image" doc:"The image the run's jobs name as job.image, checked as a submit checks it: a job image the platform offers, by name, or the whole address of another, which a cluster that has accelerator_type runs."`
 	// CPU, Memory and Storage are what one node of the run's jobs asks for, as job.cpu, job.memory
 	// and job.storage state it, so that whoever writes a job copies them from here and from no prose.
@@ -118,7 +119,8 @@ func poolAgents(pool domain.ResearcherPool) []ProposedAgent {
 // proposal and the platform's config. It refuses with every problem it finds, so a planner fixes
 // them in one pass. It returns the experiment the proposal states, as validate answers it: with
 // its cost, its length and one place for each researcher. It leaves p as it is stored: every text
-// of it without the whitespace around it, and the CPU type where it states no accelerator_type.
+// of it without the whitespace around it, the CPU type where it states no accelerator_type, and
+// the kind of its type.
 func (s *Service) checkProposal(ctx context.Context, p *Proposal, draft *domain.PlatformExperiment) (CreatePlatformExperimentRequest, error) {
 	var problems refusal.Problems
 	refuse := func(reason, format string, args ...any) {
@@ -173,6 +175,7 @@ func (s *Service) checkProposal(ctx context.Context, p *Proposal, draft *domain.
 	if p.AcceleratorType == "" {
 		p.AcceleratorType = domain.CPUType
 	}
+	p.AcceleratorKind = p.AcceleratorType.Kind()
 	clusters, err := s.requireReachable(ctx, draft.ProjectID, &p.AcceleratorType)
 	if err := problems.Add(err); err != nil {
 		return experiment, err

@@ -36,7 +36,7 @@ import type { PlatformExperiment } from '@/types/api'
 const PAGE_SIZE = 25
 
 function unitOf(pe: PlatformExperiment): string {
-  return budgetUnit(budgetKind(proposalOf(pe)?.accelerator_type, []))
+  return budgetUnit(budgetKind(proposalOf(pe)?.accelerator_kind, []))
 }
 
 // One agent's compute in one experiment. An agent that is not in the experiment has none, which

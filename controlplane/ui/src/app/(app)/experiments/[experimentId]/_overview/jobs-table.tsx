@@ -9,7 +9,7 @@ import { LinkTr, RowAnchor, Table, num } from '@/components/ui/table'
 import { formatAccH, relTime, shortId } from '@/lib/format'
 import { variedEnvByHypothesis, variedEnvSettings } from '@/lib/hypothesis-progress'
 import { experimentPath, jobPath } from '@/lib/routes'
-import { budgetUnit, kindOf } from '@/lib/units'
+import { budgetUnit } from '@/lib/units'
 import type { Experiment } from '@/types/api'
 
 /** The jobs shown, what is running first, and a link to all of them when there are more. */
@@ -39,7 +39,7 @@ export function JobsTable({ experimentId, jobs, total, rankingMetric }: {
           </thead>
           <tbody>
             {jobs.map(exp => {
-              const cost = exp.estimated_cost_acch != null ? `${formatAccH(exp.estimated_cost_acch)} ${budgetUnit(kindOf(exp.accelerator_type))}` : '—'
+              const cost = exp.estimated_cost_acch != null ? `${formatAccH(exp.estimated_cost_acch)} ${budgetUnit(exp.accelerator_kind)}` : '—'
               const varied = variedEnvSettings(exp, variedByHypothesis)
               return (
                 <LinkTr key={exp.id} href={jobPath(experimentId, exp.id)}>
