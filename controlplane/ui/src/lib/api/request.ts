@@ -1,10 +1,10 @@
 import { accessToken, endSession } from '@/lib/auth'
+import { publicConfig } from '@/lib/config'
 
 // One API, one base URL: quota, scheduler and registry operations are all served together.
-// Next.js inlines a NEXT_PUBLIC_ variable only where it is named in full.
 export function apiURL(): string {
-  const url = process.env.NEXT_PUBLIC_API_URL
-  if (!url) throw new Error('NEXT_PUBLIC_API_URL is not set: copy .env.example to .env.local and fill it in')
+  const url = publicConfig.apiURL()
+  if (!url) throw new Error('NEXT_PUBLIC_API_URL is not set, as .env.example shows')
   return url
 }
 

@@ -1,20 +1,19 @@
 import { createBrowserClient, createServerClient } from '@supabase/ssr'
 import type { CookieMethodsServer } from '@supabase/ssr'
 import { isAuthRetryableFetchError } from '@supabase/supabase-js'
+import { publicConfig } from '@/lib/config'
 
-// Next.js inlines a NEXT_PUBLIC_ variable only where it is named in full, so each is read here
-// and nowhere else.
 // The sign-in service is a Supabase project: NEXT_PUBLIC_IDENTITY_PROVIDER names it, so a
 // deployment states which service it signs people in with.
 function config(): { url: string; key: string } {
-  const provider = process.env.NEXT_PUBLIC_IDENTITY_PROVIDER
+  const provider = publicConfig.identityProvider()
   if (provider !== 'supabase') {
-    throw new Error(`NEXT_PUBLIC_IDENTITY_PROVIDER is ${provider ? `'${provider}'` : 'not set'}, and the one sign-in service this UI knows is supabase: set it in .env.local, as .env.example shows`)
+    throw new Error(`NEXT_PUBLIC_IDENTITY_PROVIDER is ${provider ? `'${provider}'` : 'not set'}, and the one sign-in service this UI knows is supabase, as .env.example shows`)
   }
-  const url = process.env.NEXT_PUBLIC_IDENTITY_SUPABASE_URL
-  const key = process.env.NEXT_PUBLIC_IDENTITY_SUPABASE_PUBLISHABLE_KEY
-  if (!url) throw new Error('NEXT_PUBLIC_IDENTITY_SUPABASE_URL is not set: copy .env.example to .env.local and fill it in')
-  if (!key) throw new Error('NEXT_PUBLIC_IDENTITY_SUPABASE_PUBLISHABLE_KEY is not set: copy .env.example to .env.local and fill it in')
+  const url = publicConfig.identitySupabaseURL()
+  const key = publicConfig.identitySupabasePublishableKey()
+  if (!url) throw new Error('NEXT_PUBLIC_IDENTITY_SUPABASE_URL is not set, as .env.example shows')
+  if (!key) throw new Error('NEXT_PUBLIC_IDENTITY_SUPABASE_PUBLISHABLE_KEY is not set, as .env.example shows')
   return { url, key }
 }
 
@@ -72,10 +71,10 @@ export type SignInProvider = keyof typeof PROVIDER_NAMES
  * A deployment names them itself, so a missing or misspelt list is an error and never a default.
  */
 export function signInProviders(): SignInProvider[] {
-  const listed = (process.env.NEXT_PUBLIC_SIGN_IN_PROVIDERS ?? '').split(',').map(name => name.trim().toLowerCase()).filter(Boolean)
+  const listed = (publicConfig.signInProviders() ?? '').split(',').map(name => name.trim().toLowerCase()).filter(Boolean)
   const known = Object.keys(PROVIDER_NAMES).join(', ')
   if (listed.length === 0) {
-    throw new Error(`NEXT_PUBLIC_SIGN_IN_PROVIDERS is not set: list the sign-in providers to offer (${known}) in .env.local, as .env.example shows`)
+    throw new Error(`NEXT_PUBLIC_SIGN_IN_PROVIDERS is not set: list the sign-in providers to offer (${known}), as .env.example shows`)
   }
   const unknown = listed.filter(name => !(name in PROVIDER_NAMES))
   if (unknown.length > 0) throw new Error(`NEXT_PUBLIC_SIGN_IN_PROVIDERS names ${unknown.join(', ')}, and the providers are ${known}`)
