@@ -922,18 +922,6 @@ func (q *countingQuota) GetAgentQuota(_ context.Context, agent, _ string) (*doma
 	return &domain.AgentQuota{AgentID: agent, GuaranteedAcceleratorHours: 100}, nil
 }
 
-type countingNovelty struct{}
-
-func (countingNovelty) ComputeNovelty(_ context.Context, hypothesisID string, existing []*domain.Experiment) (float64, error) {
-	n := 0.0
-	for _, exp := range existing {
-		if exp.HypothesisID == hypothesisID {
-			n++
-		}
-	}
-	return 1 / (1 + n), nil
-}
-
 // Two admission passes running at once, as two replicas would through a failover, beside jobs
 // being submitted and ending: no cluster is ever claimed past what it has, and no job is placed
 // twice.

@@ -672,15 +672,6 @@ func TestAFailedCreateIsRetriedByWhicheverProcessIsAskedNext(t *testing.T) {
 	}
 }
 
-func (h *harness) eventually(what string, reached func() bool) {
-	h.t.Helper()
-	for deadline := time.Now().Add(5 * time.Second); !reached(); time.Sleep(5 * time.Millisecond) {
-		if time.Now().After(deadline) {
-			h.t.Fatalf("not reached in time: %s", what)
-		}
-	}
-}
-
 // An instance is started with the control plane's environment and nothing of the launcher's own:
 // a model credential in the launcher's environment, as an older deployment had, never reaches a
 // machine, created or started from the warm pool.

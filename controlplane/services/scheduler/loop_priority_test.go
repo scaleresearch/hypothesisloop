@@ -1,11 +1,12 @@
 package scheduler
 
 import (
+	"maps"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler/placement"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/domain"
 )
 
@@ -285,7 +286,7 @@ func TestWithoutFailedKeepsAFailedClusterOnlyWhenNothingElseCouldHostTheJob(t *t
 	} {
 		t.Run(name, func(t *testing.T) {
 			kept := withoutFailed(tc.candidates, ids, tc.exp, tc.ttl, now)
-			if got := placement.Order(kept, nil); !reflect.DeepEqual(got, tc.want) {
+			if got := slices.Sorted(maps.Keys(kept)); !reflect.DeepEqual(got, tc.want) {
 				t.Fatalf("kept %v, want %v", got, tc.want)
 			}
 		})

@@ -504,13 +504,6 @@ func (twoExperimentsStore) GetRunningAndQueued(_ context.Context, platformExpID 
 
 type recordingNovelty struct{ compared []string }
 
-func (n *recordingNovelty) ComputeNovelty(_ context.Context, _ string, existing []*domain.Experiment) (float64, error) {
-	for _, e := range existing {
-		n.compared = append(n.compared, e.ID)
-	}
-	return 0, errReachedScoring
-}
-
 // Novelty is a comparison within one platform experiment: a hypothesis belongs to one, and
 // another's jobs may be another org's.
 func TestNoveltyComparesAgainstTheJobsOfTheSamePlatformExperimentOnly(t *testing.T) {

@@ -167,15 +167,6 @@ func Tiers(candidates map[string]domain.Footprint, registered map[string]domain.
 	return tiers
 }
 
-// Order is Tiers as one list, for a search with one accelerator type.
-func Order(candidates map[string]domain.Footprint, registered map[string]domain.Cluster) []string {
-	order := make([]string, 0, len(candidates))
-	for _, tier := range Tiers(candidates, registered) {
-		order = append(order, tier...)
-	}
-	return order
-}
-
 // within is the view of avail over one tier. It shares its Footprint values with avail, as
 // the scheduler's eligibleClusters does, so a reservation made through either is seen through both.
 func within(avail map[string]domain.Footprint, tier []string) map[string]domain.Footprint {

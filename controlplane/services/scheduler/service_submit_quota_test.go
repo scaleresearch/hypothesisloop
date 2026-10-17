@@ -17,12 +17,6 @@ func (admittingStore) GetRunningAndQueued(context.Context, string) ([]*domain.Ex
 	return nil, nil
 }
 
-type novel struct{}
-
-func (novel) ComputeNovelty(context.Context, string, []*domain.Experiment) (float64, error) {
-	return 1, nil
-}
-
 // refusingQuota answers every admission with one error of the transaction.
 type refusingQuota struct {
 	QuotaService

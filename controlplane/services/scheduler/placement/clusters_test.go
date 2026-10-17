@@ -62,9 +62,6 @@ func TestPlacementTiersGoByPriorityThenName(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("placementTiers = %v, want %v", got, want)
 	}
-	if order := Order(candidates, registered); !reflect.DeepEqual(order, []string{"z-first", "b-second", "m-second", "a-shared", "unregistered"}) {
-		t.Fatalf("placementOrder = %v", order)
-	}
 	if got := Tiers(nil, registered); len(got) != 0 {
 		t.Fatalf("placementTiers of no candidates = %v, want none", got)
 	}
