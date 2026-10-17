@@ -195,6 +195,9 @@ type LauncherAgent struct {
 	// AgentImage is the image the agent's platform experiment names for its machines, empty for
 	// the platform's own.
 	AgentImage string
+	// BaselineDone is an agent of role baseline whose platform experiment has its baseline
+	// declared: it has nothing left to do, and a machine of its own would measure it again.
+	BaselineDone bool
 }
 
 // launcherAgentsFrom selects the sandboxed agents the launcher still has something to do for: those
@@ -237,7 +240,8 @@ WHERE s.in_agentsandbox AND NOT (` + awaitsRepository + `)
 // ListLauncherAgents returns the sandboxed agents the launcher's desired state is decided from.
 func (s *Store) ListLauncherAgents(ctx context.Context, windDown time.Duration) ([]LauncherAgent, error) {
 	rows, err := s.pool.pool.Query(ctx, `
-SELECT `+agentSignupColumns+`, pe.agent_image`+launcherAgentsFrom+`
+SELECT `+agentSignupColumns+`, pe.agent_image,
+       s.role = '`+string(domain.SignupRoleBaseline)+`' AND pe.baseline_job_id <> ''`+launcherAgentsFrom+`
 ORDER BY s.platform_experiment_id, s.agent_id`, windDown.Seconds())
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.ListLauncherAgents: %w", err)
@@ -247,7 +251,7 @@ ORDER BY s.platform_experiment_id, s.agent_id`, windDown.Seconds())
 	for rows.Next() {
 		var agent LauncherAgent
 		var err error
-		if agent.AgentSignup, err = scanAgentSignup(rows, &agent.AgentImage); err != nil {
+		if agent.AgentSignup, err = scanAgentSignup(rows, &agent.AgentImage, &agent.BaselineDone); err != nil {
 			return nil, fmt.Errorf("platform_experiments_store.ListLauncherAgents: %w", err)
 		}
 		agents = append(agents, agent)

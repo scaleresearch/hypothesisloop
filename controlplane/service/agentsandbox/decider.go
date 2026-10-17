@@ -153,7 +153,7 @@ func (h *Decider) Reconcile(ctx context.Context, observed sandboxapi.Observed) (
 		}
 		signup, image := agent.AgentSignup, h.imageOf(agent.AgentImage)
 		all = append(all, kept{
-			platformExperimentID: agent.PlatformExperimentID, agentID: agent.AgentID, role: string(agent.Role), agentType: agent.AgentType, instance: *agent.Instance, ending: agent.Ended != "",
+			platformExperimentID: agent.PlatformExperimentID, agentID: agent.AgentID, role: string(agent.Role), agentType: agent.AgentType, instance: *agent.Instance, ending: agent.Ended != "" || agent.BaselineDone,
 			launch: launchOf(image, observed.LaunchDigest),
 			describe: func(ended int) (sandboxapi.Instance, error) {
 				return instanceFor(signup, ended, image, h.cfg.APIURL, h.cfg.SigningSecret, observed.LaunchDigest)
