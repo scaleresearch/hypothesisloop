@@ -1,5 +1,9 @@
 # HypothesisLoop platform configuration.
-# Platform-wide rates and scheduling policy live here.
+# Platform-wide rates and scheduling policy live here, and every other value that is no secret.
+# The secrets come from each program's environment, under names fixed in controlplane/config
+# (env.go): DATABASE_URL, METRICS_DB_URL, GRAPH_DB_URL, AUTH_SIGNING_SECRET and the key of each
+# provider named here that takes one, such as MODEL_ANTHROPIC_OAUTH_TOKEN. A program reads only
+# the ones it needs and does not start without one of them.
 
 #   public_api_url  the one address this API is reached at from outside the control plane: by a
 #                   hosted agent from wherever its sandbox runs, and by a cluster's runtime
@@ -9,20 +13,18 @@ services:
   api_port: 8081
   public_api_url: http://REPLACE-WITH-HOST-ADDRESS:8081
   metric_controller_port: 8084
-  metrics_db_url: http://greptimedb:4000
-  graph_db_url: bolt://memgraph:7687
 
-# The relational database, whose address holds its password. Postgres enforces the timeouts on
+# The relational database, whose address, with its password, is DATABASE_URL. Postgres enforces the timeouts on
 # every session: one statement, one wait for a lock, and a transaction left idle (the longest
 # call made inside one is the object store's 20 s). Migrations run with their own, longer ones.
 database:
-  url: ${DATABASE_URL}
   statement_timeout_seconds: 30
   lock_timeout_seconds: 10
   idle_in_transaction_session_timeout_seconds: 60
 
 # Who may call the API. Every request carries one token, and there is no setting that turns the
-# check off.
+# check off. The hls_ tokens handed to what the platform launches (jobs, agents, coordinators,
+# runtimes) and the staff token are derived from AUTH_SIGNING_SECRET.
 #
 #   identity_providers
 #                     the sign-in services whose tokens the control plane accepts. Each entry is
@@ -35,14 +37,9 @@ database:
 #                     service it signs people in with. Local development renders in a key made on
 #                     the machine, which its tests sign their users with, and the Supabase project
 #                     beside it when .env asks for one (make render-settings).
-#   signing_secret    derives the hls_ tokens handed to what the platform launches (jobs, agents,
-#                     coordinators, runtimes) and the staff token. A secret of the deployment, so
-#                     this file names the environment variable and never holds the value: the
-#                     control plane does not start without it.
 #   ui_origin         the one browser origin allowed to call the API.
 auth:
   identity_providers: []
-  signing_secret: ${HYPOTHESISLOOP_SIGNING_SECRET}
   ui_origin: REPLACE-WITH-UI-ORIGIN
 
 # Agents the platform runs. An agent joins through POST /platform-experiments/{id}/agents; one
@@ -87,7 +84,7 @@ auth:
 #              (agent.idle continues). The same period tells whoever steers a running platform
 #              experiment that its capacity holds places beyond its queued jobs (capacity.idle).
 agents:
-  image: registry.example.invalid/hypothesisloop-experimentator-base:latest
+  image: REPLACE-WITH-AGENT-IMAGE
   default_model: claude-sonnet-5
   coordinator_model: claude-opus-5-5
   boot_limit_seconds: 300
@@ -101,14 +98,10 @@ agents:
 # where the agent authenticates with its own platform token. No agent's machine holds the
 # credential, and each call's tokens are recorded for its org, platform experiment and agent.
 #
-#   provider   anthropic: Claude, through Claude Code.
-#   anthropic.oauth_token  the Claude subscription token every hosted agent's calls are made
-#              with. A secret of the deployment, so this file names the environment variable and
-#              never holds the value: the control plane does not start without it.
+#   provider   anthropic: Claude, through Claude Code, with the subscription token
+#              MODEL_ANTHROPIC_OAUTH_TOKEN.
 models:
   provider: anthropic
-  anthropic:
-    oauth_token: ${MODEL_ANTHROPIC_OAUTH_TOKEN}
 
 # What bounds a draft: a platform experiment a person started from one sentence, which an agent
 # the platform runs plans (it works out the metric, the brief and the size and proposes the
@@ -245,21 +238,19 @@ job_images:
 # it with tokens minted per repository, each good for about an hour and stored nowhere.
 #
 #   git_host:
-#     proxy_url: https://api.example.com/git
 #     provider: github
 #     github:
 #       app_id: 123456
 #       app_slug: hypothesisloop
-#       private_key: ${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY}
 #
-#   proxy_url          the address agents, jobs and environment builds reach this API's /git at, the git proxy every
-#                      clone, fetch and push of theirs goes through with their own token. The proxy
-#                      mints the host's credential for each request and refuses a push to any ref
-#                      but the pusher's own branches, so no agent or job ever holds a credential
-#                      of the host; an environment build reads its repository there with a token of
-#                      that build alone. Required with every provider; a loopback address is rejected.
-#   app_id, app_slug   the App's number and the name in its URL.
-#   private_key        the PEM GitHub issued for the App. It signs the request for every token.
+#   app_id, app_slug   the App's number and the name in its URL. The PEM GitHub issued for the App,
+#                      which signs the request for every token, is GIT_HOST_GITHUB_APP_PRIVATE_KEY.
+#
+# Agents, jobs and environment builds reach the host through this API's git proxy, at
+# services.public_api_url with /git after it. Every clone, fetch and push of theirs goes through it
+# with their own token: the proxy mints the host's credential for each request and refuses a push
+# to any ref but the pusher's own branches, so no agent or job ever holds a credential of the
+# host, and an environment build reads its repository there with a token of that build alone.
 #
 # The App asks for the permissions controlplane/clients/githost/github/app-manifest.json states, and
 # an installation that has not granted all of them is refused, naming those it lacks.
@@ -267,23 +258,21 @@ job_images:
 # plain is any host that serves repositories under one root:
 #
 #   git_host:
-#     proxy_url: https://api.example.com/git
 #     provider: plain
 #     plain:
 #       base_url: https://git.example.com/experiments
 #       username: platform
-#       password: ${HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD}
 #
 #   base_url   the https root of any git host. A repository is a name under it, created on the host
 #              beforehand: the platform creates none there and reads no experiment file from one.
 #   allow_http true lets base_url be http, for a host on the deployment's own network, as local
 #              development's is. The credential then travels in the clear.
-#   username, password
-#              what the host takes, both left out for a host that asks for nothing.
+#   username   the account the host takes, left out for a host that asks for nothing. Its password
+#              is GIT_HOST_PLAIN_PASSWORD.
 #
 # The plain credential is deployment-wide: it reads and writes whatever that account reaches on the
 # host. The proxy uses it, so no agent, coordinator or job is handed it; an environment build's RUN
-# that asks for the repository's secret still reads it. Secrets are named here as environment variables and never held in this file.
+# that asks for the repository's secret still reads it.
 
 # Durable data between jobs — checkpoints and datasets one job produces and another needs.
 #
@@ -298,7 +287,8 @@ job_images:
 # created is the store's own, which provider names. One of:
 #
 #   minio  the MinIO admin API (MinIO, Silo, AIStor): the job's key is a service account of the key
-#          below, which must be allowed to create service accounts. The store's root user is.
+#          below, access_key_id with DATA_STORE_MINIO_SECRET_ACCESS_KEY, which must be allowed to
+#          create service accounts. The store's root user is.
 #
 # The platform is not in the data path: it lists prefixes and measures them, and nothing more.
 # Expiry is a lifecycle rule configured on the bucket itself — one rule, enforced where the bytes
@@ -323,7 +313,6 @@ data_store:
   region: us-east-1
   bucket: hypothesisloop-data
   access_key_id: hypothesisloop
-  secret_access_key: ${DATA_STORE_SECRET_ACCESS_KEY}
 
   # How many bytes one agent may hold within one platform experiment. Checked at admission
   # against what the store reports right now, never mid-write: enforcing a ceiling mid-write

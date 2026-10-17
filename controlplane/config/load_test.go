@@ -7,39 +7,28 @@ import (
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-const (
-	signingSecretEnv   = "HYPOTHESISLOOP_SIGNING_SECRET"
-	modelCredentialEnv = "MODEL_ANTHROPIC_OAUTH_TOKEN"
-)
-
-// productionConfig is the committed settings file, with the deployment's secret in the
-// environment as every deployment supplies it.
+// committedConfig is the committed settings file.
 var committedConfig = filepath.Join("..", "settings", "hypothesisloop.yaml")
 
 // productionConfig is the committed settings file as a deployment renders it: with its git host.
 func productionConfig(t *testing.T) string {
 	t.Helper()
-	return withoutGitHost(t) + "\ngit_host:\n  proxy_url: https://api.example.invalid/git\n  provider: plain\n  plain:\n    base_url: https://git.example.invalid\n"
+	return withoutGitHost(t) + "\ngit_host:\n  provider: plain\n  plain:\n    base_url: https://git.example.invalid\n"
 }
 
 // withoutGitHost is the rendered settings file before the deployment's git host is added.
 func withoutGitHost(t *testing.T) string {
 	t.Helper()
-	t.Setenv(signingSecretEnv, "a-signing-secret-only-this-test-knows")
-	t.Setenv("DATABASE_URL", "postgres://test.example.invalid/hypothesisloop")
-	t.Setenv("DATA_STORE_SECRET_ACCESS_KEY", "a-store-secret-only-this-test-knows")
-	t.Setenv(modelCredentialEnv, "a-model-credential-only-this-test-knows")
 	b, err := os.ReadFile(committedConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
 	rendered := strings.ReplaceAll(string(b), Placeholder+"HOST-ADDRESS", "host.example.invalid")
 	rendered = strings.ReplaceAll(rendered, Placeholder+"UI-ORIGIN", "http://localhost:3000")
+	rendered = strings.ReplaceAll(rendered, Placeholder+"AGENT-IMAGE", "registry.example.invalid/hypothesisloop-experimentator-base:abc1234")
 	return strings.ReplaceAll(rendered, Placeholder+"IMAGE-TAG", "abc1234")
 }
 
@@ -49,7 +38,7 @@ func loadText(t *testing.T, text string) error {
 	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := Load(path)
+	_, err := LoadSettings(path)
 	return err
 }
 
@@ -96,102 +85,13 @@ func TestLoadRequiresStartTimeout(t *testing.T) {
 	}
 }
 
-func TestLoadExpandsEnvReferences(t *testing.T) {
-	t.Setenv("TEST_STORE_SECRET", "p@ss: #word\"")
-	text := strings.Replace(productionConfig(t), "  secret_access_key: hypothesisloop", "  secret_access_key: ${TEST_STORE_SECRET}", 1)
-	path := filepath.Join(t.TempDir(), "hypothesisloop.yaml")
-	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if cfg.DataStore.SecretAccessKey != "p@ss: #word\"" {
-		t.Fatalf("secret_access_key = %q", cfg.DataStore.SecretAccessKey)
-	}
-}
-
-func TestLoadRejectsUndefinedEnvReference(t *testing.T) {
-	text := strings.Replace(productionConfig(t), "  secret_access_key: hypothesisloop", "  secret_access_key: ${TEST_UNDEFINED_SECRET}", 1)
-	err := loadText(t, text)
-	if err == nil || !strings.Contains(err.Error(), "TEST_UNDEFINED_SECRET") {
-		t.Fatalf("Load error = %v, want one naming TEST_UNDEFINED_SECRET", err)
-	}
-}
-
-func TestExpandEnvLeavesCommentsAndKeysAlone(t *testing.T) {
-	t.Setenv("TEST_HOST", "store.example")
-	out, err := ExpandEnv([]byte("# ${TEST_UNDEFINED_SECRET} in a comment\n${TEST_HOST}: 1\nurl: http://${TEST_HOST}:9000/x\n"))
-	if err != nil {
-		t.Fatalf("ExpandEnv: %v", err)
-	}
-	var got map[string]string
-	if err := yaml.Unmarshal(out, &got); err != nil {
-		t.Fatal(err)
-	}
-	if got["url"] != "http://store.example:9000/x" || got["${TEST_HOST}"] != "1" {
-		t.Fatalf("got %v", got)
-	}
-}
-
-// The committed file runs nothing by itself: the secret comes from the deployment's environment,
-// and a control plane started without one, or with a guessable one, does not start.
-func TestTheSigningSecretComesFromTheEnvironmentAndIsRequired(t *testing.T) {
-	text := productionConfig(t)
-	if !strings.Contains(text, "  signing_secret: ${"+signingSecretEnv+"}\n") {
-		t.Fatal("the committed settings hold a signing secret; they must name the environment variable instead")
-	}
-	if err := loadText(t, text); err != nil {
-		t.Fatalf("Load with the secret in the environment: %v", err)
-	}
-	t.Setenv(signingSecretEnv, "too-short")
-	t.Setenv("DATABASE_URL", "postgres://test.example.invalid/hypothesisloop")
-	t.Setenv("DATA_STORE_SECRET_ACCESS_KEY", "a-store-secret-only-this-test-knows")
-	if err := loadText(t, text); err == nil {
-		t.Fatal("Load accepted a signing secret shorter than its MAC")
-	}
-	os.Unsetenv(signingSecretEnv)
-	if err := loadText(t, text); err == nil || !strings.Contains(err.Error(), signingSecretEnv) {
-		t.Fatalf("Load without the variable: got = %v, want an error naming it", err)
-	}
-}
-
-// The model credential is the control plane's alone: the committed file names its variable, and a
-// control plane without it does not start, since no hosted agent could make a model call.
-func TestTheModelCredentialComesFromTheEnvironmentAndIsRequired(t *testing.T) {
-	text := productionConfig(t)
-	if !strings.Contains(text, "models:\n  provider: anthropic\n  anthropic:\n    oauth_token: ${"+modelCredentialEnv+"}\n") {
-		t.Fatal("the committed settings hold a model credential or no models section; they must name the environment variable")
-	}
-	cfg, err := loadConfigText(t, text)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Models.Anthropic.OAuthToken != "a-model-credential-only-this-test-knows" {
-		t.Fatal("the credential was not read from the environment")
-	}
-	t.Setenv(modelCredentialEnv, "")
-	if err := loadText(t, text); err == nil || !strings.Contains(err.Error(), "oauth_token") {
-		t.Fatalf("Load with an empty credential: got = %v, want it refused", err)
-	}
-	os.Unsetenv(modelCredentialEnv)
-	if err := loadText(t, text); err == nil || !strings.Contains(err.Error(), modelCredentialEnv) {
-		t.Fatalf("Load without the variable: got = %v, want an error naming it", err)
-	}
-	t.Setenv(modelCredentialEnv, "set")
-	if err := loadText(t, strings.Replace(text, "  provider: anthropic\n", "  provider: other\n", 1)); err == nil {
-		t.Fatal("Load accepted a model provider it has no proxy for")
-	}
-}
-
 func loadConfigText(t *testing.T, text string) (*Settings, error) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "hypothesisloop.yaml")
 	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return Load(path)
+	return LoadSettings(path)
 }
 
 func TestLoadRequiresTheUIOrigin(t *testing.T) {
@@ -231,11 +131,7 @@ func TestLoadRequiresEveryIdentityProviderToBeCompleteAndListedOnce(t *testing.T
 }
 
 func TestLoadRefusesTheCommittedFileUntilItsPlaceholdersAreFilledIn(t *testing.T) {
-	t.Setenv(signingSecretEnv, "a-signing-secret-only-this-test-knows")
-	t.Setenv("DATABASE_URL", "postgres://test.example.invalid/hypothesisloop")
-	t.Setenv("DATA_STORE_SECRET_ACCESS_KEY", "a-store-secret-only-this-test-knows")
-	t.Setenv(modelCredentialEnv, "a-model-credential-only-this-test-knows")
-	if _, err := Load(committedConfig); err == nil || !strings.Contains(err.Error(), "placeholder") {
+	if _, err := LoadSettings(committedConfig); err == nil || !strings.Contains(err.Error(), "placeholder") {
 		t.Fatalf("Load of the committed settings: got = %v, want it refused for its placeholders", err)
 	}
 	rendered := productionConfig(t)
@@ -245,11 +141,13 @@ func TestLoadRefusesTheCommittedFileUntilItsPlaceholdersAreFilledIn(t *testing.T
 		"  endpoint: http://host.example.invalid:9000",
 		"  registry: host.example.invalid:5000",
 		"  image_tag: abc1234",
+		"  image: registry.example.invalid/hypothesisloop-experimentator-base:abc1234",
 	} {
 		if !strings.Contains(rendered, line) {
 			t.Fatalf("the settings file has no %q", line)
 		}
-		unfilled := strings.Replace(rendered, line, strings.NewReplacer("host.example.invalid", Placeholder+"HOST-ADDRESS", "abc1234", Placeholder+"IMAGE-TAG").Replace(line), 1)
+		unfilled := strings.Replace(rendered, line, strings.NewReplacer("host.example.invalid", Placeholder+"HOST-ADDRESS", "abc1234", Placeholder+"IMAGE-TAG",
+			"registry.example.invalid/hypothesisloop-experimentator-base:abc1234", Placeholder+"AGENT-IMAGE").Replace(line), 1)
 		if err := loadText(t, unfilled); err == nil || !strings.Contains(err.Error(), "placeholder") {
 			t.Errorf("one value left unfilled (%q): Load = %v, want it refused as a placeholder", line, err)
 		}
@@ -310,7 +208,7 @@ func TestLoadRejectsRuntimeAddressesARuntimeCannotReach(t *testing.T) {
 	if err := os.WriteFile(path, []byte(productionConfig(t)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(path)
+	cfg, err := LoadSettings(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +245,7 @@ func TestLoadRejectsRuntimeImagesANodeCannotPull(t *testing.T) {
 
 func TestLoadRejectsAnIncompleteAgentsSection(t *testing.T) {
 	for name, edit := range map[string][2]string{
-		"no image":                 {"  image: registry.example.invalid/hypothesisloop-experimentator-base:latest", `  image: ""`},
+		"no image":                 {"  image: registry.example.invalid/hypothesisloop-experimentator-base:abc1234", `  image: ""`},
 		"misspelled agents key":    {"  default_model: claude-sonnet-5", "  default_model: claude-sonnet-5\n  launchers: [main]"},
 		"no default model":         {"  default_model: claude-sonnet-5\n", ""},
 		"no coordinator model":     {"  coordinator_model: claude-opus-5-5\n", ""},
@@ -416,46 +314,20 @@ func TestLoadRejectsAnIncompleteAccountsSection(t *testing.T) {
 
 const githubSection = `
 git_host:
-  proxy_url: https://api.example.invalid/git
   provider: github
   github:
     app_id: 4242
     app_slug: hypothesisloop
-    private_key: ${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY}
 `
 
-func TestLoadTakesTheGitHubAppSecretsFromTheEnvironment(t *testing.T) {
-	text := withoutGitHost(t) + githubSection
-	if err := loadText(t, text); err == nil || !strings.Contains(err.Error(), "HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_") {
-		t.Fatalf("Load with the App's secrets unset: got = %v, want it to name the missing variable", err)
-	}
-	t.Setenv("HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY", "-----BEGIN RSA PRIVATE KEY-----\nabc: def # not a comment\n-----END RSA PRIVATE KEY-----\n")
-	path := filepath.Join(t.TempDir(), "hypothesisloop.yaml")
-	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := Load(path)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	app := cfg.GitHost.GitHub
-	if cfg.GitHost.Provider != GitHostProviderGitHub || app == nil || app.AppID != 4242 ||
-		app.PrivateKey != os.Getenv("HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY") {
-		t.Fatalf("git_host = %+v, want the github section with the private key as the environment holds it", cfg.GitHost.Provider)
-	}
-}
-
 func TestLoadTakesOneGitHostAndRefusesAHalfStatedOne(t *testing.T) {
-	t.Setenv("HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY", "pem")
-	t.Setenv("HL_TEST_GIT_USERNAME", "platform")
-	t.Setenv("HL_TEST_GIT_PASSWORD", "secret")
-	const plain = "\ngit_host:\n  proxy_url: https://api.example.invalid/git\n  provider: plain\n  plain:\n    base_url: https://git.example/experiments\n"
-	const credential = "    username: ${HL_TEST_GIT_USERNAME}\n    password: ${HL_TEST_GIT_PASSWORD}\n"
-	const app = "  github:\n    app_id: 4242\n    app_slug: hypothesisloop\n    private_key: y\n"
+	const plain = "\ngit_host:\n  provider: plain\n  plain:\n    base_url: https://git.example/experiments\n"
+	const account = "    username: platform\n"
+	const app = "  github:\n    app_id: 4242\n    app_slug: hypothesisloop\n"
 	for name, section := range map[string]string{
 		"a plain host that asks for no credential": plain,
-		"a plain host with the credential":         plain + credential,
-		"a plain host over http that says so":      "\ngit_host:\n  proxy_url: https://api.example.invalid/git\n  provider: plain\n  plain:\n    base_url: http://git.example\n    allow_http: true\n",
+		"a plain host with an account":             plain + account,
+		"a plain host over http that says so":      "\ngit_host:\n  provider: plain\n  plain:\n    base_url: http://git.example\n    allow_http: true\n",
 		"github with its App":                      githubSection,
 	} {
 		if err := loadText(t, withoutGitHost(t)+section); err != nil {
@@ -463,30 +335,28 @@ func TestLoadTakesOneGitHostAndRefusesAHalfStatedOne(t *testing.T) {
 		}
 	}
 	path := filepath.Join(t.TempDir(), "hypothesisloop.yaml")
-	if err := os.WriteFile(path, []byte(withoutGitHost(t)+plain+credential), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(withoutGitHost(t)+plain+account), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	want := PlainGitConfig{BaseURL: "https://git.example/experiments", Username: "platform", Password: "secret"}
-	if cfg, err := Load(path); err != nil || cfg.GitHost.Provider != GitHostProviderPlain || cfg.GitHost.Plain == nil || *cfg.GitHost.Plain != want || cfg.GitHost.GitHub != nil {
-		t.Fatalf("Load: %v, want the plain host with the credential as the environment holds it", err)
+	want := PlainGitConfig{BaseURL: "https://git.example/experiments", Username: "platform"}
+	if cfg, err := LoadSettings(path); err != nil || cfg.GitHost.Provider != GitHostProviderPlain || cfg.GitHost.Plain == nil || *cfg.GitHost.Plain != want || cfg.GitHost.GitHub != nil {
+		t.Fatalf("Load: %v, want the plain host and its account", err)
 	}
 	for name, section := range map[string]string{
-		"no git_host section":              "",
-		"no provider":                      "\ngit_host:\n  plain:\n    base_url: https://git.example\n",
-		"a provider nobody wrote":          "\ngit_host:\n  proxy_url: https://api.example.invalid/git\n  provider: gitlab\n",
-		"github with no App":               "\ngit_host:\n  proxy_url: https://api.example.invalid/git\n  provider: github\n",
-		"github with a plain section":      githubSection + "  plain:\n    base_url: https://git.example\n",
-		"plain beside a GitHub App":        plain + app,
-		"plain with no section":            "\ngit_host:\n  proxy_url: https://api.example.invalid/git\n  provider: plain\n",
-		"plain with no base_url":           "\ngit_host:\n  proxy_url: https://api.example.invalid/git\n  provider: plain\n  plain:\n    allow_http: false\n",
-		"plain over http":                  "\ngit_host:\n  proxy_url: https://api.example.invalid/git\n  provider: plain\n  plain:\n    base_url: http://git.example\n",
-		"plain over another scheme":        "\ngit_host:\n  proxy_url: https://api.example.invalid/git\n  provider: plain\n  plain:\n    base_url: git://git.example\n    allow_http: true\n",
-		"plain with a username alone":      plain + "    username: ${HL_TEST_GIT_USERNAME}\n",
-		"plain with a variable nobody set": plain + "    username: platform\n    password: ${HL_TEST_GIT_UNSET}\n",
-		"the old github section":           "\ngithub:\n  app_id: 4242\ngit:\n  provider: github\n",
-		"no proxy_url":                     strings.Replace(plain, "  proxy_url: https://api.example.invalid/git\n", "", 1),
-		"a loopback proxy_url":             strings.Replace(plain, "api.example.invalid", "localhost:8081", 1),
-		"a proxy_url with a credential":    strings.Replace(plain, "https://", "https://user:pw@", 1),
+		"no git_host section":         "",
+		"no provider":                 "\ngit_host:\n  plain:\n    base_url: https://git.example\n",
+		"a provider nobody wrote":     "\ngit_host:\n  provider: gitlab\n",
+		"github with no App":          "\ngit_host:\n  provider: github\n",
+		"github with a plain section": githubSection + "  plain:\n    base_url: https://git.example\n",
+		"plain beside a GitHub App":   plain + app,
+		"plain with no section":       "\ngit_host:\n  provider: plain\n",
+		"plain with no base_url":      "\ngit_host:\n  provider: plain\n  plain:\n    allow_http: false\n",
+		"plain over http":             "\ngit_host:\n  provider: plain\n  plain:\n    base_url: http://git.example\n",
+		"plain over another scheme":   "\ngit_host:\n  provider: plain\n  plain:\n    base_url: git://git.example\n    allow_http: true\n",
+		"plain with a password":       plain + account + "    password: secret\n",
+		"the old github section":      "\ngithub:\n  app_id: 4242\ngit:\n  provider: github\n",
+		"a proxy_url":                 strings.Replace(plain, "git_host:\n", "git_host:\n  proxy_url: https://api.example.invalid/git\n", 1),
+		"a GitHub App's private key":  githubSection + "    private_key: pem\n",
 	} {
 		if err := loadText(t, withoutGitHost(t)+section); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -495,8 +365,7 @@ func TestLoadTakesOneGitHostAndRefusesAHalfStatedOne(t *testing.T) {
 }
 
 func TestLoadRejectsAHalfConfiguredGitHubApp(t *testing.T) {
-	t.Setenv("HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY", "pem")
-	for _, line := range []string{"    app_id: 4242\n", "    app_slug: hypothesisloop\n", "    private_key: ${HYPOTHESISLOOP_GIT_HOST_GITHUB_APP_PRIVATE_KEY}\n"} {
+	for _, line := range []string{"    app_id: 4242\n", "    app_slug: hypothesisloop\n"} {
 		section := strings.Replace(githubSection, line, "", 1)
 		if section == githubSection {
 			t.Fatalf("the test section has no line %q", line)
@@ -514,7 +383,7 @@ func TestACoreHourIsBuiltInAtOneAndPricedNowhereElse(t *testing.T) {
 	if err := os.WriteFile(path, []byte(productionConfig(t)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(path)
+	cfg, err := LoadSettings(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -563,7 +432,7 @@ func TestAnAcceleratorTypeDeclaresWhatEveryJobOnItNeeds(t *testing.T) {
 	if err := os.WriteFile(path, []byte(productionConfig(t)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(path)
+	cfg, err := LoadSettings(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -595,13 +464,13 @@ func TestEnvironmentsAreLeftOutOrStatedWhole(t *testing.T) {
 	if err := os.WriteFile(path, []byte(productionConfig(t)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if cfg, err := Load(path); err != nil || cfg.Environments != nil {
+	if cfg, err := LoadSettings(path); err != nil || cfg.Environments != nil {
 		t.Fatalf("Load without the section: %v, environments %+v, want it loaded with none", err, cfg.Environments)
 	}
 	if err := os.WriteFile(path, []byte(productionConfig(t)+environmentsSection), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load(path)
+	cfg, err := LoadSettings(path)
 	if err != nil {
 		t.Fatalf("Load with the section: %v", err)
 	}
@@ -634,5 +503,46 @@ func TestAnOfferedJobImageNamesItsEnvironmentBaseAtTheRuntimesTag(t *testing.T) 
 	offered := c.OfferedJobImages()
 	if offered[0].Image != "registry.example.invalid/hl/hypothesisloop-job:abc1234" || offered[0].EnvironmentBase != "registry.example.invalid/hl/hypothesisloop-job-base:abc1234" || offered[1].EnvironmentBase != "" {
 		t.Errorf("offered %+v", offered)
+	}
+}
+
+// The settings hold no secret: a key that once held one, or named the variable holding one, is
+// refused as any unknown key is.
+func TestASettingsFileWithASecretIsRefused(t *testing.T) {
+	text := productionConfig(t)
+	for name, edit := range map[string][2]string{
+		"signing_secret":    {"  ui_origin:", "  signing_secret: x\n  ui_origin:"},
+		"database url":      {"database:\n", "database:\n  url: postgres://x\n"},
+		"metrics_db_url":    {"  metric_controller_port: 8084", "  metric_controller_port: 8084\n  metrics_db_url: http://x"},
+		"oauth_token":       {"  provider: anthropic\n", "  provider: anthropic\n  anthropic:\n    oauth_token: x\n"},
+		"secret_access_key": {"  access_key_id: hypothesisloop\n", "  access_key_id: hypothesisloop\n  secret_access_key: x\n"},
+	} {
+		if !strings.Contains(text, edit[0]) {
+			t.Fatalf("%s: the settings file has no %q", name, edit[0])
+		}
+		if err := loadText(t, strings.Replace(text, edit[0], edit[1], 1)); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+func TestTheGitProxyIsTheAPIsGitPath(t *testing.T) {
+	cfg, err := loadConfigText(t, productionConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.GitProxyURL(); got != "http://host.example.invalid:8081/git" {
+		t.Errorf("git proxy = %q, want public_api_url with /git after it", got)
+	}
+}
+
+// A provider's key has one name in the environment, so two accounts on one provider are refused.
+func TestTwoCloudComputeAccountsOnOneProviderAreRefused(t *testing.T) {
+	two := productionConfig(t) + "\ncloud_compute:\n" + cluster + strings.Replace(cluster, "cluster_name: a", "cluster_name: b", 1)
+	if err := loadText(t, two); err == nil || !strings.Contains(err.Error(), "one account") {
+		t.Errorf("two vast accounts: got %v, want them refused", err)
+	}
+	if err := loadText(t, productionConfig(t)+"\ncloud_compute:\n"+cluster); err != nil {
+		t.Errorf("one vast account: %v", err)
 	}
 }

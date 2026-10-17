@@ -84,7 +84,7 @@ type CloudComputeConfig struct {
 // ComputeProviderConfig is a ProviderConfig with the account it rents on.
 type ComputeProviderConfig struct {
 	Name string `yaml:"name"`
-	// AccountID tells two accounts on one provider apart. With the name it is the cluster's id.
+	// AccountID is the account's id at the provider. With the name it is the cluster's id.
 	AccountID string    `yaml:"account_id"`
 	Settings  yaml.Node `yaml:"settings"`
 }
@@ -155,12 +155,17 @@ func (c *Settings) buildRented() error {
 			}
 		}
 	}
-	clusters := map[string]bool{}
+	clusters, accounts := map[string]bool{}, map[string]string{}
 	for _, cc := range c.CloudCompute {
 		if cc.ClusterName == "" || clusters[cc.ClusterName] {
 			return fmt.Errorf("cloud_compute: cluster_name %q is empty or listed twice", cc.ClusterName)
 		}
 		clusters[cc.ClusterName] = true
+		// A provider's key has one name in the environment, so a provider has one account.
+		if other, taken := accounts[cc.Provider.Name]; taken {
+			return fmt.Errorf("cloud_compute %s: provider %s is %s's already, and a provider has one account", cc.ClusterName, cc.Provider.Name, other)
+		}
+		accounts[cc.Provider.Name] = cc.ClusterName
 		if cc.Provider.Name == "" || cc.Provider.AccountID == "" || cc.JobImage == "" {
 			return fmt.Errorf("cloud_compute %s: job_image, provider name and provider account_id are required", cc.ClusterName)
 		}

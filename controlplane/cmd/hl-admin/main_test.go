@@ -27,7 +27,8 @@ func inSettings(t *testing.T) {
 	rendered := strings.ReplaceAll(string(committed), config.Placeholder+"HOST-ADDRESS", "host.example.invalid")
 	rendered = strings.ReplaceAll(rendered, config.Placeholder+"IMAGE-TAG", "abc1234")
 	rendered = strings.ReplaceAll(rendered, config.Placeholder+"UI-ORIGIN", "http://localhost:3000")
-	rendered += "\ngit_host:\n  proxy_url: https://api.example.invalid/git\n  provider: plain\n  plain:\n    base_url: https://git.example.invalid\n"
+	rendered = strings.ReplaceAll(rendered, config.Placeholder+"AGENT-IMAGE", "registry.example.invalid/agent:abc1234")
+	rendered += "\ngit_host:\n  provider: plain\n  plain:\n    base_url: https://git.example.invalid\n"
 	if err := os.WriteFile(path, []byte(rendered), 0o600); err != nil {
 		t.Fatal(err)
 	}

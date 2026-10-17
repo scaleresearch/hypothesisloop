@@ -170,12 +170,12 @@ func (s SchedulerConfig) PassTimeout() time.Duration {
 	return time.Duration(s.PassTimeoutSeconds) * time.Second
 }
 
-// DatabaseConfig is the relational database every control-plane process connects to.
+// DatabaseConfig is how every control-plane process holds its sessions of the relational
+// database, whose address is DatabaseURL.
 type DatabaseConfig struct {
-	URL                                    string `yaml:"url"`
-	StatementTimeoutSeconds                int    `yaml:"statement_timeout_seconds"`
-	LockTimeoutSeconds                     int    `yaml:"lock_timeout_seconds"`
-	IdleInTransactionSessionTimeoutSeconds int    `yaml:"idle_in_transaction_session_timeout_seconds"`
+	StatementTimeoutSeconds                int `yaml:"statement_timeout_seconds"`
+	LockTimeoutSeconds                     int `yaml:"lock_timeout_seconds"`
+	IdleInTransactionSessionTimeoutSeconds int `yaml:"idle_in_transaction_session_timeout_seconds"`
 }
 
 // MaxScaleUpTimeoutSeconds is the hard ceiling both the global default and any per-cluster
@@ -199,17 +199,21 @@ type ServicesConfig struct {
 	// cluster. It is handed to both, so it is never loopback.
 	PublicAPIURL string `yaml:"public_api_url"`
 	// MetricControllerPort serves the internal controller only; nothing agent-facing.
-	MetricControllerPort int    `yaml:"metric_controller_port"`
-	MetricsDBURL         string `yaml:"metrics_db_url"`
-	// GraphDBURL is the Memgraph bolt address holding the hypothesis graph (storage/graphdb).
-	// Only control-service connects to it.
-	GraphDBURL string `yaml:"graph_db_url"`
+	MetricControllerPort int `yaml:"metric_controller_port"`
+}
+
+// GitProxyURL is the address agents, jobs and environment builds reach the control plane's git
+// proxy at: the API's /git. They push and fetch through it with their own token and never hold the
+// host's.
+func (c *Settings) GitProxyURL() string {
+	return strings.TrimSuffix(c.Services.PublicAPIURL, "/") + "/git"
 }
 
 // DataStoreConfig addresses the S3-compatible object store jobs write checkpoints and datasets
 // to. The control plane creates one key per job, hands out the address and that key, and never
 // sits in the data path: beyond the keys it lists prefixes and measures them, nothing more. The
-// configured key creates the job keys the way Provider's store does, so it must be allowed to.
+// configured key, AccessKeyID with the provider's secret key from the environment, creates the job
+// keys the way Provider's store does, so it must be allowed to.
 // Expiring a closed platform experiment's prefix is a lifecycle rule configured on the bucket
 // itself, not a sweeper here.
 type DataStoreConfig struct {
@@ -224,7 +228,6 @@ type DataStoreConfig struct {
 	Region               string `yaml:"region"`
 	Bucket               string `yaml:"bucket"`
 	AccessKeyID          string `yaml:"access_key_id"`
-	SecretAccessKey      string `yaml:"secret_access_key"`
 	// MaxBytesPerAgent caps how many bytes one agent may hold within one platform experiment,
 	// checked at admission against what the store reports right now. Deliberately not enforced
 	// mid-write: that would need a gateway in the data path, and a job killed as it saves loses
@@ -254,17 +257,15 @@ type IdentityProvider struct {
 	JWTKeys  []JWTKey `yaml:"jwt_keys"`
 }
 
-// AuthConfig is everything a token is checked against. There is no switch that turns the check
-// off: local development authenticates with a staff token derived from SigningSecret.
+// AuthConfig is everything a token is checked against beside the signing secret, which comes from
+// the environment. There is no switch that turns the check off: local development authenticates
+// with a staff token derived from the signing secret.
 type AuthConfig struct {
 	// IdentityProviders are the issuers whose JWTs name a person. A token is checked against
 	// the one provider its issuer claim names, so one provider's key never vouches for
 	// another's users. A deployment lists the one it signs people in with; local development
 	// lists a key made on the machine beside it. With none listed no JWT is accepted.
 	IdentityProviders []IdentityProvider `yaml:"identity_providers"`
-	// SigningSecret derives every hls_ token the platform hands to what it launches. It is a
-	// secret of the deployment: the settings file names the environment variable that holds it.
-	SigningSecret string `yaml:"signing_secret"`
 	// UIOrigin is the one browser origin allowed to call the API.
 	UIOrigin string `yaml:"ui_origin"`
 }
@@ -299,22 +300,14 @@ type AgentsConfig struct {
 }
 
 // ModelsConfig is whose models hosted agents run on. The control plane holds that provider's
-// credential and makes every model call of a hosted agent for it (httpapi/modelproxy), so no
-// agent's machine holds the credential. Provider names it, and the section of that name, the only
-// one set, configures it.
+// credential, from the environment, and makes every model call of a hosted agent for it
+// (httpapi/modelproxy), so no agent's machine holds the credential.
 type ModelsConfig struct {
-	Provider  string                 `yaml:"provider"`
-	Anthropic *AnthropicModelsConfig `yaml:"anthropic"`
+	Provider string `yaml:"provider"`
 }
 
+// ModelProviderAnthropic is Claude, which hosted agents run through Claude Code.
 const ModelProviderAnthropic = "anthropic"
-
-// AnthropicModelsConfig is Claude, which hosted agents run through Claude Code.
-type AnthropicModelsConfig struct {
-	// OAuthToken is the Claude subscription token every hosted agent's model calls are made with,
-	// a secret of the deployment: the settings file names the environment variable that holds it.
-	OAuthToken string `yaml:"oauth_token"`
-}
 
 // PlanningConfig bounds a draft: a platform experiment being planned from one sentence by an
 // agent the platform runs, before a person accepts its proposal. The platform pays for its machine.
@@ -439,21 +432,16 @@ const (
 // GitHostConfig is the one git host platform experiments keep their code on: Provider names it,
 // and the section of that name, the only one set, configures it.
 type GitHostConfig struct {
-	// ProxyURL is the address agents, jobs and environment builds reach the control plane's git proxy at, the API's
-	// /git: they push and fetch through it with their own token and never hold the host's.
-	ProxyURL string          `yaml:"proxy_url"`
 	Provider string          `yaml:"provider"`
 	GitHub   *GitHubConfig   `yaml:"github"`
 	Plain    *PlainGitConfig `yaml:"plain"`
 }
 
-// GitHubConfig is the GitHub App a project's repository is reached through. All of it is required.
+// GitHubConfig is the GitHub App a project's repository is reached through, whose private key
+// comes from the environment. All of it is required.
 type GitHubConfig struct {
 	AppID   int64  `yaml:"app_id"`
 	AppSlug string `yaml:"app_slug"`
-	// PrivateKey is the PEM GitHub issued for the App, a secret of the deployment: the settings
-	// file names the environment variable that holds it.
-	PrivateKey string `yaml:"private_key"`
 }
 
 // PlainGitConfig is any host that serves repositories under BaseURL over https, reached with
@@ -463,10 +451,9 @@ type PlainGitConfig struct {
 	// AllowHTTP lets BaseURL be http, for a host on the deployment's own network. The credential
 	// then travels in the clear.
 	AllowHTTP bool `yaml:"allow_http"`
-	// Username and Password are the deployment's one credential on a plain host. The settings
-	// file names the environment variables that hold them.
+	// Username is the deployment's one account on a plain host, left out for a host that asks for
+	// none. Its password comes from the environment.
 	Username string `yaml:"username"`
-	Password string `yaml:"password"`
 }
 
 // MinSigningSecretLength keeps the HMAC key at least as long as its output.

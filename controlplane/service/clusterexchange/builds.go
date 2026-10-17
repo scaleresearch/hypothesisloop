@@ -60,7 +60,7 @@ func (s *Service) BuildGitCredential(ctx context.Context, cluster, key string, a
 		return domain.EnvironmentGitCredential{}, refusal.Reject(http.StatusNotFound, "the environment "+key+" is of no repository")
 	}
 	if s.proxyURL == "" {
-		return domain.EnvironmentGitCredential{}, auth.Internal(s.logger, "environment git credential", errors.New("git_host.proxy_url is not configured"), zap.String("key", key))
+		return domain.EnvironmentGitCredential{}, auth.Internal(s.logger, "environment git credential", errors.New("the address of the git proxy is not configured"), zap.String("key", key))
 	}
 	token, err := auth.Mint(s.signingSecret, auth.BuildScope(cluster, key, attempt))
 	if err != nil {

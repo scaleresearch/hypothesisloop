@@ -85,7 +85,7 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environ
 	clusterExchange := clusterexchange.NewService(store,
 		time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds)*time.Second, metrics, pcfg.Scheduler.ObservationCadence(), dataStore,
 		time.Duration(pcfg.Scheduler.MaxCheckpointGraceSeconds)*time.Second,
-		pcfg.AcceleratorTypeNames(), pcfg.Scheduler.MaxLogTailLineChars, pcfg.SigningSecret, pcfg.GitHost.ProxyURL, environmentRegistry, logger).
+		pcfg.AcceleratorTypeNames(), pcfg.Scheduler.MaxLogTailLineChars, pcfg.SigningSecret, pcfg.GitProxyURL(), environmentRegistry, logger).
 		WithBuildReported(schedulerLoop.Trigger)
 
 	// The sandbox launcher and the cloud compute clusters rent machines, so one replica runs them.

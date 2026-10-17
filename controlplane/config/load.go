@@ -15,36 +15,12 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// Load reads the YAML file at path and returns a validated Settings.
-func Load(path string) (*Settings, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("config: read %s: %w", path, err)
-	}
-	data, err = ExpandEnv(data)
-	if err != nil {
-		return nil, fmt.Errorf("config: expand %s: %w", path, err)
-	}
-	cfg, err := parse(path, data)
-	if err != nil {
-		return nil, err
-	}
-	if err := cfg.checkSecrets(); err != nil {
-		return nil, fmt.Errorf("config: validate: %w", err)
-	}
-	return cfg, nil
-}
-
 // LoadSettings reads the settings file at path and returns it validated. It holds no secret.
 func LoadSettings(path string) (*Settings, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("config: read %s: %w", path, err)
 	}
-	return parse(path, data)
-}
-
-func parse(path string, data []byte) (*Settings, error) {
 	if err := refusePlaceholders(data); err != nil {
 		return nil, fmt.Errorf("config: %s: %w", path, err)
 	}
@@ -93,77 +69,7 @@ func unreachableFromElsewhere(host string) bool {
 	return host == "localhost" || ip.IsLoopback() || ip.IsUnspecified()
 }
 
-var envReference = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
-
 var serviceAccountEmail = regexp.MustCompile(`^[a-z][a-z0-9-]{4,28}[a-z0-9]@[a-z0-9.-]+\.gserviceaccount\.com$`)
-
-// ExpandEnv replaces every ${NAME} inside a YAML value with that environment variable, so a
-// config file kept in plain sight can name a secret without holding it. It works on the parsed
-// values and writes the document back out, which keeps a secret holding YAML syntax (a colon, a
-// hash, a quote) one string. An expanded value is always a string. A reference to a variable
-// that is not set is an error.
-func ExpandEnv(data []byte) ([]byte, error) {
-	if !envReference.Match(data) {
-		return data, nil
-	}
-	var document yaml.Node
-	if err := yaml.Unmarshal(data, &document); err != nil {
-		return nil, err
-	}
-	if err := expandNode(&document); err != nil {
-		return nil, err
-	}
-	return yaml.Marshal(&document)
-}
-
-func expandNode(node *yaml.Node) error {
-	if node.Kind == yaml.MappingNode {
-		for i := 1; i < len(node.Content); i += 2 {
-			if err := expandNode(node.Content[i]); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	if node.Kind != yaml.ScalarNode {
-		for _, child := range node.Content {
-			if err := expandNode(child); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	if !envReference.MatchString(node.Value) {
-		return nil
-	}
-	var missing string
-	node.Value = envReference.ReplaceAllStringFunc(node.Value, func(reference string) string {
-		name := envReference.FindStringSubmatch(reference)[1]
-		value, ok := os.LookupEnv(name)
-		if !ok && missing == "" {
-			missing = name
-		}
-		return value
-	})
-	if missing != "" {
-		return fmt.Errorf("line %d: environment variable %s is not set", node.Line, missing)
-	}
-	node.SetString(node.Value)
-	return nil
-}
-
-// PathEnv is the one environment variable a control-plane process reads itself: where its
-// settings file is. Everything else, secrets included, the file names.
-const PathEnv = "HYPOTHESISLOOP_CONFIG"
-
-// LoadFromEnv loads the settings file PathEnv names.
-func LoadFromEnv() (*Settings, error) {
-	path := os.Getenv(PathEnv)
-	if path == "" {
-		return nil, fmt.Errorf("config: the %s environment variable is required", PathEnv)
-	}
-	return Load(path)
-}
 
 // cpuCoreAccHRate is what one core of domain.CPUType costs an hour. At 1 the budget of an
 // experiment on cores reads as CPU core-hours.
@@ -412,12 +318,6 @@ func (c *Settings) build() error {
 		}
 		issuers[provider.Issuer] = true
 	}
-	if proxy, err := url.Parse(c.GitHost.ProxyURL); err != nil || proxy.Host == "" || (proxy.Scheme != "http" && proxy.Scheme != "https") ||
-		proxy.User != nil || proxy.RawQuery != "" || proxy.Fragment != "" {
-		return fmt.Errorf("git_host proxy_url %q is required: the http(s) address agents and jobs reach the API's /git at", c.GitHost.ProxyURL)
-	} else if unreachableFromElsewhere(proxy.Hostname()) {
-		return fmt.Errorf("git_host proxy_url %q is loopback or unspecified: a hosted agent or a job inside a cluster cannot reach it", c.GitHost.ProxyURL)
-	}
 	switch g := c.GitHost; g.Provider {
 	case "":
 		return fmt.Errorf("git_host provider is required, the git host platform experiments keep their code on: %s or %s", GitHostProviderGitHub, GitHostProviderPlain)
@@ -437,25 +337,6 @@ func (c *Settings) build() error {
 		}
 	default:
 		return fmt.Errorf("git_host provider %q is neither %s nor %s", g.Provider, GitHostProviderGitHub, GitHostProviderPlain)
-	}
-	return nil
-}
-
-func (c *Settings) checkSecrets() error {
-	if c.Database.URL == "" || c.DataStore.SecretAccessKey == "" || c.Services.MetricsDBURL == "" || c.Services.GraphDBURL == "" {
-		return fmt.Errorf("database url, data_store secret_access_key, metrics_db_url and graph_db_url are required")
-	}
-	if len(c.Auth.SigningSecret) < MinSigningSecretLength {
-		return fmt.Errorf("auth signing_secret is required and must be at least %d characters", MinSigningSecretLength)
-	}
-	if c.Models.Anthropic == nil || c.Models.Anthropic.OAuthToken == "" {
-		return fmt.Errorf("models anthropic oauth_token is required: the Claude subscription token hosted agents' model calls are made with")
-	}
-	if g := c.GitHost.GitHub; g != nil && g.PrivateKey == "" {
-		return fmt.Errorf("git_host github private_key is required")
-	}
-	if p := c.GitHost.Plain; p != nil && (p.Username == "") != (p.Password == "") {
-		return fmt.Errorf("git_host plain username and password are set together or not at all")
 	}
 	return nil
 }

@@ -26,12 +26,7 @@ func TestTheLocalSettingsAsRenderedLoad(t *testing.T) {
 	// The key is made in the test's directory, and what a developer's .env adds is left out: its
 	// secrets, its identity provider and its registry are that machine's.
 	render(t, repo, dir, rendered, `HL_ENVIRONMENTS_REPOSITORY=""`)
-	t.Setenv("HYPOTHESISLOOP_SIGNING_SECRET", "a-signing-secret-only-this-test-knows")
-	t.Setenv("DATABASE_URL", "postgres://test.example.invalid/hypothesisloop")
-	t.Setenv("DATA_STORE_SECRET_ACCESS_KEY", "a-store-secret-only-this-test-knows")
-	t.Setenv("MODEL_ANTHROPIC_OAUTH_TOKEN", "a-model-credential-only-this-test-knows")
-	t.Setenv("HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD", "a-password-only-this-test-knows")
-	cfg, err := Load(rendered)
+	cfg, err := LoadSettings(rendered)
 	if err != nil {
 		t.Fatalf("the rendered local settings do not load: %v", err)
 	}
@@ -39,10 +34,10 @@ func TestTheLocalSettingsAsRenderedLoad(t *testing.T) {
 		providers[0].Audience != "hypothesisloop-dev" || len(providers[0].JWTKeys) != 1 || providers[0].JWTKeys[0].Kid != "local-dev" {
 		t.Errorf("identity providers = %+v, want the one key made on this machine", providers)
 	}
-	if want := (PlainGitConfig{BaseURL: "http://host.example.internal:8085", AllowHTTP: true, Username: "hypothesisloop", Password: "a-password-only-this-test-knows"}); cfg.GitHost.Provider != GitHostProviderPlain || cfg.GitHost.Plain == nil || *cfg.GitHost.Plain != want {
+	if want := (PlainGitConfig{BaseURL: "http://host.example.internal:8085", AllowHTTP: true, Username: "hypothesisloop"}); cfg.GitHost.Provider != GitHostProviderPlain || cfg.GitHost.Plain == nil || *cfg.GitHost.Plain != want {
 		t.Errorf("git host = %s, want the git server of this machine", cfg.GitHost.Provider)
 	}
-	if cfg.Agents.DefaultModel == "" || cfg.Agents.BootLimitSeconds <= 0 {
+	if cfg.Agents.Image != "host.example.internal:5000/hypothesisloop-experimentator-base:abc1234" || cfg.Agents.DefaultModel == "" || cfg.Agents.BootLimitSeconds <= 0 {
 		t.Errorf("agents = %+v, want every key set", cfg.Agents)
 	}
 	if cfg.Environments != nil {
@@ -56,7 +51,7 @@ func TestTheLocalSettingsAsRenderedLoad(t *testing.T) {
 	registry := `lib_env_value() { case "$1" in CONTAINER_REGISTRY_PROVIDER) echo gcp ;; CONTAINER_REGISTRY_GCP_PROJECT) echo my-project ;;
 		CONTAINER_REGISTRY_GCP_LOCATION) echo europe-west1 ;; CONTAINER_REGISTRY_GCP_REPOSITORY) echo images ;; esac; } && lib_container_registry`
 	render(t, repo, dir, rendered, registry)
-	if cfg, err = Load(rendered); err != nil {
+	if cfg, err = LoadSettings(rendered); err != nil {
 		t.Fatalf("the rendered local settings with environments do not load: %v", err)
 	}
 	if want := (EnvironmentsConfig{Repository: "europe-west1-docker.pkg.dev/my-project/images-environments/environment", Provider: RegistryProviderGCP,
@@ -65,7 +60,7 @@ func TestTheLocalSettingsAsRenderedLoad(t *testing.T) {
 	}
 
 	// The committed file is the one source: without rendering it is refused for its placeholders.
-	if _, err := Load(filepath.Join(repo, "controlplane/settings/hypothesisloop.yaml")); err == nil {
+	if _, err := LoadSettings(filepath.Join(repo, "controlplane/settings/hypothesisloop.yaml")); err == nil {
 		t.Error("the committed settings loaded without being rendered")
 	}
 }
@@ -104,19 +99,14 @@ func TestTheLocalReachableAddressIsTheOneAddressEveryClusterIsHanded(t *testing.
 	}
 	rendered := filepath.Join(dir, "rendered.yaml")
 	render(t, repo, dir, rendered, `HL_ENVIRONMENTS_REPOSITORY=""`)
-	t.Setenv("HYPOTHESISLOOP_SIGNING_SECRET", "a-signing-secret-only-this-test-knows")
-	t.Setenv("DATABASE_URL", "postgres://test.example.invalid/hypothesisloop")
-	t.Setenv("DATA_STORE_SECRET_ACCESS_KEY", "a-store-secret-only-this-test-knows")
-	t.Setenv("MODEL_ANTHROPIC_OAUTH_TOKEN", "a-model-credential-only-this-test-knows")
-	t.Setenv("HYPOTHESISLOOP_GIT_HOST_PLAIN_PASSWORD", "a-password-only-this-test-knows")
-	cfg, err := Load(rendered)
+	cfg, err := LoadSettings(rendered)
 	if err != nil {
 		t.Fatalf("the rendered local settings do not load: %v", err)
 	}
 	for what, got := range map[string]string{
 		"services.public_api_url": cfg.Services.PublicAPIURL, "runtimes.metrics_url": cfg.Runtimes.MetricsURL,
 		"runtimes.registry": cfg.Runtimes.Registry, "data_store.endpoint": cfg.DataStore.Endpoint, "git_host.plain.base_url": cfg.GitHost.Plain.BaseURL,
-		"git_host.proxy_url": cfg.GitHost.ProxyURL,
+		"the git proxy": cfg.GitProxyURL(),
 	} {
 		if !strings.Contains(got, "100.64.0.5:") {
 			t.Errorf("%s = %q, want it at the reachable address", what, got)

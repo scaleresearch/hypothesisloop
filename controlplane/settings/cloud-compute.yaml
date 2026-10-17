@@ -13,7 +13,7 @@ cloud_compute:
     # What every instance boots. It carries hl, which each job's command runs under, and needs sh,
     # grep and curl: on vast.ai each job runs under a supervisor that stops its own instance when
     # the job ends, and refuses to start the job without curl.
-    job_image: registry.example.invalid/hypothesisloop-job:latest
+    job_image: REPLACE-WITH-JOB-IMAGE
 
     # Part of every instance name, hl-job-<namespace>-...: the cluster lists, counts and destroys
     # the instances of its namespace only. 1 to 16 lowercase letters and digits. Do not change it
@@ -41,7 +41,7 @@ cloud_compute:
       name: vast
       # The account's user id, as the vast.ai console shows it. With the name it is the cluster's
       # id, which per-cluster settings are keyed on.
-      account_id: "000000"
+      account_id: REPLACE-WITH-ACCOUNT-ID
       settings:
         # Offers above this price for the whole instance are never rented. Each rent takes the
         # cheapest offer that passes the filters, so this is a ceiling and not what is paid. In

@@ -66,7 +66,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		AutoAccept:  time.Duration(pcfg.Planning.AutoAcceptSeconds) * time.Second,
 	}).
 		WithJobImages(pcfg.OfferedJobImages()).
-		WithGitProxy(pcfg.GitHost.ProxyURL).
+		WithGitProxy(pcfg.GitProxyURL()).
 		WithLiveCapacity(connectedWithin, store, domain.NewPodResources(pcfg.PodResourcesByName)).
 		WithAgentLaunch(launch)
 
