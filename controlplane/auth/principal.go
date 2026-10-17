@@ -55,6 +55,8 @@ type Principal struct {
 	ClusterName  string
 	// ClusterRegisteredAt is when the registration of ClusterName a runtime token names was made.
 	ClusterRegisteredAt time.Time
+	// ExpiresAt is when a staff token stops working. A staff user's has none.
+	ExpiresAt time.Time
 }
 
 // HoldsAccount reports a principal of a person or an org: a user, an API key or staff. A token the

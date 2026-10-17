@@ -186,9 +186,10 @@ lib_render_settings() {
       -e "s|REPLACE-WITH-IMAGE-TAG|${image_tag}|g" \
       -e "s|REPLACE-WITH-UI-ORIGIN|${ui_origin}|g" \
       -e "s|^  registry_plain_http: false$|  registry_plain_http: true|" \
+      -e "s|^  local_development: false$|  local_development: true|" \
       -e "s|^  identity_providers: \[\]$|  identity_providers: [${providers}]|" \
       "${LIB_AUTH_REPO}/controlplane/settings/hypothesisloop.yaml" > "${output}"
-  for rendered in "issuer: \"${HL_DEV_JWT_ISSUER}\"" ${issuer:+"issuer: \"${issuer}\""} "  registry_plain_http: true"; do
+  for rendered in "issuer: \"${HL_DEV_JWT_ISSUER}\"" ${issuer:+"issuer: \"${issuer}\""} "  registry_plain_http: true" "  local_development: true"; do
     grep -qF -- "${rendered}" "${output}" || { echo "render-settings: the settings file changed shape, '${rendered}' was not rendered" >&2; return 1; }
   done
   if grep -qE '^(git_host|container_registry):' "${output}"; then

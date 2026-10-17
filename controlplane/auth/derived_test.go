@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/contract/scope"
 )
@@ -15,7 +16,7 @@ func TestMintedTokensVerifyToTheScopeTheyWereMintedFor(t *testing.T) {
 		scope string
 		want  Principal
 	}{
-		{scope.Staff, Principal{Kind: KindStaff}},
+		{testStaff, Principal{Kind: KindStaff, ExpiresAt: testNow.Add(time.Hour)}},
 		{scope.Job("job-1"), Principal{Kind: KindJob, ExperimentID: "job-1"}},
 		{scope.Agent("pe-1", "agent-1"), Principal{Kind: KindAgent, PlatformExperimentID: "pe-1", AgentID: "agent-1"}},
 		{scope.Coordinator("pe-1"), Principal{Kind: KindCoordinator, PlatformExperimentID: "pe-1"}},
@@ -48,13 +49,13 @@ func TestMintedTokenIsOneHTTPToken(t *testing.T) {
 }
 
 func TestForgedAndMalformedDerivedTokensAreRefused(t *testing.T) {
-	staff, _ := Mint(testSecret, scope.Staff)
+	staff, _ := Mint(testSecret, testStaff)
 	job, _ := Mint(testSecret, scope.Job("job-1"))
 	scopePart, macPart, _ := strings.Cut(strings.TrimPrefix(job, scope.Prefix), ".")
 	staffScopePart, _, _ := strings.Cut(strings.TrimPrefix(staff, scope.Prefix), ".")
 
 	for name, token := range map[string]string{
-		"signed with another secret":     mustMint(t, "another-signing-secret-of-enough-length", scope.Staff),
+		"signed with another secret":     mustMint(t, "another-signing-secret-of-enough-length", testStaff),
 		"job mac under the staff scope":  scope.Prefix + staffScopePart + "." + macPart,
 		"scope edited after signing":     scope.Prefix + encoding.EncodeToString([]byte("job:job-2")) + "." + macPart,
 		"mac truncated":                  scope.Prefix + scopePart + "." + macPart[:len(macPart)-2],
@@ -73,12 +74,12 @@ func TestForgedAndMalformedDerivedTokensAreRefused(t *testing.T) {
 }
 
 func TestMintRefusesWhatItCouldNotVerify(t *testing.T) {
-	for _, scope := range []string{"", "root", "job:", "agent:pe-1", "agent:/agent-1", "agent:pe-1/", "unknown:x", "build:local/abc", "build:local/abc/0", "build:local/abc/x", "build:local/abc/01", "build:/abc/1", "build:local//1", "build:a/b/c/1"} {
+	for _, scope := range []string{"", "root", "staff", "staff:", "staff:soon", "job:", "agent:pe-1", "agent:/agent-1", "agent:pe-1/", "unknown:x", "build:local/abc", "build:local/abc/0", "build:local/abc/x", "build:local/abc/01", "build:/abc/1", "build:local//1", "build:a/b/c/1"} {
 		if token, err := Mint(testSecret, scope); err == nil {
 			t.Errorf("mint %q: got token %q, want an error", scope, token)
 		}
 	}
-	if _, err := Mint("", scope.Staff); err == nil {
+	if _, err := Mint("", testStaff); err == nil {
 		t.Error("mint with an empty secret: got = nil, want an error")
 	}
 }
@@ -95,7 +96,7 @@ func mustMint(t *testing.T, secret, scope string) string {
 func samePrincipal(a, b Principal) bool {
 	return a.Kind == b.Kind && a.UserID == b.UserID && a.Name == b.Name && a.ProjectID == b.ProjectID &&
 		a.PlatformExperimentID == b.PlatformExperimentID && a.AgentID == b.AgentID && a.ExperimentID == b.ExperimentID &&
-		a.ClusterName == b.ClusterName && a.ClusterRegisteredAt.Equal(b.ClusterRegisteredAt) && strings.Join(a.OrgIDs, ",") == strings.Join(b.OrgIDs, ",")
+		a.ClusterName == b.ClusterName && a.ClusterRegisteredAt.Equal(b.ClusterRegisteredAt) && a.ExpiresAt.Equal(b.ExpiresAt) && strings.Join(a.OrgIDs, ",") == strings.Join(b.OrgIDs, ",")
 }
 
 func TestAPIKeysAreDistinctAndHashStably(t *testing.T) {

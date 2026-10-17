@@ -266,8 +266,11 @@ type IdentityProvider struct {
 
 // AuthConfig is everything a token is checked against beside the signing secret, which comes from
 // the environment. There is no switch that turns the check off: local development authenticates
-// with a staff token derived from the signing secret.
+// with a staff token derived from the signing secret, which expires.
 type AuthConfig struct {
+	// LocalDevelopment marks a deployment that is one developer's machine, the one place the
+	// staff token is accepted. Anywhere else an operator signs in as a staff user.
+	LocalDevelopment bool `yaml:"local_development"`
 	// IdentityProviders are the issuers whose JWTs name a person. A token is checked against
 	// the one provider its issuer claim names, so one provider's key never vouches for
 	// another's users. A deployment lists the one it signs people in with; local development

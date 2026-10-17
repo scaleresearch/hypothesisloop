@@ -38,7 +38,11 @@ database:
 #                     the machine, which its tests sign their users with, and the Supabase project
 #                     beside it when .env asks for one (make render-settings).
 #   ui_origin         the one browser origin allowed to call the API.
+#   local_development true on one developer's machine alone (make render-settings sets it), where
+#                     the staff token hl-admin token staff prints is accepted for 24 hours.
+#                     Anywhere else that token is refused and operators sign in as staff users.
 auth:
+  local_development: false
   identity_providers: []
   ui_origin: REPLACE-WITH-UI-ORIGIN
 

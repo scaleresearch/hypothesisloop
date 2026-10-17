@@ -38,13 +38,19 @@ type Directory interface {
 	GetCluster(ctx context.Context, name string) (*domain.Cluster, error)
 }
 
+// StaffTokenLifetime is how long a staff token works after it is minted. One that names a later
+// expiry is refused.
+const StaffTokenLifetime = 24 * time.Hour
+
 // Authenticator turns a token into a Principal. Nothing is kept between requests: a derived
-// token is valid while the row it names says so, an API key while it is not revoked.
+// token is valid while the row it names says so, an API key while it is not revoked, a staff
+// token in local development alone and until it expires.
 type Authenticator struct {
-	signingSecret string
-	providers     map[string]identityProvider
-	directory     Directory
-	now           func() time.Time
+	signingSecret    string
+	providers        map[string]identityProvider
+	directory        Directory
+	localDevelopment bool
+	now              func() time.Time
 }
 
 func NewAuthenticator(cfg config.AuthConfig, signingSecret string, directory Directory) (*Authenticator, error) {
@@ -52,7 +58,7 @@ func NewAuthenticator(cfg config.AuthConfig, signingSecret string, directory Dir
 	if err != nil {
 		return nil, fmt.Errorf("auth: %w", err)
 	}
-	return &Authenticator{signingSecret: signingSecret, providers: providers, directory: directory, now: time.Now}, nil
+	return &Authenticator{signingSecret: signingSecret, providers: providers, directory: directory, localDevelopment: cfg.LocalDevelopment, now: time.Now}, nil
 }
 
 // Authenticate resolves a token. A refusal is a *refusal.Refusal with status 401; any other error is the
@@ -74,6 +80,13 @@ func (a *Authenticator) derived(ctx context.Context, token string) (Principal, e
 		return Principal{}, unauthenticated("%s", err)
 	}
 	switch p.Kind {
+	case KindStaff:
+		if !a.localDevelopment {
+			return Principal{}, unauthenticated("the staff token is refused outside local development: an operator signs in as a staff user")
+		}
+		if now := a.now(); !now.Before(p.ExpiresAt) || p.ExpiresAt.After(now.Add(StaffTokenLifetime)) {
+			return Principal{}, unauthenticated("the staff token expired, or names an expiry more than %s away: mint another with hl-admin token staff", StaffTokenLifetime)
+		}
 	case KindRuntime:
 		cluster, err := a.directory.GetCluster(ctx, p.ClusterName)
 		if err != nil {

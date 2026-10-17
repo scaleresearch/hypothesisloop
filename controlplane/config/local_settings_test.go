@@ -46,6 +46,9 @@ func TestTheLocalSettingsAsRenderedLoad(t *testing.T) {
 	if cfg.Auth.UIOrigin != testUIOrigin {
 		t.Errorf("auth.ui_origin = %q, want UI_ORIGIN of .env, %q", cfg.Auth.UIOrigin, testUIOrigin)
 	}
+	if !cfg.Auth.LocalDevelopment {
+		t.Error("auth.local_development = false, want the local settings to accept the staff token")
+	}
 	if want := (RuntimesConfig{MetricsURL: "http://host.example.internal:8084", Registry: "host.example.internal:5000", ImageTag: "abc1234", RegistryPlainHTTP: true}); cfg.Runtimes != want {
 		t.Errorf("runtimes = %+v, want %+v: the dev registry serves plain HTTP", cfg.Runtimes, want)
 	}

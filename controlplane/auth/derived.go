@@ -54,5 +54,6 @@ func principalOf(s string) (Principal, error) {
 		AgentID:              named.AgentID,
 		ClusterName:          named.ClusterName,
 		ClusterRegisteredAt:  named.ClusterRegisteredAt,
+		ExpiresAt:            named.ExpiresAt,
 	}, nil
 }

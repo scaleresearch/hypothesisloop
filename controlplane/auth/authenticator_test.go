@@ -94,6 +94,9 @@ func (d *fakeDirectory) AgentFinishedAt(_ context.Context, pe, agent string) (*t
 // clusterRegisteredAt is when every cluster of a fakeDirectory was registered.
 var clusterRegisteredAt = time.UnixMicro(1_700_000_000_000_000)
 
+// testStaff is a staff token's scope minted an hour before testNow would end it.
+var testStaff = scope.Staff(testNow.Add(time.Hour))
+
 func (d *fakeDirectory) GetCluster(_ context.Context, name string) (*domain.Cluster, error) {
 	org, ok := d.clusters[name]
 	if !ok {
@@ -120,7 +123,7 @@ func newTestAuthenticator(t *testing.T, signers ...testSigner) (*Authenticator, 
 		homes:      map[string][]string{},
 		names:      map[string]string{},
 	}
-	cfg := config.AuthConfig{}
+	cfg := config.AuthConfig{LocalDevelopment: true}
 	if len(signers) > 0 {
 		provider := config.IdentityProvider{Issuer: testIssuer, Audience: testAudience}
 		for _, s := range signers {
@@ -155,7 +158,7 @@ func TestEachDerivedKindResolvesWhileItsRowStands(t *testing.T) {
 		scope string
 		want  Principal
 	}{
-		{scope.Staff, Principal{Kind: KindStaff}},
+		{testStaff, Principal{Kind: KindStaff, ExpiresAt: testNow.Add(time.Hour)}},
 		{scope.Runtime("cluster-a", clusterRegisteredAt), Principal{Kind: KindRuntime, ClusterName: "cluster-a", ClusterRegisteredAt: clusterRegisteredAt, OrgIDs: []string{"org-a"}}},
 		{scope.Job("job-a"), inA(Principal{Kind: KindJob, ExperimentID: "job-a"})},
 		{scope.Agent("pe-a", "agent-1"), inA(Principal{Kind: KindAgent, AgentID: "agent-1"})},
@@ -250,13 +253,43 @@ func TestACoordinatorTokenOutlivesCloseByTheWindDownOnlyAndSaysSo(t *testing.T) 
 	assertRefused(t, "a wind-down after the close", p, err)
 }
 
+// The staff token reaches every org and no row stands behind it, so it works in local
+// development alone and for StaffTokenLifetime at most.
+func TestTheStaffTokenWorksInLocalDevelopmentAloneUntilItExpires(t *testing.T) {
+	a, directory := newTestAuthenticator(t)
+	directory.fail = errors.New("the directory must not be read for a staff token")
+	ctx := context.Background()
+	if got, err := a.Authenticate(ctx, mustMint(t, testSecret, scope.Staff(testNow.Add(StaffTokenLifetime)))); err != nil || got.Kind != KindStaff {
+		t.Fatalf("a staff token minted now: got = %+v, %v, want staff", got, err)
+	}
+	for name, expiresAt := range map[string]time.Time{
+		"expired":                     testNow.Add(-time.Second),
+		"expiring this instant":       testNow,
+		"expiring past its lifetime":  testNow.Add(StaffTokenLifetime + time.Second),
+		"expiring in a hundred years": testNow.AddDate(100, 0, 0),
+	} {
+		p, err := a.Authenticate(ctx, mustMint(t, testSecret, scope.Staff(expiresAt)))
+		assertRefused(t, name, p, err)
+	}
+	a.localDevelopment = false
+	p, err := a.Authenticate(ctx, mustMint(t, testSecret, testStaff))
+	assertRefused(t, "a fresh staff token outside local development", p, err)
+	deployed, err := NewAuthenticator(config.AuthConfig{}, testSecret, directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deployed.now = func() time.Time { return testNow }
+	p, err = deployed.Authenticate(ctx, mustMint(t, testSecret, testStaff))
+	assertRefused(t, "a staff token where the settings do not mark local development", p, err)
+}
+
 func TestForgedTokensAreRefusedBeforeAnyRowIsRead(t *testing.T) {
 	a, directory := newTestAuthenticator(t)
 	directory.fail = errors.New("the directory must not be read for a forged token")
 	ctx := context.Background()
 	for name, token := range map[string]string{
-		"staff token of another deployment": mustMint(t, "another-signing-secret-of-enough-length", scope.Staff),
-		"staff scope with no mac":           scope.Prefix + encoding.EncodeToString([]byte(scope.Staff)) + ".",
+		"staff token of another deployment": mustMint(t, "another-signing-secret-of-enough-length", testStaff),
+		"staff scope with no mac":           scope.Prefix + encoding.EncodeToString([]byte(testStaff)) + ".",
 		"bare prefix":                       scope.Prefix,
 		"jwt with no keys configured":       "aaa.bbb.ccc",
 		"empty":                             "",
@@ -426,7 +459,7 @@ func TestOnlyARuntimeOrStaffMayPush(t *testing.T) {
 	}{
 		{"no token", "", http.StatusUnauthorized},
 		{"registered runtime", "Bearer " + mustMint(t, testSecret, scope.Runtime("cluster-a", clusterRegisteredAt)), http.StatusNoContent},
-		{"staff", "Bearer " + mustMint(t, testSecret, scope.Staff), http.StatusNoContent},
+		{"staff", "Bearer " + mustMint(t, testSecret, testStaff), http.StatusNoContent},
 		{"unregistered runtime", "Bearer " + mustMint(t, testSecret, scope.Runtime("cluster-typo", clusterRegisteredAt)), http.StatusUnauthorized},
 		{"agent", "Bearer " + mustMint(t, testSecret, scope.Agent("pe-a", "agent-1")), http.StatusForbidden},
 		{"job", "Bearer " + mustMint(t, testSecret, scope.Job("job-a")), http.StatusForbidden},

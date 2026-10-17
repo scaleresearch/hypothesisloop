@@ -25,7 +25,8 @@ import (
 
 const usage = `usage: hl-admin <command>
 
-  token SCOPE                      print the token for a scope: staff, runtime:<cluster>/<registered at, unix µs>,
+  token SCOPE                      print the token for a scope: staff (local development alone, good for 24 hours),
+                                   runtime:<cluster>/<registered at, unix µs>,
                                    agent:<platform experiment>/<agent>, coordinator:<platform experiment>,
                                    job:<experiment>
   user add SUBJECT NAME            create a user named NAME with a home org named NAME and its default project.
@@ -62,7 +63,14 @@ func run(args []string, stdout io.Writer) error {
 	}
 	switch {
 	case len(args) == 2 && args[0] == "token":
-		token, err := auth.Mint(cfg.SigningSecret, args[1])
+		s := args[1]
+		if s == string(scope.KindStaff) {
+			if !cfg.Auth.LocalDevelopment {
+				return errors.New("token staff: the staff token is accepted only where auth.local_development is set; elsewhere make an operator a staff user (user staff SUBJECT on)")
+			}
+			s = scope.Staff(time.Now().Add(auth.StaffTokenLifetime))
+		}
+		token, err := auth.Mint(cfg.SigningSecret, s)
 		if err != nil {
 			return err
 		}

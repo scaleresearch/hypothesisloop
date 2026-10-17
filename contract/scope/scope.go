@@ -26,8 +26,10 @@ const (
 	KindRuntime     Kind = "runtime"
 )
 
-// Staff is the scope of the platform's own operators, and of local development.
-const Staff = string(KindStaff)
+// Staff is the scope of the platform's own operators in local development, until expiresAt.
+func Staff(expiresAt time.Time) string {
+	return string(KindStaff) + ":" + strconv.FormatInt(expiresAt.Unix(), 10)
+}
 
 func Job(experimentID string) string { return string(KindJob) + ":" + experimentID }
 
@@ -53,18 +55,22 @@ type Scope struct {
 	AgentID              string
 	ClusterName          string
 	ClusterRegisteredAt  time.Time
+	ExpiresAt            time.Time
 }
 
 // Parse reads what scope names, refusing one of no kind or of a malformed subject.
 func Parse(scope string) (Scope, error) {
-	if scope == Staff {
-		return Scope{Kind: KindStaff}, nil
-	}
 	kind, subject, ok := strings.Cut(scope, ":")
 	if !ok || subject == "" {
 		return Scope{}, fmt.Errorf("unknown scope %q", scope)
 	}
 	switch Kind(kind) {
+	case KindStaff:
+		seconds, err := strconv.ParseInt(subject, 10, 64)
+		if err != nil {
+			return Scope{}, fmt.Errorf("staff scope must be staff:<expires at, unix seconds>, got %q", scope)
+		}
+		return Scope{Kind: KindStaff, ExpiresAt: time.Unix(seconds, 0)}, nil
 	case KindJob:
 		return Scope{Kind: KindJob, ExperimentID: subject}, nil
 	case KindAgent:

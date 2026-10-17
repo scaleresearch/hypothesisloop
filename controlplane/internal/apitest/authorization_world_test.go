@@ -229,6 +229,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 	w := &world{keys: map[string]*domain.APIKey{}}
 	signer, jwk := newWorldSigner(t)
 	authenticator, err := auth.NewAuthenticator(config.AuthConfig{
+		LocalDevelopment:  true,
 		IdentityProviders: []config.IdentityProvider{{Issuer: worldIssuer, Audience: worldAudience, JWTKeys: []config.JWTKey{jwk}}},
 	}, worldSecret, w)
 	if err != nil {
@@ -288,7 +289,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 	api.tokens["coordinator"] = mint(scope.Coordinator("pe-a1"))
 	api.tokens["job"] = mint(scope.Job("job-own"))
 	api.tokens["runtime"] = mint(scope.Runtime("cluster-a", time.Time{}))
-	api.tokens["staff"] = mint(scope.Staff)
+	api.tokens["staff"] = mint(scope.Staff(time.Now().Add(time.Hour)))
 	api.serve = answering(t, doc.API, api.router)
 	return api
 }

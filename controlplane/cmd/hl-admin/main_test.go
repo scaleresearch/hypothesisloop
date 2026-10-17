@@ -43,7 +43,7 @@ const signingSecret = "a-signing-secret-only-this-test-knows"
 
 func TestTokenPrintsTheTokenTheControlPlaneOfThatConfigAccepts(t *testing.T) {
 	inSettings(t)
-	for _, scope := range []string{scope.Staff, scope.Runtime("local", time.UnixMicro(1)), scope.Agent("pe-1", "agent-1"), scope.Job("job-1")} {
+	for _, scope := range []string{scope.Runtime("local", time.UnixMicro(1)), scope.Agent("pe-1", "agent-1"), scope.Job("job-1")} {
 		var stdout bytes.Buffer
 		if err := run([]string{"token", scope}, &stdout); err != nil {
 			t.Fatalf("token %s: %v", scope, err)
@@ -52,6 +52,41 @@ func TestTokenPrintsTheTokenTheControlPlaneOfThatConfigAccepts(t *testing.T) {
 		if got := strings.TrimSpace(stdout.String()); got != want {
 			t.Errorf("token %s: got = %q, want = %q", scope, got, want)
 		}
+	}
+}
+
+// The staff token is printed in local development alone, and expires.
+func TestTheStaffTokenIsPrintedInLocalDevelopmentAlone(t *testing.T) {
+	inSettings(t)
+	var stdout bytes.Buffer
+	if err := run([]string{"token", "staff"}, &stdout); err == nil || stdout.Len() != 0 {
+		t.Fatalf("token staff outside local development: got = %v, printed %q, want an error and nothing printed", err, stdout.String())
+	}
+	settings, err := os.ReadFile(os.Getenv(config.SettingsPath.Name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	local := strings.Replace(string(settings), "  local_development: false\n", "  local_development: true\n", 1)
+	if local == string(settings) {
+		t.Fatal("the committed settings hold no auth.local_development: false")
+	}
+	if err := os.WriteFile(os.Getenv(config.SettingsPath.Name), []byte(local), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before := time.Now()
+	if err := run([]string{"token", "staff"}, &stdout); err != nil {
+		t.Fatalf("token staff in local development: %v", err)
+	}
+	minted, err := scope.Of(strings.TrimSpace(stdout.String()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	named, err := scope.Parse(minted)
+	if err != nil || named.Kind != scope.KindStaff || named.ExpiresAt.Before(before.Add(auth.StaffTokenLifetime).Truncate(time.Second)) || named.ExpiresAt.After(time.Now().Add(auth.StaffTokenLifetime)) {
+		t.Errorf("token staff: got scope %q (%+v, %v), want staff expiring %s from now", minted, named, err, auth.StaffTokenLifetime)
+	}
+	if want, _ := auth.Mint(signingSecret, minted); strings.TrimSpace(stdout.String()) != want {
+		t.Errorf("token staff: got = %q, want the token of %s", stdout.String(), minted)
 	}
 }
 
