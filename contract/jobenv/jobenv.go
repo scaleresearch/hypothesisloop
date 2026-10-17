@@ -54,3 +54,27 @@ const (
 	GroupReplicas = "HYPOTHESISLOOP_GROUP_REPLICAS"
 	RankOffset    = "HYPOTHESISLOOP_RANK_OFFSET"
 )
+
+// The names torch.distributed and torchrun read, which the platform sets beside their
+// HYPOTHESISLOOP_ ones on a job that spans several nodes.
+const (
+	TorchWorldSize  = "WORLD_SIZE"
+	TorchMasterAddr = "MASTER_ADDR"
+	TorchMasterPort = "MASTER_PORT"
+	TorchRank       = "RANK"
+	TorchLocalRank  = "LOCAL_RANK"
+)
+
+// Reserved reports whether name is one the platform sets on a job, which the job's own env and
+// secret_env may not.
+func Reserved(name string) bool {
+	switch name {
+	case AccessKeyID, SecretAccessKey, Endpoint, EndpointS3, Region, DataURI, DataShared,
+		ExperimentID, AgentID, ProjectID, CodeRef, ConfigHash, DataRef, APIURL, AcceleratorType,
+		AcceleratorCount, DurationSeconds, Attempt, CPUs, OMPNumThreads, TraceParent, Token, GitURL,
+		StopGrace, WorldSize, MasterAddr, MasterPort, Rank, Group, GroupRank, GroupReplicas,
+		RankOffset, TorchWorldSize, TorchMasterAddr, TorchMasterPort, TorchRank, TorchLocalRank:
+		return true
+	}
+	return false
+}

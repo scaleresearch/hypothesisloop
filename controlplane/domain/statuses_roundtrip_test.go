@@ -55,7 +55,10 @@ func TestARequestedRoleReadsBackAsItself(t *testing.T) {
 			t.Errorf("ParseSignupRole(%q) = %q, %v", r, got, err)
 		}
 	}
-	for _, bad := range []string{"", string(SignupRolePlanner), "judge", "Competitor"} {
+	if got, err := ParseSignupRole(""); err != nil || got != SignupRoleCompetitor {
+		t.Errorf("ParseSignupRole(\"\") = %q, %v, want competitor", got, err)
+	}
+	for _, bad := range []string{string(SignupRolePlanner), "judge", "Competitor"} {
 		if _, err := ParseSignupRole(bad); err == nil {
 			t.Errorf("ParseSignupRole(%q) taken", bad)
 		}
