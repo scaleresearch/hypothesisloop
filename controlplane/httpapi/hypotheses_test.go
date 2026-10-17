@@ -355,7 +355,7 @@ func (missingExperimentStore) GetPlatformExperimentMetrics(context.Context, stri
 
 func TestHypothesisGraphOfAnUnknownPlatformExperimentIsNotFound(t *testing.T) {
 	r := authtest.Router(authtest.Staff)
-	RegisterRegistry(NewDoc(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop()), poolService(&missingExperimentStore{}), zap.NewNop())
+	registerRegistry(NewDoc(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop()), poolService(&missingExperimentStore{}), zap.NewNop())
 
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, authtest.Authorize(httptest.NewRequest(http.MethodGet, "/hypotheses/graph?platform_experiment_id=pe-missing", nil)))
@@ -398,7 +398,7 @@ func TestAWriteNamingAHypothesisOutOfScopeIsNotFound(t *testing.T) {
 
 	caller := authtest.As(auth.Principal{Kind: auth.KindUser, UserID: "user-1", OrgIDs: []string{"org-a"}})
 	r := authtest.Router(caller)
-	RegisterRegistry(NewDoc(r, "test", "1.0.0", "", auth.NewAccess(watchTenancy), zap.NewNop()), svc, zap.NewNop())
+	registerRegistry(NewDoc(r, "test", "1.0.0", "", auth.NewAccess(watchTenancy), zap.NewNop()), svc, zap.NewNop())
 	post := func(path string, body map[string]any) *httptest.ResponseRecorder {
 		encoded, err := json.Marshal(body)
 		if err != nil {

@@ -92,9 +92,9 @@ type jobsAPI struct {
 	logger *zap.Logger
 }
 
-// RegisterJobs registers the public, research-agent-facing scheduler operations at their full
+// registerJobs registers the public, research-agent-facing scheduler operations at their full
 // paths (/experiments...), then the environment and image credential operations.
-func RegisterJobs(doc *Doc, jobs *scheduler.Service, logger *zap.Logger) {
+func registerJobs(doc *Doc, jobs *scheduler.Service, logger *zap.Logger) {
 	a := jobsAPI{jobs: jobs, access: doc.Access, logger: logger}
 	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "submit-experiment", Method: "POST", Path: "/experiments",

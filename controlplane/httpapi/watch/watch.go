@@ -161,7 +161,7 @@ func (h *hub) dropAll() {
 // Handler serves GET /watch. It is registered on the chi router directly rather than through
 // the httpapi document: a WebSocket upgrade needs the raw connection, and Huma owns the response for
 // every operation registered with it. The honest place for it is therefore beside the router, and
-// the contract a caller reads for it is GET /watch/kinds (httpapi.RegisterWatchKinds) and hl watch --help.
+// the contract a caller reads for it is GET /watch/kinds (registered by httpapi) and hl watch --help.
 type Handler struct {
 	source EventSource
 	// experiments resolves the platform experiment a job belongs to, so a caller that knows

@@ -64,11 +64,11 @@ type hypothesesAPI struct {
 	logger   *zap.Logger
 }
 
-// RegisterRegistry registers the registry's operations: what hangs off an experiment (metrics,
+// registerRegistry registers the registry's operations: what hangs off an experiment (metrics,
 // logs) and the hypothesis notebook. Paths sit under the resource they belong to —
 // /experiments/{id}/... and /hypotheses/... — so a caller never has to know which service
 // implements them; they are all registered on the one API doc alongside scheduler and quota.
-func RegisterRegistry(doc *Doc, svc *registry.Service, logger *zap.Logger) {
+func registerRegistry(doc *Doc, svc *registry.Service, logger *zap.Logger) {
 	a := hypothesesAPI{registry: svc, access: doc.Access, logger: logger}
 	r := jobRecordsAPI{registry: svc, access: doc.Access, logger: logger}
 	register(doc, auth.AudienceAgent, huma.Operation{

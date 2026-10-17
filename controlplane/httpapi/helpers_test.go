@@ -80,10 +80,10 @@ func (fakeStore) ProjectAgentTypeCatalog(context.Context, string) (domain.AgentT
 	return agenttypes.Catalog(), nil
 }
 
-// registerPlatformExperiments registers the platform experiment operations and their budget reads.
-func registerPlatformExperiments(doc *Doc, peh *platformexperiments.PlatformExperimentsService) {
-	RegisterPlatformExperiments(doc, peh, zap.NewNop())
-	RegisterPlatformExperimentBudget(doc, peh, zap.NewNop())
+// registerPlatformExperimentsAndBudget registers the platform experiment operations and their budget reads.
+func registerPlatformExperimentsAndBudget(doc *Doc, peh *platformexperiments.PlatformExperimentsService) {
+	registerPlatformExperiments(doc, peh, zap.NewNop())
+	registerPlatformExperimentBudget(doc, peh, zap.NewNop())
 }
 
 // platformexperimentstest.Settings is the platform settings a service of these tests applies and holds a create to.

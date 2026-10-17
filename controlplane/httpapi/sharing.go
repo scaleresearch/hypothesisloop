@@ -16,14 +16,14 @@ type sharingAPI struct {
 	answer  func(context.Context, *domain.PlatformExperiment) (*struct{ Body *domain.PlatformExperiment }, error)
 }
 
-// RegisterSharing registers how staff share a platform experiment with every account and take
+// registerSharing registers how staff share a platform experiment with every account and take
 // that back. The staff audience is the whole rule: what sharing lets a caller reach is
 // auth.Access's. A platform experiment is answered as its own routes answer it.
-func RegisterSharing(doc *Doc, sharing *platformexperiments.Sharing, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
-	registerSharing(doc, sharing, platformExperimentsAPI{experiments: experiments, access: doc.Access, logger: logger}.answer)
+func registerSharing(doc *Doc, sharing *platformexperiments.Sharing, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
+	registerSharingWith(doc, sharing, platformExperimentsAPI{experiments: experiments, access: doc.Access, logger: logger}.answer)
 }
 
-func registerSharing(doc *Doc, sharing *platformexperiments.Sharing, answer func(context.Context, *domain.PlatformExperiment) (*struct{ Body *domain.PlatformExperiment }, error)) {
+func registerSharingWith(doc *Doc, sharing *platformexperiments.Sharing, answer func(context.Context, *domain.PlatformExperiment) (*struct{ Body *domain.PlatformExperiment }, error)) {
 	a := sharingAPI{sharing: sharing, answer: answer}
 	register(doc, auth.AudienceStaff, huma.Operation{
 		OperationID: "share-platform-experiment", Method: "POST", Path: "/platform-experiments/{id}/share",

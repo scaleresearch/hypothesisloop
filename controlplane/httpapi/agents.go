@@ -15,9 +15,9 @@ type agentsAPI struct {
 	access *auth.Access
 }
 
-// RegisterAgents registers the registry of agents whose standing carries from one platform
+// registerAgents registers the registry of agents whose standing carries from one platform
 // experiment to the next.
-func RegisterAgents(doc *Doc, agents *accounts.Agents) {
+func registerAgents(doc *Doc, agents *accounts.Agents) {
 	a := agentsAPI{agents: agents, access: doc.Access}
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "register-agent", Method: "POST", Path: "/agents",

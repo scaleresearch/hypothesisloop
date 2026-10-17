@@ -35,8 +35,8 @@ type draftsAPI struct {
 	access *auth.Access
 }
 
-// RegisterExperimentDrafts registers the drafts a project keeps of new platform experiments.
-func RegisterExperimentDrafts(doc *Doc, drafts *platformexperiments.Drafts) {
+// registerExperimentDrafts registers the drafts a project keeps of new platform experiments.
+func registerExperimentDrafts(doc *Doc, drafts *platformexperiments.Drafts) {
 	a := draftsAPI{drafts: drafts, access: doc.Access}
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "create-experiment-draft", Method: "POST", Path: "/projects/{id}/experiment-drafts", DefaultStatus: http.StatusCreated,

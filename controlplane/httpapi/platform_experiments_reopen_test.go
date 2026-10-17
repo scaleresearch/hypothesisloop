@@ -56,7 +56,7 @@ func reopenRouter(t *testing.T, store *reopenStore, caller auth.Principal) http.
 	doc := NewDoc(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{PlatformExperiments: tenancy}), zap.NewNop())
 	handler := newSignupTestService(t, store).WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning).
 		WithAgentLaunch(platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model-default", CoordinatorModel: "coordinator-default", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted})
-	registerPlatformExperiments(doc, handler)
+	registerPlatformExperimentsAndBudget(doc, handler)
 	return r
 }
 

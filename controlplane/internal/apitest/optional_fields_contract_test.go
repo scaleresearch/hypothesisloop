@@ -62,15 +62,13 @@ func openAPISpec(t *testing.T) map[string]any {
 	doc := httpapi.NewDoc(r, "hypothesisloop API", "1.0.0", agenttypes.PlatformRules, auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	launch := platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: "contract-test-signing-secret", MaxHosted: 20}
 	platformExperiments := platformexperiments.NewPlatformExperimentsService(nil, domain.QuotaConfig{}, zap.NewNop(), "", time.Minute).WithRepositories(worldRepositories{}).WithPlanning(worldPlanning).WithAgentLaunch(launch)
-	httpapi.RegisterAgents(doc, nil)
-	httpapi.RegisterPlatformExperiments(doc, platformExperiments, zap.NewNop())
-	httpapi.RegisterSituation(doc, nil, zap.NewNop())
-	httpapi.RegisterPlatformExperimentBudget(doc, platformExperiments, zap.NewNop())
-	httpapi.RegisterMessages(doc, nil, zap.NewNop())
-	httpapi.RegisterExperimentAgents(doc, nil, struct{ platformexperiments.Hypotheses }{}, launch, zap.NewNop())
-	httpapi.RegisterPlanning(doc, platformExperiments, zap.NewNop())
-	httpapi.RegisterJobs(doc, scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{}), zap.NewNop())
-	httpapi.RegisterRegistry(doc, nil, nil)
+	httpapi.Register(doc, httpapi.Handlers{
+		Logger:              zap.NewNop(),
+		PlatformExperiments: platformExperiments,
+		Hypotheses:          struct{ platformexperiments.Hypotheses }{},
+		Launch:              launch,
+		Scheduler:           scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{}),
+	})
 	doc.MountExplore(r)
 
 	code, body := get(t, r, "/openapi.json")

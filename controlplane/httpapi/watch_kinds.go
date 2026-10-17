@@ -9,7 +9,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// RegisterWatchKinds documents the change stream in the one place an agent already looks. The
+// registerWatchKinds documents the change stream in the one place an agent already looks. The
 // socket itself cannot be a Huma operation — an upgrade needs the raw connection, and Huma owns
 // the response of everything registered with it — so its vocabulary is served as an ordinary GET
 // beside it. That makes it discoverable from /explore instead of folklore an agent could only
@@ -17,7 +17,7 @@ import (
 //
 // The body is domain.EventKinds itself, the same slice the stream validates a query against, so this
 // cannot describe a stream the server does not serve.
-func RegisterWatchKinds(doc *Doc) {
+func registerWatchKinds(doc *Doc) {
 	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "list-watch-kinds", Method: "GET", Path: "/watch/kinds",
 		Summary: "List the event kinds GET /watch can carry", Tags: []string{"watch"},

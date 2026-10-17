@@ -253,21 +253,15 @@ func newWorldAPI(t *testing.T) *worldAPI {
 	api.docs[""] = doc
 	launch := platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: worldSecret, MaxHosted: 20}
 	peHandler := platformexperiments.NewPlatformExperimentsService(nil, domain.QuotaConfig{}, logger, "", time.Minute).WithRepositories(worldRepositories{}).WithPlanning(worldPlanning).WithAgentLaunch(launch)
-	httpapi.RegisterAgents(doc, nil)
-	httpapi.RegisterPlatformExperiments(doc, peHandler, logger)
-	httpapi.RegisterSituation(doc, nil, logger)
-	httpapi.RegisterPlatformExperimentBudget(doc, peHandler, logger)
-	httpapi.RegisterMessages(doc, nil, logger)
-	httpapi.RegisterExperimentAgents(doc, nil, worldGraph{world: w}, launch, logger)
-	httpapi.RegisterPlanning(doc, peHandler, logger)
-	httpapi.RegisterSharing(doc, nil, peHandler, logger)
-	httpapi.RegisterExperimentData(doc, nil, zap.NewNop())
-	httpapi.RegisterSessions(doc, nil, logger)
-	httpapi.RegisterExperimentDrafts(doc, nil)
-	httpapi.RegisterAccounts(doc, accounts.NewService(nil, nil, nil, nil, nil, worldSecret, accounts.RuntimeAddresses{}, accounts.Limits{MaxOrgsPerUser: 3, MaxProjectsPerOrg: 10}, doc.Access, logger))
-	httpapi.RegisterJobs(doc, scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", logger).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{}), logger)
-	httpapi.RegisterRegistry(doc, registry.New(nil, worldGraph{world: w}, nil, logger, "http://metrics.invalid", nil), logger)
-	httpapi.RegisterWatchKinds(doc)
+	httpapi.Register(doc, httpapi.Handlers{
+		Logger:              logger,
+		PlatformExperiments: peHandler,
+		Hypotheses:          worldGraph{world: w},
+		Launch:              launch,
+		Accounts:            accounts.NewService(nil, nil, nil, nil, nil, worldSecret, accounts.RuntimeAddresses{}, accounts.Limits{MaxOrgsPerUser: 3, MaxProjectsPerOrg: 10}, doc.Access, logger),
+		Scheduler:           scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", logger).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{}),
+		Registry:            registry.New(nil, worldGraph{world: w}, nil, logger, "http://metrics.invalid", nil),
+	})
 
 	mint := func(scope string) string {
 		token, err := auth.Mint(worldSecret, scope)

@@ -46,7 +46,7 @@ func sessionCall(t *testing.T, store platformexperiments.SessionStore, placement
 	t.Helper()
 	r := authtest.Router(authtest.As(caller))
 	doc := NewDoc(r, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
-	RegisterSessions(doc, platformexperiments.NewSessions(store), zap.NewNop())
+	registerSessions(doc, platformexperiments.NewSessions(store), zap.NewNop())
 	req := httptest.NewRequest(method, path, bytes.NewReader(body))
 	if body != nil {
 		req.Header.Set("Content-Type", "application/octet-stream")

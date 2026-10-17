@@ -47,21 +47,17 @@ func platformRoutes(caller auth.Principal) http.Handler {
 	launch := platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model", SigningSecret: "secret", MaxHosted: 1}
 	experiments := platformexperiments.NewPlatformExperimentsService(nil, domain.QuotaConfig{}, logger, "", time.Minute).WithRepositories(struct{ githost.Provider }{}).
 		WithPlanning(platformexperiments.Planning{Limit: time.Minute, ProposedFor: time.Minute, PlannerKept: time.Minute}).WithAgentLaunch(launch)
-	httpapi.RegisterAgents(doc, nil)
-	httpapi.RegisterPlatformExperiments(doc, experiments, logger)
-	httpapi.RegisterSituation(doc, nil, logger)
-	httpapi.RegisterPlatformExperimentBudget(doc, experiments, logger)
-	httpapi.RegisterMessages(doc, nil, logger)
-	httpapi.RegisterExperimentAgents(doc, nil, struct{ platformexperiments.Hypotheses }{}, launch, logger)
-	httpapi.RegisterPlanning(doc, experiments, logger)
-	httpapi.RegisterExperimentData(doc, nil, logger)
-	httpapi.RegisterSessions(doc, nil, logger)
-	httpapi.RegisterAccounts(doc, accounts.NewService(nil, nil, nil, nil, nil, "secret", accounts.RuntimeAddresses{}, accounts.Limits{MaxOrgsPerUser: 1, MaxProjectsPerOrg: 1}, doc.Access, logger))
-	httpapi.RegisterJobs(doc, scheduler.NewService(nil, nil, nil,
-		struct{ scheduler.CodeHost }{}, struct{ scheduler.InstalledCapacity }{}, struct{ scheduler.QuotaSettler }{}, "http://metrics.invalid", logger).
-		WithLoop(struct{ scheduler.Triggerable }{}), logger)
-	httpapi.RegisterRegistry(doc, registry.New(nil, nil, nil, logger, "http://metrics.invalid", nil), logger)
-	httpapi.RegisterWatchKinds(doc)
+	httpapi.Register(doc, httpapi.Handlers{
+		Logger:              logger,
+		PlatformExperiments: experiments,
+		Hypotheses:          struct{ platformexperiments.Hypotheses }{},
+		Launch:              launch,
+		Accounts:            accounts.NewService(nil, nil, nil, nil, nil, "secret", accounts.RuntimeAddresses{}, accounts.Limits{MaxOrgsPerUser: 1, MaxProjectsPerOrg: 1}, doc.Access, logger),
+		Scheduler: scheduler.NewService(nil, nil, nil,
+			struct{ scheduler.CodeHost }{}, struct{ scheduler.InstalledCapacity }{}, struct{ scheduler.QuotaSettler }{}, "http://metrics.invalid", logger).
+			WithLoop(struct{ scheduler.Triggerable }{}),
+		Registry: registry.New(nil, nil, nil, logger, "http://metrics.invalid", nil),
+	})
 	access := auth.NewAccess(authtest.Placement{})
 	r.Get("/watch", watch.NewHandler(nil, nil, access, logger).ServeHTTP)
 	return r

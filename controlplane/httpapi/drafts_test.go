@@ -74,7 +74,7 @@ func draftCall(t *testing.T, store platformexperiments.ExperimentDraftStore, cal
 	t.Helper()
 	r := authtest.Router(authtest.As(caller))
 	doc := NewDoc(r, "test", "1.0.0", "", auth.NewAccess(draftPlacement), zap.NewNop())
-	RegisterExperimentDrafts(doc, platformexperiments.NewDrafts(store, zap.NewNop()))
+	registerExperimentDrafts(doc, platformexperiments.NewDrafts(store, zap.NewNop()))
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")

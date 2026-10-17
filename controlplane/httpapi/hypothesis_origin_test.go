@@ -61,7 +61,7 @@ func newRegistryAs(t *testing.T, caller auth.Principal) *registryAs {
 	for _, h := range []*domain.Hypothesis{fixture.own, fixture.rivals, unowned} {
 		store.jobs = append(store.jobs, jobOn("job-"+h.ID, h.ID, domain.StatusFailed))
 	}
-	RegisterRegistry(NewDoc(fixture.router, "test", "1.0.0", "", auth.NewAccess(watchTenancy), zap.NewNop()), svc, zap.NewNop())
+	registerRegistry(NewDoc(fixture.router, "test", "1.0.0", "", auth.NewAccess(watchTenancy), zap.NewNop()), svc, zap.NewNop())
 	return fixture
 }
 

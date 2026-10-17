@@ -48,7 +48,7 @@ func shareAs(t *testing.T, store platformexperiments.SharingStore, caller auth.P
 	answer := func(_ context.Context, pe *domain.PlatformExperiment) (*struct{ Body *domain.PlatformExperiment }, error) {
 		return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
 	}
-	registerSharing(doc, platformexperiments.NewSharing(store, zap.NewNop()), answer)
+	registerSharingWith(doc, platformexperiments.NewSharing(store, zap.NewNop()), answer)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, authtest.Authorize(httptest.NewRequest("POST", path, nil)))
 	var body map[string]any

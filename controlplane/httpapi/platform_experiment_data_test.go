@@ -63,7 +63,7 @@ func dataKeyRouter(t *testing.T, keys *signupKeys, storeStatus int) (http.Handle
 		t.Fatal(err)
 	}
 	r := authtest.Router(authtest.Staff)
-	RegisterExperimentData(NewDoc(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop()), experimentsWithData(keys, client), zap.NewNop())
+	registerExperimentData(NewDoc(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop()), experimentsWithData(keys, client), zap.NewNop())
 	return r, &created
 }
 
@@ -181,7 +181,7 @@ func TestACutAgentOrAClosedPlatformExperimentGetsNoDataKey(t *testing.T) {
 		caller := authtest.As(auth.Principal{Kind: auth.KindAgent, AgentID: tc.agent, PlatformExperimentID: "pe-1", ProjectID: "prj", OrgIDs: []string{"org"}})
 		r := authtest.Router(caller)
 		doc := NewDoc(r, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
-		RegisterExperimentData(doc, experimentsWithData(store, client), zap.NewNop())
+		registerExperimentData(doc, experimentsWithData(store, client), zap.NewNop())
 
 		post := func(path, body string) *httptest.ResponseRecorder {
 			request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))

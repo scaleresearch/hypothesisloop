@@ -57,7 +57,7 @@ func declareJobsAPI(t *testing.T, pe *domain.PlatformExperiment, jobs []*platfor
 	}
 	router := authtest.Router(authtest.As(caller))
 	doc := NewDoc(router, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
-	registerPlatformExperiments(doc, svc.WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning))
+	registerPlatformExperimentsAndBudget(doc, svc.WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning))
 	return store, func(body map[string]any) (int, map[string]any) {
 		t.Helper()
 		var payload bytes.Buffer

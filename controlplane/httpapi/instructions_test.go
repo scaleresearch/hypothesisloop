@@ -20,7 +20,7 @@ func instructionsCall(t *testing.T, caller auth.Principal, path string) (int, pl
 	t.Helper()
 	r := authtest.Router(authtest.As(caller))
 	doc := NewDoc(r, "test", "1.0.0", "", auth.NewAccess(sessionPlacement), zap.NewNop())
-	RegisterInstructions(doc, platformexperiments.NewInstructionsService(platformexperimentstest.PinnedInstructions{}, platformexperimentstest.Defaults, zap.NewNop()))
+	registerInstructions(doc, platformexperiments.NewInstructionsService(platformexperimentstest.PinnedInstructions{}, platformexperimentstest.Defaults, zap.NewNop()))
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, authtest.Authorize(httptest.NewRequest("GET", path, nil)))
 	var out platformexperiments.Instructions

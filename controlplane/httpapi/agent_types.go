@@ -23,8 +23,8 @@ type agentTypesAPI struct {
 	types *accounts.AgentTypes
 }
 
-// RegisterAgentTypes registers the agent types of an org on the shared API document.
-func RegisterAgentTypes(doc *Doc, types *accounts.AgentTypes) {
+// registerAgentTypes registers the agent types of an org on the shared API document.
+func registerAgentTypes(doc *Doc, types *accounts.AgentTypes) {
 	a := agentTypesAPI{types: types}
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "list-agent-types", Method: "GET", Path: "/orgs/{id}/agent-types", Tags: []string{"agent-types"},

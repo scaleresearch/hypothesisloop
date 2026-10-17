@@ -159,11 +159,11 @@ func newAccountsWorld(t *testing.T) *world {
 	connected := func(context.Context) (map[string]bool, error) { return map[string]bool{w.clusterA: true}, nil }
 	autoscalers := func(context.Context) (map[string]bool, error) { return map[string]bool{}, nil }
 	contacts := func(context.Context) (map[string]accounts.Contact, error) { return w.contacts, nil }
-	RegisterAccounts(doc, accounts.NewService(w.store, w.store, connected, autoscalers, contacts, testSigningSecret, testRuntimeAddresses, testLimits, doc.Access, zap.NewNop()))
+	registerAccounts(doc, accounts.NewService(w.store, w.store, connected, autoscalers, contacts, testSigningSecret, testRuntimeAddresses, testLimits, doc.Access, zap.NewNop()))
 	w.agentTypes = newMemAgentTypes()
 	ownType, _ := w.agentTypes.Create(ctx, w.orgA, "Own", "", domain.AgentRoleResearcher, ownPrompt, domain.AgentTypeSettings{MaxSubagents: 2, Effort: "high"}, domain.Actor{Kind: domain.ActorUser, ID: "u-owner"})
 	w.ownType = ownType.ID
-	RegisterAgentTypes(doc, accounts.NewAgentTypes(w.agentTypes, doc.Access, zap.NewNop()))
+	registerAgentTypes(doc, accounts.NewAgentTypes(w.agentTypes, doc.Access, zap.NewNop()))
 	w.router = router
 	return w
 }
@@ -1039,7 +1039,7 @@ func TestAFailureOfThePlatformIsAnsweredWithoutItsText(t *testing.T) {
 		return nil, errors.New("metrics store at 10.0.0.7 refused the connection")
 	}
 	contacts := func(context.Context) (map[string]accounts.Contact, error) { return nil, nil }
-	RegisterAccounts(doc, accounts.NewService(failingStore{w.store}, w.store, connected, connected, contacts, testSigningSecret, testRuntimeAddresses, testLimits, doc.Access, zap.NewNop()))
+	registerAccounts(doc, accounts.NewService(failingStore{w.store}, w.store, connected, connected, contacts, testSigningSecret, testRuntimeAddresses, testLimits, doc.Access, zap.NewNop()))
 	w.router = router
 	for _, path := range []string{"/me", "/orgs/" + w.orgA + "/projects", "/orgs/" + w.orgA + "/clusters"} {
 		rec := w.call("owner", "GET", path, nil)

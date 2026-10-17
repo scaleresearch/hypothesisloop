@@ -58,8 +58,8 @@ func planningRouter(t *testing.T, store platformexperiments.PlatformExperimentsS
 	if drafts, ok := store.(*draftStore); ok {
 		svc.WithReachable(func(context.Context, string) (map[string][]domain.Cluster, error) { return drafts.reachable, nil })
 	}
-	registerPlatformExperiments(doc, handler)
-	RegisterPlanning(doc, handler, zap.NewNop())
+	registerPlatformExperimentsAndBudget(doc, handler)
+	registerPlanning(doc, handler, zap.NewNop())
 	return svc, func(method, path string, body any) (int, map[string]any) {
 		t.Helper()
 		var payload bytes.Buffer

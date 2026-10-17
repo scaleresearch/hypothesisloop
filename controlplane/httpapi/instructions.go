@@ -18,9 +18,9 @@ type instructionsAPI struct {
 	access       *auth.Access
 }
 
-// RegisterInstructions registers where an agent and a coordinator read the instructions they
+// registerInstructions registers where an agent and a coordinator read the instructions they
 // run with.
-func RegisterInstructions(doc *Doc, instructions *platformexperiments.InstructionsService) {
+func registerInstructions(doc *Doc, instructions *platformexperiments.InstructionsService) {
 	a := instructionsAPI{instructions: instructions, access: doc.Access}
 	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "get-agent-instructions", Method: "GET", Path: "/platform-experiments/{id}/agents/{agent_id}/instructions",

@@ -25,8 +25,8 @@ type repositoriesAPI struct {
 	repositories *accounts.Repositories
 }
 
-// RegisterRepositories registers the GitHub operations on the shared API document.
-func RegisterRepositories(doc *Doc, repositories *accounts.Repositories) {
+// registerRepositories registers the GitHub operations on the shared API document.
+func registerRepositories(doc *Doc, repositories *accounts.Repositories) {
 	a := repositoriesAPI{repositories: repositories}
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "get-github-app", Method: "GET", Path: "/github/app",

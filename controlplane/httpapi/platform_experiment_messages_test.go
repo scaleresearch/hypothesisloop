@@ -53,7 +53,7 @@ func messagesRouter(t *testing.T, store *messageStore, caller auth.Principal) ht
 	t.Helper()
 	r := authtest.Router(authtest.As(caller))
 	doc := NewDoc(r, "test", "1.0.0", "", auth.NewAccess(agentsTestPlacement), zap.NewNop())
-	RegisterMessages(doc, testExperiments(store), zap.NewNop())
+	registerMessages(doc, testExperiments(store), zap.NewNop())
 	return r
 }
 

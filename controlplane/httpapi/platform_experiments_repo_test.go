@@ -47,7 +47,7 @@ func repoAPI(t *testing.T, caller authtest.As, repos *fakeRepositories) (*create
 	}
 	router := authtest.Router(caller)
 	doc := NewDoc(router, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
-	registerPlatformExperiments(doc, svc.WithRepositories(repos).WithPlanning(testPlanning).WithGitProxy("https://api.test/git"))
+	registerPlatformExperimentsAndBudget(doc, svc.WithRepositories(repos).WithPlanning(testPlanning).WithGitProxy("https://api.test/git"))
 	return store, func(method, path string, body any) *httptest.ResponseRecorder {
 		var payload bytes.Buffer
 		if body != nil {

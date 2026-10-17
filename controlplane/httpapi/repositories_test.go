@@ -280,7 +280,7 @@ func newGitHubWorld(t *testing.T, withApp bool) *githubWorld {
 	w.svc = accounts.NewRepositories(w.installations, app, access, zap.NewNop())
 	router := authtest.Router(tokens{w.world})
 	doc := NewDoc(router, "test", "1.0.0", "", access, zap.NewNop())
-	RegisterRepositories(doc, w.svc)
+	registerRepositories(doc, w.svc)
 	w.router = router
 	return w
 }

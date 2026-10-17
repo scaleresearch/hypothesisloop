@@ -23,8 +23,8 @@ type messagesAPI struct {
 	logger      *zap.Logger
 }
 
-// RegisterMessages registers the direct messages to the agents of a platform experiment.
-func RegisterMessages(doc *Doc, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
+// registerMessages registers the direct messages to the agents of a platform experiment.
+func registerMessages(doc *Doc, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
 	a := messagesAPI{experiments: experiments, access: doc.Access, logger: logger}
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "send-platform-experiment-message", Method: "POST", Path: "/platform-experiments/{id}/messages",

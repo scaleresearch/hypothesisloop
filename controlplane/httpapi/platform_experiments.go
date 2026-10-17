@@ -23,8 +23,8 @@ type platformExperimentsAPI struct {
 	logger      *zap.Logger
 }
 
-// RegisterPlatformExperiments registers the platform experiment operations on the shared Huma doc.
-func RegisterPlatformExperiments(doc *Doc, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
+// registerPlatformExperiments registers the platform experiment operations on the shared Huma doc.
+func registerPlatformExperiments(doc *Doc, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
 	a := platformExperimentsAPI{experiments: experiments, access: doc.Access, logger: logger}
 
 	// ---- platform experiments ----

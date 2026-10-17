@@ -33,8 +33,8 @@ func accountsRoute[I, O any](doc *Doc, svc *accounts.Service, op huma.Operation,
 	})
 }
 
-// RegisterAccounts registers the accounts operations on the shared API document.
-func RegisterAccounts(doc *Doc, svc *accounts.Service) {
+// registerAccounts registers the accounts operations on the shared API document.
+func registerAccounts(doc *Doc, svc *accounts.Service) {
 	a := accountsAPI{accounts: svc}
 	a.registerMembers(doc)
 	accountsRoute(doc, svc, huma.Operation{

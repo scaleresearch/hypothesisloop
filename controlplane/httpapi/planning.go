@@ -18,9 +18,9 @@ type planningAPI struct {
 	platformExperimentsAPI
 }
 
-// RegisterPlanning registers the way from one sentence to a running platform experiment: a
+// registerPlanning registers the way from one sentence to a running platform experiment: a
 // draft, the planner's proposal, and the person's acceptance.
-func RegisterPlanning(doc *Doc, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
+func registerPlanning(doc *Doc, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
 	a := planningAPI{platformExperimentsAPI{experiments: experiments, access: doc.Access, logger: logger}}
 	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "put-decline", Method: "PUT", Path: "/platform-experiments/{id}/decline",

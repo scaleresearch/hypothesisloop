@@ -18,6 +18,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler"
 )
 
@@ -88,7 +89,12 @@ func schedulerRouter(t *testing.T, store scheduler.Store) chi.Router {
 	t.Cleanup(metrics.Close)
 	r := authtest.Router(authtest.Staff)
 	d := httpapi.NewDoc(r, "scheduler", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	httpapi.RegisterJobs(d, scheduler.NewService(store, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, metrics.URL, zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{}), zap.NewNop())
+	httpapi.Register(d, httpapi.Handlers{
+		Logger:     zap.NewNop(),
+		Hypotheses: struct{ platformexperiments.Hypotheses }{},
+		Launch:     platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: "contract-test-signing-secret", MaxHosted: 20},
+		Scheduler:  scheduler.NewService(store, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, metrics.URL, zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{}),
+	})
 	return r
 }
 

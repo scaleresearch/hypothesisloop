@@ -20,6 +20,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/modelproxy"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/watch"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
@@ -52,13 +53,17 @@ func testRouter(t *testing.T) chi.Router {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return newRouter(apiGate{tokens: unreachable, access: auth.NewAccess(authtest.Placement{})}, "http://ui.test", routes{
-		platformExperiments: platformExperiments,
-		hypotheses:          noHypotheses{},
-		launch:              launch,
-		watch:               &watch.Handler{},
-		modelProxy:          modelProxy,
-	}, zap.NewNop())
+	return httpapi.NewRouter(httpapi.Handlers{
+		Tokens:              unreachable,
+		Access:              auth.NewAccess(authtest.Placement{}),
+		UIOrigin:            "http://ui.test",
+		Logger:              zap.NewNop(),
+		PlatformExperiments: platformExperiments,
+		Hypotheses:          noHypotheses{},
+		Launch:              launch,
+		Watch:               &watch.Handler{},
+		ModelProxy:          modelProxy,
+	})
 }
 
 type noOneHosted struct{}

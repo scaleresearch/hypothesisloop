@@ -43,7 +43,7 @@ func hostingAPI(t *testing.T, repos *fakeRepositories) (*hostingStore, func(body
 	router := authtest.Router(ownerOfA)
 	doc := NewDoc(router, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
 	handler := svc.WithRepositories(repos).WithPlanning(testPlanning).WithGitProxy("https://api.test/git").WithAgentLaunch(platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model-default", CoordinatorModel: "coordinator-default", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted})
-	registerPlatformExperiments(doc, handler)
+	registerPlatformExperimentsAndBudget(doc, handler)
 	return store, func(body map[string]any) (int, map[string]any) {
 		t.Helper()
 		var payload bytes.Buffer
@@ -183,7 +183,7 @@ func TestACoordinatorsTokenChangesTheDescriptionAndNothingARunsCostFollowsFrom(t
 		}
 		router := authtest.Router(authtest.As(caller))
 		doc := NewDoc(router, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
-		registerPlatformExperiments(doc, svc.WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning).WithGitProxy("https://api.test/git").WithAgentLaunch(platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "m", CoordinatorModel: "c", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted}))
+		registerPlatformExperimentsAndBudget(doc, svc.WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning).WithGitProxy("https://api.test/git").WithAgentLaunch(platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "m", CoordinatorModel: "c", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted}))
 		var payload bytes.Buffer
 		if err := json.NewEncoder(&payload).Encode(body); err != nil {
 			t.Fatal(err)

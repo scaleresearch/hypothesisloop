@@ -78,7 +78,7 @@ func listHypotheses(t *testing.T, graph *listGraph, query string) (*httptest.Res
 	t.Helper()
 	r := authtest.Router(authtest.Staff)
 	svc := registry.New(&listStore{graph: graph}, graph, nil, zap.NewNop(), "", nil)
-	RegisterRegistry(NewDoc(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop()), svc, zap.NewNop())
+	registerRegistry(NewDoc(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop()), svc, zap.NewNop())
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, authtest.Authorize(httptest.NewRequest(http.MethodGet, "/hypotheses?"+query, nil)))
 	if rec.Code != http.StatusOK {
@@ -180,7 +180,7 @@ func TestAProjectsHypothesesArePagedSearchedAndKeptToTheCallersOrg(t *testing.T)
 	}}
 	r := authtest.Router(authtest.As{Kind: auth.KindUser, UserID: "u-a", OrgIDs: []string{"org-a"}})
 	svc := registry.New(&listStore{}, graph, nil, zap.NewNop(), "", nil)
-	RegisterRegistry(NewDoc(r, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop()), svc, zap.NewNop())
+	registerRegistry(NewDoc(r, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop()), svc, zap.NewNop())
 	list := func(query string) ([]string, string) {
 		t.Helper()
 		rec := httptest.NewRecorder()

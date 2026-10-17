@@ -30,11 +30,11 @@ type experimentAgentsAPI struct {
 	logger      *zap.Logger
 }
 
-// RegisterExperimentAgents registers how agents join and leave a platform experiment. graph is
+// registerExperimentAgents registers how agents join and leave a platform experiment. graph is
 // where a finish reads what the agent left open, and launch what joining needs beyond the store.
-func RegisterExperimentAgents(doc *Doc, experiments *platformexperiments.PlatformExperimentsService, graph platformexperiments.Hypotheses, launch platformexperiments.AgentLaunch, logger *zap.Logger) {
+func registerExperimentAgents(doc *Doc, experiments *platformexperiments.PlatformExperimentsService, graph platformexperiments.Hypotheses, launch platformexperiments.AgentLaunch, logger *zap.Logger) {
 	if launch.DefaultModel == "" || launch.SigningSecret == "" || launch.MaxHosted <= 0 || graph == nil {
-		panic("httpapi.RegisterExperimentAgents: every field of the agent launch and the hypothesis graph are required")
+		panic("httpapi.registerExperimentAgents: every field of the agent launch and the hypothesis graph are required")
 	}
 	a := experimentAgentsAPI{experiments: experiments, graph: graph, launch: launch, access: doc.Access, logger: logger}
 	register(doc, auth.AudienceCoordinator, huma.Operation{

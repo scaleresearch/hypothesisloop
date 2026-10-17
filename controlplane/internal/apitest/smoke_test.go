@@ -36,15 +36,13 @@ func TestSmoke(t *testing.T) {
 	r := authtest.Router(authtest.Staff)
 	doc := httpapi.NewDoc(r, "hypothesisloop API", "1.0.0", agenttypes.PlatformRules, auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	peHandler := platformexperiments.NewPlatformExperimentsService(nil, domain.QuotaConfig{}, zap.NewNop(), "", time.Minute).WithRepositories(worldRepositories{}).WithPlanning(worldPlanning)
-	httpapi.RegisterAgents(doc, nil)
-	httpapi.RegisterPlatformExperiments(doc, peHandler, zap.NewNop())
-	httpapi.RegisterSituation(doc, nil, nil)
-	httpapi.RegisterPlatformExperimentBudget(doc, peHandler, zap.NewNop())
-	httpapi.RegisterJobs(doc, scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{}), zap.NewNop())
-	httpapi.RegisterRegistry(doc, nil, nil)
-	httpapi.RegisterExperimentData(doc, nil, zap.NewNop())
-	httpapi.RegisterSessions(doc, nil, zap.NewNop())
-	httpapi.RegisterExperimentDrafts(doc, nil)
+	httpapi.Register(doc, httpapi.Handlers{
+		Logger:              zap.NewNop(),
+		PlatformExperiments: peHandler,
+		Hypotheses:          struct{ platformexperiments.Hypotheses }{},
+		Launch:              platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: "contract-test-signing-secret", MaxHosted: 20},
+		Scheduler:           scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{}),
+	})
 	doc.MountExplore(r)
 
 	// Cluster-agent traffic is a separate audience on its own prefix, so it keeps its own doc.

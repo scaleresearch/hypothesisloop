@@ -16,9 +16,9 @@ type budgetAPI struct {
 	platformExperimentsAPI
 }
 
-// RegisterPlatformExperimentBudget registers the reads of a platform experiment's health, quotas,
+// registerPlatformExperimentBudget registers the reads of a platform experiment's health, quotas,
 // stages and capacity, and its summary.
-func RegisterPlatformExperimentBudget(doc *Doc, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
+func registerPlatformExperimentBudget(doc *Doc, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
 	a := budgetAPI{platformExperimentsAPI{experiments: experiments, access: doc.Access, logger: logger}}
 
 	register(doc, auth.AudienceAgent, huma.Operation{

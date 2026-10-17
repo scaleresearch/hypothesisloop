@@ -34,7 +34,7 @@ func (s takenAgents) CreateAgent(_ context.Context, agent *domain.Agent) error {
 func TestRegisteringAnAgentRefusesATakenIDAndRequiresAName(t *testing.T) {
 	r := authtest.Router(authtest.As(auth.Principal{Kind: auth.KindUser, UserID: "u-1", OrgIDs: []string{"org-a"}}))
 	doc := NewDoc(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	RegisterAgents(doc, accounts.NewAgents(takenAgents{taken: map[string]bool{"veteran": true}}, zap.NewNop()))
+	registerAgents(doc, accounts.NewAgents(takenAgents{taken: map[string]bool{"veteran": true}}, zap.NewNop()))
 
 	if code, out := call(t, r, "POST", "/agents", `{"id":"veteran","name":"Veteran"}`); code != http.StatusConflict || out["reason"] != "agent_exists" {
 		t.Errorf("a taken id: got = %d %v, want 409 agent_exists", code, out)
@@ -67,7 +67,7 @@ func TestTheAgentListRefusesAPageOverTheMaximum(t *testing.T) {
 	var read []int
 	r := authtest.Router(authtest.Staff)
 	doc := NewDoc(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	RegisterAgents(doc, accounts.NewAgents(pagedAgents{limits: &read}, zap.NewNop()))
+	registerAgents(doc, accounts.NewAgents(pagedAgents{limits: &read}, zap.NewNop()))
 
 	for _, query := range []string{"limit=201", "limit=100000", "limit=-1", "offset=-1"} {
 		if code, out := call(t, r, "GET", "/agents?"+query, ""); code != http.StatusUnprocessableEntity || out["reason"] != "invalid_page" {

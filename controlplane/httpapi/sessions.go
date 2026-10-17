@@ -34,9 +34,9 @@ type sessionsAPI struct {
 	logger   *zap.Logger
 }
 
-// RegisterSessions registers where a hosted agent and a hosted coordinator keep their model
+// registerSessions registers where a hosted agent and a hosted coordinator keep their model
 // session, so that it outlives the machine they run on.
-func RegisterSessions(doc *Doc, sessions *platformexperiments.Sessions, logger *zap.Logger) {
+func registerSessions(doc *Doc, sessions *platformexperiments.Sessions, logger *zap.Logger) {
 	a := sessionsAPI{sessions: sessions, access: doc.Access, logger: logger}
 	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "put-agent-session", Method: "PUT", Path: "/platform-experiments/{id}/agents/{agent_id}/session",
