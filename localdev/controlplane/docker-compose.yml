@@ -39,7 +39,7 @@ services:
       # Host port 5433, not 5432: leaves a real local Postgres (if the host has one) alone.
       - "5433:5432"
     volumes:
-      # No schema here: control-service migrates the database at start (db.Migrate).
+      # No schema here: control-service builds it at start (db.EnsureSchema).
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hypothesisloop -d hypothesisloop"]

@@ -7,7 +7,7 @@
 	k3s-up k3s-down full-up k3s-dev-nodes-up k3s-dev-nodes-down e2e \
 	full-stop full-start reload stack-not-held \
 	tt-up tt-down tt-status tt-stop tt-start tt-dev-nodes-up tt-dev-nodes-down tt-hardware-image tt-e2e \
-	git-repository example db-migration ui-types
+	git-repository example ui-types
 
 # ---- Control plane: one instance, runs anywhere (the brain) -----------------
 COMPOSE_FILE := localdev/controlplane/docker-compose.yml
@@ -461,8 +461,8 @@ experimentator-base-image:
 
 # Stages the one file the helm chart renders verbatim (never edited in the chart itself, so
 # there is exactly one source of truth for platform config) — run before any helm
-# lint/template/install/upgrade. The database schema is not staged: control-service embeds its
-# migrations and applies them at start (db.Migrate).
+# lint/template/install/upgrade. The database schema is not staged: control-service embeds
+# schema.sql and builds it at start (db.EnsureSchema).
 HELM_CHART := controlplane/infra/helm/hypothesisloop
 helm-prepare:
 	mkdir -p $(HELM_CHART)/files
@@ -526,12 +526,3 @@ check: build test agent-test helm-lint
 # (controlplane/cmd/control-service/testdata/*openapi.json): run it after those goldens change.
 ui-types:
 	npm --prefix controlplane/ui run types
-
-# Creates the next numbered, empty migration: make db-migration NAME=add_widget_color
-MIGRATIONS := controlplane/storage/db/migrations
-db-migration:
-	@echo "$(NAME)" | grep -Eq '^[a-z0-9_]+$$' || { echo "NAME must be lower_snake_case, e.g. make db-migration NAME=add_widget_color" >&2; exit 1; }
-	@last=$$(ls $(MIGRATIONS) | sed -n 's/^\([0-9]\{4\}\)_.*\.sql$$/\1/p' | sort | tail -1); \
-	file=$(MIGRATIONS)/$$(printf '%04d' $$(expr $$last + 1))_$(NAME).sql; \
-	printf -- '-- Keep the previous release working against this schema (README, Database).\n' > $$file; \
-	echo $$file

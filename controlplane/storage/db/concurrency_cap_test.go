@@ -98,8 +98,8 @@ func TestReserveAdmittedAcceleratorTypeTxRejectsOverCap(t *testing.T) {
 // TestReserveAdmittedAcceleratorTypeTxCapIsAcrossAllAgents covers a real bug: the
 // in-flight SUM and its serializing advisory lock were both scoped to (agent_id,
 // platform_experiment_id), so max_concurrent_accelerators was actually enforced per agent, not
-// across the whole platform experiment as the migrations document it and autoscaler.md's concurrency
-// cap requires. Two different agents under the same platform experiment must share one cap.
+// across the whole platform experiment as autoscaler.md's concurrency cap requires. Two different
+// agents under the same platform experiment must share one cap.
 func TestReserveAdmittedAcceleratorTypeTxCapIsAcrossAllAgents(t *testing.T) {
 	pool, store, agentA, peID := setupCapTestPool(t, 3)
 	ctx := context.Background()

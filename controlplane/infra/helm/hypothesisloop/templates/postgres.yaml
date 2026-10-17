@@ -51,8 +51,8 @@ spec:
               command: ["pg_isready", "-U", {{ .Values.postgres.user | quote }}, "-d", {{ .Values.postgres.database | quote }}]
             initialDelaySeconds: 5
             periodSeconds: 5
-  # No schema is mounted: control-service applies the migrations embedded in its binary at every
-  # start (db.Migrate).
+  # No schema is mounted: control-service builds the schema.sql embedded in its binary at start
+  # (db.EnsureSchema).
   volumeClaimTemplates:
     - metadata:
         name: data

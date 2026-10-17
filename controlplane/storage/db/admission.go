@@ -336,7 +336,7 @@ func (s *Store) ReserveAdmittedAcceleratorTypeTx(ctx context.Context, experiment
 			}
 			if cap > 0 {
 				// The cap is defined on the platform experiment across ALL of its agents' jobs
-				// (autoscaler.md, the migrations' max_concurrent_accelerators comment), not per agent —
+				// (autoscaler.md), not per agent —
 				// so both the lock and the SUM below are scoped to platformExpID alone. A second,
 				// distinctly-salted advisory lock is used here (rather than reusing the agent-scoped
 				// `key` lock above) so two different agents under the same platform experiment still

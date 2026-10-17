@@ -64,7 +64,7 @@ func newHypothesisID() (string, error) {
 var ErrFindingExists = errors.New("the job already has a summary")
 
 // CreateHypothesisFinding records the agent's post-run write-up for a job, attached to the
-// hypothesis it tested. A job has one finding (UNIQUE on experiment_id in storage/db/migrations)
+// hypothesis it tested. A job has one finding (UNIQUE on experiment_id in storage/db/schema.sql)
 // and it is never replaced: a second one is refused with ErrFindingExists. agentID is the job's
 // agent, whose finding it is, and actor whose credential files it.
 func (s *Store) CreateHypothesisFinding(ctx context.Context, hypothesisID, platformExperimentID, experimentID, agentID string, actor domain.Actor, summary string) (*domain.HypothesisFinding, error) {
