@@ -243,7 +243,7 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 				return &AdmissionError{Reason: ReasonMalformed, Message: err.Error()}
 			}
 			// Position 0 is job.accelerator_type, the first choice. It may legitimately reappear
-			// among the alternatives — an agent listing every flavor it runs on naturally includes
+			// among the alternatives — an agent listing every accelerator type it runs on naturally includes
 			// its preferred one, and rejecting that makes the obvious payload unsubmittable. Only a
 			// genuine repeat *within* acceptable_accelerator_types is malformed, so dedup from i=1.
 			// placement.CandidateTypes collapses the harmless overlap before placement.

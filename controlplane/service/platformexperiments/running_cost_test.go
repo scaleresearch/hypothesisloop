@@ -77,7 +77,7 @@ func newObservedTestService(t *testing.T, metricsURL string, running []*domain.E
 // A retired accelerator type (no entry in the live rate catalog — see
 // domain.AcceleratorType.LookupCost) must not affect billing at all any more: accH is now derived
 // from the job's own admission-time estimate (domain.Experiment.RatedCost), which needs no catalog
-// lookup, so it prices identically whether or not the flavor is still registered.
+// lookup, so it prices identically whether or not the accelerator type is still registered.
 func TestAddRunningActualCostsBillsNormallyWhenAcceleratorRateIsRetired(t *testing.T) {
 	domain.SetAcceleratorRates(map[string]float64{"h100": 1.0})
 	t.Cleanup(func() { domain.SetAcceleratorRates(map[string]float64{"h100": 1.0}) })
@@ -89,7 +89,7 @@ func TestAddRunningActualCostsBillsNormallyWhenAcceleratorRateIsRetired(t *testi
 	exp := &domain.Experiment{
 		ID:                     "exp-retired",
 		CreatedAt:              now.Add(-30 * time.Minute),
-		AcceleratorType:        "retired-flavor",
+		AcceleratorType:        "retired-type",
 		AcceleratorCount:       2,
 		EstimatedDurationHours: 1,
 		EstimatedCostAccH:      8,
@@ -111,7 +111,7 @@ func TestAddRunningActualCostsBillsNormallyWhenAcceleratorRateIsRetired(t *testi
 	}
 }
 
-// correctRunningCosts's delta swap works the same whether or not the flavor is still registered
+// correctRunningCosts's delta swap works the same whether or not the accelerator type is still registered
 // in the live rate catalog, since accH no longer depends on it.
 func TestCorrectRunningCostsBillsNormallyOnRetiredRate(t *testing.T) {
 	domain.SetAcceleratorRates(map[string]float64{"h100": 1.0})
@@ -124,7 +124,7 @@ func TestCorrectRunningCostsBillsNormallyOnRetiredRate(t *testing.T) {
 	exp := &domain.Experiment{
 		ID:                     "exp-retired",
 		CreatedAt:              now.Add(-30 * time.Minute),
-		AcceleratorType:        "retired-flavor",
+		AcceleratorType:        "retired-type",
 		AcceleratorCount:       2,
 		EstimatedDurationHours: 1,
 		EstimatedCostAccH:      5,

@@ -92,12 +92,12 @@ type tickClusters struct {
 
 // queuedPlacement is where a queued job is tried in one pass: the cluster, "" when none could be picked,
 // and its footprint there. misfit is why the cluster picked does not take the job's own cpu,
-// memory and storage, and betFlavor the flavor a bet on a cluster that scales up is made at.
+// memory and storage, and betAcceleratorType the accelerator type a bet on a cluster that scales up is made at.
 type queuedPlacement struct {
-	cluster   string
-	fp        domain.Footprint
-	betFlavor domain.AcceleratorType
-	misfit    string
+	cluster            string
+	fp                 domain.Footprint
+	betAcceleratorType domain.AcceleratorType
+	misfit             string
 }
 
 // placeQueued settles where exp is tried in one pass, for the guaranteed and the burst pass
@@ -106,7 +106,7 @@ type queuedPlacement struct {
 // resolved, and the reason is written or the failure recorded.
 //
 // A job already assigned a cluster stays there and only its footprint is recomputed. Any other is
-// given a (cluster, flavor) pair among the requested type and its acceptable ones where the whole
+// given a (cluster, accelerator type) pair among the requested type and its acceptable ones where the whole
 // footprint fits (placement.ClusterAndFootprint). The search says its choice by setting
 // exp.AcceleratorType, and the resolved job is set on exp.
 func (l *Loop) placeQueued(ctx context.Context, pass string, exp *domain.Experiment, avail map[string]domain.Footprint, quota *domain.AgentQuota, c tickClusters, tickErrs *[]error) (queuedPlacement, bool) {
@@ -117,7 +117,7 @@ func (l *Loop) placeQueued(ctx context.Context, pass string, exp *domain.Experim
 		}
 		return queuedPlacement{}, false
 	}
-	placed := queuedPlacement{cluster: exp.ClusterName, betFlavor: exp.AcceleratorType}
+	placed := queuedPlacement{cluster: exp.ClusterName, betAcceleratorType: exp.AcceleratorType}
 	candidates, ineligible := eligibleClusters(avail, c.multiNode, c.registered, exp)
 	if ineligible != "" {
 		return skip(ineligible)
@@ -129,7 +129,7 @@ func (l *Loop) placeQueued(ctx context.Context, pass string, exp *domain.Experim
 		placed.fp = exp.Footprint()
 	}
 	// Check the job's cpu, memory and storage against the picked cluster's own fair share (or size
-	// it to a slot), once cluster and accelerator flavor are settled: see loop_resolve.go. An
+	// it to a slot), once cluster and accelerator type are settled: see loop_resolve.go. An
 	// unpinned job whose own resources the cluster cannot fit is placed again among the rest, and
 	// is told it misfits only when every candidate misfits: preemption cannot fix a job whose own
 	// request is oversized for every node.
@@ -137,20 +137,20 @@ func (l *Loop) placeQueued(ctx context.Context, pass string, exp *domain.Experim
 	queuedAt := exp.AcceleratorType
 	for {
 		if !pinned {
-			exp.AcceleratorType, placed.betFlavor = queuedAt, queuedAt
+			exp.AcceleratorType, placed.betAcceleratorType = queuedAt, queuedAt
 			placed.cluster, placed.fp = placement.ClusterAndFootprint(candidates, c.registered, c.nodeAvail, c.nodeResources, c.nodeLabels, exp)
 		}
-		if exp.Job.AcceleratorType != "" && exp.AcceleratorType != exp.Job.AcceleratorType && !quotaCanCoverFlavor(quota, exp) {
+		if exp.Job.AcceleratorType != "" && exp.AcceleratorType != exp.Job.AcceleratorType && !quotaCanCoverAcceleratorType(quota, exp) {
 			if !slices.Contains(placement.CandidateTypes(exp), exp.Job.AcceleratorType) {
 				return skip(ranOnTypeUncoveredReason(exp))
 			}
-			// Reverting to the requested flavor re-places the job, layout included: picking on
+			// Reverting to the requested accelerator type re-places the job, layout included: picking on
 			// scalar fit alone could point a spread job at a cluster whose nodes cannot hold it,
 			// and charge it a failed placement there.
 			exp.AcceleratorType = exp.Job.AcceleratorType
-			placed.betFlavor = exp.AcceleratorType
+			placed.betAcceleratorType = exp.AcceleratorType
 			placed.fp = exp.Footprint()
-			if cluster, ok := placement.AtFlavor(candidates, c.registered, c.nodeAvail, c.nodeResources, c.nodeLabels, exp); ok {
+			if cluster, ok := placement.AtAcceleratorType(candidates, c.registered, c.nodeAvail, c.nodeResources, c.nodeLabels, exp); ok {
 				placed.cluster = cluster
 			} else {
 				placed.cluster = placement.BestFit(candidates, c.registered, placed.fp)
@@ -370,9 +370,9 @@ func byImageChoice(registered map[string]domain.Cluster, exp *domain.Experiment)
 	return runs, others
 }
 
-// quotaCanCoverFlavor is an early, non-authoritative filter for a more expensive acceptable
-// flavor; ReserveAdmittedFlavor's transaction remains the final concurrency-safe check.
-func quotaCanCoverFlavor(quota *domain.AgentQuota, exp *domain.Experiment) bool {
+// quotaCanCoverAcceleratorType is an early, non-authoritative filter for a more expensive acceptable
+// accelerator type; ReserveAdmittedAcceleratorType's transaction remains the final concurrency-safe check.
+func quotaCanCoverAcceleratorType(quota *domain.AgentQuota, exp *domain.Experiment) bool {
 	if quota == nil || exp.AcceleratorCount <= 0 {
 		return false
 	}

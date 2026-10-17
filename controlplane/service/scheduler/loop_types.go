@@ -73,7 +73,7 @@ type LoopStore interface {
 // figures together always cover the whole job.
 type LoopQuotaStore interface {
 	GetAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error)
-	ReserveAdmittedFlavor(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, acceleratorCount int) error
+	ReserveAdmittedAcceleratorType(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, acceleratorCount int) error
 }
 
 // ObservedState is the actual state the loop reads back from the metrics store: how long a job has
@@ -94,10 +94,10 @@ type ObservedState interface {
 // ClusterCapacity is what the loop reads of the clusters' capacity: live reports net of desired
 // footprint. Placing a job is its ClaimSubmitted row alone, which the cluster reconciles against.
 type ClusterCapacity interface {
-	// GetFlavorCapacity returns per connected cluster what can be claimed now (available) and
+	// GetAcceleratorTypeCapacity returns per connected cluster what can be claimed now (available) and
 	// what is free once every job already told to stop is gone (desiredFree). The loop
 	// enumerates clusters from these maps.
-	GetFlavorCapacity(ctx context.Context) (available, desiredFree map[string]domain.Footprint, err error)
+	GetAcceleratorTypeCapacity(ctx context.Context) (available, desiredFree map[string]domain.Footprint, err error)
 	GetAcceleratorCapacityByNode(ctx context.Context) (map[string]map[string]map[string]int64, error)
 	// GetNodeResourceCapacity reports free CPU/memory/storage per node — see
 	// placement.Reserve, which must prove a job fits one node in every dimension.
@@ -191,7 +191,7 @@ type Loop struct {
 	settler LoopQuotaSettler
 
 	// pendingEvictions tracks disbalance victims whose termination request has been issued but
-	// whose freed capacity a fresh GetFlavorCapacity/GetAcceleratorCapacityByNode read cannot yet
+	// whose freed capacity a fresh GetAcceleratorTypeCapacity/GetAcceleratorCapacityByNode read cannot yet
 	// see — the node/agent that owns the accelerator hasn't reported it back yet, even though the
 	// victim is already gone from ListRunningExperiments. Without this, every tick until that
 	// report lands re-derives the same shortage and evicts a fresh set of victims to free capacity

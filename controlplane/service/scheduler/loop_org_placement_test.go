@@ -99,7 +99,7 @@ func (w orgWorkload) capability(has func(orgCluster) bool) map[string]bool {
 	return out
 }
 
-func (w orgWorkload) GetFlavorCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
+func (w orgWorkload) GetAcceleratorTypeCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
 	free := func(c orgCluster) int64 { return c.free }
 	return w.footprints(free), w.footprints(free), nil
 }

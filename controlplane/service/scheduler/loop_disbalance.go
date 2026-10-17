@@ -71,7 +71,7 @@ type pendingEviction struct {
 	acceleratorType  string // its placement.AcceleratorKey
 	acceleratorCount int64
 	evictedAt        time.Time
-	// nodeFreeAtEviction is what the victim's node reported free of its flavor at the moment it
+	// nodeFreeAtEviction is what the victim's node reported free of its accelerator type at the moment it
 	// was condemned. Once a fresh read exceeds this, the node has reported the victim's
 	// accelerators back and the credit below would be counting them a second time.
 	nodeFreeAtEviction int64
@@ -274,7 +274,7 @@ func (l *Loop) evictDisbalanced(
 //   - the shortage is confined to CPU/memory/storage. If the accelerator dimension is short too,
 //     the accelerators are genuinely busy and no disproportion is stranding anything.
 //   - at least one node `blocked` is allowed to land on has enough free accelerators of its
-//     flavor. Without idle accelerators there is no harm to undo.
+//     accelerator type. Without idle accelerators there is no harm to undo.
 //
 // Split out from selectDisbalanceVictims so evictDisbalanced can reject the common case before
 // spending a metrics query per running job — the same code decides both times, not a cheaper
@@ -313,7 +313,7 @@ func disbalancePremises(
 		}
 	}
 
-	flavor := placement.AcceleratorKey(blocked.AcceleratorType)
+	acceleratorType := placement.AcceleratorKey(blocked.AcceleratorType)
 	// Per NODE, not per job: the question is whether some single node is stranding enough free
 	// devices to host one of blocked's nodes. placement.HardestNodeShape is the same one-shape summary the
 	// shortfall vector uses, and covering the hardest node is what unblocks the job; for an
@@ -326,7 +326,7 @@ func disbalancePremises(
 		if !placement.LabelsMatch(nodeLabels[node], blocked.Job.NodeSelector) {
 			continue
 		}
-		if free := capacity[flavor]; free >= perRank {
+		if free := capacity[acceleratorType]; free >= perRank {
 			strandedNodes[node] = free
 		}
 	}
@@ -354,9 +354,9 @@ func disbalancePremisesHold(
 //  1. `blocked` wants accelerators and is short only on CPU/memory/storage. If its accelerator
 //     dimension is also short, the accelerators are genuinely busy and nothing is being stranded.
 //  2. Some node `blocked` is allowed to land on currently has enough free accelerators of its
-//     flavor. Without idle accelerators there is no harm to undo.
+//     accelerator type. Without idle accelerators there is no harm to undo.
 //  3. The victim's own node reports installed CPU/memory/storage and installed units of the
-//     victim's flavor, giving a per-unit share local to that node — not a cluster-wide average, which a
+//     victim's accelerator type, giving a per-unit share local to that node — not a cluster-wide average, which a
 //     heterogeneous cluster (nodes with different CPU-per-accelerator ratios) can get wrong in
 //     either direction: too lax on a CPU-heavy node, too strict on a CPU-light one.
 //  4. Candidate victims sit on one of those nodes, hold accelerators themselves, and request
@@ -382,21 +382,21 @@ func selectDisbalanceVictims(
 		return nil
 	}
 
-	// (3) Each node's installed units of one flavor: free there now (nodeAvail) plus held by the
-	// jobs of that flavor running there (placed). A job's share of the node is measured among the
-	// units of its own flavor, which is the rule admission bounds its request by (see
+	// (3) Each node's installed units of one accelerator type: free there now (nodeAvail) plus held by the
+	// jobs of that accelerator type running there (placed). A job's share of the node is measured among the
+	// units of its own accelerator type, which is the rule admission bounds its request by (see
 	// installedAcceleratorsByNode), so a job is never evicted for holding what it was admitted
-	// with. Flavors are not pooled: a node offers many more cores than chips, and pooled, every
+	// with. Accelerator types are not pooled: a node offers many more cores than chips, and pooled, every
 	// chip job's share would shrink to a sliver. nodeAvail also lists one device under every
-	// label of its vendor's domain, so a sum over flavors counts it several times.
+	// label of its vendor's domain, so a sum over accelerator types counts it several times.
 	cores := installedCoresByNode(nodeAvail, nodeResourcesTotal)
-	installedOf := func(node string, flavor domain.AcceleratorType) int64 {
-		if flavor.Kind() == domain.TypeKindCPU {
+	installedOf := func(node string, acceleratorType domain.AcceleratorType) int64 {
+		if acceleratorType.Kind() == domain.TypeKindCPU {
 			return cores[node]
 		}
-		installed := nodeAvail[node][placement.AcceleratorKey(flavor)]
+		installed := nodeAvail[node][placement.AcceleratorKey(acceleratorType)]
 		for _, p := range placed {
-			if p.node == node && p.experiment.AcceleratorType.Is(flavor) {
+			if p.node == node && p.experiment.AcceleratorType.Is(acceleratorType) {
 				installed += int64(p.experiment.AcceleratorCount)
 			}
 		}

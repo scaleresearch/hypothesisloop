@@ -20,8 +20,8 @@ func rankedClusters() map[string]domain.Cluster {
 	}
 }
 
-func accelerators(flavors map[string]int64) domain.Footprint {
-	return domain.CapacityFootprint(16, flavors, 64<<30, 64<<30)
+func accelerators(acceleratorTypes map[string]int64) domain.Footprint {
+	return domain.CapacityFootprint(16, acceleratorTypes, 64<<30, 64<<30)
 }
 
 // The priority decides where a job that fits everywhere goes, and a full cluster passes the job

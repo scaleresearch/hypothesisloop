@@ -251,7 +251,7 @@ func (s *Store) LiveClusterNodeTotalCapacity(ctx context.Context, window time.Du
 }
 
 // LiveClusterNodeAcceleratorCapacity returns fresh actual capacity as
-// cluster -> node -> flavor -> free count.
+// cluster -> node -> accelerator type -> free count.
 func (s *Store) LiveClusterNodeAcceleratorCapacity(ctx context.Context, window time.Duration) (map[string]map[string]map[string]int64, error) {
 	samples, err := s.queryCompleteClusterSnapshot(ctx, clusterNodeAcceleratorAvailableMetric, window)
 	if err != nil {
@@ -314,14 +314,14 @@ func (s *Store) LiveClusterNodeResourceCapacity(ctx context.Context, window time
 }
 
 // LiveClusterAcceleratorTotalCapacity returns the most recently reported total (allocatable)
-// accelerator capacity per cluster per flavor within window. A caller that also needs available
+// accelerator capacity per cluster per accelerator type within window. A caller that also needs available
 // capacity must use LiveClusterAcceleratorAvailableAndTotal so both come from one snapshot.
 func (s *Store) LiveClusterAcceleratorTotalCapacity(ctx context.Context, window time.Duration) (map[string]map[string]int64, error) {
 	return s.liveClusterAcceleratorMetric(ctx, clusterAcceleratorTotalMetric, window)
 }
 
 // LiveClusterAcceleratorAvailableAndTotal returns available and total accelerator capacity per
-// cluster per flavor, both read at the cluster's latest heartbeat so they come from one snapshot.
+// cluster per accelerator type, both read at the cluster's latest heartbeat so they come from one snapshot.
 func (s *Store) LiveClusterAcceleratorAvailableAndTotal(ctx context.Context, window time.Duration) (available, total map[string]map[string]int64, err error) {
 	samples, err := s.queryCompleteClusterAcceleratorSnapshot(ctx, window)
 	if err != nil {

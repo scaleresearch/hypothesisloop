@@ -44,13 +44,13 @@ func (l *Loop) admitGuaranteed(ctx context.Context, t *tickState, p *preemptionS
 	c := t.clusters
 	// What the row says right now, captured before the placement search mutates
 	// exp.AcceleratorType to communicate its choice. submitJob needs both to know whether it has a
-	// new flavor to persist.
-	persistedFlavor := exp.AcceleratorType
+	// new accelerator type to persist.
+	persistedAcceleratorType := exp.AcceleratorType
 	placed, ok := l.placeQueued(ctx, "guaranteed", exp, t.gAvail, quota, c, &t.errs)
 	if !ok {
 		return
 	}
-	cluster, fp, betFlavor, misfit := placed.cluster, placed.fp, placed.betFlavor, placed.misfit
+	cluster, fp, betAcceleratorType, misfit := placed.cluster, placed.fp, placed.betAcceleratorType, placed.misfit
 	// Which of the two fit checks failed decides whether preemption can help at all, so they are
 	// evaluated separately rather than or-ed into one condition.
 	scalarFits := domain.Fits(t.gAvail[cluster], fp)
@@ -70,11 +70,11 @@ func (l *Loop) admitGuaranteed(ctx context.Context, t *tickState, p *preemptionS
 	var bets []string
 	var provenFitByCluster map[string]bool
 	if !liveFits || (exp.EnvironmentImage == "" && scalesAbove(cluster, exp, t.autoscalerEnabled, t.connected, c.registered)) {
-		chosenFlavor := exp.AcceleratorType
+		chosenAcceleratorType := exp.AcceleratorType
 		if liveFits {
-			// The flavor the lower cluster fit at is that cluster's. The bet is for the one the job
+			// The accelerator type the lower cluster fit at is that cluster's. The bet is for the one the job
 			// is queued at, as it is when nothing fits.
-			exp.AcceleratorType = betFlavor
+			exp.AcceleratorType = betAcceleratorType
 		}
 		var err error
 		bets, provenFitByCluster, err = l.speculativeCandidates(ctx, c.resolveCache, exp, t.autoscalerEnabled, t.connected, c.clusterIDs, c.multiNode, c.registered, c.nodeAvailAtTickStart, c.nodeResourcesTotal, c.nodeLabels, t.speculativeFootprint, t.gAvail)
@@ -84,25 +84,25 @@ func (l *Loop) admitGuaranteed(ctx context.Context, t *tickState, p *preemptionS
 		}
 		if liveFits {
 			if bets = above(bets, cluster, c.registered); len(bets) == 0 {
-				exp.AcceleratorType = chosenFlavor
+				exp.AcceleratorType = chosenAcceleratorType
 			}
 		}
 	}
 	switch {
 	case len(bets) > 0:
-		l.submitSpeculative(ctx, t, exp, cluster, bets[0], persistedFlavor, provenFitByCluster[bets[0]])
+		l.submitSpeculative(ctx, t, exp, cluster, bets[0], persistedAcceleratorType, provenFitByCluster[bets[0]])
 	case !liveFits:
 		l.makeRoom(ctx, t, p, exp, placed, scalarFits)
 	default:
 		// bAvail is the same shared pool's other view — without claiming from it too, the burst
 		// pass later in this tick could still see this unit as free and double-book it.
-		l.admit(ctx, t, "guaranteed", exp, cluster, persistedFlavor, fp, t.gAvail, t.bAvail, t.desiredFree)
+		l.admit(ctx, t, "guaranteed", exp, cluster, persistedAcceleratorType, fp, t.gAvail, t.bAvail, t.desiredFree)
 	}
 }
 
 // submitSpeculative submits exp to specCluster, a cluster that scales up and has no room for it
 // yet, where cluster is where the job was placed live.
-func (l *Loop) submitSpeculative(ctx context.Context, t *tickState, exp *domain.Experiment, cluster, specCluster string, persistedFlavor domain.AcceleratorType, provenFit bool) {
+func (l *Loop) submitSpeculative(ctx context.Context, t *tickState, exp *domain.Experiment, cluster, specCluster string, persistedAcceleratorType domain.AcceleratorType, provenFit bool) {
 	c := t.clusters
 	// The resolution in placeQueued ran against whichever cluster looked live-fit-eligible before
 	// this job fell through to speculation -- a different cluster than specCluster, or none at
@@ -126,7 +126,7 @@ func (l *Loop) submitSpeculative(ctx context.Context, t *tickState, exp *domain.
 		}
 		exp.ResolvedJob = resolvedJob
 	}
-	if err := l.submitJobTo(ctx, exp, specCluster, c.clusterIDs[specCluster], persistedFlavor, true, provenFit); err != nil {
+	if err := l.submitJobTo(ctx, exp, specCluster, c.clusterIDs[specCluster], persistedAcceleratorType, true, provenFit); err != nil {
 		l.logger.Log(submitErrorLevel(err), "speculative submit", zap.String("exp", exp.ID), zap.String("cluster", specCluster), zap.Error(err))
 		obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
 		reason := notAdmittedReasonForSubmitError(err)
@@ -139,7 +139,7 @@ func (l *Loop) submitSpeculative(ctx context.Context, t *tickState, exp *domain.
 	obsmetrics.SpeculativeSubmitsTotal.Inc()
 	t.speculativeFootprint[specCluster] += exp.AcceleratorCount
 	// The claimed footprint is not subtracted from gAvail/bAvail/nodeAvail here: a speculative
-	// claim has no live node to subtract from, and GetFlavorCapacity already carries desired-free
+	// claim has no live node to subtract from, and GetAcceleratorTypeCapacity already carries desired-free
 	// negative for this cluster starting next tick via SumDesiredFootprintByCluster. Nothing else
 	// in this tick reads gAvail[specCluster] again for a decision this job's SUBMITTED row should
 	// have already influenced.

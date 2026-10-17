@@ -60,8 +60,8 @@ func TestSharesOnANodeOfChipsAndCoresAreCountedPerType(t *testing.T) {
 		"nobody is evicted for a job on cores": {
 			queuedCores, []*domain.Experiment{chipJob("hog", "14", "")}, 2, 3, 56 << 30, "", ""},
 	} {
-		units := map[string]int64{placement.AcceleratorKey(disbalanceFlavor): tc.freeChips, string(cpuType): tc.freeCores}
-		total := domain.CapacityFootprint(disbalanceNodeCores, map[string]int64{disbalanceFlavor: disbalanceNodeChips, string(cpuType): 16}, 64<<30, 0)
+		units := map[string]int64{placement.AcceleratorKey(disbalanceAcceleratorType): tc.freeChips, string(cpuType): tc.freeCores}
+		total := domain.CapacityFootprint(disbalanceNodeCores, map[string]int64{disbalanceAcceleratorType: disbalanceNodeChips, string(cpuType): 16}, 64<<30, 0)
 		avail := domain.CapacityFootprint(float64(tc.freeCores), units, tc.freeMemory, 0)
 
 		got := selectDisbalanceVictims(tc.blocked, tc.blocked.Footprint(), avail, total,
@@ -76,15 +76,15 @@ func TestSharesOnANodeOfChipsAndCoresAreCountedPerType(t *testing.T) {
 	}
 }
 
-// A runtime lists one device under every label of its vendor's domain. Summed over flavors, four
+// A runtime lists one device under every label of its vendor's domain. Summed over accelerator types, four
 // chips under two labels were eight and a job at its share read as twice over.
 func TestADeviceListedUnderTwoLabelsIsCountedOnce(t *testing.T) {
 	const family = "tenstorrent.com/boardType=7"
 	blocked := disbalanceJob("blocked", "2", 1)
 	fair := disbalanceJob("fair", "4", 1)
-	total := domain.CapacityFootprint(disbalanceNodeCores, map[string]int64{disbalanceFlavor: disbalanceNodeChips, family: disbalanceNodeChips}, 64<<30, 0)
-	avail := domain.CapacityFootprint(1, map[string]int64{disbalanceFlavor: 3, family: 3}, 40<<30, 0)
-	nodeAvail := map[string]map[string]int64{"node-a": {placement.AcceleratorKey(disbalanceFlavor): 3, family: 3}}
+	total := domain.CapacityFootprint(disbalanceNodeCores, map[string]int64{disbalanceAcceleratorType: disbalanceNodeChips, family: disbalanceNodeChips}, 64<<30, 0)
+	avail := domain.CapacityFootprint(1, map[string]int64{disbalanceAcceleratorType: 3, family: 3}, 40<<30, 0)
+	nodeAvail := map[string]map[string]int64{"node-a": {placement.AcceleratorKey(disbalanceAcceleratorType): 3, family: 3}}
 
 	got := selectDisbalanceVictims(blocked, blocked.Footprint(), avail, total,
 		disbalanceNodesTotal(), nodeAvail, nil, nil, placedOnNodeA(fair), testDisbalanceTolerance)
@@ -94,13 +94,13 @@ func TestADeviceListedUnderTwoLabelsIsCountedOnce(t *testing.T) {
 	}
 }
 
-// One flavor on a node: the count per flavor is the count of the node, and every decision of the
+// One accelerator type on a node: the count per accelerator type is the count of the node, and every decision of the
 // pass is what it was.
-func TestOnANodeOfOneFlavorTheShareIsWhatItWas(t *testing.T) {
+func TestOnANodeOfOneAcceleratorTypeTheShareIsWhatItWas(t *testing.T) {
 	blocked := disbalanceJob("blocked", "2", 1)
 	for cpu, evicted := range map[string]bool{"4": false, "4001m": true, "14": true, "1": false} {
 		job := disbalanceJob("running", cpu, 1)
-		avail := domain.CapacityFootprint(0.5, map[string]int64{disbalanceFlavor: 3}, 32<<30, 0)
+		avail := domain.CapacityFootprint(0.5, map[string]int64{disbalanceAcceleratorType: 3}, 32<<30, 0)
 		got := selectDisbalanceVictims(blocked, blocked.Footprint(), avail, disbalanceClusterTotal(),
 			disbalanceNodesTotal(), disbalanceNodes(3), nil, nil, placedOnNodeA(job), testDisbalanceTolerance)
 		if (len(got) == 1) != evicted {

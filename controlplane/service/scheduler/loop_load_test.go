@@ -262,8 +262,8 @@ func (s *sim) GetAgentQuota(_ context.Context, agent, _ string) (*domain.AgentQu
 	return &domain.AgentQuota{AgentID: agent, GuaranteedAcceleratorHours: budget, BurstAcceleratorHours: budget, UsedGuaranteedAccH: s.spentLocked(agent, "")}, nil
 }
 
-func (s *sim) ReserveAdmittedFlavor(_ context.Context, id string, _ domain.AcceleratorType, cost float64, _ int) error {
-	s.count("ReserveAdmittedFlavor")
+func (s *sim) ReserveAdmittedAcceleratorType(_ context.Context, id string, _ domain.AcceleratorType, cost float64, _ int) error {
+	s.count("ReserveAdmittedAcceleratorType")
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	agent := s.rows[id].exp.AgentID
@@ -334,8 +334,8 @@ func (s *sim) live() []string {
 	return out
 }
 
-func (s *sim) GetFlavorCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
-	s.count("GetFlavorCapacity")
+func (s *sim) GetAcceleratorTypeCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
+	s.count("GetAcceleratorTypeCapacity")
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	available, desiredFree := map[string]domain.Footprint{}, map[string]domain.Footprint{}
@@ -365,7 +365,7 @@ func (s *sim) perNode(value func(string) map[string]int64) map[string]map[string
 
 func (s *sim) GetAcceleratorCapacityByNode(context.Context) (map[string]map[string]map[string]int64, error) {
 	return s.perNode(func(c string) map[string]int64 {
-		return map[string]int64{string(cpuType): s.observedLocked(c)[domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: string(cpuType)}]}
+		return map[string]int64{string(cpuType): s.observedLocked(c)[domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Name: string(cpuType)}]}
 	}), nil
 }
 func (s *sim) GetNodeResourceCapacity(context.Context) (map[string]map[string]map[string]int64, error) {

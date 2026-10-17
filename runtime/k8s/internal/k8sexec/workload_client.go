@@ -11,7 +11,7 @@
 // and never owns Kubernetes credentials.
 //
 // File layout: this file holds Config/New(); cluster_setup.go holds namespace/PriorityClass
-// bootstrap and flavor-capacity config; job_lifecycle.go holds create/delete/poll operations;
+// bootstrap and accelerator type capacity config; job_lifecycle.go holds create/delete/poll operations;
 // job_build.go holds BuildJob and its affinity/toleration helpers; util.go holds small shared helpers.
 package k8sexec
 

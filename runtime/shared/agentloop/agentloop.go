@@ -402,7 +402,7 @@ func (a *Agent) fetchDesiredState(ctx context.Context, exec agentexec.Executor) 
 	}
 	report := clusterapi.ReconcileRequest{
 		CPUAvailableCores: cpuAvail, CPUTotalCores: cpuTotal,
-		AcceleratorAvailableByFlavor: acceleratorAvail, AcceleratorTotalByFlavor: acceleratorTotal,
+		AcceleratorAvailableByType: acceleratorAvail, AcceleratorTotalByType: acceleratorTotal,
 		AcceleratorAvailableByNode: acceleratorByNode,
 		NodeResourcesByNode:        nodeResources,
 		NodeResourcesTotalByNode:   nodeResourcesTotal,

@@ -12,7 +12,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-var claimLoadL40 = domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: strings.ToLower("nvidia.com/gpu.product=NVIDIA-L40")}
+var claimLoadL40 = domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Name: strings.ToLower("nvidia.com/gpu.product=NVIDIA-L40")}
 
 // Eight admission passes claim at once, as replicas through a failover would, each job on either
 // of two clusters, checking room as the scheduler does: the cluster's total less what desired

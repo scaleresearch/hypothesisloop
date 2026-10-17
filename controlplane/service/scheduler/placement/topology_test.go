@@ -89,18 +89,18 @@ func TestResolveClusterAndFootprintSkipsTopologyInfeasibleCluster(t *testing.T) 
 // were placed in desired state, held a reservation, and sat unschedulable until the stuck-pending
 // deadline, while the disbalance evictor never saw them because it only runs when admission fails.
 func TestReservePlacementRequiresTheWholeFootprintOnOneNode(t *testing.T) {
-	const flavor = "nvidia.com/gpu.product=nvidia-h100-80gb-hbm3"
+	const acceleratorType = "nvidia.com/gpu.product=nvidia-h100-80gb-hbm3"
 	exp := distributedExperiment(1, 1)
 	exp.Job.CPU = "4"
 
-	// The only node carrying the flavor has accelerators to spare but not the CPU.
-	byNode := map[string]map[string]int64{"node-a": {flavor: 8}}
+	// The only node carrying the accelerator type has accelerators to spare but not the CPU.
+	byNode := map[string]map[string]int64{"node-a": {acceleratorType: 8}}
 	starved := map[string]map[string]int64{"node-a": {domain.NodeResourceCPUMillicores: 3000}}
 	if Reserve(byNode, starved, nil, exp) {
 		t.Fatal("admitted onto a node with 3 cores free for a job requesting 4")
 	}
 
-	byNode = map[string]map[string]int64{"node-a": {flavor: 8}}
+	byNode = map[string]map[string]int64{"node-a": {acceleratorType: 8}}
 	roomy := map[string]map[string]int64{"node-a": {domain.NodeResourceCPUMillicores: 4000}}
 	if !Reserve(byNode, roomy, nil, exp) {
 		t.Fatal("a node with exactly enough CPU should accept the job")
@@ -112,11 +112,11 @@ func TestReservePlacementRequiresTheWholeFootprintOnOneNode(t *testing.T) {
 
 // Cluster-wide room is not node room: two half-full nodes cannot host one indivisible rank.
 func TestReservePlacementDoesNotPoolCPUAcrossNodes(t *testing.T) {
-	const flavor = "nvidia.com/gpu.product=nvidia-h100-80gb-hbm3"
+	const acceleratorType = "nvidia.com/gpu.product=nvidia-h100-80gb-hbm3"
 	exp := distributedExperiment(1, 1)
 	exp.Job.CPU = "6"
 
-	byNode := map[string]map[string]int64{"node-a": {flavor: 4}, "node-b": {flavor: 4}}
+	byNode := map[string]map[string]int64{"node-a": {acceleratorType: 4}, "node-b": {acceleratorType: 4}}
 	split := map[string]map[string]int64{
 		"node-a": {domain.NodeResourceCPUMillicores: 4000},
 		"node-b": {domain.NodeResourceCPUMillicores: 4000},

@@ -95,7 +95,7 @@ func notAdmittedReasonFor(fitAtTickStart, scalarFits, freedInDesiredState bool, 
 
 func shortOfADevice(shortage domain.Footprint) bool {
 	for key, short := range shortage {
-		if short > 0 && key.Kind == domain.ResourceKindAccelerator && !domain.CPUType.Is(domain.AcceleratorType(key.Flavor)) {
+		if short > 0 && key.Kind == domain.ResourceKindAccelerator && !domain.CPUType.Is(domain.AcceleratorType(key.Name)) {
 			return true
 		}
 	}

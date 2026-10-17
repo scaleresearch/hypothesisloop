@@ -15,16 +15,16 @@ import (
 
 type occupancy struct{ busy, total int64 }
 
-// occupancyByKind sums one cluster's reported flavors into devices and cores. The CPU type counts
+// occupancyByKind sums one cluster's reported accelerator types into devices and cores. The CPU type counts
 // cores and an accelerator type devices, so the two are never one sum.
 func occupancyByKind(available, total map[string]int64) (devices, cores occupancy) {
-	for flavor, installed := range total {
+	for acceleratorType, installed := range total {
 		sum := &devices
-		if domain.AcceleratorType(flavor).Kind() == domain.TypeKindCPU {
+		if domain.AcceleratorType(acceleratorType).Kind() == domain.TypeKindCPU {
 			sum = &cores
 		}
 		sum.total += installed
-		sum.busy += installed - available[flavor]
+		sum.busy += installed - available[acceleratorType]
 	}
 	return devices, cores
 }
@@ -39,7 +39,7 @@ type ClusterInfo struct {
 	LastSeenAt time.Time `json:"last_seen_at"`
 	Connected  bool      `json:"connected"`
 	// AcceleratorBusy/AcceleratorTotal are the cluster's most recently reported occupancy,
-	// summed across every flavor of kind accelerator — actual busy-vs-idle chip counts from the
+	// summed across every accelerator type of kind accelerator — actual busy-vs-idle chip counts from the
 	// last reconcile snapshot, not a budget-consumption ratio. Zero/absent when no live snapshot
 	// is within the connectedWithin freshness window (e.g. a disconnected cluster).
 	AcceleratorBusy  int64 `json:"accelerator_busy"`

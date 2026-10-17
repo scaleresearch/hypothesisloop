@@ -26,20 +26,20 @@ type mixedWorkload struct {
 	published bool
 }
 
-func (w mixedWorkload) flavors(h100s, cores int64) map[string]int64 {
+func (w mixedWorkload) acceleratorTypes(h100s, cores int64) map[string]int64 {
 	if !w.published {
 		return map[string]int64{h100: h100s}
 	}
 	return map[string]int64{h100: h100s, string(cpuType): cores}
 }
-func (w mixedWorkload) GetFlavorCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
+func (w mixedWorkload) GetAcceleratorTypeCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
 	free := func() map[string]domain.Footprint {
-		return map[string]domain.Footprint{"cluster-a": domain.CapacityFootprint(w.cpuFree, w.flavors(w.h100Free, int64(w.cpuFree)), 64<<30, 64<<30)}
+		return map[string]domain.Footprint{"cluster-a": domain.CapacityFootprint(w.cpuFree, w.acceleratorTypes(w.h100Free, int64(w.cpuFree)), 64<<30, 64<<30)}
 	}
 	return free(), free(), nil
 }
 func (w mixedWorkload) GetAcceleratorCapacityByNode(context.Context) (map[string]map[string]map[string]int64, error) {
-	return map[string]map[string]map[string]int64{"cluster-a": {"node-a": w.flavors(w.h100Free, int64(w.cpuFree))}}, nil
+	return map[string]map[string]map[string]int64{"cluster-a": {"node-a": w.acceleratorTypes(w.h100Free, int64(w.cpuFree))}}, nil
 }
 func (w mixedWorkload) GetNodeResourceCapacity(context.Context) (map[string]map[string]map[string]int64, error) {
 	node := holdNodeTotal()
@@ -53,7 +53,7 @@ func (mixedWorkload) GetNodeLabels(context.Context) (map[string]map[string]map[s
 	return map[string]map[string]map[string]string{"cluster-a": {"node-a": {}}}, nil
 }
 func (w mixedWorkload) GetTotalCapacity(context.Context) (map[string]domain.Footprint, error) {
-	return map[string]domain.Footprint{"cluster-a": domain.CapacityFootprint(16, w.flavors(4, 16), 64<<30, 64<<30)}, nil
+	return map[string]domain.Footprint{"cluster-a": domain.CapacityFootprint(16, w.acceleratorTypes(4, 16), 64<<30, 64<<30)}, nil
 }
 
 // mixedStore records where each job was claimed, the spec it was claimed with, and who was
@@ -79,9 +79,9 @@ func (s *mixedStore) RequeuePreempted(_ context.Context, id string, _, _ float64
 }
 
 type reservation struct {
-	Flavor domain.AcceleratorType
-	Cost   float64
-	Count  int
+	AcceleratorType domain.AcceleratorType
+	Cost            float64
+	Count           int
 }
 
 // mixedQuota grants every agent ample hours and records what each admitted job was reserved at.
@@ -93,8 +93,8 @@ type mixedQuota struct {
 func (*mixedQuota) GetAgentQuota(context.Context, string, string) (*domain.AgentQuota, error) {
 	return &domain.AgentQuota{GuaranteedAcceleratorHours: 100, BurstAcceleratorHours: 100}, nil
 }
-func (q *mixedQuota) ReserveAdmittedFlavor(_ context.Context, id string, flavor domain.AcceleratorType, cost float64, count int) error {
-	q.reserved[id] = reservation{flavor, cost, count}
+func (q *mixedQuota) ReserveAdmittedAcceleratorType(_ context.Context, id string, acceleratorType domain.AcceleratorType, cost float64, count int) error {
+	q.reserved[id] = reservation{acceleratorType, cost, count}
 	return nil
 }
 
@@ -169,7 +169,7 @@ func TestATickAdmitsACoreJobAndAnAcceleratorJobSideBySide(t *testing.T) {
 			}
 			want := map[string]reservation{"cores": {cpuType, 4 * 2, 4}, "gpu": {h100, 2, 1}}
 			for id, w := range want {
-				if got := quota.reserved[id]; got.Flavor != w.Flavor || got.Count != w.Count || !near(got.Cost, w.Cost) {
+				if got := quota.reserved[id]; got.AcceleratorType != w.AcceleratorType || got.Count != w.Count || !near(got.Cost, w.Cost) {
 					t.Errorf("%s reserved at %+v, want %+v", id, got, w)
 				}
 			}
@@ -379,7 +379,7 @@ func (w coreBoxes) perNode(value func(string) map[string]int64) map[string]map[s
 	}
 	return out
 }
-func (w coreBoxes) GetFlavorCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
+func (w coreBoxes) GetAcceleratorTypeCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
 	return w.footprints(), w.footprints(), nil
 }
 func (w coreBoxes) GetTotalCapacity(context.Context) (map[string]domain.Footprint, error) {

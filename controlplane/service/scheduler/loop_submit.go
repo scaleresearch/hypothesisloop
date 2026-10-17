@@ -20,11 +20,11 @@ var errAdmissionCapacityChanged = errors.New("capacity changed during admission"
 // rejection from a generic submit failure without importing the quota package's concrete type.
 type concurrencyCapExceeded interface{ ConcurrencyCapExceeded() bool }
 
-// readFlavorCapacity is GetFlavorCapacity with the clusters it left out logged and the read kept.
-func readFlavorCapacity(ctx context.Context, client interface {
-	GetFlavorCapacity(ctx context.Context) (available, desiredFree map[string]domain.Footprint, err error)
+// readAcceleratorTypeCapacity is GetAcceleratorTypeCapacity with the clusters it left out logged and the read kept.
+func readAcceleratorTypeCapacity(ctx context.Context, client interface {
+	GetAcceleratorTypeCapacity(ctx context.Context) (available, desiredFree map[string]domain.Footprint, err error)
 }, logger *zap.Logger) (available, desiredFree map[string]domain.Footprint, err error) {
-	available, desiredFree, err = client.GetFlavorCapacity(ctx)
+	available, desiredFree, err = client.GetAcceleratorTypeCapacity(ctx)
 	var skipped InconsistentSnapshots
 	if errors.As(err, &skipped) {
 		for cluster, why := range skipped {
@@ -67,20 +67,20 @@ func submitErrorLevel(err error) zapcore.Level {
 	return zapcore.ErrorLevel
 }
 
-// persistedFlavor is what the experiments row said before this tick's placement search ran.
+// persistedAcceleratorType is what the experiments row said before this tick's placement search ran.
 // Passing it in is what makes the write below correct: the search communicates its choice by
 // mutating exp.AcceleratorType, so by the time submitJob runs, exp no longer knows what is
-// actually stored. Comparing the choice against the immutable *requested* flavor instead used to
-// leave the row stranded on a substitute — tick 1 persists flavor B and then fails its claim,
-// tick 2 re-picks the originally requested A, the requested-flavor comparison sees no
+// actually stored. Comparing the choice against the immutable *requested* accelerator type instead used to
+// leave the row stranded on a substitute — tick 1 persists accelerator type B and then fails its claim,
+// tick 2 re-picks the originally requested A, the requested-type comparison sees no
 // substitution and writes nothing, and the row says B for the rest of the job's life while the
 // scheduler reserves and fit-checks A.
 // speculative marks a submit made against a cluster with no live capacity — the SUBMITTED row
 // itself is the scale-up request, so there is no fresh node to re-check a live-fit predicate
 // against at claim time. See ClaimSubmitted: a nil capacityAvailable callback skips that check
 // and relies on the lock plus the status='QUEUED' predicate alone.
-func (l *Loop) submitJob(ctx context.Context, exp *domain.Experiment, clusterName string, persistedFlavor domain.AcceleratorType) error {
-	return l.submitJobTo(ctx, exp, clusterName, "", persistedFlavor, false, false)
+func (l *Loop) submitJob(ctx context.Context, exp *domain.Experiment, clusterName string, persistedAcceleratorType domain.AcceleratorType) error {
+	return l.submitJobTo(ctx, exp, clusterName, "", persistedAcceleratorType, false, false)
 }
 
 // provenFit mirrors speculativeCandidates' own signal for this cluster (false for a non-speculative
@@ -88,25 +88,25 @@ func (l *Loop) submitJob(ctx context.Context, exp *domain.Experiment, clusterNam
 // speculativeCandidates applied a moment ago, or a cluster with no live proof and no operator cap
 // stays unbounded at the one place multiple concurrent scheduler replicas actually serialize
 // against each other: the tick-local snapshot alone cannot close this.
-func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterName, clusterID string, persistedFlavor domain.AcceleratorType, speculative, provenFit bool) error {
-	// ReserveAdmittedFlavor is called on every submit now, not only on a flavor substitution: it
+func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterName, clusterID string, persistedAcceleratorType domain.AcceleratorType, speculative, provenFit bool) error {
+	// ReserveAdmittedAcceleratorType is called on every submit now, not only on an accelerator type substitution: it
 	// is also where the max_concurrent_accelerators cap (autoscaler.md's concurrency cap) is
 	// enforced atomically against this pool's live SUBMITTED+RUNNING accelerator count, and
 	// speculation makes live capacity appear on demand — the cap is the only thing left bounding
 	// concurrency once that gate is open. Every job holds units of a priced type (ValidateExperiment),
 	// cores on CPU and devices otherwise, so there is none it does not apply to.
 	newEstCost := exp.EstimatedCostAccH
-	flavor := persistedFlavor
-	if exp.AcceleratorType != persistedFlavor {
+	acceleratorType := persistedAcceleratorType
+	if exp.AcceleratorType != persistedAcceleratorType {
 		held, err := exp.EstimateHeld()
 		if err != nil {
 			return fmt.Errorf("submitJob: %w", err)
 		}
 		newEstCost = held
-		flavor = exp.AcceleratorType
+		acceleratorType = exp.AcceleratorType
 	}
-	if err := l.quota.ReserveAdmittedFlavor(ctx, exp.ID, flavor, newEstCost, exp.AcceleratorCount); err != nil {
-		return fmt.Errorf("reserve selected accelerator flavor: %w", err)
+	if err := l.quota.ReserveAdmittedAcceleratorType(ctx, exp.ID, acceleratorType, newEstCost, exp.AcceleratorCount); err != nil {
+		return fmt.Errorf("reserve selected accelerator type: %w", err)
 	}
 	exp.EstimatedCostAccH = newEstCost
 	fp := exp.Footprint()
@@ -157,7 +157,7 @@ func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterN
 		}
 	} else {
 		capacityAvailable = func(ctx context.Context, desired []*domain.Experiment) (bool, error) {
-			available, _, err := readFlavorCapacity(ctx, l.clusters, l.logger)
+			available, _, err := readAcceleratorTypeCapacity(ctx, l.clusters, l.logger)
 			if err != nil {
 				return false, err
 			}

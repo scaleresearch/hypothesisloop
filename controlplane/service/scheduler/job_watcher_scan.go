@@ -180,7 +180,7 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 		case runningTypeMismatch:
 			// Only feed this into cross-job tried_clusters backoff on a cluster the autoscaler
 			// path actually cares about — an ordinary live-fit cluster reporting the wrong
-			// flavor is a ClaimSubmitted resolution bug, not evidence the cluster's autoscaler
+			// accelerator type is a ClaimSubmitted resolution bug, not evidence the cluster's autoscaler
 			// failed to deliver capacity, and must not bar other jobs from speculating there.
 			triedClusterID := ""
 			if autoscalerEnabled[exp.ClusterName] {

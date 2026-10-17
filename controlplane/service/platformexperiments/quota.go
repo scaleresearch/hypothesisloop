@@ -265,11 +265,11 @@ func (s *Service) AdmitExperiment(ctx context.Context, exp *domain.Experiment, r
 	}, rateLimit, createDataKey)
 }
 
-// ReserveAdmittedFlavor revalidates quota and the platform experiment's concurrency cap
-// (autoscaler.md's spend-rate control) before persisting the selected accelerator flavor.
+// ReserveAdmittedAcceleratorType revalidates quota and the platform experiment's concurrency cap
+// (autoscaler.md's spend-rate control) before persisting the selected accelerator type.
 // acceleratorCount is the job's total accelerator footprint (0 for jobs with none).
-func (s *Service) ReserveAdmittedFlavor(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, acceleratorCount int) error {
-	reason, err := s.store.ReserveAdmittedFlavorTx(ctx, experimentID, acceleratorType, estimatedCost, acceleratorCount, s.cfg.DefaultMaxConcurrentAccelerators,
+func (s *Service) ReserveAdmittedAcceleratorType(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, acceleratorCount int) error {
+	reason, err := s.store.ReserveAdmittedAcceleratorTypeTx(ctx, experimentID, acceleratorType, estimatedCost, acceleratorCount, s.cfg.DefaultMaxConcurrentAccelerators,
 		func(ctx context.Context, agentID, platformExpID string, platformExpStart time.Time) (*domain.AgentQuota, error) {
 			aq := &domain.AgentQuota{AgentID: agentID, PlatformExperimentID: platformExpID}
 			if err := s.metrics.PopulateUsageOne(ctx, platformExpStart, aq); err != nil {

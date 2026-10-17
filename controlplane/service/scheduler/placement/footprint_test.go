@@ -8,8 +8,8 @@ import (
 
 var cpuKey = domain.ResourceKey{Kind: domain.ResourceKindCPU}
 
-func acceleratorKey(flavor string) domain.ResourceKey {
-	return domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: flavor}
+func acceleratorKey(acceleratorType string) domain.ResourceKey {
+	return domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Name: acceleratorType}
 }
 
 func TestClusterWithBestFitPrefersOutrightFit(t *testing.T) {
@@ -68,16 +68,16 @@ func TestReservePlacementPlacesEachGroupsOwnShapeRatherThanAnAverage(t *testing.
 // own the requested hardware at all is not a cosmetic mistake: the guaranteed job is handed a
 // target where no burst victim can free what it needs, finds nothing to take, and stays QUEUED
 // forever while the cluster that does own the hardware sits full of evictable burst work. A
-// cluster reporting zero free of a flavor it owns is the whole point of the preemption path; a
-// cluster that never reports the flavor is not a candidate for it.
-func TestClusterWithBestFitNeverTargetsAClusterThatDoesNotOwnTheRequestedFlavor(t *testing.T) {
-	need := domain.Footprint{cpuKey: 250, acceleratorKey("flavor-l40"): 8}
+// cluster reporting zero free of an accelerator type it owns is the whole point of the preemption path; a
+// cluster that never reports the accelerator type is not a candidate for it.
+func TestClusterWithBestFitNeverTargetsAClusterThatDoesNotOwnTheRequestedAcceleratorType(t *testing.T) {
+	need := domain.Footprint{cpuKey: 250, acceleratorKey("type-l40"): 8}
 	avail := map[string]domain.Footprint{
 		// Sorts first, has ample CPU and no L40 whatsoever — its total shortage is the same 8 as
 		// the saturated owner's, which is what made the tie land here.
-		"a-no-l40-cluster": {cpuKey: 16000, acceleratorKey("flavor-blackhole"): 4},
+		"a-no-l40-cluster": {cpuKey: 16000, acceleratorKey("type-blackhole"): 4},
 		// Owns eight L40s, every one of them held by preemptible burst work.
-		"z-saturated-l40-cluster": {cpuKey: 78000, acceleratorKey("flavor-l40"): 0},
+		"z-saturated-l40-cluster": {cpuKey: 78000, acceleratorKey("type-l40"): 0},
 	}
 	got := BestFit(avail, nil, need)
 	if got != "z-saturated-l40-cluster" {
@@ -88,11 +88,11 @@ func TestClusterWithBestFitNeverTargetsAClusterThatDoesNotOwnTheRequestedFlavor(
 // When no cluster owns the hardware there is no preemption target to name, and inventing one
 // would send the evictor at live work on a cluster that can never satisfy the request. The empty
 // name fails every downstream fit check, which is the capacity_unavailable the submitter needs.
-func TestClusterWithBestFitNamesNoClusterWhenNoneOwnsTheRequestedFlavor(t *testing.T) {
-	need := domain.Footprint{acceleratorKey("flavor-h200"): 2}
+func TestClusterWithBestFitNamesNoClusterWhenNoneOwnsTheRequestedAcceleratorType(t *testing.T) {
+	need := domain.Footprint{acceleratorKey("type-h200"): 2}
 	avail := map[string]domain.Footprint{
-		"cluster-a": {cpuKey: 16000, acceleratorKey("flavor-l40"): 8},
-		"cluster-b": {cpuKey: 16000, acceleratorKey("flavor-blackhole"): 4},
+		"cluster-a": {cpuKey: 16000, acceleratorKey("type-l40"): 8},
+		"cluster-b": {cpuKey: 16000, acceleratorKey("type-blackhole"): 4},
 	}
 	if got := BestFit(avail, nil, need); got != "" {
 		t.Errorf("clusterWithBestFit = %q, want \"\" (no cluster owns this hardware)", got)
@@ -103,12 +103,12 @@ func TestClusterWithBestFitNamesNoClusterWhenNoneOwnsTheRequestedFlavor(t *testi
 // nowhere else — the exact shape whose top-level accelerator_count a grouped submission REJECTS,
 // and which the store therefore never back-fills.
 func groupedAcceleratorExperiment() *domain.Experiment {
-	const flavor = "nvidia.com/gpu.product=nvidia-l40"
+	const acceleratorType = "nvidia.com/gpu.product=nvidia-l40"
 	return &domain.Experiment{
-		AcceleratorType:  flavor,
+		AcceleratorType:  acceleratorType,
 		AcceleratorCount: 3,
 		Job: domain.JobSpec{Image: "registry.test/job:1",
-			AcceleratorType: flavor,
+			AcceleratorType: acceleratorType,
 			Groups: []domain.JobGroup{
 				{Name: "learner", Replicas: 1, CPU: "1", Memory: "1Gi", Storage: "1Gi", AcceleratorCount: 2},
 				{Name: "actor", Replicas: 1, CPU: "1", Memory: "1Gi", Storage: "1Gi", AcceleratorCount: 1},
@@ -123,13 +123,13 @@ func groupedAcceleratorExperiment() *domain.Experiment {
 // no-accelerator path: it skipped the node-layout proof entirely and could be handed a cluster
 // whose only qualifying node had not a single free device of the hardware it asked for.
 func TestAGroupedJobIsPlacedOnAClusterWhoseNodesActuallyHaveItsAccelerators(t *testing.T) {
-	const flavor = "nvidia.com/gpu.product=nvidia-l40"
+	const acceleratorType = "nvidia.com/gpu.product=nvidia-l40"
 	exp := groupedAcceleratorExperiment()
 	fp := exp.Footprint()
 	avail := map[string]domain.Footprint{"a-empty-nodes": fp, "b-real-devices": fp}
 	nodes := map[string]map[string]map[string]int64{
-		"a-empty-nodes":  {"node-a1": {flavor: 0}, "node-a2": {flavor: 0}},
-		"b-real-devices": {"node-b1": {flavor: 8}, "node-b2": {flavor: 8}},
+		"a-empty-nodes":  {"node-a1": {acceleratorType: 0}, "node-a2": {acceleratorType: 0}},
+		"b-real-devices": {"node-b1": {acceleratorType: 8}, "node-b2": {acceleratorType: 8}},
 	}
 	roomy := map[string]int64{
 		domain.NodeResourceCPUMillicores: 64000,

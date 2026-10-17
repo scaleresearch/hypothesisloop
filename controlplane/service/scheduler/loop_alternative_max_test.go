@@ -10,15 +10,17 @@ import (
 // smallFirstTypeWorkload is cluster-a with one node of two h100 and eight l40, all free.
 type smallFirstTypeWorkload struct{ holdWorkload }
 
-func (smallFirstTypeWorkload) flavors() map[string]int64 { return map[string]int64{h100: 2, l40: 8} }
-func (w smallFirstTypeWorkload) GetFlavorCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
+func (smallFirstTypeWorkload) acceleratorTypes() map[string]int64 {
+	return map[string]int64{h100: 2, l40: 8}
+}
+func (w smallFirstTypeWorkload) GetAcceleratorTypeCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
 	free := func() map[string]domain.Footprint {
-		return map[string]domain.Footprint{"cluster-a": domain.CapacityFootprint(16, w.flavors(), 64<<30, 64<<30)}
+		return map[string]domain.Footprint{"cluster-a": domain.CapacityFootprint(16, w.acceleratorTypes(), 64<<30, 64<<30)}
 	}
 	return free(), free(), nil
 }
 func (w smallFirstTypeWorkload) GetAcceleratorCapacityByNode(context.Context) (map[string]map[string]map[string]int64, error) {
-	return map[string]map[string]map[string]int64{"cluster-a": {"node-a": w.flavors()}}, nil
+	return map[string]map[string]map[string]int64{"cluster-a": {"node-a": w.acceleratorTypes()}}, nil
 }
 func (smallFirstTypeWorkload) GetNodeResourceCapacity(context.Context) (map[string]map[string]map[string]int64, error) {
 	return map[string]map[string]map[string]int64{"cluster-a": {"node-a": holdNodeTotal()}}, nil
@@ -30,7 +32,7 @@ func (smallFirstTypeWorkload) GetNodeLabels(context.Context) (map[string]map[str
 	return map[string]map[string]map[string]string{"cluster-a": {"node-a": {}}}, nil
 }
 func (w smallFirstTypeWorkload) GetTotalCapacity(context.Context) (map[string]domain.Footprint, error) {
-	return map[string]domain.Footprint{"cluster-a": domain.CapacityFootprint(16, w.flavors(), 64<<30, 64<<30)}, nil
+	return map[string]domain.Footprint{"cluster-a": domain.CapacityFootprint(16, w.acceleratorTypes(), 64<<30, 64<<30)}, nil
 }
 
 // A job asks for four of a type the cluster has two of and accepts a type it has eight of. It is
@@ -54,7 +56,7 @@ func TestAJobTooLargeForItsFirstTypeTakesAnAlternativeThatFits(t *testing.T) {
 			if got := store.resolved["job"].Memory; got != resolved {
 				t.Errorf("memory %s, %s: runs with %q, want %q", memory, tier, got, resolved)
 			}
-			if got := quota.reserved["job"]; got.Flavor != l40 || !near(got.Cost, 4*0.25) {
+			if got := quota.reserved["job"]; got.AcceleratorType != l40 || !near(got.Cost, 4*0.25) {
 				t.Errorf("memory %s, %s: reserved at %+v, want four l40 for an hour", memory, tier, got)
 			}
 		}

@@ -149,25 +149,25 @@ func PreemptionShortfall(clusterAvail domain.Footprint, byNode, nodeResources ma
 			}
 		}
 	}
-	acceleratorKey := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: key}
+	acceleratorKey := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Name: key}
 	if missing > out[acceleratorKey] {
 		out[acceleratorKey] = missing
 	}
 	return out
 }
 
-// CandidateTypes returns the flavors admission should try for exp, in preference
+// CandidateTypes returns the accelerator types admission should try for exp, in preference
 // order: exp.AcceleratorType first, then any distinct AcceptableAcceleratorTypes.
-// AcceleratorCount is already flavor-independent, so trying an alternate only changes which
+// AcceleratorCount is already accelerator-type-independent, so trying an alternate only changes which
 // accelerator key the footprint is keyed under.
 func CandidateTypes(exp *domain.Experiment) []domain.AcceleratorType {
 	if exp.Job.AcceleratorType == "" {
 		return nil
 	}
-	// A job that has already executed re-admits onto the flavor it actually ran on, and nothing
+	// A job that has already executed re-admits onto the accelerator type it actually ran on, and nothing
 	// else. Settlement bills lifetime observed hours at the rate the row carries, so moving a
-	// requeued job to a different flavor silently re-prices the stint it already ran at the new
-	// flavor's rate. Read from the type the row recorded when the job was marked RUNNING, which
+	// requeued job to a different accelerator type silently re-prices the stint it already ran at the new
+	// accelerator type's rate. Read from the type the row recorded when the job was marked RUNNING, which
 	// outlives every requeue and every placement that is rolled back, rather than from observed
 	// hours: metrics are delayed, so "has it consumed anything yet" can still read zero for a
 	// job that has run.
@@ -178,7 +178,7 @@ func CandidateTypes(exp *domain.Experiment) []domain.AcceleratorType {
 	types = append(types, exp.Job.AcceleratorType)
 	// The requested type is allowed to also appear in AcceptableAcceleratorTypes (see the
 	// admission check in admission.go), so collapse that overlap here rather than retrying the
-	// same flavor twice — "distinct" above is this dedup, not an assumption about the input.
+	// same accelerator type twice — "distinct" above is this dedup, not an assumption about the input.
 	seen := map[domain.AcceleratorType]bool{exp.Job.AcceleratorType: true}
 	for _, t := range exp.Job.AcceptableAcceleratorTypes {
 		if seen[t] {
@@ -307,7 +307,7 @@ func addNodeResourceShortfall(out domain.Footprint, byNode, nodeResources map[st
 }
 
 // ReportsEveryDimension reports whether capacity has an entry for every dimension footprint asks
-// for — present, not necessarily sufficient. Zero free of a flavor the cluster owns is a cluster
+// for — present, not necessarily sufficient. Zero free of an accelerator type the cluster owns is a cluster
 // preemption can unblock; no entry at all is a cluster that does not have the hardware, and no
 // eviction there will ever produce it.
 func ReportsEveryDimension(capacity domain.Footprint, footprint domain.Footprint) bool {

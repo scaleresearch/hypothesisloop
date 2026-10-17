@@ -15,7 +15,7 @@ import (
 func TestBacklogAggregatorAccumulatesAndTracksOldest(t *testing.T) {
 	b := newBacklogAggregator()
 	now := time.Now()
-	shortage := domain.Footprint{{Kind: domain.ResourceKindAccelerator, Flavor: strings.ToLower(h100)}: 2}
+	shortage := domain.Footprint{{Kind: domain.ResourceKindAccelerator, Name: strings.ToLower(h100)}: 2}
 
 	older := now.Add(-10 * time.Minute)
 	newer := now.Add(-1 * time.Minute)
@@ -30,7 +30,7 @@ func TestBacklogAggregatorAccumulatesAndTracksOldest(t *testing.T) {
 	exp2.QueuedAt = &newer
 	b.record(now, "cluster-a", "guaranteed", exp2, shortage)
 
-	key := backlogKey{cluster: "cluster-a", flavor: strings.ToLower(h100), tier: "guaranteed"}
+	key := backlogKey{cluster: "cluster-a", acceleratorType: strings.ToLower(h100), tier: "guaranteed"}
 	if got := b.unmet[key]; got != 4 {
 		t.Fatalf("unmet[%v] = %d, want 4 (accumulated across both jobs)", key, got)
 	}
@@ -40,12 +40,12 @@ func TestBacklogAggregatorAccumulatesAndTracksOldest(t *testing.T) {
 }
 
 func TestAcceleratorShortfall(t *testing.T) {
-	shortage := domain.Footprint{{Kind: domain.ResourceKindAccelerator, Flavor: strings.ToLower(h100)}: 7}
+	shortage := domain.Footprint{{Kind: domain.ResourceKindAccelerator, Name: strings.ToLower(h100)}: 7}
 	if got := acceleratorShortfall(shortage, domain.AcceleratorType(h100)); got != 7 {
 		t.Fatalf("acceleratorShortfall() = %d, want 7", got)
 	}
 	if got := acceleratorShortfall(shortage, "a100"); got != 0 {
-		t.Fatalf("acceleratorShortfall() for a different flavor = %d, want 0", got)
+		t.Fatalf("acceleratorShortfall() for a different accelerator type = %d, want 0", got)
 	}
 	if got := acceleratorShortfall(nil, domain.AcceleratorType(h100)); got != 0 {
 		t.Fatalf("acceleratorShortfall(nil, ...) = %d, want 0", got)

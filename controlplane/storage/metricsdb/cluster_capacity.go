@@ -113,8 +113,8 @@ const clusterMultiNodeCapableMetric = "cluster_multi_node_capable"
 const clusterAutoscalerEnabledMetric = "cluster_autoscaler_enabled"
 
 // clusterAcceleratorAvailableMetric/clusterAcceleratorTotalMetric hold cluster-agents'
-// self-reported live per-flavor accelerator capacity (allocatable minus actually-requested,
-// computed per flavor against real node/pod state — see
+// self-reported live per-accelerator-type capacity (allocatable minus actually-requested,
+// computed per accelerator type against real node/pod state — see
 // workload.GetLiveAcceleratorCapacitySnapshot). Written on every reconcile exchange, like CPU
 // capacity. Lives only in metrics storage, never duplicated into Postgres.
 const (

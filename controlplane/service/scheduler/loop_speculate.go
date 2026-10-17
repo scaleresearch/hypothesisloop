@@ -86,13 +86,13 @@ func (l *Loop) speculativeCandidates(
 				return nil, nil, ierr
 			}
 			accelCeiling = map[string]map[string]int64{}
-			flavor := string(exp.AcceleratorType)
+			acceleratorType := string(exp.AcceleratorType)
 			for node, count := range installed {
-				accelCeiling[node] = map[string]int64{flavor: count}
+				accelCeiling[node] = map[string]int64{acceleratorType: count}
 			}
 		}
 		// fitsLargestNode is a PREFERENCE signal, never an exclusion: a cluster can run several
-		// heterogeneous node groups (different accelerator flavors, some scaled to zero) at once,
+		// heterogeneous node groups (different accelerator types, some scaled to zero) at once,
 		// so "no currently-live node proves a fit" does not mean "this cluster's autoscaler could
 		// never add a matching node" — it may just mean the matching node group is the one at zero
 		// right now. Excluding on that would repeat the exact mistake this feature was fixed for,
@@ -105,7 +105,7 @@ func (l *Loop) speculativeCandidates(
 		}
 		if cap == nil && !provenFit {
 			// No live evidence backs this guess (either zero nodes, or live nodes that don't prove
-			// this flavor/shape fits — a different node group might). Absent an operator-set cap,
+			// this accelerator type/shape fits — a different node group might). Absent an operator-set cap,
 			// bound the exposure to one job's own footprint rather than leaving it unbounded — once
 			// a real attempt lands there (success or a tracked failover), the operator has empirical
 			// grounds to raise max_speculative_accelerators if they want more concurrent bets here.
@@ -169,17 +169,17 @@ func triedRecently(tried []domain.TriedCluster, clusterID string, ttl time.Durat
 }
 
 // negativeInDimension reports whether avail already carries a negative desired-free value for
-// flavor — i.e. someone already has a SUBMITTED row outstanding against this cluster's capacity
-// in this dimension. domain.Footprint.Sub never clamps at zero, so GetFlavorCapacity's own
+// accelerator type — i.e. someone already has a SUBMITTED row outstanding against this cluster's capacity
+// in this dimension. domain.Footprint.Sub never clamps at zero, so GetAcceleratorTypeCapacity's own
 // output already answers this with no second query.
-func negativeInDimension(avail domain.Footprint, flavor domain.AcceleratorType) bool {
+func negativeInDimension(avail domain.Footprint, acceleratorType domain.AcceleratorType) bool {
 	if avail == nil {
 		return false
 	}
-	key := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: strings.ToLower(string(flavor))}
+	key := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Name: strings.ToLower(string(acceleratorType))}
 	v, ok := avail[key]
 	if !ok {
-		// A flavor this footprint never mentions is not "waiting for scale-up" — that is the
+		// An accelerator type this footprint never mentions is not "waiting for scale-up" — that is the
 		// zero-value default doing the talking, not an observed desired-free of zero.
 		return false
 	}
@@ -222,7 +222,7 @@ func allSpeculativeCandidatesTried(exp *domain.Experiment, autoscalerEnabled, co
 // job would Pend forever since no addable node matches the synthesized shape.
 //
 // False does NOT mean "this cluster can never fit exp" — a cluster commonly runs several
-// heterogeneous node groups at once (different accelerator flavors, some scaled to zero), and the
+// heterogeneous node groups at once (different accelerator types, some scaled to zero), and the
 // node group that would actually fit may simply have no live nodes right now to prove it. Treating
 // false as exclusion was the bug one level up from the original one: gating on a live node's
 // capacity is exactly as wrong when done per-cluster as it was when done per-node-free-count. The
@@ -231,7 +231,7 @@ func allSpeculativeCandidatesTried(exp *domain.Experiment, autoscalerEnabled, co
 //
 // A cluster reporting zero live nodes (most commonly one already scaled to zero) has no shape data
 // at all to check against, so it reports false — no proof either way, exactly like a cluster whose
-// live nodes are all the wrong flavor.
+// live nodes are all the wrong accelerator type.
 //
 // For a cluster that DOES report live nodes, accelByNode must already carry each node's INSTALLED
 // count (free plus whatever the scheduler itself has already claimed there), not raw free capacity
@@ -243,7 +243,7 @@ func fitsLargestNode(exp *domain.Experiment, accelByNode, resourcesByNode map[st
 	if len(resourcesByNode) == 0 {
 		return false
 	}
-	flavor := string(exp.AcceleratorType)
+	acceleratorType := string(exp.AcceleratorType)
 	sawLabelMatch := false
 	for _, shape := range exp.NodeShapes() {
 		fitsSomeNode := false
@@ -252,7 +252,7 @@ func fitsLargestNode(exp *domain.Experiment, accelByNode, resourcesByNode map[st
 				continue
 			}
 			sawLabelMatch = true
-			if shape.AcceleratorCount <= accelByNode[node][flavor] && placement.NodeHasRoom(resources, shape.Resources) {
+			if shape.AcceleratorCount <= accelByNode[node][acceleratorType] && placement.NodeHasRoom(resources, shape.Resources) {
 				fitsSomeNode = true
 				break
 			}

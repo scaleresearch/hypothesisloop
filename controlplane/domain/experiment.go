@@ -252,7 +252,7 @@ func (e *Experiment) TakeEstimate(pe *PlatformExperiment) bool {
 }
 
 // EstimateHeld is the accelerator-hours a job holds of its agent's quota until it ends: the rate
-// of its type times its units times its estimated hours. The submit, a flavor substitution and
+// of its type times its units times its estimated hours. The submit, an accelerator type substitution and
 // the stored row all take the figure from here, so a refusal states the hold the job would have.
 func (e *Experiment) EstimateHeld() (float64, error) {
 	rate, ok := e.AcceleratorType.LookupCost()
@@ -268,8 +268,8 @@ func (e *Experiment) EstimateHeld() (float64, error) {
 // rate — rather than a live catalog lookup (domain.AcceleratorType.LookupCost) — keeps the two
 // call sites priced identically for the life of the job: it's invariant across a preemption
 // requeue's proportional rescale (see experiments_store_lifecycle.RequeuePreempted), and it can't
-// be knocked out by an operator retiring the accelerator flavor from the rate table mid-run, since
-// it never looks the flavor up again after admission. Zero for an unset/invalid duration.
+// be knocked out by an operator retiring the accelerator type from the rate table mid-run, since
+// it never looks the accelerator type up again after admission. Zero for an unset/invalid duration.
 func (e *Experiment) RatedCost(estimated, hours float64) float64 {
 	if e.EstimatedDurationHours <= 0 {
 		return 0
@@ -286,8 +286,8 @@ func (e *Experiment) RatedCost(estimated, hours float64) float64 {
 //
 // The accelerator dimension deliberately uses e.AcceleratorType/e.AcceleratorCount, not
 // e.Job.AcceleratorType/e.Job.AcceleratorCount (the originally requested type before
-// substitution): once a job lands on a different AcceptableAcceleratorTypes flavor than
-// requested, admission rewrites e.AcceleratorType to the flavor it actually holds, and
+// substitution): once a job lands on a different AcceptableAcceleratorTypes accelerator type than
+// requested, admission rewrites e.AcceleratorType to the accelerator type it actually holds, and
 // e.AcceleratorCount is already the job's TOTAL footprint (see JobSpec.TotalAccelerators) — so
 // this always reports what a RUNNING job really holds, not what it originally asked for.
 //
@@ -320,7 +320,7 @@ func (e *Experiment) Footprint() Footprint {
 		}
 		for name, qty := range job.ExtraResources {
 			if q, err := resource.ParseQuantity(qty); err == nil {
-				perNode.Add(ResourceKey{Kind: ResourceKindExtended, Flavor: name}, q.Value())
+				perNode.Add(ResourceKey{Kind: ResourceKindExtended, Name: name}, q.Value())
 			}
 		}
 		fp.AddFootprint(perNode.Scale(int64(group.Replicas)))
@@ -328,7 +328,7 @@ func (e *Experiment) Footprint() Footprint {
 	if e.AcceleratorCount > 0 && e.AcceleratorType != "" {
 		// Lowercased so Fits()'s exact-match join works regardless of casing (see
 		// AcceleratorType.MatchesLabels and JobSpec.Footprint, which does the same).
-		fp.Add(ResourceKey{Kind: ResourceKindAccelerator, Flavor: strings.ToLower(string(e.AcceleratorType))}, int64(e.AcceleratorCount))
+		fp.Add(ResourceKey{Kind: ResourceKindAccelerator, Name: strings.ToLower(string(e.AcceleratorType))}, int64(e.AcceleratorCount))
 	}
 	return fp
 }

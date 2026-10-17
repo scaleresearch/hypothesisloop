@@ -202,7 +202,7 @@ func TestSpeculativeCandidatesStableOrderByClusterID(t *testing.T) {
 // TestSpeculativeCandidatesExcludesClusterAlreadyWaitingForItsOwnScaleUp covers a gap the
 // never-exclude-on-live-mismatch change (above) could otherwise reopen: a cluster whose desired-
 // free already went negative in this job's accelerator dimension has a scale-up bet already in
-// flight for exactly this shortage. Unlike a live-node shape/flavor mismatch (a preference, not a
+// flight for exactly this shortage. Unlike a live-node shape/accelerator type mismatch (a preference, not a
 // gate), this is direct proof of an outstanding claim — piling a second speculative submit on top
 // would compound bets instead of waiting for the first one to land, so it must still exclude.
 func TestSpeculativeCandidatesExcludesClusterAlreadyWaitingForItsOwnScaleUp(t *testing.T) {
@@ -214,7 +214,7 @@ func TestSpeculativeCandidatesExcludesClusterAlreadyWaitingForItsOwnScaleUp(t *t
 	connected := map[string]bool{"cluster-a": true}
 	clusterIDs := map[string]string{"cluster-a": "cid-a"}
 	desiredFree := domain.NewFootprint()
-	desiredFree.Add(domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: strings.ToLower(h100)}, -2)
+	desiredFree.Add(domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Name: strings.ToLower(h100)}, -2)
 
 	got, _, err := l.speculativeCandidates(context.Background(), newResolutionCache(l), exp, autoscaler, connected, clusterIDs, nil, singleOrg, accel, resources, nil, nil, map[string]domain.Footprint{"cluster-a": desiredFree})
 	if err != nil {
@@ -400,14 +400,14 @@ func TestSubmitJobSpeculativeWithProvenFitAndNoCapIsUnbounded(t *testing.T) {
 }
 
 func TestNegativeInDimension(t *testing.T) {
-	avail := domain.Footprint{{Kind: domain.ResourceKindAccelerator, Flavor: strings.ToLower(h100)}: -2}
+	avail := domain.Footprint{{Kind: domain.ResourceKindAccelerator, Name: strings.ToLower(h100)}: -2}
 	if !negativeInDimension(avail, domain.AcceleratorType(h100)) {
-		t.Fatal("a negative desired-free entry for this flavor must be detected regardless of case")
+		t.Fatal("a negative desired-free entry for this accelerator type must be detected regardless of case")
 	}
 	if negativeInDimension(avail, "a100") {
-		t.Fatal("a different flavor's negative entry must not match")
+		t.Fatal("a different accelerator type's negative entry must not match")
 	}
-	saturated := domain.Footprint{{Kind: domain.ResourceKindAccelerator, Flavor: strings.ToLower(h100)}: 0}
+	saturated := domain.Footprint{{Kind: domain.ResourceKindAccelerator, Name: strings.ToLower(h100)}: 0}
 	if negativeInDimension(saturated, domain.AcceleratorType(h100)) {
 		t.Fatal("a saturated cluster with no claim above its total is not waiting for a scale-up")
 	}
@@ -550,19 +550,19 @@ func TestSpeculativeCandidatesTiebreaksByFewestPendingSpeculativeJobs(t *testing
 	}
 }
 
-// TestSpeculativeCandidatesIncludesMismatchedFlavorClusterButRanksItLast covers a real gap: a
+// TestSpeculativeCandidatesIncludesMismatchedAcceleratorTypeClusterButRanksItLast covers a real gap: a
 // cluster can run several heterogeneous node groups, and the one that would actually fit a job may
 // simply have no live nodes right now (scaled to zero) while a different, non-matching node group
-// (e.g. a different accelerator flavor) is what happens to be live. The old design excluded any
+// (e.g. a different accelerator type) is what happens to be live. The old design excluded any
 // cluster whose live nodes didn't prove a fit, which wrongly ruled this cluster out forever. The
 // fix must still include it as a candidate — just ranked behind a cluster that DOES have live proof
-// — since "no live node proves this flavor fits" is not "this cluster can never produce it."
-func TestSpeculativeCandidatesIncludesMismatchedFlavorClusterButRanksItLast(t *testing.T) {
+// — since "no live node proves this accelerator type fits" is not "this cluster can never produce it."
+func TestSpeculativeCandidatesIncludesMismatchedAcceleratorTypeClusterButRanksItLast(t *testing.T) {
 	exp := distributedExperiment(1, 2)
 	exp.AcceleratorType = domain.AcceleratorType(h100)
 	exp.AcceleratorCount = 2
 	accel := map[string]map[string]map[string]int64{
-		// cluster-amd's only live node group is a different flavor entirely (heterogeneous
+		// cluster-amd's only live node group is a different accelerator type entirely (heterogeneous
 		// cluster with an h100 node group currently scaled to zero) — no live proof of fit.
 		"cluster-amd":  {"node-a": {"amd.com/gpu.product=mi300": 8}},
 		"cluster-h100": {"node-a": {h100: 8}},
@@ -581,7 +581,7 @@ func TestSpeculativeCandidatesIncludesMismatchedFlavorClusterButRanksItLast(t *t
 		t.Fatalf("speculativeCandidates: %v", err)
 	}
 	if len(got) != 2 {
-		t.Fatalf("got %v, want both clusters included — a live-node flavor mismatch must never exclude a cluster outright", got)
+		t.Fatalf("got %v, want both clusters included — a live-node accelerator type mismatch must never exclude a cluster outright", got)
 	}
 	if got[0] != "cluster-h100" || got[1] != "cluster-amd" {
 		t.Fatalf("got %v, want cluster-h100 (proven fit) ranked ahead of cluster-amd (no live proof, but still eligible)", got)

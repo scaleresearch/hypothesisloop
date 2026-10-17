@@ -269,13 +269,13 @@ func heldByEstimates(jobs int, reserved float64) string {
 	return fmt.Sprintf("%d of your jobs that have not ended hold %.3g by their estimates and give back what they do not spend as each ends, so more fits once one does.", jobs, reserved)
 }
 
-// ReserveAdmittedFlavorTx rechecks the selected flavor's estimate, enforces the platform
+// ReserveAdmittedAcceleratorTypeTx rechecks the selected accelerator type's estimate, enforces the platform
 // experiment's max_concurrent_accelerators spend-rate cap (autoscaler.md's concurrency cap:
 // Σ accelerator_count over this pool's SUBMITTED+RUNNING rows + this job's count must not exceed
-// the cap), and persists the flavor — all under the same cross-replica quota lock used by initial
+// the cap), and persists the accelerator type — all under the same cross-replica quota lock used by initial
 // admission. defaultMaxConcurrent is quota.default_max_concurrent_accelerators, used when the
 // platform experiment has no override.
-func (s *Store) ReserveAdmittedFlavorTx(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, acceleratorCount, defaultMaxConcurrent int, observe func(ctx context.Context, agentID, platformExpID string, platformExpStart time.Time) (*domain.AgentQuota, error)) (string, error) {
+func (s *Store) ReserveAdmittedAcceleratorTypeTx(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, acceleratorCount, defaultMaxConcurrent int, observe func(ctx context.Context, agentID, platformExpID string, platformExpStart time.Time) (*domain.AgentQuota, error)) (string, error) {
 	reason := ""
 	if err := s.write(ctx, func(tx *Write) error {
 		var agentID, platformExpID string
@@ -287,22 +287,22 @@ func (s *Store) ReserveAdmittedFlavorTx(ctx context.Context, experimentID string
 		if err := tx.QueryRow(ctx, `SELECT e.agent_id, e.platform_experiment_id, e.capacity_tier, e.estimated_cost_acch, pe.created_at
 		FROM experiments e JOIN platform_experiments pe ON pe.id = e.platform_experiment_id WHERE e.id=$1`, experimentID).
 			Scan(&agentID, &platformExpID, &tier, &oldCost, &platformExpStart); err != nil {
-			return fmt.Errorf("reserve admitted flavor: experiment: %w", err)
+			return fmt.Errorf("reserve admitted accelerator type: experiment: %w", err)
 		}
 		key := agentID + "/" + platformExpID
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, key); err != nil {
-			return fmt.Errorf("reserve admitted flavor: lock: %w", err)
+			return fmt.Errorf("reserve admitted accelerator type: lock: %w", err)
 		}
 		observedCtx, cancelObserved := context.WithTimeout(ctx, InTxObservationTimeout)
 		observed, err := observe(observedCtx, agentID, platformExpID, platformExpStart)
 		cancelObserved()
 		if err != nil {
-			return fmt.Errorf("reserve admitted flavor: observed usage: %w", err)
+			return fmt.Errorf("reserve admitted accelerator type: observed usage: %w", err)
 		}
 		allocation, err := scanAgentQuota(tx.QueryRow(ctx, `SELECT`+agentQuotaColumns+`
 		FROM agent_quotas WHERE agent_id=$1 AND platform_experiment_id=$2 FOR UPDATE`, agentID, platformExpID))
 		if err != nil {
-			return fmt.Errorf("reserve admitted flavor: quota: %w", err)
+			return fmt.Errorf("reserve admitted accelerator type: quota: %w", err)
 		}
 		var desired, desiredAll float64
 		if err := tx.QueryRow(ctx, `SELECT COALESCE(SUM(estimated_cost_acch) FILTER (WHERE capacity_tier=$3),0), COALESCE(SUM(estimated_cost_acch),0) FROM experiments
@@ -310,7 +310,7 @@ func (s *Store) ReserveAdmittedFlavorTx(ctx context.Context, experimentID string
 		AND (status IN ('QUEUED','SUBMITTED','RUNNING')
 		OR (status IN ('COMPLETED','FAILED','EVICTED','REJECTED') AND quota_settled_at IS NULL))`,
 			agentID, platformExpID, tier).Scan(&desired, &desiredAll); err != nil {
-			return fmt.Errorf("reserve admitted flavor: desired usage: %w", err)
+			return fmt.Errorf("reserve admitted accelerator type: desired usage: %w", err)
 		}
 		used, limit := observed.UsedBurstAccH, allocation.BurstAcceleratorHours
 		if tier == domain.CapacityGuaranteed {
@@ -328,7 +328,7 @@ func (s *Store) ReserveAdmittedFlavorTx(ctx context.Context, experimentID string
 		if acceleratorCount > 0 {
 			var maxConcurrent *int
 			if err := tx.QueryRow(ctx, `SELECT max_concurrent_accelerators FROM platform_experiments WHERE id=$1`, platformExpID).Scan(&maxConcurrent); err != nil {
-				return fmt.Errorf("reserve admitted flavor: platform experiment cap: %w", err)
+				return fmt.Errorf("reserve admitted accelerator type: platform experiment cap: %w", err)
 			}
 			cap := defaultMaxConcurrent
 			if maxConcurrent != nil {
@@ -342,13 +342,13 @@ func (s *Store) ReserveAdmittedFlavorTx(ctx context.Context, experimentID string
 				// `key` lock above) so two different agents under the same platform experiment still
 				// serialize against each other instead of racing past this check independently.
 				if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 1))`, platformExpID); err != nil {
-					return fmt.Errorf("reserve admitted flavor: concurrency lock: %w", err)
+					return fmt.Errorf("reserve admitted accelerator type: concurrency lock: %w", err)
 				}
 				var inFlight int
 				if err := tx.QueryRow(ctx, `SELECT COALESCE(SUM(accelerator_count),0) FROM experiments
 				WHERE platform_experiment_id=$1 AND id!=$2 AND status IN ('SUBMITTED','RUNNING')`,
 					platformExpID, experimentID).Scan(&inFlight); err != nil {
-					return fmt.Errorf("reserve admitted flavor: in-flight accelerators: %w", err)
+					return fmt.Errorf("reserve admitted accelerator type: in-flight accelerators: %w", err)
 				}
 				if inFlight+acceleratorCount > cap {
 					reason = domain.NotAdmittedConcurrencyCap
@@ -357,7 +357,7 @@ func (s *Store) ReserveAdmittedFlavorTx(ctx context.Context, experimentID string
 			}
 		}
 		if _, err := tx.Exec(ctx, `UPDATE experiments SET accelerator_type=$2, estimated_cost_acch=$3 WHERE id=$1`, experimentID, string(acceleratorType), estimatedCost); err != nil {
-			return fmt.Errorf("reserve admitted flavor: update: %w", err)
+			return fmt.Errorf("reserve admitted accelerator type: update: %w", err)
 		}
 		return nil
 	}); err != nil {

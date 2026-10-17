@@ -6,23 +6,23 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// ClusterAndFootprint picks a concrete (cluster, flavor) pair for an unpinned job. It
+// ClusterAndFootprint picks a concrete (cluster, accelerator type) pair for an unpinned job. It
 // walks the clusters by priority (Tiers), and within one priority tries every candidate
-// flavor (requested type first, see CandidateTypes) before the next tier is looked at:
-// a job lands on a higher-priority cluster at an acceptable alternative flavor before it lands on
-// a lower one at the flavor it asked for, and a full tier never keeps it from a lower one that
-// fits. If nothing fits outright anywhere, falls back to the requested flavor's best-fit cluster
+// accelerator type (requested type first, see CandidateTypes) before the next tier is looked at:
+// a job lands on a higher-priority cluster at an acceptable alternative accelerator type before it lands on
+// a lower one at the accelerator type it asked for, and a full tier never keeps it from a lower one that
+// fits. If nothing fits outright anywhere, falls back to the requested accelerator type's best-fit cluster
 // so the caller's preemption path still runs.
 // TotalAccelerators, not the top-level per-node count: a grouped job states its counts on its
 // groups and leaves the top-level field empty, so reading it literally said every heterogeneous
-// job wanted no accelerators at all. Such a job then took the CPU-only shortcut below — no flavor
-// substitution and, worse, no AtFlavor, so it was placed on scalar fit alone and could be
+// job wanted no accelerators at all. Such a job then took the CPU-only shortcut below — no accelerator type
+// substitution and, worse, no AtAcceleratorType, so it was placed on scalar fit alone and could be
 // handed a cluster whose nodes had not one free device of the hardware it asked for.
 func ClusterAndFootprint(avail map[string]domain.Footprint, registered map[string]domain.Cluster, nodeAvail, nodeResources map[string]map[string]map[string]int64, nodeLabels map[string]map[string]map[string]string, exp *domain.Experiment) (string, domain.Footprint) {
 	requested := exp.AcceleratorType
 	types := CandidateTypes(exp)
 	if exp.Job.TotalAccelerators() <= 0 {
-		// No flavor to vary. Still judged on node layout: a cluster whose aggregate is large
+		// No accelerator type to vary. Still judged on node layout: a cluster whose aggregate is large
 		// enough but whose nodes are individually too small for one rank would otherwise be picked
 		// on the scalar alone, fail TopologyFits in the tick, and go to preemption while another
 		// cluster could host it.
@@ -35,7 +35,7 @@ func ClusterAndFootprint(avail map[string]domain.Footprint, registered map[strin
 		inTier := within(avail, tier)
 		for _, t := range types {
 			exp.AcceleratorType = t
-			if cluster, ok := AtFlavor(inTier, registered, nodeAvail, nodeResources, nodeLabels, exp); ok {
+			if cluster, ok := AtAcceleratorType(inTier, registered, nodeAvail, nodeResources, nodeLabels, exp); ok {
 				return cluster, exp.Footprint()
 			}
 		}
@@ -46,7 +46,7 @@ func ClusterAndFootprint(avail map[string]domain.Footprint, registered map[strin
 	return BestFit(avail, registered, fallback), fallback
 }
 
-// AtFlavor names the cluster that can host exp at the accelerator type it currently carries,
+// AtAcceleratorType names the cluster that can host exp at the accelerator type it currently carries,
 // judged on footprint and node layout alike: in the highest priority tier that has one, the one
 // with room for the most jobs like exp (roomFor), so jobs spread over the clusters an org ranked
 // alike and keep each busy. One run placed 7 of 9 researcher jobs on the first name that fit, a box
@@ -54,7 +54,7 @@ func ClusterAndFootprint(avail map[string]domain.Footprint, registered map[strin
 // exp's environment, which holds its image, goes first, then the name. ok=false means no cluster
 // can: the caller decides what to do with a job that does not fit anywhere, rather than being
 // handed a cluster that only looks big enough in the scalar.
-func AtFlavor(avail map[string]domain.Footprint, registered map[string]domain.Cluster, nodeAvail, nodeResources map[string]map[string]map[string]int64, nodeLabels map[string]map[string]map[string]string, exp *domain.Experiment) (string, bool) {
+func AtAcceleratorType(avail map[string]domain.Footprint, registered map[string]domain.Cluster, nodeAvail, nodeResources map[string]map[string]map[string]int64, nodeLabels map[string]map[string]map[string]string, exp *domain.Experiment) (string, bool) {
 	for _, tier := range Tiers(avail, registered) {
 		best, bestRoom := "", int64(0)
 		for _, candidate := range tier {
@@ -91,7 +91,7 @@ func AtFlavor(avail map[string]domain.Footprint, registered map[string]domain.Cl
 //
 // "Could ever host it" is the load-bearing half of step 2, and it is not the same question as
 // step 1's. A cluster that has never reported a dimension the job asks for — an accelerator
-// flavor it does not own — has a shortage equal to the whole request, which ties with a cluster
+// accelerator type it does not own — has a shortage equal to the whole request, which ties with a cluster
 // that owns exactly that hardware and is merely full of preemptible burst work. The tie used to
 // go to whichever name sorted first, and when it went to the cluster without the hardware the
 // guaranteed job was handed a preemption target where no victim could ever free what it needs:
@@ -140,7 +140,7 @@ func BestFit(avail map[string]domain.Footprint, registered map[string]domain.Clu
 
 // Tiers is the one order every placement tries a job's candidate clusters in: the
 // clusters of the highest priority first, then the next, each tier by name. Within a tier the
-// accelerator type a job prefers decides first, then the room left (AtFlavor), which is why
+// accelerator type a job prefers decides first, then the room left (AtAcceleratorType), which is why
 // this returns tiers and not one list: the search is tier, then type, then cluster. A name nobody
 // registered ranks with the shared clusters, last.
 //

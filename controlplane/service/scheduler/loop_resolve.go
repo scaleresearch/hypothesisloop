@@ -16,7 +16,7 @@ import (
 // resolutionCache amortizes the running-experiment node-attribution lookups the per-accelerator
 // share needs (see resolveClusterLocalResources) across every queued job considered in one
 // tick: the running set and each running job's node are the same answer for every queued job
-// asking about a given accelerator flavor, so this is built lazily and reused rather than
+// asking about a given accelerator type, so this is built lazily and reused rather than
 // re-queried once per queued job. The speculative-candidate reads are held the same way.
 type resolutionCache struct {
 	l               *Loop
@@ -73,12 +73,12 @@ func (c *resolutionCache) loadClaimed(ctx context.Context) ([]*domain.Experiment
 }
 
 // installedAcceleratorsByNode returns, for every node cluster's nodeAvail reports, its installed
-// (not free) count of flavor: currently free (nodeAvail) plus what is already claimed there by a
+// (not free) count of accelerator type: currently free (nodeAvail) plus what is already claimed there by a
 // RUNNING or SUBMITTED experiment (see loadClaimed — SUBMITTED jobs have
 // already reduced nodeAvail's free count and must be counted here too, or "installed" undercounts
 // and every FairShare computed against it is wrong), attributed the same way loop_disbalance.go's
 // disbalance evictor attributes running work to a node — one metrics-store node-attribution query
-// per claimed experiment of this flavor, cached across the whole tick (see resolutionCache's doc
+// per claimed experiment of this accelerator type, cached across the whole tick (see resolutionCache's doc
 // comment), not per queued job.
 //
 // Node attribution (metricsdb.LatestExperimentNode) is keyed by observed placement, so a
@@ -102,14 +102,14 @@ func (c *resolutionCache) loadClaimed(ctx context.Context) ([]*domain.Experiment
 // cores, an accelerator job too, so free cores plus the cores of CPU jobs falls short of what is
 // installed by whatever the accelerator jobs hold, and a share measured against that would
 // allow the CPU jobs memory the accelerator jobs already have.
-func (c *resolutionCache) installedAcceleratorsByNode(ctx context.Context, cluster string, flavor domain.AcceleratorType, nodeAvail, nodeResourcesTotal map[string]map[string]int64) (map[string]int64, error) {
-	if flavor.Kind() == domain.TypeKindCPU {
+func (c *resolutionCache) installedAcceleratorsByNode(ctx context.Context, cluster string, acceleratorType domain.AcceleratorType, nodeAvail, nodeResourcesTotal map[string]map[string]int64) (map[string]int64, error) {
+	if acceleratorType.Kind() == domain.TypeKindCPU {
 		return installedCoresByNode(nodeAvail, nodeResourcesTotal), nil
 	}
-	key := placement.AcceleratorKey(flavor)
+	key := placement.AcceleratorKey(acceleratorType)
 	installed := make(map[string]int64, len(nodeAvail))
-	for node, byFlavor := range nodeAvail {
-		installed[node] = byFlavor[key]
+	for node, byType := range nodeAvail {
+		installed[node] = byType[key]
 	}
 	claimed, err := c.loadClaimed(ctx)
 	if err != nil {
@@ -119,7 +119,7 @@ func (c *resolutionCache) installedAcceleratorsByNode(ctx context.Context, clust
 		if r.ClusterName != cluster || r.AcceleratorCount <= 0 {
 			continue
 		}
-		if !r.AcceleratorType.Is(flavor) {
+		if !r.AcceleratorType.Is(acceleratorType) {
 			continue
 		}
 		if r.Job.Nodes() > 1 {
@@ -149,9 +149,9 @@ func (c *resolutionCache) installedAcceleratorsByNode(ctx context.Context, clust
 // node's total where it reports one, what it has free otherwise.
 func installedCoresByNode(nodeAvail, nodeResourcesTotal map[string]map[string]int64) map[string]int64 {
 	installed := make(map[string]int64, len(nodeAvail))
-	for node, byFlavor := range nodeAvail {
-		for flavor, free := range byFlavor {
-			if !domain.CPUType.Is(domain.AcceleratorType(flavor)) {
+	for node, byType := range nodeAvail {
+		for acceleratorType, free := range byType {
+			if !domain.CPUType.Is(domain.AcceleratorType(acceleratorType)) {
 				continue
 			}
 			installed[node] = free
@@ -164,10 +164,10 @@ func installedCoresByNode(nodeAvail, nodeResourcesTotal map[string]map[string]in
 }
 
 // resolveClusterLocalResources returns exp's job as it runs on cluster, once cluster and
-// accelerator flavor are decided for this attempt. A job states its cpu, memory and storage, so
+// accelerator type are decided for this attempt. A job states its cpu, memory and storage, so
 // on a cluster of nodes that is the job as submitted, with each quantity checked against the
 // job's cluster-local share: the MINIMUM domain.FairShare across every node in cluster that
-// reports exp's accelerator flavor and carries exp.Job's node_selector.
+// reports exp's accelerator type and carries exp.Job's node_selector.
 //
 // The check is PER GROUP: each group's share is computed against that group's own per-node
 // accelerator count, never the job's TotalAccelerators. A group that holds no accelerator has no

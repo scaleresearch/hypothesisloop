@@ -38,11 +38,11 @@ const AgentVersionHeader = "X-Hypothesisloop-Agent-Version"
 // ReconcileRequest is what a runtime tells the control plane with every reconcile
 // (POST /internal/clusters/{name}/reconcile): its live capacity and what it can do.
 type ReconcileRequest struct {
-	CPUAvailableCores            float64                     `json:"cpu_available_cores"`
-	CPUTotalCores                float64                     `json:"cpu_total_cores"`
-	AcceleratorAvailableByFlavor map[string]int64            `json:"accelerator_available_by_type"`
-	AcceleratorTotalByFlavor     map[string]int64            `json:"accelerator_total_by_type"`
-	AcceleratorAvailableByNode   map[string]map[string]int64 `json:"accelerator_available_by_node"`
+	CPUAvailableCores          float64                     `json:"cpu_available_cores"`
+	CPUTotalCores              float64                     `json:"cpu_total_cores"`
+	AcceleratorAvailableByType map[string]int64            `json:"accelerator_available_by_type"`
+	AcceleratorTotalByType     map[string]int64            `json:"accelerator_total_by_type"`
+	AcceleratorAvailableByNode map[string]map[string]int64 `json:"accelerator_available_by_node"`
 	// NodeResourcesByNode is free CPU, memory and storage per node, keyed by NodeResource*. A
 	// job runs on one node and must fit that node in every dimension.
 	NodeResourcesByNode map[string]map[string]int64 `json:"node_resources_by_node"`

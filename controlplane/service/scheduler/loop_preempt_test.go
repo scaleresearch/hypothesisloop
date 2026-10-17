@@ -49,19 +49,19 @@ func (s *recordingSettler) Settle(_ context.Context, exp *domain.Experiment) err
 	return nil
 }
 
-// burstVictim is a running burst job holding one accelerator of the given flavor.
-func burstVictim(id string, flavor domain.AcceleratorType) *domain.Experiment {
+// burstVictim is a running burst job holding one accelerator of the given accelerator type.
+func burstVictim(id string, acceleratorType domain.AcceleratorType) *domain.Experiment {
 	return &domain.Experiment{
 		ID:                     id,
 		ClusterName:            "cluster-a",
 		CapacityTier:           domain.CapacityBurst,
 		Status:                 domain.StatusRunning,
-		AcceleratorType:        flavor,
+		AcceleratorType:        acceleratorType,
 		AcceleratorCount:       1,
 		EstimatedDurationHours: 10,
 		EstimatedCostAccH:      10,
 		CreatedAt:              time.Now().Add(-time.Hour),
-		Job:                    domain.JobSpec{Image: "registry.test/job:1", AcceleratorType: flavor, AcceleratorCount: 1, NumNodes: 1},
+		Job:                    domain.JobSpec{Image: "registry.test/job:1", AcceleratorType: acceleratorType, AcceleratorCount: 1, NumNodes: 1},
 	}
 }
 
@@ -71,20 +71,20 @@ func preemptLoop(store LoopStore, observed ObservedState) (*Loop, *recordingSett
 	return l, settler
 }
 
-// preemptorNeeding is a queued one-node job asking for n accelerators of flavor.
-func preemptorNeeding(flavor domain.AcceleratorType, n int) *domain.Experiment {
-	exp := burstVictim("preemptor", flavor)
+// preemptorNeeding is a queued one-node job asking for n accelerators of acceleratorType.
+func preemptorNeeding(acceleratorType domain.AcceleratorType, n int) *domain.Experiment {
+	exp := burstVictim("preemptor", acceleratorType)
 	exp.AcceleratorCount, exp.Job.AcceleratorCount = n, n
 	return exp
 }
 
 // preemptFor runs preempt for preemptor against a cluster whose nodes report free accelerators
-// of the preemptor's flavor.
+// of the preemptor's accelerator type.
 func preemptFor(l *Loop, free map[string]int64, candidates []*domain.Experiment, preemptor *domain.Experiment) (bool, error) {
 	avail := domain.NewFootprint()
 	nodeAvail := map[string]map[string]int64{}
 	for node, n := range free {
-		avail.Add(domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: string(preemptor.AcceleratorType)}, n)
+		avail.Add(domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Name: string(preemptor.AcceleratorType)}, n)
 		nodeAvail[node] = map[string]int64{string(preemptor.AcceleratorType): n}
 	}
 	return l.preempt(context.Background(), "cluster-a", avail, nodeAvail, nil, nil, nil, candidates, preemptor)
@@ -101,11 +101,11 @@ var fullNodeA = map[string]int64{"node-a": 0}
 // observed work loses, because that is the least work destroyed. Every candidate here is identical
 // apart from how long it has been observed running, so nothing else can explain the choice.
 func TestPreemptEvictsTheLeastProgressedVictim(t *testing.T) {
-	const flavor = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
+	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
 	candidates := []*domain.Experiment{
-		burstVictim("nearly-done", flavor),
-		burstVictim("just-started", flavor),
-		burstVictim("halfway", flavor),
+		burstVictim("nearly-done", acceleratorType),
+		burstVictim("just-started", acceleratorType),
+		burstVictim("halfway", acceleratorType),
 	}
 	observed := onNodeA(fakeObserved{elapsed: map[string]float64{
 		"nearly-done":  9,
@@ -115,7 +115,7 @@ func TestPreemptEvictsTheLeastProgressedVictim(t *testing.T) {
 	store := &preemptStore{}
 	l, settler := preemptLoop(store, observed)
 
-	committed, err := preemptFor(l, fullNodeA, candidates, preemptorNeeding(flavor, 1))
+	committed, err := preemptFor(l, fullNodeA, candidates, preemptorNeeding(acceleratorType, 1))
 	if err != nil {
 		t.Fatalf("preempt: %v", err)
 	}
@@ -137,10 +137,10 @@ func TestPreemptEvictsTheLeastProgressedVictim(t *testing.T) {
 // treating it as zero observed hours would sort it to the front and make the job nobody can
 // measure the first one destroyed. It must be dropped from consideration instead.
 func TestPreemptSkipsUnrankableCandidatesRatherThanEvictingThemFirst(t *testing.T) {
-	const flavor = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
+	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
 	candidates := []*domain.Experiment{
-		burstVictim("unmeasurable", flavor),
-		burstVictim("measurable", flavor),
+		burstVictim("unmeasurable", acceleratorType),
+		burstVictim("measurable", acceleratorType),
 	}
 	// unmeasurable is absent from elapsed AND fails its query; measurable reports real progress.
 	// Ranked as zero, unmeasurable would be evicted first — the exact bug being guarded.
@@ -151,7 +151,7 @@ func TestPreemptSkipsUnrankableCandidatesRatherThanEvictingThemFirst(t *testing.
 	store := &preemptStore{}
 	l, _ := preemptLoop(store, observed)
 
-	committed, err := preemptFor(l, fullNodeA, candidates, preemptorNeeding(flavor, 1))
+	committed, err := preemptFor(l, fullNodeA, candidates, preemptorNeeding(acceleratorType, 1))
 	if err != nil {
 		t.Fatalf("preempt: %v", err)
 	}
@@ -172,12 +172,12 @@ func TestPreemptSkipsUnrankableCandidatesRatherThanEvictingThemFirst(t *testing.
 // broken metrics series must not block preemption platform-wide, and with nothing rankable there
 // is simply no plan. Reporting an error here would abort the caller's whole tick.
 func TestPreemptDoesNothingWhenNoCandidateCanBeRanked(t *testing.T) {
-	const flavor = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
+	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
 	store := &preemptStore{}
 	l, _ := preemptLoop(store, fakeObserved{err: errors.New("metrics store unreachable")})
 
 	committed, err := preemptFor(l, fullNodeA,
-		[]*domain.Experiment{burstVictim("a", flavor)}, preemptorNeeding(flavor, 1))
+		[]*domain.Experiment{burstVictim("a", acceleratorType)}, preemptorNeeding(acceleratorType, 1))
 	if err != nil {
 		t.Fatalf("preempt returned an error for an unreachable metrics store, which aborts the caller's tick: %v", err)
 	}
@@ -193,12 +193,12 @@ func TestPreemptDoesNothingWhenNoCandidateCanBeRanked(t *testing.T) {
 // The shortage needs three accelerators and only two are available across every candidate, so
 // evicting both would destroy live work and still leave the preemptor unable to run.
 func TestPreemptNeverExecutesAPartialPlan(t *testing.T) {
-	const flavor = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
-	candidates := []*domain.Experiment{burstVictim("a", flavor), burstVictim("b", flavor)}
+	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
+	candidates := []*domain.Experiment{burstVictim("a", acceleratorType), burstVictim("b", acceleratorType)}
 	store := &preemptStore{}
 	l, settler := preemptLoop(store, onNodeA(fakeObserved{elapsed: map[string]float64{"a": 1, "b": 2}}, "a", "b"))
 
-	committed, err := preemptFor(l, fullNodeA, candidates, preemptorNeeding(flavor, 3))
+	committed, err := preemptFor(l, fullNodeA, candidates, preemptorNeeding(acceleratorType, 3))
 	if err != nil {
 		t.Fatalf("preempt: %v", err)
 	}
@@ -217,14 +217,14 @@ func TestPreemptNeverExecutesAPartialPlan(t *testing.T) {
 // available and one suffices; selecting a victim that the plan does not need is work destroyed for
 // no admission.
 func TestPreemptEvictsNoMoreThanTheShortageNeeds(t *testing.T) {
-	const flavor = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
+	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
 	candidates := []*domain.Experiment{
-		burstVictim("a", flavor), burstVictim("b", flavor), burstVictim("c", flavor),
+		burstVictim("a", acceleratorType), burstVictim("b", acceleratorType), burstVictim("c", acceleratorType),
 	}
 	store := &preemptStore{}
 	l, _ := preemptLoop(store, onNodeA(fakeObserved{elapsed: map[string]float64{"a": 1, "b": 2, "c": 3}}, "a", "b", "c"))
 
-	committed, err := preemptFor(l, fullNodeA, candidates, preemptorNeeding(flavor, 1))
+	committed, err := preemptFor(l, fullNodeA, candidates, preemptorNeeding(acceleratorType, 1))
 	if err != nil {
 		t.Fatalf("preempt: %v", err)
 	}
@@ -236,27 +236,27 @@ func TestPreemptEvictsNoMoreThanTheShortageNeeds(t *testing.T) {
 	}
 }
 
-// TestPreemptIgnoresVictimsHoldingADifferentFlavor: evicting an L40 job frees nothing for a job that needs an H100, so it must never be
+// TestPreemptIgnoresVictimsHoldingADifferentAcceleratorType: evicting an L40 job frees nothing for a job that needs an H100, so it must never be
 // chosen to cover an H100 shortage — however little progress it has made.
-func TestPreemptIgnoresVictimsHoldingADifferentFlavor(t *testing.T) {
+func TestPreemptIgnoresVictimsHoldingADifferentAcceleratorType(t *testing.T) {
 	const wanted = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
 	const other = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-l40")
 	candidates := []*domain.Experiment{
-		burstVictim("wrong-flavor", other), // least progress, so ranked first
-		burstVictim("right-flavor", wanted),
+		burstVictim("wrong-type", other), // least progress, so ranked first
+		burstVictim("right-type", wanted),
 	}
 	store := &preemptStore{}
-	l, _ := preemptLoop(store, onNodeA(fakeObserved{elapsed: map[string]float64{"wrong-flavor": 0.1, "right-flavor": 8}}, "wrong-flavor", "right-flavor"))
+	l, _ := preemptLoop(store, onNodeA(fakeObserved{elapsed: map[string]float64{"wrong-type": 0.1, "right-type": 8}}, "wrong-type", "right-type"))
 
 	committed, err := preemptFor(l, fullNodeA, candidates, preemptorNeeding(wanted, 1))
 	if err != nil {
 		t.Fatalf("preempt: %v", err)
 	}
 	if !committed {
-		t.Fatal("preempt found no plan although the right-flavor victim covers the shortage")
+		t.Fatal("preempt found no plan although the right-type victim covers the shortage")
 	}
 	for _, id := range store.requeued {
-		if id == "wrong-flavor" {
+		if id == "wrong-type" {
 			t.Fatalf("requeued = %v: evicting a job holding a different accelerator frees nothing the preemptor can use", store.requeued)
 		}
 	}
@@ -268,8 +268,8 @@ func TestPreemptIgnoresVictimsHoldingADifferentFlavor(t *testing.T) {
 // preempted twice has the first stint's hours charged again and its estimate collapses while most
 // of the work is still ahead.
 func TestPreemptRescalesTheVictimAgainstItsOwnStint(t *testing.T) {
-	const flavor = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
-	victim := burstVictim("victim", flavor)
+	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
+	victim := burstVictim("victim", acceleratorType)
 	store := &preemptStore{}
 	// Lifetime elapsed (9) is deliberately far from this stint's (4): only the stint may be used.
 	l, _ := preemptLoop(store, onNodeA(fakeObserved{
@@ -277,7 +277,7 @@ func TestPreemptRescalesTheVictimAgainstItsOwnStint(t *testing.T) {
 		stint:   map[string]float64{"victim": 4},
 	}, "victim"))
 
-	if _, err := preemptFor(l, fullNodeA, []*domain.Experiment{victim}, preemptorNeeding(flavor, 1)); err != nil {
+	if _, err := preemptFor(l, fullNodeA, []*domain.Experiment{victim}, preemptorNeeding(acceleratorType, 1)); err != nil {
 		t.Fatalf("preempt: %v", err)
 	}
 	if got := store.remaining["victim"]; got != 6 {
@@ -290,13 +290,13 @@ func TestPreemptRescalesTheVictimAgainstItsOwnStint(t *testing.T) {
 // plan did not complete. It must surface as an error so the caller stands down rather than letting
 // the disbalance evictor terminate more live work against the same stale numbers.
 func TestPreemptReportsAPartiallyExecutedPlanAsAnError(t *testing.T) {
-	const flavor = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
-	candidates := []*domain.Experiment{burstVictim("a", flavor), burstVictim("b", flavor)}
+	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
+	candidates := []*domain.Experiment{burstVictim("a", acceleratorType), burstVictim("b", acceleratorType)}
 	// "b" reaches a terminal status between selection and requeue, so its requeue is refused.
 	store := &preemptStore{refuse: map[string]bool{"b": true}}
 	l, _ := preemptLoop(store, onNodeA(fakeObserved{elapsed: map[string]float64{"a": 1, "b": 2}}, "a", "b"))
 
-	committed, err := preemptFor(l, fullNodeA, candidates, preemptorNeeding(flavor, 2))
+	committed, err := preemptFor(l, fullNodeA, candidates, preemptorNeeding(acceleratorType, 2))
 	if err == nil {
 		t.Fatal("a partially executed plan must be reported as an error so the caller stands down")
 	}
@@ -307,14 +307,14 @@ func TestPreemptReportsAPartiallyExecutedPlanAsAnError(t *testing.T) {
 
 // TestPreemptDoesNothingWithoutCandidatesOrShortage covers the degenerate entries.
 func TestPreemptDoesNothingWithoutCandidatesOrShortage(t *testing.T) {
-	const flavor = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
+	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
 	store := &preemptStore{}
 	l, _ := preemptLoop(store, onNodeA(fakeObserved{}, "a"))
 
-	if committed, err := preemptFor(l, fullNodeA, nil, preemptorNeeding(flavor, 1)); committed || err != nil {
+	if committed, err := preemptFor(l, fullNodeA, nil, preemptorNeeding(acceleratorType, 1)); committed || err != nil {
 		t.Fatalf("preempt with no candidates = (%v, %v), want (false, nil)", committed, err)
 	}
-	if committed, err := preemptFor(l, map[string]int64{"node-a": 1}, []*domain.Experiment{burstVictim("a", flavor)}, preemptorNeeding(flavor, 1)); committed || err != nil {
+	if committed, err := preemptFor(l, map[string]int64{"node-a": 1}, []*domain.Experiment{burstVictim("a", acceleratorType)}, preemptorNeeding(acceleratorType, 1)); committed || err != nil {
 		t.Fatalf("preempt with no shortage = (%v, %v), want (false, nil)", committed, err)
 	}
 	if len(store.requeued) != 0 {
@@ -355,19 +355,19 @@ func (f failingFor) LatestExperimentNode(ctx context.Context, id string, created
 }
 
 func TestPreemptNeverReservesMoreThanTheStintLeft(t *testing.T) {
-	const flavor = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
+	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
 	for name, tc := range map[string]struct{ estimate, stint, want float64 }{
 		"a remainder under the floor is kept":      {1, 0.9, 0.1},
 		"a stint past its estimate gets the floor": {1, 1.2, domain.MinRemainingHours},
 		"the floor never exceeds the estimate":     {0.1, 0.2, 0.1},
 	} {
 		t.Run(name, func(t *testing.T) {
-			victim := burstVictim("victim", flavor)
+			victim := burstVictim("victim", acceleratorType)
 			victim.EstimatedDurationHours = tc.estimate
 			store := &preemptStore{}
 			l, _ := preemptLoop(store, onNodeA(fakeObserved{stint: map[string]float64{"victim": tc.stint}}, "victim"))
 
-			if _, err := preemptFor(l, fullNodeA, []*domain.Experiment{victim}, preemptorNeeding(flavor, 1)); err != nil {
+			if _, err := preemptFor(l, fullNodeA, []*domain.Experiment{victim}, preemptorNeeding(acceleratorType, 1)); err != nil {
 				t.Fatalf("preempt: %v", err)
 			}
 			if got := store.remaining["victim"]; got < tc.want-1e-9 || got > tc.want+1e-9 {
@@ -383,7 +383,7 @@ func (quotaRefusal) Error() string           { return "need 0.15 additional acce
 func (quotaRefusal) InsufficientQuota() bool { return true }
 
 func TestAQuotaRefusalAtClaimHasItsOwnReason(t *testing.T) {
-	err := fmt.Errorf("reserve selected accelerator flavor: %w", quotaRefusal{})
+	err := fmt.Errorf("reserve selected accelerator type: %w", quotaRefusal{})
 	if got, want := notAdmittedReasonForSubmitError(err), "insufficient_quota: need 0.15 additional accelerator_hours"; got != want {
 		t.Fatalf("reason = %q, want %q", got, want)
 	}
@@ -395,9 +395,9 @@ func TestAQuotaRefusalAtClaimHasItsOwnReason(t *testing.T) {
 // The job needs four accelerators on one node. node-a has two free and node-b none, so only a
 // victim on node-a makes a node able to host it, whatever the ranking says.
 func TestPreemptTakesOnlyVictimsOnANodeThatCanThenHostTheJob(t *testing.T) {
-	const flavor = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
+	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
 	twoOn := func(id string) *domain.Experiment {
-		v := burstVictim(id, flavor)
+		v := burstVictim(id, acceleratorType)
 		v.AcceleratorCount, v.Job.AcceleratorCount = 2, 2
 		return v
 	}
@@ -409,7 +409,7 @@ func TestPreemptTakesOnlyVictimsOnANodeThatCanThenHostTheJob(t *testing.T) {
 			elapsed: map[string]float64{"on-b": 0.1, "on-a": 8},
 			node:    map[string]string{"on-b": "node-b", "on-a": "node-a"},
 		})
-		committed, err := preemptFor(l, free, []*domain.Experiment{twoOn("on-b"), twoOn("on-a")}, preemptorNeeding(flavor, 4))
+		committed, err := preemptFor(l, free, []*domain.Experiment{twoOn("on-b"), twoOn("on-a")}, preemptorNeeding(acceleratorType, 4))
 		if err != nil || !committed {
 			t.Fatalf("preempt = (%v, %v), want a committed plan", committed, err)
 		}
@@ -421,7 +421,7 @@ func TestPreemptTakesOnlyVictimsOnANodeThatCanThenHostTheJob(t *testing.T) {
 	t.Run("no victim is taken when no node could then host the job", func(t *testing.T) {
 		store := &preemptStore{}
 		l, _ := preemptLoop(store, fakeObserved{node: map[string]string{"on-b": "node-b"}})
-		committed, err := preemptFor(l, free, []*domain.Experiment{twoOn("on-b")}, preemptorNeeding(flavor, 4))
+		committed, err := preemptFor(l, free, []*domain.Experiment{twoOn("on-b")}, preemptorNeeding(acceleratorType, 4))
 		if err != nil || committed || len(store.requeued) != 0 {
 			t.Fatalf("preempt = (%v, %v), requeued %v: the cluster total would cover the job and no node would", committed, err, store.requeued)
 		}
@@ -430,7 +430,7 @@ func TestPreemptTakesOnlyVictimsOnANodeThatCanThenHostTheJob(t *testing.T) {
 	t.Run("a victim whose node is unknown is spared", func(t *testing.T) {
 		store := &preemptStore{}
 		l, _ := preemptLoop(store, fakeObserved{})
-		committed, err := preemptFor(l, free, []*domain.Experiment{twoOn("unattributed")}, preemptorNeeding(flavor, 4))
+		committed, err := preemptFor(l, free, []*domain.Experiment{twoOn("unattributed")}, preemptorNeeding(acceleratorType, 4))
 		if err != nil || committed || len(store.requeued) != 0 {
 			t.Fatalf("preempt = (%v, %v), requeued %v, want nothing taken", committed, err, store.requeued)
 		}
@@ -440,9 +440,9 @@ func TestPreemptTakesOnlyVictimsOnANodeThatCanThenHostTheJob(t *testing.T) {
 // One node is recorded per experiment, so a gang is proven to hold one rank on it and nothing is
 // known about where its other ranks are.
 func TestPreemptCreditsAGangOneRankOnItsRecordedNode(t *testing.T) {
-	const flavor = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
+	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
 	gang := func() *domain.Experiment {
-		g := burstVictim("gang", flavor)
+		g := burstVictim("gang", acceleratorType)
 		g.AcceleratorCount = 4
 		g.Job.AcceleratorCount, g.Job.NumNodes = 2, 2
 		return g
@@ -458,7 +458,7 @@ func TestPreemptCreditsAGangOneRankOnItsRecordedNode(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			store := &preemptStore{}
 			l, _ := preemptLoop(store, onNodeA(fakeObserved{}, "gang"))
-			committed, err := preemptFor(l, full, []*domain.Experiment{gang()}, preemptorNeeding(flavor, tc.need))
+			committed, err := preemptFor(l, full, []*domain.Experiment{gang()}, preemptorNeeding(acceleratorType, tc.need))
 			if err != nil || committed != tc.committed || (len(store.requeued) == 1) != tc.committed {
 				t.Fatalf("preempt = (%v, %v), requeued %v, want committed %v", committed, err, store.requeued, tc.committed)
 			}

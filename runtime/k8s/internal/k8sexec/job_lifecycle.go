@@ -882,7 +882,7 @@ func jobPhase(job *batchv1.Job) clusterapi.JobPhase {
 // ResolveAdmittedAcceleratorType inspects experimentID's currently-scheduled pod(s) and returns the accelerator
 // type actually admitted, reverse-mapping the assigned node's accelerator product label back to
 // a configured type name (acceleratorNodeAffinity's mapping, in reverse). This is the only way
-// to observe which acceptable_accelerator_types flavor the k8s scheduler actually chose.
+// to observe which of the acceptable_accelerator_types the k8s scheduler actually chose.
 //
 // node is rank 0's k8s node name (or the first scheduled pod's, if rank 0 isn't up yet) —
 // piggybacked on this lookup since the only consumer (cluster-agent's status report loop)

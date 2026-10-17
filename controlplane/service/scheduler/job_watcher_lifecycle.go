@@ -362,7 +362,7 @@ func (w *JobWatcher) onRunning(ctx context.Context, exp *domain.Experiment) (dom
 		}
 		admittedType = observedType
 		if !admittedType.Is(exp.AcceleratorType) {
-			w.logger.Error("job_watcher: observed accelerator type disagrees with desired flavor",
+			w.logger.Error("job_watcher: observed accelerator type disagrees with desired accelerator type",
 				zap.String("id", exp.ID), zap.String("desired", string(exp.AcceleratorType)), zap.String("observed", string(admittedType)))
 			return "", runningTypeMismatch
 		}
@@ -380,7 +380,7 @@ func (w *JobWatcher) onRunning(ctx context.Context, exp *domain.Experiment) (dom
 	}
 
 	// A CPU-only job has no accelerator dimension — whatever node it landed on (even an
-	// accelerator-labeled one) is not an "admitted flavor" and must not be reverse-mapped into one.
+	// accelerator-labeled one) is not an "admitted accelerator type" and must not be reverse-mapped into one.
 	return admittedType, runningMarked
 }
 

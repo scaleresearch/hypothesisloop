@@ -98,7 +98,7 @@ func (o *tickObservations) hours(experimentID string) (float64, bool) {
 
 // observedAcceleratorCost returns exp's cost so far: observed elapsed hours at the rate its
 // admission estimate implies, a CPU job's included. Billed flat at exp.AcceleratorType
-// — the flavor admission already recorded as authoritative in Postgres (see domain.Experiment's
+// — the accelerator type admission already recorded as authoritative in Postgres (see domain.Experiment's
 // AcceleratorType doc) — rather than a live per-type observation from the metrics store. That
 // mechanism could bill a mid-run reschedule onto a different type correctly segment-by-segment,
 // but required catching a job's RUNNING phase within a poll window to ever record anything; for
@@ -107,7 +107,7 @@ func (o *tickObservations) hours(experimentID string) (float64, bool) {
 // undercharging the rare mid-run type change.
 func observedAcceleratorCost(exp *domain.Experiment, hours float64) float64 {
 	// The same formula settlement bills by: the rate frozen into the reservation at admission,
-	// not the live catalog. A mid-run rate change (or a retired flavor, which made the live
+	// not the live catalog. A mid-run rate change (or a retired accelerator type, which made the live
 	// lookup fail and the job's cost silently drop out of the boundary) otherwise puts stage
 	// progress and the budget agents are actually billed against on different numbers.
 	return exp.RatedCost(exp.EstimatedCostAccH, hours)

@@ -17,15 +17,15 @@ const (
 	quotaL40      = "nvidia.com/gpu.product=NVIDIA-L40"
 )
 
-func seedPricedExperiment(t *testing.T, pool *Pool, agentID, peID string, flavor domain.AcceleratorType, count int, cost float64, status domain.ExperimentStatus) string {
+func seedPricedExperiment(t *testing.T, pool *Pool, agentID, peID string, acceleratorType domain.AcceleratorType, count int, cost float64, status domain.ExperimentStatus) string {
 	t.Helper()
 	id := "exp-priced-" + uuid.New().String()[:8]
 	exp := &domain.Experiment{
 		ID: id, AgentID: agentID, Actor: domain.Actor{Kind: domain.ActorAgent, ID: agentID}, PlatformExperimentID: peID,
 		HypothesisID: "priced-hypothesis-" + id, Hypothesis: "h",
-		AcceleratorType: flavor, AcceleratorCount: count, EstimatedDurationHours: 3, EstimatedCostAccH: cost,
+		AcceleratorType: acceleratorType, AcceleratorCount: count, EstimatedDurationHours: 3, EstimatedCostAccH: cost,
 		CapacityTier: domain.CapacityGuaranteed, Status: domain.StatusQueued,
-		Job:     domain.JobSpec{Image: "registry.test/job:1", AcceleratorType: flavor, AcceleratorCount: count},
+		Job:     domain.JobSpec{Image: "registry.test/job:1", AcceleratorType: acceleratorType, AcceleratorCount: count},
 		DataKey: domain.DataKey{AccessKeyID: "AK", SecretAccessKey: "SK"},
 	}
 	if err := insertExperiment(context.Background(), pool, exp); err != nil {
@@ -47,10 +47,10 @@ func TestTheConcurrencyCapCountsCoresAndDevicesAsUnitsOfOnePool(t *testing.T) {
 	seedPricedExperiment(t, pool, agentID, peID, quotaCPUClass, 6, 0.18, domain.StatusSubmitted)
 
 	for _, tc := range []struct {
-		name   string
-		flavor domain.AcceleratorType
-		count  int
-		want   string
+		name            string
+		acceleratorType domain.AcceleratorType
+		count           int
+		want            string
 	}{
 		{"2 more cores reach the cap", quotaCPUClass, 2, ""},
 		{"3 more cores pass it", quotaCPUClass, 3, domain.NotAdmittedConcurrencyCap},
@@ -58,8 +58,8 @@ func TestTheConcurrencyCapCountsCoresAndDevicesAsUnitsOfOnePool(t *testing.T) {
 		{"3 more devices pass it", quotaL40, 3, domain.NotAdmittedConcurrencyCap},
 		{"16 cores alone pass it", quotaCPUClass, 16, domain.NotAdmittedConcurrencyCap},
 	} {
-		id := seedPricedExperiment(t, pool, agentID, peID, tc.flavor, tc.count, 0.01, domain.StatusQueued)
-		reason, err := store.ReserveAdmittedFlavorTx(ctx, id, tc.flavor, 0.01, tc.count, 0, noopObserve)
+		id := seedPricedExperiment(t, pool, agentID, peID, tc.acceleratorType, tc.count, 0.01, domain.StatusQueued)
+		reason, err := store.ReserveAdmittedAcceleratorTypeTx(ctx, id, tc.acceleratorType, 0.01, tc.count, 0, noopObserve)
 		if err != nil || reason != tc.want {
 			t.Errorf("%s: got (%q, %v), want (%q, nil) with 2 devices and 6 cores in flight under a cap of 10", tc.name, reason, err, tc.want)
 		}

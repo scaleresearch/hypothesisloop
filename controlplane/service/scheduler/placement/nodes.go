@@ -25,7 +25,7 @@ func RequiresDistinctHosts(exp *domain.Experiment) bool {
 }
 
 // TopologyFits proves that every rank of a hard spread-across-hosts accelerator job has a
-// distinct currently-schedulable node with enough free devices of the selected flavor.
+// distinct currently-schedulable node with enough free devices of the selected accelerator type.
 func TopologyFits(byNode, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, exp *domain.Experiment) bool {
 	return Reserve(CloneNodes(byNode), CloneNodes(nodeResources), labelsByNode, exp)
 }

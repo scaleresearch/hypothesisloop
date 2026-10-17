@@ -89,7 +89,7 @@ func (c *JobWorkloadClient) liveDRACapacitySnapshots(ctx context.Context, schedu
 	// installed) is the same failure mode one level up from the per-driver ResourceSlice check
 	// below: `drivers` would then simply not contain that domain, the per-driver loops below
 	// iterate zero times for it, and no error would ever fire — silently reporting zero capacity
-	// for a flavor that is actually fully installed, exactly the incident this whole function
+	// for an accelerator type that is actually fully installed, exactly the incident this whole function
 	// exists to prevent. The ResourceSlices listing (fetched separately above,
 	// so a glitch has to hit both calls to go undetected) is independent proof of which drivers
 	// are actually installed: any driver publishing a slice must have a matching DeviceClass.
@@ -182,7 +182,7 @@ func (c *JobWorkloadClient) liveDRACapacitySnapshots(ctx context.Context, schedu
 			// A configured DeviceClass with zero matching ResourceSlices this observation is
 			// almost certainly a transient listing gap (informer republish, API hiccup), not the
 			// driver's hardware actually vanishing — see the field comment above. Reporting empty
-			// capacity here would make the caller publish a snapshot with the whole flavor
+			// capacity here would make the caller publish a snapshot with the whole accelerator type
 			// missing, which the scheduler cannot tell apart from "no cluster has this hardware"
 			// (see reportsEveryDimension in controlplane/service/scheduler/loop_tick.go) and
 			// wrongly denies burst admission with capacity_unavailable despite real free chips.

@@ -38,7 +38,7 @@ func (f *inTxStore) AdmitExperimentTx(ctx context.Context, exp *domain.Experimen
 	return db.AdmitInserted, nil
 }
 
-func (f *inTxStore) ReserveAdmittedFlavorTx(ctx context.Context, _ string, _ domain.AcceleratorType, _ float64, _, _ int, observe func(context.Context, string, string, time.Time) (*domain.AgentQuota, error)) (string, error) {
+func (f *inTxStore) ReserveAdmittedAcceleratorTypeTx(ctx context.Context, _ string, _ domain.AcceleratorType, _ float64, _, _ int, observe func(context.Context, string, string, time.Time) (*domain.AgentQuota, error)) (string, error) {
 	f.inTx = true
 	defer func() { f.inTx = false }()
 	_, err := observe(ctx, "agent-1", testPE.ID, testPE.CreatedAt)
@@ -59,7 +59,7 @@ func TestAdmissionObservesUsageWithoutASecondPoolConnection(t *testing.T) {
 	if err != nil || decision != db.AdmitInserted {
 		t.Fatalf("AdmitExperiment: got = (%v, %v), want = (%v, nil)", decision, err, db.AdmitInserted)
 	}
-	if err := svc.ReserveAdmittedFlavor(ctx, exp.ID, "h100", 1, 1); err != nil {
-		t.Fatalf("ReserveAdmittedFlavor: got = %v, want = nil", err)
+	if err := svc.ReserveAdmittedAcceleratorType(ctx, exp.ID, "h100", 1, 1); err != nil {
+		t.Fatalf("ReserveAdmittedAcceleratorType: got = %v, want = nil", err)
 	}
 }

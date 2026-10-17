@@ -27,7 +27,7 @@ func (s *Service) Reconcile(ctx context.Context, clusterName, agentVersion strin
 		return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, err.Error())
 	}
 
-	if report.AcceleratorAvailableByFlavor == nil || report.AcceleratorTotalByFlavor == nil || report.AcceleratorAvailableByNode == nil {
+	if report.AcceleratorAvailableByType == nil || report.AcceleratorTotalByType == nil || report.AcceleratorAvailableByNode == nil {
 		return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "complete accelerator capacity report is required")
 	}
 	s.keepPricedAccelerators(&report)
@@ -68,35 +68,35 @@ func (s *Service) Reconcile(ctx context.Context, clusterName, agentVersion strin
 	if report.CPUAvailableCores < 0 || report.CPUTotalCores < 0 || report.CPUAvailableCores > report.CPUTotalCores {
 		return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "invalid CPU capacity values")
 	}
-	for flavor, total := range report.AcceleratorTotalByFlavor {
-		if flavor == "" {
-			return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "accelerator capacity contains empty flavor")
+	for acceleratorType, total := range report.AcceleratorTotalByType {
+		if acceleratorType == "" {
+			return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "accelerator capacity contains empty accelerator type")
 		}
-		available, present := report.AcceleratorAvailableByFlavor[flavor]
+		available, present := report.AcceleratorAvailableByType[acceleratorType]
 		if !present || total < 0 || available < 0 || available > total {
 			return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "invalid accelerator capacity values")
 		}
 	}
-	if len(report.AcceleratorAvailableByFlavor) != len(report.AcceleratorTotalByFlavor) {
-		return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "accelerator available and total flavor sets must match")
+	if len(report.AcceleratorAvailableByType) != len(report.AcceleratorTotalByType) {
+		return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "accelerator available and total accelerator type sets must match")
 	}
-	availableByNode := make(map[string]int64, len(report.AcceleratorAvailableByFlavor))
-	for node, flavors := range report.AcceleratorAvailableByNode {
+	availableByNode := make(map[string]int64, len(report.AcceleratorAvailableByType))
+	for node, acceleratorTypes := range report.AcceleratorAvailableByNode {
 		if node == "" {
 			return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "per-node accelerator report has empty node identity")
 		}
-		for flavor, available := range flavors {
-			if flavor == "" || available < 0 {
+		for acceleratorType, available := range acceleratorTypes {
+			if acceleratorType == "" || available < 0 {
 				return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "invalid per-node accelerator capacity value")
 			}
-			if _, present := report.AcceleratorTotalByFlavor[flavor]; !present {
-				return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "per-node accelerator flavor is absent from cluster totals")
+			if _, present := report.AcceleratorTotalByType[acceleratorType]; !present {
+				return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "per-node accelerator type is absent from cluster totals")
 			}
-			availableByNode[flavor] += available
+			availableByNode[acceleratorType] += available
 		}
 	}
-	for flavor, byNode := range availableByNode {
-		if byNode > report.AcceleratorAvailableByFlavor[flavor] {
+	for acceleratorType, byNode := range availableByNode {
+		if byNode > report.AcceleratorAvailableByType[acceleratorType] {
 			return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "per-node accelerator capacity exceeds cluster availability")
 		}
 	}
@@ -145,7 +145,7 @@ func (s *Service) Reconcile(ctx context.Context, clusterName, agentVersion strin
 	if err := s.metrics.RecordClusterCapacitySnapshot(ctx, metricsdb.ClusterCapacitySnapshot{
 		ClusterName: clusterName, At: time.Now().UTC(),
 		CPUAvailable: report.CPUAvailableCores, CPUTotal: report.CPUTotalCores,
-		AcceleratorAvailable: report.AcceleratorAvailableByFlavor, AcceleratorTotal: report.AcceleratorTotalByFlavor,
+		AcceleratorAvailable: report.AcceleratorAvailableByType, AcceleratorTotal: report.AcceleratorTotalByType,
 		AcceleratorAvailableByNode: report.AcceleratorAvailableByNode,
 		NodeResourcesByNode:        report.NodeResourcesByNode,
 		NodeResourcesTotalByNode:   report.NodeResourcesTotalByNode,

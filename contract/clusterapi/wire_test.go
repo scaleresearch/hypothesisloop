@@ -56,7 +56,7 @@ func TestTheReconcileRequestIsTheOneAgentsSent(t *testing.T) {
 			}
 			sameJSON(t, was, ReconcileRequest{
 				CPUAvailableCores: 3.5, CPUTotalCores: 8,
-				AcceleratorAvailableByFlavor: available, AcceleratorTotalByFlavor: total,
+				AcceleratorAvailableByType: available, AcceleratorTotalByType: total,
 				AcceleratorAvailableByNode: byNode,
 				NodeResourcesByNode:        resources,
 				NodeResourcesTotalByNode:   resources,

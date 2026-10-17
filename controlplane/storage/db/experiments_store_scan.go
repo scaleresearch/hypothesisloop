@@ -75,8 +75,8 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 		exp.FinishedAt = &finished
 	}
 	// exp.Job.AcceleratorType stays the type the agent originally asked for while
-	// exp.AcceleratorType tracks the flavor admission actually chose. Do not collapse the two
-	// here: the scheduler compares them to undo a substitution whose flavor quota can no longer
+	// exp.AcceleratorType tracks the accelerator type admission actually chose. Do not collapse the two
+	// here: the scheduler compares them to undo a substitution whose accelerator type quota can no longer
 	// cover (loop_tick.go, loop_preempt.go), and the pod is already built from the concrete
 	// exp.AcceleratorType (k8sexec.job_build), so nothing downstream needs the JobSpec rewritten.
 	if evictionReason != nil {

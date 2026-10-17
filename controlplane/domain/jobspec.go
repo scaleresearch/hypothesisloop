@@ -103,7 +103,7 @@ type JobSpec struct {
 	//
 	// One accelerator type per job: a group may name AcceleratorType, but every group that does
 	// must name the same one, because a single AcceleratorType on the experiment is what
-	// admission, flavor substitution and billing all key on.
+	// admission, accelerator type substitution and billing all key on.
 	Groups []JobGroup `json:"groups,omitempty" yaml:"groups,omitempty"`
 
 	// NumNodes is how many identical nodes this job spans. 1 (default) is a single-node job;
@@ -363,7 +363,7 @@ func (j JobSpec) ValidateGroups() error {
 			continue
 		}
 		// Groups may differ in accelerator COUNT, including zero, but never in TYPE: the
-		// experiment carries a single AcceleratorType that admission, flavor substitution and
+		// experiment carries a single AcceleratorType that admission, accelerator type substitution and
 		// billing all key on, and a per-group set would have to be threaded through every one
 		// of those paths for a case nothing has asked for.
 		if acceleratorType == "" {

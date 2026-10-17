@@ -91,7 +91,7 @@ ORDER BY submitted_at ASC, id ASC`, clusterName)
 		}
 		// A nil callback is a speculative submit: there is no node yet for a live-fit predicate to
 		// check, and the capacity being claimed is the SUBMITTED row itself (already fenced against
-		// GetFlavorCapacity's desired-free by the caller's own footprint accounting). The lock and
+		// GetAcceleratorTypeCapacity's desired-free by the caller's own footprint accounting). The lock and
 		// the status='QUEUED' predicate below still fully serialize the claim.
 		available := true
 		if capacityAvailable != nil {
@@ -149,7 +149,7 @@ RETURNING e.resolved_job_spec ->> 'image', ` + jobWrittenColumns
 // job_watcher poll observing a stale "Running" phase after the experiment was already
 // cancelled/evicted (the backend Job can report Running briefly until cluster-agent reconciles
 // it away). Returns whether the transition happened, so callers can skip onRunning side effects
-// (accelerator-type recording, flavor-substitution debit) when it didn't.
+// (accelerator-type recording, accelerator type substitution debit) when it didn't.
 //
 // The same write records the accelerator type the job runs on (ran_on_accelerator_type), which
 // is the type it was admitted at: from here on the job has run, whatever ends this attempt.

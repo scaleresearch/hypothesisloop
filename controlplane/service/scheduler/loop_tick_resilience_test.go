@@ -64,7 +64,7 @@ func (resilienceQuota) GetAgentQuota(context.Context, string, string) (*domain.A
 // submitted — this test is about the prefilter surviving, not about placement.
 type resilienceWorkload struct{ ClusterCapacity }
 
-func (resilienceWorkload) GetFlavorCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
+func (resilienceWorkload) GetAcceleratorTypeCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
 	return map[string]domain.Footprint{"c1": domain.NewFootprint()},
 		map[string]domain.Footprint{"c1": domain.NewFootprint()}, nil
 }
@@ -246,8 +246,8 @@ func TestTickSkipsAnAgentWhoseQuotaCannotBeRead(t *testing.T) {
 
 type skippedClusterWorkload struct{ resilienceWorkload }
 
-func (w skippedClusterWorkload) GetFlavorCapacity(ctx context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
-	available, desiredFree, _ := w.resilienceWorkload.GetFlavorCapacity(ctx)
+func (w skippedClusterWorkload) GetAcceleratorTypeCapacity(ctx context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
+	available, desiredFree, _ := w.resilienceWorkload.GetAcceleratorTypeCapacity(ctx)
 	return available, desiredFree, InconsistentSnapshots{"c2": errors.New("available capacity exceeds total")}
 }
 

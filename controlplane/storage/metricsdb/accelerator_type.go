@@ -11,7 +11,7 @@ import (
 // by the cluster agent's status push while a job is observed running (see
 // metricsdb.RecordJobStatuses) — the only writer; nothing on the control-plane side duplicates
 // it. Read back by LatestAcceleratorType for job_watcher's onRunning admission-consistency check
-// (did the job actually land on the flavor admission decided?). It is not used for billing —
+// (did the job actually land on the accelerator type admission decided?). It is not used for billing —
 // see service/settlement.Settler.Settle and controller.observedAcceleratorCost for why a live
 // per-type-and-grid-point observation proved too unreliable for that (a job shorter than one
 // poll tick never gets an observation at all) and what replaced it.

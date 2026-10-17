@@ -66,7 +66,7 @@ func (c *runningCostCalc) costOf(ctx context.Context, exp *domain.Experiment) (r
 	// same job differently: LookupCost reflects today's catalog, which can change (or lose the
 	// entry entirely, e.g. #19) after the job was admitted, while settlement always bills at the
 	// rate implied by the estimate the job was actually admitted with. RatedCost needs no catalog
-	// lookup and so can't be knocked out by a retired flavor either.
+	// lookup and so can't be knocked out by a retired accelerator type either.
 	// A CPU job is billed at that rate too: settlement charges every job that reserved an estimate.
 	return runningCost{found: true, hours: hours, accH: exp.RatedCost(exp.EstimatedCostAccH, hours)}, nil
 }

@@ -43,7 +43,7 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 	l.applyPendingEvictions(start, t.gAvail, t.bAvail, t.clusters.nodeAvail, t.clusters.nodeResources)
 	t.snapshotTickStart()
 
-	// GetFlavorCapacity already subtracts the complete desired footprint (SUBMITTED/RUNNING). No
+	// GetAcceleratorTypeCapacity already subtracts the complete desired footprint (SUBMITTED/RUNNING). No
 	// second reservation or live-usage subtraction here — either would double-count.
 	// MarkSubmitted is itself the durable capacity claim.
 	queued, err := l.store.ListQueuedExperiments(ctx)
@@ -107,7 +107,7 @@ type tickState struct {
 // readTickState reads the clusters once for the whole tick. A failed read admission decides on
 // fails the tick.
 func (l *Loop) readTickState(ctx context.Context, start time.Time) (*tickState, error) {
-	gAvail, desiredFree, err := readFlavorCapacity(ctx, l.clusters, l.logger)
+	gAvail, desiredFree, err := readAcceleratorTypeCapacity(ctx, l.clusters, l.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -196,8 +196,8 @@ func (l *Loop) readSpeculation(ctx context.Context, gAvail map[string]domain.Foo
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("cluster ids: %w", err)
 	}
-	// gAvail only has entries for clusters GetFlavorCapacity's heartbeat read found connected
-	// (see ClusterReports.GetFlavorCapacity) — reusing its key set here is the same
+	// gAvail only has entries for clusters GetAcceleratorTypeCapacity's heartbeat read found connected
+	// (see ClusterReports.GetAcceleratorTypeCapacity) — reusing its key set here is the same
 	// "unreachable cluster is never a speculative candidate" rule the doc calls out as a
 	// pre-existing bug fixed in step 0, applied to the speculative path too.
 	connected = make(map[string]bool, len(gAvail))
@@ -315,8 +315,8 @@ func (l *Loop) admissible(ctx context.Context, t *tickState, queued []*domain.Ex
 
 // admit submits exp to cluster and claims fp from each view of free capacity and its nodes, or
 // writes why it could not be submitted.
-func (l *Loop) admit(ctx context.Context, t *tickState, pass string, exp *domain.Experiment, cluster string, persistedFlavor domain.AcceleratorType, fp domain.Footprint, views ...map[string]domain.Footprint) {
-	if err := l.submitJob(ctx, exp, cluster, persistedFlavor); err != nil {
+func (l *Loop) admit(ctx context.Context, t *tickState, pass string, exp *domain.Experiment, cluster string, persistedAcceleratorType domain.AcceleratorType, fp domain.Footprint, views ...map[string]domain.Footprint) {
+	if err := l.submitJob(ctx, exp, cluster, persistedAcceleratorType); err != nil {
 		l.logger.Log(submitErrorLevel(err), "submit "+pass+" job", zap.String("exp", exp.ID), zap.Error(err))
 		obsmetrics.AdmissionTickResultsTotal.WithLabelValues(pass, "skipped").Inc()
 		reason := notAdmittedReasonForSubmitError(err)

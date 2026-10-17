@@ -42,7 +42,7 @@ func TestFairShareZeroInstalledAcceleratorsIsAHardError(t *testing.T) {
 // installedAccelerators<=0 hard error — they are different callers' different situations, and
 // FairShare must answer each on its own terms rather than one masking the other.
 func TestFairShareLegitimateZeroNotConflatedWithInstalledZeroError(t *testing.T) {
-	// heldAccelerators == 0: a node reporting the flavor but this job holding none of it — legit 0.
+	// heldAccelerators == 0: a node reporting the accelerator type but this job holding none of it — legit 0.
 	got, err := FairShare(1000, 0, 8)
 	if err != nil || got != 0 {
 		t.Fatalf("FairShare(heldAccelerators=0) = (%d, %v), want (0, nil)", got, err)
@@ -94,8 +94,8 @@ func TestFootprintScaleMultiNode(t *testing.T) {
 	if got := fp[ResourceKey{Kind: ResourceKindCPU}]; got != 2000 {
 		t.Errorf("cpu millicores = %d, want 2000", got)
 	}
-	// Accelerator: 2 accelerators/node * 4 nodes = 8, matches TotalAccelerators(). Flavor key uses
-	if got := fp[ResourceKey{Kind: ResourceKindAccelerator, Flavor: "example.com/product=test-accelerator"}]; got != int64(j.TotalAccelerators()) {
+	// Accelerator: 2 accelerators/node * 4 nodes = 8, matches TotalAccelerators(). Name is the accelerator type.
+	if got := fp[ResourceKey{Kind: ResourceKindAccelerator, Name: "example.com/product=test-accelerator"}]; got != int64(j.TotalAccelerators()) {
 		t.Errorf("accelerator count = %d, want %d", got, j.TotalAccelerators())
 	}
 	// Memory: 1GiB/node * 4 nodes.
@@ -126,7 +126,7 @@ func TestFootprintMalformedQuantityRejected(t *testing.T) {
 func TestFits(t *testing.T) {
 	cpu := ResourceKey{Kind: ResourceKindCPU}
 	mem := ResourceKey{Kind: ResourceKindMemory}
-	accelerator := ResourceKey{Kind: ResourceKindAccelerator, Flavor: "H100"}
+	accelerator := ResourceKey{Kind: ResourceKindAccelerator, Name: "H100"}
 
 	capacity := Footprint{cpu: 4000, mem: 8_000_000_000}
 	need := Footprint{cpu: 2000, mem: 4_000_000_000}

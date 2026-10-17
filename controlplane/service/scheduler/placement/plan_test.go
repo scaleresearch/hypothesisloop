@@ -122,7 +122,7 @@ func TestTopologyFitsIgnoresExtraResourcesPerNode(t *testing.T) {
 
 // A CPU-only job (TotalAccelerators == 0) is now judged on node layout too: cluster-a's aggregate
 // is large enough (6 cores across two nodes) but no single node can host the whole rank, while
-// cluster-b's one node can. Before this went through AtFlavor, BestFit picked
+// cluster-b's one node can. Before this went through AtAcceleratorType, BestFit picked
 // cluster-a on the scalar total alone and the tick then failed TopologyFits there and went to
 // preemption instead of using cluster-b.
 func TestResolveClusterAndFootprintCPUOnlySkipsTopologyCheck(t *testing.T) {
@@ -221,7 +221,7 @@ func TestReservePlacementCommitsExactlyThePlan(t *testing.T) {
 }
 
 // A CPU-only job that fits nowhere in node layout falls back to the scalar best-fit cluster
-// rather than reporting "no cluster" outright — the caller (AtFlavor's own caller in the
+// rather than reporting "no cluster" outright — the caller (AtAcceleratorType's own caller in the
 // tick) still re-checks TopologyFits on the chosen cluster and routes to preemption from there.
 // This documents that fallback rather than assuming ClusterAndFootprint itself proves
 // feasibility for a CPU-only job when nothing actually fits.
@@ -241,18 +241,18 @@ func TestResolveClusterAndFootprintCPUOnlyFallsBackWhenNoNodeFits(t *testing.T) 
 	}
 }
 
-// AtFlavor's ok=false path: every candidate cluster fits on the scalar footprint but none
+// AtAcceleratorType's ok=false path: every candidate cluster fits on the scalar footprint but none
 // has node layout for it.
-func TestPlaceAtFlavorReturnsFalseWhenNoClusterHasLayout(t *testing.T) {
+func TestPlaceAtAcceleratorTypeReturnsFalseWhenNoClusterHasLayout(t *testing.T) {
 	exp := distributedExperiment(2, 1)
 	fp := exp.Footprint()
 	avail := map[string]domain.Footprint{"cluster-a": fp}
 	nodeAvail := map[string]map[string]map[string]int64{
 		"cluster-a": {"node-a": {h100: 2}}, // one node has both accelerators; a spread job needs two distinct hosts
 	}
-	cluster, ok := AtFlavor(avail, nil, nodeAvail, nil, nil, exp)
+	cluster, ok := AtAcceleratorType(avail, nil, nodeAvail, nil, nil, exp)
 	if ok {
-		t.Fatalf("placeAtFlavor reported ok=true with cluster %q, want false: no cluster has two distinct qualifying hosts", cluster)
+		t.Fatalf("placeAtAcceleratorType reported ok=true with cluster %q, want false: no cluster has two distinct qualifying hosts", cluster)
 	}
 }
 
@@ -314,14 +314,14 @@ func TestNodeHasRoomEdgeCases(t *testing.T) {
 	}
 }
 
-// When an accelerator job has an alternate acceptable flavor and neither flavor fits anywhere,
-// ClusterAndFootprint must restore the originally requested flavor (so the caller's own
-// preemption path reasons about the flavor the job actually asked for) and return the requested
-// flavor's own best-fit fallback, not the alternate's.
-func TestResolveClusterAndFootprintRestoresRequestedFlavorWhenNothingFits(t *testing.T) {
-	const altFlavor = "nvidia.com/gpu.product=nvidia-a100-80gb"
+// When an accelerator job has an alternate acceptable accelerator type and neither accelerator type fits anywhere,
+// ClusterAndFootprint must restore the originally requested accelerator type (so the caller's own
+// preemption path reasons about the accelerator type the job actually asked for) and return the requested
+// accelerator type's own best-fit fallback, not the alternate's.
+func TestResolveClusterAndFootprintRestoresRequestedAcceleratorTypeWhenNothingFits(t *testing.T) {
+	const altAcceleratorType = "nvidia.com/gpu.product=nvidia-a100-80gb"
 	exp := distributedExperiment(1, 8) // 8 accelerators, too many for either cluster below
-	exp.Job.AcceptableAcceleratorTypes = []domain.AcceleratorType{altFlavor}
+	exp.Job.AcceptableAcceleratorTypes = []domain.AcceleratorType{altAcceleratorType}
 	fpRequested := exp.Footprint()
 	avail := map[string]domain.Footprint{"cluster-a": fpRequested}
 	cluster, fp := ClusterAndFootprint(avail, nil, nil, nil, nil, exp)
@@ -329,9 +329,9 @@ func TestResolveClusterAndFootprintRestoresRequestedFlavorWhenNothingFits(t *tes
 		t.Fatalf("AcceleratorType left as %q after failed substitution, want restored to requested %q", exp.AcceleratorType, h100)
 	}
 	if cluster != "cluster-a" {
-		t.Fatalf("fallback cluster = %q, want the requested flavor's own best-fit cluster-a", cluster)
+		t.Fatalf("fallback cluster = %q, want the requested accelerator type's own best-fit cluster-a", cluster)
 	}
 	if !reflect.DeepEqual(fp, fpRequested) {
-		t.Fatalf("fallback footprint = %v, want the requested flavor's footprint %v", fp, fpRequested)
+		t.Fatalf("fallback footprint = %v, want the requested accelerator type's footprint %v", fp, fpRequested)
 	}
 }

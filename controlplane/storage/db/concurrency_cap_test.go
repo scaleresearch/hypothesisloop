@@ -66,11 +66,11 @@ func setupCapTestPool(t *testing.T, cap int) (*Pool, *Store, string, string) {
 	return pool, NewStore(pool, 3), agentID, peID
 }
 
-// TestReserveAdmittedFlavorTxRejectsOverCap covers autoscaler.md's concurrency cap logic: a submit
+// TestReserveAdmittedAcceleratorTypeTxRejectsOverCap covers autoscaler.md's concurrency cap logic: a submit
 // that would push this pool's SUBMITTED+RUNNING accelerator count over
 // max_concurrent_accelerators is rejected with domain.NotAdmittedConcurrencyCap, and one that
-// fits is admitted (the flavor/estimate columns are updated).
-func TestReserveAdmittedFlavorTxRejectsOverCap(t *testing.T) {
+// fits is admitted (the accelerator type/estimate columns are updated).
+func TestReserveAdmittedAcceleratorTypeTxRejectsOverCap(t *testing.T) {
 	pool, store, agentID, peID := setupCapTestPool(t, 4)
 	ctx := context.Background()
 	suffix := uuid.New().String()[:8]
@@ -80,13 +80,13 @@ func TestReserveAdmittedFlavorTxRejectsOverCap(t *testing.T) {
 	seedExperimentForCapTest(t, pool, "exp-over-"+suffix, agentID, peID, 4, domain.StatusQueued)
 
 	// Fits: 2 running + 2 requested = 4 = cap.
-	reason, err := store.ReserveAdmittedFlavorTx(ctx, "exp-fits-"+suffix, "nvidia.com/gpu.product=NVIDIA-L40", 1, 2, 0, noopObserve)
+	reason, err := store.ReserveAdmittedAcceleratorTypeTx(ctx, "exp-fits-"+suffix, "nvidia.com/gpu.product=NVIDIA-L40", 1, 2, 0, noopObserve)
 	if err != nil || reason != "" {
 		t.Fatalf("fits-at-cap: got = (%q, %v), want = (\"\", nil)", reason, err)
 	}
 
 	// Over: 2 running + 4 requested = 6 > cap 4.
-	reason, err = store.ReserveAdmittedFlavorTx(ctx, "exp-over-"+suffix, "nvidia.com/gpu.product=NVIDIA-L40", 1, 4, 0, noopObserve)
+	reason, err = store.ReserveAdmittedAcceleratorTypeTx(ctx, "exp-over-"+suffix, "nvidia.com/gpu.product=NVIDIA-L40", 1, 4, 0, noopObserve)
 	if err != nil {
 		t.Fatalf("over-cap: got err = %v, want nil", err)
 	}
@@ -95,12 +95,12 @@ func TestReserveAdmittedFlavorTxRejectsOverCap(t *testing.T) {
 	}
 }
 
-// TestReserveAdmittedFlavorTxCapIsAcrossAllAgents covers a real bug: the
+// TestReserveAdmittedAcceleratorTypeTxCapIsAcrossAllAgents covers a real bug: the
 // in-flight SUM and its serializing advisory lock were both scoped to (agent_id,
 // platform_experiment_id), so max_concurrent_accelerators was actually enforced per agent, not
 // across the whole platform experiment as the migrations document it and autoscaler.md's concurrency
 // cap requires. Two different agents under the same platform experiment must share one cap.
-func TestReserveAdmittedFlavorTxCapIsAcrossAllAgents(t *testing.T) {
+func TestReserveAdmittedAcceleratorTypeTxCapIsAcrossAllAgents(t *testing.T) {
 	pool, store, agentA, peID := setupCapTestPool(t, 3)
 	ctx := context.Background()
 	suffix := uuid.New().String()[:8]
@@ -120,7 +120,7 @@ func TestReserveAdmittedFlavorTxCapIsAcrossAllAgents(t *testing.T) {
 
 	// agentA already holds 2 in flight; agentB's own submit of 2 more is fine in isolation
 	// (2 <= cap 3) but 2+2=4 exceeds the platform experiment's shared cap of 3.
-	reason, err := store.ReserveAdmittedFlavorTx(ctx, "exp-b-"+suffix, "nvidia.com/gpu.product=NVIDIA-L40", 1, 2, 0, noopObserve)
+	reason, err := store.ReserveAdmittedAcceleratorTypeTx(ctx, "exp-b-"+suffix, "nvidia.com/gpu.product=NVIDIA-L40", 1, 2, 0, noopObserve)
 	if err != nil {
 		t.Fatalf("agent B reserve: got err = %v, want nil", err)
 	}
@@ -129,17 +129,17 @@ func TestReserveAdmittedFlavorTxCapIsAcrossAllAgents(t *testing.T) {
 	}
 }
 
-// TestReserveAdmittedFlavorTxCapSerializesAgainstAnAlreadyCommittedBaseline demonstrates the part
+// TestReserveAdmittedAcceleratorTypeTxCapSerializesAgainstAnAlreadyCommittedBaseline demonstrates the part
 // of the cap that is genuinely race-free: once a reservation is reflected in a SUBMITTED/RUNNING
 // row (the state ClaimSubmitted writes right after a successful reservation in production), every
 // later concurrent caller against the same pool sees it, because each call re-reads the SUM inside
 // its own transaction under the pool's advisory lock. Two calls racing to reserve against rows
 // that are STILL QUEUED (neither yet reflected as SUBMITTED/RUNNING) are NOT mutually visible to
 // each other by this design — the doc's SUM is explicitly SUBMITTED+RUNNING only, and
-// ReserveAdmittedFlavorTx does not itself flip status (ClaimSubmitted does, moments later, under a
+// ReserveAdmittedAcceleratorTypeTx does not itself flip status (ClaimSubmitted does, moments later, under a
 // separate per-cluster lock). That is a real, narrow, accepted race bounded by how many control-
 // plane replicas tick concurrently for the same pool — noted here rather than silently assumed.
-func TestReserveAdmittedFlavorTxCapSerializesAgainstAnAlreadyCommittedBaseline(t *testing.T) {
+func TestReserveAdmittedAcceleratorTypeTxCapSerializesAgainstAnAlreadyCommittedBaseline(t *testing.T) {
 	pool, store, agentID, peID := setupCapTestPool(t, 3)
 	ctx := context.Background()
 	suffix := uuid.New().String()[:8]
@@ -149,7 +149,7 @@ func TestReserveAdmittedFlavorTxCapSerializesAgainstAnAlreadyCommittedBaseline(t
 
 	// exp-a reserves and is claimed (status flips to SUBMITTED, as ClaimSubmitted would do),
 	// bringing the pool to 2 in flight.
-	if reason, err := store.ReserveAdmittedFlavorTx(ctx, "exp-a-"+suffix, "nvidia.com/gpu.product=NVIDIA-L40", 1, 2, 0, noopObserve); err != nil || reason != "" {
+	if reason, err := store.ReserveAdmittedAcceleratorTypeTx(ctx, "exp-a-"+suffix, "nvidia.com/gpu.product=NVIDIA-L40", 1, 2, 0, noopObserve); err != nil || reason != "" {
 		t.Fatalf("exp-a reserve: got = (%q, %v), want = (\"\", nil)", reason, err)
 	}
 	if _, err := pool.pool.Exec(ctx, `UPDATE experiments SET status='SUBMITTED', not_admitted_reason=NULL WHERE id=$1`, "exp-a-"+suffix); err != nil {
@@ -157,7 +157,7 @@ func TestReserveAdmittedFlavorTxCapSerializesAgainstAnAlreadyCommittedBaseline(t
 	}
 
 	// exp-b now sees the committed 2-in-flight baseline (exp-a) and requests 2 more: 2+2=4 > cap 3.
-	reason, err := store.ReserveAdmittedFlavorTx(ctx, "exp-b-"+suffix, "nvidia.com/gpu.product=NVIDIA-L40", 1, 2, 0, noopObserve)
+	reason, err := store.ReserveAdmittedAcceleratorTypeTx(ctx, "exp-b-"+suffix, "nvidia.com/gpu.product=NVIDIA-L40", 1, 2, 0, noopObserve)
 	if err != nil {
 		t.Fatalf("exp-b reserve: got err = %v, want nil", err)
 	}

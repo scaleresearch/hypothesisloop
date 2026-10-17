@@ -8,8 +8,8 @@ import (
 
 var cpuKey = domain.ResourceKey{Kind: domain.ResourceKindCPU}
 
-func acceleratorKey(flavor string) domain.ResourceKey {
-	return domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: flavor}
+func acceleratorKey(acceleratorType string) domain.ResourceKey {
+	return domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Name: acceleratorType}
 }
 
 func TestNotAdmittedReasonDistinguishesScarcityFromOutranking(t *testing.T) {

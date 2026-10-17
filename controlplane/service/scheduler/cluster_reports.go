@@ -95,9 +95,9 @@ func (b *ClusterReports) LogTail(ctx context.Context, exp *domain.Experiment, n 
 // GetAdmittedAcceleratorType reads the latest observed type metric for exp's current admission.
 //
 // The lookback is clamped to the time since submitted_at, which Postgres rewrites on every
-// ClaimSubmitted and clears on requeue. A job re-admitted onto a different flavor after
+// ClaimSubmitted and clears on requeue. A job re-admitted onto a different accelerator type after
 // preemption would otherwise be readable through the tail of its previous pod's samples, and
-// comparing this against the newly reserved flavor would report a placement mismatch that
+// comparing this against the newly reserved accelerator type would report a placement mismatch that
 // happened one admission ago.
 //
 // found=false means no sample of this admission names a type yet.
@@ -116,7 +116,7 @@ func (b *ClusterReports) GetAdmittedAcceleratorType(ctx context.Context, exp *do
 	return b.metrics.LatestAcceleratorType(ctx, exp.ID, now, window)
 }
 
-// GetFlavorCapacity returns two views of each connected cluster's free capacity:
+// GetAcceleratorTypeCapacity returns two views of each connected cluster's free capacity:
 //   - desiredFree = capacity left to platform jobs minus every PostgreSQL SUBMITTED/RUNNING
 //     footprint: what is free once the cluster has converged on desired state;
 //   - available = the dimension-wise minimum of desiredFree and the cluster agent's fresh
@@ -131,7 +131,7 @@ func (b *ClusterReports) GetAdmittedAcceleratorType(ctx context.Context, exp *do
 // CPU, memory and storage totals are the per-node figures net of non-platform pods, so a
 // desiredFree above available there is always a platform job still terminating. Accelerator
 // totals are raw allocatable: the runtime does not report them net of non-platform pods.
-func (b *ClusterReports) GetFlavorCapacity(ctx context.Context) (available, desiredFree map[string]domain.Footprint, err error) {
+func (b *ClusterReports) GetAcceleratorTypeCapacity(ctx context.Context) (available, desiredFree map[string]domain.Footprint, err error) {
 	heartbeats, err := b.metrics.LiveClusterHeartbeats(ctx, b.connectedWithin)
 	if err != nil {
 		return nil, nil, fmt.Errorf("scheduler: live clusters: %w", err)
@@ -255,13 +255,13 @@ func validateClusterSnapshot(
 	if len(accelAvail) != len(accelTotal) {
 		return fmt.Errorf("scheduler: mismatched live accelerator capacity sets for cluster %q", cluster)
 	}
-	for flavor, total := range accelTotal {
-		available, availableOK := accelAvail[flavor]
+	for acceleratorType, total := range accelTotal {
+		available, availableOK := accelAvail[acceleratorType]
 		if !availableOK {
-			return fmt.Errorf("scheduler: incomplete live accelerator capacity for cluster %q flavor %q", cluster, flavor)
+			return fmt.Errorf("scheduler: incomplete live accelerator capacity for cluster %q accelerator type %q", cluster, acceleratorType)
 		}
 		if available > total {
-			return fmt.Errorf("scheduler: available accelerator capacity exceeds total for cluster %q flavor %q", cluster, flavor)
+			return fmt.Errorf("scheduler: available accelerator capacity exceeds total for cluster %q accelerator type %q", cluster, acceleratorType)
 		}
 	}
 	return nil

@@ -173,15 +173,15 @@ func TestResolveClusterLocalResourcesGroupedJobUsesPerGroupAcceleratorCount(t *t
 // Nodes() > 1 means "spans multiple nodes", never "requests more than one accelerator", and the
 // latter must still be counted in full.
 func TestInstalledAcceleratorsByNodeExcludesMultiNodeSpanButCountsHighSingleNodeAcceleratorCount(t *testing.T) {
-	const flavor = domain.AcceleratorType("example.com/product=test-accelerator")
+	const acceleratorType = domain.AcceleratorType("example.com/product=test-accelerator")
 	multiNode := &domain.Experiment{
 		ID:               "exp-multi",
 		ClusterName:      "cluster-a",
-		AcceleratorType:  flavor,
+		AcceleratorType:  acceleratorType,
 		AcceleratorCount: 4,
 		CreatedAt:        pastTime(),
 		Job: domain.JobSpec{Image: "registry.test/job:1",
-			AcceleratorType:  flavor,
+			AcceleratorType:  acceleratorType,
 			AcceleratorCount: 4,
 			NumNodes:         2, // spans 2 nodes: Nodes() > 1
 		},
@@ -189,11 +189,11 @@ func TestInstalledAcceleratorsByNodeExcludesMultiNodeSpanButCountsHighSingleNode
 	singleNodeHighCount := &domain.Experiment{
 		ID:               "exp-single-high-count",
 		ClusterName:      "cluster-a",
-		AcceleratorType:  flavor,
+		AcceleratorType:  acceleratorType,
 		AcceleratorCount: 5,
 		CreatedAt:        pastTime(),
 		Job: domain.JobSpec{Image: "registry.test/job:1",
-			AcceleratorType:  flavor,
+			AcceleratorType:  acceleratorType,
 			AcceleratorCount: 5, // 5 accelerators, but on ONE node: Nodes() == 1
 			NumNodes:         1,
 		},
@@ -201,9 +201,9 @@ func TestInstalledAcceleratorsByNodeExcludesMultiNodeSpanButCountsHighSingleNode
 
 	loop := &Loop{store: &resolveTestStore{running: []*domain.Experiment{multiNode, singleNodeHighCount}}, logger: zap.NewNop(), observed: observedOnNode([]string{"exp-multi", "exp-single-high-count"}, "node-a")}
 	cache := newResolutionCache(loop)
-	nodeAvail := map[string]map[string]int64{"node-a": {string(flavor): 0}}
+	nodeAvail := map[string]map[string]int64{"node-a": {string(acceleratorType): 0}}
 
-	installed, err := cache.installedAcceleratorsByNode(context.Background(), "cluster-a", flavor, nodeAvail, nil)
+	installed, err := cache.installedAcceleratorsByNode(context.Background(), "cluster-a", acceleratorType, nodeAvail, nil)
 	if err != nil {
 		t.Fatalf("installedAcceleratorsByNode: %v", err)
 	}
@@ -220,16 +220,16 @@ func TestInstalledAcceleratorsByNodeExcludesMultiNodeSpanButCountsHighSingleNode
 // FairShare computed against the reconstructed total. Named explicitly so this can never quietly
 // regress back to a RUNNING-only view.
 func TestInstalledAcceleratorsByNodeCountsSubmittedNotJustRunning(t *testing.T) {
-	const flavor = domain.AcceleratorType("example.com/product=test-accelerator")
+	const acceleratorType = domain.AcceleratorType("example.com/product=test-accelerator")
 	claimByStatus := func(id string, status domain.ExperimentStatus, count int) *domain.Experiment {
 		return &domain.Experiment{
 			ID:               id,
 			ClusterName:      "cluster-a",
 			Status:           status,
-			AcceleratorType:  flavor,
+			AcceleratorType:  acceleratorType,
 			AcceleratorCount: count,
 			CreatedAt:        pastTime(),
-			Job:              domain.JobSpec{Image: "registry.test/job:1", AcceleratorType: flavor, AcceleratorCount: count, NumNodes: 1},
+			Job:              domain.JobSpec{Image: "registry.test/job:1", AcceleratorType: acceleratorType, AcceleratorCount: count, NumNodes: 1},
 		}
 	}
 	claimed := []*domain.Experiment{
@@ -239,9 +239,9 @@ func TestInstalledAcceleratorsByNodeCountsSubmittedNotJustRunning(t *testing.T) 
 
 	loop := &Loop{store: &resolveTestStore{running: claimed}, logger: zap.NewNop(), observed: observedOnNode([]string{"exp-submitted", "exp-running"}, "node-a")}
 	cache := newResolutionCache(loop)
-	nodeAvail := map[string]map[string]int64{"node-a": {string(flavor): 0}}
+	nodeAvail := map[string]map[string]int64{"node-a": {string(acceleratorType): 0}}
 
-	installed, err := cache.installedAcceleratorsByNode(context.Background(), "cluster-a", flavor, nodeAvail, nil)
+	installed, err := cache.installedAcceleratorsByNode(context.Background(), "cluster-a", acceleratorType, nodeAvail, nil)
 	if err != nil {
 		t.Fatalf("installedAcceleratorsByNode: %v", err)
 	}

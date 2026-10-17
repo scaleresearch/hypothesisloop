@@ -20,12 +20,12 @@ func describeFootprint(fp domain.Footprint) string {
 	for key, amount := range fp {
 		switch key.Kind {
 		case domain.ResourceKindAccelerator:
-			if statesCPU && amount*1000 == cpu && domain.AcceleratorType(key.Flavor).Kind() == domain.TypeKindCPU {
+			if statesCPU && amount*1000 == cpu && domain.AcceleratorType(key.Name).Kind() == domain.TypeKindCPU {
 				continue
 			}
-			devices = append(devices, strconv.FormatInt(amount, 10)+" x "+key.Flavor)
+			devices = append(devices, strconv.FormatInt(amount, 10)+" x "+key.Name)
 		case domain.ResourceKindExtended:
-			devices = append(devices, strconv.FormatInt(amount, 10)+" x "+key.Flavor)
+			devices = append(devices, strconv.FormatInt(amount, 10)+" x "+key.Name)
 		}
 	}
 	sort.Strings(devices)
@@ -75,7 +75,7 @@ func describeNodeResources(resources map[string]int64) string {
 func footprintStr(fp domain.Footprint) string {
 	parts := make([]string, 0, len(fp))
 	for k, v := range fp {
-		parts = append(parts, fmt.Sprintf("%s:%s=%d", k.Kind, k.Flavor, v))
+		parts = append(parts, fmt.Sprintf("%s:%s=%d", k.Kind, k.Name, v))
 	}
 	sort.Strings(parts)
 	return "{" + strings.Join(parts, ",") + "}"

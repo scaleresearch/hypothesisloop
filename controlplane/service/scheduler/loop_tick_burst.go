@@ -36,7 +36,7 @@ func (l *Loop) burstPass(ctx context.Context, t *tickState, queued []*domain.Exp
 
 func (l *Loop) admitBurst(ctx context.Context, t *tickState, exp *domain.Experiment, quota *domain.AgentQuota) {
 	c := t.clusters
-	persistedFlavor := exp.AcceleratorType
+	persistedAcceleratorType := exp.AcceleratorType
 	placed, ok := l.placeQueued(ctx, "burst", exp, t.bAvail, quota, c, &t.errs)
 	if !ok {
 		return
@@ -51,7 +51,7 @@ func (l *Loop) admitBurst(ctx context.Context, t *tickState, exp *domain.Experim
 		l.burstWait(ctx, t, exp, placed)
 		return
 	}
-	l.admit(ctx, t, "burst", exp, cluster, persistedFlavor, fp, t.bAvail)
+	l.admit(ctx, t, "burst", exp, cluster, persistedAcceleratorType, fp, t.bAvail)
 }
 
 // burstWait is the burst job that does not fit where it was placed: it may run the disbalance
@@ -67,7 +67,7 @@ func (l *Loop) burstWait(ctx context.Context, t *tickState, exp *domain.Experime
 	// no equivalent, so a burst job stuck QUEUED for many ticks left no trail at all — the actual
 	// bAvail[cluster]/nodeAvail[cluster] values a tick computed could only be reconstructed after
 	// the fact from Postgres/metrics archaeology, not read off the logs. cluster=="" (every
-	// candidate flavor/cluster combination failed to resolve) is called out explicitly because
+	// candidate accelerator type/cluster combination failed to resolve) is called out explicitly because
 	// bAvail[""] is always the nil map, so the shortage vector below is the job's whole footprint
 	// regardless of real capacity — worth distinguishing from a genuine per-dimension shortfall at
 	// a glance.

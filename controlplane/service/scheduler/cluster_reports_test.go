@@ -41,7 +41,7 @@ func TestNewClusterReportsRejectsMissingAuthoritativeInputs(t *testing.T) {
 
 func TestMinimumFootprintRequiresBothDesiredAndActualCapacity(t *testing.T) {
 	cpu := domain.ResourceKey{Kind: domain.ResourceKindCPU}
-	h100 := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: "H100"}
+	h100 := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Name: "H100"}
 	desiredFree := domain.Footprint{
 		cpu:  8000,
 		h100: 4,
@@ -71,8 +71,8 @@ func TestValidateCapacitySnapshotRejectsMissingAuthoritativeMetric(t *testing.T)
 	inconsistent := b.validateCapacitySnapshot(
 		map[string]bool{"cluster-a": true},
 		map[string]float64{"cluster-a": 4}, map[string]int64{"cluster-a": 8000},
-		map[string]map[string]int64{"cluster-a": {"flavor-h100": 1}},
-		map[string]map[string]int64{"cluster-a": {"flavor-h100": 2}},
+		map[string]map[string]int64{"cluster-a": {"type-h100": 1}},
+		map[string]map[string]int64{"cluster-a": {"type-h100": 2}},
 		map[string]int64{"cluster-a": 8}, map[string]int64{"cluster-a": 16},
 		map[string]int64{}, map[string]int64{"cluster-a": 32},
 	)
@@ -86,8 +86,8 @@ func TestValidateCapacitySnapshotAllowsClusterSpecificAcceleratorTypes(t *testin
 	inconsistent := b.validateCapacitySnapshot(
 		map[string]bool{"cluster-a": true},
 		map[string]float64{"cluster-a": 4}, map[string]int64{"cluster-a": 8000},
-		map[string]map[string]int64{"cluster-a": {"flavor-h100": 1}},
-		map[string]map[string]int64{"cluster-a": {"flavor-h100": 2}},
+		map[string]map[string]int64{"cluster-a": {"type-h100": 1}},
+		map[string]map[string]int64{"cluster-a": {"type-h100": 2}},
 		map[string]int64{"cluster-a": 8}, map[string]int64{"cluster-a": 16},
 		map[string]int64{"cluster-a": 16}, map[string]int64{"cluster-a": 32},
 	)

@@ -19,8 +19,8 @@ func rankedClusters() map[string]domain.Cluster {
 	}
 }
 
-func accelerators(flavors map[string]int64) domain.Footprint {
-	return domain.CapacityFootprint(16, flavors, 64<<30, 64<<30)
+func accelerators(acceleratorTypes map[string]int64) domain.Footprint {
+	return domain.CapacityFootprint(16, acceleratorTypes, 64<<30, 64<<30)
 }
 
 func nodeTotal() map[string]int64 {
@@ -31,11 +31,11 @@ func nodeTotal() map[string]int64 {
 	}
 }
 
-func holdJob(id string, tier domain.CapacityTier, flavor domain.AcceleratorType, count int, cpu string) *domain.Experiment {
+func holdJob(id string, tier domain.CapacityTier, acceleratorType domain.AcceleratorType, count int, cpu string) *domain.Experiment {
 	return &domain.Experiment{
 		ID: id, AgentID: "agent-" + id, PlatformExperimentID: "pe-1", CapacityTier: tier,
-		AcceleratorType: flavor, AcceleratorCount: count,
-		Job: domain.JobSpec{Image: "registry.test/job:1", CPU: cpu, Memory: "1Gi", Storage: "1Gi", AcceleratorType: flavor, AcceleratorCount: count},
+		AcceleratorType: acceleratorType, AcceleratorCount: count,
+		Job: domain.JobSpec{Image: "registry.test/job:1", CPU: cpu, Memory: "1Gi", Storage: "1Gi", AcceleratorType: acceleratorType, AcceleratorCount: count},
 	}
 }
 
@@ -43,9 +43,9 @@ func holdJob(id string, tier domain.CapacityTier, flavor domain.AcceleratorType,
 // in total and what their one node has.
 func free(byCluster map[string]map[string]int64) (avail map[string]domain.Footprint, nodes, resources map[string]map[string]map[string]int64) {
 	avail, nodes, resources = map[string]domain.Footprint{}, map[string]map[string]map[string]int64{}, map[string]map[string]map[string]int64{}
-	for cluster, flavors := range byCluster {
-		avail[cluster] = accelerators(flavors)
-		nodes[cluster] = map[string]map[string]int64{"node-" + cluster: flavors}
+	for cluster, acceleratorTypes := range byCluster {
+		avail[cluster] = accelerators(acceleratorTypes)
+		nodes[cluster] = map[string]map[string]int64{"node-" + cluster: acceleratorTypes}
 		resources[cluster] = map[string]map[string]int64{"node-" + cluster: nodeTotal()}
 	}
 	return avail, nodes, resources
@@ -77,9 +77,9 @@ func TestTheClusterTierIsSearchedBeforeTheAcceleratorType(t *testing.T) {
 		return exp
 	}
 	for name, tc := range map[string]struct {
-		free        map[string]map[string]int64
-		wantCluster string
-		wantFlavor  domain.AcceleratorType
+		free                map[string]map[string]int64
+		wantCluster         string
+		wantAcceleratorType domain.AcceleratorType
 	}{
 		"the higher cluster has only the alternative": {
 			map[string]map[string]int64{"z-first": map[string]int64{l40: 1}, "m-second": map[string]int64{h100: 1}},
@@ -103,8 +103,8 @@ func TestTheClusterTierIsSearchedBeforeTheAcceleratorType(t *testing.T) {
 
 			cluster, fp := ClusterAndFootprint(avail, registered, nodes, resources, nil, exp)
 
-			if cluster != tc.wantCluster || exp.AcceleratorType != tc.wantFlavor {
-				t.Fatalf("resolved to %q at %q, want %q at %q", cluster, exp.AcceleratorType, tc.wantCluster, tc.wantFlavor)
+			if cluster != tc.wantCluster || exp.AcceleratorType != tc.wantAcceleratorType {
+				t.Fatalf("resolved to %q at %q, want %q at %q", cluster, exp.AcceleratorType, tc.wantCluster, tc.wantAcceleratorType)
 			}
 			if !domain.Fits(avail[cluster], fp) {
 				t.Fatalf("the footprint returned does not fit the cluster chosen: %v", fp)
@@ -113,7 +113,7 @@ func TestTheClusterTierIsSearchedBeforeTheAcceleratorType(t *testing.T) {
 	}
 }
 
-// A job that already ran keeps its flavor (CandidateTypes), and is placed again by the
+// A job that already ran keeps its accelerator type (CandidateTypes), and is placed again by the
 // same order as any other.
 func TestARequeuedJobIsPlacedAgainByPriority(t *testing.T) {
 	exp := holdJob("a1", domain.CapacityBurst, l40, 1, "1")
@@ -125,21 +125,21 @@ func TestARequeuedJobIsPlacedAgainByPriority(t *testing.T) {
 	cluster, _ := ClusterAndFootprint(avail, rankedClusters(), nodes, resources, nil, exp)
 
 	if cluster != "m-second" || exp.AcceleratorType != l40 {
-		t.Fatalf("resolved to %q at %q, want the highest cluster with the flavor it ran on, m-second at %q", cluster, exp.AcceleratorType, l40)
+		t.Fatalf("resolved to %q at %q, want the highest cluster with the accelerator type it ran on, m-second at %q", cluster, exp.AcceleratorType, l40)
 	}
 }
 
-// A job reverted to the flavor it asked for, because its quota does not cover the alternative,
+// A job reverted to the accelerator type it asked for, because its quota does not cover the alternative,
 // is placed by the same order.
-func TestPlaceAtFlavorTakesTheHighestPriorityClusterThatFits(t *testing.T) {
+func TestPlaceAtAcceleratorTypeTakesTheHighestPriorityClusterThatFits(t *testing.T) {
 	exp := holdJob("a1", domain.CapacityBurst, h100, 1, "1")
 	avail, nodes, resources := free(map[string]map[string]int64{"z-first": {h100: 1}, "m-second": {h100: 1}, "a-shared": {h100: 1}})
-	if cluster, ok := AtFlavor(avail, rankedClusters(), nodes, resources, nil, exp); !ok || cluster != "z-first" {
-		t.Fatalf("placeAtFlavor = %q, %v, want z-first", cluster, ok)
+	if cluster, ok := AtAcceleratorType(avail, rankedClusters(), nodes, resources, nil, exp); !ok || cluster != "z-first" {
+		t.Fatalf("placeAtAcceleratorType = %q, %v, want z-first", cluster, ok)
 	}
 	avail, nodes, resources = free(map[string]map[string]int64{"z-first": {h100: 0}, "m-second": {h100: 1}, "a-shared": {h100: 1}})
-	if cluster, ok := AtFlavor(avail, rankedClusters(), nodes, resources, nil, exp); !ok || cluster != "m-second" {
-		t.Fatalf("placeAtFlavor with the first full = %q, %v, want m-second", cluster, ok)
+	if cluster, ok := AtAcceleratorType(avail, rankedClusters(), nodes, resources, nil, exp); !ok || cluster != "m-second" {
+		t.Fatalf("placeAtAcceleratorType with the first full = %q, %v, want m-second", cluster, ok)
 	}
 }
 
@@ -201,7 +201,7 @@ func TestAJobGoesToTheClusterOfItsTierWithTheMostRoom(t *testing.T) {
 }
 
 func TestRoomForIsTheFewestOfAnyDimension(t *testing.T) {
-	cpu, memory, h100s := domain.ResourceKey{Kind: domain.ResourceKindCPU}, domain.ResourceKey{Kind: domain.ResourceKindMemory}, domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: "h100"}
+	cpu, memory, h100s := domain.ResourceKey{Kind: domain.ResourceKindCPU}, domain.ResourceKey{Kind: domain.ResourceKindMemory}, domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Name: "h100"}
 	free := domain.Footprint{cpu: 27800, memory: 64}
 	if got := roomFor(free, domain.Footprint{cpu: 4000, memory: 8, h100s: 0}); got != 6 {
 		t.Errorf("roomFor = %d, want 6 (cpu)", got)

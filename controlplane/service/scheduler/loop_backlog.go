@@ -8,15 +8,15 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/obsmetrics"
 )
 
-// backlogKey identifies one (cluster, flavor, tier) bucket of capacity-blocked demand —
+// backlogKey identifies one (cluster, accelerator type, tier) bucket of capacity-blocked demand —
 // autoscaler.md's "Backlog signal for clusters without a native autoscaler" (secondary path).
 // Only a signal for an *external* autoscaler (bare-metal power-on, cloud API script) to consume;
 // clusters with a native autoscaler already get theirs from the Pending pod itself (the
 // speculative-submit path), so this exists for the clusters that can't see that.
 type backlogKey struct {
-	cluster string
-	flavor  string
-	tier    string
+	cluster         string
+	acceleratorType string
+	tier            string
 }
 
 // backlogAggregator collects one tick's capacity-blocked shortfall per bucket. Not persisted and
@@ -31,14 +31,14 @@ func newBacklogAggregator() *backlogAggregator {
 	return &backlogAggregator{unmet: map[backlogKey]int64{}, oldestAge: map[backlogKey]time.Duration{}}
 }
 
-// record folds one skipped job's shortage into its (cluster, flavor, tier) bucket. cluster and
+// record folds one skipped job's shortage into its (cluster, accelerator type, tier) bucket. cluster and
 // exp.AcceleratorType may be "" (no candidate resolved at all) — still a real bucket: "this
-// flavor has unmet demand with no cluster to even try."
+// accelerator type has unmet demand with no cluster to even try."
 func (b *backlogAggregator) record(now time.Time, cluster string, tier string, exp *domain.Experiment, shortage domain.Footprint) {
 	key := backlogKey{
-		cluster: cluster,
-		flavor:  strings.ToLower(string(exp.AcceleratorType)),
-		tier:    tier,
+		cluster:         cluster,
+		acceleratorType: strings.ToLower(string(exp.AcceleratorType)),
+		tier:            tier,
 	}
 	if n := acceleratorShortfall(shortage, exp.AcceleratorType); n > 0 {
 		b.unmet[key] += n
@@ -55,11 +55,11 @@ func (b *backlogAggregator) record(now time.Time, cluster string, tier string, e
 
 // acceleratorShortfall reads the shortage vector in the job's own requested dimension — the same
 // key negativeInDimension uses to read desired-free, so the two stay in the same units.
-func acceleratorShortfall(shortage domain.Footprint, flavor domain.AcceleratorType) int64 {
-	if shortage == nil || flavor == "" {
+func acceleratorShortfall(shortage domain.Footprint, acceleratorType domain.AcceleratorType) int64 {
+	if shortage == nil || acceleratorType == "" {
 		return 0
 	}
-	key := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: strings.ToLower(string(flavor))}
+	key := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Name: strings.ToLower(string(acceleratorType))}
 	return shortage[key]
 }
 
@@ -77,7 +77,7 @@ func (b *backlogAggregator) publish(speculativeFootprintByCluster map[string]int
 		if remaining < 0 {
 			remaining = 0
 		}
-		obsmetrics.SchedulerUnmetDemand.WithLabelValues(key.cluster, key.flavor, key.tier).Set(float64(remaining))
-		obsmetrics.SchedulerUnmetDemandOldestWaitSeconds.WithLabelValues(key.cluster, key.flavor, key.tier).Set(b.oldestAge[key].Seconds())
+		obsmetrics.SchedulerUnmetDemand.WithLabelValues(key.cluster, key.acceleratorType, key.tier).Set(float64(remaining))
+		obsmetrics.SchedulerUnmetDemandOldestWaitSeconds.WithLabelValues(key.cluster, key.acceleratorType, key.tier).Set(b.oldestAge[key].Seconds())
 	}
 }

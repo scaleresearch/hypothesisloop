@@ -25,14 +25,14 @@ import (
 // bug it was written to fix, which makes it exactly the thing a regression test should pin.
 
 // clusterTotals sums per-node capacity into the cluster-wide Footprint that the tick derives from
-// GetFlavorCapacity and hands to PreemptionShortfall. Building it from the same per-node maps the
+// GetAcceleratorTypeCapacity and hands to PreemptionShortfall. Building it from the same per-node maps the
 // placement check uses keeps the two views consistent, so a non-empty shortfall in the test can
 // only come from a genuine deficit rather than from two disagreeing snapshots.
 func clusterTotals(nodeAccel, nodeRes map[string]map[string]int64) domain.Footprint {
 	fp := domain.NewFootprint()
 	for _, capacity := range nodeAccel {
-		for flavor, n := range capacity {
-			fp.Add(domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: flavor}, n)
+		for acceleratorType, n := range capacity {
+			fp.Add(domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Name: acceleratorType}, n)
 		}
 	}
 	for _, capacity := range nodeRes {
@@ -159,7 +159,7 @@ func TestPreemptionShortfallNeverReportsUnrequestedDimensions(t *testing.T) {
 			}
 			if footprint[key] <= 0 {
 				t.Fatalf("case %d: shortfall names %s/%s (%d), which the job never requested\nshortfall: %s\nfootprint: %s\n%s",
-					i, key.Kind, key.Flavor, amount, footprintStr(got), footprintStr(footprint), c.describe())
+					i, key.Kind, key.Name, amount, footprintStr(got), footprintStr(footprint), c.describe())
 			}
 		}
 	}
@@ -183,7 +183,7 @@ func TestPreemptionShortfallNeverExceedsTheJobsOwnFootprint(t *testing.T) {
 		for key, amount := range got {
 			if amount > footprint[key] {
 				t.Fatalf("case %d: shortfall wants %d of %s/%s freed, but the whole job only uses %d — preemption would evict more than admitting this job can require\nshortfall: %s\n%s",
-					i, amount, key.Kind, key.Flavor, footprint[key], footprintStr(got), c.describe())
+					i, amount, key.Kind, key.Name, footprint[key], footprintStr(got), c.describe())
 			}
 		}
 	}
@@ -193,7 +193,7 @@ func TestPreemptionShortfallNeverExceedsTheJobsOwnFootprint(t *testing.T) {
 // inputs the randomized layouts above are unlikely to produce.
 func TestShortfallBasics(t *testing.T) {
 	cpu := domain.ResourceKey{Kind: domain.ResourceKindCPU}
-	accel := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: h100}
+	accel := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Name: h100}
 
 	t.Run("reports only the deficit, not the whole request", func(t *testing.T) {
 		avail := domain.Footprint{cpu: 3000, accel: 1}
@@ -231,7 +231,7 @@ func TestShortfallBasics(t *testing.T) {
 func footprintStr(fp domain.Footprint) string {
 	parts := make([]string, 0, len(fp))
 	for k, v := range fp {
-		parts = append(parts, fmt.Sprintf("%s:%s=%d", k.Kind, k.Flavor, v))
+		parts = append(parts, fmt.Sprintf("%s:%s=%d", k.Kind, k.Name, v))
 	}
 	sort.Strings(parts)
 	return "{" + strings.Join(parts, ",") + "}"

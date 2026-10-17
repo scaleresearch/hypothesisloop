@@ -90,7 +90,7 @@ func TestLiveDRACapacitySnapshotsRejectsTransientEmptyListing(t *testing.T) {
 }
 
 // TestLiveDRACapacitySnapshotsReportsRealInventory is the control case: a driver whose
-// ResourceSlices ARE present must still report full capacity, including a flavor that is
+// ResourceSlices ARE present must still report full capacity, including an accelerator type that is
 // currently fully allocated (available 0, total > 0) — proving the fix above doesn't regress
 // the ordinary "hardware is just busy" case into the same error.
 func TestLiveDRACapacitySnapshotsReportsRealInventory(t *testing.T) {

@@ -88,8 +88,8 @@ func (c *slotFixture) capacity() domain.Footprint {
 		out.Add(domain.ResourceKey{Kind: domain.ResourceKindCPU}, free[domain.NodeResourceCPUMillicores])
 		out.Add(domain.ResourceKey{Kind: domain.ResourceKindMemory}, free[domain.NodeResourceMemoryBytes])
 		out.Add(domain.ResourceKey{Kind: domain.ResourceKindStorage}, free[domain.NodeResourceStorageBytes])
-		for flavor, count := range c.accelerators[node] {
-			out.Add(domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: strings.ToLower(flavor)}, count)
+		for acceleratorType, count := range c.accelerators[node] {
+			out.Add(domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Name: strings.ToLower(acceleratorType)}, count)
 		}
 	}
 	return out
@@ -449,7 +449,7 @@ type slotQuota struct{ LoopQuotaStore }
 func (slotQuota) GetAgentQuota(context.Context, string, string) (*domain.AgentQuota, error) {
 	return &domain.AgentQuota{}, nil
 }
-func (slotQuota) ReserveAdmittedFlavor(context.Context, string, domain.AcceleratorType, float64, int) error {
+func (slotQuota) ReserveAdmittedAcceleratorType(context.Context, string, domain.AcceleratorType, float64, int) error {
 	return nil
 }
 
@@ -472,7 +472,7 @@ func (w *slotWorkload) whole() domain.Footprint {
 	}
 	return all.capacity()
 }
-func (w *slotWorkload) GetFlavorCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
+func (w *slotWorkload) GetAcceleratorTypeCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
 	desiredFree := w.whole()
 	for _, exp := range w.desired {
 		desiredFree = desiredFree.Sub(exp.Footprint())
@@ -641,13 +641,13 @@ func TestSlotsHeldBySmallJobsArePromisedToNoOne(t *testing.T) {
 	}
 	c.take("h100-0").take("h100-1")
 	workload := &slotWorkload{c: c, desired: running}
-	_, desiredFree, _ := workload.GetFlavorCapacity(context.Background())
+	_, desiredFree, _ := workload.GetAcceleratorTypeCapacity(context.Background())
 
 	waiting := sized(t, c, h100Job("waiting", "4"))
 	if domain.Fits(desiredFree[rented], waiting.Footprint()) {
 		t.Fatalf("desired-free %v reads as room for %v", desiredFree[rented], waiting.Footprint())
 	}
-	accelerator := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: strings.ToLower(h100)}
+	accelerator := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Name: strings.ToLower(h100)}
 	if got := desiredFree[rented]; got[accelerator] != 0 || got[domain.ResourceKey{Kind: domain.ResourceKindCPU}] != 4000 {
 		t.Fatalf("desired-free = %v, want only the free cpu slot", got)
 	}

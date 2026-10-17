@@ -110,7 +110,7 @@ type PlatformExperiment struct {
 	// this platform experiment's agents' jobs) at any moment. Nil defers to
 	// quota.default_max_concurrent_accelerators. Speculative submission makes capacity appear on
 	// demand and removes the live-capacity ceiling that used to bound concurrency implicitly —
-	// this is the explicit replacement, enforced in ReserveAdmittedFlavorTx on every submit.
+	// this is the explicit replacement, enforced in ReserveAdmittedAcceleratorTypeTx on every submit.
 	MaxConcurrentAccelerators *int               `json:"max_concurrent_accelerators,omitempty"`
 	Metrics                   []MetricDefinition `json:"metrics"`                 // metrics jobs must emit; used for ranking
 	ReportIntervalSeconds     int                `json:"report_interval_seconds"` // expected reporting cadence (for silent-eviction guard)

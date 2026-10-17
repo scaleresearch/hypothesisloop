@@ -47,7 +47,7 @@ type liveWorkload struct {
 	nodeLabels map[string]map[string]map[string]string
 }
 
-func (w *liveWorkload) GetFlavorCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
+func (w *liveWorkload) GetAcceleratorTypeCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
 	return w.guaranteed, w.burst, nil
 }
 func (w *liveWorkload) GetAcceleratorCapacityByNode(context.Context) (map[string]map[string]map[string]int64, error) {
@@ -62,7 +62,7 @@ func (w *liveWorkload) GetNodeLabels(context.Context) (map[string]map[string]map
 
 type submitQuota struct{ LoopQuotaStore }
 
-func (submitQuota) ReserveAdmittedFlavor(context.Context, string, domain.AcceleratorType, float64, int) error {
+func (submitQuota) ReserveAdmittedAcceleratorType(context.Context, string, domain.AcceleratorType, float64, int) error {
 	return nil
 }
 
@@ -181,7 +181,7 @@ func (tickQuota) GetAgentQuota(context.Context, string, string) (*domain.AgentQu
 // requirement fails (placement.TopologyFits is false).
 type layoutShortWorkload struct{ ClusterCapacity }
 
-func (layoutShortWorkload) GetFlavorCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
+func (layoutShortWorkload) GetAcceleratorTypeCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
 	fp := domain.CapacityFootprint(16, map[string]int64{h100: 2}, 64<<30, 64<<30)
 	return map[string]domain.Footprint{"cluster-a": fp}, map[string]domain.Footprint{"cluster-a": domain.NewFootprint()}, nil
 }
@@ -229,18 +229,18 @@ func (s *scaleUpWaitingStore) ListSubmittedExperiments(context.Context) ([]*doma
 // becomes a speculative candidate itself; it must fall through to preemption and be skipped there.
 type scaleUpWaitingWorkload struct{ ClusterCapacity }
 
-func (scaleUpWaitingWorkload) GetFlavorCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
+func (scaleUpWaitingWorkload) GetAcceleratorTypeCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
 	fp := domain.NewFootprint()
-	// GetFlavorCapacity's real implementations always build this via CapacityFootprint, which
-	// lowercases the flavor key — matched here so negativeInDimension's lookup (keyed off
+	// GetAcceleratorTypeCapacity's real implementations always build this via CapacityFootprint, which
+	// lowercases the accelerator type key — matched here so negativeInDimension's lookup (keyed off
 	// exp.AcceleratorType, lowercased) finds it, exactly as it would against real capacity.
-	fp.Add(domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Flavor: strings.ToLower(h100)}, -2)
+	fp.Add(domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Name: strings.ToLower(h100)}, -2)
 	return map[string]domain.Footprint{"cluster-a": fp}, map[string]domain.Footprint{"cluster-a": domain.NewFootprint()}, nil
 }
 func (scaleUpWaitingWorkload) GetAcceleratorCapacityByNode(context.Context) (map[string]map[string]map[string]int64, error) {
 	// installedAcceleratorsByNode needs a positive count here to resolve the job's proportionate
 	// share, independent of whether that's enough to actually admit — live fit is decided by
-	// GetFlavorCapacity's (negative) desired-free above, not by this per-node view.
+	// GetAcceleratorTypeCapacity's (negative) desired-free above, not by this per-node view.
 	return map[string]map[string]map[string]int64{"cluster-a": {"node-a": {h100: 1}}}, nil
 }
 func (scaleUpWaitingWorkload) GetNodeResourceCapacity(context.Context) (map[string]map[string]map[string]int64, error) {
@@ -326,7 +326,7 @@ func TestTickSkipsPreemptionForLayoutOnlyShortfall(t *testing.T) {
 // is entitled to 750m. Every scalar and topology check passes; only the share is too small.
 type shareWorkload struct{ ClusterCapacity }
 
-func (shareWorkload) GetFlavorCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
+func (shareWorkload) GetAcceleratorTypeCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
 	free := func() domain.Footprint {
 		return domain.CapacityFootprint(6, map[string]int64{h100: 8}, 64<<30, 64<<30)
 	}
@@ -390,7 +390,7 @@ func TestTickNamesTheAcceleratorShareWhenARequestExceedsIt(t *testing.T) {
 // fullWorkload is one node with two accelerators installed, both taken.
 type fullWorkload struct{ shareWorkload }
 
-func (fullWorkload) GetFlavorCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
+func (fullWorkload) GetAcceleratorTypeCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
 	free := func() domain.Footprint {
 		return domain.CapacityFootprint(6, map[string]int64{h100: 0}, 64<<30, 64<<30)
 	}
@@ -447,7 +447,7 @@ type holdWorkload struct {
 	terminating int64
 }
 
-func (w holdWorkload) GetFlavorCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
+func (w holdWorkload) GetAcceleratorTypeCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
 	free := func(terminating int64) map[string]domain.Footprint {
 		return map[string]domain.Footprint{
 			"cluster-a": domain.CapacityFootprint(w.cpuCores, map[string]int64{h100: 3 + terminating, l40: 2}, 64<<30, 64<<30),
@@ -513,7 +513,7 @@ func (s *holdStore) ClaimSubmitted(_ context.Context, id, cluster string, _ *dom
 
 type holdQuota struct{ tickQuota }
 
-func (holdQuota) ReserveAdmittedFlavor(context.Context, string, domain.AcceleratorType, float64, int) error {
+func (holdQuota) ReserveAdmittedAcceleratorType(context.Context, string, domain.AcceleratorType, float64, int) error {
 	return nil
 }
 
@@ -524,11 +524,11 @@ func (e *recordingEvictor) EvictExperiment(_ context.Context, id string, _ domai
 	return nil
 }
 
-func holdJob(id string, tier domain.CapacityTier, flavor domain.AcceleratorType, count int, cpu string) *domain.Experiment {
+func holdJob(id string, tier domain.CapacityTier, acceleratorType domain.AcceleratorType, count int, cpu string) *domain.Experiment {
 	return &domain.Experiment{
 		ID: id, AgentID: "agent-" + id, PlatformExperimentID: "pe-1", CapacityTier: tier,
-		AcceleratorType: flavor, AcceleratorCount: count,
-		Job: domain.JobSpec{Image: "registry.test/job:1", CPU: cpu, Memory: "1Gi", Storage: "1Gi", AcceleratorType: flavor, AcceleratorCount: count},
+		AcceleratorType: acceleratorType, AcceleratorCount: count,
+		Job: domain.JobSpec{Image: "registry.test/job:1", CPU: cpu, Memory: "1Gi", Storage: "1Gi", AcceleratorType: acceleratorType, AcceleratorCount: count},
 	}
 }
 
@@ -544,22 +544,22 @@ func holdLoop(store LoopStore, workload ClusterCapacity, evictor ExperimentEvict
 func TestTickHoldsFreeCapacityForAWaitingGuaranteedJob(t *testing.T) {
 	// The guaranteed job is pinned to cluster-a, which has three h100 free of four installed.
 	for name, tc := range map[string]struct {
-		guaranteedCount int
-		terminating     int64
-		burstFlavor     domain.AcceleratorType
-		burstCluster    string
-		admitted        bool
+		guaranteedCount      int
+		terminating          int64
+		burstAcceleratorType domain.AcceleratorType
+		burstCluster         string
+		admitted             bool
 	}{
-		"capacity being freed holds the same flavor": {4, 1, h100, "cluster-a", false},
-		"nothing being freed holds nothing":          {4, 0, h100, "cluster-a", true},
-		"above installed capacity holds nothing":     {5, 1, h100, "cluster-a", true},
-		"another flavor is admitted":                 {4, 1, l40, "cluster-a", true},
-		"another cluster is admitted":                {4, 1, h100, "cluster-b", true},
+		"capacity being freed holds the same accelerator type": {4, 1, h100, "cluster-a", false},
+		"nothing being freed holds nothing":                    {4, 0, h100, "cluster-a", true},
+		"above installed capacity holds nothing":               {5, 1, h100, "cluster-a", true},
+		"another accelerator type is admitted":                 {4, 1, l40, "cluster-a", true},
+		"another cluster is admitted":                          {4, 1, h100, "cluster-b", true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			guaranteed := holdJob("guaranteed", domain.CapacityGuaranteed, h100, tc.guaranteedCount, "1")
 			guaranteed.ClusterName = "cluster-a"
-			burst := holdJob("burst", domain.CapacityBurst, tc.burstFlavor, 1, "1")
+			burst := holdJob("burst", domain.CapacityBurst, tc.burstAcceleratorType, 1, "1")
 			burst.ClusterName = tc.burstCluster
 			store := &holdStore{noRunningListStore: noRunningListStore{t: t, queued: []*domain.Experiment{burst, guaranteed}}}
 			l := holdLoop(store, holdWorkload{cpuCores: 16, terminating: tc.terminating}, noopEvictor{})
@@ -682,7 +682,7 @@ type terminatingWorkload struct {
 	store *terminatingStore
 }
 
-func (w terminatingWorkload) GetFlavorCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
+func (w terminatingWorkload) GetAcceleratorTypeCapacity(context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
 	free := func(h100Free int64) map[string]domain.Footprint {
 		return map[string]domain.Footprint{"cluster-a": domain.CapacityFootprint(16, map[string]int64{h100: h100Free}, 64<<30, 64<<30)}
 	}
@@ -767,8 +767,8 @@ func (*noRunningListStore) MarkHeldJobs(context.Context, time.Duration) error { 
 // counted its memory is free, and the runtime's last report still shows 1 GiB of it.
 type staleMemoryWorkload struct{ holdWorkload }
 
-func (w staleMemoryWorkload) GetFlavorCapacity(ctx context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
-	available, desiredFree, err := w.holdWorkload.GetFlavorCapacity(ctx)
+func (w staleMemoryWorkload) GetAcceleratorTypeCapacity(ctx context.Context) (map[string]domain.Footprint, map[string]domain.Footprint, error) {
+	available, desiredFree, err := w.holdWorkload.GetAcceleratorTypeCapacity(ctx)
 	available["cluster-a"][domain.ResourceKey{Kind: domain.ResourceKindMemory}] = 1 << 30
 	return available, desiredFree, err
 }

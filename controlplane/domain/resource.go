@@ -14,9 +14,9 @@ import (
 
 // ResourceKindCPU/Memory/Storage are the fixed physical dimensions every job participates in
 // (CPU may be zero for an accelerator-only job, but the key always exists).
-// ResourceKindAccelerator is used once per distinct accelerator type requested (Flavor is the
+// ResourceKindAccelerator is used once per distinct accelerator type requested (Name is the
 // accelerator type, e.g. "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"). ResourceKindExtended covers uncatalogued k8s extended
-// resources (Flavor is the resource name, e.g. "google.com/tpu") — physical-fit-only, never
+// resources (Name is the resource name, e.g. "google.com/tpu") — physical-fit-only, never
 // billed (see JobSpec.ExtraResources's doc comment).
 type ResourceKind string
 
@@ -28,12 +28,12 @@ const (
 	ResourceKindExtended    ResourceKind = "extended"
 )
 
-// ResourceKey identifies one dimension of a Footprint. Flavor disambiguates within a Kind: the
-// accelerator type ID for ResourceKindAccelerator, the raw k8s extended-resource name for
-// ResourceKindExtended, and always empty for CPU/Memory/Storage (one dimension each).
+// ResourceKey identifies one dimension of a Footprint. Name disambiguates within a Kind: an
+// accelerator type, or an extended resource's Kubernetes name, and always empty for
+// CPU/Memory/Storage (one dimension each).
 type ResourceKey struct {
-	Kind   ResourceKind
-	Flavor string
+	Kind ResourceKind
+	Name string
 }
 
 // Footprint is a job's (or a cluster's capacity) resource vector in canonical integer units:
@@ -105,19 +105,19 @@ func Fits(capacity, footprint Footprint) bool {
 }
 
 // CapacityFootprint builds a per-cluster capacity Footprint from live CPU-core,
-// per-accelerator-flavor, and RAM/ephemeral-storage availability — the shape
-// the scheduler's capacity read (ClusterReports.GetFlavorCapacity) reports. cpuCores is floored to whole
+// per-accelerator-type, and RAM/ephemeral-storage availability — the shape
+// the scheduler's capacity read (ClusterReports.GetAcceleratorTypeCapacity) reports. cpuCores is floored to whole
 // millicores (never rounded up in the admission loop's favor), preserving fractional-CPU
 // precision. ramBytes/storageBytes are already integer bytes — pass 0 if a cluster has no fresh
-// report for that dimension so Fits() fails closed. acceleratorByFlavor keys must already be
+// report for that dimension so Fits() fails closed. acceleratorByType keys must already be
 // accelerator type strings, matching JobSpec.Footprint()/Experiment.Footprint()'s
 // accelerator key convention, or Fits() will never match them.
-func CapacityFootprint(cpuCores float64, acceleratorByFlavor map[string]int64, ramBytes, storageBytes int64) Footprint {
+func CapacityFootprint(cpuCores float64, acceleratorByType map[string]int64, ramBytes, storageBytes int64) Footprint {
 	fp := NewFootprint()
 	fp.Add(ResourceKey{Kind: ResourceKindCPU}, int64(cpuCores*1000))
 	// Lowercased so Fits()'s exact-match join works regardless of casing (see AcceleratorType.MatchesLabels).
-	for flavor, n := range acceleratorByFlavor {
-		fp.Add(ResourceKey{Kind: ResourceKindAccelerator, Flavor: strings.ToLower(flavor)}, n)
+	for acceleratorType, n := range acceleratorByType {
+		fp.Add(ResourceKey{Kind: ResourceKindAccelerator, Name: strings.ToLower(acceleratorType)}, n)
 	}
 	fp.Add(ResourceKey{Kind: ResourceKindMemory}, ramBytes)
 	fp.Add(ResourceKey{Kind: ResourceKindStorage}, storageBytes)
@@ -134,7 +134,7 @@ func CapacityFootprint(cpuCores float64, acceleratorByFlavor map[string]int64, r
 // installedAccelerators <= 0 is a hard error, never a silent 0: per important.md's "one path or
 // error, fail fast" rule, a zero/negative denominator is an invalid call, not a legitimate
 // "nothing installed" answer with its own defined result — a node genuinely reporting no
-// accelerators of a flavor is a case every caller must recognize and skip BEFORE calling this
+// accelerators of an accelerator type is a case every caller must recognize and skip BEFORE calling this
 // (see loop_disbalance.go/loop_resolve.go's own `if installed <= 0 { continue }` guards), not one
 // this function should paper over by returning a number that looks like a valid share.
 func FairShare(totalCanonical int64, heldAccelerators, installedAccelerators int64) (int64, error) {
@@ -243,14 +243,14 @@ func (j JobSpec) Footprint(acceleratorType AcceleratorType) (Footprint, error) {
 			if acceleratorType == "" {
 				return nil, fmt.Errorf("job.accelerator_type is required when job.accelerator_count > 0")
 			}
-			perNode.Add(ResourceKey{Kind: ResourceKindAccelerator, Flavor: strings.ToLower(string(acceleratorType))}, int64(group.AcceleratorCount))
+			perNode.Add(ResourceKey{Kind: ResourceKindAccelerator, Name: strings.ToLower(string(acceleratorType))}, int64(group.AcceleratorCount))
 		}
 		for name, qty := range j.ExtraResources {
 			q, err := resource.ParseQuantity(qty)
 			if err != nil {
 				return nil, fmt.Errorf("job.extra_resources[%q]: %w", name, err)
 			}
-			perNode.Add(ResourceKey{Kind: ResourceKindExtended, Flavor: name}, q.Value())
+			perNode.Add(ResourceKey{Kind: ResourceKindExtended, Name: name}, q.Value())
 		}
 		total.AddFootprint(perNode.Scale(int64(group.Replicas)))
 	}

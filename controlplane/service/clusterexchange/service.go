@@ -140,18 +140,18 @@ func NewService(store Store, connectedWithin time.Duration, metrics *metricsdb.S
 
 // keepPricedAccelerators drops every accelerator type outside the priced catalog from report.
 func (s *Service) keepPricedAccelerators(report *clusterapi.ReconcileRequest) {
-	unpriced := func(flavor string) bool { return !s.pricedAcceleratorTypes[strings.ToLower(flavor)] }
-	for _, byFlavor := range []map[string]int64{report.AcceleratorAvailableByFlavor, report.AcceleratorTotalByFlavor} {
-		for flavor := range byFlavor {
-			if unpriced(flavor) {
-				delete(byFlavor, flavor)
+	unpriced := func(acceleratorType string) bool { return !s.pricedAcceleratorTypes[strings.ToLower(acceleratorType)] }
+	for _, byType := range []map[string]int64{report.AcceleratorAvailableByType, report.AcceleratorTotalByType} {
+		for acceleratorType := range byType {
+			if unpriced(acceleratorType) {
+				delete(byType, acceleratorType)
 			}
 		}
 	}
-	for _, byFlavor := range report.AcceleratorAvailableByNode {
-		for flavor := range byFlavor {
-			if unpriced(flavor) {
-				delete(byFlavor, flavor)
+	for _, byType := range report.AcceleratorAvailableByNode {
+		for acceleratorType := range byType {
+			if unpriced(acceleratorType) {
+				delete(byType, acceleratorType)
 			}
 		}
 	}
