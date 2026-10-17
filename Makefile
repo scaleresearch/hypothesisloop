@@ -7,7 +7,7 @@
 	k3s-up k3s-down full-up k3s-dev-nodes-up k3s-dev-nodes-down e2e \
 	full-stop full-start reload stack-not-held \
 	tt-up tt-down tt-status tt-stop tt-start tt-dev-nodes-up tt-dev-nodes-down tt-hardware-image tt-e2e \
-	git-repository db-migration
+	git-repository example db-migration
 
 # ---- Control plane: one instance, runs anywhere (the brain) -----------------
 COMPOSE_FILE := localdev/controlplane/docker-compose.yml
@@ -330,6 +330,29 @@ git-repository:
 	  git_host="$$(lib_git_host_provider)" && \
 	  { test "$$git_host" = local || { echo "make git-repository: this stack keeps its code on GitHub (GIT_HOST_PROVIDER=$$git_host in .env)" >&2; exit 1; }; } && \
 	  git init -q --bare "$$HL_GIT_ROOT/$(NAME).git" && echo "$(NAME).git"'
+
+# Starts examples/NAME as a platform experiment (hl platform-experiments start): on the local git
+# host in a new repository NAME-<time>.git, which git reaches with the git server's credential for
+# this command alone, and on GitHub in REPOSITORY, an empty one the org's GitHub App covers.
+# API_URL, HL_TOKEN, HL_PROJECT and HL_UI_URL default to this stack, its staff token and project
+# default. Usage: make example NAME=dummy-data-search-demo [REPOSITORY=owner/name]
+example: render-settings
+	@test -n "$(NAME)" -a -f "examples/$(NAME)/.hypothesisloop/experiment.yaml" || { echo "make example: NAME is one of: $$(ls -d examples/*/ | xargs -n1 basename | tr '\n' ' ')" >&2; exit 1; }
+	@go build -o bin/hl ./cli
+	@bash -c '. localdev/lib/auth.sh && \
+	  credential=() && \
+	  case "$$(lib_git_host_provider)" in \
+	    local) repository="$(NAME)-$$(date +%Y%m%d%H%M%S).git" && \
+	      git init -q --bare --initial-branch=main "$$HL_GIT_ROOT/$$repository" && \
+	      credential=(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper \
+	        "GIT_CONFIG_VALUE_0=!f() { echo username=$$HL_GIT_USERNAME; printf password=; cat $(CURDIR)/localdev/.run/git-password; }; f") ;; \
+	    github) repository="$(REPOSITORY)" && \
+	      test -n "$$repository" || { echo "make example: this stack keeps its code on GitHub: REPOSITORY=owner/name names an empty repository the org'"'"'s GitHub App covers" >&2; exit 1; } ;; \
+	    *) exit 1 ;; \
+	  esac && \
+	  env "$${credential[@]}" API_URL="$${API_URL:-http://localhost:8081}" HL_TOKEN="$${HL_TOKEN:-$$(lib_hl_admin token staff)}" \
+	    HL_PROJECT="$${HL_PROJECT:-default}" HL_UI_URL="$${HL_UI_URL:-http://localhost:3000}" \
+	    bin/hl platform-experiments start "examples/$(NAME)" --repository "$$repository"'
 
 tt-stop:
 	bash localdev/k3s-tenstorrent/stop.sh

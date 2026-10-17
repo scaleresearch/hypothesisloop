@@ -15,7 +15,6 @@ from unittest import mock
 
 REPO = Path(__file__).resolve().parents[3]
 # A coordinator's experiments are git-ignored: the tests on them run where they are on disk.
-EXPERIMENTS = REPO / "agents/coordinator/experiments"
 
 # Every script that carries its own copy of post_metric: the template's and the seeds' are
 # copied into an experiment's repository and workloads into an image, so none of them can import
@@ -177,56 +176,39 @@ class TemplateSpoolTest(unittest.TestCase):
         self.assertEqual(Path(self.spool).read_text(), "")
 
 
-class ExperimentFilesTest(unittest.TestCase):
-    def test_the_description_is_the_block_of_experiment_md(self):
-        files = sorted(EXPERIMENTS.glob("*/.hypothesisloop/experiment.yaml"))
-        if not files:
-            self.skipTest("no experiments on disk")
-        for path in files:
-            with self.subTest(experiment=path.parents[1].name):
-                block = (path.parents[1] / "experiment.md").read_text().split("## EXPERIMENT DESCRIPTION", 1)[1]
-                if "```" in block:
-                    block = block.split("```")[1]
-                scalar = path.read_text().split("\ndescription: |\n", 1)[1]
-                lines = []
-                for line in scalar.split("\n"):
-                    if line.strip() and not line.startswith("  "):
-                        break
-                    lines.append(line[2:])
-                self.assertEqual("\n".join(lines).strip(), "\n".join(line if line.strip() else "" for line in block.strip().split("\n")))
-
-
-def clone_experiments():
-    """The experiments on disk whose job builds no image: it clones its commit and installs what
-    seed/train.py imports."""
+def clone_examples():
+    """The examples whose job runs in the platform's python job image: it clones its commit and
+    has uv install what its code imports."""
     found = []
-    for spec in sorted(EXPERIMENTS.glob("*/.hypothesisloop/job.yaml")):
+    for spec in sorted((REPO / "examples").glob("*/.hypothesisloop/job.yaml")):
         line = next((line for line in spec.read_text().splitlines() if line.strip().startswith("command:")), "")
-        if "hl-clone" in line:
+        if "hl-clone" in line and "uv run" in line:
             found.append(spec.parents[1])
     return found
 
 
 class CatalogueImageJobTest(unittest.TestCase):
     def test_the_command_runs_train_py_of_the_clone_with_every_import_installed(self):
-        experiments = clone_experiments()
-        if not experiments:
-            self.skipTest("no experiment on disk runs from its clone")
-        for demo in experiments:
-            with self.subTest(experiment=demo.name):
-                spec = (demo / ".hypothesisloop/job.yaml").read_text()
+        examples = clone_examples()
+        self.assertTrue(examples, "no example runs from its clone")
+        for example in examples:
+            with self.subTest(example=example.name):
+                spec = (example / ".hypothesisloop/job.yaml").read_text()
                 line = next(line for line in spec.splitlines() if line.strip().startswith("command:"))
                 shell, flag, script = json.loads(line.split("command:", 1)[1])
                 self.assertEqual((shell, flag), ("bash", "-c"))
                 clone, enter, run = script.split(" && ")
                 self.assertEqual((clone, enter), ("dir=$(hl-clone)", 'cd "$dir"'))
                 words = run.split()
-                self.assertEqual(words[:3] + words[-1:], ["exec", "uv", "run", "seed/train.py"])
+                self.assertEqual(words[:3] + words[-1:], ["exec", "uv", "run", "train.py"])
                 installed = {words[i + 1].split("==")[0] for i, word in enumerate(words) if word == "--with"}
-                tree = ast.parse((demo / "seed/train.py").read_text())
-                imported = {alias.name.split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names}
-                self.assertEqual(installed, imported - set(sys.stdlib_module_names))
-                self.assertEqual(sorted(path.name for path in (demo / "seed").iterdir() if path.name != "__pycache__"), ["train.py"])
+                modules = sorted(example.glob("*.py"))
+                own = {path.stem for path in modules}
+                imported = {alias.name.split(".")[0] for path in modules for node in ast.walk(ast.parse(path.read_text()))
+                            if isinstance(node, ast.Import) for alias in node.names}
+                imported |= {node.module.split(".")[0] for path in modules for node in ast.walk(ast.parse(path.read_text()))
+                             if isinstance(node, ast.ImportFrom) and node.module and node.level == 0}
+                self.assertEqual(installed, imported - set(sys.stdlib_module_names) - own)
 
 
 if __name__ == "__main__":

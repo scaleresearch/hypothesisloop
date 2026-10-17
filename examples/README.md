@@ -21,14 +21,23 @@ Every example holds:
 
 ## Starting one
 
-Push the example as the default branch of a repository a GitHub account connected to your org
-covers, then create the experiment on it:
+On this stack, one command pushes an example to a repository and creates the experiment its spec
+states:
 
-    cd examples/dummy-data-search-demo
-    git init -b main && git add -A && git commit -m "dummy-data-search-demo"
-    gh repo create OWNER/NAME --private --source . --push
-    { cat .hypothesisloop/experiment.yaml; echo "repository: OWNER/NAME"; } \
-      | hl platform-experiments create --project PROJECT -
+    make example NAME=dummy-data-search-demo
 
-With `coordinator_hosted: true` the platform runs the coordinator, measures the baseline and
-starts the researchers the spec names. `hl platform-experiments get` says what the run waits for.
+With `GIT_HOST_PROVIDER=local` it creates a repository `NAME-<time>.git` on the local git host.
+On GitHub it needs an empty repository the org's GitHub App covers:
+
+    make example NAME=dummy-data-search-demo REPOSITORY=OWNER/NAME
+
+Anywhere else, with `HL_TOKEN` and `HL_PROJECT` set, `hl` does the same from any directory that
+holds an experiment's tree:
+
+    hl platform-experiments start examples/dummy-data-search-demo --repository OWNER/NAME
+
+`start` checks the spec first, then pushes the directory as the repository's `main` when the
+repository has no branch, pushes nothing when its default branch holds the directory already,
+and stops when it holds other code. `--dry-run` runs every check and changes nothing. With
+`coordinator_hosted: true` the platform runs the coordinator, measures the baseline and starts
+the researchers the spec names. `hl platform-experiments get` says what the run waits for.
