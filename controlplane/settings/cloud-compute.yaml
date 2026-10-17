@@ -7,10 +7,10 @@
 # platform experiment records. On vast.ai each job runs under a supervisor that stops its own
 # instance when the job ends; the programs it needs in the image are what hl capacity lists as the
 # cluster's image_needs. Each entry names its provider, whose section of the same name follows the
-# keys every entry has, and none of the other providers' sections. Each entry's account key comes from the environment as
-# CLOUD_COMPUTE_<CLUSTER_NAME>_API_KEY, its cluster_name in capitals with each dash an underscore,
-# so entries on one provider each rent on their own account, or on one account in namespaces of
-# their own.
+# keys every entry has, and none of the other providers' sections. Each entry's account key comes
+# from the environment as CLOUD_COMPUTE_<CLUSTER_NAME>_API_KEY, its cluster_name in capitals with
+# each dash an underscore, so entries on one provider each rent on their own account, or on one
+# account in namespaces of their own.
 cloud_compute:
   # Lowercase letters and digits joined by single dashes.
   - cluster_name: vast
