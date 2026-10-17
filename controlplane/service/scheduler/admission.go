@@ -183,6 +183,12 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	if len(exp.Job.HostMounts) > 0 {
 		return &AdmissionError{Reason: ReasonMalformed, Field: "job.host_mounts", Message: "job.host_mounts is not accepted: a job reads its data from its data URI"}
 	}
+	if err := domain.ValidateCommand(exp.Job); err != nil {
+		return &AdmissionError{Reason: ReasonRequired, Field: "job.command", Message: err.Error()}
+	}
+	if err := domain.ValidateEnv(exp.Job); err != nil {
+		return &AdmissionError{Reason: ReasonMalformed, Field: "job.env", Message: err.Error()}
+	}
 	if err := quantitiesStated(exp.Job); err != nil {
 		return err
 	}

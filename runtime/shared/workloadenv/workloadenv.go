@@ -5,6 +5,8 @@ package workloadenv
 import (
 	"crypto/sha256"
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -114,18 +116,34 @@ func Job(spec clusterapi.JobSpec, group clusterapi.JobGroup) map[string]string {
 	return env
 }
 
-// Merged is the whole environment of one node of group as one map: the job's own entries, and the
-// platform's for every name the job did not set itself.
-func Merged(exp *clusterapi.DesiredJob, spec clusterapi.JobSpec, group clusterapi.JobGroup, apiURL string, reach func(url string) string) (map[string]string, error) {
-	platform, err := Platform(exp, group, apiURL, reach)
+// Vars is the whole environment of one node of group: the platform's variables in Platform's
+// order, then the job's own sorted by name. A name the platform sets is the platform's whatever
+// the job states, since the launch script and the platform read them; admission refuses a job
+// that states one (jobenv.Reserved).
+func Vars(exp *clusterapi.DesiredJob, spec clusterapi.JobSpec, group clusterapi.JobGroup, apiURL string, reach func(url string) string) ([]Var, error) {
+	vars, err := Platform(exp, group, apiURL, reach)
 	if err != nil {
 		return nil, err
 	}
-	env := Job(spec, group)
-	for _, v := range platform {
-		if _, set := env[v.Name]; !set {
-			env[v.Name] = v.Value
-		}
+	job := Job(spec, group)
+	for _, v := range vars {
+		delete(job, v.Name)
+	}
+	for _, name := range slices.Sorted(maps.Keys(job)) {
+		vars = append(vars, Var{name, job[name]})
+	}
+	return vars, nil
+}
+
+// Merged is Vars as one map.
+func Merged(exp *clusterapi.DesiredJob, spec clusterapi.JobSpec, group clusterapi.JobGroup, apiURL string, reach func(url string) string) (map[string]string, error) {
+	vars, err := Vars(exp, spec, group, apiURL, reach)
+	if err != nil {
+		return nil, err
+	}
+	env := make(map[string]string, len(vars))
+	for _, v := range vars {
+		env[v.Name] = v.Value
 	}
 	return env, nil
 }

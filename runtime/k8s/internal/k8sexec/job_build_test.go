@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/contract/jobenv"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
 
@@ -193,6 +194,28 @@ func TestDesiredSpecHashChangesWithDesiredJob(t *testing.T) {
 	}
 	if first.Annotations[DesiredSpecHashAnnotation] == second.Annotations[DesiredSpecHashAnnotation] {
 		t.Fatal("desired spec hash did not change when the image changed")
+	}
+}
+
+// The launch script fetches with the token and repository it reads from the environment, so a
+// job's own value for either would have it fetch other code with another token.
+func TestThePodCarriesThePlatformsValueOfEveryNameItSets(t *testing.T) {
+	exp := &clusterapi.DesiredJob{Image: testImage, Launch: "true", Data: testDataAccess(), Token: "test-job-token", GitURL: "https://api.test/git/pe-1.git", ID: "env-test", AgentID: "agent", AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3", AcceleratorCount: 1,
+		EstimatedDurationHours: 1, CapacityTier: clusterapi.CapacityGuaranteed,
+		Job: clusterapi.JobSpec{Env: map[string]string{jobenv.Token: "forged", jobenv.GitURL: "https://evil.test/x.git", "LR": "0.1"}, SecretEnv: map[string]string{jobenv.StopGrace: "99999"},
+			CPU: "1", Memory: "1Gi", Storage: "1Gi", MaxRetries: intPtr(1), TerminationGracePeriodSeconds: int64Ptr(5), AcceleratorCount: 1, AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"}}
+	job, err := (&JobWorkloadClient{apiURL: testAPIURL}).BuildJob(exp, nvidiaPlacement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string][]string{}
+	for _, v := range job.Spec.Template.Spec.Containers[0].Env {
+		got[v.Name] = append(got[v.Name], v.Value)
+	}
+	for name, want := range map[string]string{jobenv.Token: "test-job-token", jobenv.GitURL: exp.GitURL, jobenv.StopGrace: "5", "LR": "0.1"} {
+		if len(got[name]) != 1 || got[name][0] != want {
+			t.Errorf("%s = %q, want only %q", name, got[name], want)
+		}
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/contract/jobenv"
 )
 
 func TestPlatformRewritesOnlyTheURLsAndRefusesAJobWithNowhereToSave(t *testing.T) {
@@ -69,7 +70,7 @@ func TestJobLayersTheGroupEnvironmentOverTheJobs(t *testing.T) {
 	}
 }
 
-func TestMergedKeepsTheJobsOwnValueOverThePlatforms(t *testing.T) {
+func TestMergedKeepsThePlatformsValueOverTheJobs(t *testing.T) {
 	exp := &clusterapi.DesiredJob{ID: "exp-1", Image: "registry.test/image@sha256:aa", Launch: "exec \"$@\"", ResolvedJob: gracedJob(), Data: &clusterapi.DataAccess{Region: "eu"}, Token: "job-token", GitURL: "https://api.test/git/pe-1.git"}
 	spec := clusterapi.JobSpec{Env: map[string]string{"LR": "0.1", "AWS_REGION": "us"}}
 	group := clusterapi.JobGroup{Env: map[string]string{"LR": "0.3", "ROLE": "learner"}}
@@ -79,7 +80,7 @@ func TestMergedKeepsTheJobsOwnValueOverThePlatforms(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, want := range map[string]string{
-		"LR": "0.3", "ROLE": "learner", "AWS_REGION": "us",
+		"LR": "0.3", "ROLE": "learner", "AWS_REGION": "eu",
 		"HYPOTHESISLOOP_EXPERIMENT_ID": "exp-1", "HYPOTHESISLOOP_API_URL": "http://api", "HYPOTHESISLOOP_TOKEN": "job-token",
 	} {
 		if env[name] != want {
@@ -89,6 +90,32 @@ func TestMergedKeepsTheJobsOwnValueOverThePlatforms(t *testing.T) {
 	exp.Data = nil
 	if _, err := Merged(exp, spec, group, "http://api", func(url string) string { return url }); err == nil {
 		t.Error("Merged for an experiment without durable-data access: got nil, want an error")
+	}
+}
+
+// The launch script reads the token, the repository and the stop grace from the environment, so
+// a job stating any of them would fetch other code or outlive its grace. Admission refuses every
+// name the platform sets, and the merge keeps the platform's should one get through.
+func TestVarsPutThePlatformsFirstAndKeepItsValueForEveryNameItSets(t *testing.T) {
+	exp := &clusterapi.DesiredJob{ID: "exp-1", Image: "registry.test/image@sha256:aa", Launch: "exec \"$@\"", ResolvedJob: gracedJob(), Data: &clusterapi.DataAccess{}, Token: "job-token", GitURL: "https://api.test/git/pe-1.git"}
+	same := func(url string) string { return url }
+	platform, err := Platform(exp, clusterapi.JobGroup{CPU: "2"}, "http://api", same)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stated := map[string]string{"B": "job", "A": "job"}
+	for _, v := range platform {
+		if !jobenv.Reserved(v.Name) {
+			t.Errorf("the platform sets %s, which jobenv.Reserved lets a job state", v.Name)
+		}
+		stated[v.Name] = "job's own"
+	}
+	vars, err := Vars(exp, clusterapi.JobSpec{Env: stated}, clusterapi.JobGroup{CPU: "2"}, "http://api", same)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := append(slices.Clone(platform), Var{"A", "job"}, Var{"B", "job"}); !slices.Equal(vars, want) {
+		t.Errorf("Vars = %v, want %v", vars, want)
 	}
 }
 
@@ -113,8 +140,7 @@ func TestJobCarriesTheSecretEnvironment(t *testing.T) {
 	}
 }
 
-// A container sees all of its node's cores, so the job is told the whole cores its cpu holds,
-// and a thread pool it sizes itself still wins.
+// A container sees all of its node's cores, so the job is told the whole cores its cpu holds.
 func TestPlatformTellsTheJobTheCoresItHolds(t *testing.T) {
 	exp := &clusterapi.DesiredJob{ID: "exp-1", Image: "registry.test/image@sha256:aa", Launch: "exec \"$@\"", ResolvedJob: gracedJob(), Data: &clusterapi.DataAccess{}, Token: "job-token", GitURL: "https://api.test/git/pe-1.git"}
 	same := func(url string) string { return url }
@@ -126,10 +152,6 @@ func TestPlatformTellsTheJobTheCoresItHolds(t *testing.T) {
 		if env["HYPOTHESISLOOP_CPUS"] != want || env["OMP_NUM_THREADS"] != want {
 			t.Errorf("cpu %q: HYPOTHESISLOOP_CPUS %q, OMP_NUM_THREADS %q; want %q", cpu, env["HYPOTHESISLOOP_CPUS"], env["OMP_NUM_THREADS"], want)
 		}
-	}
-	env, err := Merged(exp, clusterapi.JobSpec{Env: map[string]string{"OMP_NUM_THREADS": "1"}}, clusterapi.JobGroup{CPU: "8"}, "http://api", same)
-	if err != nil || env["OMP_NUM_THREADS"] != "1" || env["HYPOTHESISLOOP_CPUS"] != "8" {
-		t.Errorf("env %v, %v; want the job's own OMP_NUM_THREADS kept beside 8 cores", env, err)
 	}
 	if _, err := Platform(exp, clusterapi.JobGroup{CPU: "four"}, "http://api", same); err == nil {
 		t.Error("Platform for cpu \"four\": got nil, want an error")
