@@ -19,7 +19,7 @@ var testTimeouts = Timeouts{Statement: 30 * time.Second, Lock: 10 * time.Second,
 
 const devDSN = "postgres://hypothesisloop:hypothesisloop@localhost:5433/hypothesisloop?sslmode=disable"
 
-// scratchDSN is the database TestMain creates for this run with every migration applied. Tests
+// scratchDSN is the database TestMain creates for this run, built from schema.sql. Tests
 // never touch the server's own databases: schema DDL there takes locks that deadlocked live
 // transactions of a running stack.
 var scratchDSN string
@@ -64,21 +64,21 @@ func runWithScratchDatabase(m *testing.M) int {
 		return 1
 	}
 	dsn.Path = "/" + name
-	if err := migrateAt(ctx, dsn.String()); err != nil {
-		fmt.Fprintf(os.Stderr, "migrate scratch database: %v\n", err)
+	if err := buildAt(ctx, dsn.String()); err != nil {
+		fmt.Fprintf(os.Stderr, "build scratch database: %v\n", err)
 		return 1
 	}
 	scratchDSN = dsn.String()
 	return m.Run()
 }
 
-func migrateAt(ctx context.Context, dsn string) error {
+func buildAt(ctx context.Context, dsn string) error {
 	pool, err := NewPool(ctx, Config{DSN: dsn, MaxConns: 1, MinConns: 1, Timeouts: testTimeouts})
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
-	if _, err := Migrate(ctx, pool); err != nil {
+	if _, err := EnsureSchema(ctx, pool); err != nil {
 		return err
 	}
 	builtins, err := agenttypes.Builtins()

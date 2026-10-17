@@ -35,23 +35,17 @@ func seedBuiltins(store *db.Store, logger *zap.Logger) {
 	}
 }
 
-// migrate brings the schema to this release's. control-service is the sole owner of the schema:
-// metrics-service reads the same tables and never migrates them.
-func migrate(pool *db.Pool, logger *zap.Logger) {
-	migrateCtx, migrateCancel := context.WithTimeout(context.Background(), db.MigrationTimeouts.Statement)
-	migrated, err := db.Migrate(migrateCtx, pool)
-	migrateCancel()
+// ensureSchema builds the schema on an empty database and refuses any other that is not exactly
+// it. control-service is the sole owner of the schema: metrics-service reads the same tables and
+// never builds them.
+func ensureSchema(pool *db.Pool, logger *zap.Logger) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	built, err := db.EnsureSchema(ctx, pool)
+	cancel()
 	if err != nil {
-		logger.Fatal("control-service: migrate database", zap.Error(err))
+		logger.Fatal("control-service: database schema", zap.Error(err))
 	}
-	if migrated.Adopted {
-		logger.Info("adopted a database from before migrations at the baseline migration, without running it")
-	}
-	for _, name := range migrated.Applied {
-		logger.Info("applied database migration", zap.String("migration", name))
-	}
-	if len(migrated.Unknown) > 0 {
-		logger.Warn("the database has migrations of a later release, which this one runs against until it is replaced",
-			zap.Strings("migrations", migrated.Unknown))
+	if built {
+		logger.Info("built the database schema on an empty database")
 	}
 }

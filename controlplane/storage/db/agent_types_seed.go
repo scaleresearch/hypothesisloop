@@ -27,7 +27,7 @@ type SeededAgentType struct {
 }
 
 // SeedBuiltins writes the built-in agent types and the platform's rules as release has them,
-// under the lock Migrate takes, in one transaction. A type that does not exist yet is created at
+// under the lock EnsureSchema takes, in one transaction. A type that does not exist yet is created at
 // version 1. Otherwise, while release is at least that of the current version (NULL counts as
 // 0), its name and description are written, and a prompt and settings, or rules, that differ from
 // the current version's become the next version, which every live agent is told of. A release
@@ -37,7 +37,7 @@ type SeededAgentType struct {
 func (s *Store) SeedBuiltins(ctx context.Context, release int, builtins []domain.BuiltinAgentType, rules string) (Seeded, error) {
 	var seeded Seeded
 	if err := s.write(ctx, func(tx *Write) error {
-		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", schemaMigrationLockKey); err != nil {
+		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", schemaLockKey); err != nil {
 			return fmt.Errorf("db.SeedBuiltins: lock: %w", err)
 		}
 		for _, b := range builtins {

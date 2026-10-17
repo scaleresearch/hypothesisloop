@@ -52,7 +52,7 @@ func main() {
 	}
 	defer pool.Close()
 
-	migrate(pool, logger)
+	ensureSchema(pool, logger)
 	store := db.NewStore(pool, pcfg.Scheduler.MaxInfrastructureRequeues)
 	seedBuiltins(store, logger)
 
