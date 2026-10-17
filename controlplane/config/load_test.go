@@ -19,7 +19,7 @@ const (
 
 // productionConfig is the committed settings file, with the deployment's secret in the
 // environment as every deployment supplies it.
-var committedConfig = filepath.Join("..", "..", "settings", "hypothesisloop.yaml")
+var committedConfig = filepath.Join("..", "settings", "hypothesisloop.yaml")
 
 // productionConfig is the committed settings file as a deployment renders it: with its git host.
 func productionConfig(t *testing.T) string {

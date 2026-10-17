@@ -17,7 +17,7 @@ func TestTheLocalSettingsAsRenderedLoad(t *testing.T) {
 			t.Skipf("no %s on this machine", tool)
 		}
 	}
-	repo, err := filepath.Abs("../../..")
+	repo, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestTheLocalReachableAddressIsTheOneAddressEveryClusterIsHanded(t *testing.
 			t.Skipf("no %s on this machine", tool)
 		}
 	}
-	repo, err := filepath.Abs("../../..")
+	repo, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestALocalReachableAddressOnlyThisMachineReachesIsRefused(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("no bash on this machine")
 	}
-	repo, err := filepath.Abs("../../..")
+	repo, err := filepath.Abs("../..")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -133,7 +133,7 @@ func (c *Controller) WithStartTimeout(d time.Duration) *Controller {
 }
 
 // WithMinSilenceWindow floors the silence window (silenceMultiplier * report interval) —
-// see MinSilenceWindowSeconds's doc comment in shared/config for why.
+// see MinSilenceWindowSeconds's doc comment in controlplane/config for why.
 func (c *Controller) WithMinSilenceWindow(d time.Duration) *Controller {
 	c.minSilenceWindow = d
 	return c

@@ -7,10 +7,10 @@ import (
 
 	"go.uber.org/zap"
 
+	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/cloudcompute"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/clusteragentapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/hosting"
-	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/provider"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/provider/providers"

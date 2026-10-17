@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
+	"github.com/scaleresearch/hypothesisloop/controlplane/config"
 )
 
 // verifyingKey is a JWK parsed once at startup.

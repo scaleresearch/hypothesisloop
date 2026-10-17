@@ -17,7 +17,7 @@ import (
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/contract/repotemplate"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
+	"github.com/scaleresearch/hypothesisloop/controlplane/config"
 )
 
 // The live checks talk to github.com as the real App and run only when asked to:

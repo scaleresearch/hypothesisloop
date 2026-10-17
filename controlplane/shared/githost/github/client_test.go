@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
+	"github.com/scaleresearch/hypothesisloop/controlplane/config"
 )
 
 const testAppID = 4242

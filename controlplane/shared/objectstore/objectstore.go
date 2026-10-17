@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
+	"github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/objectstore/minio"
 )
 

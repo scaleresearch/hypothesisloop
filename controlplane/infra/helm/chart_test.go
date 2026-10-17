@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/infra/helm/charttest"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/config"
 )
 
 // The Secret each ci values file names.
