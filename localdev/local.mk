@@ -1,5 +1,5 @@
 .PHONY: registry-up prune-images controlplane-up controlplane-down controlplane-destroy \
-	dev dev-api dev-status dev-down tunnels tunnels-down dev-hosted staff-token token runtime-token \
+	dev dev-api dev-status dev-down tunnels tunnels-down dev-rented staff-token token runtime-token \
 	k3s-up k3s-down k3s-dev-nodes-up k3s-dev-nodes-down full-stop full-start reload stack-not-held \
 	tt-up tt-down tt-status tt-stop tt-start tt-dev-nodes-up tt-dev-nodes-down \
 	nvidia-up nvidia-down nvidia-status \
@@ -70,8 +70,8 @@ tunnels-down:
 # registry, pushed again after a change to them. Needs
 # `make tunnels` first. From here hosted agents and jobs placed on the cloud cluster rent
 # machines, which cost money.
-dev-hosted: render-settings
-	bash localdev/dev.sh hosted
+dev-rented: render-settings
+	bash localdev/dev.sh rented
 
 # Every request to the control plane carries a token. These two print the ones local work needs,
 # derived from the signing secret in localdev/.run/signing-secret (localdev/lib/auth.sh).

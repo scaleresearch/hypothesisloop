@@ -124,7 +124,7 @@ url_of() {
   echo "$url"
 }
 
-# One line per service, "<name> <url>", read from the running tunnels: what `make dev-hosted`
+# One line per service, "<name> <url>", read from the running tunnels: what `make dev-rented`
 # renders into the settings. Fails when a tunnel is down, so a caller never takes an address
 # nothing answers at.
 addresses() {

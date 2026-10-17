@@ -30,7 +30,7 @@ func agentSandboxOf(configured bool) AgentSandbox {
 		Reason:         reasonAgentSandboxNotConfigured,
 		Message:        "this deployment has no sandbox provider to run agent sandboxes on",
 		Summary:        "Sandboxed agents are not available on this platform.",
-		OperatorDetail: "The settings have no sandbox section (on a dev stack: make dev-hosted).",
+		OperatorDetail: "The settings have no sandbox section (on a dev stack: make dev-rented).",
 	}}
 }
 

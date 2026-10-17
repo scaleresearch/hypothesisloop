@@ -582,4 +582,4 @@ stages:
 # The machines the control plane rents itself, both left out here: sandbox, the provider account
 # sandboxed agents run on (sandbox.yaml beside this file), and cloud_compute, the provider accounts
 # jobs run on, each scheduled as a cluster (cloud-compute.yaml). A deployment that has them adds
-# those sections to this file; make dev-hosted does.
+# those sections to this file; make dev-rented does.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# dev.sh up|hosted|api|ui|status|require-local|down
+# dev.sh up|rented|api|ui|status|require-local|down
 #
 # Runs the control plane and the UI as host processes against the compose datastores, so a code
 # change needs a restart of one process and no image build. Every process is started detached,
@@ -8,7 +8,7 @@
 #   up       render the settings for the local cluster and (re)start the API and metrics-service,
 #            building hl beside them in localdev/.bin;
 #            start the UI unless it runs, and the git server when GIT_HOST_PROVIDER is local
-#   hosted   the same with settings that rent compute elsewhere: a sandbox section on the
+#   rented   the same with settings that rent compute elsewhere: a sandbox section on the
 #            provider SANDBOX_PROVIDER in .env names, for hosted agents, and a cloud_compute
 #            section on the provider CLOUD_COMPUTE_PROVIDER names, for jobs, both run by
 #            control-service itself. The settings name the running tunnels (make tunnels) and the
@@ -23,7 +23,7 @@
 #   down     stop them all. The tunnels are not part of this (make tunnels-down)
 set -euo pipefail
 
-action="${1:?usage: dev.sh up|hosted|api|ui|status|require-local|down}"
+action="${1:?usage: dev.sh up|rented|api|ui|status|require-local|down}"
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo}"
 . localdev/lib/auth.sh
@@ -113,12 +113,12 @@ must_stay_up() {
 
 # The settings name where a hosted agent and a rented instance reach this machine and which
 # images they boot. Rendered for the local cluster these are the host's address and a
-# placeholder image, so hosted mode writes the tunnels' addresses and the published images.
+# placeholder image, so rented mode writes the tunnels' addresses and the published images.
 render_settings() {
-  local hosted=() values=("  control_plane_endpoint: http://localhost:9000") value host
-  if [[ "${1:-}" == "hosted" ]]; then
+  local rented=() values=("  control_plane_endpoint: http://localhost:9000") value host
+  if [[ "${1:-}" == "rented" ]]; then
     host="$(lib_advertised_address "$(cat localdev/.host-address)")"
-    hosted=(-e "s|http://${host}:8081|${public_api}|"
+    rented=(-e "s|http://${host}:8081|${public_api}|"
             -e "s|http://${host}:8084|${public_metrics}|"
             -e "s|http://${host}:9000|${public_store}|"
             -e "s|^  image: ${host}:5000/hypothesisloop-harness-base:.*$|  image: ${registry}/hypothesisloop-harness-base:${tag}|"
@@ -126,19 +126,19 @@ render_settings() {
             -e "s|^  registry_plain_http: true$|  registry_plain_http: false|"
             -e "s|^  image_tag: .*$|  image_tag: ${tag}|")
     if [[ "${git_host}" == "local" ]]; then
-      hosted+=(-e "s|^    base_url: http://${host}:${HL_GIT_PORT}$|    base_url: ${public_git}|")
+      rented+=(-e "s|^    base_url: http://${host}:${HL_GIT_PORT}$|    base_url: ${public_git}|")
       values+=("    base_url: ${public_git}")
     fi
     values+=("  public_api_url: ${public_api}" "  metrics_url: ${public_metrics}" "  endpoint: ${public_store}" "  image: ${registry}/hypothesisloop-harness-base:${tag}"
              "  registry: ${registry}" "  image_tag: ${tag}" "  registry_plain_http: false")
   fi
-  sed -e 's|http://minio:9000|http://localhost:9000|' ${hosted[@]+"${hosted[@]}"} "${rendered}" > "${settings}"
+  sed -e 's|http://minio:9000|http://localhost:9000|' ${rented[@]+"${rented[@]}"} "${rendered}" > "${settings}"
   for value in "${values[@]}"; do
     grep -qF -- "${value}" "${settings}" || { echo "dev: the settings file changed shape, '${value}' was not rendered" >&2; exit 1; }
   done
 }
 
-# rents: whether the settings last rendered rent compute (make dev-hosted).
+# rents: whether the settings last rendered rent compute (make dev-rented).
 rents() {
   grep -qE '^(sandbox|cloud_compute):' "${settings}"
 }
@@ -170,7 +170,7 @@ render_rented() {
 }
 
 # Each provider of .env is one its role knows, and each key that provider reads is set.
-hosted_inputs() {
+rented_inputs() {
   local missing=() key tunnels provider_keys
   sandbox_provider="$(lib_env_value SANDBOX_PROVIDER)"
   case "${sandbox_provider}" in
@@ -217,7 +217,7 @@ hosted_inputs() {
 
 start_control_plane() {
   if [[ ! -f "${settings}" ]]; then
-    echo "dev: no settings rendered yet; run make dev or make dev-hosted first" >&2
+    echo "dev: no settings rendered yet; run make dev or make dev-rented first" >&2
     exit 1
   fi
   # Built before anything is stopped: a tree that does not compile leaves what runs running.
@@ -230,7 +230,7 @@ start_control_plane() {
   # Checked before anything is stopped too: settings rendered before this tree made a key
   # required do not load, and the API would be stopped with nothing to start in its place.
   if ! lib_hl_admin token staff >/dev/null; then
-    echo "dev: ${settings} does not load with this tree; render it again with make dev or make dev-hosted" >&2
+    echo "dev: ${settings} does not load with this tree; render it again with make dev or make dev-rented" >&2
     exit 1
   fi
   stop control-service
@@ -319,7 +319,7 @@ case "${action}" in
     start_control_plane
     lib_register_local_cluster
     local_cluster enable
-    # Nor is the cloud cluster offered to every org while nothing can rent for it: hosted mode
+    # Nor is the cloud cluster offered to every org while nothing can rent for it: rented mode
     # shares it again. A job placed on it goes back to the queue.
     if [[ -n "${cloud_cluster}" ]]; then
       lib_hl_admin cluster add "${cloud_cluster}" default >/dev/null
@@ -333,9 +333,9 @@ case "${action}" in
     fi
     status
     ;;
-  hosted)
-    hosted_inputs
-    render_settings hosted
+  rented)
+    rented_inputs
+    render_settings rented
     render_rented
     start_datastores
     start_git_server
@@ -366,7 +366,7 @@ case "${action}" in
     ;;
   require-local)
     if running control-service && [[ -f "${settings}" ]] && rents; then
-      echo "dev: control-service runs (pid $(cat "${run}/control-service.pid")) with settings that rent compute (make dev-hosted). Run make dev for a stack that cannot" >&2
+      echo "dev: control-service runs (pid $(cat "${run}/control-service.pid")) with settings that rent compute (make dev-rented). Run make dev for a stack that cannot" >&2
       exit 1
     fi
     ;;
@@ -376,7 +376,7 @@ case "${action}" in
     done
     ;;
   *)
-    echo "usage: dev.sh up|hosted|api|ui|status|require-local|down" >&2
+    echo "usage: dev.sh up|rented|api|ui|status|require-local|down" >&2
     exit 1
     ;;
 esac

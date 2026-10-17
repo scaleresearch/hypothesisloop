@@ -142,7 +142,7 @@ function noneOfItsOwn(page, emptyState = 'No experiments yet.') {
 const listening = port => fetch(`http://localhost:${port}`).then(() => true, () => false)
 
 // The run creates platform experiments and adds agents to them. On a stack that rents compute
-// (make dev-hosted) a sandboxed one would be rented for real, so only the local stack is run against.
+// (make dev-rented) a sandboxed one would be rented for real, so only the local stack is run against.
 async function requireLocalStack() {
   if (spawnSync('bash', ['localdev/dev.sh', 'require-local'], { cwd: repo, stdio: 'inherit' }).status !== 0) {
     throw new Error('the browser run needs the stack make dev runs, which rents nothing')

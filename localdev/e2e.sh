@@ -4,7 +4,7 @@
 # Runs the e2e suite against the stack `make dev` runs and the local k3s cluster, and leaves both
 # as it found them. With no arguments it runs every test that needs no real accelerator.
 #
-# It refuses a stack that rents (make dev-hosted): an agent a test hosts would be rented, and a
+# It refuses a stack that rents (make dev-rented): an agent a test hosts would be rented, and a
 # job a test submits could be placed on the shared cloud cluster.
 #
 # It holds the stack lock while it runs: the scheduler tests need the cluster's whole capacity

@@ -1,7 +1,7 @@
 .PHONY: e2e tt-e2e nvidia-e2e test agent-test test-github-live
 
 # The e2e suite against the stack `make dev` runs and the local k3s cluster, in one command
-# (localdev/e2e.sh). It refuses a stack that rents compute (make dev-hosted) and one somebody
+# (localdev/e2e.sh). It refuses a stack that rents compute (make dev-rented) and one somebody
 # else holds, brings the dev nodes up, and leaves the nodes, the API and the UI as it found them.
 # The cluster's runtime and the test workload are images: `make reload` first when they changed.
 # Usage: make e2e                                        every test that needs no real accelerator
