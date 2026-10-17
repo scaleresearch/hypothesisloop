@@ -5,8 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"k8s.io/apimachinery/pkg/api/resource"
-
+	"github.com/scaleresearch/hypothesisloop/contract/jobspec"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
@@ -14,13 +13,6 @@ import (
 // codeRefPattern requires an immutable pointer — a full commit SHA, never a branch name or
 // "latest". Matches "<any-git-remote-url>@<40-hex-char-sha>"; only the "@<sha>" suffix is enforced.
 var codeRefPattern = regexp.MustCompile(`^\S+@[0-9a-f]{40}$`)
-
-// experimentIDPattern mirrors Kubernetes' RFC 1123 DNS subdomain rule. The experiment ID is
-// used verbatim by cluster-agent to name the Job/Pod/ResourceClaimTemplate it creates
-// (e.g. "exp-<id>-accelerator"), so any ID k8s would reject must be rejected here — at
-// submission time, with a message the submitter can act on — rather than accepted and left to
-// fail silently in an endless cluster-agent reconcile loop against a name it can never create.
-var experimentIDPattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
 // Admission error reason constants.
 const (
@@ -63,29 +55,19 @@ func totalOverGroups(spec domain.JobSpec, parse func(string) (float64, error), p
 	return total, nil
 }
 
-// shareOfNode is the retired way to ask for a node's share of a quantity. It is refused by name
-// so the answer says what to state instead.
-const shareOfNode = "max"
-
-// quantitiesStated refuses a job that leaves the cpu, memory or storage of a node out or asks for
-// a share of the node. What a job holds is what it states: a share of the node it lands on held
-// most of a machine for a job that used little, and nothing else fitted beside it.
+// quantitiesStated refuses a job whose nodes do not state cpu, memory and storage as
+// jobspec.CheckNode has them, checked per node because the cap checks sum over the nodes, where
+// one node's negative would cancel another's real demand.
 func quantitiesStated(job domain.JobSpec) error {
 	check := func(owner string, group domain.JobGroup) error {
-		for _, quantity := range []struct{ name, value, reason, meaning, example string }{
-			{"cpu", group.CPU, ReasonCPURequired, "the cores one node of the job uses", "cpu: 2"},
-			{"memory", group.Memory, ReasonMemoryRequired, "the memory one node of the job uses", "memory: 8Gi"},
-			{"storage", group.Storage, ReasonStorageRequired, "the scratch space one node of the job writes", "storage: 4Gi"},
-		} {
-			field := owner + "." + quantity.name
-			switch quantity.value {
-			case "":
-				return &AdmissionError{Reason: quantity.reason, Message: fmt.Sprintf("%s is required: state %s, as in %s", field, quantity.meaning, quantity.example)}
-			case shareOfNode:
-				return &AdmissionError{Reason: quantity.reason, Message: fmt.Sprintf("%s is %q: %s is stated as a quantity, as in %s, and never as a share of the node", field, quantity.value, quantity.name, quantity.example)}
-			}
+		err := jobspec.CheckNode(owner, group.CPU, group.Memory, group.Storage)
+		switch {
+		case err == nil:
+			return nil
+		case err.Unstated:
+			return &AdmissionError{Reason: map[string]string{"cpu": ReasonCPURequired, "memory": ReasonMemoryRequired, "storage": ReasonStorageRequired}[err.Quantity], Message: err.Message}
 		}
-		return nil
+		return &AdmissionError{Reason: ReasonMalformed, Message: err.Message}
 	}
 	if len(job.Groups) == 0 {
 		return check("job", domain.JobGroup{CPU: job.CPU, Memory: job.Memory, Storage: job.Storage})
@@ -119,7 +101,7 @@ func asksForCoresOnly(job domain.JobSpec) bool {
 // whose cpu is its count and needs no rule of its own.
 func countSetsCores(job *domain.JobSpec) error {
 	shape := func(field string, count *int, cpu string) error {
-		switch cores, err := domain.ParseCPUCores(cpu); {
+		switch cores, err := jobspec.CPUCores(cpu); {
 		case err != nil:
 			return fmt.Errorf("%s.cpu: %w", field, err)
 		case cores < 1 || cores != float64(int(cores)):
@@ -150,11 +132,8 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	if exp == nil {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "experiment is nil"}
 	}
-	if exp.ID == "" {
-		return &AdmissionError{Reason: ReasonMalformed, Message: "id is required"}
-	}
-	if !experimentIDPattern.MatchString(exp.ID) {
-		return &AdmissionError{Reason: ReasonMalformed, Message: "id must be a valid Kubernetes RFC 1123 DNS subdomain: lowercase alphanumeric characters and '-' only, starting and ending with an alphanumeric character (the ID is used verbatim in cluster resource names)"}
+	if err := domain.ValidateIdentifier("id", exp.ID); err != nil {
+		return &AdmissionError{Reason: ReasonMalformed, Message: err.Error()}
 	}
 	if exp.AgentID == "" {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "agent_id is required"}
@@ -269,35 +248,26 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "estimated_duration_hours must not be negative"}
 	}
 
-	// Checked here, at the only point that sees the request before anything acts on it, and per
-	// group: the cap checks sum over groups, where one group's negative silently cancels
-	// another's real demand.
-	for _, group := range exp.Job.NodeGroups() {
-		if err := domain.CheckNodeRequest(group.CPU, group.Memory, group.Storage); err != nil {
-			return &AdmissionError{Reason: ReasonMalformed, Message: "job." + err.Error()}
-		}
-	}
-
 	// The count of a job on cores is its cores, which max_cpu_cores_per_job bounds below.
 	if exp.AcceleratorType.Kind() != domain.TypeKindCPU && exp.AcceleratorCount > caps.MaxAcceleratorCountPerJob {
 		return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.accelerator_count %d is over the most accelerators one job may ask for, %d", exp.AcceleratorCount, caps.MaxAcceleratorCountPerJob)}
 	}
 	nodes := exp.Job.Nodes()
-	cpu, err := totalOverGroups(exp.Job, domain.ParseCPUCores, func(g domain.JobGroup) string { return g.CPU })
+	cpu, err := totalOverGroups(exp.Job, jobspec.CPUCores, func(g domain.JobGroup) string { return g.CPU })
 	if err != nil {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "job.cpu: " + err.Error()}
 	}
 	if cpu > caps.MaxCPUCoresPerJob {
 		return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.cpu %g cores (x%d nodes) is over the most cores one job may ask for, %g", cpu/float64(nodes), nodes, caps.MaxCPUCoresPerJob)}
 	}
-	memory, err := totalOverGroups(exp.Job, domain.ParseMemoryGB, func(g domain.JobGroup) string { return g.Memory })
+	memory, err := totalOverGroups(exp.Job, jobspec.GB, func(g domain.JobGroup) string { return g.Memory })
 	if err != nil {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "job.memory: " + err.Error()}
 	}
 	if memory > caps.MaxRAMGBPerJob {
 		return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.memory %.2fGB (x%d nodes) exceeds per-job max %.2fGB", memory/float64(nodes), nodes, caps.MaxRAMGBPerJob)}
 	}
-	storage, err := totalOverGroups(exp.Job, domain.ParseStorageGB, func(g domain.JobGroup) string { return g.Storage })
+	storage, err := totalOverGroups(exp.Job, jobspec.GB, func(g domain.JobGroup) string { return g.Storage })
 	if err != nil {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "job.storage: " + err.Error()}
 	}
@@ -307,12 +277,12 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	// ExtraResources has no billing dimension or per-job cap, but a malformed quantity string
 	// should still be rejected here rather than surfacing later as an opaque Job-creation failure.
 	for name, qty := range exp.Job.ExtraResources {
-		if _, err := resource.ParseQuantity(qty); err != nil {
+		if _, err := jobspec.ParseQuantity(qty); err != nil {
 			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.extra_resources[%q]: %s", name, err.Error())}
 		}
 	}
 	if exp.Job.ShmSize != "" {
-		q, err := resource.ParseQuantity(exp.Job.ShmSize)
+		q, err := jobspec.ParseQuantity(exp.Job.ShmSize)
 		if err != nil {
 			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.shm_size %q: %s", exp.Job.ShmSize, err.Error())}
 		}
@@ -321,7 +291,7 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 		}
 	}
 	for name, qty := range exp.Job.AcceleratorPodResources {
-		if _, err := resource.ParseQuantity(qty); err != nil {
+		if _, err := jobspec.ParseQuantity(qty); err != nil {
 			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.accelerator_pod_resources[%q]: %s", name, err.Error())}
 		}
 	}

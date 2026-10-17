@@ -15,6 +15,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
+	"github.com/scaleresearch/hypothesisloop/contract/jobspec"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
@@ -45,9 +46,9 @@ type Proposal struct {
 	Image           string                 `json:"image" doc:"The image the run's jobs name as job.image, checked as a submit checks it: a job image the platform offers, by name, or the whole address of another, which a cluster that has accelerator_type runs."`
 	// CPU, Memory and Storage are what one node of the run's jobs asks for, as job.cpu, job.memory
 	// and job.storage state it, so that whoever writes a job copies them from here and from no prose.
-	CPU     string `json:"cpu,omitempty" doc:"What the run's jobs state as job.cpu: cores for one node, a quantity such as 8 or 500m. Checked as a submit checks it: 422 invalid_resources for one that is no quantity or is negative, as for memory and storage."`
-	Memory  string `json:"memory,omitempty" doc:"What the run's jobs state as job.memory: a quantity such as 32Gi. Checked as a submit checks it."`
-	Storage string `json:"storage,omitempty" doc:"What the run's jobs state as job.storage: a quantity such as 100Gi. Checked as a submit checks it."`
+	CPU     string `json:"cpu" doc:"What the run's jobs state as job.cpu: cores for one node, a quantity such as 8 or 500m. Checked as a submit checks it: 422 invalid_resources for one left out, stated as max, no quantity or negative, as for memory and storage."`
+	Memory  string `json:"memory" doc:"What the run's jobs state as job.memory: a quantity such as 32Gi. Checked as a submit checks it."`
+	Storage string `json:"storage" doc:"What the run's jobs state as job.storage: a quantity such as 100Gi. Checked as a submit checks it."`
 
 	MetricReason string             `json:"metric_reason" doc:"Why the ranked metric is the goal itself, in plain words."`
 	Measurement  string             `json:"measurement" doc:"How it is measured, in plain words: the harness, the data it never trains on, the repeats."`
@@ -182,7 +183,7 @@ func (s *Service) checkProposal(ctx context.Context, p *Proposal, draft *domain.
 		}
 	}
 	p.CPU, p.Memory, p.Storage = strings.TrimSpace(p.CPU), strings.TrimSpace(p.Memory), strings.TrimSpace(p.Storage)
-	if err := domain.CheckNodeRequest(p.CPU, p.Memory, p.Storage); err != nil {
+	if err := jobspec.CheckNode("", p.CPU, p.Memory, p.Storage); err != nil {
 		refuse("invalid_resources", "%s", err)
 	}
 	for i, agent := range p.Agents {

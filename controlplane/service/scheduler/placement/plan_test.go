@@ -14,10 +14,8 @@ const h100 = "nvidia.com/gpu.product=nvidia-h100-80gb-hbm3"
 
 // groupedExperiment is a heterogeneous job: one group per shape, in the order given.
 func groupedExperiment(groups ...domain.JobGroup) *domain.Experiment {
-	return &domain.Experiment{
-		AcceleratorType: h100,
-		Job:             domain.JobSpec{Image: "registry.test/job:1", AcceleratorType: h100, Groups: groups},
-	}
+	job := domain.JobSpec{Image: "registry.test/job:1", AcceleratorType: h100, Groups: groups}
+	return &domain.Experiment{AcceleratorType: h100, AcceleratorCount: job.TotalAccelerators(), Job: job}
 }
 
 // Reserve walks ranks in declared order and hands each the first (alphabetical) node

@@ -15,6 +15,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
+	"github.com/scaleresearch/hypothesisloop/contract/jobspec"
 	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/command"
@@ -317,20 +318,16 @@ func jobSpecGap(data []byte, experiment declaredExperiment) string {
 	return ""
 }
 
-// quantitiesGap is the submit's rule for cpu, memory and storage: each stated, and as a quantity.
+// quantitiesGap is what the submit refuses of the cpu, memory and storage of one node.
 func quantitiesGap(owner string, fields map[string]any) string {
-	for _, quantity := range []struct{ name, meaning, example string }{
-		{"cpu", "the cores one node of the job uses", "cpu: 2"},
-		{"memory", "the memory one node of the job uses", "memory: 8Gi"},
-		{"storage", "the scratch space one node of the job writes", "storage: 4Gi"},
-	} {
-		field := owner + "." + quantity.name
-		switch fields[quantity.name] {
-		case nil, "":
-			return "states no " + field + ": state " + quantity.meaning + ", as in " + quantity.example
-		case "max":
-			return "states " + field + " as max: " + quantity.name + " is a quantity, as in " + quantity.example + ", and never a share of the node"
+	stated := func(name string) string {
+		if value, set := fields[name]; set && value != nil {
+			return fmt.Sprint(value)
 		}
+		return ""
+	}
+	if err := jobspec.CheckNode(owner, stated("cpu"), stated("memory"), stated("storage")); err != nil {
+		return "is refused at submit: " + err.Error()
 	}
 	return ""
 }

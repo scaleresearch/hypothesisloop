@@ -68,10 +68,7 @@ func TestPreemptionShortfallIsNeverEmptyForAJobThatDoesNotFit(t *testing.T) {
 	for i := 0; i < iterations; i++ {
 		c := generateCase(rnd)
 
-		footprint, err := domain.JobFootprint(c.exp.Job, c.exp.AcceleratorType)
-		if err != nil {
-			continue // a generated spec that cannot be costed is not a placement question
-		}
+		footprint := c.exp.Footprint()
 		if Reserve(CloneNodes(c.nodeAccel), CloneNodes(c.nodeRes), nil, c.exp) {
 			continue // fits, so there is nothing to report
 		}
@@ -117,10 +114,7 @@ func TestPreemptionShortfallCountsEveryRankNotJustOne(t *testing.T) {
 	if Reserve(CloneNodes(nodeAccel), CloneNodes(nodeRes), nil, exp) {
 		t.Fatal("fixture is wrong: two ranks of 2Gi cannot both be placed on 1Gi+1Gi+2Gi")
 	}
-	footprint, err := domain.JobFootprint(exp.Job, exp.AcceleratorType)
-	if err != nil {
-		t.Fatalf("Footprint() = %v", err)
-	}
+	footprint := exp.Footprint()
 	// ...and that the cluster-level view alone sees no problem, which is why the per-node pass has
 	// to be the one that catches it.
 	if len(Shortfall(clusterTotals(nodeAccel, nodeRes), footprint)) != 0 {
@@ -148,10 +142,7 @@ func TestPreemptionShortfallNeverReportsUnrequestedDimensions(t *testing.T) {
 
 	for i := 0; i < iterations; i++ {
 		c := generateCase(rnd)
-		footprint, err := domain.JobFootprint(c.exp.Job, c.exp.AcceleratorType)
-		if err != nil {
-			continue
-		}
+		footprint := c.exp.Footprint()
 		got := PreemptionShortfall(clusterTotals(c.nodeAccel, c.nodeRes), c.nodeAccel, c.nodeRes, nil, c.exp, footprint)
 		for key, amount := range got {
 			if amount <= 0 {
@@ -175,10 +166,7 @@ func TestPreemptionShortfallNeverExceedsTheJobsOwnFootprint(t *testing.T) {
 
 	for i := 0; i < iterations; i++ {
 		c := generateCase(rnd)
-		footprint, err := domain.JobFootprint(c.exp.Job, c.exp.AcceleratorType)
-		if err != nil {
-			continue
-		}
+		footprint := c.exp.Footprint()
 		got := PreemptionShortfall(clusterTotals(c.nodeAccel, c.nodeRes), c.nodeAccel, c.nodeRes, nil, c.exp, footprint)
 		for key, amount := range got {
 			if amount > footprint[key] {

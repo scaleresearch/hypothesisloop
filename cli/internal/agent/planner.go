@@ -55,7 +55,7 @@ a leading quote.
                                        # budget is core-hours. A refusal lists the valid types
   image: ...                           # the job image the brief names, from the same line of 'hl capacity':
                                        # one of its job_images, or its only_job_image where it shows one
-  cpu: 8                               # optional, like memory and storage: what one node of a job
+  cpu: 8                               # required, like memory and storage: what one node of a job
   memory: 32Gi                         # asks for, as job.cpu, job.memory and job.storage state it.
   storage: 100Gi                       # the baseline writes them into job.yaml, so no brief repeats them
   budget_accelerator_hours: 6          # proposed, positive; the person states the real ones at accept
@@ -95,7 +95,7 @@ a leading quote.
 A refusal names every problem at once and changes nothing: for a file that is no YAML the line
 and what is wrong there, accelerator_unreachable with the types that are listed, for the image
 what a job submit would refuse (unknown_job_image, no_cluster_for_image), and invalid_resources
-for a cpu, memory or storage that is no quantity. Without --check, one that passes is stored at
+for a cpu, memory or storage left out or no quantity. Without --check, one that passes is stored at
 once, replaces the one before and is what the person is asked to accept, so propose only the
 finished proposal. Your machine is kept some minutes after it, and a change of the goal the
 person makes in that time arrives as your next update.`, stderr)

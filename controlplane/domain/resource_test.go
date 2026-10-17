@@ -86,10 +86,7 @@ func TestFootprintScaleMultiNode(t *testing.T) {
 		AcceleratorType:  "example.com/product=test-accelerator",
 		NumNodes:         4,
 	}
-	fp, err := JobFootprint(j, j.AcceleratorType)
-	if err != nil {
-		t.Fatalf("Footprint: %v", err)
-	}
+	fp := (&Experiment{Job: j, AcceleratorType: j.AcceleratorType, AcceleratorCount: j.TotalAccelerators()}).Footprint()
 	// CPU: 500 millicores/node * 4 nodes = 2000.
 	if got := fp[ResourceKey{Kind: ResourceKindCPU}]; got != 2000 {
 		t.Errorf("cpu millicores = %d, want 2000", got)
@@ -107,19 +104,18 @@ func TestFootprintScaleMultiNode(t *testing.T) {
 
 func TestFootprintFractionalCPUPrecision(t *testing.T) {
 	j := JobSpec{CPU: "250m", NumNodes: 1}
-	fp, err := JobFootprint(j, j.AcceleratorType)
-	if err != nil {
-		t.Fatalf("Footprint: %v", err)
-	}
+	fp := (&Experiment{Job: j, AcceleratorType: j.AcceleratorType, AcceleratorCount: j.TotalAccelerators()}).Footprint()
 	if got := fp[ResourceKey{Kind: ResourceKindCPU}]; got != 250 {
 		t.Errorf("cpu millicores = %d, want 250 (fractional precision lost)", got)
 	}
 }
 
-func TestFootprintMalformedQuantityRejected(t *testing.T) {
-	j := JobSpec{CPU: "not-a-quantity"}
-	if _, err := JobFootprint(j, ""); err == nil {
-		t.Error("expected error for malformed CPU quantity, got nil")
+// Submission refuses a quantity that cannot be read, so one that reaches a footprint is left out.
+func TestFootprintLeavesOutAQuantityThatCannotBeRead(t *testing.T) {
+	j := JobSpec{CPU: "not-a-quantity", Memory: "-1Gi", Storage: "1Gi"}
+	fp := (&Experiment{Job: j}).Footprint()
+	if fp[ResourceKey{Kind: ResourceKindCPU}] != 0 || fp[ResourceKey{Kind: ResourceKindMemory}] != 0 || fp[ResourceKey{Kind: ResourceKindStorage}] != 1<<30 {
+		t.Errorf("Footprint() = %v, want only the 1Gi of storage", fp)
 	}
 }
 

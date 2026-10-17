@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"k8s.io/apimachinery/pkg/api/resource"
+	"github.com/scaleresearch/hypothesisloop/contract/jobspec"
 )
 
 // This file defines canonical multi-dimensional resource primitives for physical fit checks.
@@ -165,34 +165,10 @@ type NodeShape struct {
 // NodeShapes expands a job into one entry per node, in group order. This is the placement view
 // of a job: admission walks it to prove every node has somewhere to land, which for an ungrouped
 // job is Nodes() copies of one shape and for a grouped job is the groups' real, differing shapes.
-//
-// A malformed quantity string yields an absent dimension rather than an error, matching
-// Experiment.Footprint: submission already parsed all three (see ValidateExperiment), and every
-// caller here treats a job's shape as unconditional.
 func NodeShapes(j JobSpec) []NodeShape {
 	out := make([]NodeShape, 0, j.Nodes())
 	for _, group := range j.NodeGroups() {
-		resources := map[string]int64{}
-		for _, dimension := range []struct {
-			key       string
-			quantity  string
-			canonical func(resource.Quantity) int64
-		}{
-			{NodeResourceCPUMillicores, group.CPU, func(q resource.Quantity) int64 { return q.MilliValue() }},
-			{NodeResourceMemoryBytes, group.Memory, func(q resource.Quantity) int64 { return q.Value() }},
-			{NodeResourceStorageBytes, group.Storage, func(q resource.Quantity) int64 { return q.Value() }},
-		} {
-			if dimension.quantity == "" {
-				continue
-			}
-			q, err := resource.ParseQuantity(dimension.quantity)
-			if err != nil {
-				continue
-			}
-			if value := dimension.canonical(q); value > 0 {
-				resources[dimension.key] = value
-			}
-		}
+		resources := nodeResources(group)
 		for replica := 0; replica < group.Replicas; replica++ {
 			out = append(out, NodeShape{Group: group.Name, AcceleratorCount: int64(group.AcceleratorCount), Resources: resources})
 		}
@@ -200,59 +176,31 @@ func NodeShapes(j JobSpec) []NodeShape {
 	return out
 }
 
-// JobFootprint computes j's total resource footprint in canonical units: millicores for CPU,
-// bytes for memory/storage, whole units for the accelerator type (if any) and every
-// ExtraResources entry.
-//
-// It is the SUM over j.NodeGroups() of each group's per-replica shape scaled by its replica
-// count. For an ungrouped job that is one group of Nodes() identical replicas, i.e. exactly the
-// per-node footprint x NumNodes it has always been; for a heterogeneous job it is the sum of the
-// groups, which is what makes a learner plus 64 actors cost 8 accelerators rather than 520.
-//
-// ExtraResources stays job-level and is therefore charged once per node of every group, matching
-// how each backend compiles it onto every pod.
-//
-// Returns an error if any quantity string fails to parse — callers must treat that as a
-// rejection, not a zero-footprint dimension.
-func JobFootprint(j JobSpec, acceleratorType AcceleratorType) (Footprint, error) {
-	total := NewFootprint()
-	for _, group := range j.NodeGroups() {
-		perNode := NewFootprint()
-		if group.CPU != "" {
-			q, err := resource.ParseQuantity(group.CPU)
-			if err != nil {
-				return nil, fmt.Errorf("job.cpu: %w", err)
-			}
-			perNode.Add(ResourceKey{Kind: ResourceKindCPU}, q.MilliValue())
+// nodeResources is the cpu, memory and storage one node of group holds, by NodeResource* key in
+// its canonical unit: the one reading of them that a job's footprint and its placement share. A
+// quantity that cannot be read is left out, as submission refused every one
+// (jobspec.CheckNode) and every caller treats a job's shape as unconditional.
+func nodeResources(group JobGroup) map[string]int64 {
+	resources := map[string]int64{}
+	for key, qty := range map[string]string{NodeResourceCPUMillicores: group.CPU, NodeResourceMemoryBytes: group.Memory, NodeResourceStorageBytes: group.Storage} {
+		q, err := jobspec.ParseQuantity(qty)
+		if err != nil {
+			continue
 		}
-		if group.Memory != "" {
-			q, err := resource.ParseQuantity(group.Memory)
-			if err != nil {
-				return nil, fmt.Errorf("job.memory: %w", err)
-			}
-			perNode.Add(ResourceKey{Kind: ResourceKindMemory}, q.Value())
+		value := q.Value()
+		if key == NodeResourceCPUMillicores {
+			value = q.MilliValue()
 		}
-		if group.Storage != "" {
-			q, err := resource.ParseQuantity(group.Storage)
-			if err != nil {
-				return nil, fmt.Errorf("job.storage: %w", err)
-			}
-			perNode.Add(ResourceKey{Kind: ResourceKindStorage}, q.Value())
+		if value > 0 {
+			resources[key] = value
 		}
-		if group.AcceleratorCount > 0 {
-			if acceleratorType == "" {
-				return nil, fmt.Errorf("job.accelerator_type is required when job.accelerator_count > 0")
-			}
-			perNode.Add(ResourceKey{Kind: ResourceKindAccelerator, Name: strings.ToLower(string(acceleratorType))}, int64(group.AcceleratorCount))
-		}
-		for name, qty := range j.ExtraResources {
-			q, err := resource.ParseQuantity(qty)
-			if err != nil {
-				return nil, fmt.Errorf("job.extra_resources[%q]: %w", name, err)
-			}
-			perNode.Add(ResourceKey{Kind: ResourceKindExtended, Name: name}, q.Value())
-		}
-		total.AddFootprint(perNode.Scale(int64(group.Replicas)))
 	}
-	return total, nil
+	return resources
+}
+
+// nodeResourceKeys is the footprint dimension of each nodeResources key.
+var nodeResourceKeys = map[string]ResourceKey{
+	NodeResourceCPUMillicores: {Kind: ResourceKindCPU},
+	NodeResourceMemoryBytes:   {Kind: ResourceKindMemory},
+	NodeResourceStorageBytes:  {Kind: ResourceKindStorage},
 }

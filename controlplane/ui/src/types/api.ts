@@ -4065,8 +4065,8 @@ export interface components {
              * @description Proposed budget of the run: a cap, estimated before anything ran.
              */
             budget_accelerator_hours: number;
-            /** @description What the run's jobs state as job.cpu: cores for one node, a quantity such as 8 or 500m. Checked as a submit checks it: 422 invalid_resources for one that is no quantity or is negative, as for memory and storage. */
-            cpu?: string;
+            /** @description What the run's jobs state as job.cpu: cores for one node, a quantity such as 8 or 500m. Checked as a submit checks it: 422 invalid_resources for one left out, stated as max, no quantity or negative, as for memory and storage. */
+            cpu: string;
             /**
              * Format: double
              * @description Proposed length of the run, counted from the moment it starts, once its baseline is declared: a time the goal states is this.
@@ -4084,7 +4084,7 @@ export interface components {
             /** @description How it is measured, in plain words: the harness, the data it never trains on, the repeats. */
             measurement: string;
             /** @description What the run's jobs state as job.memory: a quantity such as 32Gi. Checked as a submit checks it. */
-            memory?: string;
+            memory: string;
             /** @description Why the ranked metric is the goal itself, in plain words. */
             metric_reason: string;
             out_of_scope?: string[];
@@ -4096,7 +4096,7 @@ export interface components {
             /** @description Why this budget, this long and this many researchers are the least that can reach the goal, in plain words, as an estimate: the trial length assumed, what an hour on the type costs, and the trials counted. */
             sizing_reason: string;
             /** @description What the run's jobs state as job.storage: a quantity such as 100Gi. Checked as a submit checks it. */
-            storage?: string;
+            storage: string;
         };
         ProposalQuestion: {
             /** @description The answer the proposal is planned on, which the person confirms or changes. */

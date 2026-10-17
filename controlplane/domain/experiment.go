@@ -6,9 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/apimachinery/pkg/api/resource"
-
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/contract/jobspec"
 )
 
 // TriedCluster records one placement of a job that the environment failed: the cluster it was on
@@ -296,35 +295,20 @@ func (e *Experiment) RatedCost(estimated, hours float64) float64 {
 // e.AcceleratorCount is already the job's TOTAL footprint (see JobSpec.TotalAccelerators) — so
 // this always reports what a RUNNING job really holds, not what it originally asked for.
 //
-// A malformed CPU/memory/storage quantity string should never reach this point (ValidateExperiment
-// parses all three at submission); if one does, that dimension is simply omitted rather than
-// erroring, since every caller treats Footprint() as unconditional (not (Footprint, error)).
+// A quantity that cannot be read is left out, as in NodeShapes, which reads them the same way.
 func (e *Experiment) Footprint() Footprint {
 	fp := NewFootprint()
-	// Summed over the job's node groups, exactly as JobSpec.Footprint does. An ungrouped job has
-	// one group of Nodes() identical replicas, so this is the per-node shape x Nodes() it has
-	// always been; a grouped job's true demand is the sum of its groups, never a multiple of any
+	// Summed over the job's node groups: an ungrouped job has one group of Nodes() identical
+	// replicas, and a grouped job's true demand is the sum of its groups, never a multiple of any
 	// one of them.
 	job := e.EffectiveJob()
 	for _, group := range job.NodeGroups() {
 		perNode := NewFootprint()
-		if group.CPU != "" {
-			if q, err := resource.ParseQuantity(group.CPU); err == nil {
-				perNode.Add(ResourceKey{Kind: ResourceKindCPU}, q.MilliValue())
-			}
-		}
-		if group.Memory != "" {
-			if q, err := resource.ParseQuantity(group.Memory); err == nil {
-				perNode.Add(ResourceKey{Kind: ResourceKindMemory}, q.Value())
-			}
-		}
-		if group.Storage != "" {
-			if q, err := resource.ParseQuantity(group.Storage); err == nil {
-				perNode.Add(ResourceKey{Kind: ResourceKindStorage}, q.Value())
-			}
+		for key, amount := range nodeResources(group) {
+			perNode.Add(nodeResourceKeys[key], amount)
 		}
 		for name, qty := range job.ExtraResources {
-			if q, err := resource.ParseQuantity(qty); err == nil {
+			if q, err := jobspec.ParseQuantity(qty); err == nil {
 				perNode.Add(ResourceKey{Kind: ResourceKindExtended, Name: name}, q.Value())
 			}
 		}
@@ -332,7 +316,7 @@ func (e *Experiment) Footprint() Footprint {
 	}
 	if e.AcceleratorCount > 0 && e.AcceleratorType != "" {
 		// Lowercased so Fits()'s exact-match join works regardless of casing (see
-		// AcceleratorType.MatchesLabels and JobSpec.Footprint, which does the same).
+		// AcceleratorType.MatchesLabels).
 		fp.Add(ResourceKey{Kind: ResourceKindAccelerator, Name: strings.ToLower(string(e.AcceleratorType))}, int64(e.AcceleratorCount))
 	}
 	return fp

@@ -48,8 +48,8 @@ func ValidateGroups(j JobSpec) error {
 		if g.Name == "" {
 			return fmt.Errorf("every job.groups entry needs a name")
 		}
-		if !groupNamePattern.MatchString(g.Name) {
-			return fmt.Errorf("job.groups[%q].name must be lowercase alphanumeric with '-', starting and ending alphanumeric (it names a resource in the execution cluster)", g.Name)
+		if err := ValidateIdentifier(fmt.Sprintf("job.groups[%q].name", g.Name), g.Name); err != nil {
+			return err
 		}
 		if names[g.Name] {
 			return fmt.Errorf("job.groups contains %q more than once", g.Name)
@@ -124,11 +124,6 @@ func ValidateSecretEnv(j JobSpec, secret map[string]string) error {
 	}
 	return nil
 }
-
-// groupNamePattern is the RFC 1123 DNS label rule: a group name is appended to the experiment id
-// to name the native resource each backend creates for that group, so a name k8s would reject
-// has to be rejected here rather than left to fail forever in a reconcile loop.
-var groupNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
 // ExperimentMeta holds the fields a submission needs to describe research intent and
 // bookkeeping around a run — never how it executes (that's JobSpec).

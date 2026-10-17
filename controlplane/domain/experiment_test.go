@@ -41,10 +41,7 @@ func TestJobSpecFootprintScalesEveryDimensionByNodeCount(t *testing.T) {
 		ExtraResources:  map[string]string{"google.com/tpu": "8"},
 	}
 
-	fp, err := JobFootprint(spec, spec.AcceleratorType)
-	if err != nil {
-		t.Fatal(err)
-	}
+	fp := (&Experiment{Job: spec, AcceleratorType: spec.AcceleratorType, AcceleratorCount: spec.TotalAccelerators()}).Footprint()
 	want := map[ResourceKey]int64{
 		{Kind: ResourceKindCPU}:     12000,            // 4 cores x 3
 		{Kind: ResourceKindMemory}:  3 * 8 * 1 << 30,  // 8Gi x 3
@@ -83,10 +80,7 @@ func TestGroupedJobSpecFootprintSumsTheGroupsInsteadOfMultiplyingOne(t *testing.
 		},
 	}
 
-	fp, err := JobFootprint(spec, spec.AcceleratorType)
-	if err != nil {
-		t.Fatal(err)
-	}
+	fp := (&Experiment{Job: spec, AcceleratorType: spec.AcceleratorType, AcceleratorCount: spec.TotalAccelerators()}).Footprint()
 	want := map[ResourceKey]int64{
 		{Kind: ResourceKindCPU}:     80000,               // 16 + 64 x 1 cores
 		{Kind: ResourceKindMemory}:  384 * 1 << 30,       // 128Gi + 64 x 4Gi
