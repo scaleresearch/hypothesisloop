@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/obsmetrics"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler/placement"
 )
 
@@ -111,7 +110,6 @@ type queuedPlacement struct {
 // exp.AcceleratorType, and the resolved job is set on exp.
 func (l *Loop) placeQueued(ctx context.Context, pass string, exp *domain.Experiment, avail map[string]domain.Footprint, quota *domain.AgentQuota, c tickClusters, tickErrs *[]error) (queuedPlacement, bool) {
 	skip := func(reason string) (queuedPlacement, bool) {
-		obsmetrics.AdmissionTickResultsTotal.WithLabelValues(pass, "skipped").Inc()
 		if err := l.markNotAdmitted(ctx, exp, reason); err != nil {
 			l.skipExperiment(tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))
 		}

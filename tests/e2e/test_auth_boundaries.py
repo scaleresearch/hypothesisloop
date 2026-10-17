@@ -526,9 +526,6 @@ def test_liveness_is_taken_only_from_the_cluster_a_job_is_placed_on(api: API, or
     assert _push(url, org.key.token, mine.job_id, now) == 403
     assert _push(url, admin.token(f"job:{mine.job_id}"), mine.job_id, now) == 403
     assert _push(url, admin.token(f"runtime:never-registered-{uuid.uuid4().hex[:8]}"), mine.job_id, now) == 401
-    assert requests.get(f"{url}/metrics", timeout=30).status_code == 401
-    assert requests.get(f"{url}/metrics", headers={"Authorization": f"Bearer {runtime}"}, timeout=30).status_code == 403
-    assert requests.get(f"{url}/metrics", headers={"Authorization": f"Bearer {api.token}"}, timeout=30).status_code == 200
 
     def observed() -> dict:
         return org.key.get_json(f"/experiments/{mine.job_id}/cost")

@@ -88,10 +88,10 @@ func (api *worldAPI) call(method, target, body, token string) int {
 	return recorder.Code
 }
 
-// registered lists every operation of the three documents as "METHOD /full/path", plus the two
-// handlers mounted beside them.
+// registered lists every operation of the three documents as "METHOD /full/path", plus the watch
+// handler mounted beside them.
 func (api *worldAPI) registered() []string {
-	out := []string{"GET /watch", "GET /metrics"}
+	out := []string{"GET /watch"}
 	for prefix, doc := range api.docs {
 		for path, item := range doc.API.OpenAPI().Paths {
 			for method, op := range map[string]any{"GET": item.Get, "POST": item.Post, "PUT": item.Put, "PATCH": item.Patch, "DELETE": item.Delete} {

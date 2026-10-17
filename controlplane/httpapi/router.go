@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
@@ -58,7 +57,6 @@ func NewRouter(h Handlers) chi.Router {
 	r.Use(middleware.Logging(h.Logger))
 	r.Use(middleware.CORS(h.UIOrigin))
 	r.Use(auth.Gate(h.Tokens, h.Logger, webSockets))
-	r.Handle("/metrics", auth.RequireStaff(h.Logger, promhttp.Handler()))
 	for _, path := range []string{"/health", "/healthz"} {
 		r.Get(path, func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")

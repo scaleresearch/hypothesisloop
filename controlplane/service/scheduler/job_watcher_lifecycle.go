@@ -10,7 +10,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/obsmetrics"
 )
 
 // startOverdue is how long exp has been admitted beyond its own checkpoint window. A requeued job
@@ -181,7 +180,7 @@ func (w *JobWatcher) checkScaleUpDeadline(ctx context.Context, exp *domain.Exper
 			w.logger.Warn("job_watcher: autoscaler refused to scale up, evicting early",
 				zap.String("id", exp.ID), zap.String("cluster_id", triedClusterID),
 				zap.String("scheduling_reason", schedulingReason))
-			w.evictNotYetRunningWithFailover(ctx, exp, evictionReason.WithDetail("the autoscaler refused to scale up: "+schedulingReason), triedClusterID)
+			w.evictNotYetRunning(ctx, exp, evictionReason.WithDetail("the autoscaler refused to scale up: "+schedulingReason))
 			return true, nil
 		}
 	} else {
@@ -218,7 +217,7 @@ func (w *JobWatcher) checkScaleUpDeadline(ctx context.Context, exp *domain.Exper
 		zap.String("reason", string(evictionReason)),
 		zap.Duration("timeout", timeout),
 	)
-	w.evictNotYetRunningWithFailover(ctx, exp, evictionReason.WithDetail(notRunningInTime(timeout, waiting)), triedClusterID)
+	w.evictNotYetRunning(ctx, exp, evictionReason.WithDetail(notRunningInTime(timeout, waiting)))
 	return true, nil
 }
 
@@ -269,17 +268,6 @@ func (w *JobWatcher) onUnschedulable(ctx context.Context, exp *domain.Experiment
 // row that Settle refunds in full. The decision is not repeated here: this function reports
 // whichever outcome ResolveTermination produced.
 func (w *JobWatcher) evictNotYetRunning(ctx context.Context, exp *domain.Experiment, reason domain.EvictionReason) {
-	w.evictNotYetRunningWithFailover(ctx, exp, reason, "")
-}
-
-// evictNotYetRunningWithFailover is evictNotYetRunning counted as a failover when triedClusterID
-// names the cluster that just failed to deliver capacity. Used by the scale-up-timeout and
-// accelerator_type_mismatch paths (autoscaler.md). The store records the cluster in the job's tried list
-// itself, for every infrastructure fault.
-func (w *JobWatcher) evictNotYetRunningWithFailover(ctx context.Context, exp *domain.Experiment, reason domain.EvictionReason, triedClusterID string) {
-	if triedClusterID != "" {
-		obsmetrics.FailoversTotal.WithLabelValues(string(reason.Code())).Inc()
-	}
 	outcome, err := w.store.ResolveTermination(ctx, exp.ID, exp.Status, domain.StatusEvicted, string(reason))
 	if err != nil {
 		w.logger.Error("job_watcher: evict never-started transition", zap.String("id", exp.ID), zap.Error(err))
@@ -309,7 +297,6 @@ func (w *JobWatcher) evictNotYetRunningWithFailover(ctx context.Context, exp *do
 			zap.String("id", exp.ID), zap.String("reason", string(reason)))
 		return
 	}
-	obsmetrics.CountEviction(reason)
 	exp.Status = domain.StatusEvicted
 	w.settleQuota(ctx, exp)
 }

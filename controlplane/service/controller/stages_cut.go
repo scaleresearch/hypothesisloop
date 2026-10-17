@@ -7,7 +7,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/obsmetrics"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
@@ -105,7 +104,6 @@ func (c *Controller) stopCutAgentJobs(ctx context.Context, agentID, platformExpI
 		if outcome != domain.TerminationWritten {
 			continue
 		}
-		obsmetrics.CountEviction(domain.EvictionStageCut)
 		// Status is already EVICTED above — the cluster-agent's next reconcile pass removes the
 		// Job on its own. A stage cut still owes the researcher whatever they genuinely ran, same
 		// as every other eviction path — settleAndMark computes that from observed metrics, not
@@ -130,7 +128,6 @@ func (c *Controller) stopCutAgentJobs(ctx context.Context, agentID, platformExpI
 		if outcome != domain.TerminationWritten {
 			continue
 		}
-		obsmetrics.CountEviction(domain.EvictionStageCut)
 		// Never reached RUNNING; settlement derives zero usage from absent metrics.
 		exp.Status = domain.StatusRejected
 		exp.EvictionReason = string(domain.EvictionStageCut)

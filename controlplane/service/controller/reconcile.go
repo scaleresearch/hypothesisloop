@@ -9,7 +9,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/obsmetrics"
 )
 
 // Reconcile runs one full reconciliation pass over all running experiments.
@@ -188,7 +187,6 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 		if outcome != domain.TerminationWritten {
 			continue
 		}
-		obsmetrics.CountEviction(domain.EvictionQuotaExhaustion)
 		// Persist the same observed terminal usage as every other terminal path.
 		exp.Status = domain.StatusEvicted
 		exp.EvictionReason = string(domain.EvictionQuotaExhaustion)
@@ -214,7 +212,6 @@ func (c *Controller) checkQuotaExhaustion(ctx context.Context, agentID, platform
 		if outcome != domain.TerminationWritten {
 			continue
 		}
-		obsmetrics.CountEviction(domain.EvictionQuotaExhaustion)
 		// exp never reached RUNNING, so Settle derives zero usage from metrics. If a Job was
 		// created for it, it disappears on the cluster-agent's next reconcile pass.
 		exp.Status = domain.StatusRejected

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/obsmetrics"
 )
 
 // environmentPass is what one tick read of the environments queued jobs wait for: each
@@ -118,7 +117,6 @@ func pinToLoadedNode(exp *domain.Experiment, env *domain.Environment, registered
 // that node has no room for it now, and nothing is preempted or bet for a wait that ends with the
 // push, after which it is placed anywhere.
 func (l *Loop) waitForPush(ctx context.Context, pass string, environments *environmentPass, exp *domain.Experiment, tickErrs *[]error) {
-	obsmetrics.AdmissionTickResultsTotal.WithLabelValues(pass, "skipped").Inc()
 	reason := domain.NotAdmittedEnvironmentBuilding + ": " + buildingMessage(environments.seen[exp.EnvironmentKey], false)
 	if err := l.markNotAdmitted(ctx, exp, reason); err != nil {
 		l.skipExperiment(tickErrs, exp, fmt.Errorf("mark not admitted: %w", err))

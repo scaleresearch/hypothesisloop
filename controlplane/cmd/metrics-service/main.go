@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
@@ -154,7 +153,6 @@ func newControllerServer(authenticator *auth.Authenticator, pool *db.Pool, store
 func newRouter(tokens auth.Tokens, push http.Handler, logger *zap.Logger) chi.Router {
 	r := chi.NewRouter()
 	r.Use(auth.Gate(tokens, logger, nil))
-	r.Handle("/metrics", auth.RequireStaff(logger, promhttp.Handler()))
 	r.Handle("/internal/node-metrics", auth.RequireRuntime(logger, push))
 	// Both spellings, same as the API server — a caller should never have to remember which
 	// of /health and /healthz a given process happens to answer.

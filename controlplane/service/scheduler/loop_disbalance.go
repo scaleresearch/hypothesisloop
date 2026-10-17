@@ -9,7 +9,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/obsmetrics"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler/placement"
 )
 
@@ -263,7 +262,6 @@ func (l *Loop) evictDisbalanced(
 			evictedAt:          now,
 			nodeFreeAtEviction: nodeFree,
 		}
-		obsmetrics.CountEviction(domain.EvictionResourceDisbalance)
 	}
 	return nil
 }

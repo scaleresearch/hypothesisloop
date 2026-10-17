@@ -215,7 +215,7 @@ func tripwire(next http.Handler) http.Handler {
 }
 
 // worldAPI is control-service's routing over the world: the same registrations on the same
-// three documents, the raw /watch and /metrics handlers, and services with nothing behind them.
+// three documents, the raw /watch handler, and services with nothing behind them.
 type worldAPI struct {
 	router chi.Router
 	// serve is router with every successful answer checked against the document.
@@ -240,9 +240,6 @@ func newWorldAPI(t *testing.T) *worldAPI {
 	api := &worldAPI{router: chi.NewRouter(), docs: map[string]*httpapi.Doc{}, tokens: map[string]string{"none": ""}}
 	api.router.Use(tripwire)
 	api.router.Use(auth.Gate(authenticator, logger, map[string]string{"/watch": watch.Subprotocol}))
-	api.router.Handle("/metrics", auth.RequireStaff(logger, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})))
 	watcher := watch.NewHandler(nil, nil, nil, access, logger)
 	api.router.Get("/watch", watcher.ServeHTTP)
 

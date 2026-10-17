@@ -7,7 +7,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/obsmetrics"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler/placement"
 )
 
@@ -86,8 +85,6 @@ func (l *Loop) burstWait(ctx context.Context, t *tickState, exp *domain.Experime
 			t.errs = append(t.errs, fmt.Errorf("experiment %s: disbalance eviction on %s: %w", exp.ID, cluster, err))
 		}
 	}
-	obsmetrics.AdmissionTickResultsTotal.WithLabelValues("burst", "skipped").Inc()
-	t.backlog.record(c.start, cluster, "burst", exp, shortage)
 	reason := misfit
 	if reason == "" {
 		reason = c.whenIdle.neverFitsReason(exp)

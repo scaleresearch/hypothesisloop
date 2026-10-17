@@ -9,7 +9,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/obsmetrics"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler/placement"
 )
 
@@ -21,7 +20,6 @@ func (l *Loop) tick(ctx context.Context) (tickErr error) {
 	defer l.ticking.Store(false)
 
 	start := time.Now()
-	defer func() { obsmetrics.AdmissionTickDuration.Observe(time.Since(start).Seconds()) }()
 
 	// Reprioritize all queued jobs after every tick, regardless of outcome — deferred so every
 	// exit path (including early returns below) runs it. Its failure is the tick's.
@@ -94,9 +92,6 @@ type tickState struct {
 	disbalanceRan map[string]bool
 	// The clusters a job that waited long holds this tick, in both passes (holdRoom).
 	held map[string]bool
-	// autoscaler.md's backlog signal (secondary path, for clusters with no native autoscaler to
-	// react to a Pending pod). Published once at the end of this tick, whatever else happens.
-	backlog *backlogAggregator
 
 	// Per-experiment failures collected across every pass and joined at the end (#19). A tick
 	// reads state that is shared by every queued job but acts on each one individually, so only
@@ -182,7 +177,6 @@ func (l *Loop) readTickState(ctx context.Context, start time.Time) (*tickState, 
 		environments:  newEnvironmentPass(),
 		disbalanceRan: map[string]bool{},
 		held:          map[string]bool{},
-		backlog:       newBacklogAggregator(),
 	}, nil
 }
 
@@ -318,7 +312,6 @@ func (l *Loop) admissible(ctx context.Context, t *tickState, queued []*domain.Ex
 func (l *Loop) admit(ctx context.Context, t *tickState, pass string, exp *domain.Experiment, cluster string, persistedAcceleratorType domain.AcceleratorType, fp domain.Footprint, views ...map[string]domain.Footprint) {
 	if err := l.submitJob(ctx, exp, cluster, persistedAcceleratorType); err != nil {
 		l.logger.Log(submitErrorLevel(err), "submit "+pass+" job", zap.String("exp", exp.ID), zap.Error(err))
-		obsmetrics.AdmissionTickResultsTotal.WithLabelValues(pass, "skipped").Inc()
 		reason := notAdmittedReasonForSubmitError(err)
 		if err := l.markNotAdmitted(ctx, exp, reason); err != nil {
 			l.skipExperiment(&t.errs, exp, fmt.Errorf("mark not admitted: %w", err))
@@ -330,13 +323,10 @@ func (l *Loop) admit(ctx context.Context, t *tickState, pass string, exp *domain
 	}
 	c := t.clusters
 	placement.Reserve(c.nodeAvail[cluster], c.nodeResources[cluster], c.nodeLabels[cluster], exp)
-	obsmetrics.AdmissionTickResultsTotal.WithLabelValues(pass, "admitted").Inc()
 }
 
-// finishTick publishes what both passes left: the backlog signal, and the notice to every job held
-// for long, after both passes so a job told it is held is told the reason this tick gave it.
+// finishTick publishes the notice to every job held for long, after both passes so a job told it is held is told the reason this tick gave it.
 func (l *Loop) finishTick(ctx context.Context, t *tickState) error {
-	t.backlog.publish(t.speculativeFootprint)
 	if err := l.store.MarkHeldJobs(ctx, l.heldJobNotice); err != nil {
 		t.errs = append(t.errs, fmt.Errorf("mark held jobs: %w", err))
 	}

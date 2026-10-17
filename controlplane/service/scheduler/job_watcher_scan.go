@@ -178,15 +178,7 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 		case runningMarked, runningLeftState:
 			return nil
 		case runningTypeMismatch:
-			// Only feed this into cross-job tried_clusters backoff on a cluster the autoscaler
-			// path actually cares about — an ordinary live-fit cluster reporting the wrong
-			// accelerator type is a ClaimSubmitted resolution bug, not evidence the cluster's autoscaler
-			// failed to deliver capacity, and must not bar other jobs from speculating there.
-			triedClusterID := ""
-			if autoscalerEnabled[exp.ClusterName] {
-				triedClusterID = clusterIDs[exp.ClusterName]
-			}
-			w.evictNotYetRunningWithFailover(ctx, exp, domain.EvictionAcceleratorTypeMismatch, triedClusterID)
+			w.evictNotYetRunning(ctx, exp, domain.EvictionAcceleratorTypeMismatch)
 			return nil
 		case runningTypeUnobservable:
 			return w.evictIfStuckPending(ctx, exp, waiting, clusterIDs, domain.EvictionAcceleratorTypeUnobservable)

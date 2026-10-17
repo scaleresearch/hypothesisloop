@@ -7,7 +7,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/obsmetrics"
 )
 
 // evict ends the experiment with the given reason and settles what it genuinely consumed. The
@@ -39,7 +38,6 @@ func (c *Controller) evict(ctx context.Context, exp *domain.Experiment, reason d
 			zap.String("id", exp.ID), zap.String("reason", string(reason)))
 		return nil
 	}
-	obsmetrics.CountEviction(reason)
 	// Settling final usage is a separate, independently-retryable step (see settleAndMark) —
 	// its failure must never undo or block the transition above.
 	exp.Status = domain.StatusEvicted
@@ -91,7 +89,6 @@ func (c *Controller) reconcileClosedExperiments(ctx context.Context) error {
 				if outcome != domain.TerminationWritten {
 					continue
 				}
-				obsmetrics.CountEviction(domain.EvictionExperimentClosed)
 				exp.Status = domain.StatusRejected
 				exp.EvictionReason = string(domain.EvictionExperimentClosed)
 				c.settleAndMark(ctx, exp)

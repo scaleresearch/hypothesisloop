@@ -39,7 +39,7 @@ func TestEveryRouteRefusesARequestWithoutAToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, route := range []string{"/metrics", "/internal/node-metrics", "/health", "/healthz"} {
+	for _, route := range []string{"/internal/node-metrics", "/health", "/healthz"} {
 		if !routes[route] {
 			t.Errorf("%s is not a route", route)
 		}

@@ -8,7 +8,6 @@ import (
 	"go.uber.org/zap/zapcore"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/obsmetrics"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler/placement"
 )
 
@@ -118,7 +117,6 @@ func (l *Loop) submitSpeculative(ctx context.Context, t *tickState, exp *domain.
 		if specMisfit != "" {
 			// This job's own request is above its share on the speculative target or no slot there
 			// takes it. Nothing else to try this tick.
-			obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
 			if err := l.markNotAdmitted(ctx, exp, specMisfit); err != nil {
 				l.skipExperiment(&t.errs, exp, fmt.Errorf("mark not admitted: %w", err))
 			}
@@ -128,15 +126,12 @@ func (l *Loop) submitSpeculative(ctx context.Context, t *tickState, exp *domain.
 	}
 	if err := l.submitJobTo(ctx, exp, specCluster, c.clusterIDs[specCluster], persistedAcceleratorType, true, provenFit); err != nil {
 		l.logger.Log(submitErrorLevel(err), "speculative submit", zap.String("exp", exp.ID), zap.String("cluster", specCluster), zap.Error(err))
-		obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
 		reason := notAdmittedReasonForSubmitError(err)
 		if err := l.markNotAdmitted(ctx, exp, reason); err != nil {
 			l.skipExperiment(&t.errs, exp, fmt.Errorf("mark not admitted: %w", err))
 		}
 		return
 	}
-	obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "submitted").Inc()
-	obsmetrics.SpeculativeSubmitsTotal.Inc()
 	t.speculativeFootprint[specCluster] += exp.AcceleratorCount
 	// The claimed footprint is not subtracted from gAvail/bAvail/nodeAvail here: a speculative
 	// claim has no live node to subtract from, and GetAcceleratorTypeCapacity already carries desired-free
@@ -259,8 +254,6 @@ func (l *Loop) makeRoom(ctx context.Context, t *tickState, p *preemptionState, e
 			t.errs = append(t.errs, fmt.Errorf("experiment %s: disbalance eviction on %s: %w", exp.ID, cluster, err))
 		}
 	}
-	obsmetrics.AdmissionTickResultsTotal.WithLabelValues("guaranteed", "skipped").Inc()
-	t.backlog.record(c.start, cluster, "guaranteed", exp, shortage)
 	noOffer := noOfferReason(exp, cluster, c.nodeResourcesTotal[cluster], t.nodeResourcesAtTickStart[cluster], c.nodeLabels[cluster])
 	neverFits := c.whenIdle.neverFitsReason(exp)
 	reason := ""

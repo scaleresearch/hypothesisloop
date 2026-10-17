@@ -373,7 +373,6 @@ var routes = []route{
 	{method: "POST", path: "/internal/clusters/{name}/builds/{key}/progress", request: "/internal/clusters/<cluster>/builds/key-1/progress", body: `{"attempt":1,"step":"[1/2] FROM base: started"}`, rule: ofCluster(reached)},
 	{method: "POST", path: "/internal/clusters/{name}/builds/{key}/loaded", request: "/internal/clusters/<cluster>/builds/key-1/loaded", body: `{"attempt":1,"node":"node-1","digest":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}`, rule: ofCluster(reached)},
 	{method: "POST", path: "/internal/clusters/{name}/builds/{key}", request: "/internal/clusters/<cluster>/builds/key-1", body: `{"attempt":1,"outcome":"pushed","digest":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}`, rule: ofCluster(reached)},
-	{method: "GET", path: "/metrics", rule: staffOnly},
 }
 
 // inOrgOf is a write that names the org it lands in.
@@ -508,7 +507,6 @@ var cases = []struct {
 	{"staff sharing under an id that is a path", "staff", "POST", "/platform-experiments/pe-b%2F..%2Fpe-a1/share", "", 404},
 
 	{"a runtime reporting for a cluster of another org", "runtime", "POST", "/internal/clusters/cluster-b/status", `{"reports":[]}`, 403},
-	{"staff reading the process metrics", "staff", "GET", "/metrics", "", 200},
 
 	{"staff reading an agent's session", "staff", "GET", "/platform-experiments/pe-a1/agents/agent-1/session", "", reached},
 	{"staff storing an agent's session", "staff", "PUT", "/platform-experiments/pe-a1/agents/agent-1/session", "session", 403},
