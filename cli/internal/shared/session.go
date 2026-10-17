@@ -1,12 +1,9 @@
 package shared
 
 import (
-	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
-	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
@@ -55,36 +52,8 @@ after it has closed. One that stored none yet is not found.`, stderr)
 		}
 		path = apiclient.AgentsPath(pe) + "/" + url.PathEscape(planner) + "/session"
 	}
-	if err := copyBytes(c, path, stdout); err != nil {
+	if err := c.Stream(path, stdout); err != nil {
 		return command.Fail(stderr, err)
 	}
 	return 0
-}
-
-// copyBytes streams an answer that is no JSON to out.
-func copyBytes(c *apiclient.Client, path string, out io.Writer) error {
-	if c.BaseURL == "" {
-		return errors.New("no API URL given (set API_URL)")
-	}
-	if c.Token == "" {
-		return errors.New("no token given (set HL_TOKEN)")
-	}
-	req, err := http.NewRequest("GET", strings.TrimRight(c.BaseURL, "/")+path, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+c.Token)
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return fmt.Errorf("GET %s: %w", path, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		refusal, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-		return &apiclient.HTTPError{Method: "GET", Path: path, Status: resp.StatusCode, Body: strings.TrimSpace(string(refusal))}
-	}
-	if _, err := io.Copy(out, resp.Body); err != nil {
-		return fmt.Errorf("GET %s: reading response: %w", path, err)
-	}
-	return nil
 }

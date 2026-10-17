@@ -71,12 +71,6 @@ func (c *Client) Do(method, path string, body any, out any) error {
 
 // DoHeader is Do, also returning the response headers: a list's X-Total-Count.
 func (c *Client) DoHeader(method, path string, body any, out any) (http.Header, error) {
-	if c.BaseURL == "" {
-		return nil, errors.New("no API URL given (set API_URL)")
-	}
-	if c.Token == "" {
-		return nil, errors.New("no token given (set HL_TOKEN)")
-	}
 	var reader io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)
@@ -84,6 +78,45 @@ func (c *Client) DoHeader(method, path string, body any, out any) (http.Header, 
 			return nil, fmt.Errorf("encoding request body: %w", err)
 		}
 		reader = bytes.NewReader(data)
+	}
+	resp, err := c.send(method, path, reader)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("%s %s: reading response: %w", method, path, err)
+	}
+	if out == nil || len(data) == 0 {
+		return resp.Header, nil
+	}
+	if err := json.Unmarshal(data, out); err != nil {
+		return nil, fmt.Errorf("%s %s: decoding response: %w", method, path, err)
+	}
+	return resp.Header, nil
+}
+
+// Stream GETs path and copies the answer, which is no JSON, to out byte for byte.
+func (c *Client) Stream(path string, out io.Writer) error {
+	resp, err := c.send(http.MethodGet, path, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if _, err := io.Copy(out, resp.Body); err != nil {
+		return fmt.Errorf("GET %s: reading response: %w", path, err)
+	}
+	return nil
+}
+
+// send issues one request and returns the response of a 2xx answer, whose body the caller closes.
+func (c *Client) send(method, path string, reader io.Reader) (*http.Response, error) {
+	if c.BaseURL == "" {
+		return nil, errors.New("no API URL given (set API_URL)")
+	}
+	if c.Token == "" {
+		return nil, errors.New("no token given (set HL_TOKEN)")
 	}
 	req, err := http.NewRequest(method, strings.TrimRight(c.BaseURL, "/")+path, reader)
 	if err != nil {
@@ -97,23 +130,17 @@ func (c *Client) DoHeader(method, path string, body any, out any) (http.Header, 
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: %s (%w)", method, path, unreachable(method), err)
 	}
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return resp, nil
+	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: reading response: %w", method, path, err)
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body := strings.TrimSpace(string(data))
-		if !json.Valid(data) {
-			body = notThePlatforms(method, path, resp.StatusCode)
-		}
-		return nil, &HTTPError{Method: method, Path: path, Status: resp.StatusCode, Body: body}
+	refusal := strings.TrimSpace(string(data))
+	if !json.Valid(data) {
+		refusal = notThePlatforms(method, path, resp.StatusCode)
 	}
-	if out == nil || len(data) == 0 {
-		return resp.Header, nil
-	}
-	if err := json.Unmarshal(data, out); err != nil {
-		return nil, fmt.Errorf("%s %s: decoding response: %w", method, path, err)
-	}
-	return resp.Header, nil
+	return nil, &HTTPError{Method: method, Path: path, Status: resp.StatusCode, Body: refusal}
 }
