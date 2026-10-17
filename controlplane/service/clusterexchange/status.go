@@ -143,7 +143,7 @@ func observationsOf(rep clusterapi.StatusReport, admittedAt, runReportedAt time.
 		return metricsdb.Observation{ExperimentID: rep.ExperimentID, At: t.UTC(), ExtraLabels: labels}
 	}
 	var observations []metricsdb.Observation
-	if rep.Phase == metricsdb.PhaseRunning {
+	if rep.Phase == clusterapi.JobPhaseRunning.String() {
 		observations = append(observations, at(now))
 	}
 	if rep.EndedAt == nil || admittedAt.IsZero() || !runReportedAt.After(admittedAt) {

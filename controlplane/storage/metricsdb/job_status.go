@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -20,19 +21,8 @@ const (
 	clusterJobSnapshotMetric   = "cluster_job_status_snapshot"
 )
 
-// PhaseRunning is the wire value a runtime reports for a job whose workload is executing.
-// Exported because a caller deciding anything from a reported phase must name the same string
-// this package validates against — an unrecognised phase here is a write error, but a mistyped
-// comparison elsewhere is just a branch that is silently never taken.
-const PhaseRunning = "running"
-
-var phaseValue = map[string]float64{
-	"pending":    1,
-	PhaseRunning: 2,
-	"succeeded":  3,
-	"failed":     4,
-	"gone":       5,
-}
+// A phase is stored as its number one up, so that no stored phase is 0.
+func storedPhase(p domain.JobPhase) float64 { return float64(p) + 1 }
 
 // JobStatusSample is one current cluster observation. It is telemetry, not desired state, and
 // therefore lives only in the metrics store.
@@ -55,7 +45,7 @@ func (s *Store) RecordJobStatuses(ctx context.Context, clusterName string, at ti
 	observedAt := float64(at.UnixMilli()) / 1000
 	samples := []gauge{{table: clusterJobSnapshot, labels: map[string]string{"cluster_name": clusterName, "sample_kind": "snapshot"}, value: observedAt, at: at}}
 	for _, status := range statuses {
-		value, ok := phaseValue[status.Phase]
+		phase, ok := clusterapi.ParseJobPhase(status.Phase)
 		if !ok {
 			return fmt.Errorf("metricsdb.RecordJobStatuses: invalid phase %q for %s", status.Phase, status.ExperimentID)
 		}
@@ -72,7 +62,7 @@ func (s *Store) RecordJobStatuses(ctx context.Context, clusterName string, at ti
 				"cluster_name":  status.ClusterName,
 				"sample_kind":   "phase",
 			},
-			value: value,
+			value: storedPhase(phase),
 			at:    status.At,
 		})
 		samples = append(samples, gauge{table: clusterJobObservedAt, labels: map[string]string{
@@ -195,20 +185,12 @@ func (s *Store) LatestJobPhase(ctx context.Context, experimentID, clusterName st
 	if *observedAtValue != snapshotValue {
 		return domain.JobPhasePending, false, fmt.Errorf("metricsdb.LatestJobPhase: observation timestamp for %s disagrees with its snapshot", experimentID)
 	}
-	switch int(*phaseValue) {
-	case 1:
-		return domain.JobPhasePending, true, nil
-	case 2:
-		return domain.JobPhaseRunning, true, nil
-	case 3:
-		return domain.JobPhaseSucceeded, true, nil
-	case 4:
-		return domain.JobPhaseFailed, true, nil
-	case 5:
-		return domain.JobPhaseGone, true, nil
-	default:
-		return domain.JobPhasePending, false, fmt.Errorf("metricsdb.LatestJobPhase: invalid value %v", *phaseValue)
+	for _, phase := range clusterapi.JobPhases {
+		if storedPhase(phase) == *phaseValue {
+			return phase, true, nil
+		}
 	}
+	return domain.JobPhasePending, false, fmt.Errorf("metricsdb.LatestJobPhase: invalid value %v", *phaseValue)
 }
 
 func (s *Store) queryJobStatusSnapshot(ctx context.Context, query string) (float64, *float64, *float64, bool, error) {

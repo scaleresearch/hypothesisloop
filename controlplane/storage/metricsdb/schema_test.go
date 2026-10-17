@@ -74,7 +74,7 @@ func TestEveryWriterWritesOnlyDeclaredTablesAndLabels(t *testing.T) {
 		"admission": s.RecordAdmission(ctx, "job", at),
 		"job metric": s.RecordJobMetric(ctx, JobMetric{JobID: "job", PlatformExperimentID: "pe", AgentID: "a", Name: "loss", Basis: "raw",
 			Value: 1, FractionComplete: 0.5, At: at}),
-		"job statuses": s.RecordJobStatuses(ctx, "c", at, []JobStatusSample{{ExperimentID: "job", ClusterName: "c", Phase: PhaseRunning,
+		"job statuses": s.RecordJobStatuses(ctx, "c", at, []JobStatusSample{{ExperimentID: "job", ClusterName: "c", Phase: domain.JobPhaseRunning.String(),
 			AdmittedAcceleratorType: "h100", AdmittedNode: "n", At: at,
 			AdmittedMachine: &domain.JobMachine{InstanceID: "i", HostID: "h", AcceleratorModel: "m", CPUModel: "cpu", PricePerHourUSD: 2}}}),
 		"cluster capacity": s.RecordClusterCapacitySnapshot(ctx, ClusterCapacitySnapshot{ClusterName: "c", At: at, CPUAvailable: 1, CPUTotal: 2,

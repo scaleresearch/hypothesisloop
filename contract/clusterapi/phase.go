@@ -11,6 +11,19 @@ const (
 	JobPhaseGone
 )
 
+// JobPhases is every phase, in its order.
+var JobPhases = []JobPhase{JobPhasePending, JobPhaseRunning, JobPhaseSucceeded, JobPhaseFailed, JobPhaseGone}
+
+// ParseJobPhase is the phase whose name on the wire is name, false for a name of none.
+func ParseJobPhase(name string) (JobPhase, bool) {
+	for _, p := range JobPhases {
+		if p.String() == name {
+			return p, true
+		}
+	}
+	return JobPhasePending, false
+}
+
 // String is the phase's name on the wire (StatusReport.Phase).
 func (p JobPhase) String() string {
 	switch p {
