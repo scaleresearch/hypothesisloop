@@ -257,7 +257,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 		PlatformExperiments: peHandler,
 		Hypotheses:          worldGraph{world: w},
 		Launch:              launch,
-		Accounts:            accounts.NewService(nil, nil, nil, 0, worldSecret, accounts.RuntimeAddresses{}, accounts.Limits{MaxOrgsPerUser: 3, MaxProjectsPerOrg: 10}, doc.Access, logger),
+		Accounts:            accounts.NewService(nil, nil, nil, 0, worldSecret, accounts.RuntimeAddresses{}, nil, accounts.Limits{MaxOrgsPerUser: 3, MaxProjectsPerOrg: 10}, doc.Access, logger),
 		Scheduler:           scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, metricsdb.New("http://metrics.invalid"), logger).WithLoop(noopLoop{}),
 		Registry:            registry.New(nil, worldGraph{world: w}, nil, logger, metricsdb.New("http://metrics.invalid"), nil),
 		AgentTypes:          accounts.NewAgentTypes(tripAgentTypes{}, doc.Access, logger),
