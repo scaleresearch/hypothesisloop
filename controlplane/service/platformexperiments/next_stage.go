@@ -34,7 +34,7 @@ func nextStageRelease(pe *domain.PlatformExperiment, runBudget float64, standing
 }
 
 // nextStage reads the boundary ahead of pe, nil when there is none.
-func (s *PlatformExperimentsService) nextStage(ctx context.Context, pe *domain.PlatformExperiment) (*nextStage, error) {
+func (s *Service) nextStage(ctx context.Context, pe *domain.PlatformExperiment) (*nextStage, error) {
 	if pe.Status != domain.PlatformExpRunning || pe.CurrentStage >= len(pe.Stages) {
 		return nil, nil
 	}
@@ -66,7 +66,7 @@ func (s *PlatformExperimentsService) nextStage(ctx context.Context, pe *domain.P
 
 // Stages is where the platform experiment id stands on its ladder: the boundaries crossed, the
 // agents still in and those cut.
-func (s *PlatformExperimentsService) Stages(ctx context.Context, id string) (*StagesStatusResponse, error) {
+func (s *Service) Stages(ctx context.Context, id string) (*StagesStatusResponse, error) {
 	pe, err := s.store.GetPlatformExperiment(ctx, id)
 	if err != nil {
 		return nil, auth.Internal(s.logger, "get stages", err, zap.String("id", id))

@@ -45,7 +45,7 @@ const BaselineHeadroom = 1.5
 // baselineReader reads the Baseline of the job a declaration names, nil when there is no such job.
 type baselineReader func(ctx context.Context, pe *domain.PlatformExperiment, jobID string) (*Baseline, error)
 
-func (s *PlatformExperimentsService) readBaseline(ctx context.Context, pe *domain.PlatformExperiment, jobID string) (*Baseline, error) {
+func (s *Service) readBaseline(ctx context.Context, pe *domain.PlatformExperiment, jobID string) (*Baseline, error) {
 	job, err := s.store.GetExperiment(ctx, jobID)
 	if err != nil || job == nil {
 		return nil, err
@@ -165,7 +165,7 @@ func checkBaselineEnvironment(pe *domain.PlatformExperiment, baseline *Baseline)
 // first ranking metric and beat baseline on it. A baseline agent declared a default its own
 // check had beaten, and the researchers were ranked against the weaker control. It names the
 // strongest such job.
-func (s *PlatformExperimentsService) strongerOwnJob(ctx context.Context, pe *domain.PlatformExperiment, baseline *Baseline) error {
+func (s *Service) strongerOwnJob(ctx context.Context, pe *domain.PlatformExperiment, baseline *Baseline) error {
 	ranked, ok := domain.PrimaryRankingMetric(pe.Metrics)
 	if !ok {
 		return nil
@@ -242,7 +242,7 @@ func checkRaiseRequest(pe *domain.PlatformExperiment, patch PlatformExperimentPa
 // new method never becomes the bar; reason says which configuration it measured. It answers the
 // raise to record and the block the brief is given. The estimate of a job that states none stays
 // the declared baseline's.
-func (s *PlatformExperimentsService) raisedBaseline(ctx context.Context, pe, patched *domain.PlatformExperiment, reason string, by *domain.Actor) (domain.BaselineRaise, string, error) {
+func (s *Service) raisedBaseline(ctx context.Context, pe, patched *domain.PlatformExperiment, reason string, by *domain.Actor) (domain.BaselineRaise, string, error) {
 	current, err := s.baseline(ctx, pe, pe.BaselineJobID)
 	if err != nil {
 		return domain.BaselineRaise{}, "", fmt.Errorf("platform_experiments: read baseline %s: %w", pe.BaselineJobID, err)
@@ -415,7 +415,7 @@ func trialHeld(pe *domain.PlatformExperiment, baseline *domain.Experiment) (floa
 }
 
 // runningTrialHeld is what one trial of the running pe's baseline job holds, 0 without one.
-func (s *PlatformExperimentsService) runningTrialHeld(ctx context.Context, pe *domain.PlatformExperiment) (float64, error) {
+func (s *Service) runningTrialHeld(ctx context.Context, pe *domain.PlatformExperiment) (float64, error) {
 	if pe.BaselineJobID == "" {
 		return 0, nil
 	}

@@ -25,7 +25,7 @@ func TestTheRulesVersionIsPartOfTheDigest(t *testing.T) {
 }
 
 type pinnedExperiments struct {
-	PlatformExperimentsStore
+	Store
 	pinned platformexperimentstest.PinnedInstructions
 }
 
@@ -42,7 +42,7 @@ func TestTheRosterSaysWhetherAHarnessRunsThePinnedInstructions(t *testing.T) {
 		t.Fatal(err)
 	}
 	yes, no := true, false
-	svc := &PlatformExperimentsService{store: pinnedExperiments{}}
+	svc := &Service{store: pinnedExperiments{}}
 	for _, c := range []struct {
 		name, agent, digest string
 		want                *bool

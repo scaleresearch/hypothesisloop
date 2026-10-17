@@ -17,7 +17,7 @@ import (
 )
 
 type messageStore struct {
-	platformexperiments.PlatformExperimentsStore
+	platformexperiments.Store
 	to      []string
 	text    string
 	sender  domain.Actor

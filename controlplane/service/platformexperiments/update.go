@@ -40,7 +40,7 @@ func refuseUpdate(status int, reason, format string, args ...any) error {
 // leave the baseline behind before it starts, and its description is given what the job is and
 // measured (baselineBlock). Stored with a baseline, it is started at once when nothing else
 // is missing (StartIfReady), and answered as that left it.
-func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patch PlatformExperimentPatch) (*domain.PlatformExperiment, error) {
+func (s *Service) Update(ctx context.Context, id string, patch PlatformExperimentPatch) (*domain.PlatformExperiment, error) {
 	pe, err := s.store.GetPlatformExperiment(ctx, id)
 	if err != nil {
 		return nil, err
@@ -205,7 +205,7 @@ func (s *PlatformExperimentsService) Update(ctx context.Context, id string, patc
 // seatsHoldTrials refuses a max_agents raised on the running pe when what its researchers left
 // unspent, split evenly over max_agents researchers, would not hold one trial of the baseline
 // each: the share a researcher that joins is given (domain.LateShare) would not run one.
-func (s *PlatformExperimentsService) seatsHoldTrials(ctx context.Context, pe *domain.PlatformExperiment) error {
+func (s *Service) seatsHoldTrials(ctx context.Context, pe *domain.PlatformExperiment) error {
 	held, err := s.runningTrialHeld(ctx, pe)
 	if err != nil || held == 0 {
 		return err
@@ -228,7 +228,7 @@ func (s *PlatformExperimentsService) seatsHoldTrials(ctx context.Context, pe *do
 // experiment with it. Unlike every other field, this is writable after the experiment closes: a
 // summary only exists once the run is over. The platform's record of the close is kept beside it
 // and answered after it, so a copy of the record read back with the summary is dropped.
-func (s *PlatformExperimentsService) SetSummary(ctx context.Context, id, summary string) (*domain.PlatformExperiment, error) {
+func (s *Service) SetSummary(ctx context.Context, id, summary string) (*domain.PlatformExperiment, error) {
 	if i := strings.Index(summary, closeRecordHeading); i >= 0 {
 		summary = strings.TrimRight(summary[:i], " \n")
 	}
@@ -248,7 +248,7 @@ func (s *PlatformExperimentsService) SetSummary(ctx context.Context, id, summary
 // Patch changes the platform experiment id as patch says, for caller. A coordinator's token is
 // handed to a machine the platform rents, so it changes the brief and declares the baseline, and
 // nothing a run's cost or length follows from.
-func (s *PlatformExperimentsService) Patch(ctx context.Context, id string, patch PlatformExperimentPatch, caller auth.Principal) (*domain.PlatformExperiment, error) {
+func (s *Service) Patch(ctx context.Context, id string, patch PlatformExperimentPatch, caller auth.Principal) (*domain.PlatformExperiment, error) {
 	if caller.Kind == auth.KindCoordinator {
 		if others := patch.carried("description", "baseline_job_id", "baseline_reason"); len(others) > 0 {
 			return nil, refusal.Refuse(http.StatusForbidden, "coordinator_changes_description_only", "a coordinator's token changes the description and the baseline (baseline_job_id, baseline_reason) and nothing else, and the body also carries: "+strings.Join(others, ", ")+". Leave them out")

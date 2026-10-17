@@ -26,7 +26,7 @@ import (
 // A researcher that finishes with more than finishEarlyShare of the run's time and of its quota
 // left, and more time than its jobs typically take, names the blocker that stops it, and the time and quota it leaves are recorded with its
 // reason, which agent.finished tells the coordinator.
-func (s *PlatformExperimentsService) FinishAgent(ctx context.Context, platformExpID, agentID, reason, blocker, baselineJobID string) (*domain.AgentSignup, error) {
+func (s *Service) FinishAgent(ctx context.Context, platformExpID, agentID, reason, blocker, baselineJobID string) (*domain.AgentSignup, error) {
 	reason, err := s.finishReason(ctx, platformExpID, agentID, reason, blocker)
 	if err != nil {
 		return nil, err
@@ -77,7 +77,7 @@ func (s *PlatformExperimentsService) FinishAgent(ctx context.Context, platformEx
 // checkNamedBaseline refuses, before anything is stored, a finish whose agent names as the
 // baseline baselineJobID and could not have it declared: the agent is of role baseline, the job
 // is its own, it passes the check of PATCH baseline_job_id, and no other job of the agent beat it.
-func (s *PlatformExperimentsService) checkNamedBaseline(ctx context.Context, platformExpID, agentID, baselineJobID string) error {
+func (s *Service) checkNamedBaseline(ctx context.Context, platformExpID, agentID, baselineJobID string) error {
 	signup, err := s.store.GetAgentSignup(ctx, platformExpID, agentID)
 	if err != nil {
 		return fmt.Errorf("platform_experiments.checkNamedBaseline: %w", err)
@@ -121,7 +121,7 @@ const finishEarlyShare = 0.1
 // a researcher in a run that has a clock the time and quota it leaves. A researcher with more than
 // finishEarlyShare of both left, and more time than its jobs typically take (typicalJobTime), and
 // no blocker is refused, told what is left.
-func (s *PlatformExperimentsService) finishReason(ctx context.Context, platformExpID, agentID, reason, blocker string) (string, error) {
+func (s *Service) finishReason(ctx context.Context, platformExpID, agentID, reason, blocker string) (string, error) {
 	if blocker != "" {
 		reason = sentence(reason) + " Blocker: " + blocker
 	}
@@ -168,7 +168,7 @@ func (s *PlatformExperimentsService) finishReason(ctx context.Context, platformE
 
 // typicalJobTime is the median time agentID's COMPLETED jobs in the platform experiment took from
 // submit to end, or with none of its own every COMPLETED job's there, and 0 with none at all.
-func (s *PlatformExperimentsService) typicalJobTime(ctx context.Context, platformExpID, agentID string) (time.Duration, error) {
+func (s *Service) typicalJobTime(ctx context.Context, platformExpID, agentID string) (time.Duration, error) {
 	jobs, err := s.store.CompletedJobs(ctx, platformExpID)
 	if err != nil {
 		return 0, err
@@ -250,7 +250,7 @@ func openHypotheses(ctx context.Context, graph Hypotheses, completed []*domain.E
 // Finish finishes agentID, as FinishAgent does, and answers it as reader reads the roster with the
 // hypotheses it leaves without a verdict, read from graph before the finish is stored: a graph
 // that does not answer leaves nothing changed.
-func (s *PlatformExperimentsService) Finish(ctx context.Context, graph Hypotheses, platformExpID, agentID, reason, blocker, baselineJobID string, reader domain.Actor) ([]JoinedAgent, []OpenHypothesis, error) {
+func (s *Service) Finish(ctx context.Context, graph Hypotheses, platformExpID, agentID, reason, blocker, baselineJobID string, reader domain.Actor) ([]JoinedAgent, []OpenHypothesis, error) {
 	completed, err := s.store.CompletedJobs(ctx, platformExpID)
 	if err != nil {
 		return nil, nil, err

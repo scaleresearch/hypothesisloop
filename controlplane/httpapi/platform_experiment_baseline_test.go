@@ -42,7 +42,7 @@ func declareAPI(t *testing.T, pe *domain.PlatformExperiment, baseline *platforme
 func declareJobsAPI(t *testing.T, pe *domain.PlatformExperiment, jobs []*platformexperiments.Baseline, caller auth.Principal) (*createdStore, func(body map[string]any) (int, map[string]any)) {
 	t.Helper()
 	store := &createdStore{created: []*domain.PlatformExperiment{pe}}
-	svc := platformexperiments.NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), nil, time.Minute)
+	svc := platformexperiments.NewService(store, platformexperimentstest.Settings, zap.NewNop(), nil, time.Minute)
 	svc.WithBaselineRead(func(_ context.Context, _ *domain.PlatformExperiment, jobID string) (*platformexperiments.Baseline, error) {
 		for _, job := range jobs {
 			if job != nil && job.Job.ID == jobID {

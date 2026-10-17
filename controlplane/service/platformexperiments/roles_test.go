@@ -21,7 +21,7 @@ import (
 )
 
 // signupStore fakes only the reads and the write Signup makes; every other
-// PlatformExperimentsStore method is inherited from the embedded nil interface, so a test that
+// Store method is inherited from the embedded nil interface, so a test that
 // reaches one panics loudly instead of quietly getting a zero value back.
 type signupStore struct {
 	fakeStore
@@ -57,9 +57,9 @@ func (f *signupStore) IsSignedUp(ctx context.Context, platformExpID, agentID str
 	return f.alreadySignedUp || (f.insertCalled && f.racedIn), nil
 }
 
-func newSignupTestService(t *testing.T, store PlatformExperimentsStore) *PlatformExperimentsService {
+func newSignupTestService(t *testing.T, store Store) *Service {
 	t.Helper()
-	return reaching(NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), 3*time.Minute), domain.CPUType)
+	return reaching(NewService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), 3*time.Minute), domain.CPUType)
 }
 
 // max_agents sizes the field being ranked. If a baseline or a reviewer counted against it, adding

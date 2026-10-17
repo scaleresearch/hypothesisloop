@@ -35,7 +35,7 @@ func aliveServer(t *testing.T, now time.Time, step, ago time.Duration) *httptest
 	}))
 }
 
-// runningExpStore fakes only the one PlatformExperimentsStore method running_cost.go calls;
+// runningExpStore fakes only the one Store method running_cost.go calls;
 // every other method panics if ever reached, so a test that exercises an unexpected call fails
 // loudly instead of silently returning a zero value.
 type runningExpStore struct {
@@ -47,9 +47,9 @@ func (f *runningExpStore) GetAgentRunningExperiments(ctx context.Context, agentI
 	return f.running, nil
 }
 
-func newTestService(t *testing.T, metricsURL string, running []*domain.Experiment) *PlatformExperimentsService {
+func newTestService(t *testing.T, metricsURL string, running []*domain.Experiment) *Service {
 	t.Helper()
-	return NewPlatformExperimentsService(
+	return NewService(
 		&runningExpStore{running: running},
 		domain.QuotaConfig{},
 		zap.NewNop(),
@@ -61,10 +61,10 @@ func newTestService(t *testing.T, metricsURL string, running []*domain.Experimen
 // newObservedTestService is newTestService but with a logger a test can inspect, for assertions
 // that a warning did or did not fire — zap.NewNop() discards everything, which makes "no warning
 // fired" untestable.
-func newObservedTestService(t *testing.T, metricsURL string, running []*domain.Experiment) (*PlatformExperimentsService, *observer.ObservedLogs) {
+func newObservedTestService(t *testing.T, metricsURL string, running []*domain.Experiment) (*Service, *observer.ObservedLogs) {
 	t.Helper()
 	core, logs := observer.New(zapcore.WarnLevel)
-	svc := NewPlatformExperimentsService(
+	svc := NewService(
 		&runningExpStore{running: running},
 		domain.QuotaConfig{},
 		zap.New(core),
@@ -283,7 +283,7 @@ func TestTheQuotaViewLeavesWhatASubmitWouldAndShowsNoBurstHoursBeyondTheShare(t 
 		ID: "job-1", AgentID: "a", PlatformExperimentID: "pe-1", Status: domain.StatusRunning, CapacityTier: domain.CapacityGuaranteed,
 		AcceleratorType: "h100", AcceleratorCount: 1, EstimatedDurationHours: 0.1, EstimatedCostAccH: 0.015, CreatedAt: now.Add(-3 * time.Minute),
 	}}
-	svc := NewPlatformExperimentsService(&reservingStore{runningExpStore{running: running}}, domain.QuotaConfig{}, zap.NewNop(), metricsdb.New(srv.URL), 3*time.Minute)
+	svc := NewService(&reservingStore{runningExpStore{running: running}}, domain.QuotaConfig{}, zap.NewNop(), metricsdb.New(srv.URL), 3*time.Minute)
 	quota := &domain.AgentQuota{AgentID: "a", PlatformExperimentID: "pe-1", GuaranteedAcceleratorHours: 0.028608, BurstAcceleratorHours: 0.057216}
 	views, err := svc.quotaViews(context.Background(), &domain.PlatformExperiment{ID: "pe-1", CreatedAt: now.Add(-time.Hour)}, []*domain.AgentQuota{quota})
 	if err != nil {
@@ -337,7 +337,7 @@ func TestAnAgentsQuotaSaysWhatDataItHoldsAgainstTheCeiling(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := NewPlatformExperimentsService(&grantedStore{}, domain.QuotaConfig{}, zap.NewNop(), metricsdb.New(metrics.URL), 3*time.Minute)
+	svc := NewService(&grantedStore{}, domain.QuotaConfig{}, zap.NewNop(), metricsdb.New(metrics.URL), 3*time.Minute)
 
 	if view, err := svc.QuotaView(context.Background(), "a", "pe-1"); err != nil || view.DataBytes != nil || view.MaxDataBytes != 0 {
 		t.Fatalf("with no ceiling: got %+v, %v, want no data figures and no read of the store", view, err)

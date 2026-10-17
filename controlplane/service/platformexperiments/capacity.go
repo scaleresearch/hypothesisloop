@@ -15,13 +15,13 @@ import (
 
 // WithGitProxy is where the control plane's proxy serves repositories: a platform experiment's
 // answer names its repository there, the address what the platform launches clones and pushes.
-func (s *PlatformExperimentsService) WithGitProxy(proxyURL string) *PlatformExperimentsService {
+func (s *Service) WithGitProxy(proxyURL string) *Service {
 	s.proxyURL = proxyURL
 	return s
 }
 
 // WithPlanning sets what bounds a draft, from the settings file's planning section.
-func (s *PlatformExperimentsService) WithPlanning(planning Planning) *PlatformExperimentsService {
+func (s *Service) WithPlanning(planning Planning) *Service {
 	if planning.Limit <= 0 || planning.ProposedFor <= 0 || planning.PlannerKept <= 0 {
 		panic("quota: WithPlanning requires every planning setting")
 	}
@@ -30,7 +30,7 @@ func (s *PlatformExperimentsService) WithPlanning(planning Planning) *PlatformEx
 }
 
 // WithJobImages attaches the images the deployment offers a job to run in.
-func (s *PlatformExperimentsService) WithJobImages(images []domain.JobImage) *PlatformExperimentsService {
+func (s *Service) WithJobImages(images []domain.JobImage) *Service {
 	s.jobImages = images
 	return s
 }
@@ -45,7 +45,7 @@ type ClusterRegistry interface {
 // WithLiveCapacity attaches what GET /resource-catalog/capacity needs: the freshness window past which a cluster's last
 // report is treated as stale, and the registry that says which clusters a caller may see. The
 // service checks a platform experiment against the same read.
-func (s *PlatformExperimentsService) WithLiveCapacity(freshness time.Duration, clusters ClusterRegistry, podResources domain.PodResources) *PlatformExperimentsService {
+func (s *Service) WithLiveCapacity(freshness time.Duration, clusters ClusterRegistry, podResources domain.PodResources) *Service {
 	s.podResources = podResources
 	s.capacityFreshness = freshness
 	s.clusters = clusters
@@ -132,7 +132,7 @@ var ErrLiveCapacityUnconfigured = errors.New("resource-catalog/capacity: metrics
 // liveCapacity reads the live accelerator capacity of the clusters jobs of orgID can be placed
 // on, or of every cluster that reports when every is set, which is staff's view. It fails fast
 // if this handler was never wired to a metrics DB.
-func (s *PlatformExperimentsService) liveCapacity(ctx context.Context, orgID string, every bool) ([]ClusterCapacity, error) {
+func (s *Service) liveCapacity(ctx context.Context, orgID string, every bool) ([]ClusterCapacity, error) {
 	if s.clusters == nil {
 		return nil, ErrLiveCapacityUnconfigured
 	}
@@ -192,7 +192,7 @@ func (s *PlatformExperimentsService) liveCapacity(ctx context.Context, orgID str
 
 // reachableTypes are the accelerator types jobs of the org of projectID can be placed on now,
 // each with the clusters that have it and the one image such a cluster runs, if it runs one only.
-func (s *PlatformExperimentsService) reachableTypes(ctx context.Context, projectID string) (map[string][]domain.Cluster, error) {
+func (s *Service) reachableTypes(ctx context.Context, projectID string) (map[string][]domain.Cluster, error) {
 	orgID, err := s.clusters.ProjectOrg(ctx, projectID)
 	if err != nil {
 		return nil, err
@@ -376,14 +376,14 @@ func buildClusterCapacity(available, total map[string]map[string]int64, podResou
 }
 
 // WithAgentLaunch attaches what joining needs beyond the store.
-func (s *PlatformExperimentsService) WithAgentLaunch(launch AgentLaunch) *PlatformExperimentsService {
+func (s *Service) WithAgentLaunch(launch AgentLaunch) *Service {
 	s.launch = launch
 	return s
 }
 
 // refusal answers a refusal as it is; anything else is the platform's own failure, logged and
 // answered without detail.
-func (s *PlatformExperimentsService) refusal(op string, err error) error {
+func (s *Service) refusal(op string, err error) error {
 	var refused *refusal.Refusal
 	if errors.As(err, &refused) {
 		return refused
@@ -393,7 +393,7 @@ func (s *PlatformExperimentsService) refusal(op string, err error) error {
 
 // ResourceCapacity is the live capacity of the clusters orgID's jobs can be placed on, or of
 // every cluster with every, and the images the deployment offers a job to run in.
-func (s *PlatformExperimentsService) ResourceCapacity(ctx context.Context, orgID string, every bool) ([]ClusterCapacity, []domain.JobImage, error) {
+func (s *Service) ResourceCapacity(ctx context.Context, orgID string, every bool) ([]ClusterCapacity, []domain.JobImage, error) {
 	clusters, err := s.liveCapacity(ctx, orgID, every)
 	if err != nil {
 		return nil, nil, err

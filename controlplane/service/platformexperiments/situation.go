@@ -180,7 +180,7 @@ type Placement struct {
 }
 
 // placementOf reads the live capacity jobs of the org of projectID can be placed on.
-func (s *PlatformExperimentsService) placementOf(ctx context.Context, projectID string) (*Placement, error) {
+func (s *Service) placementOf(ctx context.Context, projectID string) (*Placement, error) {
 	orgID, err := s.clusters.ProjectOrg(ctx, projectID)
 	if err != nil {
 		return nil, err
@@ -292,7 +292,7 @@ func placeJob(shapes []domain.NodeShape, nodes []string, accelerators map[string
 // runCapacity is the capacity block of pe: the lines of its baseline job's type, or of every type
 // while none is declared, on the clusters its jobs can be placed on, and how many jobs shaped
 // like its baseline job place now.
-func (s *PlatformExperimentsService) runCapacity(ctx context.Context, pe *domain.PlatformExperiment) (SituationCapacity, error) {
+func (s *Service) runCapacity(ctx context.Context, pe *domain.PlatformExperiment) (SituationCapacity, error) {
 	out := SituationCapacity{Clusters: []SituationCluster{}}
 	p, err := s.placement(ctx, pe.ProjectID)
 	if err != nil {
@@ -366,7 +366,7 @@ func gapToTarget(direction string, best, target *float64) *float64 {
 }
 
 // objective is where the run stands on each ranking metric of pe at now.
-func (s *PlatformExperimentsService) objective(ctx context.Context, pe *domain.PlatformExperiment, now time.Time) ([]SituationMetric, error) {
+func (s *Service) objective(ctx context.Context, pe *domain.PlatformExperiment, now time.Time) ([]SituationMetric, error) {
 	out := []SituationMetric{}
 	completed, err := s.store.CompletedJobs(ctx, pe.ID)
 	if err != nil {
@@ -437,7 +437,7 @@ func minutesUntil(at, now time.Time) *int {
 
 // Situation is where platform experiment id stands now, with the messages reader may still send each agent. With agentID set, the answer of that
 // agent's token, it holds that agent's row alone and no coordinator.
-func (s *PlatformExperimentsService) Situation(ctx context.Context, id, agentID string, reader domain.Actor) (*Situation, error) {
+func (s *Service) Situation(ctx context.Context, id, agentID string, reader domain.Actor) (*Situation, error) {
 	pe, err := s.store.GetPlatformExperiment(ctx, id)
 	if err != nil {
 		return nil, err
@@ -529,7 +529,7 @@ func runJobsInFlight(rows []JoinedAgent) JobCounts {
 
 // hypothesesInFlight is each hypothesis of platform experiment id with jobs in flight or claimed by
 // a checkout, its agents named as rows name them.
-func (s *PlatformExperimentsService) hypothesesInFlight(ctx context.Context, id string, rows []JoinedAgent) ([]SituationHypothesis, error) {
+func (s *Service) hypothesesInFlight(ctx context.Context, id string, rows []JoinedAgent) ([]SituationHypothesis, error) {
 	inFlight, err := s.store.HypothesesInFlight(ctx, id)
 	if err != nil {
 		return nil, err
@@ -558,7 +558,7 @@ func situationAgent(row JoinedAgent, budget *AgentBudget) SituationAgent {
 }
 
 // situationCoordinator is the hosted coordinator of pe as the situation answers it.
-func (s *PlatformExperimentsService) situationCoordinator(ctx context.Context, pe *domain.PlatformExperiment) (*SituationCoordinator, error) {
+func (s *Service) situationCoordinator(ctx context.Context, pe *domain.PlatformExperiment) (*SituationCoordinator, error) {
 	out := &SituationCoordinator{}
 	var err error
 	if out.SummaryWrittenAt, err = s.store.SummaryWrittenAt(ctx, pe.ID); err != nil {
@@ -599,7 +599,7 @@ func liveReading(instance *domain.AgentInstance, state domain.HarnessState) bool
 // withWork sets on each row of pe what its agent has going: the subagents and turn its harness
 // last reported and the model allowance it last read, of the machine it holds now, the messages
 // reader may still send it, and how long it has had no job in flight.
-func (s *PlatformExperimentsService) withWork(ctx context.Context, pe *domain.PlatformExperiment, rows []JoinedAgent, now time.Time, reader domain.Actor) error {
+func (s *Service) withWork(ctx context.Context, pe *domain.PlatformExperiment, rows []JoinedAgent, now time.Time, reader domain.Actor) error {
 	states, err := s.metrics.LatestHarnessState(ctx, pe.ID, pe.CreatedAt)
 	if err != nil {
 		return err
@@ -640,7 +640,7 @@ func (s *PlatformExperimentsService) withWork(ctx context.Context, pe *domain.Pl
 
 // runsPinnedInstructions says whether digest, the start of the digest of the instructions a
 // harness runs, is that of the instructions agentID is served now, nil for an agent with none.
-func (s *PlatformExperimentsService) runsPinnedInstructions(ctx context.Context, platformExpID, agentID, digest string) (*bool, error) {
+func (s *Service) runsPinnedInstructions(ctx context.Context, platformExpID, agentID, digest string) (*bool, error) {
 	src, err := s.store.AgentInstructions(ctx, platformExpID, agentID)
 	if err != nil || src == nil {
 		return nil, err

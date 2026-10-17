@@ -20,7 +20,7 @@ import (
 // topResults is a list of (agentID, finalMetric) ordered best-first (up to 3 entries). When it is
 // empty the standings are derived from the metrics store instead: closing must never silently
 // discard the outcome of a run just because the caller was a timer rather than a person.
-func (s *PlatformExperimentsService) Close(ctx context.Context, id string, by *domain.Actor, message string, topResults []AgentResult) (*domain.PlatformExperiment, error) {
+func (s *Service) Close(ctx context.Context, id string, by *domain.Actor, message string, topResults []AgentResult) (*domain.PlatformExperiment, error) {
 	pe, err := s.stored(ctx, id)
 	if err != nil {
 		return nil, err
@@ -37,7 +37,7 @@ func (s *PlatformExperimentsService) Close(ctx context.Context, id string, by *d
 // everything it holds is kept, its spend included. One not closed yet is closed as Close closes
 // it, its agents stopped and its jobs evicted, with close_reason removed, in the write that
 // removes it.
-func (s *PlatformExperimentsService) Remove(ctx context.Context, id string, by domain.Actor) error {
+func (s *Service) Remove(ctx context.Context, id string, by domain.Actor) error {
 	pe, err := s.stored(ctx, id)
 	if err != nil {
 		return err
@@ -63,7 +63,7 @@ func (s *PlatformExperimentsService) Remove(ctx context.Context, id string, by d
 
 // close records the standings and the agent lines of pe, which is not closed, runs write, which
 // closes it, and writes the record of the close once its every job settled.
-func (s *PlatformExperimentsService) close(ctx context.Context, pe *domain.PlatformExperiment, topResults []AgentResult, write func() error) (*domain.PlatformExperiment, error) {
+func (s *Service) close(ctx context.Context, pe *domain.PlatformExperiment, topResults []AgentResult, write func() error) (*domain.PlatformExperiment, error) {
 	id := pe.ID
 	var err error
 	// A draft never ran: closing it abandons the plan, and there are no standings to record.
@@ -119,7 +119,7 @@ func (s *PlatformExperimentsService) close(ctx context.Context, pe *domain.Platf
 // it. endsAt is held to the length a create is held to, counted from the run's start.
 // coordinatorModel, resolved by the caller, moves a hosted coordinator to that model, and empty
 // keeps the one stored.
-func (s *PlatformExperimentsService) Reopen(ctx context.Context, id string, endsAt time.Time, coordinatorModel string) (*domain.PlatformExperiment, error) {
+func (s *Service) Reopen(ctx context.Context, id string, endsAt time.Time, coordinatorModel string) (*domain.PlatformExperiment, error) {
 	pe, err := s.stored(ctx, id)
 	if err != nil {
 		return nil, err
@@ -158,7 +158,7 @@ const closeRecordWindow = 24 * time.Hour
 
 // RecordCloses writes the record of the close of every platform experiment Close left without
 // one, because a job of it was still live, once its every job ended and was settled.
-func (s *PlatformExperimentsService) RecordCloses(ctx context.Context) error {
+func (s *Service) RecordCloses(ctx context.Context) error {
 	ids, err := s.store.ClosesToRecord(ctx, closeRecordWindow)
 	if err != nil {
 		return fmt.Errorf("closes to record: %w", err)
@@ -183,7 +183,7 @@ const closeRecordHeading = "Recorded by the platform:"
 // each agent's last activity and how its run ended, and the spend, which is then
 // consumed_accelerator_hours whole. It is answered after the coordinator's summary, which a
 // coordinator on its last turn still rewrites, so an interim summary never stands alone.
-func (s *PlatformExperimentsService) recordClose(ctx context.Context, pe *domain.PlatformExperiment) error {
+func (s *Service) recordClose(ctx context.Context, pe *domain.PlatformExperiment) error {
 	why, err := s.closedReason(ctx, pe)
 	if err != nil {
 		return err
@@ -237,7 +237,7 @@ func (s *PlatformExperimentsService) recordClose(ctx context.Context, pe *domain
 }
 
 // messagesSent writes to record every message sent to an agent of the platform experiment.
-func (s *PlatformExperimentsService) messagesSent(ctx context.Context, id string, signups []domain.AgentSignup, record *strings.Builder) error {
+func (s *Service) messagesSent(ctx context.Context, id string, signups []domain.AgentSignup, record *strings.Builder) error {
 	messages, err := s.store.ListAgentMessages(ctx, id, "")
 	if err != nil || len(messages) == 0 {
 		return err
@@ -260,7 +260,7 @@ func (s *PlatformExperimentsService) messagesSent(ctx context.Context, id string
 // baselineLeft writes to record what the baseline agents of pe, closed before its run started,
 // left for another run to start from: each job with how it ended, the commit it ran and the
 // environment built for it, and the last commit of the baseline branch a job was submitted from.
-func (s *PlatformExperimentsService) baselineLeft(ctx context.Context, pe *domain.PlatformExperiment, record *strings.Builder) error {
+func (s *Service) baselineLeft(ctx context.Context, pe *domain.PlatformExperiment, record *strings.Builder) error {
 	jobs, err := s.store.ListExperimentsTesting(ctx, []string{pe.ID})
 	if err != nil {
 		return err
@@ -308,7 +308,7 @@ func (s *PlatformExperimentsService) baselineLeft(ctx context.Context, pe *domai
 // closeAgents is the agent lines of the record of the close of pe, as its agents stand at
 // closedAt, the moment just before the close is written: once the record is written, after every
 // job settled, their machines are released and what their agents last said is gone.
-func (s *PlatformExperimentsService) closeAgents(ctx context.Context, pe *domain.PlatformExperiment, closedAt time.Time) (string, error) {
+func (s *Service) closeAgents(ctx context.Context, pe *domain.PlatformExperiment, closedAt time.Time) (string, error) {
 	jobs, err := s.store.AgentJobsByAgent(ctx, pe.ID)
 	if err != nil {
 		return "", err
@@ -372,7 +372,7 @@ func runEnded(instance *domain.AgentInstance, finishedAt *time.Time, finishedRea
 }
 
 // CheckCoordinatorModel refuses a coordinator model a reopen names that is no model.
-func (s *PlatformExperimentsService) CheckCoordinatorModel(model string) error {
+func (s *Service) CheckCoordinatorModel(model string) error {
 	if s.launch.CoordinatorModel == "" {
 		return auth.Internal(s.logger, "reopen platform experiment failed", errors.New("the handler has no agent launch settings"))
 	}

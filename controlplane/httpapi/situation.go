@@ -12,13 +12,13 @@ import (
 )
 
 type situationAPI struct {
-	experiments *platformexperiments.PlatformExperimentsService
+	experiments *platformexperiments.Service
 	access      *auth.Access
 	logger      *zap.Logger
 }
 
 // registerSituation registers the situation read.
-func registerSituation(doc *Doc, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
+func registerSituation(doc *Doc, experiments *platformexperiments.Service, logger *zap.Logger) {
 	a := situationAPI{experiments: experiments, access: doc.Access, logger: logger}
 	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "get-platform-experiment-situation", Method: "GET", Path: "/platform-experiments/{id}/situation",

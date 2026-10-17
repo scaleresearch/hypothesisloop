@@ -99,7 +99,7 @@ func main() {
 
 func newControllerServer(authenticator *auth.Authenticator, pool *db.Pool, store *db.Store, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metrics *metricsdb.Store, port string, logger *zap.Logger) (*http.Server, context.CancelFunc) {
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
-	peSvc := platformexperiments.NewPlatformExperimentsService(store, quotaCfg, logger, metrics, observedGapCap)
+	peSvc := platformexperiments.NewService(store, quotaCfg, logger, metrics, observedGapCap)
 
 	// metric-controller never connects to a cluster directly, and needs no cluster/workload
 	// wiring at all: eviction is purely a status update (service/controller) — the

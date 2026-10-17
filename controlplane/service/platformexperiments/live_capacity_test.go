@@ -22,7 +22,7 @@ import (
 // starvation nobody can diagnose from the API. Fail fast instead (important.md: "no fallbacks -
 // one path or error, fail fast").
 func TestLiveCapacityFailsFastWhenUnconfigured(t *testing.T) {
-	h := NewPlatformExperimentsService(nil, platformexperimentstest.Settings, zap.NewNop(), nil, time.Minute).WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning)
+	h := NewService(nil, platformexperimentstest.Settings, zap.NewNop(), nil, time.Minute).WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning)
 	// Deliberately never call WithLiveCapacity.
 
 	clusters, err := h.liveCapacity(context.Background(), "org-a", false)

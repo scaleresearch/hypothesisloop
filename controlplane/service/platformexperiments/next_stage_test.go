@@ -72,7 +72,7 @@ func TestAQuotaSaysWhatTheNextStageBringsAndNothingInTheLastOne(t *testing.T) {
 	metrics := aliveServer(t, time.Now().UTC(), 30*time.Second, 2*time.Minute)
 	defer metrics.Close()
 	store := &stagedStore{pe: stagedPE(1)}
-	svc := NewPlatformExperimentsService(store, domain.QuotaConfig{}, zap.NewNop(), metricsdb.New(metrics.URL), 3*time.Minute)
+	svc := NewService(store, domain.QuotaConfig{}, zap.NewNop(), metricsdb.New(metrics.URL), 3*time.Minute)
 
 	view, err := svc.QuotaView(context.Background(), "a", "pe-1")
 	if err != nil {

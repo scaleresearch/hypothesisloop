@@ -39,12 +39,12 @@ type runningCost struct {
 // Deriving it from that made the same job cost differently here than in settlement, visibly
 // jumping the moment the job completed.
 type runningCostCalc struct {
-	svc    *PlatformExperimentsService
+	svc    *Service
 	gapCap time.Duration
 	now    time.Time
 }
 
-func (s *PlatformExperimentsService) newRunningCostCalc() *runningCostCalc {
+func (s *Service) newRunningCostCalc() *runningCostCalc {
 	return &runningCostCalc{
 		svc:    s,
 		gapCap: s.observedGapCap,
@@ -74,7 +74,7 @@ func (c *runningCostCalc) costOf(ctx context.Context, exp *domain.Experiment) (r
 // correctRunningCosts adjusts quotas in place: for every currently-RUNNING experiment owned by
 // one of the agents in quotas, it swaps that job's static EstimatedCostAccH (already included via
 // AddDesiredQuotaUsage) for its actual observed-elapsed accelerator cost so far.
-func (s *PlatformExperimentsService) correctRunningCosts(ctx context.Context, pe *domain.PlatformExperiment, quotas []*domain.AgentQuota) error {
+func (s *Service) correctRunningCosts(ctx context.Context, pe *domain.PlatformExperiment, quotas []*domain.AgentQuota) error {
 	if len(quotas) == 0 {
 		return nil
 	}
@@ -119,7 +119,7 @@ func (s *PlatformExperimentsService) correctRunningCosts(ctx context.Context, pe
 // anywhere: q must arrive carrying settled observed usage only. A job that has never reported adds
 // nothing — it is not yet visible in the actual state, and this figure exists to answer "has this
 // budget been spent?", which nothing unobserved can answer.
-func (s *PlatformExperimentsService) addRunningActualCosts(ctx context.Context, pe *domain.PlatformExperiment, q *domain.AgentQuota) error {
+func (s *Service) addRunningActualCosts(ctx context.Context, pe *domain.PlatformExperiment, q *domain.AgentQuota) error {
 	calc := s.newRunningCostCalc()
 	settled, err := s.metrics.SettledAccHByJob(ctx, pe.CreatedAt, pe.ID)
 	if err != nil {

@@ -30,7 +30,7 @@ type RefusedMessage struct {
 
 // SendMessage sends text from by to the agent named, with all to every researcher at work that by
 // may message now and names the rest as refused, or with coordinator to the hosted coordinator.
-func (s *PlatformExperimentsService) SendMessage(ctx context.Context, platformExpID string, req SendMessageRequest, by domain.Actor) ([]domain.AgentMessage, []RefusedMessage, error) {
+func (s *Service) SendMessage(ctx context.Context, platformExpID string, req SendMessageRequest, by domain.Actor) ([]domain.AgentMessage, []RefusedMessage, error) {
 	written := strings.TrimSpace(req.Text)
 	text := strings.TrimSpace(domain.EventDetail(written))
 	named := 0
@@ -91,7 +91,7 @@ func (s *PlatformExperimentsService) SendMessage(ctx context.Context, platformEx
 }
 
 // SendNamedMessage is SendMessage with the actor of each message sent named.
-func (s *PlatformExperimentsService) SendNamedMessage(ctx context.Context, platformExpID string, req SendMessageRequest, by domain.Actor) ([]domain.AgentMessage, []RefusedMessage, error) {
+func (s *Service) SendNamedMessage(ctx context.Context, platformExpID string, req SendMessageRequest, by domain.Actor) ([]domain.AgentMessage, []RefusedMessage, error) {
 	messages, refused, err := s.SendMessage(ctx, platformExpID, req, by)
 	if err != nil {
 		return nil, nil, err
@@ -104,7 +104,7 @@ func (s *PlatformExperimentsService) SendNamedMessage(ctx context.Context, platf
 
 // ListMessages is every message sent to an agent of the platform experiment or its coordinator,
 // oldest first, with the actor of each named; agentID narrows it to that agent's.
-func (s *PlatformExperimentsService) ListMessages(ctx context.Context, platformExpID, agentID string) ([]domain.AgentMessage, error) {
+func (s *Service) ListMessages(ctx context.Context, platformExpID, agentID string) ([]domain.AgentMessage, error) {
 	messages, err := s.store.ListAgentMessages(ctx, platformExpID, agentID)
 	if err != nil {
 		return nil, err
@@ -118,7 +118,7 @@ func (s *PlatformExperimentsService) ListMessages(ctx context.Context, platformE
 	return messages, nil
 }
 
-func (s *PlatformExperimentsService) nameMessageActors(ctx context.Context, messages []domain.AgentMessage) error {
+func (s *Service) nameMessageActors(ctx context.Context, messages []domain.AgentMessage) error {
 	if len(messages) == 0 {
 		return nil
 	}

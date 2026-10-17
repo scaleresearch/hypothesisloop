@@ -11,13 +11,13 @@ import (
 )
 
 type modelUsageAPI struct {
-	experiments *platformexperiments.PlatformExperimentsService
+	experiments *platformexperiments.Service
 	access      *auth.Access
 	logger      *zap.Logger
 }
 
 // registerModelUsage registers the read of a platform experiment's model usage on doc.
-func registerModelUsage(doc *Doc, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
+func registerModelUsage(doc *Doc, experiments *platformexperiments.Service, logger *zap.Logger) {
 	a := modelUsageAPI{experiments: experiments, access: doc.Access, logger: logger}
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "get-platform-experiment-model-usage", Method: "GET", Path: "/platform-experiments/{id}/model-usage",

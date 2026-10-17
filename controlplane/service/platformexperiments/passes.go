@@ -21,17 +21,17 @@ import (
 // no researcher's machine came up for by its AgentsDueAt, a draft whose planning limit passed or
 // whose answer no person took up, which releases its machine, and an open one that is not running
 // by its BaselineDueAt: the machines that were to measure its baseline would be rented for nothing.
-func (s *PlatformExperimentsService) SweepExpired(ctx context.Context) error {
+func (s *Service) SweepExpired(ctx context.Context) error {
 	return s.sweepExpired(ctx, domain.PlatformExpDraft, domain.PlatformExpOpen, domain.PlatformExpRunning)
 }
 
 // SweepEnded is SweepExpired for running platform experiments alone: a run's end is what its
 // agents and its coordinator's last turn are timed by, so it is closed on time.
-func (s *PlatformExperimentsService) SweepEnded(ctx context.Context) error {
+func (s *Service) SweepEnded(ctx context.Context) error {
 	return s.sweepExpired(ctx, domain.PlatformExpRunning)
 }
 
-func (s *PlatformExperimentsService) sweepExpired(ctx context.Context, statuses ...domain.PlatformExperimentStatus) error {
+func (s *Service) sweepExpired(ctx context.Context, statuses ...domain.PlatformExperimentStatus) error {
 	now := time.Now()
 	var failed error
 	for _, status := range statuses {
@@ -64,7 +64,7 @@ func (s *PlatformExperimentsService) sweepExpired(ctx context.Context, statuses 
 // job its baseline agents left, where the request they finished in could not declare it
 // (DeclareMeasured). One that is not startable waits, saying why in its status_reason (Describe),
 // until SweepExpired closes it.
-func (s *PlatformExperimentsService) SweepAutoStart(ctx context.Context) error {
+func (s *Service) SweepAutoStart(ctx context.Context) error {
 	now := time.Now().UTC()
 	pes, err := s.store.ListPlatformExperimentsByStatus(ctx, domain.PlatformExpOpen)
 	if err != nil {
@@ -99,7 +99,7 @@ func (s *PlatformExperimentsService) SweepAutoStart(ctx context.Context) error {
 // at most domain.MaxEnvironmentBuildTime in all (db.HoldBaselineClock). And the agent of a job
 // that, started now, ends after baseline_due_at is told so once, as job.held, which wakes it to
 // act on it where status_reason alone would wait to be read.
-func (s *PlatformExperimentsService) TendBaselines(ctx context.Context) error {
+func (s *Service) TendBaselines(ctx context.Context) error {
 	pes, err := s.store.ListPlatformExperimentsByStatus(ctx, domain.PlatformExpOpen)
 	if err != nil {
 		return fmt.Errorf("list open platform experiments: %w", err)
@@ -115,7 +115,7 @@ func (s *PlatformExperimentsService) TendBaselines(ctx context.Context) error {
 	return nil
 }
 
-func (s *PlatformExperimentsService) tendBaseline(ctx context.Context, pe *domain.PlatformExperiment) error {
+func (s *Service) tendBaseline(ctx context.Context, pe *domain.PlatformExperiment) error {
 	jobs, err := s.store.ListExperimentsTesting(ctx, []string{pe.ID})
 	if err != nil {
 		return err
@@ -150,7 +150,7 @@ func (s *PlatformExperimentsService) tendBaseline(ctx context.Context, pe *domai
 // so what moves it writes nothing a coordinator is woken by: a researcher's machine that stops
 // with no restart left, a baseline agent's that does. The record is that write, and one that
 // changes is announced as platform_experiment.status (db.TellCoordinator).
-func (s *PlatformExperimentsService) TellCoordinators(ctx context.Context) error {
+func (s *Service) TellCoordinators(ctx context.Context) error {
 	var failed error
 	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpOpen, domain.PlatformExpRunning} {
 		pes, err := s.store.ListPlatformExperimentsByStatus(ctx, status)
@@ -170,7 +170,7 @@ func (s *PlatformExperimentsService) TellCoordinators(ctx context.Context) error
 	return failed
 }
 
-func (s *PlatformExperimentsService) tellCoordinator(ctx context.Context, pe *domain.PlatformExperiment) error {
+func (s *Service) tellCoordinator(ctx context.Context, pe *domain.PlatformExperiment) error {
 	if err := s.Describe(ctx, pe, auth.Principal{}); err != nil {
 		return err
 	}
@@ -185,7 +185,7 @@ func (s *PlatformExperimentsService) tellCoordinator(ctx context.Context, pe *do
 // TellCoordinators and the idle notices on a ticker until ctx is cancelled, each pass bounded by
 // passTimeout. TendBaselines runs before SweepExpired, so a baseline that waited on the platform
 // until its deadline is given that time before it is closed.
-func (s *PlatformExperimentsService) StartExpirySweep(ctx context.Context, interval, passTimeout time.Duration) {
+func (s *Service) StartExpirySweep(ctx context.Context, interval, passTimeout time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -200,7 +200,7 @@ func (s *PlatformExperimentsService) StartExpirySweep(ctx context.Context, inter
 	}
 }
 
-func (s *PlatformExperimentsService) expirySweep(ctx context.Context) {
+func (s *Service) expirySweep(ctx context.Context) {
 	if err := s.SweepAutoStart(ctx); err != nil {
 		s.logger.Error("sweep_auto_start: scan", zap.Error(err))
 	}
@@ -230,7 +230,7 @@ func (s *PlatformExperimentsService) expirySweep(ctx context.Context) {
 // every idleAfter while its stretch lasts, with what the platform knows at the notice. A platform
 // experiment whose numbers cannot be read now is skipped, and its researchers are told at a
 // later pass.
-func (s *PlatformExperimentsService) NoticeIdleResearchers(ctx context.Context) error {
+func (s *Service) NoticeIdleResearchers(ctx context.Context) error {
 	due, err := s.idle.IdleResearchers(ctx, s.idleAfter)
 	if err != nil {
 		return err
@@ -248,7 +248,7 @@ func (s *PlatformExperimentsService) NoticeIdleResearchers(ctx context.Context) 
 }
 
 // noticeIdle tells each researcher of due, of platform experiment id, that it is idle.
-func (s *PlatformExperimentsService) noticeIdle(ctx context.Context, id string, due []db.IdleResearcher) error {
+func (s *Service) noticeIdle(ctx context.Context, id string, due []db.IdleResearcher) error {
 	pe, err := s.store.GetPlatformExperiment(ctx, id)
 	if err != nil {
 		return err
@@ -328,7 +328,7 @@ func (n idleNotice) detail() string {
 // its capacity holds places beyond its queued jobs (capacity.idle), every idleAfter while that
 // lasts, whoever has jobs in flight and wherever the best stands against the target. A run whose
 // numbers cannot be read is skipped, and told at a later pass.
-func (s *PlatformExperimentsService) NoticeIdleCapacity(ctx context.Context) error {
+func (s *Service) NoticeIdleCapacity(ctx context.Context) error {
 	pes, err := s.store.ListPlatformExperimentsByStatus(ctx, domain.PlatformExpRunning)
 	if err != nil {
 		return fmt.Errorf("list running platform experiments: %w", err)
@@ -343,7 +343,7 @@ func (s *PlatformExperimentsService) NoticeIdleCapacity(ctx context.Context) err
 
 // noticeIdleCapacity records whether the capacity of pe holds places beyond its queued jobs, and
 // tells it once that is due, with the numbers the situation reads.
-func (s *PlatformExperimentsService) noticeIdleCapacity(ctx context.Context, pe *domain.PlatformExperiment) error {
+func (s *Service) noticeIdleCapacity(ctx context.Context, pe *domain.PlatformExperiment) error {
 	now := time.Now()
 	notice := capacityNotice{minutesLeft: minutesUntil(pe.EndsAt, now)}
 	if notice.minutesLeft != nil && *notice.minutesLeft > 0 {
@@ -411,7 +411,7 @@ func (n capacityNotice) detail() string {
 
 // StartEndSweep runs SweepEnded on a ticker until ctx is cancelled: StartExpirySweep's interval
 // would close a run up to that long after its end. Each pass is bounded by passTimeout.
-func (s *PlatformExperimentsService) StartEndSweep(ctx context.Context, interval, passTimeout time.Duration) {
+func (s *Service) StartEndSweep(ctx context.Context, interval, passTimeout time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {

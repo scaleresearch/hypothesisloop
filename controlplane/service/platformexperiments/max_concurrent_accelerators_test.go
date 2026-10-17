@@ -8,7 +8,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// createStore fakes the single write Create makes; every other PlatformExperimentsStore method
+// createStore fakes the single write Create makes; every other Store method
 // is inherited from the embedded nil interface.
 type createStore struct {
 	fakeStore

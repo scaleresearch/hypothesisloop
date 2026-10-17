@@ -28,7 +28,7 @@ type PoolKey struct {
 func (e ResearcherPoolEntry) Key() PoolKey { return PoolKey{AgentType: e.AgentType, Model: e.Model} }
 
 // ResearcherPool is the researchers a platform experiment is to have at work: the desired state the
-// platform keeps where it runs them (quota.KeepResearchers). It is optional, and its total never
+// platform keeps where it runs them (platformexperiments.Service.KeepResearchers). It is optional, and its total never
 // exceeds the platform experiment's max_agents, the cap on the researchers at work.
 type ResearcherPool []ResearcherPoolEntry
 

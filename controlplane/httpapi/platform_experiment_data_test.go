@@ -19,7 +19,7 @@ import (
 
 // signupKeys stands in for the signup rows: one key per agent, kept once created.
 type signupKeys struct {
-	platformexperiments.PlatformExperimentsStore
+	platformexperiments.Store
 	err  error
 	keys map[string]domain.DataKey
 }
@@ -46,7 +46,7 @@ func (s *signupKeys) GetPlatformExperiment(_ context.Context, id string) (*domai
 
 func (s *signupKeys) IsAgentCut(context.Context, string, string) (bool, error) { return false, nil }
 
-func experimentsWithData(store platformexperiments.PlatformExperimentsStore, client *objectstore.Client) *platformexperiments.PlatformExperimentsService {
+func experimentsWithData(store platformexperiments.Store, client *objectstore.Client) *platformexperiments.Service {
 	return testExperiments(store).WithDataStore(client, 0)
 }
 
@@ -135,7 +135,7 @@ func TestDataKeyTheStoreRefusedIsNotKept(t *testing.T) {
 // windDownStore holds one platform experiment in a given status with one agent cut, and records
 // what a request went on to write.
 type windDownStore struct {
-	platformexperiments.PlatformExperimentsStore
+	platformexperiments.Store
 	status    domain.PlatformExperimentStatus
 	cut       string
 	keysAsked int

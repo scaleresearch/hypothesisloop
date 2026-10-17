@@ -104,7 +104,7 @@ type PlatformExperimentResults struct {
 }
 
 // Results derives the standings for a platform experiment from the metrics store.
-func (s *PlatformExperimentsService) Results(ctx context.Context, id string) (*PlatformExperimentResults, error) {
+func (s *Service) Results(ctx context.Context, id string) (*PlatformExperimentResults, error) {
 	pe, err := s.store.GetPlatformExperiment(ctx, id)
 	if err != nil {
 		return nil, err
@@ -163,7 +163,7 @@ func (s *PlatformExperimentsService) Results(ctx context.Context, id string) (*P
 
 // setAgainstBaseline sets on ranked the declared baseline's value on metric, and on each standing
 // whether it beats it.
-func (s *PlatformExperimentsService) setAgainstBaseline(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition, ranked *MetricStandings) error {
+func (s *Service) setAgainstBaseline(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition, ranked *MetricStandings) error {
 	if pe.BaselineJobID == "" {
 		return nil
 	}
@@ -217,7 +217,7 @@ func setAgainstLeader(out *PlatformExperimentResults) {
 // references is each reference metric of pe with the value of every COMPLETED job that reported
 // it, whether or not the job held the constraints: a reference a job measured is listed, and only
 // best weighs whether it counts.
-func (s *PlatformExperimentsService) references(ctx context.Context, pe *domain.PlatformExperiment) ([]MetricReference, error) {
+func (s *Service) references(ctx context.Context, pe *domain.PlatformExperiment) ([]MetricReference, error) {
 	out := []MetricReference{}
 	if !slices.ContainsFunc(pe.Metrics, func(m domain.MetricDefinition) bool { return m.EffectiveRole() == domain.MetricRoleReference }) {
 		return out, nil
@@ -249,7 +249,7 @@ func (s *PlatformExperimentsService) references(ctx context.Context, pe *domain.
 
 // mergeRanOn sets where each standing's and each reference value's job ran, in one read of the
 // metrics store.
-func (s *PlatformExperimentsService) mergeRanOn(ctx context.Context, out *PlatformExperimentResults) error {
+func (s *Service) mergeRanOn(ctx context.Context, out *PlatformExperimentResults) error {
 	var ranOn []**domain.RanOn
 	var ids []string
 	for _, metric := range out.Metrics {
@@ -290,7 +290,7 @@ func (s *PlatformExperimentsService) mergeRanOn(ctx context.Context, out *Platfo
 
 // derivedTopResults ranks agents on the experiment's first declared ranking metric — the primary
 // metric by convention — so an auto-closed run records the same placements a hand-closed one would.
-func (s *PlatformExperimentsService) derivedTopResults(ctx context.Context, id string) ([]AgentResult, error) {
+func (s *Service) derivedTopResults(ctx context.Context, id string) ([]AgentResult, error) {
 	pe, err := s.store.GetPlatformExperiment(ctx, id)
 	if err != nil {
 		return nil, err
@@ -311,7 +311,7 @@ func (s *PlatformExperimentsService) derivedTopResults(ctx context.Context, id s
 
 // primaryStandings ranks agents on pe's primary ranking metric, which is false when pe declares
 // none.
-func (s *PlatformExperimentsService) primaryStandings(ctx context.Context, pe *domain.PlatformExperiment) (domain.MetricDefinition, []AgentStanding, error) {
+func (s *Service) primaryStandings(ctx context.Context, pe *domain.PlatformExperiment) (domain.MetricDefinition, []AgentStanding, error) {
 	primary, ok := domain.PrimaryRankingMetric(pe.Metrics)
 	if !ok {
 		return primary, nil, nil
@@ -327,7 +327,7 @@ func (s *PlatformExperimentsService) primaryStandings(ctx context.Context, pe *d
 // PriorRuns describes each of ids, prior runs of one platform experiment, in their order, with
 // the leading standing on its primary ranking metric, as results ranks it. One query of each
 // store reads them all, whatever their number.
-func (s *PlatformExperimentsService) PriorRuns(ctx context.Context, ids []string) ([]domain.PriorRun, error) {
+func (s *Service) PriorRuns(ctx context.Context, ids []string) ([]domain.PriorRun, error) {
 	runs, err := s.store.RunsToRank(ctx, ids)
 	if err != nil {
 		return nil, fmt.Errorf("prior runs: %w", err)
@@ -360,7 +360,7 @@ func (s *PlatformExperimentsService) PriorRuns(ctx context.Context, ids []string
 // bestPerAgent is every agent's best on one metric over its COMPLETED jobs that hold every
 // constraint: the one figure results, standings and the top-3 at close read. An agent none of
 // whose jobs holds the constraints has no best and so no standing.
-func (s *PlatformExperimentsService) bestPerAgent(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition) (map[string]metricsdb.AgentBest, []string, error) {
+func (s *Service) bestPerAgent(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition) (map[string]metricsdb.AgentBest, []string, error) {
 	completed, err := s.store.CompletedJobIDs(ctx, pe.ID)
 	if err != nil {
 		return nil, nil, err
@@ -371,7 +371,7 @@ func (s *PlatformExperimentsService) bestPerAgent(ctx context.Context, pe *domai
 // rank presents the competitors' bests on one metric as standings: attaches each one's job, sorts
 // and assigns ranks. It is the ranking a run is judged by: results and the top-3 recorded at close
 // both read it, from the bests the stage ladder cuts with, so none of them can diverge.
-func (s *PlatformExperimentsService) rank(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition, best map[string]metricsdb.AgentBest) ([]AgentStanding, error) {
+func (s *Service) rank(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition, best map[string]metricsdb.AgentBest) ([]AgentStanding, error) {
 	// Only competitors are ranked. The metrics store answers for every agent that reported —
 	// which is the point, a baseline's numbers stay fully readable — so the roles are applied
 	// here rather than to the query, and every caller of this function inherits it.

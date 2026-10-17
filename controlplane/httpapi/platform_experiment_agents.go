@@ -23,7 +23,7 @@ type finishedAgentBody struct {
 }
 
 type experimentAgentsAPI struct {
-	experiments *platformexperiments.PlatformExperimentsService
+	experiments *platformexperiments.Service
 	graph       platformexperiments.Hypotheses
 	launch      platformexperiments.AgentLaunch
 	access      *auth.Access
@@ -32,7 +32,7 @@ type experimentAgentsAPI struct {
 
 // registerExperimentAgents registers how agents join and leave a platform experiment. graph is
 // where a finish reads what the agent left open, and launch what joining needs beyond the store.
-func registerExperimentAgents(doc *Doc, experiments *platformexperiments.PlatformExperimentsService, graph platformexperiments.Hypotheses, launch platformexperiments.AgentLaunch, logger *zap.Logger) {
+func registerExperimentAgents(doc *Doc, experiments *platformexperiments.Service, graph platformexperiments.Hypotheses, launch platformexperiments.AgentLaunch, logger *zap.Logger) {
 	if launch.DefaultModel == "" || launch.SigningSecret == "" || launch.MaxHosted <= 0 || graph == nil {
 		panic("httpapi.registerExperimentAgents: every field of the agent launch and the hypothesis graph are required")
 	}

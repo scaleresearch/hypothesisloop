@@ -21,7 +21,7 @@ import (
 // each researcher (budgetCoversTrials), and with ownJobs no other job of its agent beat it
 // (strongerOwnJob). It sets on pe the estimate of a job that states none and answers the block
 // the brief is given. It is the one check of a declaration, whoever declares.
-func (s *PlatformExperimentsService) heldToBaseline(ctx context.Context, pe *domain.PlatformExperiment, ownJobs bool) (string, error) {
+func (s *Service) heldToBaseline(ctx context.Context, pe *domain.PlatformExperiment, ownJobs bool) (string, error) {
 	baseline, err := s.baseline(ctx, pe, pe.BaselineJobID)
 	if err != nil {
 		return "", fmt.Errorf("platform_experiments: read baseline %s: %w", pe.BaselineJobID, err)
@@ -46,7 +46,7 @@ func (s *PlatformExperimentsService) heldToBaseline(ctx context.Context, pe *dom
 // that finished left. With none, or several, it answers the refusal that is the experiment's
 // status_reason until someone declares one or another baseline agent finishes: a choice between
 // jobs, and what to do about none, need judgement.
-func (s *PlatformExperimentsService) measuredJob(ctx context.Context, pe *domain.PlatformExperiment, signups []domain.AgentSignup) (string, error) {
+func (s *Service) measuredJob(ctx context.Context, pe *domain.PlatformExperiment, signups []domain.AgentSignup) (string, error) {
 	var joined, measuring, finished, gaveUp []string
 	for _, signup := range signups {
 		if signup.Role != domain.SignupRoleBaseline {
@@ -106,13 +106,13 @@ func (s *PlatformExperimentsService) measuredJob(ctx context.Context, pe *domain
 // agent finishes calls it, the one that changes what a declaration was refused for, and the
 // sweep for what neither could do. A declaration that is refused stores nothing, and the
 // experiment's status_reason says the refusal (undeclared) until it is cleared.
-func (s *PlatformExperimentsService) DeclareMeasured(ctx context.Context, id string) error {
+func (s *Service) DeclareMeasured(ctx context.Context, id string) error {
 	return s.declareFinished(ctx, id, "")
 }
 
 // declareFinished is DeclareMeasured for the job a finishing baseline agent named, or for the
 // one measuredJob finds when it named none.
-func (s *PlatformExperimentsService) declareFinished(ctx context.Context, id, jobID string) error {
+func (s *Service) declareFinished(ctx context.Context, id, jobID string) error {
 	pe, err := s.stored(ctx, id)
 	if err != nil {
 		return err
@@ -146,7 +146,7 @@ func (s *PlatformExperimentsService) declareFinished(ctx context.Context, id, jo
 
 // undeclared is why the open pe, which has no baseline, has none: what measuredJob refuses with,
 // or for the one job the platform would declare, what the declaration is refused for.
-func (s *PlatformExperimentsService) undeclared(ctx context.Context, pe *domain.PlatformExperiment, signups []domain.AgentSignup) (*refusal.Refusal, error) {
+func (s *Service) undeclared(ctx context.Context, pe *domain.PlatformExperiment, signups []domain.AgentSignup) (*refusal.Refusal, error) {
 	jobID, err := s.measuredJob(ctx, pe, signups)
 	var refused *refusal.Refusal
 	if errors.As(err, &refused) {
@@ -169,7 +169,7 @@ func (s *PlatformExperimentsService) undeclared(ctx context.Context, pe *domain.
 // StartIfReady starts the open platform experiment id when nothing is missing, in the request
 // that supplied what was: a declared baseline or a researcher. One that still waits is left open.
 // The sweep starts what only time brings: a starts_at that arrives.
-func (s *PlatformExperimentsService) StartIfReady(ctx context.Context, id string) error {
+func (s *Service) StartIfReady(ctx context.Context, id string) error {
 	pe, err := s.stored(ctx, id)
 	if err != nil {
 		return err
@@ -202,7 +202,7 @@ func maxHostedReached(limit int) string {
 // Signup gives a registered agent its place in a platform experiment: a fixed role, and
 // everything it is launched with. An empty QuotaTier defers to the experiment's
 // default_quota_tier policy (see domain.ResolveQuotaTier).
-func (s *PlatformExperimentsService) Signup(ctx context.Context, platformExpID string, signup domain.AgentSignup) error {
+func (s *Service) Signup(ctx context.Context, platformExpID string, signup domain.AgentSignup) error {
 	agentID := signup.AgentID
 	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
 	if err != nil {
@@ -263,7 +263,7 @@ func (s *PlatformExperimentsService) Signup(ctx context.Context, platformExpID s
 // RequireActive refuses a request that starts work or spends for an agent that has no further
 // part in the platform experiment: it closed, or the agent was cut. A token that is still alive
 // to file summaries does not reopen either.
-func (s *PlatformExperimentsService) RequireActive(ctx context.Context, platformExpID, agentID string) error {
+func (s *Service) RequireActive(ctx context.Context, platformExpID, agentID string) error {
 	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
 	if err != nil {
 		return fmt.Errorf("platform_experiments.RequireActive: %w", err)
@@ -284,7 +284,7 @@ func (s *PlatformExperimentsService) RequireActive(ctx context.Context, platform
 // notStartable says why the open platform experiment pe, whose roster is signups, is not started
 // at now, as a refusal whose reason is what the experiment answers as its status_reason, or nil
 // when it is to be started. With no refusal it returns what the researchers share (RunBudget).
-func (s *PlatformExperimentsService) notStartable(ctx context.Context, pe *domain.PlatformExperiment, signups []domain.AgentSignup, now time.Time) (float64, error) {
+func (s *Service) notStartable(ctx context.Context, pe *domain.PlatformExperiment, signups []domain.AgentSignup, now time.Time) (float64, error) {
 	// Every researcher starts from the baseline and is ranked against it, so none starts, and
 	// no machine is rented for one, before it is measured and declared.
 	if pe.BaselineJobID == "" {
@@ -312,7 +312,7 @@ func noResearchers(id string) error {
 
 // start makes the open pe running and allocates each agent that shares the budget its quota. It
 // answers the refusal of notStartable when pe is not to be started.
-func (s *PlatformExperimentsService) start(ctx context.Context, pe *domain.PlatformExperiment, now time.Time) ([]*domain.AgentQuota, error) {
+func (s *Service) start(ctx context.Context, pe *domain.PlatformExperiment, now time.Time) ([]*domain.AgentQuota, error) {
 	// Read before the transaction, which must issue no query of its own.
 	signups, err := s.store.ListAgentSignups(ctx, pe.ID)
 	if err != nil {

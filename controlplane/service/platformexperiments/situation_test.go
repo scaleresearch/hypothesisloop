@@ -176,7 +176,7 @@ func TestTheRecordOfACloseStatesTheAgentsAsTheyStoodAtTheClose(t *testing.T) {
 		Instance: &domain.AgentInstance{AskedAt: &asked, Name: "m-2", Reported: domain.InstanceRunning, EndReason: "gone", ExitedAt: &exited},
 		Activity: &domain.AgentActivity{Text: "running hl job submit", At: now.Add(-time.Minute)}}}},
 		unsettled: map[string]bool{"pe-ended": true}}
-	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), time.Minute)
+	svc := NewService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), time.Minute)
 	if err := svc.SweepExpired(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +254,7 @@ func (p personIdeas) OpenPersonIdeas(_ context.Context, pe string) (int, error) 
 
 // situationRun is a running platform experiment of two researchers, one with a job running and
 // one with none for 25 minutes, whose baseline job takes two devices of typeA on one node.
-func situationRun(t *testing.T) (*PlatformExperimentsService, *situationStore) {
+func situationRun(t *testing.T) (*Service, *situationStore) {
 	t.Helper()
 	now := time.Now().UTC()
 	idleSince, summaryAt := now.Add(-25*time.Minute), now.Add(-time.Hour)
@@ -277,7 +277,7 @@ func situationRun(t *testing.T) (*PlatformExperimentsService, *situationStore) {
 		allowance: map[string]domain.MessageAllowance{"ag-1": {LeftThisHour: 6}, "ag-2": {LeftThisHour: 4}},
 		inFlight:  []domain.HypothesisInFlight{{HypothesisID: "hyp-1", Queued: 1, Running: 1, AgentIDs: []string{"ag-1", "ag-gone"}}},
 	}
-	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), time.Minute).WithPersonIdeas(personIdeas{"pe-1": 2})
+	svc := NewService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), time.Minute).WithPersonIdeas(personIdeas{"pe-1": 2})
 	svc.placement = func(context.Context, string) (*Placement, error) {
 		return &Placement{
 			Clusters: []ClusterCapacity{{ClusterName: "c1", Accelerators: []AcceleratorCapacity{

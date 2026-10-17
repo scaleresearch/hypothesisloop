@@ -41,7 +41,7 @@ type Store interface {
 // early-termination path settles observed cost via Controller.settleAndMark instead.
 type QuotaService interface {
 	// GetObservedAgentQuota reports allocation against observed consumption only, never
-	// reservations — see quota.PlatformExperimentsService.GetObservedAgentQuota. The controller
+	// reservations — see platformexperiments.Service.GetObservedAgentQuota. The controller
 	// terminates work, and a termination is a verdict on what actually happened.
 	GetObservedAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error)
 	// RunBudget is the budget less what measuring the baseline spent: what the researchers' shares are carved from.
@@ -49,7 +49,7 @@ type QuotaService interface {
 }
 
 // ResearcherKeeper keeps the researchers of a running platform experiment at work as its pool
-// says, adding those it wants beyond the ones at work (quota.PlatformExperimentsService.KeepResearchers).
+// says, adding those it wants beyond the ones at work (platformexperiments.Service.KeepResearchers).
 type ResearcherKeeper interface {
 	KeepResearchers(ctx context.Context, pe *domain.PlatformExperiment, now time.Time) error
 }

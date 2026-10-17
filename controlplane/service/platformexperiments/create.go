@@ -24,7 +24,7 @@ var coordinatorReader = domain.Actor{Kind: domain.ActorCoordinator}
 
 // checkLength holds a platform experiment to a run of at most quota.max_platform_experiment_days.
 // Until its end it may rent machines.
-func (s *PlatformExperimentsService) checkLength(durationHours float64) error {
+func (s *Service) checkLength(durationHours float64) error {
 	if durationHours <= 0 {
 		return refuseUpdate(422, "invalid_length", "duration_hours is required and must be positive: how long the run lasts from the moment it starts")
 	}
@@ -38,7 +38,7 @@ func (s *PlatformExperimentsService) checkLength(durationHours float64) error {
 // withSettings returns spec with the platform's settings in the fields a request may leave to
 // them: scheduler.default_report_interval_seconds, stages.default as a run of max_agents
 // researchers has it (domain.RunStages) and quota.default_quota_tier.
-func (s *PlatformExperimentsService) withSettings(spec CreatePlatformExperimentRequest) CreatePlatformExperimentRequest {
+func (s *Service) withSettings(spec CreatePlatformExperimentRequest) CreatePlatformExperimentRequest {
 	if spec.ReportIntervalSeconds == 0 {
 		spec.ReportIntervalSeconds = s.cfg.DefaultReportIntervalSeconds
 	}
@@ -76,7 +76,7 @@ func trimTexts(spec CreatePlatformExperimentRequest) (CreatePlatformExperimentRe
 // validate is the one check of what a platform experiment is, whoever states it: a create, a
 // planner's proposal, the person accepting one or a patch of an existing one. It returns spec as it is stored,
 // with the platform's settings where spec leaves a field to them, and refuses with every problem it finds.
-func (s *PlatformExperimentsService) validate(spec CreatePlatformExperimentRequest, catalog domain.AgentTypeCatalog) (CreatePlatformExperimentRequest, error) {
+func (s *Service) validate(spec CreatePlatformExperimentRequest, catalog domain.AgentTypeCatalog) (CreatePlatformExperimentRequest, error) {
 	spec, err := trimTexts(s.withSettings(spec))
 	if err != nil {
 		return spec, err
@@ -134,7 +134,7 @@ func (s *PlatformExperimentsService) validate(spec CreatePlatformExperimentReque
 // never held to it, since a cluster that reports nothing for a moment must not stop a
 // coordinator declaring its baseline or an owner renaming a run. It answers the clusters that
 // have the type it was sized for.
-func (s *PlatformExperimentsService) requireReachable(ctx context.Context, projectID string, sizedFor *domain.AcceleratorType) ([]domain.Cluster, error) {
+func (s *Service) requireReachable(ctx context.Context, projectID string, sizedFor *domain.AcceleratorType) ([]domain.Cluster, error) {
 	reachable, err := s.reachable(ctx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.requireReachable: %w", err)
@@ -194,7 +194,7 @@ func requireImage(offered []domain.JobImage, clusters []domain.Cluster, image st
 
 // Create creates a new platform experiment in open status (accepting signups immediately), with
 // the agents req carries signed up in the same write.
-func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatformExperimentRequest) (*domain.PlatformExperiment, error) {
+func (s *Service) Create(ctx context.Context, req CreatePlatformExperimentRequest) (*domain.PlatformExperiment, error) {
 	now := time.Now().UTC()
 	catalog, err := s.store.ProjectAgentTypeCatalog(ctx, req.ProjectID)
 	if err != nil {
@@ -261,7 +261,7 @@ func (s *PlatformExperimentsService) Create(ctx context.Context, req CreatePlatf
 // requireContinuable refuses a run to continue that is not one: continues names a closed platform
 // experiment of the project that keeps its code in repository and declared a baseline, whose
 // commit the new baseline starts from. Empty continues starts fresh.
-func (s *PlatformExperimentsService) requireContinuable(ctx context.Context, projectID, repository, continues string) error {
+func (s *Service) requireContinuable(ctx context.Context, projectID, repository, continues string) error {
 	if continues == "" {
 		return nil
 	}
@@ -285,7 +285,7 @@ func (s *PlatformExperimentsService) requireContinuable(ctx context.Context, pro
 // requireContinuedMetrics refuses metrics that measure otherwise than the run continues names:
 // a run that carries on another keeps its metric keys and their directions, or the two rank
 // different things. Empty continues starts fresh and declares any.
-func (s *PlatformExperimentsService) requireContinuedMetrics(ctx context.Context, continues string, metrics []domain.MetricDefinition) error {
+func (s *Service) requireContinuedMetrics(ctx context.Context, continues string, metrics []domain.MetricDefinition) error {
 	if continues == "" {
 		return nil
 	}
@@ -317,7 +317,7 @@ func metricGoals(metrics []domain.MetricDefinition) string {
 }
 
 // stored reads the platform experiment id as a write just left it.
-func (s *PlatformExperimentsService) stored(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
+func (s *Service) stored(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
 	pe, err := s.store.GetPlatformExperiment(ctx, id)
 	if err != nil {
 		return nil, err
@@ -340,7 +340,7 @@ func noPlatformExperiment(id string) error {
 // CreateExperiment creates the platform experiment req asks for, for by: in the repository it
 // names or one the platform creates, with what the experiment file states under req when it asks
 // from_repo, and with the hosted agents its pool names.
-func (s *PlatformExperimentsService) CreateExperiment(ctx context.Context, req CreatePlatformExperimentRequest, by domain.Actor) (*domain.PlatformExperiment, error) {
+func (s *Service) CreateExperiment(ctx context.Context, req CreatePlatformExperimentRequest, by domain.Actor) (*domain.PlatformExperiment, error) {
 	named, err := s.repositoryOf(ctx, req.ProjectID, req.Repository, req.RepositoryAccount)
 	if err != nil {
 		return nil, err

@@ -28,7 +28,7 @@ type AgentDataCost struct {
 
 // AgentDataAccess is the agent's key and the two prefixes it opens. The key is created in the
 // object store on the first call and read from the signup afterwards.
-func (s *PlatformExperimentsService) AgentDataAccess(ctx context.Context, platformExperimentID, agentID string) (*domain.DataAccess, error) {
+func (s *Service) AgentDataAccess(ctx context.Context, platformExperimentID, agentID string) (*domain.DataAccess, error) {
 	key, err := s.store.AgentDataKey(ctx, platformExperimentID, agentID, func(ctx context.Context) (domain.DataKey, error) {
 		key, err := objectstore.NewDataKey()
 		if err != nil {
@@ -51,7 +51,7 @@ func (s *PlatformExperimentsService) AgentDataAccess(ctx context.Context, platfo
 
 // DataUsage lists the platform experiment's whole prefix once and attributes each object to the agent
 // segment of its key — one request to the store, not one per agent.
-func (s *PlatformExperimentsService) DataUsage(ctx context.Context, platformExperimentID string) (*DataUsage, error) {
+func (s *Service) DataUsage(ctx context.Context, platformExperimentID string) (*DataUsage, error) {
 	prefix := objectstore.PlatformExperimentPrefix(platformExperimentID)
 	objects, err := s.dataStore.List(ctx, prefix)
 	if err != nil {

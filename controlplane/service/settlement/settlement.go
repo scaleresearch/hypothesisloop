@@ -15,7 +15,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
-// UsageWriter is the narrow slice of quota.PlatformExperimentsService (or any equivalent)
+// UsageWriter is the narrow slice of platformexperiments.Service (or any equivalent)
 // Settle needs: an idempotent absolute-set write of one resource dimension's final cost.
 type UsageWriter interface {
 	SetObservedUsage(ctx context.Context, exp *domain.Experiment, amounts map[domain.ResourceType]float64) error

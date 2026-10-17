@@ -57,7 +57,7 @@ type RepositoryCheck struct {
 // chooseRepository is where a create keeps its code: named, which repositoryOf checked, or the
 // account a new one is created on, which the git host refuses here when it would refuse the
 // creation for the account alone.
-func (s *PlatformExperimentsService) chooseRepository(ctx context.Context, projectID, named, account string) (RepositoryChoice, error) {
+func (s *Service) chooseRepository(ctx context.Context, projectID, named, account string) (RepositoryChoice, error) {
 	if named != "" {
 		return RepositoryChoice{Named: named, URL: s.repos.URL(named)}, nil
 	}
@@ -69,7 +69,7 @@ func (s *PlatformExperimentsService) chooseRepository(ctx context.Context, proje
 // one, from the template, and records it, from which its machines are started. One whose
 // repository the git host does not create is closed repository_not_created with what the host
 // answered.
-func (s *PlatformExperimentsService) ProvideRepositories(ctx context.Context) error {
+func (s *Service) ProvideRepositories(ctx context.Context) error {
 	pending, err := s.store.RepositoriesToCreate(ctx)
 	if err != nil {
 		return fmt.Errorf("platform_experiments.ProvideRepositories: %w", err)
@@ -98,7 +98,7 @@ func (s *PlatformExperimentsService) ProvideRepositories(ctx context.Context) er
 }
 
 // wakeRepositories wakes the repository pass for pe when it awaits its repository.
-func (s *PlatformExperimentsService) wakeRepositories(pe *domain.PlatformExperiment) {
+func (s *Service) wakeRepositories(pe *domain.PlatformExperiment) {
 	if !pe.AwaitsRepository() {
 		return
 	}
@@ -110,7 +110,7 @@ func (s *PlatformExperimentsService) wakeRepositories(pe *domain.PlatformExperim
 
 // StartRepositoryPass runs ProvideRepositories when a create wakes it and every interval, until
 // ctx is cancelled, each pass bounded by passTimeout.
-func (s *PlatformExperimentsService) StartRepositoryPass(ctx context.Context, interval, passTimeout time.Duration) {
+func (s *Service) StartRepositoryPass(ctx context.Context, interval, passTimeout time.Duration) {
 	if s.repos == nil {
 		panic("quota: StartRepositoryPass without WithRepositories: no platform experiment would get its repository")
 	}
@@ -133,7 +133,7 @@ func (s *PlatformExperimentsService) StartRepositoryPass(ctx context.Context, in
 
 // repositoryOf checks what a request says of its repository: the one it names must be reachable
 // and is returned as the git host names it, and an account is said only for one to be created.
-func (s *PlatformExperimentsService) repositoryOf(ctx context.Context, projectID, repository, account string) (string, error) {
+func (s *Service) repositoryOf(ctx context.Context, projectID, repository, account string) (string, error) {
 	if repository == "" {
 		return "", nil
 	}
@@ -149,7 +149,7 @@ var neverFromTheFile = []string{"budget_accelerator_hours", "max_agents", "resea
 
 // fromRepo returns req laid over the experiment file of the repository it names: every field the
 // body carried is the request's, every other one the file's.
-func (s *PlatformExperimentsService) fromRepo(ctx context.Context, req CreatePlatformExperimentRequest) (CreatePlatformExperimentRequest, error) {
+func (s *Service) fromRepo(ctx context.Context, req CreatePlatformExperimentRequest) (CreatePlatformExperimentRequest, error) {
 	data, err := s.repos.File(ctx, req.ProjectID, req.Repository, domain.ExperimentFile)
 	if err != nil {
 		return req, err
@@ -184,7 +184,7 @@ type ExperimentFile struct {
 
 // experimentFile reads the experiment file of a repository the project's org reaches, by the
 // decoding a create with from_repo uses, so that what is shown is what such a create would take.
-func (s *PlatformExperimentsService) experimentFile(ctx context.Context, projectID, repository string) (*ExperimentFile, error) {
+func (s *Service) experimentFile(ctx context.Context, projectID, repository string) (*ExperimentFile, error) {
 	named, err := s.repos.Reachable(ctx, projectID, repository)
 	if err != nil {
 		return nil, err
@@ -238,13 +238,13 @@ func decodeExperimentBase(data []byte) (CreatePlatformExperimentRequest, error) 
 
 // ReadExperimentFile reads the experiment file of repository, or of the project's own when it is
 // empty, and creates nothing.
-func (s *PlatformExperimentsService) ReadExperimentFile(ctx context.Context, projectID, repository string) (*ExperimentFile, error) {
+func (s *Service) ReadExperimentFile(ctx context.Context, projectID, repository string) (*ExperimentFile, error) {
 	return s.experimentFile(ctx, projectID, repository)
 }
 
 // CheckRepository answers where a platform experiment of projectID naming repository on account
 // would keep its code, as its create would, and creates nothing.
-func (s *PlatformExperimentsService) CheckRepository(ctx context.Context, projectID, repository, account string) (RepositoryCheck, error) {
+func (s *Service) CheckRepository(ctx context.Context, projectID, repository, account string) (RepositoryCheck, error) {
 	named, err := s.repositoryOf(ctx, projectID, repository, account)
 	if err != nil {
 		return RepositoryCheck{}, err

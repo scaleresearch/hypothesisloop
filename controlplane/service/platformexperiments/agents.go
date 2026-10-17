@@ -65,7 +65,7 @@ type JoinedAgent struct {
 // agent that waits for the start says so, and for what, and its instance reads waiting. Once it
 // closed before the start, each says it never launched and why (neverLaunched). A machine that is
 // asked for and not running yet says that too (instanceStarting), in any status.
-func (s *PlatformExperimentsService) roster(ctx context.Context, platformExpID string, signups []domain.AgentSignup, reader domain.Actor) ([]JoinedAgent, error) {
+func (s *Service) roster(ctx context.Context, platformExpID string, signups []domain.AgentSignup, reader domain.Actor) ([]JoinedAgent, error) {
 	out := make([]JoinedAgent, len(signups))
 	now := time.Now()
 	for i, signup := range signups {
@@ -174,7 +174,7 @@ func refuseSignup(status int, reason, format string, args ...any) error {
 // AddAgent joins one agent to a platform experiment: the registered agent req names, or a new
 // one created in the experiment's org. by is whose credential asked. The answer holds that one
 // agent.
-func (s *PlatformExperimentsService) AddAgent(ctx context.Context, platformExpID string, req AddAgentRequest, by domain.Actor, launch AgentLaunch) ([]domain.AgentSignup, error) {
+func (s *Service) AddAgent(ctx context.Context, platformExpID string, req AddAgentRequest, by domain.Actor, launch AgentLaunch) ([]domain.AgentSignup, error) {
 	role, err := domain.ParseSignupRole(req.Role)
 	if err != nil {
 		return nil, refuseSignup(400, "unknown_role", "%s", err)
@@ -236,7 +236,7 @@ func (s *PlatformExperimentsService) AddAgent(ctx context.Context, platformExpID
 // lateJoin is what a researcher joining the running pe takes its quota from. Once the run started
 // only a researcher joins, in the place of one that ended or one a raised max_agents gave, and its
 // coordinator or a person adds it.
-func (s *PlatformExperimentsService) lateJoin(ctx context.Context, pe *domain.PlatformExperiment, role domain.SignupRole, by domain.Actor) (*db.LateJoin, error) {
+func (s *Service) lateJoin(ctx context.Context, pe *domain.PlatformExperiment, role domain.SignupRole, by domain.Actor) (*db.LateJoin, error) {
 	if role != domain.SignupRoleCompetitor {
 		return nil, refuseSignup(409, "signup_closed", "platform experiment %s is running, and only a researcher (role competitor) joins it then", pe.ID)
 	}
@@ -248,7 +248,7 @@ func (s *PlatformExperimentsService) lateJoin(ctx context.Context, pe *domain.Pl
 
 // lateShare is what a researcher joining the running pe is given its quota from: what each
 // researcher used, and the least share worth giving, one trial of the baseline.
-func (s *PlatformExperimentsService) lateShare(ctx context.Context, pe *domain.PlatformExperiment) (*db.LateJoin, error) {
+func (s *Service) lateShare(ctx context.Context, pe *domain.PlatformExperiment) (*db.LateJoin, error) {
 	quotas, err := s.researcherQuotas(ctx, pe)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.lateJoin: %w", err)
@@ -266,7 +266,7 @@ func (s *PlatformExperimentsService) lateShare(ctx context.Context, pe *domain.P
 
 // researcherQuotas is the quota and use of each researcher of pe that holds one and was not cut.
 // Ended is left unset.
-func (s *PlatformExperimentsService) researcherQuotas(ctx context.Context, pe *domain.PlatformExperiment) ([]domain.ResearcherQuota, error) {
+func (s *Service) researcherQuotas(ctx context.Context, pe *domain.PlatformExperiment) ([]domain.ResearcherQuota, error) {
 	researchers, err := s.store.ListSignupsByRole(ctx, pe.ID, domain.SignupRoleCompetitor)
 	if err != nil {
 		return nil, err
@@ -318,7 +318,7 @@ func agentNameTaken(name string) error {
 	return refuseSignup(409, "agent_name_taken", "another agent of this platform experiment is named %q, and a name tells its agents apart: state another name, or none to have the platform name it by its role", name)
 }
 
-func (s *PlatformExperimentsService) joinRegistered(ctx context.Context, pe *domain.PlatformExperiment, req AddAgentRequest, signup domain.AgentSignup, late *db.LateJoin) ([]domain.AgentSignup, error) {
+func (s *Service) joinRegistered(ctx context.Context, pe *domain.PlatformExperiment, req AddAgentRequest, signup domain.AgentSignup, late *db.LateJoin) ([]domain.AgentSignup, error) {
 	platformExpID := pe.ID
 	if req.Name != "" {
 		return nil, refuseSignup(400, "invalid_request", "name describes an agent to create and cannot be set with agent_id")
@@ -364,7 +364,7 @@ func (s *PlatformExperimentsService) joinRegistered(ctx context.Context, pe *dom
 	return []domain.AgentSignup{*joined}, nil
 }
 
-func (s *PlatformExperimentsService) spawn(ctx context.Context, pe *domain.PlatformExperiment, req AddAgentRequest, signup domain.AgentSignup, late *db.LateJoin) ([]domain.AgentSignup, error) {
+func (s *Service) spawn(ctx context.Context, pe *domain.PlatformExperiment, req AddAgentRequest, signup domain.AgentSignup, late *db.LateJoin) ([]domain.AgentSignup, error) {
 	platformExpID := pe.ID
 	id, err := domain.NewID(domain.AgentIDPrefix)
 	if err != nil {
@@ -399,7 +399,7 @@ func (s *PlatformExperimentsService) spawn(ctx context.Context, pe *domain.Platf
 // roster is what quota was divided over: an agent leaves by being cut or by the experiment closing.
 // by is whose credential asked: a coordinator's token removes only an agent a coordinator's token
 // of this platform experiment added, and never one a person or an API key did.
-func (s *PlatformExperimentsService) RemoveAgent(ctx context.Context, platformExpID, agentID string, by domain.Actor) error {
+func (s *Service) RemoveAgent(ctx context.Context, platformExpID, agentID string, by domain.Actor) error {
 	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
 	if err != nil {
 		return fmt.Errorf("platform_experiments.RemoveAgent: %w", err)
@@ -435,7 +435,7 @@ func (s *PlatformExperimentsService) RemoveAgent(ctx context.Context, platformEx
 }
 
 // nameAddedBy names whoever added each agent.
-func (s *PlatformExperimentsService) nameAddedBy(ctx context.Context, signups []domain.AgentSignup) error {
+func (s *Service) nameAddedBy(ctx context.Context, signups []domain.AgentSignup) error {
 	actors := make([]*domain.Actor, 0, len(signups))
 	for i := range signups {
 		if signups[i].Actor != nil {
@@ -450,7 +450,7 @@ func (s *PlatformExperimentsService) nameAddedBy(ctx context.Context, signups []
 
 // Join adds the agent req asks for to the platform experiment, added by by, and answers it as the
 // roster lists it to by.
-func (s *PlatformExperimentsService) Join(ctx context.Context, platformExpID string, req AddAgentRequest, by domain.Actor, launch AgentLaunch) ([]JoinedAgent, error) {
+func (s *Service) Join(ctx context.Context, platformExpID string, req AddAgentRequest, by domain.Actor, launch AgentLaunch) ([]JoinedAgent, error) {
 	signups, err := s.AddAgent(ctx, platformExpID, req, by, launch)
 	if err != nil {
 		return nil, err
@@ -460,7 +460,7 @@ func (s *PlatformExperimentsService) Join(ctx context.Context, platformExpID str
 
 // Roster is every agent that joined the platform experiment, in the order they did, as reader
 // reads them, or ErrPlatformExperimentNotFound.
-func (s *PlatformExperimentsService) Roster(ctx context.Context, platformExpID string, reader domain.Actor) ([]JoinedAgent, error) {
+func (s *Service) Roster(ctx context.Context, platformExpID string, reader domain.Actor) ([]JoinedAgent, error) {
 	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
 	if err != nil {
 		return nil, err
@@ -476,7 +476,7 @@ func (s *PlatformExperimentsService) Roster(ctx context.Context, platformExpID s
 }
 
 // namedRoster is roster with whoever added each agent named.
-func (s *PlatformExperimentsService) namedRoster(ctx context.Context, platformExpID string, signups []domain.AgentSignup, reader domain.Actor) ([]JoinedAgent, error) {
+func (s *Service) namedRoster(ctx context.Context, platformExpID string, signups []domain.AgentSignup, reader domain.Actor) ([]JoinedAgent, error) {
 	if err := s.nameAddedBy(ctx, signups); err != nil {
 		return nil, err
 	}

@@ -51,7 +51,7 @@ func TestAdmissionObservesUsageWithoutASecondPoolConnection(t *testing.T) {
 		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
 	}))
 	defer metrics.Close()
-	svc := NewPlatformExperimentsService(&inTxStore{}, domain.QuotaConfig{}, zap.NewNop(), metricsdb.New(metrics.URL), 3*time.Minute)
+	svc := NewService(&inTxStore{}, domain.QuotaConfig{}, zap.NewNop(), metricsdb.New(metrics.URL), 3*time.Minute)
 	ctx := context.Background()
 
 	exp := &domain.Experiment{ID: "exp-1", AgentID: "agent-1", PlatformExperimentID: testPE.ID}

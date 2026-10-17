@@ -38,7 +38,7 @@ func (s *hostingStore) CreatePlatformExperiment(ctx context.Context, pe *domain.
 func hostingAPI(t *testing.T, repos *fakeRepositories) (*hostingStore, func(body map[string]any) (int, map[string]any)) {
 	t.Helper()
 	store := &hostingStore{}
-	svc := reaching(platformexperiments.NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), nil, time.Minute), domain.CPUType)
+	svc := reaching(platformexperiments.NewService(store, platformexperimentstest.Settings, zap.NewNop(), nil, time.Minute), domain.CPUType)
 	placement := authtest.Placement{Projects: map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}}, PlatformExperiments: map[string]domain.Tenancy{}}
 	router := authtest.Router(ownerOfA)
 	doc := NewDoc(router, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
@@ -176,7 +176,7 @@ func TestACoordinatorsTokenChangesTheDescriptionAndNothingARunsCostFollowsFrom(t
 	put := func(caller auth.Principal, body map[string]any) (int, map[string]any, *domain.PlatformExperiment) {
 		t.Helper()
 		store := &createdStore{created: []*domain.PlatformExperiment{live()}}
-		svc := reaching(platformexperiments.NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), nil, time.Minute), domain.CPUType)
+		svc := reaching(platformexperiments.NewService(store, platformexperimentstest.Settings, zap.NewNop(), nil, time.Minute), domain.CPUType)
 		placement := authtest.Placement{
 			Projects:            map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}},
 			PlatformExperiments: map[string]domain.Tenancy{"pe-1": {PlatformExperimentID: "pe-1", ProjectID: "prj-a", OrgID: "org-a"}},

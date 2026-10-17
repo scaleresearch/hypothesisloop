@@ -38,9 +38,9 @@ func measuredBaseline() *platformexperiments.Baseline {
 }
 
 // planningRouter is the planning routes and the ones a draft passes through, over store.
-func planningRouter(t *testing.T, store platformexperiments.PlatformExperimentsStore, caller auth.Principal) (*platformexperiments.PlatformExperimentsService, func(method, path string, body any) (int, map[string]any)) {
+func planningRouter(t *testing.T, store platformexperiments.Store, caller auth.Principal) (*platformexperiments.Service, func(method, path string, body any) (int, map[string]any)) {
 	t.Helper()
-	svc := platformexperiments.NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), time.Minute)
+	svc := platformexperiments.NewService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), time.Minute)
 	placement := authtest.Placement{
 		Projects: map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}, "prj-b": {ID: "prj-b", OrgID: "org-b"}},
 		PlatformExperiments: map[string]domain.Tenancy{
@@ -1201,7 +1201,7 @@ func TestAcceptingADraftTakesTheNameThePersonGaveIt(t *testing.T) {
 // or closes it.
 func TestAProposalIsAcceptedAsProposedUnlessAPersonActsFirst(t *testing.T) {
 	creator := domain.Actor{Kind: domain.ActorUser, ID: "u-creator"}
-	proposed := func(t *testing.T) (*draftStore, *platformexperiments.PlatformExperimentsService, func(method, path string, body any) (int, map[string]any)) {
+	proposed := func(t *testing.T) (*draftStore, *platformexperiments.Service, func(method, path string, body any) (int, map[string]any)) {
 		t.Helper()
 		store := draftWithPlanner()
 		store.created[0].Actor = &creator
@@ -1306,7 +1306,7 @@ func TestAProposalWithQuestionsWaitsForAPersonWhoseAnswersGoIntoTheBrief(t *test
 		{"question": "How big a win counts?", "answer": "1.5x the control's throughput."},
 		{"question": "Which batch sizes are held equal?", "answer": "32 only."},
 	}
-	proposed := func(t *testing.T) (*draftStore, *platformexperiments.PlatformExperimentsService, func(method, path string, body any) (int, map[string]any)) {
+	proposed := func(t *testing.T) (*draftStore, *platformexperiments.Service, func(method, path string, body any) (int, map[string]any)) {
 		t.Helper()
 		store := draftWithPlanner()
 		_, propose := planningRouter(t, store, thePlanner)

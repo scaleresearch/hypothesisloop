@@ -15,7 +15,7 @@ import (
 // resolvedPool is pool as it is stored: each entry's agent type and model filled as a joining
 // agent's are, entries that come to name one agent type and model merged. 422 invalid_agents for
 // an entry no agent can be started as; validate holds the rest, max_agents among it.
-func (s *PlatformExperimentsService) resolvedPool(catalog domain.AgentTypeCatalog, pool domain.ResearcherPool) (domain.ResearcherPool, error) {
+func (s *Service) resolvedPool(catalog domain.AgentTypeCatalog, pool domain.ResearcherPool) (domain.ResearcherPool, error) {
 	resolved, err := pool.Resolved(catalog)
 	if err != nil {
 		return nil, refuseUpdate(422, "invalid_agents", "%s", err)
@@ -38,7 +38,7 @@ func (s *PlatformExperimentsService) resolvedPool(catalog domain.AgentTypeCatalo
 // model account refuses its calls now, and stops at the first one the budget its researchers
 // left unspent holds no trial for (db.ErrNoShareLeft): each is given its quota as any researcher
 // that joins a running platform experiment is (lateShare).
-func (s *PlatformExperimentsService) KeepResearchers(ctx context.Context, pe *domain.PlatformExperiment, now time.Time) error {
+func (s *Service) KeepResearchers(ctx context.Context, pe *domain.PlatformExperiment, now time.Time) error {
 	launch := s.launch
 	if pe.Status != domain.PlatformExpRunning || !pe.CoordinatorHosted {
 		return nil
@@ -139,7 +139,7 @@ func (s *PlatformExperimentsService) KeepResearchers(ctx context.Context, pe *do
 // refusedModels is the models whose account the provider refuses the calls of now, as the
 // harness of an agent of pe at work on one last read it: a researcher added on one would only wait.
 // An agent on its type's model is on the model catalog resolves.
-func (s *PlatformExperimentsService) refusedModels(ctx context.Context, pe *domain.PlatformExperiment, catalog domain.AgentTypeCatalog, now time.Time) (map[string]bool, error) {
+func (s *Service) refusedModels(ctx context.Context, pe *domain.PlatformExperiment, catalog domain.AgentTypeCatalog, now time.Time) (map[string]bool, error) {
 	states, err := s.metrics.LatestHarnessState(ctx, pe.ID, pe.CreatedAt)
 	if err != nil {
 		return nil, err

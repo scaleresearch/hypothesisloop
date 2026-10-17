@@ -29,7 +29,7 @@ type Handlers struct {
 	Logger   *zap.Logger
 
 	Agents              *accounts.Agents
-	PlatformExperiments *platformexperiments.PlatformExperimentsService
+	PlatformExperiments *platformexperiments.Service
 	Hypotheses          platformexperiments.Hypotheses
 	Launch              platformexperiments.AgentLaunch
 	Sharing             *platformexperiments.Sharing

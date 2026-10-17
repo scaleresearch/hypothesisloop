@@ -48,7 +48,7 @@ func draftName(goal string) string {
 // the planner proposes the rest and a person accepts it. A repository to be created is created
 // after this returns, by the repository pass it wakes (ProvideRepositories). repository and account
 // say where it keeps its code, as on a create.
-func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID, goal, continues, repository, account string, by domain.Actor) (*domain.PlatformExperiment, error) {
+func (s *Service) CreateDraft(ctx context.Context, projectID, goal, continues, repository, account string, by domain.Actor) (*domain.PlatformExperiment, error) {
 	named, err := s.repositoryOf(ctx, projectID, repository, account)
 	if err != nil {
 		return nil, err
@@ -68,7 +68,7 @@ func (s *PlatformExperimentsService) CreateDraft(ctx context.Context, projectID,
 	return pe, nil
 }
 
-func (s *PlatformExperimentsService) createDraft(ctx context.Context, projectID, goal, continues string, by domain.Actor, repository RepositoryChoice) (*domain.PlatformExperiment, error) {
+func (s *Service) createDraft(ctx context.Context, projectID, goal, continues string, by domain.Actor, repository RepositoryChoice) (*domain.PlatformExperiment, error) {
 	planning, launch := s.planning, s.launch
 	goal = strings.TrimSpace(goal)
 	if goal == "" {

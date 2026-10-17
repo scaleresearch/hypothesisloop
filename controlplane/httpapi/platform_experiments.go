@@ -18,13 +18,13 @@ import (
 )
 
 type platformExperimentsAPI struct {
-	experiments *platformexperiments.PlatformExperimentsService
+	experiments *platformexperiments.Service
 	access      *auth.Access
 	logger      *zap.Logger
 }
 
 // registerPlatformExperiments registers the platform experiment operations on the shared Huma doc.
-func registerPlatformExperiments(doc *Doc, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
+func registerPlatformExperiments(doc *Doc, experiments *platformexperiments.Service, logger *zap.Logger) {
 	a := platformExperimentsAPI{experiments: experiments, access: doc.Access, logger: logger}
 
 	// ---- platform experiments ----

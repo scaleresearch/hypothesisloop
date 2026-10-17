@@ -29,7 +29,7 @@ type JobCost struct {
 // JobCost reports one job's actual cost. A terminal job reports what was settled; a running job
 // reports its observed-so-far cost, computed the same way the controller's quota-exhaustion check
 // computes it, so the two can never disagree about what a job has consumed.
-func (s *PlatformExperimentsService) JobCost(ctx context.Context, experimentID string) (*JobCost, error) {
+func (s *Service) JobCost(ctx context.Context, experimentID string) (*JobCost, error) {
 	exp, err := s.store.GetExperiment(ctx, experimentID)
 	if err != nil {
 		return nil, fmt.Errorf("quota.JobCost: %w", err)

@@ -15,7 +15,7 @@ type RunHealth struct {
 }
 
 // Health reads the latest health values of platform experiment id from the metrics store.
-func (s *PlatformExperimentsService) Health(ctx context.Context, id string) (*RunHealth, error) {
+func (s *Service) Health(ctx context.Context, id string) (*RunHealth, error) {
 	pe, err := s.store.GetPlatformExperiment(ctx, id)
 	if err != nil {
 		return nil, err

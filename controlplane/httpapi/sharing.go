@@ -19,7 +19,7 @@ type sharingAPI struct {
 // registerSharing registers how staff share a platform experiment with every account and take
 // that back. The staff audience is the whole rule: what sharing lets a caller reach is
 // auth.Access's. A platform experiment is answered as its own routes answer it.
-func registerSharing(doc *Doc, sharing *platformexperiments.Sharing, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
+func registerSharing(doc *Doc, sharing *platformexperiments.Sharing, experiments *platformexperiments.Service, logger *zap.Logger) {
 	registerSharingWith(doc, sharing, platformExperimentsAPI{experiments: experiments, access: doc.Access, logger: logger}.answer)
 }
 

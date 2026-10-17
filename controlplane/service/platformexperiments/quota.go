@@ -17,7 +17,7 @@ import (
 
 // GetAgentQuota returns an agent's allocation and current usage for a platform experiment, merging
 // the allocation and current desired estimates (Postgres) with observed consumption (metrics DB).
-func (s *PlatformExperimentsService) GetAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error) {
+func (s *Service) GetAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error) {
 	aq, err := s.store.GetAgentQuota(ctx, agentID, platformExpID)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.GetAgentQuota: %w", err)
@@ -58,7 +58,7 @@ func (s *PlatformExperimentsService) GetAgentQuota(ctx context.Context, agentID,
 // RunBudget is what the researchers of pe share: its budget less what its baseline agents have
 // spent. The budget caps everything the platform experiment spends, measuring the baseline
 // included, so shares are carved from what that left.
-func (s *PlatformExperimentsService) RunBudget(ctx context.Context, pe *domain.PlatformExperiment) (float64, error) {
+func (s *Service) RunBudget(ctx context.Context, pe *domain.PlatformExperiment) (float64, error) {
 	spent, err := s.baselineSpend(ctx, pe)
 	if err != nil {
 		return 0, err
@@ -67,7 +67,7 @@ func (s *PlatformExperimentsService) RunBudget(ctx context.Context, pe *domain.P
 }
 
 // baselineSpend is what the agents of role baseline of pe have spent.
-func (s *PlatformExperimentsService) baselineSpend(ctx context.Context, pe *domain.PlatformExperiment) (float64, error) {
+func (s *Service) baselineSpend(ctx context.Context, pe *domain.PlatformExperiment) (float64, error) {
 	agents, err := s.store.ListSignupsByRole(ctx, pe.ID, domain.SignupRoleBaseline)
 	if err != nil {
 		return 0, fmt.Errorf("platform_experiments.baselineSpend: %w", err)
@@ -83,7 +83,7 @@ func (s *PlatformExperimentsService) baselineSpend(ctx context.Context, pe *doma
 	return spent, nil
 }
 
-func (s *PlatformExperimentsService) GetObservedAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error) {
+func (s *Service) GetObservedAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error) {
 	aq, err := s.store.GetAgentQuota(ctx, agentID, platformExpID)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.GetObservedAgentQuota: %w", err)
@@ -128,7 +128,7 @@ type AgentQuotaView struct {
 }
 
 // QuotaView returns one agent's quota view, nil when it has none.
-func (s *PlatformExperimentsService) QuotaView(ctx context.Context, agentID, platformExpID string) (*AgentQuotaView, error) {
+func (s *Service) QuotaView(ctx context.Context, agentID, platformExpID string) (*AgentQuotaView, error) {
 	aq, err := s.store.GetAgentQuota(ctx, agentID, platformExpID)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.QuotaView: %w", err)
@@ -162,7 +162,7 @@ func (s *PlatformExperimentsService) QuotaView(ctx context.Context, agentID, pla
 
 // ListQuotas returns every agent's quota view for a platform experiment, with consumption read
 // from the metrics store in one batched query.
-func (s *PlatformExperimentsService) ListQuotas(ctx context.Context, platformExpID string) ([]*AgentQuotaView, error) {
+func (s *Service) ListQuotas(ctx context.Context, platformExpID string) ([]*AgentQuotaView, error) {
 	quotas, err := s.store.ListAgentQuotas(ctx, platformExpID)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.ListQuotas: %w", err)
@@ -187,7 +187,7 @@ func (s *PlatformExperimentsService) ListQuotas(ctx context.Context, platformExp
 // quotaViews turns quotas that carry observed consumption into views. What remains is read
 // where the quotas hold what admission counts, every job that has not ended at its whole
 // estimate, and what is used after a running job's estimate gives way to what it has spent.
-func (s *PlatformExperimentsService) quotaViews(ctx context.Context, pe *domain.PlatformExperiment, quotas []*domain.AgentQuota) ([]*AgentQuotaView, error) {
+func (s *Service) quotaViews(ctx context.Context, pe *domain.PlatformExperiment, quotas []*domain.AgentQuota) ([]*AgentQuotaView, error) {
 	if err := s.store.AddDesiredQuotaUsage(ctx, pe.ID, quotas); err != nil {
 		return nil, fmt.Errorf("desired usage: %w", err)
 	}
@@ -245,7 +245,7 @@ func (e *concurrencyCapError) ConcurrencyCapExceeded() bool { return true }
 // answer by refreshing priority alone. A submission the transaction refuses is its
 // *db.AdmitRefusal. createDataKey runs only for an inserted row, inside the transaction (see
 // db.AdmitExperimentTx).
-func (s *PlatformExperimentsService) AdmitExperiment(ctx context.Context, exp *domain.Experiment, rateLimit db.SubmissionRateLimit, createDataKey func(context.Context) error) (db.AdmitDecision, error) {
+func (s *Service) AdmitExperiment(ctx context.Context, exp *domain.Experiment, rateLimit db.SubmissionRateLimit, createDataKey func(context.Context) error) (db.AdmitDecision, error) {
 	// Read before the transaction opens: created_at never changes, and a pool read made while the
 	// transaction holds its own connection needs a second one, which a burst of submissions as
 	// large as the pool can never get.
@@ -268,7 +268,7 @@ func (s *PlatformExperimentsService) AdmitExperiment(ctx context.Context, exp *d
 // ReserveAdmittedFlavor revalidates quota and the platform experiment's concurrency cap
 // (autoscaler.md's spend-rate control) before persisting the selected accelerator flavor.
 // acceleratorCount is the job's total accelerator footprint (0 for jobs with none).
-func (s *PlatformExperimentsService) ReserveAdmittedFlavor(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, acceleratorCount int) error {
+func (s *Service) ReserveAdmittedFlavor(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, acceleratorCount int) error {
 	reason, err := s.store.ReserveAdmittedFlavorTx(ctx, experimentID, acceleratorType, estimatedCost, acceleratorCount, s.cfg.DefaultMaxConcurrentAccelerators,
 		func(ctx context.Context, agentID, platformExpID string, platformExpStart time.Time) (*domain.AgentQuota, error) {
 			aq := &domain.AgentQuota{AgentID: agentID, PlatformExperimentID: platformExpID}
@@ -289,7 +289,7 @@ func (s *PlatformExperimentsService) ReserveAdmittedFlavor(ctx context.Context, 
 	return nil
 }
 
-func (s *PlatformExperimentsService) SetObservedUsage(ctx context.Context, exp *domain.Experiment, amounts map[domain.ResourceType]float64) error {
+func (s *Service) SetObservedUsage(ctx context.Context, exp *domain.Experiment, amounts map[domain.ResourceType]float64) error {
 	return s.metrics.SetObservedBatch(ctx, exp.AgentID, exp.PlatformExperimentID, exp.ID, exp.CapacityTier, amounts)
 }
 
@@ -300,7 +300,7 @@ var ErrNoQuota = errors.New("no quota")
 // AgentQuota is the quota of agentID in the platform experiment id, read by reader. An agent with
 // none is refused with why: a planner has none, and an agent of an open platform experiment is
 // granted one when it starts.
-func (s *PlatformExperimentsService) AgentQuota(ctx context.Context, agentID, id string, reader auth.Principal) (*AgentQuotaView, error) {
+func (s *Service) AgentQuota(ctx context.Context, agentID, id string, reader auth.Principal) (*AgentQuotaView, error) {
 	aq, err := s.QuotaView(ctx, agentID, id)
 	if err != nil {
 		return nil, auth.Internal(s.logger, "get agent quota", err, zap.String("id", id))

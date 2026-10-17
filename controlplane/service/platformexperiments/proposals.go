@@ -115,7 +115,7 @@ func poolAgents(pool domain.ResearcherPool) []ProposedAgent {
 // them in one pass. It returns the experiment the proposal states, as validate answers it: with
 // its cost, its length and one place for each researcher. It leaves p as it is stored: every text
 // of it without the whitespace around it, and the CPU type where it states no accelerator_type.
-func (s *PlatformExperimentsService) checkProposal(ctx context.Context, p *Proposal, draft *domain.PlatformExperiment) (CreatePlatformExperimentRequest, error) {
+func (s *Service) checkProposal(ctx context.Context, p *Proposal, draft *domain.PlatformExperiment) (CreatePlatformExperimentRequest, error) {
 	var problems refusal.Problems
 	refuse := func(reason, format string, args ...any) {
 		problems = append(problems, refusal.Refuse(http.StatusUnprocessableEntity, reason, fmt.Sprintf(format, args...)))
@@ -239,7 +239,7 @@ var ErrNotThePlanner = errors.New("a proposal is written by the draft's planner,
 
 // requirePlanner admits only the planner of the draft id: the agent the platform signed up to
 // plan it, with its own token.
-func (s *PlatformExperimentsService) requirePlanner(ctx context.Context, id string, caller auth.Principal) error {
+func (s *Service) requirePlanner(ctx context.Context, id string, caller auth.Principal) error {
 	if caller.Kind != auth.KindAgent || caller.PlatformExperimentID != id {
 		return ErrNotThePlanner
 	}
@@ -255,7 +255,7 @@ func (s *PlatformExperimentsService) requirePlanner(ctx context.Context, id stri
 
 // Revise asks the planner of the draft id to change its proposal as message says, or to try
 // again after it declined, for by.
-func (s *PlatformExperimentsService) Revise(ctx context.Context, id, message string, by domain.Actor) (*domain.PlatformExperiment, error) {
+func (s *Service) Revise(ctx context.Context, id, message string, by domain.Actor) (*domain.PlatformExperiment, error) {
 	switch err := s.store.Revise(ctx, id, message, by, time.Now().UTC().Add(s.planning.Limit)); {
 	case errors.Is(err, db.ErrNotDraft):
 		return nil, invalidTransition("platform experiment %s is not a draft: only a draft's proposal is revised", id)
@@ -277,12 +277,12 @@ func (s *PlatformExperimentsService) Revise(ctx context.Context, id, message str
 
 // Accept makes the draft id the open platform experiment its proposal describes, at what req
 // states, for by, who accepted it.
-func (s *PlatformExperimentsService) Accept(ctx context.Context, id string, req AcceptRequest, by domain.Actor) (*domain.PlatformExperiment, error) {
+func (s *Service) Accept(ctx context.Context, id string, req AcceptRequest, by domain.Actor) (*domain.PlatformExperiment, error) {
 	return s.accept(ctx, id, req, by, &by)
 }
 
 // Hold keeps the platform from accepting the proposal of the draft id by itself.
-func (s *PlatformExperimentsService) Hold(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
+func (s *Service) Hold(ctx context.Context, id string) (*domain.PlatformExperiment, error) {
 	switch err := s.store.HoldAccept(ctx, id); {
 	case errors.Is(err, db.ErrNotDraft):
 		return nil, invalidTransition("platform experiment %s is not a draft: only a draft's proposal is held", id)
@@ -300,7 +300,7 @@ func (s *PlatformExperimentsService) Hold(ctx context.Context, id string) (*doma
 
 // Propose stores p as the proposal of the draft id, written by its planner caller, or with check
 // only checks it and answers the draft as it stands.
-func (s *PlatformExperimentsService) Propose(ctx context.Context, id string, caller auth.Principal, p *Proposal, check bool) (*domain.PlatformExperiment, error) {
+func (s *Service) Propose(ctx context.Context, id string, caller auth.Principal, p *Proposal, check bool) (*domain.PlatformExperiment, error) {
 	if err := s.requirePlanner(ctx, id, caller); err != nil {
 		return nil, err
 	}
@@ -353,7 +353,7 @@ const MaxRevisionBytes = domain.MaxGoalBytes
 const MaxDeclineBytes = MaxProposalTextBytes
 
 // Decline records that the planner caller of the draft id proposes nothing, and why.
-func (s *PlatformExperimentsService) Decline(ctx context.Context, id string, caller auth.Principal, reason string) (*domain.PlatformExperiment, error) {
+func (s *Service) Decline(ctx context.Context, id string, caller auth.Principal, reason string) (*domain.PlatformExperiment, error) {
 	if err := s.requirePlanner(ctx, id, caller); err != nil {
 		return nil, err
 	}
@@ -393,7 +393,7 @@ func (s *PlatformExperimentsService) Decline(ctx context.Context, id string, cal
 // the platform accepts it by itself, and the agent that is to measure its baseline, signed up for
 // the person who created the draft so that its machine starts while the proposal is read. One
 // with questions is never accepted by itself, since only a person can answer them.
-func (s *PlatformExperimentsService) proposed(ctx context.Context, pe *domain.PlatformExperiment, p *Proposal) (db.Proposed, error) {
+func (s *Service) proposed(ctx context.Context, pe *domain.PlatformExperiment, p *Proposal) (db.Proposed, error) {
 	now := time.Now().UTC()
 	proposed := db.Proposed{WaitUntil: now.Add(s.planning.ProposedFor), KeepPlanner: s.planning.PlannerKept}
 	if s.planning.AutoAccept > 0 && len(p.Questions) == 0 {
@@ -488,7 +488,7 @@ func invalidTransition(format string, args ...any) error {
 // req states, with a hosted coordinator, its researchers and the agent that measures its
 // baseline, in one write. by owns its agents; acceptedBy is the person who accepted, nil when the
 // platform accepts it as proposed.
-func (s *PlatformExperimentsService) accept(ctx context.Context, id string, req AcceptRequest, by domain.Actor, acceptedBy *domain.Actor) (*domain.PlatformExperiment, error) {
+func (s *Service) accept(ctx context.Context, id string, req AcceptRequest, by domain.Actor, acceptedBy *domain.Actor) (*domain.PlatformExperiment, error) {
 	pe, err := s.store.GetPlatformExperiment(ctx, id)
 	if err != nil {
 		return nil, s.refusal("read draft", err)
@@ -576,7 +576,7 @@ func (s *PlatformExperimentsService) accept(ctx context.Context, id string, req 
 
 // nameActors names whoever created pe, closed it, accepted its proposal, asked for its revisions
 // and raised its baseline, when it carries them.
-func (s *PlatformExperimentsService) nameActors(ctx context.Context, pe *domain.PlatformExperiment) error {
+func (s *Service) nameActors(ctx context.Context, pe *domain.PlatformExperiment) error {
 	var actors []*domain.Actor
 	if pe.Actor != nil {
 		actors = append(actors, pe.Actor)
@@ -611,7 +611,7 @@ func notADraft(pe *domain.PlatformExperiment) error {
 // created it. One the check refuses now, its accelerator type gone from every cluster for one,
 // is held: it waits for a person, who is told why on accepting it. One that cannot be accepted
 // for a fault of the platform's is tried again on the next pass.
-func (s *PlatformExperimentsService) AcceptDue(ctx context.Context) error {
+func (s *Service) AcceptDue(ctx context.Context) error {
 	ids, err := s.store.DraftsToAccept(ctx)
 	if err != nil {
 		return err
@@ -636,7 +636,7 @@ func (s *PlatformExperimentsService) AcceptDue(ctx context.Context) error {
 }
 
 // acceptAsProposed accepts the draft id at the cost, length and researchers its proposal states.
-func (s *PlatformExperimentsService) acceptAsProposed(ctx context.Context, id string) error {
+func (s *Service) acceptAsProposed(ctx context.Context, id string) error {
 	pe, err := s.store.GetPlatformExperiment(ctx, id)
 	if err != nil {
 		return err
@@ -661,7 +661,7 @@ func (s *PlatformExperimentsService) acceptAsProposed(ctx context.Context, id st
 
 // StartAutoAccept runs AcceptDue every interval until ctx is cancelled, each pass bounded by
 // passTimeout.
-func (s *PlatformExperimentsService) StartAutoAccept(ctx context.Context, interval, passTimeout time.Duration) {
+func (s *Service) StartAutoAccept(ctx context.Context, interval, passTimeout time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {

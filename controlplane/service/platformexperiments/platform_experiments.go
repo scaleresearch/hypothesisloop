@@ -17,8 +17,8 @@ import (
 	"go.uber.org/zap"
 )
 
-// PlatformExperimentsStore is the persistence interface for platform experiments.
-type PlatformExperimentsStore interface {
+// Store is the persistence interface for platform experiments.
+type Store interface {
 	// CreatePlatformExperiment stores pe with the agents it is created with signed up, or neither.
 	CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error
 	GetPlatformExperiment(ctx context.Context, id string) (*domain.PlatformExperiment, error)
@@ -169,7 +169,7 @@ type PlatformExperimentsStore interface {
 	IsSignedUp(ctx context.Context, platformExpID, agentID string) (bool, error)
 	IsAgentCut(ctx context.Context, platformExpID, agentID string) (bool, error)
 	// GetAgentQuota/ListAgentQuotas cover allocation only (guaranteed/burst
-	// capacity settings) — consumption (used_*) is never stored here; PlatformExperimentsService
+	// capacity settings) — consumption (used_*) is never stored here; Service
 	// merges it in from the metrics DB on every read via metricsdb.PopulateUsage(One).
 	GetAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error)
 	ListAgentQuotas(ctx context.Context, platformExpID string) ([]*domain.AgentQuota, error)
@@ -190,9 +190,9 @@ type PlatformExperimentsStore interface {
 	AgentDataKey(ctx context.Context, platformExperimentID, agentID string, create func(context.Context) (domain.DataKey, error)) (domain.DataKey, error)
 }
 
-// PlatformExperimentsService manages the Platform Experiment lifecycle.
-type PlatformExperimentsService struct {
-	store   PlatformExperimentsStore
+// Service manages the Platform Experiment lifecycle.
+type Service struct {
+	store   Store
 	metrics *metricsdb.Store
 	cfg     domain.QuotaConfig
 	logger  *zap.Logger
@@ -255,7 +255,7 @@ type IdleNotices interface {
 }
 
 // WithIdleNotice wires the idle notices the expiry sweep sends (agent.idle, capacity.idle).
-func (s *PlatformExperimentsService) WithIdleNotice(notices IdleNotices, after time.Duration) *PlatformExperimentsService {
+func (s *Service) WithIdleNotice(notices IdleNotices, after time.Duration) *Service {
 	s.idle, s.idleAfter = notices, after
 	return s
 }
@@ -267,60 +267,60 @@ type Environments interface {
 }
 
 // WithPersonIdeas wires the graph the situation counts the open ideas of people in.
-func (s *PlatformExperimentsService) WithPersonIdeas(ideas PersonIdeas) *PlatformExperimentsService {
+func (s *Service) WithPersonIdeas(ideas PersonIdeas) *Service {
 	s.personIdeas = ideas
 	return s
 }
 
 // WithModelDefaults sets the platform's model for an agent and a coordinator whose agent type names
 // none.
-func (s *PlatformExperimentsService) WithModelDefaults(models domain.ModelDefaults) *PlatformExperimentsService {
+func (s *Service) WithModelDefaults(models domain.ModelDefaults) *Service {
 	s.models = models
 	return s
 }
 
 // WithEnvironments wires the environments.
-func (s *PlatformExperimentsService) WithEnvironments(environments Environments) *PlatformExperimentsService {
+func (s *Service) WithEnvironments(environments Environments) *Service {
 	s.environments = environments
 	return s
 }
 
 // WithRepositories wires the git host the repository pass creates drafts' repositories on.
-func (s *PlatformExperimentsService) WithRepositories(repos githost.Provider) *PlatformExperimentsService {
+func (s *Service) WithRepositories(repos githost.Provider) *Service {
 	s.repos = repos
 	return s
 }
 
 // WithReachable reads the accelerator types a project's org can place jobs on from reachable in
 // place of the live capacity, for a caller that has no metrics DB to read it from.
-func (s *PlatformExperimentsService) WithReachable(reachable func(ctx context.Context, projectID string) (map[string][]domain.Cluster, error)) *PlatformExperimentsService {
+func (s *Service) WithReachable(reachable func(ctx context.Context, projectID string) (map[string][]domain.Cluster, error)) *Service {
 	s.reachable = reachable
 	return s
 }
 
 // WithBaselineRead reads what a declared baseline job did from read in place of the metrics DB
 // and the graph.
-func (s *PlatformExperimentsService) WithBaselineRead(read func(ctx context.Context, pe *domain.PlatformExperiment, jobID string) (*Baseline, error)) *PlatformExperimentsService {
+func (s *Service) WithBaselineRead(read func(ctx context.Context, pe *domain.PlatformExperiment, jobID string) (*Baseline, error)) *Service {
 	s.baseline = read
 	return s
 }
 
 // WithDataStore wires the store a removed agent's key is deleted from, and the durable-data
 // ceiling an agent's quota is answered with.
-func (s *PlatformExperimentsService) WithDataStore(client *objectstore.Client, maxBytesPerAgent int64) *PlatformExperimentsService {
+func (s *Service) WithDataStore(client *objectstore.Client, maxBytesPerAgent int64) *Service {
 	s.dataStore = client
 	s.maxDataBytesPerAgent = maxBytesPerAgent
 	return s
 }
 
-// NewPlatformExperimentsService constructs the service. metrics is the GreptimeDB instance
+// NewService constructs the service. metrics is the GreptimeDB instance
 // backing observed agent quota consumption. PostgreSQL holds allocations and current desired
 // experiment estimates.
-func NewPlatformExperimentsService(store PlatformExperimentsStore, cfg domain.QuotaConfig, logger *zap.Logger, metrics *metricsdb.Store, observedGapCap time.Duration) *PlatformExperimentsService {
+func NewService(store Store, cfg domain.QuotaConfig, logger *zap.Logger, metrics *metricsdb.Store, observedGapCap time.Duration) *Service {
 	if observedGapCap <= 0 {
-		panic("quota: NewPlatformExperimentsService requires a positive observation cadence — it must match the controller's and the settler's")
+		panic("quota: NewService requires a positive observation cadence — it must match the controller's and the settler's")
 	}
-	s := &PlatformExperimentsService{
+	s := &Service{
 		store:          store,
 		metrics:        metrics,
 		cfg:            cfg,
@@ -470,7 +470,7 @@ type AgentResult struct {
 // stageProgress is the read-only value served by GET /platform-experiments/{id}/stages. It omits
 // the in-flight cost of running jobs that the controller's authoritative value includes, so it
 // can trail the boundary the controller acts on.
-func (s *PlatformExperimentsService) stageProgress(ctx context.Context, pe *domain.PlatformExperiment) (float64, error) {
+func (s *Service) stageProgress(ctx context.Context, pe *domain.PlatformExperiment) (float64, error) {
 	consumed, err := s.metrics.TotalObservedAccH(ctx, pe.CreatedAt, pe.ID)
 	if err != nil {
 		return 0, fmt.Errorf("stages: observed usage for %s: %w", pe.ID, err)
@@ -501,7 +501,7 @@ type ListQuery struct {
 }
 
 // List is one page of the platform experiments q reads, and how many it matches in all.
-func (s *PlatformExperimentsService) List(ctx context.Context, q ListQuery) ([]*domain.PlatformExperiment, int, error) {
+func (s *Service) List(ctx context.Context, q ListQuery) ([]*domain.PlatformExperiment, int, error) {
 	filter := db.PlatformExperimentsFilter{
 		Scope:      q.Scope,
 		WithShared: q.WithShared,
@@ -528,7 +528,7 @@ func (s *PlatformExperimentsService) List(ctx context.Context, q ListQuery) ([]*
 
 // Get reads the platform experiment id with its signed up agents, the prior runs of it reaches
 // says its reader reaches, its spend and the names of who acted on it.
-func (s *PlatformExperimentsService) Get(ctx context.Context, id string, reaches func(id string) bool) (*domain.PlatformExperiment, error) {
+func (s *Service) Get(ctx context.Context, id string, reaches func(id string) bool) (*domain.PlatformExperiment, error) {
 	pe, err := s.store.GetPlatformExperiment(ctx, id)
 	if err != nil {
 		return nil, auth.Internal(s.logger, "get platform experiment", err, zap.String("id", id))
@@ -568,7 +568,7 @@ func (s *PlatformExperimentsService) Get(ctx context.Context, id string, reaches
 var ErrNotSignedUp = errors.New("agent is not signed up to this platform experiment")
 
 // AgentSignup reads the signup of agentID to the platform experiment id.
-func (s *PlatformExperimentsService) AgentSignup(ctx context.Context, id, agentID string) (*domain.AgentSignup, error) {
+func (s *Service) AgentSignup(ctx context.Context, id, agentID string) (*domain.AgentSignup, error) {
 	signup, err := s.store.GetAgentSignup(ctx, id, agentID)
 	if err != nil {
 		return nil, auth.Internal(s.logger, "get platform experiment signup", err, zap.String("id", id))
@@ -581,12 +581,12 @@ func (s *PlatformExperimentsService) AgentSignup(ctx context.Context, id, agentI
 
 // ResearchersAtWork counts the researchers at work of the platform experiment id by agent type
 // and model.
-func (s *PlatformExperimentsService) ResearchersAtWork(ctx context.Context, id string) (map[domain.PoolKey]int, error) {
+func (s *Service) ResearchersAtWork(ctx context.Context, id string) (map[domain.PoolKey]int, error) {
 	return s.store.ResearchersAtWork(ctx, id)
 }
 
 // GitURL is where the platform experiment id's repository is served by the control plane's proxy.
-func (s *PlatformExperimentsService) GitURL(id string) (string, error) {
+func (s *Service) GitURL(id string) (string, error) {
 	if s.proxyURL == "" {
 		return "", errors.New("no git proxy address to name its repository at")
 	}

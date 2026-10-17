@@ -70,7 +70,7 @@ func TestARunningExperimentTakesAMaxAgentsItsUnspentHoursHold(t *testing.T) {
 		for _, id := range cut {
 			store.cut[id] = true
 		}
-		svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), time.Minute)
+		svc := NewService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), time.Minute)
 		svc.baseline = func(context.Context, *domain.PlatformExperiment, string) (*Baseline, error) {
 			return measuredBaseline(), nil
 		}

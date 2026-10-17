@@ -20,8 +20,8 @@ import (
 )
 
 // testExperiments is the platform experiments service over store, with nothing else wired.
-func testExperiments(store platformexperiments.PlatformExperimentsStore) *platformexperiments.PlatformExperimentsService {
-	return platformexperiments.NewPlatformExperimentsService(store, domain.QuotaConfig{}, zap.NewNop(), nil, 3*time.Minute)
+func testExperiments(store platformexperiments.Store) *platformexperiments.Service {
+	return platformexperiments.NewService(store, domain.QuotaConfig{}, zap.NewNop(), nil, 3*time.Minute)
 }
 
 var agentsTestPlacement = authtest.Placement{
@@ -55,7 +55,7 @@ func call(t *testing.T, r http.Handler, method, path, body string) (int, map[str
 // catalog of every platform experiment and project, and every other method is left to whoever
 // embeds it.
 type catalogStore struct {
-	platformexperiments.PlatformExperimentsStore
+	platformexperiments.Store
 }
 
 func (catalogStore) AgentTypeCatalog(context.Context, string) (domain.AgentTypeCatalog, error) {
@@ -70,7 +70,7 @@ func (catalogStore) ProjectAgentTypeCatalog(context.Context, string) (domain.Age
 // catalog of every platform experiment and project, and every other method is left to whoever
 // embeds it.
 type fakeStore struct {
-	platformexperiments.PlatformExperimentsStore
+	platformexperiments.Store
 }
 
 func (fakeStore) AgentTypeCatalog(context.Context, string) (domain.AgentTypeCatalog, error) {
@@ -82,7 +82,7 @@ func (fakeStore) ProjectAgentTypeCatalog(context.Context, string) (domain.AgentT
 }
 
 // registerPlatformExperimentsAndBudget registers the platform experiment operations and their budget reads.
-func registerPlatformExperimentsAndBudget(doc *Doc, peh *platformexperiments.PlatformExperimentsService) {
+func registerPlatformExperimentsAndBudget(doc *Doc, peh *platformexperiments.Service) {
 	registerPlatformExperiments(doc, peh, zap.NewNop())
 	registerPlatformExperimentBudget(doc, peh, zap.NewNop())
 }
@@ -91,7 +91,7 @@ func registerPlatformExperimentsAndBudget(doc *Doc, peh *platformexperiments.Pla
 var testPlanning = platformexperiments.Planning{Limit: 30 * time.Minute, ProposedFor: 7 * 24 * time.Hour, PlannerKept: 10 * time.Minute, AutoAccept: 30 * time.Second}
 
 // reaching has the org of every project reach the given accelerator types and no other.
-func reaching(svc *platformexperiments.PlatformExperimentsService, types ...domain.AcceleratorType) *platformexperiments.PlatformExperimentsService {
+func reaching(svc *platformexperiments.Service, types ...domain.AcceleratorType) *platformexperiments.Service {
 	reachable := map[string][]domain.Cluster{}
 	for _, t := range types {
 		reachable[string(t)] = []domain.Cluster{{Name: "k3s"}}
@@ -100,7 +100,7 @@ func reaching(svc *platformexperiments.PlatformExperimentsService, types ...doma
 	return svc
 }
 
-func newSignupTestService(t *testing.T, store platformexperiments.PlatformExperimentsStore) *platformexperiments.PlatformExperimentsService {
+func newSignupTestService(t *testing.T, store platformexperiments.Store) *platformexperiments.Service {
 	t.Helper()
-	return reaching(platformexperiments.NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), 3*time.Minute), domain.CPUType)
+	return reaching(platformexperiments.NewService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), 3*time.Minute), domain.CPUType)
 }

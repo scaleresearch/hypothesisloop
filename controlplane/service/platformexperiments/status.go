@@ -15,7 +15,7 @@ import (
 
 // Spend sets on pe what it has spent of its budget (ConsumedAcceleratorHours). A draft runs no
 // job and has none.
-func (s *PlatformExperimentsService) Spend(ctx context.Context, pe *domain.PlatformExperiment) error {
+func (s *Service) Spend(ctx context.Context, pe *domain.PlatformExperiment) error {
 	if pe.Status == domain.PlatformExpDraft {
 		return nil
 	}
@@ -54,7 +54,7 @@ func declareBaseline(id string) string {
 
 // waiting is why the open pe, whose roster is signups, is not running yet: the reason and the
 // sentence its status_reason and its roster answer with.
-func (s *PlatformExperimentsService) waiting(ctx context.Context, pe *domain.PlatformExperiment, signups []domain.AgentSignup) (*domain.StatusReason, error) {
+func (s *Service) waiting(ctx context.Context, pe *domain.PlatformExperiment, signups []domain.AgentSignup) (*domain.StatusReason, error) {
 	_, err := s.notStartable(ctx, pe, signups, time.Now().UTC())
 	var refused *refusal.Refusal
 	switch {
@@ -170,7 +170,7 @@ func runningReason(pe *domain.PlatformExperiment, signups []domain.AgentSignup, 
 
 // closedReason is why the closed pe closed: its close_reason and what that means. Of one closed
 // before its run started for want of a baseline, it says whether a job was submitted for one.
-func (s *PlatformExperimentsService) closedReason(ctx context.Context, pe *domain.PlatformExperiment) (*domain.StatusReason, error) {
+func (s *Service) closedReason(ctx context.Context, pe *domain.PlatformExperiment) (*domain.StatusReason, error) {
 	closer := "the owner"
 	if (pe.CloseReason == domain.CloseByRequest || pe.CloseReason == domain.CloseRemoved) && pe.ClosedBy != nil {
 		if err := s.store.NameActors(ctx, []*domain.Actor{pe.ClosedBy}); err != nil {
@@ -218,7 +218,7 @@ func baselineLimitReached(pe *domain.PlatformExperiment, submitted int) string {
 }
 
 // jobsSubmitted is how many jobs the platform experiment id took, by every agent.
-func (s *PlatformExperimentsService) jobsSubmitted(ctx context.Context, id string) (int, error) {
+func (s *Service) jobsSubmitted(ctx context.Context, id string) (int, error) {
 	jobs, err := s.store.AgentJobsByAgent(ctx, id)
 	if err != nil {
 		return 0, fmt.Errorf("platform_experiments.jobsSubmitted: %w", err)
@@ -233,7 +233,7 @@ func (s *PlatformExperimentsService) jobsSubmitted(ctx context.Context, id strin
 // Describe sets on pe why it is in its status (StatusReason): on a draft where it stands with its
 // planner, on an open one why it is not running yet and what reader does about it, on a running
 // one whether its clock runs and whether a researcher is left to work, and on a closed one why it closed. It is the one place that says so.
-func (s *PlatformExperimentsService) Describe(ctx context.Context, pe *domain.PlatformExperiment, reader auth.Principal) error {
+func (s *Service) Describe(ctx context.Context, pe *domain.PlatformExperiment, reader auth.Principal) error {
 	var why *domain.StatusReason
 	var signups []domain.AgentSignup
 	var err error

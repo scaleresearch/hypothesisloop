@@ -13,14 +13,14 @@ import (
 )
 
 type experimentDataAPI struct {
-	experiments *platformexperiments.PlatformExperimentsService
+	experiments *platformexperiments.Service
 	access      *auth.Access
 	logger      *zap.Logger
 }
 
 // registerExperimentData registers what a platform experiment's durable data holds and each
 // agent's own key to it.
-func registerExperimentData(doc *Doc, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
+func registerExperimentData(doc *Doc, experiments *platformexperiments.Service, logger *zap.Logger) {
 	a := experimentDataAPI{experiments: experiments, access: doc.Access, logger: logger}
 	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "get-platform-experiment-data-usage", Method: "GET", Path: "/platform-experiments/{id}/data-usage",
