@@ -35,6 +35,7 @@ func (s *Service) WithPlanning(planning Planning) *Service {
 type ClusterRegistry interface {
 	RegisteredClusters(ctx context.Context) (map[string]domain.Cluster, error)
 	ProjectOrg(ctx context.Context, projectID string) (string, error)
+	PlatformComputeHeld(ctx context.Context, orgID, projectID string) (limit domain.ComputeLimit, orgHeld, projectHeld float64, err error)
 }
 
 // WithLiveCapacity attaches what GET /resource-catalog/capacity needs: the freshness window past which a cluster's last
@@ -357,6 +358,31 @@ func (s *Service) refusal(op string, err error) error {
 		return refused
 	}
 	return auth.Internal(s.logger, op+" failed", err)
+}
+
+// PlatformComputeLimit is an org's platform compute limit (domain.ComputeLimit) and what its placed
+// jobs on shared clusters reserve of it, in accelerator hours per hour.
+type PlatformComputeLimit struct {
+	domain.ComputeLimit
+	OrgHeld     float64  `json:"org_held" doc:"What the org's placed jobs on the platform's shared clusters reserve now: acch_rate times accelerator_count of each."`
+	ProjectHeld *float64 `json:"project_held,omitempty" doc:"What the placed jobs of the caller's project reserve there now, for a caller bound to one project: an API key of a project, an agent or a coordinator."`
+}
+
+// ComputeLimit is orgID's platform compute limit and what it holds, with what projectID holds
+// when it is not empty.
+func (s *Service) ComputeLimit(ctx context.Context, orgID, projectID string) (*PlatformComputeLimit, error) {
+	if s.clusters == nil {
+		return nil, ErrLiveCapacityUnconfigured
+	}
+	limit, orgHeld, projectHeld, err := s.clusters.PlatformComputeHeld(ctx, orgID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	answer := &PlatformComputeLimit{ComputeLimit: limit, OrgHeld: orgHeld}
+	if projectID != "" {
+		answer.ProjectHeld = &projectHeld
+	}
+	return answer, nil
 }
 
 // ResourceCapacity is the live capacity of the clusters orgID's jobs can be placed on, or of

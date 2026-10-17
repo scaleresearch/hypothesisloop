@@ -54,7 +54,7 @@ func main() {
 
 	ensureSchema(pool, logger)
 	store := db.NewStore(pool, pcfg.Scheduler.MaxInfrastructureRequeues)
-	seedBuiltins(store, logger)
+	seedBuiltins(store, pcfg.Quota.NewOrgComputeLimit(), logger)
 
 	metricsCtx, metricsCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	err = metrics.EnsureSchema(metricsCtx)
@@ -97,7 +97,7 @@ func main() {
 	runCtx, runCancel := context.WithCancel(context.Background())
 	defer runCancel()
 
-	authenticator, err := auth.NewAuthenticator(pcfg.Auth, pcfg.SigningSecret, store)
+	authenticator, err := auth.NewAuthenticator(pcfg.Auth, pcfg.SigningSecret, db.OrgDefaults{Store: store, NewOrgLimit: pcfg.Quota.NewOrgComputeLimit()})
 	if err != nil {
 		logger.Fatal("control-service: configure auth", zap.Error(err))
 	}

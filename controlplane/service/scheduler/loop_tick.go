@@ -132,6 +132,10 @@ func (l *Loop) readTickState(ctx context.Context, start time.Time) (*tickState, 
 	if err != nil {
 		return nil, fmt.Errorf("registered clusters: %w", err)
 	}
+	computeLimits, err := l.store.OrgComputeLimits(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("platform compute limits: %w", err)
+	}
 	autoscalerEnabled, clusterIDs, connected, speculativeFootprint, err := l.readSpeculation(ctx, gAvail)
 	if err != nil {
 		return nil, err
@@ -168,7 +172,7 @@ func (l *Loop) readTickState(ctx context.Context, start time.Time) (*tickState, 
 			// Amortizes the running-experiment node-attribution lookups the per-accelerator share
 			// needs (see loop_resolve.go) across every queued job this tick considers, in both passes.
 			resolveCache: newResolutionCache(l),
-			whenIdle:     installed{registered: registeredClusters, totals: totalCapacity, nodeTotals: nodeResourcesTotal, scalesUp: autoscalerEnabled, multiNode: multiNodeCapable, nodeLabels: nodeLabels},
+			whenIdle:     installed{registered: registeredClusters, totals: totalCapacity, nodeTotals: nodeResourcesTotal, scalesUp: autoscalerEnabled, multiNode: multiNodeCapable, nodeLabels: nodeLabels, limits: computeLimits},
 		},
 		gAvail: gAvail, bAvail: placement.CloneAvail(gAvail), desiredFree: desiredFree,
 		totalCapacity:     totalCapacity,

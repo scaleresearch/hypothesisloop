@@ -402,6 +402,13 @@ quota:
   # this and its budget are what bound it.
   max_platform_experiment_days: 30
 
+  # The platform compute limit an org is created with: the accelerator hours per hour of the
+  # platform's shared clusters its placed jobs may reserve together, and those of any one of its
+  # projects (acch_rate times accelerator_count of each placed job). A job past either waits for
+  # placed ones to end. Staff change an org's with hl-admin org limits. 0 < project <= org.
+  default_org_shared_acch_per_hour: 64
+  default_project_shared_acch_per_hour: 32
+
   # Per-job maximum caps — checked at admission, before any quota debit, so one absurd
   # submission can never consume an entire guaranteed/burst budget in a single shot. This is
   # independent of (and on top of) budget sizing: size these relative to your smallest

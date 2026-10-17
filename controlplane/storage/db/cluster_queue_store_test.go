@@ -54,8 +54,8 @@ func TestAPreemptedJobStopsBeingRecentlyUndesiredWhileItWaitsInTheQueue(t *testi
 	}
 	seedExperimentForCapTest(t, pool, preempted, agentID, peID, 1, domain.StatusQueued)
 	seedExperimentForCapTest(t, pool, fresh, agentID, peID, 1, domain.StatusQueued)
-	if ok, err := exps.ClaimSubmitted(ctx, preempted, cluster, &domain.JobSpec{AcceleratorCount: 1}, nil); err != nil || !ok {
-		t.Fatalf("ClaimSubmitted = %v, %v, want true", ok, err)
+	if refused, err := exps.ClaimSubmitted(ctx, preempted, cluster, &domain.JobSpec{AcceleratorCount: 1}, nil); err != nil || refused != nil {
+		t.Fatalf("ClaimSubmitted = %v, %v, want it placed", refused, err)
 	}
 	if ok, err := exps.MarkStarted(ctx, preempted); err != nil || !ok {
 		t.Fatalf("MarkStarted = %v, %v, want true", ok, err)

@@ -135,6 +135,27 @@ func TestCapacityOneLinePerAcceleratorType(t *testing.T) {
 	}
 }
 
+// The org's platform compute limit is one line after the clusters'.
+func TestCapacityPrintsThePlatformComputeLimit(t *testing.T) {
+	clitest.RecordingServer(t, func(int, clitest.Recorded) any {
+		return map[string]any{
+			"clusters":               []any{map[string]any{"cluster_name": "local", "accelerators": []any{map[string]any{"accelerator_type": "L40", "available": 8, "total": 8}}}},
+			"platform_compute_limit": map[string]any{"org": 8, "project": 4, "org_held": 3, "project_held": 1},
+		}
+	})
+	var stdout, stderr bytes.Buffer
+	if code := clitest.Run(Capacity, []string{}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	want := []string{
+		`{"cluster":"local","accelerator_type":"L40","available":8,"total":8}`,
+		`{"limit":"platform_compute","org":8,"org_held":3,"project":4,"project_held":1}`,
+	}
+	if !reflect.DeepEqual(clitest.Lines(stdout.String()), want) {
+		t.Fatalf("stdout %q", stdout.String())
+	}
+}
+
 // The CPU type counts cores, and its line says so. The line of an accelerator is as it was.
 func TestCapacitySaysCoresForTheCPUType(t *testing.T) {
 	clitest.RecordingServer(t, func(int, clitest.Recorded) any {

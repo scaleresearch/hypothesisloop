@@ -74,7 +74,10 @@ func registerPlatformExperimentBudget(doc *Doc, experiments *platformexperiments
 			"and accelerator_count are per node, so per_node on a cluster says the most cores and memory one node has, installed " +
 			"and free now, and per_node_available on a type the most of it free on one node now. Check before " +
 			"choosing: a type with no live capacity anywhere QUEUES FOREVER and never errors. Only " +
-			"currently-schedulable nodes count — powered-off hardware never appears."}, a.getResourceCapacity)
+			"currently-schedulable nodes count — powered-off hardware never appears. " +
+			"platform_compute_limit is how much of the platform's shared clusters the org's placed jobs may reserve, and each of its projects', in accelerator hours per hour " +
+			"(acch_per_hour of the type times accelerator_count), with what they reserve now: a job that would pass either waits queued as org_compute_limit or project_compute_limit, " +
+			"and one that alone passes the project's where no cluster of the org's own can hold it is refused 422 exceeds_project_compute_limit."}, a.getResourceCapacity)
 }
 
 func (a budgetAPI) getPlatformExperimentHealth(ctx context.Context, in *struct {
@@ -181,7 +184,8 @@ func (a budgetAPI) getStages(ctx context.Context, in *struct {
 }
 
 type liveCapacity struct {
-	Clusters []platformexperiments.ClusterCapacity `json:"clusters"`
+	Clusters             []platformexperiments.ClusterCapacity      `json:"clusters"`
+	PlatformComputeLimit *platformexperiments.PlatformComputeLimit `json:"platform_compute_limit,omitempty" doc:"The org's limits on the platform's shared clusters, in accelerator hours per hour, and what its placed jobs reserve of them. Absent from staff's read of every cluster."`
 }
 
 func (a budgetAPI) getResourceCapacity(ctx context.Context, in *struct {
@@ -195,5 +199,12 @@ func (a budgetAPI) getResourceCapacity(ctx context.Context, in *struct {
 	if err != nil {
 		return nil, auth.Internal(a.logger, "get resource capacity", err)
 	}
-	return &struct{ Body liveCapacity }{Body: liveCapacity{Clusters: clusters}}, nil
+	answer := liveCapacity{Clusters: clusters}
+	if !every {
+		principal, _ := auth.FromContext(ctx)
+		if answer.PlatformComputeLimit, err = a.experiments.ComputeLimit(ctx, orgID, principal.ProjectID); err != nil {
+			return nil, auth.Internal(a.logger, "get platform compute limit", err)
+		}
+	}
+	return &struct{ Body liveCapacity }{Body: answer}, nil
 }

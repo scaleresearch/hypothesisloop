@@ -212,25 +212,35 @@ type installed struct {
 	scalesUp   map[string]bool
 	multiNode  map[string]bool
 	nodeLabels map[string]map[string]map[string]string
+	// limits is each org's platform compute limit, which a job on a shared cluster is held to.
+	limits map[string]domain.ComputeLimit
 }
 
 // neverFitsReason is the not_admitted_reason of a job that no wait admits as it is stated, and ""
 // for one that may yet run. Such a job asks for more than every cluster that takes its jobs and
 // reports what it has installed holds when idle (placement.FitsWhenIdle), on each accelerator
-// type the job accepts, or runs in an image of an architecture none of their nodes has. A cluster
-// that scales up may yet hold it. A cluster that reports nothing is away or not whole: it is
-// named and not judged, and with none judged the job waits. It says what each cluster judged has.
+// type the job accepts, or runs in an image of an architecture none of their nodes has, or
+// reserves more of the platform's compute than its project may hold and so runs on no shared
+// cluster. A cluster that scales up may yet hold it. A cluster that reports nothing is away or
+// not whole: it is named and not judged, and with none judged the job waits. It says what each
+// cluster judged has.
 func (in installed) neverFitsReason(exp *domain.Experiment) string {
 	runs := hostingClusters(in.registered, exp)
 	spansNodes := exp.Job.Nodes() > 1
 	arch := exp.Job.NodeSelector[domain.NodeArchitectureLabel]
+	limit, limited := in.limits[exp.OrgID]
+	rate, err := domain.AccHPerHour(exp.AcceleratorType, exp.AcceleratorCount)
+	limited = limited && err == nil && domain.ExceedsLimit(rate, limit.Project)
 	var judged []string
-	lacking := 0
+	lacking, overLimit := 0, 0
 	otherArchitectures := map[string]bool{}
 	for _, c := range runs {
 		total, reported := in.totals[c.Name]
 		has := nodeArchitectures(in.nodeLabels[c.Name])
 		switch {
+		case limited && c.Shared:
+			overLimit++
+			judged = append(judged, c.Name+" is the platform's")
 		case !reported:
 			judged = append(judged, c.Name+" reports nothing now")
 		case spansNodes && !in.multiNode[c.Name]:
@@ -252,6 +262,10 @@ func (in installed) neverFitsReason(exp *domain.Experiment) string {
 		has := strings.Join(slices.Sorted(maps.Keys(otherArchitectures)), ", ")
 		return fmt.Sprintf("%s: the job's image %s runs on %s, and the connected clusters that run this org's jobs have nodes of %s only: %s. Record an image built for %s (hl image set)",
 			domain.NotAdmittedNoClusterForArchitecture, exp.Image, arch, has, strings.Join(judged, "; "), has)
+	}
+	if lacking == 0 && overLimit > 0 && len(judged) == overLimit {
+		return fmt.Sprintf("%s: the job reserves %.1f AccH/h of platform compute, more than the %.1f any one project of its org may hold, and no cluster of the org's own can hold it: %s. Ask for fewer or cheaper accelerators (hl capacity shows the limit)",
+			domain.NotAdmittedExceedsProjectComputeLimit, rate, limit.Project, strings.Join(judged, "; "))
 	}
 	if lacking == 0 {
 		return ""

@@ -25,7 +25,7 @@ type claimStore struct {
 	claimCalled bool
 }
 
-func (s *claimStore) ClaimSubmitted(ctx context.Context, id, clusterName string, resolvedJob *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
+func (s *claimStore) claimSubmitted(ctx context.Context, id, clusterName string, resolvedJob *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
 	s.claimCalled = true
 	ok, err := capacityAvailable(ctx, nil)
 	if err != nil || !ok {
@@ -515,7 +515,7 @@ func (s *holdStore) ListRunningExperiments(context.Context) ([]*domain.Experimen
 func (s *holdStore) ListCapacityClaimedExperiments(context.Context) ([]*domain.Experiment, error) {
 	return s.running, nil
 }
-func (s *holdStore) ClaimSubmitted(_ context.Context, id, cluster string, _ *domain.JobSpec, _ func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
+func (s *holdStore) claimSubmitted(_ context.Context, id, cluster string, _ *domain.JobSpec, _ func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
 	if s.submitted == nil {
 		s.submitted = map[string]string{}
 	}
@@ -830,4 +830,20 @@ func (shareWorkload) GetAutoscalerCapability(context.Context) (map[string]bool, 
 
 func (shareWorkload) GetClusterIDs(context.Context) (map[string]string, error) {
 	return map[string]string{}, nil
+}
+
+func (s *claimStore) ClaimSubmitted(ctx context.Context, id, cluster string, resolved *domain.JobSpec, fits func(context.Context, []*domain.Experiment) (bool, error)) (*domain.ClaimRefusal, error) {
+	return refusedUnless(s.claimSubmitted(ctx, id, cluster, resolved, fits))
+}
+
+func (s *holdStore) ClaimSubmitted(ctx context.Context, id, cluster string, resolved *domain.JobSpec, fits func(context.Context, []*domain.Experiment) (bool, error)) (*domain.ClaimRefusal, error) {
+	return refusedUnless(s.claimSubmitted(ctx, id, cluster, resolved, fits))
+}
+
+// refusedUnless is a fake's claim as ClaimSubmitted answers it: nil when it placed the job.
+func refusedUnless(claimed bool, err error) (*domain.ClaimRefusal, error) {
+	if err != nil || claimed {
+		return nil, err
+	}
+	return &domain.ClaimRefusal{Code: domain.NotAdmittedCapacityUnavailable}, nil
 }

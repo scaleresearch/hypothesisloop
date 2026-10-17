@@ -46,6 +46,10 @@ type projectsOf struct{}
 func (projectsOf) RegisteredClusters(context.Context) (map[string]domain.Cluster, error) {
 	return nil, nil
 }
+func (projectsOf) PlatformComputeHeld(context.Context, string, string) (domain.ComputeLimit, float64, float64, error) {
+	return domain.ComputeLimit{}, 0, 0, nil
+}
+
 func (projectsOf) ProjectOrg(_ context.Context, projectID string) (string, error) {
 	return strings.Replace(projectID, "project", "org", 1), nil
 }
@@ -215,5 +219,52 @@ func TestRegistryCredentialsArePushLoginsOfTheOrgsRepository(t *testing.T) {
 	refusedWith(t, err, http.StatusConflict, platformapi.ReasonExperimentClosed)
 	if len(closed.registry.pushes) != 0 {
 		t.Fatal("a closed platform experiment was handed a push login")
+	}
+}
+
+// The first push login of an org asks for its repository and is answered 503 registry_preparing
+// without a call to the registry, which the registry pass provisions off the request. A failed
+// provisioning is tried again by the next pass, and once one succeeds a push login only mints.
+func TestAnOrgsRepositoryIsProvisionedOnceByThePassOffTheRequest(t *testing.T) {
+	ctx := context.Background()
+	registry := &orgRegistry{failing: map[string]bool{"org-a": true}}
+	f := newImageFixture(domain.PlatformExpRunning, registry)
+
+	_, err := f.svc.RegistryCredential(ctx, "pe-1")
+	refusedWith(t, err, http.StatusServiceUnavailable, ReasonRegistryPreparing)
+	if len(registry.provisions) != 0 || len(registry.pushes) != 0 || !slices.Equal(f.orgs.wanted, []string{"org-a"}) {
+		t.Fatalf("the request provisioned %v and pushed %v, wanted %v", registry.provisions, registry.pushes, f.orgs.wanted)
+	}
+	select {
+	case <-f.svc.registryWake:
+	default:
+		t.Fatal("the request did not wake the registry pass")
+	}
+
+	if err := f.svc.ProvideRegistries(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if f.orgs.provisioned["org-a"] || f.orgs.failures["org-a"] == "" {
+		t.Fatalf("a failed provisioning recorded provisioned %v, failure %q", f.orgs.provisioned["org-a"], f.orgs.failures["org-a"])
+	}
+	_, err = f.svc.RegistryCredential(ctx, "pe-1")
+	refusedWith(t, err, http.StatusServiceUnavailable, ReasonRegistryPreparing)
+
+	registry.failing["org-a"] = false
+	if err := f.svc.ProvideRegistries(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !f.orgs.provisioned["org-a"] {
+		t.Fatal("the next pass did not provision the org")
+	}
+	got, err := f.svc.RegistryCredential(ctx, "pe-1")
+	if err != nil || got.Username != "pusher-org-a" {
+		t.Fatalf("credential = %+v, %v, want org-a's push login", got, err)
+	}
+	if err := f.svc.ProvideRegistries(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(registry.provisions) != 2 {
+		t.Fatalf("provisioned %v, want org-a twice and never again once done", registry.provisions)
 	}
 }

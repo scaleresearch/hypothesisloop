@@ -269,7 +269,7 @@ type nilCallbackClaimStore struct {
 	resolvedJob    *domain.JobSpec
 }
 
-func (s *nilCallbackClaimStore) ClaimSubmitted(_ context.Context, _, _ string, resolvedJob *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
+func (s *nilCallbackClaimStore) claimSubmitted(_ context.Context, _, _ string, resolvedJob *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
 	s.resolvedJob = resolvedJob
 	s.sawNilCallback = capacityAvailable == nil
 	s.capacityCheck = capacityAvailable
@@ -586,4 +586,8 @@ func TestSpeculativeCandidatesIncludesMismatchedAcceleratorTypeClusterButRanksIt
 	if got[0] != "cluster-h100" || got[1] != "cluster-amd" {
 		t.Fatalf("got %v, want cluster-h100 (proven fit) ranked ahead of cluster-amd (no live proof, but still eligible)", got)
 	}
+}
+
+func (s *nilCallbackClaimStore) ClaimSubmitted(ctx context.Context, id, cluster string, resolved *domain.JobSpec, fits func(context.Context, []*domain.Experiment) (bool, error)) (*domain.ClaimRefusal, error) {
+	return refusedUnless(s.claimSubmitted(ctx, id, cluster, resolved, fits))
 }

@@ -84,7 +84,7 @@ func TestAnInviteMakesOneMemberWithItsRole(t *testing.T) {
 	if got := memberRoles(t, accounts, orgID); len(got) != 2 || got[owner] != domain.OrgRoleOwner || got[guest] != domain.OrgRoleMember {
 		t.Fatalf("members: got = %v, want the owner and the new member", got)
 	}
-	if _, orgIDs, err := accounts.EnsureUserHome(ctx, guest, "", "ignored"); err != nil || !slices.Equal(orgIDs, []string{guestOrg, orgID}) {
+	if _, orgIDs, err := accounts.EnsureUserHome(ctx, guest, "", "ignored", testLimit); err != nil || !slices.Equal(orgIDs, []string{guestOrg, orgID}) {
 		t.Fatalf("orgs of the one who joined: got = %v, %v, want home first then the joined org", orgIDs, err)
 	}
 	if got := pendingInviteIDs(t, accounts, orgID); len(got) != 0 {
@@ -396,7 +396,7 @@ func TestWhatAPersonHeldInAnOrgEndsWhenTheyLeaveIt(t *testing.T) {
 	if _, found, _ := accounts.OrgRole(ctx, orgID, member); found {
 		t.Error("the one removed still has a role in the org")
 	}
-	if _, orgIDs, err := accounts.EnsureUserHome(ctx, second, "", "ignored"); err != nil || !slices.Equal(orgIDs, []string{secondHome}) {
+	if _, orgIDs, err := accounts.EnsureUserHome(ctx, second, "", "ignored", testLimit); err != nil || !slices.Equal(orgIDs, []string{secondHome}) {
 		t.Errorf("orgs of the one who left: got = %v, %v, want their home alone and no new one made", orgIDs, err)
 	}
 	var writes int

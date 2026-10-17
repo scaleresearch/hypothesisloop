@@ -34,7 +34,7 @@ type LoopStore interface {
 	ListRunningExperiments(ctx context.Context) ([]*domain.Experiment, error)
 	// ClaimSubmitted persists resolvedJob (exp.ResolvedJob, required) alongside the SUBMITTED
 	// status transition, in the same transaction — see domain.Experiment.ResolvedJob's doc comment.
-	ClaimSubmitted(ctx context.Context, id, clusterName string, resolvedJob *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error)
+	ClaimSubmitted(ctx context.Context, id, clusterName string, resolvedJob *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (*domain.ClaimRefusal, error)
 	// RequeuePreempted returns id to QUEUED and overwrites its duration plus the accelerator-hours
 	// estimate with the caller's proportionally rescaled remaining amounts — see the store
 	// implementation's doc comment for why both must move together.

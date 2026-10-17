@@ -198,7 +198,7 @@ func TestStaffIsAFlagOnAUserThatExists(t *testing.T) {
 		if err := accounts.SetUserStaff(ctx, userID, want); err != nil {
 			t.Fatalf("set staff = %v: got = %v, want = nil", want, err)
 		}
-		user, orgIDs, err := accounts.EnsureUserHome(ctx, userID, "", "ignored")
+		user, orgIDs, err := accounts.EnsureUserHome(ctx, userID, "", "ignored", testLimit)
 		if err != nil || user.Staff != want || len(orgIDs) != 1 {
 			t.Fatalf("user after staff = %v: got = %+v in %v, %v, want the flag set and one org as before", want, user, orgIDs, err)
 		}
@@ -212,10 +212,10 @@ func TestOrgsAreReadByIDAndAnOrgNeedsAnOwnerThatExists(t *testing.T) {
 	userID, homeOrg := newTestUserHome(t, accounts)
 	_, otherOrg := newTestUserHome(t, accounts)
 
-	if _, err := accounts.CreateOrg(ctx, "ownerless", "user-missing-"+uuid.New().String(), 0); !errors.Is(err, ErrUserNotFound) {
+	if _, err := accounts.CreateOrg(ctx, "ownerless", "user-missing-"+uuid.New().String(), 0, testLimit); !errors.Is(err, ErrUserNotFound) {
 		t.Fatalf("create an org for a missing user: got = %v, want = %v", err, ErrUserNotFound)
 	}
-	second, err := accounts.CreateOrg(ctx, "home of "+userID, userID, 0)
+	second, err := accounts.CreateOrg(ctx, "home of "+userID, userID, 0, testLimit)
 	if err != nil || second.Role != domain.OrgRoleOwner {
 		t.Fatalf("a second org under the name of the first: got = %+v, %v, want it created and owned", second, err)
 	}

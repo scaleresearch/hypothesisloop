@@ -17,7 +17,7 @@ import (
 func newTestUserHome(t *testing.T, accounts *Store) (userID, orgID string) {
 	t.Helper()
 	userID = "user-" + uuid.New().String()
-	_, orgIDs, err := accounts.EnsureUserHome(context.Background(), userID, "name of "+userID, "home of "+userID)
+	_, orgIDs, err := accounts.EnsureUserHome(context.Background(), userID, "name of "+userID, "home of "+userID, testLimit)
 	if err != nil {
 		t.Fatalf("ensure user home: got = %v, want = nil", err)
 	}
@@ -50,7 +50,7 @@ func TestFirstRequestCreatesAUsersHomeOnce(t *testing.T) {
 	ctx := context.Background()
 	userID, orgID := newTestUserHome(t, accounts)
 
-	user, orgIDs, err := accounts.EnsureUserHome(ctx, userID, "name of "+userID, "another name")
+	user, orgIDs, err := accounts.EnsureUserHome(ctx, userID, "name of "+userID, "another name", testLimit)
 	if err != nil {
 		t.Fatalf("second request: got = %v, want = nil", err)
 	}
@@ -75,7 +75,7 @@ func TestAUserCarriesTheNameLastStatedForThem(t *testing.T) {
 		{"", "Ada Lovelace"},
 		{"Ada King", "Ada King"},
 	} {
-		user, _, err := accounts.EnsureUserHome(ctx, userID, step.stated, "ignored")
+		user, _, err := accounts.EnsureUserHome(ctx, userID, step.stated, "ignored", testLimit)
 		if err != nil || user.Name != step.want {
 			t.Fatalf("user after the provider states %q: got = %+v, %v, want name %q", step.stated, user, err, step.want)
 		}
@@ -131,7 +131,7 @@ func TestConcurrentFirstRequestsEndWithOneOrg(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, results[i], errs[i] = accounts.EnsureUserHome(context.Background(), userID, "", "racing")
+			_, results[i], errs[i] = accounts.EnsureUserHome(context.Background(), userID, "", "racing", testLimit)
 		}()
 	}
 	wg.Wait()
@@ -160,7 +160,7 @@ func TestOrgsAndProjectsCanBeCreatedAndRenamed(t *testing.T) {
 	ctx := context.Background()
 	userID, homeOrg := newTestUserHome(t, accounts)
 
-	second, err := accounts.CreateOrg(ctx, "second", userID, 0)
+	second, err := accounts.CreateOrg(ctx, "second", userID, 0, testLimit)
 	if err != nil {
 		t.Fatalf("create org: got = %v, want = nil", err)
 	}
@@ -227,7 +227,7 @@ func TestMembershipIsPerOrg(t *testing.T) {
 	if role, _, _ := accounts.OrgRole(ctx, orgID, owner); role != domain.OrgRoleOwner {
 		t.Fatalf("role of the creator: got = %q, want owner", role)
 	}
-	_, orgIDs, err := accounts.EnsureUserHome(ctx, guest, "", "ignored")
+	_, orgIDs, err := accounts.EnsureUserHome(ctx, guest, "", "ignored", testLimit)
 	if err != nil || !slices.Equal(orgIDs, []string{guestOrg, orgID}) {
 		t.Fatalf("orgs of a user in two: got = %v, %v, want home first then the joined one", orgIDs, err)
 	}

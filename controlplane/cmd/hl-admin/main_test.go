@@ -98,6 +98,8 @@ func TestAMalformedScopeOrCommandIsAnError(t *testing.T) {
 		{"platform-experiment", "share"}, {"platform-experiment", "share", "pe-1", "on"}, {"platform-experiment", "show", "pe-1"},
 		{"launcher", "add"}, {"launcher", "remove"}, {"launcher", "add", "main", "default"}, {"launcher", "list", "main"},
 		{"cluster", "settings", "name"}, {"cluster", "settings", "name", "{}"}, {"cluster", "settings", "name", `{"silence":1}`},
+		{"org", "limits", "org_1", "8"}, {"org", "limits", "org_1", "eight", "4"}, {"org", "limits", "org_1", "8", "NaN"},
+		{"org", "limits", "org_1", "4", "8"}, {"org", "limits", "org_1", "8", "0"},
 	} {
 		var stdout bytes.Buffer
 		if err := run(args, &stdout); err == nil || stdout.Len() != 0 {
@@ -113,11 +115,20 @@ func TestDatabaseCommandsNeedADatabase(t *testing.T) {
 	for _, args := range [][]string{
 		{"cluster", "add", "name", "default"}, {"cluster", "share", "name", "on"}, {"user", "staff", "subject", "off"},
 		{"cluster", "settings", "name", `{"status_silence_ceiling_seconds":21600}`}, {"launcher", "add", "main"}, {"launcher", "remove", "main"},
-		{"platform-experiment", "share", "pe-1"}, {"platform-experiment", "unshare", "pe-1"},
+		{"platform-experiment", "share", "pe-1"}, {"platform-experiment", "unshare", "pe-1"}, {"org", "limits", "org_1", "8", "4"},
 	} {
 		if err := run(args, &stdout); err == nil || !strings.Contains(err.Error(), "DATABASE_URL") {
 			t.Fatalf("hl-admin %v: got = %v, want an error naming DATABASE_URL", args, err)
 		}
+	}
+}
+
+func TestOrgLimitsReadsBothRates(t *testing.T) {
+	if got, err := computeLimit("8", "2.5"); err != nil || got != (domain.ComputeLimit{Org: 8, Project: 2.5}) {
+		t.Errorf("8 2.5: got = %+v, %v", got, err)
+	}
+	if got, err := computeLimit("4", "4"); err != nil || got != (domain.ComputeLimit{Org: 4, Project: 4}) {
+		t.Errorf("a project limit equal to the org's: got = %+v, %v", got, err)
 	}
 }
 

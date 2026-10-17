@@ -37,29 +37,56 @@ var singleOrg = func() map[string]domain.Cluster {
 func (*disbalanceStore) RegisteredClusters(context.Context) (map[string]domain.Cluster, error) {
 	return singleOrg, nil
 }
+func (*disbalanceStore) OrgComputeLimits(context.Context) (map[string]domain.ComputeLimit, error) {
+	return nil, nil
+}
 func (*preemptStore) RegisteredClusters(context.Context) (map[string]domain.Cluster, error) {
 	return singleOrg, nil
+}
+func (*preemptStore) OrgComputeLimits(context.Context) (map[string]domain.ComputeLimit, error) {
+	return nil, nil
 }
 func (*resolveTestStore) RegisteredClusters(context.Context) (map[string]domain.Cluster, error) {
 	return singleOrg, nil
 }
+func (*resolveTestStore) OrgComputeLimits(context.Context) (map[string]domain.ComputeLimit, error) {
+	return nil, nil
+}
 func (*speculationStore) RegisteredClusters(context.Context) (map[string]domain.Cluster, error) {
 	return singleOrg, nil
+}
+func (*speculationStore) OrgComputeLimits(context.Context) (map[string]domain.ComputeLimit, error) {
+	return nil, nil
 }
 func (*nilCallbackClaimStore) RegisteredClusters(context.Context) (map[string]domain.Cluster, error) {
 	return singleOrg, nil
 }
+func (*nilCallbackClaimStore) OrgComputeLimits(context.Context) (map[string]domain.ComputeLimit, error) {
+	return nil, nil
+}
 func (*pinningStore) RegisteredClusters(context.Context) (map[string]domain.Cluster, error) {
 	return singleOrg, nil
+}
+func (*pinningStore) OrgComputeLimits(context.Context) (map[string]domain.ComputeLimit, error) {
+	return nil, nil
 }
 func (*resilienceStore) RegisteredClusters(context.Context) (map[string]domain.Cluster, error) {
 	return singleOrg, nil
 }
+func (*resilienceStore) OrgComputeLimits(context.Context) (map[string]domain.ComputeLimit, error) {
+	return nil, nil
+}
 func (*claimStore) RegisteredClusters(context.Context) (map[string]domain.Cluster, error) {
 	return singleOrg, nil
 }
+func (*claimStore) OrgComputeLimits(context.Context) (map[string]domain.ComputeLimit, error) {
+	return nil, nil
+}
 func (*noRunningListStore) RegisteredClusters(context.Context) (map[string]domain.Cluster, error) {
 	return singleOrg, nil
+}
+func (*noRunningListStore) OrgComputeLimits(context.Context) (map[string]domain.ComputeLimit, error) {
+	return nil, nil
 }
 
 // orgCluster is one connected cluster of the placement tests: a single node holding h100
@@ -144,6 +171,9 @@ type orgStore struct {
 
 func (s *orgStore) RegisteredClusters(context.Context) (map[string]domain.Cluster, error) {
 	return s.registered, nil
+}
+func (*orgStore) OrgComputeLimits(context.Context) (map[string]domain.ComputeLimit, error) {
+	return nil, nil
 }
 func (s *orgStore) ListSubmittedExperiments(context.Context) ([]*domain.Experiment, error) {
 	return nil, nil
@@ -547,6 +577,9 @@ type twoOrgMaxStore struct {
 
 func (s *twoOrgMaxStore) RegisteredClusters(context.Context) (map[string]domain.Cluster, error) {
 	return s.registered, nil
+}
+func (*twoOrgMaxStore) OrgComputeLimits(context.Context) (map[string]domain.ComputeLimit, error) {
+	return nil, nil
 }
 
 // A job runs with what it stated, whoever holds the cluster: two orgs' jobs on a shared cluster

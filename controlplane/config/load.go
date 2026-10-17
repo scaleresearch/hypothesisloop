@@ -150,6 +150,9 @@ func (c *Settings) build() error {
 	if c.Quota.MaxPlatformExperimentDays <= 0 {
 		return fmt.Errorf("quota max_platform_experiment_days must be positive")
 	}
+	if err := c.Quota.NewOrgComputeLimit().Validate(); err != nil {
+		return fmt.Errorf("quota default_org_shared_acch_per_hour and default_project_shared_acch_per_hour: %w", err)
+	}
 	s := c.Scheduler
 	if s.LoopHeartbeatSeconds <= 0 || s.JobPollIntervalSeconds <= 0 ||
 		s.StuckPendingTimeoutSeconds <= 0 || s.StartTimeoutSeconds <= 0 || s.ClusterUnreachableAfterSeconds <= 0 ||

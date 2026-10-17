@@ -180,6 +180,7 @@ func TestASubmissionKeySeenFromTheAgentAnswersItsJobAndCreatesNothing(t *testing
 // estimate. The transaction sizes it from the figure it admits on.
 func TestAJobWithNoEstimateTakesTheLargestTheAdmissionsOwnFigureHolds(t *testing.T) {
 	domain.SetAcceleratorRates(map[string]float64{"cpu": 0.5})
+	t.Cleanup(func() { domain.SetAcceleratorRates(testRates) })
 	unsized := func(exp *domain.Experiment, id string, limit float64) *domain.Experiment {
 		job := *exp
 		job.ID, job.AcceleratorCount, job.EstimatedDurationHours, job.EstimatedCostAccH, job.MaxEstimateHours = exp.ID+id, 2, 0, 0, limit

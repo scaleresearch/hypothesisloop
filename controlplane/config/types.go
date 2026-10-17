@@ -53,6 +53,11 @@ type QuotaConfig struct {
 	// MaxPlatformExperimentDays is the longest a platform experiment may run, from the start of
 	// its run to its end. Required and positive: until its end an experiment may rent machines.
 	MaxPlatformExperimentDays int `yaml:"max_platform_experiment_days"`
+	// DefaultOrgSharedAccHPerHour and DefaultProjectSharedAccHPerHour are the platform compute
+	// limit (domain.ComputeLimit) an org is created with: the accelerator hours per hour of shared
+	// clusters its placed jobs, and each project's, may reserve. Required, 0 < project <= org.
+	DefaultOrgSharedAccHPerHour     float64 `yaml:"default_org_shared_acch_per_hour"`
+	DefaultProjectSharedAccHPerHour float64 `yaml:"default_project_shared_acch_per_hour"`
 
 	MaxAcceleratorCountPerJob int     `yaml:"max_accelerator_count_per_job"`
 	MaxCPUCoresPerJob         float64 `yaml:"max_cpu_cores_per_job"`
@@ -460,4 +465,9 @@ type Settings struct {
 	// Derived maps built by Load() for fast lookup — not in YAML.
 	RateByName         map[string]float64           // accelerator name → AccH rate
 	PodResourcesByName map[string]map[string]string // accelerator name → pod_resources, where it has any
+}
+
+// NewOrgComputeLimit is the platform compute limit an org is created with.
+func (q QuotaConfig) NewOrgComputeLimit() domain.ComputeLimit {
+	return domain.ComputeLimit{Org: q.DefaultOrgSharedAccHPerHour, Project: q.DefaultProjectSharedAccHPerHour}
 }

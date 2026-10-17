@@ -23,10 +23,16 @@ CREATE TABLE users (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- shared_acch_per_hour and project_shared_acch_per_hour are domain.ComputeLimit: the accelerator
+-- hours per hour of shared clusters the org's placed jobs, and each project's, may reserve.
 CREATE TABLE orgs (
-    id         TEXT        PRIMARY KEY,
-    name       TEXT        NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    id                           TEXT             PRIMARY KEY,
+    name                         TEXT             NOT NULL,
+    created_at                   TIMESTAMPTZ      NOT NULL DEFAULT now(),
+    shared_acch_per_hour         DOUBLE PRECISION NOT NULL,
+    project_shared_acch_per_hour DOUBLE PRECISION NOT NULL,
+    CONSTRAINT orgs_compute_limit
+        CHECK (0 < project_shared_acch_per_hour AND project_shared_acch_per_hour <= shared_acch_per_hour)
 );
 
 CREATE TABLE org_members (
@@ -64,8 +70,6 @@ CREATE TABLE projects (
     UNIQUE (org_id, name)
 );
 
-INSERT INTO orgs (id, name) VALUES ('default', 'default');
-INSERT INTO projects (id, org_id, name) VALUES ('default', 'default', 'default');
 
 -- key_hash is the sha256 of the whole token. project_id NULL reaches every project of the org.
 -- minted_by is the key an API key was created with, NULL when a person created it; a key is
@@ -559,6 +563,9 @@ CREATE TABLE experiments (
     ended_at                 TIMESTAMPTZ,
 
     image                    TEXT             NOT NULL DEFAULT '',
+    -- acch_per_hour is what the job reserves while placed (domain.AccHPerHour), written by the
+    -- placing write.
+    acch_per_hour            DOUBLE PRECISION NOT NULL DEFAULT 0,
 
     CONSTRAINT experiments_status
         CHECK (status IN ('SUBMITTED', 'QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'EVICTED', 'REJECTED')),

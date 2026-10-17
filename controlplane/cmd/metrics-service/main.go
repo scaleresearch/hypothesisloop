@@ -69,7 +69,7 @@ func main() {
 		DefaultMaxConcurrentAccelerators: pcfg.Quota.DefaultMaxConcurrentAccelerators,
 	}
 
-	authenticator, err := auth.NewAuthenticator(pcfg.Auth, pcfg.SigningSecret, store)
+	authenticator, err := auth.NewAuthenticator(pcfg.Auth, pcfg.SigningSecret, db.OrgDefaults{Store: store, NewOrgLimit: pcfg.Quota.NewOrgComputeLimit()})
 	if err != nil {
 		logger.Fatal("metrics-service: configure auth", zap.Error(err))
 	}

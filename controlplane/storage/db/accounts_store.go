@@ -43,7 +43,8 @@ func newAccountID(prefix string) (string, error) {
 //
 // name is what the identity provider states the person is called now. It replaces the name kept
 // when it differs, and an empty one, a provider that states none, leaves the kept name alone.
-func (s *Store) EnsureUserHome(ctx context.Context, userID, name, orgName string) (*domain.User, []string, error) {
+// limit is the platform compute limit a home org it creates starts with.
+func (s *Store) EnsureUserHome(ctx context.Context, userID, name, orgName string, limit domain.ComputeLimit) (*domain.User, []string, error) {
 	user, orgIDs, err := readUserHome(ctx, s.pool.pool, userID)
 	if err != nil {
 		return nil, nil, err
@@ -63,7 +64,7 @@ func (s *Store) EnsureUserHome(ctx context.Context, userID, name, orgName string
 			return fmt.Errorf("accounts_store.EnsureUserHome: insert user: %w", err)
 		}
 		if tag.RowsAffected() == 1 {
-			if _, err := createOrg(ctx, tx, orgName, userID); err != nil {
+			if _, err := createOrg(ctx, tx, orgName, userID, limit); err != nil {
 				return fmt.Errorf("accounts_store.EnsureUserHome: %w", err)
 			}
 		}
@@ -75,6 +76,21 @@ func (s *Store) EnsureUserHome(ctx context.Context, userID, name, orgName string
 		return nil, nil, err
 	}
 	return user, orgIDs, nil
+}
+
+// OrgDefaults is the store creating every org with NewOrgLimit, the settings' platform compute
+// limit, for the authenticator's home orgs and the API's.
+type OrgDefaults struct {
+	*Store
+	NewOrgLimit domain.ComputeLimit
+}
+
+func (d OrgDefaults) EnsureUserHome(ctx context.Context, userID, name, orgName string) (*domain.User, []string, error) {
+	return d.Store.EnsureUserHome(ctx, userID, name, orgName, d.NewOrgLimit)
+}
+
+func (d OrgDefaults) CreateOrg(ctx context.Context, name, ownerUserID string, maxOwned int) (*domain.Org, error) {
+	return d.Store.CreateOrg(ctx, name, ownerUserID, maxOwned, d.NewOrgLimit)
 }
 
 // userName is the SQL of the name of the user whose id the expression idExpr yields as an actor
@@ -106,14 +122,18 @@ WHERE u.id = $1 GROUP BY u.id`, userID).Scan(&user.Name, &user.Staff, &user.Crea
 	return user, orgIDs, nil
 }
 
-// createOrg inserts an org, its owner and its default project.
-func createOrg(ctx context.Context, tx *Write, name, ownerUserID string) (*domain.Org, error) {
+// createOrg inserts an org with its platform compute limit, its owner and its default project.
+func createOrg(ctx context.Context, tx *Write, name, ownerUserID string, limit domain.ComputeLimit) (*domain.Org, error) {
+	if err := limit.Validate(); err != nil {
+		return nil, err
+	}
 	orgID, err := newAccountID("org")
 	if err != nil {
 		return nil, err
 	}
 	org := &domain.Org{ID: orgID, Name: name, Role: domain.OrgRoleOwner}
-	if err := tx.QueryRow(ctx, `INSERT INTO orgs (id, name) VALUES ($1, $2) RETURNING created_at`, orgID, name).Scan(&org.CreatedAt); err != nil {
+	if err := tx.QueryRow(ctx, `INSERT INTO orgs (id, name, shared_acch_per_hour, project_shared_acch_per_hour) VALUES ($1, $2, $3, $4) RETURNING created_at`,
+		orgID, name, limit.Org, limit.Project).Scan(&org.CreatedAt); err != nil {
 		return nil, fmt.Errorf("insert org: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO org_members (org_id, user_id, role) VALUES ($1, $2, $3)`,
@@ -135,8 +155,8 @@ func createOrg(ctx context.Context, tx *Write, name, ownerUserID string) (*domai
 // there is no such user. With maxOwned set the owner may own that many orgs and no more, this one
 // included, and ErrMaxOrgsReached refuses the next; zero holds them to no limit. The owner's row
 // is locked first and the orgs they own are counted after the insert, inside its transaction, so
-// two creates at once cannot both take the last place.
-func (s *Store) CreateOrg(ctx context.Context, name, ownerUserID string, maxOwned int) (*domain.Org, error) {
+// two creates at once cannot both take the last place. limit is the org's platform compute limit.
+func (s *Store) CreateOrg(ctx context.Context, name, ownerUserID string, maxOwned int, limit domain.ComputeLimit) (*domain.Org, error) {
 	var org *domain.Org
 	if err := s.write(ctx, func(tx *Write) error {
 		var err error
@@ -148,7 +168,7 @@ func (s *Store) CreateOrg(ctx context.Context, name, ownerUserID string, maxOwne
 		if err != nil {
 			return fmt.Errorf("accounts_store.CreateOrg: lock owner: %w", err)
 		}
-		org, err = createOrg(ctx, tx, name, ownerUserID)
+		org, err = createOrg(ctx, tx, name, ownerUserID, limit)
 		if err != nil {
 			return fmt.Errorf("accounts_store.CreateOrg: %w", err)
 		}

@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // scratchDatabase creates an empty database and drops it afterwards, for tests that build a
@@ -71,9 +73,28 @@ func TestAnEmptyDatabaseIsBuiltFromSchemaSQLOnce(t *testing.T) {
 		t.Fatalf("next start: got = %v, %v, want the schema found as it is", built, err)
 	}
 	requireNoCheckNamespace(t, pool)
+}
+
+func TestTheDefaultOrgIsSeededOnceWithItsLimit(t *testing.T) {
+	pool := scratchDatabase(t)
+	ctx := context.Background()
+	if _, err := EnsureSchema(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(pool, 3)
+	if err := store.SeedDefaultOrg(ctx, domain.ComputeLimit{Org: 8, Project: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SeedDefaultOrg(ctx, domain.ComputeLimit{Org: 16, Project: 4}); err != nil {
+		t.Fatal(err)
+	}
 	var org string
 	if err := pool.pool.QueryRow(ctx, `SELECT org_id FROM projects WHERE id = 'default'`).Scan(&org); err != nil || org != "default" {
 		t.Fatalf("the default project: got = %q, %v, want it in org default", org, err)
+	}
+	limit, _, _, err := store.PlatformComputeHeld(ctx, "default", "")
+	if err != nil || limit != (domain.ComputeLimit{Org: 8, Project: 2}) {
+		t.Fatalf("the default org's limit: got = %+v, %v, want the first seed's", limit, err)
 	}
 }
 

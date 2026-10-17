@@ -64,14 +64,14 @@ type mixedStore struct {
 	requeued []string
 }
 
-func (s *mixedStore) ClaimSubmitted(ctx context.Context, id, cluster string, resolved *domain.JobSpec, fits func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
+func (s *mixedStore) claimSubmitted(ctx context.Context, id, cluster string, resolved *domain.JobSpec, fits func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
 	if s.resolved == nil {
 		s.resolved = map[string]domain.JobSpec{}
 	}
 	if resolved != nil {
 		s.resolved[id] = *resolved
 	}
-	return s.holdStore.ClaimSubmitted(ctx, id, cluster, resolved, fits)
+	return s.holdStore.claimSubmitted(ctx, id, cluster, resolved, fits)
 }
 func (s *mixedStore) RequeuePreempted(_ context.Context, id string, _, _ float64) (bool, error) {
 	s.requeued = append(s.requeued, id)
@@ -446,4 +446,8 @@ func (coreBoxes) GetAutoscalerCapability(context.Context) (map[string]bool, erro
 
 func (coreBoxes) GetClusterIDs(context.Context) (map[string]string, error) {
 	return map[string]string{}, nil
+}
+
+func (s *mixedStore) ClaimSubmitted(ctx context.Context, id, cluster string, resolved *domain.JobSpec, fits func(context.Context, []*domain.Experiment) (bool, error)) (*domain.ClaimRefusal, error) {
+	return refusedUnless(s.claimSubmitted(ctx, id, cluster, resolved, fits))
 }

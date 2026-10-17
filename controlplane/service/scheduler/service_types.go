@@ -209,6 +209,9 @@ type admissionReads interface {
 	// RegisteredClusters returns every registered cluster by name, with its org and whether the
 	// platform shares it: what eligibleClusters decides placement by org against.
 	RegisteredClusters(ctx context.Context) (map[string]domain.Cluster, error)
+	// OrgComputeLimits returns every org's platform compute limit by org: what neverFitsReason
+	// holds a job on a shared cluster to.
+	OrgComputeLimits(ctx context.Context) (map[string]domain.ComputeLimit, error)
 }
 
 // clusterSettings is the operator overrides of a cluster.

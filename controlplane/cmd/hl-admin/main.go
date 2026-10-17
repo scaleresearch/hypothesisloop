@@ -38,6 +38,9 @@ const usage = `usage: hl-admin <command>
   cluster share NAME on|off        place every org's jobs on a cluster, or only its own org's
   cluster settings NAME JSON       change a cluster's settings, as PATCH /orgs/{id}/clusters/{name} does,
                                    e.g. '{"status_silence_ceiling_seconds":21600}'. 0 puts one back on the default
+  org limits ORG RATE PROJECT_RATE set the accelerator hours per hour of the platform's shared clusters
+                                   ORG's placed jobs may reserve, and those of each of its projects.
+                                   Placed jobs stay placed
   platform-experiment share ID     let every account read a platform experiment and what is in it
   platform-experiment unshare ID   take that back: its own org alone reads it again
   github connect ORG INSTALLATION_ID
@@ -78,7 +81,7 @@ func run(args []string, stdout io.Writer) error {
 		return nil
 	case len(args) == 4 && args[0] == "user" && args[1] == "add":
 		return withStore(cfg, func(ctx context.Context, store *db.Store) error {
-			return addUser(ctx, store, args[2], args[3], stdout)
+			return addUser(ctx, db.OrgDefaults{Store: store, NewOrgLimit: cfg.Quota.NewOrgComputeLimit()}, args[2], args[3], stdout)
 		})
 	case (len(args) == 4 || len(args) == 5) && args[0] == "api-key" && args[1] == "add":
 		projectID := ""
@@ -132,6 +135,20 @@ func run(args []string, stdout io.Writer) error {
 		return withStore(cfg, func(ctx context.Context, store *db.Store) error {
 			_, _, err := store.UpdateCluster(ctx, args[2], nil, change)
 			return err
+		})
+	case len(args) == 5 && args[0] == "org" && args[1] == "limits":
+		limit, err := computeLimit(args[3], args[4])
+		if err != nil {
+			return err
+		}
+		return withStore(cfg, func(ctx context.Context, store *db.Store) error {
+			if err := store.SetOrgComputeLimit(ctx, args[2], limit); err != nil {
+				return err
+			}
+			return json.NewEncoder(stdout).Encode(struct {
+				OrgID string `json:"org_id"`
+				domain.ComputeLimit
+			}{args[2], limit})
 		})
 	case len(args) == 3 && args[0] == "platform-experiment" && (args[1] == "share" || args[1] == "unshare"):
 		return withStore(cfg, func(ctx context.Context, store *db.Store) error {
@@ -199,6 +216,19 @@ func onOff(arg string) (bool, error) {
 	default:
 		return false, fmt.Errorf("want on or off, got %q", arg)
 	}
+}
+
+// computeLimit reads an org's platform compute limit, in accelerator hours per hour.
+func computeLimit(org, project string) (domain.ComputeLimit, error) {
+	var limit domain.ComputeLimit
+	var err error
+	if limit.Org, err = strconv.ParseFloat(org, 64); err != nil {
+		return limit, fmt.Errorf("RATE must be a number of accelerator hours per hour, got %q", org)
+	}
+	if limit.Project, err = strconv.ParseFloat(project, 64); err != nil {
+		return limit, fmt.Errorf("PROJECT_RATE must be a number of accelerator hours per hour, got %q", project)
+	}
+	return limit, limit.Validate()
 }
 
 type installationStore interface {

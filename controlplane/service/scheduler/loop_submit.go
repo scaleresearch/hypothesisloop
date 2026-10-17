@@ -45,6 +45,7 @@ type insufficientQuota interface {
 func notAdmittedReasonForSubmitError(err error) string {
 	var capErr concurrencyCapExceeded
 	var quotaErr insufficientQuota
+	var limitErr computeLimitReached
 	switch {
 	case errors.As(err, &capErr):
 		return concurrencyCapReason()
@@ -52,16 +53,34 @@ func notAdmittedReasonForSubmitError(err error) string {
 		return domain.NotAdmittedInsufficientQuota + ": " + quotaErr.Error()
 	case errors.Is(err, errAdmissionCapacityChanged):
 		return capacityTakenReason()
+	case errors.As(err, &limitErr):
+		return limitErr.reason()
 	default:
 		return workloadCreationReason()
 	}
 }
 
-// submitErrorLevel logs a lost race for the last free capacity and a quota refusal at info: the
-// job stays queued with the reason on its row, so neither is an error.
+// computeLimitReached is a claim on a shared cluster that would take the job's org or project past
+// its platform compute limit.
+type computeLimitReached struct{ *domain.ClaimRefusal }
+
+func (e computeLimitReached) Error() string { return e.reason() }
+
+func (e computeLimitReached) reason() string {
+	holder := "org"
+	if e.Code == domain.NotAdmittedProjectComputeLimit {
+		holder = "project"
+	}
+	return fmt.Sprintf("%s: %s %s holds %.1f of %.1f AccH/h of platform compute; the job needs %.1f. It is admitted as the %s's jobs on platform clusters end",
+		e.Code, holder, e.Holder, e.Held, e.Limit, e.Needs, holder)
+}
+
+// submitErrorLevel logs a lost race for the last free capacity, a quota refusal and a platform
+// compute limit at info: the job stays queued with the reason on its row, so none is an error.
 func submitErrorLevel(err error) zapcore.Level {
 	var quotaErr insufficientQuota
-	if errors.Is(err, errAdmissionCapacityChanged) || errors.As(err, &quotaErr) {
+	var limitErr computeLimitReached
+	if errors.Is(err, errAdmissionCapacityChanged) || errors.As(err, &quotaErr) || errors.As(err, &limitErr) {
 		return zapcore.InfoLevel
 	}
 	return zapcore.ErrorLevel
@@ -188,12 +207,16 @@ func (l *Loop) submitJobTo(ctx context.Context, exp *domain.Experiment, clusterN
 	if err := l.observed.RecordAdmission(ctx, exp.ID, time.Now().UTC()); err != nil {
 		return err
 	}
-	claimed, err := l.store.ClaimSubmitted(ctx, exp.ID, clusterName, exp.ResolvedJob, capacityAvailable)
+	refused, err := l.store.ClaimSubmitted(ctx, exp.ID, clusterName, exp.ResolvedJob, capacityAvailable)
 	if err != nil {
 		return err
 	}
-	if !claimed {
+	switch {
+	case refused == nil:
+	case refused.Code == domain.NotAdmittedCapacityUnavailable:
 		return errAdmissionCapacityChanged
+	default:
+		return computeLimitReached{refused}
 	}
 	exp.ClusterName = clusterName
 	return nil

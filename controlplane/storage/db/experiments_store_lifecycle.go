@@ -70,11 +70,16 @@ func (s *Store) UpdateExperimentPriority(ctx context.Context, id string, score f
 // resolved_job_spec in the SAME transaction as the SUBMITTED status transition — see
 // domain.Experiment.ResolvedJob's doc comment. Its image is decided here and set on resolvedJob:
 // the one image the cluster runs, or on a cluster that runs any, the image the job names.
-func (s *Store) ClaimSubmitted(ctx context.Context, id, clusterName string, resolvedJob *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
+//
+// On a shared cluster it is also the one place the platform compute limits (domain.ComputeLimit)
+// are kept: under the org's lock, taken after the cluster's, what the org's and the project's
+// placed jobs on shared clusters reserve plus the job's own acch_per_hour stays within each
+// limit. It returns why it placed nothing, and nil when it placed the job.
+func (s *Store) ClaimSubmitted(ctx context.Context, id, clusterName string, resolvedJob *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (*domain.ClaimRefusal, error) {
 	if resolvedJob == nil {
-		return false, fmt.Errorf("experiments_store.ClaimSubmitted: resolved job spec is required")
+		return nil, fmt.Errorf("experiments_store.ClaimSubmitted: resolved job spec is required")
 	}
-	claimed := false
+	refusal := &domain.ClaimRefusal{Code: domain.NotAdmittedCapacityUnavailable}
 	if err := s.write(ctx, func(tx *Write) error {
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, "cluster-admission/"+clusterName); err != nil {
 			return fmt.Errorf("experiments_store.ClaimSubmitted: lock: %w", err)
@@ -105,6 +110,14 @@ ORDER BY submitted_at ASC, id ASC`, clusterName)
 		if !available {
 			return nil
 		}
+		rate, limited, err := withinComputeLimit(ctx, tx, id, clusterName)
+		if err != nil {
+			return fmt.Errorf("experiments_store.ClaimSubmitted: %w", err)
+		}
+		if limited != nil {
+			refusal = limited
+			return nil
+		}
 		resolvedJobSpec, err := json.Marshal(resolvedJob)
 		if err != nil {
 			return fmt.Errorf("experiments_store.ClaimSubmitted: marshal resolved job spec: %w", err)
@@ -116,23 +129,65 @@ ORDER BY submitted_at ASC, id ASC`, clusterName)
 		// this job already placed or is committed when this statement reads the cluster.
 		q := `UPDATE experiments e
 SET status = 'SUBMITTED', submitted_at = NOW(), cluster_name = $2, last_cluster = $2, eviction_reason = NULL, not_admitted_reason = NULL, updated_at = NOW(),
-	resolved_job_spec = $3::jsonb
+	resolved_job_spec = $3::jsonb, acch_per_hour = $4
 WHERE e.id = $1 AND e.status = 'QUEUED' AND ` + clusterHostsJob + `
 RETURNING ` + jobWrittenColumns
 		var j jobWritten
-		switch err := tx.QueryRow(ctx, q, id, clusterName, resolvedJobSpec).Scan(j.dest()...); {
+		switch err := tx.QueryRow(ctx, q, id, clusterName, resolvedJobSpec, rate).Scan(j.dest()...); {
 		case errors.Is(err, pgx.ErrNoRows):
 			return nil
 		case err != nil:
 			return fmt.Errorf("experiments_store.ClaimSubmitted: update: %w", err)
 		}
 		tx.jobStatus(j)
-		claimed = true
+		refusal = nil
 		return nil
 	}); err != nil {
-		return false, err
+		return nil, err
 	}
-	return claimed, nil
+	return refusal, nil
+}
+
+// withinComputeLimit is what job id reserves placed (domain.AccHPerHour) and, when clusterName is
+// shared, the refusal of a job that would take its project or its org past its platform compute
+// limit. It takes the org's lock: the caller holds the cluster's.
+func withinComputeLimit(ctx context.Context, tx *Write, id, clusterName string) (float64, *domain.ClaimRefusal, error) {
+	var acceleratorType domain.AcceleratorType
+	var count int
+	var shared bool
+	var orgID, orgName, projectID, projectName string
+	var limit domain.ComputeLimit
+	err := tx.QueryRow(ctx, `SELECT e.accelerator_type, e.accelerator_count, COALESCE((SELECT c.shared FROM clusters c WHERE c.name = $2), false),
+	o.id, o.name, p.id, p.name, o.shared_acch_per_hour, o.project_shared_acch_per_hour
+FROM experiments e
+JOIN platform_experiments pe ON pe.id = e.platform_experiment_id
+JOIN projects p ON p.id = pe.project_id
+JOIN orgs o ON o.id = p.org_id
+WHERE e.id = $1`, id, clusterName).Scan(&acceleratorType, &count, &shared, &orgID, &orgName, &projectID, &projectName, &limit.Org, &limit.Project)
+	if err != nil {
+		return 0, nil, fmt.Errorf("compute limit: job: %w", err)
+	}
+	rate, err := domain.AccHPerHour(acceleratorType, count)
+	if err != nil {
+		return 0, nil, fmt.Errorf("compute limit: job %s: %w", id, err)
+	}
+	if !shared {
+		return rate, nil, nil
+	}
+	if err := orgSharedLock(ctx, tx, orgID); err != nil {
+		return 0, nil, fmt.Errorf("compute limit: lock: %w", err)
+	}
+	var orgHeld, projectHeld float64
+	if err := tx.QueryRow(ctx, heldOnSharedSQL, orgID, projectID, id).Scan(&orgHeld, &projectHeld); err != nil {
+		return 0, nil, fmt.Errorf("compute limit: held: %w", err)
+	}
+	switch {
+	case domain.ExceedsLimit(projectHeld+rate, limit.Project):
+		return rate, &domain.ClaimRefusal{Code: domain.NotAdmittedProjectComputeLimit, Holder: projectName, Held: projectHeld, Limit: limit.Project, Needs: rate}, nil
+	case domain.ExceedsLimit(orgHeld+rate, limit.Org):
+		return rate, &domain.ClaimRefusal{Code: domain.NotAdmittedOrgComputeLimit, Holder: orgName, Held: orgHeld, Limit: limit.Org, Needs: rate}, nil
+	}
+	return rate, nil, nil
 }
 
 // MarkStarted sets status=RUNNING, but only if still SUBMITTED. Guards against a

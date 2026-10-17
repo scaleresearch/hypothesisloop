@@ -124,6 +124,9 @@ func (poolOnlyStore) ProjectOrg(context.Context, string) (string, error) { retur
 func (poolOnlyStore) RegisteredClusters(context.Context) (map[string]domain.Cluster, error) {
 	return map[string]domain.Cluster{"k8s": {Name: "k8s", OrgID: "org-a"}}, nil
 }
+func (poolOnlyStore) OrgComputeLimits(context.Context) (map[string]domain.ComputeLimit, error) {
+	return nil, nil
+}
 func (poolOnlyStore) GetAgent(_ context.Context, id string) (*domain.Agent, error) {
 	return &domain.Agent{ID: id}, nil
 }
@@ -564,10 +567,14 @@ func TestSubmitTakesSecretEnvOffTheSpec(t *testing.T) {
 type clustersStore struct {
 	poolOnlyStore
 	registered map[string]domain.Cluster
+	limits     map[string]domain.ComputeLimit
 }
 
 func (s clustersStore) RegisteredClusters(context.Context) (map[string]domain.Cluster, error) {
 	return s.registered, nil
+}
+func (s clustersStore) OrgComputeLimits(context.Context) (map[string]domain.ComputeLimit, error) {
+	return s.limits, nil
 }
 
 type installedCapacity struct {

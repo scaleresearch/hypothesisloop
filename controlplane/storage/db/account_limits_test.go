@@ -33,11 +33,11 @@ func TestAPersonOwnsAtMostTheOrgsTheyMay(t *testing.T) {
 	userID, _ := newTestUserHome(t, accounts)
 
 	for i := 2; i <= 3; i++ {
-		if _, err := accounts.CreateOrg(ctx, fmt.Sprintf("org %d", i), userID, 3); err != nil {
+		if _, err := accounts.CreateOrg(ctx, fmt.Sprintf("org %d", i), userID, 3, testLimit); err != nil {
 			t.Fatalf("org %d of 3: got = %v, want = nil", i, err)
 		}
 	}
-	if _, err := accounts.CreateOrg(ctx, "one too many", userID, 3); !errors.Is(err, ErrMaxOrgsReached) {
+	if _, err := accounts.CreateOrg(ctx, "one too many", userID, 3, testLimit); !errors.Is(err, ErrMaxOrgsReached) {
 		t.Fatalf("a fourth org of 3: got = %v, want = %v", err, ErrMaxOrgsReached)
 	}
 	if got := ownedOrgs(t, accounts, userID); got != 3 {
@@ -50,13 +50,13 @@ func TestAPersonOwnsAtMostTheOrgsTheyMay(t *testing.T) {
 	// An org the person is only a member of takes none of their places, and no limit is none.
 	other, otherOrg := newTestUserHome(t, accounts)
 	addTestMember(t, accounts, otherOrg, other, userID, domain.OrgRoleMember)
-	if _, err := accounts.CreateOrg(ctx, "still refused", userID, 3); !errors.Is(err, ErrMaxOrgsReached) {
+	if _, err := accounts.CreateOrg(ctx, "still refused", userID, 3, testLimit); !errors.Is(err, ErrMaxOrgsReached) {
 		t.Fatalf("a fourth org after joining another as a member: got = %v, want = %v", err, ErrMaxOrgsReached)
 	}
-	if _, err := accounts.CreateOrg(ctx, "by staff", userID, 0); err != nil {
+	if _, err := accounts.CreateOrg(ctx, "by staff", userID, 0, testLimit); err != nil {
 		t.Fatalf("a create held to no limit: got = %v, want = nil", err)
 	}
-	if _, err := accounts.CreateOrg(ctx, "for nobody", "user-nobody", 3); !errors.Is(err, ErrUserNotFound) {
+	if _, err := accounts.CreateOrg(ctx, "for nobody", "user-nobody", 3, testLimit); !errors.Is(err, ErrUserNotFound) {
 		t.Fatalf("an org for a user that does not exist: got = %v, want = %v", err, ErrUserNotFound)
 	}
 }
@@ -92,7 +92,7 @@ func TestCreatesAtOnceCannotBothTakeTheLastPlace(t *testing.T) {
 		userID, orgID := newTestUserHome(t, accounts)
 		// One place is left of 2 orgs, and two of 3 projects.
 		won := race(func(i int) error {
-			_, err := accounts.CreateOrg(ctx, fmt.Sprintf("racing %d", i), userID, 2)
+			_, err := accounts.CreateOrg(ctx, fmt.Sprintf("racing %d", i), userID, 2, testLimit)
 			return err
 		}, ErrMaxOrgsReached)
 		if owned := ownedOrgs(t, accounts, userID); won != 1 || owned != 2 {

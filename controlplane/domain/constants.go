@@ -108,6 +108,15 @@ const (
 	// does not scale up has nodes of other architectures than its image's only. Waiting does not
 	// help; an image built for one of theirs does.
 	NotAdmittedNoClusterForArchitecture = "no_cluster_for_architecture"
+	// NotAdmittedOrgComputeLimit and NotAdmittedProjectComputeLimit mean the job's org, or its
+	// project, holds so much of the platform's compute (ComputeLimit) that the job on a shared
+	// cluster would pass the limit. Waiting for its placed jobs to end admits it.
+	NotAdmittedOrgComputeLimit     = "org_compute_limit"
+	NotAdmittedProjectComputeLimit = "project_compute_limit"
+	// NotAdmittedExceedsProjectComputeLimit means the job alone reserves more of the platform's
+	// compute than its project may hold and no cluster of its org's own can hold it. Waiting does
+	// not help; a smaller job or a higher limit does.
+	NotAdmittedExceedsProjectComputeLimit = "exceeds_project_compute_limit"
 )
 
 // QueueReasonAwaitingAdmission is the stored reason of a job the admission loop has not looked at
@@ -140,7 +149,8 @@ func QueueReasonClearsByWaiting(reason string) bool {
 	code, _, _ := strings.Cut(reason, ":")
 	switch code {
 	case NotAdmittedAwaitingAdmission, NotAdmittedCapacityUnavailable, NotAdmittedOutranked,
-		NotAdmittedWaitingForScaleUp, NotAdmittedNoScalableCapacity, NotAdmittedConcurrencyCap:
+		NotAdmittedWaitingForScaleUp, NotAdmittedNoScalableCapacity, NotAdmittedConcurrencyCap,
+		NotAdmittedOrgComputeLimit, NotAdmittedProjectComputeLimit:
 		return true
 	}
 	return false

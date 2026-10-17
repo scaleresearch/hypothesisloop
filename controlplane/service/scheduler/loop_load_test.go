@@ -143,7 +143,7 @@ func (s *sim) lock(cluster string) *sync.Mutex {
 
 // ClaimSubmitted is the store's claim: one claim per cluster at a time, the caller's fresh
 // capacity check under that lock, and the row placed only while it is still queued.
-func (s *sim) ClaimSubmitted(ctx context.Context, id, cluster string, resolved *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
+func (s *sim) claimSubmitted(ctx context.Context, id, cluster string, resolved *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
 	s.count("ClaimSubmitted")
 	lock := s.lock(cluster)
 	lock.Lock()
@@ -234,6 +234,9 @@ func (s *sim) RegisteredClusters(context.Context) (map[string]domain.Cluster, er
 		out[name] = domain.Cluster{Name: name, Priority: box.priority}
 	}
 	return out, nil
+}
+func (*sim) OrgComputeLimits(context.Context) (map[string]domain.ComputeLimit, error) {
+	return nil, nil
 }
 
 // The quota: an agent spends its share on every job it has placed, and admission refuses a job
@@ -1109,4 +1112,8 @@ func (*sim) GetAutoscalerCapability(context.Context) (map[string]bool, error) {
 
 func (*sim) GetClusterIDs(context.Context) (map[string]string, error) {
 	return map[string]string{}, nil
+}
+
+func (s *sim) ClaimSubmitted(ctx context.Context, id, cluster string, resolved *domain.JobSpec, fits func(context.Context, []*domain.Experiment) (bool, error)) (*domain.ClaimRefusal, error) {
+	return refusedUnless(s.claimSubmitted(ctx, id, cluster, resolved, fits))
 }

@@ -41,8 +41,12 @@ func testDSN() string {
 }
 
 func TestMain(m *testing.M) {
+	domain.SetAcceleratorRates(testRates)
 	os.Exit(runWithScratchDatabase(m))
 }
+
+// testRates prices the types this package's tests place: a claim reserves its job's rate.
+var testRates = map[string]float64{"nvidia.com/gpu.product=NVIDIA-L40": 0.25, "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3": 1, "test-accelerator": 1, "cpu": 1}
 
 func runWithScratchDatabase(m *testing.M) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -81,9 +85,13 @@ func buildAt(ctx context.Context, dsn string) error {
 	return build(ctx, pool)
 }
 
-// build creates the schema on pool's empty database and seeds the release's built-ins and testRules.
+// build creates the schema on pool's empty database and seeds the default org, the release's
+// built-ins and testRules.
 func build(ctx context.Context, pool *Pool) error {
 	if _, err := EnsureSchema(ctx, pool); err != nil {
+		return err
+	}
+	if err := NewStore(pool, 3).SeedDefaultOrg(ctx, testLimit); err != nil {
 		return err
 	}
 	builtins, err := agenttypes.Builtins()
@@ -93,6 +101,9 @@ func build(ctx context.Context, pool *Pool) error {
 	_, err = NewStore(pool, 3).SeedBuiltins(ctx, agenttypes.Release, builtins, testRules)
 	return err
 }
+
+// testLimit is the platform compute limit the orgs of this package's tests are created with.
+var testLimit = domain.ComputeLimit{Org: 1000, Project: 1000}
 
 // testModelDefaults is the platform's default models in the tests of this package.
 var testModelDefaults = domain.ModelDefaults{Agent: "agent-default", Coordinator: "coordinator-default"}

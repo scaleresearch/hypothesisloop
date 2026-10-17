@@ -55,11 +55,11 @@ func (w *twoOrgs) queued(t *testing.T, id, peID string) string {
 
 func (w *twoOrgs) claim(t *testing.T, id, cluster string) bool {
 	t.Helper()
-	claimed, err := w.exps.ClaimSubmitted(context.Background(), id, cluster, &domain.JobSpec{AcceleratorCount: 1}, nil)
+	refused, err := w.exps.ClaimSubmitted(context.Background(), id, cluster, &domain.JobSpec{AcceleratorCount: 1}, nil)
 	if err != nil {
 		t.Fatalf("ClaimSubmitted(%s, %s): %v", id, cluster, err)
 	}
-	return claimed
+	return refused == nil
 }
 
 // placed puts a job of peID on cluster in the given placed status.
@@ -138,9 +138,9 @@ func TestAClaimInASingleOrgDeploymentLandsOnEveryRegisteredCluster(t *testing.T)
 		}
 		id := "job-" + suffix + "-" + string(rune('a'+i))
 		seedExperimentForCapTest(t, pool, id, agent, pe, 1, domain.StatusQueued)
-		claimed, err := exps.ClaimSubmitted(context.Background(), id, name, &domain.JobSpec{AcceleratorCount: 1}, nil)
-		if err != nil || !claimed {
-			t.Fatalf("claim on %s = %v, %v, want it placed", name, claimed, err)
+		refused, err := exps.ClaimSubmitted(context.Background(), id, name, &domain.JobSpec{AcceleratorCount: 1}, nil)
+		if err != nil || refused != nil {
+			t.Fatalf("claim on %s = %v, %v, want it placed", name, refused, err)
 		}
 	}
 }
@@ -244,8 +244,8 @@ func TestAClaimWaitingBehindTheEndOfSharingIsRefused(t *testing.T) {
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		claimed, err := w.exps.ClaimSubmitted(ctx, job, w.ofA, &domain.JobSpec{AcceleratorCount: 1}, nil)
-		done <- outcome{claimed, err}
+		refused, err := w.exps.ClaimSubmitted(ctx, job, w.ofA, &domain.JobSpec{AcceleratorCount: 1}, nil)
+		done <- outcome{refused == nil, err}
 	}()
 	select {
 	case got := <-done:

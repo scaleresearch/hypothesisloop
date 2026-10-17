@@ -67,12 +67,12 @@ func TestClaimsRacingForTwoClustersNeverOvercommitOrPlaceAJobTwice(t *testing.T)
 					return
 				}
 				for _, cluster := range []string{w.ofA, second} {
-					claimed, err := w.exps.ClaimSubmitted(ctx, exp.ID, cluster, &domain.JobSpec{AcceleratorCount: exp.AcceleratorCount}, fits(cluster, int64(exp.AcceleratorCount)))
+					refused, err := w.exps.ClaimSubmitted(ctx, exp.ID, cluster, &domain.JobSpec{AcceleratorCount: exp.AcceleratorCount}, fits(cluster, int64(exp.AcceleratorCount)))
 					if err != nil {
 						t.Error(err)
 						return
 					}
-					if claimed {
+					if refused == nil {
 						mu.Lock()
 						claims[exp.ID]++
 						mu.Unlock()

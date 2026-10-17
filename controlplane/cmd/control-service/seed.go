@@ -6,19 +6,24 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
-// seedBuiltins writes the built-in agent types and the platform's rules this build holds, under
-// its release (agenttypes.Release), right after the schema and under its lock.
-func seedBuiltins(store *db.Store, logger *zap.Logger) {
+// seedBuiltins writes the default org, with defaultOrgLimit when it creates it, and the built-in
+// agent types and the platform's rules this build holds, under its release (agenttypes.Release),
+// right after the schema and under its lock.
+func seedBuiltins(store *db.Store, defaultOrgLimit domain.ComputeLimit, logger *zap.Logger) {
 	builtins, err := agenttypes.Builtins()
 	if err != nil {
 		logger.Fatal("control-service: built-in agent types", zap.Error(err))
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	if err := store.SeedDefaultOrg(ctx, defaultOrgLimit); err != nil {
+		logger.Fatal("control-service: seed the default org", zap.Error(err))
+	}
 	seeded, err := store.SeedBuiltins(ctx, agenttypes.Release, builtins, agenttypes.PlatformRules)
 	if err != nil {
 		logger.Fatal("control-service: seed built-in agent types and rules", zap.Error(err))

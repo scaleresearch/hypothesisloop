@@ -356,7 +356,7 @@ type pinningStore struct {
 	written domain.JobSpec
 }
 
-func (s *pinningStore) ClaimSubmitted(ctx context.Context, _, _ string, resolvedJob *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
+func (s *pinningStore) claimSubmitted(ctx context.Context, _, _ string, resolvedJob *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
 	ok, err := capacityAvailable(ctx, s.desired)
 	if err != nil || !ok {
 		return false, err
@@ -419,6 +419,9 @@ func (s *slotStore) IsAgentCut(context.Context, string, string) (bool, error) { 
 func (s *slotStore) RegisteredClusters(context.Context) (map[string]domain.Cluster, error) {
 	return map[string]domain.Cluster{rented: {Name: rented}}, nil
 }
+func (*slotStore) OrgComputeLimits(context.Context) (map[string]domain.ComputeLimit, error) {
+	return nil, nil
+}
 func (s *slotStore) UpdateNotAdmittedReason(_ context.Context, id, reason string) error {
 	if s.reasons == nil {
 		s.reasons = map[string]string{}
@@ -426,7 +429,7 @@ func (s *slotStore) UpdateNotAdmittedReason(_ context.Context, id, reason string
 	s.reasons[id] = reason
 	return nil
 }
-func (s *slotStore) ClaimSubmitted(ctx context.Context, id, _ string, resolvedJob *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
+func (s *slotStore) claimSubmitted(ctx context.Context, id, _ string, resolvedJob *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
 	ok, err := capacityAvailable(ctx, s.submitted)
 	if err != nil || !ok {
 		return false, err
@@ -917,4 +920,12 @@ func (s *slotStore) ListSubmittedExperiments(context.Context) ([]*domain.Experim
 
 func (s *slotStore) RecentlyTriedClusters(context.Context, time.Duration) (map[string]bool, error) {
 	return map[string]bool{}, nil
+}
+
+func (s *pinningStore) ClaimSubmitted(ctx context.Context, id, cluster string, resolved *domain.JobSpec, fits func(context.Context, []*domain.Experiment) (bool, error)) (*domain.ClaimRefusal, error) {
+	return refusedUnless(s.claimSubmitted(ctx, id, cluster, resolved, fits))
+}
+
+func (s *slotStore) ClaimSubmitted(ctx context.Context, id, cluster string, resolved *domain.JobSpec, fits func(context.Context, []*domain.Experiment) (bool, error)) (*domain.ClaimRefusal, error) {
+	return refusedUnless(s.claimSubmitted(ctx, id, cluster, resolved, fits))
 }

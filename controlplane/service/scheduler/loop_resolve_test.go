@@ -257,7 +257,7 @@ type resolvedCPUStore struct {
 	cpu map[string]string
 }
 
-func (s *resolvedCPUStore) ClaimSubmitted(_ context.Context, id, _ string, resolved *domain.JobSpec, _ func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
+func (s *resolvedCPUStore) claimSubmitted(_ context.Context, id, _ string, resolved *domain.JobSpec, _ func(context.Context, []*domain.Experiment) (bool, error)) (bool, error) {
 	if s.cpu == nil {
 		s.cpu = map[string]string{}
 	}
@@ -285,3 +285,7 @@ func TestSharesDoNotGrowAsATickAdmits(t *testing.T) {
 }
 
 func (*resolvedCPUStore) MarkHeldJobs(context.Context, time.Duration) error { return nil }
+
+func (s *resolvedCPUStore) ClaimSubmitted(ctx context.Context, id, cluster string, resolved *domain.JobSpec, fits func(context.Context, []*domain.Experiment) (bool, error)) (*domain.ClaimRefusal, error) {
+	return refusedUnless(s.claimSubmitted(ctx, id, cluster, resolved, fits))
+}
