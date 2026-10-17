@@ -30,89 +30,72 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
-// fakeEvents is the change stream reduced to the two rules the real one guarantees: replay
-// returns the matching events at or after a cursor, in position order, and the live stream carries
-// whatever the database announced. It applies domain.EventFilter itself rather than a test-local
-// approximation, so a test here fails for the same reason production would.
-type fakeEvents struct {
-	// mu guards stored: a test adds to it while the server's handler goroutines replay from it.
+// fakeChanges is the changes table reduced to the rules the store guarantees: ids rise with every
+// append, After returns the changes of one platform experiment after an id, refuses an id never
+// issued or no longer held, and every append wakes the one listener.
+type fakeChanges struct {
 	mu     sync.Mutex
 	stored []domain.Event
-	live   chan domain.Event
-	// owner maps a hypothesis id to the agent that registered it; links maps a hypothesis id to the
-	// ids it links to. Together they answer Concerns as the graph does.
-	owner map[string]string
-	links map[string][]string
-	// next, when set, is the largest cursor this database could have issued.
-	next int64
-	// concernsCalls counts the times the agent scope was asked, each one a graph read.
-	concernsCalls atomic.Int32
-	// listenGate, when set, holds LISTEN back until it is closed: the window in which a client
-	// can connect to a hub nothing is feeding.
-	listenGate chan struct{}
-	// listening is closed once LISTEN is first in effect.
+	head   int64
+	// oldest is the oldest id still held, 0 while nothing was pruned.
+	oldest int64
+	woke   func()
+	// listenGate, when set, holds LISTEN back until it is closed.
+	listenGate    chan struct{}
 	listening     chan struct{}
 	listeningOnce sync.Once
 }
 
-func newFakeEvents(stored ...domain.Event) *fakeEvents {
-	return &fakeEvents{stored: stored, live: make(chan domain.Event, 16), listening: make(chan struct{})}
+func newFakeChanges(stored ...domain.Event) *fakeChanges {
+	f := &fakeChanges{listening: make(chan struct{})}
+	for _, e := range stored {
+		f.append(e)
+	}
+	return f
 }
 
-func (f *fakeEvents) Replay(_ context.Context, filter domain.EventFilter, since int64) ([]domain.Event, error) {
-	var out []domain.Event
-	if f.next != 0 && since > f.next {
-		return nil, db.ErrUnknownCursor
-	}
-	if since < 0 {
-		since = 0
-	}
+// append adds e as the next change and wakes the listener, if one listens.
+func (f *fakeChanges) append(e domain.Event) int64 {
 	f.mu.Lock()
-	defer f.mu.Unlock()
-	for _, e := range f.stored {
-		if e.Position >= since && filter.Matches(e) {
-			out = append(out, e)
-		}
-	}
-	return out, nil
-}
-
-func (f *fakeEvents) store(e domain.Event) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.head++
+	e.ID = f.head
 	f.stored = append(f.stored, e)
-}
-
-func (f *fakeEvents) Concerns(_ context.Context, filter domain.EventFilter, events []domain.Event) ([]domain.Event, error) {
-	f.concernsCalls.Add(1)
-	var kept []domain.Event
-	for _, e := range events {
-		if f.concerns(filter, e) {
-			kept = append(kept, e)
-		}
+	woke := f.woke
+	f.mu.Unlock()
+	if woke != nil {
+		woke()
 	}
-	return kept, nil
+	return e.ID
 }
 
-func (f *fakeEvents) concerns(filter domain.EventFilter, e domain.Event) bool {
-	switch {
-	case filter.AgentID == "" || !strings.HasPrefix(e.Subject, "hyp-"):
-		return true
-	case e.Kind == domain.EventHypothesisNew:
-		for _, to := range f.links[e.Subject] {
-			if f.owner[to] == filter.AgentID {
-				return true
+func (f *fakeChanges) After(_ context.Context, platformExperimentID string, after int64, limit int) ([]domain.Event, int64, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if after > f.head {
+		return nil, 0, false, db.ErrChangeUnknown
+	}
+	if after > 0 && after < f.oldest-1 {
+		return nil, 0, false, db.ErrChangesPruned
+	}
+	var out []domain.Event
+	for _, e := range f.stored {
+		if e.ID > after && e.PlatformExperimentID == platformExperimentID {
+			out = append(out, e)
+			if len(out) == limit {
+				return out, e.ID, false, nil
 			}
 		}
-		return false
-	case e.Kind == domain.EventHypothesisLink:
-		return f.owner[e.Detail] == filter.AgentID
-	default:
-		return f.owner[e.Subject] == filter.AgentID
 	}
+	return out, f.head, true, nil
 }
 
-func (f *fakeEvents) ListenEvents(ctx context.Context, out chan<- domain.Event, listening func()) error {
+func (f *fakeChanges) Head(context.Context) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.head, nil
+}
+
+func (f *fakeChanges) Listen(ctx context.Context, woke func()) error {
 	if f.listenGate != nil {
 		select {
 		case <-f.listenGate:
@@ -120,20 +103,40 @@ func (f *fakeEvents) ListenEvents(ctx context.Context, out chan<- domain.Event, 
 			return ctx.Err()
 		}
 	}
-	listening()
+	f.mu.Lock()
+	f.woke = woke
+	f.mu.Unlock()
+	woke()
 	f.listeningOnce.Do(func() { close(f.listening) })
-	for {
-		select {
-		case e := <-f.live:
-			select {
-			case out <- e:
-			case <-ctx.Done():
-				return ctx.Err()
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// fakeHypotheses answers ConcernsAgent as the graph does from who registered each hypothesis and
+// what each links to.
+type fakeHypotheses struct {
+	owner map[string]string
+	links map[string][]string
+	// calls counts the times it was asked, each one a graph read.
+	calls atomic.Int32
+}
+
+func (f *fakeHypotheses) ConcernsAgent(_ context.Context, agentID string, events []domain.Event) ([]bool, error) {
+	f.calls.Add(1)
+	out := make([]bool, len(events))
+	for i, e := range events {
+		switch e.Kind {
+		case domain.EventHypothesisNew:
+			for _, to := range f.links[e.Subject] {
+				out[i] = out[i] || f.owner[to] == agentID
 			}
-		case <-ctx.Done():
-			return ctx.Err()
+		case domain.EventHypothesisLink:
+			out[i] = f.owner[e.Detail] == agentID
+		default:
+			out[i] = f.owner[e.Subject] == agentID
 		}
 	}
+	return out, nil
 }
 
 // lookupStore places every job in exp's platform experiment.
@@ -145,20 +148,34 @@ func (s *lookupStore) GetExperiment(context.Context, string) (*domain.Experiment
 	return s.exp, nil
 }
 
-func watchServer(t *testing.T, source *fakeEvents) *httptest.Server {
+func newTestHandler(changes *fakeChanges, hypotheses *fakeHypotheses, placement authtest.Placement) *Handler {
+	return NewHandler(changes, hypotheses, &lookupStore{exp: &domain.Experiment{ID: "exp-1", PlatformExperimentID: "pe-1"}}, auth.NewAccess(placement), zap.NewNop())
+}
+
+// serve starts handler's LISTEN and serves it behind tokens until the test ends.
+func serve(t *testing.T, changes *fakeChanges, handler *Handler, tokens auth.Tokens) *httptest.Server {
 	t.Helper()
-	handler := NewHandler(source, &lookupStore{exp: &domain.Experiment{ID: "exp-1", PlatformExperimentID: "pe-1"}}, auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	ctx, cancel := context.WithCancel(context.Background())
 	handler.Start(ctx)
-	if source.listenGate == nil {
-		<-source.listening
+	if changes.listenGate == nil {
+		<-changes.listening
 	}
-	server := httptest.NewServer(gated(authtest.Staff, handler))
+	server := httptest.NewServer(gated(tokens, handler))
 	t.Cleanup(func() {
 		server.Close()
 		cancel()
 	})
 	return server
+}
+
+func watchServer(t *testing.T, changes *fakeChanges) *httptest.Server {
+	t.Helper()
+	return watchServerWith(t, changes, &fakeHypotheses{})
+}
+
+func watchServerWith(t *testing.T, changes *fakeChanges, hypotheses *fakeHypotheses) *httptest.Server {
+	t.Helper()
+	return serve(t, changes, newTestHandler(changes, hypotheses, authtest.Placement{}), authtest.Staff)
 }
 
 // watchClient is a WebSocket client just large enough to read what the server writes. It exists
@@ -220,32 +237,56 @@ func dialWatch(t *testing.T, server *httptest.Server, query url.Values) *watchCl
 	return &watchClient{conn: conn, r: r}
 }
 
-// sendText sends one masked text frame, which is how a client asks about or re-scopes its own
-// subscription. A client must mask everything it sends, so this does.
-func (c *watchClient) sendText(t *testing.T, text string) {
+// frame is one text frame of a stream: the subscription, a change or a progress frame.
+type frame struct {
+	Subscription *Subscription `json:"subscription"`
+	domain.Event
+	Next     *int64 `json:"next"`
+	CaughtUp bool   `json:"caught_up"`
+}
+
+func (c *watchClient) frame(t *testing.T) frame {
 	t.Helper()
-	payload := []byte(text)
-	if len(payload) > 125 {
-		t.Fatalf("control frame length: got = %v, want = a short frame this helper can encode", len(payload))
+	var f frame
+	payload := c.nextRaw(t)
+	if err := json.Unmarshal(payload, &f); err != nil {
+		t.Fatalf("decode frame %q: got = %v, want = nil", payload, err)
 	}
-	frame := []byte{0x80 | wsOpText, byte(0x80 | len(payload)), 1, 2, 3, 4}
-	for i, b := range payload {
-		frame = append(frame, b^frame[2+i%4])
-	}
-	if _, err := c.conn.Write(frame); err != nil {
-		t.Fatalf("write control frame: got = %v, want = nil", err)
+	return f
+}
+
+// next returns the next change the server sent, skipping the subscription and progress frames.
+func (c *watchClient) next(t *testing.T) domain.Event {
+	t.Helper()
+	for {
+		if f := c.frame(t); f.Kind != "" {
+			return f.Event
+		}
 	}
 }
 
-// next returns the next event the server sent, skipping the pings that keep an idle stream alive.
-func (c *watchClient) next(t *testing.T) domain.Event {
+// progress returns the next progress frame, failing on a change before it.
+func (c *watchClient) progress(t *testing.T) (int64, bool) {
 	t.Helper()
-	var e domain.Event
-	payload := c.nextRaw(t)
-	if err := json.Unmarshal(payload, &e); err != nil {
-		t.Fatalf("decode event %q: got = %v, want = nil", payload, err)
+	for {
+		f := c.frame(t)
+		if f.Kind != "" {
+			t.Fatalf("frame: got = change %+v, want = a progress frame", f.Event)
+		}
+		if f.Next != nil {
+			return *f.Next, f.CaughtUp
+		}
 	}
-	return e
+}
+
+// readSubscription returns the first frame of a stream, the subscription in force.
+func readSubscription(t *testing.T, client *watchClient) Subscription {
+	t.Helper()
+	f := client.frame(t)
+	if f.Subscription == nil {
+		t.Fatalf("first frame: got = %+v, want = the subscription", f)
+	}
+	return *f.Subscription
 }
 
 // nextRaw returns the next text frame's bytes. The stream carries two shapes — an event, and the
@@ -287,205 +328,221 @@ func (c *watchClient) nextRaw(t *testing.T) []byte {
 	}
 }
 
-func statusEvent(subject, value, agentID string, cursor int64) domain.Event {
-	return domain.Event{Kind: domain.EventExperimentStatus, Subject: subject, Value: value,
-		PlatformExperimentID: "pe-1", AgentID: agentID, Position: cursor, Cursor: cursor}
+func statusEvent(subject, value, agentID string) domain.Event {
+	return domain.Event{Kind: domain.EventExperimentStatus, Subject: subject, Value: value, PlatformExperimentID: "pe-1", AgentID: agentID}
 }
 
-// A dropped connection must cost a client a delay and never a fact. An agent that reconnects and
-// silently skips the transition it was disconnected across would go back to polling full state,
-// which is the exact failure this stream exists to end — so replay has to return every event
-// from the cursor on, the one at the cursor included, and start the live stream where it stopped.
-func TestAReconnectFromTheLargestCursorSeenReplaysEveryEventFromThatCursorOn(t *testing.T) {
-	source := newFakeEvents(
-		statusEvent("exp-1", "QUEUED", "agent-a", 100),
-		statusEvent("exp-1", "SUBMITTED", "agent-a", 200),
-		statusEvent("exp-1", "RUNNING", "agent-a", 300),
-	)
-	server := watchServer(t, source)
-	client := dialWatch(t, server, url.Values{
-		"platform_experiment_id": {"pe-1"},
-		"since":                  {"200"},
-	})
+func ids(events []domain.Event) []int64 {
+	out := []int64{}
+	for _, e := range events {
+		out = append(out, e.ID)
+	}
+	return out
+}
 
+// A stream reads on from after: every change after it, then what is appended live, on one path.
+// A dropped connection costs a client a delay and never a fact.
+func TestAStreamReadsEveryChangeAfterItsAfterAndThenWhatIsAppended(t *testing.T) {
+	changes := newFakeChanges(statusEvent("exp-1", "QUEUED", "agent-a"), statusEvent("exp-1", "SUBMITTED", "agent-a"), statusEvent("exp-1", "RUNNING", "agent-a"))
+	client := dialWatch(t, watchServer(t, changes), url.Values{"platform_experiment_id": {"pe-1"}, "after": {"1"}})
+
+	if got := readSubscription(t, client).After; got != 1 {
+		t.Errorf("subscription after: got = %d, want = 1", got)
+	}
 	for _, want := range []string{"SUBMITTED", "RUNNING"} {
 		if got := client.next(t).Value; got != want {
-			t.Errorf("replayed status: got = %v, want = %v", got, want)
+			t.Errorf("status read: got = %v, want = %v", got, want)
 		}
 	}
-	source.live <- statusEvent("exp-1", "COMPLETED", "agent-a", 400)
-	if got := client.next(t).Value; got != "COMPLETED" {
-		t.Errorf("live status after replay: got = %v, want = %v", got, "COMPLETED")
+	if next, caughtUp := client.progress(t); next != 3 || !caughtUp {
+		t.Errorf("progress: got = %d, %v, want = 3, caught up", next, caughtUp)
+	}
+	changes.append(statusEvent("exp-1", "COMPLETED", "agent-a"))
+	if got := client.next(t); got.Value != "COMPLETED" || got.ID != 4 {
+		t.Errorf("live change: got = %+v, want = COMPLETED with id 4", got)
 	}
 }
 
-// A client with no cursor at all is not asking to skip history -- it has none to give. Treating
-// that the same as an empty subscription used to mean watching a job that was already terminal
-// got nothing but pings until the client's own timeout, because a finished job emits no further
-// live event. since=0 must answer with the current snapshot, exactly as if the caller's cursor
-// predated every row it matches.
-func TestNoCursorAtAllGetsTheCurrentSnapshotInsteadOfWaitingOnALiveEventThatWillNeverCome(t *testing.T) {
-	source := newFakeEvents(
-		statusEvent("exp-1", "COMPLETED", "agent-a", 300),
+// A client with no after reads every change still held: watching a job that already ended answers
+// with its end instead of waiting on a change that will never come.
+func TestNoAfterReadsEveryChangeStillHeld(t *testing.T) {
+	client := dialWatch(t, watchServer(t, newFakeChanges(statusEvent("exp-1", "COMPLETED", "agent-a"))), url.Values{"platform_experiment_id": {"pe-1"}})
+	if got := client.next(t).Value; got != "COMPLETED" {
+		t.Fatalf("change on connect with no after: got = %v, want = COMPLETED", got)
+	}
+}
+
+// after=head reads only what is appended from then on.
+func TestAfterHeadReadsOnlyWhatComesNext(t *testing.T) {
+	changes := newFakeChanges(statusEvent("exp-1", "RUNNING", "agent-a"))
+	client := dialWatch(t, watchServer(t, changes), url.Values{"platform_experiment_id": {"pe-1"}, "after": {"head"}})
+	if got := readSubscription(t, client).After; got != 1 {
+		t.Errorf("subscription after: got = %d, want = the head, 1", got)
+	}
+	if next, caughtUp := client.progress(t); next != 1 || !caughtUp {
+		t.Errorf("progress: got = %d, %v, want = 1, caught up", next, caughtUp)
+	}
+	changes.append(statusEvent("exp-1", "COMPLETED", "agent-a"))
+	if got := client.next(t).Value; got != "COMPLETED" {
+		t.Errorf("change after head: got = %v, want = COMPLETED", got)
+	}
+}
+
+// A progress frame moves past changes the subscription leaves out, and past other platform
+// experiments' changes, so a client that saves it never reads them again.
+func TestProgressMovesPastChangesTheSubscriptionLeavesOut(t *testing.T) {
+	changes := newFakeChanges(
+		statusEvent("exp-1", "RUNNING", "agent-a"),
+		domain.Event{Kind: domain.EventCommentNew, Subject: "hyp-1", PlatformExperimentID: "pe-1"},
+		domain.Event{Kind: domain.EventExperimentStatus, Subject: "exp-9", Value: "RUNNING", PlatformExperimentID: "pe-other"},
 	)
-	server := watchServer(t, source)
-	client := dialWatch(t, server, url.Values{
-		"platform_experiment_id": {"pe-1"},
-	})
-
-	if got := client.next(t).Value; got != "COMPLETED" {
-		t.Fatalf("snapshot on connect with no cursor: got = %v, want = %v", got, "COMPLETED")
+	client := dialWatch(t, watchServer(t, changes), url.Values{"platform_experiment_id": {"pe-1"}, "kinds": {"experiment.status"}})
+	if got := client.next(t).ID; got != 1 {
+		t.Errorf("change: got = id %d, want = 1", got)
+	}
+	if next, caughtUp := client.progress(t); next != 3 || !caughtUp {
+		t.Errorf("progress: got = %d, %v, want = 3, caught up", next, caughtUp)
 	}
 }
 
-// The subscription is opened before the replay query runs, so an event committed between the two
-// is delivered twice unless the cursor removes it. A client that saw the same transition twice
-// would count two attempts where there was one — and the duplicate is invisible in the transcript
-// unless the server refuses to send it.
-func TestAnEventAlreadyReplayedIsNotSentAgainWhenTheLiveStreamRepeatsIt(t *testing.T) {
-	source := newFakeEvents(
-		statusEvent("exp-1", "SUBMITTED", "agent-a", 200),
-		statusEvent("exp-1", "RUNNING", "agent-a", 300),
-	)
-	server := watchServer(t, source)
-	client := dialWatch(t, server, url.Values{
-		"platform_experiment_id": {"pe-1"},
-		"since":                  {"100"},
-	})
-
-	if got := client.next(t).Value; got != "SUBMITTED" {
-		t.Fatalf("first replayed status: got = %v, want = %v", got, "SUBMITTED")
+// A backlog larger than one read arrives in pages, each ending with progress that is not caught up
+// until the last.
+func TestABacklogArrivesInPages(t *testing.T) {
+	changes := newFakeChanges()
+	for i := 0; i < pageSize+1; i++ {
+		changes.append(statusEvent("exp-1", "RUNNING", "agent-a"))
 	}
-	if got := client.next(t).Value; got != "RUNNING" {
-		t.Fatalf("second replayed status: got = %v, want = %v", got, "RUNNING")
+	client := dialWatch(t, watchServer(t, changes), url.Values{"platform_experiment_id": {"pe-1"}})
+	for i := 0; i < pageSize; i++ {
+		client.next(t)
 	}
-	// The same transition the replay already carried, announced live as it would be if the
-	// commit landed while the replay was in flight.
-	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 300)
-	source.live <- statusEvent("exp-1", "COMPLETED", "agent-a", 400)
-	if got := client.next(t).Value; got != "COMPLETED" {
-		t.Errorf("next status after the repeated one: got = %v, want = %v", got, "COMPLETED")
+	if next, caughtUp := client.progress(t); next != pageSize || caughtUp {
+		t.Errorf("first progress: got = %d, %v, want = %d, not caught up", next, caughtUp, pageSize)
+	}
+	if got := client.next(t).ID; got != pageSize+1 {
+		t.Errorf("last change: got = id %d, want = %d", got, pageSize+1)
+	}
+	if next, caughtUp := client.progress(t); next != pageSize+1 || !caughtUp {
+		t.Errorf("last progress: got = %d, %v, want = %d, caught up", next, caughtUp, pageSize+1)
 	}
 }
 
-// One transaction can write several events at the same cursor: a stage boundary cuts every agent
-// at one cut_at. Each is news to the agent it names, so only the exact event a replay carried may
-// be dropped from the live stream, never its siblings.
-func TestEventsSharingACursorAreAllDeliveredAndOnlyTheReplayedOneIsDropped(t *testing.T) {
-	cut := func(agentID string) domain.Event {
-		return domain.Event{Kind: domain.EventAgentCut, Subject: agentID, Value: "1", PlatformExperimentID: "pe-1", AgentID: agentID, Position: 500, Cursor: 500}
-	}
-	source := newFakeEvents(cut("agent-a"))
-	server := watchServer(t, source)
-	client := dialWatch(t, server, url.Values{
-		"platform_experiment_id": {"pe-1"},
-		"kinds":                  {domain.EventAgentCut},
-		"since":                  {"100"},
-	})
-
-	if got := client.next(t).Subject; got != "agent-a" {
-		t.Fatalf("replayed cut: got = %v, want = %v", got, "agent-a")
-	}
-	source.live <- cut("agent-a")
-	source.live <- cut("agent-b")
-	source.live <- cut("agent-c")
-	for _, want := range []string{"agent-b", "agent-c"} {
-		if got := client.next(t).Subject; got != want {
-			t.Errorf("live cut at the replayed cursor: got = %v, want = %v", got, want)
+// An after this platform never issued, and one older than what is held, are refused with 410 and
+// a message that says what to do.
+func TestAnAfterNotIssuedOrNoLongerHeldIsGone(t *testing.T) {
+	changes := newFakeChanges(statusEvent("exp-1", "RUNNING", "agent-a"), statusEvent("exp-1", "RUNNING", "agent-a"), statusEvent("exp-1", "RUNNING", "agent-a"))
+	changes.oldest = 3
+	server := watchServer(t, changes)
+	for after, want := range map[string]string{"9": "not a change id this platform issued", "1": "no longer held; re-read state and watch from head"} {
+		for _, path := range []string{"/watch", "/changes"} {
+			request, _ := http.NewRequest(http.MethodGet, server.URL+path+"?platform_experiment_id=pe-1&after="+after, nil)
+			request.Header.Set("Sec-WebSocket-Protocol", Subprotocol+", test")
+			request.Header.Set("Authorization", "Bearer test")
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatalf("request: %v", err)
+			}
+			body, _ := io.ReadAll(response.Body)
+			response.Body.Close()
+			if response.StatusCode != http.StatusGone || !strings.Contains(string(body), want) {
+				t.Errorf("%s after=%s: got = %d %s, want = 410 saying %q", path, after, response.StatusCode, body, want)
+			}
 		}
 	}
 }
 
-// A subscription naming kinds is a promise about what the stream contains. Delivering a kind that
-// was not asked for makes an --until condition fire on an event the caller never meant to wait
-// for, so the filter has to hold on the wire and not merely in the caller's own reading of it.
+// since was the parameter of the stream before changes had ids. A client still sending it is told
+// what replaced it instead of being served from the start.
+func TestSinceIsRefusedNamingAfter(t *testing.T) {
+	_, _, err := parseWatchQuery(httptest.NewRequest(http.MethodGet, "/watch?platform_experiment_id=pe-1&since=5", nil))
+	if err == nil || !strings.Contains(err.Error(), "after") {
+		t.Errorf("since: got = %v, want = a refusal naming after", err)
+	}
+}
+
+// GET /changes answers one read of what GET /watch would stream.
+func TestChangesAnswersOneRead(t *testing.T) {
+	changes := newFakeChanges(statusEvent("exp-1", "QUEUED", "agent-a"), statusEvent("exp-1", "RUNNING", "agent-a"), statusEvent("exp-1", "COMPLETED", "agent-a"))
+	server := watchServer(t, changes)
+	for query, want := range map[string]Page{
+		"after=1&limit=1": {Changes: []domain.Event{{ID: 2}}, Next: 2},
+		"after=1":         {Changes: []domain.Event{{ID: 2}, {ID: 3}}, Next: 3, CaughtUp: true},
+		"after=head":      {Changes: []domain.Event{}, Next: 3, CaughtUp: true},
+	} {
+		request, _ := http.NewRequest(http.MethodGet, server.URL+"/changes?platform_experiment_id=pe-1&"+query, nil)
+		request.Header.Set("Authorization", "Bearer test")
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatalf("request: %v", err)
+		}
+		var got Page
+		err = json.NewDecoder(response.Body).Decode(&got)
+		response.Body.Close()
+		if err != nil || response.StatusCode != http.StatusOK {
+			t.Fatalf("%s: got = %d (%v), want = 200", query, response.StatusCode, err)
+		}
+		if fmt.Sprint(ids(got.Changes)) != fmt.Sprint(ids(want.Changes)) || got.Next != want.Next || got.CaughtUp != want.CaughtUp {
+			t.Errorf("%s: got = ids %v next %d caught up %v, want = ids %v next %d caught up %v", query,
+				ids(got.Changes), got.Next, got.CaughtUp, ids(want.Changes), want.Next, want.CaughtUp)
+		}
+	}
+}
+
+// A filter that named a kind the client did not ask for would make --until fire on a change the
+// caller never meant to wait for.
 func TestASubscriptionNamingKindsReceivesOnlyThoseKinds(t *testing.T) {
-	source := newFakeEvents()
-	server := watchServer(t, source)
-	client := dialWatch(t, server, url.Values{
-		"platform_experiment_id": {"pe-1"},
-		"kinds":                  {"experiment.status"},
-	})
-
-	source.live <- domain.Event{Kind: domain.EventHypothesisNew, Subject: "hyp-1",
-		PlatformExperimentID: "pe-1", Position: 100, Cursor: 100}
-	source.live <- domain.Event{Kind: domain.EventCommentNew, Subject: "hyp-1",
-		PlatformExperimentID: "pe-1", Position: 150, Cursor: 150}
-	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 200)
-
-	got := client.next(t)
-	if got.Kind != domain.EventExperimentStatus {
-		t.Errorf("first delivered kind: got = %v, want = %v", got.Kind, domain.EventExperimentStatus)
-	}
-	if got.Value != "RUNNING" {
-		t.Errorf("first delivered value: got = %v, want = %v", got.Value, "RUNNING")
+	changes := newFakeChanges()
+	client := dialWatch(t, watchServer(t, changes), url.Values{"platform_experiment_id": {"pe-1"}, "kinds": {"experiment.status"}})
+	changes.append(domain.Event{Kind: domain.EventHypothesisNew, Subject: "hyp-1", PlatformExperimentID: "pe-1"})
+	changes.append(domain.Event{Kind: domain.EventCommentNew, Subject: "hyp-1", PlatformExperimentID: "pe-1"})
+	changes.append(statusEvent("exp-1", "RUNNING", "agent-a"))
+	if got := client.next(t); got.Kind != domain.EventExperimentStatus || got.Value != "RUNNING" {
+		t.Errorf("first delivered: got = %v %v, want = experiment.status RUNNING", got.Kind, got.Value)
 	}
 }
 
-func hypEvent(kind, subject, detail, agentID string, position int64) domain.Event {
-	return domain.Event{Kind: kind, Subject: subject, Detail: detail, PlatformExperimentID: "pe-1",
-		AgentID: agentID, Position: position, Cursor: position}
+func hypEvent(kind, subject, detail, agentID string) domain.Event {
+	return domain.Event{Kind: kind, Subject: subject, Detail: detail, PlatformExperimentID: "pe-1", AgentID: agentID}
 }
 
 // An agent scope carries its own outcomes and what other people do to hypotheses it registered: a
 // comment, a finding, a link to one, a new hypothesis building on one. A rival's job, activity on
-// someone else's hypothesis and the echo of the agent's own writes stay off it. Replay and live go
-// through the same rule, so a reconnect cannot widen or narrow what the agent is told.
+// someone else's hypothesis and the echo of the agent's own writes stay off it. The graph is read
+// once per page.
 func TestAnAgentScopeCarriesOthersActivityOnItsOwnHypothesesAndNothingElseFromThePool(t *testing.T) {
-	events := []domain.Event{
-		statusEvent("exp-2", "COMPLETED", "agent-b", 100),
-		hypEvent(domain.EventCommentNew, "hyp-b", "", "agent-c", 110),
-		hypEvent(domain.EventCommentNew, "hyp-a", "", "agent-a", 120),
-		hypEvent(domain.EventCommentNew, "hyp-a", "", "agent-b", 130),
-		hypEvent(domain.EventFindingNew, "hyp-a", "", "agent-b", 140),
-		hypEvent(domain.EventHypothesisLink, "hyp-b", "hyp-a", "agent-b", 150),
-		hypEvent(domain.EventHypothesisLink, "hyp-b", "pe-1", "agent-b", 160),
-		hypEvent(domain.EventHypothesisNew, "hyp-c", "", "agent-b", 170),
-		hypEvent(domain.EventHypothesisNew, "hyp-d", "", "agent-b", 180),
-		hypEvent(domain.EventHypothesisStatus, "hyp-a", "", "agent-a", 190),
-		statusEvent("exp-1", "RUNNING", "agent-a", 200),
-		statusEvent("exp-1", "COMPLETED", "agent-a", 210),
+	changes := newFakeChanges(
+		statusEvent("exp-2", "COMPLETED", "agent-b"),
+		hypEvent(domain.EventCommentNew, "hyp-b", "", "agent-c"),
+		hypEvent(domain.EventCommentNew, "hyp-a", "", "agent-a"),
+		hypEvent(domain.EventCommentNew, "hyp-a", "", "agent-b"),
+		hypEvent(domain.EventFindingNew, "hyp-a", "", "agent-b"),
+		hypEvent(domain.EventHypothesisLink, "hyp-b", "hyp-a", "agent-b"),
+		hypEvent(domain.EventHypothesisLink, "hyp-b", "pe-1", "agent-b"),
+		hypEvent(domain.EventHypothesisNew, "hyp-c", "", "agent-b"),
+		hypEvent(domain.EventHypothesisNew, "hyp-d", "", "agent-b"),
+		hypEvent(domain.EventHypothesisStatus, "hyp-a", "", "agent-a"),
+		statusEvent("exp-1", "RUNNING", "agent-a"),
+		statusEvent("exp-1", "COMPLETED", "agent-a"),
+	)
+	hypotheses := &fakeHypotheses{owner: map[string]string{"hyp-a": "agent-a", "hyp-b": "agent-b"}, links: map[string][]string{"hyp-c": {"hyp-a"}, "hyp-d": {"hyp-b"}}}
+	client := dialWatch(t, watchServerWith(t, changes, hypotheses), url.Values{"platform_experiment_id": {"pe-1"}, "agent_id": {"agent-a"}})
+	var got []domain.Event
+	for range 5 {
+		got = append(got, client.next(t))
 	}
-	want := []int64{130, 140, 150, 170, 210}
-	scope := func(source *fakeEvents) *fakeEvents {
-		source.owner = map[string]string{"hyp-a": "agent-a", "hyp-b": "agent-b"}
-		source.links = map[string][]string{"hyp-c": {"hyp-a"}, "hyp-d": {"hyp-b"}}
-		return source
+	if fmt.Sprint(ids(got)) != "[4 5 6 8 12]" {
+		t.Errorf("ids: got = %v, want = [4 5 6 8 12]", ids(got))
 	}
-	query := url.Values{"platform_experiment_id": {"pe-1"}, "agent_id": {"agent-a"}}
-
-	stored := scope(newFakeEvents(events...))
-	replayed := dialWatch(t, watchServer(t, stored), query)
-	for _, position := range want {
-		if got := replayed.next(t).Position; got != position {
-			t.Errorf("replayed position: got = %v, want = %v", got, position)
-		}
-	}
-	if got := stored.concernsCalls.Load(); got != 1 {
-		t.Errorf("agent scope reads for a replay of %d events: got = %v, want = 1", len(events), got)
-	}
-
-	source := scope(newFakeEvents())
-	live := dialWatch(t, watchServer(t, source), query)
-	for _, e := range events {
-		source.live <- e
-	}
-	for _, position := range want {
-		if got := live.next(t).Position; got != position {
-			t.Errorf("live position: got = %v, want = %v", got, position)
-		}
+	if got := hypotheses.calls.Load(); got != 1 {
+		t.Errorf("graph reads for one page: got = %v, want = 1", got)
 	}
 }
 
 // A client filtering on a kind the server has never heard of would wait forever on a connection
-// that looks perfectly healthy — the silent version of the polling failure. Refusing the
-// subscription is the only answer that tells the caller anything.
+// that looks healthy, so the subscription is refused.
 func TestAnUnknownKindIsRefusedRatherThanSilentlyIgnored(t *testing.T) {
-	server := watchServer(t, newFakeEvents())
-	request, err := http.NewRequest(http.MethodGet, server.URL+"/watch?platform_experiment_id=pe-1&kinds=experiment.finished", nil)
-	if err != nil {
-		t.Fatalf("build request: got = %v, want = nil", err)
-	}
+	server := watchServer(t, newFakeChanges())
+	request, _ := http.NewRequest(http.MethodGet, server.URL+"/watch?platform_experiment_id=pe-1&kinds=experiment.finished", nil)
 	request.Header.Set("Sec-WebSocket-Protocol", Subprotocol+", test")
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
@@ -497,19 +554,15 @@ func TestAnUnknownKindIsRefusedRatherThanSilentlyIgnored(t *testing.T) {
 	}
 }
 
-// A running job knows its own experiment id and nothing else — it is never told which platform
-// experiment it belongs to. If subscribing required that id the job could not subscribe at all,
-// and hl watch --experiment would be unusable from inside a workload.
+// A running job knows its own experiment id and nothing else, so subscribing by it alone has to
+// work.
 func TestSubscribingByExperimentIDAloneResolvesItsPlatformExperiment(t *testing.T) {
-	source := newFakeEvents()
-	server := watchServer(t, source)
-	client := dialWatch(t, server, url.Values{"experiment_id": {"exp-1"}})
-
-	source.live <- statusEvent("exp-2", "RUNNING", "agent-a", 100)
-	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 200)
-
+	changes := newFakeChanges()
+	client := dialWatch(t, watchServer(t, changes), url.Values{"experiment_id": {"exp-1"}})
+	changes.append(statusEvent("exp-2", "RUNNING", "agent-a"))
+	changes.append(statusEvent("exp-1", "RUNNING", "agent-a"))
 	if got := client.next(t).Subject; got != "exp-1" {
-		t.Errorf("delivered subject: got = %v, want = %v", got, "exp-1")
+		t.Errorf("delivered subject: got = %v, want = exp-1", got)
 	}
 }
 
@@ -562,135 +615,73 @@ func runHLWatchEnv(t *testing.T, env []string, serverURL string, args ...string)
 	return cmd.ProcessState.ExitCode(), stdout.String(), stderr.String()
 }
 
-// hl watch is the whole point of the transport: a model cannot hold a socket across tool calls,
-// so a process holds it instead and exits on the condition. This runs the real hl binary against
-// the real server — the handshake, the framing and the --until contract in one — because those three
-// agreeing separately is not the same as them agreeing with each other, and the failure mode if
-// they do not is a wait that always ends at the timeout and never at the answer.
+// hl watch run against the real server exits on the condition, not on its timeout.
 func TestHLWatchExitsOnTheTerminalStateRatherThanOnItsTimeout(t *testing.T) {
-	source := newFakeEvents()
-	server := watchServer(t, source)
-
-	stop := make(chan struct{})
-	defer close(stop)
+	changes := newFakeChanges()
+	server := watchServer(t, changes)
 	go func() {
-		for {
-			select {
-			case <-stop:
-				return
-			case <-time.After(100 * time.Millisecond):
-				select {
-				case source.live <- statusEvent("exp-1", "COMPLETED", "agent-a", time.Now().UnixMicro()):
-				default:
-				}
-			}
-		}
+		time.Sleep(500 * time.Millisecond)
+		changes.append(statusEvent("exp-1", "COMPLETED", "agent-a"))
 	}()
-
-	code, output, stderr := runHLWatch(t, server.URL, "--experiment", "exp-1",
-		"--until", "status in COMPLETED,FAILED,EVICTED", "--timeout", "20")
+	code, output, stderr := runHLWatch(t, server.URL, "--experiment", "exp-1", "--until", "status in COMPLETED,FAILED,EVICTED", "--timeout", "20")
 	if code != 0 {
-		t.Fatalf("hl watch exit code: got = %v, want = %v (stderr: %s)", code, 0, stderr)
+		t.Fatalf("hl watch exit code: got = %v, want = 0 (stderr: %s)", code, stderr)
 	}
 	if !strings.Contains(output, `"value":"COMPLETED"`) {
 		t.Errorf("hl watch output: got = %v, want = a line carrying COMPLETED", output)
 	}
 }
 
-// A 4xx says the request is wrong, and it will be exactly as wrong on the next attempt. Retrying
-// it to the timeout and then exiting 0 is the worst of both: the agent blocks for its whole
-// window and then reads success, which is the silent wait hl watch exists to remove. It has to
-// fail immediately and say so in the exit code.
-func TestHLWatchFailsImmediatelyWhenThePlatformRefusesTheSubscription(t *testing.T) {
-	server := watchServer(t, newFakeEvents())
-
+// A 4xx says the request is wrong and will stay wrong: hl watch fails at once with exit 2 and the
+// platform's reason.
+func TestHLWatchFailsImmediatelyWithThePlatformsReasonWhenRefused(t *testing.T) {
+	server := watchServer(t, newFakeChanges())
 	started := time.Now()
-	code, _, stderr := runHLWatch(t, server.URL, "--experiment", "exp-1",
-		"--kinds", "not.a.real.kind", "--timeout", "30")
-
+	code, _, stderr := runHLWatch(t, server.URL, "--experiment", "exp-1", "--kinds", "not.a.real.kind", "--timeout", "30")
 	if code != 2 {
-		t.Errorf("hl watch exit code for a refused subscription: got = %v, want = %v (stderr: %s)", code, 2, stderr)
+		t.Errorf("exit code: got = %v, want = 2 (stderr: %s)", code, stderr)
 	}
 	if elapsed := time.Since(started); elapsed > 10*time.Second {
 		t.Errorf("time spent before giving up: got = %v, want = well under the 30s timeout", elapsed)
 	}
-}
-
-// The status line alone says a request was refused; only the body says which part of it was
-// wrong. An agent that mistypes a kind and is told nothing but "400" has to guess between the
-// kind, the id and the agent name — so the refusal's own message has to reach the caller.
-func TestHLWatchPrintsThePlatformsReasonForRefusingRatherThanABare400(t *testing.T) {
-	server := watchServer(t, newFakeEvents())
-
-	_, _, stderr := runHLWatch(t, server.URL, "--experiment", "exp-1",
-		"--kinds", "not.a.real.kind", "--timeout", "30")
-
 	if !strings.Contains(stderr, "not.a.real.kind") {
-		t.Errorf("hl watch refusal message: got = %v, want = one naming the offending kind", stderr)
+		t.Errorf("refusal message: got = %v, want = one naming the offending kind", stderr)
 	}
 }
 
-// The other half of the same rule: a server that is momentarily unreachable is not a wrong
-// request, and giving up on it would throw away the reconnect-and-replay behaviour that makes a
-// dropped connection cost a delay instead of a fact.
+// A server that is momentarily unreachable is not a wrong request: hl watch keeps trying.
 func TestHLWatchKeepsRetryingAConnectionItCouldNotEstablish(t *testing.T) {
-	// A port nothing is listening on: every attempt is refused at the TCP level, which is the
-	// transient case.
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("reserve a port: got = %v, want = nil", err)
 	}
 	address := listener.Addr().String()
 	listener.Close()
-
-	code, _, stderr := runHLWatch(t, "http://"+address, "--experiment", "exp-1",
-		"--until", "status in COMPLETED", "--timeout", "5")
-
+	code, _, stderr := runHLWatch(t, "http://"+address, "--experiment", "exp-1", "--until", "status in COMPLETED", "--timeout", "5")
 	if code != 124 {
-		t.Errorf("hl watch exit code after retrying an unreachable server: got = %v, want = %v (stderr: %s)", code, 124, stderr)
+		t.Errorf("exit code after retrying an unreachable server: got = %v, want = 124 (stderr: %s)", code, stderr)
 	}
 }
 
-// agent.cut is the one new kind that is agent-owned, and that is the whole reason it exists: an
-// agent watching for its own stop condition must not be woken by every rival's elimination, and
-// must never conclude from one that it was cut itself. Getting this wrong turns a stop condition
-// into a false one.
+// An agent watching for its own stop condition must not be woken by a rival's cut.
 func TestAnAgentCutReachesOnlyTheAgentItNames(t *testing.T) {
-	source := newFakeEvents()
-	server := watchServer(t, source)
-	client := dialWatch(t, server, url.Values{
-		"platform_experiment_id": {"pe-1"},
-		"agent_id":               {"agent-a"},
-	})
-
-	source.live <- domain.Event{Kind: domain.EventAgentCut, Subject: "agent-b", Value: "1",
-		PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 100, Cursor: 100}
-	source.live <- domain.Event{Kind: domain.EventAgentCut, Subject: "agent-a", Value: "1",
-		PlatformExperimentID: "pe-1", AgentID: "agent-a", Position: 200, Cursor: 200}
-
+	changes := newFakeChanges()
+	client := dialWatch(t, watchServer(t, changes), url.Values{"platform_experiment_id": {"pe-1"}, "agent_id": {"agent-a"}})
+	changes.append(domain.Event{Kind: domain.EventAgentCut, Subject: "agent-b", Value: "1", PlatformExperimentID: "pe-1", AgentID: "agent-b"})
+	changes.append(domain.Event{Kind: domain.EventAgentCut, Subject: "agent-a", Value: "1", PlatformExperimentID: "pe-1", AgentID: "agent-a"})
 	if got := client.next(t).Subject; got != "agent-a" {
-		t.Errorf("first delivered cut: got = %v, want = %v", got, "agent-a")
+		t.Errorf("first delivered cut: got = %v, want = agent-a", got)
 	}
 }
 
-// The run-wide kinds are shared, and an agent-scoped subscription is the case that would hide
-// them: a ladder advance, a closure and a brief change concern everyone in the run. An agent narrowing to its own jobs and thereby going blind to the run closing would be back
-// to polling for the very thing it stopped polling for.
+// A ladder advance, a closure and a brief change concern everyone in the run, so an agent scope
+// carries them whoever wrote them.
 func TestARunWideChangeReachesAnAgentScopedSubscriptionWhoeverWroteIt(t *testing.T) {
-	source := newFakeEvents()
-	server := watchServer(t, source)
-	client := dialWatch(t, server, url.Values{
-		"platform_experiment_id": {"pe-1"},
-		"agent_id":               {"agent-a"},
-	})
-
-	source.live <- domain.Event{Kind: domain.EventStageBoundary, Subject: "pe-1", Value: "1", Detail: "advanced",
-		PlatformExperimentID: "pe-1", Position: 100, Cursor: 100}
-	source.live <- domain.Event{Kind: domain.EventPlatformExperimentDescription, Subject: "pe-1",
-		PlatformExperimentID: "pe-1", Position: 200, Cursor: 200}
-	source.live <- domain.Event{Kind: domain.EventPlatformExperimentStatus, Subject: "pe-1", Value: "closed",
-		PlatformExperimentID: "pe-1", Position: 300, Cursor: 300}
-
+	changes := newFakeChanges()
+	client := dialWatch(t, watchServer(t, changes), url.Values{"platform_experiment_id": {"pe-1"}, "agent_id": {"agent-a"}})
+	changes.append(domain.Event{Kind: domain.EventStageBoundary, Subject: "pe-1", Value: "1", Detail: "advanced", PlatformExperimentID: "pe-1"})
+	changes.append(domain.Event{Kind: domain.EventPlatformExperimentDescription, Subject: "pe-1", PlatformExperimentID: "pe-1"})
+	changes.append(domain.Event{Kind: domain.EventPlatformExperimentStatus, Subject: "pe-1", Value: "closed", PlatformExperimentID: "pe-1"})
 	for _, want := range []string{domain.EventStageBoundary, domain.EventPlatformExperimentDescription, domain.EventPlatformExperimentStatus} {
 		if got := client.next(t).Kind; got != want {
 			t.Errorf("delivered kind: got = %v, want = %v", got, want)
@@ -698,379 +689,77 @@ func TestARunWideChangeReachesAnAgentScopedSubscriptionWhoeverWroteIt(t *testing
 	}
 }
 
-// A job subscribes by its own experiment id and gets its own job's events — that scope is what
-// makes it safe for a workload to watch at all. Widening it silently to run-wide news would hand a
-// job information it has no business acting on, and the platform's rule is that a runtime acts on
-// desired state and on nothing else.
+// A job subscribes by its own experiment id and gets its own job's changes, not run-wide news.
 func TestAJobScopedSubscriptionDoesNotReceiveTheRunWideKinds(t *testing.T) {
-	source := newFakeEvents()
-	server := watchServer(t, source)
-	client := dialWatch(t, server, url.Values{"experiment_id": {"exp-1"}})
-
-	source.live <- domain.Event{Kind: domain.EventPlatformExperimentStatus, Subject: "pe-1", Value: "closed",
-		PlatformExperimentID: "pe-1", Position: 100, Cursor: 100}
-	source.live <- domain.Event{Kind: domain.EventAgentCut, Subject: "agent-a", Value: "1",
-		PlatformExperimentID: "pe-1", AgentID: "agent-a", Position: 200, Cursor: 200}
-	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 300)
-
+	changes := newFakeChanges()
+	client := dialWatch(t, watchServer(t, changes), url.Values{"experiment_id": {"exp-1"}})
+	changes.append(domain.Event{Kind: domain.EventPlatformExperimentStatus, Subject: "pe-1", Value: "closed", PlatformExperimentID: "pe-1"})
+	changes.append(domain.Event{Kind: domain.EventAgentCut, Subject: "agent-a", Value: "1", PlatformExperimentID: "pe-1", AgentID: "agent-a"})
+	changes.append(statusEvent("exp-1", "RUNNING", "agent-a"))
 	if got := client.next(t).Kind; got != domain.EventExperimentStatus {
-		t.Errorf("first delivered kind: got = %v, want = %v", got, domain.EventExperimentStatus)
+		t.Errorf("first delivered kind: got = %v, want = experiment.status", got)
 	}
 }
 
-// The vocabulary is published so a subscriber can discover it instead of being told it, and that
-// is only worth anything if what is published is what is accepted. A kind advertised but refused
-// is the worse of the two failures: the caller does exactly what the documentation said and is
-// turned away with a 400 it cannot act on.
-func TestEveryAdvertisedKindIsAKindASubscriptionMayName(t *testing.T) {
-	for _, kind := range domain.EventKinds {
-		request := httptest.NewRequest(http.MethodGet,
-			"/watch?platform_experiment_id=pe-1&kinds="+url.QueryEscape(kind.Kind), nil)
-		filter, _, err := parseWatchQuery(request)
-		if err != nil {
-			t.Errorf("subscribing to the advertised kind %v: got = %v, want = nil", kind.Kind, err)
-			continue
-		}
-		if !filter.Kinds[kind.Kind] {
-			t.Errorf("filter for the advertised kind %v: got = %v, want = it admitted", kind.Kind, filter.Kinds)
-		}
-	}
-}
-
-// The other direction of the same rule. A kind the server accepts but never advertises is folklore
-// — an agent can only use it if someone tells it, which is exactly the state publishing the
-// vocabulary was meant to end.
-func TestEveryKindASubscriptionMayNameIsAlsoAdvertised(t *testing.T) {
+// What GET /watch/kinds advertises is what a subscription may name, and the other way round.
+func TestTheAdvertisedKindsAreTheKindsASubscriptionMayName(t *testing.T) {
 	advertised := map[string]bool{}
 	for _, kind := range domain.EventKinds {
 		advertised[kind.Kind] = true
+		filter, _, err := parseWatchQuery(httptest.NewRequest(http.MethodGet, "/watch?platform_experiment_id=pe-1&kinds="+url.QueryEscape(kind.Kind), nil))
+		if err != nil || !filter.Kinds[kind.Kind] {
+			t.Errorf("subscribing to the advertised kind %v: got = %v (%v), want = it admitted", kind.Kind, filter.Kinds, err)
+		}
 	}
 	for kind := range knownKinds {
 		if !advertised[kind] {
-			t.Errorf("accepted kind %v: got = %v, want = listed by GET /watch/kinds", kind, "unlisted")
+			t.Errorf("accepted kind %v: got = unlisted, want = listed by GET /watch/kinds", kind)
 		}
 	}
 }
 
-// The default is the whole point of the feature: an agent that has to name kinds has to know them,
-// and an agent that names them wrong waits on a healthy socket forever. A subscription that names
-// none must therefore carry every signal the agent's loop would otherwise poll for — its jobs and
-// why they are stuck, its allocation, its two stop conditions, the ladder, the brief and the pool.
-func TestASubscriptionNamingNoKindsCarriesEverythingTheAgentLoopWouldOtherwisePollFor(t *testing.T) {
-	source := newFakeEvents()
-	server := watchServer(t, source)
-	client := dialWatch(t, server, url.Values{"platform_experiment_id": {"pe-1"}})
-
-	wanted := []string{
-		domain.EventExperimentStatus, domain.EventExperimentBlocked, domain.EventQuotaChanged,
-		domain.EventAgentCut, domain.EventPlatformExperimentStatus, domain.EventPlatformExperimentDescription,
-		domain.EventStageBoundary, domain.EventHypothesisNew, domain.EventHypothesisStatus,
-		domain.EventFindingNew, domain.EventCommentNew,
-	}
-	for i, kind := range wanted {
-		source.live <- domain.Event{Kind: kind, Subject: "s", PlatformExperimentID: "pe-1",
-			AgentID: "agent-a", Position: int64(100 + i), Cursor: int64(100 + i)}
-	}
-	for _, want := range wanted {
-		if got := client.next(t).Kind; got != want {
-			t.Errorf("delivered kind on the default subscription: got = %v, want = %v", got, want)
-		}
-	}
-}
-
-// The one deliberate exclusion. metric.point fires per sample for every job in the run and carries
-// no value, only a pointer, so defaulting it on would spend a run-wide subscriber's whole buffer on
-// news it did not ask for and get the connection dropped for lagging — and it is the one kind a
-// reconnect cannot replay, which would make the default the only subscription with a hole in it.
-func TestTheDefaultSubscriptionLeavesOutTheMetricPointerFirehose(t *testing.T) {
-	source := newFakeEvents()
-	server := watchServer(t, source)
-	client := dialWatch(t, server, url.Values{"platform_experiment_id": {"pe-1"}})
-
-	source.live <- domain.Event{Kind: domain.EventMetricPoint, Subject: "exp-1", Value: "loss",
-		PlatformExperimentID: "pe-1", AgentID: "agent-a", Position: 100, Cursor: 100}
-	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 200)
-
-	if got := client.next(t).Kind; got != domain.EventExperimentStatus {
-		t.Errorf("first delivered kind on the default subscription: got = %v, want = %v", got, domain.EventExperimentStatus)
-	}
-}
-
-// A default that could not be overridden would make the excluded kind unreachable. Naming kinds
-// means exactly those kinds, including when what is named is the one the default leaves out —
-// otherwise an agent watching one job's progress could never see its samples arrive.
-func TestNamingMetricPointExplicitlyStillDeliversItAndNothingElse(t *testing.T) {
-	source := newFakeEvents()
-	server := watchServer(t, source)
-	client := dialWatch(t, server, url.Values{
-		"platform_experiment_id": {"pe-1"},
-		"kinds":                  {"metric.point"},
-	})
-
-	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 100)
-	source.live <- domain.Event{Kind: domain.EventMetricPoint, Subject: "exp-1", Value: "loss",
-		PlatformExperimentID: "pe-1", AgentID: "agent-a", Position: 200, Cursor: 200}
-
-	if got := client.next(t).Kind; got != domain.EventMetricPoint {
-		t.Errorf("first delivered kind for an explicit kinds=metric.point: got = %v, want = %v", got, domain.EventMetricPoint)
-	}
-}
-
-// readSubscription reads frames until the server's answer to a control frame arrives, and returns
-// it. Events keep flowing while a control frame is in flight, so an answer is something to wait
-// for among them rather than the next thing on the wire.
-func readSubscription(t *testing.T, client *watchClient) Subscription {
-	t.Helper()
-	for i := 0; i < 32; i++ {
-		var frame watchFrame
-		payload := client.nextRaw(t)
-		if err := json.Unmarshal(payload, &frame); err != nil {
-			t.Fatalf("decode frame %q: got = %v, want = nil", payload, err)
-		}
-		if frame.Error != "" {
-			t.Fatalf("server answer to a control frame: got = %v, want = a subscription", frame.Error)
-		}
-		if frame.Subscription != nil {
-			return *frame.Subscription
-		}
-	}
-	t.Fatalf("server answer to a control frame: got = %v, want = a subscription frame", "none in 32 frames")
-	return Subscription{}
-}
-
-// An agent that cannot see what it is subscribed to is back to believing what it asked for. The
-// answer has to be read from the filter the server is matching against — including the kinds it
-// filled in itself when the client named none — or "I am subscribed" means nothing.
-func TestAConnectedClientIsToldTheFilterActuallyInForceIncludingTheDefaultItDidNotName(t *testing.T) {
-	server := watchServer(t, newFakeEvents())
-	client := dialWatch(t, server, url.Values{
-		"platform_experiment_id": {"pe-1"},
-		"agent_id":               {"agent-a"},
-	})
-
-	client.sendText(t, "{}")
-	got := readSubscription(t, client)
-
-	if got.PlatformExperimentID != "pe-1" || got.AgentID != "agent-a" {
-		t.Errorf("reported scope: got = %v/%v, want = pe-1/agent-a", got.PlatformExperimentID, got.AgentID)
-	}
-	if len(got.Kinds) != len(domain.DefaultKinds()) {
-		t.Errorf("reported kinds: got = %v, want = the %v default kinds", got.Kinds, len(domain.DefaultKinds()))
-	}
-	for _, kind := range got.Kinds {
-		if kind == domain.EventMetricPoint {
-			t.Errorf("reported kinds: got = %v, want = one without metric.point", got.Kinds)
-		}
-	}
-}
-
-// The two halves of a filter change, in the order that makes them one guarantee. Narrowing must
-// stop the kinds it dropped, and widening must deliver the added kind from where this connection
-// last stood — a widen that only went live from the moment of the change would leave the client's
-// cursor claiming it had seen events it never received, which is a gap no reconnect would ever
-// repair.
-func TestWideningAFilterReplaysTheAddedKindFromWhereTheConnectionStoodRatherThanGoingLiveOnly(t *testing.T) {
-	source := newFakeEvents(
-		domain.Event{Kind: domain.EventHypothesisNew, Subject: "hyp-1",
-			PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 150, Cursor: 150},
-	)
-	server := watchServer(t, source)
-	client := dialWatch(t, server, url.Values{
-		"platform_experiment_id": {"pe-1"},
-		"kinds":                  {"experiment.status"},
-		"since":                  {"100"},
-	})
-
-	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 200)
-	if got := client.next(t).Value; got != "RUNNING" {
-		t.Fatalf("first delivered status: got = %v, want = %v", got, "RUNNING")
-	}
-
-	client.sendText(t, `{"kinds": "experiment.status,hypothesis.new"}`)
-
-	// The pool event predates the last status this connection saw, and is delivered anyway:
-	// nothing carried that kind before, so nothing has served it.
-	if got := client.next(t); got.Kind != domain.EventHypothesisNew || got.Cursor != 150 {
-		t.Errorf("first frame after widening: got = %v at %v, want = hypothesis.new at 150", got.Kind, got.Cursor)
-	}
-	if got := readSubscription(t, client); len(got.Kinds) != 2 {
-		t.Errorf("reported kinds after widening: got = %v, want = the two named", got.Kinds)
-	}
-}
-
-// A replay starts at the floor it resumes from, the event that set the floor included. One this
-// connection already received live must not be sent again when a narrowed kind is re-added.
-func TestReAddingANarrowedKindDoesNotResendTheEventsItAlreadyDeliveredLive(t *testing.T) {
-	pool := domain.Event{Kind: domain.EventHypothesisNew, Subject: "hyp-1",
-		PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 150, Cursor: 150}
-	source := newFakeEvents()
-	server := watchServer(t, source)
-	client := dialWatch(t, server, url.Values{
-		"platform_experiment_id": {"pe-1"},
-		"kinds":                  {"experiment.status,hypothesis.new"},
-		"since":                  {"100"},
-	})
-
-	source.store(pool)
-	source.live <- pool
-	if got := client.next(t); got.Subject != "hyp-1" {
-		t.Fatalf("live pool event: got = %v, want = %v", got.Subject, "hyp-1")
-	}
-	client.sendText(t, `{"kinds": "experiment.status"}`)
-	readSubscription(t, client)
-	client.sendText(t, `{"kinds": "experiment.status,hypothesis.new"}`)
-	readSubscription(t, client)
-
-	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 200)
-	if got := client.next(t); got.Kind != domain.EventExperimentStatus {
-		t.Errorf("next frame after re-adding the kind: got = %v %v, want = the live status, with no repeat of hyp-1", got.Kind, got.Subject)
-	}
-}
-
-// The other side of the same invariant, and the one that would be silent: an event the pre-change
-// filter would have delivered must survive the change. A filter change that quietly swallowed
-// whatever was in flight would make re-scoping more dangerous than reconnecting, and an agent would
-// be right never to use it.
-func TestAFilterChangeDoesNotDropAnEventThePreChangeFilterWouldHaveDelivered(t *testing.T) {
-	source := newFakeEvents()
-	server := watchServer(t, source)
-	client := dialWatch(t, server, url.Values{
-		"platform_experiment_id": {"pe-1"},
-		"kinds":                  {"experiment.status"},
-		"since":                  {"100"},
-	})
-
-	// Queued under the old filter, and the change is sent without waiting for it to be written:
-	// whichever order the server sees them in, the status is owed to this client.
-	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 200)
-	client.sendText(t, `{"kinds": "experiment.status,quota.changed"}`)
-
-	for i := 0; i < 32; i++ {
-		var frame watchFrame
-		payload := client.nextRaw(t)
-		if err := json.Unmarshal(payload, &frame); err != nil {
-			t.Fatalf("decode frame %q: got = %v, want = nil", payload, err)
-		}
-		if frame.Subscription != nil {
-			continue
-		}
-		var e domain.Event
-		if err := json.Unmarshal(payload, &e); err != nil {
-			t.Fatalf("decode event %q: got = %v, want = nil", payload, err)
-		}
-		if e.Kind == domain.EventExperimentStatus && e.Value == "RUNNING" {
-			return
-		}
-	}
-	t.Errorf("the status queued under the pre-change filter: got = %v, want = delivered across the change", "never delivered")
-}
-
-// Narrowing has to actually narrow, and has to leave the rest alone. A change reported as applied
-// but not applied is the worst answer of the three, because the client stops watching for what it
-// believes it has already dropped.
-func TestNarrowingAFilterStopsTheDroppedKindAndKeepsTheOnesLeft(t *testing.T) {
-	source := newFakeEvents()
-	server := watchServer(t, source)
-	client := dialWatch(t, server, url.Values{"platform_experiment_id": {"pe-1"}})
-
-	client.sendText(t, `{"kinds": "experiment.status"}`)
-	if got := readSubscription(t, client); len(got.Kinds) != 1 || got.Kinds[0] != domain.EventExperimentStatus {
-		t.Fatalf("reported kinds after narrowing: got = %v, want = [experiment.status]", got.Kinds)
-	}
-
-	source.live <- domain.Event{Kind: domain.EventCommentNew, Subject: "hyp-1",
-		PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 100, Cursor: 100}
-	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 200)
-
-	if got := client.next(t).Kind; got != domain.EventExperimentStatus {
-		t.Errorf("first delivered kind after narrowing: got = %v, want = %v", got, domain.EventExperimentStatus)
-	}
-}
-
-// A kind that does not exist is refused in a control frame for the same reason it is refused in the
-// query string: a client whose change was ignored would go on waiting on a filter it does not have.
-// The connection survives — the request was wrong, not the socket.
-func TestAControlFrameNamingAnUnknownKindIsRefusedAndLeavesTheFilterAlone(t *testing.T) {
-	source := newFakeEvents()
-	server := watchServer(t, source)
-	client := dialWatch(t, server, url.Values{
-		"platform_experiment_id": {"pe-1"},
-		"kinds":                  {"experiment.status"},
-	})
-
-	client.sendText(t, `{"kinds": "experiment.finished"}`)
-	var frame watchFrame
-	payload := client.nextRaw(t)
-	if err := json.Unmarshal(payload, &frame); err != nil {
-		t.Fatalf("decode frame %q: got = %v, want = nil", payload, err)
-	}
-	if !strings.Contains(frame.Error, "experiment.finished") {
-		t.Errorf("answer to a control frame naming an unknown kind: got = %v, want = one naming it", string(payload))
-	}
-	source.live <- statusEvent("exp-1", "RUNNING", "agent-a", 200)
-	if got := client.next(t).Value; got != "RUNNING" {
-		t.Errorf("stream after a refused control frame: got = %v, want = still carrying %v", got, "RUNNING")
-	}
-}
-
-// The default subscription is the one every agent will use, so the scoping rule has to hold on it
-// and not only on the hand-written filters it was first tested with. An agent whose default
-// subscription carried a rival's job status or quota would be reading a competitor's timeline, and
-// would also be woken by every event in the run rather than by its own.
-func TestTheDefaultSubscriptionScopedToAnAgentStillNeverCarriesAnotherAgentsOwnEvents(t *testing.T) {
-	source := newFakeEvents()
-	server := watchServer(t, source)
-	client := dialWatch(t, server, url.Values{
-		"platform_experiment_id": {"pe-1"},
-		"agent_id":               {"agent-a"},
-	})
-
-	source.live <- statusEvent("exp-2", "RUNNING", "agent-b", 100)
-	source.live <- domain.Event{Kind: domain.EventQuotaChanged, Subject: "agent-b", Value: "9",
-		PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 150, Cursor: 150}
-	source.live <- domain.Event{Kind: domain.EventAgentCut, Subject: "agent-b", Value: "1",
-		PlatformExperimentID: "pe-1", AgentID: "agent-b", Position: 175, Cursor: 175}
-	source.live <- domain.Event{Kind: domain.EventQuotaChanged, Subject: "agent-a", Value: "4",
-		PlatformExperimentID: "pe-1", AgentID: "agent-a", Position: 200, Cursor: 200}
-
-	got := client.next(t)
-	if got.Kind != domain.EventQuotaChanged || got.Subject != "agent-a" {
-		t.Errorf("first delivered event: got = %v for %v, want = quota.changed for agent-a", got.Kind, got.Subject)
-	}
-}
-
-// The default set is served as part of the vocabulary rather than kept beside it, for the same
-// reason the accepted set is: a default an agent is told about but does not get, or gets but is
-// never told about, is the failure a second hand-kept list produces.
-func TestTheDefaultTheServerAppliesIsTheDefaultGETWatchKindsAdvertises(t *testing.T) {
-	request := httptest.NewRequest(http.MethodGet, "/watch?platform_experiment_id=pe-1", nil)
-	filter, _, err := parseWatchQuery(request)
+// A subscription that names no kinds carries every kind.
+func TestASubscriptionNamingNoKindsCarriesEveryKind(t *testing.T) {
+	filter, _, err := parseWatchQuery(httptest.NewRequest(http.MethodGet, "/watch?platform_experiment_id=pe-1", nil))
 	if err != nil {
 		t.Fatalf("subscribing without naming kinds: got = %v, want = nil", err)
 	}
 	for _, kind := range domain.EventKinds {
-		if filter.Kinds[kind.Kind] != kind.Default {
-			t.Errorf("kind %v on a subscription naming none: got = %v, want = %v (as advertised)",
-				kind.Kind, filter.Kinds[kind.Kind], kind.Default)
+		if !filter.Kinds[kind.Kind] {
+			t.Errorf("kind %v on a subscription naming none: got = left out, want = carried", kind.Kind)
 		}
 	}
 }
 
-// The inspect path end to end, through the real hl binary. hl watch masks what it sends and the
-// server unmasks it, and those two agreeing separately is not the same as them agreeing with each
-// other — if they do not, an agent asking what it is subscribed to gets a dropped socket instead of
-// an answer, which is worse than not being able to ask.
-func TestHLWatchPrintsWhatTheServerSaysThisConnectionIsSubscribedTo(t *testing.T) {
-	server := watchServer(t, newFakeEvents())
-
-	_, output, stderr := runHLWatch(t, server.URL, "--experiment", "exp-1",
-		"--kinds", "experiment.status", "--show-subscription", "--timeout", "5")
-
-	if !strings.Contains(output, `"subscription"`) {
-		t.Errorf("hl watch --show-subscription output: got = %v, want = a subscription line (stderr: %s)", output, stderr)
+// The first frame says what the server matches against, including the kinds it filled in itself
+// and the agent it took from the token.
+func TestTheFirstFrameIsTheFilterInForce(t *testing.T) {
+	client := dialWatch(t, watchServer(t, newFakeChanges()), url.Values{"platform_experiment_id": {"pe-1"}, "agent_id": {"agent-a"}})
+	got := readSubscription(t, client)
+	if got.PlatformExperimentID != "pe-1" || got.AgentID != "agent-a" || len(got.Kinds) != len(domain.EventKinds) {
+		t.Errorf("subscription: got = %+v, want = pe-1/agent-a with every kind", got)
 	}
-	if !strings.Contains(output, `"experiment.status"`) {
-		t.Errorf("hl watch --show-subscription output: got = %v, want = one naming the kind in force", output)
+}
+
+// An agent scope never carries another agent's own changes.
+func TestAnAgentScopeNeverCarriesAnotherAgentsOwnChanges(t *testing.T) {
+	changes := newFakeChanges()
+	client := dialWatch(t, watchServer(t, changes), url.Values{"platform_experiment_id": {"pe-1"}, "agent_id": {"agent-a"}})
+	changes.append(statusEvent("exp-2", "RUNNING", "agent-b"))
+	changes.append(domain.Event{Kind: domain.EventQuotaChanged, Subject: "agent-b", Value: "9", PlatformExperimentID: "pe-1", AgentID: "agent-b"})
+	changes.append(domain.Event{Kind: domain.EventAgentCut, Subject: "agent-b", Value: "1", PlatformExperimentID: "pe-1", AgentID: "agent-b"})
+	changes.append(domain.Event{Kind: domain.EventQuotaChanged, Subject: "agent-a", Value: "4", PlatformExperimentID: "pe-1", AgentID: "agent-a"})
+	if got := client.next(t); got.Kind != domain.EventQuotaChanged || got.Subject != "agent-a" {
+		t.Errorf("first delivered: got = %v for %v, want = quota.changed for agent-a", got.Kind, got.Subject)
+	}
+}
+
+// hl watch --show-subscription prints the first frame.
+func TestHLWatchPrintsWhatTheServerSaysThisConnectionIsSubscribedTo(t *testing.T) {
+	server := watchServer(t, newFakeChanges())
+	_, output, stderr := runHLWatch(t, server.URL, "--experiment", "exp-1", "--kinds", "experiment.status", "--show-subscription", "--no-wait", "--timeout", "5")
+	if !strings.Contains(output, `"subscription"`) || !strings.Contains(output, `"experiment.status"`) {
+		t.Errorf("output: got = %v, want = a subscription line naming the kind in force (stderr: %s)", output, stderr)
 	}
 }
 
@@ -1085,141 +774,79 @@ func eventLines(output string) []domain.Event {
 	return events
 }
 
-func positions(events []domain.Event) []int64 {
-	out := []int64{}
-	for _, e := range events {
-		out = append(out, e.Position)
-	}
-	return out
-}
-
 // agentEnv is the environment of agent-a of pe-1: hl reads who watches from the token's scope.
 func agentEnv(t *testing.T) []string {
 	scope := base64.RawURLEncoding.EncodeToString([]byte("agent:pe-1/agent-a"))
 	return []string{"HL_TOKEN=hls_" + scope + ".bWFj", "HL_STATE_DIR=" + t.TempDir()}
 }
 
-// A plain hl watch with no saved cursor returns the current snapshot of the agent's resources. The
-// next one resumes from the cursor the first saved: it prints what happened in between and nothing
-// the first already printed, though the server replays the events at that cursor again.
-func TestHLWatchResumesFromItsSavedCursorWithoutRepeatsOrGaps(t *testing.T) {
-	source := newFakeEvents(
-		statusEvent("exp-1", "COMPLETED", "agent-a", 100),
-		domain.Event{Kind: domain.EventExperimentStatus, Subject: "exp-2", Value: "FAILED", PlatformExperimentID: "pe-1",
-			AgentID: "agent-a", Position: 110, Cursor: 105},
-	)
-	server := watchServer(t, source)
+// A plain hl watch with no saved place prints every change held. The next one reads on from where
+// the first stopped: what happened in between and nothing the first already printed.
+func TestHLWatchReadsOnFromItsSavedPlaceWithoutRepeatsOrGaps(t *testing.T) {
+	changes := newFakeChanges(statusEvent("exp-1", "COMPLETED", "agent-a"), statusEvent("exp-2", "FAILED", "agent-a"))
+	server := watchServer(t, changes)
 	env := agentEnv(t)
 
 	code, out, stderr := runHLWatchEnv(t, env, server.URL, "--timeout", "10")
-	if got := positions(eventLines(out)); code != 0 || fmt.Sprint(got) != "[100 110]" {
-		t.Fatalf("first watch: got = exit %v, positions %v, want = exit 0, [100 110] (stderr: %s)", code, got, stderr)
+	if got := ids(eventLines(out)); code != 0 || fmt.Sprint(got) != "[1 2]" {
+		t.Fatalf("first watch: got = exit %v, ids %v, want = exit 0, [1 2] (stderr: %s)", code, got, stderr)
 	}
-
-	source.store(statusEvent("exp-3", "EVICTED", "agent-a", 120))
+	changes.append(statusEvent("exp-3", "EVICTED", "agent-a"))
 	code, out, stderr = runHLWatchEnv(t, env, server.URL, "--timeout", "10")
-	if got := positions(eventLines(out)); code != 0 || fmt.Sprint(got) != "[120]" {
-		t.Errorf("second watch: got = exit %v, positions %v, want = exit 0, [120] (stderr: %s)", code, got, stderr)
+	if got := ids(eventLines(out)); code != 0 || fmt.Sprint(got) != "[3]" {
+		t.Errorf("second watch: got = exit %v, ids %v, want = exit 0, [3] (stderr: %s)", code, got, stderr)
 	}
 }
 
-// A saved cursor this database never issued (it was reset, say) falls back to the snapshot once
-// instead of failing the watch.
-func TestHLWatchFallsBackToTheSnapshotWhenTheSavedCursorIsUnknown(t *testing.T) {
-	source := newFakeEvents(statusEvent("exp-1", "COMPLETED", "agent-a", 100))
-	source.next = 200
-	server := watchServer(t, source)
+// A saved place the platform no longer holds, or never issued, resets the watch to the head with
+// one watch.reset line, and the next watch reads on from there.
+func TestHLWatchResetsToTheHeadWhenItsSavedPlaceIsGone(t *testing.T) {
+	changes := newFakeChanges(statusEvent("exp-1", "COMPLETED", "agent-a"))
+	server := watchServer(t, changes)
 	env := agentEnv(t)
 	dir := strings.TrimPrefix(env[1], "HL_STATE_DIR=")
-	if err := os.WriteFile(filepath.Join(dir, "watch-pe-1-agent-a.json"), []byte(`{"cursor":5000,"seen":[]}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "changes-pe-1-agent-a.json"), []byte(`{"after":5000}`), 0o644); err != nil {
 		t.Fatalf("write cursor file: got = %v, want = nil", err)
 	}
 
 	code, out, stderr := runHLWatchEnv(t, env, server.URL, "--timeout", "10")
-	if got := positions(eventLines(out)); code != 0 || fmt.Sprint(got) != "[100]" {
-		t.Errorf("watch from an unknown cursor: got = exit %v, positions %v, want = exit 0, [100] (stderr: %s)", code, got, stderr)
+	if want := `{"detail":"changes after 5000 are no longer held: re-read state (hl situation)","kind":"watch.reset"}` + "\n"; code != 0 || out != want {
+		t.Fatalf("watch from a place gone: got = exit %v, %q, want = exit 0, %q (stderr: %s)", code, out, want, stderr)
+	}
+	changes.append(statusEvent("exp-2", "COMPLETED", "agent-a"))
+	code, out, stderr = runHLWatchEnv(t, env, server.URL, "--timeout", "10")
+	if got := ids(eventLines(out)); code != 0 || fmt.Sprint(got) != "[2]" {
+		t.Errorf("next watch: got = exit %v, ids %v, want = exit 0, [2] (stderr: %s)", code, got, stderr)
 	}
 }
 
-// An explicit --since is the caller's statement of where to start, and wins over the saved cursor.
-func TestHLWatchExplicitSinceWinsOverTheSavedCursor(t *testing.T) {
-	source := newFakeEvents(statusEvent("exp-1", "COMPLETED", "agent-a", 100), statusEvent("exp-2", "COMPLETED", "agent-a", 200))
-	server := watchServer(t, source)
+// An explicit --after is the caller's statement of where to read from, and wins over the saved place.
+func TestHLWatchExplicitAfterWinsOverTheSavedPlace(t *testing.T) {
+	changes := newFakeChanges(statusEvent("exp-1", "COMPLETED", "agent-a"), statusEvent("exp-2", "COMPLETED", "agent-a"))
+	server := watchServer(t, changes)
 	env := agentEnv(t)
 	if code, _, stderr := runHLWatchEnv(t, env, server.URL, "--timeout", "10"); code != 0 {
 		t.Fatalf("first watch: got = exit %v, want = 0 (stderr: %s)", code, stderr)
 	}
-	code, out, stderr := runHLWatchEnv(t, env, server.URL, "--since", "150", "--timeout", "10")
-	if got := positions(eventLines(out)); code != 0 || fmt.Sprint(got) != "[200]" {
-		t.Errorf("watch with --since 150: got = exit %v, positions %v, want = exit 0, [200] (stderr: %s)", code, got, stderr)
+	code, out, stderr := runHLWatchEnv(t, env, server.URL, "--after", "1", "--timeout", "10")
+	if got := ids(eventLines(out)); code != 0 || fmt.Sprint(got) != "[2]" {
+		t.Errorf("watch with --after 1: got = exit %v, ids %v, want = exit 0, [2] (stderr: %s)", code, got, stderr)
 	}
 }
 
-type countingConn struct {
-	net.Conn
-	writes int
-}
-
-func (c *countingConn) Write(p []byte) (int, error) {
-	c.writes++
-	return len(p), nil
-}
-
-func (c *countingConn) SetWriteDeadline(time.Time) error { return nil }
-
-// A connection that lives for a whole run must not remember every event it ever sent: once a kind's
-// floor passes an event, a repeat of it is recognised by its position.
-func TestAConnectionForgetsTheEventsItsFloorHasPassedAndStillDropsTheirRepeats(t *testing.T) {
-	wire := &countingConn{}
-	conn := &wsConn{conn: wire, rw: bufio.NewReadWriter(bufio.NewReader(strings.NewReader("")), bufio.NewWriter(wire))}
-	delivered := &served{ctx: context.Background(), source: newFakeEvents(), logger: zap.NewNop(),
-		floor: map[string]int64{}, sent: map[domain.Event]bool{}}
-	filter := domain.EventFilter{PlatformExperimentID: "pe-1"}
-
-	for cursor := int64(1); cursor <= 500; cursor++ {
-		if err := delivered.send(conn, filter, statusEvent("job-1", "RUNNING", "agent-1", cursor)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if len(delivered.sent) != 1 {
-		t.Errorf("identities remembered after 500 events = %d, want only the one at the floor", len(delivered.sent))
-	}
-	written := wire.writes
-	for _, cursor := range []int64{3, 500} {
-		if err := delivered.send(conn, filter, statusEvent("job-1", "RUNNING", "agent-1", cursor)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if wire.writes != written {
-		t.Errorf("a repeat of an event already sent was written again")
-	}
-	if err := delivered.send(conn, filter, statusEvent("job-2", "RUNNING", "agent-1", 500)); err != nil {
-		t.Fatal(err)
-	}
-	if wire.writes == written {
-		t.Errorf("another event of the transaction at the floor was dropped")
-	}
-}
-
-// A client that connects while LISTEN is down replays and then waits on a hub nothing feeds.
-// Whatever commits before LISTEN is back is in neither its replay nor its stream, and later
-// cursors pass it, so the connection has to end once LISTEN is back: the reconnect replays.
-func TestAClientConnectedWhileNothingWasListeningIsDroppedOnceListenIsBack(t *testing.T) {
-	source := newFakeEvents(statusEvent("exp-1", "RUNNING", "agent-a", 100))
-	source.listenGate = make(chan struct{})
-	server := watchServer(t, source)
-	client := dialWatch(t, server, url.Values{"platform_experiment_id": {"pe-1"}})
+// A client that connects while LISTEN is down reads what is held and waits. What is appended
+// before LISTEN is back woke nobody, so every stream reads again once it is.
+func TestAStreamOpenedWhileNothingListenedReadsAgainOnceListenIsBack(t *testing.T) {
+	changes := newFakeChanges(statusEvent("exp-1", "RUNNING", "agent-a"))
+	changes.listenGate = make(chan struct{})
+	client := dialWatch(t, watchServer(t, changes), url.Values{"platform_experiment_id": {"pe-1"}})
 	if got := client.next(t).Value; got != "RUNNING" {
-		t.Fatalf("replay on connect: got = %v, want = %v", got, "RUNNING")
+		t.Fatalf("change on connect: got = %v, want = RUNNING", got)
 	}
-
-	close(source.listenGate)
-
-	if err := client.conn.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
-		t.Fatalf("set read deadline: got = %v, want = nil", err)
-	}
-	_, err := io.Copy(io.Discard, client.r)
-	if err != nil {
-		t.Fatalf("connection after LISTEN came back: got = %v, want = closed by the server", err)
+	client.progress(t)
+	changes.append(statusEvent("exp-1", "COMPLETED", "agent-a"))
+	close(changes.listenGate)
+	if got := client.next(t).Value; got != "COMPLETED" {
+		t.Errorf("change appended while nothing listened: got = %v, want = COMPLETED", got)
 	}
 }

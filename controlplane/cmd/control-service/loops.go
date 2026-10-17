@@ -108,7 +108,27 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environ
 		func(ctx context.Context) { expQuotaSvc.StartAutoAccept(ctx, 2*time.Second, pass) },
 		func(ctx context.Context) { schedulerLoop.Start(ctx, pass) },
 		func(ctx context.Context) { watcher.Start(ctx, pass) },
+		func(ctx context.Context) { pruneChanges(ctx, store, logger) },
 	}, rented...)...)
 
 	return schedulerSvc, clusterExchange
+}
+
+// pruneChanges deletes the changes older than domain.ChangesRetention, now and every hour after.
+// A pass that fails is logged and the next one carries on.
+func pruneChanges(ctx context.Context, store *db.Store, logger *zap.Logger) {
+	tick := time.NewTicker(time.Hour)
+	defer tick.Stop()
+	for {
+		if pruned, err := store.Prune(ctx, domain.ChangesRetention); err != nil {
+			logger.Warn("control-service: prune changes", zap.Int64("pruned", pruned), zap.Error(err))
+		} else if pruned > 0 {
+			logger.Info("control-service: pruned changes", zap.Int64("pruned", pruned))
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+	}
 }

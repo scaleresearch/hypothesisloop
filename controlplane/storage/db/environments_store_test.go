@@ -2,7 +2,6 @@ package db
 
 import (
 	"context"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -484,7 +483,7 @@ func TestAnEnvironmentKeepsTheImageItsToolsComeFrom(t *testing.T) {
 	}
 }
 
-// An agent that asks for a build while it builds is told once it ends, live and replayed, with
+// An agent that asks for a build while it builds is told once it ends, once, with
 // the outcome and, once the file failed, where the end of its output is read. One that asks of a
 // build already over waits for nothing, and asking again once it ended waits for the next build.
 func TestAnAgentThatAskedForABuildIsToldItEnded(t *testing.T) {
@@ -492,8 +491,16 @@ func TestAnAgentThatAskedForABuildIsToldItEnded(t *testing.T) {
 	ctx := context.Background()
 	codeRef := "https://example.com/repo.git@" + strings.Repeat("c", 40)
 	before := cursorNow(t, w.pool)
-	events, stop := listenForEvents(t, w.pool)
-	defer stop()
+	told := func(key string) []domain.Event {
+		t.Helper()
+		var of []domain.Event
+		for _, e := range changesAfter(t, w.envs, domain.EventFilter{PlatformExperimentID: w.peA, AgentID: w.agent, Kinds: map[string]bool{domain.EventEnvironmentStatus: true}}, before) {
+			if e.Subject == key {
+				of = append(of, e)
+			}
+		}
+		return of
+	}
 
 	failing := w.ensure(t, w.orgA, "told failing")
 	for _, image := range []string{"pytorch", "another"} {
@@ -505,7 +512,11 @@ func TestAnAgentThatAskedForABuildIsToldItEnded(t *testing.T) {
 	if !w.finish(t, w.ofA, env, domain.EnvironmentBuildOutcome{Fault: domain.EnvironmentFaultFile, LogTail: "E: no package"}) {
 		t.Fatal("the assigned cluster's report was refused")
 	}
-	failed := awaitEvent(t, events, domain.EventEnvironmentStatus, failing.Key)
+	failedTold := told(failing.Key)
+	if len(failedTold) != 1 {
+		t.Fatalf("told of the failed build: got = %+v, want once", failedTold)
+	}
+	failed := failedTold[0]
 	if failed.Value != "failed" || failed.AgentID != w.agent || failed.PlatformExperimentID != w.peA ||
 		!strings.Contains(failed.Detail, "commit cccccccccccc ") || !strings.Contains(failed.Detail, "on pytorch") || !strings.Contains(failed.Detail, "`hl env status`") {
 		t.Fatalf("failed: got = %+v, want it failed for the agent, naming the commit, the image and hl env status", failed)
@@ -525,7 +536,11 @@ func TestAnAgentThatAskedForABuildIsToldItEnded(t *testing.T) {
 	if !w.finish(t, w.ofA, env, domain.EnvironmentBuildOutcome{Image: "registry.test/env@sha256:" + w.suffix}) {
 		t.Fatal("the assigned cluster's report was refused")
 	}
-	built := awaitEvent(t, events, domain.EventEnvironmentStatus, ready.Key)
+	builtTold := told(ready.Key)
+	if len(builtTold) != 1 {
+		t.Fatalf("told of the built one: got = %+v, want once", builtTold)
+	}
+	built := builtTold[0]
 	if built.Value != "ready" || !strings.Contains(built.Detail, "is built on pytorch") {
 		t.Fatalf("ready: got = %+v, want it built", built)
 	}
@@ -536,37 +551,20 @@ func TestAnAgentThatAskedForABuildIsToldItEnded(t *testing.T) {
 	if err := w.envs.AwaitEnvironmentBuild(ctx, ready.Key, w.peA, w.agent, codeRef, "pytorch"); err != nil {
 		t.Fatal(err)
 	}
-	replayed, err := NewEventsStore(w.pool, noHypothesisEvents{}).Replay(ctx, domain.EventFilter{PlatformExperimentID: w.peA, AgentID: w.agent}, before)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var told []domain.Event
-	for _, e := range replayed {
-		if e.Kind == domain.EventEnvironmentStatus {
-			told = append(told, e)
-		}
-	}
-	if len(told) != 2 || told[0].Identity() != failed.Identity() || told[1].Identity() != built.Identity() {
-		t.Fatalf("replayed: got = %+v, want the two live events %+v, %+v", told, failed, built)
+	if got := told(ready.Key); len(got) != 1 {
+		t.Fatalf("asked of a build already over: told %+v, want nothing more", got)
 	}
 
 	again := w.ensure(t, w.orgA, "told failing")
 	if err := w.envs.AwaitEnvironmentBuild(ctx, again.Key, w.peA, w.agent, codeRef, "pytorch"); err != nil {
 		t.Fatal(err)
 	}
-	replayed, err = NewEventsStore(w.pool, noHypothesisEvents{}).Replay(ctx, domain.EventFilter{PlatformExperimentID: w.peA, AgentID: w.agent}, before)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range replayed {
-		if e.Kind == domain.EventEnvironmentStatus && e.Subject == again.Key {
-			t.Errorf("asked again once it failed: still told %+v, want it waiting for the next build", e)
-		}
+	if got := told(again.Key); len(got) != 1 {
+		t.Errorf("asked again once it failed: told %+v, want only the failure, waiting for the next build", got)
 	}
 }
 
-// An agent waiting for a build is told once a cluster loaded it, naming that cluster, live and
-// replayed. Its jobs run from then on, by themselves once the push ends, so the build ending ready
+// An agent waiting for a build is told once a cluster loaded it, naming that cluster, once. Its jobs run from then on, by themselves once the push ends, so the build ending ready
 // tells it nothing more; a build that fails after still does.
 func TestAnAgentIsToldItsBuildLoadedAndThenOnlyOfAFailure(t *testing.T) {
 	w := newEnvironments(t)
@@ -574,8 +572,10 @@ func TestAnAgentIsToldItsBuildLoadedAndThenOnlyOfAFailure(t *testing.T) {
 	codeRef := "https://example.com/repo.git@" + strings.Repeat("d", 40)
 	image := "registry.test/env@sha256:" + w.suffix
 	before := cursorNow(t, w.pool)
-	events, stop := listenForEvents(t, w.pool)
-	defer stop()
+	told := func() []domain.Event {
+		t.Helper()
+		return changesAfter(t, w.envs, domain.EventFilter{PlatformExperimentID: w.peA, AgentID: w.agent, Kinds: map[string]bool{domain.EventEnvironmentStatus: true}}, before)
+	}
 
 	pushed := w.ensure(t, w.orgA, "told loaded then pushed")
 	failing := w.ensure(t, w.orgA, "told loaded then failed")
@@ -590,8 +590,9 @@ func TestAnAgentIsToldItsBuildLoadedAndThenOnlyOfAFailure(t *testing.T) {
 				t.Fatalf("loaded: took %v, %v", took, err)
 			}
 		}
-		told := awaitEvent(t, events, domain.EventEnvironmentStatus, made.Key)
-		if told.Value != "loaded" || told.AgentID != w.agent || !strings.Contains(told.Detail, "commit dddddddddddd ") ||
+		all := told()
+		told := all[len(all)-1]
+		if len(all) != len(loaded)+1 || told.Subject != made.Key || told.Value != "loaded" || told.AgentID != w.agent || !strings.Contains(told.Detail, "commit dddddddddddd ") ||
 			!strings.Contains(told.Detail, "loaded on cluster "+w.ofA+" ") || !strings.Contains(told.Detail, "submit its jobs now") {
 			t.Fatalf("loaded: got = %+v, want it loaded on %s, saying to submit", told, w.ofA)
 		}
@@ -606,35 +607,8 @@ func TestAnAgentIsToldItsBuildLoadedAndThenOnlyOfAFailure(t *testing.T) {
 	if !w.finish(t, w.ofA, env, domain.EnvironmentBuildOutcome{Fault: domain.EnvironmentFaultFile, LogTail: "E: no package"}) {
 		t.Fatal("the file's fault was refused")
 	}
-	var failed domain.Event
-	for failed.Kind == "" {
-		select {
-		case e := <-events:
-			switch {
-			case e.Kind == domain.EventEnvironmentStatus && e.Subject == pushed.Key:
-				t.Fatalf("told %+v, want nothing more of a build told loaded that ended ready", e)
-			case e.Kind == domain.EventEnvironmentStatus && e.Subject == failing.Key:
-				failed = e
-			}
-		case <-time.After(5 * time.Second):
-			t.Fatal("the build that failed after it was loaded told nothing")
-		}
-	}
-	if failed.Value != "failed" {
-		t.Fatalf("failed: got = %+v", failed)
-	}
-
-	replayed, err := NewEventsStore(w.pool, noHypothesisEvents{}).Replay(ctx, domain.EventFilter{PlatformExperimentID: w.peA, AgentID: w.agent}, before)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var told []domain.Event
-	for _, e := range replayed {
-		if e.Kind == domain.EventEnvironmentStatus {
-			told = append(told, e.Identity())
-		}
-	}
-	if want := []domain.Event{loaded[0].Identity(), loaded[1].Identity(), failed.Identity()}; !slices.Equal(told, want) {
-		t.Errorf("replayed: got = %v, want the live events %v", told, want)
+	all := told()
+	if len(all) != 3 || all[0] != loaded[0] || all[1] != loaded[1] || all[2].Subject != failing.Key || all[2].Value != "failed" {
+		t.Errorf("told: got = %+v, want the two loads and the failure after, nothing of the build that ended ready", all)
 	}
 }

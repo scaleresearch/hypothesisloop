@@ -2,13 +2,13 @@ package domain
 
 import "time"
 
-// Event is one change, described as small as it can be described: what kind of thing changed,
-// which thing, its new value, one qualifying detail, the two ids a subscription is scoped by,
-// a position and a cursor. Never a copy of the row — a client that wants detail follows with a normal GET,
-// so this stream duplicates no read path and no state.
+// Event is one change as GET /watch delivers it, described as small as it can be described: what
+// kind of thing changed, which thing, its new value, one qualifying detail and the two ids a
+// subscription is scoped by. Never a copy of the row: a client that wants detail follows with a
+// normal GET, so this stream duplicates no read path and no state.
 type Event struct {
-	// ID is the change's place in the stream: every change of a platform experiment with a smaller
-	// id committed before it.
+	// ID is the change's place in the stream: every change with a smaller id committed before it.
+	// A client reads on from the id of the last change it read.
 	ID                   int64  `json:"id"`
 	Kind                 string `json:"kind"`
 	Subject              string `json:"subject"`
@@ -16,27 +16,8 @@ type Event struct {
 	Detail               string `json:"detail"`
 	PlatformExperimentID string `json:"platform_experiment_id"`
 	AgentID              string `json:"agent_id"`
-	// Position is the id of the transaction that made the change, the same on a live event and
-	// on its replayed twin. With the fields above it identifies the event; transaction ids are
-	// not commit ordered, so it does not order the stream.
-	Position int64 `json:"position"`
-	// OccurredAt is when the transaction at Position began, the same on a live event and on its
-	// replayed twin. It is absent on the replay of a change made before positions kept a time.
-	OccurredAt time.Time `json:"occurred_at,omitzero"`
-	// Cursor is where to resume: every transaction below it had finished when this event was
-	// written, so its events were already delivered. A client hands the largest cursor it has
-	// seen back as `since`, and Replay returns every event at or above it. That can repeat an
-	// event the client already has (same Position), and never skips one.
-	Cursor int64 `json:"cursor"`
-}
-
-// Identity is the event without its cursor and its time: a live event and its replayed twin carry
-// different cursors, so a client dropping repeats compares identities, and the position already
-// says which transaction it is.
-func (e Event) Identity() Event {
-	e.Cursor = 0
-	e.OccurredAt = time.Time{}
-	return e
+	// OccurredAt is when the write that made the change began.
+	OccurredAt time.Time `json:"occurred_at"`
 }
 
 // Event kinds. Every event on the stream carries one of these.
@@ -94,27 +75,21 @@ const (
 	// EventPlatformExperimentRemoved says a person removed the platform experiment: it is answered
 	// to nobody from then on, its tokens included, so the event is the last word of its stream.
 	EventPlatformExperimentRemoved = "platform_experiment.removed"
-	// EventMetricPoint is a pointer, never a value: experiment id, metric name, fraction
-	// complete. Metrics live solely in the metrics store, and this event says only that one
-	// arrived — a subscriber that wants the number reads it from there. It is the one kind
-	// Replay cannot return, because Postgres never saw it (see Replay).
-	EventMetricPoint = "metric.point"
 	// EventJobUnderperforming says only that this job trailed its cohort on the platform
 	// experiment's ranking metric by enough margin to be worth a look: an opinion, never an
 	// instruction. Trailing is recomputed from the metrics store when a sample makes it true; the
-	// job's row records the metric its owner was told about, once, and that write is the event,
-	// live and replayed. The agent decides; the existing cancel-experiment call is the only path
-	// that ever ends the job.
+	// job's row records the metric its owner was told about, once, with the change. The agent
+	// decides; the existing cancel-experiment call is the only path that ever ends the job.
 	EventJobUnderperforming = "job.underperforming"
 	// EventJobHeld says a job has stayed QUEUED for longer than it was to run, and why. A queue
 	// reason that waiting clears is kept from an agent's stream (experiment.blocked), so without
 	// this an agent whose job never starts learns nothing. The job's row records the reason its
-	// owner was told, once, and that write is the event, live and replayed.
+	// owner was told, once, with the change.
 	EventJobHeld = "job.held"
 	// EventJobDuplicate says a job was submitted on a hypothesis another agent's job was already
 	// testing: queued, running or completed within the hour. Its submitter is told in the answer
 	// to its submit; the event is for whoever steers the run, so two seats do not run one idea.
-	// The job's row records the sentence, once, and that write is the event, live and replayed.
+	// The job's row records the sentence, once, with the change.
 	EventJobDuplicate = "job.duplicate"
 	// EventEnvironmentStatus says the build of an environment an agent asked for was loaded on a
 	// cluster, which runs its jobs before the push ends, or ended, ready or failed, to that agent.
@@ -124,7 +99,7 @@ const (
 )
 
 // EventKindDoc describes one kind well enough to subscribe to it without reading this file: what
-// its subject and value are, whether an `agent` filter narrows it, and what it is for.
+// its subject and value are, what an `agent` filter keeps of it, and what it is for.
 type EventKindDoc struct {
 	Kind        string `json:"kind"`
 	Subject     string `json:"subject"`
@@ -133,10 +108,6 @@ type EventKindDoc struct {
 	// AgentScope says what an `agent` filter keeps of this kind. It is filled in from agentScope,
 	// written beside the rule Matches applies, so the documented scope and the applied one sit together.
 	AgentScope string `json:"agent_scope"`
-	// Default is true when a subscription that names no kinds carries this one. Like AgentScope it
-	// is filled in from the predicate the server actually consults (isDefaultKind), so the default
-	// set cannot be advertised here and be a different set on the wire.
-	Default bool `json:"default"`
 }
 
 // EventKinds is the vocabulary of the stream, and the only list of it. The server validates a
@@ -192,8 +163,6 @@ var EventKinds = []EventKindDoc{
 		Description: "The baseline of the running run was raised to a stronger job that measured the control (PATCH /platform-experiments/{id} with baseline_job_id and baseline_reason). detail says by whom, from which value to which on the ranking metric, and why. The brief's measured baseline changed with it, and standings are set against the new bar: re-read the brief with GET /platform-experiments/{id}."},
 	{Kind: EventPlatformExperimentRemoved, Subject: "platform experiment id", Value: "empty by design",
 		Description: "A person removed the run (DELETE /platform-experiments/{id}). One still going was closed in the same write, told by platform_experiment.status closed just before. It is a stop condition for every agent in it: every read of it answers 404 from then on, and the tokens of its agents and coordinator are refused, so stop at once and file nothing more."},
-	{Kind: EventMetricPoint, Subject: "experiment id", Value: "metric name and fraction complete",
-		Description: "A sample arrived. The number lives only in the metrics store — read it with GET /experiments/{id}/metrics. The one kind replay cannot return."},
 	{Kind: EventJobHeld, Subject: "experiment id", Value: "the code of the queue reason (not_admitted_reason), or baseline_late",
 		Description: "This job is held in the queue. It is sent when the job has waited longer than its estimated duration, and for at least the platform's scheduler.held_job_notice_seconds: detail is the sentence that says why (not_admitted_message), never empty, for capacity_unavailable the cluster, what it is short of and how many jobs hold that. Nothing is done to the job: it stays queued, and its owner decides whether to wait, cancel it or ask for less. Sent once per job, with the reason it had then. " +
 			"baseline_late is a job of an open platform experiment's baseline, queued or placed and not running yet, that started now would end after baseline_due_at: detail says so with baseline_due_at, sent once per job."},
@@ -208,32 +177,14 @@ var EventKinds = []EventKindDoc{
 func init() {
 	for i := range EventKinds {
 		EventKinds[i].AgentScope = agentScope(EventKinds[i].Kind)
-		EventKinds[i].Default = isDefaultKind(EventKinds[i].Kind)
 	}
 }
 
-// isDefaultKind reports what a subscription naming no kinds carries: everything an agent's loop
-// would otherwise poll for — its jobs and why they are stuck, its allocation, its two stop
-// conditions, the ladder, the brief, and the shared pool.
-//
-// metric.point is the one exclusion, and it is deliberate. It is by far the highest-volume kind,
-// it fires for every sample of every job in the run rather than for the subscriber's own, and it
-// carries no value — only a pointer to the metrics store. On a run-wide subscription that is a
-// firehose whose only effect is to push the connection past its buffer and get it dropped, and a
-// stream that drops is worse than one that says less. It is also the single kind Replay cannot
-// return, so defaulting it on would make the default subscription the only one with a hole in its
-// reconnect. An agent watching one job's progress asks for it by name, which costs one flag and
-// says exactly what it means.
-func isDefaultKind(kind string) bool { return kind != EventMetricPoint }
-
-// DefaultKinds is the kind set of a subscription that names none, derived from EventKinds so that
-// the served vocabulary and the applied default are one list.
+// DefaultKinds is the kind set of a subscription that names none: every kind of EventKinds.
 func DefaultKinds() map[string]bool {
 	kinds := make(map[string]bool, len(EventKinds))
 	for _, k := range EventKinds {
-		if k.Default {
-			kinds[k.Kind] = true
-		}
+		kinds[k.Kind] = true
 	}
 	return kinds
 }
@@ -255,7 +206,7 @@ type EventFilter struct {
 // ones an ExperimentID filter can meaningfully narrow to.
 func isExperimentSubject(kind string) bool {
 	switch kind {
-	case EventExperimentStatus, EventExperimentBlocked, EventMetricPoint, EventJobUnderperforming, EventJobHeld, EventJobDuplicate:
+	case EventExperimentStatus, EventExperimentBlocked, EventJobUnderperforming, EventJobHeld, EventJobDuplicate:
 		return true
 	default:
 		return false
@@ -267,7 +218,7 @@ func isExperimentSubject(kind string) bool {
 // one agent's stop condition, the boundary is about the ladder.
 func isAgentOwned(kind string) bool {
 	switch kind {
-	case EventExperimentStatus, EventExperimentBlocked, EventMetricPoint, EventQuotaChanged, EventAgentCut, EventAgentFinished, EventAgentReplaced, EventAgentIdle, EventAgentInstructions, EventAgentMessage, EventJobUnderperforming, EventJobHeld,
+	case EventExperimentStatus, EventExperimentBlocked, EventQuotaChanged, EventAgentCut, EventAgentFinished, EventAgentReplaced, EventAgentIdle, EventAgentInstructions, EventAgentMessage, EventJobUnderperforming, EventJobHeld,
 		EventJobDuplicate, EventEnvironmentStatus:
 		return true
 	default:
@@ -308,16 +259,15 @@ func agentScope(kind string) string {
 	}
 }
 
-// Matches decides whether one event belongs on one subscription. Live fan-out and replay both
-// go through it, so a reconnecting client cannot receive a differently-scoped set than it was
-// receiving before the connection broke.
+// Matches decides whether one event belongs on one subscription. A backlog and what is appended
+// live go through it alike.
 //
 // An agent filter scopes the stream to what that agent has to act on, so it never needs to poll
 // its own resources: its jobs' terminal statuses, their requeues and the queue reasons waiting will not clear,
 // its allocation and cut, ladder advances, the run's status and brief, and other people's
 // activity on hypotheses it registered. A job waiting its turn for capacity is no news.
 // Whether a hypothesis event concerns one of the agent's hypotheses is a graph question, answered
-// by EventsStore.Concerns; Matches only drops the agent's own echo. Without an agent the stream is
+// by the graph (graphdb.Store.ConcernsAgent); Matches only drops the agent's own echo. Without an agent the stream is
 // the whole platform experiment, or with Decisions what of it may need a decision: a job that
 // was queued, admitted or started is on its way and asks nothing of anyone.
 func (f EventFilter) Matches(e Event) bool {
@@ -366,19 +316,4 @@ func (f EventFilter) Matches(e Event) bool {
 // first queueing does not say: only a requeue carries the reason the attempt ended.
 func requeued(e Event) bool {
 	return e.Value == string(StatusQueued) && e.Detail != ""
-}
-
-// Stamp is what Emit hands a write to another store: the position to record on what it writes,
-// and a way to tell whether an earlier write's events were sent.
-type Stamp struct {
-	// Position is the id of Emit's transaction.
-	Position int64
-	// Aborted reports whether the transaction with id position aborted. The events it emitted
-	// were then never sent, though its write to the other store may have committed: a write that
-	// finds such a position on what it would have written records its own and emits the events
-	// again.
-	Aborted func(position int64) (bool, error)
-	// RequireOpen refuses the write with ErrPlatformExperimentClosed once the platform experiment
-	// is closed, and keeps a close from committing until Emit's transaction ends.
-	RequireOpen func(platformExperimentID string) error
 }

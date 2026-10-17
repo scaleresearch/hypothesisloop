@@ -35,9 +35,11 @@ func TestAResearcherJoinsARunningPlatformExperimentInThePlaceOfOneThatEnded(t *t
 	atWork, ended := spawn("at-work"), spawn("ended")
 	for _, id := range []string{atWork, ended} {
 		qid, _ := domain.NewID(domain.AgentQuotaIDPrefix)
-		if err := pool.write(ctx, func(w *Write) error { return upsertAgentQuota(ctx, w, &domain.AgentQuota{
-			ID: qid, AgentID: id, PlatformExperimentID: pe, GuaranteedAcceleratorHours: 5, BurstAcceleratorHours: 5, CreatedAt: time.Now().UTC(),
-		}) }); err != nil {
+		if err := pool.write(ctx, func(w *Write) error {
+			return upsertAgentQuota(ctx, w, &domain.AgentQuota{
+				ID: qid, AgentID: id, PlatformExperimentID: pe, GuaranteedAcceleratorHours: 5, BurstAcceleratorHours: 5, CreatedAt: time.Now().UTC(),
+			})
+		}); err != nil {
 			t.Fatal(err)
 		}
 	}

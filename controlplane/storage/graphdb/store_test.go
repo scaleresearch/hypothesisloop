@@ -65,7 +65,6 @@ func onRoot(pe string) []domain.LinkSpec {
 	return []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: pe}}
 }
 
-
 func register(t *testing.T, s *Store, pe, agentID, text string, links []domain.LinkSpec) *domain.Hypothesis {
 	t.Helper()
 	h, _, existed, _, err := s.Register(context.Background(), NewHypothesis{

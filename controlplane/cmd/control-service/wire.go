@@ -71,12 +71,10 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		WithAgentLaunch(launch)
 
 	jobs, clusterExchange := newSchedulerParts(runCtx, gitHost, environmentsSvc, pool, store, graph, peSvc, quotaCfg, pcfg, metrics, dataStore, logger)
-	// The change stream: one LISTEN connection for this process, fanned out to whatever /watch
-	// connections are open. Nothing is persisted for it and nothing is held between connections
-	// — see httpapi/watch/watch.go.
-	events := db.NewEventsStore(pool, graph)
 	registrySvc := registry.New(store, graph, store, logger, metrics, dataStore)
-	watchHandler := watch.NewHandler(events, store, gate.access, logger)
+	// The change stream: one LISTEN for this process wakes whatever /watch streams are open, and
+	// each reads the changes table from its own cursor.
+	watchHandler := watch.NewHandler(store, graph, store, gate.access, logger)
 	watchHandler.Start(runCtx)
 
 	modelProxy, err := modelproxy.New(store, metrics,

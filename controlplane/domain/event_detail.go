@@ -6,10 +6,9 @@ import (
 	"unicode/utf8"
 )
 
-// MaxEventDetailJSONBytes bounds a free-text detail as JSON escapes it. Every event is sent with
-// pg_notify inside the transaction that writes it, and Postgres aborts that transaction for a
-// payload of 8000 bytes or more: a FAILED job whose last output was escape sequences grew past it
-// and its end could not be recorded. The rest of an event is ids, codes and numbers.
+// MaxEventDetailJSONBytes bounds a free-text detail as JSON escapes it, so a change stays small
+// whatever the text it carries: a FAILED job's last output can be anything. The rest of a change
+// is ids, codes and numbers.
 const MaxEventDetailJSONBytes = 4096
 
 const eventDetailTruncated = "… [truncated]"

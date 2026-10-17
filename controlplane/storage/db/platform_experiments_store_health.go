@@ -10,14 +10,14 @@ import (
 // RunHealth returns how each agent and hosted coordinator of every open or running platform
 // experiment is getting on, one statement so every one is described at the same moment. An agent
 // is timed from when it could first submit: a researcher from the run's start or, joining later,
-// its own signup; any other agent from its signup. A job ended at the transaction that set its
-// status, whose time event_times holds. Restarts are the instance counters, which count every
-// machine asked for again over the run, whatever launch it was under.
+// its own signup; any other agent from its signup. A job ended at its ended_at. Restarts are the
+// instance counters, which count every machine asked for again over the run, whatever launch it
+// was under.
 func (s *Store) RunHealth(ctx context.Context) ([]domain.AgentHealth, error) {
 	rows, err := s.pool.pool.Query(ctx, `
 SELECT s.platform_experiment_id, s.agent_id, s.role,
        EXTRACT(EPOCH FROM min(e.created_at) - st.start)::float8,
-       EXTRACT(EPOCH FROM min(t.occurred_at) - st.start)::float8,
+       EXTRACT(EPOCH FROM min(e.ended_at) FILTER (WHERE e.status = 'COMPLETED') - st.start)::float8,
        count(e.id) FILTER (WHERE e.status IN ('QUEUED', 'SUBMITTED', 'RUNNING')),
        COALESCE(i.restarts, 0),
        (SELECT count(*) FROM agent_messages m
@@ -26,7 +26,6 @@ FROM experiment_signups s`+signupInstanceJoin+`
 JOIN platform_experiments p ON p.id = s.platform_experiment_id
 CROSS JOIN LATERAL (SELECT CASE WHEN s.role = 'competitor' THEN GREATEST(p.started_at, s.signed_up_at) ELSE s.signed_up_at END AS start) st
 LEFT JOIN experiments e ON e.platform_experiment_id = s.platform_experiment_id AND e.agent_id = s.agent_id
-LEFT JOIN event_times t ON t.xid = e.status_xid AND e.status = 'COMPLETED'
 WHERE p.status IN ('open', 'running')
 GROUP BY s.platform_experiment_id, s.agent_id, s.role, st.start, i.restarts
 UNION ALL

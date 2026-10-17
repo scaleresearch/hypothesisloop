@@ -34,23 +34,16 @@ var watchTenancy = authtest.Placement{
 
 // gated is the watch handler behind auth.Gate, as control-service mounts it.
 func gated(tokens auth.Tokens, handler *Handler) http.Handler {
-	return auth.Gate(tokens, zap.NewNop(), map[string]string{"/watch": Subprotocol})(handler)
+	mux := http.NewServeMux()
+	mux.Handle("GET /watch", handler)
+	mux.HandleFunc("GET /changes", handler.ServeChanges)
+	return auth.Gate(tokens, zap.NewNop(), map[string]string{"/watch": Subprotocol})(mux)
 }
 
 func watchServerAs(t *testing.T, principal auth.Principal) *httptest.Server {
 	t.Helper()
-	source := newFakeEvents()
-	handler := NewHandler(source, &lookupStore{exp: &domain.Experiment{ID: "exp-1", PlatformExperimentID: "pe-1"}},
-		auth.NewAccess(watchTenancy), zap.NewNop())
-	ctx, cancel := context.WithCancel(context.Background())
-	handler.Start(ctx)
-	<-source.listening
-	server := httptest.NewServer(gated(authtest.As(principal), handler))
-	t.Cleanup(func() {
-		server.Close()
-		cancel()
-	})
-	return server
+	changes := newFakeChanges()
+	return serve(t, changes, newTestHandler(changes, &fakeHypotheses{}, watchTenancy), authtest.As(principal))
 }
 
 func watchStatus(t *testing.T, server *httptest.Server, query string, protocols ...string) int {
@@ -138,7 +131,6 @@ func TestAnAgentTokenWatchesOnlyItsOwnAgent(t *testing.T) {
 			query.Set("agent_id", asked)
 		}
 		client := dialWatch(t, server, query)
-		client.sendText(t, "{}")
 		if got := readSubscription(t, client).AgentID; got != "agent-a" {
 			t.Errorf("asking for agent %q: subscribed as %q, want agent-a", asked, got)
 		}
@@ -187,18 +179,16 @@ func TestAnOpenWatchStreamClosesOnceItsTokenIsRefused(t *testing.T) {
 		"nothing changed":                        {inOrgA, nil, false},
 		"the directory is down":                  {auth.Principal{}, errors.New("database is down"), false},
 	} {
-		source := newFakeEvents()
+		changes := newFakeChanges()
 		caller := &switchable{principal: inOrgA}
-		handler := NewHandler(source, &lookupStore{exp: &domain.Experiment{ID: "exp-1", PlatformExperimentID: "pe-1"}},
-			auth.NewAccess(watchTenancy), zap.NewNop())
+		handler := newTestHandler(changes, &fakeHypotheses{}, watchTenancy)
 		handler.recheckEvery = 20 * time.Millisecond
 		ctx, cancel := context.WithCancel(context.Background())
 		handler.Start(ctx)
-		<-source.listening
+		<-changes.listening
 		server := httptest.NewServer(gated(caller, handler))
 
 		client := dialWatch(t, server, url.Values{"platform_experiment_id": {"pe-1"}})
-		client.sendText(t, "{}")
 		readSubscription(t, client)
 		caller.set(tc.principal, tc.err)
 		if got := streamEnds(client, 400*time.Millisecond); got != tc.closes {

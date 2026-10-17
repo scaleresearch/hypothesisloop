@@ -16,7 +16,7 @@ const jobReturning = ` RETURNING ` + jobWrittenColumns
 // jobWritten is one experiments row as read back by jobReturning.
 type jobWritten struct {
 	id, platformExperimentID, agentID, status, evictionReason, notAdmittedReason string
-	heldReason, hypothesisID, sameHypothesis, underperformingMetric             string
+	heldReason, hypothesisID, sameHypothesis, underperformingMetric              string
 }
 
 func (j *jobWritten) dest() []any {

@@ -1409,11 +1409,11 @@ func cmdWatch(client *apiclient.Client, args []string, stdout, stderr io.Writer)
 	fs := newFlags("watch", `usage: hl watch [--agent A | --all [--decisions]] [--platform-experiment PE] [--kinds K,...] [--follow | --no-wait | --wake K,...]
    or: hl watch --experiment JOB [--until 'status in COMPLETED,FAILED,EVICTED']
 
-Prints events, one JSON object per line. With an agent's token or --agent and no --experiment
-or --all, the agent's own resources, resuming from where its last watch stopped. --all resumes the same way.
-occurred_at is when the change was made, in UTC, the same on an event that happens while you
-watch and on one replayed from before the watch. A change from before the platform kept the
-time is replayed without it.
+Prints changes, one JSON object per line, each with its id. With an agent's token or --agent and
+no --experiment or --all, the agent's own resources, reading on from where its last watch stopped.
+--all reads on the same way. occurred_at is when the change was made, in UTC. Changes are held
+for 7 days: a watch whose saved place is older prints one line of kind watch.reset, reads on
+from the newest change, and returns; re-read state (hl situation) then.
 A job that waits is told as experiment.blocked, and as job.held once, when it has waited longer
 than its estimate. value is the code of what it waits for (not_admitted_reason), detail the sentence
 (not_admitted_message).`, stderr)
@@ -1422,14 +1422,14 @@ than its estimate. value is the code of what it waits for (not_admitted_reason),
 	agent := fs.String("agent", "", "watch this agent's own resources: its jobs' outcomes and the queue reasons waiting will not clear, its quota and cut, stage advances, the run's status and brief, others' comments, findings and links on its hypotheses, and others' comments on the objective (default the token's agent unless --experiment or --all is set)")
 	all := fs.Bool("all", false, "watch the whole platform experiment instead of one agent's resources")
 	decisions := fs.Bool("decisions", false, "with --all, leave out what needs no decision: a job being queued, admitted or started, and a queue reason that waiting clears")
-	kinds := fs.String("kinds", "", "comma-separated event kinds instead of the default set (everything but metric.point); see GET /watch/kinds")
-	showSubscription := fs.Bool("show-subscription", false, "ask the server what this connection is subscribed to")
+	kinds := fs.String("kinds", "", "comma-separated event kinds instead of every kind; see GET /watch/kinds")
+	showSubscription := fs.Bool("show-subscription", false, "print what the server says this connection is subscribed to")
 	until := fs.String("until", "", "stop when a job or platform experiment status event has one of these values; one form only: 'status in COMPLETED,FAILED,EVICTED' or 'status in running'. A job ends COMPLETED, FAILED, EVICTED, REJECTED or CANCELLED")
 	wake := fs.String("wake", "", "comma-separated event kinds, each KIND, KIND=VALUE for events of that value only, KIND!=VALUE for events of any other, and KIND@SUBJECT, alone or ahead of =VALUE or !=VALUE, for events of that subject only: return only once an event of one of them arrives, and print ahead of it the others that came before. Until then those are not printed and the next watch gets them again")
-	noWait := fs.Bool("no-wait", false, "print the events already waiting and return at once, without listening for more")
+	noWait := fs.Bool("no-wait", false, "print the changes already waiting and return once caught up, without listening for more")
 	follow := fs.Bool("follow", false, "without --until, stream until the timeout instead of returning with the first batch of events")
 	timeout := fs.Float64("timeout", 540.0, "give up after this many seconds")
-	since := fs.Int64("since", 0, "resume from this cursor instead of the saved one: replays from it, the events at it included, before going live")
+	after := fs.Int64("after", 0, "read on from the change after this id instead of the saved place")
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)
 	}
@@ -1445,9 +1445,9 @@ than its estimate. value is the code of what it waits for (not_admitted_reason),
 		}
 	}
 
-	// An agent watching its own resources with the default kinds resumes where its last watch
-	// stopped, and so does a watch of the whole platform experiment. Any other subscription
-	// would skip events of kinds it did not carry.
+	// An agent watching its own resources with every kind reads on where its last watch stopped,
+	// and so does a watch of the whole platform experiment. Any other subscription would skip
+	// changes of kinds it did not carry.
 	var cursorFile string
 	if (*agent != "" || *all) && *platformExperiment != "" && *experiment == "" && *kinds == "" {
 		dir, err := stateDir()
@@ -1456,7 +1456,7 @@ than its estimate. value is the code of what it waits for (not_admitted_reason),
 			return 2
 		}
 		// No agent id is empty, so a whole experiment's cursor is no agent's file.
-		cursorFile = filepath.Join(dir, "watch-"+url.PathEscape(*platformExperiment)+"-"+url.PathEscape(*agent)+".json")
+		cursorFile = filepath.Join(dir, "changes-"+url.PathEscape(*platformExperiment)+"-"+url.PathEscape(*agent)+".json")
 	}
 
 	var waking func(kind, subject, value string) bool
@@ -1499,7 +1499,7 @@ than its estimate. value is the code of what it waits for (not_admitted_reason),
 		NoWait:             *noWait,
 		Wake:               waking,
 		Timeout:            time.Duration(*timeout * float64(time.Second)),
-		Since:              *since,
+		After:              *after,
 		CursorFile:         cursorFile,
 		Stdout:             stdout,
 		Stderr:             stderr,

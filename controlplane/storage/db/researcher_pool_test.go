@@ -36,9 +36,11 @@ func spawnResearcher(t *testing.T, pes *Store, pe, flavor string) string {
 		t.Fatalf("spawn: got = %v, want = nil", err)
 	}
 	qid, _ := domain.NewID(domain.AgentQuotaIDPrefix)
-	if err := pes.pool.write(context.Background(), func(w *Write) error { return upsertAgentQuota(context.Background(), w, &domain.AgentQuota{
-		ID: qid, AgentID: id, PlatformExperimentID: pe, GuaranteedAcceleratorHours: 2, CreatedAt: time.Now().UTC(),
-	}) }); err != nil {
+	if err := pes.pool.write(context.Background(), func(w *Write) error {
+		return upsertAgentQuota(context.Background(), w, &domain.AgentQuota{
+			ID: qid, AgentID: id, PlatformExperimentID: pe, GuaranteedAcceleratorHours: 2, CreatedAt: time.Now().UTC(),
+		})
+	}); err != nil {
 		t.Fatal(err)
 	}
 	return id
@@ -73,30 +75,15 @@ func TestThePoolStateNamesWhoEndedAndAReplacementTakesItsPlaceOnce(t *testing.T)
 	}
 
 	before := cursorNow(t, pool)
-	events, stop := listenForEvents(t, pool)
-	defer stop()
 	replacement, _ := domain.NewID(domain.AgentIDPrefix)
 	if err := pes.JoinRunning(ctx, pe, &domain.Agent{ID: replacement, CreatedAt: time.Now().UTC()},
 		domain.AgentSignup{Actor: testActor, AgentID: replacement, Role: domain.SignupRoleCompetitor, Hosted: true, AgentType: "generalist", Model: "model-1", Replaces: stopped},
 		LateJoin{Used: map[string]float64{}}); err != nil {
 		t.Fatalf("a replacement: got = %v, want = nil", err)
 	}
-	live := awaitEvent(t, events, domain.EventAgentReplaced, replacement)
-	if live.Value != stopped || live.Detail != "its machine stopped with no restart left" {
-		t.Errorf("live: got = %+v, want the stopped one and why its place was free", live)
-	}
-	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx, domain.EventFilter{PlatformExperimentID: pe}, before)
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := false
-	for _, e := range replayed {
-		if e.Kind == domain.EventAgentReplaced {
-			found = e.Identity() == live.Identity()
-		}
-	}
-	if !found {
-		t.Errorf("replayed %+v, want the live agent.replaced again", replayed)
+	replaced := changesAfter(t, pes, domain.EventFilter{PlatformExperimentID: pe, Kinds: map[string]bool{domain.EventAgentReplaced: true}}, before)
+	if len(replaced) != 1 || replaced[0].Subject != replacement || replaced[0].Value != stopped || replaced[0].Detail != "its machine stopped with no restart left" {
+		t.Errorf("agent.replaced: got = %+v, want the stopped one and why its place was free, once", replaced)
 	}
 
 	state, err = pes.ResearcherPoolState(ctx, pe)
@@ -205,8 +192,6 @@ func TestALoweredMaxAgentsCutsTheNewestResearchersAndNobodyReplacesThem(t *testi
 	newest := spawnResearcher(t, pes, pe, "data-search")
 	setPEStatus(t, pool, pe, domain.PlatformExpRunning, 0)
 	before := cursorNow(t, pool)
-	live, stop := listenForEvents(t, pool)
-	defer stop()
 
 	got, err := pes.GetPlatformExperiment(ctx, pe)
 	if err != nil {
@@ -236,41 +221,19 @@ func TestALoweredMaxAgentsCutsTheNewestResearchersAndNobodyReplacesThem(t *testi
 	}
 
 	told := map[string]string{}
-	deadline := time.After(5 * time.Second)
-	for len(told) < 2 {
-		select {
-		case e := <-live:
-			if e.PlatformExperimentID != pe {
-				continue
-			}
-			if e.Kind == domain.EventStageBoundary {
-				t.Errorf("a cut for max_agents moved the ladder: %+v", e)
-			}
-			if e.Kind == domain.EventAgentCut {
-				told[e.AgentID] = e.Detail
-			}
-		case <-deadline:
-			t.Fatalf("told %v, want the two cut", told)
-		}
-	}
-	if told[third] != CutMaxAgentsLowered || told[newest] != CutMaxAgentsLowered {
-		t.Errorf("told %v, want %s to %s and %s", told, CutMaxAgentsLowered, third, newest)
-	}
-	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx, domain.EventFilter{PlatformExperimentID: pe}, before)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cuts := 0
-	for _, e := range replayed {
+	for _, e := range changesAfter(t, pes, domain.EventFilter{PlatformExperimentID: pe}, before) {
 		if e.Kind == domain.EventStageBoundary {
-			t.Errorf("replayed a ladder move: %+v", e)
+			t.Errorf("a cut for max_agents moved the ladder: %+v", e)
 		}
-		if e.Kind == domain.EventAgentCut && e.Detail == CutMaxAgentsLowered {
-			cuts++
+		if e.Kind == domain.EventAgentCut {
+			if _, again := told[e.AgentID]; again {
+				t.Errorf("%s told of its cut twice", e.AgentID)
+			}
+			told[e.AgentID] = e.Detail
 		}
 	}
-	if cuts != 2 {
-		t.Errorf("replayed %d cuts for max_agents, want 2", cuts)
+	if len(told) != 2 || told[third] != CutMaxAgentsLowered || told[newest] != CutMaxAgentsLowered {
+		t.Errorf("told %v, want %s to %s and %s", told, CutMaxAgentsLowered, third, newest)
 	}
 }
 

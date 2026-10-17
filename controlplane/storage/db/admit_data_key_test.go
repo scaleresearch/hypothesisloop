@@ -20,10 +20,12 @@ func admitDataKeyFixture(t *testing.T) (*Store, *domain.Experiment) {
 	createTestAgent(t, pool, agent)
 	createTestPE(t, pool, pe, 10)
 	store := NewStore(pool, 1)
-	if err := pool.write(context.Background(), func(w *Write) error { return upsertAgentQuota(context.Background(), w, &domain.AgentQuota{
-		ID: uuid.New().String(), AgentID: agent, PlatformExperimentID: pe,
-		GuaranteedAcceleratorHours: 10, BurstAcceleratorHours: 5, CreatedAt: time.Now().UTC(),
-	}) }); err != nil {
+	if err := pool.write(context.Background(), func(w *Write) error {
+		return upsertAgentQuota(context.Background(), w, &domain.AgentQuota{
+			ID: uuid.New().String(), AgentID: agent, PlatformExperimentID: pe,
+			GuaranteedAcceleratorHours: 10, BurstAcceleratorHours: 5, CreatedAt: time.Now().UTC(),
+		})
+	}); err != nil {
 		t.Fatalf("upsert quota: %v", err)
 	}
 	retries := 0
@@ -159,9 +161,11 @@ func TestASubmissionKeySeenFromTheAgentAnswersItsJobAndCreatesNothing(t *testing
 
 	second := exp.AgentID + "-b"
 	createTestAgent(t, store.pool, second)
-	if err := store.pool.write(ctx, func(w *Write) error { return upsertAgentQuota(ctx, w, &domain.AgentQuota{
-		ID: uuid.New().String(), AgentID: second, PlatformExperimentID: exp.PlatformExperimentID, GuaranteedAcceleratorHours: 10, CreatedAt: time.Now().UTC(),
-	}) }); err != nil {
+	if err := store.pool.write(ctx, func(w *Write) error {
+		return upsertAgentQuota(ctx, w, &domain.AgentQuota{
+			ID: uuid.New().String(), AgentID: second, PlatformExperimentID: exp.PlatformExperimentID, GuaranteedAcceleratorHours: 10, CreatedAt: time.Now().UTC(),
+		})
+	}); err != nil {
 		t.Fatal(err)
 	}
 	theirs := *exp

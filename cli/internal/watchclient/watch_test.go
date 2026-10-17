@@ -118,7 +118,7 @@ func serverTextFrame(payload string) []byte {
 }
 
 func TestRunReceivesEventAndSatisfiesUntil(t *testing.T) {
-	url := serveOneFrame(t, `{"kind":"experiment.status","value":"COMPLETED","cursor":1}`, 0, "")
+	url := serveOneFrame(t, `{"id":1,"kind":"experiment.status","value":"COMPLETED"}`, 0, "")
 
 	var stdout, stderr bytes.Buffer
 	code := Run(Options{
@@ -238,7 +238,7 @@ type brokenWriter struct{}
 func (brokenWriter) Write([]byte) (int, error) { return 0, errors.New("closed pipe") }
 
 func TestAnEventThatCouldNotBeWrittenDoesNotMoveTheCursor(t *testing.T) {
-	url := serveOneFrame(t, `{"kind":"experiment.status","subject":"exp-1","value":"COMPLETED","position":7,"cursor":7}`, 0, "")
+	url := serveOneFrame(t, `{"id":7,"kind":"experiment.status","subject":"exp-1","value":"COMPLETED"}`, 0, "")
 	cursorFile := filepath.Join(t.TempDir(), "cursor.json")
 
 	var stderr bytes.Buffer
@@ -308,7 +308,7 @@ func TestPingsKeepAQuietStreamOpen(t *testing.T) {
 			time.Sleep(100 * time.Millisecond)
 			_, _ = conn.Write([]byte{0x89, 0x00})
 		}
-		_, _ = conn.Write(serverTextFrame(`{"kind":"experiment.status","value":"COMPLETED","cursor":1}`))
+		_, _ = conn.Write(serverTextFrame(`{"id":1,"kind":"experiment.status","value":"COMPLETED"}`))
 		time.Sleep(time.Second)
 	}()
 
@@ -361,36 +361,41 @@ func TestTheWatchWindowEndingIsNotAReconnect(t *testing.T) {
 	}
 }
 
-// A reconnect resumes from the largest cursor seen, and the server replays from it, the event at
-// it included. That repeat must not reach the output a second time. An event is printed with the
-// occurred_at the platform sent, and one replayed from before the platform kept it with none.
-func TestAReconnectResumesFromTheLargestCursorAndPrintsNoEventTwice(t *testing.T) {
+// accept answers one WebSocket upgrade on ln and returns the request and the connection.
+func accept(t *testing.T, ln net.Listener) (*http.Request, net.Conn) {
+	conn, err := ln.Accept()
+	if err != nil {
+		return nil, nil
+	}
+	req, err := http.ReadRequest(bufio.NewReader(conn))
+	if err != nil {
+		conn.Close()
+		return nil, nil
+	}
+	_, _ = conn.Write([]byte("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+		"Sec-WebSocket-Accept: " + computeAccept(req.Header.Get("Sec-WebSocket-Key")) + "\r\n\r\n"))
+	return req, conn
+}
+
+// A reconnect reads on from the id of the last change printed, so nothing is printed twice and
+// nothing is skipped.
+func TestAReconnectReadsOnFromTheLastChangePrinted(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ln.Close()
-	queued := `{"kind":"experiment.status","subject":"exp-1","value":"QUEUED","position":12,"occurred_at":"2026-10-06T21:31:44Z","cursor":12}`
-	running := `{"kind":"experiment.status","subject":"exp-1","value":"RUNNING","position":12,"cursor":9}`
-	completed := `{"kind":"experiment.status","subject":"exp-1","value":"COMPLETED","position":15,"cursor":14}`
-	sinces := make(chan string, 2)
+	queued := `{"id":12,"kind":"experiment.status","subject":"exp-1","value":"QUEUED","occurred_at":"2026-10-06T21:31:44Z"}`
+	running := `{"id":13,"kind":"experiment.status","subject":"exp-1","value":"RUNNING"}`
+	completed := `{"id":15,"kind":"experiment.status","subject":"exp-1","value":"COMPLETED"}`
+	afters := make(chan string, 2)
 	go func() {
-		for _, frames := range [][]string{
-			{queued, running},
-			{`{"kind":"experiment.status","subject":"exp-1","value":"QUEUED","position":12,"occurred_at":"2026-10-06T21:31:44Z","cursor":11}`, completed},
-		} {
-			conn, err := ln.Accept()
-			if err != nil {
+		for _, frames := range [][]string{{queued, running}, {completed}} {
+			req, conn := accept(t, ln)
+			if conn == nil {
 				return
 			}
-			req, err := http.ReadRequest(bufio.NewReader(conn))
-			if err != nil {
-				conn.Close()
-				return
-			}
-			sinces <- req.URL.Query().Get("since")
-			_, _ = conn.Write([]byte("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
-				"Sec-WebSocket-Accept: " + computeAccept(req.Header.Get("Sec-WebSocket-Key")) + "\r\n\r\n"))
+			afters <- req.URL.Query().Get("after")
 			for _, frame := range frames {
 				_, _ = conn.Write(serverTextFrame(frame))
 			}
@@ -400,20 +405,13 @@ func TestAReconnectResumesFromTheLargestCursorAndPrintsNoEventTwice(t *testing.T
 	}()
 
 	var stdout, stderr bytes.Buffer
-	code := Run(Options{
-		Token:      "test-token",
-		URL:        "ws://" + ln.Addr().String(),
-		Experiment: "exp-1",
-		Until:      "status in COMPLETED",
-		Timeout:    10 * time.Second,
-		Stdout:     &stdout,
-		Stderr:     &stderr,
-	})
+	code := Run(Options{Token: "test-token", URL: "ws://" + ln.Addr().String(), Experiment: "exp-1", Until: "status in COMPLETED",
+		Timeout: 10 * time.Second, Stdout: &stdout, Stderr: &stderr})
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
-	if first, second := <-sinces, <-sinces; first != "" || second != "12" {
-		t.Errorf("since on connect and on reconnect: got = %q, %q, want = none, then the largest cursor 12", first, second)
+	if first, second := <-afters, <-afters; first != "" || second != "13" {
+		t.Errorf("after on connect and on reconnect: got = %q, %q, want = none, then 13", first, second)
 	}
 	if got, want := stdout.String(), queued+"\n"+running+"\n"+completed+"\n"; got != want {
 		t.Errorf("output: got = %q, want = %q", got, want)
@@ -421,7 +419,7 @@ func TestAReconnectResumesFromTheLargestCursorAndPrintsNoEventTwice(t *testing.T
 }
 
 // Without --until a watch returns with its first batch: what arrives within the settle window after
-// the first event, and nothing after it.
+// the first change, and nothing after it.
 func TestWithoutUntilTheFirstBatchIsReturnedAfterTheSettleWindow(t *testing.T) {
 	defer func(d time.Duration) { settleWindow = d }(settleWindow)
 	settleWindow = 300 * time.Millisecond
@@ -431,21 +429,15 @@ func TestWithoutUntilTheFirstBatchIsReturnedAfterTheSettleWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ln.Close()
-	first := `{"kind":"experiment.status","value":"COMPLETED","position":10,"cursor":10}`
-	second := `{"kind":"comment.new","subject":"hyp-1","position":11,"cursor":11}`
-	late := `{"kind":"experiment.status","value":"FAILED","position":12,"cursor":12}`
+	first := `{"id":10,"kind":"experiment.status","value":"COMPLETED"}`
+	second := `{"id":11,"kind":"comment.new","subject":"hyp-1"}`
+	late := `{"id":12,"kind":"experiment.status","value":"FAILED"}`
 	go func() {
-		conn, err := ln.Accept()
-		if err != nil {
+		_, conn := accept(t, ln)
+		if conn == nil {
 			return
 		}
 		defer conn.Close()
-		req, err := http.ReadRequest(bufio.NewReader(conn))
-		if err != nil {
-			return
-		}
-		_, _ = conn.Write([]byte("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
-			"Sec-WebSocket-Accept: " + computeAccept(req.Header.Get("Sec-WebSocket-Key")) + "\r\n\r\n"))
 		time.Sleep(200 * time.Millisecond)
 		_, _ = conn.Write(serverTextFrame(first))
 		time.Sleep(100 * time.Millisecond)
@@ -471,28 +463,22 @@ func TestWithoutUntilTheFirstBatchIsReturnedAfterTheSettleWindow(t *testing.T) {
 	}
 }
 
-// A watch whose timeout ends inside the settle window still returns what it read and saves the
-// cursor.
-func TestATimeoutInsideTheSettleWindowReturnsTheEventsAndSavesTheCursor(t *testing.T) {
+// A watch whose timeout ends inside the settle window still returns what it read and saves where
+// it stands.
+func TestATimeoutInsideTheSettleWindowReturnsTheChangesAndSavesTheCursor(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ln.Close()
-	event := `{"kind":"experiment.status","value":"COMPLETED","position":10,"cursor":10}`
+	change := `{"id":10,"kind":"experiment.status","value":"COMPLETED"}`
 	go func() {
-		conn, err := ln.Accept()
-		if err != nil {
+		_, conn := accept(t, ln)
+		if conn == nil {
 			return
 		}
 		defer conn.Close()
-		req, err := http.ReadRequest(bufio.NewReader(conn))
-		if err != nil {
-			return
-		}
-		_, _ = conn.Write([]byte("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
-			"Sec-WebSocket-Accept: " + computeAccept(req.Header.Get("Sec-WebSocket-Key")) + "\r\n\r\n"))
-		_, _ = conn.Write(serverTextFrame(event))
+		_, _ = conn.Write(serverTextFrame(change))
 		time.Sleep(2 * time.Second)
 	}()
 
@@ -503,45 +489,35 @@ func TestATimeoutInsideTheSettleWindowReturnsTheEventsAndSavesTheCursor(t *testi
 	if code != 0 {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
-	if got, want := stdout.String(), event+"\n"; got != want {
+	if got, want := stdout.String(), change+"\n"; got != want {
 		t.Errorf("output: got = %q, want = %q", got, want)
 	}
-	state, err := loadCursor(cursorFile)
-	if err != nil || state.Cursor != 10 {
-		t.Errorf("saved cursor: got = %d (%v), want = 10", state.Cursor, err)
+	if state, err := loadCursor(cursorFile); err != nil || state.After != 10 {
+		t.Errorf("saved cursor: got = %d (%v), want = 10", state.After, err)
 	}
 }
 
-// A NoWait watch returns as soon as the server has answered the frame sent after connecting: what
-// was waiting is printed and the cursor saved, and an empty one costs no listening time.
-func TestNoWaitReturnsWhatWaitsAtOnce(t *testing.T) {
-	event := `{"kind":"experiment.status","value":"COMPLETED","position":10,"cursor":10}`
-	for _, waiting := range []string{event, ""} {
+// A NoWait watch returns at the first caught-up progress frame: what was waiting is printed, and
+// the place saved is the progress frame's, past changes the subscription left out.
+func TestNoWaitReturnsOnceCaughtUp(t *testing.T) {
+	change := `{"id":10,"kind":"experiment.status","value":"COMPLETED"}`
+	for _, waiting := range []string{change, ""} {
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer ln.Close()
 		go func() {
-			conn, err := ln.Accept()
-			if err != nil {
+			_, conn := accept(t, ln)
+			if conn == nil {
 				return
 			}
 			defer conn.Close()
-			reader := bufio.NewReader(conn)
-			req, err := http.ReadRequest(reader)
-			if err != nil {
-				return
-			}
-			_, _ = conn.Write([]byte("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
-				"Sec-WebSocket-Accept: " + computeAccept(req.Header.Get("Sec-WebSocket-Key")) + "\r\n\r\n"))
+			_, _ = conn.Write(serverTextFrame(`{"subscription":{"after":0}}`))
 			if waiting != "" {
 				_, _ = conn.Write(serverTextFrame(waiting))
 			}
-			if _, err := reader.ReadByte(); err != nil {
-				return
-			}
-			_, _ = conn.Write(serverTextFrame(`{"subscription":{"since":0}}`))
+			_, _ = conn.Write(serverTextFrame(`{"next":14,"caught_up":true}`))
 			time.Sleep(5 * time.Second)
 		}()
 
@@ -556,34 +532,34 @@ func TestNoWaitReturnsWhatWaitsAtOnce(t *testing.T) {
 		if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
 			t.Errorf("returned after %s, want = at once", elapsed)
 		}
-		want, wantCursor := "", int64(0)
+		want := ""
 		if waiting != "" {
-			want, wantCursor = waiting+"\n", 10
+			want = waiting + "\n"
 		}
 		if got := stdout.String(); got != want {
 			t.Errorf("output: got = %q, want = %q", got, want)
 		}
-		if state, err := loadCursor(cursorFile); err != nil || state.Cursor != wantCursor {
-			t.Errorf("saved cursor: got = %d (%v), want = %d", state.Cursor, err, wantCursor)
+		if state, err := loadCursor(cursorFile); err != nil || state.After != 14 {
+			t.Errorf("saved cursor: got = %d (%v), want = 14", state.After, err)
 		}
 	}
 }
 
-// A watch with Wake holds an event of another kind back, cursor and all, so the platform still
-// has it for whoever reads next, and hands it over ahead of the event that ends the wait.
+// A watch with Wake holds a change of another kind back, and the place it saves with it, so the
+// next watch reads it again, and hands it over ahead of the change that ends the wait.
 func TestAWakeWatchHoldsOtherKindsUntilAWakingOneArrives(t *testing.T) {
 	defer func(d time.Duration) { settleWindow = d }(settleWindow)
 	settleWindow = 100 * time.Millisecond
-	finding := `{"kind":"finding.new","subject":"hyp-1","position":10,"cursor":10}`
-	finished := `{"kind":"agent.finished","subject":"agent-a","position":11,"cursor":11}`
-	others := `{"kind":"agent.finished","subject":"agent-b","position":12,"cursor":12}`
+	finding := `{"id":10,"kind":"finding.new","subject":"hyp-1"}`
+	finished := `{"id":11,"kind":"agent.finished","subject":"agent-a"}`
+	others := `{"id":12,"kind":"agent.finished","subject":"agent-b"}`
 	for _, tc := range []struct {
-		frames     []string
-		want       string
-		wantCursor int64
+		frames    []string
+		want      string
+		wantAfter int64
 	}{
-		{[]string{finding}, "", 0},
-		{[]string{others}, "", 0},
+		{[]string{finding, `{"next":10,"caught_up":true}`}, "", 0},
+		{[]string{others, `{"next":12,"caught_up":true}`}, "", 0},
 		{[]string{finding, finding, finished}, finding + "\n" + finished + "\n", 11},
 	} {
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -592,17 +568,11 @@ func TestAWakeWatchHoldsOtherKindsUntilAWakingOneArrives(t *testing.T) {
 		}
 		defer ln.Close()
 		go func() {
-			conn, err := ln.Accept()
-			if err != nil {
+			_, conn := accept(t, ln)
+			if conn == nil {
 				return
 			}
 			defer conn.Close()
-			req, err := http.ReadRequest(bufio.NewReader(conn))
-			if err != nil {
-				return
-			}
-			_, _ = conn.Write([]byte("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
-				"Sec-WebSocket-Accept: " + computeAccept(req.Header.Get("Sec-WebSocket-Key")) + "\r\n\r\n"))
 			for _, frame := range tc.frames {
 				_, _ = conn.Write(serverTextFrame(frame))
 			}
@@ -616,8 +586,61 @@ func TestAWakeWatchHoldsOtherKindsUntilAWakingOneArrives(t *testing.T) {
 		if code != 0 || stdout.String() != tc.want {
 			t.Fatalf("exit code = %d, output = %q, want = %q, stderr = %s", code, stdout.String(), tc.want, stderr.String())
 		}
-		if state, err := loadCursor(cursorFile); err != nil || state.Cursor != tc.wantCursor {
-			t.Errorf("saved cursor: got = %d (%v), want = %d", state.Cursor, err, tc.wantCursor)
+		if state, err := loadCursor(cursorFile); err != nil || state.After != tc.wantAfter {
+			t.Errorf("saved cursor: got = %d (%v), want = %d", state.After, err, tc.wantAfter)
 		}
+	}
+}
+
+// A saved place the platform no longer holds is answered 410: the watch reads on from the head,
+// saves it, and prints one watch.reset line.
+func TestASavedPlaceNoLongerHeldResetsToTheHead(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	afters := make(chan string, 2)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		req, err := http.ReadRequest(bufio.NewReader(conn))
+		if err == nil {
+			afters <- req.URL.Query().Get("after")
+			body := `{"error":"changes after 5 are no longer held; re-read state and watch from head"}`
+			_, _ = conn.Write([]byte(fmt.Sprintf("HTTP/1.1 410 Gone\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s", len(body), body)))
+		}
+		conn.Close()
+		req, conn = accept(t, ln)
+		if conn == nil {
+			return
+		}
+		defer conn.Close()
+		afters <- req.URL.Query().Get("after")
+		_, _ = conn.Write(serverTextFrame(`{"subscription":{"after":90}}`))
+		_, _ = conn.Write(serverTextFrame(`{"next":90,"caught_up":true}`))
+		time.Sleep(2 * time.Second)
+	}()
+
+	cursorFile := filepath.Join(t.TempDir(), "cursor.json")
+	if err := saveCursor(cursorFile, 5); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := Run(Options{Token: "test-token", URL: "ws://" + ln.Addr().String(), PlatformExperiment: "pe-1", Agent: "agent-a",
+		Timeout: 5 * time.Second, CursorFile: cursorFile, Stdout: &stdout, Stderr: &stderr})
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if first, second := <-afters, <-afters; first != "5" || second != "head" {
+		t.Errorf("after: got = %q, %q, want = 5, then head", first, second)
+	}
+	if got, want := stdout.String(), `{"detail":"changes after 5 are no longer held: re-read state (hl situation)","kind":"watch.reset"}`+"\n"; got != want {
+		t.Errorf("output: got = %q, want = %q", got, want)
+	}
+	if state, err := loadCursor(cursorFile); err != nil || state.After != 90 {
+		t.Errorf("saved cursor: got = %d (%v), want = 90", state.After, err)
 	}
 }

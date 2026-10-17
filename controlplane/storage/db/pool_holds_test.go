@@ -91,37 +91,22 @@ func TestAResearcherAddedToKeepThePoolIsCheckedAgainstItUnderTheLock(t *testing.
 }
 
 // What the platform says of the places it keeps empty is told once as platform_experiment.status
-// with it as the detail, live and replayed.
+// with it as the detail.
 func TestHeldResearchersAreToldOnce(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pe, pes := poolRun(t, pool, 4, nil)
 	setPEStatus(t, pool, pe, domain.PlatformExpRunning, 0)
 	before := cursorNow(t, pool)
-	live, stop := listenForEvents(t, pool)
-	defer stop()
 	line := "researchers not replaced: ag-1 (generalist) ended early"
 	for range 2 {
 		if err := pes.HoldResearchers(ctx, pe, line); err != nil {
 			t.Fatal(err)
 		}
 	}
-	got := awaitEvent(t, live, domain.EventPlatformExperimentStatus, pe)
-	if got.Detail != line || got.Value != string(domain.PlatformExpRunning) {
-		t.Errorf("live: got = %+v", got)
-	}
-	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx, domain.EventFilter{PlatformExperimentID: pe}, before)
-	if err != nil {
-		t.Fatal(err)
-	}
-	n := 0
-	for _, e := range replayed {
-		if e.Kind == domain.EventPlatformExperimentStatus && e.Detail == line {
-			n++
-		}
-	}
-	if n != 1 {
-		t.Errorf("replayed %d, want the hold once: %+v", n, replayed)
+	got := changesAfter(t, pes, domain.EventFilter{PlatformExperimentID: pe, Kinds: map[string]bool{domain.EventPlatformExperimentStatus: true}}, before)
+	if len(got) != 1 || got[0].Detail != line || got[0].Value != string(domain.PlatformExpRunning) {
+		t.Errorf("status changes: got = %+v, want the hold once", got)
 	}
 	if err := pes.HoldResearchers(ctx, pe, ""); err != nil {
 		t.Fatal(err)

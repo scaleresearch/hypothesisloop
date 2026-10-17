@@ -84,8 +84,7 @@ func TestAReopenedRunReadsRunningAndWantsTheAgentsTheCloseEnded(t *testing.T) {
 	if agents, err := pes.ListLauncherAgents(ctx, domain.AgentWindDown); err != nil || len(agents) != 0 {
 		t.Fatalf("closed an hour ago: launcher agents = %+v, %v, want none", agents, err)
 	}
-	events, stop := listenForEvents(t, pool)
-	defer stop()
+	since := cursorNow(t, pool)
 
 	endsAt := time.Now().UTC().Add(5 * time.Hour).Truncate(time.Second)
 	before, err := pes.GetPlatformExperiment(ctx, run.ID)
@@ -138,14 +137,9 @@ func TestAReopenedRunReadsRunningAndWantsTheAgentsTheCloseEnded(t *testing.T) {
 		}
 	}
 
-	deadline := time.After(5 * time.Second)
-	for told := false; !told; {
-		select {
-		case e := <-events:
-			told = e.Kind == domain.EventPlatformExperimentStatus && e.Subject == run.ID && e.Value == string(domain.PlatformExpRunning)
-		case <-deadline:
-			t.Fatal("no platform_experiment.status running was announced")
-		}
+	told := changesAfter(t, pes, domain.EventFilter{PlatformExperimentID: run.ID, Kinds: map[string]bool{domain.EventPlatformExperimentStatus: true}}, since)
+	if len(told) != 1 || told[0].Subject != run.ID || told[0].Value != string(domain.PlatformExpRunning) {
+		t.Fatalf("status changes = %+v, want platform_experiment.status running once", told)
 	}
 
 	if err := pes.ReopenPlatformExperiment(ctx, run.ID, endsAt, duration, ""); !errors.Is(err, ErrNotReopenable) {

@@ -1,4 +1,4 @@
-// Package watchclient blocks until the platform reports an event on GET /watch, instead of
+// Package watchclient blocks until the platform reports a change on GET /watch, instead of
 // polling for it. It speaks RFC 6455 itself (no third-party library) because it ships wherever
 // `hl` does, including job images built on anything.
 package watchclient
@@ -18,8 +18,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -37,13 +35,12 @@ const (
 
 var (
 	readTimeout = 45 * time.Second
-	// settleWindow is how long a watch without --until keeps collecting after its first event, so
-	// events that arrive together (a replay after a reconnect, one transaction's several events)
-	// come back as one batch.
+	// settleWindow is how long a watch without --until keeps collecting after its first change, so
+	// changes that arrive together come back as one batch.
 	settleWindow = 2 * time.Second
 )
 
-// Closed means the connection ended, or the server was momentarily unable. Reconnect and replay.
+// Closed means the connection ended, or the server was momentarily unable. Reconnect and read on.
 type Closed struct{ msg string }
 
 func (e *Closed) Error() string { return e.msg }
@@ -68,20 +65,22 @@ type Options struct {
 	Kinds              string
 	// Decisions asks for a whole platform experiment's stream without the job transitions that
 	// need no decision.
-	Decisions        bool
+	Decisions bool
+	// ShowSubscription prints the first frame, the subscription the server serves.
 	ShowSubscription bool
 	Until            string
 	// Follow streams until the timeout instead of returning with the first batch.
 	Follow bool
-	// NoWait returns once the events already waiting have been printed.
+	// NoWait returns once the stream has caught up.
 	NoWait bool
-	// Wake, when set, says of an event's kind, subject and value whether it ends the wait. Any other
-	// event is neither printed nor passed by the cursor until one that does arrives, and then
-	// goes out ahead of it: until then it stays the platform's to replay.
+	// Wake, when set, says of a change's kind, subject and value whether it ends the wait. Any
+	// other change is neither printed nor passed by the cursor until one that does arrives, and
+	// then goes out ahead of it: until then the next watch reads it again.
 	Wake    func(kind, subject, value string) bool
 	Timeout time.Duration
-	Since   int64
-	// CursorFile, when set, is where the cursor is resumed from and saved to (see cursorState).
+	// After is the change id to read on from instead of the saved one, 0 for none.
+	After int64
+	// CursorFile, when set, is where the id to read on from is kept between watches (cursorState).
 	CursorFile string
 
 	// Stdout/Stderr let callers (and tests) capture output instead of the process streams.
@@ -89,10 +88,11 @@ type Options struct {
 	Stderr io.Writer
 }
 
-// Run executes the watch and returns the process exit code: 0 once a batch of events was printed
-// (no --until), --until became true, or the window elapsed (no --until); 124 on timeout with
-// --until still unmet; 2 on a usage error or a refused subscription; 1 when a watch without --until
-// never connected, an event could not be written to Stdout, or the cursor could not be saved.
+// Run executes the watch and returns the process exit code: 0 once a batch of changes was printed
+// (no --until), --until became true, the window elapsed (no --until) or the saved cursor was reset;
+// 124 on timeout with --until still unmet; 2 on a usage error or a refused subscription; 1 when a
+// watch without --until never connected, a change could not be written to Stdout, or the cursor
+// could not be saved.
 func Run(opts Options) int {
 	if opts.URL == "" {
 		fmt.Fprintln(opts.Stderr, "hl watch: no API URL given (set API_URL)")
@@ -115,7 +115,7 @@ func Run(opts Options) int {
 		return UsageExitCode
 	}
 
-	w := &watch{opts: opts, cursor: opts.Since, seen: map[string]int64{}}
+	w := &watch{opts: opts, after: opts.After}
 	if opts.Until != "" {
 		fn, err := parseUntil(opts.Until)
 		if err != nil {
@@ -124,18 +124,18 @@ func Run(opts Options) int {
 		}
 		w.satisfied = fn
 	}
-	if opts.CursorFile != "" && opts.Since == 0 {
+	if opts.CursorFile != "" && opts.After == 0 {
 		state, err := loadCursor(opts.CursorFile)
 		if err != nil {
 			fmt.Fprintf(opts.Stderr, "hl watch: %s\n", err)
 			return UsageExitCode
 		}
-		w.cursor, w.seen = state.Cursor, state.seen()
+		w.after = state.After
 	}
 
 	code := w.run()
-	if code != UsageExitCode && opts.CursorFile != "" && w.printed {
-		if err := saveCursor(opts.CursorFile, w.cursor, w.seen); err != nil {
+	if code != UsageExitCode && opts.CursorFile != "" && w.moved {
+		if err := saveCursor(opts.CursorFile, w.after); err != nil {
 			fmt.Fprintf(opts.Stderr, "hl watch: %s\n", err)
 			return 1
 		}
@@ -143,24 +143,26 @@ func Run(opts Options) int {
 	return code
 }
 
-// watch is one hl watch invocation: the cursor it resumes from, the identity and position of every
-// event it printed (a replay repeats the events at its cursor), and when it stops. An identity is
-// the event without its cursor and its occurred_at, as the platform compares them.
+// watch is one hl watch invocation: the id it reads on from, and when it stops.
 type watch struct {
 	opts      Options
 	satisfied func(event map[string]any) bool
-	cursor    int64
-	seen      map[string]int64
+	after     int64
+	// moved says after moved past where the watch started, so it is saved.
+	moved bool
+	// reset is the after the platform no longer holds the changes after, 0 while it holds them:
+	// the watch reads on from the head and says so.
+	reset    int64
 	printed  bool
 	settleBy time.Time
 	writeErr error
-	// held are the events a watch with Wake has read and not printed, in the order they came.
-	held []heldEvent
+	// held are the changes a watch with Wake has read and not printed, in the order they came.
+	held []heldChange
 }
 
-type heldEvent struct {
-	line, identity   string
-	position, cursor int64
+type heldChange struct {
+	line string
+	id   int64
 }
 
 func (w *watch) run() int {
@@ -185,17 +187,20 @@ func (w *watch) run() int {
 	connected := false
 	var connectErr error
 	for time.Now().Before(w.until(deadline)) {
-		if w.cursor != 0 {
-			query.Set("since", strconv.FormatInt(w.cursor, 10))
-		} else {
-			query.Del("since")
+		switch {
+		case w.reset != 0:
+			query.Set("after", "head")
+		case w.after != 0:
+			query.Set("after", strconv.FormatInt(w.after, 10))
+		default:
+			query.Del("after")
 		}
 		ws, err := connect(w.opts.URL, "/watch?"+query.Encode(), w.opts.Token, time.Until(deadline))
 		if err != nil {
 			var refused *Refused
-			if errors.As(err, &refused) && refused.code == http.StatusGone {
-				fmt.Fprintf(w.opts.Stderr, "hl watch: the platform no longer holds the events after cursor %d (%s); watch without it to start from the current state\n", w.cursor, refused)
-				return UsageExitCode
+			if errors.As(err, &refused) && refused.code == http.StatusGone && w.opts.CursorFile != "" && w.opts.After == 0 && w.reset == 0 {
+				w.reset = w.after
+				continue
 			}
 			if errors.As(err, &refused) {
 				fmt.Fprintf(w.opts.Stderr, "hl watch: %s\n", refused)
@@ -212,7 +217,7 @@ func (w *watch) run() int {
 		done := w.stream(ws, deadline)
 		ws.close()
 		if w.writeErr != nil {
-			fmt.Fprintf(w.opts.Stderr, "hl watch: write event: %s\n", w.writeErr)
+			fmt.Fprintf(w.opts.Stderr, "hl watch: write change: %s\n", w.writeErr)
 			return 1
 		}
 		if done {
@@ -240,105 +245,117 @@ func (w *watch) until(deadline time.Time) time.Time {
 	return deadline
 }
 
+// frame is what a frame of /watch may carry: the subscription, a change (which has an id) or the
+// progress that ends a read.
+type frame struct {
+	Subscription json.RawMessage `json:"subscription"`
+	ID           *int64          `json:"id"`
+	Kind         string          `json:"kind"`
+	Subject      string          `json:"subject"`
+	Value        string          `json:"value"`
+	Next         *int64          `json:"next"`
+	CaughtUp     bool            `json:"caught_up"`
+}
+
 // stream reads frames from one connection until it closes, the watch stops or --until is
 // satisfied. It returns true when the watch is done, false to reconnect or end on the deadline.
 func (w *watch) stream(ws *webSocket, deadline time.Time) bool {
-	// The server answers this frame after its replay, so in a NoWait watch the answer marks the
-	// end of what was waiting.
-	if w.opts.ShowSubscription || w.opts.NoWait {
-		_ = ws.sendText("{}")
-	}
 	for time.Now().Before(w.until(deadline)) {
 		line, err := ws.nextText(w.until(deadline))
 		if err != nil {
 			if !time.Now().Before(w.until(deadline)) {
 				return !w.settleBy.IsZero()
 			}
-			fmt.Fprintf(w.opts.Stderr, "hl watch: stream ended (%s), reconnecting from cursor %d\n", err, w.cursor)
+			fmt.Fprintf(w.opts.Stderr, "hl watch: stream ended (%s), reconnecting after change %d\n", err, w.after)
 			sleepUntil(w.until(deadline), reconnectDelay)
 			return false
 		}
-		var event map[string]any
-		if err := json.Unmarshal([]byte(line), &event); err != nil {
-			fmt.Fprintln(w.opts.Stdout, line)
+		var f frame
+		if err := json.Unmarshal([]byte(line), &f); err != nil {
+			fmt.Fprintf(w.opts.Stderr, "hl watch: a frame that is no JSON object: %s\n", line)
 			continue
 		}
-		c, isEvent := event["cursor"].(float64)
-		if _, caughtUp := event["subscription"]; caughtUp && w.opts.NoWait {
-			return true
-		}
-		if !isEvent {
-			if _, err := fmt.Fprintln(w.opts.Stdout, line); err != nil {
-				w.writeErr = err
+		switch {
+		case f.Subscription != nil:
+			if w.opts.ShowSubscription {
+				if w.writeErr = w.write(line); w.writeErr != nil {
+					return true
+				}
+			}
+		case f.ID != nil:
+			if w.change(heldChange{line: line, id: *f.ID}, f) {
 				return true
 			}
-			continue
-		}
-		delete(event, "cursor")
-		delete(event, "occurred_at")
-		identity, _ := json.Marshal(event)
-		if _, repeat := w.seen[string(identity)]; repeat {
-			continue
-		}
-		position, _ := event["position"].(float64)
-		arrived := heldEvent{line: line, identity: string(identity), position: int64(position), cursor: int64(c)}
-		kind, _ := event["kind"].(string)
-		subject, _ := event["subject"].(string)
-		value, _ := event["value"].(string)
-		if w.opts.Wake != nil && w.settleBy.IsZero() && !w.opts.Wake(kind, subject, value) {
-			// A reconnect replays what is held, since the cursor has not passed it.
-			if !slices.ContainsFunc(w.held, func(h heldEvent) bool { return h.identity == arrived.identity }) {
-				w.held = append(w.held, arrived)
+		case f.Next != nil:
+			if w.reset != 0 {
+				return w.resetTo(*f.Next)
 			}
-			continue
-		}
-		for _, e := range append(w.held, arrived) {
-			if w.writeErr = w.print(e); w.writeErr != nil {
+			if len(w.held) == 0 && *f.Next > w.after {
+				w.after, w.moved = *f.Next, true
+			}
+			if f.CaughtUp && w.opts.NoWait {
 				return true
 			}
-		}
-		w.held = nil
-		if w.satisfied != nil && w.satisfied(event) {
-			return true
 		}
 	}
 	return !w.settleBy.IsZero()
 }
 
-// print writes one event and moves the cursor past it. The cursor moves only once the event is
-// written, so one that was not is replayed.
-func (w *watch) print(e heldEvent) error {
-	if _, err := fmt.Fprintln(w.opts.Stdout, e.line); err != nil {
+// change prints c, or holds it until one that wakes the watch arrives, and says whether the
+// watch is done.
+func (w *watch) change(c heldChange, f frame) bool {
+	if w.opts.Wake != nil && w.settleBy.IsZero() && !w.opts.Wake(f.Kind, f.Subject, f.Value) {
+		// A reconnect reads again what is held, since the cursor has not passed it.
+		if len(w.held) == 0 || c.id > w.held[len(w.held)-1].id {
+			w.held = append(w.held, c)
+		}
+		return false
+	}
+	for _, h := range append(w.held, c) {
+		if w.writeErr = w.print(h); w.writeErr != nil {
+			return true
+		}
+	}
+	w.held = nil
+	if w.satisfied != nil {
+		var event map[string]any
+		_ = json.Unmarshal([]byte(c.line), &event)
+		return w.satisfied(event)
+	}
+	return false
+}
+
+// resetTo reads on from head, the newest change, after the platform refused the saved cursor, and
+// says so in one line that wakes whoever waits.
+func (w *watch) resetTo(head int64) bool {
+	w.after, w.moved = head, true
+	line, _ := json.Marshal(map[string]string{"kind": "watch.reset",
+		"detail": fmt.Sprintf("changes after %d are no longer held: re-read state (hl situation)", w.reset)})
+	w.writeErr = w.write(string(line))
+	return true
+}
+
+func (w *watch) write(line string) error {
+	_, err := fmt.Fprintln(w.opts.Stdout, line)
+	return err
+}
+
+// print writes one change and moves the cursor past it. The cursor moves only once the change is
+// written, so one that was not is read again.
+func (w *watch) print(c heldChange) error {
+	if err := w.write(c.line); err != nil {
 		return err
 	}
-	w.seen[e.identity] = e.position
-	if e.cursor > w.cursor {
-		w.cursor = e.cursor
-	}
-	w.printed = true
+	w.after, w.moved, w.printed = c.id, true, true
 	if w.satisfied == nil && !w.opts.Follow && w.settleBy.IsZero() {
 		w.settleBy = time.Now().Add(settleWindow)
 	}
 	return nil
 }
 
-// cursorState is what the cursor file holds: the largest cursor printed, and the identity of each
-// printed event at or above it, the only ones a resume can replay again.
+// cursorState is what the cursor file holds: the id of the change to read on from.
 type cursorState struct {
-	Cursor int64             `json:"cursor"`
-	Seen   []json.RawMessage `json:"seen"`
-}
-
-func (s cursorState) seen() map[string]int64 {
-	seen := make(map[string]int64, len(s.Seen))
-	for _, identity := range s.Seen {
-		var event struct {
-			Position int64 `json:"position"`
-		}
-		_ = json.Unmarshal(identity, &event)
-		seen[string(identity)] = event.Position
-	}
-	return seen
+	After int64 `json:"after"`
 }
 
 func loadCursor(path string) (cursorState, error) {
@@ -359,15 +376,8 @@ func loadCursor(path string) (cursorState, error) {
 	return state, nil
 }
 
-func saveCursor(path string, cursor int64, seen map[string]int64) error {
-	state := cursorState{Cursor: cursor, Seen: []json.RawMessage{}}
-	for identity, position := range seen {
-		if position >= cursor {
-			state.Seen = append(state.Seen, json.RawMessage(identity))
-		}
-	}
-	sort.Slice(state.Seen, func(i, j int) bool { return string(state.Seen[i]) < string(state.Seen[j]) })
-	data, err := json.Marshal(state)
+func saveCursor(path string, after int64) error {
+	data, err := json.Marshal(cursorState{After: after})
 	if err != nil {
 		return fmt.Errorf("save cursor: %w", err)
 	}
@@ -393,8 +403,8 @@ func sleepUntil(deadline time.Time, d time.Duration) {
 }
 
 // parseUntil turns "status in A,B,C" into a predicate over one job or platform experiment status
-// event (their values never overlap: jobs are upper case, runs lower case), the only form hl watch
-// understands. A wait that can never end is the failure this tool exists to remove, so an
+// change (their values never overlap: jobs are upper case, runs lower case), the only form hl
+// watch understands. A wait that can never end is the failure this tool exists to remove, so an
 // expression that isn't this shape is a usage error rather than a condition that quietly never
 // fires.
 func parseUntil(expr string) (func(map[string]any) bool, error) {
@@ -642,10 +652,6 @@ func (ws *webSocket) sendFrame(opcode byte, payload []byte) error {
 	_ = ws.conn.SetWriteDeadline(time.Now().Add(readTimeout))
 	_, err := ws.conn.Write(append(append(header, mask...), masked...))
 	return err
-}
-
-func (ws *webSocket) sendText(text string) error {
-	return ws.sendFrame(0x1, []byte(text))
 }
 
 // nextText returns the next text frame, answering pings and skipping everything else. Every frame

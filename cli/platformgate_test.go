@@ -60,7 +60,7 @@ func platformRoutes(caller auth.Principal) http.Handler {
 		Registry: registry.New(nil, nil, nil, logger, metricsdb.New("http://metrics.invalid"), nil),
 	})
 	access := auth.NewAccess(authtest.Placement{})
-	r.Get("/watch", watch.NewHandler(nil, nil, access, logger).ServeHTTP)
+	r.Get("/watch", watch.NewHandler(nil, nil, nil, access, logger).ServeHTTP)
 	return r
 }
 

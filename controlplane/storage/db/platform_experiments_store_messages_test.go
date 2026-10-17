@@ -9,7 +9,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// A message reaches its agent alone, live and replayed, with who it is from and its text, is
+// A message reaches its agent alone, once, with who it is from and its text, is
 // kept for the run, and is refused to an agent whose run ended and past the hourly limit.
 func TestAMessageIsToldToItsAgentAloneAndKept(t *testing.T) {
 	pool := eventsTestDB(t)
@@ -19,8 +19,6 @@ func TestAMessageIsToldToItsAgentAloneAndKept(t *testing.T) {
 	exec(t, pool, `UPDATE platform_experiments SET status = 'running' WHERE id = $1`, peID)
 	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist')`, peID, agentID)
 	before := cursorNow(t, pool)
-	events, stop := listenForEvents(t, pool)
-	defer stop()
 
 	coordinator := domain.Actor{Kind: domain.ActorCoordinator, ID: peID}
 	sent, _, err := pes.SendAgentMessages(ctx, peID, []string{agentID}, "leave the lr line, try warmup", coordinator)
@@ -30,28 +28,24 @@ func TestAMessageIsToldToItsAgentAloneAndKept(t *testing.T) {
 	if len(sent) != 1 || sent[0].AgentID != agentID || sent[0].From != "coordinator" || sent[0].At.IsZero() {
 		t.Fatalf("sent: got = %+v, want one message from the coordinator", sent)
 	}
-	live := awaitEvent(t, events, domain.EventAgentMessage, agentID)
+	var told []domain.Event
+	for _, e := range changesAfter(t, pes, domain.EventFilter{PlatformExperimentID: peID, AgentID: agentID}, before) {
+		if e.Kind == domain.EventAgentMessage {
+			told = append(told, e)
+		}
+	}
+	if len(told) != 1 {
+		t.Fatalf("told: got = %+v, want the message once", told)
+	}
+	live := told[0]
 	if live.Value != "coordinator" || live.Detail != "leave the lr line, try warmup" || live.AgentID != agentID {
-		t.Fatalf("live: got = %+v, want the text from the coordinator", live)
+		t.Fatalf("told: got = %+v, want the text from the coordinator", live)
 	}
 	if own := (domain.EventFilter{PlatformExperimentID: peID, AgentID: agentID}); !own.Matches(live) {
 		t.Error("the agent's own subscription does not carry its message")
 	}
 	if rival := (domain.EventFilter{PlatformExperimentID: peID, AgentID: "another"}); rival.Matches(live) {
 		t.Error("a rival's subscription carries the message")
-	}
-	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx, domain.EventFilter{PlatformExperimentID: peID, AgentID: agentID}, before)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var told []domain.Event
-	for _, e := range replayed {
-		if e.Kind == domain.EventAgentMessage {
-			told = append(told, e)
-		}
-	}
-	if len(told) != 1 || told[0].Identity() != live.Identity() {
-		t.Fatalf("replayed: got = %+v, want the live event %+v once", told, live)
 	}
 
 	// The owner's messages count apart from the coordinator's: they never spend its steering.
@@ -158,8 +152,6 @@ func TestAMessageToTheCoordinatorIsToldToItsStreamAlone(t *testing.T) {
 	}
 	exec(t, pool, `UPDATE platform_experiments SET coordinator_hosted = true WHERE id = $1`, peID)
 	before := cursorNow(t, pool)
-	events, stop := listenForEvents(t, pool)
-	defer stop()
 
 	sent, err := pes.SendCoordinatorMessage(ctx, peID, "look at the gap", staff)
 	if err != nil {
@@ -168,28 +160,24 @@ func TestAMessageToTheCoordinatorIsToldToItsStreamAlone(t *testing.T) {
 	if sent.AgentID != domain.CoordinatorRecipient || sent.From != "owner" || sent.At.IsZero() {
 		t.Fatalf("sent: got = %+v, want a message to the coordinator from the owner", sent)
 	}
-	live := awaitEvent(t, events, domain.EventAgentMessage, domain.CoordinatorRecipient)
+	var told []domain.Event
+	for _, e := range changesAfter(t, pes, domain.EventFilter{PlatformExperimentID: peID, Decisions: true}, before) {
+		if e.Kind == domain.EventAgentMessage {
+			told = append(told, e)
+		}
+	}
+	if len(told) != 1 {
+		t.Fatalf("told: got = %+v, want the message once", told)
+	}
+	live := told[0]
 	if live.Value != "owner" || live.Detail != "look at the gap" {
-		t.Fatalf("live: got = %+v, want the text from the owner", live)
+		t.Fatalf("told: got = %+v, want the text from the owner", live)
 	}
 	if !(domain.EventFilter{PlatformExperimentID: peID, Decisions: true}).Matches(live) {
 		t.Error("the coordinator's stream does not carry the message")
 	}
 	if (domain.EventFilter{PlatformExperimentID: peID, AgentID: agentID}).Matches(live) {
 		t.Error("a researcher's stream carries the coordinator's message")
-	}
-	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx, domain.EventFilter{PlatformExperimentID: peID, Decisions: true}, before)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var told []domain.Event
-	for _, e := range replayed {
-		if e.Kind == domain.EventAgentMessage {
-			told = append(told, e)
-		}
-	}
-	if len(told) != 1 || told[0].Identity() != live.Identity() {
-		t.Fatalf("replayed: got = %+v, want the live event %+v once", told, live)
 	}
 
 	for range domain.MaxAgentMessagesPerHour - 1 {

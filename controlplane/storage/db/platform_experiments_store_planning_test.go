@@ -785,8 +785,8 @@ func TestADeclinedDraftSaysSoAndExpiresAsAProposalDoes(t *testing.T) {
 
 // A revision reached a planner only as the first prompt of a machine started for it. A planner
 // still on its machine after its answer hears of it as its next update: the request is an event
-// on the planner's own stream, live and replayed, that points at the draft and carries no text.
-func TestARevisionIsAnEventOnThePlannersStreamLiveAndReplayed(t *testing.T) {
+// on the planner's own stream, once, that points at the draft and carries no text.
+func TestARevisionIsAnEventOnThePlannersStream(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewStore(pool, 3)
@@ -795,32 +795,23 @@ func TestARevisionIsAnEventOnThePlannersStreamLiveAndReplayed(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := cursorNow(t, pool)
-	events, stop := listenForEvents(t, pool)
-	defer stop()
 
 	if err := pes.Revise(ctx, draft, "it must fit one accelerator", domain.Actor{Kind: domain.ActorUser, ID: "u-planning"}, time.Now().UTC().Add(30*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	live := awaitEvent(t, events, domain.EventPlatformExperimentRevision, draft)
-	if live.PlatformExperimentID != draft || live.Value != "" || live.Detail != "" || live.AgentID != "" {
-		t.Fatalf("live: got = %+v, want a pointer at the draft with no text", live)
-	}
 	own := domain.EventFilter{PlatformExperimentID: draft, AgentID: planner}
-	if !own.Matches(live) {
-		t.Fatal("the planner's own subscription does not carry the revision")
-	}
-	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx, own, before)
-	if err != nil {
-		t.Fatal(err)
-	}
 	var revisions []domain.Event
-	for _, e := range replayed {
+	for _, e := range changesAfter(t, pes, own, before) {
 		if e.Kind == domain.EventPlatformExperimentRevision {
 			revisions = append(revisions, e)
 		}
 	}
-	if len(revisions) != 1 || revisions[0].Identity() != live.Identity() {
-		t.Fatalf("replayed: got = %+v, want the live event %+v once", revisions, live)
+	if len(revisions) != 1 {
+		t.Fatalf("revisions on the planner's stream: got = %+v, want one", revisions)
+	}
+	live := revisions[0]
+	if live.Subject != draft || live.PlatformExperimentID != draft || live.Value != "" || live.Detail != "" || live.AgentID != "" {
+		t.Fatalf("revision: got = %+v, want a pointer at the draft with no text", live)
 	}
 }
 

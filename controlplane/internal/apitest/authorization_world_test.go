@@ -242,7 +242,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 	api.router.Handle("/metrics", auth.RequireStaff(logger, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})))
-	watcher := watch.NewHandler(nil, nil, access, logger)
+	watcher := watch.NewHandler(nil, nil, nil, access, logger)
 	api.router.Get("/watch", watcher.ServeHTTP)
 
 	clusters := chi.NewRouter()

@@ -400,7 +400,6 @@ func TestAnEditIsWhatEveryAgentOfTheTypeRunsAndEachLiveOneIsTold(t *testing.T) {
 	ctx := context.Background()
 	store := NewStore(pool, 3)
 	pes := NewStore(pool, 3)
-	events := NewEventsStore(pool, noHypothesisEvents{})
 	orgID, peID, custom := orgWithExperiment(t, pool)
 	ids := spawnTestAgents(t, pes, peID,
 		domain.AgentSignup{Actor: testActor, AgentType: custom.ID},
@@ -414,8 +413,7 @@ func TestAnEditIsWhatEveryAgentOfTheTypeRunsAndEachLiveOneIsTold(t *testing.T) {
 	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET researchers = jsonb_build_array(jsonb_build_object('agent_type', $2::text, 'count', 3)) WHERE id = $1`, peID, custom.ID); err != nil {
 		t.Fatal(err)
 	}
-	live, stop := listenForEvents(t, pool)
-	defer stop()
+	since := cursorNow(t, pool)
 
 	settings := testTypeSettings()
 	settings.Model, settings.Hyperparameters = "the-new-model", map[string]any{"lr": 0.5}
@@ -437,32 +435,27 @@ func TestAnEditIsWhatEveryAgentOfTheTypeRunsAndEachLiveOneIsTold(t *testing.T) {
 		t.Errorf("the pool: got = %+v, %v, want its entry still naming no model", pe.Researchers, err)
 	}
 
+	instructions := map[string]bool{domain.EventAgentInstructions: true}
 	told := map[string]string{}
-	for deadline := time.After(5 * time.Second); len(told) < 2; {
-		select {
-		case e := <-live:
-			if e.Kind == domain.EventAgentInstructions && e.PlatformExperimentID == peID && e.AgentID != domain.CoordinatorRecipient {
-				told[e.AgentID] = e.Value + "/" + e.Detail
+	for _, e := range changesAfter(t, store, domain.EventFilter{PlatformExperimentID: peID, Kinds: instructions}, since) {
+		if e.AgentID != domain.CoordinatorRecipient {
+			if _, again := told[e.AgentID]; again {
+				t.Errorf("%s told twice", e.AgentID)
 			}
-		case <-deadline:
-			t.Fatalf("told: got = %v, want both live agents", told)
+			told[e.AgentID] = e.Value + "/" + e.Detail
 		}
 	}
-	if told[follows] != "2/"+custom.ID || told[own] != "2/"+custom.ID || told[finished] != "" {
+	if len(told) != 2 || told[follows] != "2/"+custom.ID || told[own] != "2/"+custom.ID {
 		t.Errorf("told: got = %v, want version 2 of %s to each live one", told, custom.ID)
 	}
-	replayed, err := events.Replay(ctx, domain.EventFilter{PlatformExperimentID: peID, AgentID: own}, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var instructions []domain.Event
-	for _, e := range replayed {
+	var ownTold []domain.Event
+	for _, e := range changesAfter(t, store, domain.EventFilter{PlatformExperimentID: peID, AgentID: own}, since) {
 		if e.Kind == domain.EventAgentInstructions {
-			instructions = append(instructions, e)
+			ownTold = append(ownTold, e)
 		}
 	}
-	if len(instructions) != 1 || instructions[0].AgentID != own || instructions[0].Value != "2" {
-		t.Errorf("replayed to %s: got = %+v, want its own one", own, instructions)
+	if len(ownTold) != 1 || ownTold[0].AgentID != own || ownTold[0].Value != "2" {
+		t.Errorf("told to %s: got = %+v, want its own one", own, ownTold)
 	}
 }
 
@@ -482,6 +475,7 @@ func TestAnEditOfACoordinatorTypeTellsTheCoordinatorsOfRunsThatGoOn(t *testing.T
 	}
 	settings := testTypeSettings()
 	settings.Model = "coordinator-next"
+	since := cursorNow(t, pool)
 	_, propagation, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: 1, Name: custom.Name, Prompt: coordinatorPrompt + " Strictly.", Settings: settings})
 	if err != nil || propagation.Told != 1 {
 		t.Fatalf("edit: got = %+v, %v, want the coordinator of %s told", propagation, err, peID)
@@ -490,10 +484,8 @@ func TestAnEditOfACoordinatorTypeTellsTheCoordinatorsOfRunsThatGoOn(t *testing.T
 	if err != nil || src.Version.Version != 2 || src.Model != "" || src.Version.Settings.Model != "coordinator-next" {
 		t.Errorf("the coordinator: got = %+v, %v, want version 2 on the type's new model", src, err)
 	}
-	replayed, err := NewEventsStore(pool, noHypothesisEvents{}).Replay(ctx, domain.EventFilter{PlatformExperimentID: peID}, 0)
-	if err != nil || !slices.ContainsFunc(replayed, func(e domain.Event) bool {
-		return e.Kind == domain.EventAgentInstructions && e.AgentID == domain.CoordinatorRecipient && e.Value == "2"
-	}) {
-		t.Errorf("replayed: got = %+v, %v, want agent.instructions to the coordinator", replayed, err)
+	told := changesAfter(t, store, domain.EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{domain.EventAgentInstructions: true}}, since)
+	if len(told) != 1 || told[0].AgentID != domain.CoordinatorRecipient || told[0].Value != "2" {
+		t.Errorf("told: got = %+v, want agent.instructions to the coordinator, once", told)
 	}
 }
