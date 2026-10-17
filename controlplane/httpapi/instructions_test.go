@@ -42,7 +42,7 @@ func TestAnAgentReadsItsInstructionsWithTheAssignmentFilledAndTheMachinesLeft(t 
 	if code != http.StatusOK {
 		t.Fatalf("GET %s: %d", agentInstructions, code)
 	}
-	for _, want := range []string{"agent_id: ag-1", "platform_experiment_id: pe-1", "flavor: generalist", `hyperparameters: {"lr": 0.001}`,
+	for _, want := range []string{"agent_id: ag-1", "platform_experiment_id: pe-1", "agent_type: generalist", `hyperparameters: {"lr": 0.001}`,
 		"## platform rules (read first)", "{{hl_commands}}", "{{workdir}}, the directory every command starts in, holds the clone of https://github.com/acme/vision.git"} {
 		if !strings.Contains(got.Prompt, want) {
 			t.Errorf("the prompt holds no %q", want)

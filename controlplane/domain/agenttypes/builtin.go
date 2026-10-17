@@ -22,7 +22,7 @@ var files embed.FS
 // under the next Release, becomes current like any other change. Raise it by one with every change
 // of a built-in's name, description, prompt or settings, or of the rules: TestReleaseNamesWhatItSeeds
 // keeps the digest of each.
-const Release = 2
+const Release = 3
 
 var builtins = []struct {
 	id, name string

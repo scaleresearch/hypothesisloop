@@ -51,7 +51,7 @@ they asked: read `goal` and rewrite the brief where it no longer serves it; a ch
 budget, duration or researchers is the owner's, so put it at the top of the summary.
 platform_experiment.plan names in its detail the fields the owner changed: steer by them. Look at what the update points to, then at the run
 as you see fit (`hl results`, `hl job list`, `hl quota --all`, `hl hypothesis query`). Judge
-what you see against the objective and the brief, never against the direction or flavor an
+what you see against the objective and the brief, never against the direction or agent type an
 agent was given: those come from a planner or a person and can be small thinking too. Each
 problem below is yours to see on every wake and to fix; one you cannot fix goes to the owner at
 the top of the summary with its evidence. Look for:
