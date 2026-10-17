@@ -8,10 +8,12 @@
 # instance when the job ends, and refuses to start the job in an image without curl and sleep.
 # Each entry names its
 # provider, whose section of the same name follows the keys every entry has, and none of the other
-# providers' sections. A provider's account key comes from the environment as
-# CLOUD_COMPUTE_<PROVIDER>_API_KEY, so a provider has one account and no two entries name the same
-# provider.
+# providers' sections. Each entry's account key comes from the environment as
+# CLOUD_COMPUTE_<CLUSTER_NAME>_API_KEY, its cluster_name in capitals with each dash an underscore,
+# so entries on one provider each rent on their own account, or on one account in namespaces of
+# their own.
 cloud_compute:
+  # Lowercase letters and digits joined by single dashes.
   - cluster_name: vast
 
     # The vendor, one of the sections below: vast.
@@ -39,10 +41,10 @@ cloud_compute:
     offer_wait_seconds: 180
     startup_seconds: 240
 
-    # A vast.ai account, whose API key is CLOUD_COMPUTE_VAST_API_KEY.
+    # A vast.ai account, whose API key is CLOUD_COMPUTE_VAST_API_KEY, after the cluster_name.
     vast:
-      # The account's user id, as the vast.ai console shows it. With the provider it is the
-      # cluster's id, which per-cluster settings are keyed on.
+      # The account's user id, as the vast.ai console shows it. With the provider and the
+      # namespace it is the cluster's id, which per-cluster settings are keyed on.
       account_id: REPLACE-WITH-ACCOUNT-ID
       # Offers above this price for the whole instance are never rented. Each rent takes the
       # cheapest offer that passes the filters, so this is a ceiling and not what is paid. In

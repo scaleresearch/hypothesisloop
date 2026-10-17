@@ -14,7 +14,7 @@ var madeUp = map[Key]string{
 	GraphDBURL: "bolt://graph.example.invalid:7687", AuthSigningSecret: "a-signing-secret-only-this-test-knows",
 	ModelAnthropicOAuthToken: "a-model-credential", ObjectStoreMinIOSecretAccessKey: "a-store-secret",
 	GitHostGitHubAppPrivateKey: "a-pem", GitHostPlainPassword: "a-git-password", AccountKey(SectionSandbox, "fly"): "FlyV1 a-token",
-	SandboxE2BAPIKey: "an-e2b-key", AccountKey(SectionCloudCompute, "vast"): "a-vast-key",
+	SandboxE2BAPIKey: "an-e2b-key", AccountKey(SectionCloudCompute, "a"): "a-vast-key",
 }
 
 // inEnvironment sets SettingsPath to settings written from text and every key of madeUp.
@@ -66,7 +66,7 @@ func TestEachProgramNeedsItsOwnKeysAndAProvidersKeyOnlyWithThatProvider(t *testi
 		}},
 		"the GitHub App and rented machines": {withoutGitHost(t) + githubHost + rents, map[Program][]Key{
 			ProgramControlService: {DatabaseURL, MetricsDBURL, GraphDBURL, AuthSigningSecret, ModelAnthropicOAuthToken, ObjectStoreMinIOSecretAccessKey,
-				GitHostGitHubAppPrivateKey, AccountKey(SectionSandbox, "fly"), AccountKey(SectionCloudCompute, "vast")},
+				GitHostGitHubAppPrivateKey, AccountKey(SectionSandbox, "fly"), AccountKey(SectionCloudCompute, "a")},
 			ProgramMetricsService: {DatabaseURL, MetricsDBURL, AuthSigningSecret},
 			ProgramAdmin:          {DatabaseURL, AuthSigningSecret, GitHostGitHubAppPrivateKey},
 		}},
@@ -125,7 +125,7 @@ func TestALoaderReadsItsOwnKeysAndIgnoresTheOthers(t *testing.T) {
 	}
 	if c.SigningSecret != madeUp[AuthSigningSecret] || c.GitHubKey != madeUp[GitHostGitHubAppPrivateKey] || c.SandboxSecret != madeUp[AccountKey(SectionSandbox, "fly")] ||
 		c.ModelToken != madeUp[ModelAnthropicOAuthToken] || c.ObjectStoreSecret != madeUp[ObjectStoreMinIOSecretAccessKey] || c.GraphDBURL != madeUp[GraphDBURL] ||
-		c.CloudComputeSecrets["a"] != madeUp[AccountKey(SectionCloudCompute, "vast")] {
+		c.CloudComputeSecrets["a"] != madeUp[AccountKey(SectionCloudCompute, "a")] {
 		t.Errorf("control-service = %+v, want the environment's keys", c)
 	}
 	t.Setenv(ModelAnthropicOAuthToken.Name, "")
@@ -153,13 +153,14 @@ func TestE2BTemplateTakesTheRegistryLoginWholeOrNotAtAll(t *testing.T) {
 	}
 }
 
-// A provider's secret is <SECTION>_<PROVIDER>_<FIELD>, and IsKey knows every key some program
-// reads by that rule and the platform's own few, so a key a test or a chart sets is never
-// mistaken for anything else.
-func TestAProvidersKeyIsItsSectionItsProviderAndItsField(t *testing.T) {
+// A provider's secret is <SECTION>_<NAME>_<FIELD>, NAME the section's provider or a cloud_compute
+// entry's cluster_name, and IsKey knows every key some program reads by that rule and the
+// platform's own few, so a key a test or a chart sets is never mistaken for anything else.
+func TestAProvidersKeyIsItsSectionItsNameAndItsField(t *testing.T) {
 	for key, want := range map[Key]string{
 		AccountKey(SectionSandbox, "fly"):                    "SANDBOX_FLY_API_KEY",
 		AccountKey(SectionCloudCompute, "vast"):              "CLOUD_COMPUTE_VAST_API_KEY",
+		AccountKey(SectionCloudCompute, "gcp-europe-west4"):  "CLOUD_COMPUTE_GCP_EUROPE_WEST4_API_KEY",
 		ProviderKey(SectionGitHost, "plain", "PASSWORD", ""): "GIT_HOST_PLAIN_PASSWORD",
 		ObjectStoreMinIOSecretAccessKey:                      "OBJECT_STORE_MINIO_SECRET_ACCESS_KEY",
 		GitHostGitHubAppPrivateKey:                           "GIT_HOST_GITHUB_APP_PRIVATE_KEY",
@@ -181,5 +182,23 @@ func TestAProvidersKeyIsItsSectionItsProviderAndItsField(t *testing.T) {
 		if IsKey(name) {
 			t.Errorf("IsKey(%q) = true, want no key of the platform", name)
 		}
+	}
+}
+
+// Two cloud_compute entries may rent on one provider, each with its own account key.
+func TestEachCloudComputeEntryTakesItsOwnAccountKey(t *testing.T) {
+	second := strings.Replace(cluster, "cluster_name: a", "cluster_name: vast-b", 1)
+	inEnvironment(t, withoutGitHost(t)+githubHost+rents+second)
+	t.Setenv(AccountKey(SectionCloudCompute, "vast-b").Name, "another-vast-key")
+	c, err := LoadControlService()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.CloudComputeSecrets["a"] != madeUp[AccountKey(SectionCloudCompute, "a")] || c.CloudComputeSecrets["vast-b"] != "another-vast-key" {
+		t.Errorf("secrets = %v, want each entry's own", c.CloudComputeSecrets)
+	}
+	t.Setenv("CLOUD_COMPUTE_VAST_B_API_KEY", "")
+	if _, err := LoadControlService(); err == nil || !strings.Contains(err.Error(), "CLOUD_COMPUTE_VAST_B_API_KEY is required") {
+		t.Errorf("without the second entry's key: %v, want it named", err)
 	}
 }

@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"regexp"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -129,6 +130,9 @@ func quantities(cpu, memory, storage string) (cpuMillis, memoryBytes, storageByt
 	return parsed[0].MilliValue(), parsed[1].Value(), parsed[2].Value(), nil
 }
 
+// clusterName is a cloud_compute cluster_name, which names its account key one to one.
+var clusterName = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
+
 // buildRented checks the sandbox and cloud compute sections. Whether the vendor can rent what
 // they ask for is the provider's to say when it is built at startup.
 func (c *Settings) buildRented() error {
@@ -168,20 +172,18 @@ func (c *Settings) buildRented() error {
 			}
 		}
 	}
-	clusters, accounts := map[string]bool{}, map[string]string{}
+	clusters := map[string]bool{}
 	for _, cc := range c.CloudCompute {
-		if cc.ClusterName == "" || clusters[cc.ClusterName] {
-			return fmt.Errorf("cloud_compute: cluster_name %q is empty or listed twice", cc.ClusterName)
+		if !clusterName.MatchString(cc.ClusterName) {
+			return fmt.Errorf("cloud_compute: cluster_name %q must be lowercase letters and digits joined by single dashes, as its account key %s is made of it", cc.ClusterName, AccountKey(SectionCloudCompute, "<cluster_name>").Name)
+		}
+		if clusters[cc.ClusterName] {
+			return fmt.Errorf("cloud_compute: cluster_name %q is listed twice", cc.ClusterName)
 		}
 		clusters[cc.ClusterName] = true
 		if err := cc.Sections.check("cloud_compute "+cc.ClusterName, cc.Provider); err != nil {
 			return err
 		}
-		// A provider's key has one name in the environment, so a provider has one account.
-		if other, taken := accounts[cc.Provider]; taken {
-			return fmt.Errorf("cloud_compute %s: provider %s is %s's already, and a provider has one account", cc.ClusterName, cc.Provider, other)
-		}
-		accounts[cc.Provider] = cc.ClusterName
 		if cc.OfferWaitSeconds <= 0 || cc.StartupSeconds <= 0 || cc.ReconcileIntervalSeconds <= 0 || cc.StatusIntervalSeconds <= 0 {
 			return fmt.Errorf("cloud_compute %s: offer_wait_seconds, startup_seconds, reconcile_interval_seconds and status_interval_seconds must be positive", cc.ClusterName)
 		}

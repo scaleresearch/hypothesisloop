@@ -42,10 +42,10 @@ images:
 #                                    file (a service account key or a workload identity
 #                                    federation config), with the roles the container_registry
 #                                    section of hypothesisloop.yaml names
-#   SANDBOX_<PROVIDER>_API_KEY, CLOUD_COMPUTE_<PROVIDER>_API_KEY
-#                                    the account key of the provider sandbox and each cloudCompute
-#                                    entry name, such as SANDBOX_FLY_API_KEY and
-#                                    CLOUD_COMPUTE_VAST_API_KEY
+#   SANDBOX_<PROVIDER>_API_KEY, CLOUD_COMPUTE_<CLUSTER_NAME>_API_KEY
+#                                    the account key of the provider sandbox names and of each
+#                                    cloudCompute entry by its cluster_name, dashes as underscores,
+#                                    such as SANDBOX_FLY_API_KEY and CLOUD_COMPUTE_VAST_API_KEY
 #
 # Each process is handed the keys it reads and no other.
 secretName: ""

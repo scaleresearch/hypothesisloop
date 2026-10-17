@@ -26,11 +26,12 @@ lib_env_files() {
     bash -c 'set -a && . ./.env && set +a && exec go run ./localdev/envfiles "$1"' lib_env_files "${settings}")
 }
 
-# lib_rented <example> <provider>: the sandbox or cloud_compute example of controlplane/settings with
-# the provider .env names chosen, and the values of its section .env sets (localdev/rented).
+# lib_rented <example> <provider> [<cluster_name>]: the sandbox or cloud_compute example of
+# controlplane/settings with the provider .env names chosen, the values of its section .env sets,
+# and the cloud_compute entry named cluster_name (localdev/rented).
 lib_rented() {
   (cd "${LIB_ENV_REPO}" && env -i PATH="${PATH}" HOME="${HOME}" \
-    bash -c 'set -a && . ./.env && set +a && exec go run ./localdev/rented "$1" "$2"' lib_rented "$1" "$2")
+    bash -c 'set -a && . ./.env && set +a && exec go run ./localdev/rented "$@"' lib_rented "$@")
 }
 
 # lib_run <program> <command>...: the command with the keys of the program's file, the settings

@@ -30,11 +30,16 @@ func newRented(pcfg *hypothesisloopcfg.ControlService, store *db.Store, clusters
 		}
 		loops = append(loops, func(ctx context.Context) { _ = sandboxes.Run(ctx) })
 	}
+	byID := map[string]string{}
 	for _, cc := range pcfg.CloudCompute {
-		cluster, err := newCloudCluster(pcfg, cc, store, clusters, logger)
+		cluster, id, err := newCloudCluster(pcfg, cc, store, clusters, logger)
 		if err != nil {
 			return nil, err
 		}
+		if other, taken := byID[id]; taken {
+			return nil, fmt.Errorf("cloud_compute %s: rents in namespace %s of the same account as %s, which would destroy each other's instances", cc.ClusterName, cc.Namespace, other)
+		}
+		byID[id] = cc.ClusterName
 		loops = append(loops, cluster.Run)
 	}
 	return loops, nil
@@ -70,7 +75,10 @@ func newLauncher(pcfg *hypothesisloopcfg.ControlService, s *hypothesisloopcfg.Sa
 	return sandboxes, nil
 }
 
-func newCloudCluster(pcfg *hypothesisloopcfg.ControlService, cc hypothesisloopcfg.CloudComputeConfig, store *db.Store, clusters *clusterexchange.Service, logger *zap.Logger) (*compute.Cluster, error) {
+// newCloudCluster is the runtime of one cloud_compute entry and the id it reports: the provider,
+// the account and the namespace, which together name the instances it owns and stay the same when
+// the cluster is renamed.
+func newCloudCluster(pcfg *hypothesisloopcfg.ControlService, cc hypothesisloopcfg.CloudComputeConfig, store *db.Store, clusters *clusterexchange.Service, logger *zap.Logger) (*compute.Cluster, string, error) {
 	shapes := make([]compute.Shape, 0, len(cc.Shapes))
 	var acceleratorTypes []string
 	for _, s := range cc.Shapes {
@@ -85,16 +93,17 @@ func newCloudCluster(pcfg *hypothesisloopcfg.ControlService, cc hypothesisloopcf
 	log := logger.Named("cloudcompute").With(zap.String("cluster", cc.ClusterName))
 	rented, err := providers.New(cc.Provider, cc.Sections[cc.Provider], pcfg.CloudComputeSecrets[cc.ClusterName], acceleratorTypes, log.Named(cc.Provider).Sugar().Infof)
 	if err != nil {
-		return nil, fmt.Errorf("cloud_compute %s: %w", cc.ClusterName, err)
+		return nil, "", fmt.Errorf("cloud_compute %s: %w", cc.ClusterName, err)
 	}
 	account, accounted := rented.(provider.Accounted)
 	if !accounted {
-		return nil, fmt.Errorf("cloud_compute %s: provider %s names no account, which the cluster's id is made of", cc.ClusterName, cc.Provider)
+		return nil, "", fmt.Errorf("cloud_compute %s: provider %s names no account, which the cluster's id is made of", cc.ClusterName, cc.Provider)
 	}
+	id := cc.Provider + "-" + account.Account() + "-" + cc.Namespace
 	cluster, err := compute.NewCluster(compute.ClusterConfig{
 		Name: cc.ClusterName,
 		Executor: compute.Config{
-			ClusterID: cc.Provider + "-" + account.Account(), Namespace: cc.Namespace,
+			ClusterID: id, Namespace: cc.Namespace,
 			APIURL: pcfg.Services.PublicAPIURL,
 			Shapes: shapes, Provider: rented,
 			OfferWait: time.Duration(cc.OfferWaitSeconds) * time.Second, Startup: time.Duration(cc.StartupSeconds) * time.Second,
@@ -105,9 +114,9 @@ func newCloudCluster(pcfg *hypothesisloopcfg.ControlService, cc hypothesisloopcf
 		StatusInterval:    time.Duration(cc.StatusIntervalSeconds) * time.Second,
 	})
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	log.Info("jobs of the cluster run on the cloud compute provider", zap.String("provider", cc.Provider),
 		zap.Strings("capabilities", provider.Capabilities(rented)), zap.Int("shapes", len(shapes)))
-	return cluster, nil
+	return cluster, id, nil
 }

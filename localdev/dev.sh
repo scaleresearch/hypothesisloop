@@ -139,11 +139,8 @@ render_settings() {
 render_compute() {
   local value sandbox cloud
   sandbox="$(lib_rented controlplane/settings/sandbox.yaml "${sandbox_provider}")"
-  cloud="$(lib_rented controlplane/settings/cloud-compute.yaml "${cloud_provider}")"
-  {
-    printf '%s\n\n' "${sandbox}"
-    sed -e "s|^  - cluster_name: .*$|  - cluster_name: ${cloud_cluster}|" <<<"${cloud}"
-  } > "${rented}"
+  cloud="$(lib_rented controlplane/settings/cloud-compute.yaml "${cloud_provider}" "${cloud_cluster}")"
+  printf '%s\n\n%s\n' "${sandbox}" "${cloud}" > "${rented}"
   for value in "  provider: ${sandbox_provider}" "  - cluster_name: ${cloud_cluster}" "    provider: ${cloud_provider}"; do
     grep -qF -- "${value}" "${rented}" || { echo "dev: controlplane/settings/sandbox.yaml or cloud-compute.yaml changed shape, '${value}' was not rendered" >&2; exit 1; }
   done

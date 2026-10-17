@@ -38,9 +38,9 @@ from the values and every secret from the Secret, under the same name.
 {{- end -}}
 
 {{/*
-A provider's secret is the Secret key <SECTION>_<PROVIDER>_<FIELD>, as controlplane/config names it: the
-field the object store's, git host's and registry's providers each declare, and API_KEY, the account
-key, of every provider of the sandbox and cloud compute.
+A provider's secret is the Secret key <SECTION>_<NAME>_<FIELD>, as controlplane/config names it, NAME the
+section's provider or a cloud compute entry's cluster_name: the field the object store's, git host's and
+registry's providers each declare, and API_KEY, the account key, of the sandbox and each cloud compute entry.
 */}}
 {{- define "hypothesisloop.controlServiceEnv" -}}
 {{- $keys := list "DATABASE_URL" "AUTH_SIGNING_SECRET" "MODEL_ANTHROPIC_OAUTH_TOKEN" (include "hypothesisloop.objectStoreSecretKey" .) -}}
@@ -52,7 +52,7 @@ key, of every provider of the sandbox and cloud compute.
 {{- $keys = append $keys (printf "SANDBOX_%s_API_KEY" (upper .provider)) -}}
 {{- end -}}
 {{- range .Values.cloudCompute -}}
-{{- $keys = append $keys (printf "CLOUD_COMPUTE_%s_API_KEY" (upper .provider)) -}}
+{{- $keys = append $keys (printf "CLOUD_COMPUTE_%s_API_KEY" (upper (replace "-" "_" .cluster_name))) -}}
 {{- end -}}
 - name: METRICS_DB_URL
   value: {{ include "hypothesisloop.metricsDBURL" . | quote }}

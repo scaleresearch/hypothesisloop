@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"regexp"
-	"slices"
 	"strings"
 )
 
@@ -26,15 +25,17 @@ const (
 	SectionCloudCompute      = "CLOUD_COMPUTE"
 )
 
-// ProviderKey is a secret field of a provider of a section: <SECTION>_<PROVIDER>_<FIELD>.
-func ProviderKey(section, provider, field, purpose string) Key {
-	return Key{section + "_" + strings.ToUpper(provider) + "_" + field, purpose}
+// ProviderKey is a secret field of a section: <SECTION>_<NAME>_<FIELD>. NAME is the provider of a
+// section that has one, and the cluster_name of an entry of cloud_compute, which lists several
+// that may share a provider, in capitals with each '-' an '_'.
+func ProviderKey(section, name, field, purpose string) Key {
+	return Key{section + "_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_")) + "_" + field, purpose}
 }
 
-// AccountKey is the one secret a provider of the sandbox or of cloud_compute takes, whatever the
-// provider: the key of its account at the vendor, <SECTION>_<PROVIDER>_API_KEY.
-func AccountKey(section, provider string) Key {
-	return ProviderKey(section, provider, "API_KEY", "the API key of the "+provider+" account the "+strings.ToLower(section)+" rents on")
+// AccountKey is the one secret the sandbox's provider or a cloud_compute entry takes, whatever the
+// provider: the key of its account at the vendor, <SECTION>_<NAME>_API_KEY.
+func AccountKey(section, name string) Key {
+	return ProviderKey(section, name, "API_KEY", "the API key of the account at the vendor that "+strings.ToLower(section)+" "+name+" rents on")
 }
 
 var (
@@ -56,8 +57,8 @@ var (
 var providerField = regexp.MustCompile(`^[A-Z0-9]+_[A-Z0-9]+(_[A-Z0-9]+)*$`)
 
 // IsKey reports whether name is a key some program reads: one of the platform's own, or a
-// provider's, which begins with its section. A provider of the sandbox or cloud_compute is any
-// the settings name, so its keys are known by the rule alone.
+// provider's, which begins with its section. The provider of the sandbox and a cloud_compute entry
+// are any the settings name, so their keys are known by the rule alone.
 func IsKey(name string) bool {
 	for _, key := range []Key{SettingsPath, DatabaseURL, MetricsDBURL, GraphDBURL, AuthSigningSecret} {
 		if name == key.Name {
@@ -101,9 +102,7 @@ func (s *Settings) Needs(p Program) []Key {
 			keys = append(keys, AccountKey(SectionSandbox, s.Sandbox.Provider))
 		}
 		for _, cc := range s.CloudCompute {
-			if key := AccountKey(SectionCloudCompute, cc.Provider); !slices.Contains(keys, key) {
-				keys = append(keys, key)
-			}
+			keys = append(keys, AccountKey(SectionCloudCompute, cc.ClusterName))
 		}
 		return keys
 	case ProgramMetricsService:
