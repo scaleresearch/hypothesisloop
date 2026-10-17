@@ -74,32 +74,6 @@ func TestEveryRequestCarriesTheTokenAndNoTokenIsAnError(t *testing.T) {
 	}
 }
 
-func TestPlatformExperimentsCreateNeedsAProject(t *testing.T) {
-	var gotBody map[string]any
-	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewDecoder(r.Body).Decode(&gotBody)
-		_, _ = w.Write([]byte(`{"id":"pe-1"}`))
-	})
-	setAPIURL(t, url)
-	file := t.TempDir() + "/pe.yaml"
-	if err := os.WriteFile(file, []byte(validSpec), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	t.Setenv("HL_PROJECT", "")
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"platform-experiments", "create", file}, &stdout, &stderr); code != 2 || gotBody != nil {
-		t.Fatalf("with no project: exit code = %d, sent = %v, want 2 and nothing sent", code, gotBody)
-	}
-	t.Setenv("HL_PROJECT", "prj-env")
-	if code := run([]string{"platform-experiments", "create", file}, &stdout, &stderr); code != 0 || gotBody["project_id"] != "prj-env" {
-		t.Fatalf("with $HL_PROJECT: exit code = %d, project_id = %v, stderr = %s", code, gotBody["project_id"], stderr.String())
-	}
-	if code := run([]string{"platform-experiments", "create", "--project", "prj-flag", file}, &stdout, &stderr); code != 0 || gotBody["project_id"] != "prj-flag" {
-		t.Fatalf("with --project: exit code = %d, project_id = %v", code, gotBody["project_id"])
-	}
-}
-
 // Every list of hl is one compact JSON object per line, this one included.
 func TestPlatformExperimentsListIsOneCompactLineEach(t *testing.T) {
 	list := []map[string]string{
@@ -128,35 +102,6 @@ func TestPlatformExperimentsListIsOneCompactLineEach(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"platform-experiments", "list"}, &stdout, &stderr); code != 0 || stdout.Len() != 0 || stderr.String() != "hl: platform-experiments list: none\n" {
 		t.Fatalf("empty: exit %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
-	}
-}
-
-// validSpec is an experiment spec the platform accepts as it is.
-const validSpec = "name: first\ndescription: the brief\nbudget_accelerator_hours: 10\nmax_agents: 2\nduration_hours: 4\n" +
-	"metrics:\n  - key: loss\n    direction: minimize\n"
-
-// A file once held several platform experiments under experiments:, created one request after
-// another, so a refusal of the second left the first created and the command failed. One file is
-// one experiment spec, checked before anything is sent and placed by the flags.
-func TestPlatformExperimentsCreateSendsTheOneMappingOfItsFile(t *testing.T) {
-	got := recordingServer(t, func(int, recorded) any { return map[string]any{"id": "pe-1"} })
-	file := writeFile(t, validSpec)
-	var stdout, stderr bytes.Buffer
-	if code := run([]string{"platform-experiments", "create", "--project", "prj-1", "--repository", "acme/model", file}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), `"id": "pe-1"`) {
-		t.Fatalf("exit code = %d, stdout = %q, stderr = %s", code, stdout.String(), stderr.String())
-	}
-	want := map[string]any{
-		"name": "first", "description": "the brief", "budget_accelerator_hours": float64(10), "max_agents": float64(2), "duration_hours": float64(4),
-		"metrics": []any{map[string]any{"key": "loss", "direction": "minimize"}}, "project_id": "prj-1", "repository": "acme/model",
-	}
-	if len(*got) != 1 || (*got)[0].Method != "POST" || (*got)[0].Path != "/platform-experiments" || !reflect.DeepEqual((*got)[0].Body, want) {
-		t.Fatalf("requests = %+v, want one POST of %+v", *got, want)
-	}
-	for _, refused := range []string{"project_id: prj-1\nexperiments:\n  - name: first\n  - name: second\n", "- name: first\n- name: second\n", "name: first\n", validSpec + "repository: acme/model\n"} {
-		stderr.Reset()
-		if code := run([]string{"platform-experiments", "create", "--project", "prj-1", writeFile(t, refused)}, &stdout, &stderr); code != 2 || len(*got) != 1 {
-			t.Errorf("%q: exit %d with %d requests, want 2 and none more. stderr: %s", refused, code, len(*got), stderr.String())
-		}
 	}
 }
 

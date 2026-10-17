@@ -670,7 +670,6 @@ var platformExperimentCommands = []subcommand{
 	{"list", "the platform experiments this token reaches, one line each", cmdPlatformExperimentsList},
 	{"get", "the platform experiment: its status, what it waits for, its brief and its stages", cmdPlatformExperimentsGet},
 	{"health", "where each agent and the coordinator last stood: first job, jobs in flight, restarts, messages", cmdPlatformExperimentsHealth},
-	{"create", "create a platform experiment from an experiment spec", cmdPlatformExperimentsCreate},
 	{"start", "push a directory to a repository and create the platform experiment its spec states", cmdPlatformExperimentsStart},
 	{"update", "change the brief or other fields, or declare or raise the baseline", cmdPlatformExperimentsUpdate},
 	{"propose", "a draft's planner: propose the experiment the draft becomes", cmdPlatformExperimentsPropose},
@@ -728,81 +727,6 @@ hl platform-experiments with no command is this list.`, stderr)
 	var shown []json.RawMessage
 	_ = json.Unmarshal(out, &shown)
 	pageNotice(stderr, "platform-experiments list", header, *offset, len(shown))
-	return 0
-}
-
-// cmdPlatformExperimentsCreate handles `hl platform-experiments create FILE|-`: the experiment
-// spec of FILE, checked before anything is sent, placed by the flags.
-func cmdPlatformExperimentsCreate(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments create", `usage: hl platform-experiments create [--project PROJECT] [--repository R | --repository-account A] [--continues PE] [--starts-at TIME] [--dry-run] FILE|-
-
-FILE is an experiment spec, the YAML a repository keeps at .hypothesisloop/experiment.yaml:
-contract/repotemplate/files/.hypothesisloop/experiment.yaml documents every key, and each
-directory of examples/ holds one. It is checked before anything is sent, and a file the platform
-would refuse for its own content exits 2 naming every problem. The flags say where the
-experiment is placed, which a spec never states:
-
-  --project              the project it belongs to (default $HL_PROJECT)
-  --repository           the repository it works on: owner/name on GitHub, which a GitHub
-                         account connected to the org covers, or on any other git host a name
-                         created there beforehand. hl platform-experiments start pushes a
-                         directory to one and creates the experiment on it
-  --repository-account   left without --repository, the platform creates a private repository
-                         on GitHub, on this connected account when the org connected several
-  --continues            a closed platform experiment of the project that keeps its code in the
-                         same repository and declared a baseline: its baseline starts from the
-                         commit of that run's baseline job, so the numbers of both compare
-  --starts-at            when its baseline begins to be measured, RFC 3339, for a later start
-  --dry-run              check the file and print the body, and send nothing
-
-It is created open and no run has started. With coordinator_hosted the platform runs the
-coordinator, creates a hosted baseline agent and the researchers the spec names, and declares
-the baseline job when it finishes. Without it you do both: add an agent with --role baseline
-(hl platform-experiments agents add), and once its job is COMPLETED with a summary, run
-hl platform-experiments update --baseline-job JOB. hl platform-experiments get answers in
-status_reason what the start waits for and your next step, and in baseline_due_at when the
-platform closes it, with close_reason baseline_limit_reached, if it is not running by then.`, stderr)
-	project := fs.String("project", "", "the project it belongs to (default $HL_PROJECT)")
-	repository := fs.String("repository", "", "the repository it works on")
-	account := fs.String("repository-account", "", "the connected account a new repository is created on")
-	continues := fs.String("continues", "", "a closed platform experiment this one carries on")
-	startsAt := fs.String("starts-at", "", "when its baseline begins to be measured, RFC 3339")
-	dryRun := fs.Bool("dry-run", false, "check the file, print the body and send nothing")
-	path, err := parseOne(fs, args, "FILE", "")
-	if err != nil {
-		return parseExit(err)
-	}
-	if path == "-" {
-		if err := fs.claimStdin("FILE -"); err != nil {
-			return parseExit(err)
-		}
-	}
-	spec, err := readSpec(path)
-	if err != nil {
-		fmt.Fprintf(stderr, "hl: %s\n", err)
-		return 2
-	}
-	body := createBody{Spec: spec, Repository: *repository, RepositoryAccount: *account, Continues: *continues}
-	if body.ProjectID, err = projectOf(fs, *project); err != nil {
-		return parseExit(err)
-	}
-	if *startsAt != "" {
-		at, err := time.Parse(time.RFC3339, *startsAt)
-		if err != nil {
-			return parseExit(misuse(fs, "--starts-at %q is no RFC 3339 time, as in 2030-01-02T15:04:05Z", *startsAt))
-		}
-		body.StartsAt = &at
-	}
-	if *dryRun {
-		printJSON(stdout, body)
-		fmt.Fprintln(stderr, "hl: platform-experiments create: --dry-run, nothing sent")
-		return 0
-	}
-	var out any
-	if err := c.Do("POST", "/platform-experiments", body, &out); err != nil {
-		return fail(stderr, err)
-	}
-	printJSON(stdout, out)
 	return 0
 }
 

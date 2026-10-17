@@ -55,3 +55,7 @@ logs/
 # gigabyte that every image's COPY wrote into the build VM and no image runs from.
 .claude/
 **/.venv/
+
+# Python caches
+**/__pycache__/
+**/*.pyc

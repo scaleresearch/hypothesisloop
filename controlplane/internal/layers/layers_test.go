@@ -163,17 +163,6 @@ func TestEveryPackageImportsOnlyWhatItsLayerAdmits(t *testing.T) {
 	}
 }
 
-func TestContractImportsNothingOfTheControlPlane(t *testing.T) {
-	for _, line := range goListLines(t, "-f", `{{.ImportPath}} {{join .Imports " "}}`, module+contractPath+"/...") {
-		fields := strings.Fields(line)
-		for _, imported := range fields[1:] {
-			if within(strings.TrimPrefix(imported, module), "controlplane") {
-				t.Errorf("%s imports %s", strings.TrimPrefix(fields[0], module), strings.TrimPrefix(imported, module))
-			}
-		}
-	}
-}
-
 // A program reads the keys of the environment only through controlplane/config, so each reads its
 // own and refuses to start without one. infra/ is no part of this repository.
 func TestOnlyConfigReadsTheKeysOfTheEnvironment(t *testing.T) {

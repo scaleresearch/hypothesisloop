@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
@@ -18,11 +17,8 @@ import (
 // createBody is the body of POST /platform-experiments: the experiment spec and where it is placed.
 type createBody struct {
 	experimentspec.Spec
-	ProjectID         string     `json:"project_id"`
-	Repository        string     `json:"repository,omitempty"`
-	RepositoryAccount string     `json:"repository_account,omitempty"`
-	Continues         string     `json:"continues,omitempty"`
-	StartsAt          *time.Time `json:"starts_at,omitempty"`
+	ProjectID  string `json:"project_id"`
+	Repository string `json:"repository,omitempty"`
 }
 
 // projectOf is the project a command names with --project, or $HL_PROJECT, a misuse with neither.
@@ -31,28 +27,6 @@ func projectOf(fs *flagSet, flagValue string) (string, error) {
 		return project, nil
 	}
 	return "", misuse(fs, "a project is required: --project or $HL_PROJECT")
-}
-
-// readSpec is the valid experiment spec of path, or of stdin for "-".
-func readSpec(path string) (experimentspec.Spec, error) {
-	var data []byte
-	var err error
-	if path == "-" {
-		data, err = io.ReadAll(os.Stdin)
-	} else {
-		data, err = os.ReadFile(path)
-	}
-	if err != nil {
-		return experimentspec.Spec{}, fmt.Errorf("reading %s: %w", path, err)
-	}
-	spec, err := experimentspec.Parse(data)
-	if err == nil {
-		err = spec.Validate()
-	}
-	if err != nil {
-		return spec, fmt.Errorf("%s: %w", path, err)
-	}
-	return spec, nil
 }
 
 func cmdPlatformExperimentsStart(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
@@ -73,9 +47,7 @@ R's default branch hold DIR as git add -A would commit it, DIR/.gitignore respec
 
 Nothing is ever force-pushed. Then the platform experiment the spec states is created on R, and
 start prints its id, what it waits for and, with $HL_UI_URL set, where the UI shows it.
---dry-run runs every check and says what would be pushed, and changes nothing.
-hl platform-experiments create FILE --repository R creates one on a repository that holds its
-code already.`, stderr)
+--dry-run runs every check and says what would be pushed, and changes nothing.`, stderr)
 	project := fs.String("project", "", "the project it belongs to (default $HL_PROJECT)")
 	repository := fs.String("repository", "", "the repository it works on")
 	dryRun := fs.Bool("dry-run", false, "run every check and change nothing")

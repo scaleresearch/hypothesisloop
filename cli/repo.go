@@ -337,7 +337,7 @@ helper line is printed either way and fails nothing.
 
   readme      README.md is there with no REPLACE-WITH left
   experiment  .hypothesisloop/experiment.yaml is a valid experiment spec, as
-              hl platform-experiments create checks one, and its name and metrics are the
+              hl platform-experiments start checks one, and its name and metrics are the
               platform experiment's: a file left by another experiment of the repository
               fails here, and hl repo init replaces it
   job-spec    .hypothesisloop/job.yaml states a job, its image, and its cpu, memory and

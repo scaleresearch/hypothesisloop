@@ -3,7 +3,7 @@
 # up inside it (or natively on Linux), re-opens the API port-forward,
 # restarts the control-plane containers and rebuilds the dev nodes. Assumes the cluster was previously
 # provisioned with install.sh — if no cluster exists yet, run
-# `make k3s-up` / `make full-up` instead.
+# `make k3s-up` and `make controlplane-up` instead.
 set -euo pipefail
 
 CONTEXT_NAME="k3s-local"

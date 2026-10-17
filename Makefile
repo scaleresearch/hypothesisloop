@@ -1,13 +1,13 @@
 .PHONY: $(addprefix locked-,images ui-image tt-hardware-image)
-.PHONY: dev reset build test agent-test lint check images job-images images-remote \
+.PHONY: dev build test agent-test lint check images job-images images-remote \
 	experimentator-base-image check-tag ui-image check-ui-build-args registry-up prune-images \
 	helm-prepare helm-lint chart-push \
 	controlplane-up controlplane-down controlplane-destroy render-settings \
 	cluster-agent-up cluster-agent-down staff-token token runtime-token \
-	k3s-up k3s-down full-up k3s-dev-nodes-up k3s-dev-nodes-down e2e \
+	k3s-up k3s-down k3s-dev-nodes-up k3s-dev-nodes-down e2e \
 	full-stop full-start reload stack-not-held \
 	tt-up tt-down tt-status tt-stop tt-start tt-dev-nodes-up tt-dev-nodes-down tt-hardware-image tt-e2e \
-	git-repository example ui-types
+	git-repository
 
 # ---- Control plane: one instance, runs anywhere (the brain) -----------------
 COMPOSE_FILE := localdev/controlplane/docker-compose.yml
@@ -175,10 +175,6 @@ controlplane-destroy:
 	fi
 	$(COMPOSE) down --volumes
 
-reset:
-	$(MAKE) controlplane-down
-	$(MAKE) controlplane-up
-
 # ---- Cluster agent: one per target Kubernetes cluster running jobs ----------
 # Installs/removes the runtime/k8s/infra/chart helm release (node-agent DaemonSet + cluster-agent
 # Deployment, the only component with real k8s credentials) on the cluster KUBE_CONTEXT/
@@ -250,11 +246,8 @@ e2e:
 E2E_API_URL = $${API_URL:-http://localhost:$${API_HOST_PORT:-8081}}
 E2E_ENV = bash $(CURDIR)/localdev/dev.sh require-local && . $(CURDIR)/localdev/lib/auth.sh && export API_URL="$(E2E_API_URL)" && export HL_TOKEN="$${HL_TOKEN:-$$(lib_hl_admin token staff)}" &&
 
-# ---- Convenience: local cluster + control plane in one command -------------
-full-up: k3s-up controlplane-up
-
 # Pause/resume everything (podman machine, k3s, control plane) without destroying
-# cluster state — much faster than full-up/k3s-down for a daily on/off cycle.
+# cluster state — much faster than k3s-down/k3s-up for a daily on/off cycle.
 full-stop:
 	bash localdev/k3s-macos/stop.sh
 
@@ -323,29 +316,6 @@ git-repository:
 	  git_host="$$(lib_git_host_provider)" && \
 	  { test "$$git_host" = local || { echo "make git-repository: this stack keeps its code on GitHub (GIT_HOST_PROVIDER=$$git_host in .env)" >&2; exit 1; }; } && \
 	  git init -q --bare "$$HL_GIT_ROOT/$(NAME).git" && echo "$(NAME).git"'
-
-# Starts examples/NAME as a platform experiment (hl platform-experiments start): on the local git
-# host in a new repository NAME-<time>.git, which git reaches with the git server's credential for
-# this command alone, and on GitHub in REPOSITORY, an empty one the org's GitHub App covers.
-# API_URL, HL_TOKEN, HL_PROJECT and HL_UI_URL default to this stack, its staff token and project
-# default. Usage: make example NAME=dummy-data-search-demo [REPOSITORY=owner/name]
-example: render-settings
-	@test -n "$(NAME)" -a -f "examples/$(NAME)/.hypothesisloop/experiment.yaml" || { echo "make example: NAME is one of: $$(ls -d examples/*/ | xargs -n1 basename | tr '\n' ' ')" >&2; exit 1; }
-	@go build -o bin/hl ./cli
-	@bash -c '. localdev/lib/auth.sh && \
-	  credential=() && \
-	  case "$$(lib_git_host_provider)" in \
-	    local) repository="$(NAME)-$$(date +%Y%m%d%H%M%S).git" && \
-	      git init -q --bare --initial-branch=main "$$HL_GIT_ROOT/$$repository" && \
-	      credential=(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper \
-	        "GIT_CONFIG_VALUE_0=!f() { echo username=$$HL_GIT_USERNAME; printf password=; cat $(CURDIR)/localdev/.run/git-password; }; f") ;; \
-	    github) repository="$(REPOSITORY)" && \
-	      test -n "$$repository" || { echo "make example: this stack keeps its code on GitHub: REPOSITORY=owner/name names an empty repository the org'"'"'s GitHub App covers" >&2; exit 1; } ;; \
-	    *) exit 1 ;; \
-	  esac && \
-	  env "$${credential[@]}" API_URL="$${API_URL:-http://localhost:8081}" HL_TOKEN="$${HL_TOKEN:-$$(lib_hl_admin token staff)}" \
-	    HL_PROJECT="$${HL_PROJECT:-default}" HL_UI_URL="$${HL_UI_URL:-http://localhost:3000}" \
-	    bin/hl platform-experiments start "examples/$(NAME)" --repository "$$repository"'
 
 tt-stop:
 	bash localdev/k3s-tenstorrent/stop.sh
@@ -521,8 +491,3 @@ lint:
 check: build test agent-test helm-lint
 	go vet ./...
 	cd controlplane/ui && npm test && npm run build
-
-# Regenerates the UI's API types from the OpenAPI documents the server publishes
-# (controlplane/cmd/control-service/testdata/*openapi.json): run it after those goldens change.
-ui-types:
-	npm --prefix controlplane/ui run types
