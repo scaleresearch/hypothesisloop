@@ -600,12 +600,18 @@ func (s *Store) UpdatePlatformExperiment(ctx context.Context, pe *domain.Platfor
 		return fmt.Errorf("platform_experiments_store.Update: marshal metrics: %w", err)
 	}
 	return s.write(ctx, func(tx *Write) error {
-		if err := writePlatformExperiment(ctx, tx, pe, metrics, expectedStatus, ""); err != nil {
+		planned, err := writePlatformExperiment(ctx, tx, pe, metrics, expectedStatus, "")
+		if err != nil {
 			return fmt.Errorf("platform_experiments_store.Update: %w", err)
 		}
-		if err := setResearchersTx(ctx, tx, pe.ID, pe.MaxAgents, researchers); err != nil {
+		changed, err := setResearchersTx(ctx, tx, pe.ID, pe.MaxAgents, researchers)
+		if err != nil {
 			return fmt.Errorf("platform_experiments_store.Update: %w", err)
 		}
+		if changed {
+			planned = append(planned, "researchers")
+		}
+		tx.planChange(pe.ID, planned)
 		if expectedStatus == domain.PlatformExpOpen {
 			if err := reallocateBaselineQuotas(ctx, tx, pe); err != nil {
 				return fmt.Errorf("platform_experiments_store.Update: %w", err)
@@ -616,32 +622,50 @@ func (s *Store) UpdatePlatformExperiment(ctx context.Context, pe *domain.Platfor
 }
 
 // writePlatformExperiment writes the patchable fields of pe while it is still in expectedStatus
-// and, when baseline is not empty, still has that baseline.
-func writePlatformExperiment(ctx context.Context, tx *Write, pe *domain.PlatformExperiment, metrics []byte, expectedStatus domain.PlatformExperimentStatus, baseline string) error {
+// and, when baseline is not empty, still has that baseline, and announces a changed brief. It
+// answers which fields of the plan the write changed, for platform_experiment.plan (planChange).
+func writePlatformExperiment(ctx context.Context, tx *Write, pe *domain.PlatformExperiment, metrics []byte, expectedStatus domain.PlatformExperimentStatus, baseline string) ([]string, error) {
 	const q = `UPDATE platform_experiments pe
 SET name=$2, description=$3, budget_accelerator_hours=$4, max_agents=$5, metrics=$6,
     report_interval_seconds=$7, starts_at=$8, ends_at=$9, updated_at=NOW(),
     max_concurrent_accelerators=$11, baseline_job_id=$12, job_estimated_duration_hours=$13, duration_hours=$14
-FROM (SELECT description, duration_hours FROM platform_experiments WHERE id = $1 FOR UPDATE) old
+FROM (SELECT description, duration_hours, metrics, budget_accelerator_hours, max_agents, max_concurrent_accelerators, report_interval_seconds, starts_at
+      FROM platform_experiments WHERE id = $1 FOR UPDATE) old
 WHERE pe.id=$1 AND pe.status=$10 AND ($15 = '' OR pe.baseline_job_id = $15)
-RETURNING pe.description IS DISTINCT FROM old.description OR pe.duration_hours IS DISTINCT FROM old.duration_hours`
+RETURNING pe.description IS DISTINCT FROM old.description OR pe.duration_hours IS DISTINCT FROM old.duration_hours,
+  array_remove(ARRAY[
+    CASE WHEN pe.metrics IS DISTINCT FROM old.metrics THEN 'metrics' END,
+    CASE WHEN pe.budget_accelerator_hours IS DISTINCT FROM old.budget_accelerator_hours THEN 'budget_accelerator_hours' END,
+    CASE WHEN pe.max_agents IS DISTINCT FROM old.max_agents THEN 'max_agents' END,
+    CASE WHEN pe.max_concurrent_accelerators IS DISTINCT FROM old.max_concurrent_accelerators THEN 'max_concurrent_accelerators' END,
+    CASE WHEN pe.report_interval_seconds IS DISTINCT FROM old.report_interval_seconds THEN 'report_interval_seconds' END,
+    CASE WHEN pe.starts_at IS DISTINCT FROM old.starts_at THEN 'starts_at' END], NULL)`
 	var briefMoved bool
+	var planned []string
 	err := tx.QueryRow(ctx, q,
 		pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents,
 		metrics, pe.ReportIntervalSeconds, optionalTime(pe.StartsAt), pe.ClosesAt(),
 		expectedStatus,
 		pe.MaxConcurrentAccelerators, pe.BaselineJobID, pe.JobEstimatedDurationHours, pe.DurationHours, baseline,
-	).Scan(&briefMoved)
+	).Scan(&briefMoved, &planned)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return fmt.Errorf("status or baseline changed concurrently, retry")
+		return nil, fmt.Errorf("status or baseline changed concurrently, retry")
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if briefMoved {
 		tx.runChange(pe.ID, domain.EventPlatformExperimentDescription, "", "")
 	}
-	return nil
+	return planned, nil
+}
+
+// planChange announces the fields of the plan of the platform experiment id that a write changed,
+// none for none.
+func (w *Write) planChange(id string, fields []string) {
+	if len(fields) > 0 {
+		w.runChange(id, domain.EventPlatformExperimentPlan, "", strings.Join(fields, ", "))
+	}
 }
 
 // ErrPlatformExperimentNotFound reports an id no platform experiment has.

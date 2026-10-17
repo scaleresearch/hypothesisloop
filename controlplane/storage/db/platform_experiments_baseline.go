@@ -42,9 +42,11 @@ func (s *Store) RaiseBaseline(ctx context.Context, pe *domain.PlatformExperiment
 		return fmt.Errorf("platform_experiments_store.RaiseBaseline: marshal metrics: %w", err)
 	}
 	return s.write(ctx, func(tx *Write) error {
-		if err := writePlatformExperiment(ctx, tx, pe, metrics, domain.PlatformExpRunning, raise.From); err != nil {
+		planned, err := writePlatformExperiment(ctx, tx, pe, metrics, domain.PlatformExpRunning, raise.From)
+		if err != nil {
 			return fmt.Errorf("platform_experiments_store.RaiseBaseline: %w", err)
 		}
+		tx.planChange(pe.ID, planned)
 		if _, err := tx.Exec(ctx, `INSERT INTO baseline_raises (platform_experiment_id, from_job_id, to_job_id, reason, detail, actor_kind, actor_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 			pe.ID, raise.From, raise.To, raise.Reason, raise.Detail, string(raise.Actor.Kind), raise.Actor.ID); err != nil {

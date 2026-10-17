@@ -101,36 +101,38 @@ func holdsAtWork(maxAgents int, pool domain.ResearcherPool, atWork map[domain.Po
 // setResearchersTx holds the platform experiment platformExpID, whose row the write locked, to the
 // max_agents just written to it: a running one loses the newest of its researchers at work above
 // it (evictAboveMaxTx), and its researchers, unless pool states them, are capped to it. Then pool,
-// unless it is nil, is held to the researchers at work (holdsAtWork) and written.
-func setResearchersTx(ctx context.Context, tx *Write, platformExpID string, maxAgents int, pool domain.ResearcherPool) error {
+// unless it is nil, is held to the researchers at work (holdsAtWork) and written. It answers
+// whether the researchers it wrote differ from those stored.
+func setResearchersTx(ctx context.Context, tx *Write, platformExpID string, maxAgents int, pool domain.ResearcherPool) (bool, error) {
 	if err := poolTypesTx(ctx, tx, platformExpID, pool); err != nil {
-		return err
+		return false, err
 	}
 	if err := evictAboveMaxTx(ctx, tx, platformExpID, maxAgents, pool == nil); err != nil {
-		return err
+		return false, err
 	}
 	atWork, err := researchersAtWork(ctx, tx, platformExpID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := holdsAtWork(maxAgents, pool, atWork); err != nil {
-		return err
+		return false, err
 	}
 	if pool == nil {
 		stored, err := lockedPoolTx(ctx, tx, platformExpID)
 		if err != nil || stored.Total() <= maxAgents {
-			return err
+			return false, err
 		}
 		pool = stored.Capped(maxAgents)
 	}
 	encoded, err := poolJSON(pool)
 	if err != nil {
-		return err
+		return false, err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE platform_experiments SET researchers = $2 WHERE id = $1`, platformExpID, encoded); err != nil {
-		return fmt.Errorf("write researchers: %w", err)
+	tag, err := tx.Exec(ctx, `UPDATE platform_experiments SET researchers = $2 WHERE id = $1 AND researchers IS DISTINCT FROM $2`, platformExpID, encoded)
+	if err != nil {
+		return false, fmt.Errorf("write researchers: %w", err)
 	}
-	return nil
+	return tag.RowsAffected() > 0, nil
 }
 
 // CutMaxAgentsLowered is why the platform cut a researcher that was one of the newest at work above

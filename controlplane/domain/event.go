@@ -73,6 +73,9 @@ const (
 	// EventPlatformExperimentProposal says a draft's planner answered its goal, with a proposal
 	// or a decline. Nobody acts on it but a person.
 	EventPlatformExperimentProposal = "platform_experiment.proposal"
+	// EventPlatformExperimentPlan says a person changed fields of the plan that no other kind
+	// tells, named in its detail.
+	EventPlatformExperimentPlan = "platform_experiment.plan"
 	// EventPlatformExperimentBaseline says the baseline of a running platform experiment was
 	// raised to a stronger job, with the sentence every agent is told.
 	EventPlatformExperimentBaseline = "platform_experiment.baseline"
@@ -165,6 +168,8 @@ var EventKinds = []EventKindDoc{
 		Description: "A person changed the goal (PATCH /platform-experiments/{id} with goal): re-read it with GET /platform-experiments/{id}. On a draft it is its planner's, agent_id names it, and the draft is planned again from the new goal: its status_reason reads revising until the planner answers, and a planner whose machine was released is started again. Once the draft is accepted it is the coordinator's, whose subject and agent_id are coordinator, to bring the brief in line with it."},
 	{Kind: EventPlatformExperimentProposal, Subject: "platform experiment id", Value: "proposed or declined",
 		Description: "A draft's planner answered its goal: proposed (proposal on GET /platform-experiments/{id}) or declined (declined_reason). It waits for a person from then on."},
+	{Kind: EventPlatformExperimentPlan, Subject: "platform experiment id", Value: "empty by design",
+		Description: "A person changed fields of the plan of an open or running platform experiment (PATCH /platform-experiments/{id}): detail names them, among metrics, budget_accelerator_hours, max_agents, researchers, max_concurrent_accelerators, report_interval_seconds and starts_at. Re-read them with GET /platform-experiments/{id}. The brief and the run's length are told by platform_experiment.description, a cut by agent.cut and a raised baseline by platform_experiment.baseline."},
 	{Kind: EventPlatformExperimentBaseline, Subject: "platform experiment id", Value: "the job that is the baseline from now on",
 		Description: "The baseline of the running run was raised to a stronger job that measured the control (PATCH /platform-experiments/{id} with baseline_job_id and baseline_reason). detail says by whom, from which value to which on the ranking metric, and why. The brief's measured baseline changed with it, and standings are set against the new bar: re-read the brief with GET /platform-experiments/{id}."},
 	{Kind: EventPlatformExperimentRemoved, Subject: "platform experiment id", Value: "empty by design",
