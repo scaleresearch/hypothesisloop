@@ -241,10 +241,10 @@ lib_hl_admin() {
   (cd "${LIB_AUTH_REPO}" && lib_run hl-admin go run ./controlplane/cmd/hl-admin "$@")
 }
 
-# lib_runtime_token <cluster>: the token a cluster's agents present. It is accepted once the
-# cluster is registered (lib_register_clusters, or lib_register_local_cluster for local).
+# lib_runtime_token <cluster>: the token a cluster's agents present, which names the cluster's
+# registration (lib_register_clusters, or lib_register_local_cluster for local), made before.
 lib_runtime_token() {
-  lib_hl_admin token "runtime:$1"
+  lib_hl_admin cluster token "$1"
 }
 
 # The clusters on the platform's own machines (a Tenstorrent box, an NVIDIA host) that

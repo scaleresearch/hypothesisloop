@@ -91,9 +91,15 @@ func (d *fakeDirectory) AgentFinishedAt(_ context.Context, pe, agent string) (*t
 	return at(d.finishedAt, pe+"/"+agent), d.fail
 }
 
-func (d *fakeDirectory) ClusterOrg(_ context.Context, name string) (string, bool, error) {
+// clusterRegisteredAt is when every cluster of a fakeDirectory was registered.
+var clusterRegisteredAt = time.UnixMicro(1_700_000_000_000_000)
+
+func (d *fakeDirectory) GetCluster(_ context.Context, name string) (*domain.Cluster, error) {
 	org, ok := d.clusters[name]
-	return org, ok, d.fail
+	if !ok {
+		return nil, d.fail
+	}
+	return &domain.Cluster{Name: name, OrgID: org, CreatedAt: clusterRegisteredAt}, d.fail
 }
 
 var tenancyA = domain.Tenancy{PlatformExperimentID: "pe-a", ProjectID: "prj-a", OrgID: "org-a"}
@@ -150,7 +156,7 @@ func TestEachDerivedKindResolvesWhileItsRowStands(t *testing.T) {
 		want  Principal
 	}{
 		{scope.Staff, Principal{Kind: KindStaff}},
-		{scope.Runtime("cluster-a"), Principal{Kind: KindRuntime, ClusterName: "cluster-a", OrgIDs: []string{"org-a"}}},
+		{scope.Runtime("cluster-a", clusterRegisteredAt), Principal{Kind: KindRuntime, ClusterName: "cluster-a", ClusterRegisteredAt: clusterRegisteredAt, OrgIDs: []string{"org-a"}}},
 		{scope.Job("job-a"), inA(Principal{Kind: KindJob, ExperimentID: "job-a"})},
 		{scope.Agent("pe-a", "agent-1"), inA(Principal{Kind: KindAgent, AgentID: "agent-1"})},
 		{scope.Coordinator("pe-a"), inA(Principal{Kind: KindCoordinator})},
@@ -169,7 +175,8 @@ func TestADerivedTokenStopsWorkingWhenItsRowSaysSo(t *testing.T) {
 		scope  string
 		change func(*fakeDirectory)
 	}{
-		"runtime of an unregistered cluster":                          {scope.Runtime("cluster-typo"), func(*fakeDirectory) {}},
+		"runtime of an unregistered cluster":                          {scope.Runtime("cluster-typo", clusterRegisteredAt), func(*fakeDirectory) {}},
+		"runtime of a cluster registered again since":                 {scope.Runtime("cluster-a", clusterRegisteredAt.Add(-time.Microsecond)), func(*fakeDirectory) {}},
 		"job that has ended":                                          {scope.Job("job-a"), func(d *fakeDirectory) { d.ended["job-a"] = true }},
 		"job that does not exist":                                     {scope.Job("job-missing"), func(*fakeDirectory) {}},
 		"agent of a platform experiment closed a wind-down ago":       {scope.Agent("pe-a", "agent-1"), func(d *fakeDirectory) { d.closedAt["pe-a"] = woundDown }},
@@ -418,12 +425,12 @@ func TestOnlyARuntimeOrStaffMayPush(t *testing.T) {
 		want   int
 	}{
 		{"no token", "", http.StatusUnauthorized},
-		{"registered runtime", "Bearer " + mustMint(t, testSecret, scope.Runtime("cluster-a")), http.StatusNoContent},
+		{"registered runtime", "Bearer " + mustMint(t, testSecret, scope.Runtime("cluster-a", clusterRegisteredAt)), http.StatusNoContent},
 		{"staff", "Bearer " + mustMint(t, testSecret, scope.Staff), http.StatusNoContent},
-		{"unregistered runtime", "Bearer " + mustMint(t, testSecret, scope.Runtime("cluster-typo")), http.StatusUnauthorized},
+		{"unregistered runtime", "Bearer " + mustMint(t, testSecret, scope.Runtime("cluster-typo", clusterRegisteredAt)), http.StatusUnauthorized},
 		{"agent", "Bearer " + mustMint(t, testSecret, scope.Agent("pe-a", "agent-1")), http.StatusForbidden},
 		{"job", "Bearer " + mustMint(t, testSecret, scope.Job("job-a")), http.StatusForbidden},
-		{"forged runtime", "Bearer " + mustMint(t, "another-signing-secret-of-enough-length", scope.Runtime("cluster-a")), http.StatusUnauthorized},
+		{"forged runtime", "Bearer " + mustMint(t, "another-signing-secret-of-enough-length", scope.Runtime("cluster-a", clusterRegisteredAt)), http.StatusUnauthorized},
 	} {
 		served = false
 		request := httptest.NewRequest(http.MethodPost, "/internal/node-metrics", strings.NewReader("{}"))
@@ -453,7 +460,7 @@ func TestOnlyStaffReachWhatRequireStaffGuards(t *testing.T) {
 	}{
 		"no token": {"", http.StatusUnauthorized},
 		"staff":    {"Bearer " + mustMint(t, testSecret, scope.Staff), http.StatusOK},
-		"runtime":  {"Bearer " + mustMint(t, testSecret, scope.Runtime("cluster-a")), http.StatusForbidden},
+		"runtime":  {"Bearer " + mustMint(t, testSecret, scope.Runtime("cluster-a", clusterRegisteredAt)), http.StatusForbidden},
 		"agent":    {"Bearer " + mustMint(t, testSecret, scope.Agent("pe-a", "agent-1")), http.StatusForbidden},
 	} {
 		request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
@@ -475,7 +482,7 @@ func TestAFailureOfThePlatformsOwnIsAnsweredWithoutItsText(t *testing.T) {
 		t.Error("the handler ran behind a failed directory read")
 	})))
 	request := httptest.NewRequest(http.MethodPost, "/internal/node-metrics", strings.NewReader("{}"))
-	request.Header.Set("Authorization", "Bearer "+mustMint(t, testSecret, scope.Runtime("cluster-a")))
+	request.Header.Set("Authorization", "Bearer "+mustMint(t, testSecret, scope.Runtime("cluster-a", clusterRegisteredAt)))
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusInternalServerError || strings.Contains(recorder.Body.String(), "pq:") || !strings.Contains(recorder.Body.String(), refusal.InternalMessage) {
@@ -509,8 +516,8 @@ func TestOnlyARemovedClustersRuntimeIsToldItsClusterIsNotRegistered(t *testing.T
 		token  string
 		reason string
 	}{
-		"removed cluster": {mustMint(t, testSecret, scope.Runtime("cluster-typo")), domain.ReasonClusterNotRegistered},
-		"forged token":    {mustMint(t, "another-signing-secret-of-enough-length", scope.Runtime("cluster-a")), refusal.ReasonUnauthenticated},
+		"removed cluster": {mustMint(t, testSecret, scope.Runtime("cluster-typo", clusterRegisteredAt)), domain.ReasonClusterNotRegistered},
+		"forged token":    {mustMint(t, "another-signing-secret-of-enough-length", scope.Runtime("cluster-a", clusterRegisteredAt)), refusal.ReasonUnauthenticated},
 	} {
 		request := httptest.NewRequest(http.MethodPost, "/internal/node-metrics", strings.NewReader("{}"))
 		request.Header.Set("Authorization", "Bearer "+tc.token)

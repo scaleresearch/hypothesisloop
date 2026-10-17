@@ -287,7 +287,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 	api.tokens["agent"] = mint(scope.Agent("pe-a1", "agent-1"))
 	api.tokens["coordinator"] = mint(scope.Coordinator("pe-a1"))
 	api.tokens["job"] = mint(scope.Job("job-own"))
-	api.tokens["runtime"] = mint(scope.Runtime("cluster-a"))
+	api.tokens["runtime"] = mint(scope.Runtime("cluster-a", time.Time{}))
 	api.tokens["staff"] = mint(scope.Staff)
 	api.serve = answering(t, doc.API, api.router)
 	return api

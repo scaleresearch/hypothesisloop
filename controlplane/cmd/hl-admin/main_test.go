@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
@@ -42,7 +43,7 @@ const signingSecret = "a-signing-secret-only-this-test-knows"
 
 func TestTokenPrintsTheTokenTheControlPlaneOfThatConfigAccepts(t *testing.T) {
 	inSettings(t)
-	for _, scope := range []string{scope.Staff, scope.Runtime("local"), scope.Agent("pe-1", "agent-1"), scope.Job("job-1")} {
+	for _, scope := range []string{scope.Staff, scope.Runtime("local", time.UnixMicro(1)), scope.Agent("pe-1", "agent-1"), scope.Job("job-1")} {
 		var stdout bytes.Buffer
 		if err := run([]string{"token", scope}, &stdout); err != nil {
 			t.Fatalf("token %s: %v", scope, err)

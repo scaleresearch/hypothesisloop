@@ -19,7 +19,7 @@ func TestMintedTokensVerifyToTheScopeTheyWereMintedFor(t *testing.T) {
 		{scope.Job("job-1"), Principal{Kind: KindJob, ExperimentID: "job-1"}},
 		{scope.Agent("pe-1", "agent-1"), Principal{Kind: KindAgent, PlatformExperimentID: "pe-1", AgentID: "agent-1"}},
 		{scope.Coordinator("pe-1"), Principal{Kind: KindCoordinator, PlatformExperimentID: "pe-1"}},
-		{scope.Runtime("local"), Principal{Kind: KindRuntime, ClusterName: "local"}},
+		{scope.Runtime("local", clusterRegisteredAt), Principal{Kind: KindRuntime, ClusterName: "local", ClusterRegisteredAt: clusterRegisteredAt}},
 	} {
 		token, err := Mint(testSecret, tc.scope)
 		if err != nil {
@@ -95,7 +95,7 @@ func mustMint(t *testing.T, secret, scope string) string {
 func samePrincipal(a, b Principal) bool {
 	return a.Kind == b.Kind && a.UserID == b.UserID && a.Name == b.Name && a.ProjectID == b.ProjectID &&
 		a.PlatformExperimentID == b.PlatformExperimentID && a.AgentID == b.AgentID && a.ExperimentID == b.ExperimentID &&
-		a.ClusterName == b.ClusterName && strings.Join(a.OrgIDs, ",") == strings.Join(b.OrgIDs, ",")
+		a.ClusterName == b.ClusterName && a.ClusterRegisteredAt.Equal(b.ClusterRegisteredAt) && strings.Join(a.OrgIDs, ",") == strings.Join(b.OrgIDs, ",")
 }
 
 func TestAPIKeysAreDistinctAndHashStably(t *testing.T) {

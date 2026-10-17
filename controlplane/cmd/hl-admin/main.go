@@ -25,7 +25,7 @@ import (
 
 const usage = `usage: hl-admin <command>
 
-  token SCOPE                      print the token for a scope: staff, runtime:<cluster>,
+  token SCOPE                      print the token for a scope: staff, runtime:<cluster>/<registered at, unix µs>,
                                    agent:<platform experiment>/<agent>, coordinator:<platform experiment>,
                                    job:<experiment>
   user add SUBJECT NAME            create a user named NAME with a home org named NAME and its default project.
@@ -33,6 +33,7 @@ const usage = `usage: hl-admin <command>
   user staff SUBJECT on|off        make a user one of the platform's operators, or stop
   api-key add SUBJECT ORG [PROJECT]  create an API key of ORG, bound to PROJECT when given
   cluster add NAME ORG             register a cluster for ORG and print its runtime token
+  cluster token NAME               print the runtime token of a registered cluster
   cluster share NAME on|off        place every org's jobs on a cluster, or only its own org's
   cluster settings NAME JSON       change a cluster's settings, as PATCH /orgs/{id}/clusters/{name} does,
                                    e.g. '{"status_silence_ceiling_seconds":21600}'. 0 puts one back on the default
@@ -122,10 +123,27 @@ func run(args []string, stdout io.Writer) error {
 		})
 	case len(args) == 4 && args[0] == "cluster" && args[1] == "add":
 		return withStore(cfg, func(ctx context.Context, store *db.Store) error {
-			if _, err := store.RegisterCluster(ctx, args[2], args[3]); err != nil {
+			cluster, err := store.RegisterCluster(ctx, args[2], args[3])
+			if err != nil {
 				return err
 			}
-			token, err := auth.Mint(cfg.SigningSecret, scope.Runtime(args[2]))
+			token, err := auth.Mint(cfg.SigningSecret, scope.Runtime(cluster.Name, cluster.CreatedAt))
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(stdout, token)
+			return nil
+		})
+	case len(args) == 3 && args[0] == "cluster" && args[1] == "token":
+		return withStore(cfg, func(ctx context.Context, store *db.Store) error {
+			cluster, err := store.GetCluster(ctx, args[2])
+			if err != nil {
+				return err
+			}
+			if cluster == nil {
+				return fmt.Errorf("no cluster %s", args[2])
+			}
+			token, err := auth.Mint(cfg.SigningSecret, scope.Runtime(cluster.Name, cluster.CreatedAt))
 			if err != nil {
 				return err
 			}

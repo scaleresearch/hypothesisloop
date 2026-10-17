@@ -7,7 +7,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // Prefix begins every token the platform derives.
@@ -37,7 +39,11 @@ func Coordinator(platformExperimentID string) string {
 	return string(KindCoordinator) + ":" + platformExperimentID
 }
 
-func Runtime(clusterName string) string { return string(KindRuntime) + ":" + clusterName }
+// Runtime names the registration of a cluster, so a token minted for a name that was removed and
+// registered again, by any org, names a registration that no longer stands.
+func Runtime(clusterName string, registeredAt time.Time) string {
+	return string(KindRuntime) + ":" + clusterName + "/" + strconv.FormatInt(registeredAt.UnixMicro(), 10)
+}
 
 // Scope is what a scope names. Each kind sets the fields that name its subject.
 type Scope struct {
@@ -46,6 +52,7 @@ type Scope struct {
 	PlatformExperimentID string
 	AgentID              string
 	ClusterName          string
+	ClusterRegisteredAt  time.Time
 }
 
 // Parse reads what scope names, refusing one of no kind or of a malformed subject.
@@ -69,7 +76,12 @@ func Parse(scope string) (Scope, error) {
 	case KindCoordinator:
 		return Scope{Kind: KindCoordinator, PlatformExperimentID: subject}, nil
 	case KindRuntime:
-		return Scope{Kind: KindRuntime, ClusterName: subject}, nil
+		name, registered, ok := strings.Cut(subject, "/")
+		micros, err := strconv.ParseInt(registered, 10, 64)
+		if !ok || name == "" || err != nil {
+			return Scope{}, fmt.Errorf("runtime scope must be runtime:<cluster>/<registered at, unix microseconds>, got %q", scope)
+		}
+		return Scope{Kind: KindRuntime, ClusterName: name, ClusterRegisteredAt: time.UnixMicro(micros)}, nil
 	default:
 		return Scope{}, fmt.Errorf("unknown scope %q", scope)
 	}

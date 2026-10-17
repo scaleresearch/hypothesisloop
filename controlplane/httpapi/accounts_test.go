@@ -703,13 +703,16 @@ func TestRevokingAKeyEndsItAndEveryKeyMintedFromIt(t *testing.T) {
 
 func TestRegisteringAClusterReturnsItsRuntimeToken(t *testing.T) {
 	w := newAccountsWorld(t)
-	want, err := auth.Mint(testSigningSecret, scope.Runtime("gpu-east"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	var want string
 	for _, caller := range []string{"owner", "org-key", "owner"} {
 		var registered accounts.RegisteredCluster
 		w.ok(caller, "POST", "/orgs/"+w.orgA+"/clusters", name{"name": "gpu-east"}, http.StatusOK, &registered)
+		if want == "" {
+			var err error
+			if want, err = auth.Mint(testSigningSecret, scope.Runtime("gpu-east", w.store.clusters["gpu-east"].CreatedAt)); err != nil {
+				t.Fatal(err)
+			}
+		}
 		if registered.RuntimeToken != want || registered.OrgID != w.orgA || registered.Shared {
 			t.Fatalf("registered by %s: got = %+v, want the derived token, owned by %s and not shared", caller, registered, w.orgA)
 		}

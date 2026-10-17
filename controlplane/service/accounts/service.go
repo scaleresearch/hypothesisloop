@@ -603,7 +603,7 @@ func (h *Service) RegisterCluster(ctx context.Context, orgID, name string) (*Reg
 	if err != nil {
 		return nil, err
 	}
-	token, err := auth.Mint(h.signingSecret, scope.Runtime(cluster.Name))
+	token, err := auth.Mint(h.signingSecret, scope.Runtime(cluster.Name, cluster.CreatedAt))
 	if err != nil {
 		return nil, err
 	}

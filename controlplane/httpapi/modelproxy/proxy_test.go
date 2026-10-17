@@ -61,7 +61,9 @@ func (directory) AgentFinishedAt(context.Context, string, string) (*time.Time, e
 func (directory) PlannerAnsweredAt(context.Context, string, string) (*time.Time, error) {
 	return nil, nil
 }
-func (directory) ClusterOrg(context.Context, string) (string, bool, error) { return "org-1", true, nil }
+func (directory) GetCluster(_ context.Context, name string) (*domain.Cluster, error) {
+	return &domain.Cluster{Name: name, OrgID: "org-1"}, nil
+}
 
 type sandboxed map[string]bool
 
@@ -240,7 +242,7 @@ func TestOnlyASandboxedAgentOrCoordinatorWhoseTokenLivesIsServed(t *testing.T) {
 		{"an agent whose wind-down is over", scope.Agent("pe-1", "agent-cut"), http.StatusUnauthorized},
 		{"an agent of another platform experiment than its token's", scope.Agent("pe-1", "agent-b"), http.StatusUnauthorized},
 		{"a coordinator the platform does not run", scope.Coordinator("pe-2"), http.StatusForbidden},
-		{"a cluster's runtime", scope.Runtime("cluster-1"), http.StatusForbidden},
+		{"a cluster's runtime", scope.Runtime("cluster-1", time.Time{}), http.StatusForbidden},
 	} {
 		f := newFixture(t, streamed(messageStart, messageStop))
 		resp := f.call(t, context.Background(), messagesCall, token(t, tc.scope))

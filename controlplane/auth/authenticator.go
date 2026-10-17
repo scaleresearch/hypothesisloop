@@ -35,7 +35,7 @@ type Directory interface {
 	ExperimentTenancy(ctx context.Context, experimentID string) (*domain.Tenancy, bool, error)
 	AgentCutAt(ctx context.Context, platformExperimentID, agentID string) (*time.Time, error)
 	AgentStanding(ctx context.Context, platformExperimentID, agentID string) (domain.AgentStanding, error)
-	ClusterOrg(ctx context.Context, name string) (orgID string, found bool, err error)
+	GetCluster(ctx context.Context, name string) (*domain.Cluster, error)
 }
 
 // Authenticator turns a token into a Principal. Nothing is kept between requests: a derived
@@ -75,14 +75,14 @@ func (a *Authenticator) derived(ctx context.Context, token string) (Principal, e
 	}
 	switch p.Kind {
 	case KindRuntime:
-		orgID, found, err := a.directory.ClusterOrg(ctx, p.ClusterName)
+		cluster, err := a.directory.GetCluster(ctx, p.ClusterName)
 		if err != nil {
 			return Principal{}, err
 		}
-		if !found {
-			return Principal{}, refusal.Refuse(http.StatusUnauthorized, domain.ReasonClusterNotRegistered, "cluster "+p.ClusterName+" is not registered")
+		if cluster == nil || !cluster.CreatedAt.Equal(p.ClusterRegisteredAt) {
+			return Principal{}, refusal.Refuse(http.StatusUnauthorized, domain.ReasonClusterNotRegistered, "cluster "+p.ClusterName+" is not registered, or was registered again after this token was minted")
 		}
-		p.OrgIDs = []string{orgID}
+		p.OrgIDs = []string{cluster.OrgID}
 	case KindJob:
 		tenancy, ended, err := a.directory.ExperimentTenancy(ctx, p.ExperimentID)
 		if err != nil {

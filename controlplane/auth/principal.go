@@ -5,6 +5,7 @@ package auth
 
 import (
 	"context"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
@@ -52,6 +53,8 @@ type Principal struct {
 	AgentID      string
 	ExperimentID string
 	ClusterName  string
+	// ClusterRegisteredAt is when the registration of ClusterName a runtime token names was made.
+	ClusterRegisteredAt time.Time
 }
 
 // HoldsAccount reports a principal of a person or an org: a user, an API key or staff. A token the
