@@ -39,3 +39,4 @@ func (AgentTypeAction) Schema(r huma.Registry) *huma.Schema { return enumSchema(
 func (OrgRole) Schema(r huma.Registry) *huma.Schema         { return enumSchema(r, OrgRoles) }
 func (ActorKind) Schema(r huma.Registry) *huma.Schema       { return enumSchema(r, ActorKinds) }
 func (CapacityTier) Schema(r huma.Registry) *huma.Schema    { return enumSchema(r, CapacityTiers) }
+func (TypeKind) Schema(r huma.Registry) *huma.Schema        { return enumSchema(r, TypeKinds) }

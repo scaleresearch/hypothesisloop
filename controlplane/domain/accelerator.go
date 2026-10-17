@@ -119,6 +119,9 @@ const (
 	TypeKindCPU         TypeKind = "cpu"
 )
 
+// TypeKinds is every kind of accelerator type.
+var TypeKinds = []TypeKind{TypeKindAccelerator, TypeKindCPU}
+
 // Kind returns what one unit of the type is: a core for CPUType, a device for every other.
 func (g AcceleratorType) Kind() TypeKind {
 	if g.Is(CPUType) {
