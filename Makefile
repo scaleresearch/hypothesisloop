@@ -22,7 +22,7 @@ REGISTRY_REACHABLE_IP := $(shell bash -c '. localdev/lib/node.sh && lib_registry
 COMPOSE := podman compose -f $(COMPOSE_FILE) $(if $(REGISTRY_REACHABLE_IP),-f localdev/controlplane/docker-compose.reachable.yml)
 
 # In production REGISTRY names a real registry the operator provisioned and every cluster
-# node already has network access to (see deploy/charts/hypothesisloop-cluster-agent/install.sh's REGISTRY_URL) --
+# node already has network access to (the cluster-agent chart's images.registry, make cluster-agent-up);
 # this default is the local dev registry. TAG names the tree content that was built (localdev/lib/image-tag.sh),
 # so a manifest that pins one tag can never silently start running different bytes under
 # imagePullPolicy: IfNotPresent. Computed once here and exported: every script that deploys an
