@@ -107,10 +107,11 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
     setForm(f => ({ ...f, [field]: value }))
   }
 
-  // A step that changed takes the focus to its first field, so the keyboard goes on from there.
+  // A step that changed takes the focus to its panel, so the keyboard goes on from its first field.
+  // Focusing that field itself would open the metric picker, which opens on focus.
   useEffect(() => {
     if (!moved.current) return
-    panel.current?.querySelector<HTMLElement>('input:not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled])')?.focus()
+    panel.current?.focus()
   }, [step])
 
   // Keeps the form as it stands as this form's draft, the one it opened from or a new one.
@@ -305,7 +306,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
       <Tabs label="Steps" tabs={[...STEPS]} value={step} onChange={go} />
 
       <Stack as="form" gap="xl" onSubmit={handleSubmit}>
-        <div ref={panel} role="tabpanel" aria-label={STEPS[at].label} className="grid gap-6">
+        <div ref={panel} role="tabpanel" tabIndex={-1} aria-label={STEPS[at].label} className="grid gap-6 outline-none">
           {step === '1' && <StepWhat {...stepProps} fileNote={fileNote} onRead={(r, b) => void readFile(r, b)} />}
           {step === '2' && <StepMeasure {...stepProps} />}
           {step === '3' && <StepBudget {...stepProps} budgetKind={initial?.budget_kind} />}
