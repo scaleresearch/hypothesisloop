@@ -187,6 +187,23 @@ class StartupTest(PlatformCase):
         self.assertIn("platform experiment pe-1 names no branch", str(refused.exception))
         self.clone.assert_not_called()
 
+    # A planner reads the clone prepare() made from the platform experiment it read, and its
+    # opening reads clone nothing of their own.
+    async def test_prepare_clones_for_a_planner_too(self):
+        FakePlatform.instructions = served(role="planner")
+        setup = await self.prepare()
+        self.assertEqual(setup.cfg.role, "planner")
+        self.clone.assert_called_once_with("https://github.com/acme/model.git", "main", os.path.abspath(self.workdir))
+
+    async def test_a_failed_clone_fails_startup(self):
+        with mock.patch.dict(os.environ, self.environment(), clear=True), \
+                mock.patch.object(prompt, "hl_commands", return_value="usage: hl") as commands, \
+                mock.patch.object(core.subprocess, "run", return_value=mock.Mock(returncode=128, stderr="fatal: repository not found", stdout="")):
+            with self.assertRaises(SystemExit) as failed:
+                await core.prepare()
+        self.assertIn("exited 128: fatal: repository not found", str(failed.exception))
+        commands.assert_not_called()
+
     def test_the_workspace_is_cloned_at_the_branch_into_an_empty_directory_only(self):
         workdir = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, workdir)

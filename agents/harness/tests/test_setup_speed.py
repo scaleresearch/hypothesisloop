@@ -44,16 +44,18 @@ class PlannerOpeningTest(unittest.TestCase):
             git("add", ".", cwd=origin)
             git("commit", "-qm", "init", cwd=origin)
             draft = json.dumps({"id": "pe-1", "status": "draft", "repository_url": "file://" + origin, "branch": "main"})
-            real = seed._run
+            core.clone_workspace("file://" + origin, "main", workdir)
+            real, ran = seed._run, []
 
             def fake(command, cwd=None):
+                ran.append(command[:2])
                 if command[0] == "hl":
                     return draft if command[1] == "platform-experiments" else "cluster k3s cpu cores_available=8"
                 return real(command, cwd)
 
             with mock.patch.object(seed, "_run", fake):
                 opening = seed.planner(workdir)
-            self.assertTrue(os.path.exists(os.path.join(workdir, "src", "codec.py")), "the repository was not cloned into the working directory")
+            self.assertNotIn(["git", "clone"], ran)
             for shown in ("=== hl platform-experiments get\n" + draft, "=== hl capacity\ncluster k3s", "src/codec.py",
                           "=== README.md\n# Codec\nRun bench.py.", "=== .hypothesisloop/experiment.yaml\nname: codec"):
                 self.assertIn(shown, opening)

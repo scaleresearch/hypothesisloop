@@ -61,6 +61,18 @@ class GitTokenScopeTest(unittest.TestCase):
         self.assertTrue(all(auth is None for _, auth in elsewhere.seen), elsewhere.seen)
         self.assertTrue(all(auth == "Bearer " + TOKEN for path, auth in proxy.seen if path.startswith("/git/pe-1.git/")), proxy.seen)
 
+    # The workspace clone goes through the same rewrite, with the token on the proxy's address.
+    def test_the_workspace_clone_reaches_the_proxy_with_the_token(self):
+        proxy = _serve(self)
+        git_url = f"http://127.0.0.1:{proxy.server_port}/git/pe-1.git"
+        home, workdir = tempfile.mkdtemp(), tempfile.mkdtemp()
+        with mock.patch.dict(os.environ, {"HOME": home, "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_COUNT": "0"}):
+            core.git_through_platform("https://github.com/acme/model.git", git_url, TOKEN)
+            with self.assertRaises(SystemExit):
+                core.clone_workspace("https://github.com/acme/model.git", "main", workdir)
+        self.assertIn(("/git/pe-1.git/info/refs", "Bearer " + TOKEN), proxy.seen)
+        self.assertTrue(all(auth == "Bearer " + TOKEN for _, auth in proxy.seen), proxy.seen)
+
 
 if __name__ == "__main__":
     unittest.main()

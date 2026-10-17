@@ -83,21 +83,21 @@ _CLONE_TIMEOUT_S = 600
 
 
 def clone_workspace(repository_url: str, branch: str, workdir: str) -> None:
-    """Clones branch of the repository into an empty workdir before the CLI starts in it. The CLI caches
-    that a directory is no git repository the first time it looks, for as long as it runs: an
-    agent that cloned in its first turn had every `isolation: "worktree"` subagent refused with
-    "not in a git repository". A clone that fails leaves workdir empty for the agent to clone."""
+    """Clones branch of the repository into an empty workdir, through the git proxy
+    git_through_platform set up, before the CLI starts in it. The CLI caches that a directory is
+    no git repository the first time it looks, for as long as it runs: an agent that cloned in its
+    first turn had every `isolation: "worktree"` subagent refused with "not in a git repository".
+    A workdir in use is a clone kept from an earlier start, and a clone that fails ends the run."""
     if any(Path(workdir).iterdir()):
         return
     try:
         done = subprocess.run(["git", "clone", "--branch", branch, repository_url, "."], cwd=workdir, text=True, capture_output=True,
                               timeout=_CLONE_TIMEOUT_S)
     except (OSError, subprocess.TimeoutExpired) as e:
-        log.warning("cloning %s into %s failed: %s", repository_url, workdir, e)
-        return
+        raise SystemExit(f"agent: cloning {repository_url} at {branch} into {workdir} failed: {e}") from e
     if done.returncode != 0:
-        log.warning("cloning %s into %s exited %d: %s", repository_url, workdir, done.returncode,
-                    (done.stderr or done.stdout).strip()[-500:])
+        raise SystemExit(f"agent: cloning {repository_url} at {branch} into {workdir} exited {done.returncode}: "
+                         f"{(done.stderr or done.stdout).strip()[-500:]}")
 
 
 async def prepare() -> RunSetup:
@@ -136,7 +136,7 @@ async def prepare() -> RunSetup:
     if not branch:
         raise SystemExit(f"agent: platform experiment {cfg.platform_experiment_id} names no branch, the one an agent clones")
 
-    if not config.plans(cfg) and not config.coordinates(cfg):
+    if not config.coordinates(cfg):
         await asyncio.to_thread(clone_workspace, repository_url, branch, workdir)
     commands = await asyncio.to_thread(prompt.hl_commands, cfg)
     instructions.complete(answer, cfg, commands, workdir)

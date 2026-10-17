@@ -4,6 +4,7 @@ import subprocess
 import tempfile
 import unittest
 from types import SimpleNamespace
+from unittest import mock
 
 import hypothesisloop_agent
 from hypothesisloop_agent import core, prompt
@@ -72,14 +73,31 @@ class CloneWorkspaceTest(unittest.TestCase):
             core.clone_workspace(origin, "main", workdir)
             self.assertTrue(os.path.isdir(os.path.join(workdir, ".git")))
 
-    def test_a_workdir_in_use_or_a_failed_clone_is_left_as_it_is(self):
+    def test_a_workdir_in_use_is_left_as_it_is(self):
         with tempfile.TemporaryDirectory() as workdir:
-            core.clone_workspace(os.path.join(workdir, "missing"), "main", workdir)
-            self.assertEqual(os.listdir(workdir), [])
             open(os.path.join(workdir, "work"), "w").close()
             core.clone_workspace("https://git/x", "main", workdir)
             self.assertEqual(os.listdir(workdir), ["work"])
 
+    # A failed clone once left the workdir empty for the agent to clone, which it did without the
+    # worktree subagents the CLI then refused.
+    def test_a_failed_clone_fails_the_run(self):
+        with tempfile.TemporaryDirectory() as workdir:
+            missing = os.path.join(workdir, "missing")
+            with self.assertRaises(SystemExit) as failed:
+                core.clone_workspace(missing, "main", workdir)
+            self.assertIn(f"cloning {missing} at main into {workdir} exited 128", str(failed.exception))
+            with mock.patch.object(core.subprocess, "run", side_effect=subprocess.TimeoutExpired("git", 600)), \
+                    self.assertRaises(SystemExit) as timed_out:
+                core.clone_workspace(missing, "main", workdir)
+            self.assertIn("failed: Command 'git' timed out", str(timed_out.exception))
+
+    # The planner and every researcher clone with this one function, and nothing else in the
+    # harness runs a clone of its own.
+    def test_the_harness_has_one_clone(self):
+        package = pathlib.Path(hypothesisloop_agent.__file__).parent
+        cloning = sorted(str(p.relative_to(package)) for p in package.rglob("*.py") if '"clone"' in p.read_text())
+        self.assertEqual(cloning, ["core.py"])
 
 if __name__ == "__main__":
     unittest.main()

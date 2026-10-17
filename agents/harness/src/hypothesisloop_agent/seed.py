@@ -8,7 +8,6 @@ itself.
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
 import subprocess
@@ -26,7 +25,7 @@ _OPENING = (
     "Your working directory is {workdir}, the root of the repository's clone: every path below is "
     "relative to it, and a file tool takes {workdir}/<path>. "
     "Read for you before this turn, as you would have read them yourself: the draft, the capacity, "
-    "and the repository, cloned into {workdir} (its default branch, depth 1) unless said below, "
+    "and the repository's clone in {workdir}, at the experiment's branch, "
     "with its file list, README and .hypothesisloop/. Start from them, and read again only what a "
     "change of the goal changes or a file not shown here.")
 
@@ -47,12 +46,6 @@ def _section(title: str, body: str) -> str:
     return f"=== {title}\n{body.strip()}"
 
 
-def _clone(url: str, branch: str, workdir: str) -> None:
-    if any(Path(workdir).iterdir()):
-        return
-    _run(["git", "clone", "--depth", "1", "--branch", branch, url, "."], cwd=workdir)
-
-
 def _files(workdir: str) -> list[str]:
     return _run(["git", "ls-files"], cwd=workdir).splitlines()
 
@@ -63,10 +56,10 @@ def _readme(workdir: str, files: list[str]) -> str | None:
 
 
 def planner(workdir: str) -> str:
-    """The opening reads of a planner whose session starts fresh, in workdir, as one prompt."""
+    """The opening reads of a planner whose session starts fresh, in workdir, as one prompt.
+    prepare() cloned the repository into workdir."""
     workdir = os.path.abspath(workdir)
     sections, failed = [], []
-    draft = ""
     for title, command in (("hl platform-experiments get", ["hl", "platform-experiments", "get"]),
                            ("hl capacity", ["hl", "capacity"])):
         try:
@@ -75,16 +68,9 @@ def planner(workdir: str) -> str:
             failed.append(str(e))
             continue
         sections.append(_section(title, output))
-        if command[1] == "platform-experiments":
-            draft = output
     try:
-        read = json.loads(draft) if draft else {}
-        url, branch = read.get("repository_url", ""), read.get("branch", "")
-        if not url or not branch:
-            raise RuntimeError("the draft names no repository_url and branch")
-        _clone(url, branch, workdir)
         files = _files(workdir)
-    except (OSError, ValueError, KeyError, RuntimeError, subprocess.TimeoutExpired) as e:
+    except (OSError, RuntimeError, subprocess.TimeoutExpired) as e:
         failed.append(f"the repository was not read: {e}")
         files = []
     if files:
