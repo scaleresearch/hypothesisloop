@@ -4,7 +4,7 @@ import type { MetricDefinition, PlatformExperiment } from '@/types/platform-expe
 
 /** One researcher of a proposal or of an acceptance. */
 export interface ProposedAgent {
-  flavor?: string
+  agent_type?: string
   model?: string
   // direction is the way to the goal the planner gave this researcher, in a sentence or two.
   hyperparameters?: Record<string, unknown> & { direction?: string }

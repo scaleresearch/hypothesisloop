@@ -21,7 +21,7 @@ export function poolKey(agentType: string | undefined, model: string | undefined
 /** How many researchers at work run each agent type and model. */
 export function atWorkByKey(atWork: JoinedAgent[]): Map<string, number> {
   const out = new Map<string, number>()
-  for (const a of atWork) out.set(poolKey(a.flavor, a.model), (out.get(poolKey(a.flavor, a.model)) ?? 0) + 1)
+  for (const a of atWork) out.set(poolKey(a.agent_type, a.model), (out.get(poolKey(a.agent_type, a.model)) ?? 0) + 1)
   return out
 }
 

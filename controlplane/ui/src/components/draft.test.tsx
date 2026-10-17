@@ -23,7 +23,7 @@ vi.mock('@/lib/api/request', async importActual => ({
   apiSend: vi.fn(),
 }))
 
-const sweeper = { flavor: 'hyperparameter-search', model: 'claude-opus-4-5', hyperparameters: { direction: 'Find the schedule: warmup length first, then the decay.' } }
+const sweeper = { agent_type: 'hyperparameter-search', model: 'claude-opus-4-5', hyperparameters: { direction: 'Find the schedule: warmup length first, then the decay.' } }
 const proposal: Proposal = {
   experiment: {
     name: 'Cosine or constant',
@@ -71,7 +71,7 @@ function show(d: Draft) {
 beforeEach(() => {
   vi.mocked(apiSend).mockReset().mockResolvedValue({})
   vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([
-    { platform_experiment_id: 'pe-1', agent_id: 'ag-p', name: 'Planner', role: 'planner', hosted: true, flavor: 'planner', signed_up_at: '', instance: { state: 'starting', restarts: 0, stopped: false } } as AgentSignup,
+    { platform_experiment_id: 'pe-1', agent_id: 'ag-p', name: 'Planner', role: 'planner', hosted: true, agent_type: 'planner', signed_up_at: '', instance: { state: 'starting', restarts: 0, stopped: false } } as AgentSignup,
   ])
 })
 
@@ -115,7 +115,7 @@ describe('a proposed draft', () => {
 
   // The page once started the experiment right after accepting it. The platform starts it,
   // once its baseline is declared: accepting is the one call.
-  it('accepts at the cost the person states, keeps the proposed flavors, and starts nothing', async () => {
+  it('accepts at the cost the person states, keeps the proposed agent types, and starts nothing', async () => {
     show(proposed())
     const budget = screen.getByLabelText('Budget (accelerator-hours)')
     expect(budget).toHaveProperty('value', '6')

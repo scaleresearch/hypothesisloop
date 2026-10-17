@@ -29,7 +29,7 @@ export function fetchPlatformExperimentAgents(platformExpID: string): Promise<Jo
 interface AddAgentsRequest {
   /** true: the platform runs the agent. false: its token comes back, to run it yourself. */
   hosted: boolean
-  flavor?: string
+  agent_type?: string
   model?: string
 }
 

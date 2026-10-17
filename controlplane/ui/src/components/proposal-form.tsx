@@ -77,7 +77,7 @@ function Researcher({ n, agent }: { n: number; agent: ProposedAgent }) {
     <InsetCard as="li" gap="xs">
       <Inline gap="md" align="baseline" className="text-xs">
         <span className="font-medium">Researcher {n}</span>
-        <span className="text-muted">specialization <Code className="text-foreground">{agent.flavor ?? 'generalist'}</Code></span>
+        <span className="text-muted">specialization <Code className="text-foreground">{agent.agent_type ?? 'generalist'}</Code></span>
         <span className="text-muted">model <Code className="text-foreground">{agent.model ?? 'the platform\'s default'}</Code></span>
       </Inline>
       <Text pre>{direction ?? 'No direction of its own: it works from the brief.'}</Text>

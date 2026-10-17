@@ -5,7 +5,7 @@ import type { JoinedAgent } from '@/types/agents'
 function researcher(id: string, joined: string, more: Partial<JoinedAgent> = {}): JoinedAgent {
   return {
     platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' },
-    hosted: true, flavor: 'generalist', model: 'm', at_work: true, signed_up_at: `2026-01-01T0${joined}:00:00Z`, ...more,
+    hosted: true, agent_type: 'generalist', model: 'm', at_work: true, signed_up_at: `2026-01-01T0${joined}:00:00Z`, ...more,
   }
 }
 
@@ -31,7 +31,7 @@ describe('the researchers at work, as the platform says', () => {
 
 describe('checking a change of the pool as the API does', () => {
   const name = (id: string) => id
-  const atWork = [researcher('a', '1'), researcher('b', '2', { flavor: 'data-search' })]
+  const atWork = [researcher('a', '1'), researcher('b', '2', { agent_type: 'data-search' })]
 
   it('passes a change of max alone, and refuses a max below 1', () => {
     expect(poolProblem(1, null, atWork, name)).toBeNull()

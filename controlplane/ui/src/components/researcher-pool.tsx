@@ -54,7 +54,7 @@ function CutConfirm({ max, cut, nameOf, onConfirm, onCancel }: {
           {cut.map(a => (
             <li key={a.agent_id} className="flex items-baseline justify-between gap-3">
               <span className="whitespace-nowrap font-medium">{a.name}</span>
-              <span className="text-right text-muted">{a.flavor ? nameOf(a.flavor) : 'default'} · joined {relTime(a.signed_up_at)}</span>
+              <span className="text-right text-muted">{a.agent_type ? nameOf(a.agent_type) : 'default'} · joined {relTime(a.signed_up_at)}</span>
             </li>
           ))}
         </ul>

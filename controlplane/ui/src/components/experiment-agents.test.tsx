@@ -33,8 +33,8 @@ const me: Me = {
   projects: [{ id: 'prj_1', org_id: 'org_a', name: 'default', created_at: at }],
 }
 
-function signup(id: string, hosted: boolean, flavor?: string): AgentSignup {
-  return { platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, hosted, flavor, at_work: true, signed_up_at: at }
+function signup(id: string, hosted: boolean, agentType?: string): AgentSignup {
+  return { platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, hosted, agent_type: agentType, at_work: true, signed_up_at: at }
 }
 
 function show(status = PlatformExperimentStatus.OPEN, more: Partial<PlatformExperiment> = {}) {
@@ -52,7 +52,7 @@ beforeEach(() => {
   roster = [signup('ag-old', true)]
   vi.mocked(fetchPlatformExperimentAgents).mockImplementation(async () => [...roster])
   vi.mocked(addPlatformExperimentAgents).mockImplementation(async (_pe, req) => {
-    const added = signup(`ag-new${roster.length}`, req.hosted, req.flavor)
+    const added = signup(`ag-new${roster.length}`, req.hosted, req.agent_type)
     roster = [...roster, added]
     return [req.hosted ? added : { ...added, token: `hls_token-of-${added.agent_id}` }]
   })
@@ -100,19 +100,19 @@ describe('adding agents', () => {
   it('asks the platform to run them by default and shows no token', async () => {
     show()
     await userEvent.click(screen.getByRole('button', { name: 'Add agent' }))
-    expect(addPlatformExperimentAgents).toHaveBeenCalledExactlyOnceWith('pe-1', { hosted: true, flavor: 'generalist', model: undefined })
+    expect(addPlatformExperimentAgents).toHaveBeenCalledExactlyOnceWith('pe-1', { hosted: true, agent_type: 'generalist', model: undefined })
     expect(await screen.findByRole('cell', { name: 'ag-new1' })).toBeTruthy()
     expect(screen.queryByTestId('secret')).toBeNull()
   })
 
-  it('adds one agent a click, with flavor and model, and shows the self-run agent\'s token', async () => {
+  it('adds one agent a click, with agent type and model, and shows the self-run agent\'s token', async () => {
     show()
     await choose(await screen.findByLabelText('Type'), 'Data search')
     await userEvent.type(screen.getByLabelText('Model'), 'claude-opus-4-5')
     await userEvent.click(screen.getByRole('button', { name: 'Me' }))
     await userEvent.click(screen.getByRole('button', { name: 'Add agent' }))
     expect(addPlatformExperimentAgents).toHaveBeenCalledExactlyOnceWith('pe-1', {
-      hosted: false, flavor: 'data-search', model: 'claude-opus-4-5',
+      hosted: false, agent_type: 'data-search', model: 'claude-opus-4-5',
     })
     const secrets = await screen.findAllByTestId('secret')
     expect(secrets.map(s => s.textContent)).toEqual([

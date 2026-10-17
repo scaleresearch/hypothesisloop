@@ -109,7 +109,7 @@ export function PhaseStrip({ pe, jobs = [], stages, readOnly = false, children }
   const operatorDetail = reasonOf(pe).operator_detail
   // A closed experiment waits for nobody, and a reader is told neither whose move it is.
   const who = readOnly || phase === 'closed' ? undefined : waitsFor(pe)
-  const planner = agents?.find(agent => agent.flavor === 'planner')
+  const planner = agents?.find(agent => agent.agent_type === 'planner')
   const baseline = baselineAgent(agents)
   const [showProposal, setShowProposal] = useState(false)
   const pastProposal = phase !== 'planning' && phase !== 'proposal' && !!pe.proposal

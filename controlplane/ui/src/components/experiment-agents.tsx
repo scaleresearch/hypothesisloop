@@ -48,7 +48,7 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
   const { org } = useTenant()
   const { data: catalog } = useAgentTypes(org.id)
   const [hosted, setHosted] = useState(true)
-  const [flavor, setFlavor] = useState(DEFAULT_AGENT_TYPE)
+  const [agentType, setAgentType] = useState(DEFAULT_AGENT_TYPE)
   const [model, setModel] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -59,7 +59,7 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
     setError('')
     try {
       await onAdded(await addPlatformExperimentAgents(pe.id, {
-        hosted, flavor, model: model.trim() || undefined,
+        hosted, agent_type: agentType, model: model.trim() || undefined,
       }))
     } catch (e) {
       setError(errorMessage(e))
@@ -75,10 +75,10 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
           <Select
             fieldSize="sm"
             className="w-56"
-            value={flavor}
-            placeholder={typeName(flavor, catalog)}
+            value={agentType}
+            placeholder={typeName(agentType, catalog)}
             options={researcherTypes(catalog).map(t => ({ value: t.id, label: t.builtin ? t.name : `${t.name} (v${t.current_version})` }))}
-            onChange={setFlavor}
+            onChange={setAgentType}
           />
         </FormField>
         <FormField label="Model">
@@ -86,7 +86,7 @@ function AddAgents({ pe, onAdded }: { pe: PlatformExperiment; onAdded: (joined: 
             fieldSize="sm"
             mono
             className="w-56"
-            placeholder={catalog?.find(t => t.id === flavor)?.current.settings.model || 'platform default'}
+            placeholder={catalog?.find(t => t.id === agentType)?.current.settings.model || 'platform default'}
             value={model}
             onChange={e => setModel(e.target.value)}
           />
@@ -183,8 +183,8 @@ function Messages({ messages }: { messages: AgentMessage[] }) {
 /** Everything about one agent that its row has no room for. */
 /** The agent type an agent runs, by name. */
 function AgentTypeLabel({ agent, catalog }: { agent: AgentSignup; catalog: AgentType[] | undefined }) {
-  if (!agent.flavor) return <span className="text-muted">default</span>
-  return <span title={agent.flavor}>{typeName(agent.flavor, catalog)}</span>
+  if (!agent.agent_type) return <span className="text-muted">default</span>
+  return <span title={agent.agent_type}>{typeName(agent.agent_type, catalog)}</span>
 }
 
 function AgentDetails({ agent, messages, catalog }: { agent: JoinedAgent; messages: AgentMessage[]; catalog: AgentType[] | undefined }) {

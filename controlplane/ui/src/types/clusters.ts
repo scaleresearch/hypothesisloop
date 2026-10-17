@@ -14,7 +14,7 @@ export interface ClusterInfo {
   last_seen_at: string
   connected: boolean
   // Actual busy-vs-idle chip counts from the cluster's most recent reconcile snapshot, summed
-  // across every accelerator flavor — real hardware occupancy, not the used/budget AccH ratio
+  // across every accelerator type — real hardware occupancy, not the used/budget AccH ratio
   // shown per platform experiment. Both are 0 when no live snapshot is within the freshness
   // window (e.g. a disconnected cluster).
   accelerator_busy: number

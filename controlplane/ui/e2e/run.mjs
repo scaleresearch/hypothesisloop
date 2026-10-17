@@ -504,7 +504,7 @@ async function scenarios(browser) {
   await page.getByTestId('secret').waitFor()
   await page.getByRole('button', { name: 'Add agent' }).click()
   await page.getByTestId('secret').nth(1).waitFor()
-  assert.deepEqual(agentAdds.map(r => r.postDataJSON()), Array(2).fill({ hosted: false, flavor: 'hyperparameter-search' }), 'each agent is one call that names no count')
+  assert.deepEqual(agentAdds.map(r => r.postDataJSON()), Array(2).fill({ hosted: false, agent_type: 'hyperparameter-search' }), 'each agent is one call that names no count')
   const agentEnv = await page.getByTestId('secret').first().innerText()
   // An agent is started with the API's address and its token, and nothing else.
   assert.match(agentEnv, /^API_URL=http\S+\nHL_TOKEN=hls_\S+$/)
@@ -557,7 +557,7 @@ async function scenarios(browser) {
   section('a hosted agent shows what became of its machine')
   // Stood in for: an agent the platform really hosts needs a repository and a sandbox provider that rents.
   const agentsAPI = `${API}/platform-experiments/${experimentID}/agents`
-  const signedUp = { platform_experiment_id: experimentID, role: 'competitor', hosted: true, flavor: 'generalist', model: 'stand-in-model', signed_up_at: new Date().toISOString() }
+  const signedUp = { platform_experiment_id: experimentID, role: 'competitor', hosted: true, agent_type: 'generalist', model: 'stand-in-model', signed_up_at: new Date().toISOString() }
   await page.route(agentsAPI, route => route.request().method() === 'GET'
     ? route.fulfill({
       headers: { 'access-control-allow-origin': UI },
@@ -693,7 +693,7 @@ async function scenarios(browser) {
       name: 'Cosine or constant', description: 'Train the small transformer in train.py and report val_loss.',
       metrics: [{ key: 'val_loss', direction: 'minimize' }], report_interval_seconds: 30,
     },
-    budget_accelerator_hours: 6, duration_hours: 4, agents: [{ flavor: 'hyperparameter-search' }, {}],
+    budget_accelerator_hours: 6, duration_hours: 4, agents: [{ agent_type: 'hyperparameter-search' }, {}],
     accelerator_type: 'rtx-4090',
     metric_reason: 'Validation loss on held-out text is the goal itself.',
     measurement: 'bench.py scores a split the training never reads.',
@@ -718,7 +718,7 @@ async function scenarios(browser) {
       return json(draftNow)
     }
     if (path === `/platform-experiments/${draftID}`) return json(draftNow)
-    if (path.endsWith('/agents')) return json({ agents: [{ platform_experiment_id: draftID, agent_id: 'ag-planner', name: 'Planner', role: 'baseline', hosted: true, flavor: 'planner', signed_up_at: new Date().toISOString(), instance: { state: 'starting', restarts: 0, stopped: false } }] })
+    if (path.endsWith('/agents')) return json({ agents: [{ platform_experiment_id: draftID, agent_id: 'ag-planner', name: 'Planner', role: 'baseline', hosted: true, agent_type: 'planner', signed_up_at: new Date().toISOString(), instance: { state: 'starting', restarts: 0, stopped: false } }] })
     return json([])
   })
   await page.goto(`${UI}/projects/${adaMe.projects[0].id}/experiments`)
@@ -762,7 +762,7 @@ async function scenarios(browser) {
   await page.getByRole('button', { name: 'Accept and run' }).click()
   await draftAccepted
   assert.deepEqual(draftWrites, [
-    { path: `/platform-experiments/${draftID}/accept`, body: { name: 'Cosine or constant', budget_accelerator_hours: 3, duration_hours: 4, agents: [{ flavor: 'hyperparameter-search' }, {}] } },
+    { path: `/platform-experiments/${draftID}/accept`, body: { name: 'Cosine or constant', budget_accelerator_hours: 3, duration_hours: 4, agents: [{ agent_type: 'hyperparameter-search' }, {}] } },
   ], 'the proposal\'s name, the budget the person typed, the proposal\'s duration and researchers, and no start: the platform starts it once its baseline is declared')
   await page.unroute(draftAPI)
 

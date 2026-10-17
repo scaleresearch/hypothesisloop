@@ -26,10 +26,10 @@ const me: Me = {
   projects: [{ id: 'prj_1', org_id: 'org_a', name: 'default', created_at: at }],
 }
 
-function researcher(id: string, hour: number, flavor = 'generalist'): JoinedAgent {
+function researcher(id: string, hour: number, agentType = 'generalist'): JoinedAgent {
   return {
     platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' },
-    hosted: true, flavor, model: 'm', at_work: true, signed_up_at: `2026-01-01T0${hour}:00:00Z`,
+    hosted: true, agent_type: agentType, model: 'm', at_work: true, signed_up_at: `2026-01-01T0${hour}:00:00Z`,
   }
 }
 

@@ -71,7 +71,7 @@ export interface AgentSignup {
   hosted: boolean
   // The agent type it runs, by id: it runs the type's current version. model is its own, empty
   // when it runs on its type's.
-  flavor?: string
+  agent_type?: string
   model?: string
   // Whether it is a researcher at work, by the one rule max_agents holds to.
   at_work: boolean
