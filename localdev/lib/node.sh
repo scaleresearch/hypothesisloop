@@ -236,3 +236,16 @@ lib_detach_node() {
   local context="$1" name="$2"
   kubectl --context "$context" taint node "$name" "${LIB_NODE_TAINT_KEY}:NoSchedule" --overwrite &>/dev/null
 }
+
+# lib_pin_system_pods places k3s's own deployments on the control-plane node, which carries the
+# no-workload taint they were not made to tolerate. Once one is evicted it can only land on a dev
+# node, and CoreDNS then dies with every dev-node teardown: the cluster-agent cannot resolve the
+# control plane and the cluster reads as disconnected. k3s puts its manifests back each time its
+# server starts, so this is run whenever nodes are provisioned. Idempotent.
+lib_pin_system_pods() {
+  local context="$1" deployment
+  for deployment in coredns local-path-provisioner metrics-server; do
+    kubectl --context "${context}" -n kube-system patch deployment "${deployment}" --type merge -p \
+      "{\"spec\":{\"template\":{\"spec\":{\"tolerations\":[{\"key\":\"${LIB_NODE_TAINT_KEY}\",\"operator\":\"Exists\",\"effect\":\"NoSchedule\"},{\"key\":\"CriticalAddonsOnly\",\"operator\":\"Exists\"},{\"key\":\"node-role.kubernetes.io/control-plane\",\"operator\":\"Exists\",\"effect\":\"NoSchedule\"}],\"nodeSelector\":{\"node-role.kubernetes.io/control-plane\":\"true\"}}}}}" >/dev/null
+  done
+}

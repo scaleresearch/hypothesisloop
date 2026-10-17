@@ -44,6 +44,8 @@ else
 fi
 SERVER_URL="https://${SERVER_IP}:6443"
 
+lib_pin_system_pods "${CONTEXT_NAME}"
+
 echo "==> Provisioning ${NODE_COUNT} dev/test node(s) (${NODE_CPUS} cpu / ${NODE_MEMORY} each)..."
 CPU_ALLOC_MILLI=$(( NODE_CPUS * 1000 * 80 / 100 ))
 MEM_ALLOC_KI=$(( ${NODE_MEMORY%[gG]} * 1000000 * 80 / 100 ))
