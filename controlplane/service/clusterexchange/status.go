@@ -30,13 +30,13 @@ func (s *Service) PushStatus(ctx context.Context, clusterName string, push clust
 	ids := make([]string, 0, len(push.Reports))
 	for _, rep := range push.Reports {
 		if rep.ExperimentID == "" || rep.Phase == "" {
-			return refusal.Reject(http.StatusBadRequest, "every status report requires experiment_id and phase")
+			return refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "every status report requires experiment_id and phase")
 		}
 		if rep.AdmittedMachine != nil && rep.AdmittedNode == "" {
-			return refusal.Reject(http.StatusBadRequest, "status report for "+rep.ExperimentID+" names an admitted_machine and no admitted_node")
+			return refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "status report for "+rep.ExperimentID+" names an admitted_machine and no admitted_node")
 		}
 		if (rep.StartedAt == nil) != (rep.EndedAt == nil) || (rep.StartedAt != nil && rep.EndedAt.Before(*rep.StartedAt)) {
-			return refusal.Reject(http.StatusBadRequest, "status report for "+rep.ExperimentID+" needs started_at and ended_at together, in that order")
+			return refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "status report for "+rep.ExperimentID+" needs started_at and ended_at together, in that order")
 		}
 		ids = append(ids, rep.ExperimentID)
 	}
@@ -92,8 +92,8 @@ func (s *Service) PushStatus(ctx context.Context, clusterName string, push clust
 		// runtime actually has something to say about why this job's container hasn't
 		// started or has been restarting, so a healthy tick doesn't overwrite a still-valid
 		// prior explanation with silence.
-		if rep.Reason != "" || rep.Message != "" || rep.RestartCount != 0 || rep.ScheduledNodes != 0 || rep.SchedulingReason != "" {
-			if err := s.metrics.RecordPhaseDetail(ctx, rep.ExperimentID, clusterName, rep.Reason, rep.Message, rep.RestartCount, rep.ScheduledNodes, rep.SchedulingReason, placementByID[rep.ExperimentID].AttemptCount, now); err != nil {
+		if rep.Reason != "" || rep.Message != "" || rep.RestartCount != 0 || rep.ScheduledNodes != 0 {
+			if err := s.metrics.RecordPhaseDetail(ctx, rep.ExperimentID, clusterName, rep.Reason, rep.Message, rep.RestartCount, rep.ScheduledNodes, placementByID[rep.ExperimentID].AttemptCount, now); err != nil {
 				return auth.Internal(s.logger, "cluster push status", err, zap.String("experiment_id", rep.ExperimentID), zap.String("cluster", clusterName))
 			}
 		}

@@ -19,6 +19,7 @@ import (
 	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/metricsingest"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/controller"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/settlement"
@@ -154,6 +155,8 @@ func newControllerServer(authenticator *auth.Authenticator, pool *db.Pool, store
 
 func newRouter(tokens auth.Tokens, push http.Handler, logger *zap.Logger) chi.Router {
 	r := chi.NewRouter()
+	r.NotFound(refusal.NoRoute)
+	r.MethodNotAllowed(refusal.NoMethod)
 	r.Use(auth.Gate(tokens, logger, nil))
 	r.Handle(clusterapi.NodeMetricsPath, auth.RequireRuntime(logger, push))
 	// Both spellings, same as the API server — a caller should never have to remember which

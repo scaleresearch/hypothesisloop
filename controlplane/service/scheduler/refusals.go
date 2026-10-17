@@ -27,13 +27,13 @@ func ChangeRefusal(err error) *refusal.Refusal {
 	case ReasonInvalidTransition, ReasonSummaryExists:
 		status = http.StatusConflict
 	}
-	return refusal.Refuse(status, admErr.Reason, admErr.Message)
+	return admErr.Refusal(status)
 }
 
 // AdmissionStatus is the HTTP status an admission refusal of reason is answered with.
 func AdmissionStatus(reason string) int {
 	switch reason {
-	case ReasonInsufficientCredits:
+	case ReasonInsufficientQuota:
 		return http.StatusPaymentRequired
 	case ReasonDuplicate:
 		return http.StatusConflict

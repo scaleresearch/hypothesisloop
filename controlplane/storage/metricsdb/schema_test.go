@@ -93,7 +93,7 @@ func TestEveryWriterWritesOnlyDeclaredTablesAndLabels(t *testing.T) {
 			Model: domain.RateLimit{Rejected: true, Utilization: &one, ResetsAt: &at}}}),
 		"observed cost": s.SetObservedBatch(ctx, "a", "pe", "job", domain.CapacityGuaranteed, map[domain.ResourceType]float64{domain.ResourceAcceleratorHours: 1}),
 		"log tail":      s.RecordLogTail(ctx, "job", "c", []string{"line"}, at),
-		"phase detail":  s.RecordPhaseDetail(ctx, "job", "c", "reason", "message", 1, 1, "scheduling", 1, at),
+		"phase detail":  s.RecordPhaseDetail(ctx, "job", "c", "reason", "message", 1, 1, 1, at),
 		"model call": s.RecordModelCall(ctx, ModelCall{OrgID: "o", PlatformExperimentID: "pe", AgentID: "a", Provider: "anthropic", Model: "m",
 			InputTokens: 1, At: at}),
 	}

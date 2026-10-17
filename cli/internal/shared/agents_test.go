@@ -99,7 +99,7 @@ func TestAgentsMessageAllNamesTheResearchersItDidNotReach(t *testing.T) {
 	clitest.RecordingServer(t, func(_ int, _ clitest.Recorded) any {
 		return map[string]any{
 			"messages": []map[string]any{{"agent_id": "ag-1", "from": "owner", "text": "queue more"}},
-			"refused":  []map[string]any{{"agent_id": "ag-2", "reason": "message_rate_limited", "retry_after": "2026-10-09T12:00:00Z"}},
+			"refused":  []map[string]any{{"agent_id": "ag-2", "reason": "rate_limited", "retry_after": "2026-10-09T12:00:00Z"}},
 		}
 	})
 	var stdout, stderr bytes.Buffer
@@ -108,7 +108,7 @@ func TestAgentsMessageAllNamesTheResearchersItDidNotReach(t *testing.T) {
 		t.Fatalf("message --all: exit %d, stderr %s", code, stderr.String())
 	}
 	want := `{"agent_id":"ag-1","from":"owner","text":"queue more"}` + "\n" +
-		`{"agent_id":"ag-2","reason":"message_rate_limited","retry_after":"2026-10-09T12:00:00Z"}` + "\n"
+		`{"agent_id":"ag-2","reason":"rate_limited","retry_after":"2026-10-09T12:00:00Z"}` + "\n"
 	if stdout.String() != want {
 		t.Errorf("printed %q, want %q", stdout.String(), want)
 	}

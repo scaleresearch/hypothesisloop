@@ -10,6 +10,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 )
 
 var (
@@ -53,9 +54,9 @@ func status(err error) int {
 	if err == nil {
 		return http.StatusOK
 	}
-	var refusal *auth.Error
-	if errors.As(err, &refusal) {
-		return refusal.GetStatus()
+	var refused *refusal.Refusal
+	if errors.As(err, &refused) {
+		return refused.GetStatus()
 	}
 	return -1
 }

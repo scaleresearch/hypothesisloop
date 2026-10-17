@@ -41,7 +41,7 @@ func (a *Access) Account(ctx context.Context) (Principal, error) {
 	case KindUser, KindKey, KindStaff:
 		return p, nil
 	default:
-		return Principal{}, forbidden("forbidden: a " + string(p.Kind) + " token does not reach accounts")
+		return Principal{}, forbidden("a " + string(p.Kind) + " token does not reach accounts")
 	}
 }
 
@@ -104,16 +104,16 @@ func Administers(p Principal, role domain.OrgRole) error {
 		return nil
 	case KindKey:
 		if p.ProjectID != "" {
-			return forbidden("forbidden: an API key bound to one project cannot change its org")
+			return forbidden("an API key bound to one project cannot change its org")
 		}
 		return nil
 	case KindUser:
 		if role != domain.OrgRoleOwner {
-			return forbidden("forbidden: only an owner of the org may change it")
+			return forbidden("only an owner of the org may change it")
 		}
 		return nil
 	default:
-		return forbidden("forbidden: a " + string(p.Kind) + " token does not administer an org")
+		return forbidden("a " + string(p.Kind) + " token does not administer an org")
 	}
 }
 
@@ -147,7 +147,7 @@ func (a *Access) Person(ctx context.Context) (Principal, error) {
 		return p, err
 	}
 	if p.UserID == "" {
-		return p, forbidden("forbidden: only a signed-in person does this, for themselves")
+		return p, forbidden("only a signed-in person does this, for themselves")
 	}
 	return p, nil
 }
@@ -170,7 +170,7 @@ func (a *Access) Inviter(ctx context.Context, orgID string) (userID string, err 
 		return key.Actor.ID, nil
 	}
 	if p.UserID == "" {
-		return "", forbidden("forbidden: an invite is made by a signed-in person or with an API key of the org")
+		return "", forbidden("an invite is made by a signed-in person or with an API key of the org")
 	}
 	return p.UserID, nil
 }

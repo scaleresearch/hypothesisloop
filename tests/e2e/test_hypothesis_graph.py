@@ -249,8 +249,8 @@ def test_registration_waits_until_close_hypotheses_are_told_apart(api, graph_pe,
     held = api.post_hypothesis(pe_id, reworded, agent_id=agent_b)
     assert held.status_code == 409, f"reworded duplicate: got {held.status_code} {held.text}"
     body = held.json()
-    assert [(h["id"], h["reason"]) for h in body["similar"]] == [(bs8["id"], "close_text")], body
-    assert body["similar"][0]["builds_on"] == [pe_id] and body["similar"][0]["agent_id"] == agent_a
+    assert [(p["field"], p["reason"]) for p in body["problems"]] == [(bs8["id"], "close_text")], body
+    assert bs8["text"] in body["problems"][0]["message"], body
     assert body["reason"] == "similar_hypotheses" and "distinct_from" in body["message"] and "detail" not in body, body
     assert [n["id"] for n in api.hypothesis_graph(pe_id)["nodes"]] == [bs8["id"]], "a held-back registration created a node"
 

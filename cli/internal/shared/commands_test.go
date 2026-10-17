@@ -285,8 +285,7 @@ func TestAWakeEntryNamesAKindOrAKindWithTheValueOrTheSubjectThatWakesOrTheValueT
 // A tunnel in front of the platform answered 530 with a whole HTML page, which hl printed into
 // the agent's context on every call.
 //
-// Every such answer then read as an outage, the router's own 404 for a route this hl is too old
-// or too new for among them. Only a gateway's 502, 503 and 504 and a request that got no answer
+// Every such answer then read as an outage. Only a gateway's 502, 503 and 504 and a request that got no answer
 // say the platform could not be reached.
 //
 // That line is the one place an agent reads what an outage asks of it, and it says of the command
@@ -295,15 +294,13 @@ func TestAnAnswerThatIsNotThePlatformsIsOneLineWithoutItsBody(t *testing.T) {
 	const next = "A person runs it again later; an agent ends its turn, and an update arrives when the platform answers again"
 	const unreachable = "the platform could not be reached, and this command changed nothing. " + next
 	const inFront = "the answer is no JSON, so it is none of the platform's API: something in front of the platform answered in its place"
-	const noRoute = "the platform serves no GET /experiments/job-1: this hl and the platform are of different versions"
 	for status, tc := range map[int]struct{ body, want string }{
 		530: {"<!DOCTYPE html>\n<html><head><title>Cloudflare Tunnel error</title></head>\n<body>" + strings.Repeat("<p>x</p>\n", 500) + "</body></html>", inFront},
 		500: {"Internal Server Error", inFront},
 		502: {"error code: 502", unreachable},
 		503: {"", unreachable},
 		504: {"<html>gateway timeout</html>", unreachable},
-		404: {"404 page not found\n", noRoute},
-		405: {"Method Not Allowed\n", noRoute},
+		404: {"404 page not found\n", inFront},
 	} {
 		clitest.SetAPIURL(t, clitest.WithServer(t, func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(status)

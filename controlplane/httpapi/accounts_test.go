@@ -19,6 +19,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
@@ -1046,7 +1047,7 @@ func TestAFailureOfThePlatformIsAnsweredWithoutItsText(t *testing.T) {
 				t.Fatalf("GET %s answers with the failure's own text (%q): %s", path, leak, rec.Body)
 			}
 		}
-		if !strings.Contains(rec.Body.String(), auth.InternalError) {
+		if !strings.Contains(rec.Body.String(), refusal.InternalMessage) {
 			t.Fatalf("GET %s: got = %s, want the one generic answer", path, rec.Body)
 		}
 	}

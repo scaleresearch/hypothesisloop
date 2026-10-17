@@ -651,7 +651,7 @@ func TestAFailedPullIsRetriedByTheNextPass(t *testing.T) {
 	if status, err := e.PollJobStatus(ctx, "retried"); err != nil || status.Phase != clusterapi.JobPhasePending {
 		t.Fatalf("status = %+v (err %v), want pending", status, err)
 	}
-	reason, message, _, _, _, err := e.PollPhaseDetail(ctx, "retried", 0)
+	reason, message, _, _, err := e.PollPhaseDetail(ctx, "retried", 0)
 	if err != nil || reason != "" || message != "pull image flaky: registry unreachable" {
 		t.Fatalf("phase detail = %q %q (err %v), want the image and the engine's whole error as the message and no reason that ends the job", reason, message, err)
 	}
@@ -661,7 +661,7 @@ func TestAFailedPullIsRetriedByTheNextPass(t *testing.T) {
 		t.Fatalf("%d pulls, want the failed one and one retry", got)
 	}
 	eventually(t, "the start has returned", idle(e, "retried"))
-	if _, message, _, _, _, _ := e.PollPhaseDetail(ctx, "retried", 0); message != "" {
+	if _, message, _, _, _ := e.PollPhaseDetail(ctx, "retried", 0); message != "" {
 		t.Fatalf("phase detail still says %q after the pull succeeded", message)
 	}
 }
@@ -761,7 +761,7 @@ func TestAJobPullingItsImageIsReportedPendingAndPlaced(t *testing.T) {
 	if status.Phase != clusterapi.JobPhasePending || status.Attempt != 3 {
 		t.Fatalf("status = %s attempt %d, want pending attempt 3", status.Phase, status.Attempt)
 	}
-	reason, message, _, scheduledNodes, _, err := e.PollPhaseDetail(ctx, "pulling", status.Attempt)
+	reason, message, _, scheduledNodes, err := e.PollPhaseDetail(ctx, "pulling", status.Attempt)
 	if err != nil {
 		t.Fatal(err)
 	}

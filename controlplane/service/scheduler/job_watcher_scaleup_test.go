@@ -18,7 +18,6 @@ import (
 type scaleUpBackend struct {
 	phase             domain.JobPhase
 	scheduledNodes    int32
-	schedulingReason  string
 	autoscalerEnabled map[string]bool
 	clusterIDs        map[string]string
 	admittedType      domain.AcceleratorType
@@ -47,12 +46,12 @@ func (b *scaleUpBackend) LatestJobPhase(context.Context, *domain.Experiment) (do
 func (b *scaleUpBackend) GetAdmittedAcceleratorType(context.Context, *domain.Experiment) (domain.AcceleratorType, bool, error) {
 	return b.admittedType, true, nil
 }
-func (b *scaleUpBackend) LatestPhaseDetail(context.Context, *domain.Experiment) (reason, message string, restartCount, scheduledNodes int32, schedulingReason string, found bool, err error) {
+func (b *scaleUpBackend) LatestPhaseDetail(context.Context, *domain.Experiment) (reason, message string, restartCount, scheduledNodes int32, found bool, err error) {
 	found = true
 	if b.phaseDetailFound != nil {
 		found = *b.phaseDetailFound
 	}
-	return b.reason, b.message, 0, b.scheduledNodes, b.schedulingReason, found, nil
+	return b.reason, b.message, 0, b.scheduledNodes, found, nil
 }
 func (b *scaleUpBackend) PhaseReportedSince(_ context.Context, _ *domain.Experiment, reason string) (time.Time, bool, error) {
 	since, found := b.firstReported[reason]

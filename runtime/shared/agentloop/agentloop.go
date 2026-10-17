@@ -544,7 +544,6 @@ func (a *Agent) statusReportFor(ctx context.Context, exec agentexec.Executor, id
 	var logTail []string
 	var reason, message string
 	var restartCount, scheduledNodes int32
-	var schedulingReason string
 	if phase != clusterapi.JobPhaseGone {
 		// Diagnostics accompany the phase; they are not the phase. A read error on one job must
 		// not stop this batch reporting phase for every other job (important.md #19), so it is
@@ -554,10 +553,10 @@ func (a *Agent) statusReportFor(ctx context.Context, exec agentexec.Executor, id
 			a.Log("fetch log tail %s: %v", id, err)
 			logTail = nil
 		}
-		reason, message, restartCount, scheduledNodes, schedulingReason, err = exec.PollPhaseDetail(ctx, id, observed.Attempt)
+		reason, message, restartCount, scheduledNodes, err = exec.PollPhaseDetail(ctx, id, observed.Attempt)
 		if err != nil {
 			a.Log("poll phase detail %s: %v", id, err)
-			reason, message, restartCount, scheduledNodes, schedulingReason = "", "", 0, 0, ""
+			reason, message, restartCount, scheduledNodes = "", "", 0, 0
 		}
 	}
 
@@ -585,7 +584,6 @@ func (a *Agent) statusReportFor(ctx context.Context, exec agentexec.Executor, id
 		Message:                 message,
 		RestartCount:            restartCount,
 		ScheduledNodes:          scheduledNodes,
-		SchedulingReason:        schedulingReason,
 	}, true
 }
 

@@ -22,7 +22,7 @@ const (
 	ReasonAgentTypeInUse   = "agent_type_in_use"
 	ReasonArchived         = "archived"
 	ReasonAgentTypeLimit   = "agent_type_limit"
-	ReasonEditRateLimited  = "edit_rate_limited"
+	ReasonEditRateLimited  = "rate_limited"
 )
 
 // AgentTypeStore is the persistence of agent types. *db.Store satisfies it.

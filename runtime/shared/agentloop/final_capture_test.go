@@ -91,8 +91,8 @@ func (e *captureExecutor) ResolveAdmittedAcceleratorType(context.Context, string
 func (e *captureExecutor) FetchLogTail(context.Context, string, int) ([]string, error) {
 	return e.logTail, nil
 }
-func (e *captureExecutor) PollPhaseDetail(context.Context, string, int) (string, string, int32, int32, string, error) {
-	return clusterapi.PhaseReasonContainerFailed, "container exited with code 1", 0, 0, "", nil
+func (e *captureExecutor) PollPhaseDetail(context.Context, string, int) (string, string, int32, int32, error) {
+	return clusterapi.PhaseReasonContainerFailed, "container exited with code 1", 0, 0, nil
 }
 func (e *captureExecutor) GetClusterID(context.Context) (string, error) {
 	return "test-cluster-id", nil

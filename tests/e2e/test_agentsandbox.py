@@ -29,7 +29,7 @@ import pytest
 import requests
 
 from support import admin
-from support.api import API, token_scope
+from support.api import API, ENDED, token_scope
 from support.stages import BUDGET, BURN_JOB_HOURS, REPORT_INTERVAL_SECONDS, ROSTER_SIZE, STAGES, cross_first_boundary_ranked
 from support.wait import eventually
 
@@ -153,7 +153,7 @@ def test_agents_join_through_the_api_and_the_launcher_is_told_what_to_run(with_r
     launch = {"in_agentsandbox": True, "agent_type": "data-search", "model": "claude-sonnet-5", "hyperparameters": {"batch_size": 64}}
     sandboxed = api.add_agents(pe_id, name=f"sandboxed-{run_id}", **launch)
     r = api.post(f"/platform-experiments/{pe_id}/agents", {"name": f"sandboxed-{run_id}", **launch})
-    assert (r.status_code, r.json()["reason"]) == (409, "agent_name_taken"), f"a second agent of one name: {r.status_code} {r.text}"
+    assert (r.status_code, r.json()["reason"]) == (409, "name_taken"), f"a second agent of one name: {r.status_code} {r.text}"
     sandboxed += api.add_agents(pe_id, **launch)
     self_run = api.add_agents(pe_id, agent_type="generalist")
     measurer = api.add_agents(pe_id, in_agentsandbox=True, role="baseline")[0]["agent_id"]
@@ -383,7 +383,7 @@ def test_a_cut_sandboxed_agent_is_left_to_end_while_survivors_keep_running(with_
     done = sorted(survivors)[0]
     as_done = api.as_caller(admin.token(f"agent:{pe_id}/{done}"))
     finish = ("platform-experiments", "agents", "finish", "--reason", "quota spent")
-    if api.experiment(jobs[done])["status"] in ("QUEUED", "SUBMITTED", "RUNNING", "COMPLETED"):
+    if (status := api.experiment(jobs[done])["status"]) not in ENDED or status == "COMPLETED":
         early = as_done.hl_expect(*finish)
         assert early.returncode == 1 and "work_unfinished" in early.stderr, f"finishing with work open: {early.stderr}"
         if api.experiment(jobs[done])["status"] == "COMPLETED":

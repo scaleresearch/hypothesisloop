@@ -58,7 +58,7 @@ func (a jobsAPI) buildEnvironment(ctx context.Context, in *struct{ Body environm
 	if err != nil {
 		var refused *scheduler.AdmissionError
 		if errors.As(err, &refused) {
-			return nil, refusal.Refuse(scheduler.AdmissionStatus(refused.Reason), refused.Reason, refused.Message)
+			return nil, refused.Refusal(scheduler.AdmissionStatus(refused.Reason))
 		}
 		return nil, auth.Internal(a.logger, "build environment", err)
 	}
@@ -92,7 +92,7 @@ func (a jobsAPI) getEnvironment(ctx context.Context, in *struct {
 			if refused.Reason == scheduler.ReasonEnvironmentNotRequested {
 				status = http.StatusNotFound
 			}
-			return nil, refusal.Refuse(status, refused.Reason, refused.Message)
+			return nil, refused.Refusal(status)
 		}
 		return nil, auth.Internal(a.logger, "get environment", err)
 	}
@@ -125,7 +125,7 @@ func (a jobsAPI) imageCredential(ctx context.Context, in *struct {
 	if err != nil {
 		var refused *scheduler.AdmissionError
 		if errors.As(err, &refused) {
-			return nil, refusal.Refuse(http.StatusConflict, refused.Reason, refused.Message)
+			return nil, refused.Refusal(http.StatusConflict)
 		}
 		return nil, auth.Internal(a.logger, "job image credential", err, zap.String("id", in.ID))
 	}

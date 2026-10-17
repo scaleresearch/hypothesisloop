@@ -276,7 +276,7 @@ func TestEveryCallTheAgentMakesIsOneTheChartGrants(t *testing.T) {
 	must("add a pod", kube.Tracker().Add(pod))
 	_, err = c.PollJobStatus(ctx, exp.ID)
 	must("PollJobStatus", err)
-	_, _, _, _, _, err = c.PollPhaseDetail(ctx, exp.ID, exp.AttemptCount)
+	_, _, _, _, err = c.PollPhaseDetail(ctx, exp.ID, exp.AttemptCount)
 	must("PollPhaseDetail", err)
 	_, err = c.FetchLogTail(ctx, exp.ID, 10)
 	must("FetchLogTail", err)

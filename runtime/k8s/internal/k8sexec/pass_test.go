@@ -139,7 +139,7 @@ func TestAPassListsTheClustersNodesAndPodsOnce(t *testing.T) {
 		if _, err := pass.FetchLogTail(ctx, id, agentexec.LogTailLines); err != nil {
 			t.Fatal(err)
 		}
-		if _, _, _, _, _, err := pass.PollPhaseDetail(ctx, id, observed.Attempt); err != nil {
+		if _, _, _, _, err := pass.PollPhaseDetail(ctx, id, observed.Attempt); err != nil {
 			t.Fatal(err)
 		}
 	}

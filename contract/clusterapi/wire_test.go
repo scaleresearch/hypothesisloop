@@ -84,7 +84,6 @@ type oldStatusReport struct {
 	Message                 string         `json:"message,omitempty"`
 	RestartCount            int32          `json:"restart_count,omitempty"`
 	ScheduledNodes          int32          `json:"scheduled_nodes,omitempty"`
-	SchedulingReason        string         `json:"scheduling_reason,omitempty"`
 	Attempt                 *int           `json:"attempt,omitempty"`
 	StartedAt               *time.Time     `json:"started_at,omitempty"`
 	EndedAt                 *time.Time     `json:"ended_at,omitempty"`
@@ -108,7 +107,7 @@ func TestTheStatusReportIsTheOneAgentsSent(t *testing.T) {
 			ExperimentID: "job-2", Phase: JobPhaseSucceeded.String(), AdmittedAcceleratorType: "nvidia.com/gpu.product=NVIDIA-L40",
 			AdmittedNode: "slot-1", AdmittedMachine: &oldJobMachine{InstanceID: "i-1", HostID: "h-1", AcceleratorModel: "L40", CPUModel: "EPYC", PricePerHourUSD: 1.25},
 			LogTail: []string{"epoch 1"}, Reason: PhaseReasonContainerFailed, Message: "exit 1", RestartCount: 1, ScheduledNodes: 1,
-			SchedulingReason: "scaling up", Attempt: &attempt, StartedAt: &started, EndedAt: &ended,
+			Attempt: &attempt, StartedAt: &started, EndedAt: &ended,
 		},
 	}}, StatusPush{Reports: []StatusReport{
 		{ExperimentID: "job-1", Phase: "gone"},
@@ -116,7 +115,7 @@ func TestTheStatusReportIsTheOneAgentsSent(t *testing.T) {
 			ExperimentID: "job-2", Phase: JobPhaseSucceeded.String(), AdmittedAcceleratorType: "nvidia.com/gpu.product=NVIDIA-L40",
 			AdmittedNode: "slot-1", AdmittedMachine: &JobMachine{InstanceID: "i-1", HostID: "h-1", AcceleratorModel: "L40", CPUModel: "EPYC", PricePerHourUSD: 1.25},
 			LogTail: []string{"epoch 1"}, Reason: PhaseReasonContainerFailed, Message: "exit 1", RestartCount: 1, ScheduledNodes: 1,
-			SchedulingReason: "scaling up", Attempt: &attempt, StartedAt: &started, EndedAt: &ended,
+			Attempt: &attempt, StartedAt: &started, EndedAt: &ended,
 		},
 	}})
 }

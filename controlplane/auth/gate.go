@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"go.uber.org/zap"
 )
 
@@ -60,8 +61,8 @@ func Gate(tokens Tokens, logger *zap.Logger, webSockets map[string]string) func(
 			}
 			principal, err := tokens.Authenticate(r.Context(), token)
 			if err != nil {
-				var refusal *Error
-				if !errors.As(err, &refusal) {
+				var refused *refusal.Refusal
+				if !errors.As(err, &refused) {
 					err = Internal(logger, "could not authenticate a request", err, zap.String("path", r.URL.Path))
 				}
 				WriteError(w, logger, err)
@@ -133,12 +134,12 @@ var errNotGated = errors.New("the request did not pass auth.Gate")
 // RequireRuntime serves next only to a runtime token of a registered cluster, or to staff. It
 // guards the plain HTTP endpoints runtimes push to outside the documented API.
 func RequireRuntime(logger *zap.Logger, next http.Handler) http.Handler {
-	return require(logger, "forbidden: only a runtime token may push here", next, KindRuntime, KindStaff)
+	return require(logger, "only a runtime token may push here", next, KindRuntime, KindStaff)
 }
 
 // RequireStaff serves next only to staff.
 func RequireStaff(logger *zap.Logger, next http.Handler) http.Handler {
-	return require(logger, "forbidden: staff only", next, KindStaff)
+	return require(logger, "staff only", next, KindStaff)
 }
 
 func require(logger *zap.Logger, refusal string, next http.Handler, kinds ...Kind) http.Handler {

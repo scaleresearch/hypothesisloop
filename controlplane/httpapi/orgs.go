@@ -27,7 +27,7 @@ func accountsRoute[I, O any](doc *Doc, svc *accounts.Service, op huma.Operation,
 	register(doc, auth.AudienceCoordinator, op, func(ctx context.Context, in *I) (*O, error) {
 		out, err := handle(ctx, in)
 		if err != nil {
-			return nil, rejected(svc.Answer(op.OperationID, err))
+			return nil, svc.Answer(op.OperationID, err)
 		}
 		return out, nil
 	})

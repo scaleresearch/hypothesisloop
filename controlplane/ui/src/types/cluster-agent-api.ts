@@ -304,19 +304,10 @@ export interface components {
         ErrorModel: {
             /** @description What was refused, or what failed, in a sentence. */
             message: string;
-            /** @description What the platform's staff read of that condition. */
-            operator_detail?: string;
             /** @description Each refusal of a check that found several, so that all of them are fixed in one pass. */
-            problems?: components["schemas"]["ErrorModel"][];
-            /** @description What a client acts on: a code such as not_found, set on every refusal that names one. */
-            reason?: string;
-            /**
-             * Format: date-time
-             * @description Since when that condition holds.
-             */
-            since?: string;
-            /** @description The sentence for a person, on a refusal for a condition of the platform. */
-            summary?: string;
+            problems?: components["schemas"]["Problem"][];
+            /** @description What a client acts on: a code such as not_found. */
+            reason: string;
         };
         JobGroup: {
             /** Format: int64 */
@@ -386,6 +377,14 @@ export interface components {
             /** Format: int64 */
             termination_grace_period_seconds?: number;
             topology?: components["schemas"]["TopologySpec"];
+        };
+        Problem: {
+            /** @description The field of the request, or the thing, the problem concerns. */
+            field?: string;
+            /** @description What was refused, in a sentence. */
+            message: string;
+            /** @description What a client acts on, as reason of the refusal. */
+            reason: string;
         };
         ReconcileAnswer: {
             builds: components["schemas"]["EnvironmentBuild"][];
@@ -469,7 +468,6 @@ export interface components {
             restart_count?: number;
             /** Format: int32 */
             scheduled_nodes?: number;
-            scheduling_reason?: string;
             /** Format: date-time */
             started_at?: string;
         };
@@ -500,6 +498,7 @@ export type ErrorModel = components['schemas']['ErrorModel'];
 export type JobGroup = components['schemas']['JobGroup'];
 export type JobMachine = components['schemas']['JobMachine'];
 export type JobSpec = components['schemas']['JobSpec'];
+export type Problem = components['schemas']['Problem'];
 export type ReconcileAnswer = components['schemas']['ReconcileAnswer'];
 export type ReconcileRequest = components['schemas']['ReconcileRequest'];
 export type RegistryLogin = components['schemas']['RegistryLogin'];

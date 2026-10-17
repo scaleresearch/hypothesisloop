@@ -10,11 +10,9 @@ import (
 	"time"
 )
 
-// GetLatestPhaseDetailFull must decode the two new columns back into PhaseDetailRow, in addition
-// to the pre-existing reason/message/restart_count fields.
-func TestGetLatestPhaseDetailFullDecodesSchedulingColumns(t *testing.T) {
+func TestGetLatestPhaseDetailFullDecodesScheduledNodes(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprint(w, `{"output":[{"records":{"schema":{"column_schemas":[{"name":"reason"},{"name":"phase_message"},{"name":"restart_count"},{"name":"scheduled_nodes"},{"name":"scheduling_reason"}]},"rows":[["",  "waiting", 1, 2, "TriggeredScaleUp"]]}}]}`)
+		_, _ = fmt.Fprint(w, `{"output":[{"records":{"schema":{"column_schemas":[{"name":"reason"},{"name":"phase_message"},{"name":"restart_count"},{"name":"scheduled_nodes"}]},"rows":[["",  "waiting", 1, 2]]}}]}`)
 	}))
 	defer server.Close()
 
@@ -27,9 +25,6 @@ func TestGetLatestPhaseDetailFullDecodesSchedulingColumns(t *testing.T) {
 	}
 	if row.ScheduledNodes != 2 {
 		t.Errorf("ScheduledNodes = %d, want 2", row.ScheduledNodes)
-	}
-	if row.SchedulingReason != "TriggeredScaleUp" {
-		t.Errorf("SchedulingReason = %q, want TriggeredScaleUp", row.SchedulingReason)
 	}
 	if row.Message != "waiting" || row.RestartCount != 1 {
 		t.Errorf("pre-existing fields regressed: message=%q restart_count=%d", row.Message, row.RestartCount)

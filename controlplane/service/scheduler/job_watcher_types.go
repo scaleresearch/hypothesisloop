@@ -62,7 +62,7 @@ type JobReports interface {
 	// LatestPhaseDetail is the runtime's latest explanation for why a job has not started (see
 	// domain.PhaseDetail), plus the gang-readiness facts checkScaleUpDeadline needs.
 	// found=false means no runtime has reported one yet.
-	LatestPhaseDetail(ctx context.Context, exp *domain.Experiment) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, found bool, err error)
+	LatestPhaseDetail(ctx context.Context, exp *domain.Experiment) (reason, message string, restartCount int32, scheduledNodes int32, found bool, err error)
 	// PhaseReportedSince is when exp's current attempt first reported reason. found=false means
 	// it never did.
 	PhaseReportedSince(ctx context.Context, exp *domain.Experiment, reason string) (since time.Time, found bool, err error)

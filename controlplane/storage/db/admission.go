@@ -49,10 +49,10 @@ func (r *AdmitRefusal) Error() string { return r.Reason + ": " + r.Message }
 // The reasons of an AdmitRefusal, each answered to the submitter as it is.
 const (
 	RefusedRateLimited       = "rate_limited"
-	RefusedAgentCut          = "agent_held"
+	RefusedAgentCut          = domain.NotAdmittedStageCut
 	RefusedAgentFinished     = "agent_finished"
 	RefusedNoQuota           = "no_quota"
-	RefusedInsufficientQuota = "insufficient_credits"
+	RefusedInsufficientQuota = domain.NotAdmittedInsufficientQuota
 )
 
 // admissionLockKey names the advisory lock one agent's admissions in one platform experiment

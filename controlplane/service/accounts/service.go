@@ -297,7 +297,7 @@ type WithdrawnCluster struct {
 func validName(what, name string) (string, error) {
 	name, err := domain.ValidateName(what, name)
 	if err != nil {
-		return "", refusal.Reject(http.StatusBadRequest, err.Error())
+		return "", refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, err.Error())
 	}
 	return name, nil
 }
@@ -311,15 +311,15 @@ func (h *Service) Answer(op string, err error) error {
 	case errors.As(err, &refused):
 		return err
 	case errors.Is(err, db.ErrOrgNotFound):
-		return refusal.Reject(http.StatusNotFound, "org not found")
+		return refusal.NotFound("org")
 	case errors.Is(err, db.ErrProjectNotFound):
-		return refusal.Reject(http.StatusNotFound, "project not found")
+		return refusal.NotFound("project")
 	case errors.Is(err, db.ErrAPIKeyNotFound):
-		return refusal.Reject(http.StatusNotFound, "api key not found")
+		return refusal.NotFound("api key")
 	case errors.Is(err, db.ErrUserNotFound):
-		return refusal.Reject(http.StatusNotFound, "user not found")
+		return refusal.NotFound("user")
 	case errors.Is(err, db.ErrClusterNotFound):
-		return refusal.Reject(http.StatusNotFound, "cluster not found")
+		return refusal.NotFound("cluster")
 	case errors.Is(err, db.ErrOrgMemberNotFound):
 		return refusal.NotFound("member")
 	case errors.Is(err, db.ErrOrgInviteNotFound):
@@ -335,13 +335,13 @@ func (h *Service) Answer(op string, err error) error {
 	case errors.Is(err, db.ErrOrgInviteExpired):
 		return refusal.Conflict(ReasonInviteExpired, "the invite has expired: ask an owner of the org for a new one")
 	case errors.Is(err, db.ErrAPIKeyCreatorLacksOrg):
-		return auth.Forbidden("forbidden: " + err.Error())
+		return auth.Forbidden(err.Error())
 	case errors.Is(err, db.ErrMaxOrgsReached):
 		return refusal.Conflict(ReasonMaxOrgsReached, fmt.Sprintf("a person owns at most %d orgs, and the owner of this one already does", h.limits.MaxOrgsPerUser))
 	case errors.Is(err, db.ErrMaxProjectsReached):
 		return refusal.Conflict(ReasonMaxProjectsReached, fmt.Sprintf("an org holds at most %d projects, and this one already does", h.limits.MaxProjectsPerOrg))
 	case errors.Is(err, db.ErrProjectNameTaken), errors.Is(err, db.ErrClusterNameTaken):
-		return refusal.Reject(http.StatusConflict, err.Error())
+		return refusal.Conflict("name_taken", err.Error())
 	default:
 		return auth.Internal(h.logger, "accounts request failed", err, zap.String("operation", op))
 	}
@@ -531,7 +531,7 @@ func (h *Service) RenameOrg(ctx context.Context, id, name string) (*domain.Org, 
 		return nil, err
 	}
 	if org == nil {
-		return nil, refusal.Reject(http.StatusNotFound, "org not found")
+		return nil, refusal.NotFound("org")
 	}
 	return org, nil
 }
@@ -598,7 +598,7 @@ func (h *Service) RegisterCluster(ctx context.Context, orgID, name string) (*Reg
 		return nil, err
 	}
 	if err := domain.ValidateIdentifier("cluster name", name); err != nil {
-		return nil, refusal.Reject(http.StatusBadRequest, err.Error())
+		return nil, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, err.Error())
 	}
 	cluster, err := h.clusters.RegisterCluster(ctx, name, orgID)
 	if err != nil {
@@ -633,7 +633,7 @@ func (h *Service) OrderClusters(ctx context.Context, orgID string, names []strin
 	}
 	if err := h.clusters.SetClusterOrder(ctx, orgID, names); err != nil {
 		if errors.Is(err, db.ErrClusterOrder) {
-			return nil, refusal.Reject(http.StatusUnprocessableEntity, err.Error())
+			return nil, refusal.Invalid(refusal.ReasonInvalidRequest, err.Error())
 		}
 		return nil, err
 	}
@@ -665,10 +665,10 @@ func (h *Service) UpdateCluster(ctx context.Context, orgID, name string, shared 
 		return nil, err
 	}
 	if shared == nil && settings.Empty() {
-		return nil, refusal.Reject(http.StatusUnprocessableEntity, "name what changes: shared, scale_up_timeout_seconds, max_speculative_accelerators, stuck_pending_timeout_seconds or status_silence_ceiling_seconds")
+		return nil, refusal.Invalid(refusal.ReasonInvalidRequest, "name what changes: shared, scale_up_timeout_seconds, max_speculative_accelerators, stuck_pending_timeout_seconds or status_silence_ceiling_seconds")
 	}
 	if err := domain.ValidateClusterSettings(settings); err != nil {
-		return nil, refusal.Reject(http.StatusUnprocessableEntity, err.Error())
+		return nil, refusal.Invalid(refusal.ReasonInvalidRequest, err.Error())
 	}
 	cluster, requeued, err := h.clusters.UpdateCluster(ctx, name, shared, settings)
 	if err != nil {

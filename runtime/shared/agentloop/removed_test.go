@@ -58,7 +58,7 @@ func refusingServer(t *testing.T, body string) (*httptest.Server, func() []strin
 // A removed cluster's jobs went back to the queue with the removal. What the machine still runs
 // of them holds its accelerators for nobody, so the agent stops all of it and then exits.
 func TestARemovedClustersAgentStopsItsWorkloadsAndReturns(t *testing.T) {
-	server, asked := refusingServer(t, `{"message":"unauthenticated: cluster test is not registered","reason":"cluster_not_registered"}`)
+	server, asked := refusingServer(t, `{"reason":"cluster_not_registered","message":"cluster test is not registered"}`)
 	exec := drainingExecutor{&captureExecutor{managed: []string{"job-a", "job-b"}}}
 	agent := newTestAgent(server, exec.captureExecutor)
 	agent.Executor = exec
@@ -85,7 +85,7 @@ func TestARemovedClustersAgentStopsItsWorkloadsAndReturns(t *testing.T) {
 
 // A token refused for any other cause is somebody's to fix, and the jobs keep running meanwhile.
 func TestARefusalWithoutThatReasonStopsNothing(t *testing.T) {
-	server, _ := refusingServer(t, `{"message":"unauthenticated: invalid token signature"}`)
+	server, _ := refusingServer(t, `{"reason":"unauthenticated","message":"invalid token signature"}`)
 	exec := drainingExecutor{&captureExecutor{managed: []string{"job-a"}}}
 	agent := newTestAgent(server, exec.captureExecutor)
 	agent.Executor = exec

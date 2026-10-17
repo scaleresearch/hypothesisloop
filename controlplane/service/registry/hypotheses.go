@@ -410,7 +410,7 @@ func ChangeRefusal(h *domain.Hypothesis, caller Changer, remove bool) *refusal.R
 	}
 	switch {
 	case caller.UserID == "":
-		return refusal.Refuse(http.StatusForbidden, "person_only", "only the signed-in person who wrote an idea may "+verb+" it, and this request carries no person")
+		return refusal.Refuse(http.StatusForbidden, "forbidden", "only the signed-in person who wrote an idea may "+verb+" it, and this request carries no person")
 	case h.AgentID != "":
 		return refusal.Refuse(http.StatusForbidden, "agent_hypothesis", fmt.Sprintf("hypothesis %s is agent %s's, and an agent's hypotheses are its record: nobody may %s one. Add a comment to it instead", h.ID, h.AgentID, verb))
 	case h.Actor.Kind != domain.ActorUser:
@@ -418,9 +418,9 @@ func ChangeRefusal(h *domain.Hypothesis, caller Changer, remove bool) *refusal.R
 	case h.Actor.ID == caller.UserID, remove && caller.OrgOwner:
 		return nil
 	case remove:
-		return refusal.Refuse(http.StatusForbidden, "not_the_author", "only the person who wrote this idea, or an owner of its org, may remove it. Add a comment to it instead")
+		return refusal.Refuse(http.StatusForbidden, "forbidden", "only the person who wrote this idea, or an owner of its org, may remove it. Add a comment to it instead")
 	default:
-		return refusal.Refuse(http.StatusForbidden, "not_the_author", "only the person who wrote this idea may edit it. Add a comment to it instead")
+		return refusal.Refuse(http.StatusForbidden, "forbidden", "only the person who wrote this idea may edit it. Add a comment to it instead")
 	}
 }
 

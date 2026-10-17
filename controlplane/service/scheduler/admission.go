@@ -7,6 +7,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/contract/jobspec"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
@@ -16,23 +17,33 @@ var codeRefPattern = regexp.MustCompile(`^\S+@[0-9a-f]{40}$`)
 
 // Admission error reason constants.
 const (
-	ReasonInsufficientCredits = db.RefusedInsufficientQuota
-	ReasonDuplicate           = "duplicate"
-	ReasonMalformed           = "malformed"
-	ReasonRateLimited         = db.RefusedRateLimited
-	ReasonJobTooLong          = "job_too_long"
-	ReasonEstimateRequired    = "estimate_required"
-	ReasonDataQuotaExceeded   = "data_quota_exceeded"
-	// A job states the cpu, memory and storage of each node as quantities.
-	ReasonCPURequired     = "cpu_required"
-	ReasonMemoryRequired  = "memory_required"
-	ReasonStorageRequired = "storage_required"
+	ReasonInsufficientQuota = db.RefusedInsufficientQuota
+	ReasonDuplicate         = "duplicate"
+	ReasonMalformed         = "malformed"
+	ReasonRateLimited       = db.RefusedRateLimited
+	ReasonJobTooLong        = "job_too_long"
+	ReasonDataQuotaExceeded = "data_quota_exceeded"
+	// ReasonRequired refuses a job that leaves out what every job states, the field named in its
+	// problems: its image, the cpu, memory and storage of each node as quantities, and an estimate
+	// where none was measured.
+	ReasonRequired = "required"
 )
 
-// AdmissionError is returned when an experiment cannot be admitted.
+// AdmissionError is returned when an experiment cannot be admitted. Field names the field of the
+// job it concerns, when it concerns one.
 type AdmissionError struct {
 	Reason  string
 	Message string
+	Field   string
+}
+
+// Refusal is the refusal the API answers e with, with status.
+func (e *AdmissionError) Refusal(status int) *refusal.Refusal {
+	refused := refusal.Refuse(status, e.Reason, e.Message)
+	if e.Field != "" {
+		refused.On(e.Field)
+	}
+	return refused
 }
 
 func (e *AdmissionError) Error() string {
@@ -65,9 +76,9 @@ func quantitiesStated(job domain.JobSpec) error {
 		case err == nil:
 			return nil
 		case err.Unstated:
-			return &AdmissionError{Reason: map[string]string{"cpu": ReasonCPURequired, "memory": ReasonMemoryRequired, "storage": ReasonStorageRequired}[err.Quantity], Message: err.Message}
+			return &AdmissionError{Reason: ReasonRequired, Field: err.Field, Message: err.Message}
 		}
-		return &AdmissionError{Reason: ReasonMalformed, Message: err.Message}
+		return &AdmissionError{Reason: ReasonMalformed, Field: err.Field, Message: err.Message}
 	}
 	if len(job.Groups) == 0 {
 		return check("job", domain.JobGroup{CPU: job.CPU, Memory: job.Memory, Storage: job.Storage})

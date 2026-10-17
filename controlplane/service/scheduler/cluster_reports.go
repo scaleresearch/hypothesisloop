@@ -74,12 +74,12 @@ func (b *ClusterReports) LatestJobPhase(ctx context.Context, exp *domain.Experim
 // LatestPhaseDetail reads the runtime's latest reported explanation for why exp's container
 // hasn't started (or has been restarting). found=false means nothing has been reported yet —
 // distinct from an empty reason, which just means the runtime has nothing notable to say.
-func (b *ClusterReports) LatestPhaseDetail(ctx context.Context, exp *domain.Experiment) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, found bool, err error) {
+func (b *ClusterReports) LatestPhaseDetail(ctx context.Context, exp *domain.Experiment) (reason, message string, restartCount int32, scheduledNodes int32, found bool, err error) {
 	row, found, err := b.metrics.GetLatestPhaseDetailFull(ctx, exp.ID, exp.ClusterName, exp.AttemptCount)
 	if err != nil || !found {
-		return "", "", 0, 0, "", found, err
+		return "", "", 0, 0, found, err
 	}
-	return row.Reason, row.Message, row.RestartCount, row.ScheduledNodes, row.SchedulingReason, true, nil
+	return row.Reason, row.Message, row.RestartCount, row.ScheduledNodes, true, nil
 }
 
 // PhaseReportedSince is when exp's current attempt on its cluster first reported reason.

@@ -75,13 +75,11 @@ type Executor interface {
 	FetchLogTail(ctx context.Context, experimentID string, maxLines int) ([]string, error)
 	// PollPhaseDetail also reports the gang-readiness facts the control plane's scale-up-timeout
 	// watcher needs: scheduledNodes is the count of this experiment's pods/containers that have
-	// actually landed (k8s: PodScheduled=True; bare metal: the container exists), and
-	// schedulingReason is a best-effort explanation for why a pod is still Pending (autoscaler
-	// refusal/acceptance text), empty when there is nothing to report.
+	// actually landed (k8s: PodScheduled=True; bare metal: the container exists).
 	// attempt is the generation this poll should count pods for (clusterapi.AttemptUnknown when the
 	// executor cannot resolve one), so a still-terminating pod from a superseded attempt is never
 	// counted toward the current attempt's scheduled_nodes.
-	PollPhaseDetail(ctx context.Context, experimentID string, attempt int) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, err error)
+	PollPhaseDetail(ctx context.Context, experimentID string, attempt int) (reason, message string, restartCount int32, scheduledNodes int32, err error)
 
 	// PollJobStatus is one coherent read of a managed workload. Phase, identity and generation
 	// come from the same look at the same object on purpose: read separately, a

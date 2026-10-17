@@ -41,7 +41,7 @@ job:
   # handshake (a burst of forks/execs), failing it outright rather than just slowing it down —
   # see node-agent-daemonset.yaml's resources comment for the full mechanism.
   # cpu, memory and storage are always stated quantities: a submit that leaves one out, or asks
-  # for "max", is refused with 422 cpu_required, memory_required or storage_required.
+  # for "max", is refused with 422 required.
   cpu: "250m"
   memory: "128Mi"
   storage: "512Mi"

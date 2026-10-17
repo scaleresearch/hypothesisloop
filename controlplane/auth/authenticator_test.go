@@ -16,6 +16,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 )
 
 // fakeDirectory is the rows a token is checked against.
@@ -133,8 +134,8 @@ func newTestAuthenticator(t *testing.T, signers ...testSigner) (*Authenticator, 
 
 func assertRefused(t *testing.T, what string, p Principal, err error) {
 	t.Helper()
-	var refusal *Error
-	if !errors.As(err, &refusal) || refusal.GetStatus() != http.StatusUnauthorized {
+	var refused *refusal.Refusal
+	if !errors.As(err, &refused) || refused.GetStatus() != http.StatusUnauthorized {
 		t.Errorf("%s: got = %+v, %v, want a 401 refusal", what, p, err)
 	}
 }
@@ -379,8 +380,8 @@ func TestADirectoryFailureIsNotARefusal(t *testing.T) {
 	a, directory := newTestAuthenticator(t)
 	directory.fail = errors.New("database is down")
 	_, err := a.Authenticate(context.Background(), mustMint(t, testSecret, scope.Job("job-a")))
-	var refusal *Error
-	if err == nil || errors.As(err, &refusal) {
+	var refused *refusal.Refusal
+	if err == nil || errors.As(err, &refused) {
 		t.Fatalf("got = %v, want the directory's own error, which answers 500", err)
 	}
 }
@@ -479,7 +480,7 @@ func TestAFailureOfThePlatformsOwnIsAnsweredWithoutItsText(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer "+mustMint(t, testSecret, scope.Runtime("cluster-a")))
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusInternalServerError || strings.Contains(recorder.Body.String(), "pq:") || !strings.Contains(recorder.Body.String(), InternalError) {
+	if recorder.Code != http.StatusInternalServerError || strings.Contains(recorder.Body.String(), "pq:") || !strings.Contains(recorder.Body.String(), refusal.InternalMessage) {
 		t.Fatalf("got = %d %q, want 500 with the generic body", recorder.Code, recorder.Body.String())
 	}
 }
@@ -492,7 +493,7 @@ func TestInternalLogsTheCauseAndAnswersWithoutIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if answer.GetStatus() != http.StatusInternalServerError || string(body) != `{"message":"internal error"}` {
+	if answer.GetStatus() != http.StatusInternalServerError || string(body) != `{"reason":"internal","message":"internal error"}` {
 		t.Fatalf("answered %d %s, want 500 with the generic body", answer.GetStatus(), body)
 	}
 	entries := logs.All()

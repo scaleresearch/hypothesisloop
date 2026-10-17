@@ -101,7 +101,7 @@ func TestAnExitedContainerWithNoReportedStateIsFailedWithAReason(t *testing.T) {
 	if err != nil || status.Phase != clusterapi.JobPhaseFailed {
 		t.Fatalf("status = %s (err %v), want failed: nothing says the command succeeded", status.Phase, err)
 	}
-	reason, message, _, _, _, err := east.PollPhaseDetail(context.Background(), "unknown-end", 0)
+	reason, message, _, _, err := east.PollPhaseDetail(context.Background(), "unknown-end", 0)
 	if err != nil || reason != clusterapi.PhaseReasonContainerFailed || !strings.Contains(message, "no state") {
 		t.Fatalf("phase detail = %q %q (err %v), want the failure and that the engine reported no state", reason, message, err)
 	}
@@ -135,7 +135,7 @@ func TestEveryEngineStateIsReportedByNameAndAnUnknownOneIsAFailureWithTheReason(
 			if err != nil || status.Phase != want.phase {
 				t.Fatalf("status = %s (err %v), want %s", status.Phase, err, want.phase)
 			}
-			reason, message, _, _, _, err := east.PollPhaseDetail(context.Background(), "job", 0)
+			reason, message, _, _, err := east.PollPhaseDetail(context.Background(), "job", 0)
 			if err != nil || reason != want.reason || !strings.Contains(message, want.message) || (want.message == "" && message != "") {
 				t.Fatalf("phase detail = %q %q (err %v), want reason %q and a message with %q", reason, message, err, want.reason, want.message)
 			}
@@ -154,11 +154,11 @@ func TestAContainerThatExitedNonZeroIsReportedAsFailedWithItsCode(t *testing.T) 
 	east := newFakeExecutor(engine)
 	east.clusterName = "east"
 
-	reason, message, _, _, _, err := east.PollPhaseDetail(context.Background(), "crashed", 0)
+	reason, message, _, _, err := east.PollPhaseDetail(context.Background(), "crashed", 0)
 	if err != nil || reason != clusterapi.PhaseReasonContainerFailed || message != "container exited with code 3" {
 		t.Fatalf("phase detail = %q %q (err %v), want the failure and its exit code", reason, message, err)
 	}
-	if reason, message, _, _, _, err := east.PollPhaseDetail(context.Background(), "finished", 0); err != nil || reason != "" || message != "" {
+	if reason, message, _, _, err := east.PollPhaseDetail(context.Background(), "finished", 0); err != nil || reason != "" || message != "" {
 		t.Fatalf("phase detail of a clean exit = %q %q (err %v), want none", reason, message, err)
 	}
 }

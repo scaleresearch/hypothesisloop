@@ -36,7 +36,7 @@ func TestAnInstanceThatNeverBootsWaitsUnplacedUntilItIsNoLongerDesired(t *testin
 	for pass := 0; pass < 3; pass++ {
 		mustCreate(t, e, exp)
 		matches, err := e.WorkloadMatchesDesired(ctx, exp)
-		_, _, _, scheduled, _, detailErr := e.PollPhaseDetail(ctx, "exp-1", 0)
+		_, _, _, scheduled, detailErr := e.PollPhaseDetail(ctx, "exp-1", 0)
 		phase, attempt := status(t, e, "exp-1")
 		if err != nil || detailErr != nil || !matches || phase != clusterapi.JobPhasePending || attempt != 0 || scheduled != 0 {
 			t.Fatalf("pass %d: matches %v, phase %v, attempt %d, scheduled %d, %v %v", pass, matches, phase, attempt, scheduled, err, detailErr)
@@ -48,7 +48,7 @@ func TestAnInstanceThatNeverBootsWaitsUnplacedUntilItIsNoLongerDesired(t *testin
 	if available, _, _, _, _ := e.GetLiveAcceleratorCapacitySnapshot(ctx); available[h100] != 1 {
 		t.Fatalf("available = %v, want the booting instance's slot taken", available)
 	}
-	if reason, message, _, _, _, _ := e.PollPhaseDetail(ctx, "exp-1", 0); reason != clusterapi.PhaseReasonInstanceStarting || message == "" {
+	if reason, message, _, _, _ := e.PollPhaseDetail(ctx, "exp-1", 0); reason != clusterapi.PhaseReasonInstanceStarting || message == "" {
 		t.Fatalf("a starting instance reads as %q %q, want it to say what the job waits for", reason, message)
 	}
 
@@ -128,7 +128,7 @@ func TestAnInstanceTheProviderCannotPlaceIsKeptAndLeftToTheControlPlane(t *testi
 	for pass := 0; pass < 3; pass++ {
 		mustCreate(t, e, exp)
 		matches, err := e.WorkloadMatchesDesired(ctx, exp)
-		reason, message, _, scheduled, _, detailErr := e.PollPhaseDetail(ctx, "exp-1", 0)
+		reason, message, _, scheduled, detailErr := e.PollPhaseDetail(ctx, "exp-1", 0)
 		phase, attempt := status(t, e, "exp-1")
 		if err != nil || detailErr != nil || !matches || phase != clusterapi.JobPhasePending || attempt != 0 || scheduled != 1 || reason != clusterapi.PhaseReasonInstanceUnknown || !strings.Contains(message, "does not say whether the job runs") {
 			t.Fatalf("pass %d: matches %v, phase %v, attempt %d, scheduled %d, reason %q, message %q, %v %v", pass, matches, phase, attempt, scheduled, reason, message, err, detailErr)
@@ -214,7 +214,7 @@ func TestAnUnreadableProviderFailsEveryReadInsteadOfAnsweringEmpty(t *testing.T)
 	_, nodeErr := e.GetLiveNodeResourceCapacity(ctx)
 	_, _, _, _, acceleratorErr := e.GetLiveAcceleratorCapacitySnapshot(ctx)
 	_, tailErr := e.FetchLogTail(ctx, "exp-1", 10)
-	_, _, _, _, _, detailErr := e.PollPhaseDetail(ctx, "exp-1", 0)
+	_, _, _, _, detailErr := e.PollPhaseDetail(ctx, "exp-1", 0)
 	_, _, _, admittedErr := e.ResolveAdmittedAcceleratorType(ctx, "exp-1")
 	for name, err := range map[string]error{
 		"ListManagedJobs": jobsErr, "ListManagedJobsForStatus": reportedErr, "PollJobStatus": pollErr,
@@ -343,7 +343,7 @@ func TestAnExitedInstanceWithUnreadableOutputIsReportedGone(t *testing.T) {
 	if err != nil || observed.Phase != clusterapi.JobPhaseGone || observed.Attempt != 0 {
 		t.Fatalf("poll = %+v, %v", observed, err)
 	}
-	if reason, message, _, _, _, err := e.PollPhaseDetail(ctx, "exp-1", 0); err != nil || reason != "" || message != "" {
+	if reason, message, _, _, err := e.PollPhaseDetail(ctx, "exp-1", 0); err != nil || reason != "" || message != "" {
 		t.Fatalf("detail = %q %q, %v", reason, message, err)
 	}
 	// While its attempt is desired the instance is kept and not rented again, so a read that

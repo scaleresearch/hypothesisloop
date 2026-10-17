@@ -56,9 +56,10 @@ runs in the environment built from it: QUEUED as environment_building until buil
 as environment_failed with the build's output when the file failed, EVICTED as
 environment_unbuilt at no cost when the platform could not build it (submit again).
 
-Refusals: image_required; unknown_job_image (neither a name from hl capacity nor a full
+Refusals: required (job.image, job.cpu, job.memory, job.storage or
+metadata.estimated_duration_hours left out, the field named in problems); unknown_job_image (neither a name from hl capacity nor a full
 address); no_cluster_for_image; no_environment_builder (the commit declares an environment and
-no cluster your org may use builds); cpu_required, memory_required, storage_required;
+no cluster your org may use builds);
 exceeds_cluster_capacity (more than any cluster has idle, with both figures);
 experiment_not_started (before the start only a baseline agent's job is taken; see status_reason
 of hl platform-experiments get); experiment_closed.

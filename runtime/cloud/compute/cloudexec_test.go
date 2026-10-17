@@ -383,13 +383,13 @@ func TestARunningJobReportsTheSlotItOccupies(t *testing.T) {
 	ctx := context.Background()
 	mustCreate(t, e, job(t, "exp-1", 0, 1))
 
-	_, _, _, scheduled, _, err := e.PollPhaseDetail(ctx, "exp-1", 0)
+	_, _, _, scheduled, err := e.PollPhaseDetail(ctx, "exp-1", 0)
 	if phase, _ := status(t, e, "exp-1"); phase != clusterapi.JobPhasePending || scheduled != 0 || err != nil {
 		t.Fatalf("starting instance: phase %v, scheduled %d, %v", phase, scheduled, err)
 	}
 
 	p.Start("hl-job-t1-exp-1-a0-h100-0")
-	_, _, _, scheduled, _, err = e.PollPhaseDetail(ctx, "exp-1", 0)
+	_, _, _, scheduled, err = e.PollPhaseDetail(ctx, "exp-1", 0)
 	if phase, _ := status(t, e, "exp-1"); phase != clusterapi.JobPhaseRunning || scheduled != 1 || err != nil {
 		t.Fatalf("running instance: phase %v, scheduled %d, %v", phase, scheduled, err)
 	}
@@ -440,7 +440,7 @@ func TestTheExitLineDecidesHowAnExitedInstanceEnded(t *testing.T) {
 			p.Exit("hl-job-t1-exp-1-a0-cpu-0", tc.lines...)
 
 			phase, _ := status(t, e, "exp-1")
-			reason, message, _, _, _, err := e.PollPhaseDetail(context.Background(), "exp-1", 0)
+			reason, message, _, _, err := e.PollPhaseDetail(context.Background(), "exp-1", 0)
 			if err != nil || phase != tc.phase || reason != tc.reason || !strings.Contains(message, tc.messagePart) {
 				t.Fatalf("phase %v, reason %q, message %q, %v", phase, reason, message, err)
 			}

@@ -240,9 +240,9 @@ hypotheses: [{text: one}, {text: two}]
 func TestHypothesisSubmitHeldListsTheCloseOnesAndBothWaysOn(t *testing.T) {
 	url := clitest.WithServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusConflict)
-		_, _ = w.Write([]byte(`{"reason":"similar_hypotheses","message":"Nothing was registered","similar":[` +
-			`{"id":"hyp-1","agent_id":"bob","status":"open","text":"one","reason":"close_text"},` +
-			`{"id":"hyp-2","actor":{"kind":"user","id":"user-ann","name":"ann"},"status":"refuted","text":"two","reason":"refuted_parent"}]}`))
+		_, _ = w.Write([]byte(`{"reason":"similar_hypotheses","message":"Nothing was registered","problems":[` +
+			`{"field":"hyp-1","reason":"close_text","message":"open, by bob: one"},` +
+			`{"field":"hyp-2","reason":"refuted_parent","message":"refuted, by ann: two"}]}`))
 	})
 	clitest.SetAPIURL(t, url)
 	var stdout, stderr bytes.Buffer
@@ -251,7 +251,7 @@ func TestHypothesisSubmitHeldListsTheCloseOnesAndBothWaysOn(t *testing.T) {
 	if code != 1 || stdout.Len() != 0 || len(got) != 4 {
 		t.Fatalf("exit %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
 	}
-	if got[1] != `{"id":"hyp-1","agent_id":"bob","status":"open","text":"one","reason":"close_text"}` {
+	if got[1] != "hyp-1 close_text: open, by bob: one" {
 		t.Fatalf("held hypothesis line: %s", got[1])
 	}
 	for _, want := range []string{"hl job submit FILE --hypothesis ID", "--distinct-from hyp-1,hyp-2", "--contradicts ID"} {

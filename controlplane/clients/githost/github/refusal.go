@@ -112,7 +112,7 @@ func Refusal(logger *zap.Logger, op string, err error, gone int) error {
 	case errors.Is(err, ErrInstallationGone):
 		return refusal.Refuse(gone, ReasonInstallationGone, "the GitHub App installation was removed on GitHub: its owner installs the App again from Settings, GitHub")
 	case errors.As(err, &missing):
-		return refusal.Refuse(gone, ReasonPermissionMissing, "github_permission_missing: "+strings.Join(missing.Missing, ", ")+". The GitHub App installation has not granted that, which the platform needs: its owner accepts the App's permissions on GitHub (the account's Settings, Applications, Configure)")
+		return refusal.Refuse(gone, ReasonPermissionMissing, "permissions not granted: "+strings.Join(missing.Missing, ", ")+". The GitHub App installation has not granted that, which the platform needs: its owner accepts the App's permissions on GitHub (the account's Settings, Applications, Configure)")
 	case errors.Is(err, ErrPermissionNotGranted):
 		return refusal.Refuse(gone, ReasonPermissionMissing, "the GitHub App installation has not granted the access the App asks for: its owner accepts the App's permissions on GitHub (the account's Settings, Applications, Configure)")
 	case errors.Is(err, ErrRateLimited):

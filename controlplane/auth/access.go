@@ -6,8 +6,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 )
 
 // Placement is what Access reads to place a resource in an org. *db.Store satisfies it.
@@ -43,12 +43,12 @@ func NewAccess(placement Placement) *Access {
 }
 
 // NotFound is the refusal for a resource the caller cannot reach, whether or not it exists.
-func NotFound(what string) *Error {
-	return &Error{status: http.StatusNotFound, ErrorModel: platformapi.ErrorModel{Message: what + " not found"}}
+func NotFound(what string) *refusal.Refusal {
+	return refusal.NotFound(what)
 }
 
-func forbidden(message string) *Error {
-	return &Error{status: http.StatusForbidden, ErrorModel: platformapi.ErrorModel{Message: message}}
+func forbidden(message string) *refusal.Refusal {
+	return refusal.Refuse(http.StatusForbidden, refusal.ReasonForbidden, message)
 }
 
 type readKey struct{}
@@ -342,7 +342,7 @@ func (a *Access) Staff(ctx context.Context) error {
 		return err
 	}
 	if p.Kind != KindStaff {
-		return forbidden("forbidden: only staff may do this")
+		return forbidden("only staff may do this")
 	}
 	return nil
 }
@@ -376,7 +376,7 @@ func (a *Access) Org(ctx context.Context, requested string) (string, error) {
 	}
 	if requested == "" {
 		if p.Kind == KindStaff || len(p.OrgIDs) != 1 {
-			return "", &Error{status: http.StatusBadRequest, ErrorModel: platformapi.ErrorModel{Message: "org_id is required: this token is not bound to a single org"}}
+			return "", refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "org_id is required: this token is not bound to a single org").On("org_id")
 		}
 		return p.OrgIDs[0], nil
 	}

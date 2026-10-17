@@ -9,7 +9,7 @@ five with nothing to compare, and it must advance with nobody cut rather than wa
 job is left to report.
 
 Needs quota_tier="guaranteed" at signup (an agent-kind participant otherwise defaults to
-burst_only, so a guaranteed-tier job submission 402s with insufficient_credits).
+burst_only, so a guaranteed-tier job submission 402s with insufficient_quota).
 """
 from __future__ import annotations
 

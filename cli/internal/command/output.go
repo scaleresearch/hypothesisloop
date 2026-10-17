@@ -98,7 +98,7 @@ func refusalMessage(body []byte) string {
 	return strings.TrimSpace(string(body))
 }
 
-// problemLines is a refusal that holds several problems, one line each, reason first, so all of
+// problemLines is a refusal that holds several problems, one line each, field and reason first, so all of
 // them are fixed in one pass. Empty for an answer with fewer than two.
 func problemLines(body []byte) string {
 	var refusal platformapi.ErrorModel
@@ -107,6 +107,10 @@ func problemLines(body []byte) string {
 	}
 	lines := []string{fmt.Sprintf("%d problems, fix them all:", len(refusal.Problems))}
 	for _, p := range refusal.Problems {
+		if p.Field != "" {
+			lines = append(lines, "  "+p.Field+" "+p.Reason+": "+p.Message)
+			continue
+		}
 		lines = append(lines, "  "+p.Reason+": "+p.Message)
 	}
 	return strings.Join(lines, "\n")

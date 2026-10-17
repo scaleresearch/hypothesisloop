@@ -146,7 +146,7 @@ func registerRegistry(doc *Doc, svc *registry.Service, logger *zap.Logger) {
 			"text equivalent to an existing hypothesis (modulo case/whitespace) returns that row with 200 and " +
 			"already_existed=true and your links are not applied; a new one returns 201. While the text reads close to " +
 			"hypotheses of the platform experiment it does not build on (word overlap, at a lower bar for one that builds on the objective alone), or a builds_on target is refuted, it answers 409 similar_hypotheses " +
-			"with them in `similar` and registers nothing until each is named in distinct_from or in a contradicts or " +
+			"with each of them in problems, its id the field, and registers nothing until each is named in distinct_from or in a contradicts or " +
 			"related link. A signed-in person is not refused: their hypothesis is registered with 201 and the ones it reads close to come back in similar, as a hint. The returned id is " +
 			"metadata.hypothesis_id for the job testing it; every job must reference a hypothesis from its own platform " +
 			"experiment. " +
@@ -403,9 +403,9 @@ func (a hypothesesAPI) permit(ctx context.Context, nodes []*registry.GraphNode) 
 
 const changeRule = "Only for an idea a person wrote for no agent, and only while no agent has acted on it: no job tests it " +
 	"and no other hypothesis links to it. Once one has, it is part of the record and the answer is 409 hypothesis_in_record " +
-	"naming the jobs and the links; add a comment instead. 403 person_only for a request no signed-in person makes, " +
+	"naming the jobs and the links; add a comment instead. 403 forbidden for a request no signed-in person makes, " +
 	"agent_hypothesis for an agent's hypothesis, not_a_persons_idea for one registered with an API key, a coordinator's or " +
-	"staff's token, and not_the_author for anyone else. 409 experiment_closed once the platform experiment is closed."
+	"staff's token, and forbidden for anyone else. 409 experiment_closed once the platform experiment is closed."
 
 type checkOutRequest struct {
 	AgentID string `json:"agent_id,omitempty" required:"false" doc:"The agent that checked it out. Absent, the agent token's own."`
@@ -438,7 +438,7 @@ func (a hypothesesAPI) checkOut(ctx context.Context, in *struct {
 	}
 	out, err := a.registry.CheckOut(ctx, hyp, agentID, in.Body.Branch)
 	if err != nil {
-		return nil, rejected(a.registry.WriteRefusal(err))
+		return nil, a.registry.WriteRefusal(err)
 	}
 	return &struct{ Body *registry.Checkout }{Body: out}, nil
 }
@@ -473,7 +473,7 @@ func (a hypothesesAPI) register(ctx context.Context, in *struct {
 	hyp, links, existed, similar, err := a.registry.RegisterHypothesis(ctx, owner, actor, b.PlatformExperimentID, b.Text, b.Links, b.DistinctFrom)
 	if err != nil {
 		a.logger.Info("register hypothesis", zap.Error(err))
-		return nil, rejected(a.registry.WriteRefusal(err))
+		return nil, a.registry.WriteRefusal(err)
 	}
 	status := http.StatusCreated
 	if existed {
@@ -511,7 +511,7 @@ func (a hypothesesAPI) addLink(ctx context.Context, in *struct {
 	links, err := a.registry.AddHypothesisLink(ctx, in.ID, owner, actor, domain.LinkSpec{Type: in.Body.Type, To: in.Body.To})
 	if err != nil {
 		a.logger.Info("add hypothesis link", zap.Error(err))
-		return nil, rejected(a.registry.WriteRefusal(err))
+		return nil, a.registry.WriteRefusal(err)
 	}
 	return &struct {
 		Status int
@@ -752,7 +752,7 @@ func (a hypothesesAPI) edit(ctx context.Context, in *struct {
 	edited, err := a.registry.EditHypothesis(ctx, in.ID, in.Body.Text)
 	if err != nil {
 		a.logger.Info("edit hypothesis", zap.Error(err))
-		return nil, rejected(a.registry.WriteRefusal(err))
+		return nil, a.registry.WriteRefusal(err)
 	}
 	return &struct{ Body *domain.Hypothesis }{Body: edited}, nil
 }
@@ -773,7 +773,7 @@ func (a hypothesesAPI) remove(ctx context.Context, in *struct {
 	}
 	if err := a.registry.RemoveHypothesis(ctx, in.ID); err != nil {
 		a.logger.Info("remove hypothesis", zap.Error(err))
-		return nil, rejected(a.registry.WriteRefusal(err))
+		return nil, a.registry.WriteRefusal(err)
 	}
 	return nil, nil
 }
@@ -803,7 +803,7 @@ func (a hypothesesAPI) addComment(ctx context.Context, in *struct {
 	c, err := a.registry.AddHypothesisComment(ctx, in.ID, owner, actor, in.Body.Text)
 	if err != nil {
 		a.logger.Info("add hypothesis comment", zap.Error(err))
-		return nil, rejected(a.registry.WriteRefusal(err))
+		return nil, a.registry.WriteRefusal(err)
 	}
 	return &struct {
 		Status int
@@ -860,7 +860,7 @@ func (a hypothesesAPI) setStatus(ctx context.Context, in *struct {
 	hyp, err := a.registry.SetHypothesisStatus(ctx, in.ID, owner, actor, registry.Verdict{Status: in.Body.Status, Against: in.Body.Against, Despite: in.Body.Despite})
 	if err != nil {
 		a.logger.Info("set hypothesis status", zap.Error(err))
-		return nil, rejected(a.registry.WriteRefusal(err))
+		return nil, a.registry.WriteRefusal(err)
 	}
 	return &struct{ Body *domain.Hypothesis }{Body: hyp}, nil
 }

@@ -112,7 +112,7 @@ func (s *Service) environmentJob(ctx context.Context, peID, codeRef, image strin
 		return nil, nil, fmt.Errorf("scheduler: get platform experiment: %w", err)
 	}
 	if pe == nil {
-		return nil, nil, &AdmissionError{Reason: "experiment_not_found", Message: fmt.Sprintf("platform experiment %s not found", peID)}
+		return nil, nil, &AdmissionError{Reason: "not_found", Message: fmt.Sprintf("platform experiment %s not found", peID)}
 	}
 	if pe.Status != domain.PlatformExpOpen && pe.Status != domain.PlatformExpRunning {
 		return nil, nil, &AdmissionError{Reason: platformapi.ReasonExperimentClosed, Message: fmt.Sprintf("platform experiment %s is %s: environments are built for its jobs while it is open or running", pe.ID, pe.Status)}

@@ -88,7 +88,7 @@ func TestTheTokenCheckSaysWhatTheControlPlaneAnswered(t *testing.T) {
 	}{
 		"taken":        {http.StatusNoContent, "", func(err error) bool { return err == nil }},
 		"unregistered": {http.StatusUnauthorized, `{"reason":"` + clusterapi.ReasonClusterNotRegistered + `"}`, func(err error) bool { return errors.Is(err, ErrClusterRemoved) }},
-		"refused": {http.StatusUnauthorized, `{"message":"unauthenticated: bad signature"}`, func(err error) bool {
+		"refused": {http.StatusUnauthorized, `{"reason":"unauthenticated","message":"bad signature"}`, func(err error) bool {
 			return err != nil && strings.Contains(err.Error(), "401") && strings.Contains(err.Error(), "bad signature")
 		}},
 	} {

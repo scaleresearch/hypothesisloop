@@ -145,6 +145,7 @@ export type StepID = typeof STEPS[number]['id']
 export interface Problem {
   reason?: string
   message: string
+  field?: string
 }
 
 /** The step a problem of the create concerns, by the API's reason: the repository, the metrics, or the rest, on Budget and rules. */

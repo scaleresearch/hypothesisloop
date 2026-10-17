@@ -174,7 +174,7 @@ func TestAnAcceleratorSubmissionIsValidatedAsBeforeBesideTheCPUType(t *testing.T
 	if after := read(); !reflect.DeepEqual(before, after) {
 		t.Errorf("accelerator submissions read differently once the catalog prices cores:\nbefore %+v\nafter  %+v", before, after)
 	}
-	if !strings.Contains(before["no cpu"].err, ReasonCPURequired) || before["plain"].err != "" {
+	if !strings.Contains(before["no cpu"].err, ReasonRequired) || before["plain"].err != "" {
 		t.Errorf("the comparison proves nothing: %+v", before)
 	}
 }

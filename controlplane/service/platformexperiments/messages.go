@@ -25,7 +25,7 @@ type SendMessageRequest struct {
 // RefusedMessage is a recipient an all-message was not sent to.
 type RefusedMessage struct {
 	AgentID    string    `json:"agent_id"`
-	Reason     string    `json:"reason" doc:"message_rate_limited."`
+	Reason     string    `json:"reason" doc:"rate_limited."`
 	RetryAfter time.Time `json:"retry_after" doc:"When the next message can be sent to it."`
 }
 
@@ -42,13 +42,13 @@ func (s *Service) SendMessage(ctx context.Context, platformExpID string, req Sen
 	}
 	switch {
 	case named != 1:
-		return nil, nil, refusal.Refuse(http.StatusUnprocessableEntity, "invalid_recipient", "invalid_recipient: name exactly one of agent_id, all and coordinator")
+		return nil, nil, refusal.Refuse(http.StatusUnprocessableEntity, "invalid_recipient", "name exactly one of agent_id, all and coordinator")
 	case req.Coordinator && by.Kind == domain.ActorCoordinator:
-		return nil, nil, refusal.Refuse(http.StatusUnprocessableEntity, "invalid_recipient", "invalid_recipient: the coordinator sends no message to itself")
+		return nil, nil, refusal.Refuse(http.StatusUnprocessableEntity, "invalid_recipient", "the coordinator sends no message to itself")
 	case text == "":
-		return nil, nil, refusal.Refuse(http.StatusUnprocessableEntity, "empty_message", "empty_message: text is empty")
+		return nil, nil, refusal.Refuse(http.StatusUnprocessableEntity, "empty_message", "text is empty")
 	case len(written) > domain.MaxAgentMessageBytes:
-		return nil, nil, refusal.Refuse(http.StatusUnprocessableEntity, "message_too_long", fmt.Sprintf("message_too_long: text is %d bytes, at most %d: say the one direction that matters, with the job and hypothesis ids it rests on", len(written), domain.MaxAgentMessageBytes))
+		return nil, nil, refusal.Refuse(http.StatusUnprocessableEntity, "too_long", fmt.Sprintf("text is %d bytes, at most %d: say the one direction that matters, with the job and hypothesis ids it rests on", len(written), domain.MaxAgentMessageBytes))
 	}
 	messages := []domain.AgentMessage{}
 	var refused []RefusedMessage
@@ -66,19 +66,19 @@ func (s *Service) SendMessage(ctx context.Context, platformExpID string, req Sen
 		var limited []db.MessagesRateLimited
 		messages, limited, err = s.store.SendAgentMessages(ctx, platformExpID, to, text, by)
 		for _, l := range limited {
-			refused = append(refused, RefusedMessage{AgentID: l.AgentID, Reason: "message_rate_limited", RetryAfter: l.Next})
+			refused = append(refused, RefusedMessage{AgentID: l.AgentID, Reason: "rate_limited", RetryAfter: l.Next})
 		}
 	}
 	var limited *db.MessagesRateLimited
 	switch {
 	case errors.As(err, &limited):
-		return nil, nil, refusal.Refuse(http.StatusTooManyRequests, "message_rate_limited", fmt.Sprintf(
-			"message_rate_limited: %s was sent %d messages by the %s in the last hour, the most an hour allows; the next can be sent from %s. Say in one message what you would say in several",
+		return nil, nil, refusal.Refuse(http.StatusTooManyRequests, "rate_limited", fmt.Sprintf(
+			"%s was sent %d messages by the %s in the last hour, the most an hour allows; the next can be sent from %s. Say in one message what you would say in several",
 			limited.AgentID, domain.MaxAgentMessagesPerHour, limited.From, limited.Next.Format(time.RFC3339)))
 	case errors.Is(err, db.ErrNoCoordinator):
-		return nil, nil, refusal.Refuse(http.StatusConflict, "no_coordinator", "no_coordinator: the platform hosts no coordinator for platform experiment "+platformExpID)
+		return nil, nil, refusal.Refuse(http.StatusConflict, "no_coordinator", "the platform hosts no coordinator for platform experiment "+platformExpID)
 	case errors.Is(err, domain.ErrPlatformExperimentClosed):
-		return nil, nil, refusal.Refuse(http.StatusConflict, platformapi.ReasonExperimentClosed, "experiment_closed: platform experiment "+platformExpID+" is closed: no agent of it is at work")
+		return nil, nil, refusal.Refuse(http.StatusConflict, platformapi.ReasonExperimentClosed, "platform experiment "+platformExpID+" is closed: no agent of it is at work")
 	case errors.Is(err, domain.ErrNotSignedUp):
 		return nil, nil, refuseSignup(http.StatusNotFound, "not_signed_up", "%s of platform experiment %s: hl platform-experiments agents list names its agents", err.Error(), platformExpID)
 	case errors.Is(err, db.ErrAgentEnded):

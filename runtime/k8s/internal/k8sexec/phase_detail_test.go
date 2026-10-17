@@ -40,11 +40,8 @@ func schedulingPodAttempt(name string, scheduled bool, message string, attempt i
 	return pod
 }
 
-// Two of three ranks bound, one Pending with the autoscaler's own refusal text — the exact
-// "2 nodes free, 3 more needed" case autoscaler.md's gang-scheduling section describes.
-// scheduledNodes must count only the bound pods, and schedulingReason must surface the refusal
-// from the still-Pending one so the watcher's early-exit path has something to read.
-func TestPollPhaseDetailCountsScheduledNodesAndSurfacesTheAutoscalerRefusalOnAPartialGang(t *testing.T) {
+// Two of three ranks bound, one Pending: scheduledNodes must count only the bound pods.
+func TestPollPhaseDetailCountsScheduledNodesOnAPartialGang(t *testing.T) {
 	c := phaseDetailTestClient()
 	c.kube = chartKube(t,
 		schedulingPod("gang-exp-0", true, ""),
@@ -52,36 +49,12 @@ func TestPollPhaseDetailCountsScheduledNodesAndSurfacesTheAutoscalerRefusalOnAPa
 		schedulingPod("gang-exp-2", false, "0/3 nodes are available: 3 Insufficient nvidia.com/gpu."),
 	)
 
-	_, _, _, scheduledNodes, schedulingReason, err := c.PollPhaseDetail(context.Background(), "gang-exp", 0)
+	_, _, _, scheduledNodes, err := c.PollPhaseDetail(context.Background(), "gang-exp", 0)
 	if err != nil {
 		t.Fatalf("PollPhaseDetail: %v", err)
 	}
 	if scheduledNodes != 2 {
 		t.Errorf("scheduledNodes = %d, want 2 — a landed rank must be counted, a still-Pending one must not", scheduledNodes)
-	}
-	if schedulingReason != "0/3 nodes are available: 3 Insufficient nvidia.com/gpu." {
-		t.Errorf("schedulingReason = %q, want the Pending pod's PodScheduled=False condition message", schedulingReason)
-	}
-}
-
-// A fully-bound gang has no Pending pod to explain, so schedulingReason must be empty even though
-// every pod carries a PodScheduled=True condition with no message.
-func TestPollPhaseDetailReportsNoSchedulingReasonWhenEveryPodHasBound(t *testing.T) {
-	c := phaseDetailTestClient()
-	c.kube = chartKube(t,
-		schedulingPod("gang-exp-0", true, ""),
-		schedulingPod("gang-exp-1", true, ""),
-	)
-
-	_, _, _, scheduledNodes, schedulingReason, err := c.PollPhaseDetail(context.Background(), "gang-exp", 0)
-	if err != nil {
-		t.Fatalf("PollPhaseDetail: %v", err)
-	}
-	if scheduledNodes != 2 {
-		t.Errorf("scheduledNodes = %d, want 2", scheduledNodes)
-	}
-	if schedulingReason != "" {
-		t.Errorf("schedulingReason = %q, want empty — nothing is Pending", schedulingReason)
 	}
 }
 
@@ -96,7 +69,7 @@ func TestPollPhaseDetailCountsOnlyTheRequestedAttemptsPods(t *testing.T) {
 		schedulingPodAttempt("gang-exp-1-old", true, "", 0),
 	)
 
-	_, _, _, scheduledNodes, _, err := c.PollPhaseDetail(context.Background(), "gang-exp", 1)
+	_, _, _, scheduledNodes, err := c.PollPhaseDetail(context.Background(), "gang-exp", 1)
 	if err != nil {
 		t.Fatalf("PollPhaseDetail: %v", err)
 	}
@@ -114,7 +87,7 @@ func TestPollPhaseDetailCountsEveryPodWhenAttemptIsUnknown(t *testing.T) {
 		schedulingPodAttempt("gang-exp-0", true, "", 3),
 	)
 
-	_, _, _, scheduledNodes, _, err := c.PollPhaseDetail(context.Background(), "gang-exp", clusterapi.AttemptUnknown)
+	_, _, _, scheduledNodes, err := c.PollPhaseDetail(context.Background(), "gang-exp", clusterapi.AttemptUnknown)
 	if err != nil {
 		t.Fatalf("PollPhaseDetail: %v", err)
 	}
@@ -137,14 +110,14 @@ func TestACrashedRankIsReportedBesideARankThatStillWaits(t *testing.T) {
 	c := phaseDetailTestClient()
 	c.kube = chartKube(t, waiting, crashed)
 
-	reason, message, _, scheduledNodes, _, err := c.PollPhaseDetail(context.Background(), "gang-exp", 0)
+	reason, message, _, scheduledNodes, err := c.PollPhaseDetail(context.Background(), "gang-exp", 0)
 	if err != nil || reason != clusterapi.PhaseReasonOOMKilled || message != "container exited with code 137 (OOMKilled)" || scheduledNodes != 2 {
 		t.Fatalf("reason %q, message %q, scheduled %d, %v, want the crash", reason, message, scheduledNodes, err)
 	}
 
 	// With no crash the wait is what there is to say.
 	c.kube = chartKube(t, waiting)
-	if reason, message, _, _, _, err := c.PollPhaseDetail(context.Background(), "gang-exp", 0); err != nil || reason != "" || message != "pulling image" {
+	if reason, message, _, _, err := c.PollPhaseDetail(context.Background(), "gang-exp", 0); err != nil || reason != "" || message != "pulling image" {
 		t.Fatalf("a waiting rank alone: reason %q, message %q, %v", reason, message, err)
 	}
 }

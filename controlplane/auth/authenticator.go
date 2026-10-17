@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -11,30 +10,20 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 )
 
-// Error is a refusal with the HTTP status it answers with, answered as the API's one error body.
-// Reason is set on the one refusal a client branches on (domain.ReasonClusterNotRegistered).
-type Error struct {
-	status int
-	platformapi.ErrorModel
-}
-
-func (e *Error) Error() string  { return e.Message }
-func (e *Error) GetStatus() int { return e.status }
-
 // Unauthenticated is the refusal of a request that carries no usable token.
-func Unauthenticated(message string) *Error { return unauthenticated("%s", message) }
+func Unauthenticated(message string) *refusal.Refusal { return unauthenticated("%s", message) }
 
 // Forbidden is the refusal of an authenticated caller.
-func Forbidden(message string) *Error { return forbidden(message) }
+func Forbidden(message string) *refusal.Refusal { return forbidden(message) }
 
-func unauthenticated(format string, args ...any) *Error {
-	return &Error{status: http.StatusUnauthorized, ErrorModel: platformapi.ErrorModel{Message: "unauthenticated: " + fmt.Sprintf(format, args...)}}
+func unauthenticated(format string, args ...any) *refusal.Refusal {
+	return refusal.Refuse(http.StatusUnauthorized, refusal.ReasonUnauthenticated, fmt.Sprintf(format, args...))
 }
 
 // Directory is what the authenticator reads to learn whether the thing a token names still
@@ -67,7 +56,7 @@ func NewAuthenticator(cfg config.AuthConfig, signingSecret string, directory Dir
 	return &Authenticator{signingSecret: signingSecret, providers: providers, directory: directory, now: time.Now}, nil
 }
 
-// Authenticate resolves a token. A refusal is an *Error with status 401; any other error is the
+// Authenticate resolves a token. A refusal is a *refusal.Refusal with status 401; any other error is the
 // platform failing to answer.
 func (a *Authenticator) Authenticate(ctx context.Context, token string) (Principal, error) {
 	switch {
@@ -92,9 +81,7 @@ func (a *Authenticator) derived(ctx context.Context, token string) (Principal, e
 			return Principal{}, err
 		}
 		if !found {
-			refusal := unauthenticated("cluster %s is not registered", p.ClusterName)
-			refusal.Reason = domain.ReasonClusterNotRegistered
-			return Principal{}, refusal
+			return Principal{}, refusal.Refuse(http.StatusUnauthorized, domain.ReasonClusterNotRegistered, "cluster "+p.ClusterName+" is not registered")
 		}
 		p.OrgIDs = []string{orgID}
 	case KindBuild:
@@ -214,35 +201,27 @@ func (a *Authenticator) user(ctx context.Context, token string) (Principal, erro
 	return p, nil
 }
 
-// InternalError is the body of every answer to a failure of the platform's own. What failed is
-// logged and never sent: the caller may be anyone.
-const InternalError = "internal error"
-
 // Internal logs a failure of the platform's own, with what the request was doing, and returns the
 // 500 that says nothing about it. Every handler answers such a failure through it. A failure that
 // says which dependency was down (Unavailable) is answered 503 with that reason instead.
-func Internal(logger *zap.Logger, what string, err error, fields ...zap.Field) *Error {
+func Internal(logger *zap.Logger, what string, err error, fields ...zap.Field) *refusal.Refusal {
 	logger.Error(what, append(fields, zap.Error(err))...)
 	var down interface {
 		Unavailable() (reason, message string)
 	}
 	if errors.As(err, &down) {
 		reason, message := down.Unavailable()
-		return &Error{status: http.StatusServiceUnavailable, ErrorModel: platformapi.ErrorModel{Message: message, Reason: reason}}
+		return refusal.Refuse(http.StatusServiceUnavailable, reason, message)
 	}
-	return &Error{status: http.StatusInternalServerError, ErrorModel: platformapi.ErrorModel{Message: InternalError}}
+	return refusal.Refuse(http.StatusInternalServerError, refusal.ReasonInternal, refusal.InternalMessage)
 }
 
 // WriteError answers a refusal as the API's one error body; any other error is logged and
 // answered as a 500 that says nothing about it.
 func WriteError(w http.ResponseWriter, logger *zap.Logger, err error) {
-	var refusal *Error
-	if !errors.As(err, &refusal) {
-		refusal = Internal(logger, "request failed before its handler", err)
+	var refused *refusal.Refusal
+	if !errors.As(err, &refused) {
+		refused = Internal(logger, "request failed before its handler", err)
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(refusal.status)
-	encoder := json.NewEncoder(w)
-	encoder.SetEscapeHTML(false)
-	_ = encoder.Encode(refusal)
+	refusal.Write(w, refused)
 }

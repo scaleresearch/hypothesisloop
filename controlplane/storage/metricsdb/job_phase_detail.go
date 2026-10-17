@@ -14,19 +14,18 @@ import (
 
 // RecordPhaseDetail stores the runtime's current explanation for experimentID's phase — why its
 // container hasn't started, or why it has been restarting — plus the gang-readiness facts the
-// scale-up-timeout watcher needs: scheduledNodes (pods with PodScheduled=True) and
-// schedulingReason (the autoscaler's own refusal/acceptance signal, best-effort). attempt is the
+// scale-up-timeout watcher needs: scheduledNodes (pods with PodScheduled=True). attempt is the
 // generation this observation belongs to (domain.Experiment.AttemptCount at submit time), stored
 // so a reader can fence out a still-latest-by-timestamp row left behind by a superseded attempt
 // on a cluster this job has since failed over from. Replaces whatever was previously stored, same
 // "latest snapshot" idiom as RecordLogTail.
-func (s *Store) RecordPhaseDetail(ctx context.Context, experimentID, clusterName, reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, attempt int, at time.Time) error {
+func (s *Store) RecordPhaseDetail(ctx context.Context, experimentID, clusterName, reason, message string, restartCount int32, scheduledNodes int32, attempt int, at time.Time) error {
 	if experimentID == "" {
 		return fmt.Errorf("metricsdb.RecordPhaseDetail: experiment_id is required")
 	}
 	insertSQL := fmt.Sprintf(
-		`INSERT INTO job_phase_detail (experiment_id, cluster_name, reason, phase_message, restart_count, scheduled_nodes, scheduling_reason, attempt, ts) VALUES (%s, %s, %s, %s, %d, %d, %s, %d, %d)`,
-		sqlQuote(experimentID), sqlQuote(clusterName), sqlQuote(reason), sqlQuote(message), restartCount, scheduledNodes, sqlQuote(schedulingReason), attempt, at.UnixMilli(),
+		`INSERT INTO job_phase_detail (experiment_id, cluster_name, reason, phase_message, restart_count, scheduled_nodes, attempt, ts) VALUES (%s, %s, %s, %s, %d, %d, %d, %d)`,
+		sqlQuote(experimentID), sqlQuote(clusterName), sqlQuote(reason), sqlQuote(message), restartCount, scheduledNodes, attempt, at.UnixMilli(),
 	)
 	if err := s.execSQL(ctx, insertSQL); err != nil {
 		return fmt.Errorf("metricsdb.RecordPhaseDetail: insert: %w", err)
@@ -45,12 +44,11 @@ func (s *Store) GetLatestPhaseDetail(ctx context.Context, experimentID, clusterN
 }
 
 // GetLatestPhaseDetailFull is GetLatestPhaseDetail plus the gang-readiness columns
-// (ScheduledNodes/SchedulingReason) the scale-up-timeout watcher needs.
+// (ScheduledNodes) the scale-up-timeout watcher needs.
 //
 // The read is fenced to clusterName and attempt, the same current placement PollJobPhase already
 // checks: without this, "latest by ts" can return a row a previous attempt left behind on a
-// cluster this job has since failed over from — an old terminal scheduling_reason or an old
-// scheduled_nodes count would then be misread as the fresh attempt's own state. found=false means
+// cluster this job has since failed over from — an old scheduled_nodes count would then be misread as the fresh attempt's own state. found=false means
 // nothing has been reported for this specific attempt on this cluster yet, which is
 // indistinguishable from "not placed yet" — exactly the deadline-still-applies case callers want.
 func (s *Store) GetLatestPhaseDetailFull(ctx context.Context, experimentID, clusterName string, attempt int) (PhaseDetailRow, bool, error) {
@@ -58,7 +56,7 @@ func (s *Store) GetLatestPhaseDetailFull(ctx context.Context, experimentID, clus
 		return PhaseDetailRow{}, false, fmt.Errorf("metricsdb.GetLatestPhaseDetailFull: experiment_id is required")
 	}
 	querySQL := fmt.Sprintf(
-		`SELECT reason, phase_message, restart_count, scheduled_nodes, scheduling_reason FROM job_phase_detail `+
+		`SELECT reason, phase_message, restart_count, scheduled_nodes FROM job_phase_detail `+
 			`WHERE experiment_id = %s AND cluster_name = %s AND attempt = %d ORDER BY ts DESC LIMIT 1`,
 		sqlQuote(experimentID), sqlQuote(clusterName), attempt,
 	)
@@ -66,7 +64,7 @@ func (s *Store) GetLatestPhaseDetailFull(ctx context.Context, experimentID, clus
 	if err != nil {
 		return PhaseDetailRow{}, false, fmt.Errorf("metricsdb.GetLatestPhaseDetailFull: %w", err)
 	}
-	if len(rows) == 0 || len(rows[0]) != 5 {
+	if len(rows) == 0 || len(rows[0]) != 4 {
 		return PhaseDetailRow{}, false, nil
 	}
 	return phaseDetailRowFromColumns(rows[0]), true, nil
@@ -109,10 +107,6 @@ type PhaseDetailRow struct {
 	// zero pods placed yet. Compared against domain.Experiment.Job.Nodes() to detect a partial
 	// gang; see the design in autoscaler.md.
 	ScheduledNodes int32
-	// SchedulingReason is a best-effort, runtime-supplied explanation for why a pod is still
-	// Pending — e.g. a CA/Karpenter event message like "TriggeredScaleUp" or "NotTriggerScaleUp:
-	// max node group size reached". Empty when the runtime has nothing to report.
-	SchedulingReason string
 }
 
 func phaseDetailRowFromColumns(row []any) PhaseDetailRow {
@@ -120,10 +114,9 @@ func phaseDetailRowFromColumns(row []any) PhaseDetailRow {
 	messageVal, _ := row[1].(string)
 	restartCountVal := toInt32(row[2])
 	scheduledNodesVal := toInt32(row[3])
-	schedulingReasonVal, _ := row[4].(string)
 	return PhaseDetailRow{
 		Reason: reasonVal, Message: messageVal, RestartCount: restartCountVal,
-		ScheduledNodes: scheduledNodesVal, SchedulingReason: schedulingReasonVal,
+		ScheduledNodes: scheduledNodesVal,
 	}
 }
 
@@ -160,8 +153,8 @@ func (s *Store) GetLatestPhaseDetailBatch(ctx context.Context, ids []string) (ma
 	// list endpoint that got slower the longer the platform had been running, to answer a question
 	// whose answer is one row each.
 	querySQL := fmt.Sprintf(
-		`SELECT experiment_id, reason, phase_message, restart_count, scheduled_nodes, scheduling_reason FROM (`+
-			`SELECT experiment_id, reason, phase_message, restart_count, scheduled_nodes, scheduling_reason, `+
+		`SELECT experiment_id, reason, phase_message, restart_count, scheduled_nodes FROM (`+
+			`SELECT experiment_id, reason, phase_message, restart_count, scheduled_nodes, `+
 			`ROW_NUMBER() OVER (PARTITION BY experiment_id ORDER BY ts DESC) AS rn `+
 			`FROM job_phase_detail WHERE experiment_id IN (%s)) WHERE rn = 1`,
 		strings.Join(quoted, ", "),
@@ -171,7 +164,7 @@ func (s *Store) GetLatestPhaseDetailBatch(ctx context.Context, ids []string) (ma
 		return nil, fmt.Errorf("metricsdb.GetLatestPhaseDetailBatch: %w", err)
 	}
 	for _, row := range rows {
-		if len(row) != 6 {
+		if len(row) != 5 {
 			return nil, fmt.Errorf("metricsdb.GetLatestPhaseDetailBatch: unexpected row shape")
 		}
 		id, ok := row[0].(string)

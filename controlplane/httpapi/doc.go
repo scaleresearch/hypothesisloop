@@ -21,31 +21,47 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 )
 
-// errorModel answers every huma error as platformapi.ErrorModel, in place of Huma's default
-// RFC7807 problem details.
-type errorModel struct {
-	status int
-	platformapi.ErrorModel
-}
-
-func (e *errorModel) Error() string  { return e.Message }
-func (e *errorModel) GetStatus() int { return e.status }
-
 func init() {
-	// Route every huma.ErrorXXX / huma.NewError through the one error body.
+	// Every huma.ErrorXXX and every error huma answers itself is the one error body. A value the
+	// caller sent is never repeated in it: a detail's location names the field, and its message
+	// says what is wrong with it.
 	huma.NewError = func(status int, msg string, errs ...error) huma.StatusError {
-		parts := make([]string, 0, len(errs)+1)
-		if msg != "" {
-			parts = append(parts, msg)
-		}
+		problems := make([]platformapi.Problem, 0, len(errs))
+		parts := make([]string, 0, len(errs))
 		for _, e := range errs {
-			if e != nil {
+			var detailer huma.ErrorDetailer
+			switch {
+			case e == nil:
+				continue
+			case errors.As(e, &detailer):
+				detail := detailer.ErrorDetail()
+				problems = append(problems, platformapi.Problem{Message: detail.Message, Field: detail.Location})
+				if detail.Location != "" {
+					parts = append(parts, detail.Location+": "+detail.Message)
+				} else {
+					parts = append(parts, detail.Message)
+				}
+			default:
 				parts = append(parts, e.Error())
 			}
 		}
-		return &errorModel{status: status, ErrorModel: platformapi.ErrorModel{Message: strings.Join(parts, ": ")}}
+		message := strings.Join(parts, "; ")
+		if msg != "" && message != "" {
+			message = msg + ": " + message
+		} else if msg != "" {
+			message = msg
+		}
+		refused := refusal.OfStatus(status, message)
+		for i := range problems {
+			problems[i].Reason = refused.Reason
+		}
+		if len(problems) > 0 && refused.Reason != refusal.ReasonInternal {
+			refused.Problems = problems
+		}
+		return refused
 	}
 }
 
@@ -166,12 +182,12 @@ func (d *Doc) authorize(audience auth.Audience) func(huma.Context, func(huma.Con
 		}
 		if !audience.Admits(principal, ctx.Param(clusterNameParam)) {
 			_ = huma.WriteErr(d.API, ctx, http.StatusForbidden,
-				fmt.Sprintf("forbidden: %s token may not call %s %s", withArticle(string(principal.Kind)), op.Method, op.Path))
+				fmt.Sprintf("%s token may not call %s %s", withArticle(string(principal.Kind)), op.Method, op.Path))
 			return
 		}
 		if principal.PlatformExperimentClosed && !allowedAfterClose(op) {
 			_ = huma.WriteErr(d.API, ctx, http.StatusForbidden,
-				fmt.Sprintf("forbidden: platform experiment %s is closed, and its coordinator token now only reads and files the summary", principal.PlatformExperimentID))
+				fmt.Sprintf("platform experiment %s is closed, and its coordinator token now only reads and files the summary", principal.PlatformExperimentID))
 			return
 		}
 		if reads(op) {

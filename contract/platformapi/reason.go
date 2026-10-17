@@ -14,4 +14,8 @@ const (
 	ReasonQuotaNotGranted = "quota_not_granted"
 	// ReasonPlannerHasNoQuota refuses the quota of a draft's planner, which holds none.
 	ReasonPlannerHasNoQuota = "planner_has_no_quota"
+	// ReasonCursorGone refuses a watch or a read of changes from an after this platform holds no
+	// changes past: one it never issued, or one whose changes are pruned. The client reads state
+	// again and watches from head.
+	ReasonCursorGone = "cursor_gone"
 )

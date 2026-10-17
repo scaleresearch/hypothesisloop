@@ -75,12 +75,16 @@ func (s *Service) validate(req CreatePlatformExperimentRequest, catalog domain.A
 			if !ok {
 				reason = "invalid_experiment"
 			}
-			problems = append(problems, refusal.Refuse(422, reason, problem.Message))
+			refused := refusal.Refuse(422, reason, problem.Message)
+			if problem.Key != "" {
+				refused.On(problem.Key)
+			}
+			problems = append(problems, refused)
 		}
 	}
 	req.Spec = s.withSettings(req.Spec.Trimmed())
 	if err := domain.ResearcherPool(req.Researchers).Check(catalog); err != nil {
-		problems = append(problems, refusal.Refuse(422, "invalid_agents", err.Error()+": researchers is the researchers it is to have at work, [{agent_type, model, hyperparameters, count}]"))
+		problems = append(problems, refusal.Refuse(422, "invalid_agents", err.Error()+": researchers is the researchers it is to have at work, [{agent_type, model, hyperparameters, count}]").On("researchers"))
 	}
 	if err := problems.Add(s.checkLength(req.DurationHours)); err != nil {
 		return req, err

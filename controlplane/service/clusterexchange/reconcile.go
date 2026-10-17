@@ -24,86 +24,86 @@ import (
 func (s *Service) Reconcile(ctx context.Context, clusterName, agentVersion string, report clusterapi.ReconcileRequest) (answer clusterapi.ReconcileAnswer, err error) {
 	defer func() { s.recordContact(ctx, clusterName, err) }()
 	if err := checkAgentVersion(agentVersion); err != nil {
-		return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, err.Error())
+		return clusterapi.ReconcileAnswer{}, refusal.Refuse(http.StatusBadRequest, "unsupported_version", err.Error())
 	}
 
 	if report.AcceleratorAvailableByType == nil || report.AcceleratorTotalByType == nil || report.AcceleratorAvailableByNode == nil {
-		return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "complete accelerator capacity report is required")
+		return clusterapi.ReconcileAnswer{}, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "complete accelerator capacity report is required")
 	}
 	s.keepPricedAccelerators(&report)
 	if report.NodeResourcesByNode == nil {
-		return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "per-node resource capacity report is required")
+		return clusterapi.ReconcileAnswer{}, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "per-node resource capacity report is required")
 	}
 	if report.NodeResourcesTotalByNode == nil {
-		return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "per-node total resource capacity report is required")
+		return clusterapi.ReconcileAnswer{}, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "per-node total resource capacity report is required")
 	}
 	for node, byResource := range report.NodeResourcesByNode {
 		if node == "" {
-			return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "per-node resource report has empty node identity")
+			return clusterapi.ReconcileAnswer{}, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "per-node resource report has empty node identity")
 		}
 		for _, key := range []string{domain.NodeResourceCPUMillicores, domain.NodeResourceMemoryBytes, domain.NodeResourceStorageBytes} {
 			if _, present := byResource[key]; !present {
-				return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "per-node resource report for "+node+" is missing "+key)
+				return clusterapi.ReconcileAnswer{}, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "per-node resource report for "+node+" is missing "+key)
 			}
 		}
 		for resource, available := range byResource {
 			if resource == "" || available < 0 {
-				return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "invalid per-node resource capacity value")
+				return clusterapi.ReconcileAnswer{}, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "invalid per-node resource capacity value")
 			}
 		}
 		total, present := report.NodeResourcesTotalByNode[node]
 		if !present {
-			return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "per-node total resource report for "+node+" is missing")
+			return clusterapi.ReconcileAnswer{}, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "per-node total resource report for "+node+" is missing")
 		}
 		for _, key := range []string{domain.NodeResourceCPUMillicores, domain.NodeResourceMemoryBytes, domain.NodeResourceStorageBytes} {
 			totalValue, present := total[key]
 			if !present || totalValue < 0 {
-				return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "per-node total resource report for "+node+" is missing or invalid "+key)
+				return clusterapi.ReconcileAnswer{}, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "per-node total resource report for "+node+" is missing or invalid "+key)
 			}
 			if byResource[key] > totalValue {
-				return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "per-node available resource exceeds total for "+node)
+				return clusterapi.ReconcileAnswer{}, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "per-node available resource exceeds total for "+node)
 			}
 		}
 	}
 	if report.CPUAvailableCores < 0 || report.CPUTotalCores < 0 || report.CPUAvailableCores > report.CPUTotalCores {
-		return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "invalid CPU capacity values")
+		return clusterapi.ReconcileAnswer{}, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "invalid CPU capacity values")
 	}
 	for acceleratorType, total := range report.AcceleratorTotalByType {
 		if acceleratorType == "" {
-			return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "accelerator capacity contains empty accelerator type")
+			return clusterapi.ReconcileAnswer{}, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "accelerator capacity contains empty accelerator type")
 		}
 		available, present := report.AcceleratorAvailableByType[acceleratorType]
 		if !present || total < 0 || available < 0 || available > total {
-			return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "invalid accelerator capacity values")
+			return clusterapi.ReconcileAnswer{}, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "invalid accelerator capacity values")
 		}
 	}
 	if len(report.AcceleratorAvailableByType) != len(report.AcceleratorTotalByType) {
-		return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "accelerator available and total accelerator type sets must match")
+		return clusterapi.ReconcileAnswer{}, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "accelerator available and total accelerator type sets must match")
 	}
 	availableByNode := make(map[string]int64, len(report.AcceleratorAvailableByType))
 	for node, acceleratorTypes := range report.AcceleratorAvailableByNode {
 		if node == "" {
-			return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "per-node accelerator report has empty node identity")
+			return clusterapi.ReconcileAnswer{}, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "per-node accelerator report has empty node identity")
 		}
 		for acceleratorType, available := range acceleratorTypes {
 			if acceleratorType == "" || available < 0 {
-				return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "invalid per-node accelerator capacity value")
+				return clusterapi.ReconcileAnswer{}, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "invalid per-node accelerator capacity value")
 			}
 			if _, present := report.AcceleratorTotalByType[acceleratorType]; !present {
-				return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "per-node accelerator type is absent from cluster totals")
+				return clusterapi.ReconcileAnswer{}, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "per-node accelerator type is absent from cluster totals")
 			}
 			availableByNode[acceleratorType] += available
 		}
 	}
 	for acceleratorType, byNode := range availableByNode {
 		if byNode > report.AcceleratorAvailableByType[acceleratorType] {
-			return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "per-node accelerator capacity exceeds cluster availability")
+			return clusterapi.ReconcileAnswer{}, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "per-node accelerator capacity exceeds cluster availability")
 		}
 	}
 
 	if report.RAMAvailableBytes < 0 || report.RAMTotalBytes < 0 || report.RAMAvailableBytes > report.RAMTotalBytes ||
 		report.StorageAvailableBytes < 0 || report.StorageTotalBytes < 0 || report.StorageAvailableBytes > report.StorageTotalBytes {
-		return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "invalid memory or storage capacity values")
+		return clusterapi.ReconcileAnswer{}, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "invalid memory or storage capacity values")
 	}
 
 	// The scheduler knows a connected cluster by the id its runtime reports, so an id is one cluster's and
@@ -111,15 +111,15 @@ func (s *Service) Reconcile(ctx context.Context, clusterName, agentVersion strin
 	// recorded.
 	if report.ClusterID != "" {
 		if err := domain.ValidateClusterID(report.ClusterID); err != nil {
-			return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, err.Error())
+			return clusterapi.ReconcileAnswer{}, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, err.Error())
 		}
 		switch err := s.store.BindReportedID(ctx, clusterName, report.ClusterID); {
 		case errors.Is(err, db.ErrClusterNotFound):
 			return clusterapi.ReconcileAnswer{}, auth.NotFound("cluster")
 		case errors.Is(err, db.ErrClusterIDBound):
-			return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusConflict, "cluster_id "+report.ClusterID+" is the identity of another registered cluster")
+			return clusterapi.ReconcileAnswer{}, refusal.Refuse(http.StatusConflict, "cluster_identity_conflict", "cluster_id "+report.ClusterID+" is the identity of another registered cluster")
 		case errors.Is(err, db.ErrClusterIDChanged):
-			return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusConflict, "cluster "+clusterName+" is bound to another cluster_id than the "+report.ClusterID+
+			return clusterapi.ReconcileAnswer{}, refusal.Refuse(http.StatusConflict, "cluster_identity_conflict", "cluster "+clusterName+" is bound to another cluster_id than the "+report.ClusterID+
 				" this runtime reports: if its machines were rebuilt, its owner forgets the old identity (hl cluster forget-identity "+clusterName+")")
 		case err != nil:
 			return clusterapi.ReconcileAnswer{}, auth.Internal(s.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
@@ -129,7 +129,7 @@ func (s *Service) Reconcile(ctx context.Context, clusterName, agentVersion strin
 	// Placement reads the image, so it is kept before the capacity that makes the cluster a
 	// candidate.
 	if len(report.JobImage) > domain.MaxJobImageLength {
-		return clusterapi.ReconcileAnswer{}, refusal.Reject(http.StatusBadRequest, "job_image is longer than "+strconv.Itoa(domain.MaxJobImageLength)+" characters")
+		return clusterapi.ReconcileAnswer{}, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "job_image is longer than "+strconv.Itoa(domain.MaxJobImageLength)+" characters")
 	}
 	onlyImage := report.JobImage
 	if report.JobImageDefault {

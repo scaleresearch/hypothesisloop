@@ -60,7 +60,7 @@ func TestABaselineJobThatStatesNoEstimateIsSizedByTheAdmission(t *testing.T) {
 			t.Errorf("%s: got = %v with an estimate of %g within %g, want the job taken with %g within %g", name, err, exp.EstimatedDurationHours, exp.MaxEstimateHours, tc.stated, wantLimit)
 		}
 	}
-	if got := AdmissionStatus(ReasonInsufficientCredits); got != 402 {
+	if got := AdmissionStatus(ReasonInsufficientQuota); got != 402 {
 		t.Errorf("a baseline job nothing fits is answered %d, want 402", got)
 	}
 
@@ -70,8 +70,8 @@ func TestABaselineJobThatStatesNoEstimateIsSizedByTheAdmission(t *testing.T) {
 	exp := humanIdeaSubmission()
 	exp.EstimatedDurationHours = 0
 	var refused *AdmissionError
-	if err := s.Submit(context.Background(), exp); !errors.As(err, &refused) || refused.Reason != ReasonEstimateRequired {
-		t.Errorf("a researcher's job with no estimate and none measured: got = %v, want %s", err, ReasonEstimateRequired)
+	if err := s.Submit(context.Background(), exp); !errors.As(err, &refused) || refused.Reason != ReasonRequired {
+		t.Errorf("a researcher's job with no estimate and none measured: got = %v, want %s", err, ReasonRequired)
 	}
 }
 
@@ -114,7 +114,7 @@ func TestAJobThatStatesNoEstimateTakesTheOneItsExperimentMeasured(t *testing.T) 
 	}{
 		"stated, where one was measured":   {0.025, 0.5, "not_signed_up", 0.5},
 		"not stated, and one was measured": {0.025, 0, "not_signed_up", 0.025},
-		"not stated, and none measured":    {0, 0, ReasonEstimateRequired, 0},
+		"not stated, and none measured":    {0, 0, ReasonRequired, 0},
 	} {
 		s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, environments: declared{}, store: measuredStore{measured: tc.measured}, hypotheses: humanHypothesis("pe-1")}
 		exp := humanIdeaSubmission()
@@ -124,7 +124,7 @@ func TestAJobThatStatesNoEstimateTakesTheOneItsExperimentMeasured(t *testing.T) 
 		if err := s.Submit(context.Background(), exp); !errors.As(err, &admission) || admission.Reason != tc.reason || exp.EstimatedDurationHours != tc.want {
 			t.Errorf("%s: got = %v with an estimate of %g, want %s and %g", name, err, exp.EstimatedDurationHours, tc.reason, tc.want)
 		}
-		if tc.reason == ReasonEstimateRequired && (AdmissionStatus(admission.Reason) != 422 || !strings.Contains(admission.Message, "--estimated-duration-hours")) {
+		if tc.reason == ReasonRequired && (AdmissionStatus(admission.Reason) != 422 || !strings.Contains(admission.Message, "--estimated-duration-hours")) {
 			t.Errorf("%s: refused %d %q, want 422 naming the flag", name, AdmissionStatus(admission.Reason), admission.Message)
 		}
 	}

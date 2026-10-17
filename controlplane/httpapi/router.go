@@ -15,6 +15,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/middleware"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/modelproxy"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/watch"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
@@ -55,6 +56,8 @@ var webSockets = map[string]string{"/watch": platformapi.WatchSubprotocol}
 // preflight passes before any handler runs.
 func NewRouter(h Handlers) chi.Router {
 	r := chi.NewRouter()
+	r.NotFound(refusal.NoRoute)
+	r.MethodNotAllowed(refusal.NoMethod)
 	r.Use(middleware.Recovery(h.Logger))
 	r.Use(middleware.Logging(h.Logger))
 	r.Use(middleware.CORS(h.UIOrigin))

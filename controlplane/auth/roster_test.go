@@ -7,6 +7,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 )
 
 func (d *fakeDirectory) IsSignedUp(_ context.Context, pe, agent string) (bool, error) {
@@ -82,8 +83,8 @@ func TestALookupFailureIsNeitherAdmissionNorRefusal(t *testing.T) {
 		a, directory := newTestAuthenticator(t)
 		directory.fail = context.DeadlineExceeded
 		_, err := a.Authenticate(context.Background(), mustMint(t, testSecret, scope))
-		var refusal *Error
-		if err == nil || errors.As(err, &refusal) {
+		var refused *refusal.Refusal
+		if err == nil || errors.As(err, &refused) {
 			t.Errorf("%s: got = %v, want an error that is not a refusal", name, err)
 		}
 	}

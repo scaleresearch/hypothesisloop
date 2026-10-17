@@ -150,19 +150,19 @@ func TestAJobStatesItsCPUMemoryAndStorageAsQuantities(t *testing.T) {
 		reason string
 		field  string
 	}{
-		"cpu left out":     {func(e *domain.Experiment) { e.Job.CPU = "" }, ReasonCPURequired, "job.cpu is required"},
-		"cpu a share":      {func(e *domain.Experiment) { e.Job.CPU = "max" }, ReasonCPURequired, `job.cpu is "max"`},
-		"memory left out":  {func(e *domain.Experiment) { e.Job.Memory = "" }, ReasonMemoryRequired, "job.memory is required"},
-		"memory a share":   {func(e *domain.Experiment) { e.Job.Memory = "max" }, ReasonMemoryRequired, `job.memory is "max"`},
-		"storage left out": {func(e *domain.Experiment) { e.Job.Storage = "" }, ReasonStorageRequired, "job.storage is required"},
-		"storage a share":  {func(e *domain.Experiment) { e.Job.Storage = "max" }, ReasonStorageRequired, `job.storage is "max"`},
+		"cpu left out":     {func(e *domain.Experiment) { e.Job.CPU = "" }, ReasonRequired, "job.cpu is required"},
+		"cpu a share":      {func(e *domain.Experiment) { e.Job.CPU = "max" }, ReasonRequired, `job.cpu is "max"`},
+		"memory left out":  {func(e *domain.Experiment) { e.Job.Memory = "" }, ReasonRequired, "job.memory is required"},
+		"memory a share":   {func(e *domain.Experiment) { e.Job.Memory = "max" }, ReasonRequired, `job.memory is "max"`},
+		"storage left out": {func(e *domain.Experiment) { e.Job.Storage = "" }, ReasonRequired, "job.storage is required"},
+		"storage a share":  {func(e *domain.Experiment) { e.Job.Storage = "max" }, ReasonRequired, `job.storage is "max"`},
 		"nothing stated on CPU": {func(e *domain.Experiment) {
 			e.AcceleratorType, e.Job.AcceleratorType, e.AcceleratorCount, e.Job.AcceleratorCount = "", domain.CPUType, 0, 4
 			e.Job.CPU = ""
-		}, ReasonCPURequired, "job.cpu is required"},
-		"cpu left out of a group":     {grouped(domain.JobGroup{Memory: "1Gi", Storage: "1Gi"}), ReasonCPURequired, `job.groups["learner"].cpu is required`},
-		"memory a share in a group":   {grouped(domain.JobGroup{CPU: "1", Memory: "max", Storage: "1Gi"}), ReasonMemoryRequired, `job.groups["learner"].memory is "max"`},
-		"storage left out of a group": {grouped(domain.JobGroup{CPU: "1", Memory: "1Gi"}), ReasonStorageRequired, `job.groups["learner"].storage is required`},
+		}, ReasonRequired, "job.cpu is required"},
+		"cpu left out of a group":     {grouped(domain.JobGroup{Memory: "1Gi", Storage: "1Gi"}), ReasonRequired, `job.groups["learner"].cpu is required`},
+		"memory a share in a group":   {grouped(domain.JobGroup{CPU: "1", Memory: "max", Storage: "1Gi"}), ReasonRequired, `job.groups["learner"].memory is "max"`},
+		"storage left out of a group": {grouped(domain.JobGroup{CPU: "1", Memory: "1Gi"}), ReasonRequired, `job.groups["learner"].storage is required`},
 	} {
 		exp := validSubmission()
 		tc.spoil(exp)
@@ -171,7 +171,7 @@ func TestAJobStatesItsCPUMemoryAndStorageAsQuantities(t *testing.T) {
 			t.Errorf("%s: err = %v, want %s naming the field (%s)", name, err, tc.reason, tc.field)
 		}
 	}
-	for _, reason := range []string{ReasonCPURequired, ReasonMemoryRequired, ReasonStorageRequired} {
+	for _, reason := range []string{ReasonRequired, ReasonRequired, ReasonRequired} {
 		if got := AdmissionStatus(reason); got != http.StatusUnprocessableEntity {
 			t.Errorf("%s answers %d, want 422", reason, got)
 		}
@@ -265,7 +265,7 @@ func TestANegativeAcceleratorCountIsRejected(t *testing.T) {
 }
 
 // Duration is the denominator of every per-hour rate this job is billed at, and a negative one
-// inverts that rate. One left out is the submit's to give or to refuse (estimate_required).
+// inverts that rate. One left out is the submit's to give or to refuse (required).
 func TestANegativeEstimatedDurationIsRejected(t *testing.T) {
 	exp := validSubmission()
 	exp.EstimatedDurationHours = -1

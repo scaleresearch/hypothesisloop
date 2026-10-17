@@ -146,7 +146,7 @@ restart until it was delivered. Use it to steer; a fact about a hypothesis goes 
 --coordinator tells the sandboxed coordinator, from a person or a key, the same way (409
 no_coordinator where none is sandboxed). At most 1500 bytes. A recipient is sent at most 6 messages
 an hour by the coordinator and 6 by the owner, counted apart: past that it is refused (429
-message_rate_limited) with when the next can go. With --all, researchers at their limit are
+rate_limited) with when the next can go. With --all, researchers at their limit are
 skipped and the rest are sent: one line per message sent, then one line per researcher refused
 (agent_id, reason, retry_after) and a note on stderr; refused whole only when none could be sent.
 Refused for an agent that finished or was cut (409 agent_ended). Prints one line per message

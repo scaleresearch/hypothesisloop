@@ -120,8 +120,6 @@ type StatusReport struct {
 	RestartCount    int32       `json:"restart_count,omitempty"`
 	// ScheduledNodes is how many of the job's pods are bound to a node.
 	ScheduledNodes int32 `json:"scheduled_nodes,omitempty"`
-	// SchedulingReason is a best-effort explanation for a still-pending pod.
-	SchedulingReason string `json:"scheduling_reason,omitempty"`
 	// Attempt is the generation of the workload this observation came from, DesiredJob's
 	// AttemptCount carried on the workload. Absent is AttemptUnknown, which is no attempt 0.
 	Attempt *int `json:"attempt,omitempty"`

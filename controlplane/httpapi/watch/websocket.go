@@ -178,9 +178,23 @@ func (c *wsConn) ReadFrame() (opcode byte, payload []byte, err error) {
 	return opcode, payload, nil
 }
 
-// Close sends a close frame and drops the connection. A best-effort close frame: if the peer is
+// wsClose is the close frame a stream ends with: its status code, and as its text the reason of
+// a refusal or failure that ended it.
+type wsClose struct {
+	code   uint16
+	reason string
+}
+
+const (
+	wsCloseNormal   = 1000
+	wsClosePolicy   = 1008
+	wsCloseInternal = 1011
+)
+
+// Close sends the close frame and drops the connection. A best-effort close frame: if the peer is
 // already gone there is nothing to report and nothing to retry.
-func (c *wsConn) Close() {
-	_ = c.writeFrame(wsOpClose, nil, time.Second)
+func (c *wsConn) Close(frame wsClose) {
+	payload := binary.BigEndian.AppendUint16(nil, frame.code)
+	_ = c.writeFrame(wsOpClose, append(payload, frame.reason...), time.Second)
 	_ = c.conn.Close()
 }

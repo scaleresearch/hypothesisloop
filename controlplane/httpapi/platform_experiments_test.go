@@ -151,8 +151,8 @@ func TestCloseAndSummaryAnswerThePlatformExperimentAndRefuseByReason(t *testing.
 	}
 	_, err := svc.SetSummary(context.Background(), "pe-none", strings.Repeat("x", domain.MaxProseBytes+1))
 	var refused *refusal.Refusal
-	if !errors.As(err, &refused) || refused.GetStatus() != http.StatusUnprocessableEntity || refused.Reason != "summary_too_long" {
-		t.Errorf("a summary too long: got = %v, want 422 summary_too_long", err)
+	if !errors.As(err, &refused) || refused.GetStatus() != http.StatusUnprocessableEntity || refused.Reason != "too_long" {
+		t.Errorf("a summary too long: got = %v, want 422 too_long", err)
 	}
 }
 

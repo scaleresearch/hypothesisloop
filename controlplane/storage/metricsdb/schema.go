@@ -137,7 +137,7 @@ var sqlTables = []*table{
 		tag("experiment_id"), field("cluster_name", "string"), field("lines_json", "string"), timeIndex("ts")),
 	newTable("job_phase_detail", "WITH (ttl = '30d')",
 		tag("experiment_id"), field("cluster_name", "string"), field("reason", "string"), field("phase_message", "string"),
-		field("restart_count", "bigint"), field("scheduled_nodes", "bigint"), field("scheduling_reason", "string"),
+		field("restart_count", "bigint"), field("scheduled_nodes", "bigint"),
 		field("attempt", "bigint"), timeIndex("ts")),
 	newTable("model_usage", "WITH (append_mode = 'true')",
 		tag("org_id"), tag("platform_experiment_id"), tag("agent_id"), tag("provider"), tag("model"),

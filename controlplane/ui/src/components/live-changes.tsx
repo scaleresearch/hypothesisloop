@@ -13,6 +13,7 @@ import { LIVE_KINDS, readsOf, type Reads } from '@/lib/live'
 const SILENCE_MS = 50_000
 const FIRST_RETRY_MS = 1_000
 const LAST_RETRY_MS = 30_000
+const POLICY_VIOLATION = 1008
 
 const everything: Reads = () => true
 
@@ -39,14 +40,14 @@ function follow(projectID: string, revalidate: (reads: Reads) => void): () => vo
     retry = Math.min(retry * 2, LAST_RETRY_MS)
   }
 
-  // A socket closed before its first frame failed its handshake, whose status a browser hides:
-  // the same read over HTTP answers it. 401 ends the session on the way (apiFetch).
+  // A socket closed before its first frame failed its handshake, whose status a browser hides,
+  // and one refused later says only its reason: the same read over HTTP answers it. 401 ends the session on the way (apiFetch).
   async function diagnose() {
     try {
       await fetchChanges(projectID, LIVE_KINDS, cursor)
     } catch (error) {
       if (stopped) return
-      if (error instanceof ApiError && error.status === 410) {
+      if (error instanceof ApiError && error.reason === 'cursor_gone') {
         // Starting from head reads everything again once the socket is there.
         cursor = 'head'
         later(0)
@@ -92,10 +93,12 @@ function follow(projectID: string, revalidate: (reads: Reads) => void): () => vo
         cursor = frame.next
       }
     }
-    ws.onclose = () => {
+    // A stream the server ended for a refusal (1008, the reason as its text) is asked again
+    // over HTTP, whose answer says what to do.
+    ws.onclose = event => {
       clearTimeout(silence)
       if (stopped) return
-      if (heard) backOff()
+      if (heard && event.code !== POLICY_VIOLATION) backOff()
       else void diagnose()
     }
   }

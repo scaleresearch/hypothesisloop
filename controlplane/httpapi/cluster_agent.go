@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/danielgtaylor/huma/v2"
+	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
@@ -22,6 +23,7 @@ type reconcileInput struct {
 
 type clusterAgentAPI struct {
 	exchange *clusterexchange.Service
+	logger   *zap.Logger
 }
 
 // buildPath is the path of one build of a cluster.
@@ -37,7 +39,7 @@ type DetachAnswer struct {
 // to the /internal/clusters mount. Tagged "cluster-agent", a separate consumer from the research
 // agent, so it gets its own OpenAPI doc and explore.
 func RegisterClusterAgent(doc *Doc, exchange *clusterexchange.Service) {
-	a := clusterAgentAPI{exchange: exchange}
+	a := clusterAgentAPI{exchange: exchange, logger: doc.logger}
 	register(doc, auth.AudienceInternal, huma.Operation{
 		OperationID: "list-clusters", Method: "GET", Path: "/",
 		Summary: "List clusters and their connectivity", Tags: []string{"cluster-agent"},
@@ -125,7 +127,7 @@ func (a clusterAgentAPI) reconcile(ctx context.Context, in *reconcileInput) (*st
 }, error) {
 	answer, err := a.exchange.Reconcile(ctx, in.Name, in.AgentVersion, in.Body)
 	if err != nil {
-		return nil, rejected(err)
+		return nil, refused(a.logger, "cluster API", err)
 	}
 	return &struct {
 		Body clusterapi.ReconcileAnswer
@@ -141,7 +143,7 @@ func (a clusterAgentAPI) buildCredential(ctx context.Context, in *struct {
 }, error) {
 	login, err := a.exchange.BuildCredential(ctx, in.Name, in.Key, in.Body.Attempt)
 	if err != nil {
-		return nil, rejected(err)
+		return nil, refused(a.logger, "cluster API", err)
 	}
 	return &struct {
 		Body domain.RegistryLogin
@@ -157,7 +159,7 @@ func (a clusterAgentAPI) buildGitCredential(ctx context.Context, in *struct {
 }, error) {
 	credential, err := a.exchange.BuildGitCredential(ctx, in.Name, in.Key, in.Body.Attempt)
 	if err != nil {
-		return nil, rejected(err)
+		return nil, refused(a.logger, "cluster API", err)
 	}
 	return &struct {
 		Body domain.EnvironmentGitCredential
@@ -169,7 +171,7 @@ func (a clusterAgentAPI) buildReport(ctx context.Context, in *struct {
 	Key  string `path:"key"`
 	Body domain.EnvironmentBuildReport
 }) (*struct{}, error) {
-	return nil, rejected(a.exchange.ReportBuild(ctx, in.Name, in.Key, in.Body))
+	return nil, refused(a.logger, "cluster API", a.exchange.ReportBuild(ctx, in.Name, in.Key, in.Body))
 }
 
 func (a clusterAgentAPI) buildLoaded(ctx context.Context, in *struct {
@@ -177,7 +179,7 @@ func (a clusterAgentAPI) buildLoaded(ctx context.Context, in *struct {
 	Key  string `path:"key"`
 	Body domain.EnvironmentBuildLoaded
 }) (*struct{}, error) {
-	return nil, rejected(a.exchange.BuildLoaded(ctx, in.Name, in.Key, in.Body))
+	return nil, refused(a.logger, "cluster API", a.exchange.BuildLoaded(ctx, in.Name, in.Key, in.Body))
 }
 
 func (a clusterAgentAPI) buildProgress(ctx context.Context, in *struct {
@@ -185,7 +187,7 @@ func (a clusterAgentAPI) buildProgress(ctx context.Context, in *struct {
 	Key  string `path:"key"`
 	Body domain.EnvironmentBuildProgress
 }) (*struct{}, error) {
-	return nil, rejected(a.exchange.BuildProgress(ctx, in.Name, in.Key, in.Body))
+	return nil, refused(a.logger, "cluster API", a.exchange.BuildProgress(ctx, in.Name, in.Key, in.Body))
 }
 
 func (a clusterAgentAPI) detach(ctx context.Context, in *struct {
@@ -209,7 +211,7 @@ func (a clusterAgentAPI) pushStatus(ctx context.Context, in *struct {
 	Body clusterapi.StatusAck
 }, error) {
 	if err := a.exchange.PushStatus(ctx, in.Name, in.Body); err != nil {
-		return nil, rejected(err)
+		return nil, refused(a.logger, "cluster API", err)
 	}
 	return &struct {
 		Body clusterapi.StatusAck

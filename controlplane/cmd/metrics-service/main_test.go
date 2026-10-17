@@ -31,7 +31,7 @@ func TestEveryRouteRefusesARequestWithoutAToken(t *testing.T) {
 			}
 			return nil
 		}
-		if recorder.Code != http.StatusUnauthorized || !strings.Contains(recorder.Body.String(), `"error":"unauthenticated: `) {
+		if recorder.Code != http.StatusUnauthorized || !strings.Contains(recorder.Body.String(), `"reason":"unauthenticated"`) {
 			t.Errorf("%s %s: got = %d %s, want = 401 unauthenticated", method, route, recorder.Code, recorder.Body)
 		}
 		return nil

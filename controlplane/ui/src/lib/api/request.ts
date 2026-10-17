@@ -9,17 +9,16 @@ export function apiURL(): string {
   return url
 }
 
-/** A refusal or failure the API answered with: its status, its own message, and its reason code when it gave one. */
+/** A refusal or failure the API answered with: its status, its own message, and its reason code, which only an answer in place of the API's lacks. */
 export class ApiError extends Error {
-  /** `body` is the whole answer, for a refusal that carries more than its reason. */
+  /** `body` is the whole answer, for a refusal that names its problems. */
   constructor(readonly status: number, message: string, readonly reason?: string, readonly body?: ErrorModel) {
     super(message)
     this.name = 'ApiError'
   }
 }
 
-// The API answers every failure as ErrorModel. A refusal for a condition of the platform also
-// carries summary, the sentence for a person, and for staff operator_detail.
+// The API answers every failure as ErrorModel.
 async function failure(res: Response): Promise<ApiError> {
   const text = await res.text()
   let message = text
@@ -27,7 +26,7 @@ async function failure(res: Response): Promise<ApiError> {
   let body: ErrorModel | undefined
   try {
     body = JSON.parse(text) as ErrorModel
-    message = body.summary ? [body.summary, body.operator_detail].filter(Boolean).join(' ') : body.message
+    message = body.message
     reason = body.reason
   } catch {
     // A proxy in front of the API answers in its own format.

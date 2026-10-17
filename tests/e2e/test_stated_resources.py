@@ -1,6 +1,6 @@
 """Every job states its cpu, memory and storage as quantities, and a job holds what it states:
-  1. one left out, or "max", is 422 cpu_required, memory_required or storage_required, naming
-     the field, in a group as at the top of the job.
+  1. one left out, or "max", is 422 required, naming
+     the field in problems, in a group as at the top of the job.
   2. a stated cpu above the job's per-accelerator share of every eligible node is never admitted
      (exceeds_accelerator_share).
 
@@ -42,7 +42,8 @@ def test_a_quantity_left_out_or_stated_as_max_is_refused(api, run_id, field):
         r = api.post_experiment_body({**stated, "job": job})
         assert r.status_code == 422, f"{job}: answered {r.status_code}, want 422: {r.text}"
         refusal = r.json()
-        assert refusal["reason"] == f"{field}_required" and said in refusal["message"], f"{job}: {refusal}"
+        assert refusal["reason"] == "required" and said in refusal["message"], f"{job}: {refusal}"
+        assert [p["field"] for p in refusal["problems"]] == [said.split(" is ")[0]], f"{job}: {refusal}"
     api.close_platform_experiment(pe_id)
 
 

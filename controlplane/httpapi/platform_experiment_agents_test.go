@@ -474,8 +474,8 @@ func TestJoiningIsRefusedWithAReasonTheCallerCanActOn(t *testing.T) {
 		"registered, running":           {domain.PlatformExpRunning, "pe-1", `{"agent_id":"dana"}`, 409, "no_share_left"},
 		"field full":                    {domain.PlatformExpOpen, "pe-1", `{}` + "\x00" + `{}` + "\x00" + `{}`, 409, "max_agents_reached"},
 		"registered, full":              {domain.PlatformExpOpen, "pe-1", `{}` + "\x00" + `{}` + "\x00" + `{"agent_id":"dana"}`, 409, "max_agents_reached"},
-		"no such experiment":            {domain.PlatformExpOpen, "pe-none", `{}`, 404, "experiment_not_found"},
-		"no such agent":                 {domain.PlatformExpOpen, "pe-1", `{"agent_id":"ghost"}`, 404, "agent_not_found"},
+		"no such experiment":            {domain.PlatformExpOpen, "pe-none", `{}`, 404, "not_found"},
+		"no such agent":                 {domain.PlatformExpOpen, "pe-1", `{"agent_id":"ghost"}`, 404, "not_found"},
 		"unknown role":                  {domain.PlatformExpOpen, "pe-1", `{"role":"judge"}`, 400, "unknown_role"},
 		"unknown tier":                  {domain.PlatformExpOpen, "pe-1", `{"quota_tier":"gold"}`, 400, "invalid_request"},
 		"name with agent_id":            {domain.PlatformExpOpen, "pe-1", `{"agent_id":"dana","name":"x"}`, 400, "invalid_request"},
@@ -624,7 +624,7 @@ func TestAnAgentIsRemovedOnlyBeforeTheStart(t *testing.T) {
 	if code, out := call(t, r, "DELETE", "/platform-experiments/pe-1/agents/"+first, ""); code != http.StatusNotFound || out["reason"] != "not_signed_up" {
 		t.Fatalf("remove twice: %d %v", code, out)
 	}
-	if code, out := call(t, r, "DELETE", "/platform-experiments/pe-none/agents/"+second, ""); code != http.StatusNotFound || out["reason"] != "experiment_not_found" {
+	if code, out := call(t, r, "DELETE", "/platform-experiments/pe-none/agents/"+second, ""); code != http.StatusNotFound || out["reason"] != "not_found" {
 		t.Fatalf("remove from no experiment: %d %v", code, out)
 	}
 	// Its quota goes with it, and a job of it still in flight is charged to that quota.
@@ -794,8 +794,8 @@ func TestARegisteredAgentOfAnotherOrgIsNotFoundEvenForACallerOfBothOrgs(t *testi
 	store.agents["outsider"] = &domain.Agent{ID: "outsider", OrgID: "org-b"}
 	r := agentsRouter(t, store, auth.Principal{Kind: auth.KindUser, OrgIDs: []string{"org-a", "org-b"}})
 	code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"agent_id":"outsider"}`)
-	if code != http.StatusNotFound || out["reason"] != "agent_not_found" || len(store.signups) != 0 {
-		t.Fatalf("got = %d %v with %d signups, want = 404 agent_not_found and none", code, out, len(store.signups))
+	if code != http.StatusNotFound || out["reason"] != "not_found" || len(store.signups) != 0 {
+		t.Fatalf("got = %d %v with %d signups, want = 404 not_found and none", code, out, len(store.signups))
 	}
 }
 
@@ -817,8 +817,8 @@ func TestACreatedAgentIsNamedByItsPlaceUnlessTheCallerNamesIt(t *testing.T) {
 	if got := joined(t, baseline)[0]["name"]; got != "Baseline 1" {
 		t.Errorf("the baseline agent is named %v, want Baseline 1", got)
 	}
-	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"name":"ablation"}`); code != http.StatusConflict || out["reason"] != "agent_name_taken" {
-		t.Errorf("a second agent named ablation: got = %d %v, want 409 agent_name_taken", code, out)
+	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", `{"name":"ablation"}`); code != http.StatusConflict || out["reason"] != "name_taken" {
+		t.Errorf("a second agent named ablation: got = %d %v, want 409 name_taken", code, out)
 	}
 }
 

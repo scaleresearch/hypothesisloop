@@ -106,7 +106,7 @@ describe('editing an org\'s agent type', () => {
   })
 
   it('says plainly when the type was changed as often as it may be in an hour', async () => {
-    vi.mocked(editAgentType).mockRejectedValue(new ApiError(429, 'at-lr has 60 versions in the last hour', 'edit_rate_limited'))
+    vi.mocked(editAgentType).mockRejectedValue(new ApiError(429, 'at-lr has 60 versions in the last hour', 'rate_limited'))
     show()
     await screen.findByRole('textbox', { name: 'Prompt' })
     setPrompt(`${RESEARCHER_PROMPT}More.`)
@@ -231,7 +231,7 @@ describe('restoring a version', () => {
   })
 
   it('shows the refusal of a restore in the dialog', async () => {
-    vi.mocked(restoreAgentType).mockRejectedValue(new ApiError(429, 'at-lr has 60 versions in the last hour', 'edit_rate_limited'))
+    vi.mocked(restoreAgentType).mockRejectedValue(new ApiError(429, 'at-lr has 60 versions in the last hour', 'rate_limited'))
     show()
     await screen.findByText('3 versions')
     await userEvent.click(within(listed(2)).getByRole('button', { name: 'Restore' }))

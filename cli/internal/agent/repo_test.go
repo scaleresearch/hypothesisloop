@@ -15,7 +15,7 @@ import (
 )
 
 // A job spec with no image names the one its experiment was proposed with in hl repo check. A
-// submit of it is the platform's to refuse (image_required).
+// submit of it is the platform's to refuse (required).
 func TestAJobThatNamesNoImageIsToldTheImageOfItsExperiment(t *testing.T) {
 	clone := cloneOf(t, proposed)
 	write(t, clone, experimentspec.JobSpec, "job:\n  command: [\"python\", \"bench.py\"]\n  cpu: 2\n  memory: 8Gi\n  storage: 4Gi\n")

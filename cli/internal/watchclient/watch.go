@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -48,8 +47,8 @@ func (e *Closed) Error() string { return e.msg }
 
 // Refused means the platform rejected this subscription. The request is wrong and will stay wrong.
 type Refused struct {
-	msg  string
-	code int
+	msg    string
+	reason string
 }
 
 func (e *Refused) Error() string { return e.msg }
@@ -199,7 +198,7 @@ func (w *watch) run() int {
 		ws, err := connect(w.opts.URL, "/watch?"+query.Encode(), w.opts.Token, time.Until(deadline))
 		if err != nil {
 			var refused *Refused
-			if errors.As(err, &refused) && refused.code == http.StatusGone && w.opts.CursorFile != "" && w.opts.After == 0 && w.reset == 0 {
+			if errors.As(err, &refused) && refused.reason == platformapi.ReasonCursorGone && w.opts.CursorFile != "" && w.opts.After == 0 && w.reset == 0 {
 				w.reset = w.after
 				continue
 			}
@@ -494,11 +493,11 @@ func connect(base, path, token string, budget time.Duration) (*webSocket, error)
 		return ws, nil
 	}
 	code := statusCode(statusLine)
-	detail := ws.readRefusalBody(head)
+	reason, detail := ws.readRefusalBody(head)
 	conn.Close()
 	msg := fmt.Sprintf("the platform refused this subscription: %s%s", strings.TrimSpace(statusLine), detail)
 	if code >= 400 && code < 500 {
-		return nil, &Refused{msg: msg, code: code}
+		return nil, &Refused{msg: msg, reason: reason}
 	}
 	return nil, &Closed{msg: fmt.Sprintf("handshake failed: %s%s", strings.TrimSpace(statusLine), detail)}
 }
@@ -537,9 +536,9 @@ func indexHeaderEnd(b []byte) int {
 	return strings.Index(string(b), "\r\n\r\n")
 }
 
-// readRefusalBody returns " — <message>" for a refusal's error body, which is the only thing that
-// says which part of the request was wrong.
-func (ws *webSocket) readRefusalBody(head []byte) string {
+// readRefusalBody returns the reason of a refusal's error body and " — <message>", which is the
+// only thing that says which part of the request was wrong.
+func (ws *webSocket) readRefusalBody(head []byte) (reason, detail string) {
 	length := 0
 	for _, line := range strings.Split(string(head), "\r\n")[1:] {
 		name, value, ok := strings.Cut(line, ":")
@@ -584,9 +583,9 @@ func (ws *webSocket) readRefusalBody(head []byte) string {
 		message = payload.Message
 	}
 	if message == "" {
-		return ""
+		return payload.Reason, ""
 	}
-	return " — " + message
+	return payload.Reason, " — " + message
 }
 
 func (ws *webSocket) setReadDeadline(t time.Time) {
@@ -687,6 +686,10 @@ func (ws *webSocket) nextText(deadline time.Time) (string, error) {
 		}
 		switch opcode {
 		case 0x8:
+			// A close frame's text, after its two-byte code, is the reason the stream ended for.
+			if len(payload) > 2 {
+				return "", &Closed{msg: "server closed the stream: " + string(payload[2:])}
+			}
 			return "", &Closed{msg: "server closed the stream"}
 		case 0x9:
 			_ = ws.sendFrame(0xA, payload)

@@ -609,7 +609,7 @@ func TestASavedPlaceNoLongerHeldResetsToTheHead(t *testing.T) {
 		req, err := http.ReadRequest(bufio.NewReader(conn))
 		if err == nil {
 			afters <- req.URL.Query().Get("after")
-			body := `{"message":"changes after 5 are no longer held; re-read state and watch from head"}`
+			body := `{"reason":"cursor_gone","message":"changes after 5 are no longer held; re-read state and watch from head"}`
 			_, _ = conn.Write([]byte(fmt.Sprintf("HTTP/1.1 410 Gone\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s", len(body), body)))
 		}
 		conn.Close()

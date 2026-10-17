@@ -46,7 +46,7 @@ func TestARefusalIsLoggedWithTheControlPlanesReasonAndTheLoopGoesOn(t *testing.T
 		asked++
 		mu.Unlock()
 		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write([]byte(`{"message":"unauthenticated: cluster test is not registered"}`))
+		_, _ = w.Write([]byte(`{"reason":"cluster_not_registered","message":"cluster test is not registered"}`))
 	}))
 	defer server.Close()
 

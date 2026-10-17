@@ -36,13 +36,13 @@ func TestARefusalIsTheControlPlanesOwnWords(t *testing.T) {
 			t.Errorf("a request without a body says it is %s", r.Header.Get("Content-Type"))
 		}
 		w.WriteHeader(http.StatusUnauthorized)
-		_ = json.NewEncoder(w).Encode(map[string]string{"message": "unauthenticated: cluster edge-7 is not registered", "reason": "cluster_not_registered"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"message": "cluster edge-7 is not registered", "reason": "cluster_not_registered"})
 	}))
 	defer server.Close()
 	err := (&Client{BaseURL: server.URL, Token: "tok", HTTP: server.Client()}).Do(context.Background(), http.MethodDelete, "", nil, nil)
 	var refused *Refusal
 	if !errors.As(err, &refused) || refused.Status != http.StatusUnauthorized || refused.Reason != "cluster_not_registered" ||
-		refused.Message != "unauthenticated: cluster edge-7 is not registered" || !strings.Contains(err.Error(), "control plane answered 401: {") {
+		refused.Message != "cluster edge-7 is not registered" || !strings.Contains(err.Error(), "control plane answered 401: {") {
 		t.Fatalf("refusal = %+v, %v", refused, err)
 	}
 }

@@ -171,7 +171,7 @@ const REFUSALS: Record<string, string> = {
   version_conflict: 'Someone saved a newer version while you were editing.',
   agent_type_in_use: 'It is still in use.',
   agent_type_limit: 'The org has as many agent types as it may.',
-  edit_rate_limited: 'This type was changed as often as it may be in an hour.',
+  rate_limited: 'This type was changed as often as it may be in an hour.',
 }
 
 /** A refusal of a change to a type in words, its reason explained where it has one. */

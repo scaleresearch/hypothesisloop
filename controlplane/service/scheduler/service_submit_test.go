@@ -460,7 +460,7 @@ func TestSubmitIsRefusedOnceThePlatformExperimentClosedOrTheAgentWasCut(t *testi
 		reason string
 	}{
 		"closed platform experiment": {closedStore{}, "experiment_closed"},
-		"cut agent":                  {cutStore{}, "agent_held"},
+		"cut agent":                  {cutStore{}, "stage_cut"},
 		"finished agent":             {finishedStore{}, "agent_finished"},
 	} {
 		s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, environments: declared{}, store: tc.store, hypotheses: humanHypothesis("pe-1")}
@@ -616,8 +616,8 @@ func TestAJobThatNamesNoImageIsRefusedAtSubmit(t *testing.T) {
 	exp := humanIdeaSubmission()
 	exp.Job.Image = ""
 	var refused *AdmissionError
-	if err := s.Submit(context.Background(), exp); !errors.As(err, &refused) || refused.Reason != ReasonImageRequired || AdmissionStatus(refused.Reason) != http.StatusUnprocessableEntity {
-		t.Fatalf("a job with no image: got = %v, want a 422 %s", err, ReasonImageRequired)
+	if err := s.Submit(context.Background(), exp); !errors.As(err, &refused) || refused.Reason != ReasonRequired || AdmissionStatus(refused.Reason) != http.StatusUnprocessableEntity {
+		t.Fatalf("a job with no image: got = %v, want a 422 %s", err, ReasonRequired)
 	}
 	if !strings.Contains(refused.Message, "job.image is required") || !strings.Contains(refused.Message, "hl capacity") {
 		t.Errorf("the refusal does not name the field and where its values are listed: %s", refused.Message)

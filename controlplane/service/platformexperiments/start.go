@@ -211,7 +211,7 @@ func (s *Service) Signup(ctx context.Context, platformExpID string, signup domai
 		return err
 	}
 	if pe == nil {
-		return refuseSignup(404, "experiment_not_found", "no platform experiment %s", platformExpID)
+		return refuseSignup(404, "not_found", "no platform experiment %s", platformExpID)
 	}
 	// A member signing up again has what it asked for, whatever the experiment's status or size.
 	already, err := s.store.IsSignedUp(ctx, platformExpID, agentID)
@@ -241,7 +241,7 @@ func (s *Service) Signup(ctx context.Context, platformExpID string, signup domai
 	}
 	// Not found either way: an agent of another org is not this experiment's to learn of.
 	if errors.Is(err, db.ErrAgentOutsideOrg) {
-		return refuseSignup(404, "agent_not_found", "no agent %s is registered", agentID)
+		return refuseSignup(404, "not_found", "no agent %s is registered", agentID)
 	}
 	if err != nil {
 		return fmt.Errorf("platform_experiments.Signup: %w", err)
@@ -278,7 +278,7 @@ func (s *Service) RequireActive(ctx context.Context, platformExpID, agentID stri
 		return fmt.Errorf("platform_experiments.RequireActive: %w", err)
 	}
 	if cut {
-		return refusal.Refuse(http.StatusConflict, "agent_held", "agent "+agentID+" was cut from platform experiment "+platformExpID)
+		return refusal.Refuse(http.StatusConflict, "stage_cut", "agent "+agentID+" was cut from platform experiment "+platformExpID)
 	}
 	return nil
 }

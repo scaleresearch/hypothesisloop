@@ -45,15 +45,11 @@ func unreachable(method string) string {
 }
 
 // notThePlatforms is the Body of an answer that is no JSON, which the platform's API never sends,
-// said in one line in place of what may be a whole HTML page. The platform's router answers a
-// method and path it does not serve in plain text: that is an hl older or newer than the
-// platform, and no outage.
-func notThePlatforms(method, path string, status int) string {
+// said in one line in place of what may be a whole HTML page.
+func notThePlatforms(method string, status int) string {
 	switch status {
 	case http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
 		return unreachable(method)
-	case http.StatusNotFound, http.StatusMethodNotAllowed:
-		return fmt.Sprintf("the platform serves no %s %s: this hl and the platform are of different versions", method, strings.SplitN(path, "?", 2)[0])
 	}
 	return "the answer is no JSON, so it is none of the platform's API: something in front of the platform answered in its place"
 }
@@ -140,7 +136,7 @@ func (c *Client) send(method, path string, reader io.Reader) (*http.Response, er
 	}
 	refusal := strings.TrimSpace(string(data))
 	if !json.Valid(data) {
-		refusal = notThePlatforms(method, path, resp.StatusCode)
+		refusal = notThePlatforms(method, resp.StatusCode)
 	}
 	return nil, &HTTPError{Method: method, Path: path, Status: resp.StatusCode, Body: refusal}
 }

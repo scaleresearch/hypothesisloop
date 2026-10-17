@@ -23,6 +23,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 )
 
 // Store is what the proxy reads to decide. *db.Store with *db.Store
@@ -364,5 +365,5 @@ func (p *Proxy) refusal(w http.ResponseWriter, err error) {
 
 func (p *Proxy) internal(w http.ResponseWriter, what string, err error) {
 	p.logger.Error("git proxy: could not "+what, zap.Error(err))
-	refuse(w, http.StatusInternalServerError, auth.InternalError)
+	refuse(w, http.StatusInternalServerError, refusal.InternalMessage)
 }

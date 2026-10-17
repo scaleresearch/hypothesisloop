@@ -13,6 +13,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
@@ -64,21 +65,21 @@ type Placements interface {
 func NewPushHandler(metrics *metricsdb.Store, placements Placements) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			refusal.NoMethod(w, r)
 			return
 		}
 		caller, ok := auth.FromContext(r.Context())
 		if !ok {
-			http.Error(w, "unauthenticated", http.StatusUnauthorized)
+			refusal.Write(w, refusal.Refuse(http.StatusUnauthorized, refusal.ReasonUnauthenticated, "the push carries no token"))
 			return
 		}
 		var req PushRequest
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxPushBytes)).Decode(&req); err != nil {
 			if tooLarge := (*http.MaxBytesError)(nil); errors.As(err, &tooLarge) {
-				http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+				refusal.Write(w, refusal.Refuse(http.StatusRequestEntityTooLarge, refusal.ReasonTooLarge, fmt.Sprintf("a push is at most %d bytes", maxPushBytes)))
 				return
 			}
-			http.Error(w, "bad request", http.StatusBadRequest)
+			refusal.Write(w, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "the push is no JSON node metrics push"))
 			return
 		}
 		// The timestamp is the agent's own collection time, which is exactly why it must be
@@ -87,7 +88,7 @@ func NewPushHandler(metrics *metricsdb.Store, placements Placements) http.Handle
 		// year 1) corrupts elapsed time for every job on that node.
 		if err := validPushTime(req.Timestamp, time.Now().UTC()); err != nil {
 			log.Printf("metrics: rejecting push from node %s: %v", req.Node, err)
-			http.Error(w, "bad request", http.StatusBadRequest)
+			refusal.Write(w, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, err.Error()).On("timestamp"))
 			return
 		}
 		ids := make([]string, 0, len(req.Pods))
@@ -99,7 +100,7 @@ func NewPushHandler(metrics *metricsdb.Store, placements Placements) http.Handle
 		placed, err := placements.PlacementByID(r.Context(), ids)
 		if err != nil {
 			log.Printf("metrics: resolve placements for node %s: %v", req.Node, err)
-			http.Error(w, "storage unavailable", http.StatusServiceUnavailable)
+			refusal.Write(w, refusal.Refuse(http.StatusServiceUnavailable, refusal.ReasonUnavailable, "the metrics store is unavailable: push again later"))
 			return
 		}
 		observations := make([]metricsdb.Observation, 0, len(req.Pods))
@@ -125,7 +126,7 @@ func NewPushHandler(metrics *metricsdb.Store, placements Placements) http.Handle
 				// Non-2xx tells node-agent's retry queue to keep this payload and retry later —
 				// acking a write GreptimeDB never received would let silence-eviction mistake a
 				// storage outage for genuinely dead jobs.
-				http.Error(w, "storage unavailable", http.StatusServiceUnavailable)
+				refusal.Write(w, refusal.Refuse(http.StatusServiceUnavailable, refusal.ReasonUnavailable, "the metrics store is unavailable: push again later"))
 				return
 			}
 		}

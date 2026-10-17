@@ -7,6 +7,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 )
 
 // schemaAlias has the document describe type t as alias does.
@@ -38,7 +39,7 @@ var schemaAliases = []schemaAlias{
 	enum(domain.ActorKinds),
 	enum(domain.CapacityTiers),
 	enum(domain.TypeKinds),
-	{reflect.TypeFor[errorModel](), reflect.TypeFor[platformapi.ErrorModel]()},
+	{reflect.TypeFor[refusal.Refusal](), reflect.TypeFor[platformapi.ErrorModel]()},
 	{reflect.TypeFor[domain.JobSpec](), reflect.TypeFor[jobSpec]()},
 	{reflect.TypeFor[domain.JobGroup](), reflect.TypeFor[jobGroup]()},
 }

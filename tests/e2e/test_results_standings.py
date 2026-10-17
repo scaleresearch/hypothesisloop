@@ -11,7 +11,7 @@ API-only, parallel-safe (own PE, its own agents).
 
 PROVEN against the live stack: 3x solo green. Needed quota_tier="guaranteed" at signup (an
 agent-kind participant otherwise defaults to burst_only, so a guaranteed-tier job submission 402s
-with insufficient_credits).
+with insufficient_quota).
 """
 from __future__ import annotations
 

@@ -26,11 +26,7 @@ var k8sPhaseReasons = map[string]string{
 
 // PollPhaseDetail inspects experimentID's currently-scheduled pod(s) for a waiting or
 // terminated container state and reports it, plus the gang-readiness facts the control plane's
-// scale-up-timeout watcher needs: scheduledNodes (pods with condition PodScheduled=True) and
-// schedulingReason (the PodScheduled=False condition's message on a still-Pending pod — this is
-// where CA's "0/1 nodes are available" / Karpenter's "incompatible with nodepool" messages
-// surface; a Pending pod already carries this on its own status, so no separate Events read is
-// needed). Read live on every call — no caching (important.md #4). Returns empty reason/message
+// scale-up-timeout watcher needs: scheduledNodes (pods with condition PodScheduled=True). Read live on every call — no caching (important.md #4). Returns empty reason/message
 // and nil error when nothing notable is happening (pod not scheduled yet, or every container
 // running cleanly).
 //
@@ -41,10 +37,10 @@ var k8sPhaseReasons = map[string]string{
 // because attempt N-1's terminating pods are still around. clusterapi.AttemptUnknown (the executor
 // could not resolve one) falls back to counting every pod under the experiment, today's
 // behaviour, rather than filtering on a label value that doesn't exist.
-func (c *JobWorkloadClient) PollPhaseDetail(ctx context.Context, experimentID string, attempt int) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, err error) {
+func (c *JobWorkloadClient) PollPhaseDetail(ctx context.Context, experimentID string, attempt int) (reason, message string, restartCount int32, scheduledNodes int32, err error) {
 	all, err := c.experimentPods(ctx, experimentID)
 	if err != nil {
-		return "", "", 0, 0, "", fmt.Errorf("workload: list pods for %s: %w", experimentID, err)
+		return "", "", 0, 0, fmt.Errorf("workload: list pods for %s: %w", experimentID, err)
 	}
 	var pods []corev1.Pod
 	for _, p := range all {
@@ -62,9 +58,6 @@ func (c *JobWorkloadClient) PollPhaseDetail(ctx context.Context, experimentID st
 		if scheduled, unscheduledReason := podScheduledCondition(p); scheduled {
 			scheduledNodes++
 		} else if unscheduledReason != "" {
-			if schedulingReason == "" {
-				schedulingReason = unscheduledReason
-			}
 			if refusal == "" && scaleUpRefused(unscheduledReason) {
 				refusal = unscheduledReason
 			}
@@ -89,15 +82,15 @@ func (c *JobWorkloadClient) PollPhaseDetail(ctx context.Context, experimentID st
 	switch {
 	case firstTerminated != nil:
 		r, m, rc := terminatedPhaseDetail(firstTerminated, maxRestarts)
-		return r, m, rc, scheduledNodes, schedulingReason, nil
+		return r, m, rc, scheduledNodes, nil
 	case firstWaiting != nil && k8sPhaseReasons[firstWaiting.Reason] != "":
-		return k8sPhaseReasons[firstWaiting.Reason], firstWaiting.Message, maxRestarts, scheduledNodes, schedulingReason, nil
+		return k8sPhaseReasons[firstWaiting.Reason], firstWaiting.Message, maxRestarts, scheduledNodes, nil
 	case refusal != "":
-		return clusterapi.PhaseReasonScaleUpRefused, refusal, maxRestarts, scheduledNodes, schedulingReason, nil
+		return clusterapi.PhaseReasonScaleUpRefused, refusal, maxRestarts, scheduledNodes, nil
 	case firstWaiting != nil:
-		return "", firstWaiting.Message, maxRestarts, scheduledNodes, schedulingReason, nil
+		return "", firstWaiting.Message, maxRestarts, scheduledNodes, nil
 	default:
-		return "", "", maxRestarts, scheduledNodes, schedulingReason, nil
+		return "", "", maxRestarts, scheduledNodes, nil
 	}
 }
 

@@ -17,6 +17,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 )
 
 // tokenTable authenticates a token by looking it up, and refuses or fails on the rest.
@@ -223,7 +224,7 @@ func TestAHandlersUnansweredErrorSaysNothingOfWhatFailed(t *testing.T) {
 		func(context.Context, *struct{}) (*struct{}, error) {
 			return nil, huma.Error409Conflict("already closed")
 		})
-	if rec := docCall(r, "/fail", "Bearer user"); rec.Code != http.StatusInternalServerError || strings.TrimSpace(rec.Body.String()) != `{"message":"`+auth.InternalError+`"}` {
+	if rec := docCall(r, "/fail", "Bearer user"); rec.Code != http.StatusInternalServerError || strings.TrimSpace(rec.Body.String()) != `{"reason":"internal","message":"`+refusal.InternalMessage+`"}` {
 		t.Errorf("an unanswered error: got = %d %s, want a 500 that carries no internal text", rec.Code, rec.Body)
 	}
 	if rec := docCall(r, "/refuse", "Bearer user"); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "already closed") {

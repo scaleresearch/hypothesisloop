@@ -61,14 +61,14 @@ func registerAgentTypes(doc *Doc, types *accounts.AgentTypes) {
 			"its harness applies it at its next turn boundary: a new prompt, model or the effort max in a new session, the rest in the session it has. An agent given no model or hyperparameters of its own, and a pool entry naming none, run the type's from then on. " +
 			"Only the org's administrators edit: a member is refused with 403, and so is anyone editing a built-in type (builtin_read_only), which only the platform's repository changes. " +
 			"409 version_conflict when if_version is not current, archived for an archived type; 422 invalid_agent_type for a prompt or settings an agent could not run with; " +
-			"429 edit_rate_limited once 60 versions of the type were made in the last hour.",
+			"429 rate_limited once 60 versions of the type were made in the last hour.",
 	}, a.edit)
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "restore-agent-type", Method: "POST", Path: "/orgs/{id}/agent-types/{type_id}/restore", Tags: []string{"agent-types"},
 		Summary: "Make an earlier version of an org's agent type current again",
 		Description: "Inserts the next version with the prompt and settings of version, makes it current and tells every agent and coordinator of the type whose run goes on with agent.instructions, as an edit does. " +
 			"Restoring what the current version holds makes no version. Name and description stay as they are. " +
-			"Only the org's administrators restore, and nobody a built-in type (builtin_read_only). 404 for a version the type does not have, 409 archived for an archived type, 429 edit_rate_limited as for an edit.",
+			"Only the org's administrators restore, and nobody a built-in type (builtin_read_only). 404 for a version the type does not have, 409 archived for an archived type, 429 rate_limited as for an edit.",
 	}, a.restore)
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "list-agent-type-events", Method: "GET", Path: "/orgs/{id}/agent-types/{type_id}/events", Tags: []string{"agent-types"},

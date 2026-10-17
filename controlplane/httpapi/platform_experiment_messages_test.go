@@ -82,15 +82,15 @@ func TestTheCoordinatorAndTheOwnerMessageAgentsAndAnAgentReadsItsOwn(t *testing.
 		`{"coordinator":true,"text":"x"}`:              "invalid_recipient",
 		`{"text":"x"}`:                                 "invalid_recipient",
 		`{"agent_id":"veteran","text":"   "}`:          "empty_message",
-		`{"agent_id":"veteran","text":"` + strings.Repeat("x", domain.MaxAgentMessageBytes+1) + `"}`: "message_too_long",
+		`{"agent_id":"veteran","text":"` + strings.Repeat("x", domain.MaxAgentMessageBytes+1) + `"}`: "too_long",
 	} {
 		if code, out := call(t, messagesRouter(t, &messageStore{}, coordinator), "POST", "/platform-experiments/pe-1/messages", body); code != http.StatusUnprocessableEntity || out["reason"] != reason {
 			t.Errorf("%.60s: got = %d %v, want 422 %s", body, code, out, reason)
 		}
 	}
 	limited := &messageStore{refuse: &db.MessagesRateLimited{AgentID: "veteran", From: "coordinator", Next: time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)}}
-	if code, out := call(t, messagesRouter(t, limited, coordinator), "POST", "/platform-experiments/pe-1/messages", `{"agent_id":"veteran","text":"again"}`); code != http.StatusTooManyRequests || out["reason"] != "message_rate_limited" || !strings.Contains(out["message"].(string), "2026-10-09T12:00:00Z") || !strings.Contains(out["message"].(string), "by the coordinator") {
-		t.Errorf("past the limit: got = %d %v, want 429 message_rate_limited with when", code, out)
+	if code, out := call(t, messagesRouter(t, limited, coordinator), "POST", "/platform-experiments/pe-1/messages", `{"agent_id":"veteran","text":"again"}`); code != http.StatusTooManyRequests || out["reason"] != "rate_limited" || !strings.Contains(out["message"].(string), "2026-10-09T12:00:00Z") || !strings.Contains(out["message"].(string), "by the coordinator") {
+		t.Errorf("past the limit: got = %d %v, want 429 rate_limited with when", code, out)
 	}
 
 	// A message to every researcher reaches those not rate limited and names the others.
@@ -100,8 +100,8 @@ func TestTheCoordinatorAndTheOwnerMessageAgentsAndAnAgentReadsItsOwn(t *testing.
 	if code != http.StatusCreated || len(out["messages"].([]any)) != 1 || len(refused) != 1 {
 		t.Fatalf("all with one limited: got = %d %v, want the sent and the refused", code, out)
 	}
-	if r := refused[0].(map[string]any); r["agent_id"] != "dana" || r["reason"] != "message_rate_limited" || r["retry_after"] != "2026-10-09T12:00:00Z" {
-		t.Errorf("refused = %v, want dana, message_rate_limited and when", r)
+	if r := refused[0].(map[string]any); r["agent_id"] != "dana" || r["reason"] != "rate_limited" || r["retry_after"] != "2026-10-09T12:00:00Z" {
+		t.Errorf("refused = %v, want dana, rate_limited and when", r)
 	}
 	if _, listed := out["refused"]; !listed {
 		t.Error("refused missing")
@@ -110,7 +110,7 @@ func TestTheCoordinatorAndTheOwnerMessageAgentsAndAnAgentReadsItsOwn(t *testing.
 		t.Errorf("all with none limited: got = %d %v, want no refused", code, out)
 	}
 	allLimited := &messageStore{refuse: &db.MessagesRateLimited{AgentID: "dana", From: "owner", Next: time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)}}
-	if code, out := call(t, messagesRouter(t, allLimited, owner), "POST", "/platform-experiments/pe-1/messages", `{"all":true,"text":"again"}`); code != http.StatusTooManyRequests || out["reason"] != "message_rate_limited" {
+	if code, out := call(t, messagesRouter(t, allLimited, owner), "POST", "/platform-experiments/pe-1/messages", `{"all":true,"text":"again"}`); code != http.StatusTooManyRequests || out["reason"] != "rate_limited" {
 		t.Errorf("all with every one limited: got = %d %v, want 429", code, out)
 	}
 

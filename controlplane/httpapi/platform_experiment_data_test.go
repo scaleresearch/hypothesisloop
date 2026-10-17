@@ -170,7 +170,7 @@ func TestACutAgentOrAClosedPlatformExperimentGetsNoDataKey(t *testing.T) {
 		"running, agent in":      {domain.PlatformExpRunning, "agent-1", 0, ""},
 		"open, agent in":         {domain.PlatformExpOpen, "agent-1", 0, ""},
 		"closed":                 {domain.PlatformExpClosed, "agent-1", http.StatusConflict, "experiment_closed"},
-		"running, agent cut":     {domain.PlatformExpRunning, "agent-cut", http.StatusConflict, "agent_held"},
+		"running, agent cut":     {domain.PlatformExpRunning, "agent-cut", http.StatusConflict, "stage_cut"},
 		"closed, agent also cut": {domain.PlatformExpClosed, "agent-cut", http.StatusConflict, "experiment_closed"},
 	} {
 		store := &windDownStore{status: tc.status, cut: "agent-cut"}

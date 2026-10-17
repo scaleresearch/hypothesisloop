@@ -17,6 +17,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
@@ -38,7 +39,7 @@ type Hypotheses interface {
 
 const (
 	// pageSize is how many changes one read takes.
-	pageSize = 500
+	pageSize          = 500
 	watchWriteTimeout = 10 * time.Second
 	// listenRetryDelay is how long the one LISTEN waits before it is established again after its
 	// connection broke. Every stream reads again once it is back.
@@ -153,7 +154,7 @@ func (h *Handler) Start(ctx context.Context) {
 
 func (h *Handler) admit(ctx context.Context, principal auth.Principal) (context.Context, error) {
 	if !auth.AudienceAgent.Admits(principal, "") {
-		return nil, auth.Forbidden("forbidden: a " + string(principal.Kind) + " token may not watch")
+		return nil, auth.Forbidden("a " + string(principal.Kind) + " token may not watch")
 	}
 	// A stream only reads. The platform experiment it is narrowed to is admitted by the access
 	// check on its own, so none is named for a listing here.
@@ -202,7 +203,7 @@ func (h *Handler) open(w http.ResponseWriter, r *http.Request) (context.Context,
 	}
 	filter, after, err := parseWatchQuery(r)
 	if err != nil {
-		writeWatchError(w, http.StatusBadRequest, err.Error())
+		refusal.Write(w, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, err.Error()))
 		return nil, subscription{}, false
 	}
 	if principal.Kind == auth.KindAgent {
@@ -229,7 +230,7 @@ func (h *Handler) open(w http.ResponseWriter, r *http.Request) (context.Context,
 			return nil, subscription{}, false
 		}
 		if exp == nil {
-			writeWatchError(w, http.StatusNotFound, "no such experiment "+filter.ExperimentID)
+			refusal.Write(w, refusal.Refuse(http.StatusNotFound, refusal.ReasonNotFound, "no such experiment "+filter.ExperimentID))
 			return nil, subscription{}, false
 		}
 		filter.PlatformExperimentID = exp.PlatformExperimentID
@@ -245,7 +246,7 @@ func (h *Handler) open(w http.ResponseWriter, r *http.Request) (context.Context,
 // holds for the caller (Access.PlatformExperimentListScope), and answers which those are.
 func (h *Handler) project(ctx context.Context, principal auth.Principal, projectID string) (domain.TenantScope, bool, error) {
 	if !principal.HoldsAccount() {
-		return domain.TenantScope{}, false, auth.Forbidden("forbidden: a " + string(principal.Kind) + " token watches only its own platform experiment")
+		return domain.TenantScope{}, false, auth.Forbidden("a " + string(principal.Kind) + " token watches only its own platform experiment")
 	}
 	if err := h.access.Project(ctx, projectID); err != nil {
 		return domain.TenantScope{}, false, err
@@ -334,9 +335,9 @@ func (h *Handler) concerning(ctx context.Context, filter domain.EventFilter, cha
 func (h *Handler) writeReadError(w http.ResponseWriter, after int64, err error) {
 	switch {
 	case errors.Is(err, db.ErrChangeUnknown):
-		writeWatchError(w, http.StatusGone, fmt.Sprintf("after %d is not a change id this platform issued", after))
+		refusal.Write(w, refusal.Refuse(http.StatusGone, platformapi.ReasonCursorGone, fmt.Sprintf("after %d is not a change id this platform issued", after)))
 	case errors.Is(err, db.ErrChangesPruned):
-		writeWatchError(w, http.StatusGone, fmt.Sprintf("changes after %d are no longer held; re-read state and watch from head", after))
+		refusal.Write(w, refusal.Refuse(http.StatusGone, platformapi.ReasonCursorGone, fmt.Sprintf("changes after %d are no longer held; re-read state and watch from head", after)))
 	default:
 		auth.WriteError(w, h.logger, auth.Internal(h.logger, "watch: read changes", err))
 	}
@@ -352,7 +353,7 @@ func (h *Handler) ServeChanges(w http.ResponseWriter, r *http.Request) {
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed < 1 || parsed > pageSize {
-			writeWatchError(w, http.StatusBadRequest, fmt.Sprintf("limit must be a whole number from 1 to %d", pageSize))
+			refusal.Write(w, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, fmt.Sprintf("limit must be a whole number from 1 to %d", pageSize)))
 			return
 		}
 		limit = parsed
@@ -390,10 +391,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := acceptWebSocket(w, r)
 	if err != nil {
-		writeWatchError(w, http.StatusBadRequest, err.Error())
+		refusal.Write(w, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, err.Error()))
 		return
 	}
-	defer conn.Close()
+	closing := wsClose{code: wsCloseNormal}
+	defer func() { conn.Close(closing) }()
 
 	peerGone := make(chan struct{})
 	go func() {
@@ -421,41 +423,49 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err := writeJSON(conn, stand); err != nil {
 			return
 		}
-		if page.CaughtUp && !h.wait(ctx, conn, sub.filter, stand, woke, ping.C, peerGone) {
-			return
+		if page.CaughtUp {
+			readOn, refused := h.wait(ctx, conn, sub.filter, stand, woke, ping.C, peerGone)
+			if refused != nil {
+				closing = wsClose{code: wsClosePolicy, reason: refused.Reason}
+			}
+			if !readOn {
+				return
+			}
 		}
 		if page, err = h.read(ctx, sub, stand.Next, pageSize); err != nil {
 			h.logger.Info("watch: closing a stream that could not read on", zap.Int64("after", stand.Next), zap.Error(err))
+			closing = wsClose{code: wsCloseInternal, reason: refusal.ReasonInternal}
 			return
 		}
 	}
 }
 
 // wait holds a caught-up stream until a change is appended, writing its progress frame stand
-// again and asking its token again meanwhile, and says whether to read on.
-func (h *Handler) wait(ctx context.Context, conn *wsConn, filter domain.EventFilter, stand platformapi.Progress, woke <-chan struct{}, ping <-chan time.Time, peerGone <-chan struct{}) bool {
+// again and asking its token again meanwhile, and says whether to read on, and the refusal of a
+// token no longer admitted.
+func (h *Handler) wait(ctx context.Context, conn *wsConn, filter domain.EventFilter, stand platformapi.Progress, woke <-chan struct{}, ping <-chan time.Time, peerGone <-chan struct{}) (bool, *refusal.Refusal) {
 	for {
 		select {
 		case <-woke:
-			return true
+			return true, nil
 		case <-ping:
 			if err := h.stillAdmitted(ctx, filter); err != nil {
-				var refusal *auth.Error
-				if errors.As(err, &refusal) {
+				var refused *refusal.Refusal
+				if errors.As(err, &refused) && refused.GetStatus() < http.StatusInternalServerError {
 					h.logger.Info("watch: closing a stream whose token is no longer admitted",
-						zap.String("project_id", filter.ProjectID), zap.String("platform_experiment_id", filter.PlatformExperimentID), zap.String("reason", refusal.Message))
-					return false
+						zap.String("project_id", filter.ProjectID), zap.String("platform_experiment_id", filter.PlatformExperimentID), zap.String("reason", refused.Reason), zap.String("message", refused.Message))
+					return false, refused
 				}
 				// The platform's own failure says nothing about the caller: ask again next tick.
 				h.logger.Warn("watch: could not re-check a stream's token", zap.Error(err))
 			}
 			if err := writeJSON(conn, stand); err != nil {
-				return false
+				return false, nil
 			}
 		case <-peerGone:
-			return false
+			return false, nil
 		case <-ctx.Done():
-			return false
+			return false, nil
 		}
 	}
 }
@@ -550,11 +560,3 @@ func parseKinds(raw string) (map[string]bool, error) {
 type errWatch string
 
 func (e errWatch) Error() string { return string(e) }
-
-// writeWatchError answers with the error body every other operation on this API uses, so a caller
-// parses one error shape whether or not the upgrade ever happened.
-func writeWatchError(w http.ResponseWriter, status int, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(platformapi.ErrorModel{Message: message})
-}

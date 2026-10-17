@@ -40,9 +40,7 @@ func requireAgentSandbox(configured bool) error {
 	if why == nil {
 		return nil
 	}
-	refused := refusal.Refuse(http.StatusServiceUnavailable, why.Reason, why.Reason+": "+why.Message)
-	refused.Summary, refused.OperatorDetail = why.Summary, why.OperatorDetail
-	return refused
+	return refusal.Refuse(http.StatusServiceUnavailable, why.Reason, why.Summary)
 }
 
 // withAgentSandbox resolves the coordinator a create asks the platform to run with launch: the model

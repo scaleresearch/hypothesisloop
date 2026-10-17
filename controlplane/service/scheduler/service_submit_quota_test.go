@@ -91,7 +91,7 @@ func TestASubmitTakenWakesTheAdmissionLoopOnce(t *testing.T) {
 }
 
 // The transaction's refusals were told apart by the first words of their text, and every one
-// that matched none was answered 402 insufficient_credits with a stage outlook: a cut agent, and
+// that matched none was answered 402 insufficient_quota with a stage outlook: a cut agent, and
 // one with no quota. Each is answered with its own reason, and only a quota refusal says whether
 // a stage raises the share.
 func TestEachRefusalOfTheAdmissionTransactionIsAnsweredWithItsOwnReason(t *testing.T) {

@@ -183,25 +183,19 @@ func HypothesisSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writ
 	return 0
 }
 
-// reportHold answers a submit held back for the hypotheses in the reply's similar list with those
-// hypotheses, one per line, and the two ways on. It reports whether err was such a hold.
+// reportHold answers a submit held back for the hypotheses the reply lists in its problems with
+// those hypotheses, one per line, and the two ways on. It reports whether err was such a hold.
 func reportHold(stderr io.Writer, item string, err error) bool {
 	var refused *apiclient.HTTPError
-	var reply struct {
-		Similar []json.RawMessage `json:"similar"`
-	}
-	if reason, _ := command.RefusalOf(err); reason != platformapi.ReasonSimilarHypotheses || !errors.As(err, &refused) || json.Unmarshal([]byte(refused.Body), &reply) != nil {
+	var reply platformapi.ErrorModel
+	if !errors.As(err, &refused) || json.Unmarshal([]byte(refused.Body), &reply) != nil || reply.Reason != platformapi.ReasonSimilarHypotheses {
 		return false
 	}
 	fmt.Fprintf(stderr, "hl: hypothesis submit: %snothing registered, yours reads close to these or builds on a refuted one:\n", item)
-	ids := make([]string, len(reply.Similar))
-	for i, raw := range reply.Similar {
-		var h struct {
-			ID string `json:"id"`
-		}
-		_ = json.Unmarshal(raw, &h)
-		ids[i] = h.ID
-		_ = command.PrintLine(stderr, raw)
+	ids := make([]string, len(reply.Problems))
+	for i, similar := range reply.Problems {
+		ids[i] = similar.Field
+		fmt.Fprintf(stderr, "%s %s: %s\n", similar.Field, similar.Reason, similar.Message)
 	}
 	fmt.Fprintf(stderr, "hl: hypothesis submit: judge each. The same claim as yours: register nothing and test it with "+
 		"hl job submit FILE --hypothesis ID; its verdict stays its owner's. A different claim, narrower and broader ones "+

@@ -34,12 +34,12 @@ func TestOnlyTheAuthorEditsAPersonsIdeaAndTheAuthorOrAnOrgOwnerRemovesIt(t *test
 	}{
 		{"the author edits", adas, ada, false, ""},
 		{"the author removes", adas, ada, true, ""},
-		{"another member edits", adas, member, false, "not_the_author"},
-		{"another member removes", adas, member, true, "not_the_author"},
-		{"an org owner edits", adas, owner, false, "not_the_author"},
+		{"another member edits", adas, member, false, "forbidden"},
+		{"another member removes", adas, member, true, "forbidden"},
+		{"an org owner edits", adas, owner, false, "forbidden"},
 		{"an org owner removes", adas, owner, true, ""},
-		{"an agent's or a key's token edits", adas, noPerson, false, "person_only"},
-		{"an agent's or a key's token removes", adas, noPerson, true, "person_only"},
+		{"an agent's or a key's token edits", adas, noPerson, false, "forbidden"},
+		{"an agent's or a key's token removes", adas, noPerson, true, "forbidden"},
 		{"the author edits one written for an agent", forAgent, ada, false, "agent_hypothesis"},
 		{"the author removes one written for an agent", forAgent, ada, true, "agent_hypothesis"},
 		{"an org owner removes an agent's", agents, owner, true, "agent_hypothesis"},
@@ -192,8 +192,8 @@ func TestAPersonsCloseIdeaIsRegisteredWithItsSimilarOnesAsAHint(t *testing.T) {
 	}
 
 	_, _, _, _, err = svc.RegisterHypothesis(context.Background(), "agent-2", agentActor("agent-2"), "pe-1", "a longer warmup helps a lot", buildOnRoot, nil)
-	held, ok := (&Service{}).WriteRefusal(err).(*similarHypothesesError)
-	if !ok || held.GetStatus() != http.StatusConflict || held.Reason != "similar_hypotheses" || len(held.Similar) != 1 {
+	held, ok := (&Service{}).WriteRefusal(err).(*refusal.Refusal)
+	if !ok || held.GetStatus() != http.StatusConflict || held.Reason != "similar_hypotheses" || len(held.Problems) != 1 || held.Problems[0].Field != "h-close" {
 		t.Errorf("an agent's close claim: got = %v, want 409 similar_hypotheses with the close one", err)
 	}
 }

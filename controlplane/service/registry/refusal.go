@@ -2,6 +2,7 @@ package registry
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
@@ -12,14 +13,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/graphdb"
 )
 
-// similarHypothesesError is the 409 a registration gets while it reads close to hypotheses it has
-// not been told apart from: the refusal with the hypotheses themselves beside it.
-type similarHypothesesError struct {
-	*refusal.Refusal
-	Similar []domain.SimilarHypothesis `json:"similar"`
-}
-
-const similarDetail = "Nothing was registered: your hypothesis reads close to the ones in `similar` " +
+const similarDetail = "Nothing was registered: your hypothesis reads close to the ones in `problems`, each named by its id in field " +
 	"(reason close_text), or builds on a refuted one (refuted_parent). Read each. If one states the same claim as " +
 	"yours, register nothing and test it under its id; only its owner sets its status. A narrower, broader or " +
 	"otherwise different claim is yours to register: resubmit naming each one, as a contradicts link when yours " +
@@ -34,11 +28,11 @@ const closedDetail = "the platform experiment is closed, and its hypothesis grap
 func (s *Service) WriteRefusal(err error) error {
 	var similar *graphdb.SimilarError
 	if errors.As(err, &similar) {
-		return &similarHypothesesError{Refusal: refusal.Refuse(http.StatusConflict, platformapi.ReasonSimilarHypotheses, similarDetail), Similar: similar.Similar}
+		return similarHypotheses(similar.Similar)
 	}
 	var unsupported *UnsupportedVerdictError
 	if errors.As(err, &unsupported) {
-		return &refusal.Rejection{Status: http.StatusConflict, Err: errors.New(unsupported.Detail)}
+		return refusal.Conflict("verdict_unsupported", unsupported.Detail)
 	}
 	var inRecord *InRecordError
 	if errors.As(err, &inRecord) {
@@ -50,7 +44,7 @@ func (s *Service) WriteRefusal(err error) error {
 			"nothing was changed. Test or comment on that one instead")
 	case errors.Is(err, graphdb.ErrInvalidLink),
 		errors.Is(err, ErrUnknownPlatformExperiment), errors.Is(err, db.ErrUnknownAgent):
-		return &refusal.Rejection{Status: http.StatusBadRequest, Err: err}
+		return refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, err.Error())
 	case errors.Is(err, ErrBaselineRegistersNoHypothesis):
 		return refusal.Refuse(http.StatusForbidden, "baseline_registers_no_hypothesis", err.Error())
 	case errors.Is(err, domain.ErrPlatformExperimentClosed):
@@ -58,10 +52,22 @@ func (s *Service) WriteRefusal(err error) error {
 	case errors.Is(err, domain.ErrNotSignedUp):
 		return refusal.Refuse(http.StatusForbidden, "not_signed_up", err.Error())
 	case errors.Is(err, ErrHypothesisNotOwner):
-		return &refusal.Rejection{Status: http.StatusForbidden, Err: err}
+		return refusal.Refuse(http.StatusForbidden, refusal.ReasonForbidden, err.Error())
 	case errors.Is(err, ErrHypothesisNotFound):
-		return &refusal.Rejection{Status: http.StatusNotFound, Err: err}
+		return refusal.Refuse(http.StatusNotFound, refusal.ReasonNotFound, err.Error())
 	default:
 		return auth.Internal(s.logger, "write hypothesis", err)
 	}
+}
+
+// similarHypotheses is the 409 a registration gets while it reads close to hypotheses it has not
+// been told apart from: each of them a problem, its id the field, close_text or refuted_parent
+// the reason.
+func similarHypotheses(similar []domain.SimilarHypothesis) error {
+	refused := refusal.Conflict(platformapi.ReasonSimilarHypotheses, similarDetail)
+	refused.Problems = make([]platformapi.Problem, len(similar))
+	for i, h := range similar {
+		refused.Problems[i] = platformapi.Problem{Field: h.ID, Reason: h.Reason, Message: fmt.Sprintf("%s, by %s: %s", h.Status, h.Actor.Name, h.Text)}
+	}
+	return refused
 }

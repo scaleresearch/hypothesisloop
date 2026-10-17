@@ -44,7 +44,7 @@ func (s *Service) Update(ctx context.Context, id string, patch PlatformExperimen
 		return nil, err
 	}
 	if pe == nil {
-		return nil, refuseUpdate(404, "experiment_not_found", "no platform experiment %s", id)
+		return nil, refuseUpdate(404, "not_found", "no platform experiment %s", id)
 	}
 	if len(patch.carried()) == 0 {
 		return nil, refuseUpdate(422, "nothing_to_change", "the body names no field: send the fields that change")
@@ -257,7 +257,7 @@ func (s *Service) SetSummary(ctx context.Context, id, summary string) (*domain.P
 		summary = strings.TrimRight(summary[:i], " \n")
 	}
 	if len(summary) > domain.MaxProseBytes {
-		return nil, refuseUpdate(422, "summary_too_long", "%s", tooLong("summary", len(summary)))
+		return nil, refuseUpdate(422, "too_long", "%s", tooLong("summary", len(summary)))
 	}
 	err := s.store.SetPlatformExperimentSummary(ctx, id, summary)
 	if errors.Is(err, db.ErrPlatformExperimentNotFound) {

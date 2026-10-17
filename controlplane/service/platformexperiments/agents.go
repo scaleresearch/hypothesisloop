@@ -20,7 +20,7 @@ import (
 // joins a platform experiment.
 type AddAgentRequest struct {
 	AgentID         string         `json:"agent_id,omitempty" doc:"Join as this registered agent instead of creating a new one. Joining again once joined succeeds and changes nothing."`
-	Name            string         `json:"name,omitempty" doc:"Display name of a created agent, unique in the platform experiment: 409 agent_name_taken for one another agent of it carries. Omitted, it is named by its role and a number no other agent of the experiment has: \"Researcher 2\", \"Baseline 1\"."`
+	Name            string         `json:"name,omitempty" doc:"Display name of a created agent, unique in the platform experiment: 409 name_taken for one another agent of it carries. Omitted, it is named by its role and a number no other agent of the experiment has: \"Researcher 2\", \"Baseline 1\"."`
 	Role            string         `json:"role,omitempty" doc:"\"competitor\" (default), \"baseline\" or \"reviewer\"."`
 	QuotaTier       string         `json:"quota_tier,omitempty" doc:"\"guaranteed\" or \"burst_only\"; omitted, the platform experiment's default_quota_tier applies."`
 	InAgentSandbox  bool           `json:"in_agentsandbox,omitempty" doc:"true: the platform runs the agent. false (default): its token is returned and you run it."`
@@ -171,7 +171,7 @@ func instanceStarting(signup domain.AgentSignup, now time.Time) *domain.StatusRe
 // refuseSignup is a join or a removal refused for a reason the caller can act on. Reason leads
 // the message, as every signup refusal always has.
 func refuseSignup(status int, reason, format string, args ...any) error {
-	return refusal.Refuse(status, reason, reason+": "+fmt.Sprintf(format, args...))
+	return refusal.Refuse(status, reason, fmt.Sprintf(format, args...))
 }
 
 // AddAgent joins one agent to a platform experiment: the registered agent req names, or a new
@@ -190,7 +190,7 @@ func (s *Service) AddAgent(ctx context.Context, platformExpID string, req AddAge
 		return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
 	}
 	if pe == nil {
-		return nil, refuseSignup(404, "experiment_not_found", "no platform experiment %s", platformExpID)
+		return nil, refuseSignup(404, "not_found", "no platform experiment %s", platformExpID)
 	}
 	catalog, err := s.store.AgentTypeCatalog(ctx, platformExpID)
 	if err != nil {
@@ -244,7 +244,7 @@ func (s *Service) AddAgent(ctx context.Context, platformExpID string, req AddAge
 // coordinator or a person adds it.
 func (s *Service) lateJoin(ctx context.Context, pe *domain.PlatformExperiment, by domain.Actor) (*db.LateJoin, error) {
 	if by.Kind == domain.ActorAgent {
-		return nil, refuseSignup(403, "not_coordinator", "an agent adds no agent to a running platform experiment: its coordinator or its owner does")
+		return nil, refuseSignup(403, "forbidden", "an agent adds no agent to a running platform experiment: its coordinator or its owner does")
 	}
 	return s.lateShare(ctx, pe)
 }
@@ -318,7 +318,7 @@ func enrolRefused(err error, pe *domain.PlatformExperiment, name string) error {
 
 // agentNameTaken refuses an agent whose name another agent of the platform experiment carries.
 func agentNameTaken(name string) error {
-	return refuseSignup(409, "agent_name_taken", "another agent of this platform experiment is named %q, and a name tells its agents apart: state another name, or none to have the platform name it by its role", name)
+	return refuseSignup(409, "name_taken", "another agent of this platform experiment is named %q, and a name tells its agents apart: state another name, or none to have the platform name it by its role", name)
 }
 
 func (s *Service) joinRegistered(ctx context.Context, pe *domain.PlatformExperiment, req AddAgentRequest, signup domain.AgentSignup, late *db.LateJoin) ([]domain.AgentSignup, error) {
@@ -331,7 +331,7 @@ func (s *Service) joinRegistered(ctx context.Context, pe *domain.PlatformExperim
 		return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
 	}
 	if agent == nil {
-		return nil, refuseSignup(404, "agent_not_found", "no agent %s is registered", req.AgentID)
+		return nil, refuseSignup(404, "not_found", "no agent %s is registered", req.AgentID)
 	}
 	joined, err := s.store.GetAgentSignup(ctx, platformExpID, req.AgentID)
 	if err != nil {
@@ -347,7 +347,7 @@ func (s *Service) joinRegistered(ctx context.Context, pe *domain.PlatformExperim
 			return nil, refused
 		}
 		if errors.Is(err, db.ErrAgentOutsideOrg) {
-			return nil, refuseSignup(404, "agent_not_found", "no agent %s is registered", req.AgentID)
+			return nil, refuseSignup(404, "not_found", "no agent %s is registered", req.AgentID)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
@@ -408,7 +408,7 @@ func (s *Service) RemoveAgent(ctx context.Context, platformExpID, agentID string
 		return fmt.Errorf("platform_experiments.RemoveAgent: %w", err)
 	}
 	if pe == nil {
-		return refuseSignup(404, "experiment_not_found", "no platform experiment %s", platformExpID)
+		return refuseSignup(404, "not_found", "no platform experiment %s", platformExpID)
 	}
 	signup, err := s.store.GetAgentSignup(ctx, platformExpID, agentID)
 	if err != nil {

@@ -30,7 +30,7 @@ type Client struct {
 }
 
 // Refusal is a request the control plane answered with a status other than 2xx. Reason and
-// Message are its {"reason", "error"} body, when it has one; Body is what it said, trimmed.
+// Message are those of its platformapi.ErrorModel body; Body is what it said, trimmed.
 type Refusal struct {
 	Status  int
 	Reason  string
