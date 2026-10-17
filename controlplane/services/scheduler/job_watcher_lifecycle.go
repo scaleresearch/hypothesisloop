@@ -10,7 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/obsmetrics"
+	"github.com/scaleresearch/hypothesisloop/controlplane/obsmetrics"
 )
 
 // startOverdue is how long exp has been admitted beyond its own checkpoint window. A requeued job

@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/obsmetrics"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler/placement"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/obsmetrics"
 )
 
 // scalesAbove reports whether a cluster of a higher priority than chosen could be asked to scale

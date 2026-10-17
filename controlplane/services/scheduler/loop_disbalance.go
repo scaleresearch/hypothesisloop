@@ -9,8 +9,8 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/obsmetrics"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler/placement"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/obsmetrics"
 )
 
 // A job that asks for one accelerator but nearly all of a node's CPU strands that node's other

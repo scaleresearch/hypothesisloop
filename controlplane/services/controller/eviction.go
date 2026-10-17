@@ -7,7 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/obsmetrics"
+	"github.com/scaleresearch/hypothesisloop/controlplane/obsmetrics"
 )
 
 // evict ends the experiment with the given reason and settles what it genuinely consumed. The

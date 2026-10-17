@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/obsmetrics"
+	"github.com/scaleresearch/hypothesisloop/controlplane/obsmetrics"
 )
 
 // backlogKey identifies one (cluster, flavor, tier) bucket of capacity-blocked demand —

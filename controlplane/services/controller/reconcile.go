@@ -9,7 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/obsmetrics"
+	"github.com/scaleresearch/hypothesisloop/controlplane/obsmetrics"
 )
 
 // Reconcile runs one full reconciliation pass over all running experiments.

@@ -8,8 +8,8 @@ import (
 	"go.uber.org/zap/zapcore"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/obsmetrics"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler/placement"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/obsmetrics"
 )
 
 // preemptionState is what the guaranteed pass reads once and keeps across the jobs it cannot fit.

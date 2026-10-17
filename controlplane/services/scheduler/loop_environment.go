@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/obsmetrics"
+	"github.com/scaleresearch/hypothesisloop/controlplane/obsmetrics"
 )
 
 // environmentPass is what one tick read of the environments queued jobs wait for: each
