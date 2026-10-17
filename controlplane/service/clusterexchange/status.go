@@ -73,7 +73,7 @@ func (s *Service) PushStatus(ctx context.Context, clusterName string, push clust
 	for _, rep := range accepted {
 		statusSamples = append(statusSamples, metricsdb.JobStatusSample{
 			ExperimentID: rep.ExperimentID, ClusterName: clusterName, Phase: rep.Phase,
-			AdmittedAcceleratorType: rep.AdmittedAcceleratorType, AdmittedNode: rep.AdmittedNode, AdmittedMachine: jobMachine(rep.AdmittedMachine), At: now,
+			AdmittedAcceleratorType: rep.AdmittedAcceleratorType, AdmittedNode: rep.AdmittedNode, AdmittedMachine: rep.AdmittedMachine, At: now,
 		})
 		observations = append(observations, observationsOf(rep, placementByID[rep.ExperimentID].AdmittedAt, runReportedAt[rep.ExperimentID], clusterName, now, s.observationCadence)...)
 		// LogTail is optional per report (nil when the executor has nothing new)

@@ -22,7 +22,7 @@ func settle(t *testing.T, acceleratorType domain.AcceleratorType, count int, est
 	exp := &domain.Experiment{
 		ID: "exp-1", PlatformExperimentID: "pe-1", CreatedAt: now.Add(-24 * time.Hour),
 		AcceleratorType: acceleratorType, AcceleratorCount: count, EstimatedDurationHours: estimatedHours,
-		EstimatedCostAccH: acceleratorType.Cost() * float64(count) * estimatedHours,
+		EstimatedCostAccH: domain.AcceleratorCost(acceleratorType) * float64(count) * estimatedHours,
 	}
 	if err := New(usage, metricsdb.New(server.URL), 3*time.Minute).Settle(context.Background(), exp); err != nil {
 		t.Fatalf("Settle: %v", err)

@@ -68,7 +68,7 @@ func TestPreemptionShortfallIsNeverEmptyForAJobThatDoesNotFit(t *testing.T) {
 	for i := 0; i < iterations; i++ {
 		c := generateCase(rnd)
 
-		footprint, err := c.exp.Job.Footprint(c.exp.AcceleratorType)
+		footprint, err := domain.JobFootprint(c.exp.Job, c.exp.AcceleratorType)
 		if err != nil {
 			continue // a generated spec that cannot be costed is not a placement question
 		}
@@ -117,7 +117,7 @@ func TestPreemptionShortfallCountsEveryRankNotJustOne(t *testing.T) {
 	if Reserve(CloneNodes(nodeAccel), CloneNodes(nodeRes), nil, exp) {
 		t.Fatal("fixture is wrong: two ranks of 2Gi cannot both be placed on 1Gi+1Gi+2Gi")
 	}
-	footprint, err := exp.Job.Footprint(exp.AcceleratorType)
+	footprint, err := domain.JobFootprint(exp.Job, exp.AcceleratorType)
 	if err != nil {
 		t.Fatalf("Footprint() = %v", err)
 	}
@@ -148,7 +148,7 @@ func TestPreemptionShortfallNeverReportsUnrequestedDimensions(t *testing.T) {
 
 	for i := 0; i < iterations; i++ {
 		c := generateCase(rnd)
-		footprint, err := c.exp.Job.Footprint(c.exp.AcceleratorType)
+		footprint, err := domain.JobFootprint(c.exp.Job, c.exp.AcceleratorType)
 		if err != nil {
 			continue
 		}
@@ -175,7 +175,7 @@ func TestPreemptionShortfallNeverExceedsTheJobsOwnFootprint(t *testing.T) {
 
 	for i := 0; i < iterations; i++ {
 		c := generateCase(rnd)
-		footprint, err := c.exp.Job.Footprint(c.exp.AcceleratorType)
+		footprint, err := domain.JobFootprint(c.exp.Job, c.exp.AcceleratorType)
 		if err != nil {
 			continue
 		}

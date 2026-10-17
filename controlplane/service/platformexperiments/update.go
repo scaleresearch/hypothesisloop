@@ -131,7 +131,7 @@ func (s *Service) Update(ctx context.Context, id string, patch PlatformExperimen
 		BudgetAcceleratorHours: patched.BudgetAcceleratorHours, MaxAgents: patched.MaxAgents, Researchers: patched.Researchers,
 		MaxConcurrentAccelerators: patched.MaxConcurrentAccelerators, Metrics: patched.Metrics,
 		ReportIntervalSeconds: patched.ReportIntervalSeconds, DurationHours: patched.DurationHours,
-		Stages: patched.Stages, DefaultQuotaTier: string(patched.DefaultQuotaTier),
+		Stages: patched.Stages, DefaultQuotaTier: patched.DefaultQuotaTier,
 	}, StartsAt: patched.StartsAt}, catalog)
 	if err != nil {
 		return nil, err

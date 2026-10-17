@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
 	"strings"
 	"time"
 
@@ -181,7 +182,7 @@ func (s *Service) AddAgent(ctx context.Context, platformExpID string, req AddAge
 	if err != nil {
 		return nil, refuseSignup(400, "unknown_role", "%s", err)
 	}
-	if !domain.ValidQuotaTierOverride(req.QuotaTier) {
+	if !experimentspec.ValidQuotaTierOverride(req.QuotaTier) {
 		return nil, refuseSignup(400, "invalid_request", "quota_tier must be \"guaranteed\", \"burst_only\", or omitted, got %s", req.QuotaTier)
 	}
 	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)

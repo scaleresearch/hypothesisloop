@@ -104,7 +104,7 @@ func CloneNodes(byNode map[string]map[string]int64) map[string]map[string]int64 
 //
 // This is resource-vector feasibility, not proof that the runtime will schedule the job: taints,
 // volumes and affinity are the runtime's own concerns and are not modelled here.
-// It walks domain.JobSpec.NodeShapes() — one entry per node, which for a heterogeneous (grouped)
+// It walks domain.NodeShapes — one entry per node, which for a heterogeneous (grouped)
 // job are genuinely different shapes. An averaged shape would be the one thing that must not be
 // used here: no node ever holds the average of a learner and 64 actors, so a job proven to fit
 // against it fits nowhere.

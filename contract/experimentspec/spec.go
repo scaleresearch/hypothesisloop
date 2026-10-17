@@ -41,7 +41,7 @@ type Spec struct {
 	CoordinatorModel          string                `json:"coordinator_model,omitempty"`
 	ReportIntervalSeconds     int                   `json:"report_interval_seconds,omitempty" doc:"How often a job is expected to report. Left out, it is the platform's scheduler.default_report_interval_seconds."`
 	Stages                    []Stage               `json:"stages,omitempty"`
-	DefaultQuotaTier          string                `json:"default_quota_tier,omitempty"`
+	DefaultQuotaTier          QuotaTier             `json:"default_quota_tier,omitempty"`
 	MaxConcurrentAccelerators *int                  `json:"max_concurrent_accelerators,omitempty"`
 	AgentImage                string                `json:"agent_image,omitempty" doc:"The image hosted agents and the coordinator run, built FROM the platform's agent image so the harness is in it. Empty is the platform's own."`
 }
@@ -137,7 +137,7 @@ func Load(dir string) (Spec, error) {
 // huma's wrapper of an answer cannot embed a type with methods on its value.
 func (spec *Spec) Trimmed() Spec {
 	s := *spec
-	s.Name, s.Description, s.DefaultQuotaTier = strings.TrimSpace(s.Name), strings.TrimSpace(s.Description), strings.TrimSpace(s.DefaultQuotaTier)
+	s.Name, s.Description, s.DefaultQuotaTier = strings.TrimSpace(s.Name), strings.TrimSpace(s.Description), QuotaTier(strings.TrimSpace(string(s.DefaultQuotaTier)))
 	s.Metrics = slices.Clone(s.Metrics)
 	for i := range s.Metrics {
 		m := &s.Metrics[i]
@@ -155,7 +155,7 @@ func (spec *Spec) Validate() error {
 	refuse := func(key, format string, args ...any) {
 		problems = append(problems, Problem{Key: key, Message: fmt.Sprintf(format, args...)})
 	}
-	lines := map[string]string{"name": s.Name, "default_quota_tier": s.DefaultQuotaTier}
+	lines := map[string]string{"name": s.Name, "default_quota_tier": string(s.DefaultQuotaTier)}
 	for i, m := range s.Metrics {
 		lines[fmt.Sprintf("metrics[%d].key", i)] = m.Key
 		lines[fmt.Sprintf("metrics[%d].direction", i)] = m.Direction
@@ -198,7 +198,7 @@ func (spec *Spec) Validate() error {
 				len(s.Stages), s.MaxAgents, MinResearchersForCut)
 		}
 	}
-	if s.DefaultQuotaTier != "" && s.DefaultQuotaTier != "guaranteed" && s.DefaultQuotaTier != "burst_only" {
+	if s.DefaultQuotaTier != "" && !ValidQuotaTierOverride(string(s.DefaultQuotaTier)) {
 		refuse("default_quota_tier", "default_quota_tier must be \"guaranteed\" or \"burst_only\"")
 	}
 	if s.MaxConcurrentAccelerators != nil && *s.MaxConcurrentAccelerators <= 0 {

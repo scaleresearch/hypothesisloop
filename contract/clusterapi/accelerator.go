@@ -5,9 +5,24 @@ import (
 	"strings"
 )
 
-// AcceleratorType names hardware by a fact its own driver publishes, as a fully-qualified
-// "key=value" pair, verbatim: nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3,
-// tenstorrent.com/chipArch=blackhole. Types compare without regard to case (Is).
+// AcceleratorType identifies a piece of hardware by a fact its own driver publishes, written
+// as a fully-qualified "key=value" pair — for example:
+//
+//	nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3   (NVIDIA GPU Feature Discovery node label)
+//	amd.com/gpu.product-name=Instinct-MI300X       (AMD node labeller node label)
+//	tenstorrent.com/chipArch=blackhole             (Tenstorrent DRA device attribute)
+//
+// The string is the driver's own output, verbatim. There is no platform-side name for hardware
+// and no table translating one to the other: the same string an agent writes in a job spec is
+// the string capacity reports, the string quota bills against, and the string recorded on the
+// job's pods. That is the whole point — a mapping is a place where two names can disagree, so
+// there isn't one.
+//
+// Being fully qualified is what makes this work without any per-vendor knowledge in the code.
+// The key carries its vendor domain, so matching is a plain lookup against live inventory rather
+// than a rule about which field a given vendor calls its model name. Runtime code contains no
+// vendor/model enum, and the operator's catalog (hypothesisloop.yaml) only attaches a price to
+// these strings — it never defines or renames them. Types compare without regard to case (Is).
 type AcceleratorType string
 
 // CPUType is the one type whose unit is a CPU core. A runtime offers its nodes' whole cores as

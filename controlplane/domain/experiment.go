@@ -3,6 +3,7 @@ package domain
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"strings"
 	"time"
 
@@ -232,7 +233,7 @@ func (e *Experiment) EffectiveJob() JobSpec {
 // Experiment, not JobSpec, specifically so the resolved job is what the scheduler places, never the
 // spec as submitted.
 func (e *Experiment) NodeShapes() []NodeShape {
-	return e.EffectiveJob().NodeShapes()
+	return NodeShapes(e.EffectiveJob())
 }
 
 // RetriesUsed is how much of the agent's max_retries allowance this experiment has spent: every
@@ -258,7 +259,7 @@ func (e *Experiment) TakeEstimate(pe *PlatformExperiment) bool {
 // of its type times its units times its estimated hours. The submit, an accelerator type substitution and
 // the stored row all take the figure from here, so a refusal states the hold the job would have.
 func (e *Experiment) EstimateHeld() (float64, error) {
-	rate, ok := e.AcceleratorType.LookupCost()
+	rate, ok := LookupAcceleratorCost(e.AcceleratorType)
 	if !ok {
 		return 0, fmt.Errorf("accelerator type %q of job %s has no configured acch_rate", e.AcceleratorType, e.ID)
 	}
@@ -444,16 +445,5 @@ type RanOn struct {
 	Machine *JobMachine `json:"machine,omitempty"`
 }
 
-// JobMachine is the machine a job's workload runs on, in terms no vendor owns. A runtime reports
-// it beside the node, each field as far as it knows it.
-type JobMachine struct {
-	// InstanceID is the rented instance, which is the job's alone.
-	InstanceID string `json:"instance_id,omitempty"`
-	// HostID is the physical machine, the same for every instance rented on it. A vendor may
-	// use the word for something else: vast.ai calls this machine_id and its host_id the owner.
-	HostID           string `json:"host_id,omitempty" doc:"The physical machine, stable across rentals: every instance rented on it reports the same one. It is not the account that owns the machine."`
-	AcceleratorModel string `json:"accelerator_model,omitempty"`
-	CPUModel         string `json:"cpu_model,omitempty"`
-	// PricePerHourUSD is what the whole instance is rented for.
-	PricePerHourUSD float64 `json:"price_per_hour_usd,omitempty" minimum:"0"`
-}
+// JobMachine is the machine a job's workload runs on, as its runtime reports it.
+type JobMachine = clusterapi.JobMachine

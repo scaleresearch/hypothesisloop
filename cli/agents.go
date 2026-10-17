@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
 	"io"
 	"net/url"
 	"strings"
@@ -80,8 +81,8 @@ from an env file the container reads, never a command line.`, stderr)
 	if err != nil {
 		return parseExit(err)
 	}
-	if *quotaTier != "" && *quotaTier != "guaranteed" && *quotaTier != "burst_only" {
-		return parseExit(misuse(fs, "--quota-tier must be \"guaranteed\" or \"burst_only\", got %s", *quotaTier))
+	if !experimentspec.ValidQuotaTierOverride(*quotaTier) {
+		return parseExit(misuse(fs, "--quota-tier must be %q or %q, got %s", experimentspec.QuotaTierGuaranteed, experimentspec.QuotaTierBurstOnly, *quotaTier))
 	}
 	body := map[string]any{}
 	for key, value := range map[string]string{

@@ -51,16 +51,3 @@ func TestResolveQuotaTierExperimentPolicyWinsWithNoOverride(t *testing.T) {
 		t.Errorf("no override, burst_only policy: got %q, want burst_only", got)
 	}
 }
-
-func TestValidQuotaTierOverride(t *testing.T) {
-	for _, s := range []string{"", "guaranteed", "burst_only"} {
-		if !ValidQuotaTierOverride(s) {
-			t.Errorf("ValidQuotaTierOverride(%q) = false, want true", s)
-		}
-	}
-	for _, s := range []string{"human", "agent", "GUARANTEED", "typo"} {
-		if ValidQuotaTierOverride(s) {
-			t.Errorf("ValidQuotaTierOverride(%q) = true, want false", s)
-		}
-	}
-}

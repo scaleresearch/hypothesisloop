@@ -41,7 +41,7 @@ func TestJobSpecFootprintScalesEveryDimensionByNodeCount(t *testing.T) {
 		ExtraResources:  map[string]string{"google.com/tpu": "8"},
 	}
 
-	fp, err := spec.Footprint(spec.AcceleratorType)
+	fp, err := JobFootprint(spec, spec.AcceleratorType)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestGroupedJobSpecFootprintSumsTheGroupsInsteadOfMultiplyingOne(t *testing.
 		},
 	}
 
-	fp, err := spec.Footprint(spec.AcceleratorType)
+	fp, err := JobFootprint(spec, spec.AcceleratorType)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestSpecSettingBothGroupsAndNumNodesIsRejected(t *testing.T) {
 		NumNodes: 4,
 		Groups:   []JobGroup{{Name: "worker", Replicas: 2, CPU: "1", Memory: "1Gi", Storage: "1Gi"}},
 	}
-	if err := spec.ValidateGroups(); err == nil {
+	if err := ValidateGroups(spec); err == nil {
 		t.Fatalf("ValidateGroups() accepted a spec with both num_nodes and groups — a job whose node count has two contradictory sources runs at a size the submitter never stated")
 	}
 }
@@ -158,7 +158,7 @@ func TestSpecSettingBothGroupsAndTopLevelResourcesIsRejected(t *testing.T) {
 		CPU:    "8",
 		Groups: []JobGroup{{Name: "worker", Replicas: 2, CPU: "1", Memory: "1Gi", Storage: "1Gi"}},
 	}
-	if err := spec.ValidateGroups(); err == nil {
+	if err := ValidateGroups(spec); err == nil {
 		t.Fatalf("ValidateGroups() accepted a grouped spec that also sets job.cpu — there would be no rule saying which of the two a worker actually gets")
 	}
 }
@@ -176,7 +176,7 @@ func TestTwoGroupsNamingDifferentAcceleratorTypesAreRejected(t *testing.T) {
 				AcceleratorType: "nvidia.com/gpu.product=NVIDIA-A100-SXM4-40GB"},
 		},
 	}
-	if err := spec.ValidateGroups(); err == nil {
+	if err := ValidateGroups(spec); err == nil {
 		t.Fatalf("ValidateGroups() accepted groups on two different accelerator types — the experiment has one AcceleratorType, so one of the two groups would be billed at the other's rate")
 	}
 }
@@ -192,7 +192,7 @@ func TestGroupsMayDifferInAcceleratorCountIncludingZero(t *testing.T) {
 			{Name: "actor", Replicas: 64, AcceleratorCount: 0, CPU: "1", Memory: "4Gi", Storage: "1Gi"},
 		},
 	}
-	if err := spec.ValidateGroups(); err != nil {
+	if err := ValidateGroups(spec); err != nil {
 		t.Fatalf("ValidateGroups() rejected a learner alongside CPU-only actors: %v — that is the shape heterogeneous groups exist to express", err)
 	}
 }
@@ -229,7 +229,7 @@ func TestUngroupedSpecIsOneGroupOfIdenticalNodesCarryingTheTopLevelShape(t *test
 	if len(group.Command) != 2 || group.Command[0] != "python" || len(group.Args) != 2 || group.Env["SEED"] != "7" {
 		t.Fatalf("NodeGroups()[0] carries command %v args %v env %v, want the job's own — an ungrouped job has no other place for them", group.Command, group.Args, group.Env)
 	}
-	if err := spec.ValidateGroups(); err != nil {
+	if err := ValidateGroups(spec); err != nil {
 		t.Fatalf("ValidateGroups() rejected an ungrouped spec: %v — the group rules must not apply to a job that declared no groups", err)
 	}
 	if got := spec.Nodes(); got != 3 {
@@ -246,7 +246,7 @@ func TestUngroupedSpecIsOneGroupOfIdenticalNodesCarryingTheTopLevelShape(t *test
 func TestUngroupedSpecExpandsToOneIdenticalNodeShapePerNode(t *testing.T) {
 	spec := JobSpec{CPU: "4", Memory: "8Gi", Storage: "10Gi", AcceleratorCount: 2, NumNodes: 3}
 
-	shapes := spec.NodeShapes()
+	shapes := NodeShapes(spec)
 	if len(shapes) != 3 {
 		t.Fatalf("NodeShapes() returned %d shapes, want 3 — one per node, since admission proves each node individually has somewhere to land", len(shapes))
 	}
@@ -272,7 +272,7 @@ func TestGroupedSpecExpandsToOneNodeShapePerReplicaOfEachGroup(t *testing.T) {
 		},
 	}
 
-	shapes := spec.NodeShapes()
+	shapes := NodeShapes(spec)
 	if len(shapes) != 3 {
 		t.Fatalf("NodeShapes() returned %d shapes, want 3 (1 learner + 2 actors)", len(shapes))
 	}

@@ -44,7 +44,7 @@ func (s *Service) withSettings(spec experimentspec.Spec) experimentspec.Spec {
 		spec.Stages = domain.RunStages(s.cfg.DefaultStages, spec.MaxAgents)
 	}
 	if spec.DefaultQuotaTier == "" {
-		spec.DefaultQuotaTier = string(s.cfg.DefaultQuotaTier)
+		spec.DefaultQuotaTier = s.cfg.DefaultQuotaTier
 	}
 	return spec
 }
@@ -194,7 +194,7 @@ func (s *Service) Create(ctx context.Context, req CreatePlatformExperimentReques
 		Status:                    domain.PlatformExpOpen,
 		Stages:                    req.Stages,
 		CurrentStage:              1,
-		DefaultQuotaTier:          domain.QuotaTier(req.DefaultQuotaTier),
+		DefaultQuotaTier:          req.DefaultQuotaTier,
 		MaxConcurrentAccelerators: req.MaxConcurrentAccelerators,
 		CreatedAt:                 now,
 		UpdatedAt:                 now,

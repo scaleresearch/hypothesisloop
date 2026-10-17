@@ -94,31 +94,6 @@ func TestTheReconcileAnswerIsTheOneRuntimesAlreadyRead(t *testing.T) {
 	}
 }
 
-// A field added to the job spec reaches every runtime: the spec a runtime is handed encodes as
-// the platform's own does, whatever is set on it.
-func TestTheDesiredJobSpecEncodesAsThePlatformsJobSpec(t *testing.T) {
-	var spec domain.JobSpec
-	fill(t, "JobSpec", reflect.ValueOf(&spec).Elem())
-	want, err := json.Marshal(spec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := json.Marshal(jobSpec(spec, spec.SecretEnv))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var wantFields, gotFields map[string]any
-	if err := json.Unmarshal(want, &wantFields); err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(got, &gotFields); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(wantFields, gotFields) {
-		t.Fatalf("the runtime's spec = %s\nthe platform's = %s", got, want)
-	}
-}
-
 // A job's secret_env reaches its runtime on the spec, the resolved one included, and is written
 // onto no job the platform holds.
 func TestSecretEnvReachesTheRuntimeOnBothSpecsOnly(t *testing.T) {
@@ -167,38 +142,4 @@ func zeroJSON(v any) bool {
 		return true
 	}
 	return false
-}
-
-func fill(t *testing.T, name string, v reflect.Value) {
-	t.Helper()
-	switch v.Kind() {
-	case reflect.String:
-		v.SetString("set-" + name)
-	case reflect.Int, reflect.Int32, reflect.Int64:
-		v.SetInt(7)
-	case reflect.Float64:
-		v.SetFloat(1.5)
-	case reflect.Bool:
-		v.SetBool(true)
-	case reflect.Pointer:
-		v.Set(reflect.New(v.Type().Elem()))
-		fill(t, name, v.Elem())
-	case reflect.Slice:
-		v.Set(reflect.MakeSlice(v.Type(), 1, 1))
-		fill(t, name, v.Index(0))
-	case reflect.Map:
-		v.Set(reflect.MakeMap(v.Type()))
-		key, value := reflect.New(v.Type().Key()).Elem(), reflect.New(v.Type().Elem()).Elem()
-		fill(t, name, key)
-		fill(t, name, value)
-		v.SetMapIndex(key, value)
-	case reflect.Struct:
-		for i := 0; i < v.NumField(); i++ {
-			if v.Type().Field(i).IsExported() {
-				fill(t, v.Type().Field(i).Name, v.Field(i))
-			}
-		}
-	default:
-		t.Fatalf("field %s has kind %s, which this test does not know how to set", name, v.Kind())
-	}
 }

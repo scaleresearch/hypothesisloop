@@ -358,7 +358,7 @@ func buildClusterCapacity(available, total map[string]map[string]int64, podResou
 			if total[cluster][t] <= 0 {
 				continue
 			}
-			rate, _ := domain.AcceleratorType(t).LookupCost()
+			rate, _ := domain.LookupAcceleratorCost(domain.AcceleratorType(t))
 			accelerators = append(accelerators, AcceleratorCapacity{
 				AcceleratorType: t,
 				Kind:            domain.AcceleratorType(t).Kind(),

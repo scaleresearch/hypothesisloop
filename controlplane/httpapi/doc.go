@@ -102,6 +102,7 @@ func NewDoc(r chi.Router, title, version, preamble string, access *auth.Access, 
 	cfg := huma.DefaultConfig(title, version)
 	// No $schema property and Link header on each answer: a client's types come from this document.
 	cfg.CreateHooks = nil
+	aliasSchemas(cfg.Components.Schemas)
 	cfg.Components.SecuritySchemes = map[string]*huma.SecurityScheme{
 		bearerScheme: {Type: "http", Scheme: "bearer"},
 	}

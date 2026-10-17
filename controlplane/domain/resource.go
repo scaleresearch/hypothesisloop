@@ -169,7 +169,7 @@ type NodeShape struct {
 // A malformed quantity string yields an absent dimension rather than an error, matching
 // Experiment.Footprint: submission already parsed all three (see ValidateExperiment), and every
 // caller here treats a job's shape as unconditional.
-func (j JobSpec) NodeShapes() []NodeShape {
+func NodeShapes(j JobSpec) []NodeShape {
 	out := make([]NodeShape, 0, j.Nodes())
 	for _, group := range j.NodeGroups() {
 		resources := map[string]int64{}
@@ -200,7 +200,7 @@ func (j JobSpec) NodeShapes() []NodeShape {
 	return out
 }
 
-// Footprint computes j's total resource footprint in canonical units: millicores for CPU,
+// JobFootprint computes j's total resource footprint in canonical units: millicores for CPU,
 // bytes for memory/storage, whole units for the accelerator type (if any) and every
 // ExtraResources entry.
 //
@@ -214,7 +214,7 @@ func (j JobSpec) NodeShapes() []NodeShape {
 //
 // Returns an error if any quantity string fails to parse — callers must treat that as a
 // rejection, not a zero-footprint dimension.
-func (j JobSpec) Footprint(acceleratorType AcceleratorType) (Footprint, error) {
+func JobFootprint(j JobSpec, acceleratorType AcceleratorType) (Footprint, error) {
 	total := NewFootprint()
 	for _, group := range j.NodeGroups() {
 		perNode := NewFootprint()

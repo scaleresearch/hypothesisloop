@@ -1,6 +1,10 @@
 package domain
 
-import "time"
+import (
+	"time"
+
+	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
+)
 
 // Agent is a participant of platform experiments: the identity that owns quota, submits jobs and
 // holds standings. The platform creates one when it is added to a platform experiment. Whether a
@@ -21,29 +25,13 @@ type AgentStats struct {
 	Top3Eligible int `json:"top3_eligible"`
 }
 
-// QuotaTier is which column of an experiment's budget a participant's share lands in: the normal
-// guaranteed+burst split, or burst-only. It is decided per signup (see ResolveQuotaTier):
-// one experiment can mix guaranteed and burst-only participants.
-type QuotaTier string
+// QuotaTier is the contract's own (experimentspec), decided per signup (see ResolveQuotaTier).
+type QuotaTier = experimentspec.QuotaTier
 
 const (
-	// QuotaTierGuaranteed keeps the normal guaranteed+burst split.
-	QuotaTierGuaranteed QuotaTier = "guaranteed"
-	// QuotaTierBurstOnly collapses everything into burst: no reserved share, first-come only.
-	QuotaTierBurstOnly QuotaTier = "burst_only"
+	QuotaTierGuaranteed = experimentspec.QuotaTierGuaranteed
+	QuotaTierBurstOnly  = experimentspec.QuotaTierBurstOnly
 )
-
-// ValidQuotaTierOverride reports whether s is a legal signup-time override: empty (defer to the
-// experiment's policy, see ResolveQuotaTier) or one of the two named tiers. Checked at signup so
-// a typo is rejected there, not silently stored and misread as "" (policy default) forever after.
-func ValidQuotaTierOverride(s string) bool {
-	switch QuotaTier(s) {
-	case "", QuotaTierGuaranteed, QuotaTierBurstOnly:
-		return true
-	default:
-		return false
-	}
-}
 
 // ResolveQuotaTier is the tier a signup is stored with: its explicit override, else the
 // experiment's default_quota_tier.

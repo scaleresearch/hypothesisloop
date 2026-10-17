@@ -1,15 +1,13 @@
-package domain
+package clusterapi
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-
-	"github.com/danielgtaylor/huma/v2"
 )
 
-// cpuQuantity reads a job's cpu from a request, which may write it as a number (cpu: 4) or as a
-// string ("4", "500m"). It is kept and answered as the string.
+// cpuQuantity reads a job's cpu, which may be written as a number (cpu: 4) or as a string ("4",
+// "500m"). It is kept and answered as the string.
 type cpuQuantity string
 
 func (q *cpuQuantity) UnmarshalJSON(data []byte) error {
@@ -23,22 +21,6 @@ func (q *cpuQuantity) UnmarshalJSON(data []byte) error {
 	}
 	*q = cpuQuantity(number.String())
 	return nil
-}
-
-// cpuEitherForm documents and checks cpu as either form in the schema of a struct that holds it.
-func cpuEitherForm(s *huma.Schema) *huma.Schema {
-	if s.Properties["cpu"] != nil {
-		s.Properties["cpu"] = &huma.Schema{
-			Description: `CPU for each node: a number of cores (4) or a quantity ("500m"). Always stated. Answered as a string.`,
-			OneOf:       []*huma.Schema{{Type: huma.TypeString}, {Type: huma.TypeNumber, Minimum: new(float64)}},
-		}
-	}
-	return s
-}
-
-func (JobSpec) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema { return cpuEitherForm(s) }
-func (JobGroup) TransformSchema(_ huma.Registry, s *huma.Schema) *huma.Schema {
-	return cpuEitherForm(s)
 }
 
 func (j *JobSpec) UnmarshalJSON(data []byte) error {

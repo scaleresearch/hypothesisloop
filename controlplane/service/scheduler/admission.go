@@ -101,7 +101,7 @@ func quantitiesStated(job domain.JobSpec) error {
 // asksForCoresOnly reports whether a job names no type and no accelerator anywhere and does state
 // cores: the plain way to ask for CPU, which submission reads as that many units of domain.CPUType.
 func asksForCoresOnly(job domain.JobSpec) bool {
-	if job.AcceleratorType != "" || job.GroupAcceleratorType() != "" || job.TotalAccelerators() != 0 {
+	if job.AcceleratorType != "" || domain.GroupAcceleratorType(job) != "" || job.TotalAccelerators() != 0 {
 		return false
 	}
 	for _, g := range job.NodeGroups() {
@@ -185,7 +185,7 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	if asksForCoresOnly(exp.Job) {
 		exp.Job.AcceleratorType = domain.CPUType
 	}
-	if requested := exp.Job.AcceleratorType; requested.Kind() == domain.TypeKindCPU || (requested == "" && exp.Job.GroupAcceleratorType().Kind() == domain.TypeKindCPU) {
+	if requested := exp.Job.AcceleratorType; requested.Kind() == domain.TypeKindCPU || (requested == "" && domain.GroupAcceleratorType(exp.Job).Kind() == domain.TypeKindCPU) {
 		if err := countSetsCores(&exp.Job); err != nil {
 			return &AdmissionError{Reason: ReasonMalformed, Message: err.Error()}
 		}
@@ -193,7 +193,7 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	}
 	// A grouped job states its shapes per group and is rejected outright if it also states them
 	// at the top level, so the two blocks below are alternatives, never a merge.
-	if err := exp.Job.ValidateGroups(); err != nil {
+	if err := domain.ValidateGroups(exp.Job); err != nil {
 		return &AdmissionError{Reason: ReasonMalformed, Message: err.Error()}
 	}
 	// A grouped job may name its single accelerator type on the groups rather than at the top
@@ -201,9 +201,9 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	// everything downstream — footprint, admission, substitution, billing, both backends — keeps
 	// reading exactly one field for the type instead of learning about groups.
 	if exp.Job.AcceleratorType == "" {
-		exp.Job.AcceleratorType = exp.Job.GroupAcceleratorType()
+		exp.Job.AcceleratorType = domain.GroupAcceleratorType(exp.Job)
 	}
-	if err := exp.Job.ValidateSecretEnv(exp.SecretEnv); err != nil {
+	if err := domain.ValidateSecretEnv(exp.Job, exp.SecretEnv); err != nil {
 		return &AdmissionError{Reason: ReasonMalformed, Message: err.Error()}
 	}
 	// The two fields a job may leave out for a stated default, each written here and nowhere else
@@ -253,7 +253,7 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 				}
 				seen[t] = true
 			}
-			if _, ok := t.LookupCost(); !ok {
+			if _, ok := domain.LookupAcceleratorCost(t); !ok {
 				return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("accelerator type %q has no configured acch_rate (position %d)", t, i)}
 			}
 			// A count is cores on CPU and devices on an accelerator, so one count cannot stand

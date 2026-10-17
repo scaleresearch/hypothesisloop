@@ -86,7 +86,7 @@ func TestFootprintScaleMultiNode(t *testing.T) {
 		AcceleratorType:  "example.com/product=test-accelerator",
 		NumNodes:         4,
 	}
-	fp, err := j.Footprint(j.AcceleratorType)
+	fp, err := JobFootprint(j, j.AcceleratorType)
 	if err != nil {
 		t.Fatalf("Footprint: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestFootprintScaleMultiNode(t *testing.T) {
 
 func TestFootprintFractionalCPUPrecision(t *testing.T) {
 	j := JobSpec{CPU: "250m", NumNodes: 1}
-	fp, err := j.Footprint(j.AcceleratorType)
+	fp, err := JobFootprint(j, j.AcceleratorType)
 	if err != nil {
 		t.Fatalf("Footprint: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestFootprintFractionalCPUPrecision(t *testing.T) {
 
 func TestFootprintMalformedQuantityRejected(t *testing.T) {
 	j := JobSpec{CPU: "not-a-quantity"}
-	if _, err := j.Footprint(""); err == nil {
+	if _, err := JobFootprint(j, ""); err == nil {
 		t.Error("expected error for malformed CPU quantity, got nil")
 	}
 }

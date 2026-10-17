@@ -494,7 +494,7 @@ func (s *Service) accept(ctx context.Context, id string, req AcceptRequest, by d
 	}
 
 	pe.Name, pe.Description, pe.Metrics, pe.ReportIntervalSeconds = experiment.Name, experiment.Description, experiment.Metrics, experiment.ReportIntervalSeconds
-	pe.Stages, pe.DefaultQuotaTier = experiment.Stages, domain.QuotaTier(experiment.DefaultQuotaTier)
+	pe.Stages, pe.DefaultQuotaTier = experiment.Stages, experiment.DefaultQuotaTier
 	pe.MaxConcurrentAccelerators = experiment.MaxConcurrentAccelerators
 	pe.BudgetAcceleratorHours, pe.MaxAgents, pe.Researchers, pe.DurationHours = experiment.BudgetAcceleratorHours, experiment.MaxAgents, experiment.Researchers, experiment.DurationHours
 	pe.StartsAt, pe.BaselineDueAt = now, now.Add(time.Duration(req.BaselineMinutes)*time.Minute)

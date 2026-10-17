@@ -32,7 +32,7 @@ func TestValidateSecretEnv(t *testing.T) {
 		{"too large", map[string]string{"BIG": strings.Repeat("x", MaxSecretEnvBytes)}, "more than the 65536 allowed"},
 	}
 	for _, c := range cases {
-		err := spec.ValidateSecretEnv(c.secret)
+		err := ValidateSecretEnv(spec, c.secret)
 		switch {
 		case c.wants == "" && err != nil:
 			t.Errorf("%s: got = %v, want accepted", c.name, err)
