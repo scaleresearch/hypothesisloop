@@ -227,37 +227,26 @@ def _events(stdout: str) -> list[dict]:
 _UNFINISHED = sorted(platform.EXPERIMENT_STATUSES - platform.ENDED_STATUSES)
 
 
-def _machine(job: dict) -> str:
-    """Where job ran, short: the physical machine of a rented instance, else the node, then the
-    accelerator's model or, without one, the CPU's. `hl job list` prints the same as ran_on."""
-    ran_on = job.get("ran_on")
-    if not ran_on:
-        return ""
-    machine = ran_on.get("machine") or {}
-    where = f"host {machine['host_id']}" if machine.get("host_id") else f"node {ran_on['node']}"
-    return " ".join(part for part in (where, machine.get("accelerator_model") or machine.get("cpu_model")) if part)
-
-
 def _result(job: dict) -> str:
-    return ", ".join([
-        *(f"{m['name']} {m['value']:.6g}" + ("" if m["basis"] == "raw" else f" ({m['basis']})")
-          for m in job.get("metrics", [])),
-        *([f"ranks nowhere: {job['not_rankable_reason']}"] if job.get("rankable") is False else [])])
+    """A COMPLETED job's metrics as `hl job wait` prints them and, when it ranks nowhere, why."""
+    said = json.dumps(job.get("metrics", {}), separators=(",", ":"))
+    return said + (f", ranks nowhere: {job['not_rankable_reason']}" if job.get("rankable") is False else "")
 
 
 async def _with_job_state(events: list[dict], env: dict[str, str], hl: str) -> list[dict]:
     """events, completed with what whoever is told of an ended job would otherwise read: the
     machine it ran on, and for a COMPLETED one its declared metrics and, when it ranks nowhere,
-    why, as its event's detail, from one hl call per batch. A call that failed adds the event that
-    says what was not read and the command that reads it: told COMPLETED with no metric and
-    nothing else, an agent took the job for one that reported none."""
+    why, as its event's detail, from one `hl job wait` per batch, which answers at once for jobs
+    that ended. A call that failed adds the event that says what was not read and the command
+    that reads it: told COMPLETED with no metric and nothing else, an agent took the job for one
+    that reported none."""
     def ended(e: dict) -> bool:
         return e["kind"] == platform.EVENT_EXPERIMENT_STATUS and e["value"] in platform.ENDED_STATUSES
 
     ids = list(dict.fromkeys(e["subject"] for e in events if ended(e)))
     if not ids:
         return events
-    command = [hl, "job", "status", *ids]
+    command = [hl, "job", "wait", *ids]
     code, stdout, _ = await _run_hl(command, env, lambda: False)
     if code != 0:
         return events + [{"kind": "not_read", "value": "the metrics and machine of the jobs that ended: "
@@ -268,7 +257,7 @@ async def _with_job_state(events: list[dict], env: dict[str, str], hl: str) -> l
         job = jobs.get(e["subject"]) if ended(e) else None
         if job is None:
             return e
-        return dict(e, machine=_machine(job), **({"detail": _result(job)} if e["value"] == platform.STATUS_COMPLETED else {}))
+        return dict(e, machine=job.get("ran_on", ""), **({"detail": _result(job)} if e["value"] == platform.STATUS_COMPLETED else {}))
 
     return [told(e) for e in events]
 

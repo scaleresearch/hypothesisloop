@@ -93,11 +93,11 @@ class WatchTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((own["HL_TOKEN"], updates.watch_command(own)), (AGENT_TOKEN, ["hl", "watch"]))
 
     async def test_an_ended_job_reaches_a_coordinator_with_its_machine_and_no_read_as_an_agent(self):
-        command, _ = fake_hl(f"echo '{COMPLETED}'\n", status='{"id":"exp-1","ran_on":{"node":"n1"}}', stats="{}", quota="{}")
+        command, _ = fake_hl(f"echo '{COMPLETED}'\n", status='{"id":"exp-1","ran_on":"node n1"}', stats="{}", quota="{}")
         events = await updates.drain({**os.environ, "HL_TOKEN": COORDINATOR_TOKEN}, command)
         self.assertEqual(updates.message(events, ""), "Platform updates:\nexperiment.status exp-1 COMPLETED on node n1 by agent-a")
         with open(command[0] + ".reads") as f:
-            self.assertEqual(f.read(), "job status exp-1\n")
+            self.assertEqual(f.read(), "job wait exp-1\n")
 
     # A coordinator wrote "closed by owner at 02:48" for a run that had reached its end time:
     # nothing told it why it was being stopped. The moment named is closed_at, which every closed

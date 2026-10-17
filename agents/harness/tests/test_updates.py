@@ -23,13 +23,13 @@ ENV = {**os.environ, "HL_TOKEN": "hls_" + base64.urlsafe_b64encode(b"agent:pe-1/
 
 def fake_hl(script: str, status: str = "", stats: str = "", quota: str = "", read_exit: int = 0, quota_refusal: str = "") -> tuple[list[str], str]:
     """A fake hl. `hl watch` runs script once per call, with $RUNS counting the calls so far;
-    `hl job status`, `hl job stats` and `hl quota` print status, stats and quota, record their
+    `hl job wait`, `hl job stats` and `hl quota` print status, stats and quota, record their
     arguments and exit read_exit. With quota_refusal, `hl quota` says it on stderr and exits 1.
     A new one has had no outage."""
     outage._since, outage._over, outage._suspected = None, None, False
     directory = tempfile.mkdtemp()
     path = os.path.join(directory, "hl")
-    for name, text in (("status", status), ("stats", stats), ("quota", quota), ("refusal", quota_refusal)):
+    for name, text in (("wait", status), ("stats", stats), ("quota", quota), ("refusal", quota_refusal)):
         with open(f"{path}.{name}", "w") as f:
             f.write(text)
     with open(path, "w") as f:
@@ -204,11 +204,10 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
 
 
 class JobStateTest(unittest.IsolatedAsyncioTestCase):
-    JOBS = ('{"id":"exp-1","status":"COMPLETED","metrics":[{"name":"acc","value":0.9,"basis":"raw"},'
-            '{"name":"loss","value":0.2608416958176093,"basis":"per_token"}],"ran_on":{"node":"rtx4090-0","machine":'
-            '{"instance_id":"54493630","host_id":"16358","accelerator_model":"RTX 4090","cpu_model":"AMD Ryzen"}}}\n'
-            '{"id":"exp-3","status":"EVICTED","ran_on":{"node":"blackhole-1"}}\n'
-            '{"id":"exp-2","status":"COMPLETED","metrics":[{"name":"acc","value":0.95,"basis":"raw"}],"rankable":false,'
+    JOBS = ('{"id":"exp-1","status":"COMPLETED","metrics":{"acc":{"value":0.9},"loss":{"value":0.260842,"basis":"per_token"}},'
+            '"ran_on":"host 16358 RTX 4090"}\n'
+            '{"id":"exp-3","status":"EVICTED","metrics":{},"ran_on":"node blackhole-1"}\n'
+            '{"id":"exp-2","status":"COMPLETED","metrics":{"acc":{"value":0.95}},"ran_on":"","rankable":false,'
             '"not_rankable_reason":"constraint exact_match is 0.5, and must be at least 1"}\n')
     STATS = '{"total":9,"by_status":{"COMPLETED":6,"RUNNING":2,"QUEUED":1}}\n'
     QUOTA = ('{"agent_id":"agent-a","share_accelerator_hours":2,"remaining_guaranteed_accelerator_hours":1.85,"remaining_burst_accelerator_hours":1.85,'
@@ -222,14 +221,14 @@ class JobStateTest(unittest.IsolatedAsyncioTestCase):
                                    self.JOBS, self.STATS, self.QUOTA)
         events = await updates.next_batch(ENV, lambda: False, 10, command=command)
         self.assertEqual(updates.message(events, "agent-a"), "Platform updates:\n"
-                         "experiment.status exp-1 COMPLETED acc 0.9, loss 0.260842 (per_token) "
+                         'experiment.status exp-1 COMPLETED {"acc":{"value":0.9},"loss":{"value":0.260842,"basis":"per_token"}} '
                          "on host 16358 RTX 4090\n"
                          "comment.new hyp-1 agent by agent-b\n"
-                         "experiment.status exp-2 COMPLETED acc 0.95, "
+                         'experiment.status exp-2 COMPLETED {"acc":{"value":0.95}}, '
                          "ranks nowhere: constraint exact_match is 0.5, and must be at least 1\n"
                          "experiment.status exp-3 EVICTED oom on node blackhole-1")
         with open(counter.replace(".runs", ".reads")) as f:
-            self.assertEqual(f.read(), "job status exp-1 exp-2 exp-3\n", "what stands around the batch comes with the situation")
+            self.assertEqual(f.read(), "job wait exp-1 exp-2 exp-3\n", "what stands around the batch comes with the situation")
 
     async def test_a_batch_without_an_ended_job_reads_no_job(self):
         command, counter = fake_hl(f"echo '{COMMENT}'\n", self.JOBS, self.STATS)
@@ -250,7 +249,7 @@ class JobStateTest(unittest.IsolatedAsyncioTestCase):
         with self.assertLogs("llm_agent", "WARNING") as logged:
             events = await updates.drain(ENV, command=command)
         self.assertEqual(updates.message(events, "agent-a"), "Platform updates:\nexperiment.status exp-1 COMPLETED\n"
-                         "not_read the metrics and machine of the jobs that ended: `hl job status exp-1` reads it")
+                         "not_read the metrics and machine of the jobs that ended: `hl job wait exp-1` reads it")
         self.assertEqual(len(logged.records), 1)
 
 

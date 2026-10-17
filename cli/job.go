@@ -288,6 +288,8 @@ type jobBrief struct {
 	PhaseDetail        json.RawMessage `json:"phase_detail"`
 	Theory             string          `json:"theory"`
 	EstimatedCost      float64         `json:"estimated_cost_acch"`
+	Rankable           *bool           `json:"rankable,omitempty"`
+	NotRankableReason  string          `json:"not_rankable_reason,omitempty"`
 	CreatedAt          string          `json:"created_at"`
 }
 
