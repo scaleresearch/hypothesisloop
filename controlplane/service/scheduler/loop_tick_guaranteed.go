@@ -9,7 +9,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/obsmetrics"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler/placement"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler/placement"
 )
 
 // preemptionState is what the guaranteed pass reads once and keeps across the jobs it cannot fit.

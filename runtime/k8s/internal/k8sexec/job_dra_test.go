@@ -75,7 +75,7 @@ func tenstorrentResourceSlice(name, node string, devices ...string) *unstructure
 // DeviceClass) that returns zero matching ResourceSlices in one List call must not be reported
 // as "this cluster has no such hardware" — that silently zeroed a live 3/4-free blackhole
 // snapshot and made the scheduler deny burst admission with a false capacity_unavailable while
-// real chips sat free. See controlplane/services/scheduler/loop_tick.go's reportsEveryDimension
+// real chips sat free. See controlplane/service/scheduler/loop_tick.go's reportsEveryDimension
 // for the scheduler side that consumed the bad snapshot.
 func TestLiveDRACapacitySnapshotsRejectsTransientEmptyListing(t *testing.T) {
 	c := newDRATestClient(t, tenstorrentDeviceClass())

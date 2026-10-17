@@ -437,6 +437,6 @@ def test_gang_retry_restarts_and_bills_every_attempt(api, experiment, run_id, de
     # real attempt's cost enough that two real, short-lived attempts settle below it (a rank that
     # fails right after the barrier ends the whole gang in a few seconds, not in
     # GANG_RUN_SECONDS), so this only checks the debit is positive, matching the platform's own
-    # settlement-rate assertions (controlplane/services/settlement/overbilling_test.go), which use
+    # settlement-rate assertions (controlplane/service/settlement/overbilling_test.go), which use
     # no clock at all.
     assert retry_debit > 0, f"settled cost {retry_debit} AccH is not positive -- a gang attempt was never billed"

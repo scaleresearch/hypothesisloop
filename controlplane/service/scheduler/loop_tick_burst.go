@@ -8,7 +8,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/obsmetrics"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler/placement"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler/placement"
 )
 
 // burstPass admits the queued burst jobs in what the guaranteed pass left: fairness-weighted

@@ -23,15 +23,15 @@ import (
 	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/accounts"
+	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/gitproxy"
+	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/modelproxy"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/environments"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/registry"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/settlement"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/clusteragentapi"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/environments"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/gitproxy"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/modelproxy"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/registry"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/settlement"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
@@ -234,7 +234,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	schedulerHandler, clusterAgentHandler := newSchedulerParts(runCtx, gitHost, environmentsSvc, pool, store, graph, peSvc, peHandler, quotaCfg, pcfg, metricsDBURL, dataStore, logger)
 	// The change stream: one LISTEN connection for this process, fanned out to whatever /watch
 	// connections are open. Nothing is persisted for it and nothing is held between connections
-	// — see services/registry/watch.go.
+	// — see service/registry/watch.go.
 	events := db.NewEventsStore(pool, graph)
 	registrySvc := registry.New(store, graph, events, logger, metricsDBURL, dataStore)
 	watchHandler := registry.NewWatchHandler(events, store, gate.access, logger)
@@ -405,7 +405,7 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environ
 	}
 
 	// settler is the sole path that durably writes a terminal experiment's final observed usage
-	// (see services/settlement) — used inline by JobWatcher and by the reconciler below to
+	// (see service/settlement) — used inline by JobWatcher and by the reconciler below to
 	// retry anything a crash or metrics-DB outage left unsettled.
 	settler := settlement.New(expQuotaSvc, metricsDBURL, observedGapCap)
 	settlementReconciler := settlement.NewReconciler(store, settler, 30*time.Second, logger)

@@ -154,7 +154,7 @@ func (o *tickObservations) hours(experimentID string) (float64, bool) {
 // mechanism could bill a mid-run reschedule onto a different type correctly segment-by-segment,
 // but required catching a job's RUNNING phase within a poll window to ever record anything; for
 // jobs shorter than one poll tick it silently zeroed the whole run's accelerator cost (see
-// services/settlement.Settler.Settle). This can't ever silently zero out, at the cost of slightly
+// service/settlement.Settler.Settle). This can't ever silently zero out, at the cost of slightly
 // undercharging the rare mid-run type change.
 func observedAcceleratorCost(exp *domain.Experiment, hours float64) float64 {
 	// The same formula settlement bills by: the rate frozen into the reservation at admission,

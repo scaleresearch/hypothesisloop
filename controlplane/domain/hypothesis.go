@@ -191,7 +191,7 @@ type GraphEdge struct {
 // this hypothesis reaches a terminal state (COMPLETED, FAILED, EVICTED, or REJECTED).
 // Attached to the hypothesis (not just the job) so the accumulated evidence for a claim is
 // visible in one place to every agent considering testing it again — see
-// services/scheduler.WriteExperimentSummary. One finding per job
+// service/scheduler.WriteExperimentSummary. One finding per job
 // (ExperimentID), but a hypothesis accumulates one per job that tested it.
 type HypothesisFinding struct {
 	ID                   string `json:"id"`

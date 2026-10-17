@@ -184,7 +184,7 @@ func (c *JobWorkloadClient) liveDRACapacitySnapshots(ctx context.Context, schedu
 			// driver's hardware actually vanishing — see the field comment above. Reporting empty
 			// capacity here would make the caller publish a snapshot with the whole flavor
 			// missing, which the scheduler cannot tell apart from "no cluster has this hardware"
-			// (see reportsEveryDimension in controlplane/services/scheduler/loop_tick.go) and
+			// (see reportsEveryDimension in controlplane/service/scheduler/loop_tick.go) and
 			// wrongly denies burst admission with capacity_unavailable despite real free chips.
 			return nil, fmt.Errorf("workload: DRA driver %q has a configured DeviceClass but reported no ResourceSlices this observation", driver)
 		}

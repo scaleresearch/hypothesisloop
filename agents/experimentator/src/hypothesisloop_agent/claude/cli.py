@@ -43,7 +43,7 @@ CLI_ENV = {"ENABLE_TOOL_SEARCH": "false",
 
 def model_env(cfg: config.Config) -> dict[str, str]:
     """Where the CLI makes its model calls: the platform, which makes each with the platform's own
-    credential (controlplane/services/modelproxy), reached with the agent's own token. The token
+    credential (controlplane/httpapi/modelproxy), reached with the agent's own token. The token
     goes in as the CLI's OAuth token, so the CLI sends what it sends with a Claude subscription
     and reads the account's rate limits from every answer, which it ignored with the token as
     ANTHROPIC_AUTH_TOKEN. With its nonessential traffic off it sends the token nowhere else."""

@@ -216,7 +216,7 @@ const (
 	// only thing keeping a queued job off idle accelerators on the same physical node. Terminal
 	// rather than requeued: the job's own spec is what makes it unplaceable alongside its
 	// neighbours, so returning it to the queue unchanged would evict it again on the next tick.
-	// See services/scheduler/loop_disbalance.go.
+	// See service/scheduler/loop_disbalance.go.
 	EvictionResourceDisbalance EvictionReason = "resource_disbalance"
 	// EvictionUnschedulable marks a job whose runtime reported a phase-detail reason in
 	// NeverSelfHealsPhaseReasons (a bad image, a malformed container config) before the full

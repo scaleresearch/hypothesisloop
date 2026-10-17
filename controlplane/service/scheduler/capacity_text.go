@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler/placement"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler/placement"
 )
 
 // describeFootprint says a footprint as a person reads it: devices by their type, cores, and

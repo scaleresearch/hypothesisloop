@@ -18,10 +18,10 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/controller"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/metricsingest"
+	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/metricsingest"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/controller"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/settlement"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/settlement"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
@@ -103,7 +103,7 @@ func newControllerServer(authenticator *auth.Authenticator, pool *db.Pool, store
 	peSvc := quota.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap)
 
 	// metric-controller never connects to a cluster directly, and needs no cluster/workload
-	// wiring at all: eviction is purely a status update (services/controller) — the
+	// wiring at all: eviction is purely a status update (service/controller) — the
 	// cluster-agent's own reconcile loop removes the Job once status leaves the desired set.
 	ctrl := controller.New(store, peSvc, logger).
 		WithSilenceMultiplier(pcfg.Scheduler.SilenceMultiplier).
@@ -122,7 +122,7 @@ func newControllerServer(authenticator *auth.Authenticator, pool *db.Pool, store
 	}))
 
 	// settler durably writes a terminal experiment's final observed usage (see
-	// services/settlement) — used both inline by the controller for the fast path and by the
+	// service/settlement) — used both inline by the controller for the fast path and by the
 	// reconciler below to retry any experiment a crash or metrics-DB outage left unsettled.
 	// gapCap mirrors Controller.observedGapCap exactly, so every observed-usage query in this
 	// deployment agrees on what "how long did this run" means.

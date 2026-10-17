@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler/placement"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler/placement"
 )
 
 // Every not_admitted_reason is stored as "code: sentence" (domain.SplitQueueReason). The sentence

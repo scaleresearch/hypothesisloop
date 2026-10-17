@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler/placement"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler/placement"
 )
 
 // speculativeCandidates implements autoscaler.md's step 2 candidate search: which

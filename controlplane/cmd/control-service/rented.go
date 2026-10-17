@@ -11,8 +11,8 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/cloud/provider"
 	"github.com/scaleresearch/hypothesisloop/controlplane/cloud/provider/providers"
 	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/config"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/hosting"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/clusteragentapi"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/hosting"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 

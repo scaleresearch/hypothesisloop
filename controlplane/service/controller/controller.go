@@ -29,7 +29,7 @@ type Store interface {
 	// separately (see Controller.settleAndMark) so that write can be retried independently.
 	ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (domain.Termination, error)
 	// MarkQuotaSettled records that a terminal experiment's final observed usage has been
-	// durably written — see services/settlement. Only called after that write succeeds.
+	// durably written — see service/settlement. Only called after that write succeeds.
 	MarkQuotaSettled(ctx context.Context, id string) error
 	// StatusSilenceCeiling is the status_silence_ceiling_seconds the cluster named name sets in
 	// place of the controller's own, nil where it sets none.
@@ -54,7 +54,7 @@ type ResearcherKeeper interface {
 }
 
 // QuotaSettler durably writes a terminal experiment's final observed usage — see
-// services/settlement.Settler. Idempotent and safe to retry.
+// service/settlement.Settler. Idempotent and safe to retry.
 type QuotaSettler interface {
 	Settle(ctx context.Context, exp *domain.Experiment) error
 }
@@ -103,7 +103,7 @@ func (c *Controller) WithSettler(s QuotaSettler) *Controller {
 
 // settleAndMark durably writes exp's final observed usage and marks it settled on success. Safe
 // to call after any successful terminal transition: on failure, exp is left unsettled for
-// services/settlement.Reconciler to retry the same write.
+// service/settlement.Reconciler to retry the same write.
 func (c *Controller) settleAndMark(ctx context.Context, exp *domain.Experiment) {
 	if err := c.settler.Settle(ctx, exp); err != nil {
 		c.logger.Warn("controller: settle quota", zap.String("id", exp.ID), zap.Error(err))

@@ -6,7 +6,7 @@ package scheduler
 //
 // Responsibility split:
 //   - JobWatcher: reported job status → DB status sync and quota accounting on completion.
-//   - Controller (services/controller): policy-driven eviction (silence,
+//   - Controller (service/controller): policy-driven eviction (silence,
 //     quota exhaustion, metric decline). Terminates jobs that are running but should stop.
 //
 // JobWatcher is only concerned with jobs that finish naturally or are already gone;
@@ -45,7 +45,7 @@ type JobStatusStore interface {
 	// jobs whose retry the control plane decides.
 	RequeueForRetry(ctx context.Context, id string, maxAttemptsBefore int) (bool, error)
 	// MarkQuotaSettled records that a terminal experiment's final observed usage has been
-	// durably written — see services/settlement. Only called after that write succeeds.
+	// durably written — see service/settlement. Only called after that write succeeds.
 	MarkQuotaSettled(ctx context.Context, id string) error
 	// GetClusterSettings returns clusterID's operator overrides (scale_up_timeout_seconds,
 	// max_speculative_accelerators), or nil if none were ever set.
@@ -53,7 +53,7 @@ type JobStatusStore interface {
 }
 
 // QuotaSettler durably writes a terminal experiment's final observed usage across every
-// resource dimension — see services/settlement.Settler. Idempotent and safe to retry.
+// resource dimension — see service/settlement.Settler. Idempotent and safe to retry.
 type QuotaSettler interface {
 	Settle(ctx context.Context, exp *domain.Experiment) error
 }

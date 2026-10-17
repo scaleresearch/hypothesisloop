@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/registry"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/registry"
 )
 
 // The callers of the table, none of them staff: a signed-in owner of org-a (user), a signed-in

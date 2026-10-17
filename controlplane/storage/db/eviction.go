@@ -20,7 +20,7 @@ import (
 // watchers observing the same fault, and duplicating the branch would let the two paths drift.
 //
 // It deliberately does not write final usage to the metrics DB — that's a separate store with no
-// shared transaction, so callers settle usage afterward via services/settlement.Settler, whose
+// shared transaction, so callers settle usage afterward via service/settlement.Settler, whose
 // idempotent absolute-set writes can retry until quota_settled_at is set. Settle is what turns an
 // infrastructure fault into a refund; see its doc comment.
 func (s *Store) ResolveTermination(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (domain.Termination, error) {

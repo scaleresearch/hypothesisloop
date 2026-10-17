@@ -622,7 +622,7 @@ def test_checkpoint_resume_and_window_cap(api, pe3, deadline):
 
     # Settlement bills lifetime observed hours, so the debit must be strictly positive -- a build
     # that dropped the preempted stint's hours would settle zero for a stint that ran. No upper
-    # band: see controlplane/services/settlement/overbilling_test.go
+    # band: see controlplane/service/settlement/overbilling_test.go
     # (TestAPreemptionRescaleDoesNotChangeWhatAnHourCosts) for the no-clock-at-all version of this
     # invariant.
     quota_after = _used_any(api, pe_id, agents[4])

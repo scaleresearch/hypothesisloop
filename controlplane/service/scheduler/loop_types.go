@@ -157,7 +157,7 @@ type ExperimentEvictor interface {
 }
 
 // LoopQuotaSettler durably writes an experiment's observed usage so far — see
-// services/settlement.Settler, the same implementation every other accounting path uses. An
+// service/settlement.Settler, the same implementation every other accounting path uses. An
 // absolute, idempotent set of what the metrics store has actually observed, so it is meaningful
 // for a job that is still going to run again, not only for a terminal one.
 type LoopQuotaSettler interface {

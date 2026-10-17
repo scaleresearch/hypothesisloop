@@ -10,7 +10,7 @@ import (
 
 // ClusterQueueStore backs the desired-state feed and job-status reports cluster-agents
 // push to. The control plane never writes an explicit "create"/"delete" instruction — the
-// experiment's own status (already updated by services/scheduler before Backend is called)
+// experiment's own status (already updated by service/scheduler before Backend is called)
 // *is* the instruction, and it is the single source of truth: no parallel "desired" table.
 // A cluster-agent asks "what's the desired set of Jobs for my cluster?" and reconciles its
 // local state to match, the same way a kubelet reconciles pods to the spec it's given — no
@@ -18,8 +18,8 @@ import (
 //
 // Callers that need a Job gone immediately (preemption, eviction) must update the
 // experiment's status away from the desired set (SUBMITTED/RUNNING) *before*
-// waiting for deletion to be confirmed — see services/scheduler/loop.go's preempt() and
-// services/controller's eviction paths, all of which do the status update first specifically
+// waiting for deletion to be confirmed — see service/scheduler/loop.go's preempt() and
+// service/controller's eviction paths, all of which do the status update first specifically
 // so this table stays the only source of truth for "should a Job exist."
 type ClusterQueueStore struct {
 	pool *Pool

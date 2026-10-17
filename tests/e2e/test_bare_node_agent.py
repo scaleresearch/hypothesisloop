@@ -175,7 +175,7 @@ def test_bare_node_agent_runs_and_cancels_real_containers(api, run_id, deadline,
 
     # A job left RUNNING forever (e.g. this test asserting out early) would outlive its bare-agent
     # process once the fixture kills it -- its cluster never reports again, so every future poll of
-    # it errors, and JobWatcher.scanAndWatch (controlplane/services/scheduler/job_watcher_scan.go)
+    # it errors, and JobWatcher.scanAndWatch (controlplane/service/scheduler/job_watcher_scan.go)
     # aborts its *entire* pass on the first error, starving every other experiment's status updates
     # too. Cancel unconditionally on exit, same duty the bash scenario's `cleanup`/`trap EXIT` served.
     submitted_jobs: list[str] = []

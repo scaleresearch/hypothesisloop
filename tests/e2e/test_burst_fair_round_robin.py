@@ -1,6 +1,6 @@
 """Burst-tier admission fairness across agents: an agent with a deep burst queue must not be able
 to claim every unit of capacity that frees up in one tick ahead of another agent with only one job
-waiting (see interleaveByAgent in controlplane/services/scheduler/loop_sort.go).
+waiting (see interleaveByAgent in controlplane/service/scheduler/loop_sort.go).
 
 One full-node filler job (accelerator_count=8), owned by a THIRD agent so its completion never
 touches either contender, frees the whole node in a single terminal transition --
