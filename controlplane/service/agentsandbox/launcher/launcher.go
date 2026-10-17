@@ -69,12 +69,12 @@ func New(cfg Config) (*Launcher, error) {
 		return nil, err
 	}
 	if cfg.Provider == nil || cfg.Platform == nil || cfg.Log == nil {
-		return nil, errors.New("agentsandbox: Provider, Platform and Log are required")
+		return nil, errors.New("launcher: Provider, Platform and Log are required")
 	}
 	if sizer, sizes := cfg.Provider.(provider.Sizer); sizes {
 		size := provider.Spec{Name: "instance", CPUMillis: cfg.Size.CPUMillis, MemoryBytes: cfg.Size.MemoryBytes, DiskBytes: cfg.Size.DiskBytes}
 		if err := sizer.CheckSize(size); err != nil {
-			return nil, fmt.Errorf("agentsandbox: the instance size: %w", err)
+			return nil, fmt.Errorf("launcher: the instance size: %w", err)
 		}
 	}
 	digest, err := cfg.launchDigest()
@@ -88,7 +88,7 @@ func New(cfg Config) (*Launcher, error) {
 	l.poolPrefix = l.prefix + poolSegment
 	l.warmer, _ = l.provider.(provider.Warmer)
 	if cfg.WarmPool > 0 && l.warmer == nil {
-		return nil, fmt.Errorf("agentsandbox: a warm pool of %d needs a provider that can warm instances, and this one can %v", cfg.WarmPool, provider.Capabilities(cfg.Provider))
+		return nil, fmt.Errorf("launcher: a warm pool of %d needs a provider that can warm instances, and this one can %v", cfg.WarmPool, provider.Capabilities(cfg.Provider))
 	}
 	return l, nil
 }
@@ -102,7 +102,7 @@ func (cfg Config) launchDigest() (string, error) {
 		Size    Size     `json:"size"`
 	}{cfg.Command, cfg.Size})
 	if err != nil {
-		return "", fmt.Errorf("agentsandbox: digest launch inputs: %w", err)
+		return "", fmt.Errorf("launcher: digest launch inputs: %w", err)
 	}
 	digest := sha256.Sum256(inputs)
 	return hex.EncodeToString(digest[:]), nil
@@ -112,19 +112,19 @@ func (cfg Config) launchDigest() (string, error) {
 // the provider is built.
 func (cfg Config) Validate() error {
 	if err := provider.ValidateSegment("sandbox name", cfg.Name); err != nil {
-		return fmt.Errorf("agentsandbox: %w", err)
+		return fmt.Errorf("launcher: %w", err)
 	}
 	if len(cfg.Command) == 0 {
-		return errors.New("agentsandbox: Command is required")
+		return errors.New("launcher: Command is required")
 	}
 	if cfg.Size.CPUMillis <= 0 || cfg.Size.MemoryBytes <= 0 || cfg.Size.DiskBytes <= 0 {
-		return errors.New("agentsandbox: the instance size needs positive cpu, memory and storage")
+		return errors.New("launcher: the instance size needs positive cpu, memory and storage")
 	}
 	if cfg.Interval <= 0 {
-		return errors.New("agentsandbox: Interval must be positive")
+		return errors.New("launcher: Interval must be positive")
 	}
 	if cfg.CreatePause < 0 || cfg.WarmPool < 0 {
-		return errors.New("agentsandbox: CreatePause and WarmPool must not be negative")
+		return errors.New("launcher: CreatePause and WarmPool must not be negative")
 	}
 	return nil
 }

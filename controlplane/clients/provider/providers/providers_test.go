@@ -53,8 +53,8 @@ func TestAProviderIsBuiltFromItsOwnSectionOfTheConfig(t *testing.T) {
 
 func TestAProviderTheBinaryWasNotBuiltWithIsRefusedWithTheOnesItHas(t *testing.T) {
 	_, err := New("other", yaml.Node{}, "", nil, t.Logf)
-	if err == nil || !strings.Contains(err.Error(), `"other"`) || !strings.Contains(err.Error(), "(e2b, fly, vast)") {
-		t.Fatalf("err = %v, want one naming the provider and listing e2b, fly and vast", err)
+	if err == nil || !strings.Contains(err.Error(), `"other"`) || !strings.Contains(err.Error(), "("+strings.Join(Names(), ", ")+")") {
+		t.Fatalf("err = %v, want one naming the provider and listing %v", err, Names())
 	}
 }
 
@@ -95,6 +95,9 @@ func TestTheShippedProviderSectionsBuildTheirAdapters(t *testing.T) {
 		shipped[name] = node
 	}
 	for _, name := range Names() {
+		if name == "fake" {
+			continue
+		}
 		t.Run(name, func(t *testing.T) {
 			node, found := shipped[name]
 			if !found {
