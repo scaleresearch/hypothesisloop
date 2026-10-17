@@ -27,6 +27,8 @@ type fakeGoogle struct {
 	accounts     map[string]bool
 	policies     map[string]*artifactregistry.Policy
 	writes       []string
+	// creates counts every request to create a service account, the refused ones included.
+	creates int
 }
 
 func (f *fakeGoogle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -56,7 +58,15 @@ func (f *fakeGoogle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.policies[name] = req.Policy
 		f.writes = append(f.writes, "policy "+name)
 		reply(http.StatusOK, req.Policy)
+	case strings.Contains(path, "/serviceAccounts/") && r.Method == http.MethodGet:
+		id, _, _ := strings.Cut(path[strings.LastIndex(path, "/")+1:], "@")
+		if !f.accounts[id] {
+			refuse(http.StatusNotFound, "not found")
+			return
+		}
+		reply(http.StatusOK, iam.ServiceAccount{Name: path})
 	case strings.HasSuffix(path, "/serviceAccounts") && r.Method == http.MethodPost:
+		f.creates++
 		var req iam.CreateServiceAccountRequest
 		_ = json.Unmarshal(body, &req)
 		if f.accounts[req.AccountId] {
@@ -157,12 +167,17 @@ func TestTheFirstPushOfAnOrgProvisionsItsRepositoryAndAccounts(t *testing.T) {
 		t.Fatalf("policy = %v, want the pusher a writer, the puller a reader and the admin kept", members)
 	}
 
-	before := len(google.written())
+	before, creates := len(google.written()), google.creates
 	if _, err := r.IssuePush(context.Background(), "org-a"); err != nil {
 		t.Fatal(err)
 	}
 	if got := google.written()[before:]; len(got) != 0 {
 		t.Fatalf("a second push login wrote %v", got)
+	}
+	// Google counts a refused create against its per-minute quota of creates, so accounts that
+	// are there are read and never asked to be created again.
+	if google.creates != creates {
+		t.Fatalf("a second push login asked to create %d service accounts", google.creates-creates)
 	}
 
 	// Another org gets a repository and accounts of its own.

@@ -241,9 +241,18 @@ func (r *Registry) ensureRepository(ctx context.Context, orgID string) error {
 	return nil
 }
 
+// ensureAccount reads the account before it creates one: every create counts against a small
+// per-minute project quota, the refused ones included, and push logins are asked for often.
 func (r *Registry) ensureAccount(ctx context.Context, email, orgID string) error {
+	_, err := r.iam.Projects.ServiceAccounts.Get("projects/" + r.project + "/serviceAccounts/" + email).Context(ctx).Do()
+	if err == nil {
+		return nil
+	}
+	if !hasStatus(err, http.StatusNotFound) {
+		return fmt.Errorf("registrycred gcp: read service account %s: %w", email, err)
+	}
 	id, _, _ := strings.Cut(email, "@")
-	_, err := r.iam.Projects.ServiceAccounts.Create("projects/"+r.project, &iam.CreateServiceAccountRequest{
+	_, err = r.iam.Projects.ServiceAccounts.Create("projects/"+r.project, &iam.CreateServiceAccountRequest{
 		AccountId:      id,
 		ServiceAccount: &iam.ServiceAccount{DisplayName: "HypothesisLoop images of org " + orgID},
 	}).Context(ctx).Do()
