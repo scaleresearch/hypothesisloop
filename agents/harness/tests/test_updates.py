@@ -312,6 +312,11 @@ class JobsInFlightTest(unittest.IsolatedAsyncioTestCase):
         command, _ = fake_hl("", stats='{"total":1,"by_status":{"COMPLETED":1}}\n')
         self.assertEqual(await updates.jobs_in_flight(ENV, hl=command[0]), 0)
 
+    # hl leaves out every empty object, so an agent that submitted nothing yet reads no by_status.
+    async def test_an_agent_with_no_job_has_none_in_flight(self):
+        command, _ = fake_hl("", stats='{"total":0,"in_flight_accelerators":0,"in_flight_cores":0}\n')
+        self.assertEqual(await updates.jobs_in_flight(ENV, hl=command[0]), 0)
+
     # Nothing is said on a guess: a read that failed is no "nothing in flight".
     async def test_a_read_that_failed_is_none_and_logged(self):
         command, _ = fake_hl("", stats=JobStateTest.STATS, read_exit=1)

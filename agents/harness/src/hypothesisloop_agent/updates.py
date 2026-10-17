@@ -261,8 +261,10 @@ def _unfinished_read(agent: str) -> list[str]:
 
 
 def _unfinished(stats: dict) -> dict[str, int]:
-    """The agent's job counts by unfinished status, those it has none of left out."""
-    return {s: stats["by_status"][s] for s in _UNFINISHED if stats["by_status"].get(s)}
+    """The agent's job counts by unfinished status, those it has none of left out. hl prints no
+    by_status for an agent with no job, as it leaves out every empty object."""
+    by_status = stats.get("by_status", {})
+    return {s: by_status[s] for s in _UNFINISHED if by_status.get(s)}
 
 
 async def jobs_in_flight(env: dict[str, str], hl: str = "hl") -> int | None:
