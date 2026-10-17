@@ -7,7 +7,7 @@
 	k3s-up k3s-down full-up k3s-dev-nodes-up k3s-dev-nodes-down e2e \
 	full-stop full-start reload stack-not-held \
 	tt-up tt-down tt-status tt-stop tt-start tt-dev-nodes-up tt-dev-nodes-down tt-hardware-image tt-e2e \
-	git-repository example db-migration
+	git-repository example db-migration ui-types
 
 # ---- Control plane: one instance, runs anywhere (the brain) -----------------
 COMPOSE_FILE := localdev/controlplane/docker-compose.yml
@@ -521,6 +521,11 @@ lint:
 check: build test agent-test helm-lint
 	go vet ./...
 	cd controlplane/ui && npm test && npm run build
+
+# Regenerates the UI's API types from the OpenAPI document the server publishes
+# (controlplane/cmd/control-service/testdata/openapi.json): run it after that golden changes.
+ui-types:
+	npm --prefix controlplane/ui run types
 
 # Creates the next numbered, empty migration: make db-migration NAME=add_widget_color
 MIGRATIONS := controlplane/storage/db/migrations
