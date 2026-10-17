@@ -538,7 +538,9 @@ func (s *Store) CountPlatformExperiments(ctx context.Context, filter PlatformExp
 // UpdatePlatformExperiment because it is the one field that is written *after* the experiment
 // closes, when everything else is frozen. ErrPlatformExperimentNotFound for an id none has.
 func (s *Store) SetPlatformExperimentSummary(ctx context.Context, id, summary string) error {
-	const q = `UPDATE platform_experiments SET summary = $2, updated_at = NOW() WHERE id = $1`
+	const q = `UPDATE platform_experiments
+SET summary = $2, summary_at = CASE WHEN summary IS DISTINCT FROM $2 THEN NOW() ELSE summary_at END, updated_at = NOW()
+WHERE id = $1`
 	tag, err := s.pool.pool.Exec(ctx, q, id, summary)
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.SetSummary: %w", err)
@@ -551,15 +553,34 @@ func (s *Store) SetPlatformExperimentSummary(ctx context.Context, id, summary st
 
 // TellCoordinator records reason as the status_reason the platform experiment id waits for its
 // coordinator with, "" when it waits for someone else. A reason that differs from the one
-// recorded is announced as platform_experiment.status with the reason as its detail, by the
-// trigger on the row, and one that is the same writes nothing. A closed one is told nothing.
+// recorded is announced as platform_experiment.status with the reason as its detail, and one
+// that is the same writes nothing. A closed one is told nothing.
 func (s *Store) TellCoordinator(ctx context.Context, id, reason string) error {
 	const q = `UPDATE platform_experiments SET coordinator_reason = NULLIF($2, '')
 WHERE id = $1 AND status <> 'closed' AND coordinator_reason IS DISTINCT FROM NULLIF($2, '')`
-	if _, err := s.pool.pool.Exec(ctx, q, id, reason); err != nil {
+	if err := s.writeRunStatusDetail(ctx, q, id, reason); err != nil {
 		return fmt.Errorf("platform_experiments_store.TellCoordinator: %w", err)
 	}
 	return nil
+}
+
+// writeRunStatusDetail runs q, a write of what the status of the platform experiment id says
+// beside itself, to detail, and announces the status with a detail that is not empty.
+func (s *Store) writeRunStatusDetail(ctx context.Context, q, id, detail string) error {
+	return s.write(ctx, func(w *Write) error {
+		var status string
+		err := w.QueryRow(ctx, q+` RETURNING status`, id, detail).Scan(&status)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if detail != "" {
+			w.runChange(id, domain.EventPlatformExperimentStatus, status, detail)
+		}
+		return nil
+	})
 }
 
 // UpdatePlatformExperiment writes pe's editable fields, but only if the row is still in
@@ -602,22 +623,28 @@ func (s *Store) UpdatePlatformExperiment(ctx context.Context, pe *domain.Platfor
 // writePlatformExperiment writes the patchable fields of pe while it is still in expectedStatus
 // and, when baseline is not empty, still has that baseline.
 func writePlatformExperiment(ctx context.Context, tx *Write, pe *domain.PlatformExperiment, metrics []byte, expectedStatus domain.PlatformExperimentStatus, baseline string) error {
-	const q = `UPDATE platform_experiments
+	const q = `UPDATE platform_experiments pe
 SET name=$2, description=$3, budget_accelerator_hours=$4, max_agents=$5, metrics=$6,
     report_interval_seconds=$7, starts_at=$8, ends_at=$9, updated_at=NOW(),
     max_concurrent_accelerators=$11, baseline_job_id=$12, job_estimated_duration_hours=$13, duration_hours=$14
-WHERE id=$1 AND status=$10 AND ($15 = '' OR baseline_job_id = $15)`
-	tag, err := tx.Exec(ctx, q,
+FROM (SELECT description, duration_hours FROM platform_experiments WHERE id = $1 FOR UPDATE) old
+WHERE pe.id=$1 AND pe.status=$10 AND ($15 = '' OR pe.baseline_job_id = $15)
+RETURNING pe.description IS DISTINCT FROM old.description OR pe.duration_hours IS DISTINCT FROM old.duration_hours`
+	var briefMoved bool
+	err := tx.QueryRow(ctx, q,
 		pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents,
 		metrics, pe.ReportIntervalSeconds, optionalTime(pe.StartsAt), pe.ClosesAt(),
 		expectedStatus,
 		pe.MaxConcurrentAccelerators, pe.BaselineJobID, pe.JobEstimatedDurationHours, pe.DurationHours, baseline,
-	)
+	).Scan(&briefMoved)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("status or baseline changed concurrently, retry")
+	}
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("status or baseline changed concurrently, retry")
+	if briefMoved {
+		tx.runChange(pe.ID, domain.EventPlatformExperimentDescription, "", "")
 	}
 	return nil
 }

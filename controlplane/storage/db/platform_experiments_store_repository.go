@@ -59,11 +59,13 @@ WHERE pe.id = $1 AND pe.status <> 'closed' AND `+awaitsRepository, id, repositor
 // FailRepository closes a platform experiment whose repository the git host did not create, with
 // what it answered. One that closed meanwhile keeps what it has.
 func (s *Store) FailRepository(ctx context.Context, id, answer string) error {
-	if _, err := s.pool.pool.Exec(ctx, `
+	return s.write(ctx, func(w *Write) error {
+		if _, err := moveRun(ctx, w, `
 UPDATE platform_experiments pe
-SET status = 'closed', updated_at = now(), closed_at = now(), close_reason = '`+string(domain.CloseRepositoryNotCreated)+`', repository_error = $2
+SET status = 'closed', updated_at = now(), closed_at = now(), close_reason = '`+string(domain.CloseRepositoryNotCreated)+`', repository_error = $2, `+statusMoved+`
 WHERE pe.id = $1 AND pe.status <> 'closed' AND `+awaitsRepository, id, answer); err != nil {
-		return fmt.Errorf("platform_experiments_store.FailRepository: %w", err)
-	}
-	return nil
+			return fmt.Errorf("platform_experiments_store.FailRepository: %w", err)
+		}
+		return nil
+	})
 }

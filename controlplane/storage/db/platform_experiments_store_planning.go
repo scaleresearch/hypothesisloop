@@ -298,9 +298,11 @@ func (s *Store) AcceptDraft(ctx context.Context, pe *domain.PlatformExperiment, 
 		acceptedBy = *pe.AcceptedBy
 	}
 	return s.write(ctx, func(tx *Write) error {
-		var status string
+		var status, description string
 		var proposed bool
-		err = tx.QueryRow(ctx, `SELECT status, proposed_at IS NOT NULL AND proposal IS NOT NULL FROM platform_experiments WHERE id = $1 FOR UPDATE`, pe.ID).Scan(&status, &proposed)
+		var durationHours float64
+		err = tx.QueryRow(ctx, `SELECT status, proposed_at IS NOT NULL AND proposal IS NOT NULL, description, duration_hours
+FROM platform_experiments WHERE id = $1 FOR UPDATE`, pe.ID).Scan(&status, &proposed, &description, &durationHours)
 		if errors.Is(err, pgx.ErrNoRows) || (err == nil && status != string(domain.PlatformExpDraft)) {
 			return ErrNotDraft
 		}
@@ -310,9 +312,9 @@ func (s *Store) AcceptDraft(ctx context.Context, pe *domain.PlatformExperiment, 
 		if !proposed {
 			return ErrNothingProposed
 		}
-		if _, err := tx.Exec(ctx, `
+		if _, err := moveRun(ctx, tx, `
 UPDATE platform_experiments
-SET status = 'open', name = $2, description = $3, budget_accelerator_hours = $4, max_agents = $5, metrics = $6,
+SET status = 'open', `+statusMoved+`, name = $2, description = $3, budget_accelerator_hours = $4, max_agents = $5, metrics = $6,
     report_interval_seconds = $7, starts_at = $14, ends_at = $8, stages = $9, current_stage = 1,
     default_quota_tier = $10, max_concurrent_accelerators = $11,
     coordinator_hosted = true, coordinator_model = NULLIF($12, ''), duration_hours = $13, updated_at = now(),
@@ -323,6 +325,9 @@ WHERE id = $1`, pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.Ma
 			string(pe.DefaultQuotaTier), pe.MaxConcurrentAccelerators, pe.Coordinator.Model, pe.DurationHours, optionalTime(pe.StartsAt),
 			pe.AcceptedAt, string(acceptedBy.Kind), acceptedBy.ID, answers, researchers); err != nil {
 			return fmt.Errorf("platform_experiments_store.AcceptDraft: %w", err)
+		}
+		if pe.Description != description || pe.DurationHours != durationHours {
+			tx.runChange(pe.ID, domain.EventPlatformExperimentDescription, "", "")
 		}
 		if err := poolTypesTx(ctx, tx, pe.ID, pe.Researchers); err != nil {
 			return fmt.Errorf("platform_experiments_store.AcceptDraft: %w", err)

@@ -93,13 +93,13 @@ func (s *Store) StartPlatformExperimentTx(ctx context.Context, id string, agents
 	var quotas []*domain.AgentQuota
 	started := false
 	if err := s.write(ctx, func(tx *Write) error {
-		tag, err := tx.Exec(ctx, `
+		moved, err := moveRun(ctx, tx, `
 WITH at_work AS (
     SELECT EXISTS (SELECT 1 FROM experiment_signups s
                    WHERE s.platform_experiment_id = $1 AND NOT s.hosted AND `+sharesBudgetSQL+`) AS already
 )
 UPDATE platform_experiments pe
-SET status='running', updated_at=NOW(), starts_at = NOW(),
+SET status='running', updated_at=NOW(), starts_at = NOW(), `+statusMoved+`,
     started_at = CASE WHEN at_work.already THEN NOW() END,
     ends_at = NOW() + make_interval(secs => CASE WHEN at_work.already THEN pe.duration_hours * 3600 ELSE LEAST($2, pe.duration_hours * 3600) END)
 FROM at_work
@@ -107,7 +107,7 @@ WHERE pe.id=$1 AND pe.status='open'`, id, agentsDue.Seconds())
 		if err != nil {
 			return fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: claim: %w", err)
 		}
-		if tag.RowsAffected() == 0 {
+		if !moved {
 			return nil
 		}
 

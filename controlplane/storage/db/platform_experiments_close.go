@@ -31,35 +31,47 @@ SET status = 'closed', updated_at = NOW(), closed_at = NOW(),
                         WHEN status = 'open' THEN '` + string(domain.CloseBaselineLimitReached) + `'
                         WHEN started_at IS NULL THEN '` + string(domain.CloseAgentsNotStarted) + `'
                         ELSE '` + string(domain.CloseEndTimeReached) + `' END,
-    closed_by_kind = $3, closed_by_id = $4, close_message = $5
+    closed_by_kind = $3, closed_by_id = $4, close_message = $5, ` + statusMoved + `
 WHERE id = $1 AND status <> 'closed'`
-	if _, err := s.pool.pool.Exec(ctx, q, id, reason, string(actor.Kind), actor.ID, message); err != nil {
-		return fmt.Errorf("platform_experiments_store.Close: %w", err)
-	}
-	return nil
+	return s.write(ctx, func(w *Write) error {
+		if _, err := moveRun(ctx, w, q, id, reason, string(actor.Kind), actor.ID, message); err != nil {
+			return fmt.Errorf("platform_experiments_store.Close: %w", err)
+		}
+		return nil
+	})
 }
 
 // RemovePlatformExperiment removes platform experiment id for by: from then on it is answered to
 // nobody and read by the platform's own loops alone, and everything it holds is kept. One not
-// closed yet is closed in the same write, with close_reason removed. The trigger of the row
-// announces the close and the removal. ErrPlatformExperimentNotFound for an id none has, and for
-// one removed before.
+// closed yet is closed in the same write, with close_reason removed, and its close is announced
+// before the removal. ErrPlatformExperimentNotFound for an id none has, and for one removed
+// before.
 func (s *Store) RemovePlatformExperiment(ctx context.Context, id string, by domain.Actor) error {
-	tag, err := s.pool.pool.Exec(ctx, `
-UPDATE platform_experiments
+	return s.write(ctx, func(w *Write) error {
+		var closing bool
+		var closeMessage string
+		err := w.QueryRow(ctx, `
+UPDATE platform_experiments pe
 SET removed_at = now(), removed_by_kind = $2, removed_by_id = $3, updated_at = now(),
-    status = 'closed', closed_at = COALESCE(closed_at, now()),
-    close_reason = CASE WHEN status = 'closed' THEN close_reason ELSE $4 END,
-    closed_by_kind = CASE WHEN status = 'closed' THEN closed_by_kind ELSE $2 END,
-    closed_by_id = CASE WHEN status = 'closed' THEN closed_by_id ELSE $3 END
-WHERE id = $1 AND removed_at IS NULL`, id, string(by.Kind), by.ID, string(domain.CloseRemoved))
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.Remove: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrPlatformExperimentNotFound
-	}
-	return nil
+    status = 'closed', closed_at = COALESCE(pe.closed_at, now()),
+    close_reason = CASE WHEN old.status = 'closed' THEN pe.close_reason ELSE $4 END,
+    closed_by_kind = CASE WHEN old.status = 'closed' THEN pe.closed_by_kind ELSE $2 END,
+    closed_by_id = CASE WHEN old.status = 'closed' THEN pe.closed_by_id ELSE $3 END, `+statusMoved+`
+FROM (SELECT status FROM platform_experiments WHERE id = $1 FOR UPDATE) old
+WHERE pe.id = $1 AND pe.removed_at IS NULL
+RETURNING old.status <> 'closed', pe.close_message`, id, string(by.Kind), by.ID, string(domain.CloseRemoved)).Scan(&closing, &closeMessage)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrPlatformExperimentNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("platform_experiments_store.Remove: %w", err)
+		}
+		if closing {
+			w.runStatus(id, string(domain.PlatformExpClosed), closeMessage)
+		}
+		w.runChange(id, domain.EventPlatformExperimentRemoved, "", "")
+		return nil
+	})
 }
 
 // RecordClose writes record as the platform's record of the close of the closed platform
@@ -80,23 +92,26 @@ var ErrNotReopenable = errors.New("platform experiment is not a closed run that 
 // other run continues, running again until endsAt, durationHours from its start, and with a
 // coordinatorModel that is not empty its hosted coordinator on that model. What the close wrote
 // goes with it: closed_at, why and by whom, the agent lines and record of the close and the
-// placements, so every reader takes it for the running run it was. The status change is announced
-// by the row's trigger. ErrNotReopenable, and ErrPlatformExperimentNotFound for an id none has
-// and a removed one.
+// placements, so every reader takes it for the running run it was. The status, and a run length
+// that changed, are announced. ErrNotReopenable, and ErrPlatformExperimentNotFound for an id none
+// has and a removed one.
 func (s *Store) ReopenPlatformExperiment(ctx context.Context, id string, endsAt time.Time, durationHours float64, coordinatorModel string) error {
 	return s.write(ctx, func(tx *Write) error {
-		tag, err := tx.Exec(ctx, `
+		var lengthMoved bool
+		err := tx.QueryRow(ctx, `
 UPDATE platform_experiments pe
 SET status = 'running', updated_at = now(), ends_at = $2, duration_hours = $3,
-    coordinator_model = CASE WHEN $4 <> '' THEN $4 ELSE coordinator_model END,
+    coordinator_model = CASE WHEN $4 <> '' THEN $4 ELSE pe.coordinator_model END,
     closed_at = NULL, close_reason = '', closed_by_kind = '', closed_by_id = '', close_message = '',
-    close_agents = '', close_record = ''
+    close_agents = '', close_record = '', `+statusMoved+`
+FROM (SELECT duration_hours FROM platform_experiments WHERE id = $1 FOR UPDATE) old
 WHERE pe.id = $1 AND pe.status = 'closed' AND pe.removed_at IS NULL AND pe.started_at IS NOT NULL AND ($4 = '' OR pe.coordinator_hosted)
-  AND NOT EXISTS (SELECT 1 FROM platform_experiments later WHERE later.continues = pe.id)`, id, endsAt, durationHours, coordinatorModel)
-		if err != nil {
+  AND NOT EXISTS (SELECT 1 FROM platform_experiments later WHERE later.continues = pe.id)
+RETURNING pe.duration_hours IS DISTINCT FROM old.duration_hours`, id, endsAt, durationHours, coordinatorModel).Scan(&lengthMoved)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("platform_experiments_store.Reopen: %w", err)
 		}
-		if tag.RowsAffected() == 0 {
+		if errors.Is(err, pgx.ErrNoRows) {
 			var exists bool
 			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM platform_experiments WHERE id = $1 AND removed_at IS NULL)`, id).Scan(&exists); err != nil {
 				return fmt.Errorf("platform_experiments_store.Reopen: %w", err)
@@ -105,6 +120,10 @@ WHERE pe.id = $1 AND pe.status = 'closed' AND pe.removed_at IS NULL AND pe.start
 				return ErrPlatformExperimentNotFound
 			}
 			return ErrNotReopenable
+		}
+		tx.runStatus(id, string(domain.PlatformExpRunning), "")
+		if lengthMoved {
+			tx.runChange(id, domain.EventPlatformExperimentDescription, "", "")
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM experiment_top3 WHERE platform_experiment_id = $1`, id); err != nil {
 			return fmt.Errorf("platform_experiments_store.Reopen: placements: %w", err)

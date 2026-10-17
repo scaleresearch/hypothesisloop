@@ -359,12 +359,12 @@ GROUP BY 1, 2`, platformExpID)
 
 // HoldResearchers records line as what the running platform experiment id says of the places of
 // its researchers the platform keeps empty, "" for none (domain.HoldsLine). A line that differs
-// from the one recorded is told as platform_experiment.status with it as the detail, by the
-// trigger on the row; one that is the same writes nothing.
+// from the one recorded is told as platform_experiment.status with it as the detail; one that is
+// the same writes nothing.
 func (s *Store) HoldResearchers(ctx context.Context, id, line string) error {
 	const q = `UPDATE platform_experiments SET researchers_held = NULLIF($2, '')
 WHERE id = $1 AND status = 'running' AND researchers_held IS DISTINCT FROM NULLIF($2, '')`
-	if _, err := s.pool.pool.Exec(ctx, q, id, line); err != nil {
+	if err := s.writeRunStatusDetail(ctx, q, id, line); err != nil {
 		return fmt.Errorf("platform_experiments_store.HoldResearchers: %w", err)
 	}
 	return nil

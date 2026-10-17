@@ -195,9 +195,9 @@ RETURNING restarts, renewals, stopped, exited_at, exit_log, launch, end_reason`,
 		// A draft whose planner is given up on before it answered has nobody left to answer it: it is
 		// closed with the stop, saying so, where it would have read planning until its limit.
 		if after.Stopped && agentID != "" {
-			if _, err := tx.Exec(ctx, `
+			if _, err := moveRun(ctx, tx, `
 UPDATE platform_experiments pe
-SET status = 'closed', updated_at = now(), closed_at = now(), close_reason = '`+string(domain.ClosePlannerStopped)+`'
+SET status = 'closed', updated_at = now(), closed_at = now(), close_reason = '`+string(domain.ClosePlannerStopped)+`', `+statusMoved+`
 WHERE pe.id = $1 AND pe.status = 'draft' AND pe.proposed_at IS NULL
   AND EXISTS (SELECT 1 FROM experiment_signups s
               WHERE s.platform_experiment_id = pe.id AND s.agent_id = $2 AND s.role = '`+string(domain.SignupRolePlanner)+`')`,
