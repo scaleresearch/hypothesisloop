@@ -19,4 +19,3 @@
 - a loop over many must survive any one of them failing - skip it and finish the pass
 - every datastore is queried only through its own package, never ad-hoc from a service
 - every datastore's core schema is defined in the repo and created by its own package, so a fresh stack reproduces it exactly
-- no shell scripts: a reusable task is a Make target, and logic too big for a Make recipe is a small Go program
