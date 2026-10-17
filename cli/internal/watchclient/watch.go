@@ -33,7 +33,9 @@ const (
 )
 
 var (
-	readTimeout = 45 * time.Second
+	// readTimeout is how long a stream may be silent before it is read as dead: two of the
+	// server's pings missed, and a little.
+	readTimeout = 2*platformapi.WatchPingInterval + 5*time.Second
 	// settleWindow is how long a watch without --until keeps collecting after its first change, so
 	// changes that arrive together come back as one batch.
 	settleWindow = 2 * time.Second

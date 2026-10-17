@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"context"
+	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -32,7 +34,8 @@ func registerWatchKinds(doc *Doc) {
 			"`head` for only what comes next, or nothing for every change still held. `project_id` carries the changes of every platform experiment " +
 			"GET /platform-experiments lists for you in that project, the shared ones included, up to the removal of one. The first frame is {\"subscription\": {...}}, " +
 			"the filter in force. Each read ends with a progress frame {\"next\": N, \"caught_up\": true|false}: a client that saved N " +
-			"reads on with after=N and misses nothing and repeats nothing. An idle stream repeats its last progress frame every 20 seconds. " +
+			"reads on with after=N and misses nothing and repeats nothing. An idle stream repeats its last progress frame every " +
+			fmt.Sprintf("%d seconds. ", int(platformapi.WatchPingInterval/time.Second)) +
 			"Changes are held for 7 days. An after this platform never issued, " +
 			"or one older than what is held, is refused with 410: re-read state and watch from head.\n\n" +
 			"`agent_id` scopes the stream to that agent's own resources, as `agent_scope` below says per kind: the terminal " +
@@ -45,8 +48,9 @@ func registerWatchKinds(doc *Doc) {
 			"reads on from where it stopped last time, and returns with the first batch of changes.",
 		// No operation answers a frame of the socket, so this one names their schemas for the document to keep them.
 		Extensions: map[string]any{
-			"x-frame":       map[string]string{"$ref": "#/components/schemas/WatchFrame"},
-			"x-subprotocol": map[string]string{"$ref": "#/components/schemas/WatchSubprotocol"},
+			"x-frame":        map[string]string{"$ref": "#/components/schemas/WatchFrame"},
+			"x-subprotocol":  map[string]string{"$ref": "#/components/schemas/WatchSubprotocol"},
+			"x-ping-seconds": int(platformapi.WatchPingInterval / time.Second),
 		},
 	}, listWatchKinds)
 	schemas := doc.API.OpenAPI().Components.Schemas

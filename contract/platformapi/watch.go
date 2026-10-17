@@ -62,6 +62,11 @@ const ResetKind = "watch.reset"
 // refuses a handshake that selects none of what it offered.
 const WatchSubprotocol = "hypothesisloop.watch"
 
+// WatchPingInterval is how often an idle GET /watch repeats its last progress frame, so that a job
+// sitting RUNNING for an hour with nothing to say still shows either end the path between them is
+// alive. A client that hears nothing for much longer reads the stream as dead.
+const WatchPingInterval = 20 * time.Second
+
 // Event kinds. Every event on the stream carries one of these.
 const (
 	EventExperimentStatus  = "experiment.status"

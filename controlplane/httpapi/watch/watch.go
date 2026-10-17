@@ -39,10 +39,6 @@ type Hypotheses interface {
 const (
 	// pageSize is how many changes one read takes.
 	pageSize = 500
-	// watchPingInterval keeps an idle stream honest: a job can sit RUNNING for an hour with
-	// nothing to say, and without this neither end would notice the path between them died. Each
-	// tick writes the last progress frame again: a browser sees no ping.
-	watchPingInterval = 20 * time.Second
 	watchWriteTimeout = 10 * time.Second
 	// listenRetryDelay is how long the one LISTEN waits before it is established again after its
 	// connection broke. Every stream reads again once it is back.
@@ -133,7 +129,7 @@ type experimentLookup interface {
 // requests must pass auth.Gate first, which reads a stream's token from the subprotocol
 // (platformapi.WatchSubprotocol) before the upgrade.
 func NewHandler(changes Changes, hypotheses Hypotheses, experiments experimentLookup, access *auth.Access, logger *zap.Logger) *Handler {
-	return &Handler{changes: changes, hypotheses: hypotheses, experiments: experiments, access: access, hub: newHub(), logger: logger, recheckEvery: watchPingInterval}
+	return &Handler{changes: changes, hypotheses: hypotheses, experiments: experiments, access: access, hub: newHub(), logger: logger, recheckEvery: platformapi.WatchPingInterval}
 }
 
 // Start holds the one LISTEN of this process until ctx ends, establishing it again after
