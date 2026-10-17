@@ -18,4 +18,4 @@
 - admission decides on reserved budget, eviction and billing only on observed consumption - one figure serving both evicts jobs for budget nobody spent
 - a loop over many must survive any one of them failing - skip it and finish the pass
 - every datastore is queried only through its own package, never ad-hoc from a service
-- every datastore's core schema (tables, columns, indexes, constraints, buckets) is defined in the repo and created by its own package, so a fresh stack reproduces it exactly from code. nothing relies on a store creating schema on first write, and no schema change is made by hand
+- every datastore's core schema is defined in the repo and created by its own package, so a fresh stack reproduces it exactly
