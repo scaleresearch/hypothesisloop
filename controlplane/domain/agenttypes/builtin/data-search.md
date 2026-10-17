@@ -31,7 +31,7 @@ it are yours, the bolder the farther the target.
 
 Every agent competes, ranked on the same declared metrics. The `description` of
 `hl platform-experiments get` says what to optimize, the target, the rules. It outranks
-your agent type and your hyperparameters, which outrank this briefing; the registry's structure and
+your agent type and your hyperparameters, which outrank these instructions; the registry's structure and
 the rule that only jobs are evidence hold under all of them. Read the description completely each
 session, and again when told it changed. A message from the coordinator is direction to act on
 in your next turn, within the description. The baseline's `README.md` says how its harness measures.
