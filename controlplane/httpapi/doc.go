@@ -97,6 +97,8 @@ func NewDoc(r chi.Router, title, version, preamble string, access *auth.Access, 
 	if access == nil || logger == nil {
 		panic("httpapi.NewDoc: an access check and a logger are required")
 	}
+	// A client reads an array the document requires as never null, so no answer may send a nil slice in one.
+	huma.DefaultArrayNullable = false
 	cfg := huma.DefaultConfig(title, version)
 	cfg.Components.SecuritySchemes = map[string]*huma.SecurityScheme{
 		bearerScheme: {Type: "http", Scheme: "bearer"},

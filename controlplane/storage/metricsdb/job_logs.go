@@ -74,7 +74,7 @@ func (s *Store) GetLatestLogTail(ctx context.Context, experimentID string, n int
 	if !ok {
 		return nil, fmt.Errorf("metricsdb.GetLatestLogTail: unexpected lines_json type %T", rows[0][0])
 	}
-	var lines []string
+	lines := []string{}
 	if err := json.Unmarshal([]byte(linesJSON), &lines); err != nil {
 		return nil, fmt.Errorf("metricsdb.GetLatestLogTail: decode lines: %w", err)
 	}

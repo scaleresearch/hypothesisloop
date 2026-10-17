@@ -54,6 +54,7 @@ func (s *Service) platformExperimentSeries(ctx context.Context, gauge, platformE
 			ExperimentID: r.Labels["job_id"],
 			MetricName:   r.Labels["metric_name"],
 			MetricBasis:  basis,
+			Points:       make([]domain.MetricSeriesPoint, 0, len(r.Points)),
 		}
 		for _, p := range r.Points {
 			series.Points = append(series.Points, domain.MetricSeriesPoint{
@@ -171,7 +172,7 @@ func latestAttemptOnly(experimentID string, valueResult []metricsdb.RangeSeries,
 		byMetric[metricName] = append(byMetric[metricName], sr)
 	}
 
-	var out []*domain.MetricDataPoint
+	out := []*domain.MetricDataPoint{}
 	for _, name := range order {
 		attempts := byMetric[name]
 		if len(attempts) > 1 {

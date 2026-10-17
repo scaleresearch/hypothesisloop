@@ -25,7 +25,7 @@ type AgentSignup struct {
 	// AgentType is the id of the agent type it runs, fixed when it joins: it runs the type's current
 	// version. Model, empty, and Hyperparameters, nil, are the type's, read whenever it is served.
 	AgentType       string         `json:"agent_type" doc:"The agent type it runs, by id. It runs the type's current version, told with agent.instructions when that changes."`
-	Hyperparameters map[string]any `json:"hyperparameters" doc:"Its own hyperparameters, null when it runs with its agent type's."`
+	Hyperparameters map[string]any `json:"hyperparameters" nullable:"true" doc:"Its own hyperparameters, null when it runs with its agent type's."`
 	Model           string         `json:"model" doc:"Its own model, empty when it runs on its agent type's or, for a type that names none, the platform's default."`
 	SignedUpAt      time.Time      `json:"signed_up_at"`
 	// Actor is whose credential added the agent, unverified with no id on a signup from before

@@ -43,7 +43,7 @@ func (e *MessagesRateLimited) Error() string {
 // sender may not message yet are returned as refused and the rest are sent, and only when none is
 // is it *MessagesRateLimited, for the first of them. Each is told as agent.message.
 func (s *Store) SendAgentMessages(ctx context.Context, platformExpID string, to []string, text string, sender domain.Actor) (sent []domain.AgentMessage, refused []MessagesRateLimited, err error) {
-	var messages []domain.AgentMessage
+	messages := []domain.AgentMessage{}
 	if err := s.write(ctx, func(tx *Write) error {
 		var status string
 		err = tx.QueryRow(ctx, `SELECT status::text FROM platform_experiments WHERE id = $1 FOR SHARE`, platformExpID).Scan(&status)

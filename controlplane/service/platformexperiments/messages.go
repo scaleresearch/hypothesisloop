@@ -49,7 +49,7 @@ func (s *Service) SendMessage(ctx context.Context, platformExpID string, req Sen
 	case len(written) > domain.MaxAgentMessageBytes:
 		return nil, nil, refusal.Refuse(http.StatusUnprocessableEntity, "message_too_long", fmt.Sprintf("message_too_long: text is %d bytes, at most %d: say the one direction that matters, with the job and hypothesis ids it rests on", len(written), domain.MaxAgentMessageBytes))
 	}
-	var messages []domain.AgentMessage
+	messages := []domain.AgentMessage{}
 	var refused []RefusedMessage
 	var err error
 	if req.Coordinator {

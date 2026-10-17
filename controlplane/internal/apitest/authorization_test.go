@@ -84,7 +84,7 @@ func (api *worldAPI) call(method, target, body, token string) int {
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
 	recorder := httptest.NewRecorder()
-	api.router.ServeHTTP(recorder, request)
+	api.serve.ServeHTTP(recorder, request)
 	return recorder.Code
 }
 

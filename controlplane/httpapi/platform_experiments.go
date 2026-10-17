@@ -524,7 +524,7 @@ type signupReply struct {
 	Role            string         `json:"role"`
 	AgentType       string         `json:"agent_type" doc:"The agent type it runs, by id."`
 	Model           string         `json:"model" doc:"Its own model, empty when it runs on its agent type's. What it runs with is its instructions: GET /platform-experiments/{id}/agents/{agent_id}/instructions."`
-	Hyperparameters map[string]any `json:"hyperparameters" doc:"Its own hyperparameters, null when it runs with its agent type's."`
+	Hyperparameters map[string]any `json:"hyperparameters" nullable:"true" doc:"Its own hyperparameters, null when it runs with its agent type's."`
 	FinishedAt      *time.Time     `json:"finished_at,omitempty" doc:"When the agent said it has nothing left to do."`
 	Ended           domain.RunEnd  `json:"ended" enum:",closed,cut,finished,planned" doc:"Why the agent's run here is over, the empty string while it goes on: the platform experiment closed, the agent was cut, it finished, or it is a draft's planner whose proposal or decline is stored. A machine the platform runs for the agent is told to stop for this and nothing else."`
 	CutReason       string         `json:"cut_reason,omitempty" doc:"Why the platform cut it other than at a stage boundary: max_agents_lowered for one of the newest researchers above a max_agents lowered below those at work. Absent for a stage cut."`

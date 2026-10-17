@@ -104,7 +104,7 @@ func proposedPool(catalog domain.AgentTypeCatalog, agents []ProposedAgent) (doma
 
 // poolAgents is a researcher of each place of pool, as hostedAgents creates them.
 func poolAgents(pool domain.ResearcherPool) []ProposedAgent {
-	var agents []ProposedAgent
+	agents := []ProposedAgent{}
 	for _, e := range pool {
 		for range e.Count {
 			agents = append(agents, ProposedAgent{AgentType: e.AgentType, Model: e.Model, Hyperparameters: e.Hyperparameters})

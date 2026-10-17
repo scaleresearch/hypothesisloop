@@ -37,7 +37,7 @@ WHERE p.status IN ('open', 'running') AND p.coordinator_hosted`, domain.Coordina
 		return nil, fmt.Errorf("platform_experiments_store.RunHealth: %w", err)
 	}
 	defer rows.Close()
-	var agents []domain.AgentHealth
+	agents := []domain.AgentHealth{}
 	for rows.Next() {
 		var a domain.AgentHealth
 		if err := rows.Scan(&a.PlatformExperimentID, &a.AgentID, &a.Role, &a.FirstJobSeconds, &a.FirstCompletedSeconds, &a.JobsInFlight, &a.Restarts, &a.CoordinatorMessages); err != nil {

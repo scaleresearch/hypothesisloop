@@ -218,6 +218,8 @@ func tripwire(next http.Handler) http.Handler {
 // three documents, the raw /watch and /metrics handlers, and services with nothing behind them.
 type worldAPI struct {
 	router chi.Router
+	// serve is router with every successful answer checked against the document.
+	serve  http.Handler
 	docs   map[string]*httpapi.Doc
 	tokens map[string]string
 }
@@ -288,6 +290,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 	api.tokens["runtime"] = mint(auth.RuntimeScope("cluster-a"))
 	api.tokens["build"] = mint(auth.BuildScope("cluster-a", worldBuildKey, 1))
 	api.tokens["staff"] = mint(auth.StaffScope)
+	api.serve = answering(t, doc.API, api.router)
 	return api
 }
 

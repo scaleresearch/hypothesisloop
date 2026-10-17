@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
@@ -50,7 +49,7 @@ func (s *filterSpyStore) GetPlatformExperiment(_ context.Context, id string) (*d
 
 func (s *filterSpyStore) ListExperiments(_ context.Context, f domain.ExperimentFilter) ([]*domain.Experiment, error) {
 	s.gotList = f
-	return s.items, nil
+	return append([]*domain.Experiment{}, s.items...), nil
 }
 
 func (s *filterSpyStore) GetExperiment(_ context.Context, id string) (*domain.Experiment, error) {
@@ -72,10 +71,17 @@ func (s *filterSpyStore) CountExperiments(_ context.Context, f domain.Experiment
 func (s *filterSpyStore) ExperimentStats(_ context.Context, f domain.ExperimentFilter, groupBy string) (*domain.ExperimentStats, error) {
 	s.gotStats = f
 	s.gotGroupBy = groupBy
-	return &domain.ExperimentStats{Total: s.total, ByStatus: map[string]int{"RUNNING": s.total}}, nil
+	return &domain.ExperimentStats{Total: s.total, ByStatus: map[string]int{"RUNNING": s.total}, ByCapacityTier: map[string]int{"guaranteed": s.total},
+		RunningByCapacityTier: map[string]int{"guaranteed": s.total}, EvictedByCapacityTier: map[string]int{}, EvictionsByReason: map[string]int{}, EvictionsByClass: map[string]int{}}, nil
 }
 
-func schedulerRouter(t *testing.T, store scheduler.Store) chi.Router {
+// job is a job as the store holds one: queued on guaranteed capacity, submitted by its agent.
+func job(id, platformExperimentID, hypothesisID string) *domain.Experiment {
+	return &domain.Experiment{ID: id, PlatformExperimentID: platformExperimentID, HypothesisID: hypothesisID, AgentID: "agent-1",
+		Actor: domain.Actor{Kind: domain.ActorAgent, ID: "agent-1"}, Status: domain.StatusQueued, CapacityTier: domain.CapacityGuaranteed}
+}
+
+func schedulerRouter(t *testing.T, store scheduler.Store) http.Handler {
 	t.Helper()
 	// Phase detail and where a job ran are merged into every list/read from the metrics store,
 	// so these contract tests need one that answers: no rows to SQL, no series to PromQL.
@@ -96,7 +102,7 @@ func schedulerRouter(t *testing.T, store scheduler.Store) chi.Router {
 		Launch:     platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: "contract-test-signing-secret", MaxHosted: 20},
 		Scheduler:  scheduler.NewService(store, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, metricsdb.New(metrics.URL), zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{}),
 	})
-	return r
+	return answering(t, d.API, r)
 }
 
 func TestListExperimentsForwardsEveryFilter(t *testing.T) {
@@ -132,7 +138,7 @@ func TestListExperimentsForwardsEveryFilter(t *testing.T) {
 func TestListExperimentsReportsTotalCountHeader(t *testing.T) {
 	spy := &filterSpyStore{
 		total: 45,
-		items: []*domain.Experiment{{ID: "job-1"}, {ID: "job-2"}},
+		items: []*domain.Experiment{job("job-1", "pe-1", "hyp-1"), job("job-2", "pe-1", "hyp-1")},
 	}
 	r := schedulerRouter(t, spy)
 
@@ -307,8 +313,8 @@ func TestExperimentStatsForwardsKnownGroupByAndRejectsOthers(t *testing.T) {
 // for that hypothesis: 404. The list says such a job is on the objective and names no hypothesis.
 func TestListExperimentsAnswersABaselineJobAsOnTheObjective(t *testing.T) {
 	spy := &filterSpyStore{total: 2, items: []*domain.Experiment{
-		{ID: "job-base", PlatformExperimentID: "pe-1", HypothesisID: "pe-1"},
-		{ID: "job-own", PlatformExperimentID: "pe-1", HypothesisID: "hyp-1"},
+		job("job-base", "pe-1", "pe-1"),
+		job("job-own", "pe-1", "hyp-1"),
 	}}
 	code, body := get(t, schedulerRouter(t, spy), "/experiments?platform_experiment_id=pe-1")
 	var jobs []map[string]any
@@ -325,7 +331,7 @@ func TestListExperimentsAnswersABaselineJobAsOnTheObjective(t *testing.T) {
 
 // One job is answered as an object, which gets a $schema field the list's items do not.
 func TestGetExperimentAnswersABaselineJobAsOnTheObjective(t *testing.T) {
-	spy := &filterSpyStore{items: []*domain.Experiment{{ID: "job-base", PlatformExperimentID: "pe-1", HypothesisID: "pe-1"}}}
+	spy := &filterSpyStore{items: []*domain.Experiment{job("job-base", "pe-1", "pe-1")}}
 	code, body := get(t, schedulerRouter(t, spy), "/experiments/job-base")
 	var job map[string]any
 	if err := json.Unmarshal([]byte(body), &job); code != 200 || err != nil {

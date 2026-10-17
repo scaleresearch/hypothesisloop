@@ -1,12 +1,17 @@
 package apitest
 
 import (
+	"context"
+	"encoding/json"
 	"io"
+	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
@@ -21,7 +26,48 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
-func get(t *testing.T, r chi.Router, path string) (int, string) {
+// answering serves r and checks each successful answer of an operation of api against the schema
+// its document gives that answer, as a client generated from the document reads it.
+func answering(t *testing.T, api huma.API, r http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		route := chi.NewRouteContext()
+		recorder := httptest.NewRecorder()
+		r.ServeHTTP(recorder, req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, route)))
+		for k, v := range recorder.Header() {
+			w.Header()[k] = v
+		}
+		w.WriteHeader(recorder.Code)
+		_, _ = w.Write(recorder.Body.Bytes())
+
+		item := api.OpenAPI().Paths[route.RoutePattern()]
+		if item == nil || recorder.Code >= 300 || recorder.Body.Len() == 0 {
+			return
+		}
+		op := map[string]*huma.Operation{"GET": item.Get, "POST": item.Post, "PUT": item.Put, "PATCH": item.Patch, "DELETE": item.Delete}[req.Method]
+		response := op.Responses[strconv.Itoa(recorder.Code)]
+		if response == nil {
+			t.Errorf("%s %s answered %d, which its document does not describe", req.Method, req.URL, recorder.Code)
+			return
+		}
+		var body any
+		if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+			t.Errorf("%s %s answered no JSON: %v", req.Method, req.URL, err)
+			return
+		}
+		result := &huma.ValidateResult{}
+		content := response.Content["application/json"]
+		if content == nil {
+			t.Errorf("%s %s answered %d with a body its document does not describe", req.Method, req.URL, recorder.Code)
+			return
+		}
+		huma.Validate(api.OpenAPI().Components.Schemas, content.Schema, huma.NewPathBuffer(nil, 0), huma.ModeReadFromServer, body, result)
+		for _, err := range result.Errors {
+			t.Errorf("%s %s answered what its document does not allow: %v", req.Method, req.URL, err)
+		}
+	})
+}
+
+func get(t *testing.T, r http.Handler, path string) (int, string) {
 	t.Helper()
 	rec := httptest.NewRecorder()
 	req := authtest.Authorize(httptest.NewRequest("GET", path, nil))
@@ -54,7 +100,7 @@ func TestSmoke(t *testing.T) {
 
 	for _, tc := range []struct {
 		name string
-		r    chi.Router
+		r    http.Handler
 		want []string
 	}{
 		{"api", r, []string{

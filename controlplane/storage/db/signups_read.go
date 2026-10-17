@@ -259,7 +259,7 @@ ORDER BY signed_up_at ASC`
 	}
 	defer rows.Close()
 
-	var agents []string
+	agents := []string{}
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
@@ -300,7 +300,7 @@ ORDER BY signed_up_at ASC`
 	}
 	defer rows.Close()
 
-	var agents []string
+	agents := []string{}
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {

@@ -97,7 +97,7 @@ func (s *Store) ListAgentQuotas(ctx context.Context, platformExpID string) ([]*d
 	}
 	defer rows.Close()
 
-	var out []*domain.AgentQuota
+	out := []*domain.AgentQuota{}
 	for rows.Next() {
 		aq, err := scanAgentQuota(rows)
 		if err != nil {

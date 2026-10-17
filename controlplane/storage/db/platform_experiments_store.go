@@ -283,10 +283,10 @@ WHERE pe.id = $1`
 			return nil, err
 		}
 	}
-	if err := json.Unmarshal(metricsRaw, &pe.Metrics); err != nil {
+	if err := unmarshalList(metricsRaw, &pe.Metrics); err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.Get: unmarshal metrics: %w", err)
 	}
-	if err := json.Unmarshal(stagesRaw, &pe.Stages); err != nil {
+	if err := unmarshalList(stagesRaw, &pe.Stages); err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.Get: unmarshal stages: %w", err)
 	}
 	pe.Status = domain.PlatformExperimentStatus(status)
@@ -478,7 +478,7 @@ func (s *Store) queryPlatformExperiments(ctx context.Context, q string, args ...
 	}
 	defer rows.Close()
 
-	var out []*domain.PlatformExperiment
+	out := []*domain.PlatformExperiment{}
 	for rows.Next() {
 		pe := &domain.PlatformExperiment{}
 		var status string
@@ -498,10 +498,10 @@ func (s *Store) queryPlatformExperiments(ctx context.Context, q string, args ...
 		); err != nil {
 			return nil, fmt.Errorf("platform_experiments_store.List: scan: %w", err)
 		}
-		if err := json.Unmarshal(metricsRaw, &pe.Metrics); err != nil {
+		if err := unmarshalList(metricsRaw, &pe.Metrics); err != nil {
 			return nil, fmt.Errorf("platform_experiments_store.List: unmarshal metrics: %w", err)
 		}
-		if err := json.Unmarshal(stagesRaw, &pe.Stages); err != nil {
+		if err := unmarshalList(stagesRaw, &pe.Stages); err != nil {
 			return nil, fmt.Errorf("platform_experiments_store.List: unmarshal stages: %w", err)
 		}
 		pe.Status = domain.PlatformExperimentStatus(status)
@@ -686,4 +686,13 @@ SELECT project_id, repository, closed_at IS NOT NULL, status = $2 FROM platform_
 		return "", "", false, false, fmt.Errorf("platform_experiments_store.PlatformExperimentRepository: %w", err)
 	}
 	return projectID, repository, closed, draft, nil
+}
+
+// unmarshalList decodes a stored JSON array into list, an empty one where a nil list was stored as null.
+func unmarshalList[T any](raw []byte, list *[]T) error {
+	if err := json.Unmarshal(raw, list); err != nil || *list != nil {
+		return err
+	}
+	*list = []T{}
+	return nil
 }

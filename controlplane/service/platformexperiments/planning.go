@@ -119,6 +119,7 @@ func (s *Service) createDraft(ctx context.Context, projectID, goal, continues st
 		Continues:             continues,
 		Actor:                 &by,
 		MaxAgents:             MaxProposedResearchers(launch.MaxHosted),
+		Researchers:           domain.ResearcherPool{},
 		Metrics:               []domain.MetricDefinition{},
 		ReportIntervalSeconds: settings.ReportIntervalSeconds,
 		PlanningEndsAt:        now.Add(planning.Limit),

@@ -127,7 +127,7 @@ LIMIT $%d OFFSET $%d`, where, len(args)-1, len(args))
 	}
 	defer rows.Close()
 
-	var agents []*domain.Agent
+	agents := []*domain.Agent{}
 	for rows.Next() {
 		agent := &domain.Agent{}
 		if err := rows.Scan(

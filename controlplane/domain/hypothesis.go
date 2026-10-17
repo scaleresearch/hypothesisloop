@@ -31,7 +31,7 @@ type Hypothesis struct {
 	// StatusActor is whose credential last moved Status, nil while it still holds its initial
 	// value. The verdict is the owning agent's, or anyone's on a hypothesis no agent owns, and
 	// this says who gave it: the agent itself, or the person or API key acting for it.
-	StatusActor *Actor `json:"status_actor"`
+	StatusActor *Actor `json:"status_actor,omitempty"`
 }
 
 // BranchPrefix is what the name of every git branch of a platform experiment starts with. An

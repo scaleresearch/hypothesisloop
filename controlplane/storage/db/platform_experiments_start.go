@@ -297,7 +297,7 @@ func (s *Store) ListCutAgents(ctx context.Context, platformExpID string) ([]doma
 		return nil, fmt.Errorf("platform_experiments_store.ListCutAgents: %w", err)
 	}
 	defer rows.Close()
-	var out []domain.AgentCut
+	out := []domain.AgentCut{}
 	for rows.Next() {
 		var c domain.AgentCut
 		if err := rows.Scan(&c.AgentID, &c.StageIndex); err != nil {
@@ -316,7 +316,7 @@ func (s *Store) ListStageAdvances(ctx context.Context, platformExpID string) ([]
 		return nil, fmt.Errorf("platform_experiments_store.ListStageAdvances: %w", err)
 	}
 	defer rows.Close()
-	var out []domain.StageAdvance
+	out := []domain.StageAdvance{}
 	for rows.Next() {
 		var a domain.StageAdvance
 		if err := rows.Scan(&a.StageIndex, &a.AdvancedAt); err != nil {
