@@ -40,11 +40,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/envbuild"
 )
 
-const (
-	binaryName        = "cluster-agent"
-	reconcileInterval = 2 * time.Second
-	statusInterval    = 3 * time.Second
-)
+const binaryName = "cluster-agent"
 
 // version is the image tag this binary was built from, set at link time (-X main.version=TAG).
 // Built without it, the agent names no version.
@@ -89,17 +85,9 @@ func main() {
 	ctx, cancel := agentloop.SignalContext(log)
 	defer cancel()
 
-	remote := &agentloop.Remote{ClusterName: clusterName, APIURL: apiURL, Token: token, Version: version, HTTP: &http.Client{Timeout: 35 * time.Second}}
-	a := &agentloop.Agent{
-		ClusterName:       clusterName,
-		ControlPlane:      remote,
-		Builds:            remote,
-		Executor:          jwc,
-		ReconcileInterval: reconcileInterval,
-		StatusInterval:    statusInterval,
-		AutoscalerEnabled: autoscalerEnabled,
-		Log:               log,
-	}
+	remote := agentloop.NewRemote(clusterName, apiURL, token, version)
+	a := agentloop.Installed(remote, jwc, log)
+	a.AutoscalerEnabled = autoscalerEnabled
 	if detach {
 		if err := a.Detach(ctx); err != nil {
 			fmt.Fprintln(os.Stderr, "cluster-agent: detach was interrupted before every job object was gone")

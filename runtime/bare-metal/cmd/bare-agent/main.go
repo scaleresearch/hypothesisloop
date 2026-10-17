@@ -39,11 +39,7 @@ import (
 // Built without it, the agent names no version.
 var version string
 
-const (
-	binaryName        = "bare-agent"
-	reconcileInterval = 2 * time.Second
-	statusInterval    = 3 * time.Second
-)
+const binaryName = "bare-agent"
 
 func main() {
 	if len(os.Args) > 1 {
@@ -87,16 +83,7 @@ func main() {
 		say("%s", fact)
 	}
 
-	remote := &agentloop.Remote{ClusterName: clusterName, APIURL: apiURL, Token: token, Version: version, HTTP: &http.Client{Timeout: 35 * time.Second}}
-	a := &agentloop.Agent{
-		ClusterName:       clusterName,
-		ControlPlane:      remote,
-		Builds:            remote,
-		Executor:          exec,
-		ReconcileInterval: reconcileInterval,
-		StatusInterval:    statusInterval,
-		Log:               say,
-	}
+	a := agentloop.Installed(agentloop.NewRemote(clusterName, apiURL, token, version), exec, say)
 	err = a.Run(ctx)
 	exec.Wait()
 	if errors.Is(err, agentloop.ErrClusterRemoved) {

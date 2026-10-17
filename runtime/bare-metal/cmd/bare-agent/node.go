@@ -49,19 +49,11 @@ func asRoot() error {
 }
 
 func remoteFor(settings hostinstall.Settings) *agentloop.Remote {
-	return &agentloop.Remote{ClusterName: settings.ClusterName, APIURL: settings.APIURL, Token: settings.Token, Version: version, HTTP: &http.Client{Timeout: 35 * time.Second}}
+	return agentloop.NewRemote(settings.ClusterName, settings.APIURL, settings.Token, version)
 }
 
 func agentFor(settings hostinstall.Settings) *agentloop.Agent {
-	remote := remoteFor(settings)
-	return &agentloop.Agent{
-		ClusterName:       settings.ClusterName,
-		ControlPlane:      remote,
-		Builds:            remote,
-		ReconcileInterval: reconcileInterval,
-		StatusInterval:    statusInterval,
-		Log:               say,
-	}
+	return agentloop.Installed(remoteFor(settings), nil, say)
 }
 
 func install(args []string) error {
