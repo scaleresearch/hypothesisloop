@@ -1,12 +1,6 @@
-import type { Experiment, ExperimentStats } from '@/types/api'
+import type { Experiment, ExperimentStats, ExperimentStatus } from '@/types/api'
 
-const TERMINAL: string[] = [
-  'COMPLETED',
-  'FAILED',
-  'EVICTED',
-  'REJECTED',
-  'CANCELLED',
-]
+const TERMINAL: ReadonlySet<string> = new Set<ExperimentStatus>(['COMPLETED', 'FAILED', 'EVICTED', 'REJECTED', 'CANCELLED'])
 
 // Job activity is separate from the verdict: a hypothesis whose jobs all ended is still open until
 // its owner rules on it. jobsByHypothesis is the stats endpoint's group_by=hypothesis, which has a
@@ -18,7 +12,7 @@ export function hypothesisActivity(
   platformExperimentID: string,
 ): string {
   const groups = Object.entries(jobsByHypothesis).filter(([id]) => id !== platformExperimentID).map(([, stats]) => stats)
-  const inFlight = groups.filter(g => Object.keys(g.by_status).some(s => !TERMINAL.includes(s))).length
+  const inFlight = groups.filter(g => Object.keys(g.by_status).some(s => !TERMINAL.has(s))).length
   const untested = hypothesisCount - groups.length
   return [
     inFlight > 0 && `${inFlight} with jobs in flight`,

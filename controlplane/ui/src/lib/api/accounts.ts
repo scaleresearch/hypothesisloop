@@ -1,6 +1,6 @@
 import { apiCall, apiFetch, apiFetchPage, apiSend, MAX_LIST_PAGE_SIZE } from '@/lib/api/request'
 import type { Page } from '@/lib/api/request'
-import type { APIKey, CreatedAPIKey, CreatedInvite, ListedAPIKey, ListedMember, Me, Org, OrgInvite, OrgMember, OrgRole, Project } from '@/types/api'
+import type { APIKey, CreatedAPIKey, CreatedInvite, ListedAPIKey, ListedMember, Me, Org, OrgAPIKeys, OrgInvite, OrgMember, OrgRole, Project } from '@/types/api'
 
 export function fetchMe(): Promise<Me> {
   return apiFetch<Me>(`/me`)
@@ -61,7 +61,7 @@ export function acceptOrgInvite(token: string): Promise<OrgMember> {
 
 // Newest first, revoked ones included. No token is listed.
 export function fetchAPIKeys(orgID: string): Promise<ListedAPIKey[]> {
-  return apiFetch<{ api_keys: ListedAPIKey[] }>(`/orgs/${orgID}/api-keys`).then(r => r.api_keys)
+  return apiFetch<OrgAPIKeys>(`/orgs/${orgID}/api-keys`).then(r => r.api_keys)
 }
 
 // The answer is the only place the key's token ever appears. Without a project the key reaches

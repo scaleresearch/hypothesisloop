@@ -38,25 +38,26 @@ import { variedEnvByHypothesis, variedEnvSettings } from '@/lib/hypothesis-progr
 import { BASELINE_JOB, JobHypothesis, measuresBaseline } from '@/components/job-hypothesis'
 import { keys } from '@/lib/keys'
 import { POLL } from '@/lib/poll'
-import type { Experiment } from '@/types/api'
+import type { Experiment, ExperimentStatus } from '@/types/api'
 
 // The statuses of a job that has not ended, which burst compute may still preempt.
-const LIVE = new Set(['SUBMITTED', 'QUEUED', 'RUNNING'])
+const LIVE = new Set<ExperimentStatus>(['SUBMITTED', 'QUEUED', 'RUNNING'])
 const PAGE_SIZE = 25
 
 type SortKey = 'created_at' | 'status'
 
 // Every status a job can hold, in the order a job moves through them.
-const STATUSES = [
-  { status: 'QUEUED', label: 'Queued' },
-  { status: 'SUBMITTED', label: 'Submitted' },
-  { status: 'RUNNING', label: 'Running' },
-  { status: 'COMPLETED', label: 'Completed' },
-  { status: 'FAILED', label: 'Failed' },
-  { status: 'EVICTED', label: 'Evicted' },
-  { status: 'REJECTED', label: 'Rejected' },
-  { status: 'CANCELLED', label: 'Cancelled' },
-]
+const STATUS_LABELS: Record<ExperimentStatus, string> = {
+  QUEUED: 'Queued',
+  SUBMITTED: 'Submitted',
+  RUNNING: 'Running',
+  COMPLETED: 'Completed',
+  FAILED: 'Failed',
+  EVICTED: 'Evicted',
+  REJECTED: 'Rejected',
+  CANCELLED: 'Cancelled',
+}
+const STATUSES = Object.entries(STATUS_LABELS).map(([status, label]) => ({ status: status as ExperimentStatus, label }))
 
 /** The jobs of the project, or of one experiment in it when `experimentID` names one. */
 export function JobsList({ experimentID }: { experimentID?: string }) {
@@ -280,7 +281,7 @@ function JobRow({ job, showExperiment, varied, connected, onCancel }: JobRowProp
   const about = [
     status === 'QUEUED' && job.not_admitted_reason && notAdmittedLabel(job.not_admitted_reason, job.not_admitted_message),
     job.eviction_reason && [evictionCodeLabel(evictionCode(job.eviction_reason)), evictionDetailLines(job.eviction_reason)[0]].filter(Boolean).join(': '),
-    job.capacity_tier === 'burst' && LIVE.has(status) && 'Burst compute, can be preempted',
+    job.capacity_tier === 'burst' && LIVE.has(job.status) && 'Burst compute, can be preempted',
     job.cluster_name && `On ${job.cluster_name}${connected === undefined ? '' : connected ? ', connected' : ', disconnected'}`,
   ].filter(Boolean).join('\n')
   const tested = [measuresBaseline(job) ? BASELINE_JOB : job.hypothesis, job.branch && `branch ${job.branch}`, varied].filter(Boolean).join('\n')

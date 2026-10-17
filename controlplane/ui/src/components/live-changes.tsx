@@ -3,7 +3,7 @@
 import { useEffect } from 'react'
 import { useSWRConfig } from 'swr'
 import { fetchChanges, watchURL, WATCH_SUBPROTOCOL, type After } from '@/lib/api/changes'
-import type { Change } from '@/types/api'
+import type { Change, WatchFrame } from '@/types/api'
 import { ApiError } from '@/lib/api/request'
 import { accessToken, endSession } from '@/lib/auth'
 import { LIVE_KINDS, readsOf, type Reads } from '@/lib/live'
@@ -15,8 +15,6 @@ const FIRST_RETRY_MS = 1_000
 const LAST_RETRY_MS = 30_000
 
 const everything: Reads = () => true
-
-type Frame = { subscription: unknown } | Change | { next: number; caught_up: boolean }
 
 /**
  * Follows the project's changes on one socket and reads again what each names. The cursor moves
@@ -81,7 +79,7 @@ function follow(projectID: string, revalidate: (reads: Reads) => void): () => vo
       heard = true
       clearTimeout(silence)
       silence = setTimeout(() => ws.close(), SILENCE_MS)
-      const frame = JSON.parse(event.data) as Frame
+      const frame = JSON.parse(event.data) as WatchFrame
       if ('subscription' in frame) {
         retry = FIRST_RETRY_MS
         // What the page read before the stream's head is pinned may have changed since.

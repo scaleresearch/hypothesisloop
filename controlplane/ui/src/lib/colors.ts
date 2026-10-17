@@ -74,7 +74,6 @@ export function statusColor(status?: string | null): string {
 /** The ordered series palette for charts. Assign in order; the order keeps neighbours apart for colour-blind readers. */
 export const seriesPalette = [1, 2, 3, 4, 5, 6, 7, 8].map(n => token(`chart-${n}`))
 
-export const hypothesisStatuses = ['open', 'confirmed', 'refuted', 'inconclusive'] as const
 
 /**
  * Hypothesis graph edges. builds_on is the hierarchy; a cross link carries its label on the edge

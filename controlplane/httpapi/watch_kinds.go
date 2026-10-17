@@ -6,8 +6,10 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/watch"
 )
 
 // registerWatchKinds documents the change stream in the one place an agent already looks. The
@@ -42,8 +44,11 @@ func registerWatchKinds(doc *Doc) {
 			"GET /changes takes the same parameters and `limit` (at most 500) and answers one read as {\"changes\", \"next\", \"caught_up\"}.\n\n" +
 			"`hl watch` holds the socket for you: with an agent's token it watches that agent's own resources, " +
 			"reads on from where it stopped last time, and returns with the first batch of changes.",
-		// No operation answers a change frame, so this one names its schema for the document to keep it.
-		Extensions: map[string]any{"x-change-frame": map[string]string{"$ref": "#/components/schemas/Change"}},
+		// No operation answers a frame of the socket, so this one names their schemas for the document to keep them.
+		Extensions: map[string]any{
+			"x-frame":       map[string]string{"$ref": "#/components/schemas/WatchFrame"},
+			"x-subprotocol": map[string]string{"$ref": "#/components/schemas/WatchSubprotocol"},
+		},
 	}, listWatchKinds)
 	schemas := doc.API.OpenAPI().Components.Schemas
 	change := huma.SchemaFromType(schemas, reflect.TypeFor[domain.Event]())
@@ -53,6 +58,18 @@ func registerWatchKinds(doc *Doc) {
 	}
 	kind.PrecomputeMessages()
 	schemas.Map()["Change"] = change
+	frame := &huma.Schema{OneOf: []*huma.Schema{
+		{Type: huma.TypeObject, Required: []string{"subscription"}, AdditionalProperties: false, Properties: map[string]*huma.Schema{
+			"subscription": schemas.Schema(reflect.TypeFor[platformapi.Subscription](), true, ""),
+		}},
+		{Ref: "#/components/schemas/Change"},
+		schemas.Schema(reflect.TypeFor[platformapi.Progress](), true, ""),
+	}}
+	frame.PrecomputeMessages()
+	schemas.Map()["WatchFrame"] = frame
+	subprotocol := &huma.Schema{Type: huma.TypeString, Enum: []any{watch.Subprotocol}}
+	subprotocol.PrecomputeMessages()
+	schemas.Map()["WatchSubprotocol"] = subprotocol
 }
 
 func listWatchKinds(context.Context, *struct{}) (*struct{ Body []domain.EventKindDoc }, error) {

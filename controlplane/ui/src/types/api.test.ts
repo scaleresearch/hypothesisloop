@@ -11,5 +11,5 @@ test.each([
     rootTypes: true, rootTypesNoSchemaPrefix: true, rootTypesKeepCasing: true, enumValues: true, silent: true,
   }))
   const committed = readFileSync(new URL(`./${types}`, import.meta.url), 'utf8')
-  expect(generated === committed, `src/types/${types} differs from ${document}: run make ui-types`).toBe(true)
+  expect(generated === committed, `src/types/${types} differs from ${document}: run npm run types`).toBe(true)
 })

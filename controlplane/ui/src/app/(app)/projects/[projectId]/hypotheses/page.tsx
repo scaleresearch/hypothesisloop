@@ -25,7 +25,7 @@ import { ErrorMessage, Loading } from '@/components/ui/status-message'
 import { keys } from '@/lib/keys'
 import { POLL } from '@/lib/poll'
 import { hypothesisStatusValues } from '@/types/api'
-import type { HypothesisStats, PlatformExperiment } from '@/types/api'
+import type { HypothesisStats, MetricDefinition, PlatformExperiment } from '@/types/api'
 
 // The experiments a project holds are few; past this many the newest are listed and the rest named.
 const EXPERIMENTS_LISTED = 50
@@ -43,7 +43,7 @@ function mostRecentlyActive(experiments: PlatformExperiment[]): PlatformExperime
 
 interface Standing {
   metric: string
-  direction: 'maximize' | 'minimize'
+  direction: MetricDefinition['direction']
   best?: number
   baseline?: number
 }

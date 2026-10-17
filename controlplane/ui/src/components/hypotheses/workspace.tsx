@@ -32,12 +32,12 @@ import { withQuery } from '@/lib/routes'
 import { HUMAN_OWNER, extendLayout, graphHref, layoutGraph, matchesFilters, shareUnchanged } from '@/lib/hypothesis-graph'
 import type { GraphFilters, Position } from '@/lib/hypothesis-graph'
 import { keys } from '@/lib/keys'
-import type { HypothesisGraph, PlatformExperiment } from '@/types/api'
+import { hypothesisStatusValues, type HypothesisGraph, type PlatformExperiment } from '@/types/api'
 
 /** The view a hypotheses page opens in, which the URL leaves out. */
 export const HYPOTHESES_VIEW = 'outline'
 
-const STATUS_OPTIONS = ['open', 'confirmed', 'refuted', 'inconclusive'].map(s => ({ value: s, label: s }))
+const STATUS_OPTIONS = hypothesisStatusValues.map(s => ({ value: s, label: s }))
 
 /** Narrows the graph to one agent's hypotheses, or to the ones people added. */
 function OwnerFilter({ graph, value, onChange }: { graph: HypothesisGraph | undefined; value: string; onChange: (owner: string) => void }) {

@@ -8,14 +8,14 @@ import { Loading } from '@/components/ui/status-message'
 import { Pill } from '@/components/ui/text'
 import { chart, semantic } from '@/lib/colors'
 import { ChartBox, ExpandableChart } from './chart-frame'
-import type { AgentMetricSeries, StagesStatus } from '@/types/api'
+import type { AgentMetricSeries, MetricDefinition, StagesStatus } from '@/types/api'
 
 export function CompetingAgentsChart({
   series: allSeries, metricName, direction, selectedAgents, colorFor, boundaries,
 }: {
   series: AgentMetricSeries[] | undefined
   metricName: string
-  direction: 'maximize' | 'minimize'
+  direction: MetricDefinition['direction']
   selectedAgents: Set<string>
   colorFor: (agentId: string) => string
   /** Every stage boundary already crossed, as {stage_index, advanced_at}. */

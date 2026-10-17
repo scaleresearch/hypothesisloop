@@ -1,10 +1,11 @@
 import { apiFetch, apiURL, withQuery } from '@/lib/api/request'
+import { watchSubprotocolValues } from '@/types/api'
 
 /** Where a read of the changes starts: after the id of the last change read, or at the newest. */
 export type After = number | 'head'
 
 /** The subprotocol GET /watch speaks. The token is offered beside it, since a browser sets no header on a socket. */
-export const WATCH_SUBPROTOCOL = 'hypothesisloop.watch'
+export const WATCH_SUBPROTOCOL = watchSubprotocolValues[0]
 
 function changesQuery(projectID: string, kinds: readonly string[], after: After) {
   return { project_id: projectID, kinds: kinds.join(','), after }

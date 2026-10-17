@@ -7,13 +7,13 @@ import { Text } from '@/components/ui/text'
 import { shortId } from '@/lib/format'
 import { filedAfterVerdict } from '@/lib/hypothesis-progress'
 import { hypothesisPath, jobPath } from '@/lib/routes'
-import type { HypothesisEvidence } from '@/types/api'
+import type { HypothesisEvidence, MetricDefinition } from '@/types/api'
 
 /** The hypotheses with a verdict or a result, best result first. */
 export function Findings({ experimentId, findings, direction }: {
   experimentId: string
   findings: HypothesisEvidence[]
-  direction: 'maximize' | 'minimize' | undefined
+  direction: MetricDefinition['direction'] | undefined
 }) {
   // A hypothesis whose jobs reported no metric comes last.
   const bestFirst = direction === 'minimize' ? 1 : -1

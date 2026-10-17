@@ -8,14 +8,14 @@ import { Button } from '@/components/ui/button'
 import { Dot } from '@/components/ui/dot'
 import { ExpandButton, useExpanded } from '@/components/ui/expandable'
 import { Inline } from '@/components/ui/stack'
-import { chart, hypothesisLinkStyles, hypothesisStatuses, semantic, statusColor, tint } from '@/lib/colors'
+import { chart, hypothesisLinkStyles, semantic, statusColor, tint } from '@/lib/colors'
 import { LINK_KIND_LABELS, NODE_HEIGHT, NODE_WIDTH, ROW, matchesFilters } from '@/lib/hypothesis-graph'
 import type { GraphFilters, Position } from '@/lib/hypothesis-graph'
 import { opacity as scale } from '@/lib/scale'
 import { useEditor } from '@/components/hypotheses/editor'
 import { Highlight, NODE_HANDLES, dataOf, isFar, nodeTypes } from '@/components/hypotheses/graph-nodes'
 import type { HypothesisNodeData } from '@/components/hypotheses/graph-nodes'
-import type { HypothesisGraph, LinkType } from '@/types/api'
+import { hypothesisStatusValues, type HypothesisGraph, type LinkType } from '@/types/api'
 
 // Kinds read apart by line as well as colour: a related link is thin, the others thick. No line is
 // dashed: a dash pattern on a long path is rasterized dash by dash, which at hundreds of links
@@ -39,7 +39,7 @@ function Legend({ onTidy }: { onTidy?: () => void }) {
           </span>
         )
       })}
-      {hypothesisStatuses.map(status => (
+      {hypothesisStatusValues.map(status => (
         <span key={status} className="inline-flex items-center gap-1.5">
           <Dot color={statusColor(status)} />
           {status}

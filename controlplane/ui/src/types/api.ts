@@ -3991,6 +3991,11 @@ export interface components {
             name: string;
             status: components["schemas"]["PlatformExperimentStatus"];
         };
+        Progress: {
+            caught_up: boolean;
+            /** Format: int64 */
+            next: number;
+        };
         Project: {
             /** Format: date-time */
             created_at: string;
@@ -4587,6 +4592,16 @@ export interface components {
             /** @description Makes the submit safe to repeat: a later submit of the same agent in the same platform experiment with this key creates nothing and is answered with the job this one created, as it is then. hl derives it from the request. */
             submission_key?: string;
         };
+        Subscription: {
+            /** Format: int64 */
+            after: number;
+            agent_id: string;
+            decisions?: boolean;
+            experiment_id: string;
+            kinds: string[];
+            platform_experiment_id: string;
+            project_id?: string;
+        };
         SummaryReply: {
             hypothesis_id?: string;
             status: string;
@@ -4633,6 +4648,11 @@ export interface components {
         };
         /** @enum {string} */
         Waiter: "owner" | "coordinator" | "platform";
+        WatchFrame: {
+            subscription: components["schemas"]["Subscription"];
+        } | components["schemas"]["Change"] | components["schemas"]["Progress"];
+        /** @enum {string} */
+        WatchSubprotocol: "hypothesisloop.watch";
         WithdrawnCluster: {
             cluster_id?: string;
             /** Format: date-time */
@@ -4825,6 +4845,7 @@ export type PlatformExperimentResults = components['schemas']['PlatformExperimen
 export type PlatformExperimentStatus = components['schemas']['PlatformExperimentStatus'];
 export type PoolEntryAtWork = components['schemas']['PoolEntryAtWork'];
 export type PriorRun = components['schemas']['PriorRun'];
+export type Progress = components['schemas']['Progress'];
 export type Project = components['schemas']['Project'];
 export type ProjectList = components['schemas']['ProjectList'];
 export type Propagation = components['schemas']['Propagation'];
@@ -4874,12 +4895,15 @@ export type StatusReason = components['schemas']['StatusReason'];
 export type StoredSession = components['schemas']['StoredSession'];
 export type SubmitMeta = components['schemas']['SubmitMeta'];
 export type SubmitRequest = components['schemas']['SubmitRequest'];
+export type Subscription = components['schemas']['Subscription'];
 export type SummaryReply = components['schemas']['SummaryReply'];
 export type TopologySpec = components['schemas']['TopologySpec'];
 export type TypeKind = components['schemas']['TypeKind'];
 export type UpdateClusterRequest = components['schemas']['UpdateClusterRequest'];
 export type VerdictRequest = components['schemas']['VerdictRequest'];
 export type Waiter = components['schemas']['Waiter'];
+export type WatchFrame = components['schemas']['WatchFrame'];
+export type WatchSubprotocol = components['schemas']['WatchSubprotocol'];
 export type WithdrawnCluster = components['schemas']['WithdrawnCluster'];
 export type $defs = Record<string, never>;
 export interface operations {
@@ -8970,3 +8994,4 @@ export const similarHypothesisReasonValues: ReadonlyArray<FlattenedDeepRequired<
 export const situationMetricDirectionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SituationMetric"]["direction"]> = ["maximize", "minimize"];
 export const typeKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["TypeKind"]> = ["accelerator", "cpu"];
 export const waiterValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Waiter"]> = ["owner", "coordinator", "platform"];
+export const watchSubprotocolValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["WatchSubprotocol"]> = ["hypothesisloop.watch"];
