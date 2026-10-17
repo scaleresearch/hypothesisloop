@@ -17,6 +17,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadenv"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
 
@@ -674,7 +675,7 @@ func (c *JobWorkloadClient) GetLiveAcceleratorCapacitySnapshot(ctx context.Conte
 // podDeleteGrace is how long this pod may take between SIGTERM and SIGKILL for this termination:
 // its own TerminationGracePeriodSeconds, which compileJob widened to hold the checkpoint window
 // the job declared, when the control plane granted this termination that window — and the
-// ordinary shutdown grace recorded alongside it otherwise.
+// ordinary shutdown grace recorded alongside it, with workloadenv.LaunchKillMargin, otherwise.
 //
 // A pod with no readable shutdown grace is an error rather than a guess. The two numbers are
 // only ever different for a job that declared a checkpoint window, and guessing there would mean
@@ -690,7 +691,7 @@ func podDeleteGrace(pod *corev1.Pod, grantCheckpointWindow bool) (int64, error) 
 	if err != nil {
 		return 0, fmt.Errorf("workload: pod %s has no readable shutdown grace: %w", pod.Name, err)
 	}
-	return ordinary, nil
+	return ordinary + workloadenv.LaunchKillMargin, nil
 }
 
 // signalPods deletes every pod of the experiment with an explicit grace period, which is what

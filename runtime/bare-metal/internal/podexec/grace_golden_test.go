@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadenv"
 )
 
 // Both runtimes read runtime/shared/testdata/grace_answer.json (k8sexec has the twin test): one
@@ -36,7 +37,7 @@ func TestGraceFromTheSharedReconcileAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ordinary != golden.OrdinaryStopGraceSeconds || checkpoint != golden.CheckpointStopGraceSeconds {
-		t.Fatalf("stop grace = (%d, %d), want (%d, %d)", ordinary, checkpoint, golden.OrdinaryStopGraceSeconds, golden.CheckpointStopGraceSeconds)
+	if ordinary != golden.OrdinaryStopGraceSeconds+workloadenv.LaunchKillMargin || checkpoint != golden.CheckpointStopGraceSeconds+workloadenv.LaunchKillMargin {
+		t.Fatalf("stop grace = (%d, %d), want (%d, %d) and the launch margin", ordinary, checkpoint, golden.OrdinaryStopGraceSeconds, golden.CheckpointStopGraceSeconds)
 	}
 }

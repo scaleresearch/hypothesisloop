@@ -11,6 +11,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/contract/jobenv"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadenv"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
 
@@ -840,8 +841,8 @@ func TestPodGraceIsTheOrdinaryShutdownGraceWhenNoCheckpointWindowIsDeclared(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := *job.Spec.Template.Spec.TerminationGracePeriodSeconds; got != 5 {
-		t.Fatalf("pod grace = %d, want 5: a job that declared no checkpoint window must shut down exactly as it did before", got)
+	if got := *job.Spec.Template.Spec.TerminationGracePeriodSeconds; got != 5+workloadenv.LaunchKillMargin {
+		t.Fatalf("pod grace = %d, want 5 and the launch margin: a job that declared no checkpoint window must shut down exactly as it did before", got)
 	}
 }
 
@@ -859,8 +860,8 @@ func TestPodGraceIsTheDeclaredCheckpointWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := *job.Spec.Template.Spec.TerminationGracePeriodSeconds; got != 300 {
-		t.Fatalf("pod grace = %d, want 300: the declared checkpoint window is what the kubelet must wait", got)
+	if got := *job.Spec.Template.Spec.TerminationGracePeriodSeconds; got != 300+workloadenv.LaunchKillMargin {
+		t.Fatalf("pod grace = %d, want 300 and the launch margin: the declared checkpoint window is what the kubelet must wait", got)
 	}
 }
 
@@ -908,8 +909,8 @@ func TestEveryGroupOfADistributedJobCarriesTheCheckpointWindow(t *testing.T) {
 		t.Fatalf("built %d Jobs, want 2 (one per group)", len(jobs))
 	}
 	for _, job := range jobs {
-		if got := *job.Spec.Template.Spec.TerminationGracePeriodSeconds; got != 300 {
-			t.Fatalf("group %q pod grace = %d, want 300: every rank of the gang gets the window, not just the first group", job.Labels["hypothesisloop.io/job-group"], got)
+		if got := *job.Spec.Template.Spec.TerminationGracePeriodSeconds; got != 300+workloadenv.LaunchKillMargin {
+			t.Fatalf("group %q pod grace = %d, want 300 and the launch margin: every rank of the gang gets the window, not just the first group", job.Labels["hypothesisloop.io/job-group"], got)
 		}
 	}
 }

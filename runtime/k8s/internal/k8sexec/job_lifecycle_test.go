@@ -9,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadenv"
 )
 
 func TestExistingJobMatchesDesiredRequiresHashAndIdentity(t *testing.T) {
@@ -58,8 +59,8 @@ func TestANonPolicyTerminationGivesThePodNoCheckpointWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if grace != 5 {
-		t.Fatalf("delete grace = %d, want 5: only a policy termination may spend the checkpoint window", grace)
+	if grace != 5+workloadenv.LaunchKillMargin {
+		t.Fatalf("delete grace = %d, want 5 and the launch margin: only a policy termination may spend the checkpoint window", grace)
 	}
 }
 

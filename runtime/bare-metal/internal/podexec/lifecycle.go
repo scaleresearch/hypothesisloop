@@ -11,6 +11,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadenv"
 )
 
 // CreateWorkload places exp's container on this node. No admission handshake: the scheduler
@@ -129,7 +130,7 @@ func (e *Executor) DeleteWorkload(ctx context.Context, experimentID string, gran
 
 // stopGrace is how long this container gets between SIGTERM and SIGKILL for this stop: the
 // checkpoint window it declared when the control plane granted this termination that window, and
-// the ordinary shutdown grace otherwise.
+// the ordinary shutdown grace otherwise, each with workloadenv.LaunchKillMargin.
 //
 // A granted window only ever lengthens the grace. Everything else -- an infrastructure or
 // workload failure, a drift replacement -- stops on the ordinary grace whatever the job
@@ -142,13 +143,13 @@ func stopGrace(labels map[string]string, grantCheckpointWindow bool) (int64, err
 		return 0, fmt.Errorf("no readable shutdown grace: %w", err)
 	}
 	if !grantCheckpointWindow {
-		return grace, nil
+		return grace + workloadenv.LaunchKillMargin, nil
 	}
 	window, err := strconv.ParseInt(labels[LabelCheckpointGrace], 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("no readable checkpoint grace: %w", err)
 	}
-	return max(grace, window), nil
+	return max(grace, window) + workloadenv.LaunchKillMargin, nil
 }
 
 // ListManagedJobs returns the experiment IDs of every container this executor manages whose

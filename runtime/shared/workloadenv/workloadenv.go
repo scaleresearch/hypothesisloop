@@ -15,6 +15,10 @@ import (
 	"github.com/scaleresearch/hypothesisloop/contract/jobenv"
 )
 
+// LaunchKillMargin is how much longer than a job's stop grace its runtime waits after SIGTERM
+// before killing it, so the launch script's own kill at jobenv.StopGrace lands first and says why.
+const LaunchKillMargin int64 = 5
+
 type Var struct{ Name, Value string }
 
 // Platform returns the variables the platform sets on every node of group, in a fixed order: the

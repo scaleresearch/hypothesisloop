@@ -185,7 +185,7 @@ func (c *JobWorkloadClient) compileJob(exp *clusterapi.DesiredJob, placement Acc
 	// Which terminations actually get to spend that window is not decided here and is not a rule
 	// the runtime is handed: DeleteWorkload shortens the pod back to graceSeconds below whenever
 	// the control plane did not grant this termination its window.
-	podGrace := max(terminationGrace, checkpointGrace)
+	podGrace := max(terminationGrace, checkpointGrace) + workloadenv.LaunchKillMargin
 
 	priorityClass := PriorityClassGuaranteed
 	if exp.CapacityTier == clusterapi.CapacityBurst {

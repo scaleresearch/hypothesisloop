@@ -9,6 +9,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadenv"
 )
 
 func TestResolveHostMounts(t *testing.T) {
@@ -399,8 +400,8 @@ func TestContainerRecordsTheDeclaredCheckpointWindow(t *testing.T) {
 // container is signalled and then given the window it declared instead of the ordinary grace.
 func TestAPolicyTerminationStopsTheContainerOnTheCheckpointWindow(t *testing.T) {
 	labels := map[string]string{LabelGraceSeconds: "5", LabelCheckpointGrace: "300"}
-	if got, err := stopGrace(labels, true); err != nil || got != 300 {
-		t.Fatalf("stop grace = (%d, %v), want 300: a job the platform chose to stop must get its checkpoint window", got, err)
+	if got, err := stopGrace(labels, true); err != nil || got != 300+workloadenv.LaunchKillMargin {
+		t.Fatalf("stop grace = (%d, %v), want 300 and the launch margin: a job the platform chose to stop must get its checkpoint window", got, err)
 	}
 }
 
@@ -409,8 +410,8 @@ func TestAPolicyTerminationStopsTheContainerOnTheCheckpointWindow(t *testing.T) 
 // all and would only be delaying its own recreation.
 func TestANonPolicyTerminationStopsTheContainerOnTheOrdinaryGrace(t *testing.T) {
 	labels := map[string]string{LabelGraceSeconds: "5", LabelCheckpointGrace: "300"}
-	if got, err := stopGrace(labels, false); err != nil || got != 5 {
-		t.Fatalf("stop grace = (%d, %v), want 5: only a policy termination may spend the checkpoint window", got, err)
+	if got, err := stopGrace(labels, false); err != nil || got != 5+workloadenv.LaunchKillMargin {
+		t.Fatalf("stop grace = (%d, %v), want 5 and the launch margin: only a policy termination may spend the checkpoint window", got, err)
 	}
 }
 

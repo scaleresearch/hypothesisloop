@@ -19,6 +19,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadenv"
 )
 
 const fakeAcceleratorType = "example.com/chip=fake"
@@ -821,8 +822,8 @@ func TestAContainerWithNoReadableGraceIsStoppedAndItsDeleteIsAnError(t *testing.
 	f.mu.Lock()
 	withLabel, withoutLabel := f.stopGraces[containerName("labelled")], f.stopGraces[containerName("unlabelled")]
 	f.mu.Unlock()
-	if withLabel == nil || *withLabel != 5 {
-		t.Fatalf("labelled container stopped with grace %v, want its own 5 seconds", withLabel)
+	if withLabel == nil || *withLabel != 5+int(workloadenv.LaunchKillMargin) {
+		t.Fatalf("labelled container stopped with grace %v, want its own 5 seconds and the launch margin", withLabel)
 	}
 	if withoutLabel != nil {
 		t.Fatalf("container with no grace label stopped with grace %d, want the engine default", *withoutLabel)
