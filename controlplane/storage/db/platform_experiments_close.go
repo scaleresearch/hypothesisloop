@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -69,7 +70,7 @@ RETURNING old.status <> 'closed', pe.close_message`, id, string(by.Kind), by.ID,
 		if closing {
 			w.runStatus(id, string(domain.PlatformExpClosed), closeMessage)
 		}
-		w.runChange(id, domain.EventPlatformExperimentRemoved, "", "")
+		w.runChange(id, platformapi.EventPlatformExperimentRemoved, "", "")
 		return nil
 	})
 }
@@ -123,7 +124,7 @@ RETURNING pe.duration_hours IS DISTINCT FROM old.duration_hours`, id, endsAt, du
 		}
 		tx.runStatus(id, string(domain.PlatformExpRunning), "")
 		if lengthMoved {
-			tx.runChange(id, domain.EventPlatformExperimentDescription, "", "")
+			tx.runChange(id, platformapi.EventPlatformExperimentDescription, "", "")
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM experiment_top3 WHERE platform_experiment_id = $1`, id); err != nil {
 			return fmt.Errorf("platform_experiments_store.Reopen: placements: %w", err)

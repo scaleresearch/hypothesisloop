@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -36,7 +37,7 @@ func (w *Write) runStatus(id, status, closeMessage string) {
 	if status == string(domain.PlatformExpClosed) {
 		detail = closeMessage
 	}
-	w.runChange(id, domain.EventPlatformExperimentStatus, status, detail)
+	w.runChange(id, platformapi.EventPlatformExperimentStatus, status, detail)
 }
 
 func (w *Write) runChange(id, kind, value, detail string) {
@@ -49,5 +50,5 @@ func (w *Write) agentActivity(platformExpID, agentID, value string) {
 	if agentID == "" {
 		agentID = domain.CoordinatorRecipient
 	}
-	w.Change(domain.Change{Kind: domain.EventAgentActivity, Subject: agentID, Value: value, PlatformExperimentID: platformExpID, AgentID: agentID})
+	w.Change(domain.Change{Kind: platformapi.EventAgentActivity, Subject: agentID, Value: value, PlatformExperimentID: platformExpID, AgentID: agentID})
 }

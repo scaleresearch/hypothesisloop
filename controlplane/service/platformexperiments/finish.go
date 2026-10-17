@@ -11,6 +11,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
@@ -48,7 +49,7 @@ func (s *Service) FinishAgent(ctx context.Context, platformExpID, agentID, reaso
 		// The same answer as to anything else sent past the close (RequireActive): the token's
 		// wind-down is for filing summaries, and the close already ended the agent's run.
 		if pe == nil || pe.Status == domain.PlatformExpClosed {
-			return nil, refusal.Refuse(http.StatusConflict, "experiment_closed", "platform experiment "+platformExpID+" is closed: your run is over and nothing is left to finish")
+			return nil, refusal.Refuse(http.StatusConflict, platformapi.ReasonExperimentClosed, "platform experiment "+platformExpID+" is closed: your run is over and nothing is left to finish")
 		}
 		return nil, refuseSignup(409, "not_running", "platform experiment %s is %s: only an agent of role baseline finishes before it runs", platformExpID, pe.Status)
 	case errors.Is(err, db.ErrWorkUnfinished):

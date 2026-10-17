@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -239,6 +240,6 @@ WHERE platform_experiment_id = $1 AND ($2 = '' OR agent_id = $2) ORDER BY id`, p
 // agentMessage announces a message from from to agentID, with its text: the one change that
 // carries what was said, since it is said to its reader alone.
 func (w *Write) agentMessage(platformExpID, agentID, from, text string) {
-	w.Change(domain.Change{Kind: domain.EventAgentMessage, Subject: agentID, Value: from, Detail: text,
+	w.Change(domain.Change{Kind: platformapi.EventAgentMessage, Subject: agentID, Value: from, Detail: text,
 		PlatformExperimentID: platformExpID, AgentID: agentID})
 }

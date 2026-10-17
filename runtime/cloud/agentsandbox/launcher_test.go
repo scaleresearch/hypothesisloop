@@ -359,7 +359,7 @@ func TestOnlyTheEndOfAnExitedInstancesOutputIsSent(t *testing.T) {
 	h.rented.Exit(full("a"), lines...)
 	h.mustPass()
 	sent := h.cp.lastQuestion().Instances[0].Log
-	if len(sent) > exitLogBytes || !strings.HasSuffix(sent, lines[499]) || strings.Contains(sent, "line 400") {
+	if len(sent) > sandboxapi.MaxExitLogBytes || !strings.HasSuffix(sent, lines[499]) || strings.Contains(sent, "line 400") {
 		t.Fatalf("sent %d bytes ending %q", len(sent), sent[max(0, len(sent)-30):])
 	}
 }

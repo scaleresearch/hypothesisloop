@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -200,7 +201,7 @@ func (s *Store) AdvanceStage(ctx context.Context, platformExpID string, stageInd
 		if tag.RowsAffected() == 0 {
 			return nil // boundary already committed
 		}
-		tx.runChange(platformExpID, domain.EventStageBoundary, strconv.Itoa(stageIndex), "advanced")
+		tx.runChange(platformExpID, platformapi.EventStageBoundary, strconv.Itoa(stageIndex), "advanced")
 		if err := cutTx(ctx, tx, platformExpID, cutAgentIDs, stageIndex, ""); err != nil {
 			return fmt.Errorf("platform_experiments_store.AdvanceStage: %w", err)
 		}

@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/config"
@@ -240,7 +241,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 
 	api := &worldAPI{router: chi.NewRouter(), docs: map[string]*httpapi.Doc{}, tokens: map[string]string{"none": ""}}
 	api.router.Use(tripwire)
-	api.router.Use(auth.Gate(authenticator, logger, map[string]string{"/watch": watch.Subprotocol}))
+	api.router.Use(auth.Gate(authenticator, logger, map[string]string{"/watch": platformapi.WatchSubprotocol}))
 	watcher := watch.NewHandler(nil, nil, nil, access, logger)
 	api.router.Get("/watch", watcher.ServeHTTP)
 

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -22,7 +23,7 @@ func TestAChangeIsAppendedWithItsWriteOrNotAtAll(t *testing.T) {
 	agentID, peID, hypothesisID := seedRun(t, pool, "rollback", true)
 	store := NewStore(pool, 3)
 	filter := domain.EventFilter{PlatformExperimentID: peID}
-	comment := domain.Change{Kind: domain.EventCommentNew, Subject: hypothesisID, PlatformExperimentID: peID, AgentID: agentID}
+	comment := domain.Change{Kind: platformapi.EventCommentNew, Subject: hypothesisID, PlatformExperimentID: peID, AgentID: agentID}
 	before := cursorNow(t, pool)
 	events, stop := listenForEvents(t, pool)
 	defer stop()
@@ -46,7 +47,7 @@ func TestAChangeIsAppendedWithItsWriteOrNotAtAll(t *testing.T) {
 		t.Fatalf("a write that commits: got = %v, want = nil", err)
 	}
 	got := changesAfter(t, store, filter, before)
-	if len(got) != 1 || got[0].ID <= before || got[0].Kind != domain.EventCommentNew || got[0].AgentID != agentID {
+	if len(got) != 1 || got[0].ID <= before || got[0].Kind != platformapi.EventCommentNew || got[0].AgentID != agentID {
 		t.Fatalf("changes after a committed write: got = %+v, want = the comment once, past %d", got, before)
 	}
 	if at := got[0].OccurredAt; at.Before(started) || at.After(time.Now().Add(time.Second)) || at.Location() != time.UTC {
@@ -56,7 +57,7 @@ func TestAChangeIsAppendedWithItsWriteOrNotAtAll(t *testing.T) {
 	if err != nil || !strings.Contains(string(payload), `"occurred_at":"`+got[0].OccurredAt.Format(time.RFC3339Nano)+`"`) {
 		t.Errorf("delivered change = %s, %v, want occurred_at in RFC3339 UTC", payload, err)
 	}
-	if live := awaitEvent(t, events, domain.EventCommentNew, hypothesisID); live != got[0] {
+	if live := awaitEvent(t, events, platformapi.EventCommentNew, hypothesisID); live != got[0] {
 		t.Errorf("listened: got = %+v, want = %+v", live, got[0])
 	}
 }
@@ -90,10 +91,10 @@ func TestAJobsWritesAnnounceItsStatusesAndTheReasonsItWaitsFor(t *testing.T) {
 		}
 	}
 	want := []string{
-		domain.EventExperimentStatus + " QUEUED ",
-		domain.EventExperimentBlocked + " capacity_unavailable " + sentence,
-		domain.EventExperimentStatus + " RUNNING ",
-		domain.EventExperimentStatus + " COMPLETED ",
+		platformapi.EventExperimentStatus + " QUEUED ",
+		platformapi.EventExperimentBlocked + " capacity_unavailable " + sentence,
+		platformapi.EventExperimentStatus + " RUNNING ",
+		platformapi.EventExperimentStatus + " COMPLETED ",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("changes of the job:\ngot  = %q\nwant = %q", got, want)
@@ -136,7 +137,7 @@ func TestAFinishedJobIsAnnouncedWithItsCause(t *testing.T) {
 		if err := tc.end(tc.job); err != nil {
 			t.Fatalf("end %s: got = %v, want = nil", tc.job, err)
 		}
-		got := changesAfter(t, store, domain.EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{domain.EventExperimentStatus: true}}, before)
+		got := changesAfter(t, store, domain.EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{platformapi.EventExperimentStatus: true}}, before)
 		if len(got) != 1 || got[0].Subject != tc.job || got[0].Value != tc.value || got[0].Detail != tc.detail {
 			t.Errorf("end of %s: got = %+v, want %s with detail %q", tc.job, got, tc.value, tc.detail)
 		}
@@ -178,7 +179,7 @@ func TestEditingTheBriefAnnouncesThatItChangedAndCarriesNoneOfItsText(t *testing
 		t.Fatalf("changes: got = %+v, want = two description changes", got)
 	}
 	for _, e := range got {
-		if e.Kind != domain.EventPlatformExperimentDescription || e.Subject != peID || e.Value != "" || e.Detail != "" {
+		if e.Kind != platformapi.EventPlatformExperimentDescription || e.Subject != peID || e.Value != "" || e.Detail != "" {
 			t.Errorf("description change: got = %+v, want = a pointer only", e)
 		}
 	}
@@ -200,7 +201,7 @@ func TestTheCloseIsAnnouncedWithTheReasonGiven(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := changesAfter(t, store, domain.EventFilter{PlatformExperimentID: peID}, before)
-	if len(got) != 1 || got[0].Kind != domain.EventPlatformExperimentStatus || got[0].Value != "closed" || got[0].Detail != "the baseline measured the old split" {
+	if len(got) != 1 || got[0].Kind != platformapi.EventPlatformExperimentStatus || got[0].Value != "closed" || got[0].Detail != "the baseline measured the old split" {
 		t.Fatalf("changes: got = %+v, want = closed with the reason, once", got)
 	}
 	pe, err := store.GetPlatformExperiment(ctx, peID)
@@ -219,7 +220,7 @@ func TestAReasonThatWaitsForTheCoordinatorIsAnnouncedOnceAsAStatusChange(t *test
 	_, peID, _ := seedRun(t, pool, "coordinator-reason", true)
 	exec(t, pool, `UPDATE platform_experiments SET status = 'running' WHERE id = $1`, peID)
 	store := NewStore(pool, 3)
-	filter := domain.EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{domain.EventPlatformExperimentStatus: true}}
+	filter := domain.EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{platformapi.EventPlatformExperimentStatus: true}}
 	tell := func(reasons ...string) {
 		t.Helper()
 		for _, reason := range reasons {
@@ -268,7 +269,7 @@ func TestAQuotaGrantIsAnnouncedAsTheShareTheAgentMaySpend(t *testing.T) {
 		t.Cleanup(func() { exec(t, pool, `DELETE FROM agent_quotas WHERE id = $1`, agentID) })
 
 		want := fmt.Sprintf("%g", q.Share())
-		got := changesAfter(t, NewStore(pool, 3), domain.EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{domain.EventQuotaChanged: true}}, before)
+		got := changesAfter(t, NewStore(pool, 3), domain.EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{platformapi.EventQuotaChanged: true}}, before)
 		if len(got) != 1 || got[0].Subject != agentID || got[0].Value != want || got[0].Detail != "" {
 			t.Fatalf("%s: changes: got = %+v, want = the share %s and no detail", tc.name, got, want)
 		}
@@ -302,9 +303,9 @@ func TestACutAnnouncesBothTheLadderBoundaryAndTheCutAgentsOwnStopCondition(t *te
 		got = append(got, e.Kind+" "+e.Subject+" "+e.Value+" "+e.Detail)
 	}
 	want := []string{
-		domain.EventAgentFinished + " " + agentID + "  quota spent",
-		domain.EventStageBoundary + " " + peID + " 1 cut",
-		domain.EventAgentCut + " " + agentID + " 1 ",
+		platformapi.EventAgentFinished + " " + agentID + "  quota spent",
+		platformapi.EventStageBoundary + " " + peID + " 1 cut",
+		platformapi.EventAgentCut + " " + agentID + " 1 ",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("changes:\ngot  = %q\nwant = %q", got, want)
@@ -324,11 +325,11 @@ func TestTheDefaultKindSetIsEveryKindOnTheStream(t *testing.T) {
 
 // Naming kinds means exactly those kinds.
 func TestAnExplicitKindSetMeansExactlyWhatItNames(t *testing.T) {
-	filter := domain.EventFilter{PlatformExperimentID: "pe-1", Kinds: map[string]bool{domain.EventCommentNew: true}}
-	if !filter.Matches(domain.Event{Change: domain.Change{Kind: domain.EventCommentNew, Subject: "hyp-1", PlatformExperimentID: "pe-1"}}) {
+	filter := domain.EventFilter{PlatformExperimentID: "pe-1", Kinds: map[string]bool{platformapi.EventCommentNew: true}}
+	if !filter.Matches(domain.Event{Change: domain.Change{Kind: platformapi.EventCommentNew, Subject: "hyp-1", PlatformExperimentID: "pe-1"}}) {
 		t.Errorf("comment.new on a subscription that named it: got = %v, want = %v", false, true)
 	}
-	if filter.Matches(domain.Event{Change: domain.Change{Kind: domain.EventExperimentStatus, Subject: "exp-1", PlatformExperimentID: "pe-1"}}) {
+	if filter.Matches(domain.Event{Change: domain.Change{Kind: platformapi.EventExperimentStatus, Subject: "exp-1", PlatformExperimentID: "pe-1"}}) {
 		t.Errorf("experiment.status on a subscription that named only comment.new: got = %v, want = %v", true, false)
 	}
 }
@@ -363,7 +364,7 @@ func TestAJobThatWaitsLongerThanItWasToRunIsAnnouncedAsHeldOnce(t *testing.T) {
 	if err := store.MarkHeldJobs(ctx, 5*time.Minute); err != nil {
 		t.Fatalf("MarkHeldJobs: %v", err)
 	}
-	got := changesAfter(t, store, domain.EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{domain.EventJobHeld: true}}, before)
+	got := changesAfter(t, store, domain.EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{platformapi.EventJobHeld: true}}, before)
 	if len(got) != 1 || got[0].Subject != "held-job-long-wait" || got[0].Value != "capacity_unavailable" || got[0].Detail != sentence || got[0].AgentID != agentID {
 		t.Fatalf("held changes: got = %+v, want = the one job that waited past its estimate and the minimum, once", got)
 	}
@@ -393,7 +394,7 @@ func TestABaselineJobThatCannotEndByItsDeadlineIsAnnouncedOnce(t *testing.T) {
 	if err := store.MarkBaselineLate(ctx, "late-job", domain.HeldBaselineLate+": a minute later, still late"); err != nil {
 		t.Fatal(err)
 	}
-	got := changesAfter(t, store, domain.EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{domain.EventJobHeld: true}}, before)
+	got := changesAfter(t, store, domain.EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{platformapi.EventJobHeld: true}}, before)
 	if len(got) != 1 || got[0].Subject != "late-job" || got[0].Value != domain.HeldBaselineLate || got[0].Detail != first || got[0].AgentID != agentID {
 		t.Fatalf("held changes of a late baseline job: got = %+v, want baseline_late with its sentence to its agent, once", got)
 	}
@@ -423,7 +424,7 @@ func TestAJobOnAnotherAgentsHypothesisIsAnnouncedAsADuplicateOnce(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	got := changesAfter(t, store, domain.EventFilter{PlatformExperimentID: peID, Decisions: true, Kinds: map[string]bool{domain.EventJobDuplicate: true}}, before)
+	got := changesAfter(t, store, domain.EventFilter{PlatformExperimentID: peID, Decisions: true, Kinds: map[string]bool{platformapi.EventJobDuplicate: true}}, before)
 	if len(got) != 1 || got[0].Subject != "duplicate-job" || got[0].Value != hypothesisID || got[0].Detail != sentence || got[0].AgentID != agentID {
 		t.Fatalf("duplicate changes: got = %+v, want the hypothesis, the sentence and the job's agent, once", got)
 	}
@@ -443,33 +444,33 @@ func TestAJobOnAnotherAgentsHypothesisIsAnnouncedAsADuplicateOnce(t *testing.T) 
 func TestAnAgentScopeAdmitsItsOwnOutcomesAndNoRivalsOrIntermediateStatuses(t *testing.T) {
 	filter := domain.EventFilter{PlatformExperimentID: "pe-1", AgentID: "agent-a", Kinds: domain.DefaultKinds()}
 	admitted := []domain.Event{
-		{Change: domain.Change{Kind: domain.EventExperimentStatus, Value: "COMPLETED", AgentID: "agent-a"}},
-		{Change: domain.Change{Kind: domain.EventExperimentStatus, Value: "EVICTED", AgentID: "agent-a"}},
-		{Change: domain.Change{Kind: domain.EventExperimentStatus, Value: "QUEUED", Detail: "stuck_pending: admitted and not running within 5m0s", AgentID: "agent-a"}},
-		{Change: domain.Change{Kind: domain.EventExperimentBlocked, Value: "job_too_long", AgentID: "agent-a"}},
-		{Change: domain.Change{Kind: domain.EventExperimentBlocked, Value: "exceeds_accelerator_share: cpu 64 above 8", AgentID: "agent-a"}},
-		{Change: domain.Change{Kind: domain.EventExperimentBlocked, Value: "exceeds_cluster_capacity: needs {accelerator:h200=3}, more than any connected cluster has installed", AgentID: "agent-a"}},
-		{Change: domain.Change{Kind: domain.EventQuotaChanged, Value: "4", AgentID: "agent-a"}},
-		{Change: domain.Change{Kind: domain.EventAgentCut, Value: "1", AgentID: "agent-a"}},
-		{Change: domain.Change{Kind: domain.EventStageBoundary, Value: "1", Detail: "advanced"}},
-		{Change: domain.Change{Kind: domain.EventPlatformExperimentStatus, Value: "closed"}},
-		{Change: domain.Change{Kind: domain.EventPlatformExperimentDescription}},
-		{Change: domain.Change{Kind: domain.EventCommentNew, AgentID: "agent-b"}},
-		{Change: domain.Change{Kind: domain.EventCommentNew}},
+		{Change: domain.Change{Kind: platformapi.EventExperimentStatus, Value: "COMPLETED", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: platformapi.EventExperimentStatus, Value: "EVICTED", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: platformapi.EventExperimentStatus, Value: "QUEUED", Detail: "stuck_pending: admitted and not running within 5m0s", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: platformapi.EventExperimentBlocked, Value: "job_too_long", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: platformapi.EventExperimentBlocked, Value: "exceeds_accelerator_share: cpu 64 above 8", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: platformapi.EventExperimentBlocked, Value: "exceeds_cluster_capacity: needs {accelerator:h200=3}, more than any connected cluster has installed", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: platformapi.EventQuotaChanged, Value: "4", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: platformapi.EventAgentCut, Value: "1", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: platformapi.EventStageBoundary, Value: "1", Detail: "advanced"}},
+		{Change: domain.Change{Kind: platformapi.EventPlatformExperimentStatus, Value: "closed"}},
+		{Change: domain.Change{Kind: platformapi.EventPlatformExperimentDescription}},
+		{Change: domain.Change{Kind: platformapi.EventCommentNew, AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: platformapi.EventCommentNew}},
 	}
 	refused := []domain.Event{
-		{Change: domain.Change{Kind: domain.EventExperimentStatus, Value: "QUEUED", AgentID: "agent-a"}},
-		{Change: domain.Change{Kind: domain.EventExperimentStatus, Value: "SUBMITTED", AgentID: "agent-a"}},
-		{Change: domain.Change{Kind: domain.EventExperimentStatus, Value: "RUNNING", AgentID: "agent-a"}},
-		{Change: domain.Change{Kind: domain.EventExperimentStatus, Value: "COMPLETED", AgentID: "agent-b"}},
-		{Change: domain.Change{Kind: domain.EventExperimentBlocked, Value: "job_too_long", AgentID: "agent-b"}},
-		{Change: domain.Change{Kind: domain.EventExperimentBlocked, Value: "capacity_unavailable", Detail: "cluster c is short of 1 x nvidia.com/gpu.product=nvidia-l40", AgentID: "agent-a"}},
-		{Change: domain.Change{Kind: domain.EventExperimentBlocked, Value: "outranked", AgentID: "agent-a"}},
-		{Change: domain.Change{Kind: domain.EventExperimentBlocked, Value: "concurrency_cap", AgentID: "agent-a"}},
-		{Change: domain.Change{Kind: domain.EventQuotaChanged, Value: "4", AgentID: "agent-b"}},
-		{Change: domain.Change{Kind: domain.EventAgentCut, Value: "1", AgentID: "agent-b"}},
-		{Change: domain.Change{Kind: domain.EventStageBoundary, Value: "1", Detail: "cut", AgentID: "agent-a"}},
-		{Change: domain.Change{Kind: domain.EventStageBoundary, Value: "1", Detail: "cut", AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: platformapi.EventExperimentStatus, Value: "QUEUED", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: platformapi.EventExperimentStatus, Value: "SUBMITTED", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: platformapi.EventExperimentStatus, Value: "RUNNING", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: platformapi.EventExperimentStatus, Value: "COMPLETED", AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: platformapi.EventExperimentBlocked, Value: "job_too_long", AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: platformapi.EventExperimentBlocked, Value: "capacity_unavailable", Detail: "cluster c is short of 1 x nvidia.com/gpu.product=nvidia-l40", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: platformapi.EventExperimentBlocked, Value: "outranked", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: platformapi.EventExperimentBlocked, Value: "concurrency_cap", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: platformapi.EventQuotaChanged, Value: "4", AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: platformapi.EventAgentCut, Value: "1", AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: platformapi.EventStageBoundary, Value: "1", Detail: "cut", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: platformapi.EventStageBoundary, Value: "1", Detail: "cut", AgentID: "agent-b"}},
 	}
 	for _, e := range admitted {
 		e.PlatformExperimentID = "pe-1"
@@ -488,7 +489,7 @@ func TestAnAgentScopeAdmitsItsOwnOutcomesAndNoRivalsOrIntermediateStatuses(t *te
 // The agent's own writes to the pool are echoes of what it just did; waking it for them is spam.
 func TestAnAgentScopeDropsTheEchoOfItsOwnHypothesisActivity(t *testing.T) {
 	filter := domain.EventFilter{PlatformExperimentID: "pe-1", AgentID: "agent-a", Kinds: domain.DefaultKinds()}
-	for _, kind := range []string{domain.EventHypothesisNew, domain.EventHypothesisStatus, domain.EventHypothesisLink, domain.EventFindingNew, domain.EventCommentNew} {
+	for _, kind := range []string{platformapi.EventHypothesisNew, platformapi.EventHypothesisStatus, platformapi.EventHypothesisLink, platformapi.EventFindingNew, platformapi.EventCommentNew} {
 		if filter.Matches(domain.Event{Change: domain.Change{Kind: kind, Subject: "hyp-1", PlatformExperimentID: "pe-1", AgentID: "agent-a"}}) {
 			t.Errorf("own %v on an agent scope: got = true, want = false", kind)
 		}
@@ -499,9 +500,9 @@ func TestAnAgentScopeDropsTheEchoOfItsOwnHypothesisActivity(t *testing.T) {
 func TestASubscriptionWithoutAnAgentCarriesEveryAgentsEvents(t *testing.T) {
 	filter := domain.EventFilter{PlatformExperimentID: "pe-1", Kinds: domain.DefaultKinds()}
 	for _, e := range []domain.Event{
-		{Change: domain.Change{Kind: domain.EventExperimentStatus, Value: "RUNNING", AgentID: "agent-b"}},
-		{Change: domain.Change{Kind: domain.EventHypothesisNew, AgentID: "agent-b"}},
-		{Change: domain.Change{Kind: domain.EventStageBoundary, Detail: "cut", AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: platformapi.EventExperimentStatus, Value: "RUNNING", AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: platformapi.EventHypothesisNew, AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: platformapi.EventStageBoundary, Detail: "cut", AgentID: "agent-b"}},
 	} {
 		e.PlatformExperimentID = "pe-1"
 		if !filter.Matches(e) {
@@ -517,25 +518,25 @@ func TestTheDecisionsStreamOfAnExperimentLeavesOutJobsThatAreOnTheirWay(t *testi
 	filter := domain.EventFilter{PlatformExperimentID: "pe-1", Kinds: domain.DefaultKinds(), Decisions: true}
 	whole := domain.EventFilter{PlatformExperimentID: "pe-1", Kinds: domain.DefaultKinds()}
 	admitted := []domain.Event{
-		{Change: domain.Change{Kind: domain.EventExperimentStatus, Value: "COMPLETED", AgentID: "agent-a"}},
-		{Change: domain.Change{Kind: domain.EventExperimentStatus, Value: "FAILED", AgentID: "agent-b"}},
-		{Change: domain.Change{Kind: domain.EventExperimentStatus, Value: "EVICTED", AgentID: "agent-b"}},
-		{Change: domain.Change{Kind: domain.EventExperimentBlocked, Value: "job_too_long", AgentID: "agent-a"}},
-		{Change: domain.Change{Kind: domain.EventHypothesisNew, AgentID: "agent-a"}},
-		{Change: domain.Change{Kind: domain.EventHypothesisStatus, Value: "confirmed", AgentID: "agent-a"}},
-		{Change: domain.Change{Kind: domain.EventFindingNew, Value: "job-1", AgentID: "agent-b"}},
-		{Change: domain.Change{Kind: domain.EventCommentNew}},
-		{Change: domain.Change{Kind: domain.EventQuotaChanged, Value: "4", AgentID: "agent-b"}},
-		{Change: domain.Change{Kind: domain.EventAgentCut, Value: "1", AgentID: "agent-b"}},
-		{Change: domain.Change{Kind: domain.EventStageBoundary, Value: "1", Detail: "cut", AgentID: "agent-b"}},
-		{Change: domain.Change{Kind: domain.EventPlatformExperimentStatus, Value: "closed"}},
+		{Change: domain.Change{Kind: platformapi.EventExperimentStatus, Value: "COMPLETED", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: platformapi.EventExperimentStatus, Value: "FAILED", AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: platformapi.EventExperimentStatus, Value: "EVICTED", AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: platformapi.EventExperimentBlocked, Value: "job_too_long", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: platformapi.EventHypothesisNew, AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: platformapi.EventHypothesisStatus, Value: "confirmed", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: platformapi.EventFindingNew, Value: "job-1", AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: platformapi.EventCommentNew}},
+		{Change: domain.Change{Kind: platformapi.EventQuotaChanged, Value: "4", AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: platformapi.EventAgentCut, Value: "1", AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: platformapi.EventStageBoundary, Value: "1", Detail: "cut", AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: platformapi.EventPlatformExperimentStatus, Value: "closed"}},
 	}
 	onTheirWay := []domain.Event{
-		{Change: domain.Change{Kind: domain.EventExperimentStatus, Value: "QUEUED", AgentID: "agent-a"}},
-		{Change: domain.Change{Kind: domain.EventExperimentStatus, Value: "SUBMITTED", AgentID: "agent-a"}},
-		{Change: domain.Change{Kind: domain.EventExperimentStatus, Value: "RUNNING", AgentID: "agent-b"}},
-		{Change: domain.Change{Kind: domain.EventExperimentBlocked, Value: "capacity_unavailable", Detail: "cluster c is short of 1 x nvidia.com/gpu.product=nvidia-l40", AgentID: "agent-a"}},
-		{Change: domain.Change{Kind: domain.EventExperimentBlocked, Value: "outranked", AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: platformapi.EventExperimentStatus, Value: "QUEUED", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: platformapi.EventExperimentStatus, Value: "SUBMITTED", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: platformapi.EventExperimentStatus, Value: "RUNNING", AgentID: "agent-b"}},
+		{Change: domain.Change{Kind: platformapi.EventExperimentBlocked, Value: "capacity_unavailable", Detail: "cluster c is short of 1 x nvidia.com/gpu.product=nvidia-l40", AgentID: "agent-a"}},
+		{Change: domain.Change{Kind: platformapi.EventExperimentBlocked, Value: "outranked", AgentID: "agent-b"}},
 	}
 	for _, e := range admitted {
 		e.PlatformExperimentID = "pe-1"
@@ -675,7 +676,7 @@ func TestAResearcherWithNoJobForTheNoticeIsToldAgainWhileTheStretchLasts(t *test
 	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type, signed_up_at) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist', now() - interval '30 minutes')`, peID, agentID)
 	announced := func() []domain.Event {
 		t.Helper()
-		return changesAfter(t, store, domain.EventFilter{PlatformExperimentID: peID, AgentID: agentID, Kinds: map[string]bool{domain.EventAgentIdle: true}}, before)
+		return changesAfter(t, store, domain.EventFilter{PlatformExperimentID: peID, AgentID: agentID, Kinds: map[string]bool{platformapi.EventAgentIdle: true}}, before)
 	}
 	job := func(id, status string) {
 		t.Helper()
@@ -697,7 +698,7 @@ VALUES ('agent', $4, $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator', $
 	if told := noticeIdle(t, store, peID, 10*time.Minute); told != 1 {
 		t.Fatalf("idle 20 minutes, notice at 10: told %d, want once", told)
 	}
-	live := awaitEvent(t, events, domain.EventAgentIdle, agentID)
+	live := awaitEvent(t, events, platformapi.EventAgentIdle, agentID)
 	stop()
 	if live.Value != domain.IdleNew || live.Detail != "idle 20 minutes, notice 0" || live.PlatformExperimentID != peID {
 		t.Fatalf("live: got = %+v, want new with the 20 minutes since the run started", live)
@@ -710,7 +711,7 @@ VALUES ('agent', $4, $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator', $
 	if told := noticeIdle(t, store, peID, 10*time.Minute); told != 1 {
 		t.Fatalf("the same stretch a notice later: told %d, want once more", told)
 	}
-	live = awaitEvent(t, events, domain.EventAgentIdle, agentID)
+	live = awaitEvent(t, events, platformapi.EventAgentIdle, agentID)
 	stop()
 	if live.Value != domain.IdleContinues || live.Detail != "idle 20 minutes, notice 1" {
 		t.Fatalf("live repeat: got = %+v, want continues, the second notice of the stretch", live)
@@ -767,7 +768,7 @@ func TestARunWithPlacesFreeForTheNoticeIsToldAgainWhileTheyStayFree(t *testing.T
 	}
 	announced := func(filter domain.EventFilter) []domain.Event {
 		t.Helper()
-		filter.PlatformExperimentID, filter.Kinds = peID, map[string]bool{domain.EventCapacityIdle: true}
+		filter.PlatformExperimentID, filter.Kinds = peID, map[string]bool{platformapi.EventCapacityIdle: true}
 		return changesAfter(t, store, filter, before)
 	}
 	// The stretch and the notice before this one are moved back by ago, as the clock would move them.
@@ -789,7 +790,7 @@ capacity_noticed_at = capacity_noticed_at - $2::interval WHERE id = $1`, peID, a
 	if err := store.NoticeCapacityIdle(ctx, *due, "first"); err != nil {
 		t.Fatal(err)
 	}
-	live := awaitEvent(t, events, domain.EventCapacityIdle, peID)
+	live := awaitEvent(t, events, platformapi.EventCapacityIdle, peID)
 	stop()
 	if live.Value != domain.IdleNew || live.Detail != "first" || live.PlatformExperimentID != peID || live.AgentID != "" {
 		t.Fatalf("live: got = %+v, want new with its detail, of the run", live)

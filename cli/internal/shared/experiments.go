@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/command"
 )
@@ -165,7 +166,7 @@ non-empty. Once it runs, max_agents below the researchers at work cuts the newes
 // started, and why it is in the status it is in.
 func baselineDeclared(experiment map[string]any) string {
 	started := "has not started"
-	if experiment["status"] == "running" {
+	if experiment["status"] == string(platformapi.PlatformExpRunning) {
 		started = "started"
 	}
 	reason, _ := experiment["status_reason"].(map[string]any)

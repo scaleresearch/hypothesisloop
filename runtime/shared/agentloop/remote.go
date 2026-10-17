@@ -35,7 +35,7 @@ type Remote struct {
 }
 
 func (r *Remote) client() *cpclient.Client {
-	client := &cpclient.Client{BaseURL: fmt.Sprintf("%s/internal/clusters/%s", r.APIURL, r.ClusterName), Token: r.Token, HTTP: r.HTTP}
+	client := &cpclient.Client{BaseURL: r.APIURL + clusterapi.ClustersPath + "/" + r.ClusterName, Token: r.Token, HTTP: r.HTTP}
 	if r.Version != "" {
 		client.Header = http.Header{clusterapi.AgentVersionHeader: {r.Version}}
 	}
@@ -57,7 +57,7 @@ func (r *Remote) call(ctx context.Context, method, path string, body, out any) e
 
 func (r *Remote) Reconcile(ctx context.Context, report clusterapi.ReconcileRequest) (clusterapi.ReconcileAnswer, error) {
 	var answer clusterapi.ReconcileAnswer
-	if err := r.call(ctx, http.MethodPost, "/reconcile", report, &answer); err != nil {
+	if err := r.call(ctx, http.MethodPost, clusterapi.ReconcilePath, report, &answer); err != nil {
 		return clusterapi.ReconcileAnswer{}, err
 	}
 	return answer, nil
@@ -65,7 +65,7 @@ func (r *Remote) Reconcile(ctx context.Context, report clusterapi.ReconcileReque
 
 func (r *Remote) PushStatus(ctx context.Context, push clusterapi.StatusPush) error {
 	var ack clusterapi.StatusAck
-	if err := r.call(ctx, http.MethodPost, "/status", push, &ack); err != nil {
+	if err := r.call(ctx, http.MethodPost, clusterapi.StatusPath, push, &ack); err != nil {
 		return err
 	}
 	if ack.Status != "ok" {
@@ -74,15 +74,15 @@ func (r *Remote) PushStatus(ctx context.Context, push clusterapi.StatusPush) err
 	return nil
 }
 
-func buildPath(key string) string { return "/builds/" + url.PathEscape(key) }
+func buildPath(key string) string { return clusterapi.BuildsPath + "/" + url.PathEscape(key) }
 
 func (r *Remote) BuildLoaded(ctx context.Context, key string, loaded clusterapi.EnvironmentBuildLoaded) error {
-	return r.call(ctx, http.MethodPost, buildPath(key)+"/loaded", loaded, nil)
+	return r.call(ctx, http.MethodPost, buildPath(key)+clusterapi.BuildLoadedPath, loaded, nil)
 }
 
 func (r *Remote) BuildCredential(ctx context.Context, key string, attempt int) (clusterapi.RegistryLogin, error) {
 	var login clusterapi.RegistryLogin
-	err := r.call(ctx, http.MethodPost, buildPath(key)+"/credential", clusterapi.EnvironmentBuildCredentialRequest{Attempt: attempt}, &login)
+	err := r.call(ctx, http.MethodPost, buildPath(key)+clusterapi.BuildCredentialPath, clusterapi.EnvironmentBuildCredentialRequest{Attempt: attempt}, &login)
 	return login, err
 }
 
@@ -90,7 +90,7 @@ func (r *Remote) BuildCredential(ctx context.Context, key string, attempt int) (
 // reads no repository.
 func (r *Remote) BuildGitCredential(ctx context.Context, key string, attempt int) (clusterapi.EnvironmentGitCredential, error) {
 	var credential clusterapi.EnvironmentGitCredential
-	err := r.call(ctx, http.MethodPost, buildPath(key)+"/git-credential", clusterapi.EnvironmentBuildCredentialRequest{Attempt: attempt}, &credential)
+	err := r.call(ctx, http.MethodPost, buildPath(key)+clusterapi.BuildGitCredentialPath, clusterapi.EnvironmentBuildCredentialRequest{Attempt: attempt}, &credential)
 	var refused *cpclient.Refusal
 	if errors.As(err, &refused) && refused.Status == http.StatusNotFound {
 		return credential, fmt.Errorf("%w: %w", agentexec.ErrNoEnvironmentGitCredential, err)
@@ -103,13 +103,13 @@ func (r *Remote) ReportBuild(ctx context.Context, key string, report clusterapi.
 }
 
 func (r *Remote) BuildProgress(ctx context.Context, key string, progress clusterapi.EnvironmentBuildProgress) error {
-	return r.call(ctx, http.MethodPost, buildPath(key)+"/progress", progress, nil)
+	return r.call(ctx, http.MethodPost, buildPath(key)+clusterapi.BuildProgressPath, progress, nil)
 }
 
 // CheckToken asks the control plane whether it takes this cluster's token, and changes nothing
 // there: no capacity is reported and no identity bound. An installer's dry run asks it.
 func (r *Remote) CheckToken(ctx context.Context) error {
-	return r.call(ctx, http.MethodGet, "/access", nil, nil)
+	return r.call(ctx, http.MethodGet, clusterapi.AccessPath, nil, nil)
 }
 
 // SayIfStillRegistered tells, through log, how to remove this cluster from the control plane

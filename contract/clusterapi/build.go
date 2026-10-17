@@ -30,16 +30,13 @@ var PlatformTools = []string{"/usr/local/bin/hl", "/usr/local/bin/hl-clone"}
 
 // EnvironmentGitSecret is the id of the BuildKit secret a RUN of an environment file mounts to
 // read the repository that declared it: a git config file (EnvironmentGitCredential.GitConfig),
-// which EnvironmentGitCommand includes.
+// which git includes in EnvironmentGitRun.
 const EnvironmentGitSecret = "git-credentials"
 
-// EnvironmentGitCommand is how a RUN that mounts EnvironmentGitSecret calls git to read the
-// repository: with the secret's config included, the repository's own address reaches it.
-const EnvironmentGitCommand = "git -c include.path=/run/secrets/" + EnvironmentGitSecret
-
 // EnvironmentGitRun is the line of an environment file that clones the repository it is of, the
-// one an author is told to write.
-const EnvironmentGitRun = "RUN --mount=type=secret,id=" + EnvironmentGitSecret + " " + EnvironmentGitCommand + " clone <repository url> /tmp/src"
+// one an author is told to write: with the secret's config included, the repository's own address
+// reaches it.
+const EnvironmentGitRun = "RUN --mount=type=secret,id=" + EnvironmentGitSecret + " git -c include.path=/run/secrets/" + EnvironmentGitSecret + " clone <repository url> /tmp/src"
 
 // RegistryLogin is a login to the registry host Registry, good until ExpiresAt. It is handed out
 // to push one build (POST /internal/clusters/{name}/builds/{key}/credential) and, as registry_pull
@@ -70,7 +67,7 @@ type EnvironmentGitCredential struct {
 	Token         string `json:"token"`
 }
 
-// GitConfig is the git config EnvironmentGitCommand includes: it rewrites RepositoryURL, with or
+// GitConfig is the git config EnvironmentGitRun includes: it rewrites RepositoryURL, with or
 // without .git, to ProxyURL, and sends Token there alone.
 func (c EnvironmentGitCredential) GitConfig() ([]byte, error) {
 	for name, value := range map[string]string{"proxy_url": c.ProxyURL, "repository_url": c.RepositoryURL, "token": c.Token} {

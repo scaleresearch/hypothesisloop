@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -99,7 +100,7 @@ func (s *Store) judgeConstraints(ctx context.Context, pe *domain.PlatformExperim
 func judgeConstraint(metric domain.MetricDefinition, samples []VectorSample, completed map[string]bool, unrankable map[string]string, broken map[string]bool) {
 	reported, violated := map[string]bool{}, map[string]float64{}
 	for _, sm := range samples {
-		if basis := sm.Labels["metric_basis"]; basis != "" && basis != "raw" {
+		if basis := sm.Labels["metric_basis"]; basis != "" && basis != platformapi.BasisRaw {
 			continue
 		}
 		job := sm.Labels["job_id"]
@@ -149,7 +150,7 @@ func (s *Store) LastPerJobOnMetric(ctx context.Context, pe *domain.PlatformExper
 	for _, sm := range samples {
 		job := sm.Labels["job_id"]
 		// A job's samples from before metric_basis existed carry none: one value per job stands.
-		if basis := sm.Labels["metric_basis"]; !completed[job] || seen[job] || (basis != "" && basis != "raw") {
+		if basis := sm.Labels["metric_basis"]; !completed[job] || seen[job] || (basis != "" && basis != platformapi.BasisRaw) {
 			continue
 		}
 		seen[job] = true
@@ -225,7 +226,7 @@ func bestOf(metric domain.MetricDefinition, samples []VectorSample, rankable map
 		// existed carry no metric_basis at all ("") alongside samples written after that
 		// explicitly say "raw". Both are eligible and must be merged with the same
 		// direction-aware aggregation as everything else, not treated as a conflict.
-		if basis := sm.Labels["metric_basis"]; basis != "" && basis != "raw" {
+		if basis := sm.Labels["metric_basis"]; basis != "" && basis != platformapi.BasisRaw {
 			nonRaw[agentID] = true
 			continue
 		}

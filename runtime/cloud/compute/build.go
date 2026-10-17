@@ -2,23 +2,17 @@ package compute
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/opencontainers/go-digest"
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/contract/exitline"
 	"github.com/scaleresearch/hypothesisloop/runtime/cloud/provider"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadenv"
 )
-
-// wrapperCommand runs the job's command under hl exec, which the job image carries. stopGrace is
-// how long the wrapper lets the command run after SIGTERM.
-func wrapperCommand(stopGrace int64, command []string) []string {
-	return append([]string{"hl", "exec", "--stop-grace", strconv.FormatInt(stopGrace, 10), "--"}, command...)
-}
 
 // isEnvironment says image is one of the environments repository's, named by its digest alone.
 func (e *Executor) isEnvironment(image string) bool {
@@ -94,7 +88,7 @@ func (e *Executor) buildSpec(exp *clusterapi.DesiredJob) (provider.Spec, error) 
 	argv := append(append([]string(nil), command...), args...)
 	return provider.Spec{
 		Image:            spec.Image,
-		Command:          wrapperCommand(max(grace, checkpointGrace), argv),
+		Command:          exitline.Wrap(max(grace, checkpointGrace), argv),
 		Env:              env,
 		AcceleratorType:  acceleratorType,
 		AcceleratorCount: accelerators,

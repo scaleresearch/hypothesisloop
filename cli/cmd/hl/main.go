@@ -10,6 +10,8 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 	"github.com/scaleresearch/hypothesisloop/cli/internal/command"
+	"github.com/scaleresearch/hypothesisloop/contract/agentsandbox"
+	"github.com/scaleresearch/hypothesisloop/contract/exitline"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/agent"
 	"github.com/scaleresearch/hypothesisloop/cli/internal/jobexec"
@@ -22,7 +24,7 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
-	token := os.Getenv("HL_TOKEN")
+	token := os.Getenv(agentsandbox.EnvToken)
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, usage(token))
 		return 2
@@ -32,7 +34,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	client := apiclient.New(os.Getenv("API_URL"), token)
+	client := apiclient.New(os.Getenv(agentsandbox.EnvAPIURL), token)
 	for _, cmd := range commands {
 		if cmd.Name != args[0] {
 			continue
@@ -148,7 +150,7 @@ func init() {
 			{Name: "remove", About: "end a cluster: requeue its jobs and refuse its runtime token", Run: people.ClusterRemove},
 		}},
 		{Name: "watch", About: "your own updates, one JSON object per line", Run: shared.Watch},
-		{Name: "exec", About: "--stop-grace SECONDS -- COMMAND: a runtime's wrapper around a job's command", Run: func(_ *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+		{Name: exitline.WrapperCommand, About: "--stop-grace SECONDS -- COMMAND: a runtime's wrapper around a job's command", Run: func(_ *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 			return jobexec.Run(args, stdout, stderr)
 		}},
 	}

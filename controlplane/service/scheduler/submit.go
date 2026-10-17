@@ -10,6 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
@@ -89,7 +90,7 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		}
 	default:
 		return &AdmissionError{
-			Reason:  "experiment_closed",
+			Reason:  platformapi.ReasonExperimentClosed,
 			Message: fmt.Sprintf("platform experiment %s is over; jobs are accepted only while it is running", pe.ID),
 		}
 	}
@@ -98,7 +99,7 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	// after it would be admitted only to be evicted.
 	if closesAt := pe.ClosesAt(); !closesAt.IsZero() && !closesAt.After(time.Now()) {
 		return &AdmissionError{
-			Reason:  "experiment_closed",
+			Reason:  platformapi.ReasonExperimentClosed,
 			Message: fmt.Sprintf("platform experiment %s ended at %s; jobs are accepted only before its end", pe.ID, closesAt.UTC().Format(time.RFC3339)),
 		}
 	}

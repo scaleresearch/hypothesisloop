@@ -10,21 +10,18 @@ import (
 	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 )
 
-// PlatformExperimentStatus is the lifecycle state of a platform experiment.
-type PlatformExperimentStatus string
+// PlatformExperimentStatus is the API's own (platformapi).
+type PlatformExperimentStatus = platformapi.PlatformExperimentStatus
 
 const (
-	// PlatformExpDraft is a platform experiment being planned from a goal: a planner the platform
-	// runs works out what to measure and proposes the rest, nobody else joins, and no job runs
-	// until a person accepts the proposal, which opens it.
-	PlatformExpDraft   PlatformExperimentStatus = "draft"
-	PlatformExpOpen    PlatformExperimentStatus = "open"
-	PlatformExpRunning PlatformExperimentStatus = "running"
-	PlatformExpClosed  PlatformExperimentStatus = "closed"
+	PlatformExpDraft   = platformapi.PlatformExpDraft
+	PlatformExpOpen    = platformapi.PlatformExpOpen
+	PlatformExpRunning = platformapi.PlatformExpRunning
+	PlatformExpClosed  = platformapi.PlatformExpClosed
 )
 
 // PlatformExperimentStatuses is every status of a platform experiment, in the order it goes through them.
-var PlatformExperimentStatuses = []PlatformExperimentStatus{PlatformExpDraft, PlatformExpOpen, PlatformExpRunning, PlatformExpClosed}
+var PlatformExperimentStatuses = platformapi.PlatformExperimentStatuses
 
 // ValidPlatformExperimentStatus reports whether s is one of the recognized statuses. As with
 // ValidExperimentStatus, filtering on an unrecognized value would otherwise reach Postgres as a

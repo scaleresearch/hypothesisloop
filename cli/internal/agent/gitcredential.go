@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
+	"github.com/scaleresearch/hypothesisloop/contract/jobenv"
 )
 
 const gitCredentialHelp = `usage: hl git-credential get|store|erase
@@ -28,7 +29,7 @@ address it prints nothing and git carries on without it. Nothing is stored, so s
 nothing.`
 
 func GitCredential(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	return credentialHelper(c, os.Getenv("HL_GIT_URL"), args, os.Stdin, stdout, stderr)
+	return credentialHelper(c, os.Getenv(jobenv.HLGitURL), args, os.Stdin, stdout, stderr)
 }
 
 // credentialHelper speaks git's credential helper protocol: attributes as key=value lines on

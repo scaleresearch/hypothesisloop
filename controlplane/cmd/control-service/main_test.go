@@ -128,7 +128,7 @@ func TestTheWatchUpgradeIsRefusedWithoutAToken(t *testing.T) {
 	for name, headers := range map[string]map[string]string{
 		"no subprotocol":            {},
 		"the token as a header":     {"Authorization": "Bearer t"},
-		"the subprotocol alone":     {"Sec-WebSocket-Protocol": watch.Subprotocol},
+		"the subprotocol alone":     {"Sec-WebSocket-Protocol": platformapi.WatchSubprotocol},
 		"another subprotocol first": {"Sec-WebSocket-Protocol": "other, t"},
 	} {
 		request := httptest.NewRequest(http.MethodGet, "/watch?platform_experiment_id=pe-1", nil)
@@ -140,7 +140,7 @@ func TestTheWatchUpgradeIsRefusedWithoutAToken(t *testing.T) {
 		}
 		recorder := httptest.NewRecorder()
 		r.ServeHTTP(recorder, request)
-		if recorder.Code != http.StatusUnauthorized || !strings.Contains(recorder.Body.String(), "Sec-WebSocket-Protocol: "+watch.Subprotocol) {
+		if recorder.Code != http.StatusUnauthorized || !strings.Contains(recorder.Body.String(), "Sec-WebSocket-Protocol: "+platformapi.WatchSubprotocol) {
 			t.Errorf("%s: got = %d %s, want = 401 naming the subprotocol", name, recorder.Code, recorder.Body)
 		}
 	}

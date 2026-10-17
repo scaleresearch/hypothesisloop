@@ -25,9 +25,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 )
 
-// subprotocol is the WebSocket subprotocol /watch speaks; the token is offered beside it.
-const subprotocol = "hypothesisloop.watch"
-
 const (
 	TimeoutExitCode = 124
 	UsageExitCode   = 2
@@ -416,7 +413,7 @@ func parseUntil(expr string) (func(map[string]any) bool, error) {
 	return func(event map[string]any) bool {
 		kind, _ := event["kind"].(string)
 		value, _ := event["value"].(string)
-		return (kind == "experiment.status" || kind == "platform_experiment.status") && wanted[value]
+		return (kind == platformapi.EventExperimentStatus || kind == platformapi.EventPlatformExperimentStatus) && wanted[value]
 	}, nil
 }
 
@@ -470,7 +467,7 @@ func connect(base, path, token string, budget time.Duration) (*webSocket, error)
 		"Upgrade: websocket\r\n" +
 		"Connection: Upgrade\r\n" +
 		"Sec-WebSocket-Key: " + key + "\r\n" +
-		"Sec-WebSocket-Protocol: " + subprotocol + ", " + token + "\r\n" +
+		"Sec-WebSocket-Protocol: " + platformapi.WatchSubprotocol + ", " + token + "\r\n" +
 		"Sec-WebSocket-Version: 13\r\n\r\n"
 	if _, err := conn.Write([]byte(req)); err != nil {
 		conn.Close()

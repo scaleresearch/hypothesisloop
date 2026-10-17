@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -118,7 +119,7 @@ INSERT INTO experiments (
 	}
 	w.jobStatus(j)
 	if j.sameHypothesis != "" {
-		w.Change(j.change(domain.EventJobDuplicate, j.hypothesisID, j.sameHypothesis))
+		w.Change(j.change(platformapi.EventJobDuplicate, j.hypothesisID, j.sameHypothesis))
 	}
 	return nil
 }

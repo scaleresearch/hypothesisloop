@@ -3,6 +3,7 @@ package db
 import (
 	"github.com/jackc/pgx/v5"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -43,7 +44,7 @@ func (j jobWritten) change(kind, value, detail string) domain.Change {
 // the queue reason it waits for, which a job nobody has judged yet does not have.
 func (w *Write) jobStatus(j jobWritten) {
 	status := domain.AnsweredStatus(domain.ExperimentStatus(j.status), j.evictionReason)
-	w.Change(j.change(domain.EventExperimentStatus, string(status), j.evictionReason))
+	w.Change(j.change(platformapi.EventExperimentStatus, string(status), j.evictionReason))
 	w.jobQueueReason(j)
 }
 
@@ -53,11 +54,11 @@ func (w *Write) jobQueueReason(j jobWritten) {
 	if reason == "" || reason == domain.NotAdmittedAwaitingAdmission {
 		return
 	}
-	w.Change(j.change(domain.EventExperimentBlocked, reason, message))
+	w.Change(j.change(platformapi.EventExperimentBlocked, reason, message))
 }
 
 // jobHeld announces the reason a write recorded the job is held for.
 func (w *Write) jobHeld(j jobWritten) {
 	reason, message := domain.SplitQueueReason(j.heldReason)
-	w.Change(j.change(domain.EventJobHeld, reason, message))
+	w.Change(j.change(platformapi.EventJobHeld, reason, message))
 }

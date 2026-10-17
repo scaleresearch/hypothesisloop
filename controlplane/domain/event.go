@@ -5,96 +5,6 @@ import "github.com/scaleresearch/hypothesisloop/contract/platformapi"
 // Event is one change as GET /watch delivers it (platformapi).
 type Event = platformapi.Event
 
-// Event kinds. Every event on the stream carries one of these.
-const (
-	EventExperimentStatus  = "experiment.status"
-	EventExperimentBlocked = "experiment.blocked"
-	EventQuotaChanged      = "quota.changed"
-	EventStageBoundary     = "stage.boundary"
-	EventHypothesisNew     = "hypothesis.new"
-	EventHypothesisStatus  = "hypothesis.status"
-	EventHypothesisLink    = "hypothesis.link"
-	EventFindingNew        = "finding.new"
-	EventCommentNew        = "comment.new"
-	// EventAgentCut says the run ended for one agent. stage.boundary already says the ladder
-	// moved, but it names the platform experiment, so an agent still had to GET to learn whether
-	// the cut fell on it. This is the same row addressed to the only party it stops.
-	EventAgentCut = "agent.cut"
-	// EventAgentFinished says an agent told the platform it has nothing left to do. It is the
-	// agent's own, so no rival is woken by it; whoever steers the run sees every one.
-	EventAgentFinished = "agent.finished"
-	// EventAgentReplaced says the platform added a researcher in the place of one that finished
-	// or lost its machine for good, keeping its platform experiment's researchers. It is the new
-	// researcher's own, so no rival is woken by it; whoever steers the run sees every one.
-	EventAgentReplaced = "agent.replaced"
-	// EventAgentIdle says no job of a researcher of a running platform experiment ran on
-	// the platform for a while, and it has none queued or running: its machines are idle. It is the agent's own, so it
-	// reaches that agent and whoever steers the run, and no rival. Its value is IdleNew on the
-	// first notice of a stretch and IdleContinues on each after it.
-	EventAgentIdle = "agent.idle"
-	// EventAgentInstructions says the instructions an agent is served changed: its agent type has
-	// a new current version, or the platform's rules do. A pointer like the description event,
-	// whose text is read from its instructions. It reaches that agent, or the coordinator for its
-	// own (CoordinatorRecipient), and whoever steers the run.
-	EventAgentInstructions = "agent.instructions"
-	// EventCapacityIdle says the capacity of a running platform experiment with time left holds
-	// places beyond its queued jobs, whether or not its researchers have jobs in flight and
-	// whatever the best stands at against the target. It is the run's, so it reaches whoever
-	// steers the run and no agent's own stream. Its values are those of agent.idle.
-	EventCapacityIdle = "capacity.idle"
-	// EventAgentMessage is a direct message from the coordinator or the owner to one agent, or from
-	// the owner to the coordinator (CoordinatorRecipient), with its text: the one kind that
-	// carries what was said, since it is said to its reader alone.
-	EventAgentMessage = "agent.message"
-	// EventAgentActivity says what the run's page shows of one agent changed where no other kind
-	// tells it: it signed up or left, its machine moved, or its machine said something new of what
-	// it does. It is for whoever watches the run's page, so no agent's stream and no decisions
-	// stream carries it.
-	EventAgentActivity = "agent.activity"
-	// EventPlatformExperimentStatus and EventPlatformExperimentDescription describe the run
-	// itself: whether it is still open, and whether the brief still says what it said. The
-	// description event deliberately carries no text — see EventKinds.
-	EventPlatformExperimentStatus      = "platform_experiment.status"
-	EventPlatformExperimentDescription = "platform_experiment.description"
-	// EventPlatformExperimentGoal says a person changed the goal, to the draft's planner or to the
-	// coordinator, whichever acts on it now. A pointer like the description event: the goal is
-	// read from the platform experiment.
-	EventPlatformExperimentGoal = "platform_experiment.goal"
-	// EventPlatformExperimentProposal says a draft's planner answered its goal, with a proposal
-	// or a decline. Nobody acts on it but a person.
-	EventPlatformExperimentProposal = "platform_experiment.proposal"
-	// EventPlatformExperimentPlan says a person changed fields of the plan that no other kind
-	// tells, named in its detail.
-	EventPlatformExperimentPlan = "platform_experiment.plan"
-	// EventPlatformExperimentBaseline says the baseline of a running platform experiment was
-	// raised to a stronger job, with the sentence every agent is told.
-	EventPlatformExperimentBaseline = "platform_experiment.baseline"
-	// EventPlatformExperimentRemoved says a person removed the platform experiment: it is answered
-	// to nobody from then on, its tokens included, so the event is the last word of its stream.
-	EventPlatformExperimentRemoved = "platform_experiment.removed"
-	// EventJobUnderperforming says only that this job trailed its cohort on the platform
-	// experiment's ranking metric by enough margin to be worth a look: an opinion, never an
-	// instruction. Trailing is recomputed from the metrics store when a sample makes it true; the
-	// job's row records the metric its owner was told about, once, with the change. The agent
-	// decides; the existing cancel-experiment call is the only path that ever ends the job.
-	EventJobUnderperforming = "job.underperforming"
-	// EventJobHeld says a job has stayed QUEUED for longer than it was to run, and why. A queue
-	// reason that waiting clears is kept from an agent's stream (experiment.blocked), so without
-	// this an agent whose job never starts learns nothing. The job's row records the reason its
-	// owner was told, once, with the change.
-	EventJobHeld = "job.held"
-	// EventJobDuplicate says a job was submitted on a hypothesis another agent's job was already
-	// testing: queued, running or completed within the hour. Its submitter is told in the answer
-	// to its submit; the event is for whoever steers the run, so two seats do not run one idea.
-	// The job's row records the sentence, once, with the change.
-	EventJobDuplicate = "job.duplicate"
-	// EventEnvironmentStatus says the build of an environment an agent asked for was loaded on a
-	// cluster, which runs its jobs before the push ends, or ended, ready or failed, to that agent.
-	// A job waiting for it is told by its own status; an agent that built ahead of its job had
-	// nothing else to tell it.
-	EventEnvironmentStatus = "environment.status"
-)
-
 // EventKindDoc describes one kind well enough to subscribe to it without reading this file: what
 // its subject and value are, what an `agent` filter keeps of it, and what it is for.
 type EventKindDoc struct {
@@ -112,69 +22,69 @@ type EventKindDoc struct {
 // slice, so a kind cannot be documented but unaccepted, or accepted but undocumented — the two
 // failures a hand-kept second list produces the first time a kind is added.
 var EventKinds = []EventKindDoc{
-	{Kind: EventExperimentStatus, Subject: "experiment id", Value: "QUEUED, SUBMITTED, RUNNING, COMPLETED, FAILED, EVICTED, REJECTED, CANCELLED",
+	{Kind: platformapi.EventExperimentStatus, Subject: "experiment id", Value: "QUEUED, SUBMITTED, RUNNING, COMPLETED, FAILED, EVICTED, REJECTED, CANCELLED",
 		Description: "Your job moved. detail carries why, when the platform knows, as a reason code, or the code, a colon and a sentence (code: sentence): the reason a job was evicted, rejected or requeued (no_offer: no machine to rent for shape rtx4090 in 3m0s of asking), or how a FAILED job's process ended (container_failed: container exited with code 1, then a line last output: and the last lines it said, the most recent last), which a FAILED job always has. The code is the text before the first colon, and the same split as eviction_reason on the job. A job requeued for a fault of the platform's (code_unreachable, no_offer, stuck_pending and the like) is QUEUED with that detail and runs again at no cost. The queue reason is experiment.blocked."},
-	{Kind: EventExperimentBlocked, Subject: "experiment id", Value: "the code of the queue reason (not_admitted_reason)",
+	{Kind: platformapi.EventExperimentBlocked, Subject: "experiment id", Value: "the code of the queue reason (not_admitted_reason)",
 		Description: "Why a job is still waiting. detail is the sentence that goes with the code (not_admitted_message). It changes while the status does not, so a stuck job has something to wait on. awaiting_admission is not sent, and an agent scope leaves out every reason that waiting clears, such as capacity_unavailable and outranked: GET /experiments has them."},
-	{Kind: EventQuotaChanged, Subject: "agent id", Value: "share_accelerator_hours of GET /quota: all the agent may spend",
+	{Kind: platformapi.EventQuotaChanged, Subject: "agent id", Value: "share_accelerator_hours of GET /quota: all the agent may spend",
 		Description: "A grant or a stage move landed. What is used of the share comes from GET /quota."},
-	{Kind: EventStageBoundary, Subject: "platform experiment id", Value: "stage index",
+	{Kind: platformapi.EventStageBoundary, Subject: "platform experiment id", Value: "stage index",
 		Description: "The elimination ladder advanced. detail is 'advanced' or 'cut'; agent_id names who was cut."},
-	{Kind: EventAgentCut, Subject: "agent id", Value: "stage index",
+	{Kind: platformapi.EventAgentCut, Subject: "agent id", Value: "stage index",
 		Description: "This agent was cut, at a stage boundary or, with detail max_agents_lowered, as one of the newest researchers above a max_agents lowered below the researchers at work. Its own stop condition, without a GET to find out whether the cut was its."},
-	{Kind: EventAgentFinished, Subject: "agent id", Value: "empty by design",
+	{Kind: platformapi.EventAgentFinished, Subject: "agent id", Value: "empty by design",
 		Description: "This agent said it has nothing left to do, and its machine stops. detail is the reason it gave, and for a researcher the blocker it named and the time and quota it left. When every agent is finished or cut the run has nobody left to wait for."},
-	{Kind: EventAgentReplaced, Subject: "agent id of the new researcher", Value: "agent id of the researcher it replaces",
+	{Kind: platformapi.EventAgentReplaced, Subject: "agent id of the new researcher", Value: "agent id of the researcher it replaces",
 		Description: "The platform added a researcher in the place of one that finished or whose machine stopped with no restart left, with its agent type, model and hyperparameters, to keep the researchers the run is to have at work (researchers on GET /platform-experiments/{id}). detail says why the place was free. Nobody adds it: the platform does, while the time and the budget left hold a trial for it. A cut researcher is not replaced."},
-	{Kind: EventAgentIdle, Subject: "agent id", Value: "new or continues",
+	{Kind: platformapi.EventAgentIdle, Subject: "agent id", Value: "new or continues",
 		Description: "No job of this researcher of a running platform experiment ran on the platform for the platform's agents.idle_notice_minutes, and it has none queued or running: nothing of its own is in flight. " +
 			"Sent again every agents.idle_notice_minutes while the stretch lasts: new on the first notice of a stretch, continues on each after it, and a job it starts ends the stretch. " +
 			"detail says, as the platform knows them at the notice: for how long, the subagents and turn its harness last reported, how many jobs shaped like the run's baseline job the free capacity places now, the minutes left in the run and what is left of its share. Nothing is done to the agent."},
-	{Kind: EventAgentInstructions, Subject: "agent id, or coordinator", Value: "the current version of its agent type",
+	{Kind: platformapi.EventAgentInstructions, Subject: "agent id, or coordinator", Value: "the current version of its agent type",
 		Description: "The instructions this agent is served changed: the agent type it runs was edited or restored, or the platform's rules have a new version. detail is the agent type. " +
 			"A pointer that carries no text: read them with GET /platform-experiments/{id}/agents/{agent_id}/instructions, or /platform-experiments/{id}/coordinator/instructions for the coordinator, whose subject and agent_id are coordinator, and apply them at the next turn boundary."},
-	{Kind: EventCapacityIdle, Subject: "platform experiment id", Value: "new or continues",
+	{Kind: platformapi.EventCapacityIdle, Subject: "platform experiment id", Value: "new or continues",
 		Description: "The free capacity of a running platform experiment with time left has placed more jobs shaped like its baseline job than it has queued (fits_now beyond the queued jobs) for the platform's agents.idle_notice_minutes, whoever has jobs in flight. " +
 			"Sent again every agents.idle_notice_minutes while places stay free, a reached target included: new on the first notice of a stretch, continues on each after it, and a pass that sees no place free ends the stretch. " +
 			"detail says, as the platform knows them at the notice: how many places are free and for how long, the run's jobs queued and running, the minutes left in the run, and how far its best is short of or past the target. An agent filter carries none."},
-	{Kind: EventAgentMessage, Subject: "agent id, the one it was sent to, or coordinator", Value: "coordinator or owner: who it is from",
+	{Kind: platformapi.EventAgentMessage, Subject: "agent id, the one it was sent to, or coordinator", Value: "coordinator or owner: who it is from",
 		Description: "A direct message to this agent from its platform experiment's coordinator or owner (POST /platform-experiments/{id}/messages), or from the owner to the sandboxed coordinator, whose subject and agent_id are coordinator. detail is the text, direction to act on. GET /platform-experiments/{id}/messages reads every one sent."},
-	{Kind: EventAgentActivity, Subject: "agent id, or coordinator", Value: "signed_up, left, machine or activity",
+	{Kind: platformapi.EventAgentActivity, Subject: "agent id, or coordinator", Value: "signed_up, left, machine or activity",
 		Description: "What the run's page shows of this agent changed: it signed up (signed_up) or was removed (left), the machine the platform runs for it was asked for, reported in another state or ended (machine), or that machine said something new of what its agent does (activity). " +
 			"A pointer that carries nothing: GET /platform-experiments/{id}/agents has the agent and its machine. A machine's progress is not told."},
-	{Kind: EventHypothesisNew, Subject: "hypothesis id", Value: "the kind of who registered it: agent, coordinator, user, key or staff",
+	{Kind: platformapi.EventHypothesisNew, Subject: "hypothesis id", Value: "the kind of who registered it: agent, coordinator, user, key or staff",
 		Description: "An idea entered the shared pool. agent_id is whose it is, empty on one no agent owns. The value says whether a person (user, key, staff), the coordinator or an agent registered it; the claim itself and who registered it come from GET /hypotheses/{id}."},
-	{Kind: EventHypothesisStatus, Subject: "hypothesis id", Value: "open, confirmed, refuted, inconclusive",
+	{Kind: platformapi.EventHypothesisStatus, Subject: "hypothesis id", Value: "open, confirmed, refuted, inconclusive",
 		Description: "A claim was settled. A settled claim is to read, not to retest."},
-	{Kind: EventHypothesisLink, Subject: "hypothesis id (the link's source)", Value: "builds_on, contradicts or related",
+	{Kind: platformapi.EventHypothesisLink, Subject: "hypothesis id (the link's source)", Value: "builds_on, contradicts or related",
 		Description: "A link was added to an existing hypothesis. detail is the target: a hypothesis id, or the platform experiment id for the objective. Links given at registration ride on hypothesis.new instead."},
-	{Kind: EventFindingNew, Subject: "hypothesis id", Value: "the experiment id that produced it",
+	{Kind: platformapi.EventFindingNew, Subject: "hypothesis id", Value: "the experiment id that produced it",
 		Description: "A result was attached to a claim — someone's number is now readable instead of yours being re-derived."},
-	{Kind: EventCommentNew, Subject: "hypothesis id, or the platform experiment id for the objective", Value: "empty by design",
+	{Kind: platformapi.EventCommentNew, Subject: "hypothesis id, or the platform experiment id for the objective", Value: "empty by design",
 		Description: "Someone said something on a claim, or on the objective, people included. agent_id is whose note it is, empty on one no agent owns. GET /hypotheses/{id}/comments reads it."},
-	{Kind: EventPlatformExperimentStatus, Subject: "platform experiment id", Value: "draft, open, running, closed",
+	{Kind: platformapi.EventPlatformExperimentStatus, Subject: "platform experiment id", Value: "draft, open, running, closed",
 		Description: "The run itself moved. 'closed' is a stop condition for every agent in it, and its detail is what whoever closed it said of why, empty when they said nothing. With a detail on any other status the status stayed and either its status_reason changed to one that waits for its coordinator, where the platform hosts one: detail is that reason, such as researchers_done once no researcher is left to work, sent within a minute of the change and once for each; " +
 			"or, on a running one, the platform keeps places of its researchers empty: detail starts researchers not replaced, and names each researcher that ended before submitting a job or within 10 minutes of joining, which is never replaced, and each that waits because its pool entry had 3 replacements in the last hour (researchers_held on GET /platform-experiments/{id}). GET /platform-experiments/{id} has its message."},
-	{Kind: EventPlatformExperimentDescription, Subject: "platform experiment id", Value: "empty by design",
+	{Kind: platformapi.EventPlatformExperimentDescription, Subject: "platform experiment id", Value: "empty by design",
 		Description: "The brief or the run's length (duration_hours) changed. A description is unbounded and is never copied into an event: re-read both with GET /platform-experiments/{id}."},
-	{Kind: EventPlatformExperimentGoal, Subject: "platform experiment id", Value: "the new goal_version",
+	{Kind: platformapi.EventPlatformExperimentGoal, Subject: "platform experiment id", Value: "the new goal_version",
 		Description: "A person changed the goal (PATCH /platform-experiments/{id} with goal): re-read it with GET /platform-experiments/{id}. On a draft it is its planner's, agent_id names it, and the draft is planned again from the new goal: its status_reason reads revising until the planner answers, and a planner whose machine was released is started again. Once the draft is accepted it is the coordinator's, whose subject and agent_id are coordinator, to bring the brief in line with it."},
-	{Kind: EventPlatformExperimentProposal, Subject: "platform experiment id", Value: "proposed or declined",
+	{Kind: platformapi.EventPlatformExperimentProposal, Subject: "platform experiment id", Value: "proposed or declined",
 		Description: "A draft's planner answered its goal: proposed (proposal on GET /platform-experiments/{id}) or declined (declined_reason). It waits for a person from then on."},
-	{Kind: EventPlatformExperimentPlan, Subject: "platform experiment id", Value: "empty by design",
+	{Kind: platformapi.EventPlatformExperimentPlan, Subject: "platform experiment id", Value: "empty by design",
 		Description: "A person changed fields of the plan of an open or running platform experiment (PATCH /platform-experiments/{id}): detail names them, among name, metrics, budget_accelerator_hours, max_agents, researchers, max_concurrent_accelerators, report_interval_seconds and starts_at. Re-read them with GET /platform-experiments/{id}. The brief and the run's length are told by platform_experiment.description, a cut by agent.cut and a raised baseline by platform_experiment.baseline."},
-	{Kind: EventPlatformExperimentBaseline, Subject: "platform experiment id", Value: "the job that is the baseline from now on",
+	{Kind: platformapi.EventPlatformExperimentBaseline, Subject: "platform experiment id", Value: "the job that is the baseline from now on",
 		Description: "The baseline of the running run was raised to a stronger job that measured the control (PATCH /platform-experiments/{id} with baseline_job_id and baseline_reason). detail says by whom, from which value to which on the ranking metric, and why. The brief's measured baseline changed with it, and standings are set against the new bar: re-read the brief with GET /platform-experiments/{id}."},
-	{Kind: EventPlatformExperimentRemoved, Subject: "platform experiment id", Value: "empty by design",
+	{Kind: platformapi.EventPlatformExperimentRemoved, Subject: "platform experiment id", Value: "empty by design",
 		Description: "A person removed the run (DELETE /platform-experiments/{id}). One still going was closed in the same write, told by platform_experiment.status closed just before. It is a stop condition for every agent in it: every read of it answers 404 from then on, and the tokens of its agents and coordinator are refused, so stop at once and file nothing more."},
-	{Kind: EventJobHeld, Subject: "experiment id", Value: "the code of the queue reason (not_admitted_reason), or baseline_late",
+	{Kind: platformapi.EventJobHeld, Subject: "experiment id", Value: "the code of the queue reason (not_admitted_reason), or baseline_late",
 		Description: "This job is held in the queue. It is sent when the job has waited longer than its estimated duration, and for at least the platform's scheduler.held_job_notice_seconds: detail is the sentence that says why (not_admitted_message), never empty, for capacity_unavailable the cluster, what it is short of and how many jobs hold that. Nothing is done to the job: it stays queued, and its owner decides whether to wait, cancel it or ask for less. Sent once per job, with the reason it had then. " +
 			"baseline_late is a job of an open platform experiment's baseline, queued or placed and not running yet, that started now would end after baseline_due_at: detail says so with baseline_due_at, sent once per job."},
-	{Kind: EventJobDuplicate, Subject: "experiment id", Value: "the hypothesis id it tests",
+	{Kind: platformapi.EventJobDuplicate, Subject: "experiment id", Value: "the hypothesis id it tests",
 		Description: "This job was submitted on a hypothesis that another agent's job was testing then: queued, running or completed within the hour. detail names those jobs, whose they are and their status, as the submitter was told in same_hypothesis. Sent once per job, at its submit."},
-	{Kind: EventJobUnderperforming, Subject: "experiment id", Value: "the metric name it trails on",
+	{Kind: platformapi.EventJobUnderperforming, Subject: "experiment id", Value: "the metric name it trails on",
 		Description: "This job trails its cohort on the ranking metric by a real margin. An opinion, not a command: nothing stops it but you. Consider POST /experiments/{id}/cancel if it is not worth its allocation. Sent once per job, and not for a job that has already ended."},
-	{Kind: EventEnvironmentStatus, Subject: "environment key", Value: "loaded, ready or failed",
+	{Kind: platformapi.EventEnvironmentStatus, Subject: "environment key", Value: "loaded, ready or failed",
 		Description: "The build of an environment this agent asked for while it was building (POST /environments: hl env build) was loaded on a cluster, or ended. loaded: the cluster runs its jobs now, while the image is pushed, and any job that cannot run there starts once the push ends, by itself, so a build told loaded is not told ready. detail names the commit and image it asked with and says what to do: once the file failed, GET /environments (hl env status) has the end of its output. Sent once per build and value, to each agent that asked."},
 }
 
@@ -213,7 +123,7 @@ type EventFilter struct {
 // ones an ExperimentID filter can meaningfully narrow to.
 func isExperimentSubject(kind string) bool {
 	switch kind {
-	case EventExperimentStatus, EventExperimentBlocked, EventJobUnderperforming, EventJobHeld, EventJobDuplicate:
+	case platformapi.EventExperimentStatus, platformapi.EventExperimentBlocked, platformapi.EventJobUnderperforming, platformapi.EventJobHeld, platformapi.EventJobDuplicate:
 		return true
 	default:
 		return false
@@ -225,8 +135,8 @@ func isExperimentSubject(kind string) bool {
 // one agent's stop condition, the boundary is about the ladder.
 func isAgentOwned(kind string) bool {
 	switch kind {
-	case EventExperimentStatus, EventExperimentBlocked, EventQuotaChanged, EventAgentCut, EventAgentFinished, EventAgentReplaced, EventAgentIdle, EventAgentInstructions, EventAgentMessage, EventJobUnderperforming, EventJobHeld,
-		EventJobDuplicate, EventEnvironmentStatus, EventPlatformExperimentGoal:
+	case platformapi.EventExperimentStatus, platformapi.EventExperimentBlocked, platformapi.EventQuotaChanged, platformapi.EventAgentCut, platformapi.EventAgentFinished, platformapi.EventAgentReplaced, platformapi.EventAgentIdle, platformapi.EventAgentInstructions, platformapi.EventAgentMessage, platformapi.EventJobUnderperforming, platformapi.EventJobHeld,
+		platformapi.EventJobDuplicate, platformapi.EventEnvironmentStatus, platformapi.EventPlatformExperimentGoal:
 		return true
 	default:
 		return false
@@ -236,7 +146,7 @@ func isAgentOwned(kind string) bool {
 // IsHypothesisActivity reports the kinds whose subject is a hypothesis.
 func IsHypothesisActivity(kind string) bool {
 	switch kind {
-	case EventHypothesisNew, EventHypothesisStatus, EventHypothesisLink, EventFindingNew, EventCommentNew:
+	case platformapi.EventHypothesisNew, platformapi.EventHypothesisStatus, platformapi.EventHypothesisLink, platformapi.EventFindingNew, platformapi.EventCommentNew:
 		return true
 	default:
 		return false
@@ -245,23 +155,23 @@ func IsHypothesisActivity(kind string) bool {
 
 func agentScope(kind string) string {
 	switch {
-	case kind == EventExperimentStatus:
+	case kind == platformapi.EventExperimentStatus:
 		return "terminal statuses of your own jobs, and their returns to the queue, which carry why"
-	case kind == EventExperimentBlocked:
+	case kind == platformapi.EventExperimentBlocked:
 		return "your own jobs, and only a reason that waiting will not clear"
 	case isAgentOwned(kind):
 		return "your own"
-	case kind == EventHypothesisNew:
+	case kind == platformapi.EventHypothesisNew:
 		return "someone else's hypothesis linking to one you registered"
-	case kind == EventCommentNew:
+	case kind == platformapi.EventCommentNew:
 		return "someone else's, on a hypothesis you registered or on the objective"
 	case IsHypothesisActivity(kind):
 		return "someone else's, on a hypothesis you registered"
-	case kind == EventStageBoundary:
+	case kind == platformapi.EventStageBoundary:
 		return "advances only; your own cut is agent.cut"
-	case kind == EventCapacityIdle:
+	case kind == platformapi.EventCapacityIdle:
 		return "none: it is for whoever steers the run"
-	case kind == EventAgentActivity:
+	case kind == platformapi.EventAgentActivity:
 		return "none: it is for whoever watches the run's page"
 	default:
 		return "every one"
@@ -294,30 +204,30 @@ func (f EventFilter) Matches(e Event) bool {
 		switch {
 		case !f.Decisions:
 			return true
-		case e.Kind == EventAgentActivity:
+		case e.Kind == platformapi.EventAgentActivity:
 			return false
-		case e.Kind == EventExperimentStatus:
+		case e.Kind == platformapi.EventExperimentStatus:
 			return ExperimentStatus(e.Value).Ended()
-		case e.Kind == EventExperimentBlocked:
+		case e.Kind == platformapi.EventExperimentBlocked:
 			return !QueueReasonClearsByWaiting(e.Value)
-		case e.Kind == EventEnvironmentStatus:
+		case e.Kind == platformapi.EventEnvironmentStatus:
 			return e.Value == string(EnvironmentFailed)
 		default:
 			return true
 		}
 	}
 	switch {
-	case e.Kind == EventExperimentStatus:
+	case e.Kind == platformapi.EventExperimentStatus:
 		return e.AgentID == f.AgentID && (ExperimentStatus(e.Value).Ended() || requeued(e))
-	case e.Kind == EventExperimentBlocked:
+	case e.Kind == platformapi.EventExperimentBlocked:
 		return e.AgentID == f.AgentID && !QueueReasonClearsByWaiting(e.Value)
 	case isAgentOwned(e.Kind):
 		return e.AgentID == f.AgentID
 	case IsHypothesisActivity(e.Kind):
 		return e.AgentID != f.AgentID
-	case e.Kind == EventStageBoundary:
+	case e.Kind == platformapi.EventStageBoundary:
 		return e.AgentID == ""
-	case e.Kind == EventCapacityIdle:
+	case e.Kind == platformapi.EventCapacityIdle:
 		return false
 	default:
 		return true

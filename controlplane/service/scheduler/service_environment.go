@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 )
@@ -114,7 +115,7 @@ func (s *Service) environmentJob(ctx context.Context, peID, codeRef, image strin
 		return nil, nil, &AdmissionError{Reason: "experiment_not_found", Message: fmt.Sprintf("platform experiment %s not found", peID)}
 	}
 	if pe.Status != domain.PlatformExpOpen && pe.Status != domain.PlatformExpRunning {
-		return nil, nil, &AdmissionError{Reason: "experiment_closed", Message: fmt.Sprintf("platform experiment %s is %s: environments are built for its jobs while it is open or running", pe.ID, pe.Status)}
+		return nil, nil, &AdmissionError{Reason: platformapi.ReasonExperimentClosed, Message: fmt.Sprintf("platform experiment %s is %s: environments are built for its jobs while it is open or running", pe.ID, pe.Status)}
 	}
 	if !codeRefPattern.MatchString(codeRef) {
 		return nil, nil, &AdmissionError{Reason: ReasonMalformed, Message: "code_ref must be \"<git-remote-url>@<commit-sha>\", a full 40-character commit SHA"}

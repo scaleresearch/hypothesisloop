@@ -56,3 +56,98 @@ type Frame struct {
 // ResetKind is the kind of the line hl watch prints in place of the changes a saved place no
 // longer holds: whoever reads it re-reads state.
 const ResetKind = "watch.reset"
+
+// WatchSubprotocol is the WebSocket subprotocol GET /watch speaks. A client offers it together
+// with its token, "hypothesisloop.watch, <token>", and the server selects this one: a browser
+// refuses a handshake that selects none of what it offered.
+const WatchSubprotocol = "hypothesisloop.watch"
+
+// Event kinds. Every event on the stream carries one of these.
+const (
+	EventExperimentStatus  = "experiment.status"
+	EventExperimentBlocked = "experiment.blocked"
+	EventQuotaChanged      = "quota.changed"
+	EventStageBoundary     = "stage.boundary"
+	EventHypothesisNew     = "hypothesis.new"
+	EventHypothesisStatus  = "hypothesis.status"
+	EventHypothesisLink    = "hypothesis.link"
+	EventFindingNew        = "finding.new"
+	EventCommentNew        = "comment.new"
+	// EventAgentCut says the run ended for one agent. stage.boundary already says the ladder
+	// moved, but it names the platform experiment, so an agent still had to GET to learn whether
+	// the cut fell on it. This is the same row addressed to the only party it stops.
+	EventAgentCut = "agent.cut"
+	// EventAgentFinished says an agent told the platform it has nothing left to do. It is the
+	// agent's own, so no rival is woken by it; whoever steers the run sees every one.
+	EventAgentFinished = "agent.finished"
+	// EventAgentReplaced says the platform added a researcher in the place of one that finished
+	// or lost its machine for good, keeping its platform experiment's researchers. It is the new
+	// researcher's own, so no rival is woken by it; whoever steers the run sees every one.
+	EventAgentReplaced = "agent.replaced"
+	// EventAgentIdle says no job of a researcher of a running platform experiment ran on
+	// the platform for a while, and it has none queued or running: its machines are idle. It is the agent's own, so it
+	// reaches that agent and whoever steers the run, and no rival. Its value is IdleNew on the
+	// first notice of a stretch and IdleContinues on each after it.
+	EventAgentIdle = "agent.idle"
+	// EventAgentInstructions says the instructions an agent is served changed: its agent type has
+	// a new current version, or the platform's rules do. A pointer like the description event,
+	// whose text is read from its instructions. It reaches that agent, or the coordinator for its
+	// own (CoordinatorRecipient), and whoever steers the run.
+	EventAgentInstructions = "agent.instructions"
+	// EventCapacityIdle says the capacity of a running platform experiment with time left holds
+	// places beyond its queued jobs, whether or not its researchers have jobs in flight and
+	// whatever the best stands at against the target. It is the run's, so it reaches whoever
+	// steers the run and no agent's own stream. Its values are those of agent.idle.
+	EventCapacityIdle = "capacity.idle"
+	// EventAgentMessage is a direct message from the coordinator or the owner to one agent, or from
+	// the owner to the coordinator (CoordinatorRecipient), with its text: the one kind that
+	// carries what was said, since it is said to its reader alone.
+	EventAgentMessage = "agent.message"
+	// EventAgentActivity says what the run's page shows of one agent changed where no other kind
+	// tells it: it signed up or left, its machine moved, or its machine said something new of what
+	// it does. It is for whoever watches the run's page, so no agent's stream and no decisions
+	// stream carries it.
+	EventAgentActivity = "agent.activity"
+	// EventPlatformExperimentStatus and EventPlatformExperimentDescription describe the run
+	// itself: whether it is still open, and whether the brief still says what it said. The
+	// description event deliberately carries no text.
+	EventPlatformExperimentStatus      = "platform_experiment.status"
+	EventPlatformExperimentDescription = "platform_experiment.description"
+	// EventPlatformExperimentGoal says a person changed the goal, to the draft's planner or to the
+	// coordinator, whichever acts on it now. A pointer like the description event: the goal is
+	// read from the platform experiment.
+	EventPlatformExperimentGoal = "platform_experiment.goal"
+	// EventPlatformExperimentProposal says a draft's planner answered its goal, with a proposal
+	// or a decline. Nobody acts on it but a person.
+	EventPlatformExperimentProposal = "platform_experiment.proposal"
+	// EventPlatformExperimentPlan says a person changed fields of the plan that no other kind
+	// tells, named in its detail.
+	EventPlatformExperimentPlan = "platform_experiment.plan"
+	// EventPlatformExperimentBaseline says the baseline of a running platform experiment was
+	// raised to a stronger job, with the sentence every agent is told.
+	EventPlatformExperimentBaseline = "platform_experiment.baseline"
+	// EventPlatformExperimentRemoved says a person removed the platform experiment: it is answered
+	// to nobody from then on, its tokens included, so the event is the last word of its stream.
+	EventPlatformExperimentRemoved = "platform_experiment.removed"
+	// EventJobUnderperforming says only that this job trailed its cohort on the platform
+	// experiment's ranking metric by enough margin to be worth a look: an opinion, never an
+	// instruction. Trailing is recomputed from the metrics store when a sample makes it true; the
+	// job's row records the metric its owner was told about, once, with the change. The agent
+	// decides; the existing cancel-experiment call is the only path that ever ends the job.
+	EventJobUnderperforming = "job.underperforming"
+	// EventJobHeld says a job has stayed QUEUED for longer than it was to run, and why. A queue
+	// reason that waiting clears is kept from an agent's stream (experiment.blocked), so without
+	// this an agent whose job never starts learns nothing. The job's row records the reason its
+	// owner was told, once, with the change.
+	EventJobHeld = "job.held"
+	// EventJobDuplicate says a job was submitted on a hypothesis another agent's job was already
+	// testing: queued, running or completed within the hour. Its submitter is told in the answer
+	// to its submit; the event is for whoever steers the run, so two seats do not run one idea.
+	// The job's row records the sentence, once, with the change.
+	EventJobDuplicate = "job.duplicate"
+	// EventEnvironmentStatus says the build of an environment an agent asked for was loaded on a
+	// cluster, which runs its jobs before the push ends, or ended, ready or failed, to that agent.
+	// A job waiting for it is told by its own status; an agent that built ahead of its job had
+	// nothing else to tell it.
+	EventEnvironmentStatus = "environment.status"
+)

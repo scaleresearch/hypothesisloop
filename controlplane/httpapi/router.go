@@ -7,6 +7,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/gitproxy"
@@ -47,7 +49,7 @@ type Handlers struct {
 }
 
 // webSockets are the paths a WebSocket client opens, with the subprotocol that carries its token.
-var webSockets = map[string]string{"/watch": watch.Subprotocol}
+var webSockets = map[string]string{"/watch": platformapi.WatchSubprotocol}
 
 // NewRouter mounts every route of the API behind auth.Gate, which every request but a CORS
 // preflight passes before any handler runs.
@@ -82,7 +84,7 @@ func NewRouter(h Handlers) chi.Router {
 	clusterAgentDoc := NewDoc(clusterAgentRouter, "hypothesisloop cluster-agent API", "1.0.0", "", h.Access, h.Logger)
 	RegisterClusterAgent(clusterAgentDoc, h.ClusterExchange)
 	clusterAgentDoc.MountExplore(clusterAgentRouter)
-	r.Mount("/internal/clusters", clusterAgentRouter)
+	r.Mount(clusterapi.ClustersPath, clusterAgentRouter)
 
 	// One doc for the whole public API: every operation an agent or the UI can call is
 	// registered here, so /openapi.json and /explore describe all of it in one place.

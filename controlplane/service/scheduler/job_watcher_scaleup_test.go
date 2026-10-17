@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -141,11 +142,12 @@ func TestScaleUpDeadlineNotYetPastDoesNotEvict(t *testing.T) {
 	}
 }
 
-func TestScaleUpEarlyExitOnTerminalSchedulingReason(t *testing.T) {
+func TestScaleUpEarlyExitOnARefusedScaleUp(t *testing.T) {
 	store := &lifecycleStore{infraCeiling: 1}
 	backend := &scaleUpBackend{
 		phase: domain.JobPhasePending, scheduledNodes: 0,
-		schedulingReason:  "NotTriggerScaleUp: max node group size reached",
+		reason:            clusterapi.PhaseReasonScaleUpRefused,
+		message:           "NotTriggerScaleUp: max node group size reached",
 		autoscalerEnabled: map[string]bool{"cluster-a": true},
 		clusterIDs:        map[string]string{"cluster-a": "cid-a"},
 	}
@@ -311,22 +313,6 @@ func TestScaleUpDeadlineNotYetPastWhenPhaseDetailNeverFound(t *testing.T) {
 	}
 	if len(store.terminalReasons) != 0 || len(store.requeuedReasons) != 0 {
 		t.Fatalf("terminalReasons=%v requeuedReasons=%v, want none — deadline not yet passed", store.terminalReasons, store.requeuedReasons)
-	}
-}
-
-func TestIsTerminalSchedulingRefusal(t *testing.T) {
-	cases := map[string]bool{
-		"":                           false,
-		"TriggeredScaleUp":           false,
-		"still waiting for capacity": false,
-		"NotTriggerScaleUp: max node group size reached": true,
-		"pod is incompatible with nodepool defaults":     true,
-		"nodeclaim failure: insufficient capacity":       true,
-	}
-	for reason, want := range cases {
-		if got := isTerminalSchedulingRefusal(reason); got != want {
-			t.Errorf("isTerminalSchedulingRefusal(%q) = %v, want %v", reason, got, want)
-		}
 	}
 }
 

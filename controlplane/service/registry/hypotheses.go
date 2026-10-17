@@ -10,6 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
@@ -69,7 +70,7 @@ func (s *Service) RegisterHypothesis(ctx context.Context, agentID string, actor 
 		if err != nil {
 			return err
 		}
-		return announce(ctx, a, !alreadyExisted, domain.Change{Kind: domain.EventHypothesisNew, Subject: h.ID, Value: string(h.Actor.Kind),
+		return announce(ctx, a, !alreadyExisted, domain.Change{Kind: platformapi.EventHypothesisNew, Subject: h.ID, Value: string(h.Actor.Kind),
 			PlatformExperimentID: h.PlatformExperimentID, AgentID: h.AgentID})
 	})
 	var held *graphdb.SimilarError
@@ -154,7 +155,7 @@ func (s *Service) AddHypothesisLink(ctx context.Context, id, agentID string, act
 		if err != nil || !result.Later {
 			return err
 		}
-		return announce(ctx, a, result.Created, domain.Change{Kind: domain.EventHypothesisLink, Subject: id, Value: string(spec.Type), Detail: spec.To,
+		return announce(ctx, a, result.Created, domain.Change{Kind: platformapi.EventHypothesisLink, Subject: id, Value: string(spec.Type), Detail: spec.To,
 			PlatformExperimentID: result.From.PlatformExperimentID, AgentID: agentID})
 	})
 	if err != nil {
@@ -372,7 +373,7 @@ func (s *Service) SetHypothesisStatus(ctx context.Context, id, callerAgentID str
 		if err != nil {
 			return err
 		}
-		return announce(ctx, a, changed, domain.Change{Kind: domain.EventHypothesisStatus, Subject: h.ID, Value: string(h.Status),
+		return announce(ctx, a, changed, domain.Change{Kind: platformapi.EventHypothesisStatus, Subject: h.ID, Value: string(h.Status),
 			PlatformExperimentID: h.PlatformExperimentID, AgentID: h.AgentID})
 	})
 	if err != nil {

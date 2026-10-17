@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -30,7 +31,7 @@ func TestAMessageIsToldToItsAgentAloneAndKept(t *testing.T) {
 	}
 	var told []domain.Event
 	for _, e := range changesAfter(t, pes, domain.EventFilter{PlatformExperimentID: peID, AgentID: agentID}, before) {
-		if e.Kind == domain.EventAgentMessage {
+		if e.Kind == platformapi.EventAgentMessage {
 			told = append(told, e)
 		}
 	}
@@ -162,7 +163,7 @@ func TestAMessageToTheCoordinatorIsToldToItsStreamAlone(t *testing.T) {
 	}
 	var told []domain.Event
 	for _, e := range changesAfter(t, pes, domain.EventFilter{PlatformExperimentID: peID, Decisions: true}, before) {
-		if e.Kind == domain.EventAgentMessage {
+		if e.Kind == platformapi.EventAgentMessage {
 			told = append(told, e)
 		}
 	}

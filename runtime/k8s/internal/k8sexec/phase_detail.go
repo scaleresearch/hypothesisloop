@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -55,12 +56,18 @@ func (c *JobWorkloadClient) PollPhaseDetail(ctx context.Context, experimentID st
 	var maxRestarts int32
 	var firstWaiting *corev1.ContainerStateWaiting
 	var firstTerminated *corev1.ContainerStateTerminated
+	refusal := ""
 	for i := range pods {
 		p := &pods[i]
 		if scheduled, unscheduledReason := podScheduledCondition(p); scheduled {
 			scheduledNodes++
-		} else if unscheduledReason != "" && schedulingReason == "" {
-			schedulingReason = unscheduledReason
+		} else if unscheduledReason != "" {
+			if schedulingReason == "" {
+				schedulingReason = unscheduledReason
+			}
+			if refusal == "" && scaleUpRefused(unscheduledReason) {
+				refusal = unscheduledReason
+			}
 		}
 		for _, cs := range p.Status.ContainerStatuses {
 			if cs.RestartCount > maxRestarts {
@@ -77,15 +84,42 @@ func (c *JobWorkloadClient) PollPhaseDetail(ctx context.Context, experimentID st
 
 	// A container that ended in failure comes before one that waits: in a gang one rank can crash
 	// while another still pulls its image, and the wait says nothing of why the job failed.
+	// A pod the autoscaler refused a node comes next: the job cannot start, whatever another pod
+	// of its gang waits for that resolves on its own.
 	switch {
 	case firstTerminated != nil:
 		r, m, rc := terminatedPhaseDetail(firstTerminated, maxRestarts)
 		return r, m, rc, scheduledNodes, schedulingReason, nil
-	case firstWaiting != nil:
+	case firstWaiting != nil && k8sPhaseReasons[firstWaiting.Reason] != "":
 		return k8sPhaseReasons[firstWaiting.Reason], firstWaiting.Message, maxRestarts, scheduledNodes, schedulingReason, nil
+	case refusal != "":
+		return clusterapi.PhaseReasonScaleUpRefused, refusal, maxRestarts, scheduledNodes, schedulingReason, nil
+	case firstWaiting != nil:
+		return "", firstWaiting.Message, maxRestarts, scheduledNodes, schedulingReason, nil
 	default:
 		return "", "", maxRestarts, scheduledNodes, schedulingReason, nil
 	}
+}
+
+// scaleUpRefused reports whether the message of a pod's PodScheduled=False condition names a
+// scale-up the autoscaler has already given up on, rather than one still in flight. Deliberately
+// a small, best-effort set of substrings covering cluster-autoscaler and Karpenter's own refusal
+// vocabulary: an unrecognised message (including "TriggeredScaleUp" or "still waiting") is no
+// refusal, since missing one costs one bounded wait and misreading "still trying" as "gave up"
+// would evict work the autoscaler was about to land.
+func scaleUpRefused(message string) bool {
+	message = strings.ToLower(message)
+	for _, marker := range []string{
+		"nottriggerscaleup",
+		"max node group size reached",
+		"incompatible with nodepool",
+		"nodeclaim failure",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // podScheduledCondition reports whether p's PodScheduled condition is True, and when it is

@@ -15,6 +15,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
@@ -498,7 +499,7 @@ func TestRegisteringANewHypothesisAnnouncesIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterHypothesis: got = %v, want nil", err)
 	}
-	want := domain.Event{ID: 1, Change: domain.Change{Kind: domain.EventHypothesisNew, Subject: h.ID, Value: string(domain.ActorAgent), PlatformExperimentID: "pe-1", AgentID: "agent-1"}}
+	want := domain.Event{ID: 1, Change: domain.Change{Kind: platformapi.EventHypothesisNew, Subject: h.ID, Value: string(domain.ActorAgent), PlatformExperimentID: "pe-1", AgentID: "agent-1"}}
 	if len(events.events) != 1 || events.events[0] != want {
 		t.Errorf("events: got = %+v, want = [%+v]", events.events, want)
 	}
@@ -542,7 +543,7 @@ func TestSettlingAHypothesisAnnouncesTheVerdictOnlyWhenItChanges(t *testing.T) {
 	if len(events.events) != 2 {
 		t.Fatalf("events: got = %v, want = %v (hypothesis.new, then one hypothesis.status)", len(events.events), 2)
 	}
-	if got := events.events[1]; got.Kind != domain.EventHypothesisStatus || got.Value != "refuted" {
+	if got := events.events[1]; got.Kind != platformapi.EventHypothesisStatus || got.Value != "refuted" {
 		t.Errorf("status event: got = %+v, want = hypothesis.status refuted", got)
 	}
 }
@@ -572,7 +573,7 @@ func TestAddingALinkAnnouncesItOnceWithTheTargetAsDetail(t *testing.T) {
 		t.Fatalf("events: got = %v, want = %v (two hypothesis.new, one hypothesis.link)", len(events.events), 3)
 	}
 	got := events.events[2]
-	if got.Kind != domain.EventHypothesisLink || got.Subject != a.ID || got.Value != "contradicts" || got.Detail != b.ID {
+	if got.Kind != platformapi.EventHypothesisLink || got.Subject != a.ID || got.Value != "contradicts" || got.Detail != b.ID {
 		t.Errorf("link event: got = %+v, want = hypothesis.link %s contradicts %s", got, a.ID, b.ID)
 	}
 }
@@ -596,16 +597,16 @@ func TestARetryAfterAFailedCommitAnnouncesWhatTheFailureLost(t *testing.T) {
 		kind string
 		do   func() error
 	}{
-		{domain.EventHypothesisNew, func() error {
+		{platformapi.EventHypothesisNew, func() error {
 			a, _, _, _, err = svc.RegisterHypothesis(ctx, "agent-1", agentActor("agent-1"), "pe-1", "warmup helps", buildOnRoot, nil)
 			return err
 		}},
-		{domain.EventHypothesisStatus, func() error {
+		{platformapi.EventHypothesisStatus, func() error {
 			store.jobs = []*domain.Experiment{jobOn("job-1", a.ID, domain.StatusFailed)}
 			_, err := svc.SetHypothesisStatus(ctx, a.ID, "agent-1", agentActor("agent-1"), Verdict{Status: domain.HypothesisRefuted, Despite: enoughSaid})
 			return err
 		}},
-		{domain.EventHypothesisLink, func() error {
+		{platformapi.EventHypothesisLink, func() error {
 			_, err := svc.AddHypothesisLink(ctx, a.ID, "agent-1", agentActor("agent-1"), link)
 			return err
 		}},

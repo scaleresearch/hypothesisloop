@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
@@ -47,7 +48,7 @@ func principalOf(token string) auth.Principal {
 func platformRoutes(caller auth.Principal) http.Handler {
 	logger := zap.NewNop()
 	r := chi.NewRouter()
-	r.Use(auth.Gate(authtest.As(caller), logger, map[string]string{"/watch": watch.Subprotocol}))
+	r.Use(auth.Gate(authtest.As(caller), logger, map[string]string{"/watch": platformapi.WatchSubprotocol}))
 	doc := httpapi.NewDoc(r, "hypothesisloop API", "1.0.0", "", auth.NewAccess(authtest.Placement{}), logger)
 	launch := platformexperiments.AgentLaunch{AgentSandbox: true, DefaultModel: "model", SigningSecret: "secret", MaxAgentSandboxes: 1}
 	experiments := platformexperiments.NewService(nil, domain.QuotaConfig{}, logger, nil, time.Minute).WithRepositories(struct{ githost.Provider }{}).

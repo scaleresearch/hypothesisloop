@@ -24,7 +24,7 @@ esac
 
 # Exit codes: 2 for a code ref that is none, 1 where the repository answers and does not give the
 # commit (it was never pushed), and 75 where neither the repository nor the platform's git proxy
-# in front of it answered. 75 is domain.ExitCodeCodeUnreachable: the runtime reports the job as
+# in front of it answered. 75 is clusterapi.ExitCodeCodeUnreachable: the runtime reports the job as
 # code_unreachable and the platform queues it again at no cost, since its command never ran.
 #
 # A job that cannot reach the repository or the platform's git proxy this second usually

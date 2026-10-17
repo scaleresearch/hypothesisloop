@@ -70,14 +70,6 @@ func NewDecider(store Store, metrics Metrics, cfg Settings, logger *zap.Logger) 
 	return &Decider{store: store, metrics: metrics, cfg: cfg, logger: logger}
 }
 
-// The states the launcher observes an instance in (ObservedInstance.State).
-const (
-	stateStarting = "starting"
-	stateRunning  = "running"
-	stateExited   = "exited"
-	stateUnknown  = "unknown"
-)
-
 // kept is one thing the launcher keeps a machine for: an agent, or a platform experiment's
 // coordinator, whose agentID is empty. Both are evaluated by the same steps.
 type kept struct {
@@ -212,7 +204,7 @@ func (h *Decider) Reconcile(ctx context.Context, observed sandboxapi.Observed) (
 		// What the launcher reports counts only for the machine that is still the one wanted. A
 		// name that config has since changed is replaced and its end is nobody's fault.
 		if current.Name == instance.Name {
-			if reported := seen[current.Name]; reported.State == stateRunning && reported.HarnessState != "" {
+			if reported := seen[current.Name]; reported.State == sandboxapi.InstanceRunning && reported.HarnessState != "" {
 				state, unknown, err := parseHarnessState(reported.HarnessState)
 				if len(unknown) > 0 {
 					log.Debug("harness state fields this platform does not know are ignored", zap.String("instance", current.Name), zap.Strings("fields", unknown))
@@ -313,7 +305,7 @@ func (h *Decider) observe(ctx context.Context, one kept, seen map[string]sandbox
 		return end(db.InstanceGone, "the provider lost the machine: it was running, the platform still asks for it, and its provider no longer lists it")
 	case !listed:
 		return end(db.InstanceNeverSeen, fmt.Sprintf("no machine was listed %s after it was asked for, which is the boot limit: its launcher could not create it, and the launcher's log says what the provider answered", h.cfg.BootLimit))
-	case reported.State == stateExited:
+	case reported.State == sandboxapi.InstanceExited:
 		exitLog := reported.Log
 		if token != "" {
 			exitLog = strings.ReplaceAll(exitLog, token, "<HL_TOKEN>")
@@ -322,27 +314,27 @@ func (h *Decider) observe(ctx context.Context, one kept, seen map[string]sandbox
 		if reported.Expired {
 			how = db.InstanceExpired
 		}
-		return end(how, lastBytes(exitLog, domain.MaxAgentInstanceLogBytes))
-	case reported.State == stateUnknown && one.instance.Reported == stateRunning:
+		return end(how, lastBytes(exitLog, sandboxapi.MaxExitLogBytes))
+	case reported.State == sandboxapi.InstanceUnknown && one.instance.Reported == string(sandboxapi.InstanceRunning):
 		return end(db.InstanceSilent, fmt.Sprintf("the machine was running, its provider stopped saying whether it still does, and its command reported no progress for %s, which is the progress limit", h.cfg.ProgressLimit))
 	}
 	state := reported.State
-	if state == stateUnknown {
-		state = stateStarting
+	if state == sandboxapi.InstanceUnknown {
+		state = sandboxapi.InstanceStarting
 	}
 	activity := ""
-	if reported.State == stateRunning {
+	if reported.State == sandboxapi.InstanceRunning {
 		activity = said(reported.Activity, token)
 	}
-	if err := h.store.ObserveInstance(ctx, one.platformExperimentID, one.agentID, name, state, reported.Progress, h.cfg.ProgressLimit, activity, reported.Machine); err != nil {
+	if err := h.store.ObserveInstance(ctx, one.platformExperimentID, one.agentID, name, string(state), reported.Progress, h.cfg.ProgressLimit, activity, reported.Machine); err != nil {
 		return domain.AgentInstance{}, false, err
 	}
 	switch {
-	case state == stateStarting:
+	case state == sandboxapi.InstanceStarting:
 		return end(db.InstanceStillStarting, fmt.Sprintf("the machine was still starting %s after it was first listed, which is the boot limit", h.cfg.BootLimit))
-	case reported.State == stateRunning && reported.Progress == nil:
+	case reported.State == sandboxapi.InstanceRunning && reported.Progress == nil:
 		return end(db.InstanceProgressUnreadable, fmt.Sprintf("the machine was running, no progress of its command was read for %s, which is the progress limit, and its launcher cannot read its output: whether the command still works is not known, so the machine is replaced and no restart is spent", h.cfg.ProgressLimit))
-	case reported.State == stateRunning:
+	case reported.State == sandboxapi.InstanceRunning:
 		return end(db.InstanceSilent, fmt.Sprintf("the machine was running and its command reported no progress for %s, which is the progress limit", h.cfg.ProgressLimit))
 	}
 	return domain.AgentInstance{}, false, nil

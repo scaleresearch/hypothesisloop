@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 )
 
 // A hand-written RFC 6455 server, roughly a hundred lines of it, because the repository vendors
@@ -32,11 +34,6 @@ const (
 	// watch.go on why the client half of this socket carries no commands.
 	wsMaxClientPayload = 1024
 )
-
-// Subprotocol is the subprotocol /watch speaks. A client offers it together with its token,
-// "hypothesisloop.watch, <token>", which auth.Gate reads, and the server selects this one: a
-// browser refuses a handshake that selects none of what it offered.
-const Subprotocol = "hypothesisloop.watch"
 
 // errWSClosed reports an orderly close from the peer, as opposed to a broken connection.
 var errWSClosed = errors.New("websocket closed by peer")
@@ -79,7 +76,7 @@ func acceptWebSocket(w http.ResponseWriter, r *http.Request) (*wsConn, error) {
 	response := "HTTP/1.1 101 Switching Protocols\r\n" +
 		"Upgrade: websocket\r\n" +
 		"Connection: Upgrade\r\n" +
-		"Sec-WebSocket-Protocol: " + Subprotocol + "\r\n" +
+		"Sec-WebSocket-Protocol: " + platformapi.WatchSubprotocol + "\r\n" +
 		"Sec-WebSocket-Accept: " + accept + "\r\n\r\n"
 	if _, err := rw.WriteString(response); err != nil {
 		conn.Close() //nolint:errcheck

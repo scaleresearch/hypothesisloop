@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -133,8 +133,8 @@ func (w *JobWatcher) evictIfStuckPending(ctx context.Context, exp *domain.Experi
 }
 
 // checkScaleUpDeadline evicts exp if its gang has not fully bound (called only while
-// scheduledNodes < Nodes()) past its placement deadline, or if the runtime's latest
-// schedulingReason names a terminal scale-up refusal. See autoscaler.md's "Watching" section.
+// scheduledNodes < Nodes()) past its placement deadline, or if what it waits for is the
+// autoscaler having refused it a node (clusterapi.PhaseReasonScaleUpRefused). See autoscaler.md's "Watching" section.
 //
 // On a cluster reporting autoscaler_enabled, the deadline is scale_up_timeout (per-cluster
 // override from the cluster's settings, else the global default) and the eviction reason is
@@ -144,7 +144,7 @@ func (w *JobWatcher) evictIfStuckPending(ctx context.Context, exp *domain.Experi
 // deadline is that cluster's stuck-pending timeout (stuckPendingTimeoutFor), counted from when
 // the wait the runtime reports began (stuckPendingOverdue), and the reason is
 // EvictionStuckPending.
-func (w *JobWatcher) checkScaleUpDeadline(ctx context.Context, exp *domain.Experiment, waiting domain.PhaseDetail, schedulingReason string, autoscalerEnabled map[string]bool, clusterIDs map[string]string) (evicted bool, err error) {
+func (w *JobWatcher) checkScaleUpDeadline(ctx context.Context, exp *domain.Experiment, waiting domain.PhaseDetail, autoscalerEnabled map[string]bool, clusterIDs map[string]string) (evicted bool, err error) {
 	if exp.SubmittedAt == nil {
 		// Every SUBMITTED row is written with submitted_at (ClaimSubmitted sets it in
 		// the same UPDATE); a RUNNING row keeps whatever the current attempt's submitted_at was.
@@ -173,14 +173,13 @@ func (w *JobWatcher) checkScaleUpDeadline(ctx context.Context, exp *domain.Exper
 		}
 
 		// Early exit: the autoscaler itself already said no, so waiting out the rest of the
-		// deadline only spends time — "the deadline is the guarantee, the event is the
-		// accelerator" (autoscaler.md). Best-effort string match; a schedulingReason that doesn't
-		// match anything just falls through to the deadline, same as no reason at all.
-		if isTerminalSchedulingRefusal(schedulingReason) {
+		// deadline only spends time: "the deadline is the guarantee, the event is the
+		// accelerator" (autoscaler.md). The runtime tells a refusal from a scale-up in flight.
+		if waiting.Reason == clusterapi.PhaseReasonScaleUpRefused {
 			w.logger.Warn("job_watcher: autoscaler refused to scale up, evicting early",
 				zap.String("id", exp.ID), zap.String("cluster_id", triedClusterID),
-				zap.String("scheduling_reason", schedulingReason))
-			w.evictNotYetRunning(ctx, exp, evictionReason.WithDetail("the autoscaler refused to scale up: "+schedulingReason))
+				zap.String("refusal", waiting.Message))
+			w.evictNotYetRunning(ctx, exp, evictionReason.WithDetail("the autoscaler refused to scale up: "+waiting.Message))
 			return true, nil
 		}
 	} else {
@@ -219,30 +218,6 @@ func (w *JobWatcher) checkScaleUpDeadline(ctx context.Context, exp *domain.Exper
 	)
 	w.evictNotYetRunning(ctx, exp, evictionReason.WithDetail(notRunningInTime(timeout, waiting)))
 	return true, nil
-}
-
-// isTerminalSchedulingRefusal reports whether schedulingReason names a scale-up attempt the
-// autoscaler has already given up on, rather than one still in flight. Deliberately a small,
-// best-effort set of substrings covering cluster-autoscaler and Karpenter's own refusal
-// vocabulary — an unrecognised reason (including "TriggeredScaleUp", "still waiting", or empty)
-// falls through to the deadline, never the other way around: missing a refusal costs one bounded
-// wait, misreading "still trying" as "gave up" would evict work the autoscaler was about to land.
-func isTerminalSchedulingRefusal(schedulingReason string) bool {
-	if schedulingReason == "" {
-		return false
-	}
-	reason := strings.ToLower(schedulingReason)
-	for _, marker := range []string{
-		"nottriggerscaleup",
-		"max node group size reached",
-		"incompatible with nodepool",
-		"nodeclaim failure",
-	} {
-		if strings.Contains(reason, marker) {
-			return true
-		}
-	}
-	return false
 }
 
 // onUnschedulable evicts a job whose runtime reported a phase-detail reason in

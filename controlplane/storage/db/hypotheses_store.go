@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -93,7 +94,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
 			}
 			return fmt.Errorf("hypotheses_store.CreateHypothesisFinding: %w", err)
 		}
-		w.Change(domain.Change{Kind: domain.EventFindingNew, Subject: f.HypothesisID, Value: f.ExperimentID,
+		w.Change(domain.Change{Kind: platformapi.EventFindingNew, Subject: f.HypothesisID, Value: f.ExperimentID,
 			PlatformExperimentID: f.PlatformExperimentID, AgentID: f.AgentID})
 		return nil
 	}); err != nil {
@@ -213,7 +214,7 @@ VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, $8)`
 			}
 			return fmt.Errorf("hypotheses_store.CreateHypothesisComment: %w", err)
 		}
-		tx.Change(domain.Change{Kind: domain.EventCommentNew, Subject: c.HypothesisID,
+		tx.Change(domain.Change{Kind: platformapi.EventCommentNew, Subject: c.HypothesisID,
 			PlatformExperimentID: c.PlatformExperimentID, AgentID: c.AgentID})
 		return nil
 	}); err != nil {

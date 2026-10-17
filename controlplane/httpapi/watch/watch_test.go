@@ -133,11 +133,11 @@ func (f *fakeHypotheses) ConcernsAgent(_ context.Context, agentID string, events
 	out := make([]bool, len(events))
 	for i, e := range events {
 		switch e.Kind {
-		case domain.EventHypothesisNew:
+		case platformapi.EventHypothesisNew:
 			for _, to := range f.links[e.Subject] {
 				out[i] = out[i] || f.owner[to] == agentID
 			}
-		case domain.EventHypothesisLink:
+		case platformapi.EventHypothesisLink:
 			out[i] = f.owner[e.Detail] == agentID
 		default:
 			out[i] = f.owner[e.Subject] == agentID
@@ -210,7 +210,7 @@ func dialWatch(t *testing.T, server *httptest.Server, query url.Values) *watchCl
 		"Upgrade: websocket\r\n" +
 		"Connection: Upgrade\r\n" +
 		"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
-		"Sec-WebSocket-Protocol: " + Subprotocol + ", test\r\n" +
+		"Sec-WebSocket-Protocol: " + platformapi.WatchSubprotocol + ", test\r\n" +
 		"Sec-WebSocket-Version: 13\r\n\r\n"
 	if _, err := conn.Write([]byte(request)); err != nil {
 		t.Fatalf("write handshake: got = %v, want = nil", err)
@@ -328,7 +328,7 @@ func (c *watchClient) nextRaw(t *testing.T) []byte {
 }
 
 func statusEvent(subject, value, agentID string) domain.Event {
-	return domain.Event{Change: domain.Change{Kind: domain.EventExperimentStatus, Subject: subject, Value: value, PlatformExperimentID: "pe-1", AgentID: agentID}}
+	return domain.Event{Change: domain.Change{Kind: platformapi.EventExperimentStatus, Subject: subject, Value: value, PlatformExperimentID: "pe-1", AgentID: agentID}}
 }
 
 func ids(events []domain.Event) []int64 {
@@ -392,8 +392,8 @@ func TestAfterHeadReadsOnlyWhatComesNext(t *testing.T) {
 func TestProgressMovesPastChangesTheSubscriptionLeavesOut(t *testing.T) {
 	changes := newFakeChanges(
 		statusEvent("exp-1", "RUNNING", "agent-a"),
-		domain.Event{Change: domain.Change{Kind: domain.EventCommentNew, Subject: "hyp-1", PlatformExperimentID: "pe-1"}},
-		domain.Event{Change: domain.Change{Kind: domain.EventExperimentStatus, Subject: "exp-9", Value: "RUNNING", PlatformExperimentID: "pe-other"}},
+		domain.Event{Change: domain.Change{Kind: platformapi.EventCommentNew, Subject: "hyp-1", PlatformExperimentID: "pe-1"}},
+		domain.Event{Change: domain.Change{Kind: platformapi.EventExperimentStatus, Subject: "exp-9", Value: "RUNNING", PlatformExperimentID: "pe-other"}},
 	)
 	client := dialWatch(t, watchServer(t, changes), url.Values{"platform_experiment_id": {"pe-1"}, "kinds": {"experiment.status"}})
 	if got := client.next(t).ID; got != 1 {
@@ -435,7 +435,7 @@ func TestAnAfterNotIssuedOrNoLongerHeldIsGone(t *testing.T) {
 	for after, want := range map[string]string{"9": "not a change id this platform issued", "1": "no longer held; re-read state and watch from head"} {
 		for _, path := range []string{"/watch", "/changes"} {
 			request, _ := http.NewRequest(http.MethodGet, server.URL+path+"?platform_experiment_id=pe-1&after="+after, nil)
-			request.Header.Set("Sec-WebSocket-Protocol", Subprotocol+", test")
+			request.Header.Set("Sec-WebSocket-Protocol", platformapi.WatchSubprotocol+", test")
 			request.Header.Set("Authorization", "Bearer test")
 			response, err := http.DefaultClient.Do(request)
 			if err != nil {
@@ -492,10 +492,10 @@ func TestChangesAnswersOneRead(t *testing.T) {
 func TestASubscriptionNamingKindsReceivesOnlyThoseKinds(t *testing.T) {
 	changes := newFakeChanges()
 	client := dialWatch(t, watchServer(t, changes), url.Values{"platform_experiment_id": {"pe-1"}, "kinds": {"experiment.status"}})
-	changes.append(domain.Event{Change: domain.Change{Kind: domain.EventHypothesisNew, Subject: "hyp-1", PlatformExperimentID: "pe-1"}})
-	changes.append(domain.Event{Change: domain.Change{Kind: domain.EventCommentNew, Subject: "hyp-1", PlatformExperimentID: "pe-1"}})
+	changes.append(domain.Event{Change: domain.Change{Kind: platformapi.EventHypothesisNew, Subject: "hyp-1", PlatformExperimentID: "pe-1"}})
+	changes.append(domain.Event{Change: domain.Change{Kind: platformapi.EventCommentNew, Subject: "hyp-1", PlatformExperimentID: "pe-1"}})
 	changes.append(statusEvent("exp-1", "RUNNING", "agent-a"))
-	if got := client.next(t); got.Kind != domain.EventExperimentStatus || got.Value != "RUNNING" {
+	if got := client.next(t); got.Kind != platformapi.EventExperimentStatus || got.Value != "RUNNING" {
 		t.Errorf("first delivered: got = %v %v, want = experiment.status RUNNING", got.Kind, got.Value)
 	}
 }
@@ -511,15 +511,15 @@ func hypEvent(kind, subject, detail, agentID string) domain.Event {
 func TestAnAgentScopeCarriesOthersActivityOnItsOwnHypothesesAndNothingElseFromThePool(t *testing.T) {
 	changes := newFakeChanges(
 		statusEvent("exp-2", "COMPLETED", "agent-b"),
-		hypEvent(domain.EventCommentNew, "hyp-b", "", "agent-c"),
-		hypEvent(domain.EventCommentNew, "hyp-a", "", "agent-a"),
-		hypEvent(domain.EventCommentNew, "hyp-a", "", "agent-b"),
-		hypEvent(domain.EventFindingNew, "hyp-a", "", "agent-b"),
-		hypEvent(domain.EventHypothesisLink, "hyp-b", "hyp-a", "agent-b"),
-		hypEvent(domain.EventHypothesisLink, "hyp-b", "pe-1", "agent-b"),
-		hypEvent(domain.EventHypothesisNew, "hyp-c", "", "agent-b"),
-		hypEvent(domain.EventHypothesisNew, "hyp-d", "", "agent-b"),
-		hypEvent(domain.EventHypothesisStatus, "hyp-a", "", "agent-a"),
+		hypEvent(platformapi.EventCommentNew, "hyp-b", "", "agent-c"),
+		hypEvent(platformapi.EventCommentNew, "hyp-a", "", "agent-a"),
+		hypEvent(platformapi.EventCommentNew, "hyp-a", "", "agent-b"),
+		hypEvent(platformapi.EventFindingNew, "hyp-a", "", "agent-b"),
+		hypEvent(platformapi.EventHypothesisLink, "hyp-b", "hyp-a", "agent-b"),
+		hypEvent(platformapi.EventHypothesisLink, "hyp-b", "pe-1", "agent-b"),
+		hypEvent(platformapi.EventHypothesisNew, "hyp-c", "", "agent-b"),
+		hypEvent(platformapi.EventHypothesisNew, "hyp-d", "", "agent-b"),
+		hypEvent(platformapi.EventHypothesisStatus, "hyp-a", "", "agent-a"),
 		statusEvent("exp-1", "RUNNING", "agent-a"),
 		statusEvent("exp-1", "COMPLETED", "agent-a"),
 	)
@@ -542,7 +542,7 @@ func TestAnAgentScopeCarriesOthersActivityOnItsOwnHypothesesAndNothingElseFromTh
 func TestAnUnknownKindIsRefusedRatherThanSilentlyIgnored(t *testing.T) {
 	server := watchServer(t, newFakeChanges())
 	request, _ := http.NewRequest(http.MethodGet, server.URL+"/watch?platform_experiment_id=pe-1&kinds=experiment.finished", nil)
-	request.Header.Set("Sec-WebSocket-Protocol", Subprotocol+", test")
+	request.Header.Set("Sec-WebSocket-Protocol", platformapi.WatchSubprotocol+", test")
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatalf("request: got = %v, want = nil", err)
@@ -666,8 +666,8 @@ func TestHLWatchKeepsRetryingAConnectionItCouldNotEstablish(t *testing.T) {
 func TestAnAgentCutReachesOnlyTheAgentItNames(t *testing.T) {
 	changes := newFakeChanges()
 	client := dialWatch(t, watchServer(t, changes), url.Values{"platform_experiment_id": {"pe-1"}, "agent_id": {"agent-a"}})
-	changes.append(domain.Event{Change: domain.Change{Kind: domain.EventAgentCut, Subject: "agent-b", Value: "1", PlatformExperimentID: "pe-1", AgentID: "agent-b"}})
-	changes.append(domain.Event{Change: domain.Change{Kind: domain.EventAgentCut, Subject: "agent-a", Value: "1", PlatformExperimentID: "pe-1", AgentID: "agent-a"}})
+	changes.append(domain.Event{Change: domain.Change{Kind: platformapi.EventAgentCut, Subject: "agent-b", Value: "1", PlatformExperimentID: "pe-1", AgentID: "agent-b"}})
+	changes.append(domain.Event{Change: domain.Change{Kind: platformapi.EventAgentCut, Subject: "agent-a", Value: "1", PlatformExperimentID: "pe-1", AgentID: "agent-a"}})
 	if got := client.next(t).Subject; got != "agent-a" {
 		t.Errorf("first delivered cut: got = %v, want = agent-a", got)
 	}
@@ -678,10 +678,10 @@ func TestAnAgentCutReachesOnlyTheAgentItNames(t *testing.T) {
 func TestARunWideChangeReachesAnAgentScopedSubscriptionWhoeverWroteIt(t *testing.T) {
 	changes := newFakeChanges()
 	client := dialWatch(t, watchServer(t, changes), url.Values{"platform_experiment_id": {"pe-1"}, "agent_id": {"agent-a"}})
-	changes.append(domain.Event{Change: domain.Change{Kind: domain.EventStageBoundary, Subject: "pe-1", Value: "1", Detail: "advanced", PlatformExperimentID: "pe-1"}})
-	changes.append(domain.Event{Change: domain.Change{Kind: domain.EventPlatformExperimentDescription, Subject: "pe-1", PlatformExperimentID: "pe-1"}})
-	changes.append(domain.Event{Change: domain.Change{Kind: domain.EventPlatformExperimentStatus, Subject: "pe-1", Value: "closed", PlatformExperimentID: "pe-1"}})
-	for _, want := range []string{domain.EventStageBoundary, domain.EventPlatformExperimentDescription, domain.EventPlatformExperimentStatus} {
+	changes.append(domain.Event{Change: domain.Change{Kind: platformapi.EventStageBoundary, Subject: "pe-1", Value: "1", Detail: "advanced", PlatformExperimentID: "pe-1"}})
+	changes.append(domain.Event{Change: domain.Change{Kind: platformapi.EventPlatformExperimentDescription, Subject: "pe-1", PlatformExperimentID: "pe-1"}})
+	changes.append(domain.Event{Change: domain.Change{Kind: platformapi.EventPlatformExperimentStatus, Subject: "pe-1", Value: "closed", PlatformExperimentID: "pe-1"}})
+	for _, want := range []string{platformapi.EventStageBoundary, platformapi.EventPlatformExperimentDescription, platformapi.EventPlatformExperimentStatus} {
 		if got := client.next(t).Kind; got != want {
 			t.Errorf("delivered kind: got = %v, want = %v", got, want)
 		}
@@ -692,10 +692,10 @@ func TestARunWideChangeReachesAnAgentScopedSubscriptionWhoeverWroteIt(t *testing
 func TestAJobScopedSubscriptionDoesNotReceiveTheRunWideKinds(t *testing.T) {
 	changes := newFakeChanges()
 	client := dialWatch(t, watchServer(t, changes), url.Values{"experiment_id": {"exp-1"}})
-	changes.append(domain.Event{Change: domain.Change{Kind: domain.EventPlatformExperimentStatus, Subject: "pe-1", Value: "closed", PlatformExperimentID: "pe-1"}})
-	changes.append(domain.Event{Change: domain.Change{Kind: domain.EventAgentCut, Subject: "agent-a", Value: "1", PlatformExperimentID: "pe-1", AgentID: "agent-a"}})
+	changes.append(domain.Event{Change: domain.Change{Kind: platformapi.EventPlatformExperimentStatus, Subject: "pe-1", Value: "closed", PlatformExperimentID: "pe-1"}})
+	changes.append(domain.Event{Change: domain.Change{Kind: platformapi.EventAgentCut, Subject: "agent-a", Value: "1", PlatformExperimentID: "pe-1", AgentID: "agent-a"}})
 	changes.append(statusEvent("exp-1", "RUNNING", "agent-a"))
-	if got := client.next(t).Kind; got != domain.EventExperimentStatus {
+	if got := client.next(t).Kind; got != platformapi.EventExperimentStatus {
 		t.Errorf("first delivered kind: got = %v, want = experiment.status", got)
 	}
 }
@@ -745,10 +745,10 @@ func TestAnAgentScopeNeverCarriesAnotherAgentsOwnChanges(t *testing.T) {
 	changes := newFakeChanges()
 	client := dialWatch(t, watchServer(t, changes), url.Values{"platform_experiment_id": {"pe-1"}, "agent_id": {"agent-a"}})
 	changes.append(statusEvent("exp-2", "RUNNING", "agent-b"))
-	changes.append(domain.Event{Change: domain.Change{Kind: domain.EventQuotaChanged, Subject: "agent-b", Value: "9", PlatformExperimentID: "pe-1", AgentID: "agent-b"}})
-	changes.append(domain.Event{Change: domain.Change{Kind: domain.EventAgentCut, Subject: "agent-b", Value: "1", PlatformExperimentID: "pe-1", AgentID: "agent-b"}})
-	changes.append(domain.Event{Change: domain.Change{Kind: domain.EventQuotaChanged, Subject: "agent-a", Value: "4", PlatformExperimentID: "pe-1", AgentID: "agent-a"}})
-	if got := client.next(t); got.Kind != domain.EventQuotaChanged || got.Subject != "agent-a" {
+	changes.append(domain.Event{Change: domain.Change{Kind: platformapi.EventQuotaChanged, Subject: "agent-b", Value: "9", PlatformExperimentID: "pe-1", AgentID: "agent-b"}})
+	changes.append(domain.Event{Change: domain.Change{Kind: platformapi.EventAgentCut, Subject: "agent-b", Value: "1", PlatformExperimentID: "pe-1", AgentID: "agent-b"}})
+	changes.append(domain.Event{Change: domain.Change{Kind: platformapi.EventQuotaChanged, Subject: "agent-a", Value: "4", PlatformExperimentID: "pe-1", AgentID: "agent-a"}})
+	if got := client.next(t); got.Kind != platformapi.EventQuotaChanged || got.Subject != "agent-a" {
 		t.Errorf("first delivered: got = %v for %v, want = quota.changed for agent-a", got.Kind, got.Subject)
 	}
 }

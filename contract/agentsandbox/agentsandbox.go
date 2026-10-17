@@ -28,8 +28,8 @@ type ObservedInstance struct {
 	Name string
 	// Machine is the provider's id of the machine the name is reported by.
 	Machine string
-	State   string
-	// Log is the end of what an exited instance's command wrote.
+	State   InstanceState
+	// Log is the end of what an exited instance's command wrote, at most MaxExitLogBytes.
 	Log string
 	// Expired tells an exited instance its provider ended at the provider's own lifetime.
 	Expired bool
@@ -41,6 +41,22 @@ type ObservedInstance struct {
 	// HarnessState is what a running instance's harness last said of itself (parseHarnessState).
 	HarnessState string
 }
+
+// InstanceState is what the launcher found of an instance on its provider.
+type InstanceState string
+
+const (
+	// InstanceStarting is an instance created and not yet running its command.
+	InstanceStarting InstanceState = "starting"
+	InstanceRunning  InstanceState = "running"
+	// InstanceExited is an instance whose command ended, its output still readable.
+	InstanceExited InstanceState = "exited"
+	// InstanceUnknown is an instance that exists and its provider does not say it runs.
+	InstanceUnknown InstanceState = "unknown"
+)
+
+// MaxExitLogBytes bounds ObservedInstance.Log.
+const MaxExitLogBytes = 4 << 10
 
 // Desired is the launcher's complete desired state. Instances should exist and be running.
 // Ending names instances whose run is over: they are told to stop and are otherwise left alone
@@ -84,8 +100,8 @@ const (
 	ProgressIntervalSeconds = 15
 )
 
-// The environment a sandboxed agent's machine is started with: where the platform is and the
-// agent's token.
+// The environment a sandboxed agent's machine is started with, which hl reads: where the
+// platform is and the caller's token.
 const (
 	EnvAPIURL = "API_URL"
 	EnvToken  = "HL_TOKEN"

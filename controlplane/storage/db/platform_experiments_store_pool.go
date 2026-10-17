@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -388,10 +389,10 @@ RETURNING agent_id`, platformExpID, agentIDs, stage, reason)
 	}
 	for _, agentID := range cut {
 		if reason == "" {
-			tx.Change(domain.Change{Kind: domain.EventStageBoundary, Subject: platformExpID, Value: strconv.Itoa(stage), Detail: "cut",
+			tx.Change(domain.Change{Kind: platformapi.EventStageBoundary, Subject: platformExpID, Value: strconv.Itoa(stage), Detail: "cut",
 				PlatformExperimentID: platformExpID, AgentID: agentID})
 		}
-		tx.Change(domain.Change{Kind: domain.EventAgentCut, Subject: agentID, Value: strconv.Itoa(stage), Detail: reason,
+		tx.Change(domain.Change{Kind: platformapi.EventAgentCut, Subject: agentID, Value: strconv.Itoa(stage), Detail: reason,
 			PlatformExperimentID: platformExpID, AgentID: agentID})
 	}
 	return nil

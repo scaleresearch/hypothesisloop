@@ -249,8 +249,8 @@ const (
 	EvictionPreemptedForGuaranteed EvictionReason = "preempted_for_guaranteed"
 	// EvictionScaleUpTimeout marks a job whose gang never fully bound (scheduled_nodes < Nodes())
 	// within its placement deadline on an autoscaler-enabled cluster — either the deadline
-	// passed, or the runtime reported a terminal scheduling_reason (e.g. "NotTriggerScaleUp: max
-	// node group size reached") before that. An infrastructure fault, requeued for free on the
+	// passed, or the runtime reported the autoscaler refused it a node (PhaseReasonScaleUpRefused)
+	// before that. An infrastructure fault, requeued for free on the
 	// same allowance as every other, with the cluster kept in the job's tried_clusters.
 	EvictionScaleUpTimeout EvictionReason = "scale_up_timeout"
 

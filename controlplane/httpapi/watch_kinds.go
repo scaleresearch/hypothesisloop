@@ -9,7 +9,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/watch"
 )
 
 // registerWatchKinds documents the change stream in the one place an agent already looks. The
@@ -67,7 +66,7 @@ func registerWatchKinds(doc *Doc) {
 	}}
 	frame.PrecomputeMessages()
 	schemas.Map()["WatchFrame"] = frame
-	subprotocol := &huma.Schema{Type: huma.TypeString, Enum: []any{watch.Subprotocol}}
+	subprotocol := &huma.Schema{Type: huma.TypeString, Enum: []any{platformapi.WatchSubprotocol}}
 	subprotocol.PrecomputeMessages()
 	schemas.Map()["WatchSubprotocol"] = subprotocol
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -52,7 +53,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 			pe.ID, raise.From, raise.To, raise.Reason, raise.Detail, string(raise.Actor.Kind), raise.Actor.ID); err != nil {
 			return fmt.Errorf("platform_experiments_store.RaiseBaseline: record: %w", err)
 		}
-		tx.runChange(pe.ID, domain.EventPlatformExperimentBaseline, raise.To, raise.Detail)
+		tx.runChange(pe.ID, platformapi.EventPlatformExperimentBaseline, raise.To, raise.Detail)
 		return nil
 	})
 }

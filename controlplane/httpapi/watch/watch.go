@@ -131,7 +131,7 @@ type experimentLookup interface {
 
 // NewHandler returns a handler over changes. Start must be called once to begin listening. Its
 // requests must pass auth.Gate first, which reads a stream's token from the subprotocol
-// (Subprotocol) before the upgrade.
+// (platformapi.WatchSubprotocol) before the upgrade.
 func NewHandler(changes Changes, hypotheses Hypotheses, experiments experimentLookup, access *auth.Access, logger *zap.Logger) *Handler {
 	return &Handler{changes: changes, hypotheses: hypotheses, experiments: experiments, access: access, hub: newHub(), logger: logger, recheckEvery: watchPingInterval}
 }

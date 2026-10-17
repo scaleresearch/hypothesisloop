@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -282,7 +283,7 @@ RETURNING COALESCE((SELECT CASE WHEN gone.finished_at IS NOT NULL THEN 'it finis
 		}
 		tx.agentActivity(platformExpID, signup.AgentID, domain.ActivitySignedUp)
 		if signup.Replaces != "" {
-			tx.Change(domain.Change{Kind: domain.EventAgentReplaced, Subject: signup.AgentID, Value: signup.Replaces, Detail: why,
+			tx.Change(domain.Change{Kind: platformapi.EventAgentReplaced, Subject: signup.AgentID, Value: signup.Replaces, Detail: why,
 				PlatformExperimentID: platformExpID, AgentID: signup.AgentID})
 		}
 		inserted++

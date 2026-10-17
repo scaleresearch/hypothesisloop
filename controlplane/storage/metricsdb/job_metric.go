@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -56,10 +57,10 @@ func (s *Store) PopulateJobMetrics(ctx context.Context,
 		for _, sm := range samples {
 			got := domain.JobMetric{Name: sm.Labels["metric_name"], Value: sm.Value, Basis: sm.Labels["metric_basis"]}
 			if got.Basis == "" {
-				got.Basis = "raw"
+				got.Basis = platformapi.BasisRaw
 			}
 			key := [2]string{sm.Labels["job_id"], got.Name}
-			if cur, ok := chosen[key]; ok && (cur.Basis == "raw" || got.Basis != "raw" && cur.Basis < got.Basis) {
+			if cur, ok := chosen[key]; ok && (cur.Basis == platformapi.BasisRaw || got.Basis != platformapi.BasisRaw && cur.Basis < got.Basis) {
 				continue
 			}
 			chosen[key] = got

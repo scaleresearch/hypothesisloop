@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"go.uber.org/zap"
 )
 
@@ -22,7 +23,7 @@ var publicPaths = map[string]bool{
 	"/explore": true, "/explore/coordinator": true, "/explore/rules": true,
 }
 
-var publicPrefixes = []string{"/internal/clusters"}
+var publicPrefixes = []string{clusterapi.ClustersPath}
 
 func public(path string) bool {
 	for _, prefix := range publicPrefixes {

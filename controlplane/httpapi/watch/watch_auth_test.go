@@ -14,6 +14,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
@@ -37,7 +38,7 @@ func gated(tokens auth.Tokens, handler *Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /watch", handler)
 	mux.HandleFunc("GET /changes", handler.ServeChanges)
-	return auth.Gate(tokens, zap.NewNop(), map[string]string{"/watch": Subprotocol})(mux)
+	return auth.Gate(tokens, zap.NewNop(), map[string]string{"/watch": platformapi.WatchSubprotocol})(mux)
 }
 
 func watchServerAs(t *testing.T, principal auth.Principal) *httptest.Server {
@@ -73,12 +74,12 @@ func TestWatchTakesItsTokenFromTheSubprotocolOnly(t *testing.T) {
 		want      int
 	}{
 		"no subprotocol":            {nil, http.StatusUnauthorized},
-		"subprotocol without token": {[]string{Subprotocol}, http.StatusUnauthorized},
+		"subprotocol without token": {[]string{platformapi.WatchSubprotocol}, http.StatusUnauthorized},
 		"token without subprotocol": {[]string{"test"}, http.StatusUnauthorized},
-		"token first":               {[]string{"test, " + Subprotocol}, http.StatusUnauthorized},
-		"a third value":             {[]string{Subprotocol + ", test, extra"}, http.StatusUnauthorized},
-		"one header":                {[]string{Subprotocol + ", test"}, http.StatusBadRequest},
-		"two headers":               {[]string{Subprotocol, "test"}, http.StatusBadRequest},
+		"token first":               {[]string{"test, " + platformapi.WatchSubprotocol}, http.StatusUnauthorized},
+		"a third value":             {[]string{platformapi.WatchSubprotocol + ", test, extra"}, http.StatusUnauthorized},
+		"one header":                {[]string{platformapi.WatchSubprotocol + ", test"}, http.StatusBadRequest},
+		"two headers":               {[]string{platformapi.WatchSubprotocol, "test"}, http.StatusBadRequest},
 	} {
 		if got := watchStatus(t, server, query, tc.protocols...); got != tc.want {
 			t.Errorf("%s: got = %d, want = %d", name, got, tc.want)
@@ -98,7 +99,7 @@ func TestWatchTakesItsTokenFromTheSubprotocolOnly(t *testing.T) {
 }
 
 func TestWatchKeepsToTheCallersScope(t *testing.T) {
-	offer := Subprotocol + ", test"
+	offer := platformapi.WatchSubprotocol + ", test"
 	orgA := []string{"org-a"}
 	for name, tc := range map[string]struct {
 		principal auth.Principal

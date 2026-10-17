@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
@@ -153,7 +154,7 @@ func newControllerServer(authenticator *auth.Authenticator, pool *db.Pool, store
 func newRouter(tokens auth.Tokens, push http.Handler, logger *zap.Logger) chi.Router {
 	r := chi.NewRouter()
 	r.Use(auth.Gate(tokens, logger, nil))
-	r.Handle("/internal/node-metrics", auth.RequireRuntime(logger, push))
+	r.Handle(clusterapi.NodeMetricsPath, auth.RequireRuntime(logger, push))
 	// Both spellings, same as the API server — a caller should never have to remember which
 	// of /health and /healthz a given process happens to answer.
 	health := func(w http.ResponseWriter, _ *http.Request) {

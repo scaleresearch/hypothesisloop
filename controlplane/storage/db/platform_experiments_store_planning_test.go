@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -802,7 +803,7 @@ func TestAChangedGoalIsAnEventOnThePlannersStream(t *testing.T) {
 	own := domain.EventFilter{PlatformExperimentID: draft, AgentID: planner}
 	var goals []domain.Event
 	for _, e := range changesAfter(t, pes, own, before) {
-		if e.Kind == domain.EventPlatformExperimentGoal {
+		if e.Kind == platformapi.EventPlatformExperimentGoal {
 			goals = append(goals, e)
 		}
 	}

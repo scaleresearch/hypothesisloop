@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/contract/jobenv"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/boundedname"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadenv"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
@@ -289,9 +290,9 @@ func (c *JobWorkloadClient) compileJob(exp *clusterapi.DesiredJob, placement Acc
 		worldSize := fmt.Sprintf("%d", plan.totalNodes)
 		masterPort := fmt.Sprintf("%d", DistributedMasterPort)
 		env = append(env,
-			corev1.EnvVar{Name: "HYPOTHESISLOOP_WORLD_SIZE", Value: worldSize},
-			corev1.EnvVar{Name: "HYPOTHESISLOOP_MASTER_ADDR", Value: masterAddr},
-			corev1.EnvVar{Name: "HYPOTHESISLOOP_MASTER_PORT", Value: masterPort},
+			corev1.EnvVar{Name: jobenv.WorldSize, Value: worldSize},
+			corev1.EnvVar{Name: jobenv.MasterAddr, Value: masterAddr},
+			corev1.EnvVar{Name: jobenv.MasterPort, Value: masterPort},
 			// Standard unprefixed names torch.distributed.init_process_group(env://) and
 			// torchrun read directly, alongside the HYPOTHESISLOOP_-prefixed vars above. One
 			// process per pod, so LOCAL_RANK is always 0.
@@ -312,14 +313,14 @@ func (c *JobWorkloadClient) compileJob(exp *clusterapi.DesiredJob, placement Acc
 			// pods claiming rank 0 in one process group is a hang or a corrupt all-reduce, not an
 			// error anyone sees — and an absent variable fails loudly at the workload's first read.
 			env = append(env,
-				corev1.EnvVar{Name: "HYPOTHESISLOOP_GROUP", Value: group.Name},
-				corev1.EnvVar{Name: "HYPOTHESISLOOP_GROUP_RANK", ValueFrom: rankFieldRef},
-				corev1.EnvVar{Name: "HYPOTHESISLOOP_GROUP_REPLICAS", Value: fmt.Sprintf("%d", group.Replicas)},
-				corev1.EnvVar{Name: "HYPOTHESISLOOP_RANK_OFFSET", Value: fmt.Sprintf("%d", plan.rankOffset)},
+				corev1.EnvVar{Name: jobenv.Group, Value: group.Name},
+				corev1.EnvVar{Name: jobenv.GroupRank, ValueFrom: rankFieldRef},
+				corev1.EnvVar{Name: jobenv.GroupReplicas, Value: fmt.Sprintf("%d", group.Replicas)},
+				corev1.EnvVar{Name: jobenv.RankOffset, Value: fmt.Sprintf("%d", plan.rankOffset)},
 			)
 		} else {
 			env = append(env,
-				corev1.EnvVar{Name: "HYPOTHESISLOOP_RANK", ValueFrom: rankFieldRef},
+				corev1.EnvVar{Name: jobenv.Rank, ValueFrom: rankFieldRef},
 				corev1.EnvVar{Name: "RANK", ValueFrom: rankFieldRef},
 			)
 		}

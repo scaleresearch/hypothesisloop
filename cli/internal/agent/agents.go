@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/command"
 )
@@ -70,7 +71,7 @@ baseline agents left exactly one that reports the ranking metric.`, stderr)
 		body["baseline_job_id"] = *baseline
 	}
 	if err := c.Do("POST", apiclient.AgentsPath(pe)+"/"+url.PathEscape(agent)+"/finish", body, &out); err != nil {
-		if reason, _ := command.RefusalOf(err); reason == "experiment_closed" {
+		if reason, _ := command.RefusalOf(err); reason == platformapi.ReasonExperimentClosed {
 			fmt.Fprintln(stderr, "hl: platform-experiments agents finish: the platform experiment is closed, which ended your run: nothing needs finishing, so end your turn")
 			return 0
 		}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -162,7 +163,7 @@ func TestNewRulesAreAVersionEveryLiveAgentIsToldOf(t *testing.T) {
 	for deadline := time.After(5 * time.Second); len(told) < 2; {
 		select {
 		case e := <-live:
-			if e.Kind == domain.EventAgentInstructions && e.PlatformExperimentID == peID {
+			if e.Kind == platformapi.EventAgentInstructions && e.PlatformExperimentID == peID {
 				told[e.AgentID] = true
 			}
 		case <-deadline:
@@ -425,7 +426,7 @@ func TestAnEditIsWhatEveryAgentOfTheTypeRunsAndEachLiveOneIsTold(t *testing.T) {
 		t.Errorf("the pool: got = %+v, %v, want its entry still naming no model", pe.Researchers, err)
 	}
 
-	instructions := map[string]bool{domain.EventAgentInstructions: true}
+	instructions := map[string]bool{platformapi.EventAgentInstructions: true}
 	told := map[string]string{}
 	for _, e := range changesAfter(t, store, domain.EventFilter{PlatformExperimentID: peID, Kinds: instructions}, since) {
 		if e.AgentID != domain.CoordinatorRecipient {
@@ -440,7 +441,7 @@ func TestAnEditIsWhatEveryAgentOfTheTypeRunsAndEachLiveOneIsTold(t *testing.T) {
 	}
 	var ownTold []domain.Event
 	for _, e := range changesAfter(t, store, domain.EventFilter{PlatformExperimentID: peID, AgentID: own}, since) {
-		if e.Kind == domain.EventAgentInstructions {
+		if e.Kind == platformapi.EventAgentInstructions {
 			ownTold = append(ownTold, e)
 		}
 	}
@@ -474,7 +475,7 @@ func TestAnEditOfACoordinatorTypeTellsTheCoordinatorsOfRunsThatGoOn(t *testing.T
 	if err != nil || src.Version.Version != 2 || src.Model != "" || src.Version.Settings.Model != "coordinator-next" {
 		t.Errorf("the coordinator: got = %+v, %v, want version 2 on the type's new model", src, err)
 	}
-	told := changesAfter(t, store, domain.EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{domain.EventAgentInstructions: true}}, since)
+	told := changesAfter(t, store, domain.EventFilter{PlatformExperimentID: peID, Kinds: map[string]bool{platformapi.EventAgentInstructions: true}}, since)
 	if len(told) != 1 || told[0].AgentID != domain.CoordinatorRecipient || told[0].Value != "2" {
 		t.Errorf("told: got = %+v, want agent.instructions to the coordinator, once", told)
 	}

@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/contract/jobenv"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/command"
 )
@@ -30,25 +32,18 @@ same key every time; it does not expire. Any S3 client works:
 	if *pe == "" || *agent == "" || fs.NArg() > 0 {
 		return command.ParseExit(command.Misuse(fs, "--platform-experiment and --agent are required, and nothing else"))
 	}
-	var out struct {
-		URI             string `json:"uri"`
-		Shared          string `json:"shared"`
-		Endpoint        string `json:"endpoint"`
-		Region          string `json:"region"`
-		AccessKeyID     string `json:"access_key_id"`
-		SecretAccessKey string `json:"secret_access_key"`
-	}
+	var out clusterapi.DataAccess
 	if err := c.Do("POST", "/platform-experiments/"+url.PathEscape(*pe)+"/data-key", map[string]string{"agent_id": *agent}, &out); err != nil {
 		return command.Fail(stderr, err)
 	}
 	for _, v := range [][2]string{
-		{"AWS_ACCESS_KEY_ID", out.AccessKeyID},
-		{"AWS_SECRET_ACCESS_KEY", out.SecretAccessKey},
-		{"AWS_ENDPOINT_URL", out.Endpoint},
-		{"AWS_ENDPOINT_URL_S3", out.Endpoint},
-		{"AWS_REGION", out.Region},
-		{"HYPOTHESISLOOP_DATA_URI", out.URI},
-		{"HYPOTHESISLOOP_DATA_SHARED", out.Shared},
+		{jobenv.AccessKeyID, out.AccessKeyID},
+		{jobenv.SecretAccessKey, out.SecretAccessKey},
+		{jobenv.Endpoint, out.Endpoint},
+		{jobenv.EndpointS3, out.Endpoint},
+		{jobenv.Region, out.Region},
+		{jobenv.DataURI, out.URI},
+		{jobenv.DataShared, out.Shared},
 	} {
 		fmt.Fprintf(stdout, "export %s='%s'\n", v[0], strings.ReplaceAll(v[1], "'", `'\''`))
 	}

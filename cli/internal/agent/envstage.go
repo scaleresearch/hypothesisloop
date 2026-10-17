@@ -27,6 +27,8 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 	"github.com/scaleresearch/hypothesisloop/cli/internal/watchclient"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/command"
 )
@@ -133,18 +135,14 @@ func stageJob(c *apiclient.Client, dir string, operands []string, pe string, dea
 		}
 	}
 	var credential struct {
-		Image          string `json:"image"`
-		EnvironmentKey string `json:"environment_key"`
-		Login          *struct {
-			Registry string `json:"registry"`
-			Username string `json:"username"`
-			Password string `json:"password"`
-		} `json:"login"`
+		Image          string                    `json:"image"`
+		EnvironmentKey string                    `json:"environment_key"`
+		Login          *clusterapi.RegistryLogin `json:"login"`
 	}
 	for said := false; ; said = true {
 		err := c.Do("POST", "/experiments/"+url.PathEscape(job)+"/image-credentials", nil, &credential)
 		reason, message := command.RefusalOf(err)
-		if reason != "environment_not_ready" {
+		if reason != platformapi.ReasonEnvironmentNotReady {
 			if err != nil {
 				return nil, err
 			}

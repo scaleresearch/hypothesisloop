@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -494,7 +495,7 @@ func TestAnAgentThatAskedForABuildIsToldItEnded(t *testing.T) {
 	told := func(key string) []domain.Event {
 		t.Helper()
 		var of []domain.Event
-		for _, e := range changesAfter(t, w.envs, domain.EventFilter{PlatformExperimentID: w.peA, AgentID: w.agent, Kinds: map[string]bool{domain.EventEnvironmentStatus: true}}, before) {
+		for _, e := range changesAfter(t, w.envs, domain.EventFilter{PlatformExperimentID: w.peA, AgentID: w.agent, Kinds: map[string]bool{platformapi.EventEnvironmentStatus: true}}, before) {
 			if e.Subject == key {
 				of = append(of, e)
 			}
@@ -574,7 +575,7 @@ func TestAnAgentIsToldItsBuildLoadedAndThenOnlyOfAFailure(t *testing.T) {
 	before := cursorNow(t, w.pool)
 	told := func() []domain.Event {
 		t.Helper()
-		return changesAfter(t, w.envs, domain.EventFilter{PlatformExperimentID: w.peA, AgentID: w.agent, Kinds: map[string]bool{domain.EventEnvironmentStatus: true}}, before)
+		return changesAfter(t, w.envs, domain.EventFilter{PlatformExperimentID: w.peA, AgentID: w.agent, Kinds: map[string]bool{platformapi.EventEnvironmentStatus: true}}, before)
 	}
 
 	pushed := w.ensure(t, w.orgA, "told loaded then pushed")

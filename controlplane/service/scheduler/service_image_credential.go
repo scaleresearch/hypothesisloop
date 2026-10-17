@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -19,13 +20,9 @@ func (s *Service) WithRegistryPulls(pulls RegistryPulls) *Service {
 	return s
 }
 
-// ReasonEnvironmentNotReady refuses the image of a job whose environment is still building, and
-// ReasonEnvironmentFailed one whose environment failed: the first is worth waiting on, the second
-// is not.
-const (
-	ReasonEnvironmentNotReady = "environment_not_ready"
-	ReasonEnvironmentFailed   = "environment_failed"
-)
+// ReasonEnvironmentFailed refuses the image of a job whose environment failed, which no wait
+// mends, unlike platformapi.ReasonEnvironmentNotReady.
+const ReasonEnvironmentFailed = "environment_failed"
 
 // ImageCredential is the image job id runs in, and a login that pulls it when it is an
 // environment the platform built. A job whose commit declares no environment runs in its job
@@ -50,7 +47,7 @@ func (s *Service) ImageCredential(ctx context.Context, id string) (*ImageCredent
 	}
 	if env.State != domain.EnvironmentReady {
 		answer := AnswerEnvironment(env)
-		reason := ReasonEnvironmentNotReady
+		reason := platformapi.ReasonEnvironmentNotReady
 		if env.State == domain.EnvironmentFailed {
 			reason = ReasonEnvironmentFailed
 		}

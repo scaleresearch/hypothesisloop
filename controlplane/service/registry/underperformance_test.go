@@ -12,6 +12,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
@@ -41,7 +42,7 @@ func (s underperformStore) MarkUnderperforming(_ context.Context, id, metricName
 			return nil
 		}
 	}
-	s.marks.events = append(s.marks.events, domain.Event{Change: domain.Change{Kind: domain.EventJobUnderperforming, Subject: id, Value: metricName}})
+	s.marks.events = append(s.marks.events, domain.Event{Change: domain.Change{Kind: platformapi.EventJobUnderperforming, Subject: id, Value: metricName}})
 	return nil
 }
 
@@ -153,8 +154,8 @@ func TestUnderperformanceFiresOnceOnAJobThatTrailsFromItsFirstSample(t *testing.
 		t.Fatalf("events = %d, want 1", len(notifier.events))
 	}
 	got := notifier.events[0]
-	if got.Kind != domain.EventJobUnderperforming || got.Subject != "exp-1" || got.Value != "acc" {
-		t.Fatalf("event = %+v, want kind=%s subject=exp-1 value=acc", got, domain.EventJobUnderperforming)
+	if got.Kind != platformapi.EventJobUnderperforming || got.Subject != "exp-1" || got.Value != "acc" {
+		t.Fatalf("event = %+v, want kind=%s subject=exp-1 value=acc", got, platformapi.EventJobUnderperforming)
 	}
 }
 

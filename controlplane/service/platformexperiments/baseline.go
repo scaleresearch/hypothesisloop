@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/contract/gitrefs"
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
@@ -68,7 +69,7 @@ func (s *Service) readBaseline(ctx context.Context, pe *domain.PlatformExperimen
 	}
 	// In timestamp order, so the last one of a key stands.
 	for _, sample := range samples.Values {
-		if basis := sample.Labels["metric_basis"]; basis != "" && basis != "raw" {
+		if basis := sample.Labels["metric_basis"]; basis != "" && basis != platformapi.BasisRaw {
 			continue
 		}
 		out.Reported[sample.Labels["metric_name"]] = sample.Value

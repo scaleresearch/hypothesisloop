@@ -8,6 +8,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
@@ -408,7 +409,7 @@ func order(metric domain.MetricDefinition, best map[string]metricsdb.AgentBest, 
 	standings := make([]AgentStanding, 0, len(best))
 	for agentID, b := range best {
 		if isCompetitor[agentID] {
-			standings = append(standings, AgentStanding{AgentID: agentID, Best: b.Value, Basis: "raw", ExperimentID: b.ExperimentID})
+			standings = append(standings, AgentStanding{AgentID: agentID, Best: b.Value, Basis: platformapi.BasisRaw, ExperimentID: b.ExperimentID})
 		}
 	}
 	sort.Slice(standings, func(i, j int) bool {

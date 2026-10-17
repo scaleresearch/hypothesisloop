@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -134,7 +135,7 @@ WHERE platform_experiment_id = $1 AND agent_id = $2 AND finished_at IS NULL
 RETURNING finished_reason`, platformExpID, agentID, reason).Scan(&told); err != nil {
 			return fmt.Errorf("platform_experiments_store.FinishAgent: %w", err)
 		}
-		tx.Change(domain.Change{Kind: domain.EventAgentFinished, Subject: agentID, Detail: told,
+		tx.Change(domain.Change{Kind: platformapi.EventAgentFinished, Subject: agentID, Detail: told,
 			PlatformExperimentID: platformExpID, AgentID: agentID})
 		return nil
 	})

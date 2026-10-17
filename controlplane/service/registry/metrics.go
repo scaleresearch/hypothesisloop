@@ -117,7 +117,7 @@ const (
 // progress this job has reached) and, if it is the
 // clear straggler with underperformMinRemaining of its run still ahead, marks the job's row. The
 // first mark emits job.underperforming to the owning agent: once per job, never a command. See
-// domain.EventJobUnderperforming.
+// platformapi.EventJobUnderperforming.
 //
 // Trailing is recomputed from the metrics store every time; the only thing kept is the marker on
 // the job's row saying its owner was told. A job launched against siblings that already finished

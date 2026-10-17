@@ -10,6 +10,19 @@ import (
 	"time"
 )
 
+// The wrapper is hl exec, which a job image carries: the command name, and the flag that sets how
+// many seconds the job's command runs on after SIGTERM.
+const (
+	WrapperCommand = "exec"
+	StopGraceFlag  = "stop-grace"
+)
+
+// Wrap is the command line that runs command under the wrapper, which lets it run stopGrace
+// seconds after SIGTERM.
+func Wrap(stopGrace int64, command []string) []string {
+	return append([]string{"hl", WrapperCommand, "--" + StopGraceFlag, strconv.FormatInt(stopGrace, 10), "--"}, command...)
+}
+
 const prefix = "hl-exec: exit-code="
 
 // Format is the line for a command that ended with code.

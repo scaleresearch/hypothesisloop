@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
@@ -77,7 +78,7 @@ func (s *Service) SendMessage(ctx context.Context, platformExpID string, req Sen
 	case errors.Is(err, db.ErrNoCoordinator):
 		return nil, nil, refusal.Refuse(http.StatusConflict, "no_coordinator", "no_coordinator: the platform hosts no coordinator for platform experiment "+platformExpID)
 	case errors.Is(err, domain.ErrPlatformExperimentClosed):
-		return nil, nil, refusal.Refuse(http.StatusConflict, "experiment_closed", "experiment_closed: platform experiment "+platformExpID+" is closed: no agent of it is at work")
+		return nil, nil, refusal.Refuse(http.StatusConflict, platformapi.ReasonExperimentClosed, "experiment_closed: platform experiment "+platformExpID+" is closed: no agent of it is at work")
 	case errors.Is(err, domain.ErrNotSignedUp):
 		return nil, nil, refuseSignup(http.StatusNotFound, "not_signed_up", "%s of platform experiment %s: hl platform-experiments agents list names its agents", err.Error(), platformExpID)
 	case errors.Is(err, db.ErrAgentEnded):

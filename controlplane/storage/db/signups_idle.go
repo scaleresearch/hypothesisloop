@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -81,7 +82,7 @@ WHERE platform_experiment_id = $1 AND agent_id = $2 AND idle_noticed_at IS NOT D
 			return fmt.Errorf("platform_experiments_store.NoticeIdle: %w", err)
 		}
 		if tag.RowsAffected() == 1 {
-			w.Change(domain.Change{Kind: domain.EventAgentIdle, Subject: r.AgentID, Value: domain.IdleValue(r.Repeat), Detail: detail,
+			w.Change(domain.Change{Kind: platformapi.EventAgentIdle, Subject: r.AgentID, Value: domain.IdleValue(r.Repeat), Detail: detail,
 				PlatformExperimentID: r.PlatformExperimentID, AgentID: r.AgentID})
 		}
 		return nil
@@ -146,7 +147,7 @@ WHERE id = $1 AND capacity_noticed_at IS NOT DISTINCT FROM $4`,
 			return fmt.Errorf("platform_experiments_store.NoticeCapacityIdle: %w", err)
 		}
 		if tag.RowsAffected() == 1 {
-			w.runChange(r.PlatformExperimentID, domain.EventCapacityIdle, domain.IdleValue(r.Repeat), detail)
+			w.runChange(r.PlatformExperimentID, platformapi.EventCapacityIdle, domain.IdleValue(r.Repeat), detail)
 		}
 		return nil
 	})

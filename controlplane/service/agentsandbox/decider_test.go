@@ -349,7 +349,7 @@ func TestTheLogOfAnExitIsKeptToItsLastBytes(t *testing.T) {
 	long := strings.Repeat("an early line that is dropped\n", 400) + "Traceback: the reason it exited"
 	mustReconcile(t, store, observed(sandboxapi.ObservedInstance{Name: name, State: "exited", Log: long}))
 	kept := store.Find("pe-1", "ag-1").ExitLog
-	if len(kept) > domain.MaxAgentInstanceLogBytes || !strings.HasSuffix(kept, "Traceback: the reason it exited") || !strings.HasPrefix(kept, "an early line") {
+	if len(kept) > sandboxapi.MaxExitLogBytes || !strings.HasSuffix(kept, "Traceback: the reason it exited") || !strings.HasPrefix(kept, "an early line") {
 		t.Fatalf("kept %d bytes ending %q", len(kept), kept[max(0, len(kept)-40):])
 	}
 }
@@ -801,7 +801,7 @@ func TestAMachineReportedUnknownIsHeldToTheProgressLimitOnceItRanAndToTheBootLim
 	store := oneAgentAndACoordinator()
 	first := mustReconcile(t, store, observed())
 	agent, coordinator := first.Instances[0].Name, first.Instances[1].Name
-	report := func(agentState string, progress *string) sandboxapi.Observed {
+	report := func(agentState sandboxapi.InstanceState, progress *string) sandboxapi.Observed {
 		return observed(sandboxapi.ObservedInstance{Name: agent, State: agentState, Progress: progress}, sandboxapi.ObservedInstance{Name: coordinator, State: "unknown"})
 	}
 

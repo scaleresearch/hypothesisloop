@@ -190,7 +190,7 @@ func reportHold(stderr io.Writer, item string, err error) bool {
 	var reply struct {
 		Similar []json.RawMessage `json:"similar"`
 	}
-	if reason, _ := command.RefusalOf(err); reason != "similar_hypotheses" || !errors.As(err, &refused) || json.Unmarshal([]byte(refused.Body), &reply) != nil {
+	if reason, _ := command.RefusalOf(err); reason != platformapi.ReasonSimilarHypotheses || !errors.As(err, &refused) || json.Unmarshal([]byte(refused.Body), &reply) != nil {
 		return false
 	}
 	fmt.Fprintf(stderr, "hl: hypothesis submit: %snothing registered, yours reads close to these or builds on a refuted one:\n", item)

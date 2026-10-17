@@ -365,9 +365,6 @@ const MaxAgentSessionBytes = 32 << 20
 // ErrNoSession is returned for an agent or coordinator that has stored no session.
 var ErrNoSession = errors.New("objectstore: no session is stored")
 
-// MaxAgentInstanceLogBytes bounds the log tail kept of an exited machine.
-const MaxAgentInstanceLogBytes = 4 << 10
-
 // MaxHyperparametersBytes bounds an agent's hyperparameters as JSON. They travel in every answer
 // to the agent's launcher and in the agent's environment.
 const MaxHyperparametersBytes = experimentspec.MaxHyperparametersBytes

@@ -133,8 +133,8 @@ func TestCreateRefusesAnAgentSandboxItCannotStart(t *testing.T) {
 		status int
 		reason string
 	}{
-		"a model without a coordinator": {map[string]any{"coordinator_model": "m", "repository": "acme/model"}, &fakeRepositories{files: map[string]string{"prj-a": ""}}, 400, "invalid_request"},
-		"a model no name can be":        {map[string]any{"coordinator_in_agentsandbox": true, "coordinator_model": "a b", "repository": "acme/model"}, &fakeRepositories{files: map[string]string{"prj-a": ""}}, 400, "invalid_request"},
+		"a model without a coordinator": {map[string]any{"coordinator_model": "m", "repository": "acme/model", "branch": "main"}, &fakeRepositories{files: map[string]string{"prj-a": ""}}, 400, "invalid_request"},
+		"a model no name can be":        {map[string]any{"coordinator_in_agentsandbox": true, "coordinator_model": "a b", "repository": "acme/model", "branch": "main"}, &fakeRepositories{files: map[string]string{"prj-a": ""}}, 400, "invalid_request"},
 	} {
 		store, create := agentSandboxAPI(t, tc.repos)
 		code, out := create(with(tc.more))
@@ -147,7 +147,7 @@ func TestCreateRefusesAnAgentSandboxItCannotStart(t *testing.T) {
 	attached := &fakeRepositories{files: map[string]string{"prj-a": ""}}
 	store, create := agentSandboxAPI(t, attached)
 	store.createErr = errors.New("the database is away")
-	if code, out := create(with(map[string]any{"coordinator_in_agentsandbox": true, "repository": "acme/model"})); code != http.StatusInternalServerError || len(store.created) != 0 {
+	if code, out := create(with(map[string]any{"coordinator_in_agentsandbox": true, "repository": "acme/model", "branch": "main"})); code != http.StatusInternalServerError || len(store.created) != 0 {
 		t.Fatalf("a write that failed: got = %d %v with %d created, want 500 and nothing", code, out, len(store.created))
 	}
 }

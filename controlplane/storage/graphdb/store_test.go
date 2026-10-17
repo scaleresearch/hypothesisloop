@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -1023,14 +1024,14 @@ func TestConcernsAgentFindsActivityOnTheAgentsOwnHypotheses(t *testing.T) {
 		e    domain.Event
 		want bool
 	}{
-		{domain.Event{Change: domain.Change{Kind: domain.EventCommentNew, Subject: mine.ID}}, true},
-		{domain.Event{Change: domain.Change{Kind: domain.EventFindingNew, Subject: theirs.ID}}, false},
-		{domain.Event{Change: domain.Change{Kind: domain.EventHypothesisLink, Subject: theirs.ID, Detail: mine.ID}}, true},
-		{domain.Event{Change: domain.Change{Kind: domain.EventHypothesisLink, Subject: theirs.ID, Detail: pe}}, false},
-		{domain.Event{Change: domain.Change{Kind: domain.EventHypothesisNew, Subject: child.ID}}, true},
-		{domain.Event{Change: domain.Change{Kind: domain.EventHypothesisNew, Subject: theirs.ID}}, false},
-		{domain.Event{Change: domain.Change{Kind: domain.EventCommentNew, Subject: pe, PlatformExperimentID: pe}}, true},
-		{domain.Event{Change: domain.Change{Kind: domain.EventFindingNew, Subject: pe, PlatformExperimentID: pe}}, false},
+		{domain.Event{Change: domain.Change{Kind: platformapi.EventCommentNew, Subject: mine.ID}}, true},
+		{domain.Event{Change: domain.Change{Kind: platformapi.EventFindingNew, Subject: theirs.ID}}, false},
+		{domain.Event{Change: domain.Change{Kind: platformapi.EventHypothesisLink, Subject: theirs.ID, Detail: mine.ID}}, true},
+		{domain.Event{Change: domain.Change{Kind: platformapi.EventHypothesisLink, Subject: theirs.ID, Detail: pe}}, false},
+		{domain.Event{Change: domain.Change{Kind: platformapi.EventHypothesisNew, Subject: child.ID}}, true},
+		{domain.Event{Change: domain.Change{Kind: platformapi.EventHypothesisNew, Subject: theirs.ID}}, false},
+		{domain.Event{Change: domain.Change{Kind: platformapi.EventCommentNew, Subject: pe, PlatformExperimentID: pe}}, true},
+		{domain.Event{Change: domain.Change{Kind: platformapi.EventFindingNew, Subject: pe, PlatformExperimentID: pe}}, false},
 	}
 	events := make([]domain.Event, len(cases))
 	for i, c := range cases {

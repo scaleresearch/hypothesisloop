@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/contract/jobenv"
 )
 
 type Var struct{ Name, Value string }
@@ -45,34 +46,34 @@ func Platform(exp *clusterapi.DesiredJob, group clusterapi.JobGroup, apiURL stri
 	dataEndpoint := reach(exp.Data.Endpoint)
 	traceID := sha256.Sum256([]byte(exp.ID))
 	vars := []Var{
-		{"AWS_ACCESS_KEY_ID", exp.Data.AccessKeyID},
-		{"AWS_ENDPOINT_URL", dataEndpoint},
-		{"AWS_ENDPOINT_URL_S3", dataEndpoint},
-		{"AWS_REGION", exp.Data.Region},
-		{"AWS_SECRET_ACCESS_KEY", exp.Data.SecretAccessKey},
-		{"HYPOTHESISLOOP_DATA_SHARED", exp.Data.Shared},
-		{"HYPOTHESISLOOP_DATA_URI", exp.Data.URI},
-		{"HYPOTHESISLOOP_EXPERIMENT_ID", exp.ID},
-		{"HYPOTHESISLOOP_AGENT_ID", exp.AgentID},
-		{"HYPOTHESISLOOP_PROJECT_ID", exp.ProjectID},
-		{"HYPOTHESISLOOP_CODE_REF", exp.CodeRef},
-		{"HYPOTHESISLOOP_CONFIG_HASH", exp.ConfigHash},
-		{"HYPOTHESISLOOP_DATA_REF", exp.DataRef},
-		{"HYPOTHESISLOOP_API_URL", reach(apiURL)},
-		{"HYPOTHESISLOOP_ACCELERATOR_TYPE", string(exp.AcceleratorType)},
-		{"HYPOTHESISLOOP_ACCELERATOR_COUNT", fmt.Sprintf("%d", group.AcceleratorCount)},
-		{"HYPOTHESISLOOP_DURATION_SECONDS", fmt.Sprintf("%d", int(exp.EstimatedDurationHours*3600))},
-		{"HYPOTHESISLOOP_ATTEMPT", fmt.Sprintf("%d", exp.AttemptCount)},
+		{jobenv.AccessKeyID, exp.Data.AccessKeyID},
+		{jobenv.Endpoint, dataEndpoint},
+		{jobenv.EndpointS3, dataEndpoint},
+		{jobenv.Region, exp.Data.Region},
+		{jobenv.SecretAccessKey, exp.Data.SecretAccessKey},
+		{jobenv.DataShared, exp.Data.Shared},
+		{jobenv.DataURI, exp.Data.URI},
+		{jobenv.ExperimentID, exp.ID},
+		{jobenv.AgentID, exp.AgentID},
+		{jobenv.ProjectID, exp.ProjectID},
+		{jobenv.CodeRef, exp.CodeRef},
+		{jobenv.ConfigHash, exp.ConfigHash},
+		{jobenv.DataRef, exp.DataRef},
+		{jobenv.APIURL, reach(apiURL)},
+		{jobenv.AcceleratorType, string(exp.AcceleratorType)},
+		{jobenv.AcceleratorCount, fmt.Sprintf("%d", group.AcceleratorCount)},
+		{jobenv.DurationSeconds, fmt.Sprintf("%d", int(exp.EstimatedDurationHours*3600))},
+		{jobenv.Attempt, fmt.Sprintf("%d", exp.AttemptCount)},
 	}
 	if cpus != "" {
 		// A container sees every core of its node (nproc, os.cpu_count) while its cpu limit lets
 		// it use only these, so a thread pool sized from the node is throttled.
-		vars = append(vars, Var{"HYPOTHESISLOOP_CPUS", cpus}, Var{"OMP_NUM_THREADS", cpus})
+		vars = append(vars, Var{jobenv.CPUs, cpus}, Var{jobenv.OMPNumThreads, cpus})
 	}
 	return append(vars,
-		Var{"TRACEPARENT", fmt.Sprintf("00-%x-%x-01", traceID[:16], traceID[16:24])},
-		Var{"HYPOTHESISLOOP_TOKEN", exp.Token},
-		Var{"HYPOTHESISLOOP_GIT_URL", reach(exp.GitURL)},
+		Var{jobenv.TraceParent, fmt.Sprintf("00-%x-%x-01", traceID[:16], traceID[16:24])},
+		Var{jobenv.Token, exp.Token},
+		Var{jobenv.GitURL, reach(exp.GitURL)},
 	), nil
 }
 

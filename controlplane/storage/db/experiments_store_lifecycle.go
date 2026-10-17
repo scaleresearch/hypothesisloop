@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -170,7 +171,7 @@ func (s *Store) MarkUnderperforming(ctx context.Context, id, metricName string) 
 	const q = `UPDATE experiments SET underperforming_metric = $2
 WHERE id = $1 AND underperforming_metric IS NULL AND status NOT IN ` + endedSQL
 	announce := func(w *Write, j jobWritten) {
-		w.Change(j.change(domain.EventJobUnderperforming, j.underperformingMetric, ""))
+		w.Change(j.change(platformapi.EventJobUnderperforming, j.underperformingMetric, ""))
 	}
 	if _, err := s.writeJob(ctx, announce, q, id, metricName); err != nil {
 		return fmt.Errorf("experiments_store.MarkUnderperforming: %w", err)

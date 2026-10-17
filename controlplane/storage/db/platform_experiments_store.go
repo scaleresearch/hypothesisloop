@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -567,7 +568,7 @@ func (s *Store) writeRunStatusDetail(ctx context.Context, q, id, detail string) 
 			return err
 		}
 		if detail != "" {
-			w.runChange(id, domain.EventPlatformExperimentStatus, status, detail)
+			w.runChange(id, platformapi.EventPlatformExperimentStatus, status, detail)
 		}
 		return nil
 	})
@@ -651,7 +652,7 @@ RETURNING pe.description IS DISTINCT FROM old.description OR pe.duration_hours I
 		return nil, err
 	}
 	if briefMoved {
-		tx.runChange(pe.ID, domain.EventPlatformExperimentDescription, "", "")
+		tx.runChange(pe.ID, platformapi.EventPlatformExperimentDescription, "", "")
 	}
 	return planned, nil
 }
@@ -660,7 +661,7 @@ RETURNING pe.description IS DISTINCT FROM old.description OR pe.duration_hours I
 // none for none.
 func (w *Write) planChange(id string, fields []string) {
 	if len(fields) > 0 {
-		w.runChange(id, domain.EventPlatformExperimentPlan, "", strings.Join(fields, ", "))
+		w.runChange(id, platformapi.EventPlatformExperimentPlan, "", strings.Join(fields, ", "))
 	}
 }
 

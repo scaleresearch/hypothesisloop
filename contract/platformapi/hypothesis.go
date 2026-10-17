@@ -29,3 +29,26 @@ type RegisterHypothesisRequest struct {
 	Links                []LinkSpec `json:"links,omitempty" required:"false" doc:"Where the hypothesis sits: at least one {type: builds_on, to: <hypothesis id or the platform_experiment_id for the objective>}; contradicts and related links to hypotheses are optional."`
 	DistinctFrom         []string   `json:"distinct_from,omitempty" required:"false" doc:"Ids of hypotheses a 409 listed that you read and judged a different claim from yours."`
 }
+
+// HypothesisStatus is the owning agent's own verdict on its claim. Only the agent that owns the
+// hypothesis may change it. A hypothesis a person submitted names no owner, so any agent that
+// tested it may settle it, and the findings underneath are the record of who earned the verdict.
+type HypothesisStatus string
+
+const (
+	// HypothesisOpen is the default: still being tested, no verdict yet.
+	HypothesisOpen HypothesisStatus = "open"
+	// HypothesisConfirmed means the owning agent has validated the claim as a real improvement —
+	// worth another agent building on it.
+	HypothesisConfirmed HypothesisStatus = "confirmed"
+	// HypothesisRefuted means the owning agent has confidently established the claim does NOT
+	// hold — a real negative result, not noise. Worth another agent reading so it isn't retested,
+	// but not something to build on.
+	HypothesisRefuted HypothesisStatus = "refuted"
+	// HypothesisInconclusive means noisy, ambiguous, or not worth another agent's time drilling
+	// into further.
+	HypothesisInconclusive HypothesisStatus = "inconclusive"
+)
+
+// HypothesisStatuses is every status of a hypothesis, the open one first.
+var HypothesisStatuses = []HypothesisStatus{HypothesisOpen, HypothesisConfirmed, HypothesisRefuted, HypothesisInconclusive}

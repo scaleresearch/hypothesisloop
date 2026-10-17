@@ -56,6 +56,9 @@ const (
 	// PhaseReasonInstanceUnknown: the job's rented machine is listed and its provider does not
 	// say whether the job runs on it.
 	PhaseReasonInstanceUnknown = "instance_unknown"
+	// PhaseReasonScaleUpRefused: the cluster's autoscaler gave up on adding a node for a pod of
+	// the job that waits for one. The message is the autoscaler's.
+	PhaseReasonScaleUpRefused = "scale_up_refused"
 	// PhaseReasonCreateFailed: the runtime tried to create the job's workload and its platform
 	// refused. The message is the refusal.
 	PhaseReasonCreateFailed = "create_failed"

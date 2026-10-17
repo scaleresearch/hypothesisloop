@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/contract/gitrefs"
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
@@ -270,7 +271,7 @@ func (s *Service) RequireActive(ctx context.Context, platformExpID, agentID stri
 		return fmt.Errorf("platform_experiments.RequireActive: %w", err)
 	}
 	if pe == nil || pe.Status == domain.PlatformExpClosed {
-		return refusal.Refuse(http.StatusConflict, "experiment_closed", "platform experiment "+platformExpID+" is closed")
+		return refusal.Refuse(http.StatusConflict, platformapi.ReasonExperimentClosed, "platform experiment "+platformExpID+" is closed")
 	}
 	cut, err := s.store.IsAgentCut(ctx, platformExpID, agentID)
 	if err != nil {

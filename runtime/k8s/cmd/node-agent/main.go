@@ -47,7 +47,7 @@ func main() {
 	if token == "" {
 		log.Fatal("RUNTIME_TOKEN is required")
 	}
-	controlPlane := &cpclient.Client{BaseURL: cpURL + "/internal/node-metrics", Token: token, HTTP: &http.Client{}}
+	controlPlane := &cpclient.Client{BaseURL: cpURL + clusterapi.NodeMetricsPath, Token: token, HTTP: &http.Client{}}
 
 	n, err := strconv.Atoi(os.Getenv("PUSH_INTERVAL_MS"))
 	if err != nil || n <= 0 {

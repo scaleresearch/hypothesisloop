@@ -28,3 +28,19 @@ var EndedStatuses = []ExperimentStatus{StatusCompleted, StatusFailed, StatusEvic
 
 // Ended reports whether a job of this status has ended.
 func (s ExperimentStatus) Ended() bool { return slices.Contains(EndedStatuses, s) }
+
+// PlatformExperimentStatus is the lifecycle state of a platform experiment.
+type PlatformExperimentStatus string
+
+const (
+	// PlatformExpDraft is a platform experiment being planned from a goal: a planner the platform
+	// runs works out what to measure and proposes the rest, nobody else joins, and no job runs
+	// until a person accepts the proposal, which opens it.
+	PlatformExpDraft   PlatformExperimentStatus = "draft"
+	PlatformExpOpen    PlatformExperimentStatus = "open"
+	PlatformExpRunning PlatformExperimentStatus = "running"
+	PlatformExpClosed  PlatformExperimentStatus = "closed"
+)
+
+// PlatformExperimentStatuses is every status of a platform experiment, in the order it goes through them.
+var PlatformExperimentStatuses = []PlatformExperimentStatus{PlatformExpDraft, PlatformExpOpen, PlatformExpRunning, PlatformExpClosed}

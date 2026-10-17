@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -103,7 +104,7 @@ RETURNING platform_experiment_id, agent_id, code_ref, image, loaded`, key)
 		if state == domain.EnvironmentReady && loaded {
 			return nil
 		}
-		w.Change(domain.Change{Kind: domain.EventEnvironmentStatus, Subject: key, Value: string(state),
+		w.Change(domain.Change{Kind: platformapi.EventEnvironmentStatus, Subject: key, Value: string(state),
 			Detail: domain.EnvironmentEnded(codeRef, image, state, fault), PlatformExperimentID: peID, AgentID: agentID})
 		return nil
 	})
@@ -123,7 +124,7 @@ RETURNING platform_experiment_id, agent_id, code_ref, image`, key)
 	}
 	var peID, agentID, codeRef, image string
 	_, err = pgx.ForEachRow(rows, []any{&peID, &agentID, &codeRef, &image}, func() error {
-		w.Change(domain.Change{Kind: domain.EventEnvironmentStatus, Subject: key, Value: "loaded",
+		w.Change(domain.Change{Kind: platformapi.EventEnvironmentStatus, Subject: key, Value: "loaded",
 			Detail: domain.EnvironmentLoaded(codeRef, image, cluster), PlatformExperimentID: peID, AgentID: agentID})
 		return nil
 	})

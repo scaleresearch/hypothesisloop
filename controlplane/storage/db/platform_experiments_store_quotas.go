@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -48,7 +49,7 @@ func writeQuotas(ctx context.Context, w *Write, q string, args ...any) error {
 		return err
 	}
 	for _, aq := range written {
-		w.Change(domain.Change{Kind: domain.EventQuotaChanged, Subject: aq.AgentID, Value: fmt.Sprintf("%g", aq.Share()),
+		w.Change(domain.Change{Kind: platformapi.EventQuotaChanged, Subject: aq.AgentID, Value: fmt.Sprintf("%g", aq.Share()),
 			PlatformExperimentID: aq.PlatformExperimentID, AgentID: aq.AgentID})
 	}
 	return nil

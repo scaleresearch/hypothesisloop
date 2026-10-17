@@ -78,7 +78,7 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 	// stuck in ImagePullBackOff — the desired-state Job "exists and isn't finished" long
 	// before its container ever actually starts. A never-self-heals reason means it never
 	// will, whatever exp.Status currently says.
-	reason, message, _, scheduledNodes, schedulingReason, found, err := w.reports.LatestPhaseDetail(ctx, exp)
+	reason, message, _, scheduledNodes, _, found, err := w.reports.LatestPhaseDetail(ctx, exp)
 	if err != nil {
 		return fmt.Errorf("poll phase detail: %w", err)
 	}
@@ -115,7 +115,7 @@ func (w *JobWatcher) reconcileOne(ctx context.Context, exp *domain.Experiment, a
 		waiting = domain.PhaseDetail{Reason: reason, Message: message}
 	}
 	if exp.Status != domain.StatusRunning && !bound {
-		evicted, err := w.checkScaleUpDeadline(ctx, exp, waiting, schedulingReason, autoscalerEnabled, clusterIDs)
+		evicted, err := w.checkScaleUpDeadline(ctx, exp, waiting, autoscalerEnabled, clusterIDs)
 		if err != nil {
 			return fmt.Errorf("check scale-up deadline: %w", err)
 		}

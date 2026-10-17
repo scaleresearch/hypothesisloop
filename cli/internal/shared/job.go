@@ -2,6 +2,7 @@ package shared
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 	"github.com/scaleresearch/hypothesisloop/cli/internal/watchclient"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/command"
@@ -69,7 +71,7 @@ func (m briefMetrics) MarshalJSON() ([]byte, error) {
 			b.WriteByte(',')
 		}
 		fmt.Fprintf(&b, `%q:{"value":%s`, metric.Name, strconv.FormatFloat(metric.Value, 'g', 6, 64))
-		if metric.Basis != "raw" {
+		if metric.Basis != platformapi.BasisRaw {
 			fmt.Fprintf(&b, `,"basis":%q`, metric.Basis)
 		}
 		b.WriteByte('}')
@@ -82,25 +84,20 @@ func (m briefMetrics) MarshalJSON() ([]byte, error) {
 // instance, else the node, then the accelerator's model or, without one, the CPU's. Two jobs
 // with different tags are not the same measurement.
 type machineTag struct {
-	Node    string `json:"node"`
-	Machine struct {
-		HostID           string `json:"host_id"`
-		AcceleratorModel string `json:"accelerator_model"`
-		CPUModel         string `json:"cpu_model"`
-	} `json:"machine"`
+	Node    string                 `json:"node"`
+	Machine *clusterapi.JobMachine `json:"machine"`
 }
 
 func (m machineTag) MarshalJSON() ([]byte, error) {
 	if m.Node == "" {
 		return []byte(`""`), nil
 	}
-	tag := "node " + m.Node
-	if m.Machine.HostID != "" {
-		tag = "host " + m.Machine.HostID
-	}
-	model := m.Machine.AcceleratorModel
-	if model == "" {
-		model = m.Machine.CPUModel
+	tag, model := "node "+m.Node, ""
+	if m.Machine != nil {
+		if m.Machine.HostID != "" {
+			tag = "host " + m.Machine.HostID
+		}
+		model = cmp.Or(m.Machine.AcceleratorModel, m.Machine.CPUModel)
 	}
 	return json.Marshal(strings.TrimSpace(tag + " " + model))
 }
@@ -349,9 +346,9 @@ on the hypothesis.`, stderr)
 		return 0
 	}
 	var out struct {
-		Status     string `json:"status"`
-		Hypothesis string `json:"hypothesis_id"`
-		Verdict    string `json:"verdict"`
+		Status     string                       `json:"status"`
+		Hypothesis string                       `json:"hypothesis_id"`
+		Verdict    platformapi.HypothesisStatus `json:"verdict"`
 	}
 	if err := c.Do("POST", "/experiments/"+url.PathEscape(id)+"/summary", map[string]string{"summary": text}, &out); err != nil {
 		return command.Fail(stderr, err)
@@ -359,7 +356,7 @@ on the hypothesis.`, stderr)
 	fmt.Fprintf(stdout, "{\"status\":%q}\n", out.Status)
 	switch out.Verdict {
 	case "":
-	case "open":
+	case platformapi.HypothesisOpen:
 		fmt.Fprintf(stderr, "hl: job summary: the verdict of %s is open and yours to set: hl hypothesis status %s inconclusive, or confirmed|refuted --against CONTROL_JOB once a second run agrees (one run suffices where every ranking metric is deterministic)\n", out.Hypothesis, out.Hypothesis)
 	default:
 		fmt.Fprintf(stderr, "hl: job summary: the verdict of %s is %s and yours to change if this finding does not fit it\n", out.Hypothesis, out.Verdict)

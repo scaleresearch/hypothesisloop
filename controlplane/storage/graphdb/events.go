@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -19,9 +20,9 @@ func (s *Store) ConcernsAgent(ctx context.Context, agentID string, events []doma
 	for _, e := range events {
 		switch {
 		case onObjective(e):
-		case e.Kind == domain.EventHypothesisNew:
+		case e.Kind == platformapi.EventHypothesisNew:
 			created = append(created, e.Subject)
-		case e.Kind == domain.EventHypothesisLink:
+		case e.Kind == platformapi.EventHypothesisLink:
 			targets = append(targets, e.Detail)
 		default:
 			targets = append(targets, e.Subject)
@@ -61,7 +62,7 @@ RETURN DISTINCT h.id`, created},
 	result := make([]bool, len(events))
 	for i, e := range events {
 		id := e.Subject
-		if e.Kind == domain.EventHypothesisLink {
+		if e.Kind == platformapi.EventHypothesisLink {
 			id = e.Detail
 		}
 		result[i] = onObjective(e) || concerned[id]
@@ -71,5 +72,5 @@ RETURN DISTINCT h.id`, created},
 
 // onObjective is a comment on the objective, the root of its platform experiment's graph.
 func onObjective(e domain.Event) bool {
-	return e.Kind == domain.EventCommentNew && e.Subject != "" && e.Subject == e.PlatformExperimentID
+	return e.Kind == platformapi.EventCommentNew && e.Subject != "" && e.Subject == e.PlatformExperimentID
 }

@@ -57,32 +57,18 @@ type HypothesisWorker struct {
 	Name    string `json:"name"`
 }
 
-// HypothesisStatus is the owning agent's own verdict on its claim — mirrors what agents already
-// wrote informally into finding/comment text (REFUTED/BLOCKED-style labels), made a real
-// filterable field instead. Only the agent named in Hypothesis.AgentID may change it (see
-// registry.Service.SetHypothesisStatus) — it's "own your claims," not a global judgment call
-// another agent or the operator gets to make on someone else's hypothesis. A human-submitted row
-// names no owner, so that rule leaves it to whoever tested it: any agent may settle it, and the
-// findings underneath are the record of who earned the verdict.
-type HypothesisStatus string
+// HypothesisStatus is the API's own (platformapi).
+type HypothesisStatus = platformapi.HypothesisStatus
 
 const (
-	// HypothesisOpen is the default: still being tested, no verdict yet.
-	HypothesisOpen HypothesisStatus = "open"
-	// HypothesisConfirmed means the owning agent has validated the claim as a real improvement —
-	// worth another agent building on it.
-	HypothesisConfirmed HypothesisStatus = "confirmed"
-	// HypothesisRefuted means the owning agent has confidently established the claim does NOT
-	// hold — a real negative result, not noise. Worth another agent reading so it isn't retested,
-	// but not something to build on.
-	HypothesisRefuted HypothesisStatus = "refuted"
-	// HypothesisInconclusive means noisy, ambiguous, or not worth another agent's time drilling
-	// into further.
-	HypothesisInconclusive HypothesisStatus = "inconclusive"
+	HypothesisOpen         = platformapi.HypothesisOpen
+	HypothesisConfirmed    = platformapi.HypothesisConfirmed
+	HypothesisRefuted      = platformapi.HypothesisRefuted
+	HypothesisInconclusive = platformapi.HypothesisInconclusive
 )
 
 // HypothesisStatuses is every status of a hypothesis, the open one first.
-var HypothesisStatuses = []HypothesisStatus{HypothesisOpen, HypothesisConfirmed, HypothesisRefuted, HypothesisInconclusive}
+var HypothesisStatuses = platformapi.HypothesisStatuses
 
 // ValidHypothesisStatus reports whether s is one of the four recognized statuses.
 func ValidHypothesisStatus(s HypothesisStatus) bool { return slices.Contains(HypothesisStatuses, s) }

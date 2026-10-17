@@ -36,7 +36,7 @@ Runs COMMAND as a job on a rented instance. SIGTERM is passed on to COMMAND and 
 started, which then have SECONDS to save their work before they are killed. COMMAND's exit
 code is the job's: once COMMAND has ended and what it started has ended or been killed, the code
 is written as the last line of output and returned.`, stderr)
-	stopGrace := fs.Int("stop-grace", -1, "seconds COMMAND gets between SIGTERM and SIGKILL")
+	stopGrace := fs.Int(exitline.StopGraceFlag, -1, "seconds COMMAND gets between SIGTERM and SIGKILL")
 	if err := fs.Parse(args); err != nil {
 		return command.ParseExit(err)
 	}

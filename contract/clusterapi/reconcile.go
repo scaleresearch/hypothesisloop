@@ -144,8 +144,18 @@ type JobMachine struct {
 	PricePerHourUSD float64 `json:"price_per_hour_usd,omitempty" minimum:"0"`
 }
 
-// DetachAnswer is the control plane's answer to a runtime ending its own cluster
-// (DELETE /internal/clusters/{name}): the jobs that went back to the queue.
-type DetachAnswer struct {
-	Requeued []string `json:"requeued"`
-}
+// The paths of a cluster's API. Each of a cluster's own is under ClustersPath + "/{name}", and a
+// build's under that and BuildsPath + "/{key}".
+const (
+	ClustersPath           = "/internal/clusters"
+	AccessPath             = "/access"
+	ReconcilePath          = "/reconcile"
+	StatusPath             = "/status"
+	BuildsPath             = "/builds"
+	BuildCredentialPath    = "/credential"
+	BuildGitCredentialPath = "/git-credential"
+	BuildLoadedPath        = "/loaded"
+	BuildProgressPath      = "/progress"
+	// NodeMetricsPath is where a node's agent pushes NodeMetricsPush, on the metrics service.
+	NodeMetricsPath = "/internal/node-metrics"
+)

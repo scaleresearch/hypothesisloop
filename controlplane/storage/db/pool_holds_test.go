@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -104,7 +105,7 @@ func TestHeldResearchersAreToldOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got := changesAfter(t, pes, domain.EventFilter{PlatformExperimentID: pe, Kinds: map[string]bool{domain.EventPlatformExperimentStatus: true}}, before)
+	got := changesAfter(t, pes, domain.EventFilter{PlatformExperimentID: pe, Kinds: map[string]bool{platformapi.EventPlatformExperimentStatus: true}}, before)
 	if len(got) != 1 || got[0].Detail != line || got[0].Value != string(domain.PlatformExpRunning) {
 		t.Errorf("status changes: got = %+v, want the hold once", got)
 	}

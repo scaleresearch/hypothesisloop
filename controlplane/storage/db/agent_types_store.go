@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -487,7 +488,7 @@ WHERE `+coordinatorWhere+` AND pe.status <> 'closed'`, args...)
 }
 
 func scanInstructionsChange(row pgx.CollectableRow) (domain.Change, error) {
-	c := domain.Change{Kind: domain.EventAgentInstructions}
+	c := domain.Change{Kind: platformapi.EventAgentInstructions}
 	err := row.Scan(&c.PlatformExperimentID, &c.AgentID, &c.Detail, &c.Value)
 	c.Subject = c.AgentID
 	return c, err

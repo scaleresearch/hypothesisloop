@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
@@ -317,7 +318,7 @@ func (s *Service) AgentQuota(ctx context.Context, agentID, id string, reader aut
 		return nil, auth.Internal(s.logger, "get agent quota", err, zap.String("id", id))
 	}
 	if signup != nil && signup.Role == domain.SignupRolePlanner {
-		return nil, refusal.Refuse(http.StatusNotFound, "planner_has_no_quota", "agent "+agentID+" is the planner of platform experiment "+id+": a planner submits no job, so it has no quota and needs none. The run's budget is the budget_accelerator_hours its proposal states (hl platform-experiments propose --help), sized against hl capacity, and it is shared among the researchers when the run starts")
+		return nil, refusal.Refuse(http.StatusNotFound, platformapi.ReasonPlannerHasNoQuota, "agent "+agentID+" is the planner of platform experiment "+id+": a planner submits no job, so it has no quota and needs none. The run's budget is the budget_accelerator_hours its proposal states (hl platform-experiments propose --help), sized against hl capacity, and it is shared among the researchers when the run starts")
 	}
 	if pe == nil || pe.Status != domain.PlatformExpOpen {
 		return nil, ErrNoQuota
@@ -325,5 +326,5 @@ func (s *Service) AgentQuota(ctx context.Context, agentID, id string, reader aut
 	if err := s.Describe(ctx, pe, reader); err != nil {
 		return nil, auth.Internal(s.logger, "get agent quota", err, zap.String("id", id))
 	}
-	return nil, refusal.Refuse(http.StatusNotFound, "quota_not_granted", "agent "+agentID+" holds no quota yet: it is granted when the platform experiment starts. "+pe.StatusReason.Message)
+	return nil, refusal.Refuse(http.StatusNotFound, platformapi.ReasonQuotaNotGranted, "agent "+agentID+" holds no quota yet: it is granted when the platform experiment starts. "+pe.StatusReason.Message)
 }

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -57,7 +58,7 @@ func TestAJobsImageIsItsReadyEnvironmentOrItsJobImage(t *testing.T) {
 	if err != nil || got.Image != "registry.test/job:1" || got.Login != nil || asked != 1 {
 		t.Errorf("no environment: got %+v, %v, want the job image and no login", got, err)
 	}
-	for key, reason := range map[string]string{"building": ReasonEnvironmentNotReady, "failed": ReasonEnvironmentFailed} {
+	for key, reason := range map[string]string{"building": platformapi.ReasonEnvironmentNotReady, "failed": ReasonEnvironmentFailed} {
 		var refused *AdmissionError
 		if _, err := of(key).ImageCredential(context.Background(), "job-1"); !errors.As(err, &refused) || refused.Reason != reason {
 			t.Errorf("%s: got %v, want %s", key, err, reason)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -33,7 +34,7 @@ func TestARaisedBaselineIsKeptInTheHistoryAndToldToEveryAgent(t *testing.T) {
 	}
 	var raises []domain.Event
 	for _, e := range changesAfter(t, pes, domain.EventFilter{PlatformExperimentID: peID, AgentID: agentID}, before) {
-		if e.Kind == domain.EventPlatformExperimentBaseline {
+		if e.Kind == platformapi.EventPlatformExperimentBaseline {
 			raises = append(raises, e)
 		}
 	}

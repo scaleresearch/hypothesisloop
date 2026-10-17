@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -140,7 +141,7 @@ UPDATE platform_experiments SET proposal = $2, proposed_at = now(), declined_rea
 		if err != nil {
 			return fmt.Errorf("platform_experiments_store.SetProposal: %w", err)
 		}
-		tx.runChange(id, domain.EventPlatformExperimentProposal, "proposed", "")
+		tx.runChange(id, platformapi.EventPlatformExperimentProposal, "proposed", "")
 		if p.Baseline != nil {
 			if err := signUpDraftBaseline(ctx, tx, id, p.Baseline, p.BaselineSignup); err != nil {
 				return fmt.Errorf("platform_experiments_store.SetProposal: %w", err)
@@ -260,7 +261,7 @@ UPDATE platform_experiments SET declined_reason = $2, proposal = NULL, proposed_
 		if err != nil {
 			return fmt.Errorf("platform_experiments_store.Decline: %w", err)
 		}
-		tx.runChange(id, domain.EventPlatformExperimentProposal, "declined", "")
+		tx.runChange(id, platformapi.EventPlatformExperimentProposal, "declined", "")
 		return nil
 	})
 }
@@ -334,7 +335,7 @@ WHERE id = $1`, pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.Ma
 			return fmt.Errorf("platform_experiments_store.AcceptDraft: %w", err)
 		}
 		if pe.Description != description || pe.DurationHours != durationHours {
-			tx.runChange(pe.ID, domain.EventPlatformExperimentDescription, "", "")
+			tx.runChange(pe.ID, platformapi.EventPlatformExperimentDescription, "", "")
 		}
 		if err := poolTypesTx(ctx, tx, pe.ID, pe.Researchers); err != nil {
 			return fmt.Errorf("platform_experiments_store.AcceptDraft: %w", err)
@@ -426,7 +427,7 @@ WHERE platform_experiment_id = $1 AND agent_id = $2 AND name = ''`, id, recipien
 				return fmt.Errorf("platform_experiments_store.SetGoal: renew the planner's launch: %w", err)
 			}
 		}
-		tx.Change(domain.Change{Kind: domain.EventPlatformExperimentGoal, Subject: id, Value: strconv.Itoa(version),
+		tx.Change(domain.Change{Kind: platformapi.EventPlatformExperimentGoal, Subject: id, Value: strconv.Itoa(version),
 			PlatformExperimentID: id, AgentID: recipient})
 		return nil
 	})

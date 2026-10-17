@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
@@ -33,7 +34,7 @@ const closedDetail = "the platform experiment is closed, and its hypothesis grap
 func (s *Service) WriteRefusal(err error) error {
 	var similar *graphdb.SimilarError
 	if errors.As(err, &similar) {
-		return &similarHypothesesError{Refusal: refusal.Refuse(http.StatusConflict, "similar_hypotheses", similarDetail), Similar: similar.Similar}
+		return &similarHypothesesError{Refusal: refusal.Refuse(http.StatusConflict, platformapi.ReasonSimilarHypotheses, similarDetail), Similar: similar.Similar}
 	}
 	var unsupported *UnsupportedVerdictError
 	if errors.As(err, &unsupported) {
@@ -53,7 +54,7 @@ func (s *Service) WriteRefusal(err error) error {
 	case errors.Is(err, ErrBaselineRegistersNoHypothesis):
 		return refusal.Refuse(http.StatusForbidden, "baseline_registers_no_hypothesis", err.Error())
 	case errors.Is(err, domain.ErrPlatformExperimentClosed):
-		return refusal.Refuse(http.StatusConflict, "experiment_closed", closedDetail)
+		return refusal.Refuse(http.StatusConflict, platformapi.ReasonExperimentClosed, closedDetail)
 	case errors.Is(err, domain.ErrNotSignedUp):
 		return refusal.Refuse(http.StatusForbidden, "not_signed_up", err.Error())
 	case errors.Is(err, ErrHypothesisNotOwner):

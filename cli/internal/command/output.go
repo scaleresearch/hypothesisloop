@@ -79,9 +79,7 @@ func Fail(stderr io.Writer, err error) int {
 		return 1
 	}
 	if errors.As(err, &refused) {
-		if invalid := invalidFields([]byte(refused.Body)); invalid != "" {
-			refused.Body = invalid
-		} else if problems := problemLines([]byte(refused.Body)); problems != "" {
+		if problems := problemLines([]byte(refused.Body)); problems != "" {
 			refused.Body = problems
 		} else if body, jsonErr := CompactJSON([]byte(refused.Body)); jsonErr == nil {
 			refused.Body = string(body)
@@ -100,40 +98,10 @@ func refusalMessage(body []byte) string {
 	return strings.TrimSpace(string(body))
 }
 
-// invalidFields is what a request refused for its shape got wrong, one clause per field: where
-// and what. The API's answer also carries the whole value it read at each place, which for a
-// missing field is the request itself and buries the one line that matters. Empty for an answer
-// that lists no fields.
-func invalidFields(body []byte) string {
-	var problem struct {
-		Errors []struct {
-			Message  string `json:"message"`
-			Location string `json:"location"`
-		} `json:"errors"`
-	}
-	if json.Unmarshal(body, &problem) != nil || len(problem.Errors) == 0 {
-		return ""
-	}
-	clauses := make([]string, 0, len(problem.Errors))
-	for _, e := range problem.Errors {
-		clause := e.Message
-		if e.Location != "" {
-			clause = strings.TrimPrefix(e.Location, "body.") + ": " + e.Message
-		}
-		clauses = append(clauses, clause)
-	}
-	return strings.Join(clauses, "; ")
-}
-
 // problemLines is a refusal that holds several problems, one line each, reason first, so all of
 // them are fixed in one pass. Empty for an answer with fewer than two.
 func problemLines(body []byte) string {
-	var refusal struct {
-		Problems []struct {
-			Reason  string `json:"reason"`
-			Message string `json:"message"`
-		} `json:"problems"`
-	}
+	var refusal platformapi.ErrorModel
 	if json.Unmarshal(body, &refusal) != nil || len(refusal.Problems) < 2 {
 		return ""
 	}

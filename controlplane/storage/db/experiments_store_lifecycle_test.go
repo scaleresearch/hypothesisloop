@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -46,7 +47,7 @@ func TestUnderperformingIsSentOnce(t *testing.T) {
 	ctx := context.Background()
 	id := "underperforming-" + peID
 	seedExperimentForCapTest(t, pool, id, agentID, peID, 1, domain.StatusRunning)
-	filter := domain.EventFilter{PlatformExperimentID: peID, AgentID: agentID, Kinds: map[string]bool{domain.EventJobUnderperforming: true}}
+	filter := domain.EventFilter{PlatformExperimentID: peID, AgentID: agentID, Kinds: map[string]bool{platformapi.EventJobUnderperforming: true}}
 	before := cursorNow(t, pool)
 
 	for _, metric := range []string{"val_accuracy", "other"} {

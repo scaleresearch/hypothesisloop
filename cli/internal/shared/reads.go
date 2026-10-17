@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/command"
 )
@@ -64,7 +65,7 @@ answered planner_has_no_quota, printed the same way, with where the run's budget
 	var out json.RawMessage
 	if err := c.Do("GET", path, nil, &out); err != nil {
 		// An agent's harness tells this refusal from a read that failed by the reason in the line.
-		if reason, message := command.RefusalOf(err); reason == "quota_not_granted" || reason == "planner_has_no_quota" {
+		if reason, message := command.RefusalOf(err); reason == platformapi.ReasonQuotaNotGranted || reason == platformapi.ReasonPlannerHasNoQuota {
 			fmt.Fprintf(stderr, "hl: quota: %s: %s\n", reason, message)
 			return 1
 		}

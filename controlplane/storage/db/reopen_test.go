@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -137,7 +138,7 @@ func TestAReopenedRunReadsRunningAndWantsTheAgentsTheCloseEnded(t *testing.T) {
 		}
 	}
 
-	told := changesAfter(t, pes, domain.EventFilter{PlatformExperimentID: run.ID, Kinds: map[string]bool{domain.EventPlatformExperimentStatus: true}}, since)
+	told := changesAfter(t, pes, domain.EventFilter{PlatformExperimentID: run.ID, Kinds: map[string]bool{platformapi.EventPlatformExperimentStatus: true}}, since)
 	if len(told) != 1 || told[0].Subject != run.ID || told[0].Value != string(domain.PlatformExpRunning) {
 		t.Fatalf("status changes = %+v, want platform_experiment.status running once", told)
 	}

@@ -370,10 +370,9 @@ func (p *pass) create(ctx context.Context, want *desired, byName map[string][]pr
 }
 
 const (
-	// exitLogLines and exitLogBytes bound the end of an exited instance's output that is sent
-	// to the control plane.
+	// exitLogLines bounds the end of an exited instance's output that is sent to the control
+	// plane, besides sandboxapi.MaxExitLogBytes.
 	exitLogLines = 60
-	exitLogBytes = 4 << 10
 	// progressLines is how far back in a running instance's output its newest progress marker
 	// is looked for. An agent prints one every few seconds and little else that fast.
 	progressLines = 200
@@ -414,6 +413,12 @@ var liveness = map[provider.State]int{
 	provider.StateExited: 0, provider.StateStarting: 1, provider.StateUnknown: 2, provider.StateRunning: 3,
 }
 
+// reported is the state the control plane is told for each state a name is reported in.
+var reported = map[provider.State]sandboxapi.InstanceState{
+	provider.StateExited: sandboxapi.InstanceExited, provider.StateStarting: sandboxapi.InstanceStarting,
+	provider.StateUnknown: sandboxapi.InstanceUnknown, provider.StateRunning: sandboxapi.InstanceRunning,
+}
+
 // observe is what the control plane is told with the question: every name of this launcher's
 // namespace once, live if any instance of it is, for a name whose instances all exited the end
 // of the output of the newest and whether its vendor's own lifetime ended it, and for a running one the progress marker its command last
@@ -437,7 +442,7 @@ func (l *Launcher) observe(ctx context.Context, byName map[string][]provider.Ins
 				running = &i
 			}
 		}
-		entry := sandboxapi.ObservedInstance{Name: name[len(l.prefix):], Machine: reportedBy.ID, State: string(state)}
+		entry := sandboxapi.ObservedInstance{Name: name[len(l.prefix):], Machine: reportedBy.ID, State: reported[state]}
 		if running != nil {
 			if lines, ok := l.progressOf(ctx, *running); ok {
 				progress := lastMatch(lines, progressPattern)
@@ -473,7 +478,7 @@ func (l *Launcher) exitLogOf(ctx context.Context, i provider.Instance) string {
 		l.cfg.Log("read the output of exited %s: %v", i.Name, err)
 		return ""
 	}
-	return tail(strings.Join(lines, "\n"), exitLogBytes)
+	return tail(strings.Join(lines, "\n"), sandboxapi.MaxExitLogBytes)
 }
 
 func tail(text string, limit int) string {

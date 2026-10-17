@@ -17,6 +17,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 	"github.com/scaleresearch/hypothesisloop/cli/internal/command"
+	"github.com/scaleresearch/hypothesisloop/contract/agentsandbox"
 )
 
 func WithServer(t *testing.T, handler http.HandlerFunc) string {
@@ -28,10 +29,10 @@ func WithServer(t *testing.T, handler http.HandlerFunc) string {
 
 func SetAPIURL(t *testing.T, url string) {
 	t.Helper()
-	old := os.Getenv("API_URL")
-	os.Setenv("API_URL", url)
-	t.Cleanup(func() { os.Setenv("API_URL", old) })
-	t.Setenv("HL_TOKEN", "test-token")
+	old := os.Getenv(agentsandbox.EnvAPIURL)
+	os.Setenv(agentsandbox.EnvAPIURL, url)
+	t.Cleanup(func() { os.Setenv(agentsandbox.EnvAPIURL, old) })
+	t.Setenv(agentsandbox.EnvToken, "test-token")
 }
 
 func Field(key string) func(map[string]any) any {
@@ -359,7 +360,7 @@ func overlaps(a, b []string) bool {
 
 // Run runs f as hl runs it, with the client API_URL and HL_TOKEN name.
 func Run(f command.Func, args []string, stdout, stderr io.Writer) int {
-	return f(apiclient.New(os.Getenv("API_URL"), os.Getenv("HL_TOKEN")), args, stdout, stderr)
+	return f(apiclient.New(os.Getenv(agentsandbox.EnvAPIURL), os.Getenv(agentsandbox.EnvToken)), args, stdout, stderr)
 }
 
 // Output runs f on args and returns its exit code, stdout and stderr.

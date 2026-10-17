@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -81,7 +82,7 @@ func TestThePoolStateNamesWhoEndedAndAReplacementTakesItsPlaceOnce(t *testing.T)
 		LateJoin{Used: map[string]float64{}}); err != nil {
 		t.Fatalf("a replacement: got = %v, want = nil", err)
 	}
-	replaced := changesAfter(t, pes, domain.EventFilter{PlatformExperimentID: pe, Kinds: map[string]bool{domain.EventAgentReplaced: true}}, before)
+	replaced := changesAfter(t, pes, domain.EventFilter{PlatformExperimentID: pe, Kinds: map[string]bool{platformapi.EventAgentReplaced: true}}, before)
 	if len(replaced) != 1 || replaced[0].Subject != replacement || replaced[0].Value != stopped || replaced[0].Detail != "its machine stopped with no restart left" {
 		t.Errorf("agent.replaced: got = %+v, want the stopped one and why its place was free, once", replaced)
 	}
@@ -222,10 +223,10 @@ func TestALoweredMaxAgentsCutsTheNewestResearchersAndNobodyReplacesThem(t *testi
 
 	told := map[string]string{}
 	for _, e := range changesAfter(t, pes, domain.EventFilter{PlatformExperimentID: pe}, before) {
-		if e.Kind == domain.EventStageBoundary {
+		if e.Kind == platformapi.EventStageBoundary {
 			t.Errorf("a cut for max_agents moved the ladder: %+v", e)
 		}
-		if e.Kind == domain.EventAgentCut {
+		if e.Kind == platformapi.EventAgentCut {
 			if _, again := told[e.AgentID]; again {
 				t.Errorf("%s told of its cut twice", e.AgentID)
 			}
