@@ -161,8 +161,8 @@ objectStore:
   # How the store creates each job's key, data_store.provider: minio, the MinIO admin API, which
   # the in-cluster store below speaks.
   provider: minio
-  # Deploys Silo and creates the bucket named in hypothesisloop.yaml. false when endpoint names
-  # a store run elsewhere.
+  # Deploys Silo, in which control-service creates the bucket named in hypothesisloop.yaml at
+  # start. false when endpoint names a store run elsewhere.
   enabled: true
   image: pgsty/silo:RELEASE.2026-09-16T00-00-00Z
   # data_store.endpoint: the address every job and agent is handed to reach the store at.

@@ -109,6 +109,41 @@ func (c *Client) Do(req *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
+// EnsureBucket creates the bucket when the store has none of its name. Run once at startup by
+// control-service alone.
+func (c *Client) EnsureBucket(ctx context.Context) error {
+	status := func(method string) (int, string, error) {
+		req, err := c.SignedRequest(ctx, method, "/"+c.Bucket, nil, nil)
+		if err != nil {
+			return 0, "", err
+		}
+		resp, err := c.Do(req)
+		if err != nil {
+			return 0, "", err
+		}
+		defer resp.Body.Close()
+		answer, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return resp.StatusCode, strings.TrimSpace(string(answer)), nil
+	}
+	code, _, err := status(http.MethodHead)
+	switch {
+	case err != nil:
+		return fmt.Errorf("objectstore: bucket %s: %w", c.Bucket, err)
+	case code == http.StatusOK:
+		return nil
+	case code != http.StatusNotFound:
+		return fmt.Errorf("objectstore: bucket %s: status %d", c.Bucket, code)
+	}
+	code, answer, err := status(http.MethodPut)
+	if err != nil {
+		return fmt.Errorf("objectstore: create bucket %s: %w", c.Bucket, err)
+	}
+	if code != http.StatusOK {
+		return fmt.Errorf("objectstore: create bucket %s: status %d: %s", c.Bucket, code, answer)
+	}
+	return nil
+}
+
 // URI renders an s3:// address for a prefix in this client's bucket — what a job is handed and
 // what its own S3 client resolves.
 func (c *Client) URI(prefix string) string {

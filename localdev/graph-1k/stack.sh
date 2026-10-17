@@ -103,7 +103,6 @@ containers_up() {
   until podman exec "${PREFIX}-memgraph" sh -c "echo 'RETURN 1;' | mgconsole" >/dev/null 2>&1; do sleep 0.5; done
   until curl -fsS -o /dev/null "http://localhost:${STORE_PORT}/minio/health/live" 2>/dev/null; do sleep 0.5; done
   until curl -fsS -o /dev/null "http://localhost:${GREPTIME_PORT}/health" 2>/dev/null; do sleep 0.5; done
-  podman exec "${PREFIX}-store" sh -c 'mcli alias set hl http://localhost:9000 hypothesisloop hypothesisloop >/dev/null && mcli mb --ignore-existing hl/hypothesisloop-data >/dev/null'
 }
 
 # The committed settings with this stack's addresses, its own sign-in key and the git server.

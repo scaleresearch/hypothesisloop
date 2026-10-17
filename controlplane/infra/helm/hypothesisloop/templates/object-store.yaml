@@ -65,27 +65,4 @@ spec:
         resources:
           requests:
             storage: {{ .Values.objectStore.storage }}
----
-{{- $bucket := include "hypothesisloop.dataStore" (dict "key" "bucket" "root" $) }}
-apiVersion: batch/v1
-kind: Job
-metadata:
-  # A Job's pod template cannot be edited, so the name carries what the template depends on: a
-  # new image or bucket makes a new Job and Helm removes the old one.
-  name: hypothesisloop-object-store-bucket-{{ print .Values.objectStore.image $bucket | sha256sum | trunc 8 }}
-  namespace: {{ include "hypothesisloop.namespace" . }}
-spec:
-  backoffLimit: 20
-  template:
-    spec:
-      restartPolicy: OnFailure
-      containers:
-        - name: bucket
-          image: {{ .Values.objectStore.image }}
-          command:
-            - sh
-            - -c
-            - mcli alias set hl http://object-store:9000 {{ include "hypothesisloop.dataStore" (dict "key" "access_key_id" "root" $) | squote }} "$DATA_STORE_MINIO_SECRET_ACCESS_KEY" && mcli mb --ignore-existing hl/{{ $bucket }}
-          env:
-            {{- include "hypothesisloop.secretEnv" (dict "keys" (list "DATA_STORE_MINIO_SECRET_ACCESS_KEY") "root" $) | nindent 12 }}
 {{- end }}

@@ -102,19 +102,6 @@ services:
       timeout: 3s
       retries: 30
 
-  minio-init:
-    image: docker.io/pgsty/silo:RELEASE.2026-09-16T00-00-00Z
-    entrypoint: ["sh", "-c"]
-    env_file:
-      - path: ../.run/env/object-store.env
-        required: false
-    command:
-      - "mcli alias set hl http://minio:9000 hypothesisloop \"$${MINIO_ROOT_PASSWORD}\" && mcli mb --ignore-existing hl/hypothesisloop-data"
-    depends_on:
-      minio:
-        condition: service_healthy
-    restart: "no"
-
   control-service:
     image: ${REGISTRY:?run through make, which names the registry}/hypothesisloop-control-service:${TAG:?TAG must name the image tag make images pushed}
     # The mounted Google credentials file is readable by its owner alone, who is root here.
@@ -147,8 +134,8 @@ services:
         condition: service_healthy
       memgraph:
         condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
+      minio:
+        condition: service_healthy
 
   metrics-service:
     image: ${REGISTRY:?run through make, which names the registry}/hypothesisloop-metrics-service:${TAG:?TAG must name the image tag make images pushed}
@@ -166,8 +153,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
 
 volumes:
   registry-data:

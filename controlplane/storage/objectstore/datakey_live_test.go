@@ -160,3 +160,18 @@ func TestLiveStoreRefusesADeletedKey(t *testing.T) {
 		t.Fatalf("DeleteDataKey of a key already deleted: %v", err)
 	}
 }
+
+func TestEnsureBucketCreatesAMissingBucketAndThenChangesNothing(t *testing.T) {
+	c := liveStore(t)
+	c.Bucket = "ensure-" + uuid.NewString()[:8]
+	t.Cleanup(func() { storeStatus(t, c, http.MethodDelete, "", nil) })
+	for i := range 2 {
+		if err := c.EnsureBucket(context.Background()); err != nil {
+			t.Fatalf("call %d: got = %v, want nil", i+1, err)
+		}
+	}
+	if code := putStatus(t, c, "object"); code != http.StatusOK {
+		t.Fatalf("a write to the bucket: got = %d, want 200", code)
+	}
+	storeStatus(t, c, http.MethodDelete, "object", nil)
+}

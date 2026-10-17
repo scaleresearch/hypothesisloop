@@ -42,6 +42,12 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	if err != nil {
 		logger.Fatal("control-service: configure durable data store", zap.Error(err))
 	}
+	bucketCtx, bucketCancel := context.WithTimeout(runCtx, 30*time.Second)
+	err = dataStore.EnsureBucket(bucketCtx)
+	bucketCancel()
+	if err != nil {
+		logger.Fatal("control-service: durable data store bucket", zap.Error(err))
+	}
 	connectedWithin := time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds) * time.Second
 
 	// One observation cadence for the whole process: the quota service, the settler, the
