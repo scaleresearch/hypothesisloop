@@ -171,3 +171,28 @@ func TestTheTypesAProposalMayStateAreTheLinesCapacityLists(t *testing.T) {
 		t.Fatalf("listed %v and may state %v, want the lines %v and %v", lines, got, []string{chip, cores}, want)
 	}
 }
+
+// Capacity names the architectures of each cluster's nodes, once each, so an agent picks an image
+// that runs there; a cluster whose nodes name none lists none.
+func TestCapacityNamesTheArchitecturesOfEachClustersNodes(t *testing.T) {
+	clusters := []ClusterCapacity{{ClusterName: "mixed"}, {ClusterName: "rented"}, {ClusterName: "unlabelled"}}
+	withOnDemand(clusters, map[string]map[string]map[string]string{
+		"mixed": {
+			"a": {domain.NodeArchitectureLabel: "arm64"},
+			"b": {domain.NodeArchitectureLabel: "amd64"},
+			"c": {domain.NodeArchitectureLabel: "arm64"},
+		},
+		"rented":     {"gpu-0": {domain.NodeSlotLabel: "gpu-0", domain.NodeArchitectureLabel: "amd64"}},
+		"unlabelled": {"node-1": {"gpu.product": "L40"}},
+	})
+	if got := clusters[0].Architectures; !reflect.DeepEqual(got, []string{"amd64", "arm64"}) {
+		t.Errorf("mixed: %v, want amd64 and arm64", got)
+	}
+	if got := clusters[1].Architectures; !reflect.DeepEqual(got, []string{"amd64"}) {
+		t.Errorf("rented: %v, want amd64", got)
+	}
+	raw, _ := json.Marshal(clusters[2])
+	if clusters[2].Architectures != nil || strings.Contains(string(raw), "architectures") {
+		t.Errorf("unlabelled: %s, want no architectures", raw)
+	}
+}
