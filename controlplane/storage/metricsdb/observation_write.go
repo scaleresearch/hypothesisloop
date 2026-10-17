@@ -64,6 +64,9 @@ var ensureObservationTablesSQL = []string{
 	TIME INDEX (greptime_timestamp),
 	PRIMARY KEY (agent_id, job_id, metric_basis, metric_name, platform_experiment_id)
 ) ENGINE=metric WITH ("on_physical_table" = "greptime_physical_table")`,
+	metricTableSQL(ExperimentMetricFraction, "agent_id", "job_id", "metric_basis", "metric_name", "platform_experiment_id"),
+	metricTableSQL(experimentNodeMetric, "experiment_id", "node",
+		machineInstanceLabel, machineHostLabel, machineAcceleratorLabel, machineCPULabel, machinePriceLabel),
 	metricTableSQL(clusterJobSnapshotMetric, "cluster_name", "sample_kind"),
 	metricTableSQL(clusterJobPhaseMetric, "cluster_name", "experiment_id", "sample_kind"),
 	metricTableSQL(clusterJobObservedAtMetric, "cluster_name", "experiment_id", "sample_kind"),

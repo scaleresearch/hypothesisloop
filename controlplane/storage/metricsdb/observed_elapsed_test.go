@@ -26,7 +26,7 @@ func TestObserveSpanFailsOnAMissingTable(t *testing.T) {
 	}
 }
 
-func TestEnsureObservationTablesCreatesBothSeries(t *testing.T) {
+func TestEnsureObservationTablesCreatesEverySeriesASQLReadNames(t *testing.T) {
 	var statements []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		statements = append(statements, r.FormValue("sql"))
@@ -38,7 +38,7 @@ func TestEnsureObservationTablesCreatesBothSeries(t *testing.T) {
 		t.Fatalf("EnsureObservationTables: got = %v, want = nil", err)
 	}
 	all := strings.Join(statements, "\n")
-	for _, table := range []string{aliveHeartbeatMetric, admissionMetric, ExperimentMetricValue} {
+	for _, table := range []string{aliveHeartbeatMetric, admissionMetric, ExperimentMetricValue, ExperimentMetricFraction, experimentNodeMetric} {
 		if !strings.Contains(all, "CREATE TABLE IF NOT EXISTS "+table+" ") {
 			t.Errorf("no CREATE TABLE issued for %s", table)
 		}
