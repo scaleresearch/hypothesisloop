@@ -6,7 +6,6 @@ import { fetchPlatformExperimentAgents } from '@/lib/api/agents'
 import { fetchHypothesisStats } from '@/lib/api/hypotheses'
 import { fetchExperimentStats } from '@/lib/api/jobs'
 import { fetchPlatformExperimentQuotas } from '@/lib/api/quotas'
-import { ExperimentActionsProvider, useExperimentActions } from '@/lib/experiment-actions'
 import { GraphEditorProvider, useGraphEditor } from '@/components/hypotheses/editor'
 import { AddIdeaButton } from '@/components/hypotheses/editor-controls'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
@@ -55,8 +54,7 @@ const node = {
 const ownNode: GraphNode = { ...node, actions: ['edit', 'remove', 'link', 'comment'] }
 
 // As the hypotheses page wires them: an account that only reads writes nothing.
-function GraphPanels({ node }: { node: GraphNode }) {
-  const actions = useExperimentActions()
+function GraphPanels({ node, actions }: { node: GraphNode; actions: PlatformExperiment['actions'] }) {
   const graph = { root: 'pe-x', objective: {}, nodes: [node], edges: [] } as unknown as HypothesisGraph
   const editor = useGraphEditor({ graph, rootLabel: pe.name, canWrite: actions.includes('add_idea'), mutate: vi.fn(), onSelect: () => {} })
   return (
@@ -70,13 +68,13 @@ function GraphPanels({ node }: { node: GraphNode }) {
 
 // Each case renders the same thing twice: as the owner sees it, where the control must be there
 // for its absence to mean anything, and as an account that only reads the shared experiment.
-function show(ui: ReactNode, experiment: PlatformExperiment) {
+function show(ui: ReactNode) {
   const resolved = resolveTenant(me, '')
   if (resolved.state !== 'selected') throw new Error('no tenant')
   return render(
     <SWRConfig value={{ provider: () => new Map() }}>
       <TenantContext.Provider value={resolved.tenant}>
-        <ExperimentActionsProvider value={experiment.actions}>{ui}</ExperimentActionsProvider>
+        {ui}
       </TenantContext.Provider>
     </SWRConfig>,
   )
@@ -96,24 +94,24 @@ beforeEach(() => {
 describe('a shared platform experiment of another org shows no control that writes', () => {
   it('to its agents: no add, no token, no remove', async () => {
     vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([{ ...self, actions: ['message', 'remove', 'show_token'] }])
-    const own = show(<ExperimentAgents pe={owned} />, owned)
+    const own = show(<ExperimentAgents pe={owned} />)
     await screen.findByRole('cell', { name: 'ag-self' })
     expect(names('button')).toEqual(expect.arrayContaining(['Add agent', 'Show token', 'Remove']))
     own.unmount()
 
     vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([self])
-    show(<ExperimentAgents pe={pe} />, pe)
+    show(<ExperimentAgents pe={pe} />)
     await screen.findByRole('cell', { name: 'ag-self' })
     expect(names('button')).toEqual(['Details of ag-self'])
     expect(names('textbox')).toEqual([])
   })
 
   it('to its hypothesis graph: no idea under the objective or under a hypothesis', () => {
-    const own = show(<GraphPanels node={ownNode} />, owned)
+    const own = show(<GraphPanels node={ownNode} actions={owned.actions} />)
     expect(names('button')).toEqual(expect.arrayContaining(['Add idea', 'Link to…']))
     own.unmount()
 
-    show(<GraphPanels node={node} />, pe)
+    show(<GraphPanels node={node} actions={pe.actions} />)
     expect(names('button').filter(n => n?.includes('Add idea') || n?.includes('Link to'))).toEqual([])
     // Reading on stays possible, from the reader's own project.
     expect(screen.getByRole('link', { name: 'Open detail →' }).getAttribute('href')).toBe('/experiments/pe-x/hypotheses/hyp-1')
@@ -128,27 +126,27 @@ describe('a shared platform experiment of another org shows no control that writ
       </>
     )
     const of = (n: GraphNode) => ({ ...n, links: { out: [], in: [] } }) as unknown as HypothesisWithJobs
-    const own = show(forms(of(ownNode)), owned)
+    const own = show(forms(of(ownNode)))
     expect(names('button')).toEqual(expect.arrayContaining(['Add comment']))
     expect(screen.getByText('Add link')).toBeTruthy()
     own.unmount()
 
-    const shared = show(forms(of(node)), pe)
+    const shared = show(forms(of(node)))
     expect(shared.container.textContent).toBe('')
   })
 
   it('to the experiment in the list: no edit, and a badge that says why', () => {
-    const own = show(<PlatformExperimentCard pe={owned} onEdit={() => {}} />, owned)
+    const own = show(<PlatformExperimentCard pe={owned} onEdit={() => {}} />)
     expect(names('button')).toContain('Edit')
     expect(screen.getByText('Shared')).toBeTruthy()
     own.unmount()
 
-    const plain = show(<PlatformExperimentCard pe={{ ...owned, shared: false }} onEdit={() => {}} />, owned)
+    const plain = show(<PlatformExperimentCard pe={{ ...owned, shared: false }} onEdit={() => {}} />)
     expect(screen.queryByText(/Shared/)).toBeNull()
     plain.unmount()
 
     // The card tells from the experiment itself: it sits in the list of the reader's own project.
-    show(<PlatformExperimentCard pe={pe} onEdit={() => {}} />, pe)
+    show(<PlatformExperimentCard pe={pe} onEdit={() => {}} />)
     expect(screen.getByText('Vision benchmark')).toBeTruthy()
     expect(screen.getByText('Shared · read only')).toBeTruthy()
     expect(names('button')).toEqual([])

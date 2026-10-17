@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { SWRConfig } from 'swr'
 import { describe, expect, it, vi } from 'vitest'
 import { fetchPlatformExperiment } from '@/lib/api/platform-experiments'
-import { ExperimentActionsProvider, listProject, useExperimentAccess, useExperimentActions } from '@/lib/experiment-actions'
+import { listProject, useExperimentAccess } from '@/lib/experiment-actions'
 import type { PlatformExperiment, Project } from '@/types/api'
 
 vi.mock('@/lib/api/platform-experiments', () => ({ fetchPlatformExperiment: vi.fn() }))
@@ -17,14 +17,6 @@ function wrapper({ children }: { children: ReactNode }) {
 function experiment(projectID: string) {
   return { id: 'pe-x', project_id: projectID, shared: true, editable: [], actions: [] } as unknown as PlatformExperiment
 }
-
-describe('the actions of a page\'s experiment', () => {
-  it('are what the page says the API listed, and none without one', () => {
-    const inside = ({ children }: { children: ReactNode }) => <ExperimentActionsProvider value={['close']}>{children}</ExperimentActionsProvider>
-    expect(renderHook(() => useExperimentActions(), { wrapper: inside }).result.current).toEqual(['close'])
-    expect(renderHook(() => useExperimentActions()).result.current).toEqual([])
-  })
-})
 
 describe('the experiment a page is about', () => {
   it('is none when the page names none, and its lists stay in the project', () => {

@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { ExperimentActionsProvider } from '@/lib/experiment-actions'
 import { projectPath } from '@/lib/routes'
 import { useTenant } from '@/lib/tenant'
 import { AgentNames } from '@/components/agent-label'
@@ -95,7 +94,6 @@ function PlatformExperimentDetail({ id }: { id: string }) {
   const findingsSection = <Findings experimentId={id} findings={findings ?? []} direction={primary?.direction} />
 
   return (
-    <ExperimentActionsProvider value={pe.actions}>
     <Page
       back={{ label: 'Experiments', onClick: () => router.push(projectPath(project.id, 'experiments')) }}
       title={pe.name}
@@ -162,6 +160,5 @@ function PlatformExperimentDetail({ id }: { id: string }) {
 
       <JobsTable experimentId={id} jobs={jobRows} total={stats?.total ?? 0} rankingMetric={primary?.metric} />
     </Page>
-    </ExperimentActionsProvider>
   )
 }

@@ -5,7 +5,7 @@ import useSWR from 'swr'
 import { clsx } from 'clsx'
 import { TextLink } from '@/components/ui/link'
 import { useRouter } from 'next/navigation'
-import { ExperimentActionsProvider, useExperimentAccess } from '@/lib/experiment-actions'
+import { useExperimentAccess } from '@/lib/experiment-actions'
 import { experimentPath, hypothesisPath, jobPath } from '@/lib/routes'
 import { fetchHypothesis } from '@/lib/api/hypotheses'
 import { InsetCard, RowLink } from '@/components/ui/card'
@@ -100,7 +100,6 @@ export default function HypothesisDetailPage({ params }: { params: { experimentI
   const metricName = jobs.find(j => j.metric)?.metric?.name
 
   return (
-    <ExperimentActionsProvider value={pe?.actions ?? []}>
     <AgentNames platformExperimentID={data.platform_experiment_id}>
     <Page
         back={{
@@ -275,6 +274,5 @@ export default function HypothesisDetailPage({ params }: { params: { experimentI
       </Section>
     </Page>
     </AgentNames>
-    </ExperimentActionsProvider>
   )
 }

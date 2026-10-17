@@ -73,8 +73,6 @@ export function addHumanHypothesisLink(
   return apiSend<Link[]>('POST', `/hypotheses/${hypothesisID}/links`, { type, to })
 }
 
-// The author edits their own idea, and the author or an org owner removes it, while no agent has
-// acted on it and the experiment is open.
 export function editHumanHypothesis(hypothesisID: string, text: string): Promise<Hypothesis> {
   return apiSend<Hypothesis>('PATCH', `/hypotheses/${hypothesisID}`, { text })
 }

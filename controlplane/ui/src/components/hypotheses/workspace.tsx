@@ -29,7 +29,6 @@ import { HypothesisPanel, ObjectiveBar } from '@/components/hypotheses/panel'
 import { SearchBox, SearchHits, useHypothesisSearch } from '@/components/hypotheses/search'
 import { useQueryParam } from '@/lib/query-state'
 import { withQuery } from '@/lib/routes'
-import { ExperimentActionsProvider } from '@/lib/experiment-actions'
 import { HUMAN_OWNER, extendLayout, graphHref, layoutGraph, matchesFilters, shareUnchanged } from '@/lib/hypothesis-graph'
 import type { GraphFilters, Position } from '@/lib/hypothesis-graph'
 import { keys } from '@/lib/keys'
@@ -180,17 +179,13 @@ export function ExperimentHypotheses({ peID, embedded = false }: { peID: string;
       )}
     </>
   )
-  const page = (
-    <ExperimentActionsProvider value={pe?.actions ?? []}>
-      {embedded ? content : (
-        <Page
-          fill
-          title="Hypotheses"
-        >
-          {content}
-        </Page>
-      )}
-    </ExperimentActionsProvider>
+  const page = embedded ? content : (
+    <Page
+      fill
+      title="Hypotheses"
+    >
+      {content}
+    </Page>
   )
   return <AgentNames platformExperimentID={peID}>{page}</AgentNames>
 }

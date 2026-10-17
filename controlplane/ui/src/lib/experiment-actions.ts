@@ -1,20 +1,9 @@
 'use client'
 
-import { createContext, useContext } from 'react'
 import useSWR from 'swr'
 import { fetchPlatformExperiment } from '@/lib/api/platform-experiments'
 import { keys } from '@/lib/keys'
-import type { PlatformExperiment, PlatformExperimentAction, Project } from '@/types/api'
-
-// Set by a page from the platform experiment its records belong to, as the API answered it.
-// Outside one nothing is offered.
-const ExperimentActionsContext = createContext<PlatformExperimentAction[]>([])
-
-export const ExperimentActionsProvider = ExperimentActionsContext.Provider
-
-export function useExperimentActions(): PlatformExperimentAction[] {
-  return useContext(ExperimentActionsContext)
-}
+import type { PlatformExperiment, Project } from '@/types/api'
 
 interface ExperimentAccess {
   pe?: PlatformExperiment
