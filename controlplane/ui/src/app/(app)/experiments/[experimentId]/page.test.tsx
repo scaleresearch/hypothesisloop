@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchPlatformExperimentAgents } from '@/lib/api/agents'
@@ -164,5 +164,20 @@ describe('a shared platform experiment of the caller\'s own org', () => {
     expect(await screen.findByRole('button', { name: 'Show token' })).toBeTruthy()
     expect(screen.getByText('Shared')).toBeTruthy()
     expect(screen.queryByRole('note')).toBeNull()
+  })
+})
+
+describe('what a platform experiment spent', () => {
+  const spent = async () => {
+    const figures = await screen.findByRole('list', { name: 'This experiment in figures' })
+    return within(figures).getByText('Budget spent').parentElement!.textContent
+  }
+
+  it.each([
+    ['accelerator', 'Budget spent 12.5 of 100 AccH'],
+    ['cpu', 'Budget spent 12.5 of 100 CPU hours'],
+  ] as const)('says what the API counted as consumed, in the unit of its budget_kind: %s', async (kind, said) => {
+    show('', { status: 'running', started_at: at, consumed_accelerator_hours: 12.5, budget_kind: kind })
+    expect(await spent()).toBe(said)
   })
 })

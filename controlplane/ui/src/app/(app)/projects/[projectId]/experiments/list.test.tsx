@@ -5,7 +5,7 @@ import { fetchAgentsPage } from '@/lib/api/agents'
 import { fetchOrgClusters } from '@/lib/api/clusters'
 import { fetchHypothesisStats } from '@/lib/api/hypotheses'
 import { fetchExperimentStats } from '@/lib/api/jobs'
-import { fetchPlatformExperimentsPage } from '@/lib/api/platform-experiments'
+import { fetchPlatformExperiment, fetchPlatformExperimentsPage } from '@/lib/api/platform-experiments'
 import { fetchPlatformExperimentQuotas } from '@/lib/api/quotas'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import PlatformExperimentsPage from '@/app/(app)/projects/[projectId]/experiments/page'
@@ -20,7 +20,7 @@ vi.mock('@/lib/api/agents', () => ({ fetchAgentsPage: vi.fn() }))
 vi.mock('@/lib/api/clusters', () => ({ fetchOrgClusters: vi.fn() }))
 vi.mock('@/lib/api/hypotheses', () => ({ fetchHypothesisStats: vi.fn() }))
 vi.mock('@/lib/api/jobs', () => ({ fetchExperimentStats: vi.fn() }))
-vi.mock('@/lib/api/platform-experiments', () => ({ fetchPlatformExperimentsPage: vi.fn(), fetchPlatformExperiment: vi.fn(async () => ({ consumed_accelerator_hours: 0 })), createPlatformExperiment: vi.fn(), updatePlatformExperiment: vi.fn() }))
+vi.mock('@/lib/api/platform-experiments', () => ({ fetchPlatformExperimentsPage: vi.fn(), fetchPlatformExperiment: vi.fn(), createPlatformExperiment: vi.fn(), updatePlatformExperiment: vi.fn() }))
 vi.mock('@/lib/api/quotas', () => ({ fetchPlatformExperimentQuotas: vi.fn() }))
 vi.mock('@/lib/api/request', async importActual => ({
   ...(await importActual<typeof import('@/lib/api/request')>()),
@@ -87,6 +87,26 @@ describe('the platform experiments of a project', () => {
     expect(card('Vision benchmark').queryByRole('button', { name: 'Edit' })).toBeNull()
     expect(card('Mine').queryByText(/Shared/)).toBeNull()
     expect(card('Mine').getByRole('button', { name: 'Edit' })).toBeTruthy()
+  })
+})
+
+describe('the card of a platform experiment', () => {
+  it('says what was spent from the list it is in, in the unit of its budget_kind, and reads no experiment by itself', async () => {
+    vi.mocked(fetchPlatformExperimentsPage).mockResolvedValue({
+      items: [
+        { ...experiment('pe-1', 'On accelerators', 'prj_1', false), consumed_accelerator_hours: 12.5 },
+        { ...experiment('pe-2', 'On cores', 'prj_1', false), budget_kind: 'cpu', consumed_accelerator_hours: 3 },
+        { ...experiment('pe-3', 'Nothing spent', 'prj_1', false), budget_kind: 'cpu', consumed_accelerator_hours: 0 },
+        { ...experiment('pe-4', 'Closed on cores', 'prj_1', false), status: 'closed', budget_kind: 'cpu', consumed_accelerator_hours: 7 },
+      ],
+      total: 4,
+    })
+    show()
+    expect(await screen.findByText('12.5 of 100 AccH')).toBeTruthy()
+    expect(card('On cores').getByText('3 of 100 CPU hours')).toBeTruthy()
+    expect(card('Nothing spent').getByText('100 CPU hours')).toBeTruthy()
+    expect(card('Closed on cores').getByText('7 CPU hours spent')).toBeTruthy()
+    expect(fetchPlatformExperiment).not.toHaveBeenCalled()
   })
 })
 

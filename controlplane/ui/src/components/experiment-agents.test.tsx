@@ -260,6 +260,25 @@ describe('agent types in the roster', () => {
     expect((await row('ag-3')).getByText('at-gone')).toBeTruthy()
   })
 
+  // The row read where an agent stands from the control plane's rules copied into the UI; the API
+  // now says it in ended, and its machine's state only matters while ended is empty.
+  it('labels each agent by the ended the API lists, over the state of its machine', async () => {
+    const machine = { state: 'running' as const, restarts: 0, stopped: false }
+    roster = [
+      { ...signup('ag-finished', true, 'generalist'), ended: 'finished', finished_at: at, instance: machine },
+      { ...signup('ag-cut', true, 'generalist'), ended: 'cut', instance: machine },
+      { ...signup('ag-closed', true, 'generalist'), ended: 'closed', instance: machine },
+      { ...signup('ag-planned', true, 'planner'), role: 'planner', ended: 'planned', instance: machine },
+      { ...signup('ag-working', true, 'generalist'), instance: machine },
+    ]
+    show('running')
+    expect((await row('ag-finished')).getByText(/^Finished /)).toBeTruthy()
+    expect((await row('ag-cut')).getByText('Cut at a stage boundary')).toBeTruthy()
+    expect((await row('ag-closed')).getByText('Stopped, experiment closed')).toBeTruthy()
+    expect((await row('ag-planned')).getByText('Answered the draft')).toBeTruthy()
+    expect((await row('ag-working')).getByText('Running')).toBeTruthy()
+  })
+
   it('says a researcher was cut when max researchers was lowered', async () => {
     roster = [{ ...signup('ag-1', true, 'generalist'), ended: 'cut', cut_reason: 'max_agents_lowered' }]
     show('running')

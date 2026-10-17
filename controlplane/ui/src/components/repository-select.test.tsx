@@ -7,7 +7,7 @@ import { beginGitHubInstall, checkGitHubInstallation, fetchGitHubApp, fetchGitHu
 import { checkRepository } from '@/lib/api/platform-experiments'
 import { ApiError } from '@/lib/api/request'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
-import { takeReturn } from '@/lib/github-connect'
+import { githubCardPath, takeReturn } from '@/lib/github-connect'
 import { RepositorySelect, repositoryFields } from '@/components/repository-select'
 import type { Me, OrgGitHubInstallation, Repository } from '@/types/api'
 
@@ -159,6 +159,35 @@ describe('the repository of a new platform experiment', () => {
     await userEvent.click(screen.getByRole('combobox'))
     await screen.findByRole('option', { name: 'acme/open' })
     expect(screen.queryByRole('option', { name: /antonibertel/ })).toBeNull()
+  })
+
+  it('offers an account whose check failed, since a failed check says nothing of the installation', async () => {
+    const personal = { ...organisation, installation_id: 8, account_login: 'antonibertel', account_type: 'User' as const }
+    vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [organisation, personal], total: 2 })
+    vi.mocked(checkGitHubInstallation).mockImplementation(async (_, id) => {
+      if (id === 8) throw new ApiError(500, 'internal error', 'internal')
+      return { working: true }
+    })
+    show()
+    await userEvent.click(await screen.findByRole('combobox'))
+    expect(await screen.findByRole('option', { name: 'A new private repository on antonibertel' })).toBeTruthy()
+    expect(screen.getByRole('option', { name: 'A new private repository on acme' })).toBeTruthy()
+  })
+
+  it.each([['an owner', owner], ['a member', me]])('leads %s once to the GitHub section of the org\'s settings where the App has a problem', async (_, as) => {
+    vi.mocked(checkRepository).mockRejectedValue(new ApiError(422, 'gone', 'installation_gone'))
+    show(undefined, as)
+    await screen.findByText('Not installed')
+    const links = screen.getAllByRole('link', { name: 'See the connection in settings' })
+    expect(links.map(l => l.getAttribute('href'))).toEqual([githubCardPath('org_a')])
+  })
+
+  it.each([['an owner', owner, 1], ['a member', me, 0]])('leads %s once to the org\'s settings when no account is connected', async (_, as, installs) => {
+    vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [], total: 0 })
+    show(undefined, as)
+    const links = await screen.findAllByRole('link', { name: 'See the connection in settings' })
+    expect(links.map(l => l.getAttribute('href'))).toEqual([githubCardPath('org_a')])
+    expect(screen.queryAllByRole('button', { name: 'Install GitHub App' })).toHaveLength(installs)
   })
 
   it('shows what the create would refuse as a chip and its fix, before anything is created', async () => {

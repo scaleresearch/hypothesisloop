@@ -245,6 +245,31 @@ describe('a new platform experiment', () => {
 
 })
 
+describe('a stage ladder the API refuses', () => {
+  // The form checked the ladder with a copy of the server's rules; the API is the one check now,
+  // and it names every problem at once.
+  it('shows each problem the API names, at the step of the first, and keeps them in the draft', async () => {
+    const problems = [
+      { reason: 'invalid_stages', message: 'stages: the lengths add up to 90 and must add up to 100', field: 'stages' },
+      { reason: 'invalid_agents', message: 'max_agents: at most 500 researchers', field: 'max_agents' },
+    ]
+    vi.mocked(createPlatformExperiment).mockRejectedValueOnce(new ApiError(422, `2 problems: (1) ${problems[0].message}; (2) ${problems[1].message}`, 'invalid_stages', {
+      reason: 'invalid_stages', message: `2 problems: (1) ${problems[0].message}; (2) ${problems[1].message}`, problems,
+    }))
+    show()
+    await userEvent.type(name(), 'Run')
+    await userEvent.type(screen.getByLabelText('Experiment goal'), 'The brief')
+    await userEvent.click(screen.getByRole('tab', { name: '3. Budget and rules' }))
+    await create()
+    const listed = await screen.findAllByRole('listitem')
+    expect(listed.map(li => li.textContent)).toEqual(expect.arrayContaining(problems.map(p => p.message)))
+    expect(screen.getByRole('tab', { name: '3. Budget and rules', selected: true })).toBeTruthy()
+    await waitFor(() => expect(createExperimentDraft).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(createExperimentDraft).mock.calls[0][1]).toMatchObject({ step: '3', failure: problems.map(p => p.message).join(' ') })
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy()
+  })
+})
+
 describe('a repository that brings its own experiment', () => {
   // A person who picked such a repository in the form started agents with an empty brief: the
   // form knew nothing of the spec the repository keeps.
@@ -275,6 +300,21 @@ describe('a repository that brings its own experiment', () => {
     await chooseRepository('acme/widgets')
     await waitFor(() => expect(fetchExperimentFile).toHaveBeenCalled())
     expect(name()).toHaveProperty('value', 'Mine')
+  })
+
+  it('says why its experiment file cannot be used once, in the API\'s words, which name the file and where it was read', async () => {
+    const unusable = '.hypothesisloop/experiment.yaml of acme/widgets at main: metrics: val_loss is declared twice'
+    vi.mocked(fetchExperimentFile).mockReset().mockRejectedValue(new ApiError(422, unusable, 'invalid_experiment_file'))
+    show()
+    await chooseRepository('acme/widgets')
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toBe(unusable)
+    expect(screen.getAllByText(unusable)).toHaveLength(1)
+    expect(document.body.textContent).not.toContain('Could not read')
+    vi.mocked(fetchExperimentFile).mockRejectedValue(new ApiError(422, 'the repository has no experiment file', 'no_experiment_file'))
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByText('acme/widgets at main has no .hypothesisloop/experiment.yaml.')).toBeTruthy()
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 })
 
