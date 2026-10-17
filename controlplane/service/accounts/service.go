@@ -12,6 +12,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
@@ -603,7 +604,7 @@ func (h *Service) RegisterCluster(ctx context.Context, orgID, name string) (*Reg
 	if err != nil {
 		return nil, err
 	}
-	token, err := auth.Mint(h.signingSecret, auth.RuntimeScope(cluster.Name))
+	token, err := auth.Mint(h.signingSecret, scope.Runtime(cluster.Name))
 	if err != nil {
 		return nil, err
 	}

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 )
 
 func agentsSession(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
@@ -43,7 +44,7 @@ after it has closed. One that stored none yet is not found.`, stderr)
 		}
 		planner := ""
 		for id, role := range roles {
-			if role == "planner" {
+			if role == platformapi.SignupRolePlanner {
 				planner = id
 			}
 		}

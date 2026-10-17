@@ -18,7 +18,7 @@ func (s *Store) RunHealth(ctx context.Context) ([]domain.AgentHealth, error) {
 SELECT s.platform_experiment_id, s.agent_id, s.role,
        EXTRACT(EPOCH FROM min(e.created_at) - st.start)::float8,
        EXTRACT(EPOCH FROM min(e.ended_at) FILTER (WHERE e.status = 'COMPLETED') - st.start)::float8,
-       count(e.id) FILTER (WHERE e.status IN ('QUEUED', 'SUBMITTED', 'RUNNING')),
+       count(e.id) FILTER (WHERE e.status IN `+unfinishedSQL+`),
        COALESCE(i.restarts, 0),
        (SELECT count(*) FROM agent_messages m
          WHERE m.platform_experiment_id = s.platform_experiment_id AND m.agent_id = s.agent_id AND m.sender = 'coordinator')

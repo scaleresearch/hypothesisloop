@@ -1,24 +1,9 @@
 package domain
 
-import "time"
+import "github.com/scaleresearch/hypothesisloop/contract/platformapi"
 
-// Event is one change as GET /watch delivers it, described as small as it can be described: what
-// kind of thing changed, which thing, its new value, one qualifying detail and the two ids a
-// subscription is scoped by. Never a copy of the row: a client that wants detail follows with a
-// normal GET, so this stream duplicates no read path and no state.
-type Event struct {
-	// ID is the change's place in the stream: every change with a smaller id committed before it.
-	// A client reads on from the id of the last change it read.
-	ID                   int64  `json:"id"`
-	Kind                 string `json:"kind"`
-	Subject              string `json:"subject"`
-	Value                string `json:"value"`
-	Detail               string `json:"detail"`
-	PlatformExperimentID string `json:"platform_experiment_id"`
-	AgentID              string `json:"agent_id"`
-	// OccurredAt is when the write that made the change began.
-	OccurredAt time.Time `json:"occurred_at"`
-}
+// Event is one change as GET /watch delivers it (platformapi).
+type Event = platformapi.Event
 
 // Event kinds. Every event on the stream carries one of these.
 const (
@@ -312,7 +297,7 @@ func (f EventFilter) Matches(e Event) bool {
 		case e.Kind == EventAgentActivity:
 			return false
 		case e.Kind == EventExperimentStatus:
-			return ExperimentStatus(e.Value).IsTerminal()
+			return ExperimentStatus(e.Value).Ended()
 		case e.Kind == EventExperimentBlocked:
 			return !QueueReasonClearsByWaiting(e.Value)
 		case e.Kind == EventEnvironmentStatus:
@@ -323,7 +308,7 @@ func (f EventFilter) Matches(e Event) bool {
 	}
 	switch {
 	case e.Kind == EventExperimentStatus:
-		return e.AgentID == f.AgentID && (ExperimentStatus(e.Value).IsTerminal() || requeued(e))
+		return e.AgentID == f.AgentID && (ExperimentStatus(e.Value).Ended() || requeued(e))
 	case e.Kind == EventExperimentBlocked:
 		return e.AgentID == f.AgentID && !QueueReasonClearsByWaiting(e.Value)
 	case isAgentOwned(e.Kind):

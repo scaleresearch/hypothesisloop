@@ -17,6 +17,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/contract/repotemplate"
 )
 
@@ -145,7 +146,7 @@ func baselineOnly(c *apiclient.Client, pe string) error {
 	if err != nil {
 		return err
 	}
-	if role != "" && role != "baseline" {
+	if role != "" && role != platformapi.SignupRoleBaseline {
 		return fmt.Errorf("only the baseline agent writes the experiment's files, and your role is %s. Your files come with the baseline's commit: "+
 			"hl hypothesis checkout ID puts your clone on a branch made from it", role)
 	}
@@ -153,13 +154,13 @@ func baselineOnly(c *apiclient.Client, pe string) error {
 }
 
 // agentRole is the role in pe of the agent the token is, empty for a caller that is no agent.
-func agentRole(c *apiclient.Client, pe string) (string, error) {
+func agentRole(c *apiclient.Client, pe string) (platformapi.SignupRole, error) {
 	kind, _, agent := scopeOf(c.Token)
 	if kind != callerAgent {
 		return "", nil
 	}
 	var signup struct {
-		Role string `json:"role"`
+		Role platformapi.SignupRole `json:"role"`
 	}
 	if err := c.Do("GET", signupPath(pe, agent), nil, &signup); err != nil {
 		return "", err
@@ -169,8 +170,8 @@ func agentRole(c *apiclient.Client, pe string) (string, error) {
 
 // missingFileHint is how the caller gets a missing experiment file: hl repo init writes it for
 // the baseline and anyone who is no agent, and every other agent gets the baseline's.
-func missingFileHint(role string) string {
-	if role == "" || role == "baseline" {
+func missingFileHint(role platformapi.SignupRole) string {
+	if role == "" || role == platformapi.SignupRoleBaseline {
 		return "hl repo init writes it"
 	}
 	return "it comes with the baseline's commit: hl hypothesis checkout ID puts your clone on a branch made from it"

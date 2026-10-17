@@ -31,7 +31,7 @@ var (
 // Change announces c once the write commits, and with it. A change that does not validate fails
 // the write.
 func (w *Write) Change(c domain.Change) {
-	if err := c.Validate(); err != nil {
+	if err := domain.ValidateChange(c); err != nil {
 		w.err = errors.Join(w.err, err)
 		return
 	}

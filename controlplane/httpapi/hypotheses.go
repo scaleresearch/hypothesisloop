@@ -10,6 +10,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
@@ -442,16 +443,8 @@ func (a hypothesesAPI) checkOut(ctx context.Context, in *struct {
 	return &struct{ Body *registry.Checkout }{Body: out}, nil
 }
 
-type registerHypothesisRequest struct {
-	AgentID              string            `json:"agent_id,omitempty" required:"false" doc:"The agent whose hypothesis this is. Absent, it is the caller's own: an agent token's agent, and for any other caller no agent."`
-	PlatformExperimentID string            `json:"platform_experiment_id"`
-	Text                 string            `json:"text"`
-	Links                []domain.LinkSpec `json:"links,omitempty" required:"false" doc:"Where the hypothesis sits: at least one {type: builds_on, to: <hypothesis id or the platform_experiment_id for the objective>}; contradicts and related links to hypotheses are optional."`
-	DistinctFrom         []string          `json:"distinct_from,omitempty" required:"false" doc:"Ids of hypotheses a 409 listed that you read and judged a different claim from yours."`
-}
-
 func (a hypothesesAPI) register(ctx context.Context, in *struct {
-	Body registerHypothesisRequest
+	Body platformapi.RegisterHypothesisRequest
 }) (*struct {
 	Status int
 	Body   registry.RegisteredHypothesis

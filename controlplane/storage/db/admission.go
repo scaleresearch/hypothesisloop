@@ -175,8 +175,8 @@ func (s *Store) AdmitExperimentTx(ctx context.Context, exp *domain.Experiment, o
 			COUNT(*) FILTER (WHERE estimated_cost_acch > 0)
 		FROM experiments
 		WHERE agent_id=$1 AND platform_experiment_id=$2
-		  AND (status IN ('QUEUED','SUBMITTED','RUNNING')
-		       OR (status IN ('COMPLETED','FAILED','EVICTED','REJECTED') AND quota_settled_at IS NULL))`,
+		  AND (status IN `+unfinishedSQL+`
+		       OR (status IN `+endedSQL+` AND quota_settled_at IS NULL))`,
 			exp.AgentID, exp.PlatformExperimentID).Scan(
 			&desiredGuaranteedAcc, &desiredBurstAcc, &holding); err != nil {
 			return fmt.Errorf("admit experiment: desired usage: %w", err)
@@ -307,8 +307,8 @@ func (s *Store) ReserveAdmittedAcceleratorTypeTx(ctx context.Context, experiment
 		var desired, desiredAll float64
 		if err := tx.QueryRow(ctx, `SELECT COALESCE(SUM(estimated_cost_acch) FILTER (WHERE capacity_tier=$3),0), COALESCE(SUM(estimated_cost_acch),0) FROM experiments
 		WHERE agent_id=$1 AND platform_experiment_id=$2
-		AND (status IN ('QUEUED','SUBMITTED','RUNNING')
-		OR (status IN ('COMPLETED','FAILED','EVICTED','REJECTED') AND quota_settled_at IS NULL))`,
+		AND (status IN `+unfinishedSQL+`
+		OR (status IN `+endedSQL+` AND quota_settled_at IS NULL))`,
 			agentID, platformExpID, tier).Scan(&desired, &desiredAll); err != nil {
 			return fmt.Errorf("reserve admitted accelerator type: desired usage: %w", err)
 		}

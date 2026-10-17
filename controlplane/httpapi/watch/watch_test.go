@@ -24,6 +24,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
@@ -243,17 +244,9 @@ func dialWatch(t *testing.T, server *httptest.Server, query url.Values) *watchCl
 	return &watchClient{conn: conn, r: r}
 }
 
-// frame is one text frame of a stream: the subscription, a change or a progress frame.
-type frame struct {
-	Subscription *Subscription `json:"subscription"`
-	domain.Event
-	Next     *int64 `json:"next"`
-	CaughtUp bool   `json:"caught_up"`
-}
-
-func (c *watchClient) frame(t *testing.T) frame {
+func (c *watchClient) frame(t *testing.T) platformapi.Frame {
 	t.Helper()
-	var f frame
+	var f platformapi.Frame
 	payload := c.nextRaw(t)
 	if err := json.Unmarshal(payload, &f); err != nil {
 		t.Fatalf("decode frame %q: got = %v, want = nil", payload, err)
@@ -265,8 +258,8 @@ func (c *watchClient) frame(t *testing.T) frame {
 func (c *watchClient) next(t *testing.T) domain.Event {
 	t.Helper()
 	for {
-		if f := c.frame(t); f.Kind != "" {
-			return f.Event
+		if f := c.frame(t); f.Event != nil {
+			return *f.Event
 		}
 	}
 }
@@ -276,17 +269,17 @@ func (c *watchClient) progress(t *testing.T) (int64, bool) {
 	t.Helper()
 	for {
 		f := c.frame(t)
-		if f.Kind != "" {
-			t.Fatalf("frame: got = change %+v, want = a progress frame", f.Event)
+		if f.Event != nil {
+			t.Fatalf("frame: got = change %+v, want = a progress frame", *f.Event)
 		}
-		if f.Next != nil {
-			return *f.Next, f.CaughtUp
+		if f.Progress != nil {
+			return f.Next, f.CaughtUp
 		}
 	}
 }
 
 // readSubscription returns the first frame of a stream, the subscription in force.
-func readSubscription(t *testing.T, client *watchClient) Subscription {
+func readSubscription(t *testing.T, client *watchClient) platformapi.Subscription {
 	t.Helper()
 	f := client.frame(t)
 	if f.Subscription == nil {

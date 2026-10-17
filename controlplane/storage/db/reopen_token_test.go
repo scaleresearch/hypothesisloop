@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
@@ -31,7 +32,7 @@ func TestAReopenedRunsTokensAreAcceptedByTheRowsAlone(t *testing.T) {
 		_, err = authenticator.Authenticate(ctx, token)
 		return err == nil
 	}
-	live, coordinator, finished, cut := auth.AgentScope(run.ID, run.Live), auth.CoordinatorScope(run.ID), auth.AgentScope(run.ID, run.Finished), auth.AgentScope(run.ID, run.Cut)
+	live, coordinator, finished, cut := scope.Agent(run.ID, run.Live), scope.Coordinator(run.ID), scope.Agent(run.ID, run.Finished), scope.Agent(run.ID, run.Cut)
 	for _, scope := range []string{live, coordinator, finished, cut} {
 		if accepted(scope) {
 			t.Fatalf("closed an hour ago: %s accepted, want refused", scope)

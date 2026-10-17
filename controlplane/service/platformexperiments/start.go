@@ -11,6 +11,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/gitrefs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
@@ -75,7 +76,7 @@ func (s *Service) measuredJob(ctx context.Context, pe *domain.PlatformExperiment
 			if err != nil {
 				return "", fmt.Errorf("platform_experiments.measuredJob: read %s: %w", job.ID, err)
 			}
-			if baseline == nil || job.Branch != domain.BaselineBranch(pe.ID) {
+			if baseline == nil || job.Branch != gitrefs.BaselineBranch(pe.ID) {
 				continue
 			}
 			if _, reported := baseline.Reported[ranked.Key]; reported {

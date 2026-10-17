@@ -6,9 +6,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 )
 
 // The account commands: orgs with their members and invites, projects, API keys and clusters. --org defaults to $HL_ORG and then
@@ -230,8 +232,8 @@ stops being an owner loses their API keys of the whole org and the invites they 
 	if len(operands) != 2 {
 		return parseExit(misuse(fs, "want USER and a role, got %d operands", len(operands)))
 	}
-	if operands[1] != "owner" && operands[1] != "member" {
-		return parseExit(misuse(fs, "the role must be owner or member, got %s", operands[1]))
+	if !slices.Contains(platformapi.OrgRoles, platformapi.OrgRole(operands[1])) {
+		return parseExit(misuse(fs, "the role must be %s or %s, got %s", platformapi.OrgRoleOwner, platformapi.OrgRoleMember, operands[1]))
 	}
 	id, err := resolveOrg(c, *org)
 	if err != nil {
@@ -265,12 +267,12 @@ For an owner. Prints the invite with its token. The token is shown this once: th
 only its hash and sends no email, so hand it to the person yourself. Whoever signs in and accepts
 it joins the org with the invite's role. It works once, for seven days, and until it is revoked.`, stderr)
 	org := fs.String("org", "", orgFlagHelp)
-	role := fs.String("role", "member", "the role the invited person joins with")
+	role := fs.String("role", string(platformapi.OrgRoleMember), "the role the invited person joins with")
 	if err := parseNone(fs, args); err != nil {
 		return parseExit(err)
 	}
-	if *role != "owner" && *role != "member" {
-		return parseExit(misuse(fs, "--role must be owner or member, got %s", *role))
+	if !slices.Contains(platformapi.OrgRoles, platformapi.OrgRole(*role)) {
+		return parseExit(misuse(fs, "--role must be %s or %s, got %s", platformapi.OrgRoleOwner, platformapi.OrgRoleMember, *role))
 	}
 	id, err := resolveOrg(c, *org)
 	if err != nil {

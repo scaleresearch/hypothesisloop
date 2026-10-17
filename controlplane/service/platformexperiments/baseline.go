@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/gitrefs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
@@ -84,7 +85,7 @@ func (s *Service) readBaseline(ctx context.Context, pe *domain.PlatformExperimen
 			return nil, err
 		}
 	}
-	if out.Declared, err = s.environments.Read(ctx, pe.ProjectID, pe.Repository, domain.BaselineBranch(pe.ID)); err != nil {
+	if out.Declared, err = s.environments.Read(ctx, pe.ProjectID, pe.Repository, gitrefs.BaselineBranch(pe.ID)); err != nil {
 		return nil, err
 	}
 	if out.References, err = s.references(ctx, pe); err != nil {
@@ -105,7 +106,7 @@ func checkBaseline(pe *domain.PlatformExperiment, baseline *Baseline) error {
 	if baseline == nil || baseline.Job == nil || baseline.Job.PlatformExperimentID != pe.ID || baseline.OwnerRole != domain.SignupRoleBaseline {
 		return refusedBaseline("no_baseline", "baseline_job_id %q is no job of a baseline agent of this platform experiment: an agent added with role baseline runs it with `hl job submit`, and that job is the one to name", pe.BaselineJobID)
 	}
-	if branch := domain.BaselineBranch(pe.ID); baseline.Job.Branch != branch {
+	if branch := gitrefs.BaselineBranch(pe.ID); baseline.Job.Branch != branch {
 		return refusedBaseline("baseline_not_on_branch", "baseline job %s ran branch %q, and the baseline is measured on %s alone: name the control's job of that branch", baseline.Job.ID, baseline.Job.Branch, branch)
 	}
 	return checkMeasurement(pe, baseline)
@@ -148,7 +149,7 @@ func checkMeasurement(pe *domain.PlatformExperiment, baseline *Baseline) error {
 // in it.
 func checkBaselineEnvironment(pe *domain.PlatformExperiment, baseline *Baseline) error {
 	ran, declared := baseline.Environment, baseline.Declared
-	branch := domain.BaselineBranch(pe.ID)
+	branch := gitrefs.BaselineBranch(pe.ID)
 	switch {
 	case declared != nil && (ran == nil || ran.Dockerfile != *declared):
 		return refusedBaseline("baseline_environment_differs", "branch %s declares in %s an environment that baseline job %s did not run in: every researcher's job runs in it, so the baseline is measured in it too. Name a job submitted from a commit that declares the same file, as the head of the branch does", branch, domain.EnvironmentFile, baseline.Job.ID)
@@ -200,7 +201,7 @@ func (s *Service) strongerOwnJob(ctx context.Context, pe *domain.PlatformExperim
 		return nil
 	}
 	return refusedBaseline("baseline_weaker_than_own_job", "job %s of the same baseline agent (branch %s) measured %s = %g and held every constraint, better than %g of job %s: the baseline is the control in its strongest configuration. Run the configuration of job %s as a job of %s and name that job",
-		stronger.Job.ID, stronger.Job.Branch, ranked.Key, best, declared, baseline.Job.ID, stronger.Job.ID, domain.BaselineBranch(pe.ID))
+		stronger.Job.ID, stronger.Job.Branch, ranked.Key, best, declared, baseline.Job.ID, stronger.Job.ID, gitrefs.BaselineBranch(pe.ID))
 }
 
 // holdsConstraints is whether reported holds every constraint metric, each of them reported.

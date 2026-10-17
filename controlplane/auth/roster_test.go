@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -13,7 +14,7 @@ func (d *fakeDirectory) IsSignedUp(_ context.Context, pe, agent string) (bool, e
 }
 
 func (d *fakeDirectory) AssignedEnvironmentBuild(_ context.Context, cluster, key string, attempt int) (*domain.Environment, error) {
-	if !d.builds[BuildScope(cluster, key, attempt)] {
+	if !d.builds[scope.Build(cluster, key, attempt)] {
 		return nil, d.fail
 	}
 	return &domain.Environment{Key: key, ClusterName: cluster, Attempt: attempt}, d.fail
@@ -23,12 +24,12 @@ func (d *fakeDirectory) AssignedEnvironmentBuild(_ context.Context, cluster, key
 // cluster and building: a later attempt, another cluster, or a build that ended refuse it.
 func TestABuildTokenWorksOnlyWhileItsBuildIsBuilding(t *testing.T) {
 	a, directory := newTestAuthenticator(t)
-	token := mustMint(t, testSecret, BuildScope("cluster-a", "key-1", 1))
+	token := mustMint(t, testSecret, scope.Build("cluster-a", "key-1", 1))
 
 	p, err := a.Authenticate(context.Background(), token)
 	assertRefused(t, "build not assigned", p, err)
 
-	directory.builds = map[string]bool{BuildScope("cluster-a", "key-1", 1): true}
+	directory.builds = map[string]bool{scope.Build("cluster-a", "key-1", 1): true}
 	p, err = a.Authenticate(context.Background(), token)
 	if err != nil || p.Kind != KindBuild || p.Build != (BuildRef{Cluster: "cluster-a", Key: "key-1", Attempt: 1}) {
 		t.Fatalf("build building: got = %+v, %v, want the build principal", p, err)
@@ -37,7 +38,7 @@ func TestABuildTokenWorksOnlyWhileItsBuildIsBuilding(t *testing.T) {
 		t.Errorf("build principal: got = %+v, want one that names no org, project or cluster", p)
 	}
 
-	directory.builds = map[string]bool{BuildScope("cluster-a", "key-1", 2): true, BuildScope("cluster-b", "key-1", 1): true}
+	directory.builds = map[string]bool{scope.Build("cluster-a", "key-1", 2): true, scope.Build("cluster-b", "key-1", 1): true}
 	p, err = a.Authenticate(context.Background(), token)
 	assertRefused(t, "build moved on to another attempt or cluster", p, err)
 
@@ -52,7 +53,7 @@ func TestABuildTokenWorksOnlyWhileItsBuildIsBuilding(t *testing.T) {
 // signup exists and nothing once the signup is removed.
 func TestAnAgentTokenWorksOnlyWhileItsSignupExists(t *testing.T) {
 	a, directory := newTestAuthenticator(t)
-	token := mustMint(t, testSecret, AgentScope("pe-a", "agent-1"))
+	token := mustMint(t, testSecret, scope.Agent("pe-a", "agent-1"))
 
 	directory.notSignedUp = map[string]bool{"pe-a/agent-1": true}
 	p, err := a.Authenticate(context.Background(), token)
@@ -69,7 +70,7 @@ func TestAnAgentTokenWorksOnlyWhileItsSignupExists(t *testing.T) {
 	assertRefused(t, "agent that was removed", p, err)
 
 	// Another agent's signup in the same platform experiment does not carry this one.
-	other := mustMint(t, testSecret, AgentScope("pe-a", "agent-2"))
+	other := mustMint(t, testSecret, scope.Agent("pe-a", "agent-2"))
 	if p, err := a.Authenticate(context.Background(), other); err != nil || p.AgentID != "agent-2" {
 		t.Fatalf("its neighbour: got = %+v, %v, want admitted", p, err)
 	}
@@ -77,7 +78,7 @@ func TestAnAgentTokenWorksOnlyWhileItsSignupExists(t *testing.T) {
 
 // A failing lookup is the platform's failure and is never read as a refusal or an admission.
 func TestALookupFailureIsNeitherAdmissionNorRefusal(t *testing.T) {
-	for name, scope := range map[string]string{"agent": AgentScope("pe-a", "agent-1")} {
+	for name, scope := range map[string]string{"agent": scope.Agent("pe-a", "agent-1")} {
 		a, directory := newTestAuthenticator(t)
 		directory.fail = context.DeadlineExceeded
 		_, err := a.Authenticate(context.Background(), mustMint(t, testSecret, scope))

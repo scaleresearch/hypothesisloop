@@ -70,7 +70,7 @@ func scanExperiment(row rowScanner) (*domain.Experiment, error) {
 	}
 	exp.CapacityTier = domain.CapacityTier(capacityTier)
 	exp.Status = domain.ExperimentStatus(status)
-	if exp.Status.IsTerminal() {
+	if exp.Status.Ended() {
 		finished := exp.UpdatedAt
 		exp.FinishedAt = &finished
 	}

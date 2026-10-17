@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
@@ -21,7 +22,7 @@ import (
 // reports metrics and fetches its commit with, derived from its id, so every reconcile answers
 // with the same one, and its platform experiment's repository through the git proxy.
 func (s *Service) desiredJob(exp *domain.Experiment) (*clusterapi.DesiredJob, error) {
-	token, err := auth.Mint(s.signingSecret, auth.JobScope(exp.ID))
+	token, err := auth.Mint(s.signingSecret, scope.Job(exp.ID))
 	if err != nil {
 		return nil, err
 	}

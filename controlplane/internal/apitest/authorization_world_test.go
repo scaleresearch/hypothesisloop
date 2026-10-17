@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
@@ -281,12 +282,12 @@ func newWorldAPI(t *testing.T) *worldAPI {
 	api.tokens["member"] = signer(map[string]any{"iss": worldIssuer, "aud": worldAudience, "sub": worldMember, "name": "Mel", "exp": time.Now().Add(time.Hour).Unix()})
 	api.tokens["org key"] = key(&domain.APIKey{ID: "key-a", OrgID: "org-a"})
 	api.tokens["project key"] = key(&domain.APIKey{ID: "key-a1", OrgID: "org-a", ProjectID: "prj-a1"})
-	api.tokens["agent"] = mint(auth.AgentScope("pe-a1", "agent-1"))
-	api.tokens["coordinator"] = mint(auth.CoordinatorScope("pe-a1"))
-	api.tokens["job"] = mint(auth.JobScope("job-own"))
-	api.tokens["runtime"] = mint(auth.RuntimeScope("cluster-a"))
-	api.tokens["build"] = mint(auth.BuildScope("cluster-a", worldBuildKey, 1))
-	api.tokens["staff"] = mint(auth.StaffScope)
+	api.tokens["agent"] = mint(scope.Agent("pe-a1", "agent-1"))
+	api.tokens["coordinator"] = mint(scope.Coordinator("pe-a1"))
+	api.tokens["job"] = mint(scope.Job("job-own"))
+	api.tokens["runtime"] = mint(scope.Runtime("cluster-a"))
+	api.tokens["build"] = mint(scope.Build("cluster-a", worldBuildKey, 1))
+	api.tokens["staff"] = mint(scope.Staff)
 	api.serve = answering(t, doc.API, api.router)
 	return api
 }

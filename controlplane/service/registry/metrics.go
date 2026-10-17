@@ -67,7 +67,7 @@ func (s *Service) RecordMetric(ctx context.Context, experimentID, metricName, ba
 	if exp == nil {
 		return fmt.Errorf("%w: %s", ErrExperimentNotFound, experimentID)
 	}
-	if exp.Status.IsTerminal() {
+	if exp.Status.Ended() {
 		return fmt.Errorf("%w: experiment %s is %s (terminal); progress metrics are not accepted", ErrInvalidMetric, experimentID, exp.Status)
 	}
 

@@ -168,7 +168,7 @@ WHERE id = $1 AND status = 'SUBMITTED'`
 // advisory is sent once per job.
 func (s *Store) MarkUnderperforming(ctx context.Context, id, metricName string) error {
 	const q = `UPDATE experiments SET underperforming_metric = $2
-WHERE id = $1 AND underperforming_metric IS NULL AND status NOT IN ('COMPLETED', 'FAILED', 'EVICTED', 'REJECTED')`
+WHERE id = $1 AND underperforming_metric IS NULL AND status NOT IN ` + endedSQL
 	announce := func(w *Write, j jobWritten) {
 		w.Change(j.change(domain.EventJobUnderperforming, j.underperformingMetric, ""))
 	}

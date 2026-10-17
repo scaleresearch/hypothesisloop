@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -23,20 +24,20 @@ func TestATokenWhoseRunEndedSaysSo(t *testing.T) {
 		change func(*fakeDirectory)
 		want   bool
 	}{
-		"agent at work":                           {AgentScope("pe-a", "agent-1"), func(*fakeDirectory) {}, false},
-		"agent after the close":                   {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.closedAt["pe-a"] = inWindDown }, true},
-		"agent after its cut":                     {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.cutAt["pe-a/agent-1"] = inWindDown }, true},
-		"agent whose rival was cut":               {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.cutAt["pe-a/agent-2"] = inWindDown }, false},
-		"planner whose answer is stored":          {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.answeredAt["pe-a/agent-1"] = inWindDown }, true},
-		"agent that finished":                     {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.finishedAt["pe-a/agent-1"] = inWindDown }, true},
-		"agent whose rival finished":              {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.finishedAt["pe-a/agent-2"] = inWindDown }, false},
-		"coordinator at work":                     {CoordinatorScope("pe-a"), func(*fakeDirectory) {}, false},
-		"coordinator after the close":             {CoordinatorScope("pe-a"), func(d *fakeDirectory) { d.closedAt["pe-a"] = inWindDown }, true},
-		"job at work":                             {JobScope("job-a"), job, false},
-		"job after the close":                     {JobScope("job-a"), func(d *fakeDirectory) { job(d); d.closedAt["pe-a"] = testNow }, true},
-		"job long after the close, still running": {JobScope("job-a"), func(d *fakeDirectory) { job(d); d.closedAt["pe-a"] = testNow.Add(-time.Hour) }, true},
-		"job whose agent was cut":                 {JobScope("job-a"), func(d *fakeDirectory) { job(d); d.cutAt["pe-a/agent-1"] = inWindDown }, true},
-		"job of an agent whose rival was cut":     {JobScope("job-a"), func(d *fakeDirectory) { job(d); d.cutAt["pe-a/agent-2"] = inWindDown }, false},
+		"agent at work":                           {scope.Agent("pe-a", "agent-1"), func(*fakeDirectory) {}, false},
+		"agent after the close":                   {scope.Agent("pe-a", "agent-1"), func(d *fakeDirectory) { d.closedAt["pe-a"] = inWindDown }, true},
+		"agent after its cut":                     {scope.Agent("pe-a", "agent-1"), func(d *fakeDirectory) { d.cutAt["pe-a/agent-1"] = inWindDown }, true},
+		"agent whose rival was cut":               {scope.Agent("pe-a", "agent-1"), func(d *fakeDirectory) { d.cutAt["pe-a/agent-2"] = inWindDown }, false},
+		"planner whose answer is stored":          {scope.Agent("pe-a", "agent-1"), func(d *fakeDirectory) { d.answeredAt["pe-a/agent-1"] = inWindDown }, true},
+		"agent that finished":                     {scope.Agent("pe-a", "agent-1"), func(d *fakeDirectory) { d.finishedAt["pe-a/agent-1"] = inWindDown }, true},
+		"agent whose rival finished":              {scope.Agent("pe-a", "agent-1"), func(d *fakeDirectory) { d.finishedAt["pe-a/agent-2"] = inWindDown }, false},
+		"coordinator at work":                     {scope.Coordinator("pe-a"), func(*fakeDirectory) {}, false},
+		"coordinator after the close":             {scope.Coordinator("pe-a"), func(d *fakeDirectory) { d.closedAt["pe-a"] = inWindDown }, true},
+		"job at work":                             {scope.Job("job-a"), job, false},
+		"job after the close":                     {scope.Job("job-a"), func(d *fakeDirectory) { job(d); d.closedAt["pe-a"] = testNow }, true},
+		"job long after the close, still running": {scope.Job("job-a"), func(d *fakeDirectory) { job(d); d.closedAt["pe-a"] = testNow.Add(-time.Hour) }, true},
+		"job whose agent was cut":                 {scope.Job("job-a"), func(d *fakeDirectory) { job(d); d.cutAt["pe-a/agent-1"] = inWindDown }, true},
+		"job of an agent whose rival was cut":     {scope.Job("job-a"), func(d *fakeDirectory) { job(d); d.cutAt["pe-a/agent-2"] = inWindDown }, false},
 	} {
 		a, directory := newTestAuthenticator(t)
 		tc.change(directory)

@@ -6,6 +6,7 @@ package auth
 import (
 	"context"
 
+	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -60,11 +61,7 @@ type Principal struct {
 }
 
 // BuildRef names one attempt of an environment build on the cluster it was assigned to.
-type BuildRef struct {
-	Cluster string
-	Key     string
-	Attempt int
-}
+type BuildRef = scope.BuildRef
 
 // HoldsAccount reports a principal of a person or an org: a user, an API key or staff. A token the
 // platform derived for an agent, a coordinator or a job holds none.

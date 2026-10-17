@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
@@ -198,7 +199,7 @@ func TestAGitCredentialIsABuildTokenForTheProxyAndNoHostCredential(t *testing.T)
 	if err := json.Unmarshal(rec.Body.Bytes(), &credential); err != nil {
 		t.Fatal(err)
 	}
-	want, _ := auth.Mint("test-signing-secret-of-enough-length", auth.BuildScope("of-a", "key-1", 2))
+	want, _ := auth.Mint("test-signing-secret-of-enough-length", scope.Build("of-a", "key-1", 2))
 	if credential != (domain.EnvironmentGitCredential{ProxyURL: "https://api.test/git/builds/key-1", RepositoryURL: "https://git.test/acme/model.git", Token: want}) {
 		t.Errorf("credential = %+v, want the proxy, the repository's address and the build's token", credential)
 	}

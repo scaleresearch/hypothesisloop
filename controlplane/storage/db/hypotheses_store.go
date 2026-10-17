@@ -426,7 +426,7 @@ var checkoutClaims = `c.checked_out_at > now() - make_interval(secs => $2)
 	AND ` + agentAtWork("c.platform_experiment_id", "c.agent_id")
 
 // jobOnIt is the condition on an experiments row e that a job of an agent at work is queued or running.
-var jobOnIt = `e.status IN ('QUEUED', 'SUBMITTED', 'RUNNING') AND ` + agentAtWork("e.platform_experiment_id", "e.agent_id")
+var jobOnIt = `e.status IN ` + unfinishedSQL + ` AND ` + agentAtWork("e.platform_experiment_id", "e.agent_id")
 
 // CheckOutHypothesis records that agentID checked hypothesisID of platformExpID out on branch
 // now, and answers the other agents working on it.

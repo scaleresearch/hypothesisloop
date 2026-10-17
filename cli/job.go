@@ -16,6 +16,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 	"github.com/scaleresearch/hypothesisloop/cli/internal/watchclient"
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 )
 
 var jobCommands = []subcommand{
@@ -204,9 +205,9 @@ Every other field: $HL_REFERENCE/experiment-submission.yaml.`, stderr)
 	fmt.Fprintf(stdout, "%s\n", line)
 	// A job this submit created is QUEUED in its answer, so any other status is that of the job
 	// an identical submit created before.
-	if out.Status != "QUEUED" {
+	if out.Status != string(platformapi.StatusQueued) {
 		again := fmt.Sprintf("--repeat %d submits the same request as another job", *repeat+1)
-		if slices.Contains(endedStatuses, out.Status) {
+		if platformapi.ExperimentStatus(out.Status).Ended() {
 			fmt.Fprintf(stderr, "hl: job submit: nothing was submitted: an identical submit already created %s, which ended %s. %s\n", out.ID, out.Status, again)
 			return 1
 		}
@@ -214,9 +215,6 @@ Every other field: $HL_REFERENCE/experiment-submission.yaml.`, stderr)
 	}
 	return 0
 }
-
-// endedStatuses are the statuses a job ends in.
-var endedStatuses = []string{"COMPLETED", "FAILED", "EVICTED", "REJECTED", "CANCELLED"}
 
 // submissionKey names a submit by everything it sends and which repeat of it this is, so that
 // the same submit sent twice is one job on the platform (submission_key of POST /experiments).
@@ -656,7 +654,7 @@ cause and last lines of output are its eviction_reason. Exits 0 once all ended, 
 		var said bytes.Buffer
 		code := watchclient.Run(watchclient.Options{
 			URL: c.BaseURL, Token: c.Token, Experiment: id,
-			Until:   "status in " + strings.Join(endedStatuses, ","),
+			Until:   "status in " + joined(platformapi.EndedStatuses, ","),
 			Timeout: left, Stdout: io.Discard, Stderr: &said,
 		})
 		if code == watchclient.TimeoutExitCode {
@@ -680,7 +678,7 @@ cause and last lines of output are its eviction_reason. Exits 0 once all ended, 
 		if err := json.Unmarshal(job, &status); err != nil {
 			return fail(stderr, fmt.Errorf("response is not a job: %w", err))
 		}
-		ended = ended && slices.Contains(endedStatuses, status.Status)
+		ended = ended && platformapi.ExperimentStatus(status.Status).Ended()
 		jobs = append(jobs, job)
 	}
 	lines, err := briefJobs[jobBrief](jobs)

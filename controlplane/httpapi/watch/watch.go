@@ -14,6 +14,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
@@ -82,27 +83,13 @@ func (h *hub) wake() {
 	}
 }
 
-// Subscription is what one stream is subscribed to, derived from the filter the server matches
-// against, never from what the client asked for.
-type Subscription struct {
-	ProjectID            string   `json:"project_id,omitempty"`
-	PlatformExperimentID string   `json:"platform_experiment_id"`
-	ExperimentID         string   `json:"experiment_id"`
-	AgentID              string   `json:"agent_id"`
-	Kinds                []string `json:"kinds"`
-	// Decisions is set on a stream narrowed to what may need a decision (domain.EventFilter).
-	Decisions bool `json:"decisions,omitempty"`
-	// After is the change id the stream reads on from.
-	After int64 `json:"after"`
-}
-
-func describe(filter domain.EventFilter, after int64) Subscription {
+func describe(filter domain.EventFilter, after int64) platformapi.Subscription {
 	kinds := make([]string, 0, len(filter.Kinds))
 	for kind := range filter.Kinds {
 		kinds = append(kinds, kind)
 	}
 	sort.Strings(kinds)
-	return Subscription{
+	return platformapi.Subscription{
 		ProjectID:            filter.ProjectID,
 		PlatformExperimentID: filter.PlatformExperimentID,
 		ExperimentID:         filter.ExperimentID,
@@ -119,12 +106,6 @@ type Page struct {
 	Changes  []domain.Event `json:"changes"`
 	Next     int64          `json:"next"`
 	CaughtUp bool           `json:"caught_up"`
-}
-
-// progress is the frame that ends every read of a stream.
-type progress struct {
-	Next     int64 `json:"next"`
-	CaughtUp bool  `json:"caught_up"`
 }
 
 // Handler serves GET /watch and GET /changes. They are registered on the chi router directly
@@ -429,9 +410,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	subscription := describe(sub.filter, sub.after)
-	if err := writeJSON(conn, struct {
-		Subscription Subscription `json:"subscription"`
-	}{subscription}); err != nil {
+	if err := writeJSON(conn, platformapi.Frame{Subscription: &subscription}); err != nil {
 		return
 	}
 	ping := time.NewTicker(h.recheckEvery)
@@ -442,7 +421,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		stand := progress{Next: page.Next, CaughtUp: page.CaughtUp}
+		stand := platformapi.Progress{Next: page.Next, CaughtUp: page.CaughtUp}
 		if err := writeJSON(conn, stand); err != nil {
 			return
 		}
@@ -458,7 +437,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // wait holds a caught-up stream until a change is appended, writing its progress frame stand
 // again and asking its token again meanwhile, and says whether to read on.
-func (h *Handler) wait(ctx context.Context, conn *wsConn, filter domain.EventFilter, stand progress, woke <-chan struct{}, ping <-chan time.Time, peerGone <-chan struct{}) bool {
+func (h *Handler) wait(ctx context.Context, conn *wsConn, filter domain.EventFilter, stand platformapi.Progress, woke <-chan struct{}, ping <-chan time.Time, peerGone <-chan struct{}) bool {
 	for {
 		select {
 		case <-woke:

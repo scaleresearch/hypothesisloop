@@ -4,12 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
 	"io"
 	"net/url"
 	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
+	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 )
 
 var agentsCommands = []subcommand{
@@ -33,17 +34,17 @@ func signupPath(platformExperiment, agent string) string {
 }
 
 // rolesOf is the role of each agent that joined the platform experiment, by agent id.
-func rolesOf(c *apiclient.Client, platformExperiment string) (map[string]string, error) {
+func rolesOf(c *apiclient.Client, platformExperiment string) (map[string]platformapi.SignupRole, error) {
 	var roster struct {
 		Agents []struct {
-			ID   string `json:"agent_id"`
-			Role string `json:"role"`
+			ID   string                 `json:"agent_id"`
+			Role platformapi.SignupRole `json:"role"`
 		} `json:"agents"`
 	}
 	if err := c.Do("GET", agentsPath(platformExperiment), nil, &roster); err != nil {
 		return nil, err
 	}
-	roles := make(map[string]string, len(roster.Agents))
+	roles := make(map[string]platformapi.SignupRole, len(roster.Agents))
 	for _, signup := range roster.Agents {
 		roles[signup.ID] = signup.Role
 	}

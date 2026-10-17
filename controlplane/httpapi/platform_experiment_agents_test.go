@@ -12,6 +12,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
@@ -404,7 +405,7 @@ func TestASelfRunAgentIsHandedTheTokenThatActsAsItAndNoLauncher(t *testing.T) {
 		t.Fatalf("agents = %v, want one", agents)
 	}
 	id := agents[0]["agent_id"].(string)
-	want, err := auth.Mint(agentsTestSecret, auth.AgentScope("pe-1", id))
+	want, err := auth.Mint(agentsTestSecret, scope.Agent("pe-1", id))
 	if err != nil {
 		t.Fatal(err)
 	}

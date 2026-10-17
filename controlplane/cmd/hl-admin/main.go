@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost/github"
 	"github.com/scaleresearch/hypothesisloop/controlplane/config"
@@ -124,7 +125,7 @@ func run(args []string, stdout io.Writer) error {
 			if _, err := store.RegisterCluster(ctx, args[2], args[3]); err != nil {
 				return err
 			}
-			token, err := auth.Mint(cfg.SigningSecret, auth.RuntimeScope(args[2]))
+			token, err := auth.Mint(cfg.SigningSecret, scope.Runtime(args[2]))
 			if err != nil {
 				return err
 			}

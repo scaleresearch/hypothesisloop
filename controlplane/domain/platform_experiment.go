@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 )
 
 // PlatformExperimentStatus is the lifecycle state of a platform experiment.
@@ -440,35 +441,18 @@ const CoordinatorRecipient = "coordinator"
 // MaxGoalBytes bounds the sentence a draft is created from.
 const MaxGoalBytes = 2000
 
-// SignupRole is what an agent was signed up to do in one platform experiment. It lives on the
-// signup rather than on the agent — the same agent may compete in one platform experiment and
-// hold the baseline in another — and is fixed at signup: changing it mid-run would retroactively
-// rewrite who a completed cut applied to.
-//
-// Only ranking reads it. A non-competitor's jobs are admitted, billed, evicted and settled by
-// identical code, and its metrics are recorded and readable in full.
-type SignupRole string
+// SignupRole is the API's own (platformapi).
+type SignupRole = platformapi.SignupRole
 
 const (
-	// SignupRoleCompetitor is ranked, cut-eligible, takes a quota share and earns the top-3 bonus.
-	SignupRoleCompetitor SignupRole = "competitor"
-	// SignupRoleBaseline runs the experiment's declared control. Never ranked, never cut — the
-	// point of a baseline is that its numbers are visible and comparable, not that it wins. It
-	// holds a quota from the moment it joins and is the one role whose job an open platform
-	// experiment takes: the baseline is measured before anyone is ranked against it. It takes
-	// no share at the start, and what it spent is taken from the budget before the shares.
-	SignupRoleBaseline SignupRole = "baseline"
-	// SignupRoleReviewer re-checks other agents' claims and records agreement or dispute. Never
-	// ranked, never cut.
-	SignupRoleReviewer SignupRole = "reviewer"
-	// SignupRolePlanner is the agent the platform signs up to plan a draft. It proposes the
-	// experiment, runs no job, holds no quota and takes no part once the draft is accepted. No
-	// request can ask for it.
-	SignupRolePlanner SignupRole = "planner"
+	SignupRoleCompetitor = platformapi.SignupRoleCompetitor
+	SignupRoleBaseline   = platformapi.SignupRoleBaseline
+	SignupRoleReviewer   = platformapi.SignupRoleReviewer
+	SignupRolePlanner    = platformapi.SignupRolePlanner
 )
 
 // SignupRoles is every role of a signup.
-var SignupRoles = []SignupRole{SignupRoleCompetitor, SignupRoleBaseline, SignupRoleReviewer, SignupRolePlanner}
+var SignupRoles = platformapi.SignupRoles
 
 // BaselineShare is the quota of an agent of role baseline of a platform experiment whose budget
 // is budget: half of it. No researcher can spend before the run starts, so measuring the

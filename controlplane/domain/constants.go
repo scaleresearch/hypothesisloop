@@ -5,30 +5,30 @@ import (
 	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 )
 
 // MinRemainingHours is the minimum rescheduled duration after preemption (15 minutes).
 const MinRemainingHours = 0.25
 
-// ExperimentStatus represents the lifecycle state of an agent job.
-type ExperimentStatus string
+// ExperimentStatus is the API's own (platformapi).
+type ExperimentStatus = platformapi.ExperimentStatus
 
 const (
-	StatusSubmitted ExperimentStatus = "SUBMITTED"
-	StatusQueued    ExperimentStatus = "QUEUED"
-	StatusRunning   ExperimentStatus = "RUNNING"
-	StatusCompleted ExperimentStatus = "COMPLETED"
-	StatusFailed    ExperimentStatus = "FAILED"
-	StatusEvicted   ExperimentStatus = "EVICTED"
-	StatusRejected  ExperimentStatus = "REJECTED"
-	// StatusCancelled is what a job somebody cancelled is answered as, and no row holds it: such
-	// a job is stored REJECTED when it never ran and EVICTED when it did, with EvictionCancelled
-	// as its reason. See AnsweredStatus.
-	StatusCancelled ExperimentStatus = "CANCELLED"
+	StatusSubmitted = platformapi.StatusSubmitted
+	StatusQueued    = platformapi.StatusQueued
+	StatusRunning   = platformapi.StatusRunning
+	StatusCompleted = platformapi.StatusCompleted
+	StatusFailed    = platformapi.StatusFailed
+	StatusEvicted   = platformapi.StatusEvicted
+	StatusRejected  = platformapi.StatusRejected
+	// StatusCancelled is stored as REJECTED or EVICTED with EvictionCancelled as its reason. See
+	// AnsweredStatus.
+	StatusCancelled = platformapi.StatusCancelled
 )
 
 // ExperimentStatuses is every status a job is answered with.
-var ExperimentStatuses = []ExperimentStatus{StatusSubmitted, StatusQueued, StatusRunning, StatusCompleted, StatusFailed, StatusEvicted, StatusRejected, StatusCancelled}
+var ExperimentStatuses = platformapi.ExperimentStatuses
 
 // ExperimentAction is something the reader of a job may do to it now.
 type ExperimentAction string
@@ -110,17 +110,6 @@ const (
 // yet. Every stored reason is "code: sentence" (SplitQueueReason), and this is the one the store
 // writes itself.
 const QueueReasonAwaitingAdmission = NotAdmittedAwaitingAdmission + ": the scheduler has not looked at the job since it was queued, which it does within seconds"
-
-// IsTerminal reports whether the status is a final lifecycle state that no further execution
-// or progress reporting can follow.
-func (s ExperimentStatus) IsTerminal() bool {
-	switch s {
-	case StatusCompleted, StatusFailed, StatusEvicted, StatusRejected, StatusCancelled:
-		return true
-	default:
-		return false
-	}
-}
 
 // Termination is what a requested terminal transition actually resolved to. A caller asks for
 // EVICTED/REJECTED with a reason; the store decides, because an infrastructure fault under its

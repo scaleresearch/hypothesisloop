@@ -68,7 +68,7 @@ func (s *Store) ExperimentTenancy(ctx context.Context, experimentID string) (*do
 	t := &domain.Tenancy{}
 	var terminal bool
 	err := s.pool.pool.QueryRow(ctx, `
-SELECT pe.id, pe.project_id, p.org_id, pe.shared, e.agent_id, e.status IN ('COMPLETED', 'FAILED', 'EVICTED', 'REJECTED')
+SELECT pe.id, pe.project_id, p.org_id, pe.shared, e.agent_id, e.status IN `+endedSQL+`
 FROM experiments e
 JOIN platform_experiments pe ON pe.id = e.platform_experiment_id
 JOIN projects p ON p.id = pe.project_id

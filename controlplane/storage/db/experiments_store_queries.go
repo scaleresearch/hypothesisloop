@@ -15,7 +15,7 @@ import (
 // QUEUED, or SUBMITTED.
 func (s *Store) GetRunningAndQueued(ctx context.Context, platformExpID string) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments
-WHERE platform_experiment_id = $1 AND status IN ('RUNNING', 'QUEUED', 'SUBMITTED')
+WHERE platform_experiment_id = $1 AND status IN ` + unfinishedSQL + `
 ORDER BY created_at ASC`
 
 	rows, err := s.pool.pool.Query(ctx, q, platformExpID)
@@ -178,7 +178,7 @@ FROM experiments WHERE platform_experiment_id = $1 GROUP BY agent_id`, platformE
 func (s *Store) ListActiveByPlatformExperiment(ctx context.Context, platformExpID string) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments
 WHERE platform_experiment_id = $1
-  AND status IN ('QUEUED', 'SUBMITTED', 'RUNNING')
+  AND status IN ` + unfinishedSQL + `
 ORDER BY created_at DESC`
 
 	rows, err := s.pool.pool.Query(ctx, q, platformExpID)
@@ -278,7 +278,7 @@ func (s *Store) DescribeJobs(ctx context.Context, jobs []*domain.Experiment) err
 // metrics-DB outage.
 func (s *Store) ListUnsettledTerminalExperiments(ctx context.Context) ([]*domain.Experiment, error) {
 	q := `SELECT` + experimentColumns + `FROM experiments
-WHERE status IN ('COMPLETED', 'FAILED', 'EVICTED', 'REJECTED') AND quota_settled_at IS NULL
+WHERE status IN ` + endedSQL + ` AND quota_settled_at IS NULL
 ORDER BY updated_at ASC`
 	rows, err := s.pool.pool.Query(ctx, q)
 	if err != nil {

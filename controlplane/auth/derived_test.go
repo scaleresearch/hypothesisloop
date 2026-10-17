@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/scaleresearch/hypothesisloop/contract/scope"
 )
 
 const testSecret = "test-signing-secret-of-enough-length"
@@ -13,12 +15,12 @@ func TestMintedTokensVerifyToTheScopeTheyWereMintedFor(t *testing.T) {
 		scope string
 		want  Principal
 	}{
-		{StaffScope, Principal{Kind: KindStaff}},
-		{JobScope("job-1"), Principal{Kind: KindJob, ExperimentID: "job-1"}},
-		{AgentScope("pe-1", "agent-1"), Principal{Kind: KindAgent, PlatformExperimentID: "pe-1", AgentID: "agent-1"}},
-		{CoordinatorScope("pe-1"), Principal{Kind: KindCoordinator, PlatformExperimentID: "pe-1"}},
-		{RuntimeScope("local"), Principal{Kind: KindRuntime, ClusterName: "local"}},
-		{BuildScope("local", "abc123", 2), Principal{Kind: KindBuild, Build: BuildRef{Cluster: "local", Key: "abc123", Attempt: 2}}},
+		{scope.Staff, Principal{Kind: KindStaff}},
+		{scope.Job("job-1"), Principal{Kind: KindJob, ExperimentID: "job-1"}},
+		{scope.Agent("pe-1", "agent-1"), Principal{Kind: KindAgent, PlatformExperimentID: "pe-1", AgentID: "agent-1"}},
+		{scope.Coordinator("pe-1"), Principal{Kind: KindCoordinator, PlatformExperimentID: "pe-1"}},
+		{scope.Runtime("local"), Principal{Kind: KindRuntime, ClusterName: "local"}},
+		{scope.Build("local", "abc123", 2), Principal{Kind: KindBuild, Build: BuildRef{Cluster: "local", Key: "abc123", Attempt: 2}}},
 	} {
 		token, err := Mint(testSecret, tc.scope)
 		if err != nil {
@@ -37,7 +39,7 @@ func TestMintedTokensVerifyToTheScopeTheyWereMintedFor(t *testing.T) {
 
 // The token rides in Sec-WebSocket-Protocol, whose value must be an HTTP token: no ':' or '/'.
 func TestMintedTokenIsOneHTTPToken(t *testing.T) {
-	token, err := Mint(testSecret, AgentScope("pe-1", "agent.with/odd:chars"))
+	token, err := Mint(testSecret, scope.Agent("pe-1", "agent.with/odd:chars"))
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
@@ -47,23 +49,23 @@ func TestMintedTokenIsOneHTTPToken(t *testing.T) {
 }
 
 func TestForgedAndMalformedDerivedTokensAreRefused(t *testing.T) {
-	staff, _ := Mint(testSecret, StaffScope)
-	job, _ := Mint(testSecret, JobScope("job-1"))
-	scopePart, macPart, _ := strings.Cut(strings.TrimPrefix(job, derivedPrefix), ".")
-	staffScopePart, _, _ := strings.Cut(strings.TrimPrefix(staff, derivedPrefix), ".")
+	staff, _ := Mint(testSecret, scope.Staff)
+	job, _ := Mint(testSecret, scope.Job("job-1"))
+	scopePart, macPart, _ := strings.Cut(strings.TrimPrefix(job, scope.Prefix), ".")
+	staffScopePart, _, _ := strings.Cut(strings.TrimPrefix(staff, scope.Prefix), ".")
 
 	for name, token := range map[string]string{
-		"signed with another secret":     mustMint(t, "another-signing-secret-of-enough-length", StaffScope),
-		"job mac under the staff scope":  derivedPrefix + staffScopePart + "." + macPart,
-		"scope edited after signing":     derivedPrefix + encoding.EncodeToString([]byte("job:job-2")) + "." + macPart,
-		"mac truncated":                  derivedPrefix + scopePart + "." + macPart[:len(macPart)-2],
-		"no mac":                         derivedPrefix + scopePart,
-		"empty mac":                      derivedPrefix + scopePart + ".",
-		"scope not base64":               derivedPrefix + "job:job-1." + macPart,
-		"mac not base64":                 derivedPrefix + scopePart + ".!!!",
-		"prefix only":                    derivedPrefix,
-		"correctly signed unknown scope": derivedPrefix + encoding.EncodeToString([]byte("root")) + "." + encoding.EncodeToString(mac(testSecret, "root")),
-		"correctly signed empty subject": derivedPrefix + encoding.EncodeToString([]byte("job:")) + "." + encoding.EncodeToString(mac(testSecret, "job:")),
+		"signed with another secret":     mustMint(t, "another-signing-secret-of-enough-length", scope.Staff),
+		"job mac under the staff scope":  scope.Prefix + staffScopePart + "." + macPart,
+		"scope edited after signing":     scope.Prefix + encoding.EncodeToString([]byte("job:job-2")) + "." + macPart,
+		"mac truncated":                  scope.Prefix + scopePart + "." + macPart[:len(macPart)-2],
+		"no mac":                         scope.Prefix + scopePart,
+		"empty mac":                      scope.Prefix + scopePart + ".",
+		"scope not base64":               scope.Prefix + "job:job-1." + macPart,
+		"mac not base64":                 scope.Prefix + scopePart + ".!!!",
+		"prefix only":                    scope.Prefix,
+		"correctly signed unknown scope": scope.Prefix + encoding.EncodeToString([]byte("root")) + "." + encoding.EncodeToString(mac(testSecret, "root")),
+		"correctly signed empty subject": scope.Prefix + encoding.EncodeToString([]byte("job:")) + "." + encoding.EncodeToString(mac(testSecret, "job:")),
 	} {
 		if p, err := verifyDerived(testSecret, token); err == nil {
 			t.Errorf("%s: got principal %+v, want a refusal", name, p)
@@ -77,7 +79,7 @@ func TestMintRefusesWhatItCouldNotVerify(t *testing.T) {
 			t.Errorf("mint %q: got token %q, want an error", scope, token)
 		}
 	}
-	if _, err := Mint("", StaffScope); err == nil {
+	if _, err := Mint("", scope.Staff); err == nil {
 		t.Error("mint with an empty secret: got = nil, want an error")
 	}
 }

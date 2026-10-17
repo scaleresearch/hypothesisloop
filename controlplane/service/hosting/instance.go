@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/contract/hostingapi"
+	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
@@ -41,7 +42,7 @@ func instanceFor(agent domain.AgentSignup, ended int, image, apiURL, signingSecr
 	if err != nil {
 		return hostingapi.Instance{}, err
 	}
-	token, err := auth.Mint(signingSecret, auth.AgentScope(agent.PlatformExperimentID, agent.AgentID))
+	token, err := auth.Mint(signingSecret, scope.Agent(agent.PlatformExperimentID, agent.AgentID))
 	if err != nil {
 		return hostingapi.Instance{}, err
 	}
@@ -63,7 +64,7 @@ func coordinatorInstanceFor(platformExperimentID string, ended int, image, apiUR
 	if err != nil {
 		return hostingapi.Instance{}, err
 	}
-	token, err := auth.Mint(signingSecret, auth.CoordinatorScope(platformExperimentID))
+	token, err := auth.Mint(signingSecret, scope.Coordinator(platformExperimentID))
 	if err != nil {
 		return hostingapi.Instance{}, err
 	}

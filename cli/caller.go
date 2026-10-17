@@ -1,10 +1,8 @@
 package main
 
 import (
-	"encoding/base64"
-	"strings"
-
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
+	"github.com/scaleresearch/hypothesisloop/contract/scope"
 )
 
 // callerKind is what kind of caller a token is, as far as hl can tell without asking.
@@ -17,25 +15,22 @@ const (
 	callerCoordinator
 )
 
-// scopeOf reads what a token the platform derived says of its caller (hls_<scope>.<mac>, the
-// scope being base64url of "agent:<pe>/<agent>" or "coordinator:<pe>"): its kind, its platform
+// scopeOf reads what a token the platform derived says of its caller: its kind, its platform
 // experiment and, for an agent, its agent. The platform alone verifies it.
 func scopeOf(token string) (kind callerKind, platformExperiment, agent string) {
-	scopePart, _, ok := strings.Cut(strings.TrimPrefix(token, "hls_"), ".")
-	if !ok || !strings.HasPrefix(token, "hls_") {
-		return callerOther, "", ""
-	}
-	raw, err := base64.RawURLEncoding.DecodeString(scopePart)
+	raw, err := scope.Of(token)
 	if err != nil {
 		return callerOther, "", ""
 	}
-	if rest, ok := strings.CutPrefix(string(raw), "agent:"); ok {
-		if pe, agent, ok := strings.Cut(rest, "/"); ok {
-			return callerAgent, pe, agent
-		}
+	named, err := scope.Parse(raw)
+	if err != nil {
+		return callerOther, "", ""
 	}
-	if pe, ok := strings.CutPrefix(string(raw), "coordinator:"); ok {
-		return callerCoordinator, pe, ""
+	switch named.Kind {
+	case scope.KindAgent:
+		return callerAgent, named.PlatformExperimentID, named.AgentID
+	case scope.KindCoordinator:
+		return callerCoordinator, named.PlatformExperimentID, ""
 	}
 	return callerOther, "", ""
 }

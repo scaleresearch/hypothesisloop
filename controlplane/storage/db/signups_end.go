@@ -44,7 +44,7 @@ func (s *Store) RemoveAgent(ctx context.Context, platformExpID, agentID string, 
 		err = tx.QueryRow(ctx, `
 SELECT s.data_access_key_id,
        EXISTS (SELECT 1 FROM experiments
-               WHERE platform_experiment_id = s.platform_experiment_id AND agent_id = s.agent_id AND status IN ('QUEUED', 'SUBMITTED', 'RUNNING'))
+               WHERE platform_experiment_id = s.platform_experiment_id AND agent_id = s.agent_id AND status IN `+unfinishedSQL+`)
 FROM experiment_signups s
 WHERE s.platform_experiment_id=$1 AND s.agent_id=$2 FOR UPDATE OF s`, platformExpID, agentID).Scan(&accessKeyID, &inFlight)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -111,7 +111,7 @@ func (s *Store) FinishAgent(ctx context.Context, platformExpID, agentID, reason 
 SELECT pe.status = 'running' OR pe.status = 'open' AND s.role = '`+string(domain.SignupRoleBaseline)+`', s.finished_at,
        EXISTS (SELECT 1 FROM experiments
                WHERE platform_experiment_id = s.platform_experiment_id AND agent_id = s.agent_id
-                 AND status IN ('QUEUED', 'SUBMITTED', 'RUNNING'))
+                 AND status IN `+unfinishedSQL+`)
 FROM experiment_signups s JOIN platform_experiments pe ON pe.id = s.platform_experiment_id
 WHERE s.platform_experiment_id = $1 AND s.agent_id = $2
 FOR UPDATE OF s`, platformExpID, agentID).Scan(&running, &finishedAt, &unfinished)

@@ -19,6 +19,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/gitrefs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
@@ -179,7 +180,7 @@ func (p *Proxy) authorize(ctx context.Context, pe string, write bool) (*grant, e
 			return nil, err
 		}
 		for name, agent := range names {
-			if agent != principal.AgentID && domain.AgentBranchName(name) == domain.AgentBranchName(signup.Name) {
+			if agent != principal.AgentID && gitrefs.AgentBranchName(name) == gitrefs.AgentBranchName(signup.Name) {
 				return nil, readOnly(fmt.Sprintf("your name %q and agent %s's %q make the same branch names", signup.Name, agent, name))
 			}
 		}

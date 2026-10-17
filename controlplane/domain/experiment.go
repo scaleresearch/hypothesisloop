@@ -3,11 +3,12 @@ package domain
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
+
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 )
 
 // TriedCluster records one placement of a job that the environment failed: the cluster it was on

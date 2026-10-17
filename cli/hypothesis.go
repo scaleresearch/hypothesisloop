@@ -15,11 +15,11 @@ import (
 	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
+	"github.com/scaleresearch/hypothesisloop/contract/gitrefs"
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 )
 
 const rootTarget = "root"
-
-var linkTypes = []string{"builds_on", "contradicts", "related"}
 
 const placementHelp = "place the idea in the graph: --builds-on root for a fundamentally new approach to the objective, " +
 	"or --builds-on ID for each hypothesis it refines, extends or combines " +
@@ -42,11 +42,6 @@ func (s *idList) Set(v string) error {
 		}
 	}
 	return nil
-}
-
-type link struct {
-	Type string `json:"type"`
-	To   string `json:"to"`
 }
 
 const submitUsage = `usage: hl hypothesis submit --text T --builds-on ID|root [--builds-on ID ...]
@@ -133,13 +128,13 @@ func hypothesisSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writ
 		}
 		items = raw
 	}
-	var flagLinks []link
+	var flagLinks []platformapi.LinkSpec
 	for _, group := range []struct {
-		typ string
+		typ platformapi.LinkType
 		ids idList
-	}{{"builds_on", buildsOn}, {"contradicts", contradicts}, {"related", related}} {
+	}{{platformapi.LinkBuildsOn, buildsOn}, {platformapi.LinkContradicts, contradicts}, {platformapi.LinkRelated, related}} {
 		for _, id := range group.ids {
-			flagLinks = append(flagLinks, link{Type: group.typ, To: id})
+			flagLinks = append(flagLinks, platformapi.LinkSpec{Type: group.typ, To: id})
 		}
 	}
 
@@ -241,18 +236,10 @@ func reportHold(stderr io.Writer, item string, err error) bool {
 	return true
 }
 
-type submitBody struct {
-	AgentID              string   `json:"agent_id,omitempty"`
-	PlatformExperimentID string   `json:"platform_experiment_id"`
-	Text                 string   `json:"text"`
-	Links                []link   `json:"links"`
-	DistinctFrom         []string `json:"distinct_from,omitempty"`
-}
-
 // buildSubmitBodies validates every item before anything is sent, so a bad item late in a file
 // never leaves the earlier ones half submitted. Links to a local key stay as the key here and are
 // swapped for the id the earlier item came back with at submit time.
-func buildSubmitBodies(items []map[string]any, flagLinks []link, flagDistinct []string, overrides map[string]string) ([]*submitBody, []string, error) {
+func buildSubmitBodies(items []map[string]any, flagLinks []platformapi.LinkSpec, flagDistinct []string, overrides map[string]string) ([]*platformapi.RegisterHypothesisRequest, []string, error) {
 	keyIndex := map[string]int{}
 	keys := make([]string, len(items))
 	for i, item := range items {
@@ -273,7 +260,7 @@ func buildSubmitBodies(items []map[string]any, flagLinks []link, flagDistinct []
 		keys[i] = key
 	}
 
-	bodies := make([]*submitBody, len(items))
+	bodies := make([]*platformapi.RegisterHypothesisRequest, len(items))
 	for i, item := range items {
 		if _, stated := item["author"]; stated {
 			return nil, nil, itemErr(items, i, fmt.Errorf("author is not a field: who registers a hypothesis is whoever HL_TOKEN is, and the platform refuses a request that states it. Remove it; agent_id says whose hypothesis it is, and is optional"))
@@ -300,24 +287,24 @@ func buildSubmitBodies(items []map[string]any, flagLinks []link, flagDistinct []
 			}
 			links = parsed
 		}
-		resolved := make([]link, 0, len(links))
+		resolved := make([]platformapi.LinkSpec, 0, len(links))
 		placed := false
 		for _, l := range links {
-			if !validLinkType(l.Type) {
-				return nil, nil, itemErr(items, i, fmt.Errorf("link type %q must be one of %s", l.Type, strings.Join(linkTypes, ", ")))
+			if !slices.Contains(platformapi.LinkTypes, l.Type) {
+				return nil, nil, itemErr(items, i, fmt.Errorf("link type %q must be one of %s", l.Type, joined(platformapi.LinkTypes, ", ")))
 			}
 			if l.To == "" {
 				return nil, nil, itemErr(items, i, fmt.Errorf("%s link has no target", l.Type))
 			}
 			if l.To == rootTarget {
-				if l.Type != "builds_on" {
+				if l.Type != platformapi.LinkBuildsOn {
 					return nil, nil, itemErr(items, i, fmt.Errorf("only builds_on may target root"))
 				}
 				l.To = fields["platform_experiment_id"]
 			} else if at, ok := keyIndex[l.To]; ok && at >= i {
 				return nil, nil, itemErr(items, i, fmt.Errorf("link to key %q, which item %d defines; list a parent before its children", l.To, at))
 			}
-			placed = placed || l.Type == "builds_on"
+			placed = placed || l.Type == platformapi.LinkBuildsOn
 			resolved = append(resolved, l)
 		}
 		if !placed {
@@ -331,7 +318,7 @@ func buildSubmitBodies(items []map[string]any, flagLinks []link, flagDistinct []
 			}
 			distinct = parsed
 		}
-		bodies[i] = &submitBody{
+		bodies[i] = &platformapi.RegisterHypothesisRequest{
 			AgentID:              fields["agent_id"],
 			PlatformExperimentID: fields["platform_experiment_id"],
 			Text:                 fields["text"],
@@ -361,7 +348,7 @@ func stringField(item map[string]any, name string) (string, error) {
 	return s, nil
 }
 
-func parseLinks(v any) ([]link, error) {
+func parseLinks(v any) ([]platformapi.LinkSpec, error) {
 	if v == nil {
 		return nil, nil
 	}
@@ -369,7 +356,7 @@ func parseLinks(v any) ([]link, error) {
 	if !ok {
 		return nil, fmt.Errorf("links must be a list of {type, to}")
 	}
-	out := make([]link, 0, len(list))
+	out := make([]platformapi.LinkSpec, 0, len(list))
 	for j, e := range list {
 		m, ok := e.(map[string]any)
 		if !ok {
@@ -388,7 +375,7 @@ func parseLinks(v any) ([]link, error) {
 		if err != nil {
 			return nil, fmt.Errorf("links[%d]: %w", j, err)
 		}
-		out = append(out, link{Type: typ, To: to})
+		out = append(out, platformapi.LinkSpec{Type: platformapi.LinkType(typ), To: to})
 	}
 	return out, nil
 }
@@ -412,13 +399,13 @@ func parseIDs(v any) ([]string, error) {
 	return out, nil
 }
 
-func validLinkType(t string) bool {
-	for _, lt := range linkTypes {
-		if t == lt {
-			return true
-		}
+// joined is values separated by sep.
+func joined[T ~string](values []T, sep string) string {
+	names := make([]string, len(values))
+	for i, v := range values {
+		names[i] = string(v)
 	}
-	return false
+	return strings.Join(names, sep)
 }
 
 func hypothesisLink(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
@@ -437,8 +424,8 @@ an agent's hypothesis names that agent with --agent, and is kept as who made the
 	if *typ == "" || *to == "" {
 		return parseExit(misuse(fs, "--type and --to are required"))
 	}
-	if !validLinkType(*typ) {
-		return parseExit(misuse(fs, "--type must be one of %s, got %q", strings.Join(linkTypes, ", "), *typ))
+	if !slices.Contains(platformapi.LinkTypes, platformapi.LinkType(*typ)) {
+		return parseExit(misuse(fs, "--type must be one of %s, got %q", joined(platformapi.LinkTypes, ", "), *typ))
 	}
 	for _, id := range []*string{&from, to} {
 		if *id, err = fullHypothesisID(c, experimentOf(c, ""), *id); err != nil {
@@ -1065,37 +1052,19 @@ func rowObject(columns []string, row []json.RawMessage) json.RawMessage {
 // titleSlugLength is where the hypothesis's text is cut in a branch name.
 const titleSlugLength = 40
 
-// slug is text as part of a branch name: lowercase letters and digits, every run of anything
-// else one dash, cut to limit when limit is positive.
-func slug(text string, limit int) string {
-	var b strings.Builder
-	for _, r := range strings.ToLower(text) {
-		switch {
-		case r >= 'a' && r <= 'z' || r >= '0' && r <= '9':
-			b.WriteRune(r)
-		case b.Len() > 0 && !strings.HasSuffix(b.String(), "-"):
-			b.WriteByte('-')
-		}
-		if b.Len() == limit {
-			break
-		}
-	}
-	return strings.Trim(b.String(), "-")
-}
-
 // implementationBranch names the branch one agent's code for one hypothesis lives on:
 // hl/<platform experiment>/<agent name>/<start of the hypothesis's text>-<end of its id>. The
 // end of the id tells apart two hypotheses that begin alike.
 func implementationBranch(platformExperiment, agentName, text, hypothesisID string) (string, error) {
-	agent, id := slug(agentName, 0), slug(strings.ReplaceAll(hypothesisID, "-", ""), 0)
+	agent, id := gitrefs.Slug(agentName, 0), gitrefs.Slug(strings.ReplaceAll(hypothesisID, "-", ""), 0)
 	if agent == "" || len(id) < 6 {
 		return "", fmt.Errorf("agent name %q and hypothesis id %q make no branch name", agentName, hypothesisID)
 	}
 	title := id[len(id)-6:]
-	if words := slug(text, titleSlugLength); words != "" {
+	if words := gitrefs.Slug(text, titleSlugLength); words != "" {
 		title = words + "-" + title
 	}
-	return branchPrefix(platformExperiment) + agent + "/" + title, nil
+	return gitrefs.BranchPrefix(platformExperiment) + agent + "/" + title, nil
 }
 
 func hypothesisCheckout(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {

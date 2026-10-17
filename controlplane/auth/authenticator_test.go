@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 
+	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
@@ -31,7 +32,7 @@ type fakeDirectory struct {
 	// notSignedUp is read by the methods in roster_test.go.
 	notSignedUp map[string]bool
 	clusters    map[string]string
-	// builds are the builds building now, by BuildScope.
+	// builds are the builds building now, by scope.Build.
 	builds      map[string]bool
 	staff       map[string]bool
 	homes       map[string][]string
@@ -149,11 +150,11 @@ func TestEachDerivedKindResolvesWhileItsRowStands(t *testing.T) {
 		scope string
 		want  Principal
 	}{
-		{StaffScope, Principal{Kind: KindStaff}},
-		{RuntimeScope("cluster-a"), Principal{Kind: KindRuntime, ClusterName: "cluster-a", OrgIDs: []string{"org-a"}}},
-		{JobScope("job-a"), inA(Principal{Kind: KindJob, ExperimentID: "job-a"})},
-		{AgentScope("pe-a", "agent-1"), inA(Principal{Kind: KindAgent, AgentID: "agent-1"})},
-		{CoordinatorScope("pe-a"), inA(Principal{Kind: KindCoordinator})},
+		{scope.Staff, Principal{Kind: KindStaff}},
+		{scope.Runtime("cluster-a"), Principal{Kind: KindRuntime, ClusterName: "cluster-a", OrgIDs: []string{"org-a"}}},
+		{scope.Job("job-a"), inA(Principal{Kind: KindJob, ExperimentID: "job-a"})},
+		{scope.Agent("pe-a", "agent-1"), inA(Principal{Kind: KindAgent, AgentID: "agent-1"})},
+		{scope.Coordinator("pe-a"), inA(Principal{Kind: KindCoordinator})},
 	} {
 		got, err := a.Authenticate(ctx, mustMint(t, testSecret, tc.scope))
 		if err != nil || !samePrincipal(got, tc.want) {
@@ -169,17 +170,17 @@ func TestADerivedTokenStopsWorkingWhenItsRowSaysSo(t *testing.T) {
 		scope  string
 		change func(*fakeDirectory)
 	}{
-		"runtime of an unregistered cluster":                          {RuntimeScope("cluster-typo"), func(*fakeDirectory) {}},
-		"job that has ended":                                          {JobScope("job-a"), func(d *fakeDirectory) { d.ended["job-a"] = true }},
-		"job that does not exist":                                     {JobScope("job-missing"), func(*fakeDirectory) {}},
-		"agent of a platform experiment closed a wind-down ago":       {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.closedAt["pe-a"] = woundDown }},
-		"agent of a missing platform experiment":                      {AgentScope("pe-missing", "agent-1"), func(*fakeDirectory) {}},
-		"agent that was cut a wind-down ago":                          {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.cutAt["pe-a/agent-1"] = woundDown }},
-		"agent cut long ago in a platform experiment just closed":     {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.cutAt["pe-a/agent-1"] = woundDown; d.closedAt["pe-a"] = testNow }},
-		"planner that answered its draft a wind-down ago":             {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.answeredAt["pe-a/agent-1"] = woundDown }},
-		"agent that finished a wind-down ago":                         {AgentScope("pe-a", "agent-1"), func(d *fakeDirectory) { d.finishedAt["pe-a/agent-1"] = woundDown }},
-		"coordinator of a platform experiment closed a wind-down ago": {CoordinatorScope("pe-a"), func(d *fakeDirectory) { d.closedAt["pe-a"] = testNow.Add(-domain.CoordinatorWindDown) }},
-		"coordinator of a missing platform experiment":                {CoordinatorScope("pe-missing"), func(*fakeDirectory) {}},
+		"runtime of an unregistered cluster":                          {scope.Runtime("cluster-typo"), func(*fakeDirectory) {}},
+		"job that has ended":                                          {scope.Job("job-a"), func(d *fakeDirectory) { d.ended["job-a"] = true }},
+		"job that does not exist":                                     {scope.Job("job-missing"), func(*fakeDirectory) {}},
+		"agent of a platform experiment closed a wind-down ago":       {scope.Agent("pe-a", "agent-1"), func(d *fakeDirectory) { d.closedAt["pe-a"] = woundDown }},
+		"agent of a missing platform experiment":                      {scope.Agent("pe-missing", "agent-1"), func(*fakeDirectory) {}},
+		"agent that was cut a wind-down ago":                          {scope.Agent("pe-a", "agent-1"), func(d *fakeDirectory) { d.cutAt["pe-a/agent-1"] = woundDown }},
+		"agent cut long ago in a platform experiment just closed":     {scope.Agent("pe-a", "agent-1"), func(d *fakeDirectory) { d.cutAt["pe-a/agent-1"] = woundDown; d.closedAt["pe-a"] = testNow }},
+		"planner that answered its draft a wind-down ago":             {scope.Agent("pe-a", "agent-1"), func(d *fakeDirectory) { d.answeredAt["pe-a/agent-1"] = woundDown }},
+		"agent that finished a wind-down ago":                         {scope.Agent("pe-a", "agent-1"), func(d *fakeDirectory) { d.finishedAt["pe-a/agent-1"] = woundDown }},
+		"coordinator of a platform experiment closed a wind-down ago": {scope.Coordinator("pe-a"), func(d *fakeDirectory) { d.closedAt["pe-a"] = testNow.Add(-domain.CoordinatorWindDown) }},
+		"coordinator of a missing platform experiment":                {scope.Coordinator("pe-missing"), func(*fakeDirectory) {}},
 	} {
 		a, directory := newTestAuthenticator(t)
 		token := mustMint(t, testSecret, tc.scope)
@@ -190,7 +191,7 @@ func TestADerivedTokenStopsWorkingWhenItsRowSaysSo(t *testing.T) {
 
 	a, directory := newTestAuthenticator(t)
 	directory.cutAt["pe-a/agent-2"], directory.finishedAt["pe-a/agent-2"] = woundDown, woundDown
-	if _, err := a.Authenticate(ctx, mustMint(t, testSecret, AgentScope("pe-a", "agent-1"))); err != nil {
+	if _, err := a.Authenticate(ctx, mustMint(t, testSecret, scope.Agent("pe-a", "agent-1"))); err != nil {
 		t.Errorf("an agent whose rival was cut and finished: got = %v, want it still admitted", err)
 	}
 }
@@ -209,7 +210,7 @@ func TestAnAgentTokenOutlivesTheEndOfItsRunByTheWindDownOnly(t *testing.T) {
 	} {
 		a, directory := newTestAuthenticator(t)
 		change(directory)
-		p, err := a.Authenticate(ctx, mustMint(t, testSecret, AgentScope("pe-a", "agent-1")))
+		p, err := a.Authenticate(ctx, mustMint(t, testSecret, scope.Agent("pe-a", "agent-1")))
 		if err != nil || p.Kind != KindAgent || p.PlatformExperimentClosed {
 			t.Errorf("%s: got = %+v, %v, want the agent admitted", name, p, err)
 		}
@@ -222,7 +223,7 @@ func TestAnAgentTokenOutlivesTheEndOfItsRunByTheWindDownOnly(t *testing.T) {
 func TestACoordinatorTokenOutlivesCloseByTheWindDownOnlyAndSaysSo(t *testing.T) {
 	a, directory := newTestAuthenticator(t)
 	ctx := context.Background()
-	token := mustMint(t, testSecret, CoordinatorScope("pe-a"))
+	token := mustMint(t, testSecret, scope.Coordinator("pe-a"))
 	open, err := a.Authenticate(ctx, token)
 	if err != nil || open.PlatformExperimentClosed {
 		t.Fatalf("while open: got = %+v, %v, want it admitted and not marked closed", open, err)
@@ -248,9 +249,9 @@ func TestForgedTokensAreRefusedBeforeAnyRowIsRead(t *testing.T) {
 	directory.fail = errors.New("the directory must not be read for a forged token")
 	ctx := context.Background()
 	for name, token := range map[string]string{
-		"staff token of another deployment": mustMint(t, "another-signing-secret-of-enough-length", StaffScope),
-		"staff scope with no mac":           derivedPrefix + encoding.EncodeToString([]byte(StaffScope)) + ".",
-		"bare prefix":                       derivedPrefix,
+		"staff token of another deployment": mustMint(t, "another-signing-secret-of-enough-length", scope.Staff),
+		"staff scope with no mac":           scope.Prefix + encoding.EncodeToString([]byte(scope.Staff)) + ".",
+		"bare prefix":                       scope.Prefix,
 		"jwt with no keys configured":       "aaa.bbb.ccc",
 		"empty":                             "",
 	} {
@@ -377,7 +378,7 @@ func TestAnActorIsTheCredentialAndNothingARequestSays(t *testing.T) {
 func TestADirectoryFailureIsNotARefusal(t *testing.T) {
 	a, directory := newTestAuthenticator(t)
 	directory.fail = errors.New("database is down")
-	_, err := a.Authenticate(context.Background(), mustMint(t, testSecret, JobScope("job-a")))
+	_, err := a.Authenticate(context.Background(), mustMint(t, testSecret, scope.Job("job-a")))
 	var refusal *Error
 	if err == nil || errors.As(err, &refusal) {
 		t.Fatalf("got = %v, want the directory's own error, which answers 500", err)
@@ -418,12 +419,12 @@ func TestOnlyARuntimeOrStaffMayPush(t *testing.T) {
 		want   int
 	}{
 		{"no token", "", http.StatusUnauthorized},
-		{"registered runtime", "Bearer " + mustMint(t, testSecret, RuntimeScope("cluster-a")), http.StatusNoContent},
-		{"staff", "Bearer " + mustMint(t, testSecret, StaffScope), http.StatusNoContent},
-		{"unregistered runtime", "Bearer " + mustMint(t, testSecret, RuntimeScope("cluster-typo")), http.StatusUnauthorized},
-		{"agent", "Bearer " + mustMint(t, testSecret, AgentScope("pe-a", "agent-1")), http.StatusForbidden},
-		{"job", "Bearer " + mustMint(t, testSecret, JobScope("job-a")), http.StatusForbidden},
-		{"forged runtime", "Bearer " + mustMint(t, "another-signing-secret-of-enough-length", RuntimeScope("cluster-a")), http.StatusUnauthorized},
+		{"registered runtime", "Bearer " + mustMint(t, testSecret, scope.Runtime("cluster-a")), http.StatusNoContent},
+		{"staff", "Bearer " + mustMint(t, testSecret, scope.Staff), http.StatusNoContent},
+		{"unregistered runtime", "Bearer " + mustMint(t, testSecret, scope.Runtime("cluster-typo")), http.StatusUnauthorized},
+		{"agent", "Bearer " + mustMint(t, testSecret, scope.Agent("pe-a", "agent-1")), http.StatusForbidden},
+		{"job", "Bearer " + mustMint(t, testSecret, scope.Job("job-a")), http.StatusForbidden},
+		{"forged runtime", "Bearer " + mustMint(t, "another-signing-secret-of-enough-length", scope.Runtime("cluster-a")), http.StatusUnauthorized},
 	} {
 		served = false
 		request := httptest.NewRequest(http.MethodPost, "/internal/node-metrics", strings.NewReader("{}"))
@@ -452,9 +453,9 @@ func TestOnlyStaffReachWhatRequireStaffGuards(t *testing.T) {
 		want   int
 	}{
 		"no token": {"", http.StatusUnauthorized},
-		"staff":    {"Bearer " + mustMint(t, testSecret, StaffScope), http.StatusOK},
-		"runtime":  {"Bearer " + mustMint(t, testSecret, RuntimeScope("cluster-a")), http.StatusForbidden},
-		"agent":    {"Bearer " + mustMint(t, testSecret, AgentScope("pe-a", "agent-1")), http.StatusForbidden},
+		"staff":    {"Bearer " + mustMint(t, testSecret, scope.Staff), http.StatusOK},
+		"runtime":  {"Bearer " + mustMint(t, testSecret, scope.Runtime("cluster-a")), http.StatusForbidden},
+		"agent":    {"Bearer " + mustMint(t, testSecret, scope.Agent("pe-a", "agent-1")), http.StatusForbidden},
 	} {
 		request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 		if tc.header != "" {
@@ -475,7 +476,7 @@ func TestAFailureOfThePlatformsOwnIsAnsweredWithoutItsText(t *testing.T) {
 		t.Error("the handler ran behind a failed directory read")
 	})))
 	request := httptest.NewRequest(http.MethodPost, "/internal/node-metrics", strings.NewReader("{}"))
-	request.Header.Set("Authorization", "Bearer "+mustMint(t, testSecret, RuntimeScope("cluster-a")))
+	request.Header.Set("Authorization", "Bearer "+mustMint(t, testSecret, scope.Runtime("cluster-a")))
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusInternalServerError || strings.Contains(recorder.Body.String(), "pq:") || !strings.Contains(recorder.Body.String(), InternalError) {
@@ -509,8 +510,8 @@ func TestOnlyARemovedClustersRuntimeIsToldItsClusterIsNotRegistered(t *testing.T
 		token  string
 		reason string
 	}{
-		"removed cluster": {mustMint(t, testSecret, RuntimeScope("cluster-typo")), domain.ReasonClusterNotRegistered},
-		"forged token":    {mustMint(t, "another-signing-secret-of-enough-length", RuntimeScope("cluster-a")), ""},
+		"removed cluster": {mustMint(t, testSecret, scope.Runtime("cluster-typo")), domain.ReasonClusterNotRegistered},
+		"forged token":    {mustMint(t, "another-signing-secret-of-enough-length", scope.Runtime("cluster-a")), ""},
 	} {
 		request := httptest.NewRequest(http.MethodPost, "/internal/node-metrics", strings.NewReader("{}"))
 		request.Header.Set("Authorization", "Bearer "+tc.token)

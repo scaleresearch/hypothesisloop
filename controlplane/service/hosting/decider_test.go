@@ -18,6 +18,7 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/scaleresearch/hypothesisloop/contract/hostingapi"
+	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
@@ -176,7 +177,7 @@ func TestTheAnswerIsTheLaunchersRunningInstancesAndItsEndingOnes(t *testing.T) {
 	}
 
 	running := desired.Instances[0]
-	token, err := auth.Mint(testSecret, auth.AgentScope("pe-1", "ag-running"))
+	token, err := auth.Mint(testSecret, scope.Agent("pe-1", "ag-running"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -586,7 +587,7 @@ func TestAHostedCoordinatorIsOneMoreInstanceWithACoordinatorTokenAndNoAgentID(t 
 		t.Fatalf("instances = %+v, want the agent and the coordinator", answer.Instances)
 	}
 	coordinator := answer.Instances[1]
-	token, err := auth.Mint(testSecret, auth.CoordinatorScope("pe-1"))
+	token, err := auth.Mint(testSecret, scope.Coordinator("pe-1"))
 	if err != nil {
 		t.Fatal(err)
 	}

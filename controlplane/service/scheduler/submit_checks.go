@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/gitrefs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
@@ -43,12 +44,12 @@ const ReasonBranchNotOfExperiment = "branch_not_of_experiment"
 // git command that makes it, since a baseline agent has no hypothesis to check out.
 func branchOfExperiment(exp *domain.Experiment, measuresBaseline bool) error {
 	if measuresBaseline {
-		if baseline := domain.BaselineBranch(exp.PlatformExperimentID); !domain.IsBaselineAgentBranch(exp.PlatformExperimentID, exp.Branch) {
+		if baseline := gitrefs.BaselineBranch(exp.PlatformExperimentID); !gitrefs.IsBaselineAgentBranch(exp.PlatformExperimentID, exp.Branch) {
 			return &AdmissionError{Reason: ReasonBranchNotOfExperiment, Message: fmt.Sprintf("the baseline is measured on branch %s, and this job names %q: git checkout -b %s, commit there and submit again (a check of your code as a researcher would run it goes on %s-check)", baseline, exp.Branch, baseline, baseline)}
 		}
 		return nil
 	}
-	prefix := domain.BranchPrefix(exp.PlatformExperimentID)
+	prefix := gitrefs.BranchPrefix(exp.PlatformExperimentID)
 	if len(exp.Branch) > len(prefix) && strings.HasPrefix(exp.Branch, prefix) && !strings.ContainsAny(exp.Branch, " \t\n") {
 		return nil
 	}

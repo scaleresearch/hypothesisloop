@@ -4,6 +4,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 )
 
 // Hypothesis is a registered research claim an agent intends to test, scoped to a single
@@ -32,27 +34,6 @@ type Hypothesis struct {
 	// value. The verdict is the owning agent's, or anyone's on a hypothesis no agent owns, and
 	// this says who gave it: the agent itself, or the person or API key acting for it.
 	StatusActor *Actor `json:"status_actor,omitempty"`
-}
-
-// BranchPrefix is what the name of every git branch of a platform experiment starts with. An
-// agent's implementation of a hypothesis is one branch under it, and BaselineBranch another.
-func BranchPrefix(platformExperimentID string) string { return "hl/" + platformExperimentID + "/" }
-
-// BaselineBranch is the branch the baseline of a platform experiment is measured on.
-func BaselineBranch(platformExperimentID string) string {
-	return BranchPrefix(platformExperimentID) + "baseline"
-}
-
-// IsBaselineAgentBranch is whether a baseline agent's job may run on branch: the baseline branch,
-// or one beside it, baseline-<name>, where the agent tries its code as a researcher would. Only a
-// job of the baseline branch itself is declared the baseline.
-func IsBaselineAgentBranch(platformExperimentID, branch string) bool {
-	baseline := BaselineBranch(platformExperimentID)
-	if branch == baseline {
-		return true
-	}
-	name, beside := strings.CutPrefix(branch, baseline+"-")
-	return beside && name != "" && !strings.ContainsAny(name, "/ \t\n")
 }
 
 // Implementation is one agent's code for a hypothesis: the branch it checked out or its jobs ran
@@ -106,29 +87,23 @@ var HypothesisStatuses = []HypothesisStatus{HypothesisOpen, HypothesisConfirmed,
 // ValidHypothesisStatus reports whether s is one of the four recognized statuses.
 func ValidHypothesisStatus(s HypothesisStatus) bool { return slices.Contains(HypothesisStatuses, s) }
 
-// LinkType is how one hypothesis relates to another. builds_on (refines, extends or combines;
-// acyclic, and every hypothesis has at least one) may also point at the objective root, named by
-// the platform experiment id. contradicts and related only connect hypotheses.
-type LinkType string
+// LinkType is the API's own (platformapi).
+type LinkType = platformapi.LinkType
 
 const (
-	LinkBuildsOn    LinkType = "builds_on"
-	LinkContradicts LinkType = "contradicts"
-	LinkRelated     LinkType = "related"
+	LinkBuildsOn    = platformapi.LinkBuildsOn
+	LinkContradicts = platformapi.LinkContradicts
+	LinkRelated     = platformapi.LinkRelated
 )
 
 // LinkTypes is every link type.
-var LinkTypes = []LinkType{LinkBuildsOn, LinkContradicts, LinkRelated}
+var LinkTypes = platformapi.LinkTypes
 
 // ValidLinkType reports whether t is one of the three link types.
 func ValidLinkType(t LinkType) bool { return slices.Contains(LinkTypes, t) }
 
-// LinkSpec is a link a caller asks for: from the hypothesis being written to To, a hypothesis id
-// or the platform experiment id meaning the objective root.
-type LinkSpec struct {
-	Type LinkType `json:"type"`
-	To   string   `json:"to"`
-}
+// LinkSpec is a link a caller asks for (platformapi).
+type LinkSpec = platformapi.LinkSpec
 
 // Link is one edge seen from one of its ends. HypothesisID, Text and Status describe the other end;
 // when that end is the objective root, HypothesisID is the platform experiment id and Text and

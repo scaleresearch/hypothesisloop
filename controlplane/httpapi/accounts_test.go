@@ -15,6 +15,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
@@ -701,7 +702,7 @@ func TestRevokingAKeyEndsItAndEveryKeyMintedFromIt(t *testing.T) {
 
 func TestRegisteringAClusterReturnsItsRuntimeToken(t *testing.T) {
 	w := newAccountsWorld(t)
-	want, err := auth.Mint(testSigningSecret, auth.RuntimeScope("gpu-east"))
+	want, err := auth.Mint(testSigningSecret, scope.Runtime("gpu-east"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,11 +3,13 @@ package main
 import (
 	"bytes"
 	"encoding/base64"
-	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"net/http"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/scaleresearch/hypothesisloop/contract/scope"
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 )
 
 func derivedToken(scope string) string {
@@ -34,9 +36,9 @@ func TestTheKindOfCallerIsReadFromADerivedTokenAndNothingElse(t *testing.T) {
 func TestTheKindOfCallerIsReadFromTheTokensThePlatformMints(t *testing.T) {
 	const secret = "a-signing-secret-only-this-test-knows"
 	for scope, want := range map[string]callerKind{
-		auth.AgentScope("pe-1", "ag-1"): callerAgent,
-		auth.CoordinatorScope("pe-1"):   callerCoordinator,
-		"staff":                         callerOther,
+		scope.Agent("pe-1", "ag-1"): callerAgent,
+		scope.Coordinator("pe-1"):   callerCoordinator,
+		"staff":                     callerOther,
 	} {
 		token, err := auth.Mint(secret, scope)
 		if err != nil {

@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/gitrefs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
@@ -265,7 +266,7 @@ func (s *Service) baselineLeft(ctx context.Context, pe *domain.PlatformExperimen
 	if err != nil {
 		return err
 	}
-	branch := domain.BaselineBranch(pe.ID)
+	branch := gitrefs.BaselineBranch(pe.ID)
 	fmt.Fprintf(record, "\nWhat the baseline left, on branch %s:\n", branch)
 	last := ""
 	for _, job := range jobs {

@@ -10,6 +10,7 @@ import (
 	"github.com/opencontainers/go-digest"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
@@ -62,7 +63,7 @@ func (s *Service) BuildGitCredential(ctx context.Context, cluster, key string, a
 	if s.proxyURL == "" {
 		return domain.EnvironmentGitCredential{}, auth.Internal(s.logger, "environment git credential", errors.New("the address of the git proxy is not configured"), zap.String("key", key))
 	}
-	token, err := auth.Mint(s.signingSecret, auth.BuildScope(cluster, key, attempt))
+	token, err := auth.Mint(s.signingSecret, scope.Build(cluster, key, attempt))
 	if err != nil {
 		return domain.EnvironmentGitCredential{}, auth.Internal(s.logger, "environment git credential", err, zap.String("cluster", cluster), zap.String("key", key))
 	}

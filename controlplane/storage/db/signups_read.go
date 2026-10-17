@@ -143,7 +143,7 @@ JOIN platform_experiments pe ON pe.id = s.platform_experiment_id
 CROSS JOIN LATERAL (SELECT count(*) AS jobs, count(*) FILTER (WHERE e.status = 'RUNNING') AS running
                     FROM experiments e
                     WHERE e.platform_experiment_id = s.platform_experiment_id AND e.agent_id = s.agent_id
-                      AND e.status IN ('QUEUED', 'SUBMITTED', 'RUNNING')) f
+                      AND e.status IN `+unfinishedSQL+`) f
 WHERE s.platform_experiment_id = $1
 ORDER BY s.signed_up_at, s.agent_id`, platformExpID)
 	if err != nil {

@@ -45,7 +45,7 @@ WITH idle AS (
                       WHERE c.platform_experiment_id = s.platform_experiment_id AND c.agent_id = s.agent_id)
       AND NOT EXISTS (SELECT 1 FROM experiments e
                       WHERE e.platform_experiment_id = s.platform_experiment_id AND e.agent_id = s.agent_id
-                        AND e.status IN ('QUEUED', 'SUBMITTED', 'RUNNING'))
+                        AND e.status IN `+unfinishedSQL+`)
 )
 SELECT platform_experiment_id, agent_id, since,
        CASE WHEN idle_noticed_at IS NULL OR idle_noticed_at < since THEN 0 ELSE idle_repeat + 1 END,

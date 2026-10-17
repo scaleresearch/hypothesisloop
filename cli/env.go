@@ -46,7 +46,7 @@ invalid_environment_file; no_environment_builder; unknown_job_image; code_ref_no
 	if code >= 0 {
 		return code
 	}
-	var out environmentState
+	var out json.RawMessage
 	if err := c.Do("POST", "/environments", request, &out); err != nil {
 		return fail(stderr, err)
 	}
@@ -71,29 +71,20 @@ no_environment_file; invalid_environment_file.`, stderr)
 	if code >= 0 {
 		return code
 	}
-	var out environmentState
+	var out json.RawMessage
 	if err := c.Do("GET", environmentPath(request), nil, &out); err != nil {
 		return fail(stderr, err)
 	}
 	return printEnvironment(stdout, out)
 }
 
-// environmentState is an environment as the platform answers it.
-type environmentState struct {
-	Key           string `json:"key"`
-	State         string `json:"state"`
-	Base          string `json:"base"`
-	Image         string `json:"image,omitempty"`
-	LoadedCluster string `json:"loaded_cluster,omitempty"`
-	LoadedNode    string `json:"loaded_node,omitempty"`
-	Fault         string `json:"fault,omitempty"`
-	Message       string `json:"message"`
-}
-
-func printEnvironment(stdout io.Writer, out environmentState) int {
-	line, _ := json.Marshal(out)
-	fmt.Fprintf(stdout, "%s\n", line)
-	if out.State == "failed" {
+// printEnvironment prints an environment as the platform answers it, and exits 1 once it failed.
+func printEnvironment(stdout io.Writer, out json.RawMessage) int {
+	fmt.Fprintf(stdout, "%s\n", out)
+	var environment struct {
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal(out, &environment); err != nil || environment.State == "failed" {
 		return 1
 	}
 	return 0

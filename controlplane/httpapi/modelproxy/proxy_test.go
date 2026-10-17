@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
@@ -232,14 +233,14 @@ func TestOnlyAHostedAgentOrCoordinatorWhoseTokenLivesIsServed(t *testing.T) {
 		name, scope string
 		want        int
 	}{
-		{"a hosted agent", auth.AgentScope("pe-1", "agent-a"), http.StatusOK},
-		{"a hosted coordinator", auth.CoordinatorScope("pe-1"), http.StatusOK},
-		{"an agent in its wind-down, for its last turn", auth.AgentScope("pe-1", "agent-ending"), http.StatusOK},
-		{"an agent the platform does not run", auth.AgentScope("pe-1", "agent-self"), http.StatusForbidden},
-		{"an agent whose wind-down is over", auth.AgentScope("pe-1", "agent-cut"), http.StatusUnauthorized},
-		{"an agent of another platform experiment than its token's", auth.AgentScope("pe-1", "agent-b"), http.StatusUnauthorized},
-		{"a coordinator the platform does not run", auth.CoordinatorScope("pe-2"), http.StatusForbidden},
-		{"a cluster's runtime", auth.RuntimeScope("cluster-1"), http.StatusForbidden},
+		{"a hosted agent", scope.Agent("pe-1", "agent-a"), http.StatusOK},
+		{"a hosted coordinator", scope.Coordinator("pe-1"), http.StatusOK},
+		{"an agent in its wind-down, for its last turn", scope.Agent("pe-1", "agent-ending"), http.StatusOK},
+		{"an agent the platform does not run", scope.Agent("pe-1", "agent-self"), http.StatusForbidden},
+		{"an agent whose wind-down is over", scope.Agent("pe-1", "agent-cut"), http.StatusUnauthorized},
+		{"an agent of another platform experiment than its token's", scope.Agent("pe-1", "agent-b"), http.StatusUnauthorized},
+		{"a coordinator the platform does not run", scope.Coordinator("pe-2"), http.StatusForbidden},
+		{"a cluster's runtime", scope.Runtime("cluster-1"), http.StatusForbidden},
 	} {
 		f := newFixture(t, streamed(messageStart, messageStop))
 		resp := f.call(t, context.Background(), messagesCall, token(t, tc.scope))
@@ -257,7 +258,7 @@ func TestOnlyAHostedAgentOrCoordinatorWhoseTokenLivesIsServed(t *testing.T) {
 
 func TestOnlyTheProvidersMessageCallsAreServed(t *testing.T) {
 	f := newFixture(t, streamed(messageStart, messageStop))
-	agent := token(t, auth.AgentScope("pe-1", "agent-a"))
+	agent := token(t, scope.Agent("pe-1", "agent-a"))
 	for _, path := range []string{
 		Prefix + AnthropicProvider + "/v1/models",
 		Prefix + AnthropicProvider + "/api/oauth/usage",
@@ -279,7 +280,7 @@ func TestOnlyTheProvidersMessageCallsAreServed(t *testing.T) {
 // carries the agent's platform token.
 func TestTheCallCarriesThePlatformCredentialAndNeverThePlatformToken(t *testing.T) {
 	f := newFixture(t, streamed(messageStart, messageStop))
-	agent := token(t, auth.AgentScope("pe-1", "agent-a"))
+	agent := token(t, scope.Agent("pe-1", "agent-a"))
 	resp := f.call(t, context.Background(), messagesCall, agent)
 	_, _ = io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
@@ -330,7 +331,7 @@ func TestTheProvidersRateLimitReachesTheAgentAsItWasSent(t *testing.T) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = io.WriteString(w, `{"type":"error","error":{"type":"rate_limit_error","message":"limit"}}`)
 	})
-	resp := f.call(t, context.Background(), messagesCall, token(t, auth.AgentScope("pe-1", "agent-a")))
+	resp := f.call(t, context.Background(), messagesCall, token(t, scope.Agent("pe-1", "agent-a")))
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusTooManyRequests || !strings.Contains(string(body), "rate_limit_error") {
@@ -364,7 +365,7 @@ func TestAStreamedAnswerPassesEventByEventAndItsUsageIsRecorded(t *testing.T) {
 			w.(http.Flusher).Flush()
 		}
 	})
-	resp := f.call(t, context.Background(), messagesCall, token(t, auth.AgentScope("pe-1", "agent-a")))
+	resp := f.call(t, context.Background(), messagesCall, token(t, scope.Agent("pe-1", "agent-a")))
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || resp.Header.Get("Anthropic-Ratelimit-Unified-Status") != "allowed" {
 		t.Fatalf("status = %d, headers %v", resp.StatusCode, resp.Header)
@@ -403,7 +404,7 @@ func TestAnAgentThatHangsUpEndsTheProvidersCall(t *testing.T) {
 		}
 	})
 	ctx, cancel := context.WithCancel(context.Background())
-	resp := f.call(t, ctx, messagesCall, token(t, auth.CoordinatorScope("pe-1")))
+	resp := f.call(t, ctx, messagesCall, token(t, scope.Coordinator("pe-1")))
 	if _, err := bufio.NewReader(resp.Body).ReadString('\n'); err != nil {
 		t.Fatal(err)
 	}
@@ -425,7 +426,7 @@ func TestAnAnswerThatIsNotStreamedIsMeteredWhole(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"id":"msg_1","type":"message","model":"claude-haiku-5-5","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":5,"output_tokens":3,"cache_creation_input_tokens":0,"cache_read_input_tokens":7}}`)
 	})
-	resp := f.call(t, context.Background(), messagesCall, token(t, auth.AgentScope("pe-2", "agent-b")))
+	resp := f.call(t, context.Background(), messagesCall, token(t, scope.Agent("pe-2", "agent-b")))
 	var message map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&message); err != nil || message["id"] != "msg_1" {
 		t.Fatalf("answer = %v, %v", message, err)
@@ -442,7 +443,7 @@ func TestCountingTokensSpendsNoneAndIsNotRecorded(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"input_tokens":99}`)
 	})
-	resp := f.call(t, context.Background(), Prefix+AnthropicProvider+"/v1/messages/count_tokens?beta=true", token(t, auth.AgentScope("pe-1", "agent-a")))
+	resp := f.call(t, context.Background(), Prefix+AnthropicProvider+"/v1/messages/count_tokens?beta=true", token(t, scope.Agent("pe-1", "agent-a")))
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || string(body) != `{"input_tokens":99}` {
@@ -471,7 +472,7 @@ func TestAnAnswerOutlastsTheServersOwnDeadlines(t *testing.T) {
 	slow.Start()
 	defer slow.Close()
 	req, _ := http.NewRequest(http.MethodPost, slow.URL+messagesCall, strings.NewReader(`{}`))
-	req.Header.Set("Authorization", "Bearer "+token(t, auth.AgentScope("pe-1", "agent-a")))
+	req.Header.Set("Authorization", "Bearer "+token(t, scope.Agent("pe-1", "agent-a")))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -488,7 +489,7 @@ func TestAProviderThatCannotBeReachedIsAnsweredInItsOwnErrorShape(t *testing.T) 
 	gone.Close()
 	server := newAPI(t, gone.URL, &recorded{done: make(chan struct{})})
 	req, _ := http.NewRequest(http.MethodPost, server.URL+messagesCall, strings.NewReader(`{}`))
-	req.Header.Set("Authorization", "Bearer "+token(t, auth.AgentScope("pe-1", "agent-a")))
+	req.Header.Set("Authorization", "Bearer "+token(t, scope.Agent("pe-1", "agent-a")))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)

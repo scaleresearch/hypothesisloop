@@ -9,6 +9,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 )
@@ -125,7 +126,7 @@ func (a experimentAgentsAPI) add(ctx context.Context, in *struct {
 		if agent.Hosted {
 			continue
 		}
-		token, err := auth.Mint(a.launch.SigningSecret, auth.AgentScope(in.ID, agent.AgentID))
+		token, err := auth.Mint(a.launch.SigningSecret, scope.Agent(in.ID, agent.AgentID))
 		if err != nil {
 			return nil, refused(a.logger, "mint agent token", err)
 		}

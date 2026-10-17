@@ -11,6 +11,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/gitrefs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
@@ -208,7 +209,7 @@ func TestTheRecordOfABaselineDeadlineCloseSaysWhatTheBaselineLeft(t *testing.T) 
 	now := time.Now().UTC()
 	pe := &domain.PlatformExperiment{ID: "pe-late", ProjectID: "prj-a", Status: domain.PlatformExpOpen, CreatedAt: now.Add(-time.Hour),
 		DurationHours: 1, BudgetAcceleratorHours: 9, BaselineDueAt: now.Add(-time.Minute), Stages: []domain.Stage{{LengthPct: 100}}}
-	branch := domain.BaselineBranch(pe.ID)
+	branch := gitrefs.BaselineBranch(pe.ID)
 	job := &domain.Experiment{ID: "job-1", Status: domain.StatusRejected, EvictionReason: string(domain.EvictionExperimentClosed),
 		InfraRequeueCount: 2, InfraRequeueReason: "stuck_pending: admitted and not running within 5m0s, its runtime reporting create_failed: secrets is forbidden",
 		CodeRef: "https://github.com/acme/codec.git@4c6e96", Branch: branch, EnvironmentKey: "env-1"}

@@ -21,6 +21,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 )
 
 // subprotocol is the WebSocket subprotocol /watch speaks; the token is offered beside it.
@@ -245,18 +247,6 @@ func (w *watch) until(deadline time.Time) time.Time {
 	return deadline
 }
 
-// frame is what a frame of /watch may carry: the subscription, a change (which has an id) or the
-// progress that ends a read.
-type frame struct {
-	Subscription json.RawMessage `json:"subscription"`
-	ID           *int64          `json:"id"`
-	Kind         string          `json:"kind"`
-	Subject      string          `json:"subject"`
-	Value        string          `json:"value"`
-	Next         *int64          `json:"next"`
-	CaughtUp     bool            `json:"caught_up"`
-}
-
 // stream reads frames from one connection until it closes, the watch stops or --until is
 // satisfied. It returns true when the watch is done, false to reconnect or end on the deadline.
 func (w *watch) stream(ws *webSocket, deadline time.Time) bool {
@@ -270,7 +260,7 @@ func (w *watch) stream(ws *webSocket, deadline time.Time) bool {
 			sleepUntil(w.until(deadline), reconnectDelay)
 			return false
 		}
-		var f frame
+		var f platformapi.Frame
 		if err := json.Unmarshal([]byte(line), &f); err != nil {
 			fmt.Fprintf(w.opts.Stderr, "hl watch: a frame that is no JSON object: %s\n", line)
 			continue
@@ -282,16 +272,16 @@ func (w *watch) stream(ws *webSocket, deadline time.Time) bool {
 					return true
 				}
 			}
-		case f.ID != nil:
-			if w.change(heldChange{line: line, id: *f.ID}, f) {
+		case f.Event != nil:
+			if w.change(heldChange{line: line, id: f.ID}, *f.Event) {
 				return true
 			}
-		case f.Next != nil:
+		case f.Progress != nil:
 			if w.reset != 0 {
-				return w.resetTo(*f.Next)
+				return w.resetTo(f.Next)
 			}
-			if len(w.held) == 0 && *f.Next > w.after {
-				w.after, w.moved = *f.Next, true
+			if len(w.held) == 0 && f.Next > w.after {
+				w.after, w.moved = f.Next, true
 			}
 			if f.CaughtUp && w.opts.NoWait {
 				return true
@@ -303,7 +293,7 @@ func (w *watch) stream(ws *webSocket, deadline time.Time) bool {
 
 // change prints c, or holds it until one that wakes the watch arrives, and says whether the
 // watch is done.
-func (w *watch) change(c heldChange, f frame) bool {
+func (w *watch) change(c heldChange, f platformapi.Event) bool {
 	if w.opts.Wake != nil && w.settleBy.IsZero() && !w.opts.Wake(f.Kind, f.Subject, f.Value) {
 		// A reconnect reads again what is held, since the cursor has not passed it.
 		if len(w.held) == 0 || c.id > w.held[len(w.held)-1].id {
@@ -329,7 +319,7 @@ func (w *watch) change(c heldChange, f frame) bool {
 // says so in one line that wakes whoever waits.
 func (w *watch) resetTo(head int64) bool {
 	w.after, w.moved = head, true
-	line, _ := json.Marshal(map[string]string{"kind": "watch.reset",
+	line, _ := json.Marshal(map[string]string{"kind": platformapi.ResetKind,
 		"detail": fmt.Sprintf("changes after %d are no longer held: re-read state (hl situation)", w.reset)})
 	w.writeErr = w.write(string(line))
 	return true

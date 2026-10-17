@@ -7,26 +7,9 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+
+	"github.com/scaleresearch/hypothesisloop/contract/gitrefs"
 )
-
-// branchPrefix is what every branch of a platform experiment starts with, and baselineBranch
-// the one its baseline is measured on.
-func branchPrefix(platformExperiment string) string { return "hl/" + platformExperiment + "/" }
-
-func baselineBranch(platformExperiment string) string {
-	return branchPrefix(platformExperiment) + "baseline"
-}
-
-// ofBaselineAgent is whether a baseline agent's job may run on branch: the baseline branch, or
-// one beside it, baseline-<name>, where the agent tries its code as a researcher would. Only a
-// job of the baseline branch itself is declared the baseline.
-func ofBaselineAgent(platformExperiment, branch string) bool {
-	if branch == baselineBranch(platformExperiment) {
-		return true
-	}
-	name, beside := strings.CutPrefix(branch, baselineBranch(platformExperiment)+"-")
-	return beside && name != "" && !strings.ContainsAny(name, "/ \t\n")
-}
 
 // fillCodeRef sets an empty metadata.code_ref to the commit at HEAD of the git repository in dir,
 // "<origin url>@<sha>", and metadata.branch to the branch HEAD is on, which it pushes to origin.
@@ -59,14 +42,14 @@ func fillCodeRef(metadata map[string]any, dir string) error {
 	branch, _ := git(dir, "symbolic-ref", "--quiet", "--short", "HEAD")
 	hypothesis, _ := metadata["hypothesis_id"].(string)
 	switch {
-	case hypothesis == "" && !ofBaselineAgent(pe, branch):
-		return fmt.Errorf("no hypothesis is named and HEAD is not on %s: only a baseline agent's job runs without one, on that branch (git checkout -b %s) or, to check its code as a researcher would, on %s-check. Every other job names its hypothesis with --hypothesis ID", baselineBranch(pe), baselineBranch(pe), baselineBranch(pe))
-	case !strings.HasPrefix(branch, branchPrefix(pe)) || branch == branchPrefix(pe):
+	case hypothesis == "" && !gitrefs.IsBaselineAgentBranch(pe, branch):
+		return fmt.Errorf("no hypothesis is named and HEAD is not on %s: only a baseline agent's job runs without one, on that branch (git checkout -b %s) or, to check its code as a researcher would, on %s-check. Every other job names its hypothesis with --hypothesis ID", gitrefs.BaselineBranch(pe), gitrefs.BaselineBranch(pe), gitrefs.BaselineBranch(pe))
+	case !strings.HasPrefix(branch, gitrefs.BranchPrefix(pe)) || branch == gitrefs.BranchPrefix(pe):
 		on := "detached"
 		if branch != "" {
 			on = "on " + branch
 		}
-		return fmt.Errorf("HEAD is %s, not on a branch under %s: hl hypothesis checkout %s puts you on your branch for this hypothesis; commit there and submit again", on, branchPrefix(pe), cmp.Or(hypothesis, "ID"))
+		return fmt.Errorf("HEAD is %s, not on a branch under %s: hl hypothesis checkout %s puts you on your branch for this hypothesis; commit there and submit again", on, gitrefs.BranchPrefix(pe), cmp.Or(hypothesis, "ID"))
 	}
 	if _, err := git(dir, "push", "--quiet", "origin", "refs/heads/"+branch+":refs/heads/"+branch); err != nil {
 		return err

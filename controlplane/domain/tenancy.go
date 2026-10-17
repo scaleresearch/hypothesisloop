@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 )
 
 // User is a person known to the identity provider. ID is the provider's subject.
@@ -18,15 +19,16 @@ type User struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-type OrgRole string
+// OrgRole is the API's own (platformapi).
+type OrgRole = platformapi.OrgRole
 
 const (
-	OrgRoleOwner  OrgRole = "owner"
-	OrgRoleMember OrgRole = "member"
+	OrgRoleOwner  = platformapi.OrgRoleOwner
+	OrgRoleMember = platformapi.OrgRoleMember
 )
 
 // OrgRoles is every role in an org.
-var OrgRoles = []OrgRole{OrgRoleOwner, OrgRoleMember}
+var OrgRoles = platformapi.OrgRoles
 
 func ValidOrgRole(r OrgRole) bool { return slices.Contains(OrgRoles, r) }
 

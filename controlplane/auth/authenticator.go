@@ -11,6 +11,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
@@ -70,7 +71,7 @@ func NewAuthenticator(cfg config.AuthConfig, signingSecret string, directory Dir
 // platform failing to answer.
 func (a *Authenticator) Authenticate(ctx context.Context, token string) (Principal, error) {
 	switch {
-	case strings.HasPrefix(token, derivedPrefix):
+	case strings.HasPrefix(token, scope.Prefix):
 		return a.derived(ctx, token)
 	case strings.HasPrefix(token, apiKeyPrefix):
 		return a.apiKey(ctx, token)

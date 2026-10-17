@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
@@ -53,7 +54,7 @@ func TestReconcileHandsEachJobItsOwnToken(t *testing.T) {
 		if job.GitURL != "https://api.test/git/pe-1.git" {
 			t.Errorf("repository of %s: got = %q, want its platform experiment's through the proxy", id, job.GitURL)
 		}
-		want, _ := auth.Mint(secret, auth.JobScope(id))
+		want, _ := auth.Mint(secret, scope.Job(id))
 		if job.Token == "" || job.Token != want {
 			t.Errorf("token of %s: got = %q, want the job-scoped token %q", id, job.Token, want)
 		}

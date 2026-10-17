@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 )
 
 // ChangesRetention is how long a change is held for GET /watch. A watcher further behind re-reads
@@ -12,14 +14,7 @@ const ChangesRetention = 7 * 24 * time.Hour
 
 // Change is one announcement written in the transaction of the write it announces, and delivered
 // as an Event with the id Postgres gives it.
-type Change struct {
-	Kind                 string
-	Subject              string
-	Value                string
-	Detail               string
-	PlatformExperimentID string
-	AgentID              string
-}
+type Change = platformapi.Change
 
 // Announcer is the write a change is announced in: the change commits with the write or not at
 // all.
@@ -31,8 +26,8 @@ type Announcer interface {
 	ChangeUnlessAnnounced(ctx context.Context, c Change) error
 }
 
-// Validate refuses a change of no kind EventKinds has, or of no platform experiment.
-func (c Change) Validate() error {
+// ValidateChange refuses a change of no kind EventKinds has, or of no platform experiment.
+func ValidateChange(c Change) error {
 	if c.PlatformExperimentID == "" {
 		return fmt.Errorf("change %s of %s names no platform experiment", c.Kind, c.Subject)
 	}
