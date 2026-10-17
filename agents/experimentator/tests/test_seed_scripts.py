@@ -18,7 +18,7 @@ REPO = Path(__file__).resolve().parents[3]
 
 # Every script that carries its own copy of post_metric: the template's and the seeds' are
 # copied into an experiment's repository and workloads into an image, so none of them can import
-# a shared one. Of the examples, those whose code defines post_metric.
+# a shared one.
 METRIC_HELPERS = [path for path in [
     "contract/repotemplate/files/metrics.py",
     "tests/workloads/generic/train.py",
@@ -26,10 +26,7 @@ METRIC_HELPERS = [path for path in [
     "tests/workloads/generic/train_distributed.py",
     "tests/workloads/nvidia/train.py",
     "tests/workloads/tenstorrent/train.py",
-] if (REPO / path).exists()] + sorted(
-    str(path.relative_to(REPO)) for path in (REPO / "examples").glob("*/*.py")
-    if "\ndef post_metric(" in "\n" + path.read_text()
-)
+] if (REPO / path).exists()]
 
 
 TEMPLATE_HELPER = "contract/repotemplate/files/metrics.py"
@@ -174,41 +171,6 @@ class TemplateSpoolTest(unittest.TestCase):
         self.assertEqual(sleeps, [1, 2])
         self.assertEqual(len(self.control_plane.bodies), 4)
         self.assertEqual(Path(self.spool).read_text(), "")
-
-
-def clone_examples():
-    """The examples whose job runs in the platform's python job image: it clones its commit and
-    has uv install what its code imports."""
-    found = []
-    for spec in sorted((REPO / "examples").glob("*/.hypothesisloop/job.yaml")):
-        line = next((line for line in spec.read_text().splitlines() if line.strip().startswith("command:")), "")
-        if "hl-clone" in line and "uv run" in line:
-            found.append(spec.parents[1])
-    return found
-
-
-class CatalogueImageJobTest(unittest.TestCase):
-    def test_the_command_runs_train_py_of_the_clone_with_every_import_installed(self):
-        examples = clone_examples()
-        self.assertTrue(examples, "no example runs from its clone")
-        for example in examples:
-            with self.subTest(example=example.name):
-                spec = (example / ".hypothesisloop/job.yaml").read_text()
-                line = next(line for line in spec.splitlines() if line.strip().startswith("command:"))
-                shell, flag, script = json.loads(line.split("command:", 1)[1])
-                self.assertEqual((shell, flag), ("bash", "-c"))
-                clone, enter, run = script.split(" && ")
-                self.assertEqual((clone, enter), ("dir=$(hl-clone)", 'cd "$dir"'))
-                words = run.split()
-                self.assertEqual(words[:3] + words[-1:], ["exec", "uv", "run", "train.py"])
-                installed = {words[i + 1].split("==")[0] for i, word in enumerate(words) if word == "--with"}
-                modules = sorted(example.glob("*.py"))
-                own = {path.stem for path in modules}
-                imported = {alias.name.split(".")[0] for path in modules for node in ast.walk(ast.parse(path.read_text()))
-                            if isinstance(node, ast.Import) for alias in node.names}
-                imported |= {node.module.split(".")[0] for path in modules for node in ast.walk(ast.parse(path.read_text()))
-                             if isinstance(node, ast.ImportFrom) and node.module and node.level == 0}
-                self.assertEqual(installed, imported - set(sys.stdlib_module_names) - own)
 
 
 if __name__ == "__main__":

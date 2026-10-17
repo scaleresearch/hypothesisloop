@@ -3,7 +3,6 @@ package platformexperiments
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -178,29 +177,6 @@ func TestAPatchPassesWithNoCapacityReported(t *testing.T) {
 		pe, err := svc.Update(context.Background(), "pe-1", PlatformExperimentPatch{Name: &renamed})
 		if err != nil || pe.Name != renamed {
 			t.Errorf("%s, a rename with no capacity reported: got %v, %v", status, pe, err)
-		}
-	}
-}
-
-// Each example is what an operator starts as written, so the server must accept it.
-func TestTheExamplePlatformExperimentsAreAccepted(t *testing.T) {
-	examples, err := filepath.Glob("../../../examples/*/" + experimentspec.File)
-	if err != nil || len(examples) == 0 {
-		t.Fatalf("no example found: %v", err)
-	}
-	for _, file := range examples {
-		dir := filepath.Dir(filepath.Dir(file))
-		spec, err := experimentspec.Load(dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		req := CreatePlatformExperimentRequest{Spec: spec, ProjectID: "prj-a"}
-		if spec.CoordinatorHosted {
-			req.coordinator = &domain.HostedCoordinator{}
-		}
-		svc := reaching(NewService(&createStore{}, platformexperimentstest.Settings, zap.NewNop(), nil, time.Minute), domain.CPUType)
-		if _, err := svc.Create(context.Background(), req); err != nil {
-			t.Errorf("Create from %s: %v", dir, err)
 		}
 	}
 }

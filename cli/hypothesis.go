@@ -76,7 +76,7 @@ FILE shape:
       distinct_from: [HYP_ID]     # hypotheses a refused submit listed, judged different
 
 Items are submitted in order; top-level fields default onto every item. Prints one JSON object
-per item. Full reference: controlplane/settings/examples/hypothesis.yaml`
+per item. Full reference: $HL_REFERENCE/hypothesis.yaml`
 
 var hypothesisCommands = []subcommand{
 	{"submit", "register an idea under the objective or the hypotheses it builds on", hypothesisSubmit},

@@ -96,9 +96,7 @@ of hl platform-experiments get); experiment_closed.
     storage: 4Gi                  # scratch space
                                   # max_retries left out is 0
 
-Every other field: $WORKLOAD_SAMPLES/experiment-submission.yaml. $WORKLOAD_SAMPLES also holds
-whole experiments to read first, one repository tree each: its code reports its metrics and its
-.hypothesisloop/job.yaml runs it.`, stderr)
+Every other field: $HL_REFERENCE/experiment-submission.yaml.`, stderr)
 	agent := fs.String("agent", "", "whose job it is, for a person or an API key; an agent's token says it")
 	overrides := map[string]*string{
 		"hypothesis_id":          fs.String("hypothesis", "", "sets metadata.hypothesis_id"),

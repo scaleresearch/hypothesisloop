@@ -500,7 +500,7 @@ func TestHypothesisQueryUsageErrors(t *testing.T) {
 func TestHypothesisExampleFileSubmits(t *testing.T) {
 	got := recordingServer(t, func(n int, r recorded) any { return map[string]any{"id": fmt.Sprintf("hyp-%d", n)} })
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"hypothesis", "submit", "--file", "../controlplane/settings/examples/hypothesis.yaml"}, &stdout, &stderr); code != 0 {
+	if code := run([]string{"hypothesis", "submit", "--file", "reference/hypothesis.yaml"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("the DSL reference no longer submits: exit %d, stderr %s", code, stderr.String())
 	}
 	if len(*got) != 3 || !reflect.DeepEqual((*got)[2].Body["links"], links("builds_on", "hyp-0", "builds_on", "hyp-1")) {

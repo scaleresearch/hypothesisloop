@@ -3,7 +3,7 @@
 # platform experiment a submission belongs to, so set hypothesis_id (and id, for a fresh submission) before/at submit time. An agent's
 # token says whose job it is and where it runs; a person names them with --agent and
 # --platform-experiment. The `job:` block below is the
-# real, reusable execution definition -- see controlplane/settings/examples/experiment-submission.yaml
+# real, reusable execution definition -- see cli/reference/experiment-submission.yaml
 # for the fully-commented DSL reference.
 id: replace-with-a-unique-job-id
 metadata:
@@ -22,7 +22,7 @@ job:
   # Standalone job definition for the e2e test workload (tests/workloads/generic/train.py, built
   # as the hypothesisloop-workload image — see Dockerfile.train). This is a domain.JobSpec, the
   # platform's own DSL, never a raw Kubernetes manifest (see
-  # controlplane/settings/examples/experiment-submission.yaml for the fully-commented DSL
+  # cli/reference/experiment-submission.yaml for the fully-commented DSL
   # reference). tests/e2e/test_stages_and_settlement.py reads this file as-is and submits it
   # verbatim as the `job` field of every POST /experiments call — per-run bits (hypothesis,
   # agent, platform experiment) live in the request's `metadata`, not here, since this file

@@ -21,20 +21,10 @@ Every example holds:
 
 ## Starting one
 
-On this stack, one command pushes an example to a repository and creates the experiment its spec
-states:
+With `HL_TOKEN` and `HL_PROJECT` set, `hl` pushes an example to a repository and creates the
+experiment its spec states:
 
-    make example NAME=dummy-data-search-demo
-
-With `GIT_HOST_PROVIDER=local` it creates a repository `NAME-<time>.git` on the local git host.
-On GitHub it needs an empty repository the org's GitHub App covers:
-
-    make example NAME=dummy-data-search-demo REPOSITORY=OWNER/NAME
-
-Anywhere else, with `HL_TOKEN` and `HL_PROJECT` set, `hl` does the same from any directory that
-holds an experiment's tree:
-
-    hl platform-experiments start examples/dummy-data-search-demo --repository OWNER/NAME
+    hl platform-experiments start tests/experiments/dummy-data-search-demo --repository OWNER/NAME
 
 `start` checks the spec first, then pushes the directory as the repository's `main` when the
 repository has no branch, pushes nothing when its default branch holds the directory already,

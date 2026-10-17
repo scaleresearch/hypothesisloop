@@ -454,8 +454,8 @@ locked-ui-image: check-tag check-ui-build-args $(if $(filter $(LOCAL_REGISTRY),$
 	$(MAKE) prune-images TAGS="$(TAG)"
 
 # The image every hosted agent runs (agents/experimentator/Dockerfile.base's header): the agent
-# harness, git/Claude Code plumbing, and examples/ as WORKLOAD_SAMPLES. Root build context so it
-# can bake in examples/ and hl-clone.
+# harness, git/Claude Code plumbing, and cli/reference as HL_REFERENCE. Root build context so it
+# can bake in cli/reference and hl-clone.
 experimentator-base-image:
 	podman build -f agents/experimentator/Dockerfile.base -t localhost/hypothesisloop-experimentator-base .
 

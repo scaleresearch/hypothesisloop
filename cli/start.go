@@ -58,9 +58,9 @@ func readSpec(path string) (experimentspec.Spec, error) {
 func cmdPlatformExperimentsStart(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("platform-experiments start", `usage: hl platform-experiments start --repository R [--project PROJECT] [--dry-run] DIR
 
-DIR is the tree of an experiment's repository, as each directory of examples/ is: its code and
-its spec at DIR/.hypothesisloop/experiment.yaml, which is checked first, a bad one exiting 2
-before anything is asked. R is the repository the experiment works on: owner/name on GitHub,
+DIR is the tree of an experiment's repository: its code and its spec at
+DIR/.hypothesisloop/experiment.yaml, which is checked first, a bad one exiting 2 before anything
+is asked. R is the repository the experiment works on: owner/name on GitHub,
 which a GitHub account connected to the org covers, or on any other git host a name created
 there beforehand. The platform checks it can reach R, and git, with your own credentials, makes
 R's default branch hold DIR as git add -A would commit it, DIR/.gitignore respected and DIR's own

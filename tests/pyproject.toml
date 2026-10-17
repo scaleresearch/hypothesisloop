@@ -19,6 +19,7 @@ package = false
 
 [tool.pytest.ini_options]
 testpaths = ["e2e"]
+addopts = ["--ignore=experiments"]
 markers = [
     "parallel: owns only UUID-namespaced API resources and a bounded share of capacity (default lane, xdist-safe)",
     "exclusive: needs global inventory, full capacity, node state, or cluster-agent/daemonset mutation — run with -n 0, never alongside another exclusive test",

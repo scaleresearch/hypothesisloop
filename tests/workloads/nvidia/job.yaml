@@ -3,7 +3,7 @@
 # platform experiment a submission belongs to, so set hypothesis_id (and id, for a fresh submission) before/at submit time. An agent's
 # token says whose job it is and where it runs; a person names them with --agent and
 # --platform-experiment. The `job:` block below is the
-# real, reusable execution definition -- see controlplane/settings/examples/experiment-submission.yaml
+# real, reusable execution definition -- see cli/reference/experiment-submission.yaml
 # for the fully-commented DSL reference.
 id: replace-with-a-unique-job-id
 metadata:

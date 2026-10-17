@@ -1,5 +1,5 @@
 # The image every hosted agent runs: the agent harness, git/Claude Code plumbing, and the
-# read-only WORKLOAD_SAMPLES reference, nothing of any one experiment. An agent image of its own
+# read-only HL_REFERENCE files, nothing of any one experiment. An agent image of its own
 # (agent_image) is built FROM this one.
 #
 # Thin, deliberately unopinionated: uv-managed deps (claude-agent-sdk bundles its own Claude
@@ -68,13 +68,9 @@ RUN useradd --home-dir /agent --shell /bin/bash agent \
  && echo 'agent ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/agent \
  && chmod 0440 /etc/sudoers.d/agent
 
-# WORKLOAD_SAMPLES is the agent's starting point for what a job workload looks like: every example
-# experiment's repository tree (examples/, not tests/workloads/, which is test-only fixture code)
-# with the .hypothesisloop/job.yaml that runs it. Read, copy, adapt into its own repo.
-ENV WORKLOAD_SAMPLES=/opt/workloads-samples
-COPY examples $WORKLOAD_SAMPLES
-# The job DSL reference the samples and hl job submit --help name.
-COPY controlplane/settings/examples/experiment-submission.yaml $WORKLOAD_SAMPLES/
+# The fully commented job and hypothesis files that hl job submit --help and hl hypothesis submit --help name.
+ENV HL_REFERENCE=/opt/hl-reference
+COPY cli/reference $HL_REFERENCE
 # An agent reads the code a job ran with `hl-clone <code_ref> <dir>`, so it is a command here as
 # it is in the job image.
 COPY runtime/job/hl-clone /usr/local/bin/hl-clone
