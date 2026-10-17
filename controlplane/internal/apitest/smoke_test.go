@@ -9,14 +9,14 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/clusteragentapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
 )
 
 func get(t *testing.T, r chi.Router, path string) (int, string) {

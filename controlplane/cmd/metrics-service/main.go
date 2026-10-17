@@ -15,13 +15,13 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/controller"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/metricsingest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/settlement"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
@@ -69,7 +69,7 @@ func main() {
 
 	peFullStore := db.NewPlatformExperimentsFullStore(store)
 
-	authenticator, err := auth.NewAuthenticator(pcfg.Auth, auth.NewStoreDirectory(pool))
+	authenticator, err := auth.NewAuthenticator(pcfg.Auth, store)
 	if err != nil {
 		logger.Fatal("metrics-service: configure auth", zap.Error(err))
 	}

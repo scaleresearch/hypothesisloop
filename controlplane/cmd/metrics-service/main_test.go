@@ -9,8 +9,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 )
 
 // Every route of metrics-service but its liveness refuses a request with no token before its

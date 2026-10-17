@@ -10,9 +10,9 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 )
 
 // The reasons a client tells a refusal about GitHub apart by.

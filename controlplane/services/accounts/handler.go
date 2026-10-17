@@ -1,5 +1,5 @@
 // Package accounts serves who exists and what they own: orgs, their members and invites,
-// projects, API keys and clusters. Who may call what is decided in shared/auth/orgs.go, and in
+// projects, API keys and clusters. Who may call what is decided in auth/orgs.go, and in
 // policy.go for what an API key reaches, and nowhere else.
 package accounts
 
@@ -13,9 +13,9 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 

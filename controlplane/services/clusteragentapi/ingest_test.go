@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 )
 
 // Agents report every accelerator type their hardware publishes; capacity keeps only the priced

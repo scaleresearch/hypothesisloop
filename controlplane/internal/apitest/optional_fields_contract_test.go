@@ -6,13 +6,13 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
 )
 
 // A field added to an existing request body must not become required, and huma makes it required

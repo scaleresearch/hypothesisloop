@@ -3,7 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/base64"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"net/http"
 	"reflect"
 	"strings"

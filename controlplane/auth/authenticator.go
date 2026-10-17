@@ -13,7 +13,6 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
 // Error is a refusal with the HTTP status it answers with, in the API's {"error": ...} shape.
@@ -38,7 +37,7 @@ func unauthenticated(format string, args ...any) *Error {
 }
 
 // Directory is what the authenticator reads to learn whether the thing a token names still
-// stands. *db.Store with *db.AccountsStore and *db.ClustersStore satisfy it together.
+// stands. *db.Store satisfies it.
 type Directory interface {
 	EnsureUserHome(ctx context.Context, userID, name, orgName string) (*domain.User, []string, error)
 	APIKeyByHash(ctx context.Context, keyHash string) (*domain.APIKey, error)
@@ -48,18 +47,6 @@ type Directory interface {
 	AgentStanding(ctx context.Context, platformExperimentID, agentID string) (domain.AgentStanding, error)
 	ClusterOrg(ctx context.Context, name string) (orgID string, found bool, err error)
 	AssignedEnvironmentBuild(ctx context.Context, cluster, key string, attempt int) (*domain.Environment, error)
-}
-
-// StoreDirectory is the Directory over the platform's own database.
-type StoreDirectory struct {
-	*db.AccountsStore
-	*db.ClustersStore
-	*db.PlatformExperimentsStore
-	*db.EnvironmentsStore
-}
-
-func NewStoreDirectory(pool *db.Pool) StoreDirectory {
-	return StoreDirectory{AccountsStore: db.NewAccountsStore(pool), ClustersStore: db.NewClustersStore(pool), PlatformExperimentsStore: db.NewPlatformExperimentsStore(pool), EnvironmentsStore: db.NewEnvironmentsStore(pool)}
 }
 
 // Authenticator turns a token into a Principal. Nothing is kept between requests: a derived

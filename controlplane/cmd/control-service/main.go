@@ -15,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost/github"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/imagedigest"
@@ -33,7 +34,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/settlement"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/graphdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
@@ -136,12 +136,11 @@ func main() {
 	runCtx, runCancel := context.WithCancel(context.Background())
 	defer runCancel()
 
-	directory := auth.NewStoreDirectory(pool)
-	authenticator, err := auth.NewAuthenticator(pcfg.Auth, directory)
+	authenticator, err := auth.NewAuthenticator(pcfg.Auth, store)
 	if err != nil {
 		logger.Fatal("control-service: configure auth", zap.Error(err))
 	}
-	gate := apiGate{tokens: authenticator, access: auth.NewAccess(directory)}
+	gate := apiGate{tokens: authenticator, access: auth.NewAccess(store)}
 
 	// The git host is one of two. On a plain one there is no GitHub App and no client for it:
 	// connecting GitHub answers that there is none.

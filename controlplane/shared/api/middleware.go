@@ -10,7 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 )
 
 // CORSMiddleware lets one browser origin, the UI's, call the API.

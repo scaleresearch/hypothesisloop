@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 

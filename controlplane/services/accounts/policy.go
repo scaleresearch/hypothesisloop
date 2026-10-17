@@ -5,12 +5,12 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 )
 
 // policy says what an API key reaches among projects and keys. Who reads and who administers an
-// org, and what a member may do in it, is auth.Access's (shared/auth/orgs.go), which every rule
+// org, and what a member may do in it, is auth.Access's (auth/orgs.go), which every rule
 // here starts from.
 //
 //   - an API key bound to one project reads that project and nothing else of the org.

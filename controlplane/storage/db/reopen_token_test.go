@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/config"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
@@ -18,7 +18,7 @@ func TestAReopenedRunsTokensAreAcceptedByTheRowsAlone(t *testing.T) {
 	ctx := context.Background()
 	run := db.ClosedRunWithAgents(t, pool)
 	const secret = "a-signing-secret-only-this-test-knows"
-	authenticator, err := auth.NewAuthenticator(config.AuthConfig{SigningSecret: secret}, auth.NewStoreDirectory(pool))
+	authenticator, err := auth.NewAuthenticator(config.AuthConfig{SigningSecret: secret}, db.NewStore(pool, 1))
 	if err != nil {
 		t.Fatal(err)
 	}

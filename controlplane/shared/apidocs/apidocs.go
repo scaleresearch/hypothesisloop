@@ -19,7 +19,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 )
 
 // errorModel serializes to the {"error": "..."} shape the Python agent and the

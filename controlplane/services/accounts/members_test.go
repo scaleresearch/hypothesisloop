@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 )
 
 // refusedWith makes a request that must be refused with the status and the reason.

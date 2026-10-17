@@ -9,8 +9,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// Placement is what Access reads to place a resource in an org. *db.AccountsStore and
-// *db.ClustersStore satisfy it together (StoreDirectory).
+// Placement is what Access reads to place a resource in an org. *db.Store satisfies it.
 type Placement interface {
 	PlatformExperimentTenancy(ctx context.Context, platformExperimentID string) (tenancy *domain.Tenancy, closedAt *time.Time, err error)
 	ExperimentTenancy(ctx context.Context, experimentID string) (*domain.Tenancy, bool, error)

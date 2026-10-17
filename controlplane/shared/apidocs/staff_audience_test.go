@@ -3,7 +3,7 @@ package apidocs
 import (
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 )
 
 func TestTheStaffAudienceAdmitsStaffAndNobodyElse(t *testing.T) {

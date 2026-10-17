@@ -23,6 +23,7 @@ type Store struct {
 	*HypothesesStore
 	*ClustersStore
 	*EnvironmentsStore
+	*AccountsStore
 
 	// maxInfraRequeues bounds how many times one experiment may be returned to the queue for
 	// free after an infrastructure fault, before ResolveTermination gives up and terminates it
@@ -46,6 +47,7 @@ func NewStore(pool *Pool, maxInfraRequeues int) *Store {
 		HypothesesStore:          NewHypothesesStore(pool),
 		ClustersStore:            NewClustersStore(pool),
 		EnvironmentsStore:        NewEnvironmentsStore(pool),
+		AccountsStore:            NewAccountsStore(pool),
 	}
 }
 

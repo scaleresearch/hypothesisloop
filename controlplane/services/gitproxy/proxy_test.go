@@ -18,10 +18,10 @@ import (
 	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 )
 
 const (
