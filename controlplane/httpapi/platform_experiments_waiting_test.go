@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
+	"go.uber.org/zap"
+
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
-	"go.uber.org/zap"
 )
 
 func waitingAgent(id string) auth.Principal {
@@ -22,7 +22,7 @@ func TestAQuotaAskedForBeforeTheStartIsRefusedWithTheReadersNextStep(t *testing.
 	store := newRosterStore(domain.PlatformExpOpen, 5)
 	store.signups = []domain.AgentSignup{{AgentID: "dana", Name: "Researcher 1", Role: domain.SignupRoleCompetitor}}
 	r := authtest.Router(authtest.As(waitingAgent("dana")))
-	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(agentsTestPlacement), zap.NewNop())
+	doc := NewDoc(r, "test", "1.0.0", "", auth.NewAccess(agentsTestPlacement), zap.NewNop())
 	registerPlatformExperiments(doc, newSignupTestService(t, store).WithRepositories(store).WithPlanning(testPlanning))
 
 	code, out := call(t, r, "GET", "/platform-experiments/pe-1/quotas/dana", "")
@@ -42,7 +42,7 @@ func TestAPlannersQuotaIsRefusedSayingItNeedsNone(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpDraft, 5)
 	store.signups = []domain.AgentSignup{{AgentID: "pat", Name: "Planner", Role: domain.SignupRolePlanner}}
 	r := authtest.Router(authtest.As(waitingAgent("pat")))
-	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(agentsTestPlacement), zap.NewNop())
+	doc := NewDoc(r, "test", "1.0.0", "", auth.NewAccess(agentsTestPlacement), zap.NewNop())
 	registerPlatformExperiments(doc, newSignupTestService(t, store).WithRepositories(store).WithPlanning(testPlanning))
 
 	code, out := call(t, r, "GET", "/platform-experiments/pe-1/quotas/pat", "")

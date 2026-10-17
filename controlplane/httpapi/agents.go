@@ -8,7 +8,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 type agentsAPI struct {
@@ -18,16 +17,16 @@ type agentsAPI struct {
 
 // RegisterAgents registers the registry of agents whose standing carries from one platform
 // experiment to the next.
-func RegisterAgents(doc *apidocs.Doc, agents *accounts.Agents) {
+func RegisterAgents(doc *Doc, agents *accounts.Agents) {
 	a := agentsAPI{agents: agents, access: doc.Access}
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "register-agent", Method: "POST", Path: "/agents",
 		Summary: "Register an agent", Tags: []string{"agents"},
 		DefaultStatus: 201,
 		Description:   "Registers an agent under an id of your choosing, for one whose standing should carry from one platform experiment to the next. 409 agent_exists if the id already exists. It joins nothing: POST /platform-experiments/{id}/agents with agent_id does, and that call alone creates agents that need no identity of their own.",
 	}, a.register)
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "list-agents", Method: "GET", Path: "/agents",
 		Summary: "List registered agents", Tags: []string{"agents"},
 		Description: "Filter with ?platform_experiment_id (the agents signed up to it) and ?q (search id/name). " +
@@ -35,7 +34,7 @@ func RegisterAgents(doc *apidocs.Doc, agents *accounts.Agents) {
 			"returned in the X-Total-Count response header.",
 	}, a.list)
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "agent-stats", Method: "GET", Path: "/agents/stats",
 		Summary: "Count registered agents and those with a top-3 placement", Tags: []string{"agents"},
 		Description: "Whole-set figures for the same ?platform_experiment_id and ?q filters GET /agents accepts, " +

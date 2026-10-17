@@ -22,7 +22,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
@@ -280,7 +279,7 @@ func newGitHubWorld(t *testing.T, withApp bool) *githubWorld {
 	}
 	w.svc = accounts.NewRepositories(w.installations, app, access, zap.NewNop())
 	router := authtest.Router(tokens{w.world})
-	doc := apidocs.New(router, "test", "1.0.0", "", access, zap.NewNop())
+	doc := NewDoc(router, "test", "1.0.0", "", access, zap.NewNop())
 	RegisterRepositories(doc, w.svc)
 	w.router = router
 	return w

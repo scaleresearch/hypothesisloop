@@ -4,11 +4,11 @@ import (
 	"net/http"
 	"testing"
 
+	"go.uber.org/zap"
+
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
-	"go.uber.org/zap"
 )
 
 // hl hypothesis checkout names an agent's branch after the agent, and read the name from the
@@ -20,7 +20,7 @@ func TestAnAgentReadsItsOwnNameInItsSignup(t *testing.T) {
 	dana := auth.Principal{Kind: auth.KindAgent, PlatformExperimentID: "pe-1", AgentID: "dana", ProjectID: "project-a", OrgIDs: []string{"org-a"}}
 
 	r := authtest.Router(authtest.As(dana))
-	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(agentsTestPlacement), zap.NewNop())
+	doc := NewDoc(r, "test", "1.0.0", "", auth.NewAccess(agentsTestPlacement), zap.NewNop())
 	registerPlatformExperiments(doc, newSignupTestService(t, store).WithRepositories(store).WithPlanning(testPlanning))
 
 	if code, out := call(t, r, "GET", "/platform-experiments/pe-1/signups/dana", ""); code != http.StatusOK || out["name"] != "Researcher 1" {

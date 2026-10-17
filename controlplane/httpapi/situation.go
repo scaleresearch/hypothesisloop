@@ -9,7 +9,6 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 type situationAPI struct {
@@ -19,9 +18,9 @@ type situationAPI struct {
 }
 
 // RegisterSituation registers the situation read.
-func RegisterSituation(doc *apidocs.Doc, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
+func RegisterSituation(doc *Doc, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
 	a := situationAPI{experiments: experiments, access: doc.Access, logger: logger}
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "get-platform-experiment-situation", Method: "GET", Path: "/platform-experiments/{id}/situation",
 		Summary: "Where the run stands now, in one read", Tags: []string{"platform-experiments"},
 		Description: "Computed on every read: the run's clock (ends_at, minutes_left, the stage and when the next starts; on a closed run minutes_left 0 with closed_at and close_reason, on one not started how long it will run once it starts), " +

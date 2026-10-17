@@ -1,13 +1,12 @@
 package apitest
 
 import (
-	"reflect"
-
 	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -20,7 +19,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 // filterSpyStore records the filter list-experiments builds, so the test asserts on what the
@@ -89,7 +87,7 @@ func schedulerRouter(t *testing.T, store scheduler.Store) chi.Router {
 	}))
 	t.Cleanup(metrics.Close)
 	r := authtest.Router(authtest.Staff)
-	d := apidocs.New(r, "scheduler", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	d := httpapi.NewDoc(r, "scheduler", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	httpapi.RegisterJobs(d, scheduler.NewService(store, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, metrics.URL, zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{}), zap.NewNop())
 	return r
 }

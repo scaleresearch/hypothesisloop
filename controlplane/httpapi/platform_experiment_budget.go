@@ -5,11 +5,11 @@ import (
 	"errors"
 
 	"github.com/danielgtaylor/huma/v2"
+	"go.uber.org/zap"
+
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
-	"go.uber.org/zap"
 )
 
 type budgetAPI struct {
@@ -18,10 +18,10 @@ type budgetAPI struct {
 
 // RegisterPlatformExperimentBudget registers the reads of a platform experiment's health, quotas,
 // stages and capacity, and its summary.
-func RegisterPlatformExperimentBudget(doc *apidocs.Doc, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
+func RegisterPlatformExperimentBudget(doc *Doc, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
 	a := budgetAPI{platformExperimentsAPI{experiments: experiments, access: doc.Access, logger: logger}}
 
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "get-platform-experiment-health", Method: "GET", Path: "/platform-experiments/{id}/health",
 		Summary: "Where each agent of a run last stood", Tags: []string{"platform-experiments"},
 		Description: "For each agent and the hosted coordinator, the latest values of the run's health series, read from the metrics store, which records them while the run is open or running: " +
@@ -29,7 +29,7 @@ func RegisterPlatformExperimentBudget(doc *apidocs.Doc, experiments *platformexp
 			"agents is empty for a run that never opened.",
 	}, a.getPlatformExperimentHealth)
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, apidocs.AfterClose(huma.Operation{
+	register(doc, auth.AudienceCoordinator, afterClose(huma.Operation{
 		OperationID: "set-platform-experiment-summary", Method: "PUT", Path: "/platform-experiments/{id}/summary",
 		Summary: "Record the operator's narrative verdict on a run", Tags: []string{"platform-experiments"},
 		Description: "Replaces the summary and answers the platform experiment with it. Writable after the experiment closes: it is the one field whose whole point " +
@@ -37,13 +37,13 @@ func RegisterPlatformExperimentBudget(doc *apidocs.Doc, experiments *platformexp
 			"A coordinator's token writes it until five minutes after the close (domain.CoordinatorWindDown), when the token ends (401). 422 summary_too_long past 32768 bytes.",
 	}), a.setPlatformExperimentSummary)
 
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "list-platform-experiment-quotas", Method: "GET", Path: "/platform-experiments/{id}/quotas",
 		Summary: "List per-agent quotas for a platform experiment", Tags: []string{"platform-experiments"},
 		Description: "Each signed-up agent's share of the budget, what it has used and what a job submitted now may still reserve. Guaranteed and burst jobs spend the same share: burst gives no hours on top of it.",
 	}, a.listPlatformExperimentQuotas)
 
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "get-agent-quota", Method: "GET", Path: "/platform-experiments/{id}/quotas/{agent_id}",
 		Summary: "Get one agent's quota within a platform experiment", Tags: []string{"platform-experiments"},
 		Description: "One row of what GET /platform-experiments/{id}/quotas returns for every agent, and with it data_bytes and max_data_bytes: " +
@@ -53,7 +53,7 @@ func RegisterPlatformExperimentBudget(doc *apidocs.Doc, experiments *platformexp
 			"404 quota_not_granted while the platform experiment is open and the agent holds none yet: quota is granted at the start, and the message is the platform experiment's status_reason, what the caller does next.",
 	}, a.getAgentQuota)
 
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "get-stages", Method: "GET", Path: "/platform-experiments/{id}/stages",
 		Summary: "Get the stage ladder and current standing of a platform experiment", Tags: []string{"platform-experiments"},
 		Description: "The ladder, which stage is running, progress through it, and which signed-up agents are still active vs cut. Open, the ladder is the one declared. From the start it is the one the run has: a single stage where fewer than 5 researchers joined, which has no boundary and sends no stage.boundary. Each stage carries max_job_hours: the longest one job may run while it is current (0/absent = unlimited). Where the next cut falls is not shown; every agent's best value is, at GET /platform-experiments/{id}/results.",
@@ -61,7 +61,7 @@ func RegisterPlatformExperimentBudget(doc *apidocs.Doc, experiments *platformexp
 
 	// ---- resource catalog ----
 
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "get-resource-capacity", Method: "GET", Path: "/resource-catalog/capacity",
 		Summary: "Get live per-cluster accelerator capacity", Tags: []string{"resource-catalog"},
 		Description: "Live {accelerator_type, available, total} per cluster the jobs of one org can be placed on: the org's own " +

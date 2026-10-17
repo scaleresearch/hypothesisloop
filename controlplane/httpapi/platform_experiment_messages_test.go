@@ -13,7 +13,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
@@ -53,7 +52,7 @@ func (s *messageStore) NameActors(context.Context, []*domain.Actor) error { retu
 func messagesRouter(t *testing.T, store *messageStore, caller auth.Principal) http.Handler {
 	t.Helper()
 	r := authtest.Router(authtest.As(caller))
-	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(agentsTestPlacement), zap.NewNop())
+	doc := NewDoc(r, "test", "1.0.0", "", auth.NewAccess(agentsTestPlacement), zap.NewNop())
 	RegisterMessages(doc, testExperiments(store), zap.NewNop())
 	return r
 }

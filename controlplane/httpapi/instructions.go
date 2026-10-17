@@ -8,7 +8,6 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 const instructionsDescription = "Only the token of the agent or coordinator they are for reads them, and the people and the API keys of the org that owns the platform experiment; every other agent and a coordinator asking for an agent's are refused with 403, and another org's platform experiment is not found. " +
@@ -21,14 +20,14 @@ type instructionsAPI struct {
 
 // RegisterInstructions registers where an agent and a coordinator read the instructions they
 // run with.
-func RegisterInstructions(doc *apidocs.Doc, instructions *platformexperiments.InstructionsService) {
+func RegisterInstructions(doc *Doc, instructions *platformexperiments.InstructionsService) {
 	a := instructionsAPI{instructions: instructions, access: doc.Access}
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "get-agent-instructions", Method: "GET", Path: "/platform-experiments/{id}/agents/{agent_id}/instructions",
 		Summary: "Read the instructions an agent runs with", Tags: []string{"platform-experiments"},
 		Description: "The system prompt and settings of the current version of the agent's agent type. " + instructionsDescription,
 	}, a.getAgent)
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "get-coordinator-instructions", Method: "GET", Path: "/platform-experiments/{id}/coordinator/instructions",
 		Summary: "Read the instructions the coordinator runs with", Tags: []string{"platform-experiments"},
 		Description: "The system prompt and settings of the current version of the agent type of the platform experiment's coordinator. " + instructionsDescription,

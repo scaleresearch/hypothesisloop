@@ -14,7 +14,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/registry"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 // closedRefusal is how each hypothesis write states its 409 on a closed platform experiment.
@@ -69,10 +68,10 @@ type hypothesesAPI struct {
 // logs) and the hypothesis notebook. Paths sit under the resource they belong to —
 // /experiments/{id}/... and /hypotheses/... — so a caller never has to know which service
 // implements them; they are all registered on the one API doc alongside scheduler and quota.
-func RegisterRegistry(doc *apidocs.Doc, svc *registry.Service, logger *zap.Logger) {
+func RegisterRegistry(doc *Doc, svc *registry.Service, logger *zap.Logger) {
 	a := hypothesesAPI{registry: svc, access: doc.Access, logger: logger}
 	r := jobRecordsAPI{registry: svc, access: doc.Access, logger: logger}
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "check-out-hypothesis", Method: "POST", Path: "/hypotheses/{id}/checkouts",
 		Summary: "Record that an agent works on a hypothesis", Tags: []string{"hypotheses"},
 		Description: "hl hypothesis checkout calls this once the branch is checked out: from then the agent is in working of " +
@@ -84,7 +83,7 @@ func RegisterRegistry(doc *apidocs.Doc, svc *registry.Service, logger *zap.Logge
 	}, a.checkOut)
 	// ---- what hangs off an experiment ----
 
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "list-experiment-data", Method: "GET", Path: "/experiments/{id}/data",
 		Summary: "List what a job wrote to durable storage", Tags: []string{"experiments"},
 		Description: "Checkpoints and datasets the job left under its own prefix, listed live from the object store. " +
@@ -96,13 +95,13 @@ func RegisterRegistry(doc *apidocs.Doc, svc *registry.Service, logger *zap.Logge
 
 	// ---- metrics ----
 
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "get-metrics", Method: "GET", Path: "/experiments/{id}/metrics",
 		Summary: "Get an experiment's metric timeseries", Tags: []string{"metrics"},
 		Description: "{metric_name, fraction_complete, metric_value} points.",
 	}, r.metrics)
 
-	apidocs.Register(doc, apidocs.AudienceJob, huma.Operation{
+	register(doc, auth.AudienceJob, huma.Operation{
 		OperationID: "append-metric", Method: "POST", Path: "/experiments/{id}/metrics",
 		Summary: "Append a metric sample for an experiment", Tags: []string{"metrics"},
 		DefaultStatus: 204,
@@ -115,7 +114,7 @@ func RegisterRegistry(doc *apidocs.Doc, svc *registry.Service, logger *zap.Logge
 	// No POST here: log tails are never pushed by the job/research-agent side of the API --
 	// only a cluster-agent may report a job's log tail (via /internal/clusters/{name}/status,
 	// see clusterexchange), same as job phase. This is read-only.
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "get-log-tail", Method: "GET", Path: "/experiments/{id}/logs",
 		Summary: "Get the job's most recently reported log tail", Tags: []string{"metrics"},
 		Description: "Returns up to the last `n` lines the owning cluster-agent last reported " +
@@ -123,7 +122,7 @@ func RegisterRegistry(doc *apidocs.Doc, svc *registry.Service, logger *zap.Logge
 			"Empty (not an error) if none has been reported yet.",
 	}, r.logTail)
 
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "platform-experiment-timeseries", Method: "GET",
 		Path:    "/platform-experiments/{id}/metrics-timeseries",
 		Summary: "Get per-job metric history across a platform experiment", Tags: []string{"metrics"},
@@ -134,7 +133,7 @@ func RegisterRegistry(doc *apidocs.Doc, svc *registry.Service, logger *zap.Logge
 
 	// The hypothesis writes are AfterClose so that a coordinator token is refused like every other
 	// caller, by the store's 409 experiment_closed, and not first by the gate's 403.
-	apidocs.Register(doc, apidocs.AudienceAgent, apidocs.AfterClose(huma.Operation{
+	register(doc, auth.AudienceAgent, afterClose(huma.Operation{
 		OperationID: "register-hypothesis", Method: "POST", Path: "/hypotheses",
 		Summary: "Register a hypothesis in the graph", Tags: []string{"hypotheses"},
 		DefaultStatus: 201,
@@ -158,7 +157,7 @@ func RegisterRegistry(doc *apidocs.Doc, svc *registry.Service, logger *zap.Logge
 			"standings — those key on agent_id.",
 	}), a.register)
 
-	apidocs.Register(doc, apidocs.AudienceAgent, apidocs.AfterClose(huma.Operation{
+	register(doc, auth.AudienceAgent, afterClose(huma.Operation{
 		OperationID: "add-hypothesis-link", Method: "POST", Path: "/hypotheses/{id}/links",
 		Summary: "Link a hypothesis to another", Tags: []string{"hypotheses"},
 		DefaultStatus: 201,
@@ -170,13 +169,13 @@ func RegisterRegistry(doc *apidocs.Doc, svc *registry.Service, logger *zap.Logge
 			"are append-only and re-adding one changes nothing. " + closedRefusal + "Returns the hypothesis's outgoing links.",
 	}), a.addLink)
 
-	apidocs.Register(doc, apidocs.AudienceAgent, apidocs.Read(apidocs.AfterClose(huma.Operation{
+	register(doc, auth.AudienceAgent, read(afterClose(huma.Operation{
 		OperationID: "query-hypotheses", Method: "POST", Path: "/hypotheses/query",
 		Summary: "Query the hypothesis graph with read-only Cypher", Tags: []string{"hypotheses"},
 		Description: registry.QueryDescription,
 	})), a.query)
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "get-hypothesis-graph", Method: "GET", Path: "/hypotheses/graph",
 		Summary: "Get one platform experiment's whole hypothesis graph", Tags: []string{"hypotheses"},
 		Description: "Every hypothesis of the platform experiment as a list item (nodes) and every link between them " +
@@ -188,7 +187,7 @@ func RegisterRegistry(doc *apidocs.Doc, svc *registry.Service, logger *zap.Logge
 			"for drawing the graph.",
 	}, a.graph)
 
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "list-hypotheses", Method: "GET", Path: "/hypotheses",
 		Summary: "List hypotheses, optionally scoped to one platform experiment", Tags: []string{"hypotheses"},
 		Description: "Optional ?platform_experiment_id restricts to one platform experiment; omitted, every " +
@@ -203,14 +202,14 @@ func RegisterRegistry(doc *apidocs.Doc, svc *registry.Service, logger *zap.Logge
 			"POST /hypotheses/query.",
 	}, a.list)
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "hypothesis-stats", Method: "GET", Path: "/hypotheses/stats",
 		Summary: "Count hypotheses by status", Tags: []string{"hypotheses"},
 		Description: "total and by_status over the hypotheses the ?platform_experiment_id and ?agent_id filters of " +
 			"GET /hypotheses match. A status no hypothesis holds is absent.",
 	}, a.stats)
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "platform-experiment-findings", Method: "GET", Path: "/platform-experiments/{id}/findings",
 		Summary: "What a platform experiment has found", Tags: []string{"hypotheses"},
 		Description: "Among its 200 newest hypotheses, each one that holds a verdict, a finding or a job with a " +
@@ -219,7 +218,7 @@ func RegisterRegistry(doc *apidocs.Doc, svc *registry.Service, logger *zap.Logge
 			"later than status_changed_at was filed after the verdict.",
 	}, a.findings)
 
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "get-hypothesis", Method: "GET", Path: "/hypotheses/{id}",
 		Summary: "Get a hypothesis with its links, jobs, findings, and comments", Tags: []string{"hypotheses"},
 		Description: "links.out and links.in are its edges, oldest first, at most 200 each way. Each has type, the other " +
@@ -234,7 +233,7 @@ func RegisterRegistry(doc *apidocs.Doc, svc *registry.Service, logger *zap.Logge
 			"job_count/finding_count/comment_count report the full size of each set so a caller can page the rest.",
 	}, a.get)
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "edit-hypothesis", Method: "PATCH", Path: "/hypotheses/{id}",
 		Summary: "Edit the text of an idea you wrote", Tags: []string{"hypotheses"},
 		Description: "Replaces text, by the person who wrote the idea. " + changeRule + " 409 duplicate_hypothesis when another " +
@@ -242,7 +241,7 @@ func RegisterRegistry(doc *apidocs.Doc, svc *registry.Service, logger *zap.Logge
 			"new text wherever it reads the hypothesis. Returns the hypothesis.",
 	}, a.edit)
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "remove-hypothesis", Method: "DELETE", Path: "/hypotheses/{id}",
 		Summary: "Remove an idea you wrote", Tags: []string{"hypotheses"},
 		DefaultStatus: 204,
@@ -250,7 +249,7 @@ func RegisterRegistry(doc *apidocs.Doc, svc *registry.Service, logger *zap.Logge
 			changeRule,
 	}, a.remove)
 
-	apidocs.Register(doc, apidocs.AudienceAgent, apidocs.AfterClose(huma.Operation{
+	register(doc, auth.AudienceAgent, afterClose(huma.Operation{
 		OperationID: "add-hypothesis-comment", Method: "POST", Path: "/hypotheses/{id}/comments",
 		Summary: "Add a comment to a hypothesis or to the objective", Tags: []string{"hypotheses"},
 		DefaultStatus: 201,
@@ -265,7 +264,7 @@ func RegisterRegistry(doc *apidocs.Doc, svc *registry.Service, logger *zap.Logge
 			closedRefusal,
 	}), a.addComment)
 
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "list-hypothesis-comments", Method: "GET", Path: "/hypotheses/{id}/comments",
 		Summary: "List the comments on a hypothesis or on the objective", Tags: []string{"hypotheses"},
 		Description: "id is a hypothesis, or the platform_experiment_id for the objective, whose comments no other read " +
@@ -273,7 +272,7 @@ func RegisterRegistry(doc *apidocs.Doc, svc *registry.Service, logger *zap.Logge
 			"is in the X-Total-Count response header.",
 	}, a.listComments)
 
-	apidocs.Register(doc, apidocs.AudienceAgent, apidocs.AfterClose(huma.Operation{
+	register(doc, auth.AudienceAgent, afterClose(huma.Operation{
 		OperationID: "set-hypothesis-status", Method: "POST", Path: "/hypotheses/{id}/status",
 		Summary: "Set a hypothesis's status", Tags: []string{"hypotheses"},
 		Description: "open (default) / confirmed (validated as a real improvement) / refuted " +

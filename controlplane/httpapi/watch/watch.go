@@ -15,7 +15,6 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
@@ -160,7 +159,7 @@ func (h *hub) dropAll() {
 }
 
 // Handler serves GET /watch. It is registered on the chi router directly rather than through
-// apidocs/Huma: a WebSocket upgrade needs the raw connection, and Huma owns the response for
+// the httpapi document: a WebSocket upgrade needs the raw connection, and Huma owns the response for
 // every operation registered with it. The honest place for it is therefore beside the router, and
 // the contract a caller reads for it is GET /watch/kinds (httpapi.RegisterWatchKinds) and hl watch --help.
 type Handler struct {
@@ -223,7 +222,7 @@ func (h *Handler) Start(ctx context.Context) {
 }
 
 func (h *Handler) admit(ctx context.Context, principal auth.Principal) (context.Context, error) {
-	if !apidocs.AudienceAgent.Admits(principal, "") {
+	if !auth.AudienceAgent.Admits(principal, "") {
 		return nil, auth.Forbidden("forbidden: a " + string(principal.Kind) + " token may not watch")
 	}
 	// A stream only reads. The platform experiment it is narrowed to is admitted by the access

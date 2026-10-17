@@ -1,4 +1,4 @@
-package apidocs
+package httpapi
 
 import (
 	"context"
@@ -19,21 +19,21 @@ func TestRegisterRequiresValidAudience(t *testing.T) {
 		}
 	}()
 	r := authtest.Router(authtest.Staff)
-	doc := New(r, "t", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	Register(doc, Audience("bogus"), huma.Operation{OperationID: "x", Method: "GET", Path: "/x"},
+	doc := NewDoc(r, "t", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	register(doc, auth.Audience("bogus"), huma.Operation{OperationID: "x", Method: "GET", Path: "/x"},
 		func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
 }
 
 func TestMountExploreAudienceFiltersByAudience(t *testing.T) {
 	r := authtest.Router(authtest.Staff)
-	doc := New(r, "t", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	Register(doc, AudienceAgent, huma.Operation{OperationID: "agent-op", Method: "GET", Path: "/agent-only", Summary: "agent summary"},
+	doc := NewDoc(r, "t", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	register(doc, auth.AudienceAgent, huma.Operation{OperationID: "agent-op", Method: "GET", Path: "/agent-only", Summary: "agent summary"},
 		func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
-	Register(doc, AudienceCoordinator, huma.Operation{OperationID: "coord-op", Method: "GET", Path: "/coord-only", Summary: "coordinator summary"},
+	register(doc, auth.AudienceCoordinator, huma.Operation{OperationID: "coord-op", Method: "GET", Path: "/coord-only", Summary: "coordinator summary"},
 		func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
 
-	doc.MountExploreAudience(r, "/explore", AudienceAgent)
-	doc.MountExploreAudience(r, "/explore/coordinator", AudienceCoordinator)
+	doc.MountExploreAudience(r, "/explore", auth.AudienceAgent)
+	doc.MountExploreAudience(r, "/explore/coordinator", auth.AudienceCoordinator)
 
 	get := func(path string) string {
 		req := httptest.NewRequest("GET", path, nil)

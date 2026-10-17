@@ -1,4 +1,4 @@
-package apidocs
+package httpapi
 
 import (
 	"context"
@@ -51,7 +51,7 @@ var everyKind = tokenTable{
 func audienceRouter(t *testing.T) (chi.Router, *auth.Principal) {
 	t.Helper()
 	r := authtest.Router(everyKind)
-	doc := New(r, "t", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	doc := NewDoc(r, "t", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	var seen auth.Principal
 	handler := func(ctx context.Context, _ *struct {
 		Name string `path:"name"`
@@ -59,18 +59,18 @@ func audienceRouter(t *testing.T) (chi.Router, *auth.Principal) {
 		seen, _ = auth.FromContext(ctx)
 		return nil, nil
 	}
-	for path, audience := range map[string]Audience{
-		"/agent/{name}": AudienceAgent, "/job/{name}": AudienceJob,
-		"/coordinator/{name}": AudienceCoordinator, "/internal/{name}": AudienceInternal,
+	for path, audience := range map[string]auth.Audience{
+		"/agent/{name}": auth.AudienceAgent, "/job/{name}": auth.AudienceJob,
+		"/coordinator/{name}": auth.AudienceCoordinator, "/internal/{name}": auth.AudienceInternal,
 	} {
-		Register(doc, audience, huma.Operation{OperationID: string(audience), Method: "GET", Path: path}, handler)
+		register(doc, audience, huma.Operation{OperationID: string(audience), Method: "GET", Path: path}, handler)
 	}
-	Register(doc, AudienceInternal, huma.Operation{OperationID: "internal-list", Method: "GET", Path: "/internal"},
+	register(doc, auth.AudienceInternal, huma.Operation{OperationID: "internal-list", Method: "GET", Path: "/internal"},
 		func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
 	return r, &seen
 }
 
-func call(r chi.Router, path, authorization string) *httptest.ResponseRecorder {
+func docCall(r chi.Router, path, authorization string) *httptest.ResponseRecorder {
 	request := httptest.NewRequest("GET", path, nil)
 	if authorization != "" {
 		request.Header.Set("Authorization", authorization)
@@ -98,7 +98,7 @@ func TestEachAudienceAdmitsExactlyItsCallers(t *testing.T) {
 					want = http.StatusNoContent
 				}
 			}
-			if got := call(r, path, "Bearer "+token).Code; got != want {
+			if got := docCall(r, path, "Bearer "+token).Code; got != want {
 				t.Errorf("%s as %s: got = %d, want = %d", path, token, got, want)
 			}
 		}
@@ -118,7 +118,7 @@ func TestARequestWithoutAUsableTokenNeverReachesTheHandler(t *testing.T) {
 		"directory failure": {"Bearer broken-directory", http.StatusInternalServerError},
 	} {
 		*seen = auth.Principal{}
-		recorder := call(r, "/agent/x", tc.authorization)
+		recorder := docCall(r, "/agent/x", tc.authorization)
 		if recorder.Code != tc.want {
 			t.Errorf("%s: got = %d, want = %d", name, recorder.Code, tc.want)
 		}
@@ -141,17 +141,17 @@ func TestACoordinatorOfAClosedPlatformExperimentReadsAndFilesTheSummaryOnly(t *t
 		"closed": {Kind: auth.KindCoordinator, PlatformExperimentID: "pe-a", PlatformExperimentClosed: true},
 	}
 	r := authtest.Router(tokens)
-	doc := New(r, "t", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	doc := NewDoc(r, "t", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	ran := 0
 	handler := func(context.Context, *struct{}) (*struct{}, error) {
 		ran++
 		return nil, nil
 	}
-	Register(doc, AudienceAgent, huma.Operation{OperationID: "read", Method: "GET", Path: "/read"}, handler)
-	Register(doc, AudienceCoordinator, huma.Operation{OperationID: "write", Method: "POST", Path: "/write"}, handler)
-	Register(doc, AudienceCoordinator, huma.Operation{OperationID: "patch", Method: "PATCH", Path: "/write"}, handler)
-	Register(doc, AudienceCoordinator, huma.Operation{OperationID: "delete", Method: "DELETE", Path: "/write"}, handler)
-	Register(doc, AudienceCoordinator, AfterClose(huma.Operation{OperationID: "summary", Method: "POST", Path: "/summary"}), handler)
+	register(doc, auth.AudienceAgent, huma.Operation{OperationID: "read", Method: "GET", Path: "/read"}, handler)
+	register(doc, auth.AudienceCoordinator, huma.Operation{OperationID: "write", Method: "POST", Path: "/write"}, handler)
+	register(doc, auth.AudienceCoordinator, huma.Operation{OperationID: "patch", Method: "PATCH", Path: "/write"}, handler)
+	register(doc, auth.AudienceCoordinator, huma.Operation{OperationID: "delete", Method: "DELETE", Path: "/write"}, handler)
+	register(doc, auth.AudienceCoordinator, afterClose(huma.Operation{OperationID: "summary", Method: "POST", Path: "/summary"}), handler)
 	for _, tc := range []struct {
 		token, method, path string
 		want                int
@@ -175,7 +175,7 @@ func TestACoordinatorOfAClosedPlatformExperimentReadsAndFilesTheSummaryOnly(t *t
 
 func TestTheHandlerSeesThePrincipalTheTokenResolvedTo(t *testing.T) {
 	r, seen := audienceRouter(t)
-	if code := call(r, "/agent/x", "Bearer agent").Code; code != http.StatusNoContent {
+	if code := docCall(r, "/agent/x", "Bearer agent").Code; code != http.StatusNoContent {
 		t.Fatalf("status: got = %d, want = 204", code)
 	}
 	if seen.Kind != auth.KindAgent || seen.AgentID != "agent-a" || seen.PlatformExperimentID != "pe-a" {
@@ -187,12 +187,12 @@ func TestTheHandlerSeesThePrincipalTheTokenResolvedTo(t *testing.T) {
 // operation and excludes everything coordinator-only.
 func TestTheAgentDigestIncludesTheJobAudience(t *testing.T) {
 	r, _ := audienceRouter(t)
-	doc := New(r, "t", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	Register(doc, AudienceJob, huma.Operation{OperationID: "m", Method: "POST", Path: "/metrics-op", Summary: "s"},
+	doc := NewDoc(r, "t", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	register(doc, auth.AudienceJob, huma.Operation{OperationID: "m", Method: "POST", Path: "/metrics-op", Summary: "s"},
 		func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
-	Register(doc, AudienceCoordinator, huma.Operation{OperationID: "c", Method: "POST", Path: "/coordinator-op", Summary: "s"},
+	register(doc, auth.AudienceCoordinator, huma.Operation{OperationID: "c", Method: "POST", Path: "/coordinator-op", Summary: "s"},
 		func(context.Context, *struct{}) (*struct{}, error) { return nil, nil })
-	digest := doc.render(AudienceAgent)
+	digest := doc.render(auth.AudienceAgent)
 	if !strings.Contains(digest, "/metrics-op") || strings.Contains(digest, "/coordinator-op") {
 		t.Fatalf("agent digest:\n%s", digest)
 	}
@@ -201,7 +201,7 @@ func TestTheAgentDigestIncludesTheJobAudience(t *testing.T) {
 // The reason a runtime branches on reaches it beside the message, in the same envelope.
 func TestARefusalWithAReasonCarriesItBesideTheMessage(t *testing.T) {
 	r, _ := audienceRouter(t)
-	recorder := call(r, "/internal/gone", "Bearer removed-cluster")
+	recorder := docCall(r, "/internal/gone", "Bearer removed-cluster")
 	var body struct {
 		Error  string `json:"error"`
 		Reason string `json:"reason"`
@@ -216,19 +216,19 @@ func TestARefusalWithAReasonCarriesItBesideTheMessage(t *testing.T) {
 
 func TestAHandlersUnansweredErrorSaysNothingOfWhatFailed(t *testing.T) {
 	r := authtest.Router(everyKind)
-	doc := New(r, "t", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	Register(doc, AudienceAgent, huma.Operation{OperationID: "fail", Method: "GET", Path: "/fail"},
+	doc := NewDoc(r, "t", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	register(doc, auth.AudienceAgent, huma.Operation{OperationID: "fail", Method: "GET", Path: "/fail"},
 		func(context.Context, *struct{}) (*struct{}, error) {
 			return nil, errors.New("pq: database is down at 10.0.0.7")
 		})
-	Register(doc, AudienceAgent, huma.Operation{OperationID: "refuse", Method: "GET", Path: "/refuse"},
+	register(doc, auth.AudienceAgent, huma.Operation{OperationID: "refuse", Method: "GET", Path: "/refuse"},
 		func(context.Context, *struct{}) (*struct{}, error) {
 			return nil, huma.Error409Conflict("already closed")
 		})
-	if rec := call(r, "/fail", "Bearer user"); rec.Code != http.StatusInternalServerError || strings.TrimSpace(rec.Body.String()) != `{"error":"`+auth.InternalError+`"}` {
+	if rec := docCall(r, "/fail", "Bearer user"); rec.Code != http.StatusInternalServerError || strings.TrimSpace(rec.Body.String()) != `{"error":"`+auth.InternalError+`"}` {
 		t.Errorf("an unanswered error: got = %d %s, want a 500 that carries no internal text", rec.Code, rec.Body)
 	}
-	if rec := call(r, "/refuse", "Bearer user"); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "already closed") {
+	if rec := docCall(r, "/refuse", "Bearer user"); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "already closed") {
 		t.Errorf("a refusal: got = %d %s, want the 409 as the handler stated it", rec.Code, rec.Body)
 	}
 }

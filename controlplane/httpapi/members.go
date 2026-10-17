@@ -8,14 +8,13 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 type roleBody struct {
 	Role domain.OrgRole `json:"role" doc:"owner or member"`
 }
 
-func (a accountsAPI) registerMembers(doc *apidocs.Doc) {
+func (a accountsAPI) registerMembers(doc *Doc) {
 	accountsRoute(doc, a.accounts, huma.Operation{
 		OperationID: "list-org-members", Method: "GET", Path: "/orgs/{id}/members",
 		Summary: "List an org's members", Tags: []string{"accounts"},

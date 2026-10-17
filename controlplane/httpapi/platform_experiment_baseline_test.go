@@ -11,14 +11,14 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
-	"go.uber.org/zap"
 )
 
 func openExperiment() *domain.PlatformExperiment {
@@ -56,7 +56,7 @@ func declareJobsAPI(t *testing.T, pe *domain.PlatformExperiment, jobs []*platfor
 		PlatformExperiments: map[string]domain.Tenancy{"pe-1": {PlatformExperimentID: "pe-1", ProjectID: "prj-a", OrgID: "org-a"}},
 	}
 	router := authtest.Router(authtest.As(caller))
-	doc := apidocs.New(router, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
+	doc := NewDoc(router, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
 	registerPlatformExperiments(doc, svc.WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning))
 	return store, func(body map[string]any) (int, map[string]any) {
 		t.Helper()

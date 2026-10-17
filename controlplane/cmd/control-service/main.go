@@ -35,7 +35,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/settlement"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/graphdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
@@ -357,14 +356,14 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 	// Cluster-agent traffic (Go cluster-agent binaries, not research agents) keeps its own
 	// registration and its own docs under a distinct prefix — a different audience entirely.
 	clusterAgentRouter := chi.NewRouter()
-	clusterAgentDoc := apidocs.New(clusterAgentRouter, "hypothesisloop cluster-agent API", "1.0.0", "", gate.access, logger)
+	clusterAgentDoc := httpapi.NewDoc(clusterAgentRouter, "hypothesisloop cluster-agent API", "1.0.0", "", gate.access, logger)
 	httpapi.RegisterClusterAgent(clusterAgentDoc, h.clusterAgent)
 	clusterAgentDoc.MountExplore(clusterAgentRouter)
 	r.Mount("/internal/clusters", clusterAgentRouter)
 
 	// One doc for the whole public API: every operation an agent or the UI can call is
 	// registered here, so /openapi.json and /explore describe all of it in one place.
-	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", agenttypes.PlatformRules, gate.access, logger)
+	doc := httpapi.NewDoc(r, "hypothesisloop API", "1.0.0", agenttypes.PlatformRules, gate.access, logger)
 	httpapi.RegisterAgents(doc, h.agents)
 	httpapi.RegisterPlatformExperiments(doc, h.platformExperiments, logger)
 	httpapi.RegisterSituation(doc, h.experiments, logger)
@@ -389,8 +388,8 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 	// /explore is the agent-only digest: nothing an agent isn't permitted to call.
 	// /explore/coordinator is the same registrations' operator/dashboard-admin-only view, and
 	// /explore/rules the rules alone, which the instructions the platform serves an agent carry.
-	doc.MountExploreAudience(r, "/explore", apidocs.AudienceAgent)
-	doc.MountExploreAudience(r, "/explore/coordinator", apidocs.AudienceCoordinator)
+	doc.MountExploreAudience(r, "/explore", auth.AudienceAgent)
+	doc.MountExploreAudience(r, "/explore/coordinator", auth.AudienceCoordinator)
 	doc.MountRules(r, "/explore/rules")
 	return r
 }

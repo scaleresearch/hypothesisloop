@@ -20,7 +20,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
 )
@@ -197,7 +196,7 @@ func newWorld(t *testing.T, cluster string, wrap func(*reconcileStore) clusterex
 	data := &objectstore.Client{Endpoint: "http://store.invalid:9000", Region: "us-east-1", Bucket: "data"}
 	caller := authtest.As{Kind: auth.KindRuntime, ClusterName: cluster, OrgIDs: []string{"org-a"}}
 	router := authtest.Router(caller)
-	doc := apidocs.New(router, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{Clusters: map[string]string{cluster: "org-a"}}), zap.NewNop())
+	doc := NewDoc(router, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{Clusters: map[string]string{cluster: "org-a"}}), zap.NewNop())
 	RegisterClusterAgent(doc, clusterexchange.NewService(wrap(w.store), time.Minute, metrics.URL, 90*time.Second, data, time.Minute, nil, 100, "test-signing-secret-of-enough-length", "https://api.test/git", environments, zap.NewNop()).
 		WithBuildReported(func() { w.wakes.Add(1) }))
 	w.router = router

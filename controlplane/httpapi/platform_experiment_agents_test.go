@@ -18,7 +18,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/graphdb"
 )
@@ -308,7 +307,7 @@ func (f *rosterStore) RemoveAgent(_ context.Context, _, agentID string, _ func(c
 func agentsRouter(t *testing.T, store *rosterStore, caller auth.Principal) http.Handler {
 	t.Helper()
 	r := authtest.Router(authtest.As(caller))
-	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(agentsTestPlacement), zap.NewNop())
+	doc := NewDoc(r, "test", "1.0.0", "", auth.NewAccess(agentsTestPlacement), zap.NewNop())
 	svc := platformexperiments.NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), platformexperimentstest.NoUsage(t), 3*time.Minute)
 	RegisterExperimentAgents(doc, svc, store, agentsTestLaunch(), zap.NewNop())
 	return r

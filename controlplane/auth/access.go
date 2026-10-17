@@ -61,7 +61,7 @@ type read struct {
 
 // WithRead marks ctx as a request that reads and writes nothing, naming the platform experiment
 // its platform_experiment_id narrows a listing to. The gates that authenticate a request set it
-// (apidocs for every documented operation, the watch handler for its stream) and nothing else
+// (httpapi for every documented operation, the watch handler for its stream) and nothing else
 // does, so no handler decides for itself that it is a read.
 func WithRead(ctx context.Context, platformExperimentID string) context.Context {
 	return context.WithValue(ctx, readKey{}, read{platformExperimentID: platformExperimentID})

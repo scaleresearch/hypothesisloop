@@ -7,7 +7,6 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 type clusterList struct {
@@ -29,7 +28,7 @@ func listOfClusters(clusters []accounts.ListedCluster, err error) (*clusterList,
 const clusterUseDescription = "The cluster is any the org can use, its own or one the platform shares, and the decision is the org's alone: it changes nothing for another org. " +
 	"An owner of the org, an API key of the whole org and staff decide it. Repeating it changes nothing. A cluster the org cannot use is not found."
 
-func (a accountsAPI) registerClusters(doc *apidocs.Doc) {
+func (a accountsAPI) registerClusters(doc *Doc) {
 	accountsRoute(doc, a.accounts, huma.Operation{
 		OperationID: "register-cluster", Method: "POST", Path: "/orgs/{id}/clusters",
 		Summary: "Register a cluster for an org", Tags: []string{"clusters"},

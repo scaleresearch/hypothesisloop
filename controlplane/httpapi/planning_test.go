@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/scaleresearch/hypothesisloop/contract/repotemplate"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
@@ -22,9 +24,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
-	"go.uber.org/zap"
 )
 
 func measuredBaseline() *platformexperiments.Baseline {
@@ -49,7 +49,7 @@ func planningRouter(t *testing.T, store platformexperiments.PlatformExperimentsS
 		},
 	}
 	router := authtest.Router(authtest.As(caller))
-	doc := apidocs.New(router, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
+	doc := NewDoc(router, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
 	planningRepositories = &fakeRepositories{files: map[string]string{"prj-a": ""}}
 	svc.WithRepositories(planningRepositories)
 	handler := svc.WithRepositories(planningRepositories).WithPlanning(testPlanning).WithGitProxy("https://api.test/git").

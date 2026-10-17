@@ -8,7 +8,6 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 type modelUsageAPI struct {
@@ -18,9 +17,9 @@ type modelUsageAPI struct {
 }
 
 // RegisterModelUsage registers the read of a platform experiment's model usage on doc.
-func RegisterModelUsage(doc *apidocs.Doc, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
+func RegisterModelUsage(doc *Doc, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
 	a := modelUsageAPI{experiments: experiments, access: doc.Access, logger: logger}
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "get-platform-experiment-model-usage", Method: "GET", Path: "/platform-experiments/{id}/model-usage",
 		Summary: "Get the model tokens the platform's agents spent, per agent and model", Tags: []string{"platform-experiments"},
 		Description: "The model calls the platform made for this platform experiment's hosted agents and coordinator, " +

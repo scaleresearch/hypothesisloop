@@ -13,7 +13,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
@@ -34,7 +33,7 @@ func (s takenAgents) CreateAgent(_ context.Context, agent *domain.Agent) error {
 // silently named after its id.
 func TestRegisteringAnAgentRefusesATakenIDAndRequiresAName(t *testing.T) {
 	r := authtest.Router(authtest.As(auth.Principal{Kind: auth.KindUser, UserID: "u-1", OrgIDs: []string{"org-a"}}))
-	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	doc := NewDoc(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	RegisterAgents(doc, accounts.NewAgents(takenAgents{taken: map[string]bool{"veteran": true}}, zap.NewNop()))
 
 	if code, out := call(t, r, "POST", "/agents", `{"id":"veteran","name":"Veteran"}`); code != http.StatusConflict || out["reason"] != "agent_exists" {
@@ -67,7 +66,7 @@ func (pagedAgents) AgentStats(context.Context, db.AgentsFilter) (*domain.AgentSt
 func TestTheAgentListRefusesAPageOverTheMaximum(t *testing.T) {
 	var read []int
 	r := authtest.Router(authtest.Staff)
-	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	doc := NewDoc(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	RegisterAgents(doc, accounts.NewAgents(pagedAgents{limits: &read}, zap.NewNop()))
 
 	for _, query := range []string{"limit=201", "limit=100000", "limit=-1", "offset=-1"} {

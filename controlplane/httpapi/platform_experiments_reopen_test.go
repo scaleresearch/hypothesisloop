@@ -7,14 +7,14 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
-	"go.uber.org/zap"
 )
 
 // reopenStore reopens as the database does, and records what it was asked to write.
@@ -53,7 +53,7 @@ func reopenRouter(t *testing.T, store *reopenStore, caller auth.Principal) http.
 		tenancy[pe.ID] = domain.Tenancy{PlatformExperimentID: pe.ID, ProjectID: "prj-a", OrgID: "org-a"}
 	}
 	r := authtest.Router(authtest.As(caller))
-	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{PlatformExperiments: tenancy}), zap.NewNop())
+	doc := NewDoc(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{PlatformExperiments: tenancy}), zap.NewNop())
 	handler := newSignupTestService(t, store).WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning).
 		WithAgentLaunch(platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model-default", CoordinatorModel: "coordinator-default", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted})
 	registerPlatformExperiments(doc, handler)

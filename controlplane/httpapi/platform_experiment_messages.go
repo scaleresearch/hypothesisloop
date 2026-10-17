@@ -10,7 +10,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 type agentMessagesBody struct {
@@ -25,9 +24,9 @@ type messagesAPI struct {
 }
 
 // RegisterMessages registers the direct messages to the agents of a platform experiment.
-func RegisterMessages(doc *apidocs.Doc, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
+func RegisterMessages(doc *Doc, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
 	a := messagesAPI{experiments: experiments, access: doc.Access, logger: logger}
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "send-platform-experiment-message", Method: "POST", Path: "/platform-experiments/{id}/messages",
 		Summary: "Send a message to an agent", Tags: []string{"platform-experiments"},
 		DefaultStatus: http.StatusCreated,
@@ -39,7 +38,7 @@ func RegisterMessages(doc *apidocs.Doc, experiments *platformexperiments.Platfor
 			"A recipient is sent at most 6 messages in any hour by the coordinator and 6 by the owner, each counted apart, so the owner's never spend the coordinator's: 429 message_rate_limited past that, saying when the next can be sent. With all, a researcher the sender may not message yet is left out and named in refused {agent_id, reason, retry_after}, the rest are sent and the answer is 201: 429 only when none could be sent. 422 message_too_long above 1500 bytes.",
 	}, a.send)
 
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "list-platform-experiment-messages", Method: "GET", Path: "/platform-experiments/{id}/messages",
 		Summary: "List the messages sent to agents", Tags: []string{"platform-experiments"},
 		Description: "Every message sent to an agent of the platform experiment or its coordinator (POST /platform-experiments/{id}/messages), oldest first, with whom it was sent to, from coordinator or owner, the actor whose credential sent it, and when. " +

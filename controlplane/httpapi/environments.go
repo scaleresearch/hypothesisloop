@@ -6,11 +6,11 @@ import (
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
+	"go.uber.org/zap"
+
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
-	"go.uber.org/zap"
 )
 
 // environmentRequest is the wire shape of POST /environments.
@@ -20,8 +20,8 @@ type environmentRequest struct {
 	Image                string `json:"image" doc:"The image it is built on: job.image of the job that is to run in it, a job image name or a whole address."`
 }
 
-func registerEnvironments(doc *apidocs.Doc, a jobsAPI) {
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+func registerEnvironments(doc *Doc, a jobsAPI) {
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "build-environment", Method: "POST", Path: "/environments",
 		Summary: "Build the environment a commit declares, ahead of its job", Tags: []string{"experiments"},
 		Description: "Starts building the .hypothesisloop/Dockerfile of commit code_ref on image, the build a job of that commit naming that image waits for (environment_key), so the job finds it built or building when it is submitted. " +
@@ -30,7 +30,7 @@ func registerEnvironments(doc *apidocs.Doc, a jobsAPI) {
 			"422 no_environment_file for a commit without the file, invalid_environment_file for one the platform does not build, no_environment_builder while no cluster the org may use builds, " +
 			"unknown_job_image and code_ref_not_in_repository as a submit answers them.",
 	}, a.buildEnvironment)
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "get-environment", Method: "GET", Path: "/environments",
 		Summary: "Read the environment a commit declares, building nothing", Tags: []string{"experiments"},
 		Description: "Answers the environment the .hypothesisloop/Dockerfile of commit code_ref on image is, as POST /environments answers it, and starts no build: one that failed stays failed. " +
@@ -99,8 +99,8 @@ func (a jobsAPI) getEnvironment(ctx context.Context, in *struct {
 	return &struct{ Body scheduler.EnvironmentAnswer }{Body: scheduler.AnswerEnvironment(env)}, nil
 }
 
-func registerImageCredentials(doc *apidocs.Doc, a jobsAPI) {
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+func registerImageCredentials(doc *Doc, a jobsAPI) {
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "create-job-image-credential", Method: "POST", Path: "/experiments/{id}/image-credentials", DefaultStatus: http.StatusCreated,
 		Summary: "The image a job runs in, with a login that pulls it", Tags: []string{"experiments"},
 		Description: "Answers the image job {id} runs in, so a machine without its hardware can run code in it (hl env stage): the environment its commit declares, with a short-lived login to the registry that holds it, or its job image, pulled without one. " +

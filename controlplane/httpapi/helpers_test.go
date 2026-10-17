@@ -16,7 +16,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 // testExperiments is the platform experiments service over store, with nothing else wired.
@@ -82,7 +81,7 @@ func (fakeStore) ProjectAgentTypeCatalog(context.Context, string) (domain.AgentT
 }
 
 // registerPlatformExperiments registers the platform experiment operations and their budget reads.
-func registerPlatformExperiments(doc *apidocs.Doc, peh *platformexperiments.PlatformExperimentsService) {
+func registerPlatformExperiments(doc *Doc, peh *platformexperiments.PlatformExperimentsService) {
 	RegisterPlatformExperiments(doc, peh, zap.NewNop())
 	RegisterPlatformExperimentBudget(doc, peh, zap.NewNop())
 }

@@ -26,7 +26,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 // world is the rows every token and every access check of the authorization table is resolved
@@ -218,7 +217,7 @@ func tripwire(next http.Handler) http.Handler {
 // three documents, the raw /watch and /metrics handlers, and services with nothing behind them.
 type worldAPI struct {
 	router chi.Router
-	docs   map[string]*apidocs.Doc
+	docs   map[string]*httpapi.Doc
 	tokens map[string]string
 }
 
@@ -236,7 +235,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 	access := auth.NewAccess(w)
 	logger := zap.NewNop()
 
-	api := &worldAPI{router: chi.NewRouter(), docs: map[string]*apidocs.Doc{}, tokens: map[string]string{"none": ""}}
+	api := &worldAPI{router: chi.NewRouter(), docs: map[string]*httpapi.Doc{}, tokens: map[string]string{"none": ""}}
 	api.router.Use(tripwire)
 	api.router.Use(auth.Gate(authenticator, logger, map[string]string{"/watch": watch.Subprotocol}))
 	api.router.Handle("/metrics", auth.RequireStaff(logger, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -246,11 +245,11 @@ func newWorldAPI(t *testing.T) *worldAPI {
 	api.router.Get("/watch", watcher.ServeHTTP)
 
 	clusters := chi.NewRouter()
-	api.docs["/internal/clusters"] = apidocs.New(clusters, "cluster-agent", "1.0.0", "", access, logger)
+	api.docs["/internal/clusters"] = httpapi.NewDoc(clusters, "cluster-agent", "1.0.0", "", access, logger)
 	httpapi.RegisterClusterAgent(api.docs["/internal/clusters"], clusterexchange.NewService(nil, 0, "", 0, nil, 0, nil, 0, worldSecret, "https://api.test/git", &clusterexchange.EnvironmentRegistry{Repository: "registry.test/environments/environment"}, logger))
 	api.router.Mount("/internal/clusters", clusters)
 
-	doc := apidocs.New(api.router, "hypothesisloop API", "1.0.0", "", access, logger)
+	doc := httpapi.NewDoc(api.router, "hypothesisloop API", "1.0.0", "", access, logger)
 	api.docs[""] = doc
 	launch := platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: worldSecret, MaxHosted: 20}
 	peHandler := platformexperiments.NewPlatformExperimentsService(nil, domain.QuotaConfig{}, logger, "", time.Minute).WithRepositories(worldRepositories{}).WithPlanning(worldPlanning).WithAgentLaunch(launch)

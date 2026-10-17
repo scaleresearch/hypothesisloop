@@ -14,13 +14,12 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 func instructionsCall(t *testing.T, caller auth.Principal, path string) (int, platformexperiments.Instructions) {
 	t.Helper()
 	r := authtest.Router(authtest.As(caller))
-	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(sessionPlacement), zap.NewNop())
+	doc := NewDoc(r, "test", "1.0.0", "", auth.NewAccess(sessionPlacement), zap.NewNop())
 	RegisterInstructions(doc, platformexperiments.NewInstructionsService(platformexperimentstest.PinnedInstructions{}, platformexperimentstest.Defaults, zap.NewNop()))
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, authtest.Authorize(httptest.NewRequest("GET", path, nil)))

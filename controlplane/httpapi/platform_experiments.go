@@ -9,12 +9,12 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"go.uber.org/zap"
+
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
-	"go.uber.org/zap"
 )
 
 type platformExperimentsAPI struct {
@@ -24,12 +24,12 @@ type platformExperimentsAPI struct {
 }
 
 // RegisterPlatformExperiments registers the platform experiment operations on the shared Huma doc.
-func RegisterPlatformExperiments(doc *apidocs.Doc, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
+func RegisterPlatformExperiments(doc *Doc, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
 	a := platformExperimentsAPI{experiments: experiments, access: doc.Access, logger: logger}
 
 	// ---- platform experiments ----
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "get-experiment-file", Method: "GET", Path: "/projects/{id}/experiment-file",
 		Summary: "Read what a repository's experiment file states", Tags: []string{"platform-experiments"},
 		Description: "What " + domain.ExperimentFile + " at the head of the default branch of repository states of a platform experiment: name, description, metrics, " +
@@ -38,7 +38,7 @@ func RegisterPlatformExperiments(doc *apidocs.Doc, experiments *platformexperime
 			"invalid_experiment_file when it cannot be used, and why.",
 	}, a.getExperimentFile)
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "check-repository", Method: "GET", Path: "/projects/{id}/repository-check",
 		Summary: "Check where a platform experiment would keep its code, before creating it", Tags: []string{"platform-experiments"},
 		Description: "Runs the repository checks of POST /platform-experiments and POST /platform-experiments/drafts for repository and repository_account as they would be sent, and creates nothing. " +
@@ -49,7 +49,7 @@ func RegisterPlatformExperiments(doc *apidocs.Doc, experiments *platformexperime
 			"repository_not_reachable, invalid_repository, invalid_request; 502 github_failed; on a plain git host 422 repository_required and repository_not_reachable.",
 	}, a.checkRepository)
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "create-platform-experiment", Method: "POST", Path: "/platform-experiments",
 		Summary: "Create a platform experiment", Tags: []string{"platform-experiments"},
 		DefaultStatus: 201,
@@ -96,14 +96,14 @@ func RegisterPlatformExperiments(doc *apidocs.Doc, experiments *platformexperime
 			"GET /platform-experiments/{id} shows the coordinator's model and what became of its machine.",
 	}, a.createPlatformExperiment)
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "get-hosting", Method: "GET", Path: "/hosting",
 		Summary: "Whether the platform can host agents now", Tags: []string{"platform-experiments"},
 		Description: "available is true while the deployment has a sandbox provider to run hosted machines on. " +
 			"While it is false, unavailable says why, and every request that would host an agent, a draft's planner or a coordinator is refused with 503 and the same reason.",
 	}, a.getHosting)
 
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "list-platform-experiments", Method: "GET", Path: "/platform-experiments",
 		Summary: "List platform experiments", Tags: []string{"platform-experiments"},
 		Description: "The caller's own platform experiments, within ?project_id when given, and with them the ones " +
@@ -116,7 +116,7 @@ func RegisterPlatformExperiments(doc *apidocs.Doc, experiments *platformexperime
 			"X-Total-Count response header.",
 	}, a.listPlatformExperiments)
 
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "get-job-cost", Method: "GET", Path: "/experiments/{id}/cost",
 		Summary: "Get what a job actually cost", Tags: []string{"platform-experiments"},
 		Description: "Actual consumption, not the admission-time estimate: confirmed-alive hours and the " +
@@ -124,7 +124,7 @@ func RegisterPlatformExperiments(doc *apidocs.Doc, experiments *platformexperime
 			"The estimate is returned alongside so the two can be compared.",
 	}, a.getJobCost)
 
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "get-platform-experiment", Method: "GET", Path: "/platform-experiments/{id}",
 		Summary: "Get a platform experiment", Tags: []string{"platform-experiments"},
 		Description: "Returns status, budget, the stage ladder, the list of signed-up agents and prior_runs, the closed runs of the same project and repository that its agents and coordinator read as their own. consumed_accelerator_hours is what it has spent of its budget, the whole spend once it is closed. status_reason says why it is in its status, in every status. duration_hours count from the moment the run starts, which a running one holds in starts_at, and ends_at is that start plus duration_hours. A running one reads agents_starting while no researcher's machine is running yet: the first one that is sets started_at, and the platform closes it at agents_due_at (close_reason agents_not_started) when none comes up. From then it reads running, and researchers_done once every researcher has finished, was cut or lost its machine with no restart left: nobody is left to submit a job, the platform still closes it only at ends_at, and waits_for names who writes the summary and closes it before, its coordinator where the platform hosts one and its owner otherwise. A closed one reads its close_reason. An open one says why it is not running yet. Without a baseline that is where the measuring stands: baseline_measuring (an agent of role baseline is at work, and the platform declares its job when it finishes), baseline_required (none is at work and none left a job to declare: one is added), baseline_undeclared (they left several jobs and one is declared with PATCH), baseline_declaring (the platform is about to declare the one job), or what the platform's declaration of that one job is refused for, by the reasons of PATCH baseline_job_id: budget_below_baseline, baseline_breaks_constraint, baseline_missing_metric. With a baseline: starts_at_ahead, no_researchers, budget_spent, or starting when nothing is missing: the request that declares the baseline or adds the researcher starts the run itself. The message says what the state waits for and who acts, with the hl command, and to an agent it begins with that agent's own next step: an agent of role baseline is told to measure, and any other that its jobs are refused until the start. Nothing else says what an open platform experiment waits for.repository is the code it works on, owner/name on GitHub, " +
@@ -134,7 +134,7 @@ func RegisterPlatformExperiments(doc *apidocs.Doc, experiments *platformexperime
 			"status_reason says where a draft stands: planning, revising, proposed (proposed_at is set and it waits to be accepted) or declined (declined_at and declined_reason are set, there is nothing to accept, and it waits to be revised or closed). Either answer waits until proposal_expires_at, when the platform closes the draft.",
 	}, a.getPlatformExperiment)
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "update-platform-experiment", Method: "PATCH", Path: "/platform-experiments/{id}",
 		Summary: "Change fields of a platform experiment", Tags: []string{"platform-experiments"},
 		Description: "Takes only the fields that change; a field left out keeps its value, and a body with none answers 422 nothing_to_change. " +
@@ -162,7 +162,7 @@ func RegisterPlatformExperiments(doc *apidocs.Doc, experiments *platformexperime
 			"The project, the repository, the agent image, the stages and the default quota tier are fixed at creation and are no fields of this body.",
 	}, a.updatePlatformExperiment)
 
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "get-platform-experiment-signup", Method: "GET", Path: "/platform-experiments/{id}/signups/{agent_id}",
 		Summary: "Read an agent's signup", Tags: []string{"platform-experiments"},
 		Description: "What an agent was signed up as: its name, its role, which decides whether it is ranked and cut, and the flavor, " +
@@ -170,7 +170,7 @@ func RegisterPlatformExperiments(doc *apidocs.Doc, experiments *platformexperime
 			"404 if that agent is not signed up to this platform experiment — not signed up is not a role.",
 	}, a.getPlatformExperimentSignup)
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "close-platform-experiment", Method: "POST", Path: "/platform-experiments/{id}/close",
 		Summary: "Close a platform experiment", Tags: []string{"platform-experiments"},
 		Description: "Terminal: every still-running job is evicted (reason experiment_closed) and " +
@@ -182,7 +182,7 @@ func RegisterPlatformExperiments(doc *apidocs.Doc, experiments *platformexperime
 			"409 invalid_transition for one already closed, which changes nothing.",
 	}, a.closePlatformExperiment)
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "remove-platform-experiment", Method: "DELETE", Path: "/platform-experiments/{id}", DefaultStatus: http.StatusNoContent,
 		Summary: "Remove a platform experiment", Tags: []string{"platform-experiments"},
 		Description: "Takes the platform experiment off the platform for every account: its lists, its reads and those of everything in it, its hypotheses, jobs, " +
@@ -192,7 +192,7 @@ func RegisterPlatformExperiments(doc *apidocs.Doc, experiments *platformexperime
 			"Its agents and its coordinator are told with platform_experiment.removed. 404 for one removed before.",
 	}, a.removePlatformExperiment)
 
-	apidocs.Register(doc, apidocs.AudienceStaff, huma.Operation{
+	register(doc, auth.AudienceStaff, huma.Operation{
 		OperationID: "reopen-platform-experiment", Method: "POST", Path: "/platform-experiments/{id}/reopen",
 		Summary: "Set a closed platform experiment running again", Tags: []string{"platform-experiments"},
 		Description: "Staff only. A run closed early, for one to redeploy the platform, continues as the same run until ends_at: its hypotheses, jobs, branches, brief, baseline and agents stay as the close left them. " +
@@ -204,7 +204,7 @@ func RegisterPlatformExperiments(doc *apidocs.Doc, experiments *platformexperime
 			"400 invalid_request for a coordinator_model on a run with no hosted coordinator.",
 	}, a.reopenPlatformExperiment)
 
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "get-platform-experiment-results", Method: "GET", Path: "/platform-experiments/{id}/results",
 		Summary: "Final standings and operator summary", Tags: []string{"platform-experiments"},
 		Description: "Per-metric standings, best-first, derived from the metrics store on every read " +

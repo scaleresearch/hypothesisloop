@@ -6,9 +6,9 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 type agentTypeList struct {
@@ -24,29 +24,29 @@ type agentTypesAPI struct {
 }
 
 // RegisterAgentTypes registers the agent types of an org on the shared API document.
-func RegisterAgentTypes(doc *apidocs.Doc, types *accounts.AgentTypes) {
+func RegisterAgentTypes(doc *Doc, types *accounts.AgentTypes) {
 	a := agentTypesAPI{types: types}
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "list-agent-types", Method: "GET", Path: "/orgs/{id}/agent-types", Tags: []string{"agent-types"},
 		Summary: "List the agent types an org's agents may run as",
 		Description: "The built-in agent types, read-only for everyone, and the org's own, archived ones included, each with its current version and how many agents and coordinators whose run goes on run it now. " +
 			"An agent type is a role (researcher, baseline, coordinator or planner), a system prompt and settings: researchers, pool entries and added agents name one by id as agent_type (flavor on a signup).",
 	}, a.list)
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "get-agent-type", Method: "GET", Path: "/orgs/{id}/agent-types/{type_id}", Tags: []string{"agent-types"},
 		Summary:     "Read an agent type with its current version",
 		Description: "A built-in agent type or one of the org's own. Another org's is not found.",
 	}, a.get)
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "list-agent-type-versions", Method: "GET", Path: "/orgs/{id}/agent-types/{type_id}/versions", Tags: []string{"agent-types"},
 		Summary:     "List every version of an agent type",
 		Description: "The newest first. A version is never changed: each edit made the next one.",
 	}, a.versions)
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "get-agent-type-version", Method: "GET", Path: "/orgs/{id}/agent-types/{type_id}/versions/{version}", Tags: []string{"agent-types"},
 		Summary: "Read one version of an agent type",
 	}, a.version)
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "create-agent-type", Method: "POST", Path: "/orgs/{id}/agent-types", Tags: []string{"agent-types"}, DefaultStatus: http.StatusCreated,
 		Summary: "Make an agent type of an org",
 		Description: "At version 1, from a role, a prompt and settings, or as a copy of an agent type the org reads (from), which is how a built-in one is changed. " +
@@ -54,7 +54,7 @@ func RegisterAgentTypes(doc *apidocs.Doc, types *accounts.AgentTypes) {
 			"Only the org's administrators make one: a member is refused with 403. 422 invalid_agent_type for a prompt or settings an agent could not run with; " +
 			"409 agent_type_limit once the org has 100 types that are not archived.",
 	}, a.create)
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "edit-agent-type", Method: "PUT", Path: "/orgs/{id}/agent-types/{type_id}", Tags: []string{"agent-types"},
 		Summary: "Make the next version of an org's agent type",
 		Description: "Inserts the next version and makes it current, which every agent and coordinator of the type runs, and in the same write tells each whose run goes on with agent.instructions; " +
@@ -63,19 +63,19 @@ func RegisterAgentTypes(doc *apidocs.Doc, types *accounts.AgentTypes) {
 			"409 version_conflict when if_version is not current, archived for an archived type; 422 invalid_agent_type for a prompt or settings an agent could not run with; " +
 			"429 edit_rate_limited once 60 versions of the type were made in the last hour.",
 	}, a.edit)
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "restore-agent-type", Method: "POST", Path: "/orgs/{id}/agent-types/{type_id}/restore", Tags: []string{"agent-types"},
 		Summary: "Make an earlier version of an org's agent type current again",
 		Description: "Inserts the next version with the prompt and settings of version, makes it current and tells every agent and coordinator of the type whose run goes on with agent.instructions, as an edit does. " +
 			"Restoring what the current version holds makes no version. Name and description stay as they are. " +
 			"Only the org's administrators restore, and nobody a built-in type (builtin_read_only). 404 for a version the type does not have, 409 archived for an archived type, 429 edit_rate_limited as for an edit.",
 	}, a.restore)
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "list-agent-type-events", Method: "GET", Path: "/orgs/{id}/agent-types/{type_id}/events", Tags: []string{"agent-types"},
 		Summary:     "List every change of an agent type",
 		Description: "The newest first: who created, edited, renamed, described, archived or restored it, when, and the version it was at after. Nothing is ever removed from it.",
 	}, a.events)
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "archive-agent-type", Method: "POST", Path: "/orgs/{id}/agent-types/{type_id}/archive", Tags: []string{"agent-types"},
 		Summary: "Archive an org's agent type",
 		Description: "An archived type takes no new agent and is no longer edited; nothing is deleted. " +

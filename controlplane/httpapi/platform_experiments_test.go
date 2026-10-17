@@ -10,15 +10,15 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
-	"go.uber.org/zap"
 )
 
 type noExperimentStore struct{ fakeStore }
@@ -33,7 +33,7 @@ func (noExperimentStore) ListAgentQuotas(context.Context, string) ([]*domain.Age
 
 func TestQuotasOfAnUnknownPlatformExperimentAreNotFound(t *testing.T) {
 	r := authtest.Router(authtest.Staff)
-	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	doc := NewDoc(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	svc := newSignupTestService(t, noExperimentStore{})
 	registerPlatformExperiments(doc, svc.WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning))
 
@@ -63,7 +63,7 @@ func (pagedExperiments) CountPlatformExperiments(context.Context, db.PlatformExp
 func TestThePlatformExperimentListRefusesAPageOverTheMaximum(t *testing.T) {
 	var read []int
 	r := authtest.Router(authtest.Staff)
-	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	doc := NewDoc(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	registerPlatformExperiments(doc, newSignupTestService(t, pagedExperiments{limits: &read}).WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning))
 
 	for _, list := range []string{"/platform-experiments"} {
@@ -118,7 +118,7 @@ func TestCloseAndSummaryAnswerThePlatformExperimentAndRefuseByReason(t *testing.
 	svc := newSignupTestService(t, store)
 	placement := authtest.Placement{PlatformExperiments: map[string]domain.Tenancy{"pe-1": {PlatformExperimentID: "pe-1", ProjectID: "prj-a", OrgID: "org-a"}}}
 	r := authtest.Router(authtest.As(waitingPerson))
-	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
+	doc := NewDoc(r, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
 	registerPlatformExperiments(doc, svc.WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning))
 
 	if code, out := call(t, r, "PUT", "/platform-experiments/pe-1/summary", `{"summary":"what was found"}`); code != http.StatusOK || out["id"] != "pe-1" || out["summary"] != "what was found" {
@@ -177,7 +177,7 @@ func TestResultsTheMetricsStoreRefusesAreAnInternalErrorAndNotNotFound(t *testin
 	}))
 	defer metricsDB.Close()
 	r := authtest.Router(authtest.Staff)
-	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	doc := NewDoc(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	svc := reaching(platformexperiments.NewPlatformExperimentsService(constraintResultsStore{}, platformexperimentstest.Settings, zap.NewNop(), metricsDB.URL, 3*time.Minute), domain.CPUType)
 	registerPlatformExperiments(doc, svc.WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning))
 

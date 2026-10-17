@@ -18,7 +18,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/registry"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 var (
@@ -62,7 +61,7 @@ func newRegistryAs(t *testing.T, caller auth.Principal) *registryAs {
 	for _, h := range []*domain.Hypothesis{fixture.own, fixture.rivals, unowned} {
 		store.jobs = append(store.jobs, jobOn("job-"+h.ID, h.ID, domain.StatusFailed))
 	}
-	RegisterRegistry(apidocs.New(fixture.router, "test", "1.0.0", "", auth.NewAccess(watchTenancy), zap.NewNop()), svc, zap.NewNop())
+	RegisterRegistry(NewDoc(fixture.router, "test", "1.0.0", "", auth.NewAccess(watchTenancy), zap.NewNop()), svc, zap.NewNop())
 	return fixture
 }
 

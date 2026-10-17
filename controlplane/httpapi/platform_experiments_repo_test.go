@@ -12,14 +12,14 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"go.uber.org/zap"
+
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
-	"go.uber.org/zap"
 )
 
 const experimentBase = `
@@ -46,7 +46,7 @@ func repoAPI(t *testing.T, caller authtest.As, repos *fakeRepositories) (*create
 		PlatformExperiments: map[string]domain.Tenancy{},
 	}
 	router := authtest.Router(caller)
-	doc := apidocs.New(router, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
+	doc := NewDoc(router, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
 	registerPlatformExperiments(doc, svc.WithRepositories(repos).WithPlanning(testPlanning).WithGitProxy("https://api.test/git"))
 	return store, func(method, path string, body any) *httptest.ResponseRecorder {
 		var payload bytes.Buffer

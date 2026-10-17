@@ -11,7 +11,6 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 type joinedAgentsBody struct {
@@ -33,12 +32,12 @@ type experimentAgentsAPI struct {
 
 // RegisterExperimentAgents registers how agents join and leave a platform experiment. graph is
 // where a finish reads what the agent left open, and launch what joining needs beyond the store.
-func RegisterExperimentAgents(doc *apidocs.Doc, experiments *platformexperiments.PlatformExperimentsService, graph platformexperiments.Hypotheses, launch platformexperiments.AgentLaunch, logger *zap.Logger) {
+func RegisterExperimentAgents(doc *Doc, experiments *platformexperiments.PlatformExperimentsService, graph platformexperiments.Hypotheses, launch platformexperiments.AgentLaunch, logger *zap.Logger) {
 	if launch.DefaultModel == "" || launch.SigningSecret == "" || launch.MaxHosted <= 0 || graph == nil {
 		panic("httpapi.RegisterExperimentAgents: every field of the agent launch and the hypothesis graph are required")
 	}
 	a := experimentAgentsAPI{experiments: experiments, graph: graph, launch: launch, access: doc.Access, logger: logger}
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "add-platform-experiment-agent", Method: "POST", Path: "/platform-experiments/{id}/agents",
 		Summary: "Add one agent to a platform experiment", Tags: []string{"platform-experiments"},
 		DefaultStatus: 201,
@@ -60,7 +59,7 @@ func RegisterExperimentAgents(doc *apidocs.Doc, experiments *platformexperiments
 			"and its job is the only one an open experiment accepts. It takes no share at the start, and what it spent is taken from the budget before the others' shares are carved.",
 	}, a.add)
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "list-platform-experiment-agents", Method: "GET", Path: "/platform-experiments/{id}/agents",
 		Summary: "List the agents of a platform experiment", Tags: []string{"platform-experiments"},
 		Description: "Every agent that joined, in the order they did, with its role, what it was launched with and actor, whose credential added it. No token is listed. " +
@@ -73,7 +72,7 @@ func RegisterExperimentAgents(doc *apidocs.Doc, experiments *platformexperiments
 			"While the platform experiment is open, every agent but those of role baseline waits for the start and carries status_reason: the reason the platform experiment is not running yet, and that no machine is asked for the agent before it is. Its instance reads waiting until then. One that closed before its run started leaves each of them status_reason never_launched, whose message gives the close_reason and why it closed.A hosted agent whose machine is asked for and not running yet, its instance reading requested or starting, carries status_reason instance_starting with how long ago the machine was asked for: a start in progress, and a failed one reads stopped with end_reason.",
 	}, a.list)
 
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "remove-platform-experiment-agent", Method: "DELETE", Path: "/platform-experiments/{id}/agents/{agent_id}",
 		Summary: "Remove an agent from a platform experiment that has not started", Tags: []string{"platform-experiments"},
 		DefaultStatus: http.StatusNoContent,
@@ -84,7 +83,7 @@ func RegisterExperimentAgents(doc *apidocs.Doc, experiments *platformexperiments
 			"A coordinator's token removes only an agent it added itself (actor.kind coordinator in the roster): 403 agent_not_added_by_coordinator for one a person or an API key added, which its owner removes.",
 	}, a.remove)
 
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "finish-platform-experiment-agent", Method: "POST", Path: "/platform-experiments/{id}/agents/{agent_id}/finish",
 		Summary: "Say that an agent has nothing left to do", Tags: []string{"platform-experiments"},
 		DefaultStatus: 200,

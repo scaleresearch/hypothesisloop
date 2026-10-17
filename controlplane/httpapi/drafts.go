@@ -10,7 +10,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 type experimentDraftBody struct {
@@ -37,28 +36,28 @@ type draftsAPI struct {
 }
 
 // RegisterExperimentDrafts registers the drafts a project keeps of new platform experiments.
-func RegisterExperimentDrafts(doc *apidocs.Doc, drafts *platformexperiments.Drafts) {
+func RegisterExperimentDrafts(doc *Doc, drafts *platformexperiments.Drafts) {
 	a := draftsAPI{drafts: drafts, access: doc.Access}
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "create-experiment-draft", Method: "POST", Path: "/projects/{id}/experiment-drafts", DefaultStatus: http.StatusCreated,
 		Summary: "Keep a new platform experiment's form as a draft", Tags: []string{"platform-experiments"},
 		MaxBodyBytes: domain.MaxExperimentDraftBytes, Description: draftsDescription,
 	}, a.create)
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "list-experiment-drafts", Method: "GET", Path: "/projects/{id}/experiment-drafts",
 		Summary: "List a project's drafts of new platform experiments", Tags: []string{"platform-experiments"},
 		Description: draftsDescription + " The one changed last comes first.",
 	}, a.list)
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "get-experiment-draft", Method: "GET", Path: "/projects/{id}/experiment-drafts/{draft_id}",
 		Summary: "Read a draft of a new platform experiment", Tags: []string{"platform-experiments"}, Description: draftsDescription,
 	}, a.get)
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "put-experiment-draft", Method: "PUT", Path: "/projects/{id}/experiment-drafts/{draft_id}",
 		Summary: "Replace what a draft of a new platform experiment holds", Tags: []string{"platform-experiments"},
 		MaxBodyBytes: domain.MaxExperimentDraftBytes, Description: draftsDescription,
 	}, a.put)
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "delete-experiment-draft", Method: "DELETE", Path: "/projects/{id}/experiment-drafts/{draft_id}", DefaultStatus: http.StatusNoContent,
 		Summary: "Delete a draft of a new platform experiment", Tags: []string{"platform-experiments"}, Description: draftsDescription,
 	}, a.delete)

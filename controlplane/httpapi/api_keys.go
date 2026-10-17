@@ -8,10 +8,9 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
-func (a accountsAPI) registerAPIKeys(doc *apidocs.Doc) {
+func (a accountsAPI) registerAPIKeys(doc *Doc) {
 	accountsRoute(doc, a.accounts, huma.Operation{
 		OperationID: "create-api-key", Method: "POST", Path: "/orgs/{id}/api-keys", DefaultStatus: http.StatusCreated,
 		Summary: "Create an API key", Tags: []string{"accounts"},

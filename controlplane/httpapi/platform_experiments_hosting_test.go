@@ -12,13 +12,13 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
-	"go.uber.org/zap"
 )
 
 type hostingStore struct {
@@ -41,7 +41,7 @@ func hostingAPI(t *testing.T, repos *fakeRepositories) (*hostingStore, func(body
 	svc := reaching(platformexperiments.NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), "", time.Minute), domain.CPUType)
 	placement := authtest.Placement{Projects: map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}}, PlatformExperiments: map[string]domain.Tenancy{}}
 	router := authtest.Router(ownerOfA)
-	doc := apidocs.New(router, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
+	doc := NewDoc(router, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
 	handler := svc.WithRepositories(repos).WithPlanning(testPlanning).WithGitProxy("https://api.test/git").WithAgentLaunch(platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model-default", CoordinatorModel: "coordinator-default", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted})
 	registerPlatformExperiments(doc, handler)
 	return store, func(body map[string]any) (int, map[string]any) {
@@ -182,7 +182,7 @@ func TestACoordinatorsTokenChangesTheDescriptionAndNothingARunsCostFollowsFrom(t
 			PlatformExperiments: map[string]domain.Tenancy{"pe-1": {PlatformExperimentID: "pe-1", ProjectID: "prj-a", OrgID: "org-a"}},
 		}
 		router := authtest.Router(authtest.As(caller))
-		doc := apidocs.New(router, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
+		doc := NewDoc(router, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
 		registerPlatformExperiments(doc, svc.WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning).WithGitProxy("https://api.test/git").WithAgentLaunch(platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "m", CoordinatorModel: "c", SigningSecret: "a-secret-only-this-test-knows-00", MaxHosted: hostingMaxHosted}))
 		var payload bytes.Buffer
 		if err := json.NewEncoder(&payload).Encode(body); err != nil {

@@ -18,7 +18,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 func get(t *testing.T, r chi.Router, path string) (int, string) {
@@ -35,7 +34,7 @@ func TestSmoke(t *testing.T) {
 	// together exactly as control-service wires them, so /openapi.json and /explore describe
 	// every operation a caller can reach at the single base URL.
 	r := authtest.Router(authtest.Staff)
-	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", agenttypes.PlatformRules, auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	doc := httpapi.NewDoc(r, "hypothesisloop API", "1.0.0", agenttypes.PlatformRules, auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	peHandler := platformexperiments.NewPlatformExperimentsService(nil, domain.QuotaConfig{}, zap.NewNop(), "", time.Minute).WithRepositories(worldRepositories{}).WithPlanning(worldPlanning)
 	httpapi.RegisterAgents(doc, nil)
 	httpapi.RegisterPlatformExperiments(doc, peHandler, zap.NewNop())
@@ -50,7 +49,7 @@ func TestSmoke(t *testing.T) {
 
 	// Cluster-agent traffic is a separate audience on its own prefix, so it keeps its own doc.
 	rc := authtest.Router(authtest.Staff)
-	dc := apidocs.New(rc, "cluster-agent", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	dc := httpapi.NewDoc(rc, "cluster-agent", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	httpapi.RegisterClusterAgent(dc, clusterexchange.NewService(nil, 0, "", 0, nil, 0, nil, 0, "", "https://api.test/git", nil, nil))
 	dc.MountExplore(rc)
 

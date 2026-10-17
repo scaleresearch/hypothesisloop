@@ -15,7 +15,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
@@ -74,7 +73,7 @@ var draftPlacement = authtest.Placement{Projects: map[string]domain.Project{
 func draftCall(t *testing.T, store platformexperiments.ExperimentDraftStore, caller auth.Principal, method, path, body string) (int, string) {
 	t.Helper()
 	r := authtest.Router(authtest.As(caller))
-	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(draftPlacement), zap.NewNop())
+	doc := NewDoc(r, "test", "1.0.0", "", auth.NewAccess(draftPlacement), zap.NewNop())
 	RegisterExperimentDrafts(doc, platformexperiments.NewDrafts(store, zap.NewNop()))
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	if body != "" {

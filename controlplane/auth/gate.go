@@ -37,7 +37,7 @@ func public(path string) bool {
 // Gate is the one check every request passes before any handler runs: it resolves the request's
 // token and hands the handler a context carrying the principal. What the principal may do is
 // declared per route and asked of that principal (RequireStaff, RequireRuntime, an
-// apidocs.Audience). webSockets names the paths a WebSocket client opens with the subprotocol
+// Audience). webSockets names the paths a WebSocket client opens with the subprotocol
 // each speaks: a browser cannot set a header on a WebSocket, so such a client offers its token
 // as the second of two subprotocols.
 func Gate(tokens Tokens, logger *zap.Logger, webSockets map[string]string) func(http.Handler) http.Handler {

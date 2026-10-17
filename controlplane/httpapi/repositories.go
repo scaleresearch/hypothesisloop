@@ -6,9 +6,9 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 type installationsPage struct {
@@ -26,16 +26,16 @@ type repositoriesAPI struct {
 }
 
 // RegisterRepositories registers the GitHub operations on the shared API document.
-func RegisterRepositories(doc *apidocs.Doc, repositories *accounts.Repositories) {
+func RegisterRepositories(doc *Doc, repositories *accounts.Repositories) {
 	a := repositoriesAPI{repositories: repositories}
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "get-github-app", Method: "GET", Path: "/github/app",
 		Summary: "The platform's GitHub App", Tags: []string{"github"},
 		Description: "The GitHub addresses a browser needs for an org's repositories. new_repository_url is where a person creates a repository themselves. " +
 			"install_url is the App's install page; connecting an installation starts at POST /orgs/{id}/github-install-states, whose install_url carries the state. " +
 			"Answers 503 github_not_configured on a deployment that has no GitHub App.",
 	}, a.app)
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "create-github-install-state", Method: "POST", Path: "/orgs/{id}/github-install-states", DefaultStatus: http.StatusCreated,
 		Summary: "Start installing the platform's GitHub App for an org", Tags: []string{"github"},
 		Description: "For an owner of the org, as a user or an API key. Answers a state good once, for the caller, for 15 minutes, and install_url, GitHub's install page of the App carrying it. " +
@@ -43,7 +43,7 @@ func RegisterRepositories(doc *apidocs.Doc, repositories *accounts.Repositories)
 			"GitHub then sends them to the App's setup URL with state, installation_id and setup_action, and POST /github/installations connects the installation. " +
 			"return_to is the page of the UI the install starts from, handed back when it finishes. 422 invalid_request when it is not a path of the UI. 503 github_not_configured.",
 	}, a.beginInstall)
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "create-github-installation", Method: "POST", Path: "/github/installations", DefaultStatus: http.StatusCreated,
 		Summary: "Connect the GitHub App installation an install made or changed", Tags: []string{"github"},
 		Description: "For the user or API key that started the install, while still an owner of its org. state and installation_id are what GitHub handed back to the setup URL. " +
@@ -53,7 +53,7 @@ func RegisterRepositories(doc *apidocs.Doc, repositories *accounts.Repositories)
 			"422 install_state_invalid (made up, used, expired or another person's), installation_not_new (last changed before the install started), installation_gone, installation_suspended, " +
 			"github_permission_missing naming each permission missing as name:level. 502 github_failed, 503 github_not_configured.",
 	}, a.finishInstall)
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "list-github-installations", Method: "GET", Path: "/orgs/{id}/github-installations",
 		Summary: "List the GitHub App installations an org connected", Tags: []string{"github"},
 		Description: "For any member of the org, oldest first. What was recorded at connect: GitHub is not asked, so an installation removed there " +
@@ -61,7 +61,7 @@ func RegisterRepositories(doc *apidocs.Doc, repositories *accounts.Repositories)
 			"account_type is User for a person's own account and Organization, and absent on an installation connected before " +
 			"the type was kept, until it is connected again.",
 	}, a.installations)
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "delete-github-installation", Method: "DELETE", Path: "/orgs/{id}/github-installations/{installation_id}", DefaultStatus: http.StatusNoContent,
 		Summary: "Disconnect a GitHub App installation from an org", Tags: []string{"github"},
 		Description: "For an owner of the org. No git credential is minted through it from then on: a platform experiment that names a repository of " +
@@ -69,21 +69,21 @@ func RegisterRepositories(doc *apidocs.Doc, repositories *accounts.Repositories)
 			"their next credential call answers 409 installation_not_connected. The App stays installed on GitHub: removing it there is the account " +
 			"owner's own step. 404 not_found when the org had not connected it.",
 	}, a.disconnect)
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "make-github-installation-default", Method: "PUT", Path: "/orgs/{id}/github-installations/{installation_id}/default", DefaultStatus: http.StatusNoContent,
 		Summary: "Make a GitHub installation where an org's new repositories are created", Tags: []string{"github"},
 		Description: "For an owner of the org. A platform experiment or draft that names neither repository nor repository_account has its repository created on this installation's account, " +
 			"in place of the default before. With one installation connected that one is used whether or not it is the default; with several and none the default, " +
 			"such a create is refused 422 repository_account_required. Disconnecting the default leaves none. 404 not_found when the org has not connected it.",
 	}, a.makeDefault)
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "check-github-installation", Method: "GET", Path: "/orgs/{id}/github-installations/{installation_id}/check", DefaultStatus: http.StatusNoContent,
 		Summary: "Check with GitHub that a connected installation still works", Tags: []string{"github"},
 		Description: "For any member of the org. Asks GitHub now whether the App is still installed on the account and has granted every permission the App asks for (app-manifest.json), " +
 			"the check a create runs on the account it creates on. 204 when it has. 422 installation_gone when GitHub removed it, installation_suspended when its owner suspended it, github_permission_missing naming what it has not granted, " +
 			"each with what to do. 404 not_found when the org has not connected it. 502 github_failed, 503 github_not_configured.",
 	}, a.check)
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "list-github-repositories", Method: "GET", Path: "/orgs/{id}/github-repositories",
 		Summary: "List the repositories an org's GitHub installations cover", Tags: []string{"github"},
 		Description: "For any member of the org: what a platform experiment of the org may name as its repository, sorted by name. q keeps the " +

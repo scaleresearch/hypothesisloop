@@ -9,9 +9,9 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 type planningAPI struct {
@@ -20,9 +20,9 @@ type planningAPI struct {
 
 // RegisterPlanning registers the way from one sentence to a running platform experiment: a
 // draft, the planner's proposal, and the person's acceptance.
-func RegisterPlanning(doc *apidocs.Doc, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
+func RegisterPlanning(doc *Doc, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
 	a := planningAPI{platformExperimentsAPI{experiments: experiments, access: doc.Access, logger: logger}}
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "put-decline", Method: "PUT", Path: "/platform-experiments/{id}/decline",
 		Summary: "Decline to propose, with the reason", Tags: []string{"platform-experiments"},
 		Description: "Written by a draft's planner and by nobody else, while the platform experiment is a draft (409 not_a_draft after), when the goal cannot be made into an experiment: " +
@@ -30,7 +30,7 @@ func RegisterPlanning(doc *apidocs.Doc, experiments *platformexperiments.Platfor
 			"Stored, it answers the goal as a proposal does: the draft carries declined_reason and declined_at and no proposed_at, its status_reason reads declined, a proposal made before is cleared so there is nothing to accept, " +
 			"the planner's machine is kept until planner_ends_at for a revision asked for soon and released then, and the person revises the draft or closes it. It waits for that until proposal_expires_at, as a proposal does, and the platform closes it then with close_reason proposal_expired. The next proposal clears the reason.",
 	}, a.putDecline)
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "revise-draft", Method: "POST", Path: "/platform-experiments/{id}/revise",
 		Summary: "Ask a draft's planner to change its proposal, or to try again after it declined", Tags: []string{"platform-experiments"},
 		Description: "Takes one sentence or two saying what to change (\"it must fit a 4090\", \"measure latency too\"). The request is recorded with whose credential made it and shown in the draft's revisions; " +
@@ -39,7 +39,7 @@ func RegisterPlanning(doc *apidocs.Doc, experiments *platformexperiments.Platfor
 			"A draft its planner declined is revised the same way: say what the planner lacked, and its reason stays readable until it answers again. " +
 			"409 invalid_transition for anything but a draft its planner has answered: while the planner still works there is nothing to revise yet.",
 	}, a.reviseDraft)
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "accept-draft", Method: "POST", Path: "/platform-experiments/{id}/accept",
 		Summary: "Accept a draft's proposal", Tags: []string{"platform-experiments"},
 		Description: "Makes a proposed draft an open platform experiment in one write: its name, description, metrics, report interval, stages and policies are the proposal's; " +
@@ -56,14 +56,14 @@ func RegisterPlanning(doc *apidocs.Doc, experiments *platformexperiments.Platfor
 			"accelerator_unreachable among them when the proposal's accelerator_type is on no cluster the org's jobs can be placed on now, and no_cluster_for_image when none that has it runs the proposal's image any more; " +
 			"503 hosting_not_configured when nothing could run it. A draft's own planner cannot accept it.",
 	}, a.acceptDraft)
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "hold-draft", Method: "POST", Path: "/platform-experiments/{id}/hold",
 		Summary: "Keep the platform from accepting a draft's proposal by itself", Tags: []string{"platform-experiments"},
 		Description: "For a person who edits the proposal before accepting it: accepts_at is cleared, status_reason reads proposed, and the draft waits for the person to accept it (POST /platform-experiments/{id}/accept, with what they changed), revise it or close it. " +
 			"The baseline agent the proposal signed up is let go of its machine until then, and is given one again with the accept. Holding a draft that is held changes nothing. " +
 			"409 invalid_transition for anything but a draft with a proposal standing.",
 	}, a.holdDraft)
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "put-proposal", Method: "PUT", Path: "/platform-experiments/{id}/proposal",
 		Summary: "Propose the platform experiment a draft becomes", Tags: []string{"platform-experiments"},
 		Description: "Written by a draft's planner and by nobody else, while the platform experiment is a draft (409 not_a_draft after). " +
@@ -78,7 +78,7 @@ func RegisterPlanning(doc *apidocs.Doc, experiments *platformexperiments.Platfor
 			"A refusal lists every problem the check found, each in problems with its reason and message, the first also as the refusal's own reason. " +
 			"With check=true the proposal is checked exactly so and nothing is stored: 422 with every problem, or 200 with the draft as it stands, so a planner tries variants with check and proposes only the one it means.",
 	}, a.putProposal)
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "create-draft", Method: "POST", Path: "/platform-experiments/drafts",
 		Summary: "Start planning a platform experiment from one sentence", Tags: []string{"platform-experiments"},
 		DefaultStatus: 201,

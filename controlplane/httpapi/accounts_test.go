@@ -19,7 +19,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
@@ -156,7 +155,7 @@ func newAccountsWorld(t *testing.T) *world {
 		"staff-user":  {Kind: auth.KindStaff, UserID: "u-staff", Name: "Staff", OrgIDs: []string{}},
 	}
 	router := authtest.Router(tokens{w})
-	doc := apidocs.New(router, "test", "1.0.0", "", auth.NewAccess(placement{memStore: w.store}), zap.NewNop())
+	doc := NewDoc(router, "test", "1.0.0", "", auth.NewAccess(placement{memStore: w.store}), zap.NewNop())
 	connected := func(context.Context) (map[string]bool, error) { return map[string]bool{w.clusterA: true}, nil }
 	autoscalers := func(context.Context) (map[string]bool, error) { return map[string]bool{}, nil }
 	contacts := func(context.Context) (map[string]accounts.Contact, error) { return w.contacts, nil }
@@ -1035,7 +1034,7 @@ func (failingStore) ListProjects(context.Context, []string) ([]*domain.Project, 
 func TestAFailureOfThePlatformIsAnsweredWithoutItsText(t *testing.T) {
 	w := newAccountsWorld(t)
 	router := authtest.Router(tokens{w})
-	doc := apidocs.New(router, "test", "1.0.0", "", auth.NewAccess(placement{memStore: w.store}), zap.NewNop())
+	doc := NewDoc(router, "test", "1.0.0", "", auth.NewAccess(placement{memStore: w.store}), zap.NewNop())
 	connected := func(context.Context) (map[string]bool, error) {
 		return nil, errors.New("metrics store at 10.0.0.7 refused the connection")
 	}

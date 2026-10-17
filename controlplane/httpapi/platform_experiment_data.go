@@ -10,7 +10,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 type experimentDataAPI struct {
@@ -21,16 +20,16 @@ type experimentDataAPI struct {
 
 // RegisterExperimentData registers what a platform experiment's durable data holds and each
 // agent's own key to it.
-func RegisterExperimentData(doc *apidocs.Doc, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
+func RegisterExperimentData(doc *Doc, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
 	a := experimentDataAPI{experiments: experiments, access: doc.Access, logger: logger}
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "get-platform-experiment-data-usage", Method: "GET", Path: "/platform-experiments/{id}/data-usage",
 		Summary: "Get durable-data bytes held, per agent", Tags: []string{"platform-experiments"},
 		Description: "Checkpoint and dataset bytes stored under this platform experiment, totalled and broken down by " +
 			"agent, read live from the object store. max_bytes_per_agent is the ceiling admission refuses a submission " +
 			"against (reason data_quota_exceeded).",
 	}, a.usage)
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "get-agent-data-key", Method: "POST", Path: "/platform-experiments/{id}/data-key",
 		Summary: "Get an agent's own key to the platform experiment's data", Tags: []string{"platform-experiments"},
 		Description: "S3 credentials for a signed-up agent: read everything under shared, write under uri, the prefix " +

@@ -5,8 +5,8 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 // RegisterWatchKinds documents the change stream in the one place an agent already looks. The
@@ -17,8 +17,8 @@ import (
 //
 // The body is domain.EventKinds itself, the same slice the stream validates a query against, so this
 // cannot describe a stream the server does not serve.
-func RegisterWatchKinds(doc *apidocs.Doc) {
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+func RegisterWatchKinds(doc *Doc) {
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "list-watch-kinds", Method: "GET", Path: "/watch/kinds",
 		Summary: "List the event kinds GET /watch can carry", Tags: []string{"watch"},
 		Description: "GET /watch is a WebSocket that pushes small typed records (kind, subject, value, detail, position, occurred_at, cursor) " +

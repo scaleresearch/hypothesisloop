@@ -8,12 +8,12 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"go.uber.org/zap"
+
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
-	"go.uber.org/zap"
 )
 
 type summaryReply struct {
@@ -94,9 +94,9 @@ type jobsAPI struct {
 
 // RegisterJobs registers the public, research-agent-facing scheduler operations at their full
 // paths (/experiments...), then the environment and image credential operations.
-func RegisterJobs(doc *apidocs.Doc, jobs *scheduler.Service, logger *zap.Logger) {
+func RegisterJobs(doc *Doc, jobs *scheduler.Service, logger *zap.Logger) {
 	a := jobsAPI{jobs: jobs, access: doc.Access, logger: logger}
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "submit-experiment", Method: "POST", Path: "/experiments",
 		Summary: "Submit one job", Tags: []string{"experiments"},
 		DefaultStatus: 202,
@@ -120,7 +120,7 @@ func RegisterJobs(doc *apidocs.Doc, jobs *scheduler.Service, logger *zap.Logger)
 			"503 object_store_unavailable while the platform's object store does not answer: a submit measures the agent's durable data there and creates the job's data key in it, so nothing was stored and the same submit is repeated later. " +
 			"Rejections return {reason,message}; an accepted job remains QUEUED until current capacity fits. Every not_admitted_reason comes with its sentence in not_admitted_message.",
 	}, a.submit)
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "list-experiments", Method: "GET", Path: "/experiments",
 		Summary: "List experiments", Tags: []string{"experiments"},
 		Description: "Filter with ?agent_id, ?platform_experiment_id, ?hypothesis_id, ?project_id, " +
@@ -133,7 +133,7 @@ func RegisterJobs(doc *apidocs.Doc, jobs *scheduler.Service, logger *zap.Logger)
 			"Each also carries agent_name, what its agent is called now. " +
 			"Total match count is returned in the X-Total-Count response header.",
 	}, a.list)
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "experiment-stats", Method: "GET", Path: "/experiments/stats",
 		Summary: "Count experiments by status, capacity tier and eviction reason", Tags: []string{"experiments"},
 		Description: "Whole-set totals for the same ?agent/?platform_experiment_id/?hypothesis_id/" +
@@ -152,7 +152,7 @@ func RegisterJobs(doc *apidocs.Doc, jobs *scheduler.Service, logger *zap.Logger)
 			"?group_by=agent or ?group_by=hypothesis adds groups: the same counts once per " +
 			"agent or hypothesis that has a matching experiment, keyed by its id.",
 	}, a.stats)
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "get-experiment", Method: "GET", Path: "/experiments/{id}",
 		Summary: "Get one experiment", Tags: []string{"experiments"},
 		Description: "status flows QUEUED -> SUBMITTED -> RUNNING -> COMPLETED/FAILED/EVICTED/REJECTED, and is CANCELLED once somebody cancelled the job, whether or not it ran. " +
@@ -161,12 +161,12 @@ func RegisterJobs(doc *apidocs.Doc, jobs *scheduler.Service, logger *zap.Logger)
 			"A COMPLETED job of a platform experiment with a constraint metric carries rankable, and when that is false not_rankable_reason: " +
 			"such a job is in no standing.",
 	}, a.get)
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "cancel-experiment", Method: "POST", Path: "/experiments/{id}/cancel",
 		Summary: "Cancel a QUEUED or RUNNING experiment", Tags: []string{"experiments"},
 		Description: "Credits are refunded. Answers the job, whose status is CANCELLED from then on. 409 invalid_transition for a job that has ended, with the status it ended in: a cancelled one is CANCELLED there as everywhere.",
 	}, a.cancel)
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "write-experiment-summary", Method: "POST", Path: "/experiments/{id}/summary",
 		Summary: "File a summary for a finished job", Tags: []string{"experiments"},
 		Description: "The finding of a finished job, filed by its agent when the result says something: what it showed and why. Body: {\"summary\": \"...\"}. " +

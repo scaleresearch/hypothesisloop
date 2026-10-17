@@ -6,9 +6,9 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 // accountsAPI serves who exists and what they own: orgs, their members and invites, projects,
@@ -23,8 +23,8 @@ type nameBody struct {
 
 // accountsRoute registers one accounts operation and passes every error it returns through
 // accounts.Service.Answer.
-func accountsRoute[I, O any](doc *apidocs.Doc, svc *accounts.Service, op huma.Operation, handle func(context.Context, *I) (*O, error)) {
-	apidocs.Register(doc, apidocs.AudienceCoordinator, op, func(ctx context.Context, in *I) (*O, error) {
+func accountsRoute[I, O any](doc *Doc, svc *accounts.Service, op huma.Operation, handle func(context.Context, *I) (*O, error)) {
+	register(doc, auth.AudienceCoordinator, op, func(ctx context.Context, in *I) (*O, error) {
 		out, err := handle(ctx, in)
 		if err != nil {
 			return nil, rejected(svc.Answer(op.OperationID, err))
@@ -34,7 +34,7 @@ func accountsRoute[I, O any](doc *apidocs.Doc, svc *accounts.Service, op huma.Op
 }
 
 // RegisterAccounts registers the accounts operations on the shared API document.
-func RegisterAccounts(doc *apidocs.Doc, svc *accounts.Service) {
+func RegisterAccounts(doc *Doc, svc *accounts.Service) {
 	a := accountsAPI{accounts: svc}
 	a.registerMembers(doc)
 	accountsRoute(doc, svc, huma.Operation{

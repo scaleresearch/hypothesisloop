@@ -23,7 +23,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 // principalOf is the caller a test token stands for: the agent or the coordinator a derived
@@ -44,7 +43,7 @@ func platformRoutes(caller auth.Principal) http.Handler {
 	logger := zap.NewNop()
 	r := chi.NewRouter()
 	r.Use(auth.Gate(authtest.As(caller), logger, map[string]string{"/watch": watch.Subprotocol}))
-	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", "", auth.NewAccess(authtest.Placement{}), logger)
+	doc := httpapi.NewDoc(r, "hypothesisloop API", "1.0.0", "", auth.NewAccess(authtest.Placement{}), logger)
 	launch := platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model", SigningSecret: "secret", MaxHosted: 1}
 	experiments := platformexperiments.NewPlatformExperimentsService(nil, domain.QuotaConfig{}, logger, "", time.Minute).WithRepositories(struct{ githost.Provider }{}).
 		WithPlanning(platformexperiments.Planning{Limit: time.Minute, ProposedFor: time.Minute, PlannerKept: time.Minute}).WithAgentLaunch(launch)

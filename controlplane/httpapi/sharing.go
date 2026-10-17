@@ -6,9 +6,9 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 type sharingAPI struct {
@@ -19,13 +19,13 @@ type sharingAPI struct {
 // RegisterSharing registers how staff share a platform experiment with every account and take
 // that back. The staff audience is the whole rule: what sharing lets a caller reach is
 // auth.Access's. A platform experiment is answered as its own routes answer it.
-func RegisterSharing(doc *apidocs.Doc, sharing *platformexperiments.Sharing, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
+func RegisterSharing(doc *Doc, sharing *platformexperiments.Sharing, experiments *platformexperiments.PlatformExperimentsService, logger *zap.Logger) {
 	registerSharing(doc, sharing, platformExperimentsAPI{experiments: experiments, access: doc.Access, logger: logger}.answer)
 }
 
-func registerSharing(doc *apidocs.Doc, sharing *platformexperiments.Sharing, answer func(context.Context, *domain.PlatformExperiment) (*struct{ Body *domain.PlatformExperiment }, error)) {
+func registerSharing(doc *Doc, sharing *platformexperiments.Sharing, answer func(context.Context, *domain.PlatformExperiment) (*struct{ Body *domain.PlatformExperiment }, error)) {
 	a := sharingAPI{sharing: sharing, answer: answer}
-	apidocs.Register(doc, apidocs.AudienceStaff, huma.Operation{
+	register(doc, auth.AudienceStaff, huma.Operation{
 		OperationID: "share-platform-experiment", Method: "POST", Path: "/platform-experiments/{id}/share",
 		Summary: "Show a platform experiment to every account", Tags: []string{"platform-experiments"},
 		Description: "Staff only. Every account then reads the platform experiment and everything in it through the same read routes as its own: " +
@@ -33,7 +33,7 @@ func registerSharing(doc *apidocs.Doc, sharing *platformexperiments.Sharing, ans
 			"or is handed a credential of it, and GET /platform-experiments lists it for every account beside the account's own. " +
 			"What its jobs and agents wrote is shown as it is, so share only what may be read by anyone. Sharing a shared one changes nothing.",
 	}, a.share)
-	apidocs.Register(doc, apidocs.AudienceStaff, huma.Operation{
+	register(doc, auth.AudienceStaff, huma.Operation{
 		OperationID: "unshare-platform-experiment", Method: "POST", Path: "/platform-experiments/{id}/unshare",
 		Summary: "Stop showing a platform experiment to every account", Tags: []string{"platform-experiments"},
 		Description: "Staff only. From the next request on the platform experiment is read by its own org alone, and an open watch stream of another org's caller ends at its next check.",

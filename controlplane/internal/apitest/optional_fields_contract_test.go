@@ -14,7 +14,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 // A field added to an existing request body must not become required, and huma makes it required
@@ -60,7 +59,7 @@ func TestFieldsAddedToExistingRequestBodiesStayOptional(t *testing.T) {
 func openAPISpec(t *testing.T) map[string]any {
 	t.Helper()
 	r := authtest.Router(authtest.Staff)
-	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", agenttypes.PlatformRules, auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	doc := httpapi.NewDoc(r, "hypothesisloop API", "1.0.0", agenttypes.PlatformRules, auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	launch := platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: "contract-test-signing-secret", MaxHosted: 20}
 	platformExperiments := platformexperiments.NewPlatformExperimentsService(nil, domain.QuotaConfig{}, zap.NewNop(), "", time.Minute).WithRepositories(worldRepositories{}).WithPlanning(worldPlanning).WithAgentLaunch(launch)
 	httpapi.RegisterAgents(doc, nil)

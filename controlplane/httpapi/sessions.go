@@ -10,7 +10,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 type storedSession struct {
@@ -37,25 +36,25 @@ type sessionsAPI struct {
 
 // RegisterSessions registers where a hosted agent and a hosted coordinator keep their model
 // session, so that it outlives the machine they run on.
-func RegisterSessions(doc *apidocs.Doc, sessions *platformexperiments.Sessions, logger *zap.Logger) {
+func RegisterSessions(doc *Doc, sessions *platformexperiments.Sessions, logger *zap.Logger) {
 	a := sessionsAPI{sessions: sessions, access: doc.Access, logger: logger}
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "put-agent-session", Method: "PUT", Path: "/platform-experiments/{id}/agents/{agent_id}/session",
 		Summary: "Store an agent's model session", Tags: []string{"platform-experiments"},
 		MaxBodyBytes: domain.MaxAgentSessionBytes, Description: sessionDescription,
 	}, a.putAgent)
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
+	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "get-agent-session", Method: "GET", Path: "/platform-experiments/{id}/agents/{agent_id}/session",
 		Summary: "Read an agent's stored model session", Tags: []string{"platform-experiments"}, Description: sessionDescription,
 	}, a.getAgent)
 	// A coordinator's last turn is the one that closes the experiment, so its session is one of
 	// the writes its token keeps after the close, until the token ends with the wind-down.
-	apidocs.Register(doc, apidocs.AudienceCoordinator, apidocs.AfterClose(huma.Operation{
+	register(doc, auth.AudienceCoordinator, afterClose(huma.Operation{
 		OperationID: "put-coordinator-session", Method: "PUT", Path: "/platform-experiments/{id}/coordinator/session",
 		Summary: "Store the hosted coordinator's model session", Tags: []string{"platform-experiments"},
 		MaxBodyBytes: domain.MaxAgentSessionBytes, Description: sessionDescription,
 	}), a.putCoordinator)
-	apidocs.Register(doc, apidocs.AudienceCoordinator, huma.Operation{
+	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "get-coordinator-session", Method: "GET", Path: "/platform-experiments/{id}/coordinator/session",
 		Summary: "Read the hosted coordinator's stored model session", Tags: []string{"platform-experiments"}, Description: sessionDescription,
 	}, a.getCoordinator)
