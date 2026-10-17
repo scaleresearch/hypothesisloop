@@ -107,7 +107,7 @@ ON CONFLICT (id) DO NOTHING`, b.ID, b.Name, b.Description, string(b.Role), strin
 		if _, err := tx.Exec(ctx, `UPDATE agent_types SET archived_at = NULL WHERE id = $1`, b.ID); err != nil {
 			return nil, false, err
 		}
-		if err := recordEventTx(ctx, tx, b.ID, domain.AgentTypeCreated, current.CurrentVersion, fmt.Sprintf("release %d", release), platform); err != nil {
+		if err := recordEventTx(ctx, tx, b.ID, domain.AgentTypeRestored, current.CurrentVersion, fmt.Sprintf("release %d", release), platform); err != nil {
 			return nil, false, err
 		}
 	}
