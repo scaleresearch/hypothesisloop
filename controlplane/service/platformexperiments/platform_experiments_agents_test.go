@@ -303,7 +303,7 @@ func (f *rosterStore) RemoveAgent(_ context.Context, _, agentID string, _ func(c
 			return nil
 		}
 	}
-	return db.ErrNotSignedUp
+	return domain.ErrNotSignedUp
 }
 
 var agentsTestPlacement = authtest.Placement{
@@ -855,7 +855,7 @@ func (f *rosterStore) FinishAgent(_ context.Context, _, agentID, reason string) 
 		}
 		return db.ErrSignupClosed
 	}
-	return db.ErrNotSignedUp
+	return domain.ErrNotSignedUp
 }
 
 func (f *rosterStore) AddDesiredQuotaUsageOne(context.Context, *domain.AgentQuota) error { return nil }

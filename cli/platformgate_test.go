@@ -48,7 +48,7 @@ func platformRoutes(caller auth.Principal) http.Handler {
 	platformexperiments.RegisterHuma(doc, platformexperiments.NewHandler(nil, logger), experiments)
 	platformexperiments.RegisterAgentsHuma(doc, experiments, struct{ platformexperiments.Hypotheses }{})
 	platformexperiments.RegisterPlanningHuma(doc, experiments)
-	platformexperiments.RegisterDataUsageHuma(doc, platformexperiments.NewDataUsageHandler(nil, nil, nil, 0, logger))
+	httpapi.RegisterExperimentData(doc, nil, logger)
 	httpapi.RegisterSessions(doc, nil, logger)
 	accounts.RegisterHuma(doc, accounts.NewHandler(nil, nil, nil, nil, nil, "secret", accounts.RuntimeAddresses{}, accounts.Limits{MaxOrgsPerUser: 1, MaxProjectsPerOrg: 1}, logger))
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(scheduler.NewService(nil, nil, nil,

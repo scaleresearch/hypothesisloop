@@ -271,7 +271,6 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		sharing:             platformexperiments.NewSharing(db.NewPlatformExperimentsStore(pool), logger),
 		instructions:        platformexperiments.NewInstructionsService(db.NewPlatformExperimentsStore(pool), modelDefaults(pcfg), logger),
 		agentTypes:          accounts.NewAgentTypesHandler(db.NewAgentTypesStore(pool), logger),
-		dataUsage:           platformexperiments.NewDataUsageHandler(dataStore, store, peSvc, pcfg.DataStore.MaxBytesPerAgent, logger),
 		sessions:            platformexperiments.NewSessions(dataStore),
 		drafts:              platformexperiments.NewDrafts(db.NewExperimentDraftsStore(pool), logger),
 		accounts: accounts.NewHandler(db.NewAccountsStore(pool), store, connectedClusters, autoscaledClusters, clusterContacts, pcfg.Auth.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Services.PublicAPIURL, MetricsURL: pcfg.Runtimes.MetricsURL, Registry: pcfg.Runtimes.Registry, ImageTag: pcfg.Runtimes.ImageTag, RegistryPlainHTTP: pcfg.Runtimes.RegistryPlainHTTP},
@@ -285,8 +284,8 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 			*db.PlatformExperimentsStore
 			*db.EnvironmentsStore
 		}{db.NewPlatformExperimentsStore(pool), store.EnvironmentsStore}, gitHost, logger),
-		modelProxy: modelProxy,
-		modelUsage: peSvc,
+		modelProxy:  modelProxy,
+		experiments: peSvc,
 	}, logger)
 
 	return &http.Server{
@@ -304,7 +303,6 @@ type routes struct {
 	platformExperiments *platformexperiments.PlatformExperimentsHandler
 	hypotheses          platformexperiments.Hypotheses
 	sharing             *platformexperiments.Sharing
-	dataUsage           *platformexperiments.DataUsageHandler
 	sessions            *platformexperiments.Sessions
 	instructions        *platformexperiments.InstructionsService
 	drafts              *platformexperiments.Drafts
@@ -317,7 +315,7 @@ type routes struct {
 	clusterAgent        *clusterexchange.Handler
 	gitProxy            *gitproxy.Proxy
 	modelProxy          *modelproxy.Proxy
-	modelUsage          *platformexperiments.PlatformExperimentsService
+	experiments         *platformexperiments.PlatformExperimentsService
 }
 
 // webSockets are the paths a WebSocket client opens, with the subprotocol that carries its token.
@@ -369,7 +367,7 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 	platformexperiments.RegisterAgentsHuma(doc, h.platformExperiments, h.hypotheses)
 	platformexperiments.RegisterPlanningHuma(doc, h.platformExperiments)
 	httpapi.RegisterSharing(doc, h.sharing, h.platformExperiments.Answer)
-	platformexperiments.RegisterDataUsageHuma(doc, h.dataUsage)
+	httpapi.RegisterExperimentData(doc, h.experiments, logger)
 	httpapi.RegisterSessions(doc, h.sessions, logger)
 	httpapi.RegisterInstructions(doc, h.instructions)
 	httpapi.RegisterExperimentDrafts(doc, h.drafts)
@@ -377,7 +375,7 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 	accounts.RegisterAgentTypesHuma(doc, h.agentTypes)
 	accounts.RegisterRepositoriesHuma(doc, h.repositories)
 	scheduler.RegisterHuma(doc, h.scheduler)
-	httpapi.RegisterModelUsage(doc, h.modelUsage, logger)
+	httpapi.RegisterModelUsage(doc, h.experiments, logger)
 	registry.RegisterHuma(doc, h.registry)
 	// /watch itself cannot be registered here (it is an upgrade), but its vocabulary can be, so
 	// an agent reading /explore learns what the stream carries rather than having to be told.

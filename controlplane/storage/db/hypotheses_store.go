@@ -228,7 +228,7 @@ VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, $8)`
 }
 
 // holdOpenPlatformExperiment refuses a hypothesis write to a closed platform experiment with
-// ErrPlatformExperimentClosed, whoever makes it. It holds the row until tx ends, so a close waits
+// domain.ErrPlatformExperimentClosed, whoever makes it. It holds the row until tx ends, so a close waits
 // for a write that passed and a write that waited for a close sees it.
 func holdOpenPlatformExperiment(ctx context.Context, tx pgx.Tx, platformExperimentID string) error {
 	var status domain.PlatformExperimentStatus
@@ -240,7 +240,7 @@ func holdOpenPlatformExperiment(ctx context.Context, tx pgx.Tx, platformExperime
 		return err
 	}
 	if status == domain.PlatformExpClosed {
-		return fmt.Errorf("%w: %s", ErrPlatformExperimentClosed, platformExperimentID)
+		return fmt.Errorf("%w: %s", domain.ErrPlatformExperimentClosed, platformExperimentID)
 	}
 	return nil
 }

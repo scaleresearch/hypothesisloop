@@ -53,11 +53,11 @@ func TestAHypothesisWriteHoldsOffACloseAndNoneIsTakenAfterIt(t *testing.T) {
 	}
 
 	err = events.Emit(ctx, func(stamp domain.Stamp) ([]domain.Event, error) { return nil, stamp.RequireOpen(pe) })
-	if !errors.Is(err, ErrPlatformExperimentClosed) {
-		t.Errorf("a graph write after the close: got = %v, want %v", err, ErrPlatformExperimentClosed)
+	if !errors.Is(err, domain.ErrPlatformExperimentClosed) {
+		t.Errorf("a graph write after the close: got = %v, want %v", err, domain.ErrPlatformExperimentClosed)
 	}
-	if _, err := hypotheses.CreateHypothesisComment(ctx, hypothesis, pe, "", person, "after the close"); !errors.Is(err, ErrPlatformExperimentClosed) {
-		t.Errorf("a comment after the close: got = %v, want %v", err, ErrPlatformExperimentClosed)
+	if _, err := hypotheses.CreateHypothesisComment(ctx, hypothesis, pe, "", person, "after the close"); !errors.Is(err, domain.ErrPlatformExperimentClosed) {
+		t.Errorf("a comment after the close: got = %v, want %v", err, domain.ErrPlatformExperimentClosed)
 	}
 	if count, err := hypotheses.CountCommentsByHypothesis(ctx, hypothesis); err != nil || count != 1 {
 		t.Errorf("comments kept: got = (%d, %v), want only the one made while open", count, err)

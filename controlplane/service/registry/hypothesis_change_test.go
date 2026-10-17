@@ -10,7 +10,6 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
-	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/graphdb"
 )
 
@@ -155,11 +154,11 @@ func TestAClosedExperimentKeepsItsIdeas(t *testing.T) {
 	h := registerAdas(t, svc, "warmup helps")
 	svc.events.(*recordedEvents).closed = map[string]bool{"pe-1": true}
 
-	if _, err := svc.EditHypothesis(context.Background(), h.ID, "warmup hurts"); !errors.Is(err, db.ErrPlatformExperimentClosed) {
-		t.Errorf("EditHypothesis on a closed experiment: got = %v, want %v", err, db.ErrPlatformExperimentClosed)
+	if _, err := svc.EditHypothesis(context.Background(), h.ID, "warmup hurts"); !errors.Is(err, domain.ErrPlatformExperimentClosed) {
+		t.Errorf("EditHypothesis on a closed experiment: got = %v, want %v", err, domain.ErrPlatformExperimentClosed)
 	}
-	if err := svc.RemoveHypothesis(context.Background(), h.ID); !errors.Is(err, db.ErrPlatformExperimentClosed) {
-		t.Errorf("RemoveHypothesis on a closed experiment: got = %v, want %v", err, db.ErrPlatformExperimentClosed)
+	if err := svc.RemoveHypothesis(context.Background(), h.ID); !errors.Is(err, domain.ErrPlatformExperimentClosed) {
+		t.Errorf("RemoveHypothesis on a closed experiment: got = %v, want %v", err, domain.ErrPlatformExperimentClosed)
 	}
 }
 

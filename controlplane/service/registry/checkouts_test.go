@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
 // checkoutStore answers that others work on the hypothesis already.
@@ -46,7 +45,7 @@ func TestACheckoutIsRecordedAndOneOfAClaimedHypothesisSaysWhoHasIt(t *testing.T)
 		}
 	}
 
-	if _, err := svc.CheckOut(context.Background(), hyp, "agent-elsewhere", "hl/pe-1/x/idea"); !errors.Is(err, db.ErrNotSignedUp) || len(store.recorded) != 2 {
+	if _, err := svc.CheckOut(context.Background(), hyp, "agent-elsewhere", "hl/pe-1/x/idea"); !errors.Is(err, domain.ErrNotSignedUp) || len(store.recorded) != 2 {
 		t.Errorf("an agent outside the platform experiment: err = %v (recorded %v), want ErrNotSignedUp and nothing recorded", err, store.recorded)
 	}
 }

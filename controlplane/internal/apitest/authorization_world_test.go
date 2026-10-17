@@ -256,7 +256,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 	platformexperiments.RegisterAgentsHuma(doc, peHandler, worldGraph{world: w})
 	platformexperiments.RegisterPlanningHuma(doc, peHandler)
 	httpapi.RegisterSharing(doc, nil, peHandler.Answer)
-	platformexperiments.RegisterDataUsageHuma(doc, platformexperiments.NewDataUsageHandler(nil, nil, nil, 0, zap.NewNop()))
+	httpapi.RegisterExperimentData(doc, nil, zap.NewNop())
 	httpapi.RegisterSessions(doc, nil, logger)
 	httpapi.RegisterExperimentDrafts(doc, nil)
 	accounts.RegisterHuma(doc, accounts.NewHandler(nil, nil, nil, nil, nil, worldSecret, accounts.RuntimeAddresses{}, accounts.Limits{MaxOrgsPerUser: 3, MaxProjectsPerOrg: 10}, logger))

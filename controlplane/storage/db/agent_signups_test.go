@@ -189,8 +189,8 @@ func TestAnAgentIsRemovedOnlyBeforeTheExperimentStarts(t *testing.T) {
 	if in, _ := pes.IsSignedUp(ctx, pe, ids[0]); in {
 		t.Error("the removed agent is still signed up")
 	}
-	if err := pes.RemoveAgent(ctx, pe, ids[0], nil); !errors.Is(err, ErrNotSignedUp) {
-		t.Errorf("remove twice: got = %v, want = ErrNotSignedUp", err)
+	if err := pes.RemoveAgent(ctx, pe, ids[0], nil); !errors.Is(err, domain.ErrNotSignedUp) {
+		t.Errorf("remove twice: got = %v, want = domain.ErrNotSignedUp", err)
 	}
 	if err := pes.RemoveAgent(ctx, "pe-that-does-not-exist", ids[1], nil); !errors.Is(err, ErrSignupClosed) {
 		t.Errorf("remove from no experiment: got = %v, want = ErrSignupClosed", err)

@@ -29,8 +29,8 @@ func TestAgentDataKeyIsCreatedOnceEvenByConcurrentFirstCalls(t *testing.T) {
 		return domain.DataKey{AccessKeyID: "AK-" + uuid.New().String()[:8], SecretAccessKey: "SK"}, nil
 	}
 
-	if _, err := store.AgentDataKey(ctx, pe, agent, create); !errors.Is(err, ErrNotSignedUp) {
-		t.Fatalf("before signup: err = %v, want ErrNotSignedUp", err)
+	if _, err := store.AgentDataKey(ctx, pe, agent, create); !errors.Is(err, domain.ErrNotSignedUp) {
+		t.Fatalf("before signup: err = %v, want domain.ErrNotSignedUp", err)
 	}
 	if ok, err := store.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: agent, Role: domain.SignupRoleCompetitor}); err != nil || !ok {
 		t.Fatalf("signup = %v %v", ok, err)
@@ -67,8 +67,8 @@ func TestAgentDataKeyIsCreatedOnceEvenByConcurrentFirstCalls(t *testing.T) {
 	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET status = 'closed' WHERE id = $1`, pe); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.AgentDataKey(ctx, pe, agent, create); !errors.Is(err, ErrPlatformExperimentClosed) {
-		t.Fatalf("after close: err = %v, want ErrPlatformExperimentClosed", err)
+	if _, err := store.AgentDataKey(ctx, pe, agent, create); !errors.Is(err, domain.ErrPlatformExperimentClosed) {
+		t.Fatalf("after close: err = %v, want domain.ErrPlatformExperimentClosed", err)
 	}
 }
 

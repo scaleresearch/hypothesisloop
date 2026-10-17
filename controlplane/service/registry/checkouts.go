@@ -11,7 +11,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
-	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
 // Checkout is what a checkout of a hypothesis answers: the branch recorded and who else works on
@@ -33,7 +32,7 @@ func (s *Service) CheckOut(ctx context.Context, hyp *domain.Hypothesis, agentID,
 		return nil, fmt.Errorf("registry.CheckOut: %w", err)
 	}
 	if signup == nil {
-		return nil, db.ErrNotSignedUp
+		return nil, domain.ErrNotSignedUp
 	}
 	others, err := s.store.CheckOutHypothesis(ctx, hyp.PlatformExperimentID, hyp.ID, agentID, branch)
 	if err != nil {

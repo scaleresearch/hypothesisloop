@@ -105,9 +105,9 @@ func (h *Handler) hypothesisWriteError(err error) error {
 		return huma.Error400BadRequest(err.Error())
 	case errors.Is(err, ErrBaselineRegistersNoHypothesis):
 		return refusal.Refuse(http.StatusForbidden, "baseline_registers_no_hypothesis", err.Error())
-	case errors.Is(err, db.ErrPlatformExperimentClosed):
+	case errors.Is(err, domain.ErrPlatformExperimentClosed):
 		return refusal.Refuse(http.StatusConflict, "experiment_closed", closedDetail)
-	case errors.Is(err, db.ErrNotSignedUp):
+	case errors.Is(err, domain.ErrNotSignedUp):
 		return refusal.Refuse(http.StatusForbidden, "not_signed_up", err.Error())
 	case errors.Is(err, ErrHypothesisNotOwner):
 		return huma.Error403Forbidden(err.Error())

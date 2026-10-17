@@ -813,7 +813,7 @@ func (s *draftStore) FinishAgent(_ context.Context, _, agentID, reason string) e
 			return nil
 		}
 	}
-	return db.ErrNotSignedUp
+	return domain.ErrNotSignedUp
 }
 
 // A person accepts in one call, and what the run costs is what they state: the proposal's own

@@ -36,8 +36,8 @@ func (e *MessagesRateLimited) Error() string {
 }
 
 // SendAgentMessages stores text as a message from sender to the agent of to, or with to empty to
-// every researcher at work, and returns them, or stores none: ErrPlatformExperimentClosed once the
-// platform experiment closed, ErrNotSignedUp for an agent not in it, ErrAgentEnded for one that
+// every researcher at work, and returns them, or stores none: domain.ErrPlatformExperimentClosed once the
+// platform experiment closed, domain.ErrNotSignedUp for an agent not in it, ErrAgentEnded for one that
 // finished or was cut, ErrNoResearcherAtWork, and *MessagesRateLimited for an agent the same
 // sender sent domain.MaxAgentMessagesPerHour in the last hour. To every researcher, those the
 // sender may not message yet are returned as refused and the rest are sent, and only when none is
@@ -53,11 +53,11 @@ func (s *PlatformExperimentsStore) SendAgentMessages(ctx context.Context, platfo
 	err = tx.QueryRow(ctx, `SELECT status::text FROM platform_experiments WHERE id = $1 FOR SHARE`, platformExpID).Scan(&status)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
-		return nil, nil, ErrNotSignedUp
+		return nil, nil, domain.ErrNotSignedUp
 	case err != nil:
 		return nil, nil, fmt.Errorf("platform_experiments_store.SendAgentMessages: %w", err)
 	case status == string(domain.PlatformExpClosed):
-		return nil, nil, ErrPlatformExperimentClosed
+		return nil, nil, domain.ErrPlatformExperimentClosed
 	}
 
 	if to == nil {
@@ -112,7 +112,7 @@ FOR UPDATE OF s`, platformExpID, string(domain.SignupRolePlanner), to, string(do
 	}
 	for _, agentID := range to {
 		if !found[agentID] {
-			return nil, nil, fmt.Errorf("agent %s: %w", agentID, ErrNotSignedUp)
+			return nil, nil, fmt.Errorf("agent %s: %w", agentID, domain.ErrNotSignedUp)
 		}
 	}
 	if len(kept) == 0 && len(refused) > 0 {
@@ -140,7 +140,7 @@ VALUES ($1, $2, $3, $4, $5, $6, pg_current_xact_id()::text::bigint) RETURNING cr
 
 // SendCoordinatorMessage stores text as a message from sender, a person or a key, to the hosted
 // coordinator of a platform experiment, kept and told as agent.message under
-// domain.CoordinatorRecipient, or stores none: ErrPlatformExperimentClosed once it closed,
+// domain.CoordinatorRecipient, or stores none: domain.ErrPlatformExperimentClosed once it closed,
 // ErrNoCoordinator where the platform hosts none, and *MessagesRateLimited past
 // domain.MaxAgentMessagesPerHour of the sender's in the last hour.
 func (s *PlatformExperimentsStore) SendCoordinatorMessage(ctx context.Context, platformExpID, text string, sender domain.Actor) (*domain.AgentMessage, error) {
@@ -167,7 +167,7 @@ FROM platform_experiments p WHERE p.id = $1 FOR NO KEY UPDATE OF p`, platformExp
 	case err != nil:
 		return nil, fmt.Errorf("platform_experiments_store.SendCoordinatorMessage: %w", err)
 	case status == string(domain.PlatformExpClosed):
-		return nil, ErrPlatformExperimentClosed
+		return nil, domain.ErrPlatformExperimentClosed
 	case !hosted:
 		return nil, ErrNoCoordinator
 	case len(recent) >= domain.MaxAgentMessagesPerHour:

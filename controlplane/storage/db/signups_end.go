@@ -12,7 +12,7 @@ import (
 )
 
 // RemoveAgent takes an agent out of a platform experiment that has not started. ErrSignupClosed
-// once it has, ErrNotSignedUp when the agent is not in it, ErrWorkUnfinished while a job of it is
+// once it has, domain.ErrNotSignedUp when the agent is not in it, ErrWorkUnfinished while a job of it is
 // queued or running, which only an agent of role baseline has then. Only its place goes, and the quota a
 // baseline agent held with it: the agent itself
 // stays in its org however it came to be, as every agent that ever joined does, and can be added
@@ -52,7 +52,7 @@ SELECT s.data_access_key_id,
 FROM experiment_signups s
 WHERE s.platform_experiment_id=$1 AND s.agent_id=$2 FOR UPDATE OF s`, platformExpID, agentID).Scan(&accessKeyID, &inFlight)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrNotSignedUp
+		return domain.ErrNotSignedUp
 	}
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.RemoveAgent: read signup: %w", err)
@@ -100,7 +100,7 @@ var ErrWorkUnfinished = errors.New("the agent has a job in flight")
 
 // FinishAgent records that an agent of a running platform experiment has nothing left to do, or
 // that one that measures the baseline is done in an open one, where its work is. It answers
-// ErrSignupClosed anywhere else, ErrNotSignedUp, and ErrWorkUnfinished. An agent that already
+// ErrSignupClosed anywhere else, domain.ErrNotSignedUp, and ErrWorkUnfinished. An agent that already
 // finished keeps the moment and the reason it has.
 func (s *PlatformExperimentsStore) FinishAgent(ctx context.Context, platformExpID, agentID, reason string) error {
 	tx, err := s.pool.pool.Begin(ctx)
@@ -126,7 +126,7 @@ WHERE s.platform_experiment_id = $1 AND s.agent_id = $2
 FOR UPDATE OF s`, platformExpID, agentID).Scan(&running, &finishedAt, &unfinished)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
-		return ErrNotSignedUp
+		return domain.ErrNotSignedUp
 	case err != nil:
 		return fmt.Errorf("platform_experiments_store.FinishAgent: %w", err)
 	case finishedAt != nil:

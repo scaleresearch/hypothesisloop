@@ -39,7 +39,7 @@ func TestSmoke(t *testing.T) {
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(
 		scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{})))
 	registry.RegisterHuma(doc, registry.NewHandler(nil, nil))
-	platformexperiments.RegisterDataUsageHuma(doc, platformexperiments.NewDataUsageHandler(nil, nil, nil, 0, zap.NewNop()))
+	httpapi.RegisterExperimentData(doc, nil, zap.NewNop())
 	httpapi.RegisterSessions(doc, nil, zap.NewNop())
 	httpapi.RegisterExperimentDrafts(doc, nil)
 	doc.MountExplore(r)

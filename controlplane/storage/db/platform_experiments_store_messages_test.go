@@ -81,8 +81,8 @@ func TestAMessageIsToldToItsAgentAloneAndKept(t *testing.T) {
 		t.Fatalf("kept: got = %+v, want the %d sent, oldest first", kept, 2*domain.MaxAgentMessagesPerHour)
 	}
 
-	if _, _, err := pes.SendAgentMessages(ctx, peID, []string{"nobody"}, "hello", coordinator); !errors.Is(err, ErrNotSignedUp) {
-		t.Errorf("to an agent not signed up: got = %v, want = %v", err, ErrNotSignedUp)
+	if _, _, err := pes.SendAgentMessages(ctx, peID, []string{"nobody"}, "hello", coordinator); !errors.Is(err, domain.ErrNotSignedUp) {
+		t.Errorf("to an agent not signed up: got = %v, want = %v", err, domain.ErrNotSignedUp)
 	}
 	exec(t, pool, `UPDATE experiment_signups SET finished_at = now() WHERE platform_experiment_id = $1`, peID)
 	if _, _, err := pes.SendAgentMessages(ctx, peID, []string{agentID}, "hello", coordinator); !errors.Is(err, ErrAgentEnded) {
@@ -92,8 +92,8 @@ func TestAMessageIsToldToItsAgentAloneAndKept(t *testing.T) {
 		t.Errorf("to every researcher with none at work: got = %v, want = %v", err, ErrNoResearcherAtWork)
 	}
 	exec(t, pool, `UPDATE platform_experiments SET status = 'closed' WHERE id = $1`, peID)
-	if _, _, err := pes.SendAgentMessages(ctx, peID, []string{agentID}, "hello", coordinator); !errors.Is(err, ErrPlatformExperimentClosed) {
-		t.Errorf("once closed: got = %v, want = %v", err, ErrPlatformExperimentClosed)
+	if _, _, err := pes.SendAgentMessages(ctx, peID, []string{agentID}, "hello", coordinator); !errors.Is(err, domain.ErrPlatformExperimentClosed) {
+		t.Errorf("once closed: got = %v, want = %v", err, domain.ErrPlatformExperimentClosed)
 	}
 }
 
@@ -208,8 +208,8 @@ func TestAMessageToTheCoordinatorIsToldToItsStreamAlone(t *testing.T) {
 		t.Fatalf("kept: got = (%d, %v), want the %d sent", len(kept), err, domain.MaxAgentMessagesPerHour)
 	}
 	exec(t, pool, `UPDATE platform_experiments SET status = 'closed' WHERE id = $1`, peID)
-	if _, err := pes.SendCoordinatorMessage(ctx, peID, "hello", staff); !errors.Is(err, ErrPlatformExperimentClosed) {
-		t.Errorf("once closed: got = %v, want = %v", err, ErrPlatformExperimentClosed)
+	if _, err := pes.SendCoordinatorMessage(ctx, peID, "hello", staff); !errors.Is(err, domain.ErrPlatformExperimentClosed) {
+		t.Errorf("once closed: got = %v, want = %v", err, domain.ErrPlatformExperimentClosed)
 	}
 }
 

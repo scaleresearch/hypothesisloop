@@ -487,7 +487,7 @@ func (s *PlatformExperimentsService) RemoveAgent(ctx context.Context, platformEx
 	}
 	err = s.store.RemoveAgent(ctx, platformExpID, agentID, s.dataStore.DeleteDataKey)
 	switch {
-	case errors.Is(err, db.ErrNotSignedUp):
+	case errors.Is(err, domain.ErrNotSignedUp):
 		return refuseSignup(404, "not_signed_up", "agent %s is not in platform experiment %s", agentID, platformExpID)
 	case errors.Is(err, db.ErrSignupClosed):
 		return refuseSignup(409, "experiment_started", "experiment is %s: once started, an agent leaves by being cut or by the experiment closing", pe.Status)
@@ -521,7 +521,7 @@ func (s *PlatformExperimentsService) FinishAgent(ctx context.Context, platformEx
 	}
 	err = s.store.FinishAgent(ctx, platformExpID, agentID, domain.EventDetail(reason))
 	switch {
-	case errors.Is(err, db.ErrNotSignedUp):
+	case errors.Is(err, domain.ErrNotSignedUp):
 		return nil, refuseSignup(404, "not_signed_up", "agent %s is not in platform experiment %s", agentID, platformExpID)
 	case errors.Is(err, db.ErrSignupClosed):
 		pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)

@@ -116,8 +116,8 @@ func TestAnAgentWithNoSignupHereRegistersNoHypothesis(t *testing.T) {
 	store := newPoolStore()
 	svc := poolService(store)
 	_, _, _, _, err := svc.RegisterHypothesis(context.Background(), "agent-elsewhere", adaActor, "pe-1", "warmup helps", buildOnRoot, nil)
-	if !errors.Is(err, db.ErrNotSignedUp) {
-		t.Fatalf("RegisterHypothesis for an agent of another platform experiment: got = %v, want %v", err, db.ErrNotSignedUp)
+	if !errors.Is(err, domain.ErrNotSignedUp) {
+		t.Fatalf("RegisterHypothesis for an agent of another platform experiment: got = %v, want %v", err, domain.ErrNotSignedUp)
 	}
 	var refused *refusal.Refusal
 	if answered := (&Handler{}).hypothesisWriteError(err); !errors.As(answered, &refused) || refused.GetStatus() != http.StatusForbidden || refused.Reason != "not_signed_up" {
@@ -136,7 +136,7 @@ func (s *poolStore) CreateHypothesisComment(_ context.Context, hypothesisID, pla
 		return nil, errors.New("insert failed")
 	}
 	if s.closed[platformExperimentID] {
-		return nil, fmt.Errorf("%w: %s", db.ErrPlatformExperimentClosed, platformExperimentID)
+		return nil, fmt.Errorf("%w: %s", domain.ErrPlatformExperimentClosed, platformExperimentID)
 	}
 	s.comments = append(s.comments, text)
 	s.commentActors = append(s.commentActors, actor)
@@ -352,7 +352,7 @@ func (r *recordedEvents) Emit(_ context.Context, write func(stamp domain.Stamp) 
 	events, err := write(domain.Stamp{Position: r.position, Aborted: func(p int64) (bool, error) { return r.aborted[p], nil },
 		RequireOpen: func(pe string) error {
 			if r.closed[pe] {
-				return fmt.Errorf("%w: %s", db.ErrPlatformExperimentClosed, pe)
+				return fmt.Errorf("%w: %s", domain.ErrPlatformExperimentClosed, pe)
 			}
 			return nil
 		}})

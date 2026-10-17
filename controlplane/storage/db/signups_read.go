@@ -311,11 +311,6 @@ ORDER BY signed_up_at ASC`
 	return agents, rows.Err()
 }
 
-var (
-	ErrNotSignedUp              = errors.New("agent is not signed up to this platform experiment")
-	ErrPlatformExperimentClosed = errors.New("platform experiment is closed")
-)
-
 // AgentDataKey returns the agent's object-store key in a platform experiment. The first call
 // stores what create returns; the signup row is locked meanwhile, so a concurrent first call
 // waits and reads that same key. A failed create stores nothing.
@@ -334,13 +329,13 @@ FROM experiment_signups s JOIN platform_experiments pe ON pe.id = s.platform_exp
 WHERE s.platform_experiment_id = $1 AND s.agent_id = $2
 FOR UPDATE OF s`, platformExpID, agentID).Scan(&key.AccessKeyID, &key.SecretAccessKey, &status)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.DataKey{}, ErrNotSignedUp
+		return domain.DataKey{}, domain.ErrNotSignedUp
 	}
 	if err != nil {
 		return domain.DataKey{}, fmt.Errorf("platform_experiments_store.AgentDataKey: %w", err)
 	}
 	if status == string(domain.PlatformExpClosed) {
-		return domain.DataKey{}, ErrPlatformExperimentClosed
+		return domain.DataKey{}, domain.ErrPlatformExperimentClosed
 	}
 	if key.AccessKeyID != "" {
 		return key, nil

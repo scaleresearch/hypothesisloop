@@ -2,17 +2,10 @@ package platformexperiments
 
 import (
 	"context"
-	"errors"
 	"sort"
 	"strings"
 
-	"github.com/danielgtaylor/huma/v2"
-	"go.uber.org/zap"
-
-	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
-	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
 )
 
@@ -33,127 +26,40 @@ type AgentDataCost struct {
 	ObjectCount int    `json:"object_count"`
 }
 
-// AgentDataKeyStore keeps one object-store key per signup; see db.PlatformExperimentsStore.AgentDataKey.
-type AgentDataKeyStore interface {
-	AgentDataKey(ctx context.Context, platformExperimentID, agentID string, create func(context.Context) (domain.DataKey, error)) (domain.DataKey, error)
-}
-
-// ActiveGate is PlatformExperimentsService.RequireActive.
-type ActiveGate interface {
-	RequireActive(ctx context.Context, platformExperimentID, agentID string) error
-}
-
-// DataUsageHandler serves the durable-data half of what a platform experiment costs, and each
-// agent's own key to that data.
-type DataUsageHandler struct {
-	dataStore *objectstore.Client
-	keys      AgentDataKeyStore
-	// active refuses a key to an agent that was cut or whose platform experiment closed.
-	active           ActiveGate
-	maxBytesPerAgent int64
-	logger           *zap.Logger
-}
-
-// NewDataUsageHandler returns a handler reporting against client, with the same per-agent ceiling
-// admission enforces so a caller can see how close it is to being refused.
-func NewDataUsageHandler(client *objectstore.Client, keys AgentDataKeyStore, active ActiveGate, maxBytesPerAgent int64, logger *zap.Logger) *DataUsageHandler {
-	return &DataUsageHandler{dataStore: client, keys: keys, active: active, maxBytesPerAgent: maxBytesPerAgent, logger: logger}
-}
-
-// RegisterDataUsageHuma registers the durable-data usage operation on doc.
-func RegisterDataUsageHuma(doc *apidocs.Doc, h *DataUsageHandler) {
-	access := doc.Access
-
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
-		OperationID: "get-platform-experiment-data-usage", Method: "GET", Path: "/platform-experiments/{id}/data-usage",
-		Summary: "Get durable-data bytes held, per agent", Tags: []string{"platform-experiments"},
-		Description: "Checkpoint and dataset bytes stored under this platform experiment, totalled and broken down by " +
-			"agent, read live from the object store. max_bytes_per_agent is the ceiling admission refuses a submission " +
-			"against (reason data_quota_exceeded).",
-	}, func(ctx context.Context, in *struct {
-		ID string `path:"id"`
-	}) (*struct{ Body *DataUsage }, error) {
-		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
-			return nil, err
-		}
-		usage, err := h.Usage(ctx, in.ID)
-		if err != nil {
-			return nil, auth.Internal(h.logger, "get platform experiment data usage", err, zap.String("id", in.ID))
-		}
-		return &struct{ Body *DataUsage }{Body: usage}, nil
-	})
-
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
-		OperationID: "get-agent-data-key", Method: "POST", Path: "/platform-experiments/{id}/data-key",
-		Summary: "Get an agent's own key to the platform experiment's data", Tags: []string{"platform-experiments"},
-		Description: "S3 credentials for a signed-up agent: read everything under shared, write under uri, the prefix " +
-			"its jobs write below. The same key on every call, with no expiry. Refused once the platform experiment " +
-			"is closed. `hl data-key` prints it as environment variables.",
-	}, func(ctx context.Context, in *struct {
-		ID   string `path:"id"`
-		Body struct {
-			AgentID string `json:"agent_id"`
-		}
-	}) (*struct{ Body *domain.DataAccess }, error) {
-		if in.Body.AgentID == "" {
-			return nil, huma.Error400BadRequest("agent_id is required")
-		}
-		if err := access.PlatformExperiment(ctx, in.ID); err != nil {
-			return nil, err
-		}
-		if err := access.ActAs(ctx, in.Body.AgentID); err != nil {
-			return nil, err
-		}
-		if err := h.active.RequireActive(ctx, in.ID, in.Body.AgentID); err != nil {
-			return nil, err
-		}
-		dataAccess, err := h.AgentDataAccess(ctx, in.ID, in.Body.AgentID)
-		switch {
-		case errors.Is(err, db.ErrNotSignedUp):
-			return nil, huma.Error404NotFound(err.Error())
-		case errors.Is(err, db.ErrPlatformExperimentClosed):
-			return nil, huma.Error409Conflict(err.Error())
-		case err != nil:
-			return nil, auth.Internal(h.logger, "get agent data key", err, zap.String("id", in.ID))
-		}
-		return &struct{ Body *domain.DataAccess }{Body: dataAccess}, nil
-	})
-}
-
 // AgentDataAccess is the agent's key and the two prefixes it opens. The key is created in the
 // object store on the first call and read from the signup afterwards.
-func (h *DataUsageHandler) AgentDataAccess(ctx context.Context, platformExperimentID, agentID string) (*domain.DataAccess, error) {
-	key, err := h.keys.AgentDataKey(ctx, platformExperimentID, agentID, func(ctx context.Context) (domain.DataKey, error) {
+func (s *PlatformExperimentsService) AgentDataAccess(ctx context.Context, platformExperimentID, agentID string) (*domain.DataAccess, error) {
+	key, err := s.store.AgentDataKey(ctx, platformExperimentID, agentID, func(ctx context.Context) (domain.DataKey, error) {
 		key, err := objectstore.NewDataKey()
 		if err != nil {
 			return domain.DataKey{}, err
 		}
-		return key, h.dataStore.CreateAgentDataKey(ctx, key, platformExperimentID, agentID)
+		return key, s.dataStore.CreateAgentDataKey(ctx, key, platformExperimentID, agentID)
 	})
 	if err != nil {
 		return nil, err
 	}
 	return &domain.DataAccess{
-		URI:             h.dataStore.URI(objectstore.AgentPrefix(platformExperimentID, agentID)),
-		Shared:          h.dataStore.URI(objectstore.PlatformExperimentPrefix(platformExperimentID)),
-		Endpoint:        h.dataStore.Endpoint,
-		Region:          h.dataStore.Region,
+		URI:             s.dataStore.URI(objectstore.AgentPrefix(platformExperimentID, agentID)),
+		Shared:          s.dataStore.URI(objectstore.PlatformExperimentPrefix(platformExperimentID)),
+		Endpoint:        s.dataStore.Endpoint,
+		Region:          s.dataStore.Region,
 		AccessKeyID:     key.AccessKeyID,
 		SecretAccessKey: key.SecretAccessKey,
 	}, nil
 }
 
-// Usage lists the platform experiment's whole prefix once and attributes each object to the agent
+// DataUsage lists the platform experiment's whole prefix once and attributes each object to the agent
 // segment of its key — one request to the store, not one per agent.
-func (h *DataUsageHandler) Usage(ctx context.Context, platformExperimentID string) (*DataUsage, error) {
+func (s *PlatformExperimentsService) DataUsage(ctx context.Context, platformExperimentID string) (*DataUsage, error) {
 	prefix := objectstore.PlatformExperimentPrefix(platformExperimentID)
-	objects, err := h.dataStore.List(ctx, prefix)
+	objects, err := s.dataStore.List(ctx, prefix)
 	if err != nil {
 		return nil, err
 	}
 	bytesByAgent := map[string]int64{}
 	countByAgent := map[string]int{}
-	out := &DataUsage{PlatformExperimentID: platformExperimentID, MaxBytesPerAgent: h.maxBytesPerAgent, ByAgent: []AgentDataCost{}}
+	out := &DataUsage{PlatformExperimentID: platformExperimentID, MaxBytesPerAgent: s.maxDataBytesPerAgent, ByAgent: []AgentDataCost{}}
 	for _, o := range objects {
 		out.TotalBytes += o.SizeBytes
 		agent, _, ok := strings.Cut(strings.TrimPrefix(o.Key, prefix), "/")
