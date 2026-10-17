@@ -5,7 +5,7 @@ import logging
 
 from claude_agent_sdk import ResultMessage
 
-from hypothesisloop_agent import config, session
+from hypothesisloop_agent import session
 from hypothesisloop_agent.claude import cli, stream, transcripts, turns
 from hypothesisloop_agent.claude.store import Store
 
@@ -20,8 +20,7 @@ log = logging.getLogger("llm_agent")
 # and overstates it many times over.
 # Below a smaller model window, the session rotates at this part of the one the CLI reports.
 _CONTEXT_WINDOW_SHARE = 0.75
-_CONTEXT_COMPACTION_THRESHOLD_TOKENS = (min(400_000, int(cli.AUTO_COMPACT_WINDOW_TOKENS * _CONTEXT_WINDOW_SHARE))
-                                        if cli.AUTO_COMPACT_WINDOW_TOKENS else 400_000)
+_CONTEXT_COMPACTION_THRESHOLD_TOKENS = min(400_000, int(cli.AUTO_COMPACT_WINDOW_TOKENS * _CONTEXT_WINDOW_SHARE))
 # A transcript this large rotates too, so that the session still fits what the platform stores.
 _TRANSCRIPT_ROTATION_BYTES = session.MAX_BYTES * 3 // 4
 # A rotation ends the CLI and with it every subagent at work, which a lead then starts again. While
@@ -32,7 +31,7 @@ _TRANSCRIPT_HARD_BYTES = int(session.MAX_BYTES * _HARD_SHARE)
 # Every model call reads the session's whole context again. Researchers whose subagents were live
 # at nearly every turn end carried 0.7-0.85M tokens into each call, about 50M cache-read tokens an
 # hour each, and spent the account's five-hour allowance in three.
-_CONTEXT_CEILING_TOKENS = config.tuning("HL_CONTEXT_CEILING_TOKENS", 500_000)
+_CONTEXT_CEILING_TOKENS = 500_000
 # Ends the handoff of a session rotated with subagents at work.
 _STOPPED_SUBAGENTS = (
     "These subagents were at work when that session ended and stopped with it before they completed:\n"

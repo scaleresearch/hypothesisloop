@@ -21,8 +21,8 @@ DISALLOWED_TOOLS = ["ScheduleWakeup", "Monitor", "TaskCreate", "TaskUpdate", "Ta
 
 # The CLI compacts a session near the model's window, 1M or so, and subagents, which the platform
 # never rotates, re-read 400-450K on every call. Past this window less about 33K it compacts each
-# session, a subagent's too (CLAUDE_CODE_AUTO_COMPACT_WINDOW, 100K to 1M). 0 leaves the CLI's own.
-AUTO_COMPACT_WINDOW_TOKENS = config.tuning("HLAUTO_COMPACT_WINDOW_TOKENS", 200_000)
+# session, a subagent's too (CLAUDE_CODE_AUTO_COMPACT_WINDOW, 100K to 1M).
+AUTO_COMPACT_WINDOW_TOKENS = 200_000
 
 # The CLI defers WebSearch and WebFetch behind ToolSearch by default: a planner had to call
 # ToolSearch "select:WebSearch" first, and in live runs most researchers and planners never
@@ -38,7 +38,7 @@ CLI_ENV = {"ENABLE_TOOL_SEARCH": "false",
            # overage: a subagent whose `hl job wait` returns every 9 min would write its whole
            # context again on each wake. Every call is cached for an hour.
            "ENABLE_PROMPT_CACHING_1H": "1",
-           **({"CLAUDE_CODE_AUTO_COMPACT_WINDOW": str(AUTO_COMPACT_WINDOW_TOKENS)} if AUTO_COMPACT_WINDOW_TOKENS else {})}
+           "CLAUDE_CODE_AUTO_COMPACT_WINDOW": str(AUTO_COMPACT_WINDOW_TOKENS)}
 
 
 def model_env(cfg: config.Config) -> dict[str, str]:
