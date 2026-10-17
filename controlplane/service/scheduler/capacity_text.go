@@ -24,8 +24,6 @@ func describeFootprint(fp domain.Footprint) string {
 				continue
 			}
 			devices = append(devices, strconv.FormatInt(amount, 10)+" x "+key.Name)
-		case domain.ResourceKindExtended:
-			devices = append(devices, strconv.FormatInt(amount, 10)+" x "+key.Name)
 		}
 	}
 	sort.Strings(devices)

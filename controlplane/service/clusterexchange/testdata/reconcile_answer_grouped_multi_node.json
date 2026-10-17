@@ -27,9 +27,6 @@
         "node_selector": {
           "zone": "a"
         },
-        "accelerator_tolerations": [
-          "tenstorrent.com/chip"
-        ],
         "groups": [
           {
             "name": "learner",
@@ -63,12 +60,6 @@
         "topology": {
           "spread_across_hosts": false,
           "same_zone": true
-        },
-        "extra_resources": {
-          "example.com/fpga": "1"
-        },
-        "host_mounts": {
-          "/data": "/mnt/datasets/imagenet"
         }
       },
       "hypothesis": "",
@@ -90,6 +81,9 @@
       },
       "token": "hls_am9iOmpvYi0y.gRh9hADYFl_MMpTp7KZc6cJr3r6mENIQSw2B--33kII",
       "git_url": "https://api.test/git/pe-1.git",
+      "pod_resources": {
+        "hugepages-1Gi": "4Gi"
+      },
       "attempt_count": 0,
       "infra_requeue_count": 0,
       "created_at": "0001-01-01T00:00:00Z",

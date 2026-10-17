@@ -64,7 +64,7 @@ func (c *controlPlane) lastStatus() []clusterapi.StatusReport {
 // the pass, and each is logged when it changes.
 func TestAJobTheRuntimeDidNotCreateIsReportedWithItsReason(t *testing.T) {
 	exec := &captureExecutor{managed: []string{"exp-running"}, uncreatable: map[string]error{
-		"exp-refused": fmt.Errorf("build: %w", &agentexec.Unrunnable{Why: "the job asks for host_mounts, and a rented instance has none"}),
+		"exp-refused": fmt.Errorf("build: %w", &agentexec.Unrunnable{Why: "the job asks for 2 nodes, and a rented instance is one"}),
 		"exp-later":   errors.New(`jobs.batch is forbidden: User "system:serviceaccount:hl:agent" cannot create resource "jobs"`),
 	}}
 	cp := &controlPlane{desired: `[{"id":"exp-running"},{"id":"exp-refused","attempt_count":2},{"id":"exp-later","attempt_count":1},{"id":"exp-fine"}]`}
@@ -101,7 +101,7 @@ func TestAJobTheRuntimeDidNotCreateIsReportedWithItsReason(t *testing.T) {
 	}
 	refused, reported := reports["exp-refused"]
 	if !reported || refused.Phase != "pending" || refused.Reason != clusterapi.PhaseReasonConfigError ||
-		refused.Message != "the job asks for host_mounts, and a rented instance has none" || refused.Attempt == nil || *refused.Attempt != 2 {
+		refused.Message != "the job asks for 2 nodes, and a rented instance is one" || refused.Attempt == nil || *refused.Attempt != 2 {
 		t.Fatalf("the refused job was reported as %+v", refused)
 	}
 	failed, reported := reports["exp-later"]

@@ -69,6 +69,9 @@ func (e *Executor) CreateWorkload(ctx context.Context, exp *clusterapi.DesiredJo
 		failed.labels[LabelDesiredSpecHash] == spec.Labels[LabelDesiredSpecHash] && failed.labels[LabelAttempt] == spec.Labels[LabelAttempt] {
 		return &agentexec.Unrunnable{Reason: failed.reason, Why: failed.message}
 	}
+	if err := e.isolate(ctx); err != nil {
+		return fmt.Errorf("podexec: keep jobs apart before starting %s: %w", exp.ID, err)
+	}
 	e.begin(exp.ID, "create workload", operation{starting: true, labels: spec.Labels, devices: placement.DevicePaths}, func(ctx context.Context) error {
 		err := e.pullImage(ctx, spec.Image, auth)
 		e.recordPull(ctx, exp.ID, spec.Labels, err)

@@ -347,12 +347,6 @@ func TestASubmittedNodeSelectorMayNotNameAPlatformLabel(t *testing.T) {
 	}
 }
 
-func TestASubmittedJobMayNotMountAHostPath(t *testing.T) {
-	exp := validSubmission()
-	exp.Job.HostMounts = map[string]string{"/h": "/"}
-	mustReject(t, exp, "job.host_mounts")
-}
-
 func TestASecretEnvNameAlsoSetInTheOpenIsRejected(t *testing.T) {
 	exp := validSubmission()
 	exp.Job.Env = map[string]string{"HF_TOKEN": "open"}

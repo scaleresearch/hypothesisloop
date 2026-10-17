@@ -73,6 +73,7 @@ func (s *Service) desiredJob(ctx context.Context, exp *domain.Experiment) (*clus
 		Token:        token,
 		GitURL:       domain.GitProxyURL(s.proxyURL, exp.PlatformExperimentID),
 		AttemptCount: exp.AttemptCount,
+		PodResources: s.podResources.Of(exp.AcceleratorType),
 	}
 	job.Job.SecretEnv = exp.SecretEnv
 	if exp.ResolvedJob != nil {

@@ -73,7 +73,7 @@ func (s hugepageSize) reservedPages() (int, error) {
 	return pages, nil
 }
 
-// hugepageMountsFor resolves accelerator_pod_resources's hugepage keys to the hugetlbfs mount
+// hugepageMountsFor resolves the job's pod_resources' hugepage keys to the hugetlbfs mount
 // points of this node. A key that names no hugepage size, a size this node has no mount for, or
 // one it reserved no pages of makes the job unrunnable here: started like that it dies in its
 // device driver with nothing in its phase reason. A count that cannot be read is this node's
@@ -88,43 +88,21 @@ func hugepageMountsFor(podResources map[string]string) ([]string, error) {
 	for _, key := range keys {
 		size, known := hugepageSizes[key]
 		if !known {
-			return nil, &agentexec.Unrunnable{Why: fmt.Sprintf("accelerator_pod_resources[%s] is not a hugepage size a bare node can give a job (it gives hugepages-2Mi and hugepages-1Gi)", key)}
+			return nil, &agentexec.Unrunnable{Why: fmt.Sprintf("pod_resources[%s] is not a hugepage size a bare node can give a job (it gives hugepages-2Mi and hugepages-1Gi)", key)}
 		}
 		if _, err := os.Stat(size.mount); err != nil {
-			return nil, &agentexec.Unrunnable{Why: fmt.Sprintf("accelerator_pod_resources[%s] needs the hugetlbfs mount %s, which this node does not have: %v", key, size.mount, err)}
+			return nil, &agentexec.Unrunnable{Why: fmt.Sprintf("pod_resources[%s] needs the hugetlbfs mount %s, which this node does not have: %v", key, size.mount, err)}
 		}
 		pages, err := size.reservedPages()
 		if err != nil {
 			return nil, fmt.Errorf("podexec: read how many %s pages this node reserved: %w", key, err)
 		}
 		if pages == 0 {
-			return nil, &agentexec.Unrunnable{Why: fmt.Sprintf("accelerator_pod_resources[%s] needs pages of that size, and this node has reserved none (%s is 0)", key, size.reserved)}
+			return nil, &agentexec.Unrunnable{Why: fmt.Sprintf("pod_resources[%s] needs pages of that size, and this node has reserved none (%s is 0)", key, size.reserved)}
 		}
 		mounts = append(mounts, size.mount)
 	}
 	return mounts, nil
-}
-
-// resolveHostMounts validates JobSpec.HostMounts against this node's actual filesystem. A
-// requested host mount that doesn't exist on this node makes the job unrunnable: a job silently
-// running without the dataset it expects at a given path is a correctness bug that looks like a
-// working job, not a visible failure.
-func resolveHostMounts(hostMounts map[string]string) (map[string]string, error) {
-	if len(hostMounts) == 0 {
-		return nil, nil
-	}
-	resolved := make(map[string]string, len(hostMounts))
-	for containerPath, hostPath := range hostMounts {
-		info, err := os.Stat(hostPath)
-		if err != nil {
-			return nil, &agentexec.Unrunnable{Why: fmt.Sprintf("host_mounts[%s]=%q: %v (this node does not have the requested dataset/directory — either it was never populated here, or the job should target a node that has it via node_selector)", containerPath, hostPath, err)}
-		}
-		if !info.IsDir() {
-			return nil, &agentexec.Unrunnable{Why: fmt.Sprintf("host_mounts[%s]=%q is not a directory on this node", containerPath, hostPath)}
-		}
-		resolved[containerPath] = hostPath
-	}
-	return resolved, nil
 }
 
 // Placement is the bare-node analogue of k8sexec.AcceleratorPlacement: which specific local
@@ -142,11 +120,8 @@ type Placement struct {
 //
 // The control plane picks which runtime (k8s or bare-metal) a job lands on; the job spec itself
 // is written against neither in particular. What a job asks for and this node cannot give makes
-// the job unrunnable here, with the reason: extra_resources, which only a k8s device plugin
-// provides, a hugepage size of accelerator_pod_resources with no hugetlbfs mount on this node
-// (see hugepageMountsFor), a host mount that is not there, and more than one node.
-// accelerator_tolerations ask for nothing: they permit landing on a tainted node, and a bare
-// node has no taints, so a job that carries them runs as it would without.
+// the job unrunnable here, with the reason: a hugepage size of its pod_resources with no
+// hugetlbfs mount on this node (see hugepageMountsFor), and more than one node.
 func (e *Executor) BuildContainerSpec(exp *clusterapi.DesiredJob, placement Placement) (containerSpec, error) {
 	// EffectiveJob, never exp.Job directly: the job as admission resolved it lives in
 	// exp.ResolvedJob (see clusterapi.DesiredJob.ResolvedJob).
@@ -168,19 +143,7 @@ func (e *Executor) BuildContainerSpec(exp *clusterapi.DesiredJob, placement Plac
 	if exp.Image == "" {
 		return containerSpec{}, fmt.Errorf("podexec: experiment %s has no image in desired state", exp.ID)
 	}
-	if len(spec.ExtraResources) > 0 {
-		names := make([]string, 0, len(spec.ExtraResources))
-		for name := range spec.ExtraResources {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		return containerSpec{}, &agentexec.Unrunnable{Why: fmt.Sprintf("extra_resources (%s) are given by a Kubernetes device plugin, and this bare node has none", strings.Join(names, ", "))}
-	}
-	hugepageMounts, err := hugepageMountsFor(spec.AcceleratorPodResources)
-	if err != nil {
-		return containerSpec{}, err
-	}
-	readOnlyMounts, err := resolveHostMounts(spec.HostMounts)
+	hugepageMounts, err := hugepageMountsFor(exp.PodResources)
 	if err != nil {
 		return containerSpec{}, err
 	}
@@ -222,16 +185,16 @@ func (e *Executor) BuildContainerSpec(exp *clusterapi.DesiredJob, placement Plac
 		return containerSpec{}, fmt.Errorf("podexec: %w", err)
 	}
 	cs := containerSpec{
-		Name:           containerName(exp.ID),
-		Image:          exp.Image,
-		Command:        workloadenv.Command(exp, spec, group),
-		Env:            env,
-		NanoCPUs:       nanoCPUs,
-		MemoryBytes:    memQty.Value(),
-		ShmSizeBytes:   shmSizeBytes,
-		Devices:        placement.DevicePaths,
-		Mounts:         hugepageMounts,
-		ReadOnlyMounts: readOnlyMounts,
+		Name:         containerName(exp.ID),
+		Image:        exp.Image,
+		Command:      workloadenv.Command(exp, spec, group),
+		Env:          env,
+		NanoCPUs:     nanoCPUs,
+		MemoryBytes:  memQty.Value(),
+		ShmSizeBytes: shmSizeBytes,
+		Devices:      placement.DevicePaths,
+		Mounts:       hugepageMounts,
+		Network:      jobNetwork,
 		Labels: map[string]string{
 			LabelManagedBy:       ManagedByValue,
 			LabelCluster:         e.clusterName,
@@ -298,9 +261,9 @@ func hashContainerSpec(cs containerSpec) (string, error) {
 		StorageOptSize string
 		Devices        []string
 		Mounts         []string
-		ReadOnlyMounts map[string]string
+		Network        string
 		Labels         map[string]string
-	}{cs.Name, cs.Image, cs.Command, cs.Env, cs.NanoCPUs, cs.MemoryBytes, cs.ShmSizeBytes, cs.StorageOptSize, sortedDevices, sortedMounts, cs.ReadOnlyMounts, labels}
+	}{cs.Name, cs.Image, cs.Command, cs.Env, cs.NanoCPUs, cs.MemoryBytes, cs.ShmSizeBytes, cs.StorageOptSize, sortedDevices, sortedMounts, cs.Network, labels}
 	buf, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("podexec: hash desired spec: %w", err)

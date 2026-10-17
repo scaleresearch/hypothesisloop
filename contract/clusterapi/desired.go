@@ -51,6 +51,10 @@ type DesiredJob struct {
 	// AttemptCount numbers the job's generation. A requeue reuses the job's id and advances it,
 	// so every attempt is a distinct desired state and its workload a distinct one.
 	AttemptCount int `json:"attempt_count"`
+	// PodResources is what every node of the job needs beside the device on its accelerator
+	// type, such as the hugepages a Tenstorrent chip's driver maps, from the platform's
+	// accelerator catalog. A job states none of it.
+	PodResources map[string]string `json:"pod_resources,omitempty"`
 }
 
 // EffectiveJob is the job as it should be run: ResolvedJob when admission resolved one, Job
@@ -150,21 +154,10 @@ type JobSpec struct {
 	// omitted entirely.
 	NodeSelector map[string]string `json:"node_selector,omitempty" yaml:"node_selector,omitempty"`
 
-	// AcceleratorTolerations are taint keys the job tolerates so it can land on tainted
-	// accelerator nodes. Kept explicit rather than derived: whether a cluster taints its
-	// accelerator nodes is a property of that cluster, not of the hardware model.
-	AcceleratorTolerations []string `json:"accelerator_tolerations,omitempty" yaml:"accelerator_tolerations,omitempty"`
-
-	// AcceleratorPodResources are extra per-node resource requests an accelerator needs
-	// alongside the device itself (e.g. {"hugepages-1Gi": "4Gi"}). What a type always needs is
-	// the catalog's (AcceleratorType.PodResources) and admission writes it into ResolvedJob, so a
-	// job states only what is its own.
-	AcceleratorPodResources map[string]string `json:"accelerator_pod_resources,omitempty" yaml:"accelerator_pod_resources,omitempty"`
-
 	// Groups expresses a job whose nodes are NOT identical — a learner alongside a fleet of
 	// actors, a parameter server alongside workers. Each group carries its own per-replica
 	// resources, command, args and env; everything that describes the JOB rather than a node
-	// within it (accelerator type, tolerations, node selector, topology, max_retries)
+	// within it (accelerator type, node selector, topology, max_retries)
 	// stays at the top level and is shared by every group.
 	//
 	// Optional. Absent, the job is the identical-nodes shape described by NumNodes and the
@@ -267,24 +260,6 @@ type JobSpec struct {
 	// which silently breaks PyTorch's DataLoader workers and NCCL's shared-memory IPC. Empty
 	// means no explicit /dev/shm volume.
 	ShmSize string `json:"shm_size,omitempty" yaml:"shm_size,omitempty"`
-
-	// ExtraResources requests any k8s extended resource AcceleratorType/AcceleratorCount doesn't
-	// cover — TPUs, other AI accelerators, or anything a device plugin advertises — as plain
-	// quantity strings per node (e.g. {"google.com/tpu": "8"}). Not billed or capped by the quota
-	// system today; passes straight through to pod resource requests/limits so the job can still
-	// get scheduled onto the right hardware.
-	ExtraResources map[string]string `json:"extra_resources,omitempty" yaml:"extra_resources,omitempty"`
-
-	// HostMounts bind-mounts a static, already-populated directory on whichever node the job
-	// lands on, read-only, into the container — keyed by the container path the job expects to
-	// read it at, valued by the host path on the node. This is the platform's lightweight
-	// hostPath-volume equivalent: for data that already exists on disk out of band (a dataset
-	// fetched once, ahead of time), never a fetch-on-demand cache — if the named host path
-	// doesn't exist on the node a job actually gets placed on, the job fails fast (missing mount)
-	// rather than silently running without the data. Because it's node-local, a job only sees the
-	// mount if it lands on a node that has it; NodeSelector is the tool for pinning a job to nodes
-	// known to carry a given mount. Supported identically by both the k8s and bare-metal backends.
-	HostMounts map[string]string `json:"host_mounts,omitempty" yaml:"host_mounts,omitempty"`
 }
 
 // TopologySpec expresses placement requirements for a distributed job's nodes — the difference

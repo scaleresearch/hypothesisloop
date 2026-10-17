@@ -53,7 +53,6 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, imageRe
 		WithDataStore(dataStore, pcfg.ObjectStore.MaxBytesPerAgent)
 
 	schedulerLoop := scheduler.NewLoop(store, expQuotaSvc, clusterReports, grace, logger).
-		WithPodResources(domain.NewPodResources(pcfg.PodResourcesByName)).
 		WithReprioritizer(schedulerSvc).
 		WithHeartbeat(time.Duration(pcfg.Scheduler.LoopHeartbeatSeconds)*time.Second).
 		WithGuaranteedFairnessWindow(time.Duration(pcfg.Scheduler.GuaranteedFairnessWindowSeconds)*time.Second).
@@ -87,6 +86,7 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, imageRe
 		SigningSecret:          pcfg.SigningSecret,
 		ProxyURL:               pcfg.GitProxyURL(),
 		Pulls:                  imageRegistry,
+		PodResources:           domain.NewPodResources(pcfg.PodResourcesByName),
 		Logger:                 logger,
 	})
 

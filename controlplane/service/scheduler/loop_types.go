@@ -114,7 +114,6 @@ type Loop struct {
 	quota         LoopQuotaStore
 	clusters      ClusterCapacity
 	grace         domain.GraceLimits
-	podResources  domain.PodResources
 	reprioritizer Reprioritizer // called after each admission pass
 	trigger       chan struct{}
 	logger        *zap.Logger
@@ -192,12 +191,6 @@ func NewLoop(store LoopStore, quota LoopQuotaStore, clusters ClusterCapacity, gr
 // observed usage at requeue time.
 func (l *Loop) WithQuotaSettler(s QuotaSettler) *Loop {
 	l.settler = s
-	return l
-}
-
-// WithPodResources is what admission writes into every job on a type beside what the job stated.
-func (l *Loop) WithPodResources(p domain.PodResources) *Loop {
-	l.podResources = p
 	return l
 }
 

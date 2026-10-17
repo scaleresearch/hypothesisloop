@@ -2,6 +2,7 @@ package k8sexec
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -24,11 +25,10 @@ func TestBuildJobAddsConfiguredAcceleratorPodResources(t *testing.T) {
 		ID: "hugepage-test", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
 		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
+		PodResources: map[string]string{"hugepages-1Gi": "4Gi"},
 		Job: clusterapi.JobSpec{
 			CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(3), TerminationGracePeriodSeconds: int64Ptr(5),
-			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorPodResources: map[string]string{"hugepages-1Gi": "4Gi"},
-			// The operator requirement must not be weakened by a submitted extra resource.
-			ExtraResources: map[string]string{"hugepages-1Gi": "1Gi"},
+			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole",
 		},
 	}
 
@@ -126,37 +126,35 @@ func TestBuildJobPodGetsNoServiceAccountToken(t *testing.T) {
 	}
 }
 
-func TestBuildJobAddsReadOnlyHostPathVolumeForHostMounts(t *testing.T) {
+// A job tolerates only the taint keyed by the extended resource it requests, so it lands on the
+// accelerator nodes kept for that resource and on no node tainted for another reason.
+func TestBuildJobToleratesOnlyItsAcceleratorsResourceTaint(t *testing.T) {
 	c := &JobWorkloadClient{apiURL: testAPIURL}
-	exp := &clusterapi.DesiredJob{Image: testImage, Launch: "true",
-		Data: testDataAccess(), Token: "test-job-token", GitURL: "https://api.test/git/pe-1.git",
-		ID: "host-mount-test", AgentID: "agent", ProjectID: "project",
-		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
-		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
-		Job: clusterapi.JobSpec{
-			CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(3), TerminationGracePeriodSeconds: int64Ptr(5),
-			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole",
-			HostMounts: map[string]string{"/data/dataset": "/var/lib/hypothesisloop/datasets/example"},
-		},
+	build := func(acceleratorType clusterapi.AcceleratorType, count int, placement AcceleratorPlacement) []corev1.Toleration {
+		t.Helper()
+		exp := &clusterapi.DesiredJob{Image: testImage, Launch: "true",
+			Data: testDataAccess(), Token: "test-job-token", GitURL: "https://api.test/git/pe-1.git",
+			ID: "toleration-test", AgentID: "agent", ProjectID: "project",
+			AcceleratorType: acceleratorType, AcceleratorCount: count,
+			EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
+			Job: clusterapi.JobSpec{
+				CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(3), TerminationGracePeriodSeconds: int64Ptr(5),
+				AcceleratorCount: count, AcceleratorType: acceleratorType,
+			},
+		}
+		job, err := c.BuildJob(exp, placement)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return job.Spec.Template.Spec.Tolerations
 	}
-
-	job, err := c.BuildJob(exp, AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
-	if err != nil {
-		t.Fatal(err)
+	got := build("nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3", 1, nvidiaPlacement)
+	want := []corev1.Toleration{{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("a device plugin job tolerates %+v, want %+v", got, want)
 	}
-	mounts := job.Spec.Template.Spec.Containers[0].VolumeMounts
-	if len(mounts) != 1 || mounts[0].MountPath != "/data/dataset" || !mounts[0].ReadOnly {
-		t.Fatalf("VolumeMounts = %+v, want one read-only mount at /data/dataset", mounts)
-	}
-	vols := job.Spec.Template.Spec.Volumes
-	if len(vols) != 1 || vols[0].Name != mounts[0].Name {
-		t.Fatalf("Volumes = %+v, want one volume named %q", vols, mounts[0].Name)
-	}
-	if vols[0].HostPath == nil || vols[0].HostPath.Path != "/var/lib/hypothesisloop/datasets/example" {
-		t.Fatalf("HostPath volume = %+v, want Path /var/lib/hypothesisloop/datasets/example", vols[0].HostPath)
-	}
-	if vols[0].HostPath.Type == nil || *vols[0].HostPath.Type != corev1.HostPathDirectory {
-		t.Fatalf("HostPath.Type = %v, want HostPathDirectory (fail fast if not present, not DirectoryOrCreate)", vols[0].HostPath.Type)
+	if got := build("tenstorrent.com/chipArch=blackhole", 1, AcceleratorPlacement{DeviceClassName: "tenstorrent.com"}); len(got) != 0 {
+		t.Errorf("a DRA job tolerates %+v, want nothing", got)
 	}
 }
 

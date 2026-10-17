@@ -178,11 +178,6 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 			return &AdmissionError{Reason: ReasonMalformed, Field: "job.node_selector", Message: fmt.Sprintf("job.node_selector may not name %q: labels under %s are set by the platform", label, domain.NodeLabelReservedPrefix)}
 		}
 	}
-	// A host path names the node's own filesystem, its container runtime socket and the
-	// runtime's token among it, so a job that chose one would hold the node and every job on it.
-	if len(exp.Job.HostMounts) > 0 {
-		return &AdmissionError{Reason: ReasonMalformed, Field: "job.host_mounts", Message: "job.host_mounts is not accepted: a job reads its data from its data URI"}
-	}
 	if err := domain.ValidateCommand(exp.Job); err != nil {
 		return &AdmissionError{Reason: ReasonRequired, Field: "job.command", Message: err.Error()}
 	}
@@ -305,13 +300,6 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	if storage > caps.MaxStorageGBPerJob {
 		return &AdmissionError{Reason: ReasonMalformed, Field: "job.storage", Message: fmt.Sprintf("job.storage %.2fGB (x%d nodes) exceeds per-job max %.2fGB", storage/float64(nodes), nodes, caps.MaxStorageGBPerJob)}
 	}
-	// ExtraResources has no billing dimension or per-job cap, but a malformed quantity string
-	// should still be rejected here rather than surfacing later as an opaque Job-creation failure.
-	for name, qty := range exp.Job.ExtraResources {
-		if _, err := jobspec.ParseQuantity(qty); err != nil {
-			return &AdmissionError{Reason: ReasonMalformed, Field: "job.extra_resources", Message: fmt.Sprintf("job.extra_resources[%q]: %s", name, err.Error())}
-		}
-	}
 	if exp.Job.ShmSize != "" {
 		q, err := jobspec.ParseQuantity(exp.Job.ShmSize)
 		if err != nil {
@@ -319,11 +307,6 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 		}
 		if q.Sign() <= 0 {
 			return &AdmissionError{Reason: ReasonMalformed, Field: "job.shm_size", Message: fmt.Sprintf("job.shm_size must be positive (%q)", exp.Job.ShmSize)}
-		}
-	}
-	for name, qty := range exp.Job.AcceleratorPodResources {
-		if _, err := jobspec.ParseQuantity(qty); err != nil {
-			return &AdmissionError{Reason: ReasonMalformed, Field: "job.accelerator_pod_resources", Message: fmt.Sprintf("job.accelerator_pod_resources[%q]: %s", name, err.Error())}
 		}
 	}
 	return nil

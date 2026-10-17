@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"sort"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -236,20 +235,10 @@ func (c *JobWorkloadClient) compileJob(exp *clusterapi.DesiredJob, placement Acc
 		resources.Requests[acceleratorResource] = acceleratorQty
 		resources.Limits[acceleratorResource] = acceleratorQty
 	}
-	for name, qty := range spec.ExtraResources {
+	for name, qty := range exp.PodResources {
 		q, err := resource.ParseQuantity(qty)
 		if err != nil {
-			return nil, fmt.Errorf("workload: extra_resources[%q]: %w", name, err)
-		}
-		resources.Requests[corev1.ResourceName(name)] = q
-		resources.Limits[corev1.ResourceName(name)] = q
-	}
-	// Accelerator-required resources win over job-provided extras: a workload can't lower a
-	// hardware runtime prerequisite its accelerator needs.
-	for name, qty := range spec.AcceleratorPodResources {
-		q, err := resource.ParseQuantity(qty)
-		if err != nil {
-			return nil, fmt.Errorf("workload: accelerator_pod_resources[%q]: %w", name, err)
+			return nil, fmt.Errorf("workload: pod_resources[%q]: %w", name, err)
 		}
 		resources.Requests[corev1.ResourceName(name)] = q
 		resources.Limits[corev1.ResourceName(name)] = q
@@ -354,36 +343,6 @@ func (c *JobWorkloadClient) compileJob(exp *clusterapi.DesiredJob, placement Acc
 			MountPath: "/dev/shm",
 		})
 	}
-	// HostMounts (JobSpec.HostMounts): a static, already-populated directory bind-mounted
-	// read-only from whichever node the pod lands on — the k8s side of the same feature
-	// runtime/bare-metal/internal/podexec implements via a plain bind mount. HostPathType
-	// Directory (not DirectoryOrCreate) makes the kubelet itself fail the pod if the path isn't
-	// actually there, matching the bare-metal backend's fail-fast-at-admission behavior rather
-	// than silently creating an empty directory and running without the data.
-	containerPaths := make([]string, 0, len(spec.HostMounts))
-	for containerPath := range spec.HostMounts {
-		containerPaths = append(containerPaths, containerPath)
-	}
-	sort.Strings(containerPaths)
-	hostPathType := corev1.HostPathDirectory
-	for i, containerPath := range containerPaths {
-		volName := fmt.Sprintf("host-mount-%d", i)
-		volumes = append(volumes, corev1.Volume{
-			Name: volName,
-			VolumeSource: corev1.VolumeSource{
-				HostPath: &corev1.HostPathVolumeSource{
-					Path: spec.HostMounts[containerPath],
-					Type: &hostPathType,
-				},
-			},
-		})
-		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
-			Name:      volName,
-			MountPath: containerPath,
-			ReadOnly:  true,
-		})
-	}
-
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      plan.jobName,
@@ -433,7 +392,7 @@ func (c *JobWorkloadClient) compileJob(exp *clusterapi.DesiredJob, placement Acc
 					Containers:                    []corev1.Container{container},
 					Volumes:                       volumes,
 					Affinity:                      c.buildAffinity(exp.ID, spec, placement, distributed),
-					Tolerations:                   acceleratorTolerations(group.AcceleratorCount, spec.AcceleratorTolerations),
+					Tolerations:                   acceleratorTolerations(group.AcceleratorCount, placement),
 					NodeSelector:                  spec.NodeSelector,
 					TerminationGracePeriodSeconds: &podGrace,
 				},

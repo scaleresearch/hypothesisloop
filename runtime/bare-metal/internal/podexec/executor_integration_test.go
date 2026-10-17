@@ -168,18 +168,3 @@ func TestIntegrationRejectsMultiNode(t *testing.T) {
 		t.Fatal("expected rejection for num_nodes>1")
 	}
 }
-
-// TestIntegrationToleratesTolerations confirms a job that carries accelerator_tolerations builds:
-// they permit a tainted node and ask for nothing, and a bare node has no taints.
-func TestIntegrationToleratesTolerations(t *testing.T) {
-	e := newTestExecutor(t)
-	spec := clusterapi.JobSpec{
-		Image: "busybox", CPU: "0.5", Memory: "64Mi", Storage: "128Mi",
-		MaxRetries: maxRetries(0), TerminationGracePeriodSeconds: int64Ptr(5),
-		AcceleratorTolerations: []string{"x"},
-	}
-	exp := &clusterapi.DesiredJob{Image: testImage, Launch: "true", ID: "tolerations", Job: spec, Data: testDataAccess(), Token: "test-job-token", GitURL: "https://api.test/git/pe-1.git"}
-	if _, err := e.BuildContainerSpec(exp, Placement{}); err != nil {
-		t.Fatalf("a job carrying tolerations was refused: %v", err)
-	}
-}

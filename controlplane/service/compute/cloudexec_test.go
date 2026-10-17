@@ -176,12 +176,8 @@ func TestAJobThatCannotRunAsOneInstanceIsRefused(t *testing.T) {
 	e, p := newTestExecutor(t)
 	twoNodes := job(t, "exp-2", 0, 0)
 	twoNodes.ResolvedJob.NumNodes = 2
-	hostMount := job(t, "exp-3", 0, 0)
-	hostMount.ResolvedJob.HostMounts = map[string]string{"/data": "/mnt/data"}
-	for _, exp := range []*clusterapi.DesiredJob{twoNodes, hostMount} {
-		if err := e.CreateWorkload(context.Background(), exp); err == nil {
-			t.Errorf("%s was rented", exp.ID)
-		}
+	if err := e.CreateWorkload(context.Background(), twoNodes); err == nil {
+		t.Errorf("%s was rented", twoNodes.ID)
 	}
 	if names := p.Names(); len(names) != 0 || e.SupportsMultiNodeJobs() {
 		t.Fatalf("rented %v, multi-node %v", names, e.SupportsMultiNodeJobs())
@@ -575,8 +571,7 @@ func TestAJobARentedInstanceCanNeverRunIsUnrunnableAndAFailedRentIsNot(t *testin
 		spoil func(*clusterapi.JobSpec)
 		says  string
 	}{
-		"host mounts": {func(s *clusterapi.JobSpec) { s.HostMounts = map[string]string{"/data": "/data"} }, "host_mounts"},
-		"two nodes":   {func(s *clusterapi.JobSpec) { s.NumNodes = 2 }, "2 nodes"},
+		"two nodes": {func(s *clusterapi.JobSpec) { s.NumNodes = 2 }, "2 nodes"},
 	} {
 		exp := job(t, "exp-"+strings.ReplaceAll(name, " ", "-"), 0, 0)
 		c.spoil(exp.ResolvedJob)

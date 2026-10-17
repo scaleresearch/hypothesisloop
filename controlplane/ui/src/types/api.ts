@@ -2039,7 +2039,7 @@ export interface components {
             kind: components["schemas"]["TypeKind"];
             /** Format: int64 */
             per_node_available: number;
-            /** @description What the platform adds to every node of a job on this type, by Kubernetes resource name, such as the hugepages a Tenstorrent Blackhole chip's driver maps. A job states none of it: it is added over the job's own accelerator_pod_resources. */
+            /** @description What the platform adds to every node of a job on this type, by Kubernetes resource name, such as the hugepages a Tenstorrent Blackhole chip's driver maps. A job states none of it. */
             pod_resources?: {
                 [key: string]: string;
             };
@@ -3297,10 +3297,6 @@ export interface components {
         JobSpec: {
             /** Format: int64 */
             accelerator_count?: number;
-            accelerator_pod_resources?: {
-                [key: string]: string;
-            };
-            accelerator_tolerations?: string[];
             accelerator_type?: string;
             acceptable_accelerator_types?: string[];
             args?: string[];
@@ -3312,13 +3308,7 @@ export interface components {
             env?: {
                 [key: string]: string;
             };
-            extra_resources?: {
-                [key: string]: string;
-            };
             groups?: components["schemas"]["JobGroup"][];
-            host_mounts?: {
-                [key: string]: string;
-            };
             /** Format: int64 */
             max_retries?: number;
             memory?: string;

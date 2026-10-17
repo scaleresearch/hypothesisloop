@@ -23,7 +23,8 @@ func wireHandler(t *testing.T) *Service {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &Service{dataStore: store, signingSecret: "test-signing-secret-of-enough-length", proxyURL: "https://api.test/git"}
+	return &Service{dataStore: store, signingSecret: "test-signing-secret-of-enough-length", proxyURL: "https://api.test/git",
+		podResources: domain.NewPodResources(map[string]map[string]string{"tenstorrent.com/chipArch=blackhole": {"hugepages-1Gi": "4Gi"}})}
 }
 
 func wireCases() map[string]wireCase {
@@ -49,9 +50,8 @@ func wireCases() map[string]wireCase {
 					Command: []string{"bash", "-c", "python train.py"}, Args: []string{"--lr", "0.1"},
 					Env: map[string]string{"LR": "0.1"}, CPU: "16", Memory: "64Gi", Storage: "200Gi",
 					AcceleratorCount: 1, AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3",
-					NodeSelector:            map[string]string{domain.NodeSlotLabel: "slot-3"},
-					AcceleratorPodResources: map[string]string{"hugepages-1Gi": "4Gi"},
-					ShmSize:                 "8Gi", TerminationGracePeriodSeconds: &shutdown, CheckpointGraceSeconds: &checkpoint,
+					NodeSelector: map[string]string{domain.NodeSlotLabel: "slot-3"},
+					ShmSize:      "8Gi", TerminationGracePeriodSeconds: &shutdown, CheckpointGraceSeconds: &checkpoint,
 				},
 				AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3", AcceleratorCount: 1,
 				EstimatedDurationHours: 2.5, EstimatedCostAccH: 2.5, CapacityTier: domain.CapacityGuaranteed,
@@ -72,7 +72,6 @@ func wireCases() map[string]wireCase {
 					AcceleratorType:            "tenstorrent.com/chipArch=blackhole",
 					AcceptableAcceleratorTypes: []domain.AcceleratorType{"tenstorrent.com/chipArch=wormhole"},
 					NodeSelector:               map[string]string{"zone": "a"},
-					AcceleratorTolerations:     []string{"tenstorrent.com/chip"},
 					Groups: []domain.JobGroup{
 						{Name: "learner", Replicas: 1, CPU: "32", Memory: "128Gi", Storage: "500Gi", AcceleratorCount: 4,
 							AcceleratorType: "tenstorrent.com/chipArch=blackhole", Command: []string{"python", "learn.py"}, Env: map[string]string{"ROLE": "learner"}},
@@ -81,8 +80,6 @@ func wireCases() map[string]wireCase {
 					MaxRetries:                    &retries,
 					TerminationGracePeriodSeconds: &shortShutdown,
 					Topology:                      &domain.TopologySpec{SpreadAcrossHosts: &spread, SameZone: true},
-					ExtraResources:                map[string]string{"example.com/fpga": "1"},
-					HostMounts:                    map[string]string{"/data": "/mnt/datasets/imagenet"},
 				},
 				AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 4,
 				EstimatedDurationHours: 1, CapacityTier: domain.CapacityBurst, Status: domain.StatusRunning,

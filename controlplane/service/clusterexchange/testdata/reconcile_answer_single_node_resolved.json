@@ -64,9 +64,6 @@
         "node_selector": {
           "hypothesisloop.io/slot": "slot-3"
         },
-        "accelerator_pod_resources": {
-          "hugepages-1Gi": "4Gi"
-        },
         "termination_grace_period_seconds": 30,
         "checkpoint_grace_seconds": 120,
         "shm_size": "8Gi"

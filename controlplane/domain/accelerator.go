@@ -52,23 +52,6 @@ func (p PodResources) Of(t AcceleratorType) map[string]string {
 	return p[string(t)]
 }
 
-// Over is a job's accelerator_pod_resources as it runs on t: what the job stated, and over it
-// what the type always needs, so a job states none of that itself.
-func (p PodResources) Over(t AcceleratorType, stated map[string]string) map[string]string {
-	always := p.Of(t)
-	if len(always) == 0 {
-		return stated
-	}
-	out := make(map[string]string, len(stated)+len(always))
-	for name, quantity := range stated {
-		out[name] = quantity
-	}
-	for name, quantity := range always {
-		out[name] = quantity
-	}
-	return out
-}
-
 // TypeKinds is every kind of accelerator type.
 var TypeKinds = []TypeKind{TypeKindAccelerator, TypeKindCPU}
 

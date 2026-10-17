@@ -69,17 +69,14 @@ func (c *JobWorkloadClient) buildAffinity(experimentID string, spec clusterapi.J
 	return aff
 }
 
-// acceleratorTolerations tolerates the taint real accelerator nodes carry (commonly applied by the NVIDIA
-// GPU Operator, e.g. nvidia.com/gpu=present:NoSchedule) so accelerator-requesting pods can land
-// there while non-accelerator workloads stay off. Purely an execution-engine concern the agent
-// never declares in JobSpec: any request with acceleratorCount > 0 gets it automatically.
-func acceleratorTolerations(acceleratorCount int, taintKeys []string) []corev1.Toleration {
-	if acceleratorCount <= 0 || len(taintKeys) == 0 {
+// acceleratorTolerations tolerates the NoSchedule taint keyed by the extended resource a node
+// group's pods request, the one accelerator nodes carry to keep other pods off (the NVIDIA GPU
+// Operator's nvidia.com/gpu, as Kubernetes' ExtendedResourceToleration admission plugin
+// tolerates it). Nothing else is tolerated, so a job never lands on a node tainted for any other
+// reason, a control-plane node among them.
+func acceleratorTolerations(acceleratorCount int, placement AcceleratorPlacement) []corev1.Toleration {
+	if acceleratorCount <= 0 || placement.ResourceName == "" {
 		return nil
 	}
-	out := make([]corev1.Toleration, 0, len(taintKeys))
-	for _, key := range taintKeys {
-		out = append(out, corev1.Toleration{Key: key, Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule})
-	}
-	return out
+	return []corev1.Toleration{{Key: placement.ResourceName, Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}}
 }

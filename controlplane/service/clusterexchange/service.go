@@ -81,6 +81,8 @@ type Service struct {
 	proxyURL string
 	// pulls mints each desired job's image pull login, nil on a deployment that keeps no registry.
 	pulls ImagePulls
+	// podResources is what every node of a job on a type needs beside the device.
+	podResources domain.PodResources
 }
 
 // Config is what a Service is built from.
@@ -98,8 +100,9 @@ type Config struct {
 	SigningSecret          string
 	ProxyURL               string
 	// Pulls is nil on a deployment that keeps no registry, whose images are pulled without a login.
-	Pulls  ImagePulls
-	Logger *zap.Logger
+	Pulls        ImagePulls
+	PodResources domain.PodResources
+	Logger       *zap.Logger
 }
 
 // NewService constructs a Service from cfg.
@@ -110,7 +113,7 @@ func NewService(cfg Config) *Service {
 	}
 	return &Service{store: cfg.Store, connectedWithin: cfg.ConnectedWithin, metrics: cfg.Metrics, observationCadence: cfg.ObservationCadence,
 		dataStore: cfg.DataStore, maxCheckpointGrace: cfg.MaxCheckpointGrace,
-		pricedAcceleratorTypes: priced, maxLogLineChars: cfg.MaxLogLineChars, signingSecret: cfg.SigningSecret, proxyURL: cfg.ProxyURL, pulls: cfg.Pulls, logger: cfg.Logger}
+		pricedAcceleratorTypes: priced, maxLogLineChars: cfg.MaxLogLineChars, signingSecret: cfg.SigningSecret, proxyURL: cfg.ProxyURL, pulls: cfg.Pulls, podResources: cfg.PodResources, logger: cfg.Logger}
 }
 
 // keepPricedAccelerators drops every accelerator type outside the priced catalog from report.

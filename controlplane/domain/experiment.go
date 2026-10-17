@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
-	"github.com/scaleresearch/hypothesisloop/contract/jobspec"
 )
 
 // TriedCluster records one placement of a job that the environment failed: the cluster it was on
@@ -300,11 +299,6 @@ func (e *Experiment) Footprint() Footprint {
 		perNode := NewFootprint()
 		for key, amount := range nodeResources(group) {
 			perNode.Add(nodeResourceKeys[key], amount)
-		}
-		for name, qty := range job.ExtraResources {
-			if q, err := jobspec.ParseQuantity(qty); err == nil {
-				perNode.Add(ResourceKey{Kind: ResourceKindExtended, Name: name}, q.Value())
-			}
 		}
 		fp.AddFootprint(perNode.Scale(int64(group.Replicas)))
 	}

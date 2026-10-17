@@ -75,25 +75,9 @@ job:
   # acceptable_accelerator_types:
   #   - nvidia.com/gpu.product=NVIDIA-A100-80GB-PCIe
 
-  # accelerator_tolerations: taint keys to tolerate so the pod may land on tainted accelerator
-  # nodes (whether a cluster taints them is a property of that cluster, not of the hardware).
-  accelerator_tolerations: [nvidia.com/gpu]
-
-  # accelerator_pod_resources: extra per-node requests of this job's own beside the device.
-  # What a type always needs is the platform's: it adds the hugepages a Tenstorrent chip's
-  # driver maps to every job on that type, so no job states them.
-
   # node_selector: ordinary Kubernetes node selection for anything that is NOT the accelerator —
   # a zone, a disk class, a kernel version. ANDed with wherever the accelerator lives. Optional.
   # node_selector: {topology.kubernetes.io/zone: us-east-1a}
-
-  # extra_resources: any k8s extended resource beyond accelerator_type/accelerator_count — TPUs
-  # (google.com/tpu), other AI accelerators (habana.ai/gaudi, aws.amazon.com/neuron, ...), or
-  # anything else a device plugin advertises. Plain quantity strings per node, like
-  # cpu/memory/storage. Unlike accelerator_count, NOT billed or capped by quota — passes
-  # straight through to the pod's resource requests.
-  # extra_resources:
-  #   google.com/tpu: "8"
 
   # --- Distributed training ------------------------------------------------------------
   # num_nodes > 1 requests a real multi-host distributed run. The backend handles everything

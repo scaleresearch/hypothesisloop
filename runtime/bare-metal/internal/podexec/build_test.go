@@ -12,48 +12,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadenv"
 )
 
-func TestResolveHostMounts(t *testing.T) {
-	t.Run("nil/empty input resolves to nil", func(t *testing.T) {
-		got, err := resolveHostMounts(nil)
-		if err != nil || got != nil {
-			t.Fatalf("resolveHostMounts(nil) = (%v, %v), want (nil, nil)", got, err)
-		}
-	})
-
-	t.Run("existing directory resolves through unchanged", func(t *testing.T) {
-		dir := t.TempDir()
-		got, err := resolveHostMounts(map[string]string{"/data/dataset": dir})
-		if err != nil {
-			t.Fatalf("resolveHostMounts: unexpected error: %v", err)
-		}
-		if got["/data/dataset"] != dir {
-			t.Fatalf("resolveHostMounts = %v, want /data/dataset -> %s", got, dir)
-		}
-	})
-
-	t.Run("missing host path fails fast rather than silently mounting nothing", func(t *testing.T) {
-		missing := filepath.Join(t.TempDir(), "does-not-exist")
-		_, err := resolveHostMounts(map[string]string{"/data/dataset": missing})
-		var unrunnable *agentexec.Unrunnable
-		if !errors.As(err, &unrunnable) || !strings.Contains(unrunnable.Why, missing) {
-			t.Fatalf("resolveHostMounts: err = %v, want an Unrunnable naming the nonexistent host path", err)
-		}
-	})
-
-	t.Run("host path that is a file, not a directory, fails", func(t *testing.T) {
-		f, err := os.CreateTemp(t.TempDir(), "not-a-dir")
-		if err != nil {
-			t.Fatalf("setup: %v", err)
-		}
-		defer f.Close()
-		_, err = resolveHostMounts(map[string]string{"/data/dataset": f.Name()})
-		var unrunnable *agentexec.Unrunnable
-		if !errors.As(err, &unrunnable) {
-			t.Fatalf("resolveHostMounts: err = %v, want an Unrunnable for a host path that is a file", err)
-		}
-	})
-}
-
 // A job on a Tenstorrent chip is given hugepages-1Gi by the platform. Started on a node with no
 // 1 GiB hugetlbfs mount it died in its driver with nothing in its phase reason.
 func TestAJobAskingForWhatTheNodeCannotGiveIsUnrunnable(t *testing.T) {
@@ -71,22 +29,15 @@ func TestAJobAskingForWhatTheNodeCannotGiveIsUnrunnable(t *testing.T) {
 	placement := Placement{DevicePaths: []string{"/dev/tenstorrent/0"}}
 
 	for name, tc := range map[string]struct {
-		change func(*clusterapi.JobSpec)
-		want   string
+		podResources map[string]string
+		want         string
 	}{
-		"a hugepage size with no mount on the node": {func(s *clusterapi.JobSpec) {
-			s.AcceleratorPodResources = map[string]string{"hugepages-1Gi": "4Gi"}
-		}, absent},
-		"a pod resource that is no hugepage size": {func(s *clusterapi.JobSpec) {
-			s.AcceleratorPodResources = map[string]string{"example.com/thing": "1"}
-		}, "accelerator_pod_resources[example.com/thing]"},
-		"extra_resources": {func(s *clusterapi.JobSpec) {
-			s.ExtraResources = map[string]string{"google.com/tpu": "1"}
-		}, "google.com/tpu"},
+		"a hugepage size with no mount on the node": {map[string]string{"hugepages-1Gi": "4Gi"}, absent},
+		"a pod resource that is no hugepage size":   {map[string]string{"example.com/thing": "1"}, "pod_resources[example.com/thing]"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			exp := checkpointWindowExperiment(nil)
-			tc.change(&exp.Job)
+			exp.PodResources = tc.podResources
 			_, err := e.BuildContainerSpec(exp, placement)
 			var unrunnable *agentexec.Unrunnable
 			if !errors.As(err, &unrunnable) || !strings.Contains(unrunnable.Why, tc.want) {
@@ -96,11 +47,10 @@ func TestAJobAskingForWhatTheNodeCannotGiveIsUnrunnable(t *testing.T) {
 	}
 
 	exp := checkpointWindowExperiment(nil)
-	exp.Job.AcceleratorPodResources = map[string]string{"hugepages-2Mi": "64Mi"}
-	exp.Job.AcceleratorTolerations = []string{"nvidia.com/gpu"}
+	exp.PodResources = map[string]string{"hugepages-2Mi": "64Mi"}
 	cs, err := e.BuildContainerSpec(exp, placement)
 	if err != nil {
-		t.Fatalf("BuildContainerSpec refused a hugepage size the node has and a toleration, which asks for nothing: %v", err)
+		t.Fatalf("BuildContainerSpec refused a hugepage size the node has: %v", err)
 	}
 	if len(cs.Mounts) != 1 || cs.Mounts[0] != present {
 		t.Fatalf("mounts = %v, want the node's hugetlbfs mount %s", cs.Mounts, present)
@@ -118,37 +68,6 @@ func TestAJobAskingForWhatTheNodeCannotGiveIsUnrunnable(t *testing.T) {
 	hugepageSizes["hugepages-2Mi"] = hugepageSize{mount: present, reserved: absent}
 	if _, err = e.BuildContainerSpec(exp, placement); err == nil || errors.As(err, &unrunnable) {
 		t.Fatalf("an unreadable count: err = %v, want an error that does not end the job", err)
-	}
-}
-
-// TestHashContainerSpecDetectsReadOnlyMountsDrift guards against a regression where
-// ReadOnlyMounts was omitted from hashContainerSpec's input: reconcile compares this hash
-// against the running container's desired-spec label to decide whether to recreate it, so a
-// change to a job's desired host mounts (different host path or container target) must change
-// the hash, or the running container silently keeps stale/wrong mounts forever.
-func TestHashContainerSpecDetectsReadOnlyMountsDrift(t *testing.T) {
-	base := containerSpec{
-		Name:  "test-container",
-		Image: "example/image:latest",
-		ReadOnlyMounts: map[string]string{
-			"/data/dataset": "/host/dataset-v1",
-		},
-	}
-	changed := base
-	changed.ReadOnlyMounts = map[string]string{
-		"/data/dataset": "/host/dataset-v2",
-	}
-
-	baseHash, err := hashContainerSpec(base)
-	if err != nil {
-		t.Fatalf("hashContainerSpec(base): unexpected error: %v", err)
-	}
-	changedHash, err := hashContainerSpec(changed)
-	if err != nil {
-		t.Fatalf("hashContainerSpec(changed): unexpected error: %v", err)
-	}
-	if baseHash == changedHash {
-		t.Fatal("hashContainerSpec: hash unchanged when ReadOnlyMounts changed — reconcile will never detect this drift")
 	}
 }
 

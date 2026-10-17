@@ -37,12 +37,6 @@ func (e *Executor) buildSpec(exp *clusterapi.DesiredJob) (provider.Spec, error) 
 	if err != nil {
 		return provider.Spec{}, fmt.Errorf("cloudcompute: parse storage %q: %w", group.Storage, err)
 	}
-	// A job that expects a dataset at a host path must not run without it, and a rented instance
-	// has no host of ours to mount from.
-	if len(spec.HostMounts) > 0 {
-		return provider.Spec{}, &agentexec.Unrunnable{Why: "the job asks for host_mounts, and a rented instance has no host of the platform's to mount from"}
-	}
-
 	arch := spec.NodeSelector[clusterapi.NodeArchitectureLabel]
 	if arch == "" {
 		return provider.Spec{}, fmt.Errorf("cloudcompute: experiment %s names no architecture in its node selector (%s)", exp.ID, clusterapi.NodeArchitectureLabel)

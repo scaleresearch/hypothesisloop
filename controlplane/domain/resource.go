@@ -14,9 +14,7 @@ import (
 // ResourceKindCPU/Memory/Storage are the fixed physical dimensions every job participates in
 // (CPU may be zero for an accelerator-only job, but the key always exists).
 // ResourceKindAccelerator is used once per distinct accelerator type requested (Name is the
-// accelerator type, e.g. "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"). ResourceKindExtended covers uncatalogued k8s extended
-// resources (Name is the resource name, e.g. "google.com/tpu") — physical-fit-only, never
-// billed (see JobSpec.ExtraResources's doc comment).
+// accelerator type, e.g. "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3").
 type ResourceKind string
 
 const (
@@ -24,21 +22,19 @@ const (
 	ResourceKindMemory      ResourceKind = "memory"
 	ResourceKindStorage     ResourceKind = "storage"
 	ResourceKindAccelerator ResourceKind = "accelerator"
-	ResourceKindExtended    ResourceKind = "extended"
 )
 
 // ResourceKey identifies one dimension of a Footprint. Name disambiguates within a Kind: an
-// accelerator type, or an extended resource's Kubernetes name, and always empty for
-// CPU/Memory/Storage (one dimension each).
+// accelerator type, and always empty for CPU/Memory/Storage (one dimension each).
 type ResourceKey struct {
 	Kind ResourceKind
 	Name string
 }
 
 // Footprint is a job's (or a cluster's capacity) resource vector in canonical integer units:
-// millicores for CPU, bytes for memory/storage, whole units for accelerators and extended
-// resources. Integer units avoid fractional-CPU precision loss and let dimensions be
-// compared/subtracted with plain integer arithmetic.
+// millicores for CPU, bytes for memory/storage, whole units for accelerators. Integer units
+// avoid fractional-CPU precision loss and let dimensions be compared/subtracted with plain
+// integer arithmetic.
 type Footprint map[ResourceKey]int64
 
 // NewFootprint returns an empty, ready-to-populate Footprint.

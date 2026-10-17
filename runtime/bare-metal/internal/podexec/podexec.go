@@ -86,6 +86,10 @@ type Executor struct {
 	storageQuotaEnforced bool
 	storageQuotaRefusal  string
 	probe                func(context.Context) ([]acceleratorDevice, error)
+	// isolate puts the jobs' network and the host firewall rules that keep jobs apart in place
+	// (see jobnet.go). Every container start is preceded by it, so rules an engine or a firewall
+	// reload displaced are back before the next job runs.
+	isolate func(context.Context) error
 	// life is what the operations a pass starts run under, as they outlive the pass. Cancelling
 	// it is how shutdown stops them.
 	life context.Context
@@ -108,6 +112,7 @@ type engine interface {
 	ContainerLogs(ctx context.Context, containerID string, options client.ContainerLogsOptions) (client.ContainerLogsResult, error)
 	ImageInspect(ctx context.Context, imageID string, inspectOpts ...client.ImageInspectOption) (client.ImageInspectResult, error)
 	ImagePull(ctx context.Context, refStr string, options client.ImagePullOptions) (client.ImagePullResponse, error)
+	networkEngine
 }
 
 // engineCallTimeout bounds every engine call that should answer at once.
@@ -183,14 +188,17 @@ func New(ctx context.Context, cfg Config) (*Executor, error) {
 	for k, v := range cfg.NodeLabels {
 		labels[k] = v
 	}
+	infoCtx, infoCancel := context.WithTimeout(context.Background(), engineCallTimeout)
+	defer infoCancel()
+	info, err := docker.Info(infoCtx, client.InfoOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("podexec: read the engine's info: %w", err)
+	}
+	if err := requireHostFirewall(info); err != nil {
+		return nil, err
+	}
 	storageDir := cfg.StorageDir
 	if storageDir == "" {
-		infoCtx, infoCancel := context.WithTimeout(context.Background(), engineCallTimeout)
-		defer infoCancel()
-		info, err := docker.Info(infoCtx, client.InfoOptions{})
-		if err != nil {
-			return nil, fmt.Errorf("podexec: read the engine's store: %w", err)
-		}
 		if storageDir, err = engineStore(info.Info.DockerRootDir); err != nil {
 			return nil, err
 		}
@@ -202,6 +210,18 @@ func New(ctx context.Context, cfg Config) (*Executor, error) {
 	defer probeCancel()
 	quotaEnforced, quotaRefusal, err := probeStorageQuota(probeCtx, docker)
 	if err != nil {
+		return nil, err
+	}
+	firewall := hostFirewall()
+	isolate := func(ctx context.Context) error {
+		ctx, cancel := context.WithTimeout(ctx, engineCallTimeout)
+		defer cancel()
+		if err := ensureJobNetwork(ctx, docker); err != nil {
+			return err
+		}
+		return firewall.ensure()
+	}
+	if err := isolate(context.Background()); err != nil {
 		return nil, err
 	}
 	return &Executor{
@@ -216,6 +236,7 @@ func New(ctx context.Context, cfg Config) (*Executor, error) {
 		storageQuotaEnforced: quotaEnforced,
 		storageQuotaRefusal:  quotaRefusal,
 		probe:                probeAccelerators,
+		isolate:              isolate,
 		life:                 ctx,
 	}, nil
 }

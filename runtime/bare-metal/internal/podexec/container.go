@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"sort"
 
 	"github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/container"
@@ -111,12 +110,10 @@ type containerSpec struct {
 	StorageOptSize string   // storage-opt "size" value in bytes; empty when not enforced
 	Devices        []string // host device paths, mapped straight through to the container
 	Mounts         []string // host paths bind-mounted read-write at the same path in the container (e.g. a hugetlbfs mount)
-	// ReadOnlyMounts is JobSpec.HostMounts, resolved and validated (see BuildContainerSpec):
-	// container path -> host path, mounted read-only. Distinct from Mounts because a host mount
-	// generally has a different container path than its host path (unlike hugepages) and must
-	// never be writable, since it's shared read-only across concurrent jobs.
-	ReadOnlyMounts map[string]string
-	Labels         map[string]string
+	// Network is the engine network the container runs on, jobNetwork, whose traffic the host
+	// firewall rules see.
+	Network string
+	Labels  map[string]string
 }
 
 // startContainer creates and starts spec detached. Podman/Docker tolerate neither AlreadyExists
@@ -128,21 +125,14 @@ func (e *Executor) startContainer(ctx context.Context, spec containerSpec) error
 		env = append(env, k+"="+v)
 	}
 	devices, deviceRequests := passDevices(spec.Devices)
-	binds := make([]string, 0, len(spec.Mounts)+len(spec.ReadOnlyMounts))
+	binds := make([]string, 0, len(spec.Mounts))
 	for _, m := range spec.Mounts {
 		binds = append(binds, m+":"+m)
 	}
-	containerPaths := make([]string, 0, len(spec.ReadOnlyMounts))
-	for containerPath := range spec.ReadOnlyMounts {
-		containerPaths = append(containerPaths, containerPath)
-	}
-	sort.Strings(containerPaths)
-	for _, containerPath := range containerPaths {
-		binds = append(binds, spec.ReadOnlyMounts[containerPath]+":"+containerPath+":ro")
-	}
 	hostConfig := &container.HostConfig{
-		ShmSize: spec.ShmSizeBytes,
-		Binds:   binds,
+		ShmSize:     spec.ShmSizeBytes,
+		Binds:       binds,
+		NetworkMode: container.NetworkMode(spec.Network),
 		// Without this the engine keeps every byte a training job ever wrote, on the same
 		// filesystem whose free space is reported as storage capacity — a long run fills the node
 		// and takes every other job on it down. Only the tail is ever read (FetchLogTail), so

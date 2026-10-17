@@ -157,6 +157,9 @@ export interface components {
             image_pull?: components["schemas"]["RegistryLogin"];
             job: components["schemas"]["JobSpec"];
             launch: string;
+            pod_resources?: {
+                [key: string]: string;
+            };
             project_id: string;
             resolved_job?: components["schemas"]["JobSpec"];
             /** Format: date-time */
@@ -203,10 +206,6 @@ export interface components {
         JobSpec: {
             /** Format: int64 */
             accelerator_count?: number;
-            accelerator_pod_resources?: {
-                [key: string]: string;
-            };
-            accelerator_tolerations?: string[];
             accelerator_type?: string;
             acceptable_accelerator_types?: string[];
             args?: string[];
@@ -218,13 +217,7 @@ export interface components {
             env?: {
                 [key: string]: string;
             };
-            extra_resources?: {
-                [key: string]: string;
-            };
             groups?: components["schemas"]["JobGroup"][];
-            host_mounts?: {
-                [key: string]: string;
-            };
             /** Format: int64 */
             max_retries?: number;
             memory?: string;

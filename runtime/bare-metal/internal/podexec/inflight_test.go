@@ -56,6 +56,8 @@ type fakeEngine struct {
 	stoppingState string
 	// sizedLists counts the lists that asked for sizes.
 	sizedLists int
+	// networks holds each network created, by name.
+	networks map[string]client.NetworkCreateOptions
 }
 
 func newFakeEngine() *fakeEngine {
@@ -66,7 +68,27 @@ func newFakeEngine() *fakeEngine {
 		gates:     map[string]chan struct{}{}, waiting: map[string]bool{}, pullFailures: map[string]int{},
 		pullAuths:     map[string]string{},
 		stoppingState: "stopping",
+		networks:      map[string]client.NetworkCreateOptions{},
 	}
+}
+
+func (f *fakeEngine) NetworkInspect(_ context.Context, name string, _ client.NetworkInspectOptions) (client.NetworkInspectResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.networks[name]; !ok {
+		return client.NetworkInspectResult{}, errdefs.ErrNotFound
+	}
+	return client.NetworkInspectResult{}, nil
+}
+
+func (f *fakeEngine) NetworkCreate(_ context.Context, name string, options client.NetworkCreateOptions) (client.NetworkCreateResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.networks[name]; ok {
+		return client.NetworkCreateResult{}, errdefs.ErrConflict
+	}
+	f.networks[name] = options
+	return client.NetworkCreateResult{ID: name}, nil
 }
 
 func (f *fakeEngine) sawDeadline(ctx context.Context, kind string) {
@@ -178,6 +200,9 @@ func (f *fakeEngine) ContainerCreate(ctx context.Context, options client.Contain
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if _, ok := f.networks[string(options.HostConfig.NetworkMode)]; !ok {
+		return client.ContainerCreateResult{}, fmt.Errorf("network %q not found", options.HostConfig.NetworkMode)
+	}
 	for _, d := range options.HostConfig.Devices {
 		for name, other := range f.containers {
 			if other.state == "exited" {
@@ -281,9 +306,10 @@ func (f *fakeEngine) ImagePull(ctx context.Context, image string, options client
 
 func newFakeExecutor(f *fakeEngine, devicePaths ...string) *Executor {
 	return &Executor{
-		apiURL: "http://example.invalid:8083",
-		docker: bounded{f},
-		life:   context.Background(),
+		apiURL:  "http://example.invalid:8083",
+		docker:  bounded{f},
+		life:    context.Background(),
+		isolate: func(ctx context.Context) error { return ensureJobNetwork(ctx, f) },
 		probe: func(context.Context) ([]acceleratorDevice, error) {
 			var devices []acceleratorDevice
 			for _, p := range devicePaths {

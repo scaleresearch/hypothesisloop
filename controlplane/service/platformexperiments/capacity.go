@@ -110,7 +110,7 @@ type AcceleratorCapacity struct {
 	AccHPerHour float64 `json:"acch_per_hour,omitempty"`
 	// PodResources is what the platform adds to every node of a job on this type beside the
 	// device, as the catalog states it (accelerator_types[].pod_resources).
-	PodResources map[string]string `json:"pod_resources,omitempty" doc:"What the platform adds to every node of a job on this type, by Kubernetes resource name, such as the hugepages a Tenstorrent Blackhole chip's driver maps. A job states none of it: it is added over the job's own accelerator_pod_resources."`
+	PodResources map[string]string `json:"pod_resources,omitempty" doc:"What the platform adds to every node of a job on this type, by Kubernetes resource name, such as the hugepages a Tenstorrent Blackhole chip's driver maps. A job states none of it."`
 }
 
 // ErrLiveCapacityUnconfigured means WithLiveCapacity was never called: GET /resource-catalog/capacity

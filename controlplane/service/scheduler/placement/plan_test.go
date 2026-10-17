@@ -98,25 +98,6 @@ func TestReservePlacementFailureLeavesInputUntouched(t *testing.T) {
 	}
 }
 
-// ExtraResources (arbitrary extended resources) are part of the cluster-scalar footprint but not
-// of NodeShapes, so TopologyFits never checks that any single node has them. Two nodes with one
-// device each satisfy the cluster total of 2 while no node can run the rank that needs 2.
-//
-// Known gap, not fixable in the scheduler alone: cluster agents report only CPU/memory/storage
-// per node (see clusterexchange), so there is no per-node figure to check against. Skipped until
-// the agent protocol carries extended resources per node; the assertion below is the contract.
-func TestTopologyFitsIgnoresExtraResourcesPerNode(t *testing.T) {
-	t.Skip("per-node extended resources are not reported by cluster agents yet")
-	exp := &domain.Experiment{Job: domain.JobSpec{NumNodes: 1, CPU: "1", ExtraResources: map[string]string{"example.com/fpga": "2"}}}
-	resources := map[string]map[string]int64{
-		"node-a": {domain.NodeResourceCPUMillicores: 4000, "example.com/fpga": 1},
-		"node-b": {domain.NodeResourceCPUMillicores: 4000, "example.com/fpga": 1},
-	}
-	if TopologyFits(nil, resources, nil, exp) {
-		t.Fatal("no node has 2 example.com/fpga, yet the placement was accepted on cluster-wide total alone")
-	}
-}
-
 // A CPU-only job (TotalAccelerators == 0) is now judged on node layout too: cluster-a's aggregate
 // is large enough (6 cores across two nodes) but no single node can host the whole rank, while
 // cluster-b's one node can. Before this went through AtAcceleratorType, BestFit picked
