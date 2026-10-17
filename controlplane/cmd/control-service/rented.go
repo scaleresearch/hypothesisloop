@@ -30,12 +30,8 @@ func newRented(pcfg *hypothesisloopcfg.ControlService, store *db.Store, clusters
 		}
 		loops = append(loops, func(ctx context.Context) { _ = sandboxes.Run(ctx) })
 	}
-	environments := ""
-	if pcfg.ContainerRegistry != nil {
-		environments = pcfg.ContainerRegistry.EnvironmentsRepository
-	}
 	for _, cc := range pcfg.CloudCompute {
-		cluster, err := newCloudCluster(pcfg, cc, environments, store, clusters, logger)
+		cluster, err := newCloudCluster(pcfg, cc, store, clusters, logger)
 		if err != nil {
 			return nil, err
 		}
@@ -74,7 +70,7 @@ func newLauncher(pcfg *hypothesisloopcfg.ControlService, s *hypothesisloopcfg.Sa
 	return sandboxes, nil
 }
 
-func newCloudCluster(pcfg *hypothesisloopcfg.ControlService, cc hypothesisloopcfg.CloudComputeConfig, environments string, store *db.Store, clusters *clusterexchange.Service, logger *zap.Logger) (*compute.Cluster, error) {
+func newCloudCluster(pcfg *hypothesisloopcfg.ControlService, cc hypothesisloopcfg.CloudComputeConfig, store *db.Store, clusters *clusterexchange.Service, logger *zap.Logger) (*compute.Cluster, error) {
 	shapes := make([]compute.Shape, 0, len(cc.Shapes))
 	var acceleratorTypes []string
 	for _, s := range cc.Shapes {
@@ -99,7 +95,7 @@ func newCloudCluster(pcfg *hypothesisloopcfg.ControlService, cc hypothesisloopcf
 		Name: cc.ClusterName,
 		Executor: compute.Config{
 			ClusterID: cc.Provider + "-" + account.Account(), Namespace: cc.Namespace,
-			APIURL: pcfg.Services.PublicAPIURL, JobImage: cc.JobImage, EnvironmentsRepository: environments,
+			APIURL: pcfg.Services.PublicAPIURL,
 			Shapes: shapes, Provider: rented,
 			OfferWait: time.Duration(cc.OfferWaitSeconds) * time.Second, Startup: time.Duration(cc.StartupSeconds) * time.Second,
 			Log: log.Sugar().Infof,

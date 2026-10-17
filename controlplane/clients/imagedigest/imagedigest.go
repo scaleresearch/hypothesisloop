@@ -2,52 +2,125 @@ package imagedigest
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"slices"
 	"time"
 
+	"github.com/containerd/containerd/v2/core/images"
+	"github.com/containerd/containerd/v2/core/remotes"
 	"github.com/containerd/containerd/v2/core/remotes/docker"
 	"github.com/distribution/reference"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// Resolver pins references to digests, asking a reference's registry every time.
+// maxManifestBytes bounds a manifest or an image config read.
+const maxManifestBytes = 4 << 20
+
+// Image is what a registry says of a reference: the image it names, repository@digest, and the
+// linux architectures it runs on.
+type Image struct {
+	Pinned        string
+	Architectures []string
+}
+
+// Resolver reads images from their registries, asking every time.
 type Resolver struct {
-	resolve   func(ctx context.Context, ref string, plainHTTP bool) (string, error)
+	client    *http.Client
 	plainHTTP map[string]bool
 }
 
-// New asks registries anonymously, as a node that pulls a job image does: over plain HTTP the
-// registries plainHTTP names by host[:port], and over TLS every other.
+// New asks registries over plain HTTP for the hosts plainHTTP names by host[:port], and over TLS
+// for every other.
 func New(plainHTTP ...string) *Resolver {
-	client := &http.Client{Timeout: 15 * time.Second}
 	hosts := make(map[string]bool, len(plainHTTP))
 	for _, host := range plainHTTP {
 		hosts[host] = true
 	}
-	return &Resolver{plainHTTP: hosts, resolve: func(ctx context.Context, ref string, plainHTTP bool) (string, error) {
-		_, desc, err := docker.NewResolver(docker.ResolverOptions{Client: client, PlainHTTP: plainHTTP}).Resolve(ctx, ref)
-		if err != nil {
-			return "", err
-		}
-		return desc.Digest.String(), nil
-	}}
+	return &Resolver{client: &http.Client{Timeout: 30 * time.Second}, plainHTTP: hosts}
 }
 
-// Pinned is ref as repository@digest: one that names its digest already keeps it, and any other
-// takes the digest its registry answers for it.
-func (r *Resolver) Pinned(ctx context.Context, ref string) (string, error) {
+// Resolve reads ref, a tag or a digest, with login for its registry host, or anonymously when
+// login is nil.
+func (r *Resolver) Resolve(ctx context.Context, ref string, login *domain.RegistryLogin) (Image, error) {
 	named, err := reference.ParseNormalizedNamed(ref)
 	if err != nil {
-		return "", fmt.Errorf("imagedigest: %q: %w", ref, err)
+		return Image{}, fmt.Errorf("imagedigest: %q: %w", ref, err)
 	}
-	repository := named.Name()
-	if digested, ok := named.(reference.Digested); ok {
-		return repository + "@" + digested.Digest().String(), nil
+	named = reference.TagNameOnly(named)
+	credentials := func(host string) (string, string, error) {
+		if login != nil && host == login.Registry {
+			return login.Username, login.Password, nil
+		}
+		return "", "", nil
 	}
-	tagged := reference.TagNameOnly(named).String()
-	digest, err := r.resolve(ctx, tagged, r.plainHTTP[reference.Domain(named)])
+	resolver := docker.NewResolver(docker.ResolverOptions{Hosts: docker.ConfigureDefaultRegistries(
+		docker.WithClient(r.client),
+		docker.WithPlainHTTP(func(host string) (bool, error) { return r.plainHTTP[host], nil }),
+		docker.WithAuthorizer(docker.NewDockerAuthorizer(docker.WithAuthClient(r.client), docker.WithAuthCreds(credentials))),
+	)})
+	name, desc, err := resolver.Resolve(ctx, named.String())
 	if err != nil {
-		return "", fmt.Errorf("imagedigest: %s: %w", tagged, err)
+		return Image{}, fmt.Errorf("imagedigest: %s: %w", named, err)
 	}
-	return repository + "@" + digest, nil
+	fetcher, err := resolver.Fetcher(ctx, name)
+	if err != nil {
+		return Image{}, fmt.Errorf("imagedigest: %s: %w", named, err)
+	}
+	architectures, err := architectures(ctx, fetcher, desc)
+	if err != nil {
+		return Image{}, fmt.Errorf("imagedigest: %s: %w", named, err)
+	}
+	return Image{Pinned: named.Name() + "@" + desc.Digest.String(), Architectures: architectures}, nil
+}
+
+// architectures is the linux architectures the image desc names runs on: those of its index, or
+// the one of its config.
+func architectures(ctx context.Context, fetcher remotes.Fetcher, desc ocispec.Descriptor) ([]string, error) {
+	if images.IsIndexType(desc.MediaType) {
+		var index ocispec.Index
+		if err := fetchJSON(ctx, fetcher, desc, &index); err != nil {
+			return nil, err
+		}
+		var out []string
+		for _, m := range index.Manifests {
+			if m.Platform != nil && m.Platform.OS == "linux" && m.Platform.Architecture != "unknown" && !slices.Contains(out, m.Platform.Architecture) {
+				out = append(out, m.Platform.Architecture)
+			}
+		}
+		slices.Sort(out)
+		return out, nil
+	}
+	if !images.IsManifestType(desc.MediaType) {
+		return nil, fmt.Errorf("names a %s, which is no image", desc.MediaType)
+	}
+	var manifest ocispec.Manifest
+	if err := fetchJSON(ctx, fetcher, desc, &manifest); err != nil {
+		return nil, err
+	}
+	var config ocispec.Image
+	if err := fetchJSON(ctx, fetcher, manifest.Config, &config); err != nil {
+		return nil, err
+	}
+	if config.OS != "linux" || config.Architecture == "" {
+		return nil, nil
+	}
+	return []string{config.Architecture}, nil
+}
+
+func fetchJSON(ctx context.Context, fetcher remotes.Fetcher, desc ocispec.Descriptor, into any) error {
+	body, err := fetcher.Fetch(ctx, desc)
+	if err != nil {
+		return err
+	}
+	defer body.Close()
+	raw, err := io.ReadAll(io.LimitReader(body, maxManifestBytes))
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(raw, into)
 }

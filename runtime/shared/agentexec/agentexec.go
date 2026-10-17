@@ -7,7 +7,6 @@ package agentexec
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
@@ -27,10 +26,6 @@ type Unrunnable struct{ Reason, Why string }
 
 func (u *Unrunnable) Error() string { return u.Why }
 
-// ErrNoEnvironmentGitCredential is a build of an environment of no repository: the control plane
-// answers its git credential with 404. Its clusterapi.EnvironmentGitSecret is absent then.
-var ErrNoEnvironmentGitCredential = errors.New("the repository of the build takes no credential")
-
 // Waiting is what CreateWorkload returns while what the job needs is not there yet and may still
 // come, such as a machine to rent. The loop reports the job as pending under Reason with Why as
 // the message its owner reads, says so in its log once, and asks again next pass.
@@ -43,10 +38,9 @@ func (w *Waiting) Error() string { return w.Why }
 // phase back. It is the single-cluster, agent-facing contract each cluster-agent/bare-agent
 // binary drives its local reconcile/status loop with.
 type Executor interface {
-	// CreateWorkload creates exp's workload. pull is the reconcile answer's registry_pull, the
-	// login a job that runs in an environment (exp.EnvironmentKey) pulls its image with, and nil
-	// when no desired job runs in one.
-	CreateWorkload(ctx context.Context, exp *clusterapi.DesiredJob, pull *clusterapi.RegistryLogin) error
+	// CreateWorkload creates exp's workload, which pulls exp.Image with exp.ImagePull when it is
+	// set.
+	CreateWorkload(ctx context.Context, exp *clusterapi.DesiredJob) error
 	// DeleteWorkload removes the experiment's workload. grantCheckpointWindow says whether the
 	// control plane granted this termination the checkpoint window the job declared: true for a
 	// policy-class termination (the platform decided and the job was fine), false for everything
@@ -115,12 +109,6 @@ type Executor interface {
 	// execution time.
 	SupportsMultiNodeJobs() bool
 
-	// OnlyImage is the one image this runtime runs, or empty for a runtime that runs whatever
-	// image a job names. Like SupportsMultiNodeJobs it is a fact reported with capacity. The
-	// control plane decides each job's image from it and writes it into the job's desired
-	// state, and the runtime runs exactly that one.
-	OnlyImage() string
-
 	// GetClusterID returns a stable fingerprint for this cluster that the runtime derives live
 	// and never persists itself: the kube-system namespace UID on k8s, /etc/machine-id on bare
 	// metal. Unlike ClusterName (an operator-typed label that can be renamed or duplicated), this
@@ -139,11 +127,11 @@ type PassScoped interface {
 }
 
 // PullRefresher is implemented by an executor whose live workloads pull their image again after
-// creation, as a k8s pod rescheduled to another node does. Every reconcile pass hands it the
-// current registry_pull for each live workload of a job that runs in an environment, since the
-// login it was created with expires.
+// creation, as a k8s pod rescheduled to another node does. Every reconcile pass hands it each
+// live workload whose job pulls its image with a login, exp.ImagePull, since the login it was
+// created with expires.
 type PullRefresher interface {
-	RefreshPull(ctx context.Context, exp *clusterapi.DesiredJob, pull *clusterapi.RegistryLogin) error
+	RefreshPull(ctx context.Context, exp *clusterapi.DesiredJob) error
 }
 
 // JobStatus is what one poll of a managed workload observed.

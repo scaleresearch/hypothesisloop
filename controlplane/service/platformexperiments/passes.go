@@ -94,9 +94,9 @@ func (s *Service) SweepAutoStart(ctx context.Context) error {
 }
 
 // TendBaselines keeps the clock of every open platform experiment with no baseline declared.
-// Time the platform spends on a job of its baseline, building its environment or starting it on
-// its cluster, is the platform's and not the baseline agent's: baseline_due_at moves out by it,
-// at most domain.MaxEnvironmentBuildTime in all (db.HoldBaselineClock). And the agent of a job
+// Time the platform spends on a job of its baseline, starting it on its cluster, is the
+// platform's and not the baseline agent's: baseline_due_at moves out by it, at most
+// domain.MaxBaselineHold in all (db.HoldBaselineClock). And the agent of a job
 // that, started now, ends after baseline_due_at is told so once, as job.held, which wakes it to
 // act on it where status_reason alone would wait to be read.
 func (s *Service) TendBaselines(ctx context.Context) error {
@@ -121,7 +121,7 @@ func (s *Service) tendBaseline(ctx context.Context, pe *domain.PlatformExperimen
 		return err
 	}
 	held := slices.ContainsFunc(jobs, waitsOnPlatform)
-	if err := s.store.HoldBaselineClock(ctx, pe.ID, held, domain.MaxEnvironmentBuildTime); err != nil {
+	if err := s.store.HoldBaselineClock(ctx, pe.ID, held, domain.MaxBaselineHold); err != nil {
 		return err
 	}
 	if held {

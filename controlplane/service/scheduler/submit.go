@@ -133,7 +133,7 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	if err := branchOfExperiment(exp, measuresBaseline); err != nil {
 		return err
 	}
-	if err := s.resolveImage(&exp.Job); err != nil {
+	if err := takeImage(pe, exp); err != nil {
 		return err
 	}
 	if exp.OrgID, err = s.store.ProjectOrg(ctx, pe.ProjectID); err != nil {
@@ -170,10 +170,6 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 			Reason:  "agent_finished",
 			Message: "agent finished in this platform experiment (POST /platform-experiments/{id}/agents/{agent_id}/finish), which is final: it submits no further job. Its token reads for two more minutes and then stops working",
 		}
-	}
-
-	if err := s.declaredEnvironment(ctx, pe, exp); err != nil {
-		return err
 	}
 
 	// 3ab. Durable-data ceiling.

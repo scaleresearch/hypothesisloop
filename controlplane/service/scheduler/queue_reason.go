@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler/placement"
@@ -152,23 +151,6 @@ func holdersOf(claimed []*domain.Experiment, cluster string, shortage domain.Foo
 		}
 	}
 	return held
-}
-
-// nameThatImage is how a job gets onto a cluster that runs one image: every job names its image.
-const nameThatImage = "state that image as job.image to run there"
-
-// noClusterRunsImageReason is the reason of a job whose image no cluster of its org runs, with
-// which image runs where. "" when the org has no cluster with another image either, which is the
-// org's matter and none of the job's.
-func noClusterRunsImageReason(others []domain.Cluster, exp *domain.Experiment) string {
-	if len(others) == 0 {
-		return ""
-	}
-	serving := make([]string, len(others))
-	for i, c := range others {
-		serving[i] = c.Name + " runs every job in " + c.JobImage
-	}
-	return domain.NotAdmittedNoClusterForImage + ": the job names image " + exp.Job.Image + ", and " + strings.Join(serving, "; ") + ": " + nameThatImage
 }
 
 // describeOffer says what a cluster has installed of what exp asks for, and the most one node of

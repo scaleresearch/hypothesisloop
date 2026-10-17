@@ -50,8 +50,8 @@ func ClusterAndFootprint(avail map[string]domain.Footprint, registered map[strin
 // judged on footprint and node layout alike: in the highest priority tier that has one, the one
 // with room for the most jobs like exp (roomFor), so jobs spread over the clusters an org ranked
 // alike and keep each busy. One run placed 7 of 9 researcher jobs on the first name that fit, a box
-// of 12 cores, while one of 28 sat mostly idle. Among those with equal room the cluster that built
-// exp's environment, which holds its image, goes first, then the name. ok=false means no cluster
+// of 12 cores, while one of 28 sat mostly idle. Among those with equal room the name goes first.
+// ok=false means no cluster
 // can: the caller decides what to do with a job that does not fit anywhere, rather than being
 // handed a cluster that only looks big enough in the scalar.
 func AtAcceleratorType(avail map[string]domain.Footprint, registered map[string]domain.Cluster, nodeAvail, nodeResources map[string]map[string]map[string]int64, nodeLabels map[string]map[string]map[string]string, exp *domain.Experiment) (string, bool) {
@@ -69,8 +69,7 @@ func AtAcceleratorType(avail map[string]domain.Footprint, registered map[string]
 				continue
 			}
 			room := roomFor(avail[candidate], fp)
-			loaded := exp.EnvironmentCluster != "" && candidate == exp.EnvironmentCluster && best != exp.EnvironmentCluster
-			if best == "" || room > bestRoom || room == bestRoom && loaded {
+			if best == "" || room > bestRoom {
 				best, bestRoom = candidate, room
 			}
 		}

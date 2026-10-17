@@ -39,9 +39,16 @@ func Platform(exp *clusterapi.DesiredJob, group clusterapi.JobGroup, apiURL stri
 	if exp.GitURL == "" {
 		return nil, fmt.Errorf("experiment %s has no repository address in desired state", exp.ID)
 	}
+	if exp.Image == "" || exp.Launch == "" {
+		return nil, fmt.Errorf("experiment %s has no image or launch script in desired state", exp.ID)
+	}
 	cpus, err := allottedCPUs(group.CPU)
 	if err != nil {
 		return nil, err
+	}
+	shutdown, checkpoint, err := exp.EffectiveJob().ResolvedGrace()
+	if err != nil {
+		return nil, fmt.Errorf("experiment %s: %w", exp.ID, err)
 	}
 	dataEndpoint := reach(exp.Data.Endpoint)
 	traceID := sha256.Sum256([]byte(exp.ID))
@@ -74,6 +81,7 @@ func Platform(exp *clusterapi.DesiredJob, group clusterapi.JobGroup, apiURL stri
 		Var{jobenv.TraceParent, fmt.Sprintf("00-%x-%x-01", traceID[:16], traceID[16:24])},
 		Var{jobenv.Token, exp.Token},
 		Var{jobenv.GitURL, reach(exp.GitURL)},
+		Var{jobenv.StopGrace, strconv.FormatInt(max(shutdown, checkpoint), 10)},
 	), nil
 }
 
@@ -122,11 +130,12 @@ func Merged(exp *clusterapi.DesiredJob, spec clusterapi.JobSpec, group clusterap
 	return env, nil
 }
 
-// Command is the process one node of group runs: the group's own when it names one, the job's
-// shared entrypoint otherwise. An ungrouped job's one group carries the job-level values.
-func Command(spec clusterapi.JobSpec, group clusterapi.JobGroup) (command, args []string) {
+// Command is the process one node of group runs: the job's launch script around the group's own
+// command when it names one, the job's shared one otherwise. An ungrouped job's one group carries
+// the job-level values.
+func Command(exp *clusterapi.DesiredJob, spec clusterapi.JobSpec, group clusterapi.JobGroup) []string {
 	if len(group.Command) > 0 {
-		return group.Command, group.Args
+		return clusterapi.LaunchCommand(exp.Launch, group.Command, group.Args)
 	}
-	return spec.Command, spec.Args
+	return clusterapi.LaunchCommand(exp.Launch, spec.Command, spec.Args)
 }

@@ -165,7 +165,7 @@ func (e *Executor) BuildContainerSpec(exp *clusterapi.DesiredJob, placement Plac
 	if group.CPU == "" || group.Memory == "" || group.Storage == "" || spec.MaxRetries == nil || *spec.MaxRetries < 0 {
 		return containerSpec{}, fmt.Errorf("podexec: CPU, memory, storage, and non-negative max_retries are required desired state")
 	}
-	if spec.Image == "" {
+	if exp.Image == "" {
 		return containerSpec{}, fmt.Errorf("podexec: experiment %s has no image in desired state", exp.ID)
 	}
 	if len(spec.ExtraResources) > 0 {
@@ -221,12 +221,10 @@ func (e *Executor) BuildContainerSpec(exp *clusterapi.DesiredJob, placement Plac
 	if err != nil {
 		return containerSpec{}, fmt.Errorf("podexec: %w", err)
 	}
-	command, args := workloadenv.Command(spec, group)
 	cs := containerSpec{
 		Name:           containerName(exp.ID),
-		Image:          spec.Image,
-		Command:        command,
-		Args:           args,
+		Image:          exp.Image,
+		Command:        workloadenv.Command(exp, spec, group),
 		Env:            env,
 		NanoCPUs:       nanoCPUs,
 		MemoryBytes:    memQty.Value(),
@@ -293,7 +291,6 @@ func hashContainerSpec(cs containerSpec) (string, error) {
 		Name           string
 		Image          string
 		Command        []string
-		Args           []string
 		Env            map[string]string
 		NanoCPUs       int64
 		MemoryBytes    int64
@@ -303,7 +300,7 @@ func hashContainerSpec(cs containerSpec) (string, error) {
 		Mounts         []string
 		ReadOnlyMounts map[string]string
 		Labels         map[string]string
-	}{cs.Name, cs.Image, cs.Command, cs.Args, cs.Env, cs.NanoCPUs, cs.MemoryBytes, cs.ShmSizeBytes, cs.StorageOptSize, sortedDevices, sortedMounts, cs.ReadOnlyMounts, labels}
+	}{cs.Name, cs.Image, cs.Command, cs.Env, cs.NanoCPUs, cs.MemoryBytes, cs.ShmSizeBytes, cs.StorageOptSize, sortedDevices, sortedMounts, cs.ReadOnlyMounts, labels}
 	buf, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("podexec: hash desired spec: %w", err)
@@ -317,6 +314,3 @@ func hashContainerSpec(cs containerSpec) (string, error) {
 // placed here — before, such a job was admitted, held a reservation, and only then failed at
 // BuildContainerSpec, which is an admission-time answer given at execution time.
 func (e *Executor) SupportsMultiNodeJobs() bool { return false }
-
-// OnlyImage is empty: a container runs in the image its job's desired state names, whatever it is.
-func (e *Executor) OnlyImage() string { return "" }

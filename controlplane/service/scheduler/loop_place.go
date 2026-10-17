@@ -214,18 +214,13 @@ type installed struct {
 }
 
 // neverFitsReason is the not_admitted_reason of a job that no wait admits as it is stated, and ""
-// for one that may yet run. Such a job asks for more than every cluster that runs its image
-// choice and reports what it has installed holds when idle (placement.FitsWhenIdle), on each accelerator
+// for one that may yet run. Such a job asks for more than every cluster that takes its jobs and
+// reports what it has installed holds when idle (placement.FitsWhenIdle), on each accelerator
 // type the job accepts. A cluster that scales up may yet hold it. A cluster that reports nothing
-// is away or not whole: it is named and not judged, and with none judged the job waits.
-//
-// The cause is the job's image where a cluster that runs another holds the job when idle, and its
-// size otherwise. Both say what each cluster judged has.
+// is away or not whole: it is named and not judged, and with none judged the job waits. It says
+// what each cluster judged has.
 func (in installed) neverFitsReason(exp *domain.Experiment) string {
-	runs, others := byImageChoice(in.registered, exp)
-	if len(runs) == 0 {
-		return noClusterRunsImageReason(others, exp)
-	}
+	runs := hostingClusters(in.registered, exp)
 	spansNodes := exp.Job.Nodes() > 1
 	var judged []string
 	lacking := 0
@@ -245,24 +240,12 @@ func (in installed) neverFitsReason(exp *domain.Experiment) string {
 	if lacking == 0 {
 		return ""
 	}
-	var holding []string
-	for _, c := range others {
-		total, reported := in.totals[c.Name]
-		if reported && (!spansNodes || in.multiNode[c.Name]) && placement.FitsWhenIdle(total, in.nodeTotals[c.Name], exp) {
-			holding = append(holding, c.Name+" runs every job in "+c.JobImage)
-		}
-	}
 	asks := describeFootprint(exp.Footprint())
 	if spansNodes {
 		asks += fmt.Sprintf(" over %d nodes", exp.Job.Nodes())
 	}
-	has := strings.Join(judged, "; ")
-	if len(holding) == 0 {
-		return fmt.Sprintf("%s: the job asks for %s, more than any connected cluster that runs it has when idle: %s. Ask for less (hl capacity lists what each cluster has)",
-			domain.NotAdmittedExceedsClusterCapacity, asks, has)
-	}
-	return fmt.Sprintf("%s: the job names image %s, and no connected cluster that runs it has what the job asks for, %s, when idle: %s. A cluster with one job image has it (%s): %s",
-		domain.NotAdmittedNoClusterForImage, exp.Job.Image, asks, has, strings.Join(holding, "; "), nameThatImage)
+	return fmt.Sprintf("%s: the job asks for %s, more than any connected cluster that runs it has when idle: %s. Ask for less (hl capacity lists what each cluster has)",
+		domain.NotAdmittedExceedsClusterCapacity, asks, strings.Join(judged, "; "))
 }
 
 // couldHold narrows candidates to the clusters that hold exp when idle, so a job that fits nowhere
@@ -314,9 +297,6 @@ func eligibleClusters(avail map[string]domain.Footprint, multiNodeCapable map[st
 	if !orgHasCluster(registered, exp.OrgID, domain.Cluster.Hosts) {
 		return map[string]domain.Footprint{}, clustersDisabledReason()
 	}
-	if runs, others := byImageChoice(registered, exp); len(runs) == 0 {
-		return map[string]domain.Footprint{}, noClusterRunsImageReason(others, exp)
-	}
 	if exp.Job.Nodes() <= 1 {
 		return hosted, ""
 	}
@@ -343,29 +323,23 @@ func orgHasCluster(registered map[string]domain.Cluster, orgID string, is func(d
 	return false
 }
 
-// hostsJob reports whether cluster is registered, takes jobs of exp's org and runs the image exp
-// names (domain.Cluster.HostsJob).
+// hostsJob reports whether cluster is registered and takes jobs of exp's org
+// (domain.Cluster.Hosts).
 func hostsJob(registered map[string]domain.Cluster, cluster string, exp *domain.Experiment) bool {
 	c, ok := registered[cluster]
-	return ok && c.HostsJob(exp.OrgID, exp.Job.Image)
+	return ok && c.Hosts(exp.OrgID)
 }
 
-// byImageChoice splits the clusters that take jobs of exp's org into those that run the image
-// exp names, or run it naming none (domain.Cluster.Runs), and the others, each sorted by name.
-func byImageChoice(registered map[string]domain.Cluster, exp *domain.Experiment) (runs, others []domain.Cluster) {
+// hostingClusters is the clusters that take jobs of exp's org, sorted by name.
+func hostingClusters(registered map[string]domain.Cluster, exp *domain.Experiment) []domain.Cluster {
+	var runs []domain.Cluster
 	for _, c := range registered {
-		switch {
-		case !c.Hosts(exp.OrgID):
-		case c.Runs(exp.Job.Image):
+		if c.Hosts(exp.OrgID) {
 			runs = append(runs, c)
-		default:
-			others = append(others, c)
 		}
 	}
-	byName := func(a, b domain.Cluster) int { return strings.Compare(a.Name, b.Name) }
-	slices.SortFunc(runs, byName)
-	slices.SortFunc(others, byName)
-	return runs, others
+	slices.SortFunc(runs, func(a, b domain.Cluster) int { return strings.Compare(a.Name, b.Name) })
+	return runs
 }
 
 // quotaCanCoverAcceleratorType is an early, non-authoritative filter for a more expensive acceptable

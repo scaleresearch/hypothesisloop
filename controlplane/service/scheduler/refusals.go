@@ -39,8 +39,6 @@ func AdmissionStatus(reason string) int {
 		return http.StatusConflict
 	case ReasonRateLimited:
 		return http.StatusTooManyRequests
-	case ReasonImageUnresolved:
-		return http.StatusServiceUnavailable
 	default:
 		return http.StatusUnprocessableEntity
 	}
@@ -60,7 +58,7 @@ func (s *Service) List(ctx context.Context, filter domain.ExperimentFilter) ([]*
 	if err != nil {
 		return nil, 0, auth.Internal(s.logger, "list experiments", err)
 	}
-	for _, merge := range []func(context.Context, []*domain.Experiment) error{s.mergePhaseDetails, s.mergeRanOn, s.mergeBuildProgress, s.mergeMetrics} {
+	for _, merge := range []func(context.Context, []*domain.Experiment) error{s.mergePhaseDetails, s.mergeRanOn, s.mergeMetrics} {
 		if err := merge(ctx, exps); err != nil {
 			return nil, 0, auth.Internal(s.logger, "list experiments", err)
 		}

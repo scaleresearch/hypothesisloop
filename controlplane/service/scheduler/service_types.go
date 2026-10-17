@@ -45,11 +45,6 @@ type Store interface {
 	DescribeJobs(ctx context.Context, jobs []*domain.Experiment) error
 	// FindingSummary returns the summary filed for a job, empty when none was.
 	FindingSummary(ctx context.Context, experimentID string) (string, error)
-	// GetEnvironment is the environment of key, nil when there is none.
-	GetEnvironment(ctx context.Context, key string) (*domain.Environment, error)
-	// AwaitEnvironmentBuild has an agent told once the build of key it asked for ends
-	// (db.Store.AwaitEnvironmentBuild).
-	AwaitEnvironmentBuild(ctx context.Context, key, peID, agentID, codeRef, image string) error
 	// ProjectOrg is the org of a project: with RegisteredClusters, which clusters take its jobs.
 	ProjectOrg(ctx context.Context, projectID string) (string, error)
 	// CompletedJobIDs and ListSignupsByRole are what the standings rank: the completed jobs of a
@@ -93,15 +88,6 @@ type CodeHost interface {
 	Serves(repository, protocol, host, path string) bool
 }
 
-// Environments finds the environment a commit declares (environments.Service.Declared): nil when
-// it declares none, a *domain.EnvironmentFileError for a file the platform does not build and
-// domain.ErrNoEnvironmentBuilder while no cluster builds for the org. Find reads it as it is and
-// builds nothing (environments.Service.Find).
-type Environments interface {
-	Declared(ctx context.Context, orgID, projectID, repository, ref, image string) (*domain.Environment, error)
-	Find(ctx context.Context, orgID, projectID, repository, ref, image string) (env *domain.Environment, declared bool, err error)
-}
-
 // InstalledCapacity is what each connected cluster and each of its nodes has installed, whether
 // it scales up and whether it runs a job over several nodes, as the admission loop reads them
 // (ClusterCapacity).
@@ -121,23 +107,18 @@ type InstalledCapacity interface {
 
 // Service is the Scheduler Service that gates, scores, and queues experiments.
 type Service struct {
-	store        Store
-	quota        QuotaService
-	hypotheses   HypothesisStore
-	codeHost     CodeHost
-	environments Environments
-	clusters     InstalledCapacity
-	// jobImages is the images the deployment offers a job to run in, which a job names by name.
-	jobImages []domain.JobImage
-	weights   domain.SchedulingWeights
-	credits   domain.QuotaConfig
-	loop      Triggerable
-	builds    BuildAssigner
-	pulls     RegistryPulls
-	settler   QuotaSettler
-	metrics   *metricsdb.Store
-	standings Standings
-	logger    *zap.Logger
+	store      Store
+	quota      QuotaService
+	hypotheses HypothesisStore
+	codeHost   CodeHost
+	clusters   InstalledCapacity
+	weights    domain.SchedulingWeights
+	credits    domain.QuotaConfig
+	loop       Triggerable
+	settler    QuotaSettler
+	metrics    *metricsdb.Store
+	standings  Standings
+	logger     *zap.Logger
 	// dataStore creates each submitted job's key. With maxDataBytesPerAgent it is also the
 	// durable-data ceiling: how much one agent already holds in this platform experiment is asked
 	// of the store at admission and nowhere else. Not enforced mid-write — that needs a gateway in
@@ -183,23 +164,11 @@ func (s *Service) WithQuotaConfig(cfg domain.QuotaConfig) *Service {
 	return s
 }
 
-// WithJobImages sets the images the deployment offers a job to run in.
-func (s *Service) WithJobImages(images []domain.JobImage) *Service {
-	s.jobImages = images
-	return s
-}
-
 // WithDataStore wires the store job keys are created in and the durable-data ceiling. A ceiling
 // of 0 is unlimited, like every other per-job cap, and then the store is never measured.
 func (s *Service) WithDataStore(client *objectstore.Client, maxBytesPerAgent int64) *Service {
 	s.dataStore = client
 	s.maxDataBytesPerAgent = maxBytesPerAgent
-	return s
-}
-
-// WithEnvironments wires what finds the environment a job's commit declares.
-func (s *Service) WithEnvironments(environments Environments) *Service {
-	s.environments = environments
 	return s
 }
 

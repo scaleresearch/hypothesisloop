@@ -2,15 +2,14 @@ package scheduler
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/contract/gitrefs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
 )
 
@@ -74,51 +73,28 @@ func shareOutlook(pe *domain.PlatformExperiment) string {
 		pe.CurrentStage, len(pe.Stages), ends)
 }
 
-// resolveImage writes the address of the image the job names into its spec (domain.ResolveJobImage),
-// so that everything after admission reads one form. Every job names its image: a cluster with one
-// image runs the jobs that name it, so no job is placed by what it leaves out.
-func (s *Service) resolveImage(job *domain.JobSpec) error {
-	if job.Image == "" {
-		return &AdmissionError{Reason: ReasonRequired, Field: "job.image", Message: "job.image is required: state the image the job runs in, a job_image of hl capacity or the whole address of another, registry host first"}
+// takeImage runs exp in the image its platform experiment records now, on nodes of that image's
+// architecture, which its node selector states from here on: a job runs only where its image
+// does. Every node runs the job's command in its code, so each states one.
+func takeImage(pe *domain.PlatformExperiment, exp *domain.Experiment) error {
+	if pe.Image == nil {
+		return &AdmissionError{Reason: domain.ReasonNoExperimentImage, Message: fmt.Sprintf("platform experiment %s records no image for its jobs to run in: record one with hl image set REF, a base image that has what the code needs or one built from .hypothesisloop/Dockerfile and pushed (hl image credentials)", pe.ID)}
 	}
-	address, ok := domain.ResolveJobImage(s.jobImages, job.Image)
-	if !ok {
-		return &AdmissionError{Reason: domain.ReasonUnknownJobImage, Message: domain.UnknownJobImage(s.jobImages, "job.image", job.Image)}
+	for _, group := range exp.Job.NodeGroups() {
+		if len(group.Command) == 0 && len(exp.Job.Command) == 0 {
+			return &AdmissionError{Reason: ReasonRequired, Field: "job.command", Message: "job.command is required: the command every node runs in the job's code, checked out in " + domain.JobCodeDir + ", as [\"python\", \"train.py\"]"}
+		}
 	}
-	job.Image = address
-	return nil
-}
-
-// ReasonEnvironmentUnreadable refuses a job whose environment file the git host did not hand over.
-const ReasonEnvironmentUnreadable = "environment_unreadable"
-
-// ReasonImageUnresolved refuses, for now, a job whose environment is built from an image its
-// registry did not name: the environment is keyed on what the image holds.
-const ReasonImageUnresolved = "image_unresolved"
-
-// declaredEnvironment keeps on exp the environment its commit declares, built on its image, which
-// admission waits for. The file is read at the commit itself, so the environment is the one the
-// code was pushed with.
-func (s *Service) declaredEnvironment(ctx context.Context, pe *domain.PlatformExperiment, exp *domain.Experiment) error {
-	commit := exp.CodeRef[strings.LastIndex(exp.CodeRef, "@")+1:]
-	env, err := s.environments.Declared(ctx, exp.OrgID, pe.ProjectID, pe.Repository, commit, exp.Job.Image)
-	var invalid *domain.EnvironmentFileError
-	var refused *refusal.Refusal
-	var unresolved *domain.ImageUnresolvedError
-	switch {
-	case errors.As(err, &invalid):
-		return &AdmissionError{Reason: domain.ReasonInvalidEnvironmentFile, Message: invalid.Why + ". Fix it, commit and submit again"}
-	case errors.Is(err, domain.ErrNoEnvironmentBuilder):
-		return &AdmissionError{Reason: domain.ReasonNoEnvironmentBuilder, Message: fmt.Sprintf("commit %s declares %s, and no cluster your org may use builds environments: submit from a commit without the file, or attach a cluster that builds", commit, domain.EnvironmentFile)}
-	case errors.As(err, &refused):
-		return &AdmissionError{Reason: ReasonEnvironmentUnreadable, Message: fmt.Sprintf("the platform could not read %s at commit %s: %s", domain.EnvironmentFile, commit, refused.Message)}
-	case errors.As(err, &unresolved):
-		return &AdmissionError{Reason: ReasonImageUnresolved, Message: fmt.Sprintf("commit %s declares %s, and %s. Nothing was stored: submit again in a minute", commit, domain.EnvironmentFile, unresolved.Error())}
-	case err != nil:
-		return fmt.Errorf("scheduler: environment of %s: %w", commit, err)
-	case env != nil:
-		exp.EnvironmentKey = env.Key
+	if stated, ok := exp.Job.NodeSelector[domain.NodeArchitectureLabel]; ok && stated != pe.Image.Architecture {
+		return &AdmissionError{Reason: ReasonMalformed, Field: "job.node_selector", Message: fmt.Sprintf("job.node_selector states %s %s, and the image of platform experiment %s, %s, runs on %s", domain.NodeArchitectureLabel, stated, pe.ID, pe.Image.Image, pe.Image.Architecture)}
 	}
+	selector := maps.Clone(exp.Job.NodeSelector)
+	if selector == nil {
+		selector = map[string]string{}
+	}
+	selector[domain.NodeArchitectureLabel] = pe.Image.Architecture
+	exp.Job.NodeSelector = selector
+	exp.Image = pe.Image.Image
 	return nil
 }
 

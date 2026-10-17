@@ -175,8 +175,6 @@ func registerJobs(doc *Doc, jobs *scheduler.Service, logger *zap.Logger) {
 			"The job of an agent of role baseline tests no hypothesis: its finding is kept on the objective and the answer names neither. " +
 			"The finding is the job's agent's, and who filed it is the caller, answered as actor where the finding is read.",
 	}, a.writeSummary)
-	registerEnvironments(doc, a)
-	registerImageCredentials(doc, a)
 }
 
 func (a jobsAPI) submit(ctx context.Context, in *struct{ Body submitRequest }) (*struct{ Body *domain.Experiment }, error) {

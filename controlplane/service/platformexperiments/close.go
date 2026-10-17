@@ -260,8 +260,8 @@ func (s *Service) messagesSent(ctx context.Context, id string, signups []domain.
 }
 
 // baselineLeft writes to record what the baseline agents of pe, closed before its run started,
-// left for another run to start from: each job with how it ended, the commit it ran and the
-// environment built for it, and the last commit of the baseline branch a job was submitted from.
+// left for another run to start from: each job with how it ended, the commit and the image it
+// ran, and the last commit of the baseline branch a job was submitted from.
 func (s *Service) baselineLeft(ctx context.Context, pe *domain.PlatformExperiment, record *strings.Builder) error {
 	jobs, err := s.store.ListExperimentsTesting(ctx, []string{pe.ID})
 	if err != nil {
@@ -278,21 +278,7 @@ func (s *Service) baselineLeft(ctx context.Context, pe *domain.PlatformExperimen
 		if job.InfraRequeueCount > 0 {
 			fmt.Fprintf(record, "; requeued %d times for faults of the platform's, the last %s", job.InfraRequeueCount, job.InfraRequeueReason)
 		}
-		fmt.Fprintf(record, "; code %s", job.CodeRef)
-		if job.EnvironmentKey != "" {
-			env, err := s.environments.Get(ctx, job.EnvironmentKey)
-			if err != nil {
-				return fmt.Errorf("environment of %s: %w", job.ID, err)
-			}
-			switch {
-			case env == nil:
-				return fmt.Errorf("job %s names environment %s, which does not exist", job.ID, job.EnvironmentKey)
-			case env.State == domain.EnvironmentReady:
-				fmt.Fprintf(record, "; its environment %s built as %s", domain.EnvironmentFile, env.Image)
-			default:
-				fmt.Fprintf(record, "; its environment %s %s, not built", domain.EnvironmentFile, env.State)
-			}
-		}
+		fmt.Fprintf(record, "; code %s; image %s", job.CodeRef, job.Image)
 		record.WriteString(".\n")
 		if job.Branch == branch {
 			last = job.CodeRef

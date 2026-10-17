@@ -20,7 +20,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
 
-func (c *JobWorkloadClient) CreateWorkload(ctx context.Context, exp *clusterapi.DesiredJob, pull *clusterapi.RegistryLogin) error {
+func (c *JobWorkloadClient) CreateWorkload(ctx context.Context, exp *clusterapi.DesiredJob) error {
 	// Reconcile calls this only when no live Job exists for the experiment, so any pod still
 	// carrying its identity belongs to the previous generation and may be inside its checkpoint
 	// window. A new pod started now would read the store before that checkpoint lands, restart
@@ -43,8 +43,8 @@ func (c *JobWorkloadClient) CreateWorkload(ctx context.Context, exp *clusterapi.
 		return err
 	}
 	// The pull Secret before any pod that names it.
-	if exp.EnvironmentKey != "" {
-		if err := c.ensurePullSecret(ctx, exp, pull); err != nil {
+	if exp.ImagePull != nil {
+		if err := c.ensurePullSecret(ctx, exp); err != nil {
 			return err
 		}
 	}
@@ -945,9 +945,6 @@ func (c *JobWorkloadClient) ResolveAdmittedAcceleratorType(ctx context.Context, 
 // plane on every reconcile so admission places distributed work here and not on a single-node
 // runtime.
 func (c *JobWorkloadClient) SupportsMultiNodeJobs() bool { return true }
-
-// OnlyImage is empty: a pod runs in the image its job's desired state names, whatever it is.
-func (c *JobWorkloadClient) OnlyImage() string { return "" }
 
 // GetClusterID returns the kube-system namespace's UID: created with the cluster, immutable for
 // its life, globally unique, and readable with the credentials the agent already holds. The

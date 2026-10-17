@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"slices"
-	"strconv"
 	"time"
 
 	"go.uber.org/zap"
@@ -126,22 +124,6 @@ func (s *Service) Reconcile(ctx context.Context, clusterName, agentVersion strin
 		}
 	}
 
-	// Placement reads the image, so it is kept before the capacity that makes the cluster a
-	// candidate.
-	if len(report.JobImage) > domain.MaxJobImageLength {
-		return clusterapi.ReconcileAnswer{}, refusal.Invalid(refusal.ReasonInvalidRequest, "job_image is longer than "+strconv.Itoa(domain.MaxJobImageLength)+" characters").On("job_image")
-	}
-	onlyImage := report.JobImage
-	if report.JobImageDefault {
-		onlyImage = ""
-	}
-	if err := s.store.RecordJobImage(ctx, clusterName, onlyImage); err != nil {
-		return clusterapi.ReconcileAnswer{}, auth.Internal(s.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
-	}
-	if err := s.store.RecordBuilds(ctx, clusterName, report.Builds && s.environments != nil); err != nil {
-		return clusterapi.ReconcileAnswer{}, auth.Internal(s.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
-	}
-
 	if err := s.metrics.RecordClusterCapacitySnapshot(ctx, metricsdb.ClusterCapacitySnapshot{
 		ClusterName: clusterName, At: time.Now().UTC(),
 		CPUAvailable: report.CPUAvailableCores, CPUTotal: report.CPUTotalCores,
@@ -178,43 +160,12 @@ func (s *Service) Reconcile(ctx context.Context, clusterName, agentVersion strin
 	}
 	answer.Jobs = make([]*clusterapi.DesiredJob, len(exps))
 	for i, exp := range exps {
-		if answer.Jobs[i], err = s.desiredJob(exp); err != nil {
+		if answer.Jobs[i], err = s.desiredJob(ctx, exp); err != nil {
 			return clusterapi.ReconcileAnswer{}, auth.Internal(s.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
 		}
 	}
 	answer.CheckpointWindow = domain.CheckpointWindowGrants(undesired)
-	if answer.Builds, answer.RegistryPull, err = s.environmentWork(ctx, clusterName, exps); err != nil {
-		return clusterapi.ReconcileAnswer{}, auth.Internal(s.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
-	}
 	return answer, nil
-}
-
-// environmentWork is the builds assigned to cluster, and the pull login when one of exps, the
-// workloads desired on it, runs in an environment.
-func (s *Service) environmentWork(ctx context.Context, cluster string, exps []*domain.Experiment) ([]domain.EnvironmentBuild, *domain.RegistryLogin, error) {
-	builds := []domain.EnvironmentBuild{}
-	if s.environments == nil {
-		return builds, nil, nil
-	}
-	assigned, err := s.store.AssignedEnvironmentBuilds(ctx, cluster)
-	if err != nil {
-		return nil, nil, err
-	}
-	for _, env := range assigned {
-		builds = append(builds, domain.EnvironmentBuild{Key: env.Key, Attempt: env.Attempt, Base: env.Base, Tools: env.Tools, Dockerfile: env.Dockerfile, Repository: s.environments.Repository,
-			CacheScope: domain.EnvironmentCacheScope(env.OrgID, env.GitRepository)})
-	}
-	if !slices.ContainsFunc(exps, func(exp *domain.Experiment) bool { return exp.EnvironmentKey != "" }) {
-		return builds, nil, nil
-	}
-	// Without a login only a pull fails, and a desired state that is refused instead has the
-	// runtime act on none of it.
-	login, err := s.environments.Logins.Pull(ctx)
-	if err != nil {
-		s.logger.Error("cluster reconcile: mint registry pull login", zap.String("cluster", cluster), zap.Error(err))
-		return builds, nil, nil
-	}
-	return builds, &login, nil
 }
 
 // MaxReconcileBytes bounds one capacity report. Its size grows with nodes times the labels each

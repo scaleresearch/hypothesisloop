@@ -44,7 +44,7 @@ type Proposal struct {
 
 	AcceleratorType domain.AcceleratorType `json:"accelerator_type,omitempty" doc:"The type the run's jobs are sized for, one of the accelerator_type strings GET /resource-catalog/capacity lists (hl capacity), copied verbatim. Left out for work that needs no accelerator: the run is then on CPU cores, hypothesisloop.dev/cpu=core, which is what is stored, and its budget is CPU core-hours. 422 accelerator_unreachable names every type that is listed now."`
 	AcceleratorKind domain.TypeKind        `json:"accelerator_kind" readOnly:"true" doc:"What accelerator_type counts, which the platform sets: accelerator for devices, cpu for CPU cores, whose budget is CPU core-hours."`
-	Image           string                 `json:"image" doc:"The image the run's jobs name as job.image, checked as a submit checks it: a job image the platform offers, by name, or the whole address of another, which a cluster that has accelerator_type runs."`
+
 	// CPU, Memory and Storage are what one node of the run's jobs asks for, as job.cpu, job.memory
 	// and job.storage state it, so that whoever writes a job copies them from here and from no prose.
 	CPU     string `json:"cpu" doc:"What the run's jobs state as job.cpu: cores for one node, a quantity such as 8 or 500m. Checked as a submit checks it: 422 invalid_resources for one left out, stated as max, no quantity or negative, as for memory and storage."`
@@ -176,12 +176,8 @@ func (s *Service) checkProposal(ctx context.Context, p *Proposal, draft *domain.
 		p.AcceleratorType = domain.CPUType
 	}
 	p.AcceleratorKind = p.AcceleratorType.Kind()
-	clusters, err := s.requireReachable(ctx, draft.ProjectID, &p.AcceleratorType)
-	if err := problems.Add(err); err != nil {
-		return experiment, err
-	}
-	if err == nil {
-		if err := problems.Add(requireImage(s.jobImages, clusters, p.Image)); err != nil {
+	if _, err := s.requireReachable(ctx, draft.ProjectID, &p.AcceleratorType); err != nil {
+		if err := problems.Add(err); err != nil {
 			return experiment, err
 		}
 	}

@@ -18,18 +18,16 @@ import (
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
 
-// pullSecretName names the Secret the pods of an experiment that runs in an environment pull its
-// image with: one for every group of the experiment.
+// pullSecretName names the Secret the pods of an experiment whose image is pulled with a login
+// pull it with: one for every group of the experiment.
 func pullSecretName(experimentID string) string {
 	return boundedname.Name("exp-"+experimentID+"-pull", experimentID+"/pull", dnsLabelLength)
 }
 
-// ensurePullSecret writes pull as the experiment's pull Secret when it holds anything else, so
-// its pods pull with the login the control plane handed out last.
-func (c *JobWorkloadClient) ensurePullSecret(ctx context.Context, exp *clusterapi.DesiredJob, pull *clusterapi.RegistryLogin) error {
-	if pull == nil {
-		return fmt.Errorf("workload: experiment %s runs in an environment and the reconcile answer has no registry_pull", exp.ID)
-	}
+// ensurePullSecret writes exp.ImagePull as the experiment's pull Secret when it holds anything
+// else, so its pods pull with the login the control plane handed out last.
+func (c *JobWorkloadClient) ensurePullSecret(ctx context.Context, exp *clusterapi.DesiredJob) error {
+	pull := exp.ImagePull
 	config, err := json.Marshal(map[string]any{"auths": map[string]any{pull.Registry: map[string]string{
 		"username": pull.Username,
 		"password": pull.Password,
@@ -71,8 +69,8 @@ func (c *JobWorkloadClient) ensurePullSecret(ctx context.Context, exp *clusterap
 
 // RefreshPull rewrites the pull Secret of exp's live workload with the current login: a pod that
 // is rescheduled after the login it was created with expired pulls with this one.
-func (c *JobWorkloadClient) RefreshPull(ctx context.Context, exp *clusterapi.DesiredJob, pull *clusterapi.RegistryLogin) error {
-	return c.ensurePullSecret(ctx, exp, pull)
+func (c *JobWorkloadClient) RefreshPull(ctx context.Context, exp *clusterapi.DesiredJob) error {
+	return c.ensurePullSecret(ctx, exp)
 }
 
 // deletePullSecret removes the experiment's pull Secret. Most experiments have none.

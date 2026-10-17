@@ -36,7 +36,6 @@ type Directory interface {
 	AgentCutAt(ctx context.Context, platformExperimentID, agentID string) (*time.Time, error)
 	AgentStanding(ctx context.Context, platformExperimentID, agentID string) (domain.AgentStanding, error)
 	ClusterOrg(ctx context.Context, name string) (orgID string, found bool, err error)
-	AssignedEnvironmentBuild(ctx context.Context, cluster, key string, attempt int) (*domain.Environment, error)
 }
 
 // Authenticator turns a token into a Principal. Nothing is kept between requests: a derived
@@ -84,14 +83,6 @@ func (a *Authenticator) derived(ctx context.Context, token string) (Principal, e
 			return Principal{}, refusal.Refuse(http.StatusUnauthorized, domain.ReasonClusterNotRegistered, "cluster "+p.ClusterName+" is not registered")
 		}
 		p.OrgIDs = []string{orgID}
-	case KindBuild:
-		env, err := a.directory.AssignedEnvironmentBuild(ctx, p.Build.Cluster, p.Build.Key, p.Build.Attempt)
-		if err != nil {
-			return Principal{}, err
-		}
-		if env == nil {
-			return Principal{}, unauthenticated("the build of %s is not building on cluster %s at attempt %d", p.Build.Key, p.Build.Cluster, p.Build.Attempt)
-		}
 	case KindJob:
 		tenancy, ended, err := a.directory.ExperimentTenancy(ctx, p.ExperimentID)
 		if err != nil {

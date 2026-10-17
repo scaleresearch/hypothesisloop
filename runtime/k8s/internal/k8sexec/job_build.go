@@ -83,7 +83,7 @@ func (c *JobWorkloadClient) BuildJobs(exp *clusterapi.DesiredJob, placement Acce
 	if spec.MaxRetries == nil || *spec.MaxRetries < 0 {
 		return nil, fmt.Errorf("workload: CPU, memory, storage, and non-negative max_retries are required desired state")
 	}
-	if spec.Image == "" {
+	if exp.Image == "" {
 		return nil, fmt.Errorf("workload: experiment %s has no image in desired state", exp.ID)
 	}
 	if spec.TotalAccelerators() > 0 && !onCores(exp) && placement.ResourceName == "" && placement.DeviceClassName == "" {
@@ -326,16 +326,14 @@ func (c *JobWorkloadClient) compileJob(exp *clusterapi.DesiredJob, placement Acc
 		}
 	}
 
-	command, args := workloadenv.Command(spec, group)
 	container := corev1.Container{
 		Name:  "experiment",
-		Image: spec.Image,
+		Image: exp.Image,
 		// IfNotPresent rather than k8s's default (Always for :latest-tagged images): otherwise
 		// a locally-built image is ignored and the kubelet always attempts a registry pull,
 		// which fails on any cluster without a real registry behind the image reference.
 		ImagePullPolicy: corev1.PullIfNotPresent,
-		Command:         command,
-		Args:            args,
+		Command:         workloadenv.Command(exp, spec, group),
 		Env:             env,
 		Resources:       resources,
 	}
@@ -458,8 +456,8 @@ func (c *JobWorkloadClient) compileJob(exp *clusterapi.DesiredJob, placement Acc
 		job.Labels[workloadkeys.JobGroup] = boundedname.Name(group.Name, group.Name, dnsLabelLength)
 	}
 
-	if exp.EnvironmentKey != "" {
-		// The environment's image is read only with the login CreateWorkload writes here.
+	if exp.ImagePull != nil {
+		// The image is read only with the login CreateWorkload writes here.
 		job.Spec.Template.Spec.ImagePullSecrets = []corev1.LocalObjectReference{{Name: pullSecretName(exp.ID)}}
 	}
 

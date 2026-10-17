@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -251,6 +252,8 @@ func (e *Executor) GetLiveAcceleratorCapacitySnapshot(ctx context.Context) (avai
 			}
 		}
 	}
+	// The agent runs on the node it reports, so its own architecture is the node's.
+	labels[clusterapi.NodeArchitectureLabel] = runtime.GOARCH
 	nodeLabels = map[string]map[string]string{e.nodeName: labels}
 	return available, total, byNode, nodeLabels, nil
 }

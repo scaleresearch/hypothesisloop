@@ -181,8 +181,7 @@ func (a budgetAPI) getStages(ctx context.Context, in *struct {
 }
 
 type liveCapacity struct {
-	Clusters  []platformexperiments.ClusterCapacity `json:"clusters"`
-	JobImages []domain.JobImage                     `json:"job_images" doc:"The images the deployment offers a job to run in, each with what it carries. A capacity line names the ones that suit its type. A job names one of these by its name, or any other image by its full registry address, host first: 422 unknown_job_image otherwise, and no_cluster_for_image for one no cluster could run."`
+	Clusters []platformexperiments.ClusterCapacity `json:"clusters"`
 }
 
 func (a budgetAPI) getResourceCapacity(ctx context.Context, in *struct {
@@ -192,12 +191,9 @@ func (a budgetAPI) getResourceCapacity(ctx context.Context, in *struct {
 	if err != nil {
 		return nil, err
 	}
-	clusters, images, err := a.experiments.ResourceCapacity(ctx, orgID, every)
+	clusters, err := a.experiments.ResourceCapacity(ctx, orgID, every)
 	if err != nil {
 		return nil, auth.Internal(a.logger, "get resource capacity", err)
 	}
-	if images == nil {
-		images = []domain.JobImage{}
-	}
-	return &struct{ Body liveCapacity }{Body: liveCapacity{Clusters: clusters, JobImages: images}}, nil
+	return &struct{ Body liveCapacity }{Body: liveCapacity{Clusters: clusters}}, nil
 }

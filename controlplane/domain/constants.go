@@ -81,12 +81,6 @@ const (
 	// NotAdmittedClustersDisabled means the org has clusters it can use and has turned every one
 	// of them off for its jobs. Waiting does not fix it; turning one on does.
 	NotAdmittedClustersDisabled = "clusters_disabled"
-	// NotAdmittedNoClusterForImage means the job's image choice keeps it off every cluster taking
-	// its org's jobs: none runs the image it names, which holds of every cluster for a job stored
-	// with none, or those that run its choice have installed less than it asks for while a cluster
-	// its choice rules out has it. Waiting does not fix it; the reason says which choice runs
-	// where. A submit is refused with it, and a job queued before the clusters changed carries it.
-	NotAdmittedNoClusterForImage = "no_cluster_for_image"
 	// NotAdmittedWaitingForScaleUp means this cluster's desired-free already went negative for a
 	// speculative submit in this job's accelerator dimension — a scale-up is outstanding there.
 	// Preemption is skipped rather than evicting a burst job to cover a shortage the incoming

@@ -26,9 +26,14 @@ type DesiredJob struct {
 	// it onto this cluster, nil when nothing was resolved: read EffectiveJob.
 	Job         JobSpec  `json:"job"`
 	ResolvedJob *JobSpec `json:"resolved_job,omitempty"`
-	// EnvironmentKey is set on a job that runs in an environment image, which is pulled with the
-	// reconcile answer's registry_pull.
-	EnvironmentKey         string          `json:"environment_key,omitempty"`
+	// Image is the image every node of the job runs in, repository@digest: its platform
+	// experiment's image when the job was submitted. ImagePull is a read-only login that pulls
+	// it, nil for an image pulled without one.
+	Image     string         `json:"image"`
+	ImagePull *RegistryLogin `json:"image_pull,omitempty"`
+	// Launch is the script every node of the job runs as its process, the node's command and
+	// arguments after it (LaunchCommand).
+	Launch                 string          `json:"launch"`
 	AcceleratorType        AcceleratorType `json:"accelerator_type"`
 	AcceleratorCount       int             `json:"accelerator_count"`
 	EstimatedDurationHours float64         `json:"estimated_duration_hours"`
@@ -84,13 +89,10 @@ type DataAccess struct {
 // templates, or CRDs): whatever backend is configured (k8s today; conceivably Slurm/Ray tomorrow)
 // compiles this down into its own native resource, deterministically, from the same desired state.
 type JobSpec struct {
-	// Image is the container image to run. Left out, the job is placed only on a cluster that
-	// runs one image (Cluster.Runs), and admission writes that image into
-	// Experiment.ResolvedJob, which always carries the exact reference the runtime runs.
-	Image string `json:"image,omitempty" yaml:"image,omitempty"`
-	// Command overrides the image's entrypoint, if set.
+	// Command is the process every node runs in the job's code, /workspace/code, unless its
+	// group names its own.
 	Command []string `json:"command,omitempty" yaml:"command,omitempty"`
-	// Args are appended after Command (or after the image's own entrypoint if Command is unset).
+	// Args are appended after Command.
 	Args []string `json:"args,omitempty" yaml:"args,omitempty"`
 	// Env is injected into every node's container, in addition to the platform's own
 	// HYPOTHESISLOOP_* env vars (experiment id, rank, world size, etc).
@@ -162,7 +164,7 @@ type JobSpec struct {
 	// Groups expresses a job whose nodes are NOT identical — a learner alongside a fleet of
 	// actors, a parameter server alongside workers. Each group carries its own per-replica
 	// resources, command, args and env; everything that describes the JOB rather than a node
-	// within it (image, accelerator type, tolerations, node selector, topology, max_retries)
+	// within it (accelerator type, tolerations, node selector, topology, max_retries)
 	// stays at the top level and is shared by every group.
 	//
 	// Optional. Absent, the job is the identical-nodes shape described by NumNodes and the
@@ -387,4 +389,12 @@ func (j JobSpec) ResolvedGrace() (shutdown, checkpoint int64, err error) {
 		checkpoint = *j.CheckpointGraceSeconds
 	}
 	return *j.TerminationGracePeriodSeconds, checkpoint, nil
+}
+
+// RegistryLogin is a login to the registry host Registry, good until ExpiresAt.
+type RegistryLogin struct {
+	Registry  string    `json:"registry"`
+	Username  string    `json:"username"`
+	Password  string    `json:"password"`
+	ExpiresAt time.Time `json:"expires_at"`
 }

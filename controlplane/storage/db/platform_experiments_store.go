@@ -211,7 +211,7 @@ SELECT pe.id, pe.project_id, pe.name, pe.description, pe.budget_accelerator_hour
        ` + coordinatorColumns + `, pe.max_agentsandboxes, pe.repository, pe.repository_url, pe.branch, pe.agent_image, pe.goal, pe.goal_version, COALESCE(pe.continues, ''), pe.created_by_kind, pe.created_by_id, pe.proposal, pe.proposed_at, pe.declined_reason,
        pe.baseline_job_id, pe.job_estimated_duration_hours, pe.closed_at, pe.close_reason, pe.closed_by_kind, pe.closed_by_id, pe.close_message, pe.removed_at, pe.repository_error, pe.repository_account, COALESCE(pe.researchers_held, ''),
        pe.duration_hours, pe.started_at, pe.planner_ends_at, pe.accepts_at, COALESCE(ci.activity, ''), ci.activity_at,
-       pe.accepted_at, pe.accepted_by_kind, pe.accepted_by_id, pe.accepted_answers,
+       pe.accepted_at, pe.accepted_by_kind, pe.accepted_by_id, pe.accepted_answers, pe.image, pe.image_architecture, pe.image_set_at,
        (SELECT pi.activity FROM experiment_signups planner JOIN agentsandbox_instances pi USING (platform_experiment_id, agent_id) WHERE ` + plannerOfDraft + `),
        (SELECT pi.activity_at FROM experiment_signups planner JOIN agentsandbox_instances pi USING (platform_experiment_id, agent_id) WHERE ` + plannerOfDraft + `)
 FROM platform_experiments pe` + coordinatorInstanceJoin + `
@@ -227,6 +227,8 @@ WHERE pe.id = $1`
 	var startsAt, startedAt, answeredAt, plannerEndsAt, acceptsAt, coordinatorActivityAt, plannerActivityAt *time.Time
 	var coordinatorActivity string
 	var plannerActivity *string
+	var image domain.ExperimentImage
+	var imageSetAt *time.Time
 	err := s.pool.pool.QueryRow(ctx, q, id).Scan(
 		&pe.ID, &pe.ProjectID, &pe.Name, &pe.Description, &pe.BudgetAcceleratorHours, &pe.MaxAgents, &pe.Researchers,
 		&metricsRaw, &pe.ReportIntervalSeconds,
@@ -239,7 +241,7 @@ WHERE pe.id = $1`
 		&pe.Goal, &pe.GoalVersion, &pe.Continues, &createdBy.Kind, &createdBy.ID, &proposal, &answeredAt, &pe.DeclinedReason,
 		&pe.BaselineJobID, &pe.JobEstimatedDurationHours, &pe.ClosedAt, &pe.CloseReason, &closedBy.Kind, &closedBy.ID, &pe.CloseMessage, &pe.RemovedAt, &pe.RepositoryError, &pe.RepositoryAccount, &pe.ResearchersHeld,
 		&pe.DurationHours, &startedAt, &plannerEndsAt, &acceptsAt, &coordinatorActivity, &coordinatorActivityAt,
-		&pe.AcceptedAt, &acceptedBy.Kind, &acceptedBy.ID, &acceptedAnswers,
+		&pe.AcceptedAt, &acceptedBy.Kind, &acceptedBy.ID, &acceptedAnswers, &image.Image, &image.Architecture, &imageSetAt,
 		&plannerActivity, &plannerActivityAt,
 	)
 	if err != nil {
@@ -257,6 +259,10 @@ WHERE pe.id = $1`
 	if pe.CoordinatorInAgentSandbox {
 		coordinator.Activity = domain.ActivityOf(coordinatorActivity, coordinatorActivityAt)
 		pe.Coordinator = &coordinator
+	}
+	if imageSetAt != nil {
+		image.SetAt = *imageSetAt
+		pe.Image = &image
 	}
 	pe.Actor = &createdBy
 	if closedBy.Kind != "" {
@@ -691,4 +697,16 @@ func unmarshalList[T any](raw []byte, list *[]T) error {
 	}
 	*list = []T{}
 	return nil
+}
+
+// SetPlatformExperimentImage records image as what the jobs of platform experiment id submitted
+// from now on run in, while it is open or running. It reports whether it was.
+func (s *Store) SetPlatformExperimentImage(ctx context.Context, id string, image domain.ExperimentImage) (bool, error) {
+	tag, err := s.pool.pool.Exec(ctx, `
+UPDATE platform_experiments SET image = $2, image_architecture = $3, image_set_at = $4, updated_at = now()
+WHERE id = $1 AND status IN ('open', 'running')`, id, image.Image, image.Architecture, image.SetAt)
+	if err != nil {
+		return false, fmt.Errorf("platform_experiments_store.SetImage: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
 }

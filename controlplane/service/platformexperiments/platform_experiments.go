@@ -10,6 +10,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
+	"github.com/scaleresearch/hypothesisloop/controlplane/clients/registrycred"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
@@ -28,6 +29,9 @@ type Store interface {
 	InstructionsStore
 	// CreatePlatformExperiment stores pe with the agents it is created with signed up, or neither.
 	CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error
+	// SetPlatformExperimentImage records the image the jobs of an open or running platform
+	// experiment run in (db.Store).
+	SetPlatformExperimentImage(ctx context.Context, id string, image domain.ExperimentImage) (bool, error)
 	// AgentTypeCatalog and ProjectAgentTypeCatalog are the agent types the agents of a platform
 	// experiment, or of one of a project, may run as.
 	AgentTypeCatalog(ctx context.Context, platformExpID string) (domain.AgentTypeCatalog, error)
@@ -222,7 +226,6 @@ type Service struct {
 	repos          githost.Provider
 	repositoryWake chan struct{}
 	// environments reads what the baseline branch declares and the environment a job ran in.
-	environments Environments
 	// models is the platform's model for an agent and a coordinator whose agent type names none
 	// (WithModelDefaults).
 	models domain.ModelDefaults
@@ -235,8 +238,6 @@ type Service struct {
 	// placement reads the live capacity jobs of a project's org can be placed on, node by node.
 	// WithLiveCapacity sets it, and until then it answers ErrLiveCapacityUnconfigured.
 	placement func(ctx context.Context, projectID string) (*Placement, error)
-	// jobImages is the images the deployment offers a job to run in (WithJobImages).
-	jobImages []domain.JobImage
 	// capacityFreshness, clusters and podResources are what the live capacity is
 	// read from (WithLiveCapacity).
 	capacityFreshness time.Duration
@@ -248,6 +249,9 @@ type Service struct {
 	planning Planning
 	// proxyURL is where the control plane's proxy serves repositories (WithGitProxy).
 	proxyURL string
+	// registry and images record and push the images jobs run in (WithImages).
+	registry registrycred.Provider
+	images   ImageResolver
 }
 
 // IdleNotices reads the researchers of running platform experiments due an idle notice, and
@@ -267,12 +271,6 @@ func (s *Service) WithIdleNotice(notices IdleNotices, after time.Duration) *Serv
 	return s
 }
 
-// Environments is what the baseline gate asks of the environments (environments.Service).
-type Environments interface {
-	Read(ctx context.Context, projectID, repository, ref string) (*string, error)
-	Get(ctx context.Context, key string) (*domain.Environment, error)
-}
-
 // WithPersonIdeas wires the graph the situation counts the open ideas of people in.
 func (s *Service) WithPersonIdeas(ideas PersonIdeas) *Service {
 	s.personIdeas = ideas
@@ -283,12 +281,6 @@ func (s *Service) WithPersonIdeas(ideas PersonIdeas) *Service {
 // none.
 func (s *Service) WithModelDefaults(models domain.ModelDefaults) *Service {
 	s.models = models
-	return s
-}
-
-// WithEnvironments wires the environments.
-func (s *Service) WithEnvironments(environments Environments) *Service {
-	s.environments = environments
 	return s
 }
 

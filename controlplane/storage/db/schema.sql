@@ -96,8 +96,6 @@ CREATE TABLE clusters (
     shared                         BOOLEAN     NOT NULL DEFAULT false,
     priority                       INTEGER     NOT NULL DEFAULT 100,
     reported_id                    TEXT        UNIQUE,
-    job_image                      TEXT        NOT NULL DEFAULT '',
-    builds                         BOOLEAN     NOT NULL DEFAULT false,
     scale_up_timeout_seconds       INTEGER     CHECK (scale_up_timeout_seconds > 0 AND scale_up_timeout_seconds < 1800),
     max_speculative_accelerators   INTEGER     CHECK (max_speculative_accelerators > 0),
     stuck_pending_timeout_seconds  INTEGER     CHECK (stuck_pending_timeout_seconds > 0),
@@ -322,6 +320,10 @@ CREATE TABLE platform_experiments (
     removed_by_kind                TEXT             NOT NULL DEFAULT '',
     removed_by_id                  TEXT             NOT NULL DEFAULT '',
 
+    image                          TEXT             NOT NULL DEFAULT '',
+    image_architecture             TEXT             NOT NULL DEFAULT '',
+    image_set_at                   TIMESTAMPTZ,
+
     CONSTRAINT platform_experiments_status CHECK (status IN ('draft', 'open', 'running', 'closed')),
     CONSTRAINT platform_experiments_current_stage CHECK (current_stage >= 1),
     CONSTRAINT platform_experiments_budget_non_negative CHECK (budget_accelerator_hours >= 0),
@@ -338,7 +340,9 @@ CREATE TABLE platform_experiments (
         CHECK (closed_by_kind IN ('', 'user', 'key', 'agent', 'coordinator', 'staff', 'unverified')),
     CONSTRAINT platform_experiments_removed_by_kind
         CHECK (removed_by_kind IN ('', 'user', 'key', 'agent', 'coordinator', 'staff', 'unverified')),
-    CONSTRAINT platform_experiments_removed_closed CHECK (removed_at IS NULL OR status = 'closed')
+    CONSTRAINT platform_experiments_removed_closed CHECK (removed_at IS NULL OR status = 'closed'),
+    CONSTRAINT platform_experiments_image
+        CHECK ((image = '') = (image_set_at IS NULL) AND (image = '') = (image_architecture = ''))
 );
 CREATE INDEX idx_platform_experiments_project ON platform_experiments(project_id);
 CREATE INDEX idx_platform_experiments_accepts_at ON platform_experiments(accepts_at) WHERE accepts_at IS NOT NULL;
@@ -494,62 +498,14 @@ CREATE TABLE agentsandbox_pool (
 );
 
 -- ---------------------------------------------------------------------------
--- Environments
--- ---------------------------------------------------------------------------
-
--- An image built for an org from a repository's .hypothesisloop/Dockerfile on one base
--- (domain.Environment), named by key so it is built once. cluster_name is the cluster its
--- attempt-th build is assigned to, '' while none. loaded_* is the image of a building environment
--- one node already holds.
-CREATE TABLE environments (
-    key            TEXT        PRIMARY KEY,
-    org_id         TEXT        NOT NULL REFERENCES orgs(id),
-    project_id     TEXT        NOT NULL REFERENCES projects(id),
-    git_repository TEXT        NOT NULL,
-    base           TEXT        NOT NULL,
-    tools          TEXT        NOT NULL DEFAULT '',
-    dockerfile     TEXT        NOT NULL,
-    image          TEXT        NOT NULL,
-    state          TEXT        NOT NULL,
-    fault          TEXT        NOT NULL DEFAULT '',
-    log_tail       TEXT        NOT NULL DEFAULT '',
-    failed_log     TEXT        NOT NULL DEFAULT '',
-    cluster_name   TEXT        NOT NULL DEFAULT '',
-    attempt        INTEGER     NOT NULL DEFAULT 0,
-    assigned_at    TIMESTAMPTZ,
-    progress       TEXT        NOT NULL DEFAULT '',
-    progress_at    TIMESTAMPTZ,
-    loaded_image   TEXT        NOT NULL DEFAULT '',
-    loaded_node    TEXT        NOT NULL DEFAULT '',
-    loaded_cluster TEXT        NOT NULL DEFAULT '',
-    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT environments_state CHECK (
-        state IN ('building', 'ready', 'failed') AND fault IN ('', 'file', 'platform') AND (state = 'failed') = (fault <> '')
-        AND (cluster_name = '') = (assigned_at IS NULL)
-    )
-);
-CREATE INDEX idx_environments_assigned ON environments(cluster_name) WHERE state = 'building';
-
--- An agent told environment.status once the build it asked for is loaded or ends.
-CREATE TABLE environment_waiters (
-    environment_key        TEXT    NOT NULL REFERENCES environments(key) ON DELETE CASCADE,
-    platform_experiment_id TEXT    NOT NULL REFERENCES platform_experiments(id) ON DELETE CASCADE,
-    agent_id               TEXT    NOT NULL REFERENCES agents(id),
-    code_ref               TEXT    NOT NULL,
-    image                  TEXT    NOT NULL,
-    loaded                 BOOLEAN NOT NULL DEFAULT false,
-    PRIMARY KEY (environment_key, platform_experiment_id, agent_id)
-);
-
--- ---------------------------------------------------------------------------
 -- Jobs (experiments)
 -- ---------------------------------------------------------------------------
 
 -- job_spec is what was submitted and is never rewritten; resolved_job_spec is it as the runtime
 -- runs it, written at admission and cleared on requeue. eviction_reason explains only the attempt
 -- the status is about. cluster_name is '' while placed on none; last_cluster keeps the last
--- placement. data_access_key_id is '' only on terminal rows from before per-job keys.
+-- placement. data_access_key_id is '' only on terminal rows from before per-job keys. image is
+-- the platform experiment's image at the submit, repository@digest.
 CREATE TABLE experiments (
     id                       TEXT             PRIMARY KEY,
     parent_id                TEXT             REFERENCES experiments(id),
@@ -568,7 +524,6 @@ CREATE TABLE experiments (
     job_spec                 JSONB            NOT NULL DEFAULT '{}',
     resolved_job_spec        JSONB,
     secret_env               JSONB            NOT NULL DEFAULT '{}',
-    environment_key          TEXT             REFERENCES environments(key),
     submission_key           TEXT             NOT NULL DEFAULT '',
 
     accelerator_type         TEXT             NOT NULL,
@@ -602,6 +557,8 @@ CREATE TABLE experiments (
     created_at               TIMESTAMPTZ      NOT NULL DEFAULT now(),
     updated_at               TIMESTAMPTZ      NOT NULL DEFAULT now(),
     ended_at                 TIMESTAMPTZ,
+
+    image                    TEXT             NOT NULL DEFAULT '',
 
     CONSTRAINT experiments_status
         CHECK (status IN ('SUBMITTED', 'QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'EVICTED', 'REJECTED')),
@@ -720,7 +677,7 @@ CREATE TABLE changes (
         'platform_experiment.status', 'platform_experiment.description', 'platform_experiment.goal',
         'platform_experiment.proposal', 'platform_experiment.plan',
         'platform_experiment.baseline', 'platform_experiment.removed',
-        'job.underperforming', 'job.held', 'job.duplicate', 'environment.status'
+        'job.underperforming', 'job.held', 'job.duplicate'
     ))
 );
 CREATE INDEX idx_changes_platform ON changes(platform_experiment_id, id);

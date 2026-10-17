@@ -23,6 +23,9 @@ const (
 	// NodeSlotNoOfferLabel is on a slot no instance holds and no machine can be rented for right
 	// now. Its value is the runtime's reason, in words a person reads.
 	NodeSlotNoOfferLabel = NodeLabelReservedPrefix + "slot-no-offer"
+	// NodeArchitectureLabel is on every node a runtime reports: the architecture of its CPU as Go
+	// and image manifests name it (amd64, arm64). A job runs only on a node of its image's.
+	NodeArchitectureLabel = "kubernetes.io/arch"
 )
 
 // ReasonClusterNotRegistered is the reason on the 401 a runtime token gets once its cluster is
@@ -53,20 +56,9 @@ type ReconcileRequest struct {
 	// MultiNodeCapable is whether this runtime can execute a job spanning more than one node.
 	// Absent means single-node only.
 	MultiNodeCapable bool `json:"multi_node_capable"`
-	// JobImage is the one image this cluster runs, for a runtime that boots its own. Absent
-	// means it runs whatever image a job names. A runtime sends it, empty or not; a report
-	// without it is still read.
-	JobImage string `json:"job_image" required:"false"`
-	// JobImageDefault is sent only by a runtime built when a cluster that runs any image also
-	// reported, in job_image, where a job naming none ran. True, the cluster runs any image and
-	// job_image is not read. It goes once no such runtime is installed: a report that carries a
-	// field this body does not name is refused.
-	JobImageDefault bool `json:"job_image_default,omitempty"`
 	// AutoscalerEnabled is the operator's claim that this cluster sits behind a native
 	// autoscaler that reacts to pending pods. Absent means it does not.
 	AutoscalerEnabled bool `json:"autoscaler_enabled"`
-	// Builds is whether this runtime builds environments. Absent means it is assigned none.
-	Builds bool `json:"builds" required:"false"`
 	// ClusterID is a stable fingerprint the runtime derives live and never persists itself: the
 	// kube-system namespace UID on k8s, /etc/machine-id on bare metal. It identifies the cluster
 	// across a rename of its name.
@@ -84,11 +76,6 @@ type ReconcileAnswer struct {
 	// CheckpointWindow names the jobs whose termination was the platform's own decision: ids and
 	// nothing else. How long each window is was declared on the job's own spec.
 	CheckpointWindow []string `json:"checkpoint_window"`
-	// Builds are the environment builds assigned to this cluster now.
-	Builds []EnvironmentBuild `json:"builds"`
-	// RegistryPull pulls the environment images of the jobs listed, sent only when one of them
-	// runs in one.
-	RegistryPull *RegistryLogin `json:"registry_pull,omitempty"`
 }
 
 // StatusPush is one complete snapshot of a cluster's jobs (POST /internal/clusters/{name}/status).
@@ -142,18 +129,12 @@ type JobMachine struct {
 	PricePerHourUSD float64 `json:"price_per_hour_usd,omitempty" minimum:"0"`
 }
 
-// The paths of a cluster's API. Each of a cluster's own is under ClustersPath + "/{name}", and a
-// build's under that and BuildsPath + "/{key}".
+// The paths of a cluster's API. Each of a cluster's own is under ClustersPath + "/{name}".
 const (
-	ClustersPath           = "/internal/clusters"
-	AccessPath             = "/access"
-	ReconcilePath          = "/reconcile"
-	StatusPath             = "/status"
-	BuildsPath             = "/builds"
-	BuildCredentialPath    = "/credential"
-	BuildGitCredentialPath = "/git-credential"
-	BuildLoadedPath        = "/loaded"
-	BuildProgressPath      = "/progress"
+	ClustersPath  = "/internal/clusters"
+	AccessPath    = "/access"
+	ReconcilePath = "/reconcile"
+	StatusPath    = "/status"
 	// NodeMetricsPath is where a node's agent pushes NodeMetricsPush, on the metrics service.
 	NodeMetricsPath = "/internal/node-metrics"
 )

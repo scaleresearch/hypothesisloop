@@ -84,8 +84,7 @@ type tickState struct {
 	connected            map[string]bool
 	speculativeFootprint map[string]int
 
-	completion   map[string]float64
-	environments *environmentPass
+	completion map[string]float64
 
 	// The disbalance evictor is a cluster-level verdict about stranded accelerators — at most one
 	// per cluster per tick, shared by both admission passes. See its call sites for why.
@@ -174,7 +173,6 @@ func (l *Loop) readTickState(ctx context.Context, start time.Time) (*tickState, 
 		gAvail: gAvail, bAvail: placement.CloneAvail(gAvail), desiredFree: desiredFree,
 		totalCapacity:     totalCapacity,
 		autoscalerEnabled: autoscalerEnabled, connected: connected, speculativeFootprint: speculativeFootprint,
-		environments:  newEnvironmentPass(),
 		disbalanceRan: map[string]bool{},
 		held:          map[string]bool{},
 	}, nil
@@ -234,8 +232,7 @@ func (t *tickState) snapshotTickStart() {
 }
 
 // admissible keeps the queued jobs this tick may place, and writes why each other one waits or
-// ends: a job held for its environment, one longer than its stage's max_job_hours allows, and one
-// whose agent was cut.
+// ends: one longer than its stage's max_job_hours allows, and one whose agent was cut.
 //
 // The current stage's max_job_hours is enforced here: a job queued while an earlier, looser stage
 // was running must not slip through after the ladder tightened. Held, not rejected — a later
@@ -253,14 +250,6 @@ func (l *Loop) admissible(ctx context.Context, t *tickState, queued []*domain.Ex
 	cut := map[string]bool{}
 	filtered := queued[:0]
 	for _, exp := range queued {
-		if exp.EnvironmentKey != "" {
-			if held, err := l.heldForEnvironment(ctx, t.environments, exp, t.clusters.registered, t.clusters.nodeLabels); err != nil {
-				l.skipExperiment(&t.errs, exp, fmt.Errorf("environment: %w", err))
-				continue
-			} else if held {
-				continue
-			}
-		}
 		if exp.PlatformExperimentID == "" {
 			filtered = append(filtered, exp)
 			continue

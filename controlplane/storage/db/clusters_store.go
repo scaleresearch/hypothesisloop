@@ -26,16 +26,13 @@ var (
 // cluster from jobs, so the two never interleave.
 const clusterAdmissionLock = `SELECT pg_advisory_xact_lock(hashtextextended('cluster-admission/' || $1, 0))`
 
-// clusterHostsJob is the placement rule (domain.Cluster.HostsJob) as a condition on a job row e
-// and a cluster named $2: the cluster is registered, is shared or belongs to the job's org, that
-// org has not turned it off, and it runs the image the job names: a cluster with one image a job
-// that names it, any other cluster a job that names one.
+// clusterHostsJob is the placement rule (domain.Cluster.Hosts) as a condition on a job row e and
+// a cluster named $2: the cluster is registered, is shared or belongs to the job's org, and that
+// org has not turned it off.
 var clusterHostsJob = `EXISTS (
 	SELECT 1 FROM clusters c, (SELECT ` + orgOfSQL("e.platform_experiment_id") + ` AS org_id) o
 	WHERE c.name = $2 AND (c.shared OR c.org_id = o.org_id)
-	  AND NOT EXISTS (SELECT 1 FROM org_disabled_clusters d WHERE d.cluster_name = c.name AND d.org_id = o.org_id)
-	  AND CASE WHEN c.job_image = '' THEN COALESCE(e.job_spec ->> 'image', '') <> ''
-	           ELSE COALESCE(e.job_spec ->> 'image', '') = c.job_image END)`
+	  AND NOT EXISTS (SELECT 1 FROM org_disabled_clusters d WHERE d.cluster_name = c.name AND d.org_id = o.org_id))`
 
 // requeueWithdrawn returns to the queue every job placed on a cluster that no longer takes it:
 // all of them, or with keepOrg set every one of another org. It is the requeue an infrastructure
@@ -59,14 +56,14 @@ UPDATE experiments e SET
 WHERE e.cluster_name = $1 AND e.status IN ` + placedSQL + `
   AND ($2 = '' OR $2 <> ` + orgOfSQL("e.platform_experiment_id") + `)` + jobReturning
 
-const clusterColumns = `name, org_id, shared, priority, COALESCE(reported_id, ''), job_image, created_at,
+const clusterColumns = `name, org_id, shared, priority, COALESCE(reported_id, ''), created_at,
 	scale_up_timeout_seconds, max_speculative_accelerators, stuck_pending_timeout_seconds, status_silence_ceiling_seconds,
 	last_error, last_error_at,
 	ARRAY(SELECT d.org_id FROM org_disabled_clusters d WHERE d.cluster_name = clusters.name ORDER BY d.org_id)`
 
 func scanCluster(row rowScanner) (*domain.Cluster, error) {
 	c := &domain.Cluster{}
-	if err := row.Scan(&c.Name, &c.OrgID, &c.Shared, &c.Priority, &c.ReportedID, &c.JobImage, &c.CreatedAt,
+	if err := row.Scan(&c.Name, &c.OrgID, &c.Shared, &c.Priority, &c.ReportedID, &c.CreatedAt,
 		&c.ScaleUpTimeoutSeconds, &c.MaxSpeculativeAccelerators, &c.StuckPendingTimeoutSeconds, &c.StatusSilenceCeilingSeconds,
 		&c.LastError, &c.LastErrorAt, &c.DisabledOrgs); err != nil {
 		return nil, err
@@ -131,15 +128,6 @@ func (s *Store) ClusterOrg(ctx context.Context, name string) (orgID string, foun
 	return orgID, true, nil
 }
 
-// RecordJobImage keeps the one image the cluster's runtime says it runs, empty for a runtime that
-// runs whatever image a job names. A report that changes nothing writes nothing.
-func (s *Store) RecordJobImage(ctx context.Context, name, image string) error {
-	if _, err := s.pool.pool.Exec(ctx, `UPDATE clusters SET job_image = $2 WHERE name = $1 AND job_image <> $2`, name, image); err != nil {
-		return fmt.Errorf("clusters_store.RecordJobImage: %w", err)
-	}
-	return nil
-}
-
 // RecordContactRefusal keeps what the control plane refused a reconcile of the cluster's agent
 // with, and when. An empty refusal is a reconcile it accepted, which clears what was kept, and
 // writes nothing when nothing was.
@@ -150,15 +138,6 @@ func (s *Store) RecordContactRefusal(ctx context.Context, name, refusal string) 
 	}
 	if _, err := s.pool.pool.Exec(ctx, query, name, refusal); err != nil {
 		return fmt.Errorf("clusters_store.RecordContactRefusal: %w", err)
-	}
-	return nil
-}
-
-// RecordBuilds keeps whether the cluster's runtime says it builds environments. A report that
-// changes nothing writes nothing.
-func (s *Store) RecordBuilds(ctx context.Context, name string, builds bool) error {
-	if _, err := s.pool.pool.Exec(ctx, `UPDATE clusters SET builds = $2 WHERE name = $1 AND builds <> $2`, name, builds); err != nil {
-		return fmt.Errorf("clusters_store.RecordBuilds: %w", err)
 	}
 	return nil
 }

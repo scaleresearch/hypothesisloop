@@ -84,8 +84,6 @@ var EventKinds = []EventKindDoc{
 		Description: "This job was submitted on a hypothesis that another agent's job was testing then: queued, running or completed within the hour. detail names those jobs, whose they are and their status, as the submitter was told in same_hypothesis. Sent once per job, at its submit."},
 	{Kind: platformapi.EventJobUnderperforming, Subject: "experiment id", Value: "the metric name it trails on",
 		Description: "This job trails its cohort on the ranking metric by a real margin. An opinion, not a command: nothing stops it but you. Consider POST /experiments/{id}/cancel if it is not worth its allocation. Sent once per job, and not for a job that has already ended."},
-	{Kind: platformapi.EventEnvironmentStatus, Subject: "environment key", Value: "loaded, ready or failed",
-		Description: "The build of an environment this agent asked for while it was building (POST /environments: hl env build) was loaded on a cluster, or ended. loaded: the cluster runs its jobs now, while the image is pushed, and any job that cannot run there starts once the push ends, by itself, so a build told loaded is not told ready. detail names the commit and image it asked with and says what to do: once the file failed, GET /environments (hl env status) has the end of its output. Sent once per build and value, to each agent that asked."},
 }
 
 func init() {
@@ -136,7 +134,7 @@ func isExperimentSubject(kind string) bool {
 func isAgentOwned(kind string) bool {
 	switch kind {
 	case platformapi.EventExperimentStatus, platformapi.EventExperimentBlocked, platformapi.EventQuotaChanged, platformapi.EventAgentCut, platformapi.EventAgentFinished, platformapi.EventAgentReplaced, platformapi.EventAgentIdle, platformapi.EventAgentInstructions, platformapi.EventAgentMessage, platformapi.EventJobUnderperforming, platformapi.EventJobHeld,
-		platformapi.EventJobDuplicate, platformapi.EventEnvironmentStatus, platformapi.EventPlatformExperimentGoal:
+		platformapi.EventJobDuplicate, platformapi.EventPlatformExperimentGoal:
 		return true
 	default:
 		return false
@@ -210,8 +208,6 @@ func (f EventFilter) Matches(e Event) bool {
 			return ExperimentStatus(e.Value).Ended()
 		case e.Kind == platformapi.EventExperimentBlocked:
 			return !QueueReasonClearsByWaiting(e.Value)
-		case e.Kind == platformapi.EventEnvironmentStatus:
-			return e.Value == string(EnvironmentFailed)
 		default:
 			return true
 		}

@@ -1,7 +1,9 @@
 package clusterexchange
 
 import (
+	"context"
 	"errors"
+	"fmt"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/contract/scope"
@@ -20,14 +22,24 @@ import (
 // key stored with it; the store already limits that key to writing the job's own prefix and
 // reading its platform experiment's, and nothing here calls the store. It is handed the token it
 // reports metrics and fetches its commit with, derived from its id, so every reconcile answers
-// with the same one, and its platform experiment's repository through the git proxy.
-func (s *Service) desiredJob(exp *domain.Experiment) (*clusterapi.DesiredJob, error) {
+// with the same one, its platform experiment's repository through the git proxy, the launch
+// script every node runs, and a login that pulls its image when the image needs one. A login that
+// cannot be minted fails the whole answer, so a runtime acts on nothing rather than on a job it
+// cannot pull.
+func (s *Service) desiredJob(ctx context.Context, exp *domain.Experiment) (*clusterapi.DesiredJob, error) {
 	token, err := auth.Mint(s.signingSecret, scope.Job(exp.ID))
 	if err != nil {
 		return nil, err
 	}
 	if s.proxyURL == "" {
 		return nil, errors.New("no git proxy address to hand jobs their repository at")
+	}
+	if exp.Image == "" {
+		return nil, fmt.Errorf("job %s has no image", exp.ID)
+	}
+	pull, err := s.pulls(ctx, exp.OrgID, exp.Image)
+	if err != nil {
+		return nil, fmt.Errorf("the pull login of job %s: %w", exp.ID, err)
 	}
 	job := &clusterapi.DesiredJob{
 		ID:                     exp.ID,
@@ -37,7 +49,9 @@ func (s *Service) desiredJob(exp *domain.Experiment) (*clusterapi.DesiredJob, er
 		ConfigHash:             exp.ConfigHash,
 		DataRef:                exp.DataRef,
 		Job:                    exp.Job,
-		EnvironmentKey:         exp.EnvironmentKey,
+		Image:                  exp.Image,
+		ImagePull:              pull,
+		Launch:                 domain.LaunchScript,
 		AcceleratorType:        exp.AcceleratorType,
 		AcceleratorCount:       exp.AcceleratorCount,
 		EstimatedDurationHours: exp.EstimatedDurationHours,

@@ -53,6 +53,5 @@ func principalOf(s string) (Principal, error) {
 		PlatformExperimentID: named.PlatformExperimentID,
 		AgentID:              named.AgentID,
 		ClusterName:          named.ClusterName,
-		Build:                named.Build,
 	}, nil
 }

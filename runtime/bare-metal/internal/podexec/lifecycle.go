@@ -21,11 +21,11 @@ import (
 // the job still without a container, tries again. How the pull ended is remembered: a pass that
 // finds the image of this very spec and attempt can never be pulled starts no further pull and
 // returns the job as unrunnable with what the engine said.
-func (e *Executor) CreateWorkload(ctx context.Context, exp *clusterapi.DesiredJob, pull *clusterapi.RegistryLogin) error {
+func (e *Executor) CreateWorkload(ctx context.Context, exp *clusterapi.DesiredJob) error {
 	if _, busy := e.operations()[exp.ID]; busy {
 		return nil
 	}
-	auth, err := registryAuth(exp, pull)
+	auth, err := registryAuth(exp)
 	if err != nil {
 		return err
 	}

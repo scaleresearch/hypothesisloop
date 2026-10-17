@@ -19,8 +19,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/modelproxy"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/watch"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
-	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
-	"github.com/scaleresearch/hypothesisloop/controlplane/service/environments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
@@ -58,12 +56,10 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	// or the same job's cost depends on which of them is asked.
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
 
-	// An environment is keyed on the digests of the images it is built from, asked of their
-	// registry at most once a minute per tag.
-	environmentsSvc := environments.NewService(store, gitHost).WithJobImages(pcfg.OfferedJobImages(), imagedigest.New(pcfg.PlainHTTPRegistries()...))
+	imageRegistry := newImageRegistry(runCtx, pcfg, logger)
 
 	peSvc := platformexperiments.NewService(store, quotaCfg, logger, metrics, observedGapCap).WithDataStore(dataStore, pcfg.ObjectStore.MaxBytesPerAgent).WithRepositories(gitHost).
-		WithEnvironments(environmentsSvc).WithModelDefaults(modelDefaults(pcfg)).WithIdleNotice(store, time.Duration(pcfg.Agents.IdleNoticeMinutes)*time.Minute).WithPersonIdeas(graph)
+		WithImages(imageRegistry, imagedigest.New(pcfg.PlainHTTPRegistries()...)).WithModelDefaults(modelDefaults(pcfg)).WithIdleNotice(store, time.Duration(pcfg.Agents.IdleNoticeMinutes)*time.Minute).WithPersonIdeas(graph)
 	launch := platformexperiments.AgentLaunch{
 		AgentSandbox: pcfg.Sandbox != nil, DefaultModel: pcfg.Agents.DefaultModel, CoordinatorModel: pcfg.Agents.CoordinatorModel,
 		SigningSecret: pcfg.SigningSecret, MaxAgentSandboxes: pcfg.Agents.MaxAgentSandboxesPerPlatformExperiment,
@@ -74,12 +70,11 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		PlannerKept: time.Duration(pcfg.Planning.PlannerKeptMinutes) * time.Minute,
 		AutoAccept:  time.Duration(pcfg.Planning.AutoAcceptSeconds) * time.Second,
 	}).
-		WithJobImages(pcfg.OfferedJobImages()).
 		WithGitProxy(pcfg.GitProxyURL()).
 		WithLiveCapacity(connectedWithin, store, domain.NewPodResources(pcfg.PodResourcesByName)).
 		WithAgentLaunch(launch)
 
-	jobs, clusterExchange := newSchedulerParts(runCtx, gitHost, environmentsSvc, pool, store, graph, peSvc, quotaCfg, pcfg, metrics, dataStore, logger)
+	jobs, clusterExchange := newSchedulerParts(runCtx, gitHost, imageRegistry, pool, store, graph, peSvc, quotaCfg, pcfg, metrics, dataStore, logger)
 	registrySvc := registry.New(store, graph, store, logger, metrics, dataStore)
 	// The change stream: one LISTEN for this process wakes whatever /watch streams are open, and
 	// each reads the changes table from its own cursor.
@@ -126,19 +121,18 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	}
 }
 
-// newEnvironmentRegistry is where assigned environment builds push to and the logins to it, and
-// the git host their files' repositories are read from, nil on a deployment whose settings have no
-// container_registry section.
-func newEnvironmentRegistry(ctx context.Context, pcfg *hypothesisloopcfg.ControlService, gitHost githost.Provider, logger *zap.Logger) *clusterexchange.EnvironmentRegistry {
+// newImageRegistry is the registry experiments push their images to and jobs pull them from,
+// nil on a deployment whose settings have no container_registry section.
+func newImageRegistry(ctx context.Context, pcfg *hypothesisloopcfg.ControlService, logger *zap.Logger) registrycred.Provider {
 	r := pcfg.ContainerRegistry
 	if r == nil {
 		return nil
 	}
-	logins, err := registrycred.New(ctx, *r)
+	registry, err := registrycred.New(ctx, *r)
 	if err != nil {
-		logger.Fatal("control-service: the registry logins of environment builds", zap.Error(err))
+		logger.Fatal("control-service: the image registry", zap.Error(err))
 	}
-	return &clusterexchange.EnvironmentRegistry{Repository: r.EnvironmentsRepository, Logins: logins, Git: gitHost}
+	return registry
 }
 
 // openGraph connects to the hypothesis graph and makes sure its schema exists.

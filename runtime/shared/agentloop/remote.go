@@ -5,22 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
-	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/cpclient"
 )
-
-// BuildAPI is what a cluster that builds environments asks of the control plane about one
-// assigned build at its attempt.
-type BuildAPI interface {
-	BuildLoaded(ctx context.Context, key string, loaded clusterapi.EnvironmentBuildLoaded) error
-	BuildCredential(ctx context.Context, key string, attempt int) (clusterapi.RegistryLogin, error)
-	BuildGitCredential(ctx context.Context, key string, attempt int) (clusterapi.EnvironmentGitCredential, error)
-	ReportBuild(ctx context.Context, key string, report clusterapi.EnvironmentBuildReport) error
-	BuildProgress(ctx context.Context, key string, progress clusterapi.EnvironmentBuildProgress) error
-}
 
 // Remote is a cluster's API on a control plane it reaches over HTTP with its runtime token.
 type Remote struct {
@@ -72,38 +60,6 @@ func (r *Remote) PushStatus(ctx context.Context, push clusterapi.StatusPush) err
 		return fmt.Errorf("invalid acknowledgement status %q", ack.Status)
 	}
 	return nil
-}
-
-func buildPath(key string) string { return clusterapi.BuildsPath + "/" + url.PathEscape(key) }
-
-func (r *Remote) BuildLoaded(ctx context.Context, key string, loaded clusterapi.EnvironmentBuildLoaded) error {
-	return r.call(ctx, http.MethodPost, buildPath(key)+clusterapi.BuildLoadedPath, loaded, nil)
-}
-
-func (r *Remote) BuildCredential(ctx context.Context, key string, attempt int) (clusterapi.RegistryLogin, error) {
-	var login clusterapi.RegistryLogin
-	err := r.call(ctx, http.MethodPost, buildPath(key)+clusterapi.BuildCredentialPath, clusterapi.EnvironmentBuildCredentialRequest{Attempt: attempt}, &login)
-	return login, err
-}
-
-// BuildGitCredential answers agentexec.ErrNoEnvironmentGitCredential for a build whose file
-// reads no repository.
-func (r *Remote) BuildGitCredential(ctx context.Context, key string, attempt int) (clusterapi.EnvironmentGitCredential, error) {
-	var credential clusterapi.EnvironmentGitCredential
-	err := r.call(ctx, http.MethodPost, buildPath(key)+clusterapi.BuildGitCredentialPath, clusterapi.EnvironmentBuildCredentialRequest{Attempt: attempt}, &credential)
-	var refused *cpclient.Refusal
-	if errors.As(err, &refused) && refused.Status == http.StatusNotFound {
-		return credential, fmt.Errorf("%w: %w", agentexec.ErrNoEnvironmentGitCredential, err)
-	}
-	return credential, err
-}
-
-func (r *Remote) ReportBuild(ctx context.Context, key string, report clusterapi.EnvironmentBuildReport) error {
-	return r.call(ctx, http.MethodPost, buildPath(key), report, nil)
-}
-
-func (r *Remote) BuildProgress(ctx context.Context, key string, progress clusterapi.EnvironmentBuildProgress) error {
-	return r.call(ctx, http.MethodPost, buildPath(key)+clusterapi.BuildProgressPath, progress, nil)
 }
 
 // CheckToken asks the control plane whether it takes this cluster's token, and changes nothing

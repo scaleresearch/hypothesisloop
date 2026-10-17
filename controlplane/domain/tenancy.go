@@ -198,9 +198,6 @@ type Cluster struct {
 	Shared     bool   `json:"shared"`
 	Priority   int    `json:"priority"`
 	ReportedID string `json:"cluster_id,omitempty"`
-	// JobImage is the one image the cluster runs, as its runtime reports it. Empty for a cluster
-	// that runs whatever image a job names.
-	JobImage string `json:"job_image,omitempty"`
 	ClusterSettings
 	CreatedAt time.Time `json:"created_at"`
 	// LastError is what the control plane last refused a reconcile of the cluster's agent with,
@@ -240,9 +237,6 @@ func ValidateClusterOrder(ranked, order []string) error {
 	return nil
 }
 
-// MaxJobImageLength bounds the image a runtime reports for its cluster.
-const MaxJobImageLength = 512
-
 // MaxClusterIDLength bounds the identity a runtime states: a kube-system namespace UID or a
 // machine id, with room to spare.
 const MaxClusterIDLength = 128
@@ -265,22 +259,6 @@ func ValidateClusterID(id string) error {
 // org has not turned off.
 func (c Cluster) Hosts(orgID string) bool {
 	return c.OpenTo(orgID) && c.EnabledFor(orgID)
-}
-
-// HostsJob is the placement rule: the cluster takes jobs of orgID and runs a job that names
-// image.
-func (c Cluster) HostsJob(orgID, image string) bool {
-	return c.Hosts(orgID) && c.Runs(image)
-}
-
-// Runs reports whether a job naming image can run on the cluster. A cluster with one image runs
-// a job that names it, and any other cluster runs the image a job names. Every job names one
-// (submit refuses a job without), so an image that is empty runs nowhere.
-func (c Cluster) Runs(image string) bool {
-	if c.JobImage == "" {
-		return image != ""
-	}
-	return image == c.JobImage
 }
 
 // OpenTo reports whether the cluster is one orgID can use: one of its own, or one the platform

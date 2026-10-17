@@ -59,9 +59,9 @@ type Experiment struct {
 	// estimation, BuildJobs, Footprint, NodeShapes) must call EffectiveJob() instead of reading
 	// Job directly.
 	ResolvedJob *JobSpec `json:"resolved_job,omitempty"`
-	// EnvironmentKey names the environment the job's commit declares (EnvironmentFile), built on
-	// Job.Image. Admission waits for it to be ready and runs the job in its image.
-	EnvironmentKey string `json:"environment_key,omitempty" doc:"The environment the job's commit declares in .hypothesisloop/Dockerfile, built on job.image. The job waits (environment_building) until it is built and runs in it. Absent when the commit declares none."`
+	// Image is the image the job runs in, repository@digest: its platform experiment's image at
+	// its submit.
+	Image string `json:"image" doc:"The image the job runs in, repository@digest: the image its platform experiment recorded when it was submitted (PUT /platform-experiments/{id}/image)."`
 	// HypothesisID is the hypothesis the job tests, registered via POST /hypotheses. The job of a
 	// baseline agent tests none and is kept on the objective, which the platform experiment's id
 	// names here as it does in a builds_on link. That id is no hypothesis a reader can fetch, so
@@ -130,14 +130,6 @@ type Experiment struct {
 	// MaxEstimateHours bounds the estimate admission gives a job that reaches it with none
 	// (EstimatedDurationHours 0), 0 for no bound. Read by the admission transaction alone.
 	MaxEstimateHours float64 `json:"-"`
-	// EnvironmentImage is set by one admission pass alone, on a job whose environment is loaded
-	// on one node (Environment.LoadedImage) and not yet pushed: its Job is pinned to that node
-	// for the pass, and the claim runs it in that image.
-	EnvironmentImage string `json:"-"`
-	// EnvironmentCluster is set by one admission pass alone, on a job whose environment is built:
-	// the cluster that built it, whose node holds its image. Placement prefers it among clusters
-	// with equal room.
-	EnvironmentCluster string `json:"-"`
 	// QuotaSettledAt is set once this (terminal) experiment's final usage has been durably
 	// written to the metrics DB. nil means settlement is pending — the signal a background
 	// reconciler uses to retry after a crash or outage. Meaningless for non-terminal experiments.
@@ -434,3 +426,11 @@ type RanOn struct {
 
 // JobMachine is the machine a job's workload runs on, as its runtime reports it.
 type JobMachine = clusterapi.JobMachine
+
+// HeldBaselineLate is the job.held reason of a job of an open platform experiment's baseline
+// that, started now, ends after its baseline_due_at.
+const HeldBaselineLate = "baseline_late"
+
+// MaxBaselineHold is the most an open platform experiment's baseline_due_at moves out for the
+// time jobs of its baseline wait on the platform to start them.
+const MaxBaselineHold = 90 * time.Minute

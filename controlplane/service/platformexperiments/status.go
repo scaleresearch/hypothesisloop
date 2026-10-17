@@ -195,17 +195,16 @@ func lateBaselineJob(job *domain.Experiment, due, now time.Time) string {
 }
 
 // waitsOnPlatform says job, a job of an open platform experiment's baseline, waits on the
-// platform: for the environment its commit declares to be built, or placed on its cluster and
-// not running yet, which includes pulling its image.
+// platform: placed on its cluster and not running yet, which includes pulling its image.
 func waitsOnPlatform(job *domain.Experiment) bool {
-	return job.Status == domain.StatusSubmitted || job.Status == domain.StatusQueued && job.NotAdmittedReason == domain.NotAdmittedEnvironmentBuilding
+	return job.Status == domain.StatusSubmitted
 }
 
 // baselineClock says when an open platform experiment whose baseline is due at due closes, how
 // long that is from now, and what moves it.
 func baselineClock(due, now time.Time) string {
-	return fmt.Sprintf("baseline_due_at is %s, %d minutes from now: the platform closes it then if the run has not started. While a job of the baseline waits for the platform to build its environment or to start it on its cluster, baseline_due_at moves out by that time, at most %d minutes in all. ",
-		due.UTC().Format(time.RFC3339), max(0, int(due.Sub(now).Minutes())), int(domain.MaxEnvironmentBuildTime.Minutes()))
+	return fmt.Sprintf("baseline_due_at is %s, %d minutes from now: the platform closes it then if the run has not started. While a job of the baseline waits for the platform to start it on its cluster, baseline_due_at moves out by that time, at most %d minutes in all. ",
+		due.UTC().Format(time.RFC3339), max(0, int(due.Sub(now).Minutes())), int(domain.MaxBaselineHold.Minutes()))
 }
 
 // researcherLeft says a researcher of signups may still work: one that neither finished nor was

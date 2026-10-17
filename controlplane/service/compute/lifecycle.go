@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
-	"github.com/scaleresearch/hypothesisloop/contract/exitline"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 )
@@ -31,18 +30,10 @@ func workloadOf(exp *clusterapi.DesiredJob, i instance) bool {
 // placement. An exited one is destroyed before the new instance is rented, so a status read
 // never finds two instances of one job to choose between. A live one is the reconcile pass's to
 // delete first, and until it has, nothing is rented.
-//
-// An instance that boots an environment pulls it with pull, the reconcile answer's registry_pull.
-func (e *Executor) CreateWorkload(ctx context.Context, exp *clusterapi.DesiredJob, pull *clusterapi.RegistryLogin) error {
+func (e *Executor) CreateWorkload(ctx context.Context, exp *clusterapi.DesiredJob) error {
 	spec, err := e.buildSpec(exp)
 	if err != nil {
 		return err
-	}
-	if spec.Image != e.jobImage {
-		if pull == nil {
-			return fmt.Errorf("cloudcompute: experiment %s runs in an environment and the reconcile answer has no registry_pull", exp.ID)
-		}
-		spec.ImageLogin = &provider.ImageLogin{Registry: pull.Registry, Username: pull.Username, Password: pull.Password}
 	}
 	name := exp.EffectiveJob().NodeSelector[clusterapi.NodeSlotLabel]
 	if name == "" {
@@ -285,7 +276,9 @@ func (e *Executor) PollJobStatus(ctx context.Context, experimentID string) (agen
 			e.log("reporting %s as gone: %v", i.Name, readErr)
 		}
 		if how != endingUnknown {
-			observed.StartedAt, observed.EndedAt, _ = exitline.FindRun(e.output(ctx, v, i).lines)
+			if line, found := clusterapi.FindExitLine(e.output(ctx, v, i).lines); found {
+				observed.StartedAt, observed.EndedAt = line.StartedAt, line.EndedAt
+			}
 		}
 		observed.Phase = map[ending]clusterapi.JobPhase{
 			endingUnknown:   clusterapi.JobPhaseGone,

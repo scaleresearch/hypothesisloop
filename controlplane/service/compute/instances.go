@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/scaleresearch/hypothesisloop/contract/exitline"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 )
@@ -213,12 +213,12 @@ func (e *Executor) ending(ctx context.Context, v *view, i instance) (how ending,
 	if read.err != nil {
 		return endingUnknown, 0, read.err
 	}
-	code, reported := exitline.Find(read.lines)
+	line, reported := clusterapi.FindExitLine(read.lines)
 	switch {
 	case !reported:
 		return endingUnknown, 0, nil
-	case code == 0:
+	case line.Code == 0:
 		return endingSucceeded, 0, nil
 	}
-	return endingFailed, code, nil
+	return endingFailed, line.Code, nil
 }

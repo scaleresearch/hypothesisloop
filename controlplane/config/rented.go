@@ -85,8 +85,6 @@ type CloudComputeConfig struct {
 	// below, configures it and names the account (ProviderSections).
 	Provider    string `yaml:"provider"`
 	ClusterName string `yaml:"cluster_name"`
-	// JobImage is what every instance boots. It carries hl, which each job's command runs under.
-	JobImage string `yaml:"job_image"`
 	// Namespace is part of every instance name, hl-job-<namespace>-...: the cluster lists, counts
 	// and destroys the instances of its namespace only. Do not change it while instances exist.
 	Namespace string `yaml:"namespace"`
@@ -182,9 +180,6 @@ func (c *Settings) buildRented() error {
 			return fmt.Errorf("cloud_compute %s: provider %s is %s's already, and a provider has one account", cc.ClusterName, cc.Provider, other)
 		}
 		accounts[cc.Provider] = cc.ClusterName
-		if cc.JobImage == "" {
-			return fmt.Errorf("cloud_compute %s: job_image is required", cc.ClusterName)
-		}
 		if cc.OfferWaitSeconds <= 0 || cc.StartupSeconds <= 0 || cc.ReconcileIntervalSeconds <= 0 || cc.StatusIntervalSeconds <= 0 {
 			return fmt.Errorf("cloud_compute %s: offer_wait_seconds, startup_seconds, reconcile_interval_seconds and status_interval_seconds must be positive", cc.ClusterName)
 		}

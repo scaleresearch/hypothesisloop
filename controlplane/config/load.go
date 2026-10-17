@@ -70,7 +70,11 @@ func unreachableFromElsewhere(host string) bool {
 	return host == "localhost" || ip.IsLoopback() || ip.IsUnspecified()
 }
 
-var serviceAccountEmail = regexp.MustCompile(`^[a-z][a-z0-9-]{4,28}[a-z0-9]@[a-z0-9.-]+\.gserviceaccount\.com$`)
+// gcpProjectID and gcpLocation are the shapes of a Google Cloud project id and of a region.
+var (
+	gcpProjectID = regexp.MustCompile(`^[a-z][a-z0-9-]{4,28}[a-z0-9]$`)
+	gcpLocation  = regexp.MustCompile(`^[a-z]+-[a-z]+[0-9]$`)
+)
 
 // cpuCoreAccHRate is what one core of domain.CPUType costs an hour. At 1 the budget of an
 // experiment on cores reads as CPU core-hours.
@@ -278,35 +282,11 @@ func (c *Settings) build() error {
 	if c.Runtimes.ImageTag == "" || strings.ContainsAny(c.Runtimes.ImageTag, " \t/:") {
 		return fmt.Errorf("runtimes image_tag %q must be the tag the runtime's images were pushed under", c.Runtimes.ImageTag)
 	}
-	offered := map[string]bool{}
-	for _, i := range c.JobImages {
-		if i.Name == "" || offered[i.Name] {
-			return fmt.Errorf("job_images: name %q is empty or listed twice", i.Name)
-		}
-		offered[i.Name] = true
-		if (i.Image == "") == (i.Repository == "") || strings.ContainsAny(i.Image+i.Repository, " \t") {
-			return fmt.Errorf("job_images %s: state image, a whole reference, or repository, a name under runtimes.registry, and one of them only", i.Name)
-		}
-		if i.Carries == "" {
-			return fmt.Errorf("job_images %s: carries is required, since what is installed is what an agent chooses the image by", i.Name)
-		}
-		if i.EnvironmentBase != "" && (i.Repository == "" || strings.ContainsAny(i.EnvironmentBase, " \t:@")) {
-			return fmt.Errorf("job_images %s: environment_base is a name under runtimes.registry, beside repository, of the image an environment is built on", i.Name)
-		}
-	}
 	if r := c.ContainerRegistry; r != nil {
-		if _, path, ok := strings.Cut(r.EnvironmentsRepository, "/"); !ok || path == "" || strings.ContainsAny(r.EnvironmentsRepository, " \t@") || strings.Contains(r.EnvironmentsRepository, "://") {
-			return fmt.Errorf("container_registry environments_repository %q must be the whole address environment images are pushed to, host/path", r.EnvironmentsRepository)
-		}
 		switch r.Provider {
 		case RegistryProviderGCP:
-			if r.GCP == nil {
-				return fmt.Errorf("container_registry provider gcp takes the container_registry gcp section")
-			}
-			for key, account := range map[string]string{"pusher": r.GCP.Pusher, "puller": r.GCP.Puller} {
-				if !serviceAccountEmail.MatchString(account) {
-					return fmt.Errorf("container_registry gcp %s %q must be the email of a Google service account", key, account)
-				}
+			if r.GCP == nil || !gcpProjectID.MatchString(r.GCP.Project) || !gcpLocation.MatchString(r.GCP.Location) {
+				return fmt.Errorf("container_registry provider gcp takes the container_registry gcp section with the project and the location of its repositories")
 			}
 		default:
 			return fmt.Errorf("container_registry provider %q is not a registry provider this build knows (%s)", r.Provider, RegistryProviderGCP)

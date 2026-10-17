@@ -3,8 +3,10 @@
 # rents compute adds it to its settings file. Each cluster is registered as any other is
 # (hl-admin cluster add <cluster_name> <org>, and hl-admin cluster share for every org's jobs): the
 # control plane runs its runtime itself, and rents nothing for a cluster that is not registered.
-# Jobs boot with services.public_api_url, which a rented machine must reach, and environments
-# named by digest come from container_registry.environments_repository. Each entry names its
+# Jobs boot with services.public_api_url, which a rented machine must reach, in the image their
+# platform experiment records. On vast.ai each job runs under a supervisor that stops its own
+# instance when the job ends, and refuses to start the job in an image without curl and sleep.
+# Each entry names its
 # provider, whose section of the same name follows the keys every entry has, and none of the other
 # providers' sections. A provider's account key comes from the environment as
 # CLOUD_COMPUTE_<PROVIDER>_API_KEY, so a provider has one account and no two entries name the same
@@ -14,11 +16,6 @@ cloud_compute:
 
     # The vendor, one of the sections below: vast.
     provider: vast
-
-    # What every instance boots. It carries hl, which each job's command runs under, and needs sh,
-    # grep and curl: on vast.ai each job runs under a supervisor that stops its own instance when
-    # the job ends, and refuses to start the job without curl.
-    job_image: REPLACE-WITH-JOB-IMAGE
 
     # Part of every instance name, hl-job-<namespace>-...: the cluster lists, counts and destroys
     # the instances of its namespace only. 1 to 16 lowercase letters and digits. Do not change it

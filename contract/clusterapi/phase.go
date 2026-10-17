@@ -77,9 +77,9 @@ const (
 	PhaseReasonCreateFailed = "create_failed"
 )
 
-// ExitCodeCodeUnreachable is the one exit code with a meaning to the platform: hl-clone ends with
-// it when neither the platform's git credential nor the repository answered, so the job's own
-// command never started. It is EX_TEMPFAIL of sysexits.h.
+// ExitCodeCodeUnreachable is the one exit code with a meaning to the platform: the launch script
+// (DesiredJob.Launch) ends with it when neither the platform's git proxy nor the repository
+// answered, so the job's own command never started. It is EX_TEMPFAIL of sysexits.h.
 const ExitCodeCodeUnreachable = 75
 
 // PhaseReasonOfExit is the reason a process that ended with a non-zero code is reported under.

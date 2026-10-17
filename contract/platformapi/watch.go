@@ -150,9 +150,4 @@ const (
 	// to its submit; the event is for whoever steers the run, so two seats do not run one idea.
 	// The job's row records the sentence, once, with the change.
 	EventJobDuplicate = "job.duplicate"
-	// EventEnvironmentStatus says the build of an environment an agent asked for was loaded on a
-	// cluster, which runs its jobs before the push ends, or ended, ready or failed, to that agent.
-	// A job waiting for it is told by its own status; an agent that built ahead of its job had
-	// nothing else to tell it.
-	EventEnvironmentStatus = "environment.status"
 )

@@ -114,6 +114,7 @@ func Register(doc *Doc, h Handlers) {
 	registerPlanning(doc, h.PlatformExperiments, h.Logger)
 	registerSharing(doc, h.Sharing, h.PlatformExperiments, h.Logger)
 	registerExperimentData(doc, h.PlatformExperiments, h.Logger)
+	registerExperimentImage(doc, h.PlatformExperiments, h.Logger)
 	registerSessions(doc, h.Sessions, h.Logger)
 	registerInstructions(doc, h.Instructions)
 	registerExperimentDrafts(doc, h.Drafts)

@@ -2,27 +2,14 @@ package compute
 
 import (
 	"fmt"
-	"strings"
 
-	"github.com/opencontainers/go-digest"
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
-	"github.com/scaleresearch/hypothesisloop/contract/exitline"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadenv"
 )
-
-// isEnvironment says image is one of the environments repository's, named by its digest alone.
-func (e *Executor) isEnvironment(image string) bool {
-	reference, found := strings.CutPrefix(image, e.environments+"@")
-	if e.environments == "" || !found {
-		return false
-	}
-	parsed, err := digest.Parse(reference)
-	return err == nil && parsed.Algorithm() == digest.SHA256
-}
 
 // buildSpec compiles exp into the instance to rent, without its name.
 func (e *Executor) buildSpec(exp *clusterapi.DesiredJob) (provider.Spec, error) {
@@ -31,12 +18,6 @@ func (e *Executor) buildSpec(exp *clusterapi.DesiredJob) (provider.Spec, error) 
 	spec := exp.EffectiveJob()
 	if spec.Nodes() > 1 {
 		return provider.Spec{}, &agentexec.Unrunnable{Why: fmt.Sprintf("the job asks for %d nodes, and a job on this cluster is one rented instance", spec.Nodes())}
-	}
-	// An instance boots the image desired state names: the job image this cluster reports
-	// (OnlyImage), or an environment the control plane built on it, which carries the wrapper
-	// as well. Any other is an image this cluster does not run.
-	if spec.Image != e.jobImage && !e.isEnvironment(spec.Image) {
-		return provider.Spec{}, &agentexec.Unrunnable{Why: fmt.Sprintf("the job is to run in image %q, and this cluster runs only %q and the environments in %q by digest", spec.Image, e.jobImage, e.environments)}
 	}
 	group := spec.NodeGroups()[0]
 	for name, quantity := range map[string]string{"cpu": group.CPU, "memory": group.Memory, "storage": group.Storage} {
@@ -62,22 +43,9 @@ func (e *Executor) buildSpec(exp *clusterapi.DesiredJob) (provider.Spec, error) 
 		return provider.Spec{}, &agentexec.Unrunnable{Why: "the job asks for host_mounts, and a rented instance has no host of the platform's to mount from"}
 	}
 
-	command, args := workloadenv.Command(spec, group)
-	// The image's own entrypoint cannot be wrapped from outside, so there has to be a command.
-	if len(command) == 0 {
-		return provider.Spec{}, &agentexec.Unrunnable{Why: "the job has no command, and a job on a rented instance needs one: the image's own entrypoint cannot be run under the platform's wrapper"}
-	}
 	env, err := workloadenv.Merged(exp, spec, group, e.apiURL, func(url string) string { return url })
 	if err != nil {
 		return provider.Spec{}, fmt.Errorf("cloudcompute: %w", err)
-	}
-
-	// The wrapper is only sent SIGTERM for a termination the control plane granted the checkpoint
-	// window, so the window is the one grace compiled into it. A granted window only ever
-	// lengthens the ordinary grace.
-	grace, checkpointGrace, err := spec.ResolvedGrace()
-	if err != nil {
-		return provider.Spec{}, fmt.Errorf("cloudcompute: experiment %s: %w", exp.ID, err)
 	}
 
 	// A job on CPU counts its cores as units of the CPU type, which is no device to rent.
@@ -85,10 +53,16 @@ func (e *Executor) buildSpec(exp *clusterapi.DesiredJob) (provider.Spec, error) 
 	if exp.AcceleratorType.Kind() == clusterapi.TypeKindCPU {
 		acceleratorType, accelerators = "", 0
 	}
-	argv := append(append([]string(nil), command...), args...)
+	var login *provider.ImageLogin
+	if pull := exp.ImagePull; pull != nil {
+		login = &provider.ImageLogin{Registry: pull.Registry, Username: pull.Username, Password: pull.Password}
+	}
+	// The launch script is only sent SIGTERM for a termination the control plane granted the
+	// checkpoint window, and keeps the command running for the job's stop grace after it.
 	return provider.Spec{
-		Image:            spec.Image,
-		Command:          exitline.Wrap(max(grace, checkpointGrace), argv),
+		Image:            exp.Image,
+		ImageLogin:       login,
+		Command:          workloadenv.Command(exp, spec, group),
 		Env:              env,
 		AcceleratorType:  acceleratorType,
 		AcceleratorCount: accelerators,

@@ -3,14 +3,12 @@ package httpapi
 import (
 	"context"
 	"net/http"
-	"strconv"
 
 	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
-	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
 )
 
@@ -25,9 +23,6 @@ type clusterAgentAPI struct {
 	exchange *clusterexchange.Service
 	logger   *zap.Logger
 }
-
-// buildPath is the path of one build of a cluster.
-const buildPath = "/{name}" + clusterapi.BuildsPath + "/{key}"
 
 // DetachAnswer is the control plane's answer to a runtime ending its own cluster
 // (DELETE /internal/clusters/{name}): the jobs that went back to the queue.
@@ -54,43 +49,10 @@ func RegisterClusterAgent(doc *Doc, exchange *clusterexchange.Service) {
 		OperationID: "cluster-reconcile", Method: "POST", Path: "/{name}" + clusterapi.ReconcilePath,
 		MaxBodyBytes: clusterexchange.MaxReconcileBytes,
 		Summary:      "Exchange actual capacity for desired workloads", Tags: []string{"cluster-agent"},
-		Description: "Atomically records one complete actual-capacity snapshot in metrics storage, keeping only priced accelerator types, then returns the complete PostgreSQL desired workload set for this cluster, plus the ids of workloads whose termination earns them their declared checkpoint window, " +
-			"the environment builds assigned to this cluster (builds, recorded as building only for a runtime that reports builds true), and registry_pull, a login that reads environment images, when a listed workload runs in one. " +
+		Description: "Atomically records one complete actual-capacity snapshot in metrics storage, keeping only priced accelerator types, then returns the complete PostgreSQL desired workload set for this cluster, plus the ids of workloads whose termination earns them their declared checkpoint window. " +
+			"Each workload names the image it runs in by digest, with image_pull, a read-only login that pulls it, when the image needs one, and the launch script every node runs. " +
 			"The version the agent sends in " + clusterapi.AgentVersionHeader + " is kept with the snapshot, and a refusal of the request is kept as the cluster's last error until one is accepted.",
 	}, a.reconcile)
-	register(doc, auth.AudienceInternal, huma.Operation{
-		OperationID: "cluster-build-credential", Method: "POST", Path: buildPath + clusterapi.BuildCredentialPath,
-		Summary: "The push login of an assigned environment build", Tags: []string{"cluster-agent"},
-		Description: "A login that writes to the environment repository for at least 25 minutes, handed out only while the build of key is assigned to this cluster at attempt and still building; otherwise 409.",
-	}, a.buildCredential)
-	register(doc, auth.AudienceInternal, huma.Operation{
-		OperationID: "cluster-build-git-credential", Method: "POST", Path: buildPath + clusterapi.BuildGitCredentialPath,
-		Summary: "A read of the repository an assigned environment build is of", Tags: []string{"cluster-agent"},
-		Description: "The git proxy address the repository whose environment file this is is read at, the repository's own address, and a platform token " +
-			"that reads that repository alone through the proxy, read-only, while the build of key is assigned to this cluster at attempt and still building. " +
-			"The build mounts them as the git config secret " + domain.EnvironmentGitSecret + " of a RUN that asks for it, never into a layer. Handed out only while the " +
-			"build is assigned and building; otherwise 409. 404 for an environment of no repository: the build then mounts no secret.",
-	}, a.buildGitCredential)
-	register(doc, auth.AudienceInternal, huma.Operation{
-		OperationID: "cluster-build-report", Method: "POST", Path: buildPath,
-		Summary: "Report the outcome of an assigned environment build", Tags: []string{"cluster-agent"},
-		Description: "outcome pushed makes the environment ready in the image the repository holds under digest; file fails it with log_tail as the file's fault; " +
-			"platform frees the build to be assigned again. Recorded only while the build of key is assigned to this cluster at attempt and still building; otherwise 409. " +
-			"file is the exception: the file is the key's, so it fails a build still building at attempt or a later one, wherever it was assigned again.",
-	}, a.buildReport)
-	register(doc, auth.AudienceInternal, huma.Operation{
-		OperationID: "cluster-build-loaded", Method: "POST", Path: buildPath + clusterapi.BuildLoadedPath,
-		Summary: "Report an assigned environment build held on one node", Tags: []string{"cluster-agent"},
-		Description: "The image of the build, the repository's under digest, is in the image store of node while its push goes on: a job that waits for the environment and fits on that node is placed there, pinned to it, " +
-			"and runs the image from there before it is pushed. The outcome is still reported once the push ends. " +
-			"Recorded only while the build of key is assigned to this cluster at attempt and still building; otherwise 409.",
-	}, a.buildLoaded)
-	register(doc, auth.AudienceInternal, huma.Operation{
-		OperationID: "cluster-build-progress", Method: "POST", Path: buildPath + clusterapi.BuildProgressPath,
-		Summary: "Report the step an assigned environment build is at", Tags: []string{"cluster-agent"},
-		Description: "step, one line of at most " + strconv.Itoa(domain.MaxEnvironmentProgressBytes) + " bytes, replaces the last one reported, and the jobs waiting for the environment show it. " +
-			"Recorded only while the build of key is assigned to this cluster at attempt and still building; otherwise 409.",
-	}, a.buildProgress)
 	register(doc, auth.AudienceInternal, huma.Operation{
 		OperationID: "cluster-detach", Method: "DELETE", Path: "/{name}",
 		Summary: "Detach this cluster", Tags: []string{"cluster-agent"},
@@ -132,62 +94,6 @@ func (a clusterAgentAPI) reconcile(ctx context.Context, in *reconcileInput) (*st
 	return &struct {
 		Body clusterapi.ReconcileAnswer
 	}{Body: answer}, nil
-}
-
-func (a clusterAgentAPI) buildCredential(ctx context.Context, in *struct {
-	Name string `path:"name"`
-	Key  string `path:"key"`
-	Body domain.EnvironmentBuildCredentialRequest
-}) (*struct {
-	Body domain.RegistryLogin
-}, error) {
-	login, err := a.exchange.BuildCredential(ctx, in.Name, in.Key, in.Body.Attempt)
-	if err != nil {
-		return nil, refused(a.logger, "cluster API", err)
-	}
-	return &struct {
-		Body domain.RegistryLogin
-	}{Body: login}, nil
-}
-
-func (a clusterAgentAPI) buildGitCredential(ctx context.Context, in *struct {
-	Name string `path:"name"`
-	Key  string `path:"key"`
-	Body domain.EnvironmentBuildCredentialRequest
-}) (*struct {
-	Body domain.EnvironmentGitCredential
-}, error) {
-	credential, err := a.exchange.BuildGitCredential(ctx, in.Name, in.Key, in.Body.Attempt)
-	if err != nil {
-		return nil, refused(a.logger, "cluster API", err)
-	}
-	return &struct {
-		Body domain.EnvironmentGitCredential
-	}{Body: credential}, nil
-}
-
-func (a clusterAgentAPI) buildReport(ctx context.Context, in *struct {
-	Name string `path:"name"`
-	Key  string `path:"key"`
-	Body domain.EnvironmentBuildReport
-}) (*struct{}, error) {
-	return nil, refused(a.logger, "cluster API", a.exchange.ReportBuild(ctx, in.Name, in.Key, in.Body))
-}
-
-func (a clusterAgentAPI) buildLoaded(ctx context.Context, in *struct {
-	Name string `path:"name"`
-	Key  string `path:"key"`
-	Body domain.EnvironmentBuildLoaded
-}) (*struct{}, error) {
-	return nil, refused(a.logger, "cluster API", a.exchange.BuildLoaded(ctx, in.Name, in.Key, in.Body))
-}
-
-func (a clusterAgentAPI) buildProgress(ctx context.Context, in *struct {
-	Name string `path:"name"`
-	Key  string `path:"key"`
-	Body domain.EnvironmentBuildProgress
-}) (*struct{}, error) {
-	return nil, refused(a.logger, "cluster API", a.exchange.BuildProgress(ctx, in.Name, in.Key, in.Body))
 }
 
 func (a clusterAgentAPI) detach(ctx context.Context, in *struct {

@@ -12,7 +12,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
-	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
@@ -37,43 +36,16 @@ type Store interface {
 	// itself. It refuses one another cluster holds (db.ErrClusterIDBound) and one other than
 	// the cluster's own (db.ErrClusterIDChanged).
 	BindReportedID(ctx context.Context, name, reportedID string) error
-	// RecordJobImage keeps the one image the cluster's runtime says it runs.
-	RecordJobImage(ctx context.Context, name, image string) error
 	// RecordContactRefusal keeps what a reconcile of the cluster was refused with, and clears it
 	// with an empty refusal (db.Store).
 	RecordContactRefusal(ctx context.Context, name, refusal string) error
 	// RemoveCluster ends a cluster and returns its jobs to the queue (db.Store).
 	RemoveCluster(ctx context.Context, name string) (requeued []string, err error)
-	// RecordBuilds keeps whether the cluster's runtime builds environments.
-	RecordBuilds(ctx context.Context, name string, builds bool) error
-	// AssignedEnvironmentBuilds, AssignedEnvironmentBuild and FinishEnvironmentBuild are the
-	// builds the scheduler assigned to a cluster (db.Store).
-	AssignedEnvironmentBuilds(ctx context.Context, cluster string) ([]*domain.Environment, error)
-	AssignedEnvironmentBuild(ctx context.Context, cluster, key string, attempt int) (*domain.Environment, error)
-	FinishEnvironmentBuild(ctx context.Context, cluster, key string, attempt int, outcome domain.EnvironmentBuildOutcome) (bool, error)
-	RecordEnvironmentProgress(ctx context.Context, cluster, key string, attempt int, step string) (bool, error)
-	RecordEnvironmentLoaded(ctx context.Context, cluster, key string, attempt int, node, image string) (bool, error)
 }
 
-// RegistryLogins hands out logins to the registry of environment images (registrycred.Source).
-type RegistryLogins interface {
-	Push(ctx context.Context) (domain.RegistryLogin, error)
-	Pull(ctx context.Context) (domain.RegistryLogin, error)
-}
-
-// RepositoryCredentials mints what git reads a repository of a project with (githost.Provider).
-type RepositoryCredentials interface {
-	URL(repository string) string
-	Credential(ctx context.Context, projectID, repository string, write bool) (*githost.Credential, error)
-}
-
-// EnvironmentRegistry is where assigned builds push to, and the logins to it. Git reads the
-// repository an environment file is of, for its build.
-type EnvironmentRegistry struct {
-	Repository string
-	Logins     RegistryLogins
-	Git        RepositoryCredentials
-}
+// ImagePulls mints the login a job's runtime pulls its image with (registrycred.PullFor), nil
+// for an image pulled without one.
+type ImagePulls func(ctx context.Context, orgID, image string) (*domain.RegistryLogin, error)
 
 // Service is the control plane's side of the exchange with cluster-agents.
 type Service struct {
@@ -106,36 +78,20 @@ type Service struct {
 	// proxyURL is where the control plane's git proxy serves repositories, which each job fetches
 	// its commit from with its token.
 	proxyURL string
-	// environments is nil on a deployment that builds no environments, which counts no cluster
-	// as building.
-	environments *EnvironmentRegistry
-	// buildReported wakes admission once a build is loaded on a node or ends, so the jobs that
-	// wait for it are placed without waiting for the next heartbeat.
-	buildReported func()
-}
-
-// WithBuildReported has every recorded build report that can place a job call wake.
-func (s *Service) WithBuildReported(wake func()) *Service {
-	s.buildReported = wake
-	return s
-}
-
-func (s *Service) wakeAdmission() {
-	if s.buildReported != nil {
-		s.buildReported()
-	}
+	// pulls mints each desired job's image pull login.
+	pulls ImagePulls
 }
 
 // NewService constructs a Service. connectedWithin is how recent a cluster's heartbeat must be
 // to count as reachable/connected.
-func NewService(store Store, connectedWithin time.Duration, metrics *metricsdb.Store, observationCadence time.Duration, dataStore *objectstore.Client, maxCheckpointGrace time.Duration, pricedAcceleratorTypes []string, maxLogLineChars int, signingSecret, proxyURL string, environments *EnvironmentRegistry, logger *zap.Logger) *Service {
+func NewService(store Store, connectedWithin time.Duration, metrics *metricsdb.Store, observationCadence time.Duration, dataStore *objectstore.Client, maxCheckpointGrace time.Duration, pricedAcceleratorTypes []string, maxLogLineChars int, signingSecret, proxyURL string, pulls ImagePulls, logger *zap.Logger) *Service {
 	priced := make(map[string]bool, len(pricedAcceleratorTypes))
 	for _, name := range pricedAcceleratorTypes {
 		priced[strings.ToLower(name)] = true
 	}
 	return &Service{store: store, connectedWithin: connectedWithin, metrics: metrics, observationCadence: observationCadence,
 		dataStore: dataStore, maxCheckpointGrace: maxCheckpointGrace,
-		pricedAcceleratorTypes: priced, maxLogLineChars: maxLogLineChars, signingSecret: signingSecret, proxyURL: proxyURL, environments: environments, logger: logger}
+		pricedAcceleratorTypes: priced, maxLogLineChars: maxLogLineChars, signingSecret: signingSecret, proxyURL: proxyURL, pulls: pulls, logger: logger}
 }
 
 // keepPricedAccelerators drops every accelerator type outside the priced catalog from report.

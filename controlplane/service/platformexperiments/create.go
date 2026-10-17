@@ -154,25 +154,6 @@ func unreachableType(sizedFor domain.AcceleratorType, reachable map[string][]dom
 	return stated + " on no cluster this org's jobs can be placed on now. State one of the types `hl capacity` lists now, copied verbatim: " + strings.Join(valid, ", ")
 }
 
-// requireImage refuses a proposal whose image no job on clusters, the ones that have its type,
-// could be submitted with, by the two refusals a submit gives a job for its image: one that is
-// no image, and one none of them runs. The baseline job is the first to name it, after a person
-// accepted.
-func requireImage(offered []domain.JobImage, clusters []domain.Cluster, image string) error {
-	address, ok := domain.ResolveJobImage(offered, image)
-	if !ok {
-		return refuseUpdate(422, domain.ReasonUnknownJobImage, "%s", domain.UnknownJobImage(offered, "image", image))
-	}
-	runEveryJobIn := make([]string, 0, len(clusters))
-	for _, cluster := range clusters {
-		if cluster.Runs(address) {
-			return nil
-		}
-		runEveryJobIn = append(runEveryJobIn, cluster.Name+" runs every job in "+cluster.JobImage)
-	}
-	return refuseUpdate(422, domain.NotAdmittedNoClusterForImage, "image %q runs on no cluster that has the accelerator_type: %s. State that image, as `hl capacity` shows it for the cluster", image, strings.Join(runEveryJobIn, "; "))
-}
-
 // Create creates a new platform experiment in open status (accepting signups immediately), with
 // the agents req carries signed up in the same write.
 func (s *Service) Create(ctx context.Context, req CreatePlatformExperimentRequest) (*domain.PlatformExperiment, error) {

@@ -7,10 +7,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
+	"github.com/scaleresearch/hypothesisloop/controlplane/clients/registrycred"
 	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
-	"github.com/scaleresearch/hypothesisloop/controlplane/service/environments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/settlement"
@@ -23,7 +23,7 @@ import (
 // newSchedulerParts builds the scheduler's handler and starts its background loops, returning
 // the handlers httpapi.NewRouter serves: the scheduler's on the shared API doc, the cluster-agents' under
 // its own prefix.
-func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environmentsSvc *environments.Service, pool *db.Pool, store *db.Store, graph *graphdb.Store, expQuotaSvc *platformexperiments.Service, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.ControlService, metrics *metricsdb.Store, dataStore *objectstore.Client, logger *zap.Logger) (*scheduler.Service, *clusterexchange.Service) {
+func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, imageRegistry registrycred.Provider, pool *db.Pool, store *db.Store, graph *graphdb.Store, expQuotaSvc *platformexperiments.Service, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.ControlService, metrics *metricsdb.Store, dataStore *objectstore.Client, logger *zap.Logger) (*scheduler.Service, *clusterexchange.Service) {
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
 
 	clusterReports, err := scheduler.NewClusterReports(store, metrics,
@@ -51,8 +51,6 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environ
 	}
 	schedulerSvc := scheduler.NewService(store, expQuotaSvc, graph, gitHost, clusterReports, settler, metrics, logger).
 		WithQuotaConfig(quotaCfg).
-		WithJobImages(pcfg.OfferedJobImages()).
-		WithEnvironments(environmentsSvc).
 		WithDataStore(dataStore, pcfg.ObjectStore.MaxBytesPerAgent)
 
 	schedulerLoop := scheduler.NewLoop(store, expQuotaSvc, clusterReports, grace, logger).
@@ -65,11 +63,7 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environ
 		WithDisbalanceEvictor(schedulerSvc, pcfg.Scheduler.ResourceDisbalanceTolerance).
 		WithQuotaSettler(settler).
 		WithSpeculation(time.Duration(pcfg.Scheduler.TriedClusterTTLSeconds) * time.Second)
-	schedulerSvc = schedulerSvc.WithLoop(schedulerLoop).WithBuildAssigner(schedulerLoop)
-	environmentRegistry := newEnvironmentRegistry(runCtx, pcfg, gitHost, logger)
-	if environmentRegistry != nil {
-		schedulerSvc = schedulerSvc.WithRegistryPulls(environmentRegistry.Logins)
-	}
+	schedulerSvc = schedulerSvc.WithLoop(schedulerLoop)
 	watcher.WithCapacityFreed(schedulerLoop.Trigger)
 
 	// Admission (read-decide-write, not a CAS) and JobWatcher's per-experiment pollers must run
@@ -85,8 +79,10 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environ
 	clusterExchange := clusterexchange.NewService(store,
 		time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds)*time.Second, metrics, pcfg.Scheduler.ObservationCadence(), dataStore,
 		time.Duration(pcfg.Scheduler.MaxCheckpointGraceSeconds)*time.Second,
-		pcfg.AcceleratorTypeNames(), pcfg.Scheduler.MaxLogTailLineChars, pcfg.SigningSecret, pcfg.GitProxyURL(), environmentRegistry, logger).
-		WithBuildReported(schedulerLoop.Trigger)
+		pcfg.AcceleratorTypeNames(), pcfg.Scheduler.MaxLogTailLineChars, pcfg.SigningSecret, pcfg.GitProxyURL(),
+		func(ctx context.Context, orgID, image string) (*domain.RegistryLogin, error) {
+			return registrycred.PullFor(ctx, imageRegistry, orgID, image)
+		}, logger)
 
 	// The sandbox launcher and the cloud compute clusters rent machines, so one replica runs them.
 	rented, err := newRented(pcfg, store, clusterExchange, metrics, logger)

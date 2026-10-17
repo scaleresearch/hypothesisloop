@@ -42,15 +42,9 @@ type Config struct {
 	Namespace string
 	// APIURL is handed to every job as HYPOTHESISLOOP_API_URL, so it must be reachable from a
 	// rented instance.
-	APIURL string
-	// JobImage is the image this cluster's jobs name. It carries hl, which the job's command runs
-	// under.
-	JobImage string
-	// EnvironmentsRepository is where the environments the control plane builds on JobImage are,
-	// host/path: a job may run in one of its images, named by digest. Empty runs none.
-	EnvironmentsRepository string
-	Shapes                 []Shape
-	Provider               provider.Provider
+	APIURL   string
+	Shapes   []Shape
+	Provider provider.Provider
 	// OfferWait is how long a job may wait from its admission for a machine to rent before it is
 	// reported as one this cluster cannot run.
 	OfferWait time.Duration
@@ -64,13 +58,11 @@ type Config struct {
 // came from ForPass, in which case it answers from that pass's one read. What it keeps is the
 // last read of the vendor's market (marketReads).
 type Executor struct {
-	clusterID    string
-	prefix       string
-	apiURL       string
-	jobImage     string
-	environments string
-	shapes       []Shape
-	provider     provider.Provider
+	clusterID string
+	prefix    string
+	apiURL    string
+	shapes    []Shape
+	provider  provider.Provider
 	// market is the provider's Market capability, nil for a vendor that has none.
 	market    provider.Market
 	reads     marketReads
@@ -103,18 +95,16 @@ func New(cfg Config) (*Executor, error) {
 	rented := provider.Bounded(cfg.Provider)
 	market, _ := rented.(provider.Market)
 	return &Executor{
-		market:       market,
-		reads:        newMarketReads(cfg.Shapes),
-		clusterID:    cfg.ClusterID,
-		prefix:       cfg.prefix(),
-		apiURL:       cfg.APIURL,
-		jobImage:     cfg.JobImage,
-		environments: cfg.EnvironmentsRepository,
-		shapes:       append([]Shape(nil), cfg.Shapes...),
-		provider:     rented,
-		offerWait:    cfg.OfferWait,
-		startup:      cfg.Startup,
-		log:          cfg.Log,
+		market:    market,
+		reads:     newMarketReads(cfg.Shapes),
+		clusterID: cfg.ClusterID,
+		prefix:    cfg.prefix(),
+		apiURL:    cfg.APIURL,
+		shapes:    append([]Shape(nil), cfg.Shapes...),
+		provider:  rented,
+		offerWait: cfg.OfferWait,
+		startup:   cfg.Startup,
+		log:       cfg.Log,
 	}, nil
 }
 
@@ -123,11 +113,8 @@ func (cfg Config) prefix() string { return provider.JobPrefix(cfg.Namespace) }
 // Validate checks everything but the provider, so a config file is refused when it is loaded,
 // before any vendor is contacted.
 func (cfg Config) Validate() error {
-	if cfg.ClusterID == "" || cfg.APIURL == "" || cfg.JobImage == "" {
-		return fmt.Errorf("cloudcompute: ClusterID, APIURL and JobImage are required")
-	}
-	if r := cfg.EnvironmentsRepository; r != "" && (!strings.Contains(r, "/") || strings.ContainsAny(r, " \t@")) {
-		return fmt.Errorf("cloudcompute: EnvironmentsRepository %q must be host/path with no digest", r)
+	if cfg.ClusterID == "" || cfg.APIURL == "" {
+		return fmt.Errorf("cloudcompute: ClusterID and APIURL are required")
 	}
 	if err := provider.ValidateSegment("namespace", cfg.Namespace); err != nil {
 		return fmt.Errorf("cloudcompute: %w", err)
@@ -183,7 +170,3 @@ func (e *Executor) GetClusterID(context.Context) (string, error) { return e.clus
 // SupportsMultiNodeJobs is false: a job is one instance, and instances of one account share no
 // network a distributed job could rendezvous over.
 func (e *Executor) SupportsMultiNodeJobs() bool { return false }
-
-// OnlyImage is the job image, which carries the wrapper a job's command runs under: the control
-// plane places here only jobs that name it, and runs each in it or in its environment built on it.
-func (e *Executor) OnlyImage() string { return e.jobImage }

@@ -17,7 +17,6 @@ func Installed(remote *Remote, exec agentexec.Executor, log func(format string, 
 	return &Agent{
 		ClusterName:       remote.ClusterName,
 		ControlPlane:      remote,
-		Builds:            remote,
 		Executor:          exec,
 		ReconcileInterval: 2 * time.Second,
 		StatusInterval:    3 * time.Second,

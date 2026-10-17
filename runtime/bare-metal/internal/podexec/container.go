@@ -100,10 +100,10 @@ func (e *Executor) exitCode(ctx context.Context, id string) (code int, reported 
 // containerSpec is the fully-resolved container configuration for one experiment, produced by
 // BuildContainerSpec — the podman/docker analogue of a compiled batchv1.Job.
 type containerSpec struct {
-	Name           string
-	Image          string
+	Name  string
+	Image string
+	// Command is the whole process, run in place of the image's entrypoint.
 	Command        []string
-	Args           []string
 	Env            map[string]string
 	NanoCPUs       int64
 	MemoryBytes    int64
@@ -123,7 +123,6 @@ type containerSpec struct {
 // nor NotFound the way k8s Jobs do, so callers (CreateWorkload) check listManagedContainers
 // themselves first.
 func (e *Executor) startContainer(ctx context.Context, spec containerSpec) error {
-	cmd := append(append([]string{}, spec.Command...), spec.Args...)
 	env := make([]string, 0, len(spec.Env))
 	for k, v := range spec.Env {
 		env = append(env, k+"="+v)
@@ -182,10 +181,10 @@ func (e *Executor) startContainer(ctx context.Context, spec containerSpec) error
 	result, err := e.docker.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Name: spec.Name,
 		Config: &container.Config{
-			Image:  spec.Image,
-			Cmd:    cmd,
-			Env:    env,
-			Labels: spec.Labels,
+			Image:      spec.Image,
+			Entrypoint: spec.Command,
+			Env:        env,
+			Labels:     spec.Labels,
 		},
 		HostConfig: hostConfig,
 	})
@@ -229,14 +228,12 @@ func (e *Executor) removeContainer(ctx context.Context, name string) error {
 // pull always fails, even though the image already sits in the local store from the build step
 // this ran right after. Skipping the network round-trip when the image is already present is also
 // just the IfNotPresent policy every other image in this repo already runs under.
-// registryAuth is what the engine pulls exp's image with: pull, encoded as the engine takes it,
-// for a job that runs in an environment, and nothing for one on a public job image.
-func registryAuth(exp *clusterapi.DesiredJob, pull *clusterapi.RegistryLogin) (string, error) {
-	if exp.EnvironmentKey == "" {
-		return "", nil
-	}
+// registryAuth is what the engine pulls exp's image with: exp.ImagePull, encoded as the engine
+// takes it, and nothing for an image pulled without a login.
+func registryAuth(exp *clusterapi.DesiredJob) (string, error) {
+	pull := exp.ImagePull
 	if pull == nil {
-		return "", fmt.Errorf("podexec: experiment %s runs in an environment and the reconcile answer has no registry_pull", exp.ID)
+		return "", nil
 	}
 	encoded, err := json.Marshal(registry.AuthConfig{Username: pull.Username, Password: pull.Password, ServerAddress: pull.Registry})
 	if err != nil {

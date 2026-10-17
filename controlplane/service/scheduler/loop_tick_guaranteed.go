@@ -49,15 +49,11 @@ func (l *Loop) admitGuaranteed(ctx context.Context, t *tickState, p *preemptionS
 	if !ok {
 		return
 	}
-	cluster, fp, betAcceleratorType, misfit := placed.cluster, placed.fp, placed.betAcceleratorType, placed.misfit
+	cluster, fp, betAcceleratorType := placed.cluster, placed.fp, placed.betAcceleratorType
 	// Which of the two fit checks failed decides whether preemption can help at all, so they are
 	// evaluated separately rather than or-ed into one condition.
 	scalarFits := domain.Fits(t.gAvail[cluster], fp)
 	liveFits := scalarFits && placement.TopologyFits(c.nodeAvail[cluster], c.nodeResources[cluster], c.nodeLabels[cluster], exp)
-	if exp.EnvironmentImage != "" && (misfit != "" || !liveFits) {
-		l.waitForPush(ctx, "guaranteed", t.environments, exp, &t.errs)
-		return
-	}
 	// Speculative submit (autoscaler.md): before spending a guaranteed job's preemption power, try
 	// every autoscaler-enabled cluster this job hasn't already failed over from. A candidate has
 	// no live capacity by definition — the SUBMITTED row itself is the scale-up request the native
@@ -68,7 +64,7 @@ func (l *Loop) admitGuaranteed(ctx context.Context, t *tickState, p *preemptionS
 	// the cluster is excluded for it.
 	var bets []string
 	var provenFitByCluster map[string]bool
-	if !liveFits || (exp.EnvironmentImage == "" && scalesAbove(cluster, exp, t.autoscalerEnabled, t.connected, c.registered)) {
+	if !liveFits || (scalesAbove(cluster, exp, t.autoscalerEnabled, t.connected, c.registered)) {
 		chosenAcceleratorType := exp.AcceleratorType
 		if liveFits {
 			// The accelerator type the lower cluster fit at is that cluster's. The bet is for the one the job

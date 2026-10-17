@@ -6,7 +6,6 @@ package auth
 import (
 	"context"
 
-	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -19,10 +18,7 @@ const (
 	KindCoordinator Kind = "coordinator"
 	KindJob         Kind = "job"
 	KindRuntime     Kind = "runtime"
-	// KindBuild reads, through the git proxy, the repository of one environment build while it
-	// is assigned and building, and reaches nothing else.
-	KindBuild Kind = "build"
-	KindStaff Kind = "staff"
+	KindStaff       Kind = "staff"
 )
 
 // Principal is the authenticated caller. Which fields are set depends on Kind: a user carries
@@ -56,12 +52,7 @@ type Principal struct {
 	AgentID      string
 	ExperimentID string
 	ClusterName  string
-	// Build is the environment build a build token reads the repository of.
-	Build BuildRef
 }
-
-// BuildRef names one attempt of an environment build on the cluster it was assigned to.
-type BuildRef = scope.BuildRef
 
 // HoldsAccount reports a principal of a person or an org: a user, an API key or staff. A token the
 // platform derived for an agent, a coordinator or a job holds none.

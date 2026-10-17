@@ -29,12 +29,6 @@ func (s *Service) WithPlanning(planning Planning) *Service {
 	return s
 }
 
-// WithJobImages attaches the images the deployment offers a job to run in.
-func (s *Service) WithJobImages(images []domain.JobImage) *Service {
-	s.jobImages = images
-	return s
-}
-
 // ClusterRegistry says whose each registered cluster is and whether the platform shares it, and
 // which org a project is of. *db.Store satisfies it.
 type ClusterRegistry interface {
@@ -57,11 +51,6 @@ func (s *Service) WithLiveCapacity(freshness time.Duration, clusters ClusterRegi
 // ClusterCapacity is one cluster's live capacity, per accelerator type.
 type ClusterCapacity struct {
 	ClusterName string `json:"cluster_name"`
-	// JobImage is the one image the cluster runs: a job placed there names none or it. Absent,
-	// the cluster takes only jobs that name their image.
-	JobImage string `json:"job_image,omitempty"`
-	// JobImageCarries is what is installed in JobImage, when it is an image the deployment offers.
-	JobImageCarries string `json:"job_image_carries,omitempty"`
 	// OnDemand says the cluster rents a machine when a job needs one and has none standing by.
 	// Its totals are then the most it rents at once, and what is available is what it may still
 	// rent. The runtime says so itself, by reporting its nodes as slots (domain.NodeSlotLabel).
@@ -103,8 +92,6 @@ type ResourceCapacity struct {
 // an agent reads this and submits the same string with nothing in between to get wrong.
 type AcceleratorCapacity struct {
 	AcceleratorType string `json:"accelerator_type"`
-	// JobImages names the offered images that suit this type (see the answer's job_images).
-	JobImages []string `json:"job_images,omitempty"`
 	// Kind is what available and total count: devices, or for cpu cores.
 	Kind      domain.TypeKind `json:"kind"`
 	Available int64           `json:"available"`
@@ -162,8 +149,6 @@ func (s *Service) liveCapacity(ctx context.Context, orgID string, every bool) ([
 	if err != nil {
 		return nil, err
 	}
-	withJobImages(registered, clusters)
-	withOfferedImages(s.jobImages, clusters)
 	nodeLabels, err := s.metrics.LiveClusterNodeLabels(ctx, s.capacityFreshness)
 	if err != nil {
 		return nil, err
@@ -204,14 +189,13 @@ func (s *Service) reachableTypes(ctx context.Context, projectID string) (map[str
 	return typesListed(clusters), nil
 }
 
-// typesListed is every type line of a capacity answer, with the clusters that have it and the
-// one image such a cluster runs: the types `hl capacity` prints are exactly the ones a proposal
+// typesListed is every type line of a capacity answer, with the clusters that have it: the types `hl capacity` prints are exactly the ones a proposal
 // may be sized for.
 func typesListed(clusters []ClusterCapacity) map[string][]domain.Cluster {
 	listed := map[string][]domain.Cluster{}
 	for _, cluster := range clusters {
 		for _, accelerator := range cluster.Accelerators {
-			listed[accelerator.AcceleratorType] = append(listed[accelerator.AcceleratorType], domain.Cluster{Name: cluster.ClusterName, JobImage: cluster.JobImage})
+			listed[accelerator.AcceleratorType] = append(listed[accelerator.AcceleratorType], domain.Cluster{Name: cluster.ClusterName})
 		}
 	}
 	return listed
@@ -241,38 +225,6 @@ func withResources(clusters []ClusterCapacity, cpuAvailable, cpuTotal map[string
 	}
 	sort.Slice(clusters, func(i, j int) bool { return clusters[i].ClusterName < clusters[j].ClusterName })
 	return clusters
-}
-
-// withOfferedImages names on each capacity line the offered images that suit its type, and says
-// what a cluster's own job image carries when it is one of them. A cluster that runs its own
-// image and no other gets no names: a job there can name none of them.
-func withOfferedImages(offered []domain.JobImage, clusters []ClusterCapacity) {
-	for c := range clusters {
-		cluster := &clusters[c]
-		for _, image := range offered {
-			if cluster.JobImage != "" && image.Image == cluster.JobImage {
-				cluster.JobImageCarries = image.Carries
-			}
-		}
-		if cluster.JobImage != "" {
-			continue
-		}
-		for a := range cluster.Accelerators {
-			for _, image := range offered {
-				if image.SuitsType(cluster.Accelerators[a].AcceleratorType) {
-					cluster.Accelerators[a].JobImages = append(cluster.Accelerators[a].JobImages, image.Name)
-				}
-			}
-		}
-	}
-}
-
-// withJobImages says of each cluster the one image it runs, if it runs one only, so that a
-// submitter reads from the same answer what to ask for and whether to name an image.
-func withJobImages(registered map[string]domain.Cluster, clusters []ClusterCapacity) {
-	for i := range clusters {
-		clusters[i].JobImage = registered[clusters[i].ClusterName].JobImage
-	}
 }
 
 // withOnDemand marks the clusters whose nodes are slots, each a machine the runtime may rent, and
@@ -392,11 +344,7 @@ func (s *Service) refusal(op string, err error) error {
 }
 
 // ResourceCapacity is the live capacity of the clusters orgID's jobs can be placed on, or of
-// every cluster with every, and the images the deployment offers a job to run in.
-func (s *Service) ResourceCapacity(ctx context.Context, orgID string, every bool) ([]ClusterCapacity, []domain.JobImage, error) {
-	clusters, err := s.liveCapacity(ctx, orgID, every)
-	if err != nil {
-		return nil, nil, err
-	}
-	return clusters, s.jobImages, nil
+// every cluster with every.
+func (s *Service) ResourceCapacity(ctx context.Context, orgID string, every bool) ([]ClusterCapacity, error) {
+	return s.liveCapacity(ctx, orgID, every)
 }

@@ -11,10 +11,8 @@ import (
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 	"github.com/scaleresearch/hypothesisloop/cli/internal/command"
 	"github.com/scaleresearch/hypothesisloop/contract/agentsandbox"
-	"github.com/scaleresearch/hypothesisloop/contract/exitline"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/agent"
-	"github.com/scaleresearch/hypothesisloop/cli/internal/jobexec"
 	"github.com/scaleresearch/hypothesisloop/cli/internal/people"
 	"github.com/scaleresearch/hypothesisloop/cli/internal/shared"
 )
@@ -78,7 +76,6 @@ func init() {
 		{Name: "capacity", About: "live accelerators per cluster, available and total", Run: shared.Capacity},
 		{Name: "situation", About: "the run now: time, objective, capacity, budget and each agent's work and allowances", Run: shared.Situation},
 		{Name: "data-key", About: `your S3 key to the experiment's data: eval "$(hl data-key)"`, Run: agent.DataKey},
-		{Name: "git-credential", About: "git's credential helper for your experiment's repository; git runs it", Run: agent.GitCredential},
 		{Name: "hypothesis", Run: hypothesis, Subs: []command.Command{
 			{Name: "submit", About: "register an idea under the objective or the hypotheses it builds on", Run: shared.HypothesisSubmit},
 			{Name: "checkout", About: "put the clone on your branch for a hypothesis, made from what the hypothesis builds on, and record you as working on it", Run: agent.HypothesisCheckout},
@@ -102,11 +99,10 @@ func init() {
 			{Name: "cancel", About: "cancel a job that has not ended, releasing what it holds of its agent's quota", Run: shared.JobCancel},
 			{Name: "stats", About: "job counts by status, capacity tier and eviction reason", Run: shared.JobStats},
 		}},
-		{Name: "env", Subs: []command.Command{
-			{Name: "build", About: "start building HEAD's .hypothesisloop/Dockerfile before the job that runs in it", Run: agent.EnvBuild},
-			{Name: "status", About: "say whether HEAD's .hypothesisloop/Dockerfile is building, built or failed, building nothing", Run: agent.EnvStatus},
-			{Name: "stage", About: "pull the image a job runs in, the baseline's by default, onto this machine for hl env run", Run: agent.EnvStage},
-			{Name: "run", About: "-- COMMAND: run COMMAND here inside the staged image", Run: agent.EnvRun},
+		{Name: "image", About: "the image the platform experiment's jobs run in", Subs: []command.Command{
+			{Name: "show", About: "the image recorded for the jobs, by digest, and their architecture", Run: agent.ImageShow},
+			{Name: "set", About: "record the image every job submitted from now on runs in", Run: agent.ImageSet},
+			{Name: "credentials", About: `a login that pushes the experiment's images: eval "$(hl image credentials)"`, Run: agent.ImageCredentials},
 		}},
 		{Name: "repo", About: "the files every experiment's repository holds", Subs: []command.Command{
 			{Name: "init", About: "put the experiment template in a new directory", Run: people.RepoInit},
@@ -150,9 +146,6 @@ func init() {
 			{Name: "remove", About: "end a cluster: requeue its jobs and refuse its runtime token", Run: people.ClusterRemove},
 		}},
 		{Name: "watch", About: "your own updates, one JSON object per line", Run: shared.Watch},
-		{Name: exitline.WrapperCommand, About: "--stop-grace SECONDS -- COMMAND: a runtime's wrapper around a job's command", Run: func(_ *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-			return jobexec.Run(args, stdout, stderr)
-		}},
 	}
 }
 

@@ -52,9 +52,6 @@ type LoopStore interface {
 	// attempt on within ttl — the cross-job half of the tried-cluster backoff (autoscaler.md line
 	// 109): a job never speculates onto a node group another job just watched fail to deliver.
 	RecentlyTriedClusters(ctx context.Context, ttl time.Duration) (map[string]bool, error)
-	// AssignEnvironment is the environment a job's commit declares, which it waits for, with its
-	// build assigned to one of live and kept by one of holding (db.Store.AssignEnvironment).
-	AssignEnvironment(ctx context.Context, key string, live, holding []string, lease time.Duration) (*domain.Environment, error)
 	// EndQueuedSettled ends a queued job and releases its hold in one write (db.Store.EndQueuedSettled).
 	EndQueuedSettled(ctx context.Context, id string, to domain.ExperimentStatus, reason string) (bool, error)
 }
@@ -97,10 +94,6 @@ type ClusterCapacity interface {
 	// placement.Reserve, which must prove a job fits one node in every dimension.
 	GetNodeResourceCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error)
 	GetNodeLabels(ctx context.Context) (map[string]map[string]map[string]string, error)
-	// GetLiveClusters reports true for the clusters that reported within the connected window,
-	// those an environment's build may be assigned to, and false for those that reported only
-	// within domain.EnvironmentBuildHold, which keep the builds they hold.
-	GetLiveClusters(ctx context.Context) (map[string]bool, error)
 }
 
 // ExperimentEvictor terminates a RUNNING experiment through the platform's one canonical

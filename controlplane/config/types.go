@@ -324,7 +324,7 @@ type PlanningConfig struct {
 	// BaselineLimitMinutes is how long a platform experiment, accepted from a draft or created
 	// whole, may stay open: one not running by then is closed. The run's length counts from its
 	// start, so this alone bounds the time before, with the time a job of its baseline waits on
-	// the platform added (domain.MaxEnvironmentBuildTime at most).
+	// the platform added (domain.MaxBaselineHold at most).
 	BaselineLimitMinutes int `yaml:"baseline_limit_minutes"`
 	// MinBaselineMinutes is the fewest minutes an accepted draft may give its baseline: what
 	// writing a harness, building its environment and measuring once take at the least.
@@ -361,19 +361,15 @@ type RuntimesConfig struct {
 	RegistryPlainHTTP bool `yaml:"registry_plain_http"`
 }
 
-// ContainerRegistryConfig is the registry provider that holds EnvironmentsRepository, where the
-// images a repository's .hypothesisloop/Dockerfile declares are pushed by the cluster each build is
-// assigned to, and that hands out the logins to it (clients/registrycred). Left out, the
-// deployment builds no environments: no cluster counts as building, so a job whose commit declares
-// one is refused.
+// ContainerRegistryConfig is the registry the images of experiments are pushed to by their
+// agents and pulled from by their jobs, and the provider that hands out the logins to it
+// (clients/registrycred). Each org has its own repository there. Left out, an experiment records
+// only images pulled without a login.
 type ContainerRegistryConfig struct {
 	// Provider names the registry, and the section of that name, the only one set:
 	// RegistryProviderGCP, Google Artifact Registry.
 	Provider string             `yaml:"provider"`
 	GCP      *GCPRegistryConfig `yaml:"gcp"`
-	// EnvironmentsRepository is the whole address environment images are pushed to by digest,
-	// host/path/name, in a registry no one pulls from without a token.
-	EnvironmentsRepository string `yaml:"environments_repository"`
 }
 
 // ObjectStoreProviderMinIO is a store that speaks the MinIO admin API (MinIO, Silo, AIStor), which
@@ -383,26 +379,11 @@ const ObjectStoreProviderMinIO = "minio"
 // RegistryProviderGCP is Google Artifact Registry, logged in to with service account tokens.
 const RegistryProviderGCP = "gcp"
 
-// GCPRegistryConfig is the two service accounts whose tokens are the logins to an Artifact
-// Registry repository. Pusher is the email of the one that may write to it, and Puller of the one
-// that may read it. The control plane's own Google identity may mint tokens of both.
+// GCPRegistryConfig is the Google Cloud project and location the Artifact Registry repositories
+// of orgs are created in, with the service accounts that read and write each.
 type GCPRegistryConfig struct {
-	Pusher string `yaml:"pusher"`
-	Puller string `yaml:"puller"`
-}
-
-// JobImageConfig is one image the deployment offers a job to run in. It is named by image, a
-// whole reference, or by repository, a name under runtimes.registry at runtimes.image_tag: one
-// this deployment built and pushed with its own. EnvironmentBase, beside repository alone, is
-// the name under runtimes.registry, at the same tag, of the same image without the platform's
-// tools (domain.JobImage.EnvironmentBase).
-type JobImageConfig struct {
-	Name            string   `yaml:"name"`
-	Image           string   `yaml:"image"`
-	Repository      string   `yaml:"repository"`
-	EnvironmentBase string   `yaml:"environment_base"`
-	Carries         string   `yaml:"carries"`
-	Suits           []string `yaml:"suits"`
+	Project  string `yaml:"project"`
+	Location string `yaml:"location"`
 }
 
 // PlainHTTPRegistries is the registries, by host[:port], that serve plain HTTP: runtimes.registry
@@ -413,22 +394,6 @@ func (c *Settings) PlainHTTPRegistries() []string {
 	}
 	host, _, _ := strings.Cut(c.Runtimes.Registry, "/")
 	return []string{host}
-}
-
-// OfferedJobImages is the configured job images with their references resolved.
-func (c *Settings) OfferedJobImages() []domain.JobImage {
-	images := make([]domain.JobImage, 0, len(c.JobImages))
-	for _, i := range c.JobImages {
-		reference, base := i.Image, ""
-		if i.Repository != "" {
-			reference = c.Runtimes.Registry + "/" + i.Repository + ":" + c.Runtimes.ImageTag
-		}
-		if i.EnvironmentBase != "" {
-			base = c.Runtimes.Registry + "/" + i.EnvironmentBase + ":" + c.Runtimes.ImageTag
-		}
-		images = append(images, domain.JobImage{Name: i.Name, Image: reference, Carries: i.Carries, Suits: i.Suits, EnvironmentBase: base})
-	}
-	return images
 }
 
 // The git hosts a deployment can keep its platform experiments' code on.
@@ -484,7 +449,6 @@ type Settings struct {
 	Planning          PlanningConfig           `yaml:"planning"`
 	Accounts          AccountsConfig           `yaml:"accounts"`
 	Runtimes          RuntimesConfig           `yaml:"runtimes"`
-	JobImages         []JobImageConfig         `yaml:"job_images"`
 	GitHost           GitHostConfig            `yaml:"git_host"`
 	ContainerRegistry *ContainerRegistryConfig `yaml:"container_registry"`
 	Sandbox           *SandboxConfig           `yaml:"sandbox"`

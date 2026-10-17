@@ -49,8 +49,6 @@ var faultClasses = map[EvictionReason]FaultClass{
 	EvictionResourceDisbalance: FaultWorkload,
 	// A bad image reference or a malformed container config: NeverSelfHealsPhaseReasons.
 	EvictionUnschedulable: FaultWorkload,
-	// The environment file of the job's commit did not build.
-	EvictionEnvironmentFailed: FaultWorkload,
 
 	// --- infrastructure: the environment failed the job --------------------------------------
 	EvictionClusterUnreachable:          FaultInfrastructure,
@@ -72,8 +70,6 @@ var faultClasses = map[EvictionReason]FaultClass{
 	EvictionCodeUnreachable: FaultInfrastructure,
 	// The machine admission counted was rented by someone else before the runtime asked for it.
 	EvictionNoOffer: FaultInfrastructure,
-	// The platform did not build the environment of the job's commit on any attempt it allows.
-	EvictionEnvironmentUnbuilt: FaultInfrastructure,
 
 	// --- policy: the platform decided, and the job was fine -----------------------------------
 	EvictionStageCut:               FaultPolicy,
@@ -105,22 +101,14 @@ func IsInfrastructureFault(reason EvictionReason) bool {
 	return ok && class == FaultInfrastructure
 }
 
-// RequeuedOnFault reports whether a job ended for reason goes back to the queue while its
-// allowance lasts: every infrastructure fault but environment_unbuilt, whose environment stays
-// failed until a submit names it, so a requeued job would only end again.
-func RequeuedOnFault(reason EvictionReason) bool {
-	return IsInfrastructureFault(reason) && reason.Code() != EvictionEnvironmentUnbuilt
-}
-
 // FailedByItsCluster reports whether an infrastructure fault says something about the cluster the
 // job was on, so that the job's next placement leaves that cluster out for a while (its tried
-// list). Three faults do not: code_unreachable is the platform's or the repository's outage, the
-// same from every cluster, no_offer is a market that had no machine at that moment, which the
-// cluster's reported capacity already keeps the job waiting on, and environment_unbuilt ends a
-// job that was on no cluster.
+// list). Two faults do not: code_unreachable is the platform's or the repository's outage, the
+// same from every cluster, and no_offer is a market that had no machine at that moment, which the
+// cluster's reported capacity already keeps the job waiting on.
 func FailedByItsCluster(reason EvictionReason) bool {
 	code := reason.Code()
-	return IsInfrastructureFault(reason) && code != EvictionCodeUnreachable && code != EvictionNoOffer && code != EvictionEnvironmentUnbuilt
+	return IsInfrastructureFault(reason) && code != EvictionCodeUnreachable && code != EvictionNoOffer
 }
 
 // IsPolicyFault reports whether an eviction reason names the platform's own decision — the one

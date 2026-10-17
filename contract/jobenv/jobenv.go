@@ -35,9 +35,12 @@ const (
 	TraceParent   = "TRACEPARENT"
 	// Token is the job's platform token, which it pushes its metrics with.
 	Token = "HYPOTHESISLOOP_TOKEN"
-	// GitURL is the platform's git proxy address of the job's repository, which hl-clone fetches
-	// the job's commit from.
+	// GitURL is the platform's git proxy address of the job's repository, which the launch
+	// script fetches the job's commit from.
 	GitURL = "HYPOTHESISLOOP_GIT_URL"
+	// StopGrace is how many seconds the job's command runs on after SIGTERM before the launch
+	// script kills it: the longer of the job's resolved shutdown grace and checkpoint window.
+	StopGrace = "HYPOTHESISLOOP_STOP_GRACE"
 )
 
 // Where a node of a job that spans several stands among them.
@@ -51,7 +54,3 @@ const (
 	GroupReplicas = "HYPOTHESISLOOP_GROUP_REPLICAS"
 	RankOffset    = "HYPOTHESISLOOP_RANK_OFFSET"
 )
-
-// HLGitURL is the address hl git-credential answers for, the one it hands the caller's token to.
-// A job image sets it to GitURL, and an agent's harness to its platform experiment's git_url.
-const HLGitURL = "HL_GIT_URL"

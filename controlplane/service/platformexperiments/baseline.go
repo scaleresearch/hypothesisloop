@@ -28,11 +28,6 @@ type Baseline struct {
 	// ObservedHours is how long the job ran, as it was billed. A job too short to be observed
 	// alive has none.
 	ObservedHours float64
-	// Environment is the environment the job's commit declared, nil when it declared none.
-	Environment *domain.Environment
-	// Declared is the environment file at the head of the baseline branch, nil when it holds
-	// none: what a job of the default branch runs in.
-	Declared *string
 	// References is what the experiment's COMPLETED jobs measured of each reference metric,
 	// the baseline's follow-up jobs among them.
 	References []MetricReference
@@ -81,14 +76,6 @@ func (s *Service) readBaseline(ctx context.Context, pe *domain.PlatformExperimen
 	if cost != nil {
 		out.ObservedHours = cost.ObservedHours
 	}
-	if job.EnvironmentKey != "" {
-		if out.Environment, err = s.environments.Get(ctx, job.EnvironmentKey); err != nil {
-			return nil, err
-		}
-	}
-	if out.Declared, err = s.environments.Read(ctx, pe.ProjectID, pe.Repository, gitrefs.BaselineBranch(pe.ID)); err != nil {
-		return nil, err
-	}
 	if out.References, err = s.references(ctx, pe); err != nil {
 		return nil, err
 	}
@@ -114,8 +101,8 @@ func checkBaseline(pe *domain.PlatformExperiment, baseline *Baseline) error {
 }
 
 // checkMeasurement holds a job named as the baseline, whoever ran it on whichever branch, to what
-// a baseline measures: it completed, filed its finding, reported every metric but the references,
-// held every constraint and ran in the environment of the baseline branch.
+// a baseline measures: it completed, filed its finding, reported every metric but the references
+// and held every constraint.
 func checkMeasurement(pe *domain.PlatformExperiment, baseline *Baseline) error {
 	if baseline.Job.Status != domain.StatusCompleted {
 		return refusedBaseline("baseline_not_completed", "baseline job %s is %s: a run rests on a baseline that ran to the end. Wait for it, or have it fixed and run again", baseline.Job.ID, baseline.Job.Status)
@@ -140,24 +127,6 @@ func checkMeasurement(pe *domain.PlatformExperiment, baseline *Baseline) error {
 	if len(missing) > 0 {
 		sort.Strings(missing)
 		return refusedBaseline("baseline_missing_metric", "baseline job %s reported no %s: every metric of the platform experiment must be one the harness really reports", baseline.Job.ID, strings.Join(missing, ", "))
-	}
-	return checkBaselineEnvironment(pe, baseline)
-}
-
-// checkBaselineEnvironment holds the baseline job to the environment the baseline branch
-// declares: every researcher's job inherits it, so the baseline is measured in it too. The
-// environment is the file's content, so a job of another branch that declares the same file ran
-// in it.
-func checkBaselineEnvironment(pe *domain.PlatformExperiment, baseline *Baseline) error {
-	ran, declared := baseline.Environment, baseline.Declared
-	branch := gitrefs.BaselineBranch(pe.ID)
-	switch {
-	case declared != nil && (ran == nil || ran.Dockerfile != *declared):
-		return refusedBaseline("baseline_environment_differs", "branch %s declares in %s an environment that baseline job %s did not run in: every researcher's job runs in it, so the baseline is measured in it too. Name a job submitted from a commit that declares the same file, as the head of the branch does", branch, domain.EnvironmentFile, baseline.Job.ID)
-	case declared == nil && ran != nil:
-		return refusedBaseline("baseline_environment_differs", "baseline job %s ran in the environment its commit declares in %s, and the head of branch %s declares none: commit the file there again, or name a job submitted from a commit that declares none", baseline.Job.ID, domain.EnvironmentFile, branch)
-	case ran != nil && (baseline.Job.ResolvedJob == nil || !inEnvironment(ran, baseline.Job.ResolvedJob.Image)):
-		return refusedBaseline("baseline_not_in_environment", "baseline job %s did not run in the image of the environment its commit declares (%s): submit it again and name that job", baseline.Job.ID, ran.Image)
 	}
 	return nil
 }
@@ -288,12 +257,6 @@ func (s *Service) raisedBaseline(ctx context.Context, pe, patched *domain.Platfo
 	return raise, baselineBlock(candidate, patched.Metrics), nil
 }
 
-// inEnvironment is whether image is the environment's: the pushed one, or before its push ends the one
-// loaded into the builder's node, which a job placed there runs.
-func inEnvironment(env *domain.Environment, image string) bool {
-	return image != "" && (image == env.Image || image == env.LoadedImage)
-}
-
 // MeasuredBaselineHeader opens the block of the description the platform writes: what the
 // declared baseline job is, from the platform's own records. The description is all a researcher reads,
 // and a coordinator that copied these lines into it by hand got one of them wrong and waited.
@@ -310,7 +273,7 @@ func baselineBlock(baseline *Baseline, metrics []domain.MetricDefinition) string
 			measured = append(measured, fmt.Sprintf("%s = %g", metric.Key, value))
 		}
 	}
-	lines := []string{MeasuredBaselineHeader, "job: " + baseline.Job.ID, "code_ref: " + baseline.Job.CodeRef}
+	lines := []string{MeasuredBaselineHeader, "job: " + baseline.Job.ID, "code_ref: " + baseline.Job.CodeRef, "image: " + baseline.Job.Image}
 	if env := baseline.Job.Job.Env; len(env) > 0 {
 		settings := make([]string, 0, len(env))
 		for _, key := range slices.Sorted(maps.Keys(env)) {

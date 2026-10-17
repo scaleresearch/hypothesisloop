@@ -42,10 +42,6 @@ func (l *Loop) admitBurst(ctx context.Context, t *tickState, exp *domain.Experim
 	}
 	cluster, fp := placed.cluster, placed.fp
 	fits := domain.Fits(t.bAvail[cluster], fp) && placement.TopologyFits(c.nodeAvail[cluster], c.nodeResources[cluster], c.nodeLabels[cluster], exp)
-	if exp.EnvironmentImage != "" && (placed.misfit != "" || !fits) {
-		l.waitForPush(ctx, "burst", t.environments, exp, &t.errs)
-		return
-	}
 	if !fits {
 		l.burstWait(ctx, t, exp, placed)
 		return

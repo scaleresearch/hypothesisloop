@@ -54,11 +54,7 @@ type Agent struct {
 	// env var, default false (fail-closed: a false positive costs a job a wasted scale-up
 	// deadline, so this is never heuristically detected). See autoscaler.md.
 	AutoscalerEnabled bool
-	// Builder builds the environments the control plane assigns this cluster, which reports
-	// that it builds, and Builds is what it asks of the control plane about them. Nil builds none.
-	Builder Builder
-	Builds  BuildAPI
-	Log     func(format string, args ...any)
+	Log               func(format string, args ...any)
 
 	// unrunnable is what the last reconcile pass did not create, by experiment, with the attempt,
 	// the reason and the runtime's words. It is that pass's observation and nothing more: every
@@ -72,32 +68,6 @@ type Agent struct {
 
 	// contacted is set by the first reconcile exchange the control plane answers, which is logged.
 	contacted atomic.Bool
-
-	// builds is what runs of the builds the last reconcile answer listed, by key: started when
-	// listed, cancelled when no longer listed at that attempt, and kept once reported until then
-	// so a finished build is not run again.
-	buildsMu sync.Mutex
-	builds   map[string]*runningBuild
-	building sync.WaitGroup
-}
-
-// Builder builds one environment (envbuild.Daemon) and says how the build ended. credential is
-// the registry login of the push, asked of the control plane each time the daemon needs it,
-// gitCredential the read of the repository the file is of, asked each time a step mounts it,
-// progress is told each step of the build as it starts and ends, and loaded the node its image is
-// held on and its digest once it is there, before the push ends.
-type Builder interface {
-	Run(ctx context.Context, b clusterapi.EnvironmentBuild, credential func(ctx context.Context) (username, password string, err error),
-		gitCredential func(ctx context.Context) (clusterapi.EnvironmentGitCredential, error), progress func(format string, args ...any), loaded func(node, digest string)) clusterapi.EnvironmentBuildReport
-}
-
-type runningBuild struct {
-	attempt int
-	cancel  context.CancelFunc
-	// unsent is the outcome of a build that ended and whose report the control plane did not
-	// take; posting is set while it is posted again.
-	unsent  *clusterapi.EnvironmentBuildReport
-	posting bool
 }
 
 // ErrClusterRemoved is what Run returns once the control plane no longer knows this cluster
@@ -123,8 +93,6 @@ func (a *Agent) Run(ctx context.Context) error {
 	go func() { defer wg.Done(); a.statusReportLoop(statusCtx) }()
 	go func() { defer wg.Done(); defer stopStatus(); err = a.reconcileLoop(ctx) }()
 	wg.Wait()
-	a.reconcileBuilds(ctx, nil)
-	a.building.Wait()
 	return err
 }
 
@@ -162,8 +130,7 @@ func passContext(ctx context.Context, interval time.Duration) (context.Context, 
 	return context.WithTimeout(ctx, passIntervals*interval)
 }
 
-// reconcileOnce runs one pass under its own deadline. Builds outlive the pass, so they run under
-// ctx.
+// reconcileOnce runs one pass under its own deadline.
 func (a *Agent) reconcileOnce(ctx context.Context) error {
 	pass, cancel := passContext(ctx, a.ReconcileInterval)
 	defer cancel()
@@ -184,7 +151,6 @@ func (a *Agent) reconcileOnce(ctx context.Context) error {
 	if !removed && !a.contacted.Swap(true) {
 		a.Log("first contact with the control plane ok: %d workloads desired here", len(answer.Jobs))
 	}
-	a.reconcileBuilds(ctx, answer.Builds)
 	done, err := a.converge(pass, exec, answer, removed)
 	if done {
 		return ErrClusterRemoved
@@ -264,15 +230,15 @@ func (a *Agent) converge(ctx context.Context, exec agentexec.Executor, answer cl
 				a.Log("deleted drifted workload %s; next pass recreates desired spec", id)
 				continue
 			}
-			if refresher, ok := exec.(agentexec.PullRefresher); ok && exp.EnvironmentKey != "" {
-				if err := refresher.RefreshPull(ctx, exp, answer.RegistryPull); err != nil {
+			if refresher, ok := exec.(agentexec.PullRefresher); ok && exp.ImagePull != nil {
+				if err := refresher.RefreshPull(ctx, exp); err != nil {
 					a.Log("refresh the pull login of %s: %v", id, err)
 					reconcileErrors = append(reconcileErrors, fmt.Errorf("refresh the pull login of %s: %w", id, err))
 				}
 			}
 			continue
 		}
-		if err := exec.CreateWorkload(ctx, exp, answer.RegistryPull); err != nil {
+		if err := exec.CreateWorkload(ctx, exp); err != nil {
 			// A job that waits is reported with the next status push and asked for again. Its
 			// wait is logged when it begins or its reason changes, not every pass.
 			var waiting *agentexec.Waiting
@@ -408,9 +374,7 @@ func (a *Agent) fetchDesiredState(ctx context.Context, exec agentexec.Executor) 
 		NodeResourcesTotalByNode:   nodeResourcesTotal,
 		NodeLabelsByNode:           nodeLabels,
 		MultiNodeCapable:           exec.SupportsMultiNodeJobs(),
-		JobImage:                   exec.OnlyImage(),
 		AutoscalerEnabled:          a.AutoscalerEnabled,
-		Builds:                     a.Builder != nil,
 		ClusterID:                  clusterID,
 		RAMAvailableBytes:          ramAvail, RAMTotalBytes: ramTotal,
 		StorageAvailableBytes: storageAvail, StorageTotalBytes: storageTotal,
