@@ -105,11 +105,11 @@ func (e *Executor) current(ctx context.Context) (*view, error) {
 
 func (e *Executor) read(ctx context.Context) (*view, error) {
 	listed, err := e.provider.List(ctx, e.prefix)
-	// A job is never paused: one found paused is one that does not run.
-	listed = provider.PausedAsStarting(listed)
 	if err != nil {
 		return nil, fmt.Errorf("cloudcompute: list instances: %w", err)
 	}
+	// A job is never paused: one found paused is one that does not run.
+	listed = provider.PausedAsStarting(listed)
 	v := &view{outputs: map[string]output{}}
 	for _, l := range listed {
 		parsed, ok := e.parseInstanceName(l.Name)
