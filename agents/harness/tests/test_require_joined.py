@@ -54,11 +54,11 @@ class FakePlatform(BaseHTTPRequestHandler):
         agent_id = self.path.rsplit("/", 1)[-1]
         if agent_id in FakePlatform.joined:
             return self._reply(200, {"agent_id": agent_id, "role": "competitor", **FakePlatform.signup})
-        self._reply(FakePlatform.status_for_strangers, {"error": "unauthenticated: agent is not in platform experiment"})
+        self._reply(FakePlatform.status_for_strangers, {"message": "unauthenticated: agent is not in platform experiment"})
 
     def do_POST(self):
         FakePlatform.calls.append(("POST", self.path))
-        self._reply(500, {"error": "the harness must not write at startup"})
+        self._reply(500, {"message": "the harness must not write at startup"})
 
     def log_message(self, *args):
         pass

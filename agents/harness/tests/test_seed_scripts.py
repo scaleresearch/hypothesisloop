@@ -102,7 +102,7 @@ class MetricHelperTest(unittest.TestCase):
         for path in METRIC_HELPERS:
             for status in (401, 403):
                 with self.subTest(path=path, status=status):
-                    requests, stderr = self.post_three(path, status, '{"error":"unauthenticated: job job-1 is not running"}')
+                    requests, stderr = self.post_three(path, status, '{"message":"unauthenticated: job job-1 is not running"}')
                     self.assertEqual(requests, [("/experiments/job-1/metrics", "Bearer job-token")] * 3)
                     self.assertEqual(len(stderr.splitlines()), 1, stderr)
                     self.assertIn(str(status), stderr)
@@ -111,7 +111,7 @@ class MetricHelperTest(unittest.TestCase):
     def test_another_failure_is_reported_each_time_with_the_reason(self):
         for path in METRIC_HELPERS:
             with self.subTest(path=path):
-                _, stderr = self.post_three(path, 422, '{"error":"metric_value must be finite"}')
+                _, stderr = self.post_three(path, 422, '{"message":"invalid metric: metric_value must be finite"}')
                 self.assertEqual(len(stderr.splitlines()), 3, stderr)
                 self.assertIn("metric_value must be finite", stderr)
 

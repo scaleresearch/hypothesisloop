@@ -5,7 +5,7 @@ from unittest import mock
 
 from hypothesisloop_agent import api_client, core, outage
 
-REFUSED = api_client.APIError("GET", "http://api/x", 401, '{"error":"unauthenticated: agent ag-1 finished in platform experiment pe-1"}')
+REFUSED = api_client.APIError("GET", "http://api/x", 401, '{"message":"unauthenticated: agent ag-1 finished in platform experiment pe-1"}')
 DOWN = api_client.APIError("GET", "http://api/x", 0, "connection refused")
 
 
@@ -34,7 +34,7 @@ class RunOverTest(unittest.TestCase):
 
     def test_a_refused_token_is_a_run_that_is_over(self):
         reason = core.run_over(setup(lambda: REFUSED))
-        self.assertEqual(reason, 'the platform refuses this token, so its run is over ({"error":"unauthenticated: agent ag-1 finished in platform experiment pe-1"})')
+        self.assertEqual(reason, 'the platform refuses this token, so its run is over ({"message":"unauthenticated: agent ag-1 finished in platform experiment pe-1"})')
         self.assertTrue(core.lost_platform(reason))
         self.assertEqual(core.stop_reason(setup(lambda: REFUSED), [False]), reason)
 
