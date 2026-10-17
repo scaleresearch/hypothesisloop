@@ -358,7 +358,7 @@ class DisbalanceNodeShape:
     `accel_type`, ported from resource-disbalance-evict.sh's inline Python node-selection block.
 
     `node`/`installed`/`free_cpu_cores` describe the node carrying the MOST accelerators of this
-    flavor (empty/0/0.0 if none carry any); `flavor_nodes` is how many live nodes carry the label
+    accelerator type (empty/0/0.0 if none carry any); `labeled_nodes` is how many live nodes carry the label
     at all, regardless of accelerator count -- the scenario only fires when exactly one does,
     otherwise the blocked job would just land on a different node and prove nothing.
     """
@@ -366,7 +366,7 @@ class DisbalanceNodeShape:
     node: str
     installed: int
     free_cpu_cores: float
-    flavor_nodes: int
+    labeled_nodes: int
 
 
 def disbalance_node_shape(accel_type: str) -> DisbalanceNodeShape:
@@ -374,11 +374,11 @@ def disbalance_node_shape(accel_type: str) -> DisbalanceNodeShape:
     key, _, value = accel_type.partition("=")
     nodes = json.loads(_kubectl("get", "nodes", "-o", "json"))["items"]
 
-    best_node, best_count, best_cpu_milli, flavor_nodes = "", 0, 0, 0
+    best_node, best_count, best_cpu_milli, labeled_nodes = "", 0, 0, 0
     for node in nodes:
         if (node.get("metadata", {}).get("labels") or {}).get(key) != value:
             continue
-        flavor_nodes += 1
+        labeled_nodes += 1
         alloc = node.get("status", {}).get("allocatable") or {}
         count = sum(int(v) for k, v in alloc.items() if k.startswith(f"{vendor}/") and v.lstrip("-").isdigit())
         if count <= best_count:
@@ -386,7 +386,7 @@ def disbalance_node_shape(accel_type: str) -> DisbalanceNodeShape:
         best_node, best_count, best_cpu_milli = node["metadata"]["name"], count, _millicores(alloc.get("cpu", "0"))
 
     if not best_node:
-        return DisbalanceNodeShape("", 0, 0.0, flavor_nodes)
+        return DisbalanceNodeShape("", 0, 0.0, labeled_nodes)
 
     # Same platform-local denominator as GetNodeTotalCapacity (runtime/k8s/internal/k8sexec/
     # job_lifecycle.go): raw allocatable minus the CPU requests of every resident pod NOT labeled
@@ -406,7 +406,7 @@ def disbalance_node_shape(accel_type: str) -> DisbalanceNodeShape:
                 free_milli -= _millicores(cpu)
     free_milli = max(0, free_milli)
 
-    return DisbalanceNodeShape(best_node, best_count, free_milli / 1000.0, flavor_nodes)
+    return DisbalanceNodeShape(best_node, best_count, free_milli / 1000.0, labeled_nodes)
 
 
 def pod_resource(experiment_id: str, resource: str) -> tuple[str | None, str | None]:

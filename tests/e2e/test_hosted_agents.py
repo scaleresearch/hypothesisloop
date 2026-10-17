@@ -122,15 +122,15 @@ def test_agents_and_a_coordinator_are_hosted_in_the_experiments_repository(api: 
         assert [a["name"] for a in project.agents(pe_id)] == ["Baseline 1"], "the hosted agent was not removed"
 
         # An agent its owner runs needs nothing of the platform's to start, and joins. What it
-        # runs is resolved here and shown: the default flavor and the platform's default model.
+        # runs is resolved here and shown: the default agent type and the platform's default model.
         own = project.add_agents(pe_id)[0]
         assert not own["hosted"] and own["token"].startswith("hls_") and "instance" not in own, own
-        assert own["flavor"] == "generalist" and own["model"], own
-        named = project.add_agents(pe_id, flavor="data-search", model="another-model-1")[0]
-        assert (named["flavor"], named["model"]) == ("data-search", "another-model-1"), named
+        assert own["agent_type"] == "generalist" and own["model"], own
+        named = project.add_agents(pe_id, agent_type="data-search", model="another-model-1")[0]
+        assert (named["agent_type"], named["model"]) == ("data-search", "another-model-1"), named
 
-        r = project.post(f"/platform-experiments/{pe_id}/agents", {"flavor": "no-such-flavor"})
-        assert r.status_code == 400 and "no-such-flavor" in r.text, f"an unknown flavor: {r.status_code} {r.text}"
+        r = project.post(f"/platform-experiments/{pe_id}/agents", {"agent_type": "no-such-type"})
+        assert r.status_code == 400 and "no-such-type" in r.text, f"an unknown agent type: {r.status_code} {r.text}"
         r = project.post(f"/platform-experiments/{pe_id}/agents", {"hyperparameters": {"blob": "x" * 5000}})
         assert r.status_code == 400 and "4096" in r.text, f"oversize hyperparameters: {r.status_code} {r.text}"
         assert len(project.agents(pe_id)) == 3
@@ -150,12 +150,12 @@ def test_agents_join_through_the_api_and_the_launcher_is_told_what_to_run(with_r
     api = with_repo
     pe_id = hosted_pe("hosted-agents", 1.0, 5)
 
-    launch = {"hosted": True, "flavor": "data-search", "model": "claude-sonnet-5", "hyperparameters": {"batch_size": 64}}
+    launch = {"hosted": True, "agent_type": "data-search", "model": "claude-sonnet-5", "hyperparameters": {"batch_size": 64}}
     hosted = api.add_agents(pe_id, name=f"hosted-{run_id}", **launch)
     r = api.post(f"/platform-experiments/{pe_id}/agents", {"name": f"hosted-{run_id}", **launch})
     assert (r.status_code, r.json()["reason"]) == (409, "agent_name_taken"), f"a second agent of one name: {r.status_code} {r.text}"
     hosted += api.add_agents(pe_id, **launch)
-    self_run = api.add_agents(pe_id, flavor="generalist")
+    self_run = api.add_agents(pe_id, agent_type="generalist")
     measurer = api.add_agents(pe_id, hosted=True, role="baseline")[0]["agent_id"]
     assert len(hosted) == 2 and len(self_run) == 1
     hosted_ids = [a["agent_id"] for a in hosted]
@@ -239,7 +239,7 @@ def test_agents_join_through_the_api_and_the_launcher_is_told_what_to_run(with_r
     assert set(env) == {"API_URL", "HL_TOKEN"}, sorted(env)
     as_kept = api.as_caller(env["HL_TOKEN"])
     signup = as_kept.get_json(f"/platform-experiments/{pe_id}/signups/{kept}")
-    assert (signup["flavor"], signup["model"], signup["hyperparameters"]) == ("data-search", "claude-sonnet-5", {"batch_size": 64}), signup
+    assert (signup["agent_type"], signup["model"], signup["hyperparameters"]) == ("data-search", "claude-sonnet-5", {"batch_size": 64}), signup
     assert env["API_URL"].startswith("http") and instance["image"]
     assert env["HL_TOKEN"] not in instance["name"]
     assert instance["name"] == instance["name"].lower() and len(instance["name"]) <= 58 and instance["name"] not in ending

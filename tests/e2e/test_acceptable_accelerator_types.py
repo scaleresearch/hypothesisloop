@@ -1,11 +1,11 @@
-"""acceptable_accelerator_types: a job must get its concrete flavor selected at admission time
+"""acceptable_accelerator_types: a job must get its concrete accelerator type selected at admission time
 from accelerator_type + acceptable_accelerator_types, not just at k8s node-affinity time. If the
-requested flavor is saturated but a listed alternative is free, the job must admit onto the
+requested accelerator type is saturated but a listed alternative is free, the job must admit onto the
 alternative instead of sitting QUEUED next to idle accelerators.
 
 Regression test for findings.md's P1 "acceptable_accelerator_types cannot be scheduled
 correctly": scheduler capacity selection used to use only Experiment.AcceleratorType (the
-requested flavor) -- see resolveClusterAndFootprint in loop_tick.go for the fix.
+requested accelerator type) -- see resolveClusterAndFootprint in loop_tick.go for the fix.
 
 Ported 1:1 from tests/scenarios/acceptable-accelerator-types.sh. Cluster-exclusive because the
 assertion deliberately consumes one live accelerator pool (every L40 device) -- run with -n 0,
@@ -104,7 +104,7 @@ def test_acceptable_accelerator_types_admits_onto_free_alternative(api, run_id, 
     status = exp["status"]
     assert status in ("RUNNING", "COMPLETED"), (
         f"job stayed QUEUED (status={status}) with idle {ALTERNATIVE} capacity available -- "
-        "admission only considered the requested flavor, not acceptable_accelerator_types"
+        "admission only considered the requested accelerator type, not acceptable_accelerator_types"
     )
     admitted_type = exp.get("accelerator_type")
     assert admitted_type == ALTERNATIVE, (

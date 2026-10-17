@@ -180,7 +180,7 @@ class IdleStopTest(unittest.IsolatedAsyncioTestCase):
     # A run that reached its end with no signal yet ended the process at the turn boundary, so
     # a coordinator never wrote the summary its briefing promises a turn for. A token the
     # platform refuses has nothing left to file with.
-    async def run_ends_while_idle(self, flavor: str, signup: dict | Exception, experiment: dict) -> list[str]:
+    async def run_ends_while_idle(self, role: str, signup: dict | Exception, experiment: dict) -> list[str]:
         async def nothing(env, stopped, idle_s):
             return []
 
@@ -190,7 +190,7 @@ class IdleStopTest(unittest.IsolatedAsyncioTestCase):
             return signup
 
         setup = _setup()
-        setup.cfg.role = flavor
+        setup.cfg.role = role
         setup.client = SimpleNamespace(get_platform_experiment=lambda _id: experiment, get_signup=get_signup)
         with mock.patch.object(run, "ClaudeSDKClient", IdleClient), \
                 mock.patch.object(run.updates, "next_batch", nothing), \
@@ -244,7 +244,7 @@ class IdleStopTest(unittest.IsolatedAsyncioTestCase):
 
 
 class ReviewTest(unittest.IsolatedAsyncioTestCase):
-    async def waits(self, flavor: str, batches: list) -> tuple[list, list]:
+    async def waits(self, role: str, batches: list) -> tuple[list, list]:
         stop_flag = [False]
         waits = []
 
@@ -255,7 +255,7 @@ class ReviewTest(unittest.IsolatedAsyncioTestCase):
             return batches[len(waits) - 1]
 
         setup = _setup()
-        setup.cfg.role = flavor
+        setup.cfg.role = role
         with mock.patch.object(run, "ClaudeSDKClient", IdleClient), \
                 mock.patch.object(run.updates, "next_batch", next_batch), \
                 mock.patch.object(run.updates, "jobs_in_flight", mock.AsyncMock(return_value=1)), \

@@ -76,7 +76,7 @@ def served(**changes) -> dict:
 class PlatformCase(unittest.TestCase):
     def setUp(self):
         FakePlatform.joined, FakePlatform.calls, FakePlatform.tokens = {"agent-a"}, [], set()
-        FakePlatform.signup = {"flavor": "generalist", "model": "model-1", "hyperparameters": {"batch_size": 64}}
+        FakePlatform.signup = {"agent_type": "generalist", "model": "model-1", "hyperparameters": {"batch_size": 64}}
         FakePlatform.status_for_strangers = 401
         FakePlatform.repository_url = "https://github.com/acme/model.git"
         FakePlatform.git_url = "https://api.example.invalid/git/pe-1.git"

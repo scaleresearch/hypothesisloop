@@ -61,9 +61,9 @@ def test_reservation_alone_never_evicts_then_overrun_evicts(api, experiment, run
     held = api.quota_field(pe_id, agent, "guaranteed_accelerator_hours")
     job_hours = math.floor(held * 1e6 / 2) / 1e6 / TEST_ACCH_RATE
 
-    # Both jobs are pinned to the requested flavor: every assertion below is arithmetic on a
+    # Both jobs are pinned to the requested accelerator type: every assertion below is arithmetic on a
     # budget sized as exactly two of them, which only holds if both are actually priced at that
-    # rate (an alternate acceptable type prices differently -- see pin_job_flavor's bash comment).
+    # rate (an alternate acceptable type prices differently -- see the bash suite's pinning comment).
     pin = {"acceptable_accelerator_types": None}
     job = api.submit_job(
         pe_id,

@@ -42,7 +42,7 @@ TERMINAL = {"COMPLETED", "FAILED", "EVICTED", "REJECTED"}
 
 # A100. The suite runs its slow group concurrently and this scenario is in it (see run.sh): of the
 # slow group, distributed-jobs holds H100 and everything else runs on the TEST_ACCELERATOR_TYPE
-# default (L40), so A100 is the one flavor nothing else in the group competes for. The two
+# default (L40), so A100 is the one accelerator type nothing else in the group competes for. The two
 # scenarios that do use A100 -- preemption-requeue and burst-fair-round-robin -- are
 # CLUSTER_EXCLUSIVE and run in their own phase, after this one has finished.
 ACCELERATOR_TYPE = "nvidia.com/gpu.product=NVIDIA-A100-80GB-PCIe"

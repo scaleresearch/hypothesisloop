@@ -26,7 +26,7 @@ from support.wait import Deadline, assert_stable, eventually
 
 pytestmark = pytest.mark.exclusive("cluster")
 
-# A dedicated flavor no other scenario touches (see test_distributed_jobs_gang_scheduling.py's own
+# A dedicated accelerator type no other scenario touches (see test_distributed_jobs_gang_scheduling.py's own
 # comment on why each exclusive/contended scenario picks an unshared accelerator type) -- the
 # local fake device plugin advertises this on exactly one node, so "oversized" and "N-1 of N
 # hosts free" are both cheap to construct.
@@ -52,7 +52,7 @@ def test_oversized_job_submits_speculatively_and_blocks_preemption(api, experime
     """Scenario 1, adjusted from autoscaler.md's literal wording after live verification exposed a
     real architecture gap (see NOTE below): a job sized to exactly the SOLO_TYPE node's installed
     capacity goes SUBMITTED with a genuinely Pending pod on an autoscaler-enabled cluster, and a
-    second guaranteed job on the same flavor is not admitted while it holds the node -- the
+    second guaranteed job on the same accelerator type is not admitted while it holds the node -- the
     skip-preemption rule's `waiting-for-scale-up` reason (or the pre-existing generic
     `capacity_unavailable` at the exact zero-desired-free boundary; see NOTE).
 
@@ -62,16 +62,16 @@ def test_oversized_job_submits_speculatively_and_blocks_preemption(api, experime
     accelerator metric exists, but only accelerator_available_by_node (free) is ever recorded; no
     accelerator_total_by_node series exists anywhere in the metrics pipeline. Consequence: for a
     single-node (non-gang) job, "fits the largest node" and "fits live" collapse to the same
-    condition on a flavor with exactly one node, since any occupant that shrinks live-free
+    condition on an accelerator type with exactly one node, since any occupant that shrinks live-free
     identically shrinks the speculative ceiling. A job at exactly the node's installed size can
     still go SUBMITTED (there is nothing else there to make live-fit fail first), but desired-free
     lands at exactly 0, not negative -- so the skip-preemption rule's own strictly-negative test
-    sits right on the boundary this flavor can produce, and a second job here is correctly never
+    sits right on the boundary this accelerator type can produce, and a second job here is correctly never
     admitted but may carry either reason depending on which check the tick reaches first. A
     faithful test of "genuinely exceeds live-free while still fitting installed capacity" needs
     either a real installed-total-per-node metric (a step 1/2-shaped follow-up: agent-reported
     node shape by accelerator type, mirroring how CPU/memory/storage totals already work via
-    GetNodeTotalCapacity) or a multi-node flavor exercised through the gang path, which is exactly
+    GetNodeTotalCapacity) or a multi-node accelerator type exercised through the gang path, which is exactly
     what test_partial_gang_completes_or_evicts_wholly_on_deadline below already covers."""
     agent = make_agent(api, run_id, "asc-oversize")
     pe_id = experiment("autoscaler-oversize", [agent], budget=5.0)
@@ -110,7 +110,7 @@ def test_oversized_job_submits_speculatively_and_blocks_preemption(api, experime
         job_overrides={"accelerator_type": SOLO_TYPE, "accelerator_count": 1},
     )
     assert_stable(
-        "a second job on the same (now fully claimed) flavor does not run, and the first keeps the "
+        "a second job on the same (now fully claimed) accelerator type does not run, and the first keeps the "
         "only node of this type",
         lambda: (api.experiment(second)["status"], api.experiment(big)["status"]),
         ok=lambda s: s[0] in ("QUEUED", "SUBMITTED") and s[1] in ("SUBMITTED", "RUNNING"),
@@ -134,7 +134,7 @@ def test_scale_up_timeout_fails_over_without_spending_retry_budget(api, experime
     retries are untouched. Once every autoscaler candidate is tried the reason becomes
     no_scalable_capacity.
 
-    Uses a 2-node request on a flavor with exactly one real host, not the oversized-single-node
+    Uses a 2-node request on an accelerator type with exactly one real host, not the oversized-single-node
     shape autoscaler.md's own wording suggests, for the same reason documented on
     test_oversized_job_submits_speculatively_and_blocks_preemption: fitsLargestNode's per-node
     accelerator ceiling is free-capacity-based (no installed-total metric exists), so any
@@ -306,7 +306,7 @@ def test_partial_gang_evicted_wholly_past_deadline(api, experiment, run_id, dead
 def test_concurrency_cap_gates_third_job_until_one_finishes(api, run_id, deadline):
     """Scenario 4: max_concurrent_accelerators=2 with three 1-accelerator jobs -- the third waits
     on concurrency_cap, then gets admitted once one of the first two finishes. Uses a normal
-    (live-fit) flavor since the concurrency cap applies to every submit, live or speculative."""
+    (live-fit) accelerator type since the concurrency cap applies to every submit, live or speculative."""
     agent = make_agent(api, run_id, "asc-cap")
     pe_id = api.create_platform_experiment(
         f"autoscaler-cap-{run_id}", 5.0, 1, max_concurrent_accelerators=2,

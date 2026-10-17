@@ -201,7 +201,7 @@ def _run(api, pe_id: str, agent: str, cluster_name: str, deadline: Deadline) -> 
         duration=15,
     )
     # A cluster that has aged out of live heartbeats must never be treated as a speculative
-    # scale-up candidate (GetFlavorCapacity's !connected skip, autoscaler.md pre-work) --
+    # scale-up candidate (GetAcceleratorTypeCapacity's !connected skip, autoscaler.md pre-work) --
     # not_admitted_reason must not read as "waiting on this dead cluster to scale up".
     stuck_reason = api.experiment(stuck_job).get("not_admitted_reason") or ""
     assert stuck_reason not in ("waiting-for-scale-up", "no_scalable_capacity"), (

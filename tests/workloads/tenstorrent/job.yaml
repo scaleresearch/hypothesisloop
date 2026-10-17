@@ -27,7 +27,7 @@ job:
   #
   # The only thing that makes this job Tenstorrent-specific is accelerator_type below: the
   # control plane's admission loop picks whichever registered cluster reports live capacity for
-  # that flavor (see controlplane/settings/hypothesisloop.yaml's tenstorrent.com/chipArch=blackhole entry,
+  # that accelerator type (see controlplane/settings/hypothesisloop.yaml's tenstorrent.com/chipArch=blackhole entry,
   # allocation_mode: dra) — nothing here names a cluster directly.
   image: localhost/hypothesisloop-tenstorrent-workload:latest
 

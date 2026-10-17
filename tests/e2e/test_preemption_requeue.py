@@ -9,7 +9,7 @@ Five parts, all preemption and requeue, split into one test function per indepen
 diagnosable behaviour (tests/improve.md #7's "split oversized scenarios" -- this file is the
 example named explicitly):
   1. a single-node burst job is preempted, its burned hours are counted while it sits QUEUED, and
-     it is re-admitted onto the flavor it already ran on.
+     it is re-admitted onto the accelerator type it already ran on.
   2. the same, with burst saturation and the guaranteed preemptor arriving at the exact same
      instant (true concurrency, ThreadPoolExecutor).
   3. a distributed burst gang is preempted with NO surviving rank, and requeues at full width.
@@ -146,7 +146,7 @@ def test_single_node_burst_job_preempted_and_readmitted(api, run_id, deadline):
     assert used > 0, f"{preempted} was requeued but its consumed hours are in no consumption figure -- its agent could re-admit against budget it already spent"
 
     # Settlement bills lifetime observed hours at the rate the row carries, so re-admitting a job
-    # that has already run onto a different flavor would retroactively re-price the stint it ran.
+    # that has already run onto a different accelerator type would retroactively re-price the stint it ran.
     victim_type = victim.get("accelerator_type")
     assert victim_type == ACCELERATOR_TYPE, (
         f"{preempted} was requeued onto {victim_type}, not the {ACCELERATOR_TYPE} it already ran on -- its first stint would be re-priced"

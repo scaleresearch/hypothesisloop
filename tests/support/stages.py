@@ -34,7 +34,7 @@ def _job(seconds: int, baseline: str | None) -> dict:
     env = {"HYPOTHESISLOOP_DURATION_SECONDS": str(seconds)}
     if baseline is not None:
         env["HYPOTHESISLOOP_BASELINE"] = baseline
-    # One flavor only: every figure above is priced at the default accelerator's rate.
+    # One accelerator type only: every figure above is priced at the default accelerator's rate.
     return {"env": env, "acceptable_accelerator_types": None}
 
 

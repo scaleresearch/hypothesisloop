@@ -37,7 +37,7 @@ def _at(moment: str) -> datetime:
 
 def _planner_instance(api: API, pe_id: str) -> tuple[dict | None, set[str]]:
     desired = api.launcher_desired(LAUNCHER)
-    planners = {a["agent_id"] for a in api.agents(pe_id) if a["flavor"] == "planner"}
+    planners = {a["agent_id"] for a in api.agents(pe_id) if a["agent_type"] == "planner"}
     own = [i for i in desired["instances"]
            if (scope := token_scope(i["env"]["HL_TOKEN"]))[:2] == ("agent", pe_id) and scope[2] in planners]
     assert len(own) <= 1, own
@@ -52,7 +52,7 @@ def _proposal(accelerator_type: str, image: str, **more) -> dict:
             "metrics": [{"key": "val_accuracy", "direction": "maximize"}], "report_interval_seconds": 10,
         },
         "goal_version": 1, "accelerator_type": accelerator_type, "image": image,
-        "budget_accelerator_hours": 2, "duration_hours": 3, "baseline_minutes": 45, "agents": [{"flavor": "hyperparameter-search"}, {}],
+        "budget_accelerator_hours": 2, "duration_hours": 3, "baseline_minutes": 45, "agents": [{"agent_type": "hyperparameter-search"}, {}],
         "metric_reason": "Validation accuracy is what the goal asks about.",
         "measurement": "The sample workload scores a split it does not train on.",
         "sizing_reason": "An estimate, nothing has run: a trial is assumed to take a minute, and two researchers with a few trials each fit in 2 hours of budget.",
@@ -78,7 +78,7 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
 
         # Its one agent is the planner, and the launcher is asked for its machine.
         roster = api.agents(pe_id)
-        assert [(a["name"], a["flavor"], a["role"], a["hosted"]) for a in roster] == [("Planner", "planner", "planner", True)], roster
+        assert [(a["name"], a["agent_type"], a["role"], a["hosted"]) for a in roster] == [("Planner", "planner", "planner", True)], roster
         planner_id = roster[0]["agent_id"]
         instance, _ = _planner_instance(api, pe_id)
         assert instance is not None and token_scope(instance["env"]["HL_TOKEN"])[2] == planner_id, instance
@@ -157,17 +157,17 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         # Accepted at the cost the person states, whatever was proposed, and under the name the
         # person gives it.
         accepted = api.post(f"/platform-experiments/{pe_id}/accept", {
-            "budget_accelerator_hours": 1, "duration_hours": 2, "baseline_minutes": 45, "agents": [{"flavor": "data-search"}, {}], "name": "Hidden layer width, accepted"})
+            "budget_accelerator_hours": 1, "duration_hours": 2, "baseline_minutes": 45, "agents": [{"agent_type": "data-search"}, {}], "name": "Hidden layer width, accepted"})
         assert accepted.status_code == 200, accepted.text
         pe = accepted.json()
         assert (pe["status"], pe["name"], pe["budget_accelerator_hours"], pe["max_agents"]) == ("open", "Hidden layer width, accepted", 1, 2), pe
         assert pe["coordinator"]["launcher"] == LAUNCHER and pe["goal"] == GOAL
         # The accept made the researchers, beside the one agent the proposal signed up to measure
         # the baseline.
-        joined = [a for a in api.agents(pe_id) if a["flavor"] != "planner"]
+        joined = [a for a in api.agents(pe_id) if a["agent_type"] != "planner"]
         assert all(a["hosted"] for a in joined), joined
         researchers = [a for a in joined if a["role"] == "competitor"]
-        assert sorted(a["flavor"] for a in researchers) == ["data-search", "generalist"], researchers
+        assert sorted(a["agent_type"] for a in researchers) == ["data-search", "generalist"], researchers
         measurers = [a for a in joined if a["role"] == "baseline"]
         assert [a["name"] for a in measurers] == ["Baseline 1"] and len(joined) == 3, joined
         again = api.post(f"/platform-experiments/{pe_id}/accept", {"budget_accelerator_hours": 1, "duration_hours": 2, "baseline_minutes": 45, "agents": [{}]})

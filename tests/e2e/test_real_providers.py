@@ -100,7 +100,7 @@ def test_a_hosted_experiment_runs_end_to_end_on_rented_machines_and_survives_a_l
     pe_id = created.json()["id"]
     org.created_platform_experiments.append(pe_id)
     assert created.json()["repository_url"].endswith(os.environ["TEST_GIT_HOST_GITHUB_REPOSITORY"] + ".git")
-    researchers = [org.add_agents(pe_id, hosted=True, flavor=flavor)[0]["agent_id"] for flavor in ("hyperparameter-search", "architecture-search")]
+    researchers = [org.add_agents(pe_id, hosted=True, agent_type=agent_type)[0]["agent_id"] for agent_type in ("hyperparameter-search", "architecture-search")]
     # Its start time is now. The create made its agent of role baseline, and when that agent
     # finishes with one completed job the platform declares it and starts the run: no researcher's
     # machine is rented before, and duration_hours counts from that start.

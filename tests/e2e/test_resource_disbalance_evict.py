@@ -35,8 +35,8 @@ BLOCKED_CPU_FRACTION = 0.70
 
 def test_resource_disbalance_evicts_and_explains_itself(api, run_id, deadline):
     shape = disbalance_node_shape(TEST_ACCELERATOR_TYPE)
-    if shape.flavor_nodes != 1:
-        pytest.skip(f"{shape.flavor_nodes} nodes carry {TEST_ACCELERATOR_TYPE}; the scenario needs exactly one")
+    if shape.labeled_nodes != 1:
+        pytest.skip(f"{shape.labeled_nodes} nodes carry {TEST_ACCELERATOR_TYPE}; the scenario needs exactly one")
     if HOG_CPU_FRACTION * shape.installed <= TOLERANCE:
         pytest.skip(
             f"node {shape.node} carries {shape.installed} accelerator(s); too few for a hog to "

@@ -14,7 +14,7 @@ legitimately let A3 go instead of A2; that is not what this scenario checks for)
 
 Ported 1:1 from tests/scenarios/burst-fair-round-robin.sh.
 
-CLUSTER_EXCLUSIVE on the A100 flavor: needs the whole node's capacity accounted for with nothing
+CLUSTER_EXCLUSIVE on the A100 accelerator type: needs the whole node's capacity accounted for with nothing
 else touching this accelerator type concurrently, or "the node has exactly two free half-node
 slots" stops being observable. The local dev cluster carries exactly one A100 node
 (fake-a100-4, 8 accelerators) -- matching what test_multi_stage_chain.py's header documents about
@@ -54,7 +54,7 @@ def test_burst_fair_round_robin(api, run_id, deadline):
     # Every job here is pinned to the one accelerator type whose capacity this scenario accounts
     # for. submit_job's job_overrides with an explicit accelerator_type also drops
     # acceptable_accelerator_types (JobRequest.to_yaml), so a job is never silently satisfied by a
-    # cheaper alternate -- mirroring pin_job_flavor in the bash suite.
+    # cheaper alternate -- as the bash suite pinned its jobs.
     def pinned(count: int) -> dict:
         return {"accelerator_type": ACCELERATOR_TYPE, "accelerator_count": count}
 

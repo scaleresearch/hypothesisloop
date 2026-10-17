@@ -1,5 +1,5 @@
 """Job/platform-experiment termination semantics, ported 1:1 from tests/scenarios/job-lifecycle.sh:
-  1. A valid job that no connected cluster can ever hold (known flavor, none installed) is
+  1. A valid job that no connected cluster can ever hold (known accelerator type, none installed) is
      refused at submit with 422 exceeds_cluster_capacity, is not stored and debits nothing. A job
      that waits in the queue reserves its estimate, and cancelling it while still QUEUED ends it
      as CANCELLED with its reservation returned.
