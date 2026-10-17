@@ -3,7 +3,7 @@
 # The e2e suite against the stack `make dev` runs and the local k3s cluster, in one command
 # (localdev/e2e.sh). It refuses a stack somebody else holds, brings the dev nodes up, and leaves the nodes, the API and the UI as it found them.
 # The tests that rent machines at real vendors (marker real_providers) are skipped unless RENT=1.
-# The cluster's runtime and the test workload are images: `make reload` first when they changed.
+# The cluster's runtime is images: `make reload` first when it changed.
 # Usage: make e2e                                        every test that needs no real accelerator and rents nothing
 #        make e2e E2E_ARGS='e2e/test_accounts.py -x'      what pytest is given instead
 #        make e2e RENT=1                                  the tests that rent
@@ -16,11 +16,9 @@ E2E_API_URL = $${API_URL:-http://localhost:$(HL_API_PORT)}
 E2E_ENV = . $(CURDIR)/localdev/lib/auth.sh && export API_URL="$(E2E_API_URL)" && export HL_TOKEN="$${HL_TOKEN:-$$(lib_hl_admin token staff)}" && \
 	export HL_E2E_RENT="$(RENT)" &&
 
-# The workloads the tests' jobs run, built and pushed as the product's images are (push_image in
-# deploy/deploy.mk) and never part of a publish. make local-images builds workload for make e2e.
-TEST_IMAGES := workload tenstorrent-workload
-IMAGE_DOCKERFILE_workload := tests/workloads/generic/Dockerfile.train
-IMAGE_CONTEXT_workload := tests/workloads/generic
+# The Tenstorrent workload, built and pushed as the product's images are (push_image in
+# deploy/deploy.mk) and never part of a publish.
+TEST_IMAGES := tenstorrent-workload
 IMAGE_DOCKERFILE_tenstorrent-workload := tests/workloads/tenstorrent/Dockerfile.train
 IMAGE_CONTEXT_tenstorrent-workload := tests/workloads/tenstorrent
 .PHONY: $(addprefix image-,$(TEST_IMAGES))
