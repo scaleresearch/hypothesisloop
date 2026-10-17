@@ -21,7 +21,7 @@ const listed = (words: string[]) => words.length === 1 ? words[0] : `${words.sli
 const BRIEF_PLACEHOLDER = 'What to find out, the number that decides it and how it is measured, what to compare against, and what must stay the same.'
 
 /** Step 1: the code, the name and the brief. */
-export function StepWhat({ form, set, isEdit, fileNote, onRepository }: StepProps & {
+export function StepWhat({ form, set, isEdit, locked, fileNote, onRepository }: StepProps & {
   fileNote: FileNote | null
   onRepository: (repository: string) => void
 }) {
@@ -53,7 +53,7 @@ export function StepWhat({ form, set, isEdit, fileNote, onRepository }: StepProp
         </FormField>
       )}
       <FormField label="Name">
-        <Input value={form.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Q3 Vision Benchmark" />
+        <Input value={form.name} disabled={locked('name')} onChange={e => set('name', e.target.value)} placeholder="e.g. Q3 Vision Benchmark" />
       </FormField>
       <FormField
         label="Brief"
@@ -63,6 +63,7 @@ export function StepWhat({ form, set, isEdit, fileNote, onRepository }: StepProp
           rows={8}
           className="overflow-x-hidden break-words"
           value={form.description}
+          disabled={locked('description')}
           onChange={e => set('description', e.target.value)}
           placeholder={BRIEF_PLACEHOLDER}
         />

@@ -703,7 +703,7 @@ async function scenarios(browser) {
   let draftNow = {
     id: draftID, project_id: adaMe.projects[0].id, name: draftGoal, goal: draftGoal, status: 'draft', status_reason: { reason: 'planning', message: '', waits_for: 'platform' }, shared: false,
     budget_accelerator_hours: 2, max_agents: 1, signup_count: 1, stages: [{ length_pct: 100, evict_pct: 0 }], current_stage: 1,
-    planning_ends_at: new Date(Date.now() + 30 * 60_000).toISOString(), created_at: new Date().toISOString(),
+    goal_version: 1, editable: ['goal'], planning_ends_at: new Date(Date.now() + 30 * 60_000).toISOString(), created_at: new Date().toISOString(),
   }
   const draftWrites = []
   const draftAPI = url => url.origin === API && (url.pathname === '/platform-experiments/drafts' || url.pathname.startsWith(`/platform-experiments/${draftID}`))
@@ -712,9 +712,9 @@ async function scenarios(browser) {
     const path = new URL(request.url()).pathname
     const json = body => route.fulfill({ headers: runCors, json: body })
     if (request.method() === 'OPTIONS') return route.fallback()
-    if (request.method() === 'POST') {
+    if (request.method() === 'POST' || request.method() === 'PATCH') {
       draftWrites.push({ path, body: request.postDataJSON() })
-      if (path.endsWith('/revise')) draftNow = { ...draftNow, proposed_at: undefined, status_reason: { reason: 'revising', message: '', waits_for: 'platform' }, revisions: [{ message: request.postDataJSON().message, actor: { kind: 'user', id: adaMe.user_id, name: ada.name }, at: new Date().toISOString() }] }
+      if (request.method() === 'PATCH') draftNow = { ...draftNow, goal: request.postDataJSON().goal, goal_version: draftNow.goal_version + 1, proposed_at: undefined, status_reason: { reason: 'revising', message: '', waits_for: 'platform' } }
       return json(draftNow)
     }
     if (path === `/platform-experiments/${draftID}`) return json(draftNow)
@@ -748,11 +748,12 @@ async function scenarios(browser) {
   await page.getByText(/Nothing has run yet\. Once you accept, the baseline is measured on rtx-4090/).waitFor()
   await page.getByText('Is four hours enough?').waitFor()
   draftWrites.length = 0
-  await page.getByLabel('What should be different?').fill('It must fit one RTX 4090.')
-  await page.getByRole('button', { name: 'Revise', exact: true }).click()
+  await page.getByRole('button', { name: 'Edit what you asked', exact: true }).click()
+  await page.getByLabel('Goal', { exact: true }).fill(`${draftGoal} It must fit one RTX 4090.`)
+  await page.getByRole('button', { name: 'Save', exact: true }).click()
   await page.getByRole('status').filter({ hasText: 'Updating the plan with your change.' }).waitFor()
-  await page.getByText('It must fit one RTX 4090.').waitFor()
-  assert.deepEqual(draftWrites, [{ path: `/platform-experiments/${draftID}/revise`, body: { message: 'It must fit one RTX 4090.' } }])
+  await page.getByText(`${draftGoal} It must fit one RTX 4090.`).waitFor()
+  assert.deepEqual(draftWrites, [{ path: `/platform-experiments/${draftID}`, body: { goal: `${draftGoal} It must fit one RTX 4090.` } }])
 
   await openProposed()
   draftWrites.length = 0

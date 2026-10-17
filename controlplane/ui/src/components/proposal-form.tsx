@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import type { ReactNode } from 'react'
 import { abandonDraft, acceptDraft, holdDraft } from '@/lib/api/planning'
 import { ApiError } from '@/lib/api/request'
 import type { Draft, Proposal, ProposedAgent } from '@/types/planning'
@@ -125,20 +124,19 @@ function Countdown({ draft, accept, sending, onDone }: { draft: Draft; accept: (
  * has, the number of researchers and the answers to the planner's questions are the person's to
  * change, and accepting sends them as shown.
  * Nothing has run.
- * `editable` is off for a reader, while the planner revises and while the platform counts down
- * to accepting it by itself, when it is only read. `accepting` shows that countdown, with Accept
- * now, Edit, which stops the countdown and makes the form editable, and Reject, which closes the
- * draft. `children` is the box that asks the planner for a change. `accepted` shows a proposal
- * that was accepted as the record of it: the same layout with the values as text and no control.
+ * `editable` is off for a reader, while the planner plans again from a changed goal and while the
+ * platform counts down to accepting it by itself, when it is only read. `accepting` shows that
+ * countdown, with Accept now, Edit, which stops the countdown and makes the form editable, and
+ * Reject, which closes the draft. `accepted` shows a proposal that was accepted as the record of
+ * it: the same layout with the values as text and no control.
  */
-export function ProposalForm({ draft, proposal, editable, accepting, accepted = false, onDone, children }: {
+export function ProposalForm({ draft, proposal, editable, accepting, accepted = false, onDone }: {
   draft: Draft
   proposal: Proposal
   editable: boolean
   accepting: boolean
   accepted?: boolean
   onDone: () => void
-  children?: ReactNode
 }) {
   const [name, setName] = useState(proposal.experiment.name)
   const [budget, setBudget] = useState(String(proposal.budget_accelerator_hours))
@@ -179,7 +177,6 @@ export function ProposalForm({ draft, proposal, editable, accepting, accepted = 
   }
 
   return (
-    <Stack gap="xl">
     <Section title={accepted ? 'Accepted proposal' : 'Proposed experiment'}>
       <Stack gap="lg">
         {accepted && draft.accepted_at && (
@@ -313,7 +310,5 @@ export function ProposalForm({ draft, proposal, editable, accepting, accepted = 
         )}
       </Stack>
     </Section>
-    {children}
-    </Stack>
   )
 }

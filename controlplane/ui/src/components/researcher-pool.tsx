@@ -5,11 +5,10 @@ import { useSWRConfig } from 'swr'
 import { updatePlatformExperiment } from '@/lib/api/platform-experiments'
 import type { PlatformExperimentPatch } from '@/lib/api/platform-experiments'
 import type { JoinedAgent } from '@/types/agents'
-import { PlatformExperimentStatus } from '@/types/platform-experiments'
+import { canEdit, PlatformExperimentStatus } from '@/types/platform-experiments'
 import type { PlatformExperiment } from '@/types/platform-experiments'
 import { DEFAULT_AGENT_TYPE, describeType, researcherTypes, typeName, useAgentTypes } from '@/lib/agent-types'
 import { relTime } from '@/lib/format'
-import { useReadOnly } from '@/lib/read-only'
 import {
   atWorkByKey, cutByMax, poolKey, poolProblem, researchersAtWork, toPool, toRows,
 } from '@/lib/researcher-pool'
@@ -196,11 +195,10 @@ function PoolEditor({ pe, atWork, onDone }: { pe: PlatformExperiment; atWork: Jo
 /** Who an experiment keeps at work: its max researchers and its pool, editable in place by its owner. */
 export function ResearcherPool({ pe }: { pe: PlatformExperiment }) {
   const { org } = useTenant()
-  const readOnly = useReadOnly()
   const { data: roster, error } = useRoster(pe)
   const { data: catalog } = useAgentTypes(org.id)
   const [editing, setEditing] = useState(false)
-  const editable = !readOnly && (pe.status === PlatformExperimentStatus.OPEN || pe.status === PlatformExperimentStatus.RUNNING)
+  const editable = canEdit(pe, 'researchers')
 
   const atWork = roster && researchersAtWork(roster)
   const counts = pe.researchers_at_work

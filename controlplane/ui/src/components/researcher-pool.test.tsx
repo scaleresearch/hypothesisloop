@@ -34,7 +34,7 @@ function researcher(id: string, hour: number, flavor = 'generalist'): JoinedAgen
 }
 
 const pe = {
-  id: 'pe-1', project_id: 'prj_1', status: PlatformExperimentStatus.RUNNING, max_agents: 4,
+  id: 'pe-1', project_id: 'prj_1', status: PlatformExperimentStatus.RUNNING, max_agents: 4, editable: ['name', 'description', 'duration_hours', 'max_agents', 'researchers'],
   researchers: [{ agent_type: 'generalist', model: 'm', count: 2 }, { agent_type: 'at-lr', model: 'm', count: 1 }],
   researchers_at_work: { total: 3, pool: [{ agent_type: 'generalist', model: 'm', at_work: 2 }, { agent_type: 'at-lr', model: 'm', at_work: 1 }], outside_pool: 0 },
 } as PlatformExperiment
@@ -117,12 +117,12 @@ describe('the researchers of an experiment', () => {
     expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it('offers no edit on an experiment the reader only reads, nor on a closed one', async () => {
-    const { unmount } = show(true)
+  it('offers no edit where the API lists no researchers in editable: to a reader, or on a closed one', async () => {
+    const { unmount } = show(true, { ...pe, editable: undefined })
     await screen.findByText('3 at work of 4 max')
     expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
     unmount()
-    show(false, { ...pe, status: PlatformExperimentStatus.CLOSED })
+    show(false, { ...pe, status: PlatformExperimentStatus.CLOSED, editable: undefined })
     await screen.findByText('3 at work of 4 max')
     expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
   })

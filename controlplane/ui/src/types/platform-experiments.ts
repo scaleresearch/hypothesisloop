@@ -72,6 +72,15 @@ export interface ResearchersAtWork {
   outside_pool: number
 }
 
+/** A field of PATCH /platform-experiments/{id}. */
+export type EditableField = 'goal' | 'name' | 'description' | 'budget_accelerator_hours' | 'max_agents' | 'researchers' |
+  'max_concurrent_accelerators' | 'metrics' | 'report_interval_seconds' | 'starts_at' | 'duration_hours' | 'baseline_job_id' | 'baseline_reason'
+
+/** Whether the reader may change field of pe now, as the API says in editable. */
+export function canEdit(pe: Pick<PlatformExperiment, 'editable'>, field: EditableField): boolean {
+  return pe.editable?.includes(field) ?? false
+}
+
 export interface PlatformExperiment {
   id: string
   project_id: string
@@ -107,6 +116,13 @@ export interface PlatformExperiment {
   status: PlatformExperimentStatus
   // On every read of one, in every status, and never in a list.
   status_reason?: StatusReason
+  // The fields the reader may change now (PATCH /platform-experiments/{id}), for its status and
+  // credential. Absent for a reader who changes nothing, and in a list.
+  editable?: EditableField[]
+  // What its owner asked, on one made from a sentence, which a draft is planned from, and how many
+  // goals it has had. Its owner changes it until it closes.
+  goal?: string
+  goal_version?: number
   // What it has spent of its budget. On a read of one that is no draft.
   consumed_accelerator_hours?: number
   stages: Stage[]  // the elimination ladder

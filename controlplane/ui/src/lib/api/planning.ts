@@ -16,10 +16,6 @@ export function createDraft(projectID: string, goal: string, repository: { repos
   return apiSend<Draft>('POST', '/platform-experiments/drafts', { project_id: projectID, goal, ...repository })
 }
 
-export function reviseDraft(id: string, message: string): Promise<Draft> {
-  return apiSend<Draft>('POST', `/platform-experiments/${id}/revise`, { message })
-}
-
 /**
  * Accepts a draft's proposal. Accepted, it is an open experiment with its coordinator and
  * researchers, which the platform starts by itself once its baseline is measured and declared.

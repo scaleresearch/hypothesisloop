@@ -35,7 +35,7 @@ type OwnerAction = { opens: 'edit' | 'agents'; label: string }
  * those of statusWaiters in controlplane/domain/status_reason.go that wait for the owner,
  * or for the coordinator, whose move is the owner's where a person coordinates. phase.test.ts
  * reads that file and fails when the two differ. null is a move with no control in the strip:
- * the proposal and the revise box are below it, a baseline is added or declared with the hl
+ * the proposal and the goal are below it, a baseline is added or declared with the hl
  * command the API's message gives, which names the platform experiment, the edit form has no
  * field for a metric's bound, and the page's Close experiment button is there in every state, but
  * the strip's sentence gives the hl commands that write its summary and close it.

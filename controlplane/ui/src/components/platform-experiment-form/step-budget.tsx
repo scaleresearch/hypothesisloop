@@ -34,9 +34,9 @@ export function StepBudget({ form, set, isEdit, locked, budgetKind }: StepProps 
         )}
         <FormField
           label="Budget (accelerator hours)"
-          hint={locked ? LOCKED : <>Caps everything it spends.<InfoTip>{`Counted in ${unit}. An hour on an accelerator spends its type's price; memory and storage spend nothing.`}</InfoTip></>}
+          hint={locked('budget_accelerator_hours') ? LOCKED : <>Caps everything it spends.<InfoTip>{`Counted in ${unit}. An hour on an accelerator spends its type's price; memory and storage spend nothing.`}</InfoTip></>}
         >
-          <Input type="number" min={1} step={0.5} value={form.budget_accelerator_hours} disabled={locked} onChange={e => set('budget_accelerator_hours', e.target.value)} />
+          <Input type="number" min={1} step={0.5} value={form.budget_accelerator_hours} disabled={locked('budget_accelerator_hours')} onChange={e => set('budget_accelerator_hours', e.target.value)} />
         </FormField>
       </div>
 
@@ -110,15 +110,15 @@ export function StepBudget({ form, set, isEdit, locked, budgetKind }: StepProps 
             </FieldGroup>
           )}
           {isEdit && (
-            <FormField label="Starts at" hint={locked ? LOCKED : 'When its baseline begins to be measured. Its baseline deadline moves with it.'}>
-              <Input type="datetime-local" value={form.starts_at} disabled={locked} onChange={e => set('starts_at', e.target.value)} />
+            <FormField label="Starts at" hint={locked('starts_at') ? LOCKED : 'When its baseline begins to be measured. Its baseline deadline moves with it.'}>
+              <Input type="datetime-local" value={form.starts_at} disabled={locked('starts_at')} onChange={e => set('starts_at', e.target.value)} />
             </FormField>
           )}
-          <FormField label="Max concurrent accelerators" hint={locked ? LOCKED : `Held at once across its jobs. ${PLATFORM_DEFAULT}`}>
-            <Input type="number" min={1} step={1} placeholder="platform default" value={form.max_concurrent_accelerators} disabled={locked} onChange={e => set('max_concurrent_accelerators', e.target.value)} />
+          <FormField label="Max concurrent accelerators" hint={locked('max_concurrent_accelerators') ? LOCKED : `Held at once across its jobs. ${PLATFORM_DEFAULT}`}>
+            <Input type="number" min={1} step={1} placeholder="platform default" value={form.max_concurrent_accelerators} disabled={locked('max_concurrent_accelerators')} onChange={e => set('max_concurrent_accelerators', e.target.value)} />
           </FormField>
-          <FormField label="Report interval (seconds)" hint={locked ? LOCKED : `How often jobs report metrics. ${PLATFORM_DEFAULT}`}>
-            <Input type="number" min={1} step={1} placeholder="platform default" value={form.report_interval_seconds} disabled={locked} onChange={e => set('report_interval_seconds', e.target.value)} />
+          <FormField label="Report interval (seconds)" hint={locked('report_interval_seconds') ? LOCKED : `How often jobs report metrics. ${PLATFORM_DEFAULT}`}>
+            <Input type="number" min={1} step={1} placeholder="platform default" value={form.report_interval_seconds} disabled={locked('report_interval_seconds')} onChange={e => set('report_interval_seconds', e.target.value)} />
           </FormField>
         </Stack>
       </Disclosure>

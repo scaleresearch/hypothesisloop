@@ -60,7 +60,7 @@ function draft(reason: 'planning' | 'revising' | 'accepting' | 'proposed' | 'dec
   return {
     id: 'pe-1', project_id: 'prj_1', name: 'Does a cosine schedule beat…', status: PlatformExperimentStatus.DRAFT,
     status_reason: { reason, message: '', waits_for: reason === 'proposed' || reason === 'declined' ? 'owner' : 'platform' },
-    goal: 'Does a cosine schedule beat a constant one?', planning_ends_at: '2026-10-05T12:30:00Z', ...more,
+    goal: 'Does a cosine schedule beat a constant one?', goal_version: 1, editable: ['goal'], planning_ends_at: '2026-10-05T12:30:00Z', ...more,
   } as Draft
 }
 
@@ -90,7 +90,7 @@ describe('a draft being planned', () => {
     expect(await screen.findByText('Starting the planner, usually about a minute.')).toBeTruthy()
     expect(machineStep()).toBe('Starting the planner')
     expect(screen.queryByRole('button', { name: 'Accept and run' })).toBeNull()
-    expect(screen.queryByRole('button', { name: 'Revise' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Edit what you asked' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Abandon this draft' })).toBeTruthy()
   })
 
@@ -160,31 +160,33 @@ describe('a proposed draft', () => {
     expect((await screen.findByRole('alert')).textContent).toMatch(/between 1 and 24/)
   })
 
-  it('asks for a change in a sentence', async () => {
+  it('changes what the person asked', async () => {
     show(proposed())
-    const revise = screen.getByRole('button', { name: 'Revise' })
-    expect(revise).toHaveProperty('disabled', true)
-    await userEvent.type(screen.getByLabelText('What should be different?'), 'It must fit one RTX 4090.')
-    await userEvent.click(revise)
-    expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/pe-1/revise', { message: 'It must fit one RTX 4090.' })
+    await userEvent.click(screen.getByRole('button', { name: 'Edit what you asked' }))
+    expect(screen.getByText('Saving starts planning again from this text.')).toBeTruthy()
+    const save = screen.getByRole('button', { name: 'Save' })
+    expect(save).toHaveProperty('disabled', true)
+    await userEvent.type(screen.getByLabelText('Goal'), ' It must fit one RTX 4090.')
+    await userEvent.click(save)
+    expect(apiSend).toHaveBeenCalledExactlyOnceWith('PATCH', '/platform-experiments/pe-1', { goal: 'Does a cosine schedule beat a constant one? It must fit one RTX 4090.' })
   })
 
-  it('keeps the proposal readable while it is revised, with what was asked, and takes no acceptance', async () => {
-    show(draft('revising', { proposal, revisions: [{ message: 'It must fit one RTX 4090.', actor: { kind: 'user', id: 'u-1', name: 'Ada' }, at: '2026-10-05T12:20:00Z' }] }))
-    expect(screen.getByText('It must fit one RTX 4090.')).toBeTruthy()
-    expect(screen.getByText(/Ada asked/)).toBeTruthy()
+  it('keeps the proposal readable while it is planned again from the changed goal, and takes no acceptance', async () => {
+    show(draft('revising', { proposal, goal: 'Does a cosine schedule beat a constant one? It must fit one RTX 4090.', goal_version: 2 }))
+    expect(screen.getByText('Does a cosine schedule beat a constant one? It must fit one RTX 4090.')).toBeTruthy()
     expect(screen.getByLabelText('Name')).toMatchObject({ value: 'Cosine or constant', disabled: true })
-    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Updating the plan with your change.'))
+    await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/^Updating the plan with your change\. /))
+    expect(screen.queryByText(/so far\./)).toBeNull()
     expect(phase()).toBe('Planning')
     expect(screen.queryByRole('button', { name: 'Accept and run' })).toBeNull()
   })
 
   it('shows a reader of a shared draft the proposal and no control that writes', async () => {
-    render(<SWRConfig value={{ provider: () => new Map() }}><TenantContext.Provider value={tenant}><DraftView draft={proposed()} readOnly /></TenantContext.Provider></SWRConfig>)
+    render(<SWRConfig value={{ provider: () => new Map() }}><TenantContext.Provider value={tenant}><DraftView draft={{ ...proposed(), editable: undefined }} readOnly /></TenantContext.Provider></SWRConfig>)
     expect(screen.getByLabelText('Name')).toMatchObject({ value: 'Cosine or constant', disabled: true })
     expect(screen.getByLabelText('Budget (accelerator-hours)')).toHaveProperty('disabled', true)
     expect(screen.getByText('val_loss, lower is better, target -20% against the baseline')).toBeTruthy()
-    for (const name of ['Accept and run', 'Revise', 'Abandon this draft']) expect(screen.queryByRole('button', { name })).toBeNull()
+    for (const name of ['Accept and run', 'Edit what you asked', 'Abandon this draft']) expect(screen.queryByRole('button', { name })).toBeNull()
   })
 
   it('is abandoned by closing it', async () => {
@@ -295,14 +297,16 @@ describe('a draft the planner declined', () => {
     expect(screen.getByText('What the planner needs')).toBeTruthy()
     expect(screen.getByText(why)).toBeTruthy()
     expect(screen.getByText(/Draft, waiting for you/)).toBeTruthy()
-    expect(screen.getByText(new RegExp(`^Answer below and it tries again\\. Otherwise the draft closes on ${formatDate('2026-10-12T12:10:00Z')}\\.$`))).toBeTruthy()
+    expect(screen.getByText(new RegExp(`^Edit what you asked and the planner tries again\\. Otherwise the draft closes on ${formatDate('2026-10-12T12:10:00Z')}\\.$`))).toBeTruthy()
     expect(phase()).toBe('Proposal')
     expect(screen.getByRole('status').textContent).toBe('The planner needs more from you. Its reason is below.')
     expect(screen.queryByRole('button', { name: 'Accept and run' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Abandon this draft' })).toBeTruthy()
-    await userEvent.type(screen.getByLabelText('What was missing?'), 'The small transformer, by validation loss.')
-    await userEvent.click(screen.getByRole('button', { name: 'Revise' }))
-    expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/pe-1/revise', { message: 'The small transformer, by validation loss.' })
+    await userEvent.click(screen.getByRole('button', { name: 'Edit what you asked' }))
+    await userEvent.clear(screen.getByLabelText('Goal'))
+    await userEvent.type(screen.getByLabelText('Goal'), 'The small transformer, by validation loss.')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(apiSend).toHaveBeenCalledExactlyOnceWith('PATCH', '/platform-experiments/pe-1', { goal: 'The small transformer, by validation loss.' })
   })
 })
 

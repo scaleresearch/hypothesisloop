@@ -277,7 +277,8 @@ describe('a repository that brings its own experiment', () => {
 })
 
 describe('editing a platform experiment', () => {
-  const existing = { id: 'pe-1', project_id: 'prj_1', name: 'Old', description: 'the brief', status: 'open', budget_accelerator_hours: 10, max_agents: 2, starts_at: at, duration_hours: 12, stages: [], shared: false } as unknown as PlatformExperiment
+  const existing = { id: 'pe-1', project_id: 'prj_1', name: 'Old', description: 'the brief', status: 'open', budget_accelerator_hours: 10, max_agents: 2, starts_at: at, duration_hours: 12, stages: [], shared: false,
+    editable: ['name', 'description', 'budget_accelerator_hours', 'max_agents', 'researchers', 'max_concurrent_accelerators', 'metrics', 'report_interval_seconds', 'starts_at', 'duration_hours', 'baseline_job_id', 'baseline_reason'] } as unknown as PlatformExperiment
 
   it('sends the fields that changed and no others, from any step', async () => {
     const renamed = { ...existing, name: 'New' }

@@ -14,6 +14,7 @@ import { CloseExperiment } from '@/components/close-experiment'
 import { DraftView } from '@/components/draft'
 import { ExperimentAgents } from '@/components/experiment-agents'
 import { ExperimentCode } from '@/components/experiment-code'
+import { GoalEditor } from '@/components/goal-editor'
 import { HostedMachines } from '@/components/hosted-machines'
 import { PhaseStrip } from '@/components/phase-strip'
 import { PlatformExperimentDialog } from '@/components/platform-experiment-form'
@@ -102,12 +103,8 @@ function PlatformExperimentDetail({ id }: { id: string }) {
       title={pe.name}
       actions={!readOnly && (
         <Inline gap="sm">
-          {pe.status !== PlatformExperimentStatus.CLOSED && (
-            <>
-              <Button size="sm" onClick={() => setEditing(true)}>Edit</Button>
-              <CloseExperiment pe={pe} onClosed={() => void mutatePE()} />
-            </>
-          )}
+          {pe.editable?.some(field => field !== 'goal') && <Button size="sm" onClick={() => setEditing(true)}>Edit</Button>}
+          {pe.status !== PlatformExperimentStatus.CLOSED && <CloseExperiment pe={pe} onClosed={() => void mutatePE()} />}
           <RemoveExperiment pe={pe} onRemoved={() => router.push(projectPath(project.id, 'experiments'))} />
         </Inline>
       )}
@@ -154,6 +151,7 @@ function PlatformExperimentDetail({ id }: { id: string }) {
       {!plannedOnly && <ResearcherPool pe={pe} />}
       <ExperimentAgents pe={pe} />
 
+      {pe.goal && <GoalEditor pe={pe} onSaved={() => void mutatePE()} />}
       <About pe={pe} />
 
       {jobRows.length > 0 && (

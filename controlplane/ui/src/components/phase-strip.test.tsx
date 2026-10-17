@@ -193,7 +193,7 @@ describe('the proposal of an accepted experiment', () => {
     expect(screen.getByText('Researcher 2')).toBeTruthy()
     expect(screen.queryAllByRole('textbox')).toHaveLength(0)
     expect(screen.queryAllByRole('spinbutton')).toHaveLength(0)
-    for (const name of ['Accept and run', 'Accept now', 'Edit', 'Reject', 'Revise']) expect(screen.queryByRole('button', { name })).toBeNull()
+    for (const name of ['Accept and run', 'Accept now', 'Edit', 'Reject']) expect(screen.queryByRole('button', { name })).toBeNull()
     await userEvent.click(step()!)
     expect(screen.queryByText('How big a win counts?')).toBeNull()
   })

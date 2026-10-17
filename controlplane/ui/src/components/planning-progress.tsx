@@ -66,9 +66,8 @@ function SetUpMyself({ pe }: { pe: Draft }) {
 export function PlanningProgress({ pe, planner, readOnly }: { pe: Draft; planner: JoinedAgent | undefined; readOnly: boolean }) {
   useTick(1_000)
   const reason = reasonOf(pe)
-  const revising = reason.reason === 'revising' || (!PLANNING_MOVES.has(reason.reason) && (pe.revisions?.length ?? 0) > 0)
-  const since = revising ? pe.revisions!.at(-1)!.at : pe.created_at
-  const elapsed = formatDuration(Math.max(0, Date.now() - new Date(since).getTime()))
+  const revising = reason.reason === 'revising'
+  const elapsed = formatDuration(Math.max(0, Date.now() - new Date(pe.created_at).getTime()))
 
   if (!PLANNING_MOVES.has(reason.reason)) {
     return (
@@ -93,9 +92,11 @@ export function PlanningProgress({ pe, planner, readOnly }: { pe: Draft; planner
       <Text className="text-base font-medium" role="status" aria-live="polite">
         {revising ? 'Updating the plan with your change. ' : ''}{now.text}
       </Text>
-      <Text variant="note">
-        <span className="tabular-nums">{elapsed}</span> so far.
-      </Text>
+      {!revising && (
+        <Text variant="note">
+          <span className="tabular-nums">{elapsed}</span> so far.
+        </Text>
+      )}
     </Stack>
   )
 }

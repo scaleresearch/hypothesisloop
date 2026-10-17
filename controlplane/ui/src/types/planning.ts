@@ -54,35 +54,27 @@ export interface Proposal {
   questions?: ProposalQuestion[]
 }
 
-export interface PlanningRequest {
-  message: string
-  actor: Actor
-  at: string
-}
-
 /** A platform experiment made from a sentence: a draft, or what a draft became. */
 export type Draft = PlatformExperiment & {
-  goal?: string
   // When the platform closes a draft nobody acts on: the first while its planner has answered
   // nothing, the second once it has and the answer waits for a person.
   planning_ends_at?: string
   proposal_expires_at?: string
   // What the draft's planner is doing now, while its machine is up.
   activity?: AgentActivity
-  // On a draft whose planner answered: until when its machine is kept, so that a revision asked
-  // for before then is answered with nothing to boot.
+  // On a draft whose planner answered: until when its machine is kept, so that a goal changed
+  // before then is answered with nothing to boot.
   planner_ends_at?: string
   proposal?: Proposal
-  // Set while a proposal stands. Absent while the planner works, on the first plan or on a
-  // revision, and on a draft it declined.
+  // Set while a proposal stands. Absent while the planner works, on the first goal or a changed
+  // one, and on a draft it declined.
   proposed_at?: string
   // When the platform accepts the proposal as proposed, unless the person accepts it sooner,
-  // holds it to edit it, revises it or closes it. Absent on a draft that waits for the person.
+  // holds it to edit it, changes the goal or closes it. Absent on a draft that waits for the person.
   accepts_at?: string
-  // When and why the planner proposed nothing. The reason stays while a revision is planned.
+  // When and why the planner proposed nothing. The reason stays while a changed goal is planned.
   declined_at?: string
   declined_reason?: string
-  revisions?: PlanningRequest[]
   // Once its proposal was accepted: when, by whom (absent when the platform accepted it by itself
   // at accepts_at) and the answers given to proposal.questions, in their order. The proposal
   // itself stays as it was proposed.

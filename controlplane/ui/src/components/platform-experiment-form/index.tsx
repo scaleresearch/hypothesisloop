@@ -7,8 +7,8 @@ import { createPlatformExperiment, fetchExperimentFile, NO_EXPERIMENT_FILE, upda
 import type { CreatePlatformExperimentRequest, PlatformExperimentPatch } from '@/lib/api/platform-experiments'
 import { ApiError } from '@/lib/api/request'
 import type { ExperimentDraft } from '@/types/drafts'
-import { PlatformExperimentStatus } from '@/types/platform-experiments'
-import type { PlatformExperiment } from '@/types/platform-experiments'
+import { canEdit } from '@/types/platform-experiments'
+import type { EditableField, PlatformExperiment } from '@/types/platform-experiments'
 import { isZeroDate } from '@/lib/format'
 import { useTenant } from '@/lib/tenant'
 import { repositoryFields } from '@/components/repository-select'
@@ -63,10 +63,9 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
   const { mutate } = useSWRConfig()
   const needsGitHub = useNeedsGitHub()
   const isEdit = !!initial
-  // Once running, admission and the stage ladder have acted on everything but the name, the
-  // description, the duration and the researchers, and the API takes no other field, so the rest is
-  // locked here. The researchers are changed in place on the experiment's page.
-  const lockedWhileRunning = isEdit && initial?.status === PlatformExperimentStatus.RUNNING
+  // An edit changes the fields the API lists in editable and locks the rest. The researchers are
+  // changed in place on the experiment's page.
+  const locked = (field: EditableField) => !!initial && !canEdit(initial, field)
   const [form, setForm] = useState<FormState>(() => ({
     name: initial?.name ?? '',
     description: initial?.description ?? '',
@@ -212,15 +211,14 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
   // which is to the minute, so one left alone is never sent back rounded.
   function changes(): PlatformExperimentPatch {
     const patch: PlatformExperimentPatch = {}
-    if (form.name.trim() !== opened.name) patch.name = form.name.trim()
-    if (form.description.trim() !== opened.description) patch.description = form.description.trim()
-    if (Number(form.duration_hours) !== Number(opened.duration_hours)) patch.duration_hours = Number(form.duration_hours)
-    if (lockedWhileRunning) return patch
-    if (Number(form.budget_accelerator_hours) !== Number(opened.budget_accelerator_hours)) patch.budget_accelerator_hours = Number(form.budget_accelerator_hours)
-    if (form.max_concurrent_accelerators !== opened.max_concurrent_accelerators) patch.max_concurrent_accelerators = Number(form.max_concurrent_accelerators)
-    if (JSON.stringify(form.metrics) !== JSON.stringify(opened.metrics)) patch.metrics = form.metrics
-    if (form.report_interval_seconds !== opened.report_interval_seconds) patch.report_interval_seconds = Number(form.report_interval_seconds)
-    if (form.starts_at !== opened.starts_at) patch.starts_at = new Date(form.starts_at).toISOString()
+    if (!locked('name') && form.name.trim() !== opened.name) patch.name = form.name.trim()
+    if (!locked('description') && form.description.trim() !== opened.description) patch.description = form.description.trim()
+    if (!locked('duration_hours') && Number(form.duration_hours) !== Number(opened.duration_hours)) patch.duration_hours = Number(form.duration_hours)
+    if (!locked('budget_accelerator_hours') && Number(form.budget_accelerator_hours) !== Number(opened.budget_accelerator_hours)) patch.budget_accelerator_hours = Number(form.budget_accelerator_hours)
+    if (!locked('max_concurrent_accelerators') && form.max_concurrent_accelerators !== opened.max_concurrent_accelerators) patch.max_concurrent_accelerators = Number(form.max_concurrent_accelerators)
+    if (!locked('metrics') && JSON.stringify(form.metrics) !== JSON.stringify(opened.metrics)) patch.metrics = form.metrics
+    if (!locked('report_interval_seconds') && form.report_interval_seconds !== opened.report_interval_seconds) patch.report_interval_seconds = Number(form.report_interval_seconds)
+    if (!locked('starts_at') && form.starts_at !== opened.starts_at) patch.starts_at = new Date(form.starts_at).toISOString()
     return patch
   }
 
@@ -296,7 +294,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
   const next = STEPS[at + 1]
   const back = STEPS[at - 1]
   const fileNote = fromFile?.repository === form.repository ? fromFile : null
-  const stepProps = { form, set, isEdit, locked: lockedWhileRunning }
+  const stepProps = { form, set, isEdit, locked }
 
   return (
     <Stack gap="xl">

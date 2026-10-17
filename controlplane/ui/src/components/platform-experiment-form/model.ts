@@ -1,4 +1,4 @@
-import type { MetricDefinition, ResearcherPoolEntry, Stage } from '@/types/platform-experiments'
+import type { EditableField, MetricDefinition, ResearcherPoolEntry, Stage } from '@/types/platform-experiments'
 import { DEFAULT_AGENT_TYPE } from '@/lib/agent-types'
 
 // What a new experiment starts from. The stage ladder and the report interval are left out, so
@@ -39,8 +39,8 @@ export interface StepProps {
   form: FormState
   set: SetField
   isEdit: boolean
-  /** Running: everything but the name, the description and the duration is locked. */
-  locked: boolean
+  /** Whether an edit leaves field as it is: the API does not list it in the experiment's editable. */
+  locked: (field: EditableField) => boolean
 }
 
 // StageDraft holds what's typed, not what's parsed. A number-typed field cannot represent a

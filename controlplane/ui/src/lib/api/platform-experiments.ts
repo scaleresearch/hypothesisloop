@@ -73,10 +73,10 @@ export function fetchPlatformExperimentResults(id: string): Promise<PlatformExpe
   return apiFetch<PlatformExperimentResults>(`/platform-experiments/${id}/results`)
 }
 
-/** The fields of a platform experiment that can change after it is created. */
+/** The fields of a platform experiment that can change after it is created. The goal changes alone. */
 export type PlatformExperimentPatch = Partial<Pick<CreatePlatformExperimentRequest,
   'name' | 'description' | 'budget_accelerator_hours' | 'max_agents' | 'researchers' | 'max_concurrent_accelerators' | 'metrics' |
-  'report_interval_seconds' | 'starts_at' | 'duration_hours'>>
+  'report_interval_seconds' | 'starts_at' | 'duration_hours'> & { goal: string }>
 
 /** Changes the fields the patch names and no others. */
 export function updatePlatformExperiment(id: string, patch: PlatformExperimentPatch): Promise<PlatformExperiment> {
