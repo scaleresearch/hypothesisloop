@@ -17,9 +17,9 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 
+	"github.com/scaleresearch/hypothesisloop/contract/hostingapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/service/hosting/hostingtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
@@ -30,8 +30,6 @@ const (
 )
 
 const testDigest = "0123456789abcdef0123456789abcdef"
-
-type launcherStore = hostingtest.Store
 
 const testBootLimit = 5 * time.Minute
 
@@ -58,20 +56,20 @@ func ended(signup domain.AgentSignup, reason domain.RunEnd) domain.AgentSignup {
 	return signup
 }
 
-func observed(instances ...ObservedInstance) Observed {
+func observed(instances ...hostingapi.ObservedInstance) hostingapi.Observed {
 	if instances == nil {
-		instances = []ObservedInstance{}
+		instances = []hostingapi.ObservedInstance{}
 	}
-	return withMachines(Observed{LaunchDigest: testDigest, Instances: instances})
+	return withMachines(hostingapi.Observed{LaunchDigest: testDigest, Instances: instances})
 }
 
 // withMachines gives every instance reported with no machine id one of its own name: a test that
 // does not care which machine a name is reported by.
-func withMachines(o Observed) Observed {
+func withMachines(o hostingapi.Observed) hostingapi.Observed {
 	if o.Instances == nil {
 		return o
 	}
-	instances := make([]ObservedInstance, len(o.Instances))
+	instances := make([]hostingapi.ObservedInstance, len(o.Instances))
 	copy(instances, o.Instances)
 	for i := range instances {
 		if instances[i].Machine == "" {
@@ -100,13 +98,13 @@ func reconcile(t *testing.T, store Store, logger *zap.Logger) (int, []byte) {
 	return reconcileWith(t, store, logger, observed())
 }
 
-func reconcileWith(t *testing.T, store Store, logger *zap.Logger, body Observed) (int, []byte) {
+func reconcileWith(t *testing.T, store Store, logger *zap.Logger, body hostingapi.Observed) (int, []byte) {
 	t.Helper()
-	return decide(t, NewDecider(store, &hostingtest.Metrics{}, testSettings, logger), body)
+	return decide(t, NewDecider(store, &harnessMetrics{}, testSettings, logger), body)
 }
 
 // decide is one pass of the decider: 200 with the answer, or 500 with the error.
-func decide(t *testing.T, d *Decider, body Observed) (int, []byte) {
+func decide(t *testing.T, d *Decider, body hostingapi.Observed) (int, []byte) {
 	t.Helper()
 	desired, err := d.Reconcile(context.Background(), withMachines(body))
 	if err != nil {
@@ -124,7 +122,7 @@ func decide(t *testing.T, d *Decider, body Observed) (int, []byte) {
 }
 
 // mustReconcile is one launcher pass as the platform sees it.
-func mustReconcile(t *testing.T, store Store, body Observed) Desired {
+func mustReconcile(t *testing.T, store Store, body hostingapi.Observed) hostingapi.Desired {
 	t.Helper()
 	code, raw := reconcileWith(t, store, zap.NewNop(), body)
 	if code != http.StatusOK {
@@ -133,7 +131,7 @@ func mustReconcile(t *testing.T, store Store, body Observed) Desired {
 	return decode(t, raw)
 }
 
-func decode(t *testing.T, raw []byte) Desired {
+func decode(t *testing.T, raw []byte) hostingapi.Desired {
 	t.Helper()
 	var keys map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &keys); err != nil {
@@ -148,9 +146,9 @@ func decode(t *testing.T, raw []byte) Desired {
 	if err := json.Unmarshal(raw, &read); err != nil {
 		t.Fatal(err)
 	}
-	desired := Desired{Instances: []Instance{}, Ending: read.Ending, Image: read.Image}
+	desired := hostingapi.Desired{Instances: []hostingapi.Instance{}, Ending: read.Ending, Image: read.Image}
 	for _, i := range read.Instances {
-		desired.Instances = append(desired.Instances, Instance(i))
+		desired.Instances = append(desired.Instances, hostingapi.Instance(i))
 	}
 	return desired
 }
@@ -253,8 +251,8 @@ func TestAnExitedInstanceIsRecordedAndItsAgentAskedForUnderANewNameUntilItsResta
 
 	for exit := 1; exit <= domain.MaxAgentInstanceRestarts; exit++ {
 		answer := mustReconcile(t, store, observed(
-			ObservedInstance{Name: crashing, State: "exited", Log: fmt.Sprintf("exit %d", exit)},
-			ObservedInstance{Name: steady, State: "running"},
+			hostingapi.ObservedInstance{Name: crashing, State: "exited", Log: fmt.Sprintf("exit %d", exit)},
+			hostingapi.ObservedInstance{Name: steady, State: "running"},
 		))
 		if len(answer.Instances) != 2 || answer.Instances[1].Name != steady {
 			t.Fatalf("exit %d: instances = %+v, want both agents and the steady one unchanged", exit, answer.Instances)
@@ -269,14 +267,14 @@ func TestAnExitedInstanceIsRecordedAndItsAgentAskedForUnderANewNameUntilItsResta
 			t.Fatalf("exit %d: recorded %+v", exit, recorded)
 		}
 		// The launcher could not destroy the old machine and reports it again: nothing is counted.
-		again := mustReconcile(t, store, observed(ObservedInstance{Name: crashing, State: "exited", Log: "said again"}, ObservedInstance{Name: steady, State: "running"}))
+		again := mustReconcile(t, store, observed(hostingapi.ObservedInstance{Name: crashing, State: "exited", Log: "said again"}, hostingapi.ObservedInstance{Name: steady, State: "running"}))
 		if again.Instances[0].Name != next || store.Find("pe-1", "ag-crashing").Restarts != exit {
 			t.Fatalf("exit %d reported twice was counted twice", exit)
 		}
 		crashing = next
 	}
 
-	last := mustReconcile(t, store, observed(ObservedInstance{Name: crashing, State: "exited", Log: "the last words"}, ObservedInstance{Name: steady, State: "running"}))
+	last := mustReconcile(t, store, observed(hostingapi.ObservedInstance{Name: crashing, State: "exited", Log: "the last words"}, hostingapi.ObservedInstance{Name: steady, State: "running"}))
 	if len(last.Instances) != 1 || last.Instances[0].Name != steady || len(last.Ending) != 0 {
 		t.Fatalf("after the last restart: %+v, want the agent in neither list", last)
 	}
@@ -297,7 +295,7 @@ func TestExitsSpreadOverTheRestartWindowNeverStopTheAgent(t *testing.T) {
 	spacing := domain.AgentInstanceRestartWindow / time.Duration(domain.MaxAgentInstanceRestarts)
 	for exit := 1; exit <= 3*domain.MaxAgentInstanceRestarts; exit++ {
 		store.Advance(spacing)
-		answer := mustReconcile(t, store, observed(ObservedInstance{Name: name, State: "exited", Log: "boom"}))
+		answer := mustReconcile(t, store, observed(hostingapi.ObservedInstance{Name: name, State: "exited", Log: "boom"}))
 		if recorded := store.Find("pe-1", "ag-1"); recorded.Stopped || recorded.Restarts != exit || len(answer.Instances) != 1 {
 			t.Fatalf("exit %d, one every %s: recorded %+v, want it restarted", exit, spacing, recorded)
 		}
@@ -314,8 +312,8 @@ func TestAnInstanceItsProviderExpiredIsAskedForUnderANewNameEveryTimeAndSpendsNo
 	seen := map[string]bool{agent: true, coordinator: true}
 	for expiry := 1; expiry <= domain.MaxAgentInstanceRestarts+2; expiry++ {
 		answer := mustReconcile(t, store, observed(
-			ObservedInstance{Name: agent, State: "exited", Log: fmt.Sprintf("expiry %d", expiry), Expired: true},
-			ObservedInstance{Name: coordinator, State: "exited", Expired: true},
+			hostingapi.ObservedInstance{Name: agent, State: "exited", Log: fmt.Sprintf("expiry %d", expiry), Expired: true},
+			hostingapi.ObservedInstance{Name: coordinator, State: "exited", Expired: true},
 		))
 		if len(answer.Instances) != 2 || seen[answer.Instances[0].Name] || seen[answer.Instances[1].Name] {
 			t.Fatalf("expiry %d: instances = %+v, want both under names not used before", expiry, answer.Instances)
@@ -329,7 +327,7 @@ func TestAnInstanceItsProviderExpiredIsAskedForUnderANewNameEveryTimeAndSpendsNo
 			t.Fatalf("expiry %d: exit log %q", expiry, got)
 		}
 		// Reported again before the launcher destroyed it: nothing more is recorded.
-		again := mustReconcile(t, store, observed(ObservedInstance{Name: agent, State: "exited", Expired: true}))
+		again := mustReconcile(t, store, observed(hostingapi.ObservedInstance{Name: agent, State: "exited", Expired: true}))
 		if again.Instances[0].Name != answer.Instances[0].Name || store.Find("pe-1", "ag-1").Renewals != expiry {
 			t.Fatalf("expiry %d reported twice was recorded twice", expiry)
 		}
@@ -338,7 +336,7 @@ func TestAnInstanceItsProviderExpiredIsAskedForUnderANewNameEveryTimeAndSpendsNo
 	}
 
 	// The restarts are all still there for a command that ends by itself.
-	crashed := mustReconcile(t, store, observed(ObservedInstance{Name: agent, State: "exited", Log: "boom"}))
+	crashed := mustReconcile(t, store, observed(hostingapi.ObservedInstance{Name: agent, State: "exited", Log: "boom"}))
 	if recorded := store.Find("pe-1", "ag-1"); recorded.Restarts != 1 || recorded.EndReason != string(db.InstanceExited) || seen[crashed.Instances[0].Name] {
 		t.Fatalf("a crash after the expiries: recorded %+v, asked for as %q", recorded, crashed.Instances[0].Name)
 	}
@@ -348,7 +346,7 @@ func TestTheLogOfAnExitIsKeptToItsLastBytes(t *testing.T) {
 	store := &launcherStore{ByLauncher: map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-1")}}}}
 	name := mustReconcile(t, store, observed()).Instances[0].Name
 	long := strings.Repeat("an early line that is dropped\n", 400) + "Traceback: the reason it exited"
-	mustReconcile(t, store, observed(ObservedInstance{Name: name, State: "exited", Log: long}))
+	mustReconcile(t, store, observed(hostingapi.ObservedInstance{Name: name, State: "exited", Log: long}))
 	kept := store.Find("pe-1", "ag-1").ExitLog
 	if len(kept) > domain.MaxAgentInstanceLogBytes || !strings.HasSuffix(kept, "Traceback: the reason it exited") || !strings.HasPrefix(kept, "an early line") {
 		t.Fatalf("kept %d bytes ending %q", len(kept), kept[max(0, len(kept)-40):])
@@ -420,12 +418,12 @@ func TestAMachineWhoseWriteFailsIsKeptAsItWas(t *testing.T) {
 	running := first.Instances[0]
 	store.WriteErr = map[string]error{"ag-1": errors.New("statement timeout")}
 
-	exited := mustReconcile(t, store, observed(ObservedInstance{Name: running.Name, State: "exited", Log: "boom"}))
-	if !reflect.DeepEqual(exited.Instances, []Instance{running}) {
+	exited := mustReconcile(t, store, observed(hostingapi.ObservedInstance{Name: running.Name, State: "exited", Log: "boom"}))
+	if !reflect.DeepEqual(exited.Instances, []hostingapi.Instance{running}) {
 		t.Fatalf("after a failed write of its end: instances = %+v, want %+v unchanged", exited.Instances, running)
 	}
 
-	rotated := observed(ObservedInstance{Name: running.Name, State: "running"})
+	rotated := observed(hostingapi.ObservedInstance{Name: running.Name, State: "running"})
 	rotated.LaunchDigest = "fedcba9876543210fedcba9876543210"
 	renamed := mustReconcile(t, store, rotated)
 	if len(renamed.Instances) != 1 || renamed.Instances[0].Name != running.Name {
@@ -443,9 +441,9 @@ func TestARenamedMachineWaitingItsTurnIsKept(t *testing.T) {
 		{AgentSignup: hosted("pe-1", "ag-1")}, {AgentSignup: hosted("pe-1", "ag-2")},
 	}}}
 	first := mustReconcile(t, store, observed())
-	var listed []ObservedInstance
+	var listed []hostingapi.ObservedInstance
 	for _, instance := range first.Instances {
-		listed = append(listed, ObservedInstance{Name: instance.Name, State: "running"})
+		listed = append(listed, hostingapi.ObservedInstance{Name: instance.Name, State: "running"})
 	}
 	cfg := testSettings
 	cfg.MaxNewPerAnswer = 1
@@ -602,7 +600,7 @@ func TestAHostedCoordinatorIsOneMoreInstanceWithACoordinatorTokenAndNoAgentID(t 
 	if store.Find("pe-1", "").Name != coordinator.Name {
 		t.Error("the name asked for was not recorded")
 	}
-	if again := mustReconcile(t, store, observed(ObservedInstance{Name: coordinator.Name, State: "running"})); again.Instances[1].Name != coordinator.Name {
+	if again := mustReconcile(t, store, observed(hostingapi.ObservedInstance{Name: coordinator.Name, State: "running"})); again.Instances[1].Name != coordinator.Name {
 		t.Errorf("a second ask renamed the coordinator: %q then %q", coordinator.Name, again.Instances[1].Name)
 	}
 }
@@ -618,12 +616,12 @@ func TestAnAgentWhoseIDIsTheCoordinatorsNameGetsAnotherInstanceName(t *testing.T
 	}
 }
 
-func reconcileUnder(t *testing.T, store Store, cfg Settings, body Observed) (int, []byte) {
+func reconcileUnder(t *testing.T, store Store, cfg Settings, body hostingapi.Observed) (int, []byte) {
 	t.Helper()
-	return reconcileRecording(t, store, &hostingtest.Metrics{}, cfg, body)
+	return reconcileRecording(t, store, &harnessMetrics{}, cfg, body)
 }
 
-func reconcileRecording(t *testing.T, store Store, metrics Metrics, cfg Settings, body Observed) (int, []byte) {
+func reconcileRecording(t *testing.T, store Store, metrics Metrics, cfg Settings, body hostingapi.Observed) (int, []byte) {
 	t.Helper()
 	return decide(t, NewDecider(store, metrics, cfg, zap.NewNop()), body)
 }
@@ -636,10 +634,10 @@ func TestARunningMachinesHarnessStateGoesToTheRunsHealth(t *testing.T) {
 	store.ByLauncher["main"][0].Role = domain.SignupRoleCompetitor
 	first := mustReconcile(t, store, observed())
 	agent, coordinator := first.Instances[0].Name, first.Instances[1].Name
-	metrics := &hostingtest.Metrics{}
+	metrics := &harnessMetrics{}
 	body := observed(
-		ObservedInstance{Name: agent, State: "running", Progress: marker("1"), HarnessState: "subagents=3 turn=working since=1759990000 instructions_digest=0123456789ab version=4 model_status=rejected model_type=seven_day model_utilization=1.0 model_resets_at=1760000000"},
-		ObservedInstance{Name: coordinator, State: "running", Progress: marker("1"), HarnessState: "subagents=0 turn=waiting since=1759999000"})
+		hostingapi.ObservedInstance{Name: agent, State: "running", Progress: marker("1"), HarnessState: "subagents=3 turn=working since=1759990000 instructions_digest=0123456789ab version=4 model_status=rejected model_type=seven_day model_utilization=1.0 model_resets_at=1760000000"},
+		hostingapi.ObservedInstance{Name: coordinator, State: "running", Progress: marker("1"), HarnessState: "subagents=0 turn=waiting since=1759999000"})
 	if code, raw := reconcileRecording(t, store, metrics, testSettings, body); code != http.StatusOK {
 		t.Fatalf("status = %d: %s", code, raw)
 	}
@@ -653,7 +651,7 @@ func TestARunningMachinesHarnessStateGoesToTheRunsHealth(t *testing.T) {
 		t.Fatalf("written %+v, want %+v", got, want)
 	}
 
-	metrics = &hostingtest.Metrics{}
+	metrics = &harnessMetrics{}
 	body.Instances[0].HarnessState, body.Instances[1].HarnessState = "subagents=1 turn=working since=1759990000 model_status=exhausted", "subagents=0 turn=idle since=1759999000"
 	if code, raw := reconcileRecording(t, store, metrics, testSettings, body); code != http.StatusOK || len(metrics.Written()) != 0 {
 		t.Fatalf("lines that cannot be read: status = %d, written %+v: %s", code, metrics.Written(), raw)
@@ -702,7 +700,7 @@ func TestOnlyTheEndOfTheMachineAskedForIsRecorded(t *testing.T) {
 		{AgentSignup: ended(named("pe-1", "ag-ending", "pe1-agending-aaaaaaaaaaaa"), domain.RunEndPlanned)},
 	}}}
 	name := mustReconcile(t, store, observed()).Instances[0].Name
-	for _, reported := range [][]ObservedInstance{
+	for _, reported := range [][]hostingapi.ObservedInstance{
 		{{Name: name, State: "starting"}},
 		{{Name: name, State: "running", Log: "ignored"}},
 		{{Name: name, State: "running"}, {Name: "pe1-ag1-000000000000", State: "exited"}},
@@ -762,8 +760,8 @@ func TestAMachineThatStaysStartingIsTimedFromWhenItWasFirstListed(t *testing.T) 
 	store := oneAgentAndACoordinator()
 	first := mustReconcile(t, store, observed())
 	agent, coordinator := first.Instances[0].Name, first.Instances[1].Name
-	starting := func() Observed {
-		return observed(ObservedInstance{Name: agent, State: "starting"}, ObservedInstance{Name: coordinator, State: "starting"})
+	starting := func() hostingapi.Observed {
+		return observed(hostingapi.ObservedInstance{Name: agent, State: "starting"}, hostingapi.ObservedInstance{Name: coordinator, State: "starting"})
 	}
 
 	// First listed long after it was asked for, as the last machine of a slow pass is: the limit
@@ -787,9 +785,9 @@ func TestAMachineThatStaysStartingIsTimedFromWhenItWasFirstListed(t *testing.T) 
 
 	// Running is no boot: it is held to the progress limit, which is longer.
 	next := answer.Instances[0].Name
-	mustReconcile(t, store, observed(ObservedInstance{Name: next, State: "running"}, ObservedInstance{Name: answer.Instances[1].Name, State: "running"}))
+	mustReconcile(t, store, observed(hostingapi.ObservedInstance{Name: next, State: "running"}, hostingapi.ObservedInstance{Name: answer.Instances[1].Name, State: "running"}))
 	store.Advance(testSettings.ProgressLimit - time.Second)
-	up := mustReconcile(t, store, observed(ObservedInstance{Name: next, State: "running"}, ObservedInstance{Name: answer.Instances[1].Name, State: "running"}))
+	up := mustReconcile(t, store, observed(hostingapi.ObservedInstance{Name: next, State: "running"}, hostingapi.ObservedInstance{Name: answer.Instances[1].Name, State: "running"}))
 	if up.Instances[0].Name != next || store.Find("pe-1", "ag-1").Restarts != 1 {
 		t.Fatal("a running machine was held to the boot limit")
 	}
@@ -802,8 +800,8 @@ func TestAMachineReportedUnknownIsHeldToTheProgressLimitOnceItRanAndToTheBootLim
 	store := oneAgentAndACoordinator()
 	first := mustReconcile(t, store, observed())
 	agent, coordinator := first.Instances[0].Name, first.Instances[1].Name
-	report := func(agentState string, progress *string) Observed {
-		return observed(ObservedInstance{Name: agent, State: agentState, Progress: progress}, ObservedInstance{Name: coordinator, State: "unknown"})
+	report := func(agentState string, progress *string) hostingapi.Observed {
+		return observed(hostingapi.ObservedInstance{Name: agent, State: agentState, Progress: progress}, hostingapi.ObservedInstance{Name: coordinator, State: "unknown"})
 	}
 
 	mustReconcile(t, store, report("running", marker("1")))
@@ -818,14 +816,14 @@ func TestAMachineReportedUnknownIsHeldToTheProgressLimitOnceItRanAndToTheBootLim
 	}
 
 	// The host answers again and the agent goes on.
-	back := observed(ObservedInstance{Name: agent, State: "running", Progress: marker("2")})
+	back := observed(hostingapi.ObservedInstance{Name: agent, State: "running", Progress: marker("2")})
 	store.Advance(testSettings.ProgressLimit / 2)
 	if answer := mustReconcile(t, store, back); answer.Instances[0].Name != agent || store.Find("pe-1", "ag-1").Restarts != 0 {
 		t.Fatalf("after the host answered again: %+v", answer.Instances)
 	}
 
 	// The host stays away: the agent is kept inside the progress limit and given up on at it.
-	away := observed(ObservedInstance{Name: agent, State: "unknown"})
+	away := observed(hostingapi.ObservedInstance{Name: agent, State: "unknown"})
 	store.Advance(testSettings.ProgressLimit - time.Second)
 	if answer := mustReconcile(t, store, away); answer.Instances[0].Name != agent {
 		t.Fatalf("unknown inside the progress limit: %+v, want it kept", answer.Instances)
@@ -839,11 +837,11 @@ func TestAMachineReportedUnknownIsHeldToTheProgressLimitOnceItRanAndToTheBootLim
 }
 
 // Held is the machines the platform holds, as the launcher reads them.
-type Held struct{ Machines []HeldMachine }
+type Held struct{ Machines []hostingapi.HeldMachine }
 
 func held(t *testing.T, store Store) (int, Held) {
 	t.Helper()
-	machines, err := NewDecider(store, &hostingtest.Metrics{}, testSettings, zap.NewNop()).Held(context.Background())
+	machines, err := NewDecider(store, &harnessMetrics{}, testSettings, zap.NewNop()).Held(context.Background())
 	if err != nil {
 		return http.StatusInternalServerError, Held{}
 	}
@@ -857,14 +855,14 @@ func TestALauncherIsToldTheMachineEachNameItHoldsWasReportedByUntilItIsGivenUpOn
 	if code, got := held(t, store); code != http.StatusOK || len(got.Machines) != 0 {
 		t.Fatalf("before any report: %d %+v, want none held", code, got)
 	}
-	mustReconcile(t, store, observed(ObservedInstance{Name: agent, Machine: "m-agent", State: "running"}, ObservedInstance{Name: coordinator, Machine: "m-coordinator", State: "running"}))
-	want := []HeldMachine{{Name: agent, Machine: "m-agent"}, {Name: coordinator, Machine: "m-coordinator"}}
+	mustReconcile(t, store, observed(hostingapi.ObservedInstance{Name: agent, Machine: "m-agent", State: "running"}, hostingapi.ObservedInstance{Name: coordinator, Machine: "m-coordinator", State: "running"}))
+	want := []hostingapi.HeldMachine{{Name: agent, Machine: "m-agent"}, {Name: coordinator, Machine: "m-coordinator"}}
 	sort.Slice(want, func(a, b int) bool { return want[a].Name < want[b].Name })
 	if code, got := held(t, store); code != http.StatusOK || !reflect.DeepEqual(got.Machines, want) {
 		t.Fatalf("held = %d %+v, want %+v", code, got.Machines, want)
 	}
-	mustReconcile(t, store, observed(ObservedInstance{Name: coordinator, Machine: "m-coordinator", State: "running"}))
-	if code, got := held(t, store); code != http.StatusOK || !reflect.DeepEqual(got.Machines, []HeldMachine{{Name: coordinator, Machine: "m-coordinator"}}) {
+	mustReconcile(t, store, observed(hostingapi.ObservedInstance{Name: coordinator, Machine: "m-coordinator", State: "running"}))
+	if code, got := held(t, store); code != http.StatusOK || !reflect.DeepEqual(got.Machines, []hostingapi.HeldMachine{{Name: coordinator, Machine: "m-coordinator"}}) {
 		t.Fatalf("after the agent's machine was given up on: %d %+v, want the coordinator's alone", code, got.Machines)
 	}
 }
@@ -873,9 +871,9 @@ func TestAMachineThatWasListedAndIsGoneIsAnExitAtOnce(t *testing.T) {
 	store := oneAgentAndACoordinator()
 	first := mustReconcile(t, store, observed())
 	agent, coordinator := first.Instances[0].Name, first.Instances[1].Name
-	mustReconcile(t, store, observed(ObservedInstance{Name: agent, State: "running"}, ObservedInstance{Name: coordinator, State: "running"}))
+	mustReconcile(t, store, observed(hostingapi.ObservedInstance{Name: agent, State: "running"}, hostingapi.ObservedInstance{Name: coordinator, State: "running"}))
 
-	answer := mustReconcile(t, store, observed(ObservedInstance{Name: coordinator, State: "running"}))
+	answer := mustReconcile(t, store, observed(hostingapi.ObservedInstance{Name: coordinator, State: "running"}))
 	if len(answer.Instances) != 2 || answer.Instances[0].Name == agent || answer.Instances[1].Name != coordinator {
 		t.Fatalf("answer = %+v, want the agent under a new name and the coordinator as it was", answer.Instances)
 	}
@@ -898,10 +896,10 @@ func TestAMachineThePlatformReleasedIsNotOneItsProviderLost(t *testing.T) {
 	store := &launcherStore{ByLauncher: map[string][]db.LauncherAgent{"main": {{AgentSignup: hosted("pe-1", "ag-planner")}}}}
 	first := mustReconcile(t, store, observed())
 	machine := first.Instances[0].Name
-	mustReconcile(t, store, observed(ObservedInstance{Name: machine, State: "running"}))
+	mustReconcile(t, store, observed(hostingapi.ObservedInstance{Name: machine, State: "running"}))
 
 	store.Over = map[string]domain.RunEnd{"pe-1/ag-planner": domain.RunEndPlanned}
-	if answer := mustReconcile(t, store, observed(ObservedInstance{Name: machine, State: "running"})); len(answer.Instances) != 0 || len(answer.Ending) != 0 {
+	if answer := mustReconcile(t, store, observed(hostingapi.ObservedInstance{Name: machine, State: "running"})); len(answer.Instances) != 0 || len(answer.Ending) != 0 {
 		t.Fatalf("answer = %+v, want the machine no longer asked for", answer)
 	}
 	released := *store.Find("pe-1", "ag-planner")
@@ -925,9 +923,9 @@ func TestAMachineThePlatformReleasedIsNotOneItsProviderLost(t *testing.T) {
 func TestAnAgentAndACoordinatorWhoseMachinesWereReleasedAreAskedForAgainOnceTheirRunGoesOn(t *testing.T) {
 	store := oneAgentAndACoordinator()
 	first := mustReconcile(t, store, observed())
-	var running []ObservedInstance
+	var running []hostingapi.ObservedInstance
 	for _, instance := range first.Instances {
-		running = append(running, ObservedInstance{Name: instance.Name, State: "running"})
+		running = append(running, hostingapi.ObservedInstance{Name: instance.Name, State: "running"})
 	}
 	mustReconcile(t, store, observed(running...))
 
@@ -958,9 +956,9 @@ func TestAStoppedAgentIsAskedForAgainOnceTheImageOrTheLaunchersInputsChange(t *t
 		store := oneAgentAndACoordinator()
 		answer := mustReconcile(t, store, observed())
 		for len(answer.Instances) > 0 {
-			var exited []ObservedInstance
+			var exited []hostingapi.ObservedInstance
 			for _, instance := range answer.Instances {
-				exited = append(exited, ObservedInstance{Name: instance.Name, State: "exited", Log: "the credential was refused"})
+				exited = append(exited, hostingapi.ObservedInstance{Name: instance.Name, State: "exited", Log: "the credential was refused"})
 			}
 			answer = mustReconcile(t, store, observed(exited...))
 		}
@@ -988,7 +986,7 @@ func TestAStoppedAgentIsAskedForAgainOnceTheImageOrTheLaunchersInputsChange(t *t
 	// The budget is whole again, and no more than whole.
 	for exit := 1; exit <= domain.MaxAgentInstanceRestarts+1; exit++ {
 		body := rotated
-		body.Instances = []ObservedInstance{{Name: answer.Instances[0].Name, State: "exited"}, {Name: answer.Instances[len(answer.Instances)-1].Name, State: "running"}}
+		body.Instances = []hostingapi.ObservedInstance{{Name: answer.Instances[0].Name, State: "exited"}, {Name: answer.Instances[len(answer.Instances)-1].Name, State: "running"}}
 		answer = mustReconcile(t, store, body)
 	}
 	if recorded := store.Find("pe-1", "ag-1"); !recorded.Stopped || recorded.Restarts != 2*domain.MaxAgentInstanceRestarts {
@@ -1009,7 +1007,7 @@ func TestAStoppedAgentIsAskedForAgainOnceTheImageOrTheLaunchersInputsChange(t *t
 func TestAMachineReplacedByAConfigChangeSpendsNoRestartWhenItIsGone(t *testing.T) {
 	store := oneAgentAndACoordinator()
 	first := mustReconcile(t, store, observed())
-	running := observed(ObservedInstance{Name: first.Instances[0].Name, State: "running"}, ObservedInstance{Name: first.Instances[1].Name, State: "running"})
+	running := observed(hostingapi.ObservedInstance{Name: first.Instances[0].Name, State: "running"}, hostingapi.ObservedInstance{Name: first.Instances[1].Name, State: "running"})
 	mustReconcile(t, store, running)
 
 	moved := testSettings
@@ -1034,7 +1032,7 @@ func TestAnAnswerAsksForABoundedNumberOfNewMachinesAndTheNextForTheRest(t *testi
 	store := &launcherStore{ByLauncher: map[string][]db.LauncherAgent{"main": agents}, Coordinators: []db.LauncherCoordinator{hostedCoordinator("pe-1")}}
 	cfg := testSettings
 	cfg.MaxNewPerAnswer = 3
-	var listed []ObservedInstance
+	var listed []hostingapi.ObservedInstance
 	sizes := []int{}
 	for range 4 {
 		// Each pass takes longer than the boot limit, which would spend a restart of every
@@ -1048,7 +1046,7 @@ func TestAnAnswerAsksForABoundedNumberOfNewMachinesAndTheNextForTheRest(t *testi
 		sizes = append(sizes, len(answer.Instances))
 		listed = nil
 		for _, instance := range answer.Instances {
-			listed = append(listed, ObservedInstance{Name: instance.Name, State: "running"})
+			listed = append(listed, hostingapi.ObservedInstance{Name: instance.Name, State: "running"})
 		}
 	}
 	if !reflect.DeepEqual(sizes, []int{3, 6, 8, 8}) {
@@ -1067,9 +1065,9 @@ func TestAnAnswerAsksForABoundedNumberOfNewMachinesAndTheNextForTheRest(t *testi
 func TestTheTokenMintedForAMachineIsTakenOutOfItsExitLog(t *testing.T) {
 	store := oneAgentAndACoordinator()
 	answer := mustReconcile(t, store, observed())
-	var exited []ObservedInstance
+	var exited []hostingapi.ObservedInstance
 	for _, instance := range answer.Instances {
-		exited = append(exited, ObservedInstance{Name: instance.Name, State: "exited", Log: "env dump: HL_TOKEN=" + instance.Env["HL_TOKEN"] + "\nTraceback"})
+		exited = append(exited, hostingapi.ObservedInstance{Name: instance.Name, State: "exited", Log: "env dump: HL_TOKEN=" + instance.Env["HL_TOKEN"] + "\nTraceback"})
 	}
 	mustReconcile(t, store, observed(exited...))
 	for i, agent := range []string{"ag-1", ""} {
@@ -1123,9 +1121,9 @@ func TestARunningMachineThatReportsNoProgressForTheLimitIsEndedAndReplaced(t *te
 	store := oneAgentAndACoordinator()
 	first := mustReconcile(t, store, observed())
 	agent, coordinator := first.Instances[0].Name, first.Instances[1].Name
-	running := func(agentProgress, coordinatorProgress *string) Observed {
-		return observed(ObservedInstance{Name: agent, State: "running", Progress: agentProgress},
-			ObservedInstance{Name: coordinator, State: "running", Progress: coordinatorProgress})
+	running := func(agentProgress, coordinatorProgress *string) hostingapi.Observed {
+		return observed(hostingapi.ObservedInstance{Name: agent, State: "running", Progress: agentProgress},
+			hostingapi.ObservedInstance{Name: coordinator, State: "running", Progress: coordinatorProgress})
 	}
 	limit := testSettings.ProgressLimit
 
@@ -1153,8 +1151,8 @@ func TestARunningMachineThatReportsNoProgressForTheLimitIsEndedAndReplaced(t *te
 func TestAMachineThatNeverPrintsAMarkerIsSilentFromItsFirstSight(t *testing.T) {
 	store := oneAgentAndACoordinator()
 	first := mustReconcile(t, store, observed())
-	quiet := observed(ObservedInstance{Name: first.Instances[0].Name, State: "running", Progress: marker("")},
-		ObservedInstance{Name: first.Instances[1].Name, State: "running", Progress: marker("")})
+	quiet := observed(hostingapi.ObservedInstance{Name: first.Instances[0].Name, State: "running", Progress: marker("")},
+		hostingapi.ObservedInstance{Name: first.Instances[1].Name, State: "running", Progress: marker("")})
 	mustReconcile(t, store, quiet)
 	store.Advance(testSettings.ProgressLimit - time.Second)
 	if answer := mustReconcile(t, store, quiet); answer.Instances[0].Name != first.Instances[0].Name {
@@ -1176,13 +1174,13 @@ func TestAMachineWhoseProgressCannotBeReadForTheLimitIsReplacedAndSpendsNoRestar
 	first := mustReconcile(t, store, observed())
 	agent, coordinator := first.Instances[0].Name, first.Instances[1].Name
 	limit := testSettings.ProgressLimit
-	unread := func() Observed {
-		return observed(ObservedInstance{Name: agent, State: "running"}, ObservedInstance{Name: coordinator, State: "running"})
+	unread := func() hostingapi.Observed {
+		return observed(hostingapi.ObservedInstance{Name: agent, State: "running"}, hostingapi.ObservedInstance{Name: coordinator, State: "running"})
 	}
 	// The limit runs from the last progress recorded, and with none from the first sight.
-	mustReconcile(t, store, observed(ObservedInstance{Name: agent, State: "running", Progress: marker("1")}, ObservedInstance{Name: coordinator, State: "running"}))
+	mustReconcile(t, store, observed(hostingapi.ObservedInstance{Name: agent, State: "running", Progress: marker("1")}, hostingapi.ObservedInstance{Name: coordinator, State: "running"}))
 	store.Advance(limit / 2)
-	mustReconcile(t, store, observed(ObservedInstance{Name: agent, State: "running", Progress: marker("2")}, ObservedInstance{Name: coordinator, State: "running"}))
+	mustReconcile(t, store, observed(hostingapi.ObservedInstance{Name: agent, State: "running", Progress: marker("2")}, hostingapi.ObservedInstance{Name: coordinator, State: "running"}))
 	store.Advance(limit/2 - time.Second)
 	answer := mustReconcile(t, store, unread())
 	if answer.Instances[0].Name != agent || answer.Instances[1].Name != coordinator {
@@ -1228,7 +1226,7 @@ func TestAMachineWhoseProgressCannotBeReadForTheLimitIsReplacedAndSpendsNoRestar
 	// The log is back and the marker stands where it stood: that is a silent machine, and a restart.
 	mustReconcile(t, store, unread())
 	store.Advance(limit)
-	stuck := observed(ObservedInstance{Name: agent, State: "running", Progress: marker("")}, ObservedInstance{Name: coordinator, State: "running", Progress: marker("")})
+	stuck := observed(hostingapi.ObservedInstance{Name: agent, State: "running", Progress: marker("")}, hostingapi.ObservedInstance{Name: coordinator, State: "running", Progress: marker("")})
 	if answer := mustReconcile(t, store, stuck); answer.Instances[0].Name == agent {
 		t.Fatal("a machine read again and silent for the limit was kept")
 	}
@@ -1243,7 +1241,7 @@ func TestProgressIsWrittenDownAFewTimesALimitHoweverOftenItIsReported(t *testing
 	const reports = 200
 	for i := range reports {
 		store.Advance(2 * testSettings.ProgressLimit / reports)
-		mustReconcile(t, store, observed(ObservedInstance{Name: name, State: "running", Progress: marker(fmt.Sprint(i))}))
+		mustReconcile(t, store, observed(hostingapi.ObservedInstance{Name: name, State: "running", Progress: marker(fmt.Sprint(i))}))
 	}
 	if store.ProgressWrites < 8 || store.ProgressWrites > 9 {
 		t.Fatalf("%d reports over two limits wrote progress %d times, want four a limit", reports, store.ProgressWrites)

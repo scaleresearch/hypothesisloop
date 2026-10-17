@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/scaleresearch/hypothesisloop/contract/hostingapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
@@ -30,7 +31,7 @@ const MaxInstanceNameLength = namePlatformExperimentLength + 1 + nameAgentLength
 // says which agent of which platform experiment it is, and the agent reads its agent type, model
 // and hyperparameters from its instructions, again whenever they change. None of them goes into
 // the machine's name: the agent applies an edit of its type or model on the machine it has.
-func instanceFor(agent domain.AgentSignup, ended int, image, apiURL, signingSecret, launchDigest string) (Instance, error) {
+func instanceFor(agent domain.AgentSignup, ended int, image, apiURL, signingSecret, launchDigest string) (hostingapi.Instance, error) {
 	startedAs := map[string]string{
 		"API_URL":                apiURL,
 		"AGENT_ID":               agent.AgentID,
@@ -38,13 +39,13 @@ func instanceFor(agent domain.AgentSignup, ended int, image, apiURL, signingSecr
 	}
 	name, err := instanceName(agent.PlatformExperimentID, agent.AgentID, "", image, startedAs, launchDigest, ended)
 	if err != nil {
-		return Instance{}, err
+		return hostingapi.Instance{}, err
 	}
 	token, err := auth.Mint(signingSecret, auth.AgentScope(agent.PlatformExperimentID, agent.AgentID))
 	if err != nil {
-		return Instance{}, err
+		return hostingapi.Instance{}, err
 	}
-	return Instance{Name: name, Image: image, Env: map[string]string{"API_URL": apiURL, "HL_TOKEN": token}}, nil
+	return hostingapi.Instance{Name: name, Image: image, Env: map[string]string{"API_URL": apiURL, "HL_TOKEN": token}}, nil
 }
 
 // coordinatorName stands where an agent's id does in the name of a coordinator's machine.
@@ -53,20 +54,20 @@ const coordinatorName = "coordinator"
 // coordinatorInstanceFor is the machine a platform experiment's hosted coordinator runs in: the
 // agents' image started with the platform experiment's coordinator token, which is what makes it
 // a coordinator. It reads its model from its instructions, so a change of it keeps the machine.
-func coordinatorInstanceFor(platformExperimentID string, ended int, image, apiURL, signingSecret, launchDigest string) (Instance, error) {
+func coordinatorInstanceFor(platformExperimentID string, ended int, image, apiURL, signingSecret, launchDigest string) (hostingapi.Instance, error) {
 	startedAs := map[string]string{
 		"API_URL":                apiURL,
 		"PLATFORM_EXPERIMENT_ID": platformExperimentID,
 	}
 	name, err := instanceName(platformExperimentID, coordinatorName, coordinatorName, image, startedAs, launchDigest, ended)
 	if err != nil {
-		return Instance{}, err
+		return hostingapi.Instance{}, err
 	}
 	token, err := auth.Mint(signingSecret, auth.CoordinatorScope(platformExperimentID))
 	if err != nil {
-		return Instance{}, err
+		return hostingapi.Instance{}, err
 	}
-	return Instance{Name: name, Image: image, Env: map[string]string{"API_URL": apiURL, "HL_TOKEN": token}}, nil
+	return hostingapi.Instance{Name: name, Image: image, Env: map[string]string{"API_URL": apiURL, "HL_TOKEN": token}}, nil
 }
 
 // instanceName names one machine of one agent, or of a coordinator when role says so: an agent

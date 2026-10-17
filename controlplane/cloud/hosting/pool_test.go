@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/hostingapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/cloud/provider"
 )
 
@@ -217,7 +218,7 @@ func TestThePlatformsImageNeverOutweighsTheAgentsAskedFor(t *testing.T) {
 	h := newPoolHarness(t, 1)
 	other := agent("a")
 	other.Image = image2
-	h.cp.answer(Desired{Instances: []Instance{other}, Image: image1})
+	h.cp.answer(hostingapi.Desired{Instances: []hostingapi.Instance{other}, Image: image1})
 	h.mustPass()
 	h.names(full("a"), h.launcher.poolName(image2))
 }

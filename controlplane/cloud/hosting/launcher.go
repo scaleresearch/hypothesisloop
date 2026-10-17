@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/hostingapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/cloud/provider"
 )
 
@@ -23,10 +24,10 @@ type Size struct {
 }
 
 // Platform is what the launcher asks of the platform: the machines it holds, and the machines
-// to keep for what the launcher observed (Decider).
+// to keep for what the launcher observed (service/hosting.Decider).
 type Platform interface {
-	Held(ctx context.Context) ([]HeldMachine, error)
-	Reconcile(ctx context.Context, observed Observed) (*Desired, error)
+	Held(ctx context.Context) ([]hostingapi.HeldMachine, error)
+	Reconcile(ctx context.Context, observed hostingapi.Observed) (*hostingapi.Desired, error)
 }
 
 type Config struct {
@@ -180,7 +181,7 @@ func (l *Launcher) Pass(ctx context.Context) error {
 		}
 		byName[i.Name] = append(byName[i.Name], i)
 	}
-	answer, err := l.cfg.Platform.Reconcile(ctx, Observed{LaunchDigest: l.launchDigest, Instances: l.observe(ctx, byName)})
+	answer, err := l.cfg.Platform.Reconcile(ctx, hostingapi.Observed{LaunchDigest: l.launchDigest, Instances: l.observe(ctx, byName)})
 	if err != nil {
 		return fmt.Errorf("decide desired state: %w", err)
 	}
@@ -226,7 +227,7 @@ func (l *Launcher) Pass(ctx context.Context) error {
 // a read that says the machine is gone leaves it out, and a read that fails fails the pass, so
 // nothing is reported from a list that may be missing a machine. A read that finds the machine
 // replaces whatever the list says of that id.
-func (l *Launcher) confirmUnlisted(ctx context.Context, rented []provider.Instance, held []HeldMachine) ([]provider.Instance, error) {
+func (l *Launcher) confirmUnlisted(ctx context.Context, rented []provider.Instance, held []hostingapi.HeldMachine) ([]provider.Instance, error) {
 	for _, h := range held {
 		name := l.prefix + h.Name
 		listed := false
@@ -413,8 +414,8 @@ var liveness = map[provider.State]int{
 // printed and what it last said its agent is doing, both from one read of its output. A marker
 // that could not be read is left out, which the control plane tells apart from one that was
 // never printed. The output is sent and never logged here.
-func (l *Launcher) observe(ctx context.Context, byName map[string][]provider.Instance) []ObservedInstance {
-	observed := []ObservedInstance{}
+func (l *Launcher) observe(ctx context.Context, byName map[string][]provider.Instance) []hostingapi.ObservedInstance {
+	observed := []hostingapi.ObservedInstance{}
 	for _, name := range sortedKeys(byName) {
 		instances := byName[name]
 		sort.SliceStable(instances, func(a, b int) bool { return instances[a].ID < instances[b].ID })
@@ -430,7 +431,7 @@ func (l *Launcher) observe(ctx context.Context, byName map[string][]provider.Ins
 				running = &i
 			}
 		}
-		entry := ObservedInstance{Name: name[len(l.prefix):], Machine: reportedBy.ID, State: string(state)}
+		entry := hostingapi.ObservedInstance{Name: name[len(l.prefix):], Machine: reportedBy.ID, State: string(state)}
 		if running != nil {
 			if lines, ok := l.progressOf(ctx, *running); ok {
 				progress := lastMatch(lines, progressPattern)

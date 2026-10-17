@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/cloud/compute"
+	cloudhosting "github.com/scaleresearch/hypothesisloop/controlplane/cloud/hosting"
 	"github.com/scaleresearch/hypothesisloop/controlplane/cloud/provider"
 	"github.com/scaleresearch/hypothesisloop/controlplane/cloud/provider/providers"
 	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/config"
@@ -47,7 +48,7 @@ func newRented(pcfg *hypothesisloopcfg.Config, store *db.Store, clusters *cluste
 	return loops, nil
 }
 
-func newLauncher(pcfg *hypothesisloopcfg.Config, s *hypothesisloopcfg.SandboxConfig, store *db.Store, metrics *metricsdb.Store, logger *zap.Logger) (*hosting.Launcher, error) {
+func newLauncher(pcfg *hypothesisloopcfg.Config, s *hypothesisloopcfg.SandboxConfig, store *db.Store, metrics *metricsdb.Store, logger *zap.Logger) (*cloudhosting.Launcher, error) {
 	log := logger.Named("hosting")
 	// An agent instance has no accelerator, so the provider is asked for no accelerator type.
 	rented, err := providers.New(s.Provider.Name, s.Provider.Settings, nil, log.Named(s.Provider.Name).Sugar().Infof)
@@ -67,10 +68,10 @@ func newLauncher(pcfg *hypothesisloopcfg.Config, s *hypothesisloopcfg.SandboxCon
 		ProgressLimit:   time.Duration(pcfg.Agents.ProgressLimitSeconds) * time.Second,
 		MaxNewPerAnswer: pcfg.Agents.MaxNewInstancesPerAnswer,
 	}, log)
-	launcher, err := hosting.New(hosting.Config{
+	launcher, err := cloudhosting.New(cloudhosting.Config{
 		Name:     s.Name,
 		Command:  s.Instance.Command,
-		Size:     hosting.Size{CPUMillis: s.Instance.CPUMillis, MemoryBytes: s.Instance.MemoryBytes, DiskBytes: s.Instance.DiskBytes},
+		Size:     cloudhosting.Size{CPUMillis: s.Instance.CPUMillis, MemoryBytes: s.Instance.MemoryBytes, DiskBytes: s.Instance.DiskBytes},
 		Provider: rented, Platform: decider,
 		Interval: s.Interval(), CreatePause: s.CreatePause(), WarmPool: warmPool,
 		Log: log.Sugar().Infof,

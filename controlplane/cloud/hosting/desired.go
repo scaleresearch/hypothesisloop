@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/scaleresearch/hypothesisloop/contract/hostingapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/cloud/provider"
 )
 
@@ -26,7 +27,7 @@ type desired struct {
 // read turns an answer into the pass's view of it under this launcher's prefix, or refuses the
 // whole answer. Nothing in it is repaired or skipped: a list understood in part would have the
 // launcher destroy the agents it did not understand.
-func (l *Launcher) read(answer *Desired) (*desired, error) {
+func (l *Launcher) read(answer *hostingapi.Desired) (*desired, error) {
 	want := &desired{instances: map[string]instance{}, ending: map[string]bool{}, image: answer.Image}
 	for _, entry := range answer.Instances {
 		name := l.prefix + entry.Name

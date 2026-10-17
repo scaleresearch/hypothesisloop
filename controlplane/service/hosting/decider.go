@@ -13,6 +13,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/hostingapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
@@ -76,60 +77,6 @@ const (
 	stateUnknown  = "unknown"
 )
 
-// Observed is what the launcher found on its provider account: every instance whose name starts
-// with its own prefix, by the name the decider gave it.
-type Observed struct {
-	// LaunchDigest is a digest of everything the launcher itself starts an instance with.
-	LaunchDigest string
-	Instances    []ObservedInstance
-}
-
-// ObservedInstance is one name of the launcher's namespace as its provider lists it, without the
-// launcher's prefix.
-type ObservedInstance struct {
-	Name string
-	// Machine is the provider's id of the machine the name is reported by.
-	Machine string
-	State   string
-	// Log is the end of what an exited instance's command wrote.
-	Log string
-	// Expired tells an exited instance its provider ended at the provider's own lifetime.
-	Expired bool
-	// Progress is the progress marker a running instance's command last printed, "" when it
-	// printed none, nil when its output could not be read.
-	Progress *string
-	// Activity is what a running instance's agent last said it is doing.
-	Activity string
-	// HarnessState is what a running instance's harness last said of itself (parseHarnessState).
-	HarnessState string
-}
-
-// Desired is the launcher's complete desired state. Instances should exist and be running.
-// Ending names instances whose run is over: they are told to stop and are otherwise left alone
-// for a last turn, neither created nor replaced, and destroyed once it has exited. An instance in
-// neither list should not exist. Image is the platform's image, which the launcher warms ahead
-// of the next machine while nothing is asked for.
-type Desired struct {
-	Instances []Instance
-	Ending    []string
-	Image     string
-}
-
-// Instance is one machine the launcher keeps: what it boots and the environment its agent starts
-// with. Name is its identity, and the launcher puts its own prefix in front of it.
-type Instance struct {
-	Name  string
-	Image string
-	Env   map[string]string
-}
-
-// HeldMachine is a machine the platform holds: the name it is asked for under, without the
-// launcher's prefix, and the provider's id the launcher last reported the name by.
-type HeldMachine struct {
-	Name    string
-	Machine string
-}
-
 // kept is one thing the launcher keeps a machine for: an agent, or a platform experiment's
 // coordinator, whose agentID is empty. Both are evaluated by the same steps.
 type kept struct {
@@ -141,7 +88,7 @@ type kept struct {
 	// launch is launchOf the image this one boots and the launcher's digest.
 	launch string
 	// describe takes how many machines of this one ended before.
-	describe func(ended int) (Instance, error)
+	describe func(ended int) (hostingapi.Instance, error)
 }
 
 // launchOf identifies what a machine is started with on the platform's and the launcher's side.
@@ -162,14 +109,14 @@ func (h *Decider) imageOf(agentImage string) string {
 }
 
 // Held is every machine the platform holds, an agent's or a coordinator's. It changes nothing.
-func (h *Decider) Held(ctx context.Context) ([]HeldMachine, error) {
+func (h *Decider) Held(ctx context.Context) ([]hostingapi.HeldMachine, error) {
 	machines, err := h.store.ListLauncherMachines(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("hosting.Held: %w", err)
 	}
-	held := make([]HeldMachine, 0, len(machines))
+	held := make([]hostingapi.HeldMachine, 0, len(machines))
 	for _, m := range machines {
-		held = append(held, HeldMachine{Name: m.Name, Machine: m.Machine})
+		held = append(held, hostingapi.HeldMachine{Name: m.Name, Machine: m.Machine})
 	}
 	return held, nil
 }
@@ -178,7 +125,7 @@ func (h *Decider) Held(ctx context.Context) ([]HeldMachine, error) {
 // coordinators are hosted, which of them still run, which have domain.AgentWindDown
 // (a coordinator domain.CoordinatorWindDown) left, and which get another machine after theirs ended. One that cannot be evaluated is
 // logged and left out and the rest of the list stands.
-func (h *Decider) Reconcile(ctx context.Context, observed Observed) (*Desired, error) {
+func (h *Decider) Reconcile(ctx context.Context, observed hostingapi.Observed) (*hostingapi.Desired, error) {
 	// A machine this answer no longer names is taken down by the launcher: that is written
 	// down first, as the platform's own doing, so no later answer reads it as lost.
 	if err := h.store.ReleaseInstances(ctx, domain.AgentWindDown, domain.CoordinatorWindDown); err != nil {
@@ -192,7 +139,7 @@ func (h *Decider) Reconcile(ctx context.Context, observed Observed) (*Desired, e
 	if err != nil {
 		return nil, err
 	}
-	seen := map[string]ObservedInstance{}
+	seen := map[string]hostingapi.ObservedInstance{}
 	for _, instance := range observed.Instances {
 		seen[instance.Name] = instance
 	}
@@ -207,7 +154,7 @@ func (h *Decider) Reconcile(ctx context.Context, observed Observed) (*Desired, e
 		all = append(all, kept{
 			platformExperimentID: agent.PlatformExperimentID, agentID: agent.AgentID, role: string(agent.Role), agentType: agent.AgentType, instance: *agent.Instance, ending: agent.Ended != "",
 			launch: launchOf(image, observed.LaunchDigest),
-			describe: func(ended int) (Instance, error) {
+			describe: func(ended int) (hostingapi.Instance, error) {
 				return instanceFor(signup, ended, image, h.cfg.APIURL, h.cfg.SigningSecret, observed.LaunchDigest)
 			},
 		})
@@ -217,13 +164,13 @@ func (h *Decider) Reconcile(ctx context.Context, observed Observed) (*Desired, e
 		all = append(all, kept{
 			platformExperimentID: pe, role: domain.CoordinatorHealthRole, agentType: domain.CoordinatorFlavor, instance: coordinator.Instance, ending: coordinator.Ending,
 			launch: launchOf(image, observed.LaunchDigest),
-			describe: func(ended int) (Instance, error) {
+			describe: func(ended int) (hostingapi.Instance, error) {
 				return coordinatorInstanceFor(pe, ended, image, h.cfg.APIURL, h.cfg.SigningSecret, observed.LaunchDigest)
 			},
 		})
 	}
 
-	out := &Desired{Instances: []Instance{}, Ending: []string{}, Image: h.cfg.Image}
+	out := &hostingapi.Desired{Instances: []hostingapi.Instance{}, Ending: []string{}, Image: h.cfg.Image}
 	asked := 0
 	var states []domain.HarnessState
 	for _, one := range all {
@@ -231,7 +178,7 @@ func (h *Decider) Reconcile(ctx context.Context, observed Observed) (*Desired, e
 		current := one.instance
 		// A machine is named after how many ended before it, whether or not their end spent a
 		// restart, so every one that ends is followed by another name.
-		describe := func(restarts, renewals int) (Instance, error) {
+		describe := func(restarts, renewals int) (hostingapi.Instance, error) {
 			return one.describe(restarts + renewals)
 		}
 		if one.ending {
@@ -291,7 +238,7 @@ func (h *Decider) Reconcile(ctx context.Context, observed Observed) (*Desired, e
 			// would have the launcher destroy a machine the platform still asks for.
 			keepCurrent := func() {
 				if current.Name != "" {
-					out.Instances = append(out.Instances, Instance{Name: current.Name, Image: instance.Image, Env: instance.Env})
+					out.Instances = append(out.Instances, hostingapi.Instance{Name: current.Name, Image: instance.Image, Env: instance.Env})
 				}
 			}
 			// The launcher creates one machine after another, so an answer asks for a bounded
@@ -342,7 +289,7 @@ func (h *Decider) Reconcile(ctx context.Context, observed Observed) (*Desired, e
 //
 // The limits are counted by the store on the database's clock. token is the one this API
 // minted for the machine, which its output must not carry into the database.
-func (h *Decider) observe(ctx context.Context, one kept, seen map[string]ObservedInstance, token string) (domain.AgentInstance, bool, error) {
+func (h *Decider) observe(ctx context.Context, one kept, seen map[string]hostingapi.ObservedInstance, token string) (domain.AgentInstance, bool, error) {
 	name := one.instance.Name
 	end := func(how db.InstanceEnd, exitLog string) (domain.AgentInstance, bool, error) {
 		limit := h.cfg.BootLimit

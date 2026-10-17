@@ -1,4 +1,4 @@
-package hostingtest
+package hosting
 
 import (
 	"context"
@@ -13,10 +13,9 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
-// Store is the decider's store in memory, with the conditions the database's own
-// statements apply, for tests that follow a hosted machine over several reconciles: the
-// handler's, and the launcher's against the handler.
-type Store struct {
+// launcherStore is the decider's store in memory, with the conditions the database's own
+// statements apply, for tests that follow a hosted machine over several reconciles.
+type launcherStore struct {
 	mu sync.Mutex
 	// ByLauncher holds the hosted agents under any keys, Instance set on every one.
 	ByLauncher   map[string][]db.LauncherAgent
@@ -53,7 +52,7 @@ type Store struct {
 var epoch = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
 // agents is every hosted agent, in the order of its key.
-func (s *Store) agents() []db.LauncherAgent {
+func (s *launcherStore) agents() []db.LauncherAgent {
 	var all []db.LauncherAgent
 	for _, key := range slices.Sorted(maps.Keys(s.ByLauncher)) {
 		all = append(all, s.ByLauncher[key]...)
@@ -62,13 +61,13 @@ func (s *Store) agents() []db.LauncherAgent {
 }
 
 // Advance moves the store's clock, which stands in for the database's.
-func (s *Store) Advance(by time.Duration) {
+func (s *launcherStore) Advance(by time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.clock += by
 }
 
-func (s *Store) ListLauncherAgents(_ context.Context, windDown time.Duration) ([]db.LauncherAgent, error) {
+func (s *launcherStore) ListLauncherAgents(_ context.Context, windDown time.Duration) ([]db.LauncherAgent, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Listed++
@@ -87,7 +86,7 @@ func (s *Store) ListLauncherAgents(_ context.Context, windDown time.Duration) ([
 	return listed, s.Err
 }
 
-func (s *Store) ListLauncherCoordinators(_ context.Context, windDown time.Duration) ([]db.LauncherCoordinator, error) {
+func (s *launcherStore) ListLauncherCoordinators(_ context.Context, windDown time.Duration) ([]db.LauncherCoordinator, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.CoordinatorWindDown = windDown
@@ -95,7 +94,7 @@ func (s *Store) ListLauncherCoordinators(_ context.Context, windDown time.Durati
 }
 
 // ReleaseInstances records the machines of the agents in Over as released by the platform.
-func (s *Store) ReleaseInstances(_ context.Context, _, _ time.Duration) error {
+func (s *launcherStore) ReleaseInstances(_ context.Context, _, _ time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.Err != nil {
@@ -116,7 +115,7 @@ func (s *Store) ReleaseInstances(_ context.Context, _, _ time.Duration) error {
 }
 
 // Find is the stored instance of an agent, or with no agent id of the coordinator.
-func (s *Store) Find(platformExpID, agentID string) *domain.AgentInstance {
+func (s *launcherStore) Find(platformExpID, agentID string) *domain.AgentInstance {
 	if agentID == "" {
 		for i := range s.Coordinators {
 			if s.Coordinators[i].PlatformExperimentID == platformExpID {
@@ -129,10 +128,10 @@ func (s *Store) Find(platformExpID, agentID string) *domain.AgentInstance {
 			return agent.Instance
 		}
 	}
-	panic("hostingtest: nothing hosted as " + platformExpID + "/" + agentID)
+	panic("hosting test: nothing hosted as " + platformExpID + "/" + agentID)
 }
 
-func (s *Store) AskInstance(_ context.Context, platformExpID, agentID, name, launch string) error {
+func (s *launcherStore) AskInstance(_ context.Context, platformExpID, agentID, name, launch string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.WriteErr[agentID]; err != nil {
@@ -154,9 +153,9 @@ func (s *Store) AskInstance(_ context.Context, platformExpID, agentID, name, lau
 	return nil
 }
 
-func (s *Store) ObserveInstance(_ context.Context, platformExpID, agentID, name, state string, progress *string, progressLimit time.Duration, activity, machine string) error {
+func (s *launcherStore) ObserveInstance(_ context.Context, platformExpID, agentID, name, state string, progress *string, progressLimit time.Duration, activity, machine string) error {
 	if machine == "" {
-		return fmt.Errorf("hostingtest: %s is reported with no machine id", name)
+		return fmt.Errorf("hosting test: %s is reported with no machine id", name)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -194,7 +193,7 @@ func (s *Store) ObserveInstance(_ context.Context, platformExpID, agentID, name,
 	return nil
 }
 
-func (s *Store) EndInstance(_ context.Context, platformExpID, agentID, name string, how db.InstanceEnd, exitLog string, limit time.Duration, maxRestarts int) (domain.AgentInstance, bool, error) {
+func (s *launcherStore) EndInstance(_ context.Context, platformExpID, agentID, name string, how db.InstanceEnd, exitLog string, limit time.Duration, maxRestarts int) (domain.AgentInstance, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.WriteErr[agentID]; err != nil {
@@ -251,7 +250,7 @@ func (s *Store) EndInstance(_ context.Context, platformExpID, agentID, name stri
 	return *instance, true, nil
 }
 
-func (s *Store) ListLauncherMachines(_ context.Context) ([]db.LauncherMachine, error) {
+func (s *launcherStore) ListLauncherMachines(_ context.Context) ([]db.LauncherMachine, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.Err != nil {
@@ -273,13 +272,13 @@ func (s *Store) ListLauncherMachines(_ context.Context) ([]db.LauncherMachine, e
 	return held, nil
 }
 
-// Metrics is the handler's health series in memory: the harness states written, in order.
-type Metrics struct {
+// harnessMetrics is the decider's health series in memory: the harness states written, in order.
+type harnessMetrics struct {
 	mu            sync.Mutex
 	HarnessStates []domain.HarnessState
 }
 
-func (m *Metrics) RecordHarnessState(_ context.Context, _ time.Time, states []domain.HarnessState) error {
+func (m *harnessMetrics) RecordHarnessState(_ context.Context, _ time.Time, states []domain.HarnessState) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.HarnessStates = append(m.HarnessStates, states...)
@@ -287,7 +286,7 @@ func (m *Metrics) RecordHarnessState(_ context.Context, _ time.Time, states []do
 }
 
 // Written is a copy of the harness states written so far.
-func (m *Metrics) Written() []domain.HarnessState {
+func (m *harnessMetrics) Written() []domain.HarnessState {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]domain.HarnessState(nil), m.HarnessStates...)
