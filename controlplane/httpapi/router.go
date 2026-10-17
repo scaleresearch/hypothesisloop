@@ -34,7 +34,7 @@ type Handlers struct {
 	Launch              platformexperiments.AgentLaunch
 	Sharing             *platformexperiments.Sharing
 	Sessions            *platformexperiments.Sessions
-	Instructions        *platformexperiments.InstructionsService
+	Instructions        *platformexperiments.Composer
 	Drafts              *platformexperiments.Drafts
 	Accounts            *accounts.Service
 	AgentTypes          *accounts.AgentTypes

@@ -14,13 +14,13 @@ const instructionsDescription = "Only the token of the agent or coordinator they
 	"An edit or a restore of the agent type, and a new version of the platform's rules, tell every agent and coordinator whose run goes on with agent.instructions, and these answer the new version from then on."
 
 type instructionsAPI struct {
-	instructions *platformexperiments.InstructionsService
+	instructions *platformexperiments.Composer
 	access       *auth.Access
 }
 
 // registerInstructions registers where an agent and a coordinator read the instructions they
 // run with.
-func registerInstructions(doc *Doc, instructions *platformexperiments.InstructionsService) {
+func registerInstructions(doc *Doc, instructions *platformexperiments.Composer) {
 	a := instructionsAPI{instructions: instructions, access: doc.Access}
 	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "get-agent-instructions", Method: "GET", Path: "/platform-experiments/{id}/agents/{agent_id}/instructions",

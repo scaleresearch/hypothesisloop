@@ -96,7 +96,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		Launch:              launch,
 		Sharing:             platformexperiments.NewSharing(store, logger),
 		Sessions:            platformexperiments.NewSessions(dataStore),
-		Instructions:        platformexperiments.NewInstructionsService(store, modelDefaults(pcfg), logger),
+		Instructions:        platformexperiments.NewComposer(store, modelDefaults(pcfg), logger),
 		Drafts:              platformexperiments.NewDrafts(store, logger),
 		Accounts: accounts.NewService(store, store, metrics, connectedWithin, pcfg.Auth.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Services.PublicAPIURL, MetricsURL: pcfg.Runtimes.MetricsURL, Registry: pcfg.Runtimes.Registry, ImageTag: pcfg.Runtimes.ImageTag, RegistryPlainHTTP: pcfg.Runtimes.RegistryPlainHTTP},
 			accounts.Limits{MaxOrgsPerUser: pcfg.Accounts.MaxOrgsPerUser, MaxProjectsPerOrg: pcfg.Accounts.MaxProjectsPerOrg}, gate.access, logger),

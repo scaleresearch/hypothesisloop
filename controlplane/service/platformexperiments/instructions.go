@@ -34,30 +34,30 @@ type Instructions struct {
 // ErrNoInstructions answers for an agent or a coordinator the platform experiment does not run.
 var ErrNoInstructions = errors.New("instructions not found")
 
-// InstructionsService composes what an agent and a coordinator run with.
-type InstructionsService struct {
+// Composer composes what an agent and a coordinator run with.
+type Composer struct {
 	store    InstructionsStore
 	defaults domain.ModelDefaults
 	logger   *zap.Logger
 }
 
-func NewInstructionsService(store InstructionsStore, defaults domain.ModelDefaults, logger *zap.Logger) *InstructionsService {
-	return &InstructionsService{store: store, defaults: defaults, logger: logger}
+func NewComposer(store InstructionsStore, defaults domain.ModelDefaults, logger *zap.Logger) *Composer {
+	return &Composer{store: store, defaults: defaults, logger: logger}
 }
 
 // Agent is what agentID runs with in platformExperimentID, or ErrNoInstructions.
-func (s *InstructionsService) Agent(ctx context.Context, platformExperimentID, agentID string) (*Instructions, error) {
+func (s *Composer) Agent(ctx context.Context, platformExperimentID, agentID string) (*Instructions, error) {
 	src, err := s.store.AgentInstructions(ctx, platformExperimentID, agentID)
 	return s.compose(platformExperimentID, agentID, src, err)
 }
 
 // Coordinator is what the coordinator of platformExperimentID runs with, or ErrNoInstructions.
-func (s *InstructionsService) Coordinator(ctx context.Context, platformExperimentID string) (*Instructions, error) {
+func (s *Composer) Coordinator(ctx context.Context, platformExperimentID string) (*Instructions, error) {
 	src, err := s.store.CoordinatorInstructions(ctx, platformExperimentID)
 	return s.compose(platformExperimentID, "", src, err)
 }
 
-func (s *InstructionsService) compose(platformExperimentID, agentID string, src *db.InstructionsSource, err error) (*Instructions, error) {
+func (s *Composer) compose(platformExperimentID, agentID string, src *db.InstructionsSource, err error) (*Instructions, error) {
 	if err != nil {
 		return nil, auth.Internal(s.logger, "read instructions failed", err, zap.String("platformExpID", platformExperimentID), zap.String("agentID", agentID))
 	}
