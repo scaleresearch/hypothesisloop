@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/contract/exitline"
+
+	"github.com/scaleresearch/hypothesisloop/cli/internal/command"
 )
 
 func cmdExec(args []string, stdout, stderr io.Writer) int {
@@ -28,7 +30,7 @@ func cmdExec(args []string, stdout, stderr io.Writer) int {
 // as `sh -c 'prepare && train'` has a shell between this wrapper and the process that saves, and
 // that shell dies on SIGTERM without passing it on.
 func runExec(args []string, stdout, stderr io.Writer, signals <-chan os.Signal) int {
-	fs := newFlags("exec", `usage: hl exec --stop-grace SECONDS -- COMMAND [ARG...]
+	fs := command.NewFlags("exec", `usage: hl exec --stop-grace SECONDS -- COMMAND [ARG...]
 
 Runs COMMAND as a job on a rented instance. SIGTERM is passed on to COMMAND and everything it
 started, which then have SECONDS to save their work before they are killed. COMMAND's exit
@@ -36,15 +38,15 @@ code is the job's: once COMMAND has ended and what it started has ended or been 
 is written as the last line of output and returned.`, stderr)
 	stopGrace := fs.Int("stop-grace", -1, "seconds COMMAND gets between SIGTERM and SIGKILL")
 	if err := fs.Parse(args); err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
-	command := fs.Args()
-	if *stopGrace < 0 || len(command) == 0 {
+	commandLine := fs.Args()
+	if *stopGrace < 0 || len(commandLine) == 0 {
 		fmt.Fprintln(stderr, "hl exec: --stop-grace SECONDS and a COMMAND are required")
 		return 2
 	}
 
-	cmd := exec.Command(command[0], command[1:]...)
+	cmd := exec.Command(commandLine[0], commandLine[1:]...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, stdout, stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	startedAt := time.Now()

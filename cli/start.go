@@ -12,6 +12,8 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
+
+	"github.com/scaleresearch/hypothesisloop/cli/internal/command"
 )
 
 // createBody is the body of POST /platform-experiments: the experiment spec and where it is placed.
@@ -22,15 +24,15 @@ type createBody struct {
 }
 
 // projectOf is the project a command names with --project, or $HL_PROJECT, a misuse with neither.
-func projectOf(fs *flagSet, flagValue string) (string, error) {
-	if project := orEnv(flagValue, projectEnv); project != "" {
+func projectOf(fs *command.Flags, flagValue string) (string, error) {
+	if project := command.OrEnv(flagValue, command.ProjectEnv); project != "" {
 		return project, nil
 	}
-	return "", misuse(fs, "a project is required: --project or $HL_PROJECT")
+	return "", command.Misuse(fs, "a project is required: --project or $HL_PROJECT")
 }
 
 func cmdPlatformExperimentsStart(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments start", `usage: hl platform-experiments start --repository R [--project PROJECT] [--dry-run] DIR
+	fs := command.NewFlags("platform-experiments start", `usage: hl platform-experiments start --repository R [--project PROJECT] [--dry-run] DIR
 
 DIR is the tree of an experiment's repository: its code and its spec at
 DIR/.hypothesisloop/experiment.yaml, which is checked first, a bad one exiting 2 before anything
@@ -51,12 +53,12 @@ start prints its id, what it waits for and, with $HL_UI_URL set, where the UI sh
 	project := fs.String("project", "", "the project it belongs to (default $HL_PROJECT)")
 	repository := fs.String("repository", "", "the repository it works on")
 	dryRun := fs.Bool("dry-run", false, "run every check and change nothing")
-	dir, err := parseOne(fs, args, "DIR", "")
+	dir, err := command.ParseOne(fs, args, "DIR", "")
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	if *repository == "" {
-		return parseExit(misuse(fs, "want --repository: the repository the experiment works on"))
+		return command.ParseExit(command.Misuse(fs, "want --repository: the repository the experiment works on"))
 	}
 	spec, err := experimentspec.Load(dir)
 	if err == nil {
@@ -68,14 +70,14 @@ start prints its id, what it waits for and, with $HL_UI_URL set, where the UI sh
 	}
 	body := createBody{Spec: spec, Repository: *repository}
 	if body.ProjectID, err = projectOf(fs, *project); err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	var check struct {
 		Repository    string `json:"repository"`
 		RepositoryURL string `json:"repository_url"`
 	}
 	if err := c.Do("GET", "/projects/"+url.PathEscape(body.ProjectID)+"/repository-check?"+url.Values{"repository": {body.Repository}}.Encode(), nil, &check); err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
 	body.Repository = check.Repository
 	plan, err := planPush(dir, check.RepositoryURL)
@@ -83,10 +85,10 @@ start prints its id, what it waits for and, with $HL_UI_URL set, where the UI sh
 		defer os.RemoveAll(plan.gitDir)
 	}
 	if err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
 	if plan.other {
-		return fail(stderr, fmt.Errorf("%s already holds other code; name an empty repository or run start in a clone of it", body.Repository))
+		return command.Fail(stderr, fmt.Errorf("%s already holds other code; name an empty repository or run start in a clone of it", body.Repository))
 	}
 	if *dryRun {
 		if plan.files > 0 {
@@ -99,7 +101,7 @@ start prints its id, what it waits for and, with $HL_UI_URL set, where the UI sh
 	}
 	if plan.files > 0 {
 		if err := plan.push(spec.Name); err != nil {
-			return fail(stderr, err)
+			return command.Fail(stderr, err)
 		}
 		fmt.Fprintf(stdout, "pushed %d files of %s to %s as main\n", plan.files, dir, body.Repository)
 	} else {
@@ -113,7 +115,7 @@ start prints its id, what it waits for and, with $HL_UI_URL set, where the UI sh
 		} `json:"status_reason"`
 	}
 	if err := c.Do("POST", "/platform-experiments", body, &created); err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
 	fmt.Fprintf(stdout, "created %s, %s: %s\n", created.ID, created.Status, created.StatusReason.Summary)
 	if ui := os.Getenv("HL_UI_URL"); ui != "" {

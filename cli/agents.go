@@ -11,6 +11,8 @@ import (
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
 	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
+
+	"github.com/scaleresearch/hypothesisloop/cli/internal/command"
 )
 
 var agentsCommands = []subcommand{
@@ -23,16 +25,6 @@ var agentsCommands = []subcommand{
 	{"session", "the stored model session of an agent, the coordinator or the planner", agentsSession},
 }
 
-func agentsPath(platformExperiment string) string {
-	return "/platform-experiments/" + url.PathEscape(platformExperiment) + "/agents"
-}
-
-// signupPath is where an agent's own signup is read, by the agent itself too: the roster above
-// is the coordinator's.
-func signupPath(platformExperiment, agent string) string {
-	return "/platform-experiments/" + url.PathEscape(platformExperiment) + "/signups/" + url.PathEscape(agent)
-}
-
 // rolesOf is the role of each agent that joined the platform experiment, by agent id.
 func rolesOf(c *apiclient.Client, platformExperiment string) (map[string]platformapi.SignupRole, error) {
 	var roster struct {
@@ -41,7 +33,7 @@ func rolesOf(c *apiclient.Client, platformExperiment string) (map[string]platfor
 			Role platformapi.SignupRole `json:"role"`
 		} `json:"agents"`
 	}
-	if err := c.Do("GET", agentsPath(platformExperiment), nil, &roster); err != nil {
+	if err := c.Do("GET", apiclient.AgentsPath(platformExperiment), nil, &roster); err != nil {
 		return nil, err
 	}
 	roles := make(map[string]platformapi.SignupRole, len(roster.Agents))
@@ -52,7 +44,7 @@ func rolesOf(c *apiclient.Client, platformExperiment string) (map[string]platfor
 }
 
 func agentsAdd(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments agents add", `usage: hl platform-experiments agents add [--platform-experiment PE] [--hosted] [--agent-type TYPE] [--hyperparameters JSON] [--model M] [--name NAME] [--role ROLE] [--quota-tier TIER]
+	fs := command.NewFlags("platform-experiments agents add", `usage: hl platform-experiments agents add [--platform-experiment PE] [--hosted] [--agent-type TYPE] [--hyperparameters JSON] [--model M] [--name NAME] [--role ROLE] [--quota-tier TIER]
    or: hl platform-experiments agents add [--platform-experiment PE] --agent ID [--role ROLE] [--quota-tier TIER]
 
 The only way an agent joins a platform experiment, while it is open; once per agent. While it
@@ -74,16 +66,16 @@ from an env file the container reads, never a command line.`, stderr)
 	name := fs.String("name", "", "display name of a created agent, unique in the platform experiment; omitted, its role and a number")
 	role := fs.String("role", "", "competitor (default), baseline or reviewer")
 	quotaTier := fs.String("quota-tier", "", "guaranteed or burst_only; omit to use the platform experiment's default_quota_tier")
-	named := experimentFlag(fs)
-	if err := parseNone(fs, args); err != nil {
-		return parseExit(err)
+	named := command.ExperimentFlag(fs)
+	if err := command.ParseNone(fs, args); err != nil {
+		return command.ParseExit(err)
 	}
-	pe, err := namedExperiment(fs, c, *named)
+	pe, err := command.NamedExperiment(fs, c, *named)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	if !experimentspec.ValidQuotaTierOverride(*quotaTier) {
-		return parseExit(misuse(fs, "--quota-tier must be %q or %q, got %s", experimentspec.QuotaTierGuaranteed, experimentspec.QuotaTierBurstOnly, *quotaTier))
+		return command.ParseExit(command.Misuse(fs, "--quota-tier must be %q or %q, got %s", experimentspec.QuotaTierGuaranteed, experimentspec.QuotaTierBurstOnly, *quotaTier))
 	}
 	body := map[string]any{}
 	for key, value := range map[string]string{
@@ -99,15 +91,15 @@ from an env file the container reads, never a command line.`, stderr)
 	if *hyperparameters != "" {
 		var object map[string]any
 		if err := json.Unmarshal([]byte(*hyperparameters), &object); err != nil || object == nil {
-			return parseExit(misuse(fs, "--hyperparameters must be a JSON object, got %s", *hyperparameters))
+			return command.ParseExit(command.Misuse(fs, "--hyperparameters must be a JSON object, got %s", *hyperparameters))
 		}
 		body["hyperparameters"] = object
 	}
-	return call(c, "POST", agentsPath(pe), body, "agents", "no agent was added", stdout, stderr)
+	return command.Call(c, "POST", apiclient.AgentsPath(pe), body, "agents", "no agent was added", stdout, stderr)
 }
 
 func agentsRemove(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments agents remove", `usage: hl platform-experiments agents remove [--platform-experiment PE] AGENT
+	fs := command.NewFlags("platform-experiments agents remove", `usage: hl platform-experiments agents remove [--platform-experiment PE] AGENT
 
 Takes the agent out of a platform experiment that is still open: its token stops working and a
 hosted agent's machine is taken down. A coordinator's token removes only an agent it added,
@@ -115,20 +107,20 @@ and 403 agent_not_added_by_coordinator answers for any other.
 Refused once the experiment has started; from then on an agent leaves by being cut or by the
 experiment closing. Refused with 409 work_unfinished while the agent has a job queued or
 running, which a baseline agent may: cancel the job or let it end first.`, stderr)
-	named := experimentFlag(fs)
-	agent, err := parseOne(fs, args, "AGENT", "", "agent")
+	named := command.ExperimentFlag(fs)
+	agent, err := command.ParseOne(fs, args, "AGENT", "", "agent")
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
-	pe, err := namedExperiment(fs, c, *named)
+	pe, err := command.NamedExperiment(fs, c, *named)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
-	return call(c, "DELETE", agentsPath(pe)+"/"+url.PathEscape(agent), nil, "", fmt.Sprintf("removed %s from platform experiment %s", agent, pe), stdout, stderr)
+	return command.Call(c, "DELETE", apiclient.AgentsPath(pe)+"/"+url.PathEscape(agent), nil, "", fmt.Sprintf("removed %s from platform experiment %s", agent, pe), stdout, stderr)
 }
 
 func agentsList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments agents list", `usage: hl platform-experiments agents list [--platform-experiment PE]
+	fs := command.NewFlags("platform-experiments agents list", `usage: hl platform-experiments agents list [--platform-experiment PE]
 
 Every agent that joined the platform experiment, in the order they did, each with its role and
 in actor whose credential added it. A draft's planner has role planner. While the platform
@@ -139,15 +131,15 @@ requested once a machine is asked for, starting while it boots, running, and sto
 in_flight counts its jobs and checks queued or running: both 0 is nothing of its own in flight.
 No token is listed:
 hl platform-experiments agents add --agent ID prints a self-run agent's token again.`, stderr)
-	named := experimentFlag(fs)
-	if err := parseNone(fs, args); err != nil {
-		return parseExit(err)
+	named := command.ExperimentFlag(fs)
+	if err := command.ParseNone(fs, args); err != nil {
+		return command.ParseExit(err)
 	}
-	pe, err := namedExperiment(fs, c, *named)
+	pe, err := command.NamedExperiment(fs, c, *named)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
-	return call(c, "GET", agentsPath(pe), nil, "agents", fmt.Sprintf("no agents have joined %s", pe), stdout, stderr)
+	return command.Call(c, "GET", apiclient.AgentsPath(pe), nil, "agents", fmt.Sprintf("no agents have joined %s", pe), stdout, stderr)
 }
 
 func messagesPath(platformExperiment string) string {
@@ -155,7 +147,7 @@ func messagesPath(platformExperiment string) string {
 }
 
 func agentsMessage(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments agents message", `usage: hl platform-experiments agents message [--platform-experiment PE] AGENT --text T
+	fs := command.NewFlags("platform-experiments agents message", `usage: hl platform-experiments agents message [--platform-experiment PE] AGENT --text T
    or: hl platform-experiments agents message [--platform-experiment PE] --all --text T
    or: hl platform-experiments agents message [--platform-experiment PE] --coordinator --text T
 
@@ -171,27 +163,27 @@ skipped and the rest are sent: one line per message sent, then one line per rese
 Refused for an agent that finished or was cut (409 agent_ended). Prints one line per message
 sent. hl platform-experiments agents messages reads what was sent before. --text-file FILE, or - for
 stdin, gives T in place of --text T.`, stderr)
-	named := experimentFlag(fs)
-	message := newTextFlag(fs, "text", "what the agent is told")
+	named := command.ExperimentFlag(fs)
+	message := command.NewTextFlag(fs, "text", "what the agent is told")
 	all := fs.Bool("all", false, "every researcher at work")
 	coordinator := fs.Bool("coordinator", false, "the hosted coordinator")
-	operands, err := parseOperands(fs, args, "agent")
+	operands, err := command.ParseOperands(fs, args, "agent")
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
-	text, err := message.value(fs)
+	text, err := message.Value(fs)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	switch {
 	case *all && *coordinator, (*all || *coordinator) && len(operands) > 0, !*all && !*coordinator && len(operands) != 1:
-		return parseExit(misuse(fs, "want one AGENT, --all or --coordinator"))
+		return command.ParseExit(command.Misuse(fs, "want one AGENT, --all or --coordinator"))
 	case strings.TrimSpace(text) == "":
-		return parseExit(misuse(fs, "want --text or --text-file"))
+		return command.ParseExit(command.Misuse(fs, "want --text or --text-file"))
 	}
-	pe, err := namedExperiment(fs, c, *named)
+	pe, err := command.NamedExperiment(fs, c, *named)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	body := map[string]any{"text": text}
 	switch {
@@ -207,14 +199,14 @@ stdin, gives T in place of --text T.`, stderr)
 		Refused  []json.RawMessage `json:"refused"`
 	}
 	if err := c.Do("POST", messagesPath(pe), body, &out); err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
-	if err := printLines(stdout, stderr, "no message was sent", out.Messages); err != nil {
-		return fail(stderr, err)
+	if err := command.PrintLines(stdout, stderr, "no message was sent", out.Messages); err != nil {
+		return command.Fail(stderr, err)
 	}
 	for _, refused := range out.Refused {
-		if err := printLine(stdout, refused); err != nil {
-			return fail(stderr, err)
+		if err := command.PrintLine(stdout, refused); err != nil {
+			return command.Fail(stderr, err)
 		}
 	}
 	if len(out.Refused) > 0 {
@@ -224,30 +216,30 @@ stdin, gives T in place of --text T.`, stderr)
 }
 
 func agentsMessages(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments agents messages", `usage: hl platform-experiments agents messages [--platform-experiment PE] [--agent ID]
+	fs := command.NewFlags("platform-experiments agents messages", `usage: hl platform-experiments agents messages [--platform-experiment PE] [--agent ID]
 
 Every message the coordinator and the owner sent to an agent of the platform experiment, and the
 owner to its coordinator, oldest first, one per line: agent_id (coordinator for the
 coordinator's), from (coordinator or owner), text, actor and at. --agent narrows it to one
 agent's, --agent coordinator to the coordinator's. An agent's token reads its own alone.`, stderr)
-	named := experimentFlag(fs)
+	named := command.ExperimentFlag(fs)
 	agent := fs.String("agent", "", "only the messages to this agent")
-	if err := parseNone(fs, args); err != nil {
-		return parseExit(err)
+	if err := command.ParseNone(fs, args); err != nil {
+		return command.ParseExit(err)
 	}
-	pe, err := namedExperiment(fs, c, *named)
+	pe, err := command.NamedExperiment(fs, c, *named)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	path := messagesPath(pe)
 	if *agent != "" {
 		path += "?agent_id=" + url.QueryEscape(*agent)
 	}
-	return call(c, "GET", path, nil, "messages", "no message was sent", stdout, stderr)
+	return command.Call(c, "GET", path, nil, "messages", "no message was sent", stdout, stderr)
 }
 
 func agentsFinish(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments agents finish", `usage: hl platform-experiments agents finish --reason TEXT [--blocker TEXT] [--baseline JOB]
+	fs := command.NewFlags("platform-experiments agents finish", `usage: hl platform-experiments agents finish --reason TEXT [--blocker TEXT] [--baseline JOB]
 
 --reason-file and --blocker-file read the text from a FILE, or stdin for -, in place of the
 inline flag.
@@ -267,26 +259,26 @@ platform declares as the baseline in this request. It must be your own job and p
 of a declared baseline, or the finish is refused with the reason (422) and nothing is recorded:
 fix what it says and finish again. Without --baseline the platform declares a job only when the
 baseline agents left exactly one that reports the ranking metric.`, stderr)
-	reasonFlag := newTextFlag(fs, "reason", "why nothing is left to do")
-	blockerFlag := newTextFlag(fs, "blocker", "what stops you that the time and quota left cannot fix")
+	reasonFlag := command.NewTextFlag(fs, "reason", "why nothing is left to do")
+	blockerFlag := command.NewTextFlag(fs, "blocker", "what stops you that the time and quota left cannot fix")
 	baseline := fs.String("baseline", "", "an agent of role baseline: the job of the control to declare as the baseline")
-	if err := parseNone(fs, args); err != nil {
-		return parseExit(err)
+	if err := command.ParseNone(fs, args); err != nil {
+		return command.ParseExit(err)
 	}
-	reason, err := reasonFlag.value(fs)
+	reason, err := reasonFlag.Value(fs)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
-	blocker, err := blockerFlag.value(fs)
+	blocker, err := blockerFlag.Value(fs)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	if strings.TrimSpace(reason) == "" {
-		return parseExit(misuse(fs, "want --reason or --reason-file"))
+		return command.ParseExit(command.Misuse(fs, "want --reason or --reason-file"))
 	}
-	_, pe, agent := scopeOf(c.Token)
+	_, pe, agent := apiclient.ScopeOf(c.Token)
 	if agent == "" {
-		return fail(stderr, errors.New("platform-experiments agents finish: an agent finishes itself, with its own token, and HL_TOKEN names no agent"))
+		return command.Fail(stderr, errors.New("platform-experiments agents finish: an agent finishes itself, with its own token, and HL_TOKEN names no agent"))
 	}
 	var out struct {
 		Agents []json.RawMessage `json:"agents"`
@@ -302,16 +294,16 @@ baseline agents left exactly one that reports the ranking metric.`, stderr)
 	if *baseline != "" {
 		body["baseline_job_id"] = *baseline
 	}
-	if err := c.Do("POST", agentsPath(pe)+"/"+url.PathEscape(agent)+"/finish", body, &out); err != nil {
-		if reason, _ := refusalOf(err); reason == "experiment_closed" {
+	if err := c.Do("POST", apiclient.AgentsPath(pe)+"/"+url.PathEscape(agent)+"/finish", body, &out); err != nil {
+		if reason, _ := command.RefusalOf(err); reason == "experiment_closed" {
 			fmt.Fprintln(stderr, "hl: platform-experiments agents finish: the platform experiment is closed, which ended your run: nothing needs finishing, so end your turn")
 			return 0
 		}
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
 	for _, finished := range out.Agents {
-		if err := printLine(stdout, finished); err != nil {
-			return fail(stderr, err)
+		if err := command.PrintLine(stdout, finished); err != nil {
+			return command.Fail(stderr, err)
 		}
 	}
 	if len(out.Open) > 0 {

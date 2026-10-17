@@ -24,15 +24,17 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
+
+	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 )
 
 // principalOf is the caller a test token stands for: the agent or the coordinator a derived
 // token names, and an API key for any other.
 func principalOf(token string) auth.Principal {
-	switch kind, pe, agent := scopeOf(token); kind {
-	case callerAgent:
+	switch kind, pe, agent := apiclient.ScopeOf(token); kind {
+	case apiclient.CallerAgent:
 		return auth.Principal{Kind: auth.KindAgent, PlatformExperimentID: pe, AgentID: agent}
-	case callerCoordinator:
+	case apiclient.CallerCoordinator:
 		return auth.Principal{Kind: auth.KindCoordinator, PlatformExperimentID: pe}
 	}
 	return auth.Principal{Kind: auth.KindKey}

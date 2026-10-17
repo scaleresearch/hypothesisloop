@@ -11,10 +11,12 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
+
+	"github.com/scaleresearch/hypothesisloop/cli/internal/command"
 )
 
 func cmdSituation(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("situation", `usage: hl situation [--json] [--platform-experiment PE]
+	fs := command.NewFlags("situation", `usage: hl situation [--json] [--platform-experiment PE]
 
 The platform experiment as it stands now, one line per block, each field as key=value:
   run         now, status, ends_at, minutes_left and the stage: its index and name,
@@ -47,18 +49,18 @@ The platform experiment as it stands now, one line per block, each field as key=
 An agent's token reads its own line of agents, a coordinator's every line. A field with no value
 is left out. Every figure is read when the command runs. --json prints the record as the
 platform answers it.`, stderr)
-	named := experimentFlag(fs)
+	named := command.ExperimentFlag(fs)
 	raw := fs.Bool("json", false, "print the platform's JSON record")
-	if err := parseNone(fs, args); err != nil {
-		return parseExit(err)
+	if err := command.ParseNone(fs, args); err != nil {
+		return command.ParseExit(err)
 	}
-	pe, err := namedExperiment(fs, c, *named)
+	pe, err := command.NamedExperiment(fs, c, *named)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	var out json.RawMessage
 	if err := c.Do("GET", "/platform-experiments/"+url.PathEscape(pe)+"/situation", nil, &out); err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
 	if *raw {
 		fmt.Fprintln(stdout, string(bytes.TrimSpace(out)))
@@ -66,7 +68,7 @@ platform answers it.`, stderr)
 	}
 	text, err := situationLines(out)
 	if err != nil {
-		return fail(stderr, fmt.Errorf("situation: %w", err))
+		return command.Fail(stderr, fmt.Errorf("situation: %w", err))
 	}
 	fmt.Fprint(stdout, text)
 	return 0

@@ -5,11 +5,9 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -17,13 +15,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
-
-	"go.yaml.in/yaml/v4"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 	"github.com/scaleresearch/hypothesisloop/cli/internal/watchclient"
-	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
+
+	"github.com/scaleresearch/hypothesisloop/cli/internal/command"
 )
 
 func main() {
@@ -120,7 +116,7 @@ func usage(token string) string {
 		fmt.Fprintf(&b, "  %-22s%s\n", command.name, about)
 	}
 	b.WriteString(usageRules)
-	if kindOf(token) == callerOther {
+	if apiclient.KindOf(token) == apiclient.CallerOther {
 		b.WriteString(usageOfPeople)
 	}
 	return b.String()
@@ -160,460 +156,10 @@ func runGroup(group string, subs []subcommand, c *apiclient.Client, args []strin
 	return 2
 }
 
-const (
-	orgEnv     = "HL_ORG"
-	projectEnv = "HL_PROJECT"
-)
-
-// orEnv is a flag's value, or the named environment variable when the flag was omitted.
-func orEnv(flagValue, name string) string {
-	if flagValue != "" {
-		return flagValue
-	}
-	return os.Getenv(name)
-}
-
-// printLeading prints record as printJSON does with the keys lead ahead of the others: its
-// description is long, and a reader of the first lines must not miss what it waits for.
-func printLeading(stdout io.Writer, record map[string]any, lead ...string) {
-	keys := make([]string, 0, len(record))
-	for _, key := range lead {
-		if _, has := record[key]; has {
-			keys = append(keys, key)
-		}
-	}
-	rest := make([]string, 0, len(record))
-	for key := range record {
-		if !slices.Contains(lead, key) {
-			rest = append(rest, key)
-		}
-	}
-	slices.Sort(rest)
-	var b bytes.Buffer
-	b.WriteString("{")
-	for i, key := range append(keys, rest...) {
-		name, _ := json.Marshal(key)
-		value, err := json.MarshalIndent(record[key], "  ", "  ")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "hl: encoding response: %s\n", err)
-			return
-		}
-		if i > 0 {
-			b.WriteString(",")
-		}
-		fmt.Fprintf(&b, "\n  %s: %s", name, value)
-	}
-	b.WriteString("\n}")
-	fmt.Fprintln(stdout, b.String())
-}
-
-// refusalOf is the reason and the message err was refused with by the platform, empty for any
-// other error.
-func refusalOf(err error) (reason, message string) {
-	var refused *apiclient.HTTPError
-	var body platformapi.ErrorModel
-	if !errors.As(err, &refused) || json.Unmarshal([]byte(refused.Body), &body) != nil {
-		return "", ""
-	}
-	return body.Reason, body.Message
-}
-
-func printJSON(stdout io.Writer, v any) {
-	data, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "hl: encoding response: %s\n", err)
-		return
-	}
-	fmt.Fprintln(stdout, string(data))
-}
-
-// fail prints err on one line, a JSON reply of the platform compacted like any other output.
-func fail(stderr io.Writer, err error) int {
-	var refused *apiclient.HTTPError
-	if errors.As(err, &refused) && refused.Status == http.StatusForbidden {
-		fmt.Fprintf(stderr, "hl: the platform refuses this token %s %s: %s\n", refused.Method, strings.SplitN(refused.Path, "?", 2)[0], refusalMessage([]byte(refused.Body)))
-		return 1
-	}
-	if errors.As(err, &refused) {
-		if invalid := invalidFields([]byte(refused.Body)); invalid != "" {
-			refused.Body = invalid
-		} else if problems := problemLines([]byte(refused.Body)); problems != "" {
-			refused.Body = problems
-		} else if body, jsonErr := compactJSON([]byte(refused.Body)); jsonErr == nil {
-			refused.Body = string(body)
-		}
-	}
-	fmt.Fprintf(stderr, "hl: %s\n", err)
-	return 1
-}
-
-// refusalMessage is the platform's own words in a refusal's body, or the body as it is.
-func refusalMessage(body []byte) string {
-	var refusal platformapi.ErrorModel
-	if json.Unmarshal(body, &refusal) == nil && refusal.Message != "" {
-		return refusal.Message
-	}
-	return strings.TrimSpace(string(body))
-}
-
-// invalidFields is what a request refused for its shape got wrong, one clause per field: where
-// and what. The API's answer also carries the whole value it read at each place, which for a
-// missing field is the request itself and buries the one line that matters. Empty for an answer
-// that lists no fields.
-func invalidFields(body []byte) string {
-	var problem struct {
-		Errors []struct {
-			Message  string `json:"message"`
-			Location string `json:"location"`
-		} `json:"errors"`
-	}
-	if json.Unmarshal(body, &problem) != nil || len(problem.Errors) == 0 {
-		return ""
-	}
-	clauses := make([]string, 0, len(problem.Errors))
-	for _, e := range problem.Errors {
-		clause := e.Message
-		if e.Location != "" {
-			clause = strings.TrimPrefix(e.Location, "body.") + ": " + e.Message
-		}
-		clauses = append(clauses, clause)
-	}
-	return strings.Join(clauses, "; ")
-}
-
-// problemLines is a refusal that holds several problems, one line each, reason first, so all of
-// them are fixed in one pass. Empty for an answer with fewer than two.
-func problemLines(body []byte) string {
-	var refusal struct {
-		Problems []struct {
-			Reason  string `json:"reason"`
-			Message string `json:"message"`
-		} `json:"problems"`
-	}
-	if json.Unmarshal(body, &refusal) != nil || len(refusal.Problems) < 2 {
-		return ""
-	}
-	lines := []string{fmt.Sprintf("%d problems, fix them all:", len(refusal.Problems))}
-	for _, p := range refusal.Problems {
-		lines = append(lines, "  "+p.Reason+": "+p.Message)
-	}
-	return strings.Join(lines, "\n")
-}
-
-// flagSet answers -h with the command's help and any misuse with one error line and the synopsis,
-// the first paragraph of the help.
-type flagSet struct {
-	*flag.FlagSet
-	help   string
-	stderr io.Writer
-	// stdinReader names the flag that read stdin, which only one can.
-	stdinReader string
-}
-
-func newFlags(name, help string, stderr io.Writer) *flagSet {
-	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	fs.Usage = func() {}
-	return &flagSet{FlagSet: fs, help: help, stderr: stderr}
-}
-
-func (fs *flagSet) Parse(args []string) error {
-	err := fs.FlagSet.Parse(args)
-	if errors.Is(err, flag.ErrHelp) {
-		fmt.Fprintln(fs.stderr, fs.help)
-		fs.printFlags()
-		return err
-	}
-	if err != nil && strings.HasSuffix(err.Error(), "not defined: -platform-experiment") {
-		fmt.Fprintf(fs.stderr, "hl: %s: takes no --platform-experiment, leave it out: an ID is found on the whole platform, and a command given none is not about one platform experiment\n", fs.Name())
-		return errUsage
-	}
-	if err != nil {
-		return misuse(fs, "%s", asTyped(err.Error(), args))
-	}
-	return nil
-}
-
-// asTyped is a flag error of the standard library, which names every flag with one dash, naming
-// the flag the way args spelled it.
-func asTyped(msg string, args []string) string {
-	for _, arg := range args {
-		spelled, _, _ := strings.Cut(arg, "=")
-		if !strings.HasPrefix(spelled, "--") {
-			continue
-		}
-		if one := spelled[1:]; strings.HasSuffix(msg, ": "+one) {
-			return strings.TrimSuffix(msg, one) + spelled
-		} else if strings.Contains(msg, " "+one+": ") {
-			return strings.Replace(msg, " "+one+": ", " "+spelled+": ", 1)
-		}
-	}
-	return msg
-}
-
-// printFlags lists the flags except the aliases, which are registered with an empty usage.
-func (fs *flagSet) printFlags() {
-	header := false
-	fs.VisitAll(func(f *flag.Flag) {
-		if f.Usage == "" {
-			return
-		}
-		if !header {
-			fmt.Fprintln(fs.stderr, "\nflags:")
-			header = true
-		}
-		name, help := flag.UnquoteUsage(f)
-		if name != "" {
-			name = " " + name
-		}
-		fmt.Fprintf(fs.stderr, "  --%s%s\n      %s\n", f.Name, name, help)
-	})
-}
-
-// textFlag is free text given inline as --NAME or read by --NAME-file from a file, or stdin for -,
-// where a shell neither expands nor splits it.
-type textFlag struct {
-	name   string
-	inline *string
-	file   *string
-}
-
-func newTextFlag(fs *flagSet, name, usage string) *textFlag {
-	return &textFlag{
-		name:   name,
-		inline: fs.String(name, "", usage),
-		file:   fs.String(name+"-file", "", "read --"+name+" from this `file`, - for stdin (a quoted heredoc: <<'EOF')"),
-	}
-}
-
-// value is the text given by either flag, its trailing whitespace dropped, and empty when neither
-// was. Giving both, or a file that holds no text, is a misuse.
-func (t *textFlag) value(fs *flagSet) (string, error) {
-	if *t.file == "" {
-		return *t.inline, nil
-	}
-	if *t.inline != "" {
-		return "", misuse(fs, "--%s and --%s-file are two ways to say one thing: give one", t.name, t.name)
-	}
-	var raw []byte
-	var err error
-	if *t.file == "-" {
-		if err := fs.claimStdin("--" + t.name + "-file -"); err != nil {
-			return "", err
-		}
-		raw, err = io.ReadAll(os.Stdin)
-	} else {
-		raw, err = os.ReadFile(*t.file)
-	}
-	if err != nil {
-		return "", misuse(fs, "--%s-file: %s", t.name, err)
-	}
-	text := strings.TrimRightFunc(string(raw), unicode.IsSpace)
-	if strings.TrimSpace(text) == "" {
-		return "", misuse(fs, "--%s-file %s holds no text", t.name, *t.file)
-	}
-	return text, nil
-}
-
-// claimStdin records that what reads stdin, a misuse when another argument already does.
-func (fs *flagSet) claimStdin(what string) error {
-	if fs.stdinReader != "" {
-		return misuse(fs, "%s and %s both read stdin: give one of them a file", fs.stdinReader, what)
-	}
-	fs.stdinReader = what
-	return nil
-}
-
-var errUsage = errors.New("usage")
-
-// misuse reports a wrong invocation followed by the command's synopsis.
-func misuse(fs *flagSet, format string, a ...any) error {
-	synopsis, _, _ := strings.Cut(fs.help, "\n\n")
-	fmt.Fprintf(fs.stderr, "hl: %s: %s\n%s\n", fs.Name(), fmt.Sprintf(format, a...), synopsis)
-	return errUsage
-}
-
-// parseArgs parses flags placed before, between or after the positional arguments.
-func parseArgs(fs *flagSet, args []string) ([]string, error) {
-	var positional []string
-	for {
-		if err := fs.Parse(args); err != nil {
-			return nil, err
-		}
-		args = fs.Args()
-		if len(args) == 0 {
-			return positional, nil
-		}
-		positional = append(positional, args[0])
-		args = args[1:]
-	}
-}
-
-// parseOperands returns the positional arguments followed by the values of the alias flags, which
-// take the same arguments so that a first guess at the form works: hl job status ID and --id ID.
-func parseOperands(fs *flagSet, argv []string, aliases ...string) ([]string, error) {
-	var flagged stringList
-	for _, name := range aliases {
-		fs.Var(&flagged, name, "")
-	}
-	positional, err := parseArgs(fs, argv)
-	if err != nil {
-		return nil, err
-	}
-	return append(positional, flagged...), nil
-}
-
-// parseOne is parseOperands for a command taking exactly one operand; def stands in for a missing
-// one when set.
-func parseOne(fs *flagSet, argv []string, what, def string, aliases ...string) (string, error) {
-	got, err := parseOperands(fs, argv, aliases...)
-	if err != nil {
-		return "", err
-	}
-	if len(got) == 0 && def != "" {
-		return def, nil
-	}
-	if len(got) != 1 {
-		return "", misuse(fs, "want one %s, got %d", what, len(got))
-	}
-	return got[0], nil
-}
-
-// experimentFlag registers --platform-experiment, the one way a command names its platform
-// experiment. It is never an operand and has no shorter spelling.
-func experimentFlag(fs *flagSet) *string {
-	return fs.String("platform-experiment", "", "the platform experiment (default the token's)")
-}
-
-// namedExperiment is the platform experiment a command works in (see experimentOf), or a misuse
-// when nothing names one.
-func namedExperiment(fs *flagSet, c *apiclient.Client, flagValue string) (string, error) {
-	if id := experimentOf(c, flagValue); id != "" {
-		return id, nil
-	}
-	return "", misuse(fs, "want --platform-experiment: HL_TOKEN names none")
-}
-
-// parseExit is the exit code for a parse error: 0 for an explicit -h or --help, else 2.
-func parseExit(err error) int {
-	if errors.Is(err, flag.ErrHelp) {
-		return 0
-	}
-	return 2
-}
-
-// printLines prints a JSON response compactly: an array one element per line, anything else on
-// one line, each through compactJSON. An empty array prints none to stderr, so that no output is
-// never mistaken for a command that did nothing.
-func printLines(stdout, stderr io.Writer, none string, raw json.RawMessage, drop ...string) error {
-	if trimmed := bytes.TrimSpace(raw); len(trimmed) > 0 && trimmed[0] == '[' {
-		var items []json.RawMessage
-		if err := json.Unmarshal(trimmed, &items); err != nil {
-			return fmt.Errorf("response is not JSON: %w", err)
-		}
-		if len(items) == 0 {
-			fmt.Fprintf(stderr, "hl: %s\n", none)
-		}
-		for _, item := range items {
-			if err := printLine(stdout, item, drop...); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	return printLine(stdout, raw, drop...)
-}
-
-func printLine(stdout io.Writer, raw json.RawMessage, drop ...string) error {
-	line, err := compactJSON(raw, drop...)
-	if err != nil {
-		return fmt.Errorf("response is not JSON: %w", err)
-	}
-	_, err = fmt.Fprintf(stdout, "%s\n", line)
-	return err
-}
-
-// compactJSON re-encodes raw on one line in its own key order, leaving out every null,
-// "" and {} value, and the named keys of the top-level object.
-func compactJSON(raw []byte, drop ...string) ([]byte, error) {
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	var b bytes.Buffer
-	if err := writeValue(dec, &b, drop); err != nil {
-		return nil, err
-	}
-	return b.Bytes(), nil
-}
-
-func writeValue(dec *json.Decoder, b *bytes.Buffer, drop []string) error {
-	tok, err := dec.Token()
-	if err != nil {
-		return err
-	}
-	switch t := tok.(type) {
-	case json.Delim:
-		if t == '[' {
-			b.WriteByte('[')
-			for i := 0; dec.More(); i++ {
-				if i > 0 {
-					b.WriteByte(',')
-				}
-				if err := writeValue(dec, b, nil); err != nil {
-					return err
-				}
-			}
-			b.WriteByte(']')
-		} else {
-			b.WriteByte('{')
-			n := 0
-			for dec.More() {
-				keyTok, err := dec.Token()
-				if err != nil {
-					return err
-				}
-				key, _ := keyTok.(string)
-				var v bytes.Buffer
-				if err := writeValue(dec, &v, nil); err != nil {
-					return err
-				}
-				if s := v.String(); slices.Contains(drop, key) || s == "null" || s == `""` || s == "{}" {
-					continue
-				}
-				if n > 0 {
-					b.WriteByte(',')
-				}
-				writeString(b, key)
-				b.WriteByte(':')
-				b.Write(v.Bytes())
-				n++
-			}
-			b.WriteByte('}')
-		}
-		_, err := dec.Token()
-		return err
-	case string:
-		writeString(b, t)
-	case json.Number:
-		b.WriteString(t.String())
-	case bool:
-		b.WriteString(strconv.FormatBool(t))
-	case nil:
-		b.WriteString("null")
-	}
-	return nil
-}
-
-func writeString(b *bytes.Buffer, s string) {
-	enc := json.NewEncoder(b)
-	enc.SetEscapeHTML(false)
-	_ = enc.Encode(s)
-	b.Truncate(b.Len() - 1)
-}
-
 // --- register ----------------------------------------------------------------------------------
 
 func cmdDataKey(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("data-key", `usage: hl data-key [--platform-experiment PE] [--agent A]
+	fs := command.NewFlags("data-key", `usage: hl data-key [--platform-experiment PE] [--agent A]
 
 Your own S3 key to the platform experiment's data, as export lines: eval "$(hl data-key)".
 It reads everything under $HYPOTHESISLOOP_DATA_SHARED and writes under $HYPOTHESISLOOP_DATA_URI,
@@ -624,12 +170,12 @@ same key every time; it does not expire. Any S3 client works:
 	pe := fs.String("platform-experiment", "", "platform experiment id (default the token's)")
 	agent := fs.String("agent", "", "whose key it is, for a person or an API key; an agent's token says it")
 	if err := fs.Parse(args); err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
-	*pe = experimentOf(c, *pe)
-	*agent = agentOf(c, *agent)
+	*pe = c.Experiment(*pe)
+	*agent = c.Agent(*agent)
 	if *pe == "" || *agent == "" || fs.NArg() > 0 {
-		return parseExit(misuse(fs, "--platform-experiment and --agent are required, and nothing else"))
+		return command.ParseExit(command.Misuse(fs, "--platform-experiment and --agent are required, and nothing else"))
 	}
 	var out struct {
 		URI             string `json:"uri"`
@@ -640,7 +186,7 @@ same key every time; it does not expire. Any S3 client works:
 		SecretAccessKey string `json:"secret_access_key"`
 	}
 	if err := c.Do("POST", "/platform-experiments/"+url.PathEscape(*pe)+"/data-key", map[string]string{"agent_id": *agent}, &out); err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
 	for _, v := range [][2]string{
 		{"AWS_ACCESS_KEY_ID", out.AccessKeyID},
@@ -681,7 +227,7 @@ func cmdPlatformExperiments(c *apiclient.Client, args []string, stdout, stderr i
 }
 
 func cmdPlatformExperimentsList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments list", `usage: hl platform-experiments list [--limit N] [--offset N] [--project PROJECT] [--shared[=false]]
+	fs := command.NewFlags("platform-experiments list", `usage: hl platform-experiments list [--limit N] [--offset N] [--project PROJECT] [--shared[=false]]
 
 One platform experiment per line as compact JSON, without description and summary
 (hl platform-experiments get prints both). A closed one carries close_reason.
@@ -691,16 +237,16 @@ hl platform-experiments with no command is this list.`, stderr)
 	project := fs.String("project", "", "only this project's platform experiments (default $HL_PROJECT)")
 	shared := fs.Bool("shared", false, "only the platform experiments the platform shows every account, or with --shared=false none of them. Without it both are listed, the shared ones marked \"shared\": true. Read those like your own, write nothing to them")
 	if err := fs.Parse(args); err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	if fs.NArg() > 0 {
-		return parseExit(misuse(fs, "unexpected argument %q", fs.Arg(0)))
+		return command.ParseExit(command.Misuse(fs, "unexpected argument %q", fs.Arg(0)))
 	}
 	q := url.Values{"limit": {strconv.Itoa(*limit)}}
 	if *offset != 0 {
 		q.Set("offset", strconv.Itoa(*offset))
 	}
-	if p := orEnv(*project, projectEnv); p != "" {
+	if p := command.OrEnv(*project, command.ProjectEnv); p != "" {
 		q.Set("project_id", p)
 	}
 	fs.Visit(func(f *flag.Flag) {
@@ -711,14 +257,14 @@ hl platform-experiments with no command is this list.`, stderr)
 	var out json.RawMessage
 	header, err := c.DoHeader("GET", "/platform-experiments?"+q.Encode(), nil, &out)
 	if err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
-	if err := printLines(stdout, stderr, "platform-experiments list: none", out, "description", "summary"); err != nil {
-		return fail(stderr, err)
+	if err := command.PrintLines(stdout, stderr, "platform-experiments list: none", out, "description", "summary"); err != nil {
+		return command.Fail(stderr, err)
 	}
 	var shown []json.RawMessage
 	_ = json.Unmarshal(out, &shown)
-	pageNotice(stderr, "platform-experiments list", header, *offset, len(shown))
+	command.PageNotice(stderr, "platform-experiments list", header, *offset, len(shown))
 	return 0
 }
 
@@ -727,7 +273,7 @@ hl platform-experiments with no command is this list.`, stderr)
 // including metrics is editable; once running, only name, description, duration_hours and the
 // baseline are.
 func cmdPlatformExperimentsUpdate(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments update", `usage: hl platform-experiments update [--platform-experiment PE] [--description TEXT | --description-file FILE|-] [--baseline-job JOB [--reason TEXT | --reason-file FILE|-]] [--name NAME] [FIELDS.yaml]
+	fs := command.NewFlags("platform-experiments update", `usage: hl platform-experiments update [--platform-experiment PE] [--description TEXT | --description-file FILE|-] [--baseline-job JOB [--reason TEXT | --reason-file FILE|-]] [--name NAME] [FIELDS.yaml]
 
 Changes the fields you name and no other. A coordinator's token changes the description and
 declares or raises the baseline, nothing else.
@@ -762,38 +308,38 @@ description, duration_hours, max_agents and researchers once it runs. The result
 non-empty. Once it runs, max_agents below the researchers at work cuts the newest of them
 (agent.cut with detail max_agents_lowered) and nobody takes their places; before that it is
 409 max_agents_below_researchers, which says how many are signed up.`, stderr)
-	pe := experimentFlag(fs)
+	pe := command.ExperimentFlag(fs)
 	name := fs.String("name", "", "the new name")
-	descriptionFlag := newTextFlag(fs, "description", "the new description")
+	descriptionFlag := command.NewTextFlag(fs, "description", "the new description")
 	baselineJob := fs.String("baseline-job", "", "the completed `job` that measured the baseline")
-	reasonFlag := newTextFlag(fs, "reason", "with --baseline-job on a running experiment: why the baseline is raised to it")
-	operands, err := parseArgs(fs, args)
+	reasonFlag := command.NewTextFlag(fs, "reason", "with --baseline-job on a running experiment: why the baseline is raised to it")
+	operands, err := command.ParseArgs(fs, args)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	if len(operands) > 1 {
-		return parseExit(misuse(fs, "want at most one FIELDS.yaml, got %d operands: the platform experiment is --platform-experiment", len(operands)))
+		return command.ParseExit(command.Misuse(fs, "want at most one FIELDS.yaml, got %d operands: the platform experiment is --platform-experiment", len(operands)))
 	}
-	id, err := namedExperiment(fs, c, *pe)
+	id, err := command.NamedExperiment(fs, c, *pe)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
-	description, err := descriptionFlag.value(fs)
+	description, err := descriptionFlag.Value(fs)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
-	reason, err := reasonFlag.value(fs)
+	reason, err := reasonFlag.Value(fs)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	body := map[string]any{}
 	if len(operands) == 1 {
 		if operands[0] == "-" {
-			if err := fs.claimStdin("FIELDS.yaml -"); err != nil {
-				return parseExit(err)
+			if err := fs.ClaimStdin("FIELDS.yaml -"); err != nil {
+				return command.ParseExit(err)
 			}
 		}
-		if body, err = readYAMLBody(operands[0]); err != nil {
+		if body, err = command.ReadYAMLBody(operands[0]); err != nil {
 			fmt.Fprintf(stderr, "hl: %s\n", err)
 			return 2
 		}
@@ -811,13 +357,13 @@ non-empty. Once it runs, max_agents below the researchers at work cuts the newes
 		body["baseline_reason"] = reason
 	}
 	if len(body) == 0 {
-		return parseExit(misuse(fs, "nothing to change: name a field"))
+		return command.ParseExit(command.Misuse(fs, "nothing to change: name a field"))
 	}
 	var out map[string]any
 	if err := c.Do("PATCH", "/platform-experiments/"+url.PathEscape(id), body, &out); err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
-	printJSON(stdout, out)
+	command.PrintJSON(stdout, out)
 	switch {
 	case reason != "":
 		fmt.Fprintf(stderr, "hl: platform-experiments update: the baseline is raised to job %v, every agent is told (platform_experiment.baseline), and results set the standings against it\n", out["baseline_job_id"])
@@ -839,7 +385,7 @@ func baselineDeclared(experiment map[string]any) string {
 }
 
 func cmdPlatformExperimentsPropose(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments propose", `usage: hl platform-experiments propose [--platform-experiment PE] [--check] [FILE|-]
+	fs := command.NewFlags("platform-experiments propose", `usage: hl platform-experiments propose [--platform-experiment PE] [--check] [FILE|-]
 
 For the planner of a draft. A proposal defines the experiment and runs nothing: no job, no
 code. --check runs the platform's whole check of FILE and stores nothing: it prints every
@@ -926,24 +472,24 @@ for a cpu, memory or storage that is no quantity. Without --check, one that pass
 once, replaces the one before and is what the person is asked to accept, so propose only the
 finished proposal. Your machine is kept some minutes after it, and a change of the goal the
 person makes in that time arrives as your next update.`, stderr)
-	pe := experimentFlag(fs)
+	pe := command.ExperimentFlag(fs)
 	check := fs.Bool("check", false, "check the proposal and store nothing")
-	operands, err := parseArgs(fs, args)
+	operands, err := command.ParseArgs(fs, args)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	if len(operands) > 1 {
-		return parseExit(misuse(fs, "want at most one FILE, got %d operands", len(operands)))
+		return command.ParseExit(command.Misuse(fs, "want at most one FILE, got %d operands", len(operands)))
 	}
-	id, err := namedExperiment(fs, c, *pe)
+	id, err := command.NamedExperiment(fs, c, *pe)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	path := "-"
 	if len(operands) == 1 {
 		path = operands[0]
 	}
-	body, err := readYAMLBody(path)
+	body, err := command.ReadYAMLBody(path)
 	if err != nil {
 		fmt.Fprintf(stderr, "hl: %s\n", err)
 		return 2
@@ -956,13 +502,13 @@ person makes in that time arrives as your next update.`, stderr)
 	}
 	var out any
 	if err := c.Do("PUT", path, body, &out); err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
 	if *check {
 		fmt.Fprintln(stdout, "the proposal passes every check; nothing is stored. Propose it without --check when it is the one you mean.")
 		return 0
 	}
-	printJSON(stdout, out)
+	command.PrintJSON(stdout, out)
 	return 0
 }
 
@@ -988,43 +534,43 @@ func textsAsLists(body map[string]any) {
 }
 
 func cmdPlatformExperimentsDecline(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments decline", `usage: hl platform-experiments decline [--platform-experiment PE] --goal-version N --reason TEXT | --reason-file FILE|-
+	fs := command.NewFlags("platform-experiments decline", `usage: hl platform-experiments decline [--platform-experiment PE] --goal-version N --reason TEXT | --reason-file FILE|-
 
 For the planner of a draft, when the goal cannot be made into an experiment: nothing measurable,
 or nothing this platform can run. The reason is shown to the person who wrote the goal in place
 of a proposal, so say in plain words why, and what would make it plannable. A proposal you made
 before no longer stands. --goal-version is the draft's goal_version you answer: a decline of an
 older goal is refused with goal_changed. The person may change the goal, which starts you again.`, stderr)
-	pe := experimentFlag(fs)
+	pe := command.ExperimentFlag(fs)
 	goalVersion := fs.Int("goal-version", 0, "the draft's goal_version the decline answers")
-	reasonFlag := newTextFlag(fs, "reason", "why no experiment is proposed")
-	if err := parseNone(fs, args); err != nil {
-		return parseExit(err)
+	reasonFlag := command.NewTextFlag(fs, "reason", "why no experiment is proposed")
+	if err := command.ParseNone(fs, args); err != nil {
+		return command.ParseExit(err)
 	}
 	if *goalVersion < 1 {
-		return parseExit(misuse(fs, "want --goal-version, the draft's goal_version"))
+		return command.ParseExit(command.Misuse(fs, "want --goal-version, the draft's goal_version"))
 	}
-	reason, err := reasonFlag.value(fs)
+	reason, err := reasonFlag.Value(fs)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	if strings.TrimSpace(reason) == "" {
-		return parseExit(misuse(fs, "want --reason"))
+		return command.ParseExit(command.Misuse(fs, "want --reason"))
 	}
-	id, err := namedExperiment(fs, c, *pe)
+	id, err := command.NamedExperiment(fs, c, *pe)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	var out any
 	if err := c.Do("PUT", "/platform-experiments/"+url.PathEscape(id)+"/decline", map[string]any{"reason": reason, "goal_version": *goalVersion}, &out); err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
-	printJSON(stdout, out)
+	command.PrintJSON(stdout, out)
 	return 0
 }
 
 func cmdPlatformExperimentsGet(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments get", `usage: hl platform-experiments get [--platform-experiment PE]
+	fs := command.NewFlags("platform-experiments get", `usage: hl platform-experiments get [--platform-experiment PE]
 
 The platform experiment: its status, description, metrics, stages and current_stage, and in
 consumed_accelerator_hours what it spent of its budget. While it is open, stages are the ones
@@ -1057,17 +603,17 @@ On an open one the message begins with your own next step, worded for your token
 a coordinator or a person runs, what a baseline agent measures, or that a researcher's jobs
 are refused until the start. status_reason is printed ahead of the record with id and status,
 and nothing is written beside the JSON, so the output parses whole.`, stderr)
-	pe := experimentFlag(fs)
-	if err := parseNone(fs, args); err != nil {
-		return parseExit(err)
+	pe := command.ExperimentFlag(fs)
+	if err := command.ParseNone(fs, args); err != nil {
+		return command.ParseExit(err)
 	}
-	id, err := namedExperiment(fs, c, *pe)
+	id, err := command.NamedExperiment(fs, c, *pe)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	var out map[string]any
 	if err := c.Do("GET", "/platform-experiments/"+url.PathEscape(id), nil, &out); err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
 	if job, _ := out["baseline_job_id"].(string); job != "" {
 		var baseline struct {
@@ -1075,16 +621,16 @@ and nothing is written beside the JSON, so the output parses whole.`, stderr)
 			CodeRef string `json:"code_ref"`
 		}
 		if err := c.Do("GET", "/experiments/"+url.PathEscape(job), nil, &baseline); err != nil {
-			return fail(stderr, fmt.Errorf("reading the baseline job %s: %w", job, err))
+			return command.Fail(stderr, fmt.Errorf("reading the baseline job %s: %w", job, err))
 		}
 		out["baseline_branch"], out["baseline_code_ref"] = baseline.Branch, baseline.CodeRef
 	}
-	printLeading(stdout, out, "id", "status", "status_reason")
+	command.PrintLeading(stdout, out, "id", "status", "status_reason")
 	return 0
 }
 
 func cmdPlatformExperimentsHealth(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments health", `usage: hl platform-experiments health [--platform-experiment PE]
+	fs := command.NewFlags("platform-experiments health", `usage: hl platform-experiments health [--platform-experiment PE]
 
 Where each agent of the platform experiment, and its hosted coordinator, last stood, one line
 each as compact JSON, as the metrics store recorded it while the run was open or running:
@@ -1094,45 +640,45 @@ coordinator_messages sent to it, and for a hosted agent rate_limit_utilization, 
 its model account's rate limit used, and while the model provider refuses its calls
 rate_limited_until, when the limit resets: it waits until then and resumes. The coordinator's
 line has role coordinator and no agent_id.`, stderr)
-	pe := experimentFlag(fs)
-	if err := parseNone(fs, args); err != nil {
-		return parseExit(err)
+	pe := command.ExperimentFlag(fs)
+	if err := command.ParseNone(fs, args); err != nil {
+		return command.ParseExit(err)
 	}
-	id, err := namedExperiment(fs, c, *pe)
+	id, err := command.NamedExperiment(fs, c, *pe)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	var out struct {
 		Agents json.RawMessage `json:"agents"`
 	}
 	if err := c.Do("GET", "/platform-experiments/"+url.PathEscape(id)+"/health", nil, &out); err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
-	if err := printLines(stdout, stderr, "platform-experiments health: nothing recorded yet", out.Agents); err != nil {
-		return fail(stderr, err)
+	if err := command.PrintLines(stdout, stderr, "platform-experiments health: nothing recorded yet", out.Agents); err != nil {
+		return command.Fail(stderr, err)
 	}
 	return 0
 }
 
 func cmdPlatformExperimentsClose(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments close", `usage: hl platform-experiments close [--reason TEXT | --reason-file FILE|-] [--platform-experiment PE]
+	fs := command.NewFlags("platform-experiments close", `usage: hl platform-experiments close [--reason TEXT | --reason-file FILE|-] [--platform-experiment PE]
 
 Ends the platform experiment for good: every job still running
 is evicted, nothing more is accepted, and the standings are taken from the metrics reported. Its
 summary can still be written afterwards. --reason says why: it is kept as close_message, written
 in the platform's record of the close, and told to the coordinator and the agents with the close.`, stderr)
-	reasonFlag := newTextFlag(fs, "reason", "why it is closed, in a sentence or two")
-	pe := experimentFlag(fs)
-	if err := parseNone(fs, args); err != nil {
-		return parseExit(err)
+	reasonFlag := command.NewTextFlag(fs, "reason", "why it is closed, in a sentence or two")
+	pe := command.ExperimentFlag(fs)
+	if err := command.ParseNone(fs, args); err != nil {
+		return command.ParseExit(err)
 	}
-	reason, err := reasonFlag.value(fs)
+	reason, err := reasonFlag.Value(fs)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
-	id, err := namedExperiment(fs, c, *pe)
+	id, err := command.NamedExperiment(fs, c, *pe)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	body := map[string]any{}
 	if reason != "" {
@@ -1140,14 +686,14 @@ in the platform's record of the close, and told to the coordinator and the agent
 	}
 	var out any
 	if err := c.Do("POST", "/platform-experiments/"+url.PathEscape(id)+"/close", body, &out); err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
-	printJSON(stdout, out)
+	command.PrintJSON(stdout, out)
 	return 0
 }
 
 func cmdPlatformExperimentsReopen(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments reopen", `usage: hl platform-experiments reopen [--platform-experiment PE] --ends-at TIME [--coordinator-model M]
+	fs := command.NewFlags("platform-experiments reopen", `usage: hl platform-experiments reopen [--platform-experiment PE] --ends-at TIME [--coordinator-model M]
 
 Staff only. Sets a closed platform experiment, whose run started, running again until TIME
 (RFC 3339) as the same run: its hypotheses, jobs, branches, brief, baseline and agents stay. Every
@@ -1156,20 +702,20 @@ agent whose run ended only with the close is at work again, and so is a hosted c
 it ended.`, stderr)
 	endsAt := fs.String("ends-at", "", "when the run closes again, RFC 3339")
 	model := fs.String("coordinator-model", "", "the model the hosted coordinator runs on from now (default the one it has)")
-	pe := experimentFlag(fs)
-	if err := parseNone(fs, args); err != nil {
-		return parseExit(err)
+	pe := command.ExperimentFlag(fs)
+	if err := command.ParseNone(fs, args); err != nil {
+		return command.ParseExit(err)
 	}
 	if *endsAt == "" {
-		return parseExit(misuse(fs, "want --ends-at"))
+		return command.ParseExit(command.Misuse(fs, "want --ends-at"))
 	}
 	end, err := time.Parse(time.RFC3339, *endsAt)
 	if err != nil {
-		return parseExit(misuse(fs, "--ends-at %q is no RFC 3339 time, such as 2026-10-12T18:00:00Z", *endsAt))
+		return command.ParseExit(command.Misuse(fs, "--ends-at %q is no RFC 3339 time, such as 2026-10-12T18:00:00Z", *endsAt))
 	}
-	id, err := namedExperiment(fs, c, *pe)
+	id, err := command.NamedExperiment(fs, c, *pe)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	body := map[string]any{"ends_at": end.Format(time.RFC3339)}
 	if *model != "" {
@@ -1177,148 +723,49 @@ it ended.`, stderr)
 	}
 	var out any
 	if err := c.Do("POST", "/platform-experiments/"+url.PathEscape(id)+"/reopen", body, &out); err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
-	printJSON(stdout, out)
+	command.PrintJSON(stdout, out)
 	return 0
 }
 
 func cmdPlatformExperimentsSummary(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments summary", `usage: hl platform-experiments summary [--platform-experiment PE] --text T | --text-file FILE|-
+	fs := command.NewFlags("platform-experiments summary", `usage: hl platform-experiments summary [--platform-experiment PE] --text T | --text-file FILE|-
 
 Writes the summary of the platform experiment: what the run
 found and what the next one should do differently. Each write replaces the one before, so write
 the whole text; hl platform-experiments get shows it as summary. It can be written while the
 experiment runs and after it closed.`, stderr)
-	summary := newTextFlag(fs, "text", "the summary")
-	fs.StringVar(summary.file, "file", "", "")
-	pe := experimentFlag(fs)
-	if err := parseNone(fs, args); err != nil {
-		return parseExit(err)
+	summary := command.NewTextFlag(fs, "text", "the summary")
+	fs.StringVar(summary.File, "file", "", "")
+	pe := command.ExperimentFlag(fs)
+	if err := command.ParseNone(fs, args); err != nil {
+		return command.ParseExit(err)
 	}
-	id, err := namedExperiment(fs, c, *pe)
+	id, err := command.NamedExperiment(fs, c, *pe)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
-	text, err := summary.value(fs)
+	text, err := summary.Value(fs)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	if strings.TrimSpace(text) == "" {
-		return parseExit(misuse(fs, "want --text or --text-file"))
+		return command.ParseExit(command.Misuse(fs, "want --text or --text-file"))
 	}
 	var out any
 	if err := c.Do("PUT", "/platform-experiments/"+url.PathEscape(id)+"/summary", map[string]string{"summary": text}, &out); err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
-	printJSON(stdout, out)
+	command.PrintJSON(stdout, out)
 	return 0
-}
-
-// yamlProblem is why raw is not the YAML a command reads, with where the parser stopped when
-// it says: the line, the column and what that line reads.
-func yamlProblem(raw []byte, err error) string {
-	var problem *yaml.LoadError
-	if !errors.As(err, &problem) || problem.Mark.Line == 0 {
-		return err.Error()
-	}
-	said := problem.Mark.String() + ": " + problem.Message
-	lines := strings.Split(string(raw), "\n")
-	if problem.Mark.Line > len(lines) || strings.TrimSpace(lines[problem.Mark.Line-1]) == "" {
-		return said
-	}
-	return said + ", where the line reads: " + strings.TrimSpace(lines[problem.Mark.Line-1])
-}
-
-func readYAMLBody(path string) (map[string]any, error) {
-	var raw []byte
-	var err error
-	if path == "-" {
-		raw, err = io.ReadAll(os.Stdin)
-	} else {
-		raw, err = os.ReadFile(path)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", path, err)
-	}
-	var body map[string]any
-	if err := yaml.Unmarshal(raw, &body); err != nil {
-		return nil, fmt.Errorf("%s is not valid YAML: %s", path, yamlProblem(raw, err))
-	}
-	if body == nil {
-		return nil, fmt.Errorf("expected a YAML mapping at the top level, got nothing")
-	}
-	return body, nil
-}
-
-// readYAMLItems reads the hypotheses of FILE (or stdin for "-"), one map each: a bare mapping is
-// one, a bare list of mappings one per element, and a mapping holding a listKey list one per
-// element of it, with every other top-level key the default of an item that does not set it.
-func readYAMLItems(path, listKey string) ([]map[string]any, error) {
-	var raw []byte
-	var err error
-	if path == "-" {
-		raw, err = io.ReadAll(os.Stdin)
-	} else {
-		raw, err = os.ReadFile(path)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", path, err)
-	}
-	var doc any
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("%s is not valid YAML: %s", path, yamlProblem(raw, err))
-	}
-	switch v := doc.(type) {
-	case []any:
-		return toMapSlice(v)
-	case map[string]any:
-		if list, ok := v[listKey].([]any); ok {
-			items, err := toMapSlice(list)
-			if err != nil {
-				return nil, fmt.Errorf("%s: %w", listKey, err)
-			}
-			defaults := make(map[string]any, len(v))
-			for k, val := range v {
-				if k != listKey {
-					defaults[k] = val
-				}
-			}
-			for _, item := range items {
-				for k, val := range defaults {
-					if _, exists := item[k]; !exists {
-						item[k] = val
-					}
-				}
-			}
-			return items, nil
-		}
-		if len(v) == 0 {
-			return nil, fmt.Errorf("expected a YAML mapping or list at the top level, got nothing")
-		}
-		return []map[string]any{v}, nil
-	default:
-		return nil, fmt.Errorf("expected a YAML mapping or list at the top level")
-	}
-}
-
-func toMapSlice(list []any) ([]map[string]any, error) {
-	out := make([]map[string]any, 0, len(list))
-	for i, e := range list {
-		m, ok := e.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("item %d: expected a YAML mapping, got %T", i, e)
-		}
-		out = append(out, m)
-	}
-	return out, nil
 }
 
 // --- watch -----------------------------------------------------------------------------------------
 
 func cmdWatch(client *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	apiURL, token := client.BaseURL, client.Token
-	fs := newFlags("watch", `usage: hl watch [--agent A | --all [--decisions]] [--platform-experiment PE] [--kinds K,...] [--follow | --no-wait | --wake K,...]
+	fs := command.NewFlags("watch", `usage: hl watch [--agent A | --all [--decisions]] [--platform-experiment PE] [--kinds K,...] [--follow | --no-wait | --wake K,...]
    or: hl watch --experiment JOB [--until 'status in COMPLETED,FAILED,EVICTED']
 
 Prints changes, one JSON object per line, each with its id. With an agent's token or --agent and
@@ -1343,17 +790,17 @@ than its estimate. value is the code of what it waits for (not_admitted_reason),
 	timeout := fs.Float64("timeout", 540.0, "give up after this many seconds")
 	after := fs.Int64("after", 0, "read on from the change after this id instead of the saved place")
 	if err := fs.Parse(args); err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 
 	if *experiment == "" {
 		c := apiclient.New(apiURL, token)
-		*platformExperiment = experimentOf(c, *platformExperiment)
-		if readsEveryAgent(token, *agent) {
+		*platformExperiment = c.Experiment(*platformExperiment)
+		if apiclient.ReadsEveryAgent(token, *agent) {
 			*all = true
 		}
 		if !*all {
-			*agent = agentOf(c, *agent)
+			*agent = c.Agent(*agent)
 		}
 	}
 
@@ -1377,7 +824,7 @@ than its estimate. value is the code of what it waits for (not_admitted_reason),
 			Kind string `json:"kind"`
 		}
 		if err := apiclient.New(apiURL, token).Do("GET", "/watch/kinds", nil, &kinds); err != nil {
-			return fail(stderr, err)
+			return command.Fail(stderr, err)
 		}
 		known := map[string]bool{}
 		for _, k := range kinds {

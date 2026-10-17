@@ -19,6 +19,8 @@ import (
 	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
 	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/contract/repotemplate"
+
+	"github.com/scaleresearch/hypothesisloop/cli/internal/command"
 )
 
 var repoCommands = []subcommand{
@@ -38,7 +40,7 @@ const repoFiles = `  .hypothesisloop/experiment.yaml   the experiment spec, writ
   .gitignore                        bytecode caches, virtual environments and editor files, kept out of a commit`
 
 func repoInit(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("repo init", `usage: hl repo init [--platform-experiment PE]
+	fs := command.NewFlags("repo init", `usage: hl repo init [--platform-experiment PE]
 
 Run in a clone of the experiment's repository, on a branch under hl/PE/ and never the default
 branch (a baseline agent's is hl/PE/baseline). Writes the files every experiment repository
@@ -59,43 +61,43 @@ Run again it changes nothing that is already written and says so, so it is safe 
 failure says which step failed and what the platform or git answered, and writes nothing.
 Of the agents only the baseline runs it: every other one gets the files with the baseline's
 commit (hl hypothesis checkout ID).`, stderr)
-	pe := experimentFlag(fs)
+	pe := command.ExperimentFlag(fs)
 	if err := fs.Parse(args); err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	if fs.NArg() != 0 {
-		return parseExit(misuse(fs, "hl repo init takes no argument"))
+		return command.ParseExit(command.Misuse(fs, "hl repo init takes no argument"))
 	}
 	root, err := cloneRoot()
 	if err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
-	id, err := namedExperiment(fs, c, *pe)
+	id, err := command.NamedExperiment(fs, c, *pe)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	if err := baselineOnly(c, id); err != nil {
-		return fail(stderr, fmt.Errorf("repo init: %w", err))
+		return command.Fail(stderr, fmt.Errorf("repo init: %w", err))
 	}
 	var experiment declaredExperiment
 	if err := c.Do("GET", "/platform-experiments/"+url.PathEscape(id), nil, &experiment); err != nil {
-		return fail(stderr, fmt.Errorf("repo init: reading platform experiment %s: %w", id, err))
+		return command.Fail(stderr, fmt.Errorf("repo init: reading platform experiment %s: %w", id, err))
 	}
 	started, err := startDefaultBranch(root)
 	if err != nil {
-		return fail(stderr, fmt.Errorf("repo init: %w. Nothing was written, and hl repo init can be run again", err))
+		return command.Fail(stderr, fmt.Errorf("repo init: %w. Nothing was written, and hl repo init can be run again", err))
 	}
 	if started {
 		fmt.Fprintf(stdout, "pushed %s: the repository had no branch, and its default branch is no experiment's\n", defaultBranch)
 	}
 	another, err := anotherExperiment(root, experiment)
 	if err != nil {
-		return fail(stderr, fmt.Errorf("repo init: %w", err))
+		return command.Fail(stderr, fmt.Errorf("repo init: %w", err))
 	}
 	template := repotemplate.Files()
 	files, err := experimentFiles(template, experiment)
 	if err != nil {
-		return fail(stderr, fmt.Errorf("repo init: %w", err))
+		return command.Fail(stderr, fmt.Errorf("repo init: %w", err))
 	}
 	written := started
 	for _, path := range sortedPaths(files) {
@@ -106,7 +108,7 @@ commit (hl hypothesis checkout ID).`, stderr)
 		case errors.Is(err, os.ErrNotExist):
 			did = "added    " + path
 		case err != nil:
-			return fail(stderr, err)
+			return command.Fail(stderr, err)
 		case string(existing) == files[path]:
 			did = ""
 		case path == repotemplate.ExperimentFile:
@@ -123,10 +125,10 @@ commit (hl hypothesis checkout ID).`, stderr)
 			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return fail(stderr, err)
+			return command.Fail(stderr, err)
 		}
 		if err := os.WriteFile(target, []byte(files[path]), 0o644); err != nil {
-			return fail(stderr, err)
+			return command.Fail(stderr, err)
 		}
 		fmt.Fprintln(stdout, did)
 		written = true
@@ -155,14 +157,14 @@ func baselineOnly(c *apiclient.Client, pe string) error {
 
 // agentRole is the role in pe of the agent the token is, empty for a caller that is no agent.
 func agentRole(c *apiclient.Client, pe string) (platformapi.SignupRole, error) {
-	kind, _, agent := scopeOf(c.Token)
-	if kind != callerAgent {
+	kind, _, agent := apiclient.ScopeOf(c.Token)
+	if kind != apiclient.CallerAgent {
 		return "", nil
 	}
 	var signup struct {
 		Role platformapi.SignupRole `json:"role"`
 	}
-	if err := c.Do("GET", signupPath(pe, agent), nil, &signup); err != nil {
+	if err := c.Do("GET", apiclient.SignupPath(pe, agent), nil, &signup); err != nil {
 		return "", err
 	}
 	return signup.Role, nil
@@ -328,7 +330,7 @@ func experimentFiles(template map[string]string, experiment declaredExperiment) 
 }
 
 func repoCheck(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("repo check", `usage: hl repo check [--platform-experiment PE]
+	fs := command.NewFlags("repo check", `usage: hl repo check [--platform-experiment PE]
 
 Run in a clone of the experiment's repository. Checks the working tree against the platform
 experiment: that each of the first three files below is there and valid, and that what they
@@ -357,33 +359,33 @@ Not checked: the README's text, the code the job spec runs or its baseline job, 
 platform checks when the baseline is declared (hl platform-experiments update --baseline-job).
 hl repo init writes a missing file for the baseline; any other agent gets it with the baseline's
 commit (hl hypothesis checkout ID).`, stderr)
-	pe := experimentFlag(fs)
+	pe := command.ExperimentFlag(fs)
 	if err := fs.Parse(args); err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	if fs.NArg() != 0 {
-		return parseExit(misuse(fs, "hl repo check takes no argument"))
+		return command.ParseExit(command.Misuse(fs, "hl repo check takes no argument"))
 	}
 	root, err := cloneRoot()
 	if err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
-	id, err := namedExperiment(fs, c, *pe)
+	id, err := command.NamedExperiment(fs, c, *pe)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	var experiment declaredExperiment
 	if err := c.Do("GET", "/platform-experiments/"+url.PathEscape(id), nil, &experiment); err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
 	role, err := agentRole(c, id)
 	if err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
 	clone := os.DirFS(root)
 	failures, err := notReady(clone, experiment, missingFileHint(role))
 	if err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
 	// What follows fails nothing. Code may build a metric's key, so a key no file spells out is
 	// said and not refused.
@@ -391,7 +393,7 @@ commit (hl hypothesis checkout ID).`, stderr)
 	for _, metric := range experiment.Metrics {
 		named, err := namedInClone(root, metric.Key)
 		if err != nil {
-			return fail(stderr, err)
+			return command.Fail(stderr, err)
 		}
 		if !named {
 			notes = append(notes, metricNotSpelled(metric.Key, id))
@@ -401,7 +403,7 @@ commit (hl hypothesis checkout ID).`, stderr)
 	if _, err := iofs.Stat(clone, repotemplate.MetricsHelper); err == nil {
 		helper = metricsHelperPresent
 	} else if !errors.Is(err, iofs.ErrNotExist) {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
 	notes = append(notes, helper)
 	if len(failures) > 0 {
@@ -624,7 +626,7 @@ func jobSpecGap(data []byte, experiment declaredExperiment) string {
 		Job map[string]any `yaml:"job"`
 	}
 	if err := yaml.Unmarshal(data, &file); err != nil {
-		return "is not the YAML of a job spec: " + yamlProblem(data, err)
+		return "is not the YAML of a job spec: " + command.YAMLProblem(data, err)
 	}
 	if len(file.Job) == 0 {
 		return "states no job: hl job submit --help shows the shape"

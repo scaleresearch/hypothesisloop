@@ -27,6 +27,8 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 	"github.com/scaleresearch/hypothesisloop/cli/internal/watchclient"
+
+	"github.com/scaleresearch/hypothesisloop/cli/internal/command"
 )
 
 // staged is what hl env stage leaves beside the root it extracted, and hl env run reads.
@@ -55,7 +57,7 @@ func stageDir() (string, error) {
 var stageWait = 5 * time.Second
 
 func envStage(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("env stage", `usage: hl env stage [JOB] [--platform-experiment PE] [--timeout SECONDS]
+	fs := command.NewFlags("env stage", `usage: hl env stage [JOB] [--platform-experiment PE] [--timeout SECONDS]
 
 Pulls the image job JOB runs in, its environment once built, and extracts it on this machine,
 where hl env run runs commands in it. JOB defaults to the platform experiment's baseline job, so
@@ -69,28 +71,28 @@ Staging an image already staged does nothing. Prints what it staged as one JSON 
 
 Refusals: environment_failed (the job's environment did not build: its message says why);
 run_over.`, stderr)
-	pe := experimentFlag(fs)
+	pe := command.ExperimentFlag(fs)
 	timeout := fs.Float64("timeout", 540, "give up waiting for the environment after this many `seconds`")
-	operands, err := parseOperands(fs, args)
+	operands, err := command.ParseOperands(fs, args)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	if len(operands) > 1 {
-		return parseExit(misuse(fs, "want at most one JOB, got %d", len(operands)))
+		return command.ParseExit(command.Misuse(fs, "want at most one JOB, got %d", len(operands)))
 	}
 	if *timeout <= 0 {
-		return parseExit(misuse(fs, "--timeout wants a positive number of seconds"))
+		return command.ParseExit(command.Misuse(fs, "--timeout wants a positive number of seconds"))
 	}
 	dir, err := stageDir()
 	if err != nil {
-		return fail(stderr, fmt.Errorf("env stage: %w", err))
+		return command.Fail(stderr, fmt.Errorf("env stage: %w", err))
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fail(stderr, fmt.Errorf("env stage: %w", err))
+		return command.Fail(stderr, fmt.Errorf("env stage: %w", err))
 	}
 	unlock, err := lockStage(dir)
 	if err != nil {
-		return fail(stderr, fmt.Errorf("env stage: %w", err))
+		return command.Fail(stderr, fmt.Errorf("env stage: %w", err))
 	}
 	defer unlock()
 	deadline := time.Now().Add(time.Duration(*timeout * float64(time.Second)))
@@ -102,11 +104,11 @@ run_over.`, stderr)
 			code = watchclient.TimeoutExitCode
 		}
 		_ = os.WriteFile(filepath.Join(dir, "stage.failed"), []byte(err.Error()), 0o644)
-		fail(stderr, fmt.Errorf("env stage: %w", err))
+		command.Fail(stderr, fmt.Errorf("env stage: %w", err))
 		return code
 	}
 	if err := os.Remove(filepath.Join(dir, "stage.failed")); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fail(stderr, fmt.Errorf("env stage: %w", err))
+		return command.Fail(stderr, fmt.Errorf("env stage: %w", err))
 	}
 	return printStaged(stdout, out)
 }
@@ -126,7 +128,7 @@ func stageJob(c *apiclient.Client, dir string, operands []string, pe string, dea
 		job = operands[0]
 	} else {
 		var err error
-		if job, err = baselineJob(c, experimentOf(c, pe)); err != nil {
+		if job, err = baselineJob(c, c.Experiment(pe)); err != nil {
 			return nil, err
 		}
 	}
@@ -141,7 +143,7 @@ func stageJob(c *apiclient.Client, dir string, operands []string, pe string, dea
 	}
 	for said := false; ; said = true {
 		err := c.Do("POST", "/experiments/"+url.PathEscape(job)+"/image-credentials", nil, &credential)
-		reason, message := refusalOf(err)
+		reason, message := command.RefusalOf(err)
 		if reason != "environment_not_ready" {
 			if err != nil {
 				return nil, err
@@ -544,7 +546,7 @@ func printStaged(stdout io.Writer, s *staged) int {
 }
 
 func envRun(_ *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	flags := newFlags("env run", `usage: hl env run -- COMMAND [ARG...]
+	flags := command.NewFlags("env run", `usage: hl env run -- COMMAND [ARG...]
 
 Runs COMMAND on this machine inside the image hl env stage staged, the image a job runs in, as
 root of that image, with its environment variables. Your home and /tmp are the machine's own,
@@ -557,15 +559,15 @@ tree sees it, until the tree is removed or the next stage replaces the image. Th
 imports, and what needs the device fails. With nothing staged yet it waits for the hl env stage
 running now, and says why when none is. Exits with COMMAND's status.`, stderr)
 	if err := flags.Parse(args); err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
-	command := flags.Args()
-	if len(command) == 0 {
-		return parseExit(misuse(flags, "no COMMAND: hl env run -- COMMAND"))
+	commandLine := flags.Args()
+	if len(commandLine) == 0 {
+		return command.ParseExit(command.Misuse(flags, "no COMMAND: hl env run -- COMMAND"))
 	}
 	dir, err := stageDir()
 	if err != nil {
-		return fail(stderr, fmt.Errorf("env run: %w", err))
+		return command.Fail(stderr, fmt.Errorf("env run: %w", err))
 	}
 	s, held, err := holdStaged(dir)
 	if errors.Is(err, fs.ErrNotExist) && awaitStage(dir, stderr) {
@@ -576,33 +578,33 @@ running now, and says why when none is. Exits with COMMAND's status.`, stderr)
 		if failed, readErr := os.ReadFile(filepath.Join(dir, "stage.failed")); readErr == nil {
 			why = "the last hl env stage failed: " + string(failed)
 		}
-		return fail(stderr, fmt.Errorf("env run: nothing is staged on this machine, as %s. Run hl env stage for the baseline's image, or hl env stage JOB for a job of yours, then this again", why))
+		return command.Fail(stderr, fmt.Errorf("env run: nothing is staged on this machine, as %s. Run hl env stage for the baseline's image, or hl env stage JOB for a job of yours, then this again", why))
 	}
 	if err != nil {
-		return fail(stderr, fmt.Errorf("env run: %w", err))
+		return command.Fail(stderr, fmt.Errorf("env run: %w", err))
 	}
 	bwrap, err := exec.LookPath("bwrap")
 	if err != nil {
-		return fail(stderr, errors.New("env run: needs bubblewrap (bwrap) on PATH, on Linux"))
+		return command.Fail(stderr, errors.New("env run: needs bubblewrap (bwrap) on PATH, on Linux"))
 	}
 	wd, err := sharedWorkingDirectory()
 	if err != nil {
-		return fail(stderr, fmt.Errorf("env run: %w", err))
+		return command.Fail(stderr, fmt.Errorf("env run: %w", err))
 	}
 	sweepOverlays(dir, s.Root, stderr)
 	view, err := mountOverlay(dir, s.Root, worktreeOf(wd))
 	if err != nil {
-		return fail(stderr, fmt.Errorf("env run: %w", err))
+		return command.Fail(stderr, fmt.Errorf("env run: %w", err))
 	}
 	argv, err := sandboxArgs(s, view, wd)
 	if err != nil {
-		return fail(stderr, fmt.Errorf("env run: %w", err))
+		return command.Fail(stderr, fmt.Errorf("env run: %w", err))
 	}
 	if err := keepAcrossExec(held); err != nil {
-		return fail(stderr, fmt.Errorf("env run: %w", err))
+		return command.Fail(stderr, fmt.Errorf("env run: %w", err))
 	}
-	if err := syscall.Exec(bwrap, append(append([]string{"bwrap"}, argv...), command...), nil); err != nil {
-		return fail(stderr, fmt.Errorf("env run: %w", err))
+	if err := syscall.Exec(bwrap, append(append([]string{"bwrap"}, argv...), commandLine...), nil); err != nil {
+		return command.Fail(stderr, fmt.Errorf("env run: %w", err))
 	}
 	return 0
 }

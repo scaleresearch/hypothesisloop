@@ -10,10 +10,12 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
+
+	"github.com/scaleresearch/hypothesisloop/cli/internal/command"
 )
 
 func agentsSession(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments agents session", `usage: hl platform-experiments agents session [--platform-experiment PE] AGENT|coordinator|planner > session.tar.gz
+	fs := command.NewFlags("platform-experiments agents session", `usage: hl platform-experiments agents session [--platform-experiment PE] AGENT|coordinator|planner > session.tar.gz
 
 Writes the model session last stored to standard output, byte for byte: what its owner said and
 saw, as its harness packed it. AGENT is an agent's id, coordinator the hosted coordinator and
@@ -24,23 +26,23 @@ the model's transcript as JSON lines under model-home/:
 
 Read by the agent itself and by the org that owns the platform experiment, while it runs and
 after it has closed. One that stored none yet is not found.`, stderr)
-	named := experimentFlag(fs)
-	who, err := parseOne(fs, args, "AGENT, coordinator or planner", "", "agent")
+	named := command.ExperimentFlag(fs)
+	who, err := command.ParseOne(fs, args, "AGENT, coordinator or planner", "", "agent")
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
-	pe, err := namedExperiment(fs, c, *named)
+	pe, err := command.NamedExperiment(fs, c, *named)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
-	path := agentsPath(pe) + "/" + url.PathEscape(who) + "/session"
+	path := apiclient.AgentsPath(pe) + "/" + url.PathEscape(who) + "/session"
 	switch who {
 	case "coordinator":
 		path = "/platform-experiments/" + url.PathEscape(pe) + "/coordinator/session"
 	case "planner":
 		roles, err := rolesOf(c, pe)
 		if err != nil {
-			return fail(stderr, err)
+			return command.Fail(stderr, err)
 		}
 		planner := ""
 		for id, role := range roles {
@@ -49,12 +51,12 @@ after it has closed. One that stored none yet is not found.`, stderr)
 			}
 		}
 		if planner == "" {
-			return fail(stderr, fmt.Errorf("platform experiment %s has no planner: only one that began as a draft has", pe))
+			return command.Fail(stderr, fmt.Errorf("platform experiment %s has no planner: only one that began as a draft has", pe))
 		}
-		path = agentsPath(pe) + "/" + url.PathEscape(planner) + "/session"
+		path = apiclient.AgentsPath(pe) + "/" + url.PathEscape(planner) + "/session"
 	}
 	if err := copyBytes(c, path, stdout); err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
 	return 0
 }

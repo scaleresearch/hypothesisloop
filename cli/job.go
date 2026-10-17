@@ -17,6 +17,8 @@ import (
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 	"github.com/scaleresearch/hypothesisloop/cli/internal/watchclient"
 	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
+
+	"github.com/scaleresearch/hypothesisloop/cli/internal/command"
 )
 
 var jobCommands = []subcommand{
@@ -38,7 +40,7 @@ var jobCommands = []subcommand{
 }
 
 func jobSubmit(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("job submit", `usage: hl job submit [FILE|-] [--hypothesis ID] [--theory T | --theory-file FILE|-] [--env K=V ...] [--estimated-duration-hours H] [--capacity-tier guaranteed|burst] [--secret-env NAME ...] [--repeat N]
+	fs := command.NewFlags("job submit", `usage: hl job submit [FILE|-] [--hypothesis ID] [--theory T | --theory-file FILE|-] [--env K=V ...] [--estimated-duration-hours H] [--capacity-tier guaranteed|burst] [--secret-env NAME ...] [--repeat N]
 
 FILE is a YAML job spec (metadata, job). The flags override it for this submission, so one
 committed spec serves every job that differs in hypothesis, env, estimate or tier. Prints the
@@ -104,30 +106,30 @@ Every other field: $HL_REFERENCE/experiment-submission.yaml.`, stderr)
 		"platform_experiment_id": fs.String("platform-experiment", "", "sets metadata.platform_experiment_id (default the file's, then the token's)"),
 		"capacity_tier":          fs.String("capacity-tier", "", "sets metadata.capacity_tier: guaranteed or burst"),
 	}
-	theoryFlag := newTextFlag(fs, "theory", "sets metadata.theory")
+	theoryFlag := command.NewTextFlag(fs, "theory", "sets metadata.theory")
 	estimate := fs.String("estimated-duration-hours", "", "sets metadata.estimated_duration_hours, the `hours` this job is expected to run")
 	repeat := fs.Int("repeat", 1, "which job of this same request it is: 2 for a second run of what was already submitted, `N` for the Nth")
-	var env stringList
+	var env command.StringList
 	fs.Var(&env, "env", "job.env entry as `K=V`, repeat per variable")
-	var secretEnv stringList
+	var secretEnv command.StringList
 	fs.Var(&secretEnv, "secret-env", "job.secret_env entry by `NAME`, its value read from $NAME here; repeat per variable")
-	path, err := parseOne(fs, args, "FILE", "-")
+	path, err := command.ParseOne(fs, args, "FILE", "-")
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
-	if *agent = agentOf(c, *agent); *agent == "" {
-		return parseExit(misuse(fs, "--agent is required: HL_TOKEN is no agent's token, so say whose job this is"))
+	if *agent = c.Agent(*agent); *agent == "" {
+		return command.ParseExit(command.Misuse(fs, "--agent is required: HL_TOKEN is no agent's token, so say whose job this is"))
 	}
-	theory, err := theoryFlag.value(fs)
+	theory, err := theoryFlag.Value(fs)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	if path == "-" {
-		if err := fs.claimStdin("FILE - (the job spec, read from stdin when no FILE is named)"); err != nil {
-			return parseExit(err)
+		if err := fs.ClaimStdin("FILE - (the job spec, read from stdin when no FILE is named)"); err != nil {
+			return command.ParseExit(err)
 		}
 	}
-	body, err := readYAMLBody(path)
+	body, err := command.ReadYAMLBody(path)
 	if err != nil {
 		fmt.Fprintf(stderr, "hl: %s\n", err)
 		return 2
@@ -147,42 +149,42 @@ Every other field: $HL_REFERENCE/experiment-submission.yaml.`, stderr)
 	if *estimate != "" {
 		hours, err := strconv.ParseFloat(*estimate, 64)
 		if err != nil || hours <= 0 {
-			return parseExit(misuse(fs, "--estimated-duration-hours wants a positive number of hours, got %q", *estimate))
+			return command.ParseExit(command.Misuse(fs, "--estimated-duration-hours wants a positive number of hours, got %q", *estimate))
 		}
 		metadata["estimated_duration_hours"] = hours
 	}
 	if err := setJobEnv(body, env); err != nil {
-		return parseExit(misuse(fs, "%s", err))
+		return command.ParseExit(command.Misuse(fs, "%s", err))
 	}
 	if err := setJobSecretEnv(body, secretEnv); err != nil {
-		return parseExit(misuse(fs, "%s", err))
+		return command.ParseExit(command.Misuse(fs, "%s", err))
 	}
 	metadata["agent_id"] = *agent
 	if v := metadata["platform_experiment_id"]; v == nil || v == "" {
-		metadata["platform_experiment_id"] = experimentOf(c, "")
+		metadata["platform_experiment_id"] = c.Experiment("")
 	}
 	if id, _ := metadata["hypothesis_id"].(string); id != "" {
 		pe, _ := metadata["platform_experiment_id"].(string)
-		if metadata["hypothesis_id"], err = fullHypothesisID(c, pe, id); err != nil {
-			return fail(stderr, fmt.Errorf("job submit: %w", err))
+		if metadata["hypothesis_id"], err = apiclient.FullHypothesisID(c, pe, id); err != nil {
+			return command.Fail(stderr, fmt.Errorf("job submit: %w", err))
 		}
 	}
 	if err := fillCodeRef(metadata, ""); err != nil {
-		return fail(stderr, fmt.Errorf("job submit: %w", err))
+		return command.Fail(stderr, fmt.Errorf("job submit: %w", err))
 	}
 	body["metadata"] = metadata
 	if *repeat < 1 {
-		return parseExit(misuse(fs, "--repeat wants 1 or more, got %d", *repeat))
+		return command.ParseExit(command.Misuse(fs, "--repeat wants 1 or more, got %d", *repeat))
 	}
 	if body["submission_key"], err = submissionKey(body, *repeat); err != nil {
-		return fail(stderr, fmt.Errorf("job submit: %w", err))
+		return command.Fail(stderr, fmt.Errorf("job submit: %w", err))
 	}
 	var answer struct {
 		submitted
 		RunBest *runBest `json:"run_best"`
 	}
 	if err := c.Do("POST", "/experiments", body, &answer); err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
 	out := answer.submitted
 	if answer.RunBest != nil {
@@ -395,12 +397,12 @@ func briefJobs[T any](jobs []json.RawMessage) ([][]byte, error) {
 			}
 		}
 		line, _ := json.Marshal(briefs[i])
-		line, err := compactJSON(line)
+		line, err := command.CompactJSON(line)
 		if err != nil {
 			return nil, err
 		}
 		env, _ := json.Marshal(varied)
-		if env, err = compactJSON(env); err != nil {
+		if env, err = command.CompactJSON(env); err != nil {
 			return nil, err
 		}
 		lines[i] = withJobEnv(line, env)
@@ -415,7 +417,7 @@ func withJobEnv(line, env []byte) []byte {
 }
 
 func jobList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("job list", `usage: hl job list [--agent A] [--status S] [--limit N] [--offset N]
+	fs := command.NewFlags("job list", `usage: hl job list [--agent A] [--status S] [--limit N] [--offset N]
 
 One job per line, newest first: ids (hypothesis_id is the hypothesis it tests; a baseline
 agent's job tests none and prints "objective":true in its place, so there is nothing to
@@ -434,16 +436,16 @@ prints a job's whole record. Without --agent, every agent's jobs.`, stderr)
 	limit := fs.Int("limit", 0, "page size (server default 20, max 50)")
 	offset := fs.Int("offset", 0, "rows to skip")
 	if err := fs.Parse(args); err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	if fs.NArg() > 0 {
-		return parseExit(misuse(fs, "unexpected argument %q", fs.Arg(0)))
+		return command.ParseExit(command.Misuse(fs, "unexpected argument %q", fs.Arg(0)))
 	}
 	q := url.Values{}
 	if *agent != "" {
 		q.Set("agent_id", *agent)
 	}
-	if p := experimentOf(c, *pe); p != "" {
+	if p := c.Experiment(*pe); p != "" {
 		q.Set("platform_experiment_id", p)
 	}
 	if *status != "" {
@@ -458,11 +460,11 @@ prints a job's whole record. Without --agent, every agent's jobs.`, stderr)
 	var jobs []json.RawMessage
 	header, err := c.DoHeader("GET", "/experiments?"+q.Encode(), nil, &jobs)
 	if err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
 	lines, err := briefJobs[jobBrief](jobs)
 	if err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
 	for _, line := range lines {
 		fmt.Fprintf(stdout, "%s\n", line)
@@ -470,12 +472,12 @@ prints a job's whole record. Without --agent, every agent's jobs.`, stderr)
 	if len(lines) == 0 {
 		fmt.Fprintln(stderr, "hl: job list: no job matches")
 	}
-	pageNotice(stderr, "job list", header, *offset, len(lines))
+	command.PageNotice(stderr, "job list", header, *offset, len(lines))
 	return 0
 }
 
 func jobStatus(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("job status", `usage: hl job status ID [ID ...]
+	fs := command.NewFlags("job status", `usage: hl job status ID [ID ...]
 
 One line per job, its whole record: hypothesis_id, or "objective":true on a baseline agent's
 job, which tests no hypothesis; status (QUEUED, SUBMITTED, RUNNING, then COMPLETED, FAILED,
@@ -492,22 +494,22 @@ in no standing: not_rankable_reason names the constraint it broke or did not rep
 While QUEUED, not_admitted_reason is the code of what the job waits for: awaiting_admission for
 the scheduler's first look at it, environment_building for its environment, capacity_unavailable for room on a cluster. not_admitted_message is its
 sentence.`, stderr)
-	ids, err := parseOperands(fs, args, "id", "experiment")
+	ids, err := command.ParseOperands(fs, args, "id", "experiment")
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	if len(ids) == 0 {
-		return parseExit(misuse(fs, "want at least one ID"))
+		return command.ParseExit(command.Misuse(fs, "want at least one ID"))
 	}
 	code := 0
 	for _, id := range ids {
 		var out json.RawMessage
 		if err := c.Do("GET", "/experiments/"+url.PathEscape(id), nil, &out); err != nil {
-			code = fail(stderr, err)
+			code = command.Fail(stderr, err)
 			continue
 		}
-		if err := printLine(stdout, out, jobDrop...); err != nil {
-			return fail(stderr, err)
+		if err := command.PrintLine(stdout, out, jobDrop...); err != nil {
+			return command.Fail(stderr, err)
 		}
 	}
 	return code
@@ -531,29 +533,29 @@ type metricSummary struct {
 }
 
 func jobMetrics(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("job metrics", `usage: hl job metrics ID [--points]
+	fs := command.NewFlags("job metrics", `usage: hl job metrics ID [--points]
 
 One line per reported metric: points reported, the last value and the fraction_complete it was
 reported at, and the min and max over the run. --points prints every point instead. Either way
 the output is JSON lines, one object per line and no enclosing array: parse it line by line.`, stderr)
 	points := fs.Bool("points", false, "print every reported point, oldest first, one JSON object per line")
-	id, err := parseOne(fs, args, "ID", "", "id", "experiment")
+	id, err := command.ParseOne(fs, args, "ID", "", "id", "experiment")
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	var out json.RawMessage
 	if err := c.Do("GET", "/experiments/"+url.PathEscape(id)+"/metrics", nil, &out); err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
 	if *points {
-		if err := printLines(stdout, stderr, "job metrics: no metric reported yet", out, "experiment_id"); err != nil {
-			return fail(stderr, err)
+		if err := command.PrintLines(stdout, stderr, "job metrics: no metric reported yet", out, "experiment_id"); err != nil {
+			return command.Fail(stderr, err)
 		}
 		return 0
 	}
 	var series []metricPoint
 	if err := json.Unmarshal(out, &series); err != nil {
-		return fail(stderr, fmt.Errorf("metrics response: %w", err))
+		return command.Fail(stderr, fmt.Errorf("metrics response: %w", err))
 	}
 	var order []*metricSummary
 	byKey := map[[2]string]*metricSummary{}
@@ -580,28 +582,28 @@ the output is JSON lines, one object per line and no enclosing array: parse it l
 }
 
 func jobSummary(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("job summary", `usage: hl job summary ID [--text T | --text-file FILE|-]
+	fs := command.NewFlags("job summary", `usage: hl job summary ID [--text T | --text-file FILE|-]
 
 Prints the job's summary. With --text, or --text-file reading it from FILE or stdin for -,
 files the write-up of a finished job when its result says something: what changed, what the metric did, what it means. It is the job's finding on its hypothesis, shown there and announced
 as finding.new, so it needs no comment that repeats it. It is filed once and cannot be replaced
 (409 summary_exists): others read it the moment it is announced, so a correction is a comment
 on the hypothesis.`, stderr)
-	summary := newTextFlag(fs, "text", "the summary to file")
-	id, err := parseOne(fs, args, "ID", "", "id", "experiment")
+	summary := command.NewTextFlag(fs, "text", "the summary to file")
+	id, err := command.ParseOne(fs, args, "ID", "", "id", "experiment")
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
-	text, err := summary.value(fs)
+	text, err := summary.Value(fs)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	if text == "" {
 		var job struct {
 			Summary string `json:"summary"`
 		}
 		if err := c.Do("GET", "/experiments/"+url.PathEscape(id), nil, &job); err != nil {
-			return fail(stderr, err)
+			return command.Fail(stderr, err)
 		}
 		if job.Summary == "" {
 			fmt.Fprintf(stderr, "hl: job summary: %s has none filed yet: hl job summary %s --text T files it\n", id, id)
@@ -616,7 +618,7 @@ on the hypothesis.`, stderr)
 		Verdict    string `json:"verdict"`
 	}
 	if err := c.Do("POST", "/experiments/"+url.PathEscape(id)+"/summary", map[string]string{"summary": text}, &out); err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
 	fmt.Fprintf(stdout, "{\"status\":%q}\n", out.Status)
 	switch out.Verdict {
@@ -630,21 +632,21 @@ on the hypothesis.`, stderr)
 }
 
 func jobWait(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("job wait", `usage: hl job wait ID [ID ...] [--timeout SECONDS]
+	fs := command.NewFlags("job wait", `usage: hl job wait ID [ID ...] [--timeout SECONDS]
 
 Blocks until every named job has ended, then prints each as hl job list does: a FAILED job's
 cause and last lines of output are its eviction_reason. Exits 0 once all ended, or 124 at
 --timeout with the jobs as they stand.`, stderr)
 	timeout := fs.Float64("timeout", 540, "give up after this many `seconds`")
-	ids, err := parseOperands(fs, args, "id", "experiment")
+	ids, err := command.ParseOperands(fs, args, "id", "experiment")
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	if len(ids) == 0 {
-		return parseExit(misuse(fs, "want at least one ID"))
+		return command.ParseExit(command.Misuse(fs, "want at least one ID"))
 	}
 	if *timeout <= 0 {
-		return parseExit(misuse(fs, "--timeout wants a positive number of seconds"))
+		return command.ParseExit(command.Misuse(fs, "--timeout wants a positive number of seconds"))
 	}
 	deadline := time.Now().Add(time.Duration(*timeout * float64(time.Second)))
 	for _, id := range ids {
@@ -673,20 +675,20 @@ cause and last lines of output are its eviction_reason. Exits 0 once all ended, 
 	for _, id := range ids {
 		var job json.RawMessage
 		if err := c.Do("GET", "/experiments/"+url.PathEscape(id), nil, &job); err != nil {
-			return fail(stderr, err)
+			return command.Fail(stderr, err)
 		}
 		var status struct {
 			Status string `json:"status"`
 		}
 		if err := json.Unmarshal(job, &status); err != nil {
-			return fail(stderr, fmt.Errorf("response is not a job: %w", err))
+			return command.Fail(stderr, fmt.Errorf("response is not a job: %w", err))
 		}
 		ended = ended && platformapi.ExperimentStatus(status.Status).Ended()
 		jobs = append(jobs, job)
 	}
 	lines, err := briefJobs[jobBrief](jobs)
 	if err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
 	for _, line := range lines {
 		fmt.Fprintf(stdout, "%s\n", line)
@@ -699,15 +701,15 @@ cause and last lines of output are its eviction_reason. Exits 0 once all ended, 
 }
 
 func jobLogs(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("job logs", "usage: hl job logs ID [--lines N]\n\nThe last log lines the job's cluster reported, oldest first.", stderr)
+	fs := command.NewFlags("job logs", "usage: hl job logs ID [--lines N]\n\nThe last log lines the job's cluster reported, oldest first.", stderr)
 	n := fs.Int("lines", 50, "how many of the last reported lines")
-	id, err := parseOne(fs, args, "ID", "", "id", "experiment")
+	id, err := command.ParseOne(fs, args, "ID", "", "id", "experiment")
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	var out []string
 	if err := c.Do("GET", "/experiments/"+url.PathEscape(id)+"/logs?n="+strconv.Itoa(*n), nil, &out); err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
 	for _, line := range out {
 		fmt.Fprintln(stdout, line)
@@ -720,39 +722,39 @@ func jobLogs(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 
 // jobRead prints GET /experiments/{id}<suffix>.
 func jobRead(c *apiclient.Client, name, suffix, help string, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("job "+name, "usage: hl job "+name+" ID\n\n"+help+".", stderr)
-	id, err := parseOne(fs, args, "ID", "", "id", "experiment")
+	fs := command.NewFlags("job "+name, "usage: hl job "+name+" ID\n\n"+help+".", stderr)
+	id, err := command.ParseOne(fs, args, "ID", "", "id", "experiment")
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	var out json.RawMessage
 	if err := c.Do("GET", "/experiments/"+url.PathEscape(id)+suffix, nil, &out); err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
-	if err := printLines(stdout, stderr, "job "+name+": none", out); err != nil {
-		return fail(stderr, err)
+	if err := command.PrintLines(stdout, stderr, "job "+name+": none", out); err != nil {
+		return command.Fail(stderr, err)
 	}
 	return 0
 }
 
 func jobCancel(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("job cancel", "usage: hl job cancel ID\n\nCancels a job that has not ended and prints it, CANCELLED. What it held of your quota is released, down to what it spent running. A job that has ended is refused invalid_transition, with its status.", stderr)
-	id, err := parseOne(fs, args, "ID", "", "id", "experiment")
+	fs := command.NewFlags("job cancel", "usage: hl job cancel ID\n\nCancels a job that has not ended and prints it, CANCELLED. What it held of your quota is released, down to what it spent running. A job that has ended is refused invalid_transition, with its status.", stderr)
+	id, err := command.ParseOne(fs, args, "ID", "", "id", "experiment")
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	var out json.RawMessage
 	if err := c.Do("POST", "/experiments/"+url.PathEscape(id)+"/cancel", map[string]any{}, &out); err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
-	if err := printLine(stdout, out, jobDrop...); err != nil {
-		return fail(stderr, err)
+	if err := command.PrintLine(stdout, out, jobDrop...); err != nil {
+		return command.Fail(stderr, err)
 	}
 	return 0
 }
 
 func jobStats(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("job stats", `usage: hl job stats [--agent A] [--hypothesis ID]
+	fs := command.NewFlags("job stats", `usage: hl job stats [--agent A] [--hypothesis ID]
 
 Counts over every matching job: by status, capacity tier, eviction reason and eviction class
 (workload is yours, infrastructure the environment's, policy the platform's own decision).`, stderr)
@@ -760,31 +762,31 @@ Counts over every matching job: by status, capacity tier, eviction reason and ev
 	agent := fs.String("agent", "", "only this agent's jobs")
 	hypothesis := fs.String("hypothesis", "", "only jobs testing this hypothesis")
 	if err := fs.Parse(args); err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	if fs.NArg() > 0 {
-		return parseExit(misuse(fs, "unexpected argument %q", fs.Arg(0)))
+		return command.ParseExit(command.Misuse(fs, "unexpected argument %q", fs.Arg(0)))
 	}
 	q := url.Values{}
-	if p := experimentOf(c, *pe); p != "" {
+	if p := c.Experiment(*pe); p != "" {
 		q.Set("platform_experiment_id", p)
 	}
 	if *agent != "" {
 		q.Set("agent_id", *agent)
 	}
 	if *hypothesis != "" {
-		id, err := fullHypothesisID(c, q.Get("platform_experiment_id"), *hypothesis)
+		id, err := apiclient.FullHypothesisID(c, q.Get("platform_experiment_id"), *hypothesis)
 		if err != nil {
-			return fail(stderr, err)
+			return command.Fail(stderr, err)
 		}
 		q.Set("hypothesis_id", id)
 	}
 	var out json.RawMessage
 	if err := c.Do("GET", "/experiments/stats?"+q.Encode(), nil, &out); err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
-	if err := printLine(stdout, out); err != nil {
-		return fail(stderr, err)
+	if err := command.PrintLine(stdout, out); err != nil {
+		return command.Fail(stderr, err)
 	}
 	return 0
 }

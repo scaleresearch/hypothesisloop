@@ -4,13 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"net/url"
 	"slices"
 	"strconv"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
+
+	"github.com/scaleresearch/hypothesisloop/cli/internal/command"
 )
 
 // The account commands: orgs with their members and invites, projects, API keys and clusters. --org defaults to $HL_ORG and then
@@ -66,7 +67,7 @@ const orgFlagHelp = "org (default $HL_ORG, then the one org this token reaches)"
 // resolveOrg is the org a command acts in: the flag, else $HL_ORG, else the only org the token
 // reaches.
 func resolveOrg(c *apiclient.Client, flagValue string) (string, error) {
-	if org := orEnv(flagValue, orgEnv); org != "" {
+	if org := command.OrEnv(flagValue, command.OrgEnv); org != "" {
 		return org, nil
 	}
 	var me struct {
@@ -83,281 +84,209 @@ func resolveOrg(c *apiclient.Client, flagValue string) (string, error) {
 	return me.Orgs[0].ID, nil
 }
 
-// call makes one request and prints its reply, an object or the list under listKey, one compact
-// line each. An answer that holds nothing, no body or an empty list, says none on stderr, so that
-// no output is never mistaken for a command that did nothing. A route may answer a change with
-// the resource or with 204, and either is the command done.
-func call(c *apiclient.Client, method, path string, body any, listKey, none string, stdout, stderr io.Writer) int {
-	var out json.RawMessage
-	if err := c.Do(method, path, body, &out); err != nil {
-		return fail(stderr, err)
-	}
-	if len(out) == 0 || string(out) == "null" {
-		if none == "" {
-			none = method + " " + path + ": done"
-		}
-		fmt.Fprintf(stderr, "hl: %s\n", none)
-		return 0
-	}
-	if listKey != "" {
-		var keyed map[string]json.RawMessage
-		if err := json.Unmarshal(out, &keyed); err != nil {
-			return fail(stderr, fmt.Errorf("response is not a JSON object: %w", err))
-		}
-		out = keyed[listKey]
-	}
-	if err := printLines(stdout, stderr, none, out); err != nil {
-		return fail(stderr, err)
-	}
-	return 0
-}
-
 func orgPath(org, rest string) string {
 	return "/orgs/" + url.PathEscape(org) + rest
 }
 
 func orgList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("org list", "usage: hl org list\n\nThe orgs this token reaches, one per line: id, name and, for a person, their role.", stderr)
-	if err := parseNone(fs, args); err != nil {
-		return parseExit(err)
+	fs := command.NewFlags("org list", "usage: hl org list\n\nThe orgs this token reaches, one per line: id, name and, for a person, their role.", stderr)
+	if err := command.ParseNone(fs, args); err != nil {
+		return command.ParseExit(err)
 	}
-	return call(c, "GET", "/me", nil, "orgs", "org list: this token reaches no org", stdout, stderr)
+	return command.Call(c, "GET", "/me", nil, "orgs", "org list: this token reaches no org", stdout, stderr)
 }
 
 func orgCreate(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("org create", `usage: hl org create NAME [--owner USER]
+	fs := command.NewFlags("org create", `usage: hl org create NAME [--owner USER]
 
 Creates an org with a project named Default project. A signed-in person owns the org they create. A
 staff token names the owner with --owner. An API key belongs to one org and cannot create another.
 A person owns a bounded number of orgs, the first one they signed in to included: past it the
 create is refused with max_orgs_reached.`, stderr)
 	owner := fs.String("owner", "", "user id of the owner, for a staff token")
-	name, err := parseOne(fs, args, "NAME", "", "name")
+	name, err := command.ParseOne(fs, args, "NAME", "", "name")
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	body := map[string]string{"name": name}
 	if *owner != "" {
 		body["owner_user_id"] = *owner
 	}
-	return call(c, "POST", "/orgs", body, "", "", stdout, stderr)
+	return command.Call(c, "POST", "/orgs", body, "", "", stdout, stderr)
 }
 
 func orgRename(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("org rename", "usage: hl org rename NAME [--org ORG]\n\nGives the org a new name. Its id, projects, keys and clusters stay.", stderr)
+	fs := command.NewFlags("org rename", "usage: hl org rename NAME [--org ORG]\n\nGives the org a new name. Its id, projects, keys and clusters stay.", stderr)
 	org := fs.String("org", "", orgFlagHelp)
-	name, err := parseOne(fs, args, "NAME", "", "name")
+	name, err := command.ParseOne(fs, args, "NAME", "", "name")
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	id, err := resolveOrg(c, *org)
 	if err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
-	return call(c, "PATCH", orgPath(id, ""), map[string]string{"name": name}, "", "", stdout, stderr)
-}
-
-// pageNotice says on stderr that a list was cut: how many of the total this page shows and the
-// --offset of the next one. total is the platform's X-Total-Count.
-func pageNotice(stderr io.Writer, label string, header http.Header, offset, shown int) {
-	if total, _ := strconv.Atoi(header.Get("X-Total-Count")); total > offset+shown {
-		fmt.Fprintf(stderr, "hl: %s: %d of %d shown: --offset %d for the next page\n", label, shown, total, offset+shown)
-	}
-}
-
-// callPage reads a page of a list and prints one line per row, then says if more match.
-func callPage(c *apiclient.Client, path, label string, offset int, stdout, stderr io.Writer) int {
-	var out json.RawMessage
-	header, err := c.DoHeader("GET", path, nil, &out)
-	if err != nil {
-		return fail(stderr, err)
-	}
-	if err := printLines(stdout, stderr, label+": none", out); err != nil {
-		return fail(stderr, err)
-	}
-	var rows []json.RawMessage
-	_ = json.Unmarshal(out, &rows)
-	pageNotice(stderr, label, header, offset, len(rows))
-	return 0
-}
-
-// pageFlags are --limit and --offset of a list the platform pages, and the offset asked for.
-func pageFlags(fs *flagSet) (func() string, *int) {
-	limit := fs.Int("limit", 0, "page size (default the platform's 20, at most 200)")
-	offset := fs.Int("offset", 0, "rows to skip")
-	return func() string {
-		query := url.Values{}
-		if *limit != 0 {
-			query.Set("limit", fmt.Sprint(*limit))
-		}
-		if *offset != 0 {
-			query.Set("offset", fmt.Sprint(*offset))
-		}
-		if len(query) == 0 {
-			return ""
-		}
-		return "?" + query.Encode()
-	}, offset
+	return command.Call(c, "PATCH", orgPath(id, ""), map[string]string{"name": name}, "", "", stdout, stderr)
 }
 
 func orgMembersList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("org members list", `usage: hl org members list [--org ORG] [--limit N] [--offset N]
+	fs := command.NewFlags("org members list", `usage: hl org members list [--org ORG] [--limit N] [--offset N]
 
 The org's members, oldest first: user id, role and when they joined. The platform holds no name
 and no email for a person, so a member is named by user id. An owner changes everything in the
 org; a member reads everything, runs platform experiments and creates API keys bound to one
 project.`, stderr)
 	org := fs.String("org", "", orgFlagHelp)
-	query, offset := pageFlags(fs)
-	if err := parseNone(fs, args); err != nil {
-		return parseExit(err)
+	query, offset := command.PageFlags(fs)
+	if err := command.ParseNone(fs, args); err != nil {
+		return command.ParseExit(err)
 	}
 	id, err := resolveOrg(c, *org)
 	if err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
-	return callPage(c, orgPath(id, "/members")+query(), "org members list", *offset, stdout, stderr)
+	return command.CallPage(c, orgPath(id, "/members")+query(), "org members list", *offset, stdout, stderr)
 }
 
 func orgMembersSetRole(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("org members set-role", `usage: hl org members set-role USER owner|member [--org ORG]
+	fs := command.NewFlags("org members set-role", `usage: hl org members set-role USER owner|member [--org ORG]
 
 For an owner. An org keeps at least one owner, so demoting the last one is refused. Someone who
 stops being an owner loses their API keys of the whole org and the invites they made.`, stderr)
 	org := fs.String("org", "", orgFlagHelp)
-	operands, err := parseOperands(fs, args)
+	operands, err := command.ParseOperands(fs, args)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	if len(operands) != 2 {
-		return parseExit(misuse(fs, "want USER and a role, got %d operands", len(operands)))
+		return command.ParseExit(command.Misuse(fs, "want USER and a role, got %d operands", len(operands)))
 	}
 	if !slices.Contains(platformapi.OrgRoles, platformapi.OrgRole(operands[1])) {
-		return parseExit(misuse(fs, "the role must be %s or %s, got %s", platformapi.OrgRoleOwner, platformapi.OrgRoleMember, operands[1]))
+		return command.ParseExit(command.Misuse(fs, "the role must be %s or %s, got %s", platformapi.OrgRoleOwner, platformapi.OrgRoleMember, operands[1]))
 	}
 	id, err := resolveOrg(c, *org)
 	if err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
-	return call(c, "PATCH", orgPath(id, "/members/"+url.PathEscape(operands[0])), map[string]string{"role": operands[1]}, "", "", stdout, stderr)
+	return command.Call(c, "PATCH", orgPath(id, "/members/"+url.PathEscape(operands[0])), map[string]string{"role": operands[1]}, "", "", stdout, stderr)
 }
 
 func orgMembersRemove(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("org members remove", `usage: hl org members remove USER [--org ORG]
+	fs := command.NewFlags("org members remove", `usage: hl org members remove USER [--org ORG]
 
 For an owner, and for anyone naming themselves, which is how a person leaves an org. The last
 owner cannot be removed. The API keys the person created in the org stop working at once and the
 invites they made are revoked.`, stderr)
 	org := fs.String("org", "", orgFlagHelp)
-	user, err := parseOne(fs, args, "USER", "", "user")
+	user, err := command.ParseOne(fs, args, "USER", "", "user")
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	id, err := resolveOrg(c, *org)
 	if err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
-	return call(c, "DELETE", orgPath(id, "/members/"+url.PathEscape(user)), nil, "", fmt.Sprintf("removed %s from org %s", user, id), stdout, stderr)
+	return command.Call(c, "DELETE", orgPath(id, "/members/"+url.PathEscape(user)), nil, "", fmt.Sprintf("removed %s from org %s", user, id), stdout, stderr)
 }
 
 func orgInvitesCreate(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("org invites create", `usage: hl org invites create [--role owner|member] [--org ORG]
+	fs := command.NewFlags("org invites create", `usage: hl org invites create [--role owner|member] [--org ORG]
 
 For an owner. Prints the invite with its token. The token is shown this once: the platform keeps
 only its hash and sends no email, so hand it to the person yourself. Whoever signs in and accepts
 it joins the org with the invite's role. It works once, for seven days, and until it is revoked.`, stderr)
 	org := fs.String("org", "", orgFlagHelp)
 	role := fs.String("role", string(platformapi.OrgRoleMember), "the role the invited person joins with")
-	if err := parseNone(fs, args); err != nil {
-		return parseExit(err)
+	if err := command.ParseNone(fs, args); err != nil {
+		return command.ParseExit(err)
 	}
 	if !slices.Contains(platformapi.OrgRoles, platformapi.OrgRole(*role)) {
-		return parseExit(misuse(fs, "--role must be %s or %s, got %s", platformapi.OrgRoleOwner, platformapi.OrgRoleMember, *role))
+		return command.ParseExit(command.Misuse(fs, "--role must be %s or %s, got %s", platformapi.OrgRoleOwner, platformapi.OrgRoleMember, *role))
 	}
 	id, err := resolveOrg(c, *org)
 	if err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
-	return call(c, "POST", orgPath(id, "/invites"), map[string]string{"role": *role}, "", "", stdout, stderr)
+	return command.Call(c, "POST", orgPath(id, "/invites"), map[string]string{"role": *role}, "", "", stdout, stderr)
 }
 
 func orgInvitesList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("org invites list", "usage: hl org invites list [--org ORG] [--limit N] [--offset N]\n\nFor an owner. The invites that can still be accepted, newest first.", stderr)
+	fs := command.NewFlags("org invites list", "usage: hl org invites list [--org ORG] [--limit N] [--offset N]\n\nFor an owner. The invites that can still be accepted, newest first.", stderr)
 	org := fs.String("org", "", orgFlagHelp)
-	query, offset := pageFlags(fs)
-	if err := parseNone(fs, args); err != nil {
-		return parseExit(err)
+	query, offset := command.PageFlags(fs)
+	if err := command.ParseNone(fs, args); err != nil {
+		return command.ParseExit(err)
 	}
 	id, err := resolveOrg(c, *org)
 	if err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
-	return callPage(c, orgPath(id, "/invites")+query(), "org invites list", *offset, stdout, stderr)
+	return command.CallPage(c, orgPath(id, "/invites")+query(), "org invites list", *offset, stdout, stderr)
 }
 
 func orgInvitesRevoke(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("org invites revoke", "usage: hl org invites revoke ID\n\nFor an owner of the invite's org. The invite can no longer be accepted. One already accepted is refused: remove the member instead.", stderr)
-	id, err := parseOne(fs, args, "ID", "", "id")
+	fs := command.NewFlags("org invites revoke", "usage: hl org invites revoke ID\n\nFor an owner of the invite's org. The invite can no longer be accepted. One already accepted is refused: remove the member instead.", stderr)
+	id, err := command.ParseOne(fs, args, "ID", "", "id")
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
-	return call(c, "DELETE", "/invites/"+url.PathEscape(id), nil, "", "revoked invite "+id, stdout, stderr)
+	return command.Call(c, "DELETE", "/invites/"+url.PathEscape(id), nil, "", "revoked invite "+id, stdout, stderr)
 }
 
 func orgInvitesAccept(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("org invites accept", `usage: hl org invites accept TOKEN
+	fs := command.NewFlags("org invites accept", `usage: hl org invites accept TOKEN
 
 Joins the org the invite is for, with the invite's role. Only a signed-in person joins an org, so
 HL_TOKEN must be your own sign-in: an API key is refused. Prints the membership.`, stderr)
-	token, err := parseOne(fs, args, "TOKEN", "", "token")
+	token, err := command.ParseOne(fs, args, "TOKEN", "", "token")
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
-	return call(c, "POST", "/invites/accept", map[string]string{"token": token}, "", "", stdout, stderr)
+	return command.Call(c, "POST", "/invites/accept", map[string]string{"token": token}, "", "", stdout, stderr)
 }
 
 func projectList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("project list", "usage: hl project list [--org ORG]\n\nThe org's projects, oldest first. An API key bound to one project sees that one.", stderr)
+	fs := command.NewFlags("project list", "usage: hl project list [--org ORG]\n\nThe org's projects, oldest first. An API key bound to one project sees that one.", stderr)
 	org := fs.String("org", "", orgFlagHelp)
-	if err := parseNone(fs, args); err != nil {
-		return parseExit(err)
+	if err := command.ParseNone(fs, args); err != nil {
+		return command.ParseExit(err)
 	}
 	id, err := resolveOrg(c, *org)
 	if err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
-	return call(c, "GET", orgPath(id, "/projects"), nil, "projects", "project list: none", stdout, stderr)
+	return command.Call(c, "GET", orgPath(id, "/projects"), nil, "projects", "project list: none", stdout, stderr)
 }
 
 func projectCreate(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("project create", "usage: hl project create NAME [--org ORG]\n\nCreates a project. Its name is unique within the org. Export its id as $HL_PROJECT to work in it. An org holds a bounded number of projects, its default one included: past it the create is refused with max_projects_reached.", stderr)
+	fs := command.NewFlags("project create", "usage: hl project create NAME [--org ORG]\n\nCreates a project. Its name is unique within the org. Export its id as $HL_PROJECT to work in it. An org holds a bounded number of projects, its default one included: past it the create is refused with max_projects_reached.", stderr)
 	org := fs.String("org", "", orgFlagHelp)
-	name, err := parseOne(fs, args, "NAME", "", "name")
+	name, err := command.ParseOne(fs, args, "NAME", "", "name")
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	id, err := resolveOrg(c, *org)
 	if err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
-	return call(c, "POST", orgPath(id, "/projects"), map[string]string{"name": name}, "", "", stdout, stderr)
+	return command.Call(c, "POST", orgPath(id, "/projects"), map[string]string{"name": name}, "", "", stdout, stderr)
 }
 
 func projectRename(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("project rename", "usage: hl project rename NAME [--project PROJECT]\n\nGives the project a new name. Its id and its platform experiments stay.", stderr)
+	fs := command.NewFlags("project rename", "usage: hl project rename NAME [--project PROJECT]\n\nGives the project a new name. Its id and its platform experiments stay.", stderr)
 	project := fs.String("project", "", "project id (default $HL_PROJECT)")
-	name, err := parseOne(fs, args, "NAME", "", "name")
+	name, err := command.ParseOne(fs, args, "NAME", "", "name")
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
-	if *project = orEnv(*project, projectEnv); *project == "" {
-		return parseExit(misuse(fs, "--project or $HL_PROJECT is required"))
+	if *project = command.OrEnv(*project, command.ProjectEnv); *project == "" {
+		return command.ParseExit(command.Misuse(fs, "--project or $HL_PROJECT is required"))
 	}
-	return call(c, "PATCH", "/projects/"+url.PathEscape(*project), map[string]string{"name": name}, "", "", stdout, stderr)
+	return command.Call(c, "PATCH", "/projects/"+url.PathEscape(*project), map[string]string{"name": name}, "", "", stdout, stderr)
 }
 
 func apiKeyCreate(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("api-key create", `usage: hl api-key create NAME [--project PROJECT] [--org ORG]
+	fs := command.NewFlags("api-key create", `usage: hl api-key create NAME [--project PROJECT] [--org ORG]
 
 Creates an API key and prints it with its token. The token is shown this once: the platform
 keeps only its hash. Without --project the key reaches the whole org; with it, that project
@@ -365,41 +294,41 @@ only. $HL_PROJECT is not read here, so a key is never narrowed by accident. A ke
 no wider than itself, and revoking a key revokes every key minted from it.`, stderr)
 	org := fs.String("org", "", orgFlagHelp)
 	project := fs.String("project", "", "bind the key to this one project")
-	name, err := parseOne(fs, args, "NAME", "", "name")
+	name, err := command.ParseOne(fs, args, "NAME", "", "name")
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	id, err := resolveOrg(c, *org)
 	if err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
 	body := map[string]string{"name": name}
 	if *project != "" {
 		body["project_id"] = *project
 	}
-	return call(c, "POST", orgPath(id, "/api-keys"), body, "", "", stdout, stderr)
+	return command.Call(c, "POST", orgPath(id, "/api-keys"), body, "", "", stdout, stderr)
 }
 
 func apiKeyList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("api-key list", "usage: hl api-key list [--org ORG]\n\nThe org's API keys, newest first, revoked ones with revoked_at. An API key sees itself and the keys minted from it.", stderr)
+	fs := command.NewFlags("api-key list", "usage: hl api-key list [--org ORG]\n\nThe org's API keys, newest first, revoked ones with revoked_at. An API key sees itself and the keys minted from it.", stderr)
 	org := fs.String("org", "", orgFlagHelp)
-	if err := parseNone(fs, args); err != nil {
-		return parseExit(err)
+	if err := command.ParseNone(fs, args); err != nil {
+		return command.ParseExit(err)
 	}
 	id, err := resolveOrg(c, *org)
 	if err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
-	return call(c, "GET", orgPath(id, "/api-keys"), nil, "api_keys", "api-key list: none", stdout, stderr)
+	return command.Call(c, "GET", orgPath(id, "/api-keys"), nil, "api_keys", "api-key list: none", stdout, stderr)
 }
 
 func apiKeyRevoke(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("api-key revoke", "usage: hl api-key revoke ID\n\nEnds the key and every key minted from it, at once.", stderr)
-	id, err := parseOne(fs, args, "ID", "", "id")
+	fs := command.NewFlags("api-key revoke", "usage: hl api-key revoke ID\n\nEnds the key and every key minted from it, at once.", stderr)
+	id, err := command.ParseOne(fs, args, "ID", "", "id")
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
-	return call(c, "DELETE", "/api-keys/"+url.PathEscape(id), nil, "", "revoked API key "+id, stdout, stderr)
+	return command.Call(c, "DELETE", "/api-keys/"+url.PathEscape(id), nil, "", "revoked API key "+id, stdout, stderr)
 }
 
 // registeredCluster is what registering a cluster answers.
@@ -416,7 +345,7 @@ type registeredCluster struct {
 }
 
 func clusterAdd(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("cluster add", `usage: hl cluster add NAME [--bare-metal] [--org ORG]
+	fs := command.NewFlags("cluster add", `usage: hl cluster add NAME [--bare-metal] [--org ORG]
 
 Registers the cluster name for the org and prints the one command that attaches it, complete:
 the addresses its agent reaches the platform at and the registry and tag of its images. A
@@ -458,45 +387,45 @@ accelerators it has, with nothing to configure.
 hl cluster remove NAME detaches from this side: the agent stops its jobs and stays stopped.`, stderr)
 	bareMetal := fs.Bool("bare-metal", false, "print the command for a bare-metal node")
 	org := fs.String("org", "", orgFlagHelp)
-	name, err := parseOne(fs, args, "NAME", "", "name")
+	name, err := command.ParseOne(fs, args, "NAME", "", "name")
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	id, err := resolveOrg(c, *org)
 	if err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
 	var registered registeredCluster
 	if err := c.Do("POST", orgPath(id, "/clusters"), map[string]string{"name": name}, &registered); err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
-	command := registered.Attach.Kubernetes
+	attach := registered.Attach.Kubernetes
 	if *bareMetal {
-		command = registered.Attach.BareMetal
+		attach = registered.Attach.BareMetal
 	}
-	fmt.Fprintf(stdout, "%s\n\nIt asks for the runtime token of %s:\n%s\n", command, registered.Name, registered.RuntimeToken)
-	warnLocalOnly(stderr, "the API address", registered.APIURL)
+	fmt.Fprintf(stdout, "%s\n\nIt asks for the runtime token of %s:\n%s\n", attach, registered.Name, registered.RuntimeToken)
+	command.WarnLocalOnly(stderr, "the API address", registered.APIURL)
 	if !*bareMetal {
-		warnLocalOnly(stderr, "the metrics address", registered.MetricsURL)
+		command.WarnLocalOnly(stderr, "the metrics address", registered.MetricsURL)
 	}
-	warnLocalOnly(stderr, "the image registry", registered.Registry)
+	command.WarnLocalOnly(stderr, "the image registry", registered.Registry)
 	return 0
 }
 
 func clusterToken(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("cluster token", `usage: hl cluster token NAME [--org ORG]
+	fs := command.NewFlags("cluster token", `usage: hl cluster token NAME [--org ORG]
 
 Prints the runtime token of a cluster the org registered, and nothing else. The token is derived
 from the cluster's name and never changes: removing the cluster is what ends it. The command
 hl cluster add prints asks for it on stdin, so pipe it there and keep it out of a command line.`, stderr)
 	org := fs.String("org", "", orgFlagHelp)
-	name, err := parseOne(fs, args, "NAME", "", "name")
+	name, err := command.ParseOne(fs, args, "NAME", "", "name")
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	id, err := resolveOrg(c, *org)
 	if err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
 	// Asking for a token registers nothing: the name must be a cluster the org already has.
 	var listing struct {
@@ -506,25 +435,25 @@ hl cluster add prints asks for it on stdin, so pipe it there and keep it out of 
 		} `json:"clusters"`
 	}
 	if err := c.Do("GET", orgPath(id, "/clusters"), nil, &listing); err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
 	owned := false
 	for _, cluster := range listing.Clusters {
 		owned = owned || (cluster.Name == name && cluster.Owned)
 	}
 	if !owned {
-		return fail(stderr, fmt.Errorf("%s is not a cluster org %s registered: see hl cluster list, or register it with hl cluster add", name, id))
+		return command.Fail(stderr, fmt.Errorf("%s is not a cluster org %s registered: see hl cluster list, or register it with hl cluster add", name, id))
 	}
 	var registered registeredCluster
 	if err := c.Do("POST", orgPath(id, "/clusters"), map[string]string{"name": name}, &registered); err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
 	fmt.Fprintln(stdout, registered.RuntimeToken)
 	return 0
 }
 
 func clusterForgetIdentity(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("cluster forget-identity", `usage: hl cluster forget-identity NAME [--org ORG]
+	fs := command.NewFlags("cluster forget-identity", `usage: hl cluster forget-identity NAME [--org ORG]
 
 A cluster is bound to the first cluster id its runtime reports, and a runtime reporting another is
 refused. After the machines behind a name are rebuilt, run this: the cluster binds to the id its
@@ -533,7 +462,7 @@ runtime reports next. The cluster keeps its name, its place in the order and its
 }
 
 func clusterOrder(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("cluster order", `usage: hl cluster order NAME... [--org ORG]
+	fs := command.NewFlags("cluster order", `usage: hl cluster order NAME... [--org ORG]
 
 Sets the order the org's jobs are placed on the clusters it registered: name every one of them
 once, first placed first. A job goes to the first cluster that can take it as the scheduler reads
@@ -543,22 +472,22 @@ out. A cluster registered afterwards comes last until it is ordered, and the clu
 shares come after all of the org's own. Jobs that are placed do not move. Prints the clusters in
 the new order, as hl cluster list does.`, stderr)
 	org := fs.String("org", "", orgFlagHelp)
-	names, err := parseOperands(fs, args)
+	names, err := command.ParseOperands(fs, args)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	if len(names) == 0 {
-		return parseExit(misuse(fs, "name the org's clusters in the order to place jobs on them"))
+		return command.ParseExit(command.Misuse(fs, "name the org's clusters in the order to place jobs on them"))
 	}
 	id, err := resolveOrg(c, *org)
 	if err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
-	return call(c, "PUT", orgPath(id, "/clusters/order"), map[string][]string{"names": names}, "clusters", "", stdout, stderr)
+	return command.Call(c, "PUT", orgPath(id, "/clusters/order"), map[string][]string{"names": names}, "clusters", "", stdout, stderr)
 }
 
 func clusterSettings(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("cluster settings", `usage: hl cluster settings NAME [--scale-up-timeout SECONDS] [--speculative-cap N] [--stuck-pending-timeout SECONDS] [--status-silence-ceiling SECONDS] [--org ORG]
+	fs := command.NewFlags("cluster settings", `usage: hl cluster settings NAME [--scale-up-timeout SECONDS] [--speculative-cap N] [--stuck-pending-timeout SECONDS] [--status-silence-ceiling SECONDS] [--org ORG]
 
 Sets what a cluster the org registered uses in place of the scheduler's defaults. Most matter for a
 cluster whose nodes appear when a job asks for them, --status-silence-ceiling for one whose link to
@@ -581,18 +510,18 @@ default. hl cluster list shows the ones that are set.`, stderr)
 			return nil
 		})
 	}
-	name, err := parseOne(fs, args, "NAME", "", "name")
+	name, err := command.ParseOne(fs, args, "NAME", "", "name")
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	if len(body) == 0 {
-		return parseExit(misuse(fs, "name a setting to change"))
+		return command.ParseExit(command.Misuse(fs, "name a setting to change"))
 	}
 	id, err := resolveOrg(c, *org)
 	if err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
-	return call(c, "PATCH", orgPath(id, "/clusters/"+url.PathEscape(name)), body, "", "", stdout, stderr)
+	return command.Call(c, "PATCH", orgPath(id, "/clusters/"+url.PathEscape(name)), body, "", "", stdout, stderr)
 }
 
 var clusterSettingHelp = map[string]string{
@@ -603,7 +532,7 @@ var clusterSettingHelp = map[string]string{
 }
 
 func clusterDisable(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("cluster disable", `usage: hl cluster disable NAME [--org ORG]
+	fs := command.NewFlags("cluster disable", `usage: hl cluster disable NAME [--org ORG]
 
 Turns a cluster off for the org's jobs: from now on none of them is placed on it. The cluster is
 any that hl cluster list shows, one the org registered or one the platform shares, and the
@@ -614,7 +543,7 @@ not_admitted_reason clusters_disabled. Turn it on again with hl cluster enable.`
 }
 
 func clusterEnable(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("cluster enable", `usage: hl cluster enable NAME [--org ORG]
+	fs := command.NewFlags("cluster enable", `usage: hl cluster enable NAME [--org ORG]
 
 Turns a cluster on again for the org's jobs after hl cluster disable, which is how every cluster
 starts.`, stderr)
@@ -622,7 +551,7 @@ starts.`, stderr)
 }
 
 func clusterRemove(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("cluster remove", `usage: hl cluster remove NAME [--org ORG]
+	fs := command.NewFlags("cluster remove", `usage: hl cluster remove NAME [--org ORG]
 
 Ends the cluster. Every job placed on it goes back to the queue, keeping its retries, and is
 placed on another cluster that takes its org; requeued lists them. The cluster's settings are
@@ -632,21 +561,21 @@ still runs and exits. The name becomes free for any org to register.`, stderr)
 }
 
 // onCluster calls one operation of a cluster of the org and prints what it answers.
-func onCluster(c *apiclient.Client, fs *flagSet, args []string, method, rest string, stdout, stderr io.Writer) int {
+func onCluster(c *apiclient.Client, fs *command.Flags, args []string, method, rest string, stdout, stderr io.Writer) int {
 	org := fs.String("org", "", orgFlagHelp)
-	name, err := parseOne(fs, args, "NAME", "", "name")
+	name, err := command.ParseOne(fs, args, "NAME", "", "name")
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	id, err := resolveOrg(c, *org)
 	if err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
-	return call(c, method, orgPath(id, "/clusters/"+url.PathEscape(name)+rest), nil, "", "", stdout, stderr)
+	return command.Call(c, method, orgPath(id, "/clusters/"+url.PathEscape(name)+rest), nil, "", "", stdout, stderr)
 }
 
 func clusterList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("cluster list", `usage: hl cluster list [--org ORG]
+	fs := command.NewFlags("cluster list", `usage: hl cluster list [--org ORG]
 
 The clusters the org's jobs run on, by name: the ones it registered (owned) and the ones the
 platform shares with every org, in the order a job is placed on them (see hl cluster order),
@@ -657,21 +586,21 @@ version_skew when that is not the platform's own, and last_error, what the platf
 its agent with. A cluster with version_skew, or not connected with a last_error, is also warned
 about on stderr.`, stderr)
 	org := fs.String("org", "", orgFlagHelp)
-	if err := parseNone(fs, args); err != nil {
-		return parseExit(err)
+	if err := command.ParseNone(fs, args); err != nil {
+		return command.ParseExit(err)
 	}
 	id, err := resolveOrg(c, *org)
 	if err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
 	var listing struct {
 		Clusters json.RawMessage `json:"clusters"`
 	}
 	if err := c.Do("GET", orgPath(id, "/clusters"), nil, &listing); err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
-	if err := printLines(stdout, stderr, "cluster list: none", listing.Clusters); err != nil {
-		return fail(stderr, err)
+	if err := command.PrintLines(stdout, stderr, "cluster list: none", listing.Clusters); err != nil {
+		return command.Fail(stderr, err)
 	}
 	var clusters []struct {
 		Name         string `json:"name"`
@@ -681,7 +610,7 @@ about on stderr.`, stderr)
 		LastError    string `json:"last_error"`
 	}
 	if err := json.Unmarshal(listing.Clusters, &clusters); err != nil {
-		return fail(stderr, fmt.Errorf("response is not a list of clusters: %w", err))
+		return command.Fail(stderr, fmt.Errorf("response is not a list of clusters: %w", err))
 	}
 	for _, cluster := range clusters {
 		if cluster.VersionSkew {
@@ -693,15 +622,4 @@ about on stderr.`, stderr)
 		}
 	}
 	return 0
-}
-
-// parseNone parses the flags of a command that takes no operand.
-func parseNone(fs *flagSet, args []string) error {
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if fs.NArg() > 0 {
-		return misuse(fs, "unexpected argument %q", fs.Arg(0))
-	}
-	return nil
 }

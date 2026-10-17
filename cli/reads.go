@@ -9,10 +9,12 @@ import (
 	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
+
+	"github.com/scaleresearch/hypothesisloop/cli/internal/command"
 )
 
 func cmdQuota(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("quota", `usage: hl quota [--agent A | --all] [--platform-experiment PE]
+	fs := command.NewFlags("quota", `usage: hl quota [--agent A | --all] [--platform-experiment PE]
 
 Accelerator-hours granted, used and held, one line per agent. share_accelerator_hours is all the
 agent may spend, on guaranteed and burst jobs together. used_guaranteed_acch and used_burst_acch
@@ -42,40 +44,40 @@ answered planner_has_no_quota, printed the same way, with where the run's budget
 	all := fs.Bool("all", false, "every agent signed up to the platform experiment")
 	pe := fs.String("platform-experiment", "", "platform experiment (default the token's)")
 	if err := fs.Parse(args); err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
-	*pe = experimentOf(c, *pe)
+	*pe = c.Experiment(*pe)
 	path := "/platform-experiments/" + url.PathEscape(*pe) + "/quotas"
-	if readsEveryAgent(c.Token, *agent) {
+	if apiclient.ReadsEveryAgent(c.Token, *agent) {
 		*all = true
 	}
 	if !*all {
-		*agent = agentOf(c, *agent)
+		*agent = c.Agent(*agent)
 		if *agent == "" {
-			return parseExit(misuse(fs, "--agent or --all is required"))
+			return command.ParseExit(command.Misuse(fs, "--agent or --all is required"))
 		}
 		path += "/" + url.PathEscape(*agent)
 	}
 	if *pe == "" {
-		return parseExit(misuse(fs, "--platform-experiment is required"))
+		return command.ParseExit(command.Misuse(fs, "--platform-experiment is required"))
 	}
 	var out json.RawMessage
 	if err := c.Do("GET", path, nil, &out); err != nil {
 		// An agent's harness tells this refusal from a read that failed by the reason in the line.
-		if reason, message := refusalOf(err); reason == "quota_not_granted" || reason == "planner_has_no_quota" {
+		if reason, message := command.RefusalOf(err); reason == "quota_not_granted" || reason == "planner_has_no_quota" {
 			fmt.Fprintf(stderr, "hl: quota: %s: %s\n", reason, message)
 			return 1
 		}
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
-	if err := printLines(stdout, stderr, "quota: none granted yet, it is granted when the platform experiment starts to the agents signed up to it", out, "id", "platform_experiment_id", "created_at"); err != nil {
-		return fail(stderr, err)
+	if err := command.PrintLines(stdout, stderr, "quota: none granted yet, it is granted when the platform experiment starts to the agents signed up to it", out, "id", "platform_experiment_id", "created_at"); err != nil {
+		return command.Fail(stderr, err)
 	}
 	return 0
 }
 
 func cmdResults(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("results", `usage: hl results [--platform-experiment PE]
+	fs := command.NewFlags("results", `usage: hl results [--platform-experiment PE]
 
 The standings on each ranking metric, first the declared baseline's value on it (baseline, with
 baseline_job_id: the bar, which moves when the baseline is raised), then one line per agent in
@@ -92,13 +94,13 @@ constraints_met is true counts. Then a line setting the best of those against th
 first ranking metric when both run in the same direction: beaten false means no result has met
 the goal yet, whatever the standings against the control say. Compare a result with a reference
 measured on the same machine.`, stderr)
-	named := experimentFlag(fs)
-	if err := parseNone(fs, args); err != nil {
-		return parseExit(err)
+	named := command.ExperimentFlag(fs)
+	if err := command.ParseNone(fs, args); err != nil {
+		return command.ParseExit(err)
 	}
-	pe, err := namedExperiment(fs, c, *named)
+	pe, err := command.NamedExperiment(fs, c, *named)
 	if err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	var out struct {
 		Metrics []struct {
@@ -111,7 +113,7 @@ measured on the same machine.`, stderr)
 		References []json.RawMessage `json:"references"`
 	}
 	if err := c.Do("GET", "/platform-experiments/"+url.PathEscape(pe)+"/results", nil, &out); err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
 	for _, m := range out.Metrics {
 		if m.Baseline != nil {
@@ -123,11 +125,11 @@ measured on the same machine.`, stderr)
 				Env map[string]string `json:"env"`
 			}
 			if err := json.Unmarshal(s, &standing); err != nil {
-				return fail(stderr, fmt.Errorf("response is not a standing: %w", err))
+				return command.Fail(stderr, fmt.Errorf("response is not a standing: %w", err))
 			}
-			rest, err := compactJSON(s, "env")
+			rest, err := command.CompactJSON(s, "env")
 			if err != nil {
-				return fail(stderr, fmt.Errorf("response is not JSON: %w", err))
+				return command.Fail(stderr, fmt.Errorf("response is not JSON: %w", err))
 			}
 			env, _ := json.Marshal(standing.Env)
 			if standing.Env == nil {
@@ -146,12 +148,12 @@ measured on the same machine.`, stderr)
 			Values    []json.RawMessage `json:"values"`
 		}
 		if err := json.Unmarshal(raw, &r); err != nil {
-			return fail(stderr, fmt.Errorf("response is not a reference: %w", err))
+			return command.Fail(stderr, fmt.Errorf("response is not a reference: %w", err))
 		}
 		for _, v := range r.Values {
-			rest, err := compactJSON(v)
+			rest, err := command.CompactJSON(v)
 			if err != nil {
-				return fail(stderr, fmt.Errorf("response is not JSON: %w", err))
+				return command.Fail(stderr, fmt.Errorf("response is not JSON: %w", err))
 			}
 			fmt.Fprintf(stdout, "%s\n", prefixed(rest, "reference", r.Metric, "direction", r.Direction))
 		}
@@ -159,9 +161,9 @@ measured on the same machine.`, stderr)
 			fmt.Fprintf(stdout, "%s\n", prefixed(nil, "reference", r.Metric, "direction", r.Direction, "measured", "not measured"))
 			continue
 		}
-		against, err := compactJSON(raw, "metric", "direction", "values")
+		against, err := command.CompactJSON(raw, "metric", "direction", "values")
 		if err != nil {
-			return fail(stderr, fmt.Errorf("response is not JSON: %w", err))
+			return command.Fail(stderr, fmt.Errorf("response is not JSON: %w", err))
 		}
 		fmt.Fprintf(stdout, "%s\n", prefixed(against, "reference", r.Metric, "direction", r.Direction))
 	}
@@ -169,7 +171,7 @@ measured on the same machine.`, stderr)
 }
 
 func cmdCapacity(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("capacity", `usage: hl capacity [--org ORG]
+	fs := command.NewFlags("capacity", `usage: hl capacity [--org ORG]
 
 Live capacity per cluster, of the clusters your org's jobs can be placed on now: enabled for
 the org and reporting. First one line of its cores and memory, in total and not asked for
@@ -212,10 +214,10 @@ The clusters are the ones one org's jobs can be placed on: its own and the share
 key and an agent token have one org and need no --org. A person in several orgs names one.`, stderr)
 	org := fs.String("org", "", "org whose clusters to read (default $HL_ORG, then the one org this token is bound to)")
 	if err := fs.Parse(args); err != nil {
-		return parseExit(err)
+		return command.ParseExit(err)
 	}
 	if fs.NArg() > 0 {
-		return parseExit(misuse(fs, "unexpected argument %q", fs.Arg(0)))
+		return command.ParseExit(command.Misuse(fs, "unexpected argument %q", fs.Arg(0)))
 	}
 	var out struct {
 		JobImages []json.RawMessage `json:"job_images"`
@@ -231,11 +233,11 @@ key and an agent token have one org and need no --org. A person in several orgs 
 		} `json:"clusters"`
 	}
 	path := "/resource-catalog/capacity"
-	if id := orEnv(*org, orgEnv); id != "" {
+	if id := command.OrEnv(*org, command.OrgEnv); id != "" {
 		path += "?org_id=" + url.QueryEscape(id)
 	}
 	if err := c.Do("GET", path, nil, &out); err != nil {
-		return fail(stderr, err)
+		return command.Fail(stderr, err)
 	}
 	for _, cl := range out.Clusters {
 		prefix := []string{"cluster", cl.Name}
@@ -251,31 +253,31 @@ key and an agent token have one org and need no --org. A person in several orgs 
 		if present(cl.Resources) || present(cl.PerNode) {
 			line, err := withPerNode(cl.Resources, cl.PerNode)
 			if err != nil {
-				return fail(stderr, err)
+				return command.Fail(stderr, err)
 			}
 			if err := printPrefixed(stdout, line, prefix...); err != nil {
-				return fail(stderr, err)
+				return command.Fail(stderr, err)
 			}
 		}
 		for _, a := range cl.Accelerators {
 			a, err := inCores(a)
 			if err != nil {
-				return fail(stderr, err)
+				return command.Fail(stderr, err)
 			}
 			if err := printPrefixed(stdout, a, prefix...); err != nil {
-				return fail(stderr, err)
+				return command.Fail(stderr, err)
 			}
 		}
 		for _, why := range cl.NoOffer {
 			if err := printPrefixed(stdout, json.RawMessage("{}"), append(prefix, "no_offer", why)...); err != nil {
-				return fail(stderr, err)
+				return command.Fail(stderr, err)
 			}
 		}
 	}
 	for _, image := range out.JobImages {
-		line, err := compactJSON(json.RawMessage(strings.Replace(string(image), `"name":`, `"job_image":`, 1)))
+		line, err := command.CompactJSON(json.RawMessage(strings.Replace(string(image), `"name":`, `"job_image":`, 1)))
 		if err != nil {
-			return fail(stderr, fmt.Errorf("response is not JSON: %w", err))
+			return command.Fail(stderr, fmt.Errorf("response is not JSON: %w", err))
 		}
 		fmt.Fprintln(stdout, string(line))
 	}
@@ -284,7 +286,7 @@ key and an agent token have one org and need no --org. A person in several orgs 
 			Name  string `json:"name"`
 			Image string `json:"image"`
 		}
-		if json.Unmarshal(raw, &image) == nil && localOnly(image.Image) {
+		if json.Unmarshal(raw, &image) == nil && command.LocalOnly(image.Image) {
 			fmt.Fprintf(stderr, "hl: warning: job_image %s is in a registry only the platform's own machine reaches (%s): a cluster on any other machine cannot pull it. "+
 				"On a local stack, set LOCAL_REACHABLE_ADDRESS in .env (.env.example) and run make dev again\n", image.Name, image.Image)
 		}
@@ -305,14 +307,14 @@ func withPerNode(resources, perNode json.RawMessage) (json.RawMessage, error) {
 	if !present(resources) {
 		resources = json.RawMessage("{}")
 	}
-	line, err := compactJSON(resources)
+	line, err := command.CompactJSON(resources)
 	if err != nil {
 		return nil, fmt.Errorf("response is not JSON: %w", err)
 	}
 	if !present(perNode) {
 		return line, nil
 	}
-	node, err := compactJSON(perNode)
+	node, err := command.CompactJSON(perNode)
 	if err != nil {
 		return nil, fmt.Errorf("response is not JSON: %w", err)
 	}
@@ -348,7 +350,7 @@ func inCores(raw json.RawMessage) (json.RawMessage, error) {
 
 // printPrefixed prints the object raw on one line after the given key and value pairs.
 func printPrefixed(stdout io.Writer, raw json.RawMessage, kv ...string) error {
-	rest, err := compactJSON(raw)
+	rest, err := command.CompactJSON(raw)
 	if err != nil {
 		return fmt.Errorf("response is not JSON: %w", err)
 	}
@@ -364,9 +366,9 @@ func prefixed(rest []byte, kv ...string) []byte {
 		if i > 0 {
 			b.WriteByte(',')
 		}
-		writeString(&b, kv[i])
+		command.WriteJSONString(&b, kv[i])
 		b.WriteByte(':')
-		writeString(&b, kv[i+1])
+		command.WriteJSONString(&b, kv[i+1])
 	}
 	if len(rest) > 2 {
 		b.WriteByte(',')

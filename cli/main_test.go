@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/scaleresearch/hypothesisloop/cli/internal/command"
 )
 
 func withServer(t *testing.T, handler http.HandlerFunc) string {
@@ -281,7 +283,7 @@ func TestJobStatusPrintsOneCompactLinePerJob(t *testing.T) {
 }
 
 func TestCompactJSONKeepsKeyOrder(t *testing.T) {
-	got, err := compactJSON([]byte(`{"z": 1, "a": {"y": "", "b": [], "c": null, "d": "<x>"}, "m": 0.10}`))
+	got, err := command.CompactJSON([]byte(`{"z": 1, "a": {"y": "", "b": [], "c": null, "d": "<x>"}, "m": 0.10}`))
 	if err != nil {
 		t.Fatal(err)
 	}
