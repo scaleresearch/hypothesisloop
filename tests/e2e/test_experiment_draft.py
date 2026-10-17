@@ -51,7 +51,7 @@ def _proposal(accelerator_type: str, image: str, **more) -> dict:
             "description": "Vary the hidden layer of the sample classifier and report val_accuracy. BASELINE config: the sample classifier as it is measured: not yet established",
             "metrics": [{"key": "val_accuracy", "direction": "maximize"}], "report_interval_seconds": 10,
         },
-        "accelerator_type": accelerator_type, "image": image,
+        "goal_version": 1, "accelerator_type": accelerator_type, "image": image,
         "budget_accelerator_hours": 2, "duration_hours": 3, "baseline_minutes": 45, "agents": [{"flavor": "hyperparameter-search"}, {}],
         "metric_reason": "Validation accuracy is what the goal asks about.",
         "measurement": "The sample workload scores a split it does not train on.",
@@ -134,7 +134,7 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         assert (waits["reason"], waits["waits_for"]) == ("proposed", "owner"), waits
         assert proposed.json()["proposal"]["accelerator_type"] == on and "baseline_job_id" not in proposed.json()["proposal"], proposed.json()["proposal"]
         assert {key: proposed.json()["proposal"][key] for key in ("image", *node)} == {"image": image, **node}, proposed.json()["proposal"]
-        # Proposed, the planner's machine is kept for a revision asked for soon: until the
+        # Proposed, the planner's machine is kept for a goal changed soon: until the
         # draft's planner_ends_at, which a second answer does not move.
         kept_until = proposed.json()["planner_ends_at"]
         assert _at(kept_until) > _at(proposed.json()["proposed_at"]), proposed.json()
@@ -143,15 +143,15 @@ def test_a_sentence_becomes_a_running_experiment_through_a_checked_proposal(api:
         assert planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(on, image, **node)).json()["planner_ends_at"] == kept_until
         assert api.post(f"/platform-experiments/{pe_id}/hold").status_code == 200
 
-        # A change asked for in a sentence reaches the planner that is still there, and it
-        # proposes again.
-        revised = api.post(f"/platform-experiments/{pe_id}/revise", {"message": "Use three researchers at most."})
+        # A changed goal reaches the planner that is still there, and it proposes again from it.
+        goal = api.get_json(f"/platform-experiments/{pe_id}")["goal"] + " Use three researchers at most."
+        revised = api.patch(f"/platform-experiments/{pe_id}", {"goal": goal})
         assert revised.status_code == 200 and "proposed_at" not in revised.json() and "planner_ends_at" not in revised.json(), revised.text
-        assert [r["message"] for r in revised.json()["revisions"]] == ["Use three researchers at most."]
+        assert (revised.json()["goal"], revised.json()["goal_version"]) == (goal, 2), revised.json()
         assert revised.json()["status_reason"]["reason"] == "revising"
         instance, _ = _planner_instance(api, pe_id)
-        assert instance is not None and instance["name"] == kept["name"], "a draft revised while its planner was kept got another machine"
-        assert planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(on, image, agents=[{}, {}, {}])).status_code == 200
+        assert instance is not None and instance["name"] == kept["name"], "a draft whose goal changed while its planner was kept got another machine"
+        assert planner.put(f"/platform-experiments/{pe_id}/proposal", _proposal(on, image, agents=[{}, {}, {}], goal_version=2)).status_code == 200
         assert api.post(f"/platform-experiments/{pe_id}/hold").status_code == 200
 
         # Accepted at the cost the person states, whatever was proposed, and under the name the
@@ -222,15 +222,15 @@ def test_a_goal_the_planner_declines_shows_why_and_can_be_answered(api: API):
         planner = api.as_caller(instance["env"]["HL_TOKEN"], api.org_id, api.project_id)
         why = "The goal names nothing to measure: say what should get better, and by which number."
 
-        assert api.put(f"/platform-experiments/{pe_id}/decline", {"reason": why}).status_code == 403, "only the planner declines"
-        assert planner.put(f"/platform-experiments/{pe_id}/decline", {"reason": " "}).status_code == 422
-        declined = planner.put(f"/platform-experiments/{pe_id}/decline", {"reason": why})
+        assert api.put(f"/platform-experiments/{pe_id}/decline", {"reason": why, "goal_version": 1}).status_code == 403, "only the planner declines"
+        assert planner.put(f"/platform-experiments/{pe_id}/decline", {"reason": " ", "goal_version": 1}).status_code == 422
+        declined = planner.put(f"/platform-experiments/{pe_id}/decline", {"reason": why, "goal_version": 1})
         assert declined.status_code == 200, declined.text
         draft = api.get_json(f"/platform-experiments/{pe_id}")
         assert (draft["status"], draft["status_reason"]["reason"], draft["declined_reason"]) == ("draft", "declined", why), draft
         assert draft["declined_at"] and "proposed_at" not in draft and "proposal" not in draft, draft
         assert draft["status_reason"]["waits_for"] == "owner", draft["status_reason"]
-        # Answered, the planner's machine is kept for a revision asked for soon, as after a
+        # Answered, the planner's machine is kept for a goal changed soon, as after a
         # proposal, and there is nothing to accept.
         assert _at(draft["planner_ends_at"]) > _at(draft["declined_at"]), draft
         kept, _ = _planner_instance(api, pe_id)
@@ -239,11 +239,11 @@ def test_a_goal_the_planner_declines_shows_why_and_can_be_answered(api: API):
         assert (accept.status_code, accept.json()["reason"]) == (409, "invalid_transition") and "declined" in accept.json()["message"], accept.text
 
         # The person says what was missing: the planner is back, and the reason is still readable.
-        revised = api.post(f"/platform-experiments/{pe_id}/revise", {"message": "Validation accuracy of the sample classifier."})
+        revised = api.patch(f"/platform-experiments/{pe_id}", {"goal": "Make the model better: validation accuracy of the sample classifier."})
         assert revised.status_code == 200 and "declined_at" not in revised.json() and revised.json()["declined_reason"] == why, revised.text
         assert api.get_json(f"/platform-experiments/{pe_id}")["status_reason"]["reason"] == "revising"
         instance, _ = _planner_instance(api, pe_id)
-        assert instance is not None and instance["name"] == kept["name"], "a draft revised while its planner was kept got another machine"
+        assert instance is not None and instance["name"] == kept["name"], "a draft whose goal changed while its planner was kept got another machine"
     finally:
         api.close_platform_experiment(pe_id)
     assert api.get_json(f"/platform-experiments/{pe_id}")["status"] == "closed"
