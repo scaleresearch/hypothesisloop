@@ -42,9 +42,12 @@ func (s *Service) WriteRefusal(err error) error {
 	case errors.Is(err, graphdb.ErrDuplicateText):
 		return refusal.Refuse(http.StatusConflict, "duplicate_hypothesis", "another hypothesis of this platform experiment already states this text: "+
 			"nothing was changed. Test or comment on that one instead")
-	case errors.Is(err, graphdb.ErrInvalidLink),
-		errors.Is(err, ErrUnknownPlatformExperiment), errors.Is(err, db.ErrUnknownAgent):
-		return refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, err.Error())
+	case errors.Is(err, graphdb.ErrInvalidLink):
+		return refusal.Invalid(refusal.ReasonInvalidRequest, err.Error()).On("links")
+	case errors.Is(err, ErrUnknownPlatformExperiment):
+		return refusal.Invalid(refusal.ReasonInvalidRequest, err.Error()).On("platform_experiment_id")
+	case errors.Is(err, db.ErrUnknownAgent):
+		return refusal.Invalid(refusal.ReasonInvalidRequest, err.Error()).On("agent_id")
 	case errors.Is(err, ErrBaselineRegistersNoHypothesis):
 		return refusal.Refuse(http.StatusForbidden, "baseline_registers_no_hypothesis", err.Error())
 	case errors.Is(err, domain.ErrPlatformExperimentClosed):
@@ -58,6 +61,14 @@ func (s *Service) WriteRefusal(err error) error {
 	default:
 		return auth.Internal(s.logger, "write hypothesis", err)
 	}
+}
+
+// LinkRefusal is WriteRefusal for adding one link, whose request names its target in to.
+func (s *Service) LinkRefusal(err error) error {
+	if errors.Is(err, graphdb.ErrInvalidLink) {
+		return refusal.Invalid(refusal.ReasonInvalidRequest, err.Error()).On("to")
+	}
+	return s.WriteRefusal(err)
 }
 
 // similarHypotheses is the 409 a registration gets while it reads close to hypotheses it has not

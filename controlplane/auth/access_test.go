@@ -210,13 +210,13 @@ func TestOrgOfANewAgent(t *testing.T) {
 		{"user of A", "", "org-a", 200},
 		{"user of A", "org-a", "org-a", 200},
 		{"user of A", "org-b", "", 404},
-		{"user of A and B", "", "", 400},
+		{"user of A and B", "", "", 422},
 		{"user of A and B", "org-b", "org-b", 200},
 		{"agent in pe-a", "", "org-a", 200},
 		{"agent in pe-a", "org-b", "", 404},
-		{"staff", "", "", 400},
+		{"staff", "", "", 422},
 		{"staff", "org-b", "org-b", 200},
-		{"user with no org", "", "", 400},
+		{"user with no org", "", "", 422},
 	} {
 		got, err := access.Org(auth.WithPrincipal(context.Background(), callers[tc.caller]), tc.requested)
 		if status(err) != tc.status || got != tc.want {

@@ -167,7 +167,7 @@ func registerRegistry(doc *Doc, svc *registry.Service, logger *zap.Logger) {
 			"objective), contradicts or related (to a hypothesis in the same platform experiment). Only the agent whose " +
 			"hypothesis it is may link from it, and one with no owning agent can be linked by anyone; others get 403. " +
 			"agent_id says whose link it is, as on registering, and who made it is the caller, answered as actor: author is refused. " +
-			"400 on a builds_on cycle, a self link, a target in another platform experiment or an unknown target. Links " +
+			"422 naming to on a builds_on cycle, a self link, a target in another platform experiment or an unknown target. Links " +
 			"are append-only and re-adding one changes nothing. " + closedRefusal + "Returns the hypothesis's outgoing links.",
 	}), a.addLink)
 
@@ -498,6 +498,9 @@ func (a hypothesesAPI) addLink(ctx context.Context, in *struct {
 	Status int
 	Body   []domain.Link
 }, error) {
+	if !domain.ValidLinkType(in.Body.Type) {
+		return nil, invalid("type", "type must be one of: builds_on, contradicts, related")
+	}
 	if _, err := a.loadHypothesis(ctx, in.ID); err != nil {
 		return nil, err
 	}
@@ -511,7 +514,7 @@ func (a hypothesesAPI) addLink(ctx context.Context, in *struct {
 	links, err := a.registry.AddHypothesisLink(ctx, in.ID, owner, actor, domain.LinkSpec{Type: in.Body.Type, To: in.Body.To})
 	if err != nil {
 		a.logger.Info("add hypothesis link", zap.Error(err))
-		return nil, a.registry.WriteRefusal(err)
+		return nil, a.registry.LinkRefusal(err)
 	}
 	return &struct {
 		Status int

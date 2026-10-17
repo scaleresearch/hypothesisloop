@@ -192,7 +192,7 @@ func TestTheTokenIsOfferedAsASubprotocol(t *testing.T) {
 }
 
 func TestRunRefused(t *testing.T) {
-	url := serveOneFrame(t, "", http.StatusBadRequest, `{"message":"unknown kind"}`)
+	url := serveOneFrame(t, "", http.StatusUnprocessableEntity, `{"message":"unknown kind"}`)
 
 	var stdout, stderr bytes.Buffer
 	code := Run(Options{

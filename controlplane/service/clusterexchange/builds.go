@@ -80,14 +80,14 @@ func (s *Service) ReportBuild(ctx context.Context, cluster, key string, report d
 		return noEnvironments()
 	}
 	if len(report.LogTail) > domain.MaxEnvironmentLogBytes {
-		return refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "log_tail is longer than "+strconv.Itoa(domain.MaxEnvironmentLogBytes)+" bytes")
+		return refusal.Invalid(refusal.ReasonInvalidRequest, "log_tail is longer than "+strconv.Itoa(domain.MaxEnvironmentLogBytes)+" bytes").On("log_tail")
 	}
 	outcome := domain.EnvironmentBuildOutcome{LogTail: report.LogTail}
 	switch report.Outcome {
 	case domain.EnvironmentBuildPushed:
 		parsed, err := digest.Parse(report.Digest)
 		if err != nil || parsed.Algorithm() != digest.SHA256 {
-			return refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "a pushed build names its digest, sha256:<hex>")
+			return refusal.Invalid(refusal.ReasonInvalidRequest, "a pushed build names its digest, sha256:<hex>").On("digest")
 		}
 		outcome.Image = s.environments.Repository + "@" + report.Digest
 	case domain.EnvironmentBuildFileFault:
@@ -95,10 +95,10 @@ func (s *Service) ReportBuild(ctx context.Context, cluster, key string, report d
 	case domain.EnvironmentBuildPlatformFault:
 		outcome.Fault = domain.EnvironmentFaultPlatform
 	default:
-		return refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "outcome is pushed, file or platform")
+		return refusal.Invalid(refusal.ReasonInvalidRequest, "outcome is pushed, file or platform").On("outcome")
 	}
 	if report.Outcome != domain.EnvironmentBuildPushed && report.Digest != "" {
-		return refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "only a pushed build names a digest")
+		return refusal.Invalid(refusal.ReasonInvalidRequest, "only a pushed build names a digest").On("digest")
 	}
 	current, err := s.store.FinishEnvironmentBuild(ctx, cluster, key, report.Attempt, outcome)
 	if err != nil {
@@ -119,10 +119,10 @@ func (s *Service) BuildLoaded(ctx context.Context, cluster, key string, loaded d
 		return noEnvironments()
 	}
 	if parsed, err := digest.Parse(loaded.Digest); err != nil || parsed.Algorithm() != digest.SHA256 {
-		return refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "digest is the image's, sha256:<hex>")
+		return refusal.Invalid(refusal.ReasonInvalidRequest, "digest is the image's, sha256:<hex>").On("digest")
 	}
 	if loaded.Node == "" || len(loaded.Node) > domain.MaxNodeNameBytes || strings.ContainsFunc(loaded.Node, func(r rune) bool { return r <= ' ' || r == 0x7f }) {
-		return refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "node is the name of the node, 1 to "+strconv.Itoa(domain.MaxNodeNameBytes)+" bytes")
+		return refusal.Invalid(refusal.ReasonInvalidRequest, "node is the name of the node, 1 to "+strconv.Itoa(domain.MaxNodeNameBytes)+" bytes").On("node")
 	}
 	current, err := s.store.RecordEnvironmentLoaded(ctx, cluster, key, loaded.Attempt, loaded.Node, s.environments.Repository+"@"+loaded.Digest)
 	if err != nil {
@@ -144,7 +144,7 @@ func (s *Service) BuildProgress(ctx context.Context, cluster, key string, progre
 	}
 	step := progress.Step
 	if step == "" || len(step) > domain.MaxEnvironmentProgressBytes || strings.ContainsAny(step, "\r\n") {
-		return refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "step is one line of 1 to "+strconv.Itoa(domain.MaxEnvironmentProgressBytes)+" bytes")
+		return refusal.Invalid(refusal.ReasonInvalidRequest, "step is one line of 1 to "+strconv.Itoa(domain.MaxEnvironmentProgressBytes)+" bytes").On("step")
 	}
 	current, err := s.store.RecordEnvironmentProgress(ctx, cluster, key, progress.Attempt, step)
 	if err != nil {

@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"time"
 
 	"go.uber.org/zap"
@@ -297,7 +296,7 @@ type WithdrawnCluster struct {
 func validName(what, name string) (string, error) {
 	name, err := domain.ValidateName(what, name)
 	if err != nil {
-		return "", refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, err.Error())
+		return "", refusal.Invalid(refusal.ReasonInvalidRequest, err.Error()).On("name")
 	}
 	return name, nil
 }
@@ -598,7 +597,7 @@ func (h *Service) RegisterCluster(ctx context.Context, orgID, name string) (*Reg
 		return nil, err
 	}
 	if err := domain.ValidateIdentifier("cluster name", name); err != nil {
-		return nil, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, err.Error())
+		return nil, refusal.Invalid(refusal.ReasonInvalidRequest, err.Error()).On("name")
 	}
 	cluster, err := h.clusters.RegisterCluster(ctx, name, orgID)
 	if err != nil {

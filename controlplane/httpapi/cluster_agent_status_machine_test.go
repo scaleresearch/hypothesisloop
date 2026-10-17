@@ -52,8 +52,8 @@ func TestAStatusReportMayNameTheMachineBehindItsNodeAndNeedNot(t *testing.T) {
 	if code := push(map[string]any{"experiment_id": "job-1", "phase": "running", "admitted_node": "rtx4090-0", "admitted_machine": map[string]any{}}); code != 200 {
 		t.Errorf("a report from a runtime that knows nothing of the machine = %d, want 200", code)
 	}
-	if code := push(map[string]any{"experiment_id": "job-1", "phase": "running", "admitted_machine": machine}); code != 400 {
-		t.Errorf("a machine with no node = %d, want 400", code)
+	if code := push(map[string]any{"experiment_id": "job-1", "phase": "running", "admitted_machine": machine}); code != 422 {
+		t.Errorf("a machine with no node = %d, want 422", code)
 	}
 	if code := push(map[string]any{"experiment_id": "job-1", "phase": "running", "admitted_node": "rtx4090-0", "admitted_machine": map[string]any{"gpu_name": "RTX 4090"}}); code != 422 {
 		t.Errorf("a machine described in a vendor's field = %d, want 422", code)

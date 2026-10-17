@@ -197,6 +197,7 @@ func (s *Service) bindHypothesis(ctx context.Context, exp *domain.Experiment) er
 	if hyp == nil {
 		return &AdmissionError{
 			Reason:  ReasonMalformed,
+			Field:   "hypothesis_id",
 			Message: hypothesisNotInExperiment(exp),
 		}
 	}
@@ -214,6 +215,7 @@ func (s *Service) bindHypothesis(ctx context.Context, exp *domain.Experiment) er
 	if hyp.PlatformExperimentID != exp.PlatformExperimentID {
 		return &AdmissionError{
 			Reason:  ReasonMalformed,
+			Field:   "hypothesis_id",
 			Message: hypothesisNotInExperiment(exp),
 		}
 	}

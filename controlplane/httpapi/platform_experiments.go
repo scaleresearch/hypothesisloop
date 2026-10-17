@@ -213,7 +213,7 @@ func registerPlatformExperiments(doc *Doc, experiments *platformexperiments.Serv
 			"Jobs the close evicted stay evicted. Agents are told with platform_experiment.status running and platform_experiment.description, as the run's length changed. " +
 			"coordinator_model moves a sandboxed coordinator to that model, checked as on a create, and left out keeps the one it has. " +
 			"409 invalid_transition for one that is not closed, one that closed before its run started, and one a later run continues. 422 invalid_length for an ends_at that has passed, run_too_long for one past quota.max_platform_experiment_days from the run's start. " +
-			"400 invalid_request for a coordinator_model on a run with no sandboxed coordinator.",
+			"422 invalid_request naming coordinator_model for a coordinator_model on a run with no sandboxed coordinator.",
 	}, a.reopenPlatformExperiment)
 
 	register(doc, auth.AudienceAgent, huma.Operation{

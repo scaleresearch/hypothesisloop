@@ -2,7 +2,7 @@ package clusterexchange
 
 import (
 	"context"
-	"net/http"
+	"strconv"
 	"time"
 
 	"go.uber.org/zap"
@@ -28,15 +28,17 @@ func (s *Service) PushStatus(ctx context.Context, clusterName string, push clust
 	// on "never observed" could not be bounded because it would have condemned all of them.
 	var observations []metricsdb.Observation
 	ids := make([]string, 0, len(push.Reports))
-	for _, rep := range push.Reports {
-		if rep.ExperimentID == "" || rep.Phase == "" {
-			return refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "every status report requires experiment_id and phase")
-		}
-		if rep.AdmittedMachine != nil && rep.AdmittedNode == "" {
-			return refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "status report for "+rep.ExperimentID+" names an admitted_machine and no admitted_node")
-		}
-		if (rep.StartedAt == nil) != (rep.EndedAt == nil) || (rep.StartedAt != nil && rep.EndedAt.Before(*rep.StartedAt)) {
-			return refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "status report for "+rep.ExperimentID+" needs started_at and ended_at together, in that order")
+	for i, rep := range push.Reports {
+		field := "reports[" + strconv.Itoa(i) + "]."
+		switch {
+		case rep.ExperimentID == "":
+			return refusal.Invalid(refusal.ReasonInvalidRequest, "every status report requires experiment_id and phase").On(field + "experiment_id")
+		case rep.Phase == "":
+			return refusal.Invalid(refusal.ReasonInvalidRequest, "every status report requires experiment_id and phase").On(field + "phase")
+		case rep.AdmittedMachine != nil && rep.AdmittedNode == "":
+			return refusal.Invalid(refusal.ReasonInvalidRequest, "status report for "+rep.ExperimentID+" names an admitted_machine and no admitted_node").On(field + "admitted_node")
+		case (rep.StartedAt == nil) != (rep.EndedAt == nil) || (rep.StartedAt != nil && rep.EndedAt.Before(*rep.StartedAt)):
+			return refusal.Invalid(refusal.ReasonInvalidRequest, "status report for "+rep.ExperimentID+" needs started_at and ended_at together, in that order").On(field + "ended_at")
 		}
 		ids = append(ids, rep.ExperimentID)
 	}

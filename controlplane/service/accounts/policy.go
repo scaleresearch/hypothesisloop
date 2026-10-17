@@ -2,7 +2,6 @@ package accounts
 
 import (
 	"context"
-	"net/http"
 	"slices"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
@@ -66,7 +65,7 @@ func (pol policy) createOrg(ctx context.Context, requestedOwner string) (ownerUs
 	case p.Kind == auth.KindStaff && requestedOwner != "":
 		return requestedOwner, nil
 	case p.UserID == "":
-		return "", refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "owner_user_id is required: this token is no person").On("owner_user_id")
+		return "", refusal.Invalid(refusal.ReasonInvalidRequest, "owner_user_id is required: this token is no person").On("owner_user_id")
 	case requestedOwner != "" && requestedOwner != p.UserID:
 		return "", auth.Forbidden("you can create an org only for yourself")
 	default:

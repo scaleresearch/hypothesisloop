@@ -67,7 +67,7 @@ func registerPlatformExperimentBudget(doc *Doc, experiments *platformexperiments
 		Description: "Live {accelerator_type, available, total} per cluster the jobs of one org can be placed on: the org's own " +
 			"clusters and the ones the platform shares, without the ones the org turned off for its jobs. The org is the one your token is bound to: every API key, agent and " +
 			"coordinator token has exactly one, and so does a person in one org. A person in several orgs names it with org_id, " +
-			"and is answered 400 without it. An org you do not reach is not found. Staff read one org with org_id and every " +
+			"and is answered 422 naming org_id without it. An org you do not reach is not found. Staff read one org with org_id and every " +
 			"cluster that reports without it. accelerator_type is the exact " +
 			"driver-published string a job spec takes, so what you read here is what you submit. pod_resources on a type " +
 			"is what the platform adds to every node of a job on it, which the job does not state itself. A job's cpu, memory " +

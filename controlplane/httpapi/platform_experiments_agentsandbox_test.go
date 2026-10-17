@@ -133,8 +133,8 @@ func TestCreateRefusesAnAgentSandboxItCannotStart(t *testing.T) {
 		status int
 		reason string
 	}{
-		"a model without a coordinator": {map[string]any{"coordinator_model": "m", "repository": "acme/model", "branch": "main"}, &fakeRepositories{files: map[string]string{"prj-a": ""}}, 400, "invalid_request"},
-		"a model no name can be":        {map[string]any{"coordinator_in_agentsandbox": true, "coordinator_model": "a b", "repository": "acme/model", "branch": "main"}, &fakeRepositories{files: map[string]string{"prj-a": ""}}, 400, "invalid_request"},
+		"a model without a coordinator": {map[string]any{"coordinator_model": "m", "repository": "acme/model", "branch": "main"}, &fakeRepositories{files: map[string]string{"prj-a": ""}}, 422, "invalid_request"},
+		"a model no name can be":        {map[string]any{"coordinator_in_agentsandbox": true, "coordinator_model": "a b", "repository": "acme/model", "branch": "main"}, &fakeRepositories{files: map[string]string{"prj-a": ""}}, 422, "invalid_request"},
 	} {
 		store, create := agentSandboxAPI(t, tc.repos)
 		code, out := create(with(tc.more))

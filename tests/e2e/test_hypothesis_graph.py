@@ -73,8 +73,8 @@ def test_registration_requires_placement(api, graph_pe, run_id):
     }
     for case, links in refused.items():
         r = api.post_hypothesis(pe_id, f"unplaced {case} {run_id}", agent_id=agent_a, links=links)
-        assert r.status_code == 400, f"{case}: got {r.status_code} {r.text}"
-        assert r.text.strip(), f"{case}: 400 without a readable message"
+        assert r.status_code == 422, f"{case}: got {r.status_code} {r.text}"
+        assert r.json()["problems"][0]["field"] == "links", f"{case}: the refusal does not name links: {r.text}"
 
     proc = api.hl_expect("hypothesis", "submit", "--agent", agent_a, "--platform-experiment", pe_id, "--text", f"cli unplaced {run_id}")
     assert proc.returncode == 2, f"hl hypothesis submit without --builds-on exited {proc.returncode}"
@@ -164,11 +164,11 @@ def test_link_rules(api, graph_pe, experiment, run_id):
     assert sum(1 for lk in api.hypothesis(b["id"])["links"]["out"] if lk["type"] == "related") == 1, "duplicate link stored twice"
 
     cycle = api.post_hypothesis_link(a["id"], "builds_on", b["id"], agent_id=agent_a)
-    assert cycle.status_code == 400, f"builds_on cycle accepted: {cycle.status_code} {cycle.text}"
+    assert cycle.status_code == 422 and cycle.json()["problems"][0]["field"] == "to", f"builds_on cycle accepted: {cycle.status_code} {cycle.text}"
     self_link = api.post_hypothesis_link(a["id"], "related", a["id"], agent_id=agent_a)
-    assert self_link.status_code == 400, f"self link accepted: {self_link.status_code}"
+    assert self_link.status_code == 422, f"self link accepted: {self_link.status_code}"
     unknown = api.post_hypothesis_link(a["id"], "related", f"no-such-hypothesis-{run_id}", agent_id=agent_a)
-    assert unknown.status_code == 400, f"link to an unknown target accepted: {unknown.status_code}"
+    assert unknown.status_code == 422, f"link to an unknown target accepted: {unknown.status_code}"
 
     not_owner = api.post_hypothesis_link(a["id"], "contradicts", theirs["id"], agent_id=agent_b)
     assert not_owner.status_code == 403, f"agent_b linked from agent_a's hypothesis: {not_owner.status_code}"
@@ -181,11 +181,11 @@ def test_link_rules(api, graph_pe, experiment, run_id):
     other_pe = experiment("hypothesis-graph-other", [agent_a], budget=BUDGET)
     foreign = api.register_hypothesis(other_pe, agent_a, f"foreign idea {run_id}")
     cross_link = api.post_hypothesis_link(a["id"], "related", foreign["id"], agent_id=agent_a)
-    assert cross_link.status_code == 400, f"cross-experiment link accepted: {cross_link.status_code}"
+    assert cross_link.status_code == 422, f"cross-experiment link accepted: {cross_link.status_code}"
     cross_register = api.post_hypothesis(pe_id, f"built on a foreign idea {run_id}", agent_id=agent_a, links=[link("builds_on", foreign["id"])])
-    assert cross_register.status_code == 400, f"cross-experiment builds_on accepted: {cross_register.status_code}"
+    assert cross_register.status_code == 422, f"cross-experiment builds_on accepted: {cross_register.status_code}"
     foreign_root = api.post_hypothesis(pe_id, f"built on a foreign root {run_id}", agent_id=agent_a, links=[link("builds_on", other_pe)])
-    assert foreign_root.status_code == 400, f"builds_on another experiment's root accepted: {foreign_root.status_code}"
+    assert foreign_root.status_code == 422, f"builds_on another experiment's root accepted: {foreign_root.status_code}"
 
 
 def test_cli_tree_from_one_file_and_reads(api, graph_pe, run_id, tmp_path: Path):

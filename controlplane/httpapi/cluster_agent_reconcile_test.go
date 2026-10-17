@@ -332,8 +332,8 @@ func TestReconcileBindsTheReportedIdentityBeforeItRecordsAnything(t *testing.T) 
 	binds := len(w.store.binds)
 	for _, invalid := range []string{"has/slash", "has space", strings.Repeat("a", domain.MaxClusterIDLength+1)} {
 		rec := w.reconcile(t, "of-a", idleReport(invalid))
-		if rec.Code != http.StatusBadRequest || len(w.store.binds) != binds || w.metricsWrites.Load() != written {
-			t.Errorf("cluster_id %q: got = %d %s with %d binds, want 400 before anything is stored", invalid, rec.Code, rec.Body, len(w.store.binds)-binds)
+		if rec.Code != http.StatusUnprocessableEntity || len(w.store.binds) != binds || w.metricsWrites.Load() != written {
+			t.Errorf("cluster_id %q: got = %d %s with %d binds, want 422 before anything is stored", invalid, rec.Code, rec.Body, len(w.store.binds)-binds)
 		}
 	}
 }
@@ -390,7 +390,7 @@ func TestReconcileKeepsTheImageTheRuntimeRunsEveryJobIn(t *testing.T) {
 	w.store.jobImages = w.store.jobImages[:2]
 	written := w.metricsWrites.Load()
 	report["job_image"] = strings.Repeat("i", domain.MaxJobImageLength+1)
-	if rec := w.reconcile(t, "of-a", report); rec.Code != http.StatusBadRequest || len(w.store.jobImages) != 2 || w.metricsWrites.Load() != written {
-		t.Fatalf("an image name too long to be one: got = %d %s, want 400 before anything is stored", rec.Code, rec.Body)
+	if rec := w.reconcile(t, "of-a", report); rec.Code != http.StatusUnprocessableEntity || len(w.store.jobImages) != 2 || w.metricsWrites.Load() != written {
+		t.Fatalf("an image name too long to be one: got = %d %s, want 422 before anything is stored", rec.Code, rec.Body)
 	}
 }

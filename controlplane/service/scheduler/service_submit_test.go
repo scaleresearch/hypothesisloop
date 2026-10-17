@@ -543,8 +543,8 @@ func TestSubmitTakesSecretEnvOffTheSpec(t *testing.T) {
 	clash.Job.Env = map[string]string{"HF_TOKEN": "open"}
 	clash.Job.SecretEnv = map[string]string{"HF_TOKEN": "the-secret-value"}
 	var refused *AdmissionError
-	if err := s.Submit(context.Background(), clash); !errors.As(err, &refused) || refused.Reason != ReasonMalformed || AdmissionStatus(refused.Reason) != 400 {
-		t.Fatalf("a name in both env and secret_env: got = %v, want a malformed submission answered 400", err)
+	if err := s.Submit(context.Background(), clash); !errors.As(err, &refused) || refused.Reason != ReasonMalformed || AdmissionStatus(refused.Reason) != 422 {
+		t.Fatalf("a name in both env and secret_env: got = %v, want a malformed submission answered 422", err)
 	}
 	if strings.Contains(refused.Message, "the-secret-value") {
 		t.Fatalf("the refusal repeats the secret: %s", refused.Message)

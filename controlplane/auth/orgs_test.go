@@ -156,7 +156,7 @@ func TestCapacityIsReadForOneOrgTheCallerReaches(t *testing.T) {
 		"a person in one org, naming none":     {accountCallers["owner"], "", "org-a", false, 200},
 		"a person in one org, naming it":       {accountCallers["owner"], "org-a", "org-a", false, 200},
 		"a person in one org, naming another":  {accountCallers["owner"], "org-b", "", false, 404},
-		"a person in two orgs, naming none":    {inBoth, "", "", false, 400},
+		"a person in two orgs, naming none":    {inBoth, "", "", false, 422},
 		"a person in two orgs, naming one":     {inBoth, "org-b", "org-b", false, 200},
 		"a person in two orgs, naming a third": {inBoth, "org-c", "", false, 404},
 		"a key, naming none":                   {accountCallers["org key"], "", "org-a", false, 200},

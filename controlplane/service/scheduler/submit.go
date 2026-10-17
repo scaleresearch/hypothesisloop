@@ -46,7 +46,7 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	// 1. The platform experiment and its state, before the spec: a job sent before the start is
 	// told so at once, whatever else is wrong with it.
 	if exp.PlatformExperimentID == "" {
-		return &AdmissionError{Reason: ReasonMalformed, Message: "platform_experiment_id is required"}
+		return &AdmissionError{Reason: ReasonMalformed, Field: "platform_experiment_id", Message: "platform_experiment_id is required"}
 	}
 	pe, err := s.store.GetPlatformExperiment(ctx, exp.PlatformExperimentID)
 	if err != nil {

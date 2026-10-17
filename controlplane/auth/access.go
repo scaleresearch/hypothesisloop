@@ -376,7 +376,7 @@ func (a *Access) Org(ctx context.Context, requested string) (string, error) {
 	}
 	if requested == "" {
 		if p.Kind == KindStaff || len(p.OrgIDs) != 1 {
-			return "", refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, "org_id is required: this token is not bound to a single org").On("org_id")
+			return "", refusal.Invalid(refusal.ReasonInvalidRequest, "org_id is required: this token is not bound to a single org").On("org_id")
 		}
 		return p.OrgIDs[0], nil
 	}

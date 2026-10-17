@@ -118,7 +118,7 @@ func (s *Service) environmentJob(ctx context.Context, peID, codeRef, image strin
 		return nil, nil, &AdmissionError{Reason: platformapi.ReasonExperimentClosed, Message: fmt.Sprintf("platform experiment %s is %s: environments are built for its jobs while it is open or running", pe.ID, pe.Status)}
 	}
 	if !codeRefPattern.MatchString(codeRef) {
-		return nil, nil, &AdmissionError{Reason: ReasonMalformed, Message: "code_ref must be \"<git-remote-url>@<commit-sha>\", a full 40-character commit SHA"}
+		return nil, nil, &AdmissionError{Reason: ReasonMalformed, Field: "code_ref", Message: "code_ref must be \"<git-remote-url>@<commit-sha>\", a full 40-character commit SHA"}
 	}
 	if err := s.codeInRepository(pe, codeRef); err != nil {
 		return nil, nil, err

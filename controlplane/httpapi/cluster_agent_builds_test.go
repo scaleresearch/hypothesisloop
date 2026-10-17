@@ -269,8 +269,8 @@ func TestABuildLoadedOnANodeIsRecordedFencedOnItsAttemptAndWakesAdmission(t *tes
 		"a node with space": {Attempt: 1, Node: "node 1", Digest: pushedDigest},
 		"a node too long":   {Attempt: 1, Node: strings.Repeat("n", domain.MaxNodeNameBytes+1), Digest: pushedDigest},
 	} {
-		if rec := w.post(t, "/of-a/builds/key-1/loaded", loaded); rec.Code != http.StatusBadRequest {
-			t.Errorf("%s: got = %d %s, want = 400", name, rec.Code, rec.Body)
+		if rec := w.post(t, "/of-a/builds/key-1/loaded", loaded); rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("%s: got = %d %s, want = 422", name, rec.Code, rec.Body)
 		}
 	}
 	if len(w.store.loaded) != 1 || w.wakes.Load() != 1 {
@@ -289,7 +289,7 @@ func TestABuildReportThatSaysTooLittleOrTooMuchIsRefused(t *testing.T) {
 		"an outcome nobody wrote":      {Attempt: 1, Outcome: "maybe"},
 		"a log tail past the boundary": {Attempt: 1, Outcome: domain.EnvironmentBuildFileFault, LogTail: strings.Repeat("x", domain.MaxEnvironmentLogBytes+1)},
 	} {
-		if rec := w.post(t, "/of-a/builds/key-1", report); rec.Code != http.StatusBadRequest && rec.Code != http.StatusUnprocessableEntity {
+		if rec := w.post(t, "/of-a/builds/key-1", report); rec.Code != http.StatusUnprocessableEntity {
 			t.Errorf("%s: got = %d %s, want it refused", name, rec.Code, rec.Body)
 		}
 	}
@@ -310,8 +310,8 @@ func TestABuildsProgressIsRecordedFencedOnItsAttemptAndOneLine(t *testing.T) {
 		t.Errorf("an attempt not assigned: got = %d %s, want = 409", rec.Code, rec.Body)
 	}
 	for name, step := range map[string]string{"empty": "", "two lines": "a\nb", "past the boundary": strings.Repeat("x", domain.MaxEnvironmentProgressBytes+1)} {
-		if rec := w.post(t, "/of-a/builds/key-1/progress", domain.EnvironmentBuildProgress{Attempt: 1, Step: step}); rec.Code != http.StatusBadRequest {
-			t.Errorf("%s: got = %d %s, want = 400", name, rec.Code, rec.Body)
+		if rec := w.post(t, "/of-a/builds/key-1/progress", domain.EnvironmentBuildProgress{Attempt: 1, Step: step}); rec.Code != http.StatusUnprocessableEntity {
+			t.Errorf("%s: got = %d %s, want = 422", name, rec.Code, rec.Body)
 		}
 	}
 	if want := []string{"key-1 [2/3] RUN apt-get install gcc: started"}; !slices.Equal(w.store.progress, want) {

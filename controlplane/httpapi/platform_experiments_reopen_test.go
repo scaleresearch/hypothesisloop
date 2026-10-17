@@ -97,8 +97,8 @@ func TestAReopenMovesASandboxedCoordinatorToTheModelItNamesCheckedAsACreateIs(t 
 	r := reopenRouter(t, store, auth.Principal{Kind: auth.KindStaff})
 	end := start.Add(10 * time.Hour).Format(time.RFC3339)
 
-	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/reopen", fmt.Sprintf(`{"ends_at":%q,"coordinator_model":"no spaces allowed"}`, end)); code != http.StatusBadRequest || out["reason"] != "invalid_request" || len(store.reopened) != 0 {
-		t.Fatalf("an invalid model: got = %d %v, want 400 invalid_request and nothing written", code, out)
+	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/reopen", fmt.Sprintf(`{"ends_at":%q,"coordinator_model":"no spaces allowed"}`, end)); code != http.StatusUnprocessableEntity || out["reason"] != "invalid_request" || len(store.reopened) != 0 {
+		t.Fatalf("an invalid model: got = %d %v, want 422 invalid_request and nothing written", code, out)
 	}
 	if code, out := call(t, r, "POST", "/platform-experiments/pe-1/reopen", fmt.Sprintf(`{"ends_at":%q,"coordinator_model":"coordinator-new-2"}`, end)); code != http.StatusOK || store.model != "coordinator-new-2" {
 		t.Fatalf("a new model: got = %d %v, stored %q, want 200 and the model written with the reopen", code, out, store.model)
@@ -128,7 +128,7 @@ func TestAReopenIsRefusedWithAPlainReason(t *testing.T) {
 		"one a later run continues":             {"/platform-experiments/pe-continued/reopen", fmt.Sprintf(`{"ends_at":%q}`, ahead), "invalid_transition", 409},
 		"an ends_at that has passed":            {"/platform-experiments/pe-1/reopen", fmt.Sprintf(`{"ends_at":%q}`, now.Add(-time.Minute).Format(time.RFC3339)), "invalid_length", 422},
 		"an ends_at past the longest run":       {"/platform-experiments/pe-1/reopen", fmt.Sprintf(`{"ends_at":%q}`, now.Add(platformexperimentstest.Settings.MaxRunLength).Format(time.RFC3339)), "run_too_long", 422},
-		"a model with no sandboxed coordinator": {"/platform-experiments/pe-1/reopen", fmt.Sprintf(`{"ends_at":%q,"coordinator_model":"coordinator-new"}`, ahead), "invalid_request", 400},
+		"a model with no sandboxed coordinator": {"/platform-experiments/pe-1/reopen", fmt.Sprintf(`{"ends_at":%q,"coordinator_model":"coordinator-new"}`, ahead), "invalid_request", 422},
 		"one that does not exist":               {"/platform-experiments/pe-none/reopen", fmt.Sprintf(`{"ends_at":%q}`, ahead), "not_found", 404},
 	} {
 		if code, out := call(t, staff, "POST", c.path, c.body); code != c.status || out["reason"] != c.reason || out["message"] == "" {

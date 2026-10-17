@@ -503,6 +503,16 @@ type AgentLaunchChoice struct {
 	Hyperparameters map[string]any
 }
 
+// LaunchError is what ResolveAgentLaunch refuses, Field naming agent_type, model or
+// hyperparameters.
+type LaunchError struct {
+	Field string
+	Err   error
+}
+
+func (e *LaunchError) Error() string { return e.Err.Error() }
+func (e *LaunchError) Unwrap() error { return e.Err }
+
 // ResolveAgentLaunch checks what an agent of role asked to be started with: the role's built-in
 // type for none, a model an agent can be started on and hyperparameters of the size allowed.
 // What it leaves out stays out, and is the type's.
@@ -511,15 +521,15 @@ func ResolveAgentLaunch(catalog AgentTypeCatalog, role AgentRole, agentType, mod
 		agentType = AgentTypeOfRole(role)
 	}
 	if _, err := LookupAgentType(catalog, agentType, role); err != nil {
-		return AgentLaunchChoice{}, err
+		return AgentLaunchChoice{}, &LaunchError{Field: "agent_type", Err: err}
 	}
 	if model != "" {
 		if err := ValidateModel(model); err != nil {
-			return AgentLaunchChoice{}, err
+			return AgentLaunchChoice{}, &LaunchError{Field: "model", Err: err}
 		}
 	}
 	if err := experimentspec.ValidateHyperparameters(hyperparameters); err != nil {
-		return AgentLaunchChoice{}, err
+		return AgentLaunchChoice{}, &LaunchError{Field: "hyperparameters", Err: err}
 	}
 	return AgentLaunchChoice{AgentType: agentType, Model: model, Hyperparameters: hyperparameters}, nil
 }

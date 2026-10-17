@@ -201,9 +201,9 @@ func (h *Handler) open(w http.ResponseWriter, r *http.Request) (context.Context,
 		auth.WriteError(w, h.logger, err)
 		return nil, subscription{}, false
 	}
-	filter, after, err := parseWatchQuery(r)
-	if err != nil {
-		refusal.Write(w, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, err.Error()))
+	filter, after, refused := parseWatchQuery(r)
+	if refused != nil {
+		refusal.Write(w, refused)
 		return nil, subscription{}, false
 	}
 	if principal.Kind == auth.KindAgent {
@@ -353,7 +353,7 @@ func (h *Handler) ServeChanges(w http.ResponseWriter, r *http.Request) {
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed < 1 || parsed > pageSize {
-			refusal.Write(w, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, fmt.Sprintf("limit must be a whole number from 1 to %d", pageSize)))
+			refusal.Write(w, invalid("limit", fmt.Sprintf("limit must be a whole number from 1 to %d", pageSize)))
 			return
 		}
 		limit = parsed
@@ -493,7 +493,7 @@ var knownKinds = func() map[string]bool {
 // head is the after of a subscription that reads on from the newest change.
 const head = -1
 
-func parseWatchQuery(r *http.Request) (domain.EventFilter, int64, error) {
+func parseWatchQuery(r *http.Request) (domain.EventFilter, int64, *refusal.Refusal) {
 	q := r.URL.Query()
 	filter := domain.EventFilter{
 		ProjectID:            q.Get("project_id"),
@@ -502,27 +502,27 @@ func parseWatchQuery(r *http.Request) (domain.EventFilter, int64, error) {
 		AgentID:              q.Get("agent_id"),
 	}
 	if q.Has("agent") {
-		return filter, 0, errWatch("agent is no parameter of a watch: the agent is agent_id")
+		return filter, 0, invalid("agent", "agent is no parameter of a watch: the agent is agent_id")
 	}
 	if q.Has("since") {
-		return filter, 0, errWatch("since is no parameter of a watch: read on with after=<id of the last change you read>, or after=head")
+		return filter, 0, invalid("since", "since is no parameter of a watch: read on with after=<id of the last change you read>, or after=head")
 	}
 	if raw := q.Get("decisions"); raw != "" {
 		decisions, err := strconv.ParseBool(raw)
 		if err != nil {
-			return filter, 0, errWatch("decisions must be true or false")
+			return filter, 0, invalid("decisions", "decisions must be true or false")
 		}
 		filter.Decisions = decisions
 	}
 	if filter.ProjectID != "" && (filter.PlatformExperimentID != "" || filter.ExperimentID != "") {
-		return filter, 0, errWatch("project_id is not combined with platform_experiment_id or experiment_id")
+		return filter, 0, invalid("project_id", "project_id is not combined with platform_experiment_id or experiment_id")
 	}
 	if filter.ProjectID == "" && filter.PlatformExperimentID == "" && filter.ExperimentID == "" {
-		return filter, 0, errWatch("one of project_id, platform_experiment_id or experiment_id is required")
+		return filter, 0, invalid("project_id", "one of project_id, platform_experiment_id or experiment_id is required")
 	}
-	kinds, err := parseKinds(q.Get("kinds"))
-	if err != nil {
-		return filter, 0, err
+	kinds, refused := parseKinds(q.Get("kinds"))
+	if refused != nil {
+		return filter, 0, refused
 	}
 	filter.Kinds = kinds
 	var after int64
@@ -533,7 +533,7 @@ func parseWatchQuery(r *http.Request) (domain.EventFilter, int64, error) {
 	default:
 		parsed, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil || parsed < 0 {
-			return filter, 0, errWatch("after must be the id of a change, or head")
+			return filter, 0, invalid("after", "after must be the id of a change, or head")
 		}
 		after = parsed
 	}
@@ -542,7 +542,7 @@ func parseWatchQuery(r *http.Request) (domain.EventFilter, int64, error) {
 
 // parseKinds turns a comma-separated list into the set a filter admits. An empty list is the
 // default subscription, and a list that names kinds means exactly those and nothing more.
-func parseKinds(raw string) (map[string]bool, error) {
+func parseKinds(raw string) (map[string]bool, *refusal.Refusal) {
 	if strings.TrimSpace(raw) == "" {
 		return domain.DefaultKinds(), nil
 	}
@@ -550,13 +550,13 @@ func parseKinds(raw string) (map[string]bool, error) {
 	for _, kind := range strings.Split(raw, ",") {
 		kind = strings.TrimSpace(kind)
 		if !knownKinds[kind] {
-			return nil, errWatch("unknown kind " + kind)
+			return nil, invalid("kinds", "unknown kind "+kind)
 		}
 		kinds[kind] = true
 	}
 	return kinds, nil
 }
 
-type errWatch string
-
-func (e errWatch) Error() string { return string(e) }
+func invalid(field, message string) *refusal.Refusal {
+	return refusal.Invalid(refusal.ReasonInvalidRequest, message).On(field)
+}

@@ -136,6 +136,15 @@ func countSetsCores(job *domain.JobSpec) error {
 	return nil
 }
 
+// typeField is the field of the accelerator type at position i of a job's choices, the first its
+// accelerator_type and the rest its acceptable_accelerator_types.
+func typeField(i int) string {
+	if i == 0 {
+		return "job.accelerator_type"
+	}
+	return "job.acceptable_accelerator_types"
+}
+
 // ValidateExperiment checks required fields are populated and no resource dimension exceeds
 // its per-job cap — applied before any quota debit, so one absurd submission can't consume an
 // entire budget in one shot.
@@ -144,29 +153,29 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 		return &AdmissionError{Reason: ReasonMalformed, Message: "experiment is nil"}
 	}
 	if err := domain.ValidateIdentifier("id", exp.ID); err != nil {
-		return &AdmissionError{Reason: ReasonMalformed, Message: err.Error()}
+		return &AdmissionError{Reason: ReasonMalformed, Field: "id", Message: err.Error()}
 	}
 	if exp.AgentID == "" {
-		return &AdmissionError{Reason: ReasonMalformed, Message: "agent_id is required"}
+		return &AdmissionError{Reason: ReasonMalformed, Field: "agent_id", Message: "agent_id is required"}
 	}
 	if exp.HypothesisID == "" {
-		return &AdmissionError{Reason: ReasonMalformed, Message: "hypothesis_id is required: every job but a baseline agent's tests a hypothesis registered with POST /hypotheses"}
+		return &AdmissionError{Reason: ReasonMalformed, Field: "hypothesis_id", Message: "hypothesis_id is required: every job but a baseline agent's tests a hypothesis registered with POST /hypotheses"}
 	}
 	// A job on the objective is the baseline's: it measures and predicts nothing.
 	if exp.Theory == "" && !exp.OnObjective() {
-		return &AdmissionError{Reason: ReasonMalformed, Message: "theory is required"}
+		return &AdmissionError{Reason: ReasonMalformed, Field: "theory", Message: "theory is required"}
 	}
 	if exp.CodeRef == "" {
-		return &AdmissionError{Reason: ReasonMalformed, Message: "code_ref is required"}
+		return &AdmissionError{Reason: ReasonMalformed, Field: "code_ref", Message: "code_ref is required"}
 	}
 	if !codeRefPattern.MatchString(exp.CodeRef) {
-		return &AdmissionError{Reason: ReasonMalformed, Message: "code_ref must be \"<git-remote-url>@<commit-sha>\" — a full 40-character commit SHA, not a branch name or tag"}
+		return &AdmissionError{Reason: ReasonMalformed, Field: "code_ref", Message: "code_ref must be \"<git-remote-url>@<commit-sha>\" — a full 40-character commit SHA, not a branch name or tag"}
 	}
 	// Node labels under the platform's prefix are written by admission, the slot a job is
 	// admitted to among them. A submitter who could name one would place the job themselves.
 	for label := range exp.Job.NodeSelector {
 		if strings.HasPrefix(label, domain.NodeLabelReservedPrefix) {
-			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.node_selector may not name %q: labels under %s are set by the platform", label, domain.NodeLabelReservedPrefix)}
+			return &AdmissionError{Reason: ReasonMalformed, Field: "job.node_selector", Message: fmt.Sprintf("job.node_selector may not name %q: labels under %s are set by the platform", label, domain.NodeLabelReservedPrefix)}
 		}
 	}
 	if err := quantitiesStated(exp.Job); err != nil {
@@ -177,14 +186,14 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	}
 	if requested := exp.Job.AcceleratorType; requested.Kind() == domain.TypeKindCPU || (requested == "" && domain.GroupAcceleratorType(exp.Job).Kind() == domain.TypeKindCPU) {
 		if err := countSetsCores(&exp.Job); err != nil {
-			return &AdmissionError{Reason: ReasonMalformed, Message: err.Error()}
+			return &AdmissionError{Reason: ReasonMalformed, Field: "job", Message: err.Error()}
 		}
 		exp.AcceleratorCount = exp.Job.TotalAccelerators()
 	}
 	// A grouped job states its shapes per group and is rejected outright if it also states them
 	// at the top level, so the two blocks below are alternatives, never a merge.
 	if err := domain.ValidateGroups(exp.Job); err != nil {
-		return &AdmissionError{Reason: ReasonMalformed, Message: err.Error()}
+		return &AdmissionError{Reason: ReasonMalformed, Field: "job.groups", Message: err.Error()}
 	}
 	// A grouped job may name its single accelerator type on the groups rather than at the top
 	// level. Normalize it onto the job here, at the one place a submission is validated, so
@@ -194,7 +203,7 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 		exp.Job.AcceleratorType = domain.GroupAcceleratorType(exp.Job)
 	}
 	if err := domain.ValidateSecretEnv(exp.Job, exp.SecretEnv); err != nil {
-		return &AdmissionError{Reason: ReasonMalformed, Message: err.Error()}
+		return &AdmissionError{Reason: ReasonMalformed, Field: "secret_env", Message: err.Error()}
 	}
 	// The two fields a job may leave out for a stated default, each written here and nowhere else
 	// and answered on the job: job.max_retries is 0, and capacity_tier is guaranteed.
@@ -202,14 +211,14 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 		exp.Job.MaxRetries = new(int)
 	}
 	if *exp.Job.MaxRetries < 0 {
-		return &AdmissionError{Reason: ReasonMalformed, Message: "job.max_retries must not be negative"}
+		return &AdmissionError{Reason: ReasonMalformed, Field: "job.max_retries", Message: "job.max_retries must not be negative"}
 	}
 	switch exp.CapacityTier {
 	case "":
 		exp.CapacityTier = domain.CapacityGuaranteed
 	case domain.CapacityGuaranteed, domain.CapacityBurst:
 	default:
-		return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("capacity_tier must be %q, %q, or omitted, got %q", domain.CapacityGuaranteed, domain.CapacityBurst, exp.CapacityTier)}
+		return &AdmissionError{Reason: ReasonMalformed, Field: "capacity_tier", Message: fmt.Sprintf("capacity_tier must be %q, %q, or omitted, got %q", domain.CapacityGuaranteed, domain.CapacityBurst, exp.CapacityTier)}
 	}
 
 	// Every job holds units of a priced type. Budget, quota, fairness and the concurrency cap all
@@ -217,11 +226,11 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	// must name a type, or nothing downstream has a type to schedule against.
 	switch {
 	case exp.AcceleratorCount < 0:
-		return &AdmissionError{Reason: ReasonMalformed, Message: "job.accelerator_count must not be negative"}
+		return &AdmissionError{Reason: ReasonMalformed, Field: "job.accelerator_count", Message: "job.accelerator_count must not be negative"}
 	case exp.AcceleratorCount == 0:
-		return &AdmissionError{Reason: ReasonMalformed, Message: "the job asks for nothing the catalog prices: state job.cpu, a whole number of cores, for a job on CPU, or job.accelerator_type with job.accelerator_count of at least 1 for a job on accelerators"}
+		return &AdmissionError{Reason: ReasonMalformed, Field: "job", Message: "the job asks for nothing the catalog prices: state job.cpu, a whole number of cores, for a job on CPU, or job.accelerator_type with job.accelerator_count of at least 1 for a job on accelerators"}
 	case exp.Job.AcceleratorType == "":
-		return &AdmissionError{Reason: ReasonMalformed, Message: "job.accelerator_type is required when job.accelerator_count > 0"}
+		return &AdmissionError{Reason: ReasonMalformed, Field: "job.accelerator_type", Message: "job.accelerator_type is required when job.accelerator_count > 0"}
 	}
 	if exp.AcceleratorCount > 0 {
 		// Every type must be a well-formed driver-published key=value AND priced in the
@@ -230,7 +239,7 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 		seen := map[domain.AcceleratorType]bool{}
 		for i, t := range append([]domain.AcceleratorType{exp.Job.AcceleratorType}, exp.Job.AcceptableAcceleratorTypes...) {
 			if err := t.Validate(); err != nil {
-				return &AdmissionError{Reason: ReasonMalformed, Message: err.Error()}
+				return &AdmissionError{Reason: ReasonMalformed, Field: typeField(i), Message: err.Error()}
 			}
 			// Position 0 is job.accelerator_type, the first choice. It may legitimately reappear
 			// among the alternatives — an agent listing every accelerator type it runs on naturally includes
@@ -239,71 +248,71 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 			// placement.CandidateTypes collapses the harmless overlap before placement.
 			if i > 0 {
 				if seen[t] {
-					return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("accelerator type %q is listed more than once", t)}
+					return &AdmissionError{Reason: ReasonMalformed, Field: "job.acceptable_accelerator_types", Message: fmt.Sprintf("accelerator type %q is listed more than once", t)}
 				}
 				seen[t] = true
 			}
 			if _, ok := domain.LookupAcceleratorCost(t); !ok {
-				return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("accelerator type %q has no configured acch_rate (position %d)", t, i)}
+				return &AdmissionError{Reason: ReasonMalformed, Field: typeField(i), Message: fmt.Sprintf("accelerator type %q has no configured acch_rate (position %d)", t, i)}
 			}
 			// A count is cores on CPU and devices on an accelerator, so one count cannot stand
 			// for both.
 			if requested := exp.Job.AcceleratorType; t.Kind() != requested.Kind() {
-				return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("acceptable accelerator type %q cannot stand in for job.accelerator_type %q: a job runs on CPU cores or on accelerators, never either", t, requested)}
+				return &AdmissionError{Reason: ReasonMalformed, Field: "job.acceptable_accelerator_types", Message: fmt.Sprintf("acceptable accelerator type %q cannot stand in for job.accelerator_type %q: a job runs on CPU cores or on accelerators, never either", t, requested)}
 			}
 		}
 		exp.AcceleratorType = exp.Job.AcceleratorType
 	}
 	// One that is left out is the submit's to give (Experiment.TakeEstimate, takeLargestEstimate).
 	if exp.EstimatedDurationHours < 0 {
-		return &AdmissionError{Reason: ReasonMalformed, Message: "estimated_duration_hours must not be negative"}
+		return &AdmissionError{Reason: ReasonMalformed, Field: "estimated_duration_hours", Message: "estimated_duration_hours must not be negative"}
 	}
 
 	// The count of a job on cores is its cores, which max_cpu_cores_per_job bounds below.
 	if exp.AcceleratorType.Kind() != domain.TypeKindCPU && exp.AcceleratorCount > caps.MaxAcceleratorCountPerJob {
-		return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.accelerator_count %d is over the most accelerators one job may ask for, %d", exp.AcceleratorCount, caps.MaxAcceleratorCountPerJob)}
+		return &AdmissionError{Reason: ReasonMalformed, Field: "job.accelerator_count", Message: fmt.Sprintf("job.accelerator_count %d is over the most accelerators one job may ask for, %d", exp.AcceleratorCount, caps.MaxAcceleratorCountPerJob)}
 	}
 	nodes := exp.Job.Nodes()
 	cpu, err := totalOverGroups(exp.Job, jobspec.CPUCores, func(g domain.JobGroup) string { return g.CPU })
 	if err != nil {
-		return &AdmissionError{Reason: ReasonMalformed, Message: "job.cpu: " + err.Error()}
+		return &AdmissionError{Reason: ReasonMalformed, Field: "job.cpu", Message: "job.cpu: " + err.Error()}
 	}
 	if cpu > caps.MaxCPUCoresPerJob {
-		return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.cpu %g cores (x%d nodes) is over the most cores one job may ask for, %g", cpu/float64(nodes), nodes, caps.MaxCPUCoresPerJob)}
+		return &AdmissionError{Reason: ReasonMalformed, Field: "job.cpu", Message: fmt.Sprintf("job.cpu %g cores (x%d nodes) is over the most cores one job may ask for, %g", cpu/float64(nodes), nodes, caps.MaxCPUCoresPerJob)}
 	}
 	memory, err := totalOverGroups(exp.Job, jobspec.GB, func(g domain.JobGroup) string { return g.Memory })
 	if err != nil {
-		return &AdmissionError{Reason: ReasonMalformed, Message: "job.memory: " + err.Error()}
+		return &AdmissionError{Reason: ReasonMalformed, Field: "job.memory", Message: "job.memory: " + err.Error()}
 	}
 	if memory > caps.MaxRAMGBPerJob {
-		return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.memory %.2fGB (x%d nodes) exceeds per-job max %.2fGB", memory/float64(nodes), nodes, caps.MaxRAMGBPerJob)}
+		return &AdmissionError{Reason: ReasonMalformed, Field: "job.memory", Message: fmt.Sprintf("job.memory %.2fGB (x%d nodes) exceeds per-job max %.2fGB", memory/float64(nodes), nodes, caps.MaxRAMGBPerJob)}
 	}
 	storage, err := totalOverGroups(exp.Job, jobspec.GB, func(g domain.JobGroup) string { return g.Storage })
 	if err != nil {
-		return &AdmissionError{Reason: ReasonMalformed, Message: "job.storage: " + err.Error()}
+		return &AdmissionError{Reason: ReasonMalformed, Field: "job.storage", Message: "job.storage: " + err.Error()}
 	}
 	if storage > caps.MaxStorageGBPerJob {
-		return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.storage %.2fGB (x%d nodes) exceeds per-job max %.2fGB", storage/float64(nodes), nodes, caps.MaxStorageGBPerJob)}
+		return &AdmissionError{Reason: ReasonMalformed, Field: "job.storage", Message: fmt.Sprintf("job.storage %.2fGB (x%d nodes) exceeds per-job max %.2fGB", storage/float64(nodes), nodes, caps.MaxStorageGBPerJob)}
 	}
 	// ExtraResources has no billing dimension or per-job cap, but a malformed quantity string
 	// should still be rejected here rather than surfacing later as an opaque Job-creation failure.
 	for name, qty := range exp.Job.ExtraResources {
 		if _, err := jobspec.ParseQuantity(qty); err != nil {
-			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.extra_resources[%q]: %s", name, err.Error())}
+			return &AdmissionError{Reason: ReasonMalformed, Field: "job.extra_resources", Message: fmt.Sprintf("job.extra_resources[%q]: %s", name, err.Error())}
 		}
 	}
 	if exp.Job.ShmSize != "" {
 		q, err := jobspec.ParseQuantity(exp.Job.ShmSize)
 		if err != nil {
-			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.shm_size %q: %s", exp.Job.ShmSize, err.Error())}
+			return &AdmissionError{Reason: ReasonMalformed, Field: "job.shm_size", Message: fmt.Sprintf("job.shm_size %q: %s", exp.Job.ShmSize, err.Error())}
 		}
 		if q.Sign() <= 0 {
-			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.shm_size must be positive (%q)", exp.Job.ShmSize)}
+			return &AdmissionError{Reason: ReasonMalformed, Field: "job.shm_size", Message: fmt.Sprintf("job.shm_size must be positive (%q)", exp.Job.ShmSize)}
 		}
 	}
 	for name, qty := range exp.Job.AcceleratorPodResources {
 		if _, err := jobspec.ParseQuantity(qty); err != nil {
-			return &AdmissionError{Reason: ReasonMalformed, Message: fmt.Sprintf("job.accelerator_pod_resources[%q]: %s", name, err.Error())}
+			return &AdmissionError{Reason: ReasonMalformed, Field: "job.accelerator_pod_resources", Message: fmt.Sprintf("job.accelerator_pod_resources[%q]: %s", name, err.Error())}
 		}
 	}
 	return nil

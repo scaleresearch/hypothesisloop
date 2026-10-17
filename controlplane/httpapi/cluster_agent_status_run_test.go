@@ -111,8 +111,8 @@ func TestAStatusReportNamesBothEndsOfARunInOrderOrNeither(t *testing.T) {
 		"an end alone":  {"ended_at": ended},
 		"an end first":  {"started_at": ended, "ended_at": started},
 	} {
-		if code := push(extra); code != 400 {
-			t.Errorf("%s = %d, want 400", name, code)
+		if code := push(extra); code != 422 {
+			t.Errorf("%s = %d, want 422", name, code)
 		}
 	}
 }

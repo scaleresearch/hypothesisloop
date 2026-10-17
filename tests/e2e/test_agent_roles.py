@@ -67,7 +67,7 @@ def test_unknown_role_refused_and_writes_no_signup(api, pe, run_id):
     stranger = make_agent(api, run_id, "roles-stranger")
 
     r = api.signup(pe_id, stranger, "referee")
-    assert r.status_code == 400, "a typo'd role must be refused, not defaulted to competitor"
+    assert r.status_code == 422, "a typo'd role must be refused, not defaulted to competitor"
     assert r.json().get("reason") == "unknown_role"
 
     code, _ = api.signup_role(pe_id, stranger)

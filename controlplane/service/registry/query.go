@@ -38,7 +38,7 @@ var QueryDescription = "Read-only Cypher against one platform experiment's hypot
 	"the platform rewrites it before it runs. Every node pattern names its label, (h:Hypothesis) or (o:Objective), and is " +
 	"tied to $pe (platform_experiment_id on a hypothesis, id on the objective), which you may leave out or write as " +
 	"{platform_experiment_id: $pe} and {id: $pe}; a variable-length relationship ([:BUILDS_ON*1..3]) stays inside the " +
-	"platform experiment and takes no filter of its own; a text search keeps this platform experiment's hits. Refused with 400: " +
+	"platform experiment and takes no filter of its own; a text search keeps this platform experiment's hits. Refused with 422 naming cypher: " +
 	"a node without a label, as (n), () or a variable in parentheses on its own, which is then written (n:Hypothesis) " +
 	"again, another or a second label, the scope property set to anything but $pe, a parameter as a property map, a " +
 	"function outside the built-in ones (" + strings.Join(graphdb.QueryFunctions, ", ") + "), a statement that does not start with " +
@@ -56,5 +56,5 @@ var QueryDescription = "Read-only Cypher against one platform experiment's hypot
 	"Nothing a query writes persists (writes go through POST /hypotheses and POST /hypotheses/{id}/links). " +
 	"LOAD CSV, periodic commits and procedures other than " + strings.Join(graphdb.QueryProcedures, ", ") + " are refused. Limits: " +
 	fmt.Sprintf("%s and %d MB of memory per query, %d rows (truncated=true when cut). ", graphdb.QueryTimeout, graphdb.QueryMemoryLimitMB, graphdb.QueryRowCap) +
-	"A Cypher error comes back as 400 with Memgraph's message. Findings, comments and jobs are not in the graph: " +
+	"A Cypher error comes back as 422 naming cypher, with Memgraph's message. Findings, comments and jobs are not in the graph: " +
 	"GET /hypotheses/{id} returns them, and GET /hypotheses/{platform_experiment_id}/comments the objective's comments."

@@ -127,7 +127,7 @@ def test_a_job_on_cores_states_whole_cores_and_one_count_and_no_accelerator(api,
     for overrides in ({**cpu_job(2), "accelerator_count": 4}, {**cpu_job(2), "cpu": "500m"}, {**cpu_job(2), "cpu": "1.5"},
                       {**cpu_job(2), "acceptable_accelerator_types": ["nvidia.com/gpu.product=NVIDIA-L40"]}):
         code, _ = api.submit_job_expect(pe_id, agent, hours=PROBE_JOB_HOURS, job_overrides=overrides)
-        assert code == 400, f"{overrides}: answered {code}, want 400"
+        assert code == 422, f"{overrides}: answered {code}, want 422"
 
 
 

@@ -83,6 +83,6 @@ def test_a_name_in_both_env_and_secret_env_is_refused(api, experiment, run_id):
         job_overrides={"env": {"HF_TOKEN": "open"}, "secret_env": {"HF_TOKEN": "the-secret-value"}},
     )
     r = api.post("/experiments", yaml.safe_load(req.to_yaml()))
-    assert r.status_code == 400, f"HTTP {r.status_code}: {r.text}"
+    assert r.status_code == 422, f"HTTP {r.status_code}: {r.text}"
     assert "HF_TOKEN" in r.text and "the-secret-value" not in r.text, r.text
     assert api.get(f"/experiments/{job_id}").status_code == 404, "the refused job was stored"

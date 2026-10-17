@@ -181,10 +181,10 @@ func refuseSignup(status int, reason, format string, args ...any) error {
 func (s *Service) AddAgent(ctx context.Context, platformExpID string, req AddAgentRequest, by domain.Actor, launch AgentLaunch) ([]domain.AgentSignup, error) {
 	role, err := domain.ParseSignupRole(req.Role)
 	if err != nil {
-		return nil, refuseSignup(400, "unknown_role", "%s", err)
+		return nil, refusal.Invalid("unknown_role", err.Error()).On("role")
 	}
 	if !experimentspec.ValidQuotaTierOverride(req.QuotaTier) {
-		return nil, refuseSignup(400, "invalid_request", "quota_tier must be \"guaranteed\", \"burst_only\", or omitted, got %s", req.QuotaTier)
+		return nil, refusal.Invalid(refusal.ReasonInvalidRequest, `quota_tier must be "guaranteed", "burst_only", or omitted`).On("quota_tier")
 	}
 	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
 	if err != nil {
@@ -198,8 +198,12 @@ func (s *Service) AddAgent(ctx context.Context, platformExpID string, req AddAge
 		return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
 	}
 	choice, err := domain.ResolveAgentLaunch(catalog, domain.RoleOfSignup(role), req.AgentType, req.Model, req.Hyperparameters)
+	var launchErr *domain.LaunchError
+	if errors.As(err, &launchErr) {
+		return nil, refusal.Invalid(refusal.ReasonInvalidRequest, err.Error()).On(launchErr.Field)
+	}
 	if err != nil {
-		return nil, refuseSignup(400, "invalid_request", "%s", err)
+		return nil, err
 	}
 	signup := domain.AgentSignup{
 		AgentID: req.AgentID, Role: role, QuotaTier: domain.QuotaTier(req.QuotaTier),
@@ -325,7 +329,7 @@ func agentNameTaken(name string) error {
 func (s *Service) joinRegistered(ctx context.Context, pe *domain.PlatformExperiment, req AddAgentRequest, signup domain.AgentSignup, late *db.LateJoin) ([]domain.AgentSignup, error) {
 	platformExpID := pe.ID
 	if req.Name != "" {
-		return nil, refuseSignup(400, "invalid_request", "name describes an agent to create and cannot be set with agent_id")
+		return nil, refusal.Invalid(refusal.ReasonInvalidRequest, "name describes an agent to create and cannot be set with agent_id").On("name")
 	}
 	agent, err := s.store.GetAgent(ctx, req.AgentID)
 	if err != nil {

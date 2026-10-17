@@ -476,13 +476,13 @@ func TestJoiningIsRefusedWithAReasonTheCallerCanActOn(t *testing.T) {
 		"registered, full":              {domain.PlatformExpOpen, "pe-1", `{}` + "\x00" + `{}` + "\x00" + `{"agent_id":"dana"}`, 409, "max_agents_reached"},
 		"no such experiment":            {domain.PlatformExpOpen, "pe-none", `{}`, 404, "not_found"},
 		"no such agent":                 {domain.PlatformExpOpen, "pe-1", `{"agent_id":"ghost"}`, 404, "not_found"},
-		"unknown role":                  {domain.PlatformExpOpen, "pe-1", `{"role":"judge"}`, 400, "unknown_role"},
-		"unknown tier":                  {domain.PlatformExpOpen, "pe-1", `{"quota_tier":"gold"}`, 400, "invalid_request"},
-		"name with agent_id":            {domain.PlatformExpOpen, "pe-1", `{"agent_id":"dana","name":"x"}`, 400, "invalid_request"},
-		"agent type not an id":          {domain.PlatformExpOpen, "pe-1", `{"agent_type":"../x"}`, 400, "invalid_request"},
-		"unknown agent type":            {domain.PlatformExpOpen, "pe-1", `{"agent_type":"prompt-search"}`, 400, "invalid_request"},
-		"unknown agent type, sandboxed": {domain.PlatformExpOpen, "pe-1", `{"agent_type":"prompt-search","in_agentsandbox":true}`, 400, "invalid_request"},
-		"model with a space":            {domain.PlatformExpOpen, "pe-1", `{"model":"a b"}`, 400, "invalid_request"},
+		"unknown role":                  {domain.PlatformExpOpen, "pe-1", `{"role":"judge"}`, 422, "unknown_role"},
+		"unknown tier":                  {domain.PlatformExpOpen, "pe-1", `{"quota_tier":"gold"}`, 422, "invalid_request"},
+		"name with agent_id":            {domain.PlatformExpOpen, "pe-1", `{"agent_id":"dana","name":"x"}`, 422, "invalid_request"},
+		"agent type not an id":          {domain.PlatformExpOpen, "pe-1", `{"agent_type":"../x"}`, 422, "invalid_request"},
+		"unknown agent type":            {domain.PlatformExpOpen, "pe-1", `{"agent_type":"prompt-search"}`, 422, "invalid_request"},
+		"unknown agent type, sandboxed": {domain.PlatformExpOpen, "pe-1", `{"agent_type":"prompt-search","in_agentsandbox":true}`, 422, "invalid_request"},
+		"model with a space":            {domain.PlatformExpOpen, "pe-1", `{"model":"a b"}`, 422, "invalid_request"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			store := newRosterStore(tc.status, 2)
@@ -775,8 +775,8 @@ func TestHyperparametersAboveTheBoundAreRefusedAtJoin(t *testing.T) {
 	r := agentsRouter(t, store, staff)
 	big := `{"in_agentsandbox":true,"hyperparameters":{"blob":"` + strings.Repeat("x", domain.MaxHyperparametersBytes) + `"}}`
 	code, out := call(t, r, "POST", "/platform-experiments/pe-1/agents", big)
-	if code != http.StatusBadRequest || out["reason"] != "invalid_request" || !strings.Contains(out["message"].(string), "4096") {
-		t.Fatalf("got = %d %v, want = 400 naming the limit", code, out)
+	if code != http.StatusUnprocessableEntity || out["reason"] != "invalid_request" || !strings.Contains(out["message"].(string), "4096") {
+		t.Fatalf("got = %d %v, want = 422 naming the limit", code, out)
 	}
 	if len(store.signups) != 0 {
 		t.Fatalf("%d signups were written", len(store.signups))
@@ -1000,8 +1000,8 @@ func TestTheRosterAnswersWhatEachSandboxedAgentIsDoing(t *testing.T) {
 // Nobody asks for a planner: it is no agent type a request can name.
 func TestNobodyAsksForAPlanner(t *testing.T) {
 	open := &rosterStore{pe: &domain.PlatformExperiment{ID: "pe-1", ProjectID: "prj-a", Status: domain.PlatformExpOpen, MaxAgents: 5, MaxAgentSandboxes: rosterMaxAgentSandboxes, Repository: "acme/model"}, agents: map[string]*domain.Agent{}}
-	if code, body := call(t, agentsRouter(t, open, staff), "POST", "/platform-experiments/pe-1/agents", `{"in_agentsandbox":true,"agent_type":"planner"}`); code != http.StatusBadRequest || len(open.signups) != 0 {
-		t.Errorf("an agent asked for as a planner: got = %d %v, want 400 and nobody joined", code, body)
+	if code, body := call(t, agentsRouter(t, open, staff), "POST", "/platform-experiments/pe-1/agents", `{"in_agentsandbox":true,"agent_type":"planner"}`); code != http.StatusUnprocessableEntity || len(open.signups) != 0 {
+		t.Errorf("an agent asked for as a planner: got = %d %v, want 422 and nobody joined", code, body)
 	}
 }
 

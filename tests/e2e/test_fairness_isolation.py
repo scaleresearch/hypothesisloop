@@ -46,7 +46,7 @@ def test_a_job_that_holds_no_priced_unit_is_refused(api, two_pes_with_pe1_usage)
     _, pe2, agent, _ = two_pes_with_pe1_usage
     for overrides in ({"accelerator_count": 0}, {"accelerator_count": 0, "accelerator_type": None, "acceptable_accelerator_types": None}):
         code, _ = api.submit_job_expect(pe2, agent, hours=0.02, job_overrides=overrides)
-        assert code == 400, f"a job with no accelerator and no whole core was answered {code}, want 400"
+        assert code == 422, f"a job with no accelerator and no whole core was answered {code}, want 422"
 
 
 def test_pe2_quota_unaffected_by_pe1_usage(api, two_pes_with_pe1_usage, deadline):

@@ -301,7 +301,7 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
     changed = runtime.api.post(f"/internal/clusters/{name}/reconcile", _report(f"other-{runtime.cluster_id}"))
     assert changed.status_code == 409, f"org A's runtime stating a second cluster id: {changed.status_code} {changed.text}"
     malformed = runtime.api.post(f"/internal/clusters/{name}/reconcile", _report("../" + runtime.cluster_id))
-    assert malformed.status_code == 400, f"a cluster id that is a path: {malformed.status_code} {malformed.text}"
+    assert malformed.status_code == 422, f"a cluster id that is a path: {malformed.status_code} {malformed.text}"
 
     listed = {c["name"]: c for c in _lines(a.api.hl("cluster", "list"))}
     assert listed[name] == {**listed[name], "org_id": a.org_id, "shared": False, "owned": True, "connected": True, "cluster_id": runtime.cluster_id}
@@ -622,7 +622,7 @@ def test_only_staff_see_every_org(orgs, api: API):
     assert r.status_code == 403, f"a staff token that is no person created a key: {r.status_code} {r.text}"
     created = api.post("/orgs", {"name": f"by staff {a.marker}", "owner_user_id": a.subject})
     assert created.status_code == 201, created.text
-    assert api.post("/orgs", {"name": "ownerless"}).status_code == 400
+    assert api.post("/orgs", {"name": "ownerless"}).status_code == 422
     assert api.post("/orgs", {"name": "x", "owner_user_id": f"user-nobody-{uuid.uuid4().hex}"}).status_code == 404
     assert created.json()["id"] not in a.api.get("/me").text, "an org-wide key reached an org made after it"
 

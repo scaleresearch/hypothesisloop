@@ -548,8 +548,8 @@ func TestAnUnknownKindIsRefusedRatherThanSilentlyIgnored(t *testing.T) {
 		t.Fatalf("request: got = %v, want = nil", err)
 	}
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusBadRequest {
-		t.Errorf("status for an unknown kind: got = %v, want = %v", response.StatusCode, http.StatusBadRequest)
+	if response.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("status for an unknown kind: got = %v, want = %v", response.StatusCode, http.StatusUnprocessableEntity)
 	}
 }
 

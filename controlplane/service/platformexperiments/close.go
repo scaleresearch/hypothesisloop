@@ -12,6 +12,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/contract/gitrefs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
@@ -133,7 +134,7 @@ func (s *Service) Reopen(ctx context.Context, id string, endsAt time.Time, coord
 	case !endsAt.After(time.Now()):
 		return nil, refuseUpdate(422, "invalid_length", "ends_at %s has passed: state a time ahead", endsAt.UTC().Format(time.RFC3339))
 	case coordinatorModel != "" && !pe.CoordinatorInAgentSandbox:
-		return nil, refuseSignup(400, "invalid_request", "coordinator_model is set and platform experiment %s has no sandboxed coordinator", id)
+		return nil, refusal.Invalid(refusal.ReasonInvalidRequest, "coordinator_model is set and platform experiment "+id+" has no sandboxed coordinator").On("coordinator_model")
 	}
 	if length := endsAt.Sub(pe.StartsAt); length > s.cfg.MaxRunLength {
 		return nil, refuseUpdate(422, "run_too_long", "ends_at %s would have the run, started at %s, last %.1f days, and a platform experiment runs at most %g days (quota.max_platform_experiment_days): state an earlier ends_at",
@@ -378,7 +379,7 @@ func (s *Service) CheckCoordinatorModel(model string) error {
 		return auth.Internal(s.logger, "reopen platform experiment failed", errors.New("the handler has no agent launch settings"))
 	}
 	if err := domain.ValidateModel(model); err != nil {
-		return refuseSignup(400, "invalid_request", "coordinator_model: %s", err)
+		return refusal.Invalid(refusal.ReasonInvalidRequest, "coordinator_model: "+err.Error()).On("coordinator_model")
 	}
 	return nil
 }

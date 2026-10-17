@@ -47,7 +47,7 @@ func requireAgentSandbox(configured bool) error {
 // in.
 func withAgentSandbox(req CreatePlatformExperimentRequest, launch AgentLaunch) (CreatePlatformExperimentRequest, error) {
 	if req.CoordinatorModel != "" && !req.CoordinatorInAgentSandbox {
-		return req, refuseSignup(400, "invalid_request", "coordinator_model is set and coordinator_in_agentsandbox is not")
+		return req, refusal.Invalid(refusal.ReasonInvalidRequest, "coordinator_model is set and coordinator_in_agentsandbox is not").On("coordinator_model")
 	}
 	req.maxAgentSandboxes = launch.MaxAgentSandboxes
 	if !req.CoordinatorInAgentSandbox {
@@ -61,7 +61,7 @@ func withAgentSandbox(req CreatePlatformExperimentRequest, launch AgentLaunch) (
 	}
 	if req.CoordinatorModel != "" {
 		if err := domain.ValidateModel(req.CoordinatorModel); err != nil {
-			return req, refuseSignup(400, "invalid_request", "coordinator_model: %s", err)
+			return req, refusal.Invalid(refusal.ReasonInvalidRequest, "coordinator_model: "+err.Error()).On("coordinator_model")
 		}
 	}
 	// Checked before anything is made for the experiment: its repository is created ahead of

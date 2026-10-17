@@ -37,8 +37,6 @@ func AdmissionStatus(reason string) int {
 		return http.StatusPaymentRequired
 	case ReasonDuplicate:
 		return http.StatusConflict
-	case ReasonMalformed:
-		return http.StatusBadRequest
 	case ReasonRateLimited:
 		return http.StatusTooManyRequests
 	case ReasonImageUnresolved:

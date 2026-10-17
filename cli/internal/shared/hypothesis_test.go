@@ -221,7 +221,7 @@ func TestHypothesisSubmitFlagLinksOverrideFileLinks(t *testing.T) {
 
 func TestHypothesisSubmitBatchStopsAtFirstAPIError(t *testing.T) {
 	url := clitest.WithServer(t, func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusBadRequest)
+		w.WriteHeader(http.StatusUnprocessableEntity)
 		_, _ = w.Write([]byte(`{"detail":"unknown link target hyp-gone"}`))
 	})
 	clitest.SetAPIURL(t, url)

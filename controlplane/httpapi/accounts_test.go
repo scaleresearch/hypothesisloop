@@ -243,7 +243,7 @@ func TestWhoMayCallWhat(t *testing.T) {
 	const (
 		ok        = http.StatusOK
 		created   = http.StatusCreated
-		bad       = http.StatusBadRequest
+		invalid   = http.StatusUnprocessableEntity
 		gone      = http.StatusNoContent
 		conflict  = http.StatusConflict
 		noToken   = http.StatusUnauthorized
@@ -259,7 +259,7 @@ func TestWhoMayCallWhat(t *testing.T) {
 		{"read me", func(w *world) request { return request{"GET", "/me", nil} },
 			map[string]int{"owner": ok, "member": ok, "outsider": ok, "org-key": ok, "project-key": ok, "foreign-key": ok, "staff": ok, "staff-user": ok}},
 		{"create an org", func(w *world) request { return request{"POST", "/orgs", name{"name": "new"}} },
-			map[string]int{"owner": created, "member": created, "outsider": created, "org-key": forbidden, "project-key": forbidden, "foreign-key": forbidden, "staff": bad, "staff-user": created}},
+			map[string]int{"owner": created, "member": created, "outsider": created, "org-key": forbidden, "project-key": forbidden, "foreign-key": forbidden, "staff": invalid, "staff-user": created}},
 		{"rename an org", func(w *world) request { return request{"PATCH", "/orgs/" + w.orgA, name{"name": "renamed"}} },
 			map[string]int{"owner": ok, "member": forbidden, "outsider": notFound, "org-key": ok, "project-key": forbidden, "foreign-key": notFound, "staff": ok, "staff-user": ok}},
 		{"list projects", func(w *world) request { return request{"GET", "/orgs/" + w.orgA + "/projects", nil} },
@@ -270,7 +270,7 @@ func TestWhoMayCallWhat(t *testing.T) {
 			w.fillOrgs()
 			return request{"POST", "/orgs", name{"name": "one more"}}
 		},
-			map[string]int{"owner": conflict, "member": conflict, "outsider": conflict, "org-key": forbidden, "project-key": forbidden, "foreign-key": forbidden, "staff": bad, "staff-user": created}},
+			map[string]int{"owner": conflict, "member": conflict, "outsider": conflict, "org-key": forbidden, "project-key": forbidden, "foreign-key": forbidden, "staff": invalid, "staff-user": created}},
 		{"create a project in an org that holds the most it may", func(w *world) request {
 			w.fillProjects(w.orgA)
 			return request{"POST", "/orgs/" + w.orgA + "/projects", name{"name": "one more"}}
@@ -479,8 +479,8 @@ func TestAnOrgIsCreatedForItsOwner(t *testing.T) {
 		t.Fatalf("an org for a user that does not exist: got = %d %s, want = 404", rec.Code, rec.Body)
 	}
 	for _, invalid := range []string{"", "   ", strings.Repeat("n", domain.MaxNameLength+1)} {
-		if rec := w.call("owner", "POST", "/orgs", name{"name": invalid}); rec.Code != http.StatusBadRequest {
-			t.Fatalf("org named %q: got = %d %s, want = 400", invalid, rec.Code, rec.Body)
+		if rec := w.call("owner", "POST", "/orgs", name{"name": invalid}); rec.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("org named %q: got = %d %s, want = 422", invalid, rec.Code, rec.Body)
 		}
 	}
 }
@@ -574,8 +574,8 @@ func TestAKeysSecretIsReturnedOnceAndNeverListed(t *testing.T) {
 	if rec := w.call("owner", "POST", "/orgs/"+w.orgA+"/api-keys", name{"name": "x", "project_id": w.projectB}); rec.Code != http.StatusNotFound {
 		t.Fatalf("a key bound to another org's project: got = %d %s, want = 404", rec.Code, rec.Body)
 	}
-	if rec := w.call("owner", "POST", "/orgs/"+w.orgA+"/api-keys", name{"name": ""}); rec.Code != http.StatusBadRequest {
-		t.Fatalf("a key with no name: got = %d %s, want = 400", rec.Code, rec.Body)
+	if rec := w.call("owner", "POST", "/orgs/"+w.orgA+"/api-keys", name{"name": ""}); rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("a key with no name: got = %d %s, want = 422", rec.Code, rec.Body)
 	}
 }
 
@@ -764,8 +764,8 @@ func TestRegisteringAClusterReturnsItsRuntimeToken(t *testing.T) {
 		t.Fatal("the cluster changed hands")
 	}
 	for _, invalid := range []string{"", "Not A Name", "has/slash"} {
-		if rec := w.call("owner", "POST", "/orgs/"+w.orgA+"/clusters", name{"name": invalid}); rec.Code != http.StatusBadRequest {
-			t.Fatalf("cluster named %q: got = %d %s, want = 400", invalid, rec.Code, rec.Body)
+		if rec := w.call("owner", "POST", "/orgs/"+w.orgA+"/clusters", name{"name": invalid}); rec.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("cluster named %q: got = %d %s, want = 422", invalid, rec.Code, rec.Body)
 		}
 	}
 	if rec := w.call("staff", "POST", "/orgs/org-missing/clusters", name{"name": "gpu-west"}); rec.Code != http.StatusNotFound {
@@ -1064,8 +1064,8 @@ func TestANameHoldsNoControlCharacterWhateverItNames(t *testing.T) {
 			{"POST", "/orgs/" + w.orgA + "/api-keys", name{"name": bad}},
 		} {
 			before := snapshot(t, w.store)
-			if rec := w.call("owner", r.method, r.path, r.body); rec.Code != http.StatusBadRequest {
-				t.Errorf("%s %s named %q: got = %d %s, want = 400", r.method, r.path, bad, rec.Code, rec.Body)
+			if rec := w.call("owner", r.method, r.path, r.body); rec.Code != http.StatusUnprocessableEntity {
+				t.Errorf("%s %s named %q: got = %d %s, want = 422", r.method, r.path, bad, rec.Code, rec.Body)
 			}
 			if snapshot(t, w.store) != before {
 				t.Errorf("%s %s named %q changed the store", r.method, r.path, bad)

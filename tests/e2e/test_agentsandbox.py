@@ -133,9 +133,9 @@ def test_agents_and_a_coordinator_are_sandboxed_in_the_experiments_repository(ap
         assert (named["agent_type"], named["model"]) == ("data-search", "another-model-1"), named
 
         r = project.post(f"/platform-experiments/{pe_id}/agents", {"agent_type": "no-such-type"})
-        assert r.status_code == 400 and "no-such-type" in r.text, f"an unknown agent type: {r.status_code} {r.text}"
+        assert r.status_code == 422 and "no-such-type" in r.text, f"an unknown agent type: {r.status_code} {r.text}"
         r = project.post(f"/platform-experiments/{pe_id}/agents", {"hyperparameters": {"blob": "x" * 5000}})
-        assert r.status_code == 400 and "4096" in r.text, f"oversize hyperparameters: {r.status_code} {r.text}"
+        assert r.status_code == 422 and "4096" in r.text, f"oversize hyperparameters: {r.status_code} {r.text}"
         assert len(project.agents(pe_id)) == 3
 
         # Removal takes the place and leaves the agent, which joins again by its id.
@@ -144,7 +144,7 @@ def test_agents_and_a_coordinator_are_sandboxed_in_the_experiments_repository(ap
         assert again["agent_id"] == own["agent_id"] and again["token"] == own["token"], again
 
         r = _sandboxed_run(project, f"sandboxed-either-stack-{run_id}", coordinator_model="some-model")
-        assert r.status_code == 400, f"a model with no coordinator: {r.status_code} {r.text}"
+        assert r.status_code == 422, f"a model with no coordinator: {r.status_code} {r.text}"
     finally:
         project.close_platform_experiment(pe_id)
 

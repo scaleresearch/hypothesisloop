@@ -53,8 +53,8 @@ func TestAnAgentVersionNoTagCouldBeIsRefused(t *testing.T) {
 		req.Header.Set(clusterapi.AgentVersionHeader, version)
 		rec := httptest.NewRecorder()
 		w.router.ServeHTTP(rec, req)
-		if rec.Code != http.StatusBadRequest || w.metricsWrites.Load() != 0 {
-			t.Errorf("version %q: got = %d %s with %d metric writes, want 400 and nothing recorded", version, rec.Code, rec.Body, w.metricsWrites.Load())
+		if rec.Code != http.StatusUnprocessableEntity || w.metricsWrites.Load() != 0 {
+			t.Errorf("version %q: got = %d %s with %d metric writes, want 422 and nothing recorded", version, rec.Code, rec.Body, w.metricsWrites.Load())
 		}
 	}
 }

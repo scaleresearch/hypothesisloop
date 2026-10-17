@@ -376,14 +376,14 @@ def test_watch_unknown_kind_refused_at_handshake(pe, run_id, watch):
 
     # Three things have to be true at once, and each one alone is satisfiable by a broken client:
     # the exit code is 2 (fatal, not retried to the timeout and then reported as success), the
-    # status line says 400, and the platform's own message naming the offending kind reached the
+    # status line says 422, and the platform's own message naming the offending kind reached the
     # caller. A client that printed the refusal but exited 0 would leave an agent branching on
-    # success; one that exited 2 with a bare "400" would leave it guessing which of kind, id or
+    # success; one that exited 2 with a bare "422" would leave it guessing which of kind, id or
     # agent was wrong.
     stderr = bogus_watcher.stderr_text()
     assert rc == 2, f"unknown kind was not visibly refused (exit {rc}); stderr: {stderr}"
     assert "refused this subscription" in stderr
-    assert "400" in stderr
+    assert "422" in stderr
     assert "not.a.real.kind" in stderr
 
     assert bogus_watcher.stdout_text() == "", (

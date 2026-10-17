@@ -88,7 +88,7 @@ func NewPushHandler(metrics *metricsdb.Store, placements Placements) http.Handle
 		// year 1) corrupts elapsed time for every job on that node.
 		if err := validPushTime(req.Timestamp, time.Now().UTC()); err != nil {
 			log.Printf("metrics: rejecting push from node %s: %v", req.Node, err)
-			refusal.Write(w, refusal.Refuse(http.StatusBadRequest, refusal.ReasonInvalidRequest, err.Error()).On("timestamp"))
+			refusal.Write(w, refusal.Invalid(refusal.ReasonInvalidRequest, err.Error()).On("timestamp"))
 			return
 		}
 		ids := make([]string, 0, len(req.Pods))
