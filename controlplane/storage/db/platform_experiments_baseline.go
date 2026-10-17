@@ -50,6 +50,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, pg_current_xact_id()::text::bigint)`,
 			pe.ID, raise.From, raise.To, raise.Reason, raise.Detail, string(raise.Actor.Kind), raise.Actor.ID); err != nil {
 			return fmt.Errorf("platform_experiments_store.RaiseBaseline: record: %w", err)
 		}
+		tx.runChange(pe.ID, domain.EventPlatformExperimentBaseline, raise.To, raise.Detail)
 		return nil
 	})
 }

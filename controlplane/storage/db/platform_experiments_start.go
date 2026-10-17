@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -199,15 +200,9 @@ func (s *Store) AdvanceStage(ctx context.Context, platformExpID string, stageInd
 		if tag.RowsAffected() == 0 {
 			return nil // boundary already committed
 		}
-
-		for _, agentID := range cutAgentIDs {
-			if _, err := tx.Exec(ctx,
-				`INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index)
-			 VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-				platformExpID, agentID, stageIndex,
-			); err != nil {
-				return fmt.Errorf("platform_experiments_store.AdvanceStage: insert cut %s: %w", agentID, err)
-			}
+		tx.runChange(platformExpID, domain.EventStageBoundary, strconv.Itoa(stageIndex), "advanced")
+		if err := cutTx(ctx, tx, platformExpID, cutAgentIDs, stageIndex, ""); err != nil {
+			return fmt.Errorf("platform_experiments_store.AdvanceStage: %w", err)
 		}
 		// The stages after the boundary want as many fewer researchers as it cut, written with the
 		// cut: nobody is added in a cut researcher's place.

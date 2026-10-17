@@ -263,17 +263,26 @@ VALUES ($1, $2, $3, $4)`, agent.ID, agent.Name, agent.OrgID, agent.CreatedAt); e
 			return 0, err
 		}
 		signup.QuotaTier = domain.ResolveQuotaTier(signup.QuotaTier, defaultTier)
-		tag, err := tx.Exec(ctx, `
+		var why string
+		err = tx.QueryRow(ctx, `
 INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, agent_type, hyperparameters, model, added_by_kind, added_by_id,
                                 replaces, replaces_xid)
 VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $8, $9, $10, $11::text, CASE WHEN $11::text <> '' THEN pg_current_xact_id()::text::bigint END)
-ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING`, platformExpID, signup.AgentID, string(signup.Role), string(signup.QuotaTier),
-			signup.Hosted, agentType, hyperparameters, model, string(addedBy.Kind), addedBy.ID, signup.Replaces)
+ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING
+RETURNING COALESCE((SELECT CASE WHEN gone.finished_at IS NOT NULL THEN 'it finished: ' || gone.finished_reason
+                                ELSE 'its machine stopped with no restart left' END
+                    FROM experiment_signups gone WHERE gone.platform_experiment_id = $1 AND gone.agent_id = $11::text), '')`,
+			platformExpID, signup.AgentID, string(signup.Role), string(signup.QuotaTier),
+			signup.Hosted, agentType, hyperparameters, model, string(addedBy.Kind), addedBy.ID, signup.Replaces).Scan(&why)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
 		if err != nil {
 			return 0, fmt.Errorf("platform_experiments_store.Signup: %w", err)
 		}
-		if tag.RowsAffected() == 0 {
-			continue
+		if signup.Replaces != "" {
+			tx.Change(domain.Change{Kind: domain.EventAgentReplaced, Subject: signup.AgentID, Value: signup.Replaces, Detail: why,
+				PlatformExperimentID: platformExpID, AgentID: signup.AgentID})
 		}
 		inserted++
 		competitors = competitors || signup.Role == domain.SignupRoleCompetitor

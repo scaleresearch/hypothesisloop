@@ -71,14 +71,21 @@ ORDER BY platform_experiment_id, agent_id`, after.Seconds(), string(domain.Signu
 // NoticeIdle tells r that it is idle, with detail: agent.idle, new for its first notice of the
 // stretch and continues after. A notice told since r was read stands, and this one writes nothing.
 func (s *Store) NoticeIdle(ctx context.Context, r IdleResearcher, detail string) error {
-	if _, err := s.pool.pool.Exec(ctx, `
+	return s.write(ctx, func(w *Write) error {
+		tag, err := w.Exec(ctx, `
 UPDATE experiment_signups
 SET idle_noticed_at = now(), idle_xid = pg_current_xact_id()::text::bigint, idle_repeat = $3, idle_detail = $4
 WHERE platform_experiment_id = $1 AND agent_id = $2 AND idle_noticed_at IS NOT DISTINCT FROM $5`,
-		r.PlatformExperimentID, r.AgentID, r.Repeat, detail, r.NoticedAt); err != nil {
-		return fmt.Errorf("platform_experiments_store.NoticeIdle: %w", err)
-	}
-	return nil
+			r.PlatformExperimentID, r.AgentID, r.Repeat, detail, r.NoticedAt)
+		if err != nil {
+			return fmt.Errorf("platform_experiments_store.NoticeIdle: %w", err)
+		}
+		if tag.RowsAffected() == 1 {
+			w.Change(domain.Change{Kind: domain.EventAgentIdle, Subject: r.AgentID, Value: domain.IdleValue(r.Repeat), Detail: detail,
+				PlatformExperimentID: r.PlatformExperimentID, AgentID: r.AgentID})
+		}
+		return nil
+	})
 }
 
 // IdleCapacity is a running platform experiment whose capacity has held places beyond its queued
@@ -129,12 +136,18 @@ WHERE id = $1 AND status = 'running' AND capacity_free_since <= now() - make_int
 // places beyond its queued jobs, with detail: capacity.idle, new for the first notice of the
 // stretch and continues after. A notice told since r was read stands, and this one writes nothing.
 func (s *Store) NoticeCapacityIdle(ctx context.Context, r IdleCapacity, detail string) error {
-	if _, err := s.pool.pool.Exec(ctx, `
+	return s.write(ctx, func(w *Write) error {
+		tag, err := w.Exec(ctx, `
 UPDATE platform_experiments
 SET capacity_noticed_at = now(), capacity_xid = pg_current_xact_id()::text::bigint, capacity_repeat = $2, capacity_detail = $3
 WHERE id = $1 AND capacity_noticed_at IS NOT DISTINCT FROM $4`,
-		r.PlatformExperimentID, r.Repeat, detail, r.NoticedAt); err != nil {
-		return fmt.Errorf("platform_experiments_store.NoticeCapacityIdle: %w", err)
-	}
-	return nil
+			r.PlatformExperimentID, r.Repeat, detail, r.NoticedAt)
+		if err != nil {
+			return fmt.Errorf("platform_experiments_store.NoticeCapacityIdle: %w", err)
+		}
+		if tag.RowsAffected() == 1 {
+			w.runChange(r.PlatformExperimentID, domain.EventCapacityIdle, domain.IdleValue(r.Repeat), detail)
+		}
+		return nil
+	})
 }

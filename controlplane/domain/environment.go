@@ -249,3 +249,33 @@ func remoteSource(source string) bool {
 	}
 	return false
 }
+
+// EnvironmentEnded is what an agent that asked for a build at codeRef on image is told once it
+// ended in state, failed for fault.
+func EnvironmentEnded(codeRef, image string, state EnvironmentState, fault EnvironmentFault) string {
+	declares := "the environment commit " + environmentCommit(codeRef) + " declares in .hypothesisloop/Dockerfile "
+	switch {
+	case state == EnvironmentReady:
+		return declares + "is built on " + image + ": a job of that commit on that image runs in it"
+	case fault == EnvironmentFaultFile:
+		return declares + "did not build on " + image + ": `hl env status` at that commit prints the end of its output. Fix the file, commit and build again"
+	default:
+		return declares + "was not built on " + image + ", no fault of the file's: the platform could not build it, and `hl env build` builds it again"
+	}
+}
+
+// EnvironmentLoaded is what an agent that asked for a build at codeRef on image is told once
+// cluster runs it while it is pushed.
+func EnvironmentLoaded(codeRef, image, cluster string) string {
+	return "the environment commit " + environmentCommit(codeRef) + " declares in .hypothesisloop/Dockerfile is built on " + image +
+		" and loaded on cluster " + cluster + " while it is pushed to the registry: submit its jobs now. One that fits on that cluster's node starts there at once, " +
+		"any other starts once the push ends, by itself. A failed push or build is told as an update"
+}
+
+// environmentCommit is the commit of codeRef as an agent reads it: the first 12 of the last 40
+// characters, its commit hash.
+func environmentCommit(codeRef string) string {
+	r := []rune(codeRef)
+	r = r[max(len(r)-40, 0):]
+	return string(r[:min(len(r), 12)])
+}

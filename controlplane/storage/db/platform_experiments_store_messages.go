@@ -126,6 +126,7 @@ VALUES ($1, $2, $3, $4, $5, $6, pg_current_xact_id()::text::bigint) RETURNING cr
 				platformExpID, r.agentID, from, text, string(sender.Kind), sender.ID).Scan(&messages[i].At); err != nil {
 				return fmt.Errorf("platform_experiments_store.SendAgentMessages: insert: %w", err)
 			}
+			tx.agentMessage(platformExpID, r.agentID, from, text)
 			messages[i].At = messages[i].At.UTC()
 		}
 		return nil
@@ -173,6 +174,7 @@ VALUES ($1, $2, $3, $4, $5, $6, pg_current_xact_id()::text::bigint) RETURNING cr
 			platformExpID, domain.CoordinatorRecipient, from, text, string(sender.Kind), sender.ID).Scan(&message.At); err != nil {
 			return fmt.Errorf("platform_experiments_store.SendCoordinatorMessage: insert: %w", err)
 		}
+		tx.agentMessage(platformExpID, domain.CoordinatorRecipient, from, text)
 		message.At = message.At.UTC()
 		return nil
 	}); err != nil {
@@ -232,4 +234,11 @@ WHERE platform_experiment_id = $1 AND ($2 = '' OR agent_id = $2) ORDER BY id`, p
 		return nil, fmt.Errorf("platform_experiments_store.ListAgentMessages: %w", err)
 	}
 	return messages, nil
+}
+
+// agentMessage announces a message from from to agentID, with its text: the one change that
+// carries what was said, since it is said to its reader alone.
+func (w *Write) agentMessage(platformExpID, agentID, from, text string) {
+	w.Change(domain.Change{Kind: domain.EventAgentMessage, Subject: agentID, Value: from, Detail: text,
+		PlatformExperimentID: platformExpID, AgentID: agentID})
 }

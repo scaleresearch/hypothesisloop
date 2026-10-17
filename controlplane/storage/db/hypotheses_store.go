@@ -85,12 +85,19 @@ func (s *Store) CreateHypothesisFinding(ctx context.Context, hypothesisID, platf
 	const q = `
 INSERT INTO hypothesis_findings (id, hypothesis_id, platform_experiment_id, experiment_id, agent_id, actor_kind, actor_id, summary, created_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
-	if _, err := s.pool.pool.Exec(ctx, q, f.ID, f.HypothesisID, f.PlatformExperimentID, f.ExperimentID, f.AgentID, string(actor.Kind), actor.ID, f.Summary, f.CreatedAt); err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation && pgErr.ConstraintName == "hypothesis_findings_experiment_id_key" {
-			return nil, fmt.Errorf("hypotheses_store.CreateHypothesisFinding: %w: %s", ErrFindingExists, experimentID)
+	if err := s.write(ctx, func(w *Write) error {
+		if _, err := w.Exec(ctx, q, f.ID, f.HypothesisID, f.PlatformExperimentID, f.ExperimentID, f.AgentID, string(actor.Kind), actor.ID, f.Summary, f.CreatedAt); err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation && pgErr.ConstraintName == "hypothesis_findings_experiment_id_key" {
+				return fmt.Errorf("hypotheses_store.CreateHypothesisFinding: %w: %s", ErrFindingExists, experimentID)
+			}
+			return fmt.Errorf("hypotheses_store.CreateHypothesisFinding: %w", err)
 		}
-		return nil, fmt.Errorf("hypotheses_store.CreateHypothesisFinding: %w", err)
+		w.Change(domain.Change{Kind: domain.EventFindingNew, Subject: f.HypothesisID, Value: f.ExperimentID,
+			PlatformExperimentID: f.PlatformExperimentID, AgentID: f.AgentID})
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	return f, nil
 }
@@ -206,6 +213,8 @@ VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, $8)`
 			}
 			return fmt.Errorf("hypotheses_store.CreateHypothesisComment: %w", err)
 		}
+		tx.Change(domain.Change{Kind: domain.EventCommentNew, Subject: c.HypothesisID,
+			PlatformExperimentID: c.PlatformExperimentID, AgentID: c.AgentID})
 		return nil
 	}); err != nil {
 		return nil, err

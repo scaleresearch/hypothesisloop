@@ -83,10 +83,52 @@ func (s *Store) GetEnvironment(ctx context.Context, key string) (*domain.Environ
 func (s *Store) AwaitEnvironmentBuild(ctx context.Context, key, peID, agentID, codeRef, image string) error {
 	if _, err := s.pool.pool.Exec(ctx, `INSERT INTO environment_waiters (environment_key, platform_experiment_id, agent_id, code_ref, image)
 SELECT key, $2, $3, $4, $5 FROM environments WHERE key = $1 AND state = 'building' FOR SHARE
-ON CONFLICT (environment_key, platform_experiment_id, agent_id) DO UPDATE SET code_ref = EXCLUDED.code_ref, image = EXCLUDED.image,
-	state = '', detail = '', ended_xid = NULL, loaded_xid = NULL, loaded_detail = ''
-WHERE environment_waiters.ended_xid IS NOT NULL`, key, peID, agentID, codeRef, image); err != nil {
+ON CONFLICT (environment_key, platform_experiment_id, agent_id) DO NOTHING`, key, peID, agentID, codeRef, image); err != nil {
 		return fmt.Errorf("environments_store.AwaitBuild: %w", err)
+	}
+	return nil
+}
+
+// environmentEnded tells every agent that waits for the build of key how it ended, in state for
+// fault, and lets them go. One told the build was loaded is not told it is ready.
+func environmentEnded(ctx context.Context, w *Write, key string, state domain.EnvironmentState, fault domain.EnvironmentFault) error {
+	rows, err := w.Query(ctx, `DELETE FROM environment_waiters WHERE environment_key = $1
+RETURNING platform_experiment_id, agent_id, code_ref, image, loaded`, key)
+	if err != nil {
+		return fmt.Errorf("tell the end of %s: %w", key, err)
+	}
+	var peID, agentID, codeRef, image string
+	var loaded bool
+	_, err = pgx.ForEachRow(rows, []any{&peID, &agentID, &codeRef, &image, &loaded}, func() error {
+		if state == domain.EnvironmentReady && loaded {
+			return nil
+		}
+		w.Change(domain.Change{Kind: domain.EventEnvironmentStatus, Subject: key, Value: string(state),
+			Detail: domain.EnvironmentEnded(codeRef, image, state, fault), PlatformExperimentID: peID, AgentID: agentID})
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("tell the end of %s: %w", key, err)
+	}
+	return nil
+}
+
+// environmentLoaded tells every agent that waits for the build of key, and was not told so yet,
+// that cluster runs it while it is pushed.
+func environmentLoaded(ctx context.Context, w *Write, key, cluster string) error {
+	rows, err := w.Query(ctx, `UPDATE environment_waiters SET loaded = true WHERE environment_key = $1 AND NOT loaded
+RETURNING platform_experiment_id, agent_id, code_ref, image`, key)
+	if err != nil {
+		return fmt.Errorf("tell the load of %s: %w", key, err)
+	}
+	var peID, agentID, codeRef, image string
+	_, err = pgx.ForEachRow(rows, []any{&peID, &agentID, &codeRef, &image}, func() error {
+		w.Change(domain.Change{Kind: domain.EventEnvironmentStatus, Subject: key, Value: "loaded",
+			Detail: domain.EnvironmentLoaded(codeRef, image, cluster), PlatformExperimentID: peID, AgentID: agentID})
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("tell the load of %s: %w", key, err)
 	}
 	return nil
 }
@@ -123,10 +165,22 @@ func (s *Store) AssignEnvironment(ctx context.Context, key string, live, holding
 	  AND (e.cluster_name = '' OR e.assigned_at <= now() - make_interval(secs => $3) OR NOT e.cluster_name = ANY(COALESCE($6::text[], '{}')))
 	  AND (e.cluster_name <> '' OR e.attempt >= $4 OR pick.name IS NOT NULL)
 	RETURNING` + environmentColumns + `)
-SELECT` + environmentColumns + `FROM made
+SELECT true,` + environmentColumns + `FROM made
 UNION ALL
-SELECT` + environmentColumns + `FROM environments WHERE key = $1 AND NOT EXISTS (SELECT 1 FROM made)`
-	env, err := scanEnvironment(s.pool.pool.QueryRow(ctx, q, key, live, lease.Seconds(), domain.MaxEnvironmentAttempts, domain.MaxEnvironmentBuildsPerCluster, holding))
+SELECT false,` + environmentColumns + `FROM environments WHERE key = $1 AND NOT EXISTS (SELECT 1 FROM made)`
+	var env *domain.Environment
+	err := s.write(ctx, func(w *Write) error {
+		var assigned bool
+		var err error
+		env, err = scanEnvironment(prefixScanner{w.QueryRow(ctx, q, key, live, lease.Seconds(), domain.MaxEnvironmentAttempts, domain.MaxEnvironmentBuildsPerCluster, holding), &assigned})
+		if err != nil {
+			return err
+		}
+		if assigned && env.State == domain.EnvironmentFailed {
+			return environmentEnded(ctx, w, key, env.State, env.Fault)
+		}
+		return nil
+	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -193,11 +247,26 @@ func (s *Store) FinishEnvironmentBuild(ctx context.Context, cluster, key string,
 	default:
 		return false, fmt.Errorf("environments_store.FinishBuild: %q is no fault of a build", outcome.Fault)
 	}
-	tag, err := s.pool.pool.Exec(ctx, `UPDATE environments SET `+set+`, updated_at = now() WHERE `+fence, args...)
+	finished := false
+	err := s.write(ctx, func(w *Write) error {
+		var state, fault string
+		err := w.QueryRow(ctx, `UPDATE environments SET `+set+`, updated_at = now() WHERE `+fence+` RETURNING state, fault`, args...).Scan(&state, &fault)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		finished = true
+		if domain.EnvironmentState(state) == domain.EnvironmentBuilding {
+			return nil
+		}
+		return environmentEnded(ctx, w, key, domain.EnvironmentState(state), domain.EnvironmentFault(fault))
+	})
 	if err != nil {
 		return false, fmt.Errorf("environments_store.FinishBuild: %w", err)
 	}
-	return tag.RowsAffected() == 1, nil
+	return finished, nil
 }
 
 // RecordEnvironmentLoaded keeps image, repository@digest, as the image of the build of key that
@@ -207,12 +276,20 @@ func (s *Store) RecordEnvironmentLoaded(ctx context.Context, cluster, key string
 	if node == "" || image == "" {
 		return false, errors.New("environments_store.RecordLoaded: a loaded build names its node and its image")
 	}
-	tag, err := s.pool.pool.Exec(ctx, `UPDATE environments SET loaded_image = $5, loaded_node = $4, loaded_cluster = $3, updated_at = now()
+	recorded := false
+	err := s.write(ctx, func(w *Write) error {
+		tag, err := w.Exec(ctx, `UPDATE environments SET loaded_image = $5, loaded_node = $4, loaded_cluster = $3, updated_at = now()
 WHERE key = $1 AND attempt = $2 AND cluster_name = $3 AND state = 'building'`, key, attempt, cluster, node, image)
+		if err != nil || tag.RowsAffected() == 0 {
+			return err
+		}
+		recorded = true
+		return environmentLoaded(ctx, w, key, cluster)
+	})
 	if err != nil {
 		return false, fmt.Errorf("environments_store.RecordLoaded: %w", err)
 	}
-	return tag.RowsAffected() == 1, nil
+	return recorded, nil
 }
 
 // RecordEnvironmentProgress keeps step as the progress of the build of key that cluster runs at
@@ -224,4 +301,14 @@ WHERE key = $1 AND attempt = $2 AND cluster_name = $3 AND state = 'building'`, k
 		return false, fmt.Errorf("environments_store.RecordProgress: %w", err)
 	}
 	return tag.RowsAffected() == 1, nil
+}
+
+// prefixScanner scans the first column of row into first and the others as its reader asks.
+type prefixScanner struct {
+	row   rowScanner
+	first any
+}
+
+func (p prefixScanner) Scan(dest ...any) error {
+	return p.row.Scan(append([]any{p.first}, dest...)...)
 }

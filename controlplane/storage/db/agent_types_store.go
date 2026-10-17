@@ -451,31 +451,51 @@ func newVersionTx(ctx context.Context, tx *Write, current *domain.CurrentAgentTy
 	if err := recordEventTx(ctx, tx, current.ID, action, next, detail, by); err != nil {
 		return nil, err
 	}
-	told, err := tellTx(ctx, tx, `s.agent_type = $1`, `coordinator_agent_type = $1`, current.ID)
+	told, err := tellTx(ctx, tx, `s.agent_type = $1`, `pe.coordinator_agent_type = $1`, current.ID)
 	if err != nil {
 		return nil, err
 	}
 	return &domain.Propagation{Version: next, Told: told}, nil
 }
 
-// tellTx writes the instructions xid of every signup whose run goes on and every coordinator of a
-// platform experiment that is not closed that signupWhere and coordinatorWhere hold for: each is
-// told agent.instructions by the trigger on its row, and replay derives it from the xid. It
-// answers how many were told.
+// tellTx tells agent.instructions, with the current version of its agent type, to every signup
+// whose run goes on and every coordinator of a platform experiment that is not closed that
+// signupWhere and coordinatorWhere hold for. It answers how many were told.
 func tellTx(ctx context.Context, tx *Write, signupWhere, coordinatorWhere string, args ...any) (int, error) {
-	agents, err := tx.Exec(ctx, `
-UPDATE experiment_signups s SET instructions_xid = pg_current_xact_id()::text::bigint
+	agents, err := tx.Query(ctx, `
+SELECT s.platform_experiment_id, s.agent_id, s.agent_type, t.current_version::text
+FROM experiment_signups s JOIN agent_types t ON t.id = s.agent_type
 WHERE `+signupWhere+` AND `+liveSignupSQL, args...)
 	if err != nil {
 		return 0, fmt.Errorf("tell the agents: %w", err)
 	}
-	coordinators, err := tx.Exec(ctx, `
-UPDATE platform_experiments SET coordinator_instructions_xid = pg_current_xact_id()::text::bigint
-WHERE `+coordinatorWhere+` AND status <> 'closed'`, args...)
+	told, err := pgx.CollectRows(agents, scanInstructionsChange)
+	if err != nil {
+		return 0, fmt.Errorf("tell the agents: %w", err)
+	}
+	coordinators, err := tx.Query(ctx, `
+SELECT pe.id, '`+domain.CoordinatorRecipient+`', pe.coordinator_agent_type, t.current_version::text
+FROM platform_experiments pe JOIN agent_types t ON t.id = pe.coordinator_agent_type
+WHERE `+coordinatorWhere+` AND pe.status <> 'closed'`, args...)
 	if err != nil {
 		return 0, fmt.Errorf("tell the coordinators: %w", err)
 	}
-	return int(agents.RowsAffected() + coordinators.RowsAffected()), nil
+	toldCoordinators, err := pgx.CollectRows(coordinators, scanInstructionsChange)
+	if err != nil {
+		return 0, fmt.Errorf("tell the coordinators: %w", err)
+	}
+	told = append(told, toldCoordinators...)
+	for _, c := range told {
+		tx.Change(c)
+	}
+	return len(told), nil
+}
+
+func scanInstructionsChange(row pgx.CollectableRow) (domain.Change, error) {
+	c := domain.Change{Kind: domain.EventAgentInstructions}
+	err := row.Scan(&c.PlatformExperimentID, &c.AgentID, &c.Detail, &c.Value)
+	c.Subject = c.AgentID
+	return c, err
 }
 
 // Archive archives agent type id of org orgID: no new agent runs it, and the agents that do keep

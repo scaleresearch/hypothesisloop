@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -163,9 +164,7 @@ OFFSET $2`, platformExpID, maxAgents)
 	if err != nil || len(evicted) == 0 {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `
-INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index, reason)
-SELECT $1, unnest($2::text[]), $3, $4`, platformExpID, evicted, stage, CutMaxAgentsLowered); err != nil {
+	if err := cutTx(ctx, tx, platformExpID, evicted, stage, CutMaxAgentsLowered); err != nil {
 		return fmt.Errorf("cut researchers above max_agents: %w", err)
 	}
 	if !lowerPool {
@@ -375,3 +374,28 @@ WHERE id = $1 AND status = 'running' AND researchers_held IS DISTINCT FROM NULLI
 var ErrPoolBelowAtWork = errors.New("researchers below the researchers at work")
 
 func (e *PoolBelowAtWorkError) Is(target error) bool { return target == ErrPoolBelowAtWork }
+
+// cutTx cuts agentIDs at stage for reason, ” for a stage cut, each agent once, and announces each
+// cut: to the agent, and a stage cut also as a move of the ladder.
+func cutTx(ctx context.Context, tx *Write, platformExpID string, agentIDs []string, stage int, reason string) error {
+	rows, err := tx.Query(ctx, `
+INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index, reason)
+SELECT $1, unnest($2::text[]), $3, $4 ON CONFLICT DO NOTHING
+RETURNING agent_id`, platformExpID, agentIDs, stage, reason)
+	if err != nil {
+		return fmt.Errorf("cut %v: %w", agentIDs, err)
+	}
+	cut, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return fmt.Errorf("cut %v: %w", agentIDs, err)
+	}
+	for _, agentID := range cut {
+		if reason == "" {
+			tx.Change(domain.Change{Kind: domain.EventStageBoundary, Subject: platformExpID, Value: strconv.Itoa(stage), Detail: "cut",
+				PlatformExperimentID: platformExpID, AgentID: agentID})
+		}
+		tx.Change(domain.Change{Kind: domain.EventAgentCut, Subject: agentID, Value: strconv.Itoa(stage), Detail: reason,
+			PlatformExperimentID: platformExpID, AgentID: agentID})
+	}
+	return nil
+}

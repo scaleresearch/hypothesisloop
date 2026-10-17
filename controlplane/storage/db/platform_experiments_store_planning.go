@@ -412,6 +412,7 @@ WHERE s.platform_experiment_id = i.platform_experiment_id AND s.agent_id = i.age
 			id, message, string(by.Kind), by.ID); err != nil {
 			return fmt.Errorf("platform_experiments_store.Revise: record request: %w", err)
 		}
+		tx.runChange(id, domain.EventPlatformExperimentRevision, "", "")
 		return nil
 	})
 }

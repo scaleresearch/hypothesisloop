@@ -126,11 +126,15 @@ FOR UPDATE OF s`, platformExpID, agentID).Scan(&running, &finishedAt, &unfinishe
 		case unfinished:
 			return ErrWorkUnfinished
 		}
-		if _, err := tx.Exec(ctx, `
+		var told string
+		if err := tx.QueryRow(ctx, `
 UPDATE experiment_signups SET finished_at = now(), finished_reason = $3, finished_xid = pg_current_xact_id()::text::bigint
-WHERE platform_experiment_id = $1 AND agent_id = $2`, platformExpID, agentID, reason); err != nil {
+WHERE platform_experiment_id = $1 AND agent_id = $2 AND finished_at IS NULL
+RETURNING finished_reason`, platformExpID, agentID, reason).Scan(&told); err != nil {
 			return fmt.Errorf("platform_experiments_store.FinishAgent: %w", err)
 		}
+		tx.Change(domain.Change{Kind: domain.EventAgentFinished, Subject: agentID, Detail: told,
+			PlatformExperimentID: platformExpID, AgentID: agentID})
 		return nil
 	})
 }
