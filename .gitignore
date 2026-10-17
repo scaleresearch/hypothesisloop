@@ -29,20 +29,13 @@ go.work.sum
 dist/
 
 # Next.js
-controlplane/ui/.next/
 controlplane/ui/.next-e2e/
 controlplane/ui/.next-walk/
 controlplane/ui/.next-graph-1k/
 controlplane/ui/out/
-controlplane/ui/node_modules/
-controlplane/ui/.env.local
-controlplane/ui/.env.development.local
-controlplane/ui/.env.test.local
-controlplane/ui/.env.production.local
 controlplane/ui/npm-debug.log*
 controlplane/ui/yarn-debug.log*
 controlplane/ui/yarn-error.log*
-controlplane/ui/tsconfig.tsbuildinfo
 
 # Python
 **/__pycache__/
@@ -57,7 +50,6 @@ controlplane/ui/tsconfig.tsbuildinfo
 *.ckpt
 
 # k3s
-localdev/**/kubeconfig
 *.kubeconfig
 *.pem
 *.key
@@ -100,14 +92,11 @@ localdev/.run/
 localdev/.host-address
 localdev/.image-tag
 deploy/charts/hypothesisloop/files/hypothesisloop.yaml
-local.secrets.env
 
-# Deployment tooling (Pulumi program and stacks, image publishing) is kept locally.
 /infra/
 
 # Owner's local working notes and scratch
 /fix-later.md
-/feedback.md
 
 # Dependencies and tool caches anywhere in the tree
 node_modules/

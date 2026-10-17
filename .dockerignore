@@ -24,7 +24,7 @@ controlplane/ui/
 # Charts, install scripts and the local stack (not needed at runtime)
 deploy/
 localdev/
-tests/*.sh
+tests/
 
 # Go test artifacts
 *_test.go
