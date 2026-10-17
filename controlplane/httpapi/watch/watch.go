@@ -555,12 +555,10 @@ type errWatch string
 
 func (e errWatch) Error() string { return string(e) }
 
-// writeWatchError answers in the same {"error": "..."} envelope every other operation on this
-// API uses, so a caller parses one error shape whether or not the upgrade ever happened.
+// writeWatchError answers with the error body every other operation on this API uses, so a caller
+// parses one error shape whether or not the upgrade ever happened.
 func writeWatchError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(struct {
-		Error string `json:"error"`
-	}{Error: message})
+	_ = json.NewEncoder(w).Encode(platformapi.ErrorModel{Message: message})
 }

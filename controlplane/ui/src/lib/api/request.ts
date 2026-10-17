@@ -1,5 +1,6 @@
 import { accessToken, endSession } from '@/lib/auth'
 import { publicConfig } from '@/lib/config'
+import type { ErrorModel } from '@/types/api'
 
 // One API, one base URL: quota, scheduler and registry operations are all served together.
 export function apiURL(): string {
@@ -11,25 +12,23 @@ export function apiURL(): string {
 /** A refusal or failure the API answered with: its status, its own message, and its reason code when it gave one. */
 export class ApiError extends Error {
   /** `body` is the whole answer, for a refusal that carries more than its reason. */
-  constructor(readonly status: number, message: string, readonly reason?: string, readonly body?: Record<string, unknown>) {
+  constructor(readonly status: number, message: string, readonly reason?: string, readonly body?: ErrorModel) {
     super(message)
     this.name = 'ApiError'
   }
 }
 
-// The API answers a failure as {"error"} or {"reason","message"}. A refusal for a condition of the
-// platform also carries summary, the sentence for a person, and for staff operator_detail.
+// The API answers every failure as ErrorModel. A refusal for a condition of the platform also
+// carries summary, the sentence for a person, and for staff operator_detail.
 async function failure(res: Response): Promise<ApiError> {
   const text = await res.text()
   let message = text
   let reason: string | undefined
-  let body: Record<string, unknown> | undefined
+  let body: ErrorModel | undefined
   try {
-    body = JSON.parse(text)
-    message = body?.summary
-      ? [body.summary, body.operator_detail].filter(Boolean).join(' ')
-      : (body?.message ?? body?.error ?? text) as string
-    reason = body?.reason as string | undefined
+    body = JSON.parse(text) as ErrorModel
+    message = body.summary ? [body.summary, body.operator_detail].filter(Boolean).join(' ') : body.message
+    reason = body.reason
   } catch {
     // A proxy in front of the API answers in its own format.
   }

@@ -4,7 +4,6 @@ package main
 
 import (
 	"bytes"
-	"cmp"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -24,6 +23,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 	"github.com/scaleresearch/hypothesisloop/cli/internal/watchclient"
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 )
 
 func main() {
@@ -211,10 +211,7 @@ func printLeading(stdout io.Writer, record map[string]any, lead ...string) {
 // other error.
 func refusalOf(err error) (reason, message string) {
 	var refused *apiclient.HTTPError
-	var body struct {
-		Reason  string `json:"reason"`
-		Message string `json:"message"`
-	}
+	var body platformapi.ErrorModel
 	if !errors.As(err, &refused) || json.Unmarshal([]byte(refused.Body), &body) != nil {
 		return "", ""
 	}
@@ -252,14 +249,9 @@ func fail(stderr io.Writer, err error) int {
 
 // refusalMessage is the platform's own words in a refusal's body, or the body as it is.
 func refusalMessage(body []byte) string {
-	var refusal struct {
-		Error  string `json:"error"`
-		Detail string `json:"detail"`
-	}
-	if json.Unmarshal(body, &refusal) == nil {
-		if said := cmp.Or(refusal.Error, refusal.Detail); said != "" {
-			return said
-		}
+	var refusal platformapi.ErrorModel
+	if json.Unmarshal(body, &refusal) == nil && refusal.Message != "" {
+		return refusal.Message
 	}
 	return strings.TrimSpace(string(body))
 }

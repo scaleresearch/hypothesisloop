@@ -196,7 +196,7 @@ def test_a_repository_is_checked_after_the_project_and_must_be_one_the_org_reach
     whole = {**RUN, "name": f"repo-named-{run_id}", "description": "names a repository", "report_interval_seconds": 10,
              "metrics": [{"key": "val_accuracy", "direction": "maximize"}]}
     foreign = _call(a.api, "POST", "/platform-experiments", {**whole, "project_id": b.project_id, "repository": "acme/model"})
-    assert foreign.status_code == 404 and foreign.json() == {"error": "project not found"}, foreign.text
+    assert foreign.status_code == 404 and foreign.json() == {"message": "project not found"}, foreign.text
 
     named = _call(a.api, "POST", "/platform-experiments", {**whole, "project_id": a.project_id, "repository": "acme/model"})
     if _call(a.api, "GET", "/github/app").status_code == 503:

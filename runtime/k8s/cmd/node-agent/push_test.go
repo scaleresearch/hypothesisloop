@@ -29,7 +29,7 @@ func answers(t *testing.T, statuses ...int) (*httptest.Server, *[]string) {
 		status := statuses[len(received)-1]
 		w.WriteHeader(status)
 		if status/100 != 2 {
-			_, _ = io.WriteString(w, `{"error":"unauthenticated: cluster edge-7 is not registered"}`)
+			_, _ = io.WriteString(w, `{"message":"unauthenticated: cluster edge-7 is not registered"}`)
 		}
 	}))
 	t.Cleanup(server.Close)

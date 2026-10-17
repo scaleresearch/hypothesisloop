@@ -58,7 +58,7 @@ func refusingServer(t *testing.T, body string) (*httptest.Server, func() []strin
 // A removed cluster's jobs went back to the queue with the removal. What the machine still runs
 // of them holds its accelerators for nobody, so the agent stops all of it and then exits.
 func TestARemovedClustersAgentStopsItsWorkloadsAndReturns(t *testing.T) {
-	server, asked := refusingServer(t, `{"error":"unauthenticated: cluster test is not registered","reason":"cluster_not_registered"}`)
+	server, asked := refusingServer(t, `{"message":"unauthenticated: cluster test is not registered","reason":"cluster_not_registered"}`)
 	exec := drainingExecutor{&captureExecutor{managed: []string{"job-a", "job-b"}}}
 	agent := newTestAgent(server, exec.captureExecutor)
 	agent.Executor = exec
@@ -85,7 +85,7 @@ func TestARemovedClustersAgentStopsItsWorkloadsAndReturns(t *testing.T) {
 
 // A token refused for any other cause is somebody's to fix, and the jobs keep running meanwhile.
 func TestARefusalWithoutThatReasonStopsNothing(t *testing.T) {
-	server, _ := refusingServer(t, `{"error":"unauthenticated: invalid token signature"}`)
+	server, _ := refusingServer(t, `{"message":"unauthenticated: invalid token signature"}`)
 	exec := drainingExecutor{&captureExecutor{managed: []string{"job-a"}}}
 	agent := newTestAgent(server, exec.captureExecutor)
 	agent.Executor = exec
@@ -105,7 +105,7 @@ func TestARefusalWithoutThatReasonStopsNothing(t *testing.T) {
 // Detach stops what this cluster holds here and asks nothing of the control plane: removing the
 // cluster there is its owner's alone.
 func TestDetachStopsEveryWorkloadAndTellsTheControlPlaneNothing(t *testing.T) {
-	server, asked := refusingServer(t, `{"error":"unexpected"}`)
+	server, asked := refusingServer(t, `{"message":"unexpected"}`)
 	exec := drainingExecutor{&captureExecutor{managed: []string{"job-a", "job-b"}}}
 	agent := newTestAgent(server, exec.captureExecutor)
 	agent.Executor = exec
@@ -131,7 +131,7 @@ func TestAnAgentSaysHowToRemoveAClusterThatIsStillRegistered(t *testing.T) {
 		want   string
 	}{
 		"registered":     {http.StatusNoContent, "", "is still registered at"},
-		"not registered": {http.StatusUnauthorized, `{"error":"unauthenticated","reason":"cluster_not_registered"}`, "is not registered at"},
+		"not registered": {http.StatusUnauthorized, `{"message":"unauthenticated","reason":"cluster_not_registered"}`, "is not registered at"},
 		"unreachable":    {http.StatusBadGateway, "", "if it is, remove it"},
 	} {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

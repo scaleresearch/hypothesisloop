@@ -92,7 +92,7 @@ func asThePlatformAdmits(t *testing.T, token string, handler http.HandlerFunc) h
 // anything at all, and neither is a refusal of the caller.
 func admitted(routes http.Handler, r *http.Request) (status int, answer string) {
 	if rctx := chi.NewRouteContext(); !routes.(chi.Routes).Match(rctx, r.Method, r.URL.Path) {
-		return http.StatusNotFound, `{"error":"the platform serves no ` + r.Method + " " + r.URL.Path + `"}`
+		return http.StatusNotFound, `{"message":"the platform serves no ` + r.Method + " " + r.URL.Path + `"}`
 	}
 	rec := httptest.NewRecorder()
 	func() {

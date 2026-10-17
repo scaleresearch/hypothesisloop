@@ -11,17 +11,17 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// Error is a refusal with the HTTP status it answers with, in the API's {"error": ...} shape.
+// Error is a refusal with the HTTP status it answers with, answered as the API's one error body.
 // Reason is set on the one refusal a client branches on (domain.ReasonClusterNotRegistered).
 type Error struct {
-	status  int
-	Message string `json:"error"`
-	Reason  string `json:"reason,omitempty"`
+	status int
+	platformapi.ErrorModel
 }
 
 func (e *Error) Error() string  { return e.Message }
@@ -34,7 +34,7 @@ func Unauthenticated(message string) *Error { return unauthenticated("%s", messa
 func Forbidden(message string) *Error { return forbidden(message) }
 
 func unauthenticated(format string, args ...any) *Error {
-	return &Error{status: http.StatusUnauthorized, Message: "unauthenticated: " + fmt.Sprintf(format, args...)}
+	return &Error{status: http.StatusUnauthorized, ErrorModel: platformapi.ErrorModel{Message: "unauthenticated: " + fmt.Sprintf(format, args...)}}
 }
 
 // Directory is what the authenticator reads to learn whether the thing a token names still
@@ -228,12 +228,12 @@ func Internal(logger *zap.Logger, what string, err error, fields ...zap.Field) *
 	}
 	if errors.As(err, &down) {
 		reason, message := down.Unavailable()
-		return &Error{status: http.StatusServiceUnavailable, Message: message, Reason: reason}
+		return &Error{status: http.StatusServiceUnavailable, ErrorModel: platformapi.ErrorModel{Message: message, Reason: reason}}
 	}
-	return &Error{status: http.StatusInternalServerError, Message: InternalError}
+	return &Error{status: http.StatusInternalServerError, ErrorModel: platformapi.ErrorModel{Message: InternalError}}
 }
 
-// WriteError answers a refusal in the API's {"error": ...} shape; any other error is logged and
+// WriteError answers a refusal as the API's one error body; any other error is logged and
 // answered as a 500 that says nothing about it.
 func WriteError(w http.ResponseWriter, logger *zap.Logger, err error) {
 	var refusal *Error

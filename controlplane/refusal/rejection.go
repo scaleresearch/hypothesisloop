@@ -2,8 +2,8 @@ package refusal
 
 import "errors"
 
-// Rejection is a request refused with Status, answered in the API's {"error"} envelope with the
-// message of Err.
+// Rejection is a request refused with Status, answered as the API's error body with the message
+// of Err.
 type Rejection struct {
 	Status int
 	Err    error

@@ -36,7 +36,7 @@ func TestARefusalIsTheControlPlanesOwnWords(t *testing.T) {
 			t.Errorf("a request without a body says it is %s", r.Header.Get("Content-Type"))
 		}
 		w.WriteHeader(http.StatusUnauthorized)
-		_ = json.NewEncoder(w).Encode(map[string]string{"error": "unauthenticated: cluster edge-7 is not registered", "reason": "cluster_not_registered"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"message": "unauthenticated: cluster edge-7 is not registered", "reason": "cluster_not_registered"})
 	}))
 	defer server.Close()
 	err := (&Client{BaseURL: server.URL, Token: "tok", HTTP: server.Client()}).Do(context.Background(), http.MethodDelete, "", nil, nil)

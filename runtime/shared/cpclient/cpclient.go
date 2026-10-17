@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 )
 
 // refusalBodyLimit bounds how much of a refusal's body is read.
@@ -92,10 +94,7 @@ func (c *Client) Do(ctx context.Context, method, path string, body, out any) err
 
 func refusal(resp *http.Response) *Refusal {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, refusalBodyLimit))
-	said := struct {
-		Reason  string `json:"reason"`
-		Message string `json:"error"`
-	}{}
+	var said platformapi.ErrorModel
 	_ = json.Unmarshal(body, &said)
 	return &Refusal{Status: resp.StatusCode, Reason: said.Reason, Message: said.Message, Body: string(bytes.TrimSpace(body))}
 }

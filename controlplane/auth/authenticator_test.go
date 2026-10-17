@@ -436,8 +436,8 @@ func TestOnlyARuntimeOrStaffMayPush(t *testing.T) {
 		if recorder.Code != tc.want || served != (tc.want == http.StatusNoContent) {
 			t.Errorf("%s: got = %d served=%v, want = %d", tc.name, recorder.Code, served, tc.want)
 		}
-		if tc.want != http.StatusNoContent && !strings.Contains(recorder.Body.String(), `"error"`) {
-			t.Errorf("%s: refusal body %q is not the API's error envelope", tc.name, recorder.Body.String())
+		if tc.want != http.StatusNoContent && !strings.Contains(recorder.Body.String(), `"message"`) {
+			t.Errorf("%s: refusal body %q is not the API's error body", tc.name, recorder.Body.String())
 		}
 		if tc.name == "registered runtime" && (caller.Kind != KindRuntime || caller.ClusterName != "cluster-a") {
 			t.Errorf("%s: the handler was given %+v, want the runtime of cluster-a", tc.name, caller)
@@ -492,7 +492,7 @@ func TestInternalLogsTheCauseAndAnswersWithoutIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if answer.GetStatus() != http.StatusInternalServerError || string(body) != `{"error":"internal error"}` {
+	if answer.GetStatus() != http.StatusInternalServerError || string(body) != `{"message":"internal error"}` {
 		t.Fatalf("answered %d %s, want 500 with the generic body", answer.GetStatus(), body)
 	}
 	entries := logs.All()

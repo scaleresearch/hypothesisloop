@@ -373,10 +373,10 @@ def test_query_is_read_only_and_bounded(api, graph_pe, run_id):
 
     bad = api.query(pe_id, "MATCH (h:Hypothesis) RETRN h")
     assert bad.status_code == 400, f"malformed Cypher answered {bad.status_code}"
-    assert "mismatched input 'RETRN'" in bad.json().get("error", ""), f"400 without Memgraph's message: {bad.text}"
+    assert "mismatched input 'RETRN'" in bad.json().get("message", ""), f"400 without Memgraph's message: {bad.text}"
     # A statement that opens with no read clause never reaches Memgraph.
     unknown = api.query(pe_id, "MATC (h:Hypothesis) RETURN h")
-    assert unknown.status_code == 400 and "a query starts with MATCH" in unknown.json().get("error", ""), unknown.text
+    assert unknown.status_code == 400 and "a query starts with MATCH" in unknown.json().get("message", ""), unknown.text
 
     # Refused before it reaches the graph, each with its reason: a statement that reads a file on
     # the database's host, and a rune outside printable ASCII anywhere but in a string or a
@@ -387,7 +387,7 @@ def test_query_is_read_only_and_bounded(api, graph_pe, run_id):
         ("MATCH (h:Hypothesis)‐[:BUILDS_ON]->(p:Hypothesis) RETURN h.id", "printable ASCII"),
     ):
         refused = api.query(pe_id, cypher)
-        assert refused.status_code == 400 and reason in refused.json()["error"], f"{cypher!r}: {refused.status_code} {refused.text}"
+        assert refused.status_code == 400 and reason in refused.json()["message"], f"{cypher!r}: {refused.status_code} {refused.text}"
     assert api.query_rows(pe_id, "MATCH (h:Hypothesis {id: $id}) RETURN 'déjà vu' AS said", id=hyp["id"]) == [{"said": "déjà vu"}]
 
     capped = api.query(pe_id, "UNWIND range(1, 1000) AS i RETURN i")

@@ -5,6 +5,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -12,8 +13,8 @@ import (
 type schemaAlias struct{ t, alias reflect.Type }
 
 // schemaAliases are the types the document describes otherwise than their Go shape: each string
-// enum as a schema of its own its fields refer to, and a job whose cpu a request may write as a
-// number.
+// enum as a schema of its own its fields refer to, every error as the one error body, and a job
+// whose cpu a request may write as a number.
 var schemaAliases = []schemaAlias{
 	enum(domain.ExperimentStatuses),
 	enum(domain.ExperimentActions),
@@ -37,6 +38,7 @@ var schemaAliases = []schemaAlias{
 	enum(domain.ActorKinds),
 	enum(domain.CapacityTiers),
 	enum(domain.TypeKinds),
+	{reflect.TypeFor[errorModel](), reflect.TypeFor[platformapi.ErrorModel]()},
 	{reflect.TypeFor[domain.JobSpec](), reflect.TypeFor[jobSpec]()},
 	{reflect.TypeFor[domain.JobGroup](), reflect.TypeFor[jobGroup]()},
 }

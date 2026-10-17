@@ -3,7 +3,7 @@
 // handler. An operation cannot be registered without an Audience, which is its authorization
 // class, so the digest an agent reads never lists an operation its token is refused on.
 //
-// Errors keep the {"error": "..."} envelope the agent harness and the UI parse (see init).
+// Every error is answered as the API's one error body, platformapi.ErrorModel (see init).
 package httpapi
 
 import (
@@ -19,22 +19,22 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 )
 
-// errorModel serializes to the {"error": "..."} shape the Python agent and the
-// UI have always parsed, instead of Huma's default RFC7807 problem details.
+// errorModel answers every huma error as platformapi.ErrorModel, in place of Huma's default
+// RFC7807 problem details.
 type errorModel struct {
-	status  int
-	Message string `json:"error"`
+	status int
+	platformapi.ErrorModel
 }
 
 func (e *errorModel) Error() string  { return e.Message }
 func (e *errorModel) GetStatus() int { return e.status }
 
 func init() {
-	// Route every huma.ErrorXXX / huma.NewError through our envelope so the wire
-	// shape stays {"error": "..."} for all migrated services.
+	// Route every huma.ErrorXXX / huma.NewError through the one error body.
 	huma.NewError = func(status int, msg string, errs ...error) huma.StatusError {
 		parts := make([]string, 0, len(errs)+1)
 		if msg != "" {
@@ -45,7 +45,7 @@ func init() {
 				parts = append(parts, e.Error())
 			}
 		}
-		return &errorModel{status: status, Message: strings.Join(parts, ": ")}
+		return &errorModel{status: status, ErrorModel: platformapi.ErrorModel{Message: strings.Join(parts, ": ")}}
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -43,11 +44,11 @@ func NewAccess(placement Placement) *Access {
 
 // NotFound is the refusal for a resource the caller cannot reach, whether or not it exists.
 func NotFound(what string) *Error {
-	return &Error{status: http.StatusNotFound, Message: what + " not found"}
+	return &Error{status: http.StatusNotFound, ErrorModel: platformapi.ErrorModel{Message: what + " not found"}}
 }
 
 func forbidden(message string) *Error {
-	return &Error{status: http.StatusForbidden, Message: message}
+	return &Error{status: http.StatusForbidden, ErrorModel: platformapi.ErrorModel{Message: message}}
 }
 
 type readKey struct{}
@@ -375,7 +376,7 @@ func (a *Access) Org(ctx context.Context, requested string) (string, error) {
 	}
 	if requested == "" {
 		if p.Kind == KindStaff || len(p.OrgIDs) != 1 {
-			return "", &Error{status: http.StatusBadRequest, Message: "org_id is required: this token is not bound to a single org"}
+			return "", &Error{status: http.StatusBadRequest, ErrorModel: platformapi.ErrorModel{Message: "org_id is required: this token is not bound to a single org"}}
 		}
 		return p.OrgIDs[0], nil
 	}

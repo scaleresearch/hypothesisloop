@@ -465,7 +465,7 @@ func TestWatchScopeDefaultsToTheTokenOnlyWithoutExperiment(t *testing.T) {
 	var queries []string
 	url := withServer(t, func(w http.ResponseWriter, r *http.Request) {
 		queries = append(queries, r.URL.RawQuery)
-		http.Error(w, `{"error":"refused"}`, http.StatusBadRequest)
+		http.Error(w, `{"message":"refused"}`, http.StatusBadRequest)
 	})
 	setAPIURL(t, url)
 	t.Setenv("HL_TOKEN", derivedToken("agent:pe-env/agent-env"))

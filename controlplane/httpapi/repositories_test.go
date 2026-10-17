@@ -318,9 +318,6 @@ func refusalOf(t *testing.T, rec *httptest.ResponseRecorder) (reason, message st
 	}
 	reason, _ = body["reason"].(string)
 	message, _ = body["message"].(string)
-	if internal, ok := body["error"].(string); ok {
-		message = internal
-	}
 	return reason, message
 }
 

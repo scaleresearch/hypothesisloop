@@ -341,7 +341,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
 function problemsOf(error: unknown): Problem[] {
   if (!(error instanceof ApiError)) return [{ message: errorMessage(error) }]
   const listed = error.body?.problems
-  if (Array.isArray(listed) && listed.length > 0) return listed as Problem[]
+  if (listed && listed.length > 0) return listed
   return [{ reason: error.reason, message: error.message }]
 }
 

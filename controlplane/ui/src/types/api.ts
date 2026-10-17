@@ -2776,7 +2776,21 @@ export interface components {
             platform_experiment_id?: string;
         };
         ErrorModel: {
-            error: string;
+            /** @description What was refused, or what failed, in a sentence. */
+            message: string;
+            /** @description What the platform's staff read of that condition. */
+            operator_detail?: string;
+            /** @description Each refusal of a check that found several, so that all of them are fixed in one pass. */
+            problems?: components["schemas"]["ErrorModel"][];
+            /** @description What a client acts on: a code such as not_found, set on every refusal that names one. */
+            reason?: string;
+            /**
+             * Format: date-time
+             * @description Since when that condition holds.
+             */
+            since?: string;
+            /** @description The sentence for a person, on a refusal for a condition of the platform. */
+            summary?: string;
         };
         EventKindDoc: {
             agent_scope: string;

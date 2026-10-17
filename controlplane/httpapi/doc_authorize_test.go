@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
@@ -202,14 +203,11 @@ func TestTheAgentDigestIncludesTheJobAudience(t *testing.T) {
 func TestARefusalWithAReasonCarriesItBesideTheMessage(t *testing.T) {
 	r, _ := audienceRouter(t)
 	recorder := docCall(r, "/internal/gone", "Bearer removed-cluster")
-	var body struct {
-		Error  string `json:"error"`
-		Reason string `json:"reason"`
-	}
+	var body platformapi.ErrorModel
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("%v in %s", err, recorder.Body)
 	}
-	if recorder.Code != http.StatusUnauthorized || body.Reason != domain.ReasonClusterNotRegistered || !strings.Contains(body.Error, "not registered") {
+	if recorder.Code != http.StatusUnauthorized || body.Reason != domain.ReasonClusterNotRegistered || !strings.Contains(body.Message, "not registered") {
 		t.Fatalf("status = %d body = %s, want 401 with the reason and the message", recorder.Code, recorder.Body)
 	}
 }
@@ -225,7 +223,7 @@ func TestAHandlersUnansweredErrorSaysNothingOfWhatFailed(t *testing.T) {
 		func(context.Context, *struct{}) (*struct{}, error) {
 			return nil, huma.Error409Conflict("already closed")
 		})
-	if rec := docCall(r, "/fail", "Bearer user"); rec.Code != http.StatusInternalServerError || strings.TrimSpace(rec.Body.String()) != `{"error":"`+auth.InternalError+`"}` {
+	if rec := docCall(r, "/fail", "Bearer user"); rec.Code != http.StatusInternalServerError || strings.TrimSpace(rec.Body.String()) != `{"message":"`+auth.InternalError+`"}` {
 		t.Errorf("an unanswered error: got = %d %s, want a 500 that carries no internal text", rec.Code, rec.Body)
 	}
 	if rec := docCall(r, "/refuse", "Bearer user"); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "already closed") {

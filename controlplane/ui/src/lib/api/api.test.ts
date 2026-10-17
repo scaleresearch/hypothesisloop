@@ -140,19 +140,19 @@ describe('the order of an org\'s clusters', () => {
 
 describe('a session that is gone or refused has one outcome', () => {
   it('ends the session when the API answers 401 to a read', async () => {
-    fetchMock().mockResolvedValue(answer(401, { error: 'unauthenticated: token has expired' }))
+    fetchMock().mockResolvedValue(answer(401, { message: 'unauthenticated: token has expired' }))
     await expect(fetchMe()).rejects.toBe(SESSION_OVER)
     expect(endSession).toHaveBeenCalledExactlyOnceWith('refused')
   })
 
   it('ends the session when the API answers 401 to a paged read', async () => {
-    fetchMock().mockResolvedValue(answer(401, { error: 'unauthenticated' }))
+    fetchMock().mockResolvedValue(answer(401, { message: 'unauthenticated' }))
     await expect(fetchAgentsPage({ project_id: 'prj_1' })).rejects.toBe(SESSION_OVER)
     expect(endSession).toHaveBeenCalledExactlyOnceWith('refused')
   })
 
   it('ends the session when the API answers 401 to a write', async () => {
-    fetchMock().mockResolvedValue(answer(401, { error: 'unauthenticated' }))
+    fetchMock().mockResolvedValue(answer(401, { message: 'unauthenticated' }))
     await expect(createAPIKey('org_1', 'laptop')).rejects.toBe(SESSION_OVER)
     expect(endSession).toHaveBeenCalledExactlyOnceWith('refused')
   })
@@ -172,21 +172,21 @@ describe('a session that is gone or refused has one outcome', () => {
   })
 
   it('keeps the session on a 403 and a 404, which are answers about one thing', async () => {
-    fetchMock().mockImplementation(async () => answer(403, { error: 'forbidden: only an owner of the org may change it' }))
+    fetchMock().mockImplementation(async () => answer(403, { message: 'forbidden: only an owner of the org may change it' }))
     await expect(createAPIKey('org_1', 'laptop')).rejects.toThrow('forbidden: only an owner of the org may change it')
     expect(endSession).not.toHaveBeenCalled()
   })
 })
 
 describe('a failure carries the API\'s own words', () => {
-  it('from the {"error"} envelope', async () => {
-    fetchMock().mockResolvedValue(answer(404, { error: 'org not found' }))
+  it('from its error body', async () => {
+    fetchMock().mockResolvedValue(answer(404, { message: 'org not found' }))
     const error = await fetchMe().catch(e => e)
     expect(error).toBeInstanceOf(ApiError)
     expect(error).toMatchObject({ status: 404, message: 'org not found' })
   })
 
-  it('from the {"reason","message"} envelope', async () => {
+  it('with the reason its error body names', async () => {
     fetchMock().mockResolvedValue(answer(409, { reason: 'experiment_started', message: 'experiment_started: experiment is running' }))
     await expect(updateCluster('org_a', 'c1', { stuck_pending_timeout_seconds: 60 })).rejects.toMatchObject({ status: 409, message: 'experiment_started: experiment is running' })
   })

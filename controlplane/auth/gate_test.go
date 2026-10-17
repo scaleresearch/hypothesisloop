@@ -78,11 +78,11 @@ func TestGateAnswersEachRefusalInTheAPIsEnvelope(t *testing.T) {
 		status        int
 		body          string
 	}{
-		"no token":        {"", http.StatusUnauthorized, `{"error":"unauthenticated: send Authorization: Bearer <token>"}`},
-		"not a bearer":    {"Basic abc", http.StatusUnauthorized, `{"error":"unauthenticated: send Authorization: Bearer <token>"}`},
-		"unknown token":   {"Bearer nope", http.StatusUnauthorized, `{"error":"unauthenticated: unknown token"}`},
-		"removed cluster": {"Bearer removed-cluster", http.StatusUnauthorized, `{"error":"unauthenticated: cluster gone is not registered","reason":"cluster_not_registered"}`},
-		"broken store":    {"Bearer broken-directory", http.StatusInternalServerError, `{"error":"internal error"}`},
+		"no token":        {"", http.StatusUnauthorized, `{"message":"unauthenticated: send Authorization: Bearer <token>"}`},
+		"not a bearer":    {"Basic abc", http.StatusUnauthorized, `{"message":"unauthenticated: send Authorization: Bearer <token>"}`},
+		"unknown token":   {"Bearer nope", http.StatusUnauthorized, `{"message":"unauthenticated: unknown token"}`},
+		"removed cluster": {"Bearer removed-cluster", http.StatusUnauthorized, `{"message":"unauthenticated: cluster gone is not registered","reason":"cluster_not_registered"}`},
+		"broken store":    {"Bearer broken-directory", http.StatusInternalServerError, `{"message":"internal error"}`},
 	} {
 		recorder := serve(h, "/me", map[string]string{"Authorization": tc.authorization})
 		if recorder.Code != tc.status || strings.TrimSpace(recorder.Body.String()) != tc.body || recorder.Header().Get("Content-Type") != "application/json" {

@@ -538,8 +538,8 @@ func indexHeaderEnd(b []byte) int {
 	return strings.Index(string(b), "\r\n\r\n")
 }
 
-// readRefusalBody returns " — <message>" for a refusal's JSON {"error": "..."} body, which is the
-// only thing that says which part of the request was wrong.
+// readRefusalBody returns " — <message>" for a refusal's error body, which is the only thing that
+// says which part of the request was wrong.
 func (ws *webSocket) readRefusalBody(head []byte) string {
 	length := 0
 	for _, line := range strings.Split(string(head), "\r\n")[1:] {
@@ -579,12 +579,10 @@ func (ws *webSocket) readRefusalBody(head []byte) string {
 		}
 	}
 	text := strings.TrimSpace(string(body))
-	var payload struct {
-		Error string `json:"error"`
-	}
+	var payload platformapi.ErrorModel
 	message := text
-	if json.Unmarshal(body, &payload) == nil && payload.Error != "" {
-		message = payload.Error
+	if json.Unmarshal(body, &payload) == nil && payload.Message != "" {
+		message = payload.Message
 	}
 	if message == "" {
 		return ""

@@ -5,28 +5,22 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
+
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 )
 
-// Refusal is a refusal a client acts on by its reason, in the {"reason","message"} envelope.
-// Problems holds each refusal of a check that found several, so a client fixes them in one pass.
+// Refusal is a refusal a client acts on by its reason, answered as the API's one error body with
+// the status it answers with.
 type Refusal struct {
-	status   int
-	Reason   string     `json:"reason"`
-	Message  string     `json:"message"`
-	Problems []*Refusal `json:"problems,omitempty"`
-	// Summary, OperatorDetail and Since are those of domain.StatusReason, on a refusal that
-	// answers a condition of the platform rather than of the request.
-	Summary        string     `json:"summary,omitempty"`
-	OperatorDetail string     `json:"operator_detail,omitempty"`
-	Since          *time.Time `json:"since,omitempty"`
+	status int
+	platformapi.ErrorModel
 }
 
 func (e *Refusal) Error() string  { return e.Message }
 func (e *Refusal) GetStatus() int { return e.status }
 
 func Refuse(status int, reason, message string) *Refusal {
-	return &Refusal{status: status, Reason: reason, Message: message}
+	return &Refusal{status: status, ErrorModel: platformapi.ErrorModel{Reason: reason, Message: message}}
 }
 
 // Problems collects the refusals of one check, so that it reports every one of them at once.
@@ -43,7 +37,9 @@ func (p *Problems) Add(err error) error {
 		return err
 	}
 	if len(refused.Problems) > 0 {
-		*p = append(*p, refused.Problems...)
+		for _, problem := range refused.Problems {
+			*p = append(*p, &Refusal{status: refused.status, ErrorModel: problem})
+		}
 		return nil
 	}
 	*p = append(*p, refused)
@@ -60,10 +56,12 @@ func (p Problems) Err() error {
 		return p[0]
 	}
 	messages := make([]string, len(p))
+	problems := make([]platformapi.ErrorModel, len(p))
 	for i, problem := range p {
 		messages[i] = fmt.Sprintf("(%d) %s: %s", i+1, problem.Reason, problem.Message)
+		problems[i] = problem.ErrorModel
 	}
-	return &Refusal{status: p[0].status, Reason: p[0].Reason, Message: fmt.Sprintf("%d problems: %s", len(p), strings.Join(messages, "; ")), Problems: p}
+	return &Refusal{status: p[0].status, ErrorModel: platformapi.ErrorModel{Reason: p[0].Reason, Message: fmt.Sprintf("%d problems: %s", len(p), strings.Join(messages, "; ")), Problems: problems}}
 }
 
 // NotFound refuses what with 404 not_found.

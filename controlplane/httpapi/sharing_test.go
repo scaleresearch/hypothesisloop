@@ -100,7 +100,7 @@ func TestOnlyStaffShareAPlatformExperiment(t *testing.T) {
 func TestAFailedShareSaysNothingOfWhatFailed(t *testing.T) {
 	store := &sharedFlags{shared: map[string]bool{"pe-1": false}, fail: errors.New("connection to 10.0.0.7 refused")}
 	code, body := shareAs(t, store, auth.Principal{Kind: auth.KindStaff}, "/platform-experiments/pe-1/share")
-	if code != http.StatusInternalServerError || body["error"] != auth.InternalError || len(body) != 1 {
+	if code != http.StatusInternalServerError || body["message"] != auth.InternalError || len(body) != 1 {
 		t.Fatalf("got = %d %v, want a 500 that carries no internal text", code, body)
 	}
 }
