@@ -66,7 +66,7 @@ cloudCompute:
           gpu_name: RTX 4090
     shapes:
       - name: rtx4090
-        accelerator_type: nvidia.com/gpu.product=NVIDIA-GEFORCE-RTX-4090
+        accelerator_type: nvidia.com/gpu.product=NVIDIA-GeForce-RTX-4090
         accelerators: 1
         cpu: "8"
         memory: 32Gi

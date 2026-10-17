@@ -2,7 +2,6 @@ package domain
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/contract/jobspec"
 )
@@ -115,9 +114,8 @@ func Fits(capacity, footprint Footprint) bool {
 func CapacityFootprint(cpuCores float64, acceleratorByType map[string]int64, ramBytes, storageBytes int64) Footprint {
 	fp := NewFootprint()
 	fp.Add(ResourceKey{Kind: ResourceKindCPU}, int64(cpuCores*1000))
-	// Lowercased so Fits()'s exact-match join works regardless of casing (see AcceleratorType.MatchesLabels).
 	for acceleratorType, n := range acceleratorByType {
-		fp.Add(ResourceKey{Kind: ResourceKindAccelerator, Name: strings.ToLower(acceleratorType)}, n)
+		fp.Add(ResourceKey{Kind: ResourceKindAccelerator, Name: acceleratorType}, n)
 	}
 	fp.Add(ResourceKey{Kind: ResourceKindMemory}, ramBytes)
 	fp.Add(ResourceKey{Kind: ResourceKindStorage}, storageBytes)

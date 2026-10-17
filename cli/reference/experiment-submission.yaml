@@ -73,7 +73,7 @@ job:
   # Admission may place the job on any of them when the first choice is busy, and bills whichever
   # one actually ran.
   # acceptable_accelerator_types:
-  #   - nvidia.com/gpu.product=NVIDIA-A100-80GB-PCIE
+  #   - nvidia.com/gpu.product=NVIDIA-A100-80GB-PCIe
 
   # accelerator_tolerations: taint keys to tolerate so the pod may land on tainted accelerator
   # nodes (whether a cluster taints them is a property of that cluster, not of the hardware).

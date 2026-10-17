@@ -320,15 +320,13 @@ func TestAWorkloadTerminationIsNotRequeued(t *testing.T) {
 	}
 }
 
-// Placement folds the case of an accelerator type, so a job that wrote its type in another
-// casing than the runtime reports is admitted and runs. Compared exactly here, it was then
-// evicted for a type mismatch, readmitted, and evicted again.
-func TestARunningJobWhoseTypeIsReportedInAnotherCasingIsTheTypeItAskedFor(t *testing.T) {
-	const asked = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100")
+// A running job is on the type it asked for only where the runtime reports that type exactly.
+func TestARunningJobIsOnItsTypeOnlyWhereTheRuntimeReportsItExactly(t *testing.T) {
+	const asked = domain.AcceleratorType("nvidia.com/gpu.product=NVIDIA-H100")
 	exp := &domain.Experiment{ID: "exp-1", Status: domain.StatusSubmitted, AcceleratorType: asked, AcceleratorCount: 1}
 
 	store := &lifecycleStore{}
-	w := NewJobWatcher(store, &scaleUpBackend{admittedType: "nvidia.com/gpu.product=NVIDIA-H100"}, noopSettler{}, zap.NewNop())
+	w := NewJobWatcher(store, &scaleUpBackend{admittedType: asked}, noopSettler{}, zap.NewNop())
 	admitted, outcome := w.onRunning(context.Background(), exp)
 	if outcome != runningMarked || admitted != asked || store.started != 1 {
 		t.Fatalf("outcome %v, admitted %q, started %d", outcome, admitted, store.started)

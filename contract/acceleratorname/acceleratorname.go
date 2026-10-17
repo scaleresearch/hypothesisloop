@@ -4,6 +4,7 @@ package acceleratorname
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -15,18 +16,20 @@ func NVIDIAProductLabel(name string) string {
 	return nvidiaProductKey + "=" + GFDProduct(name)
 }
 
-// GFDProduct reproduces NVIDIA GPU Feature Discovery's node-label normalization exactly
-// (different-backend.md §4.2): uppercase, spaces to dashes. "NVIDIA H100 80GB HBM3" ->
-// "NVIDIA-H100-80GB-HBM3".
+// gfdDropped is every character NVIDIA GPU Feature Discovery drops from a product name.
+var gfdDropped = regexp.MustCompile(`[^A-Za-z0-9-_. ]`)
+
+// GFDProduct is the nvidia.com/gpu.product value GPU Feature Discovery labels a node with for the
+// product name NVML reports (sanitise in k8s-device-plugin's internal/lm/resource.go): characters
+// other than ASCII letters, digits, '-', '_', '.' and ' ' dropped, each run of spaces one '-',
+// and the case kept. "NVIDIA GeForce RTX 4090" -> "NVIDIA-GeForce-RTX-4090".
 func GFDProduct(name string) string {
-	upper := strings.ToUpper(strings.TrimSpace(name))
-	return strings.Join(strings.Fields(upper), "-")
+	return strings.Join(strings.Fields(gfdDropped.ReplaceAllString(name, "")), "-")
 }
 
 // Validate checks a catalog string an operator wrote by hand: a key=value pair, and for an NVIDIA
-// product the form NVIDIAProductLabel produces. The control plane compares the type a running
-// job reports with the one it requested character for character, so a type configured in another
-// casing would match jobs at admission and then fail every one of them once it ran.
+// product a value GPU Feature Discovery could have labelled. Types compare exactly, so the
+// catalog must also keep the case GFD keeps (NVIDIA-GeForce-RTX-4090, Tesla-T4).
 func Validate(catalogType string) error {
 	key, value, ok := strings.Cut(catalogType, "=")
 	if !ok || key == "" || value == "" {

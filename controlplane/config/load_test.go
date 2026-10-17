@@ -559,13 +559,13 @@ func TestAcceleratorTypesAreCanonicalAndEveryRentedShapeIsPriced(t *testing.T) {
 		t.Fatalf("a shape of a priced type: %v", err)
 	}
 	for name, tc := range map[string]struct{ text, want string }{
-		"a catalog name in another casing": {strings.Replace(productionConfig(t), priced, "nvidia.com/gpu.product=NVIDIA-l40", 1),
-			`accelerator_types: accelerator type "nvidia.com/gpu.product=NVIDIA-l40" must be written "nvidia.com/gpu.product=NVIDIA-L40"`},
+		"a catalog name GFD never labels": {strings.Replace(productionConfig(t), priced, "nvidia.com/gpu.product=NVIDIA L40", 1),
+			`accelerator_types: accelerator type "nvidia.com/gpu.product=NVIDIA L40" must be written "nvidia.com/gpu.product=NVIDIA-L40"`},
 		"a catalog name with no key": {strings.Replace(productionConfig(t), priced, "L40", 1), `accelerator type "L40" is not a key=value catalog string`},
 		"a shape of an unpriced type": {productionConfig(t) + shape("nvidia.com/gpu.product=NVIDIA-B200"),
 			`cloud_compute a shape "gpu": accelerator_type "nvidia.com/gpu.product=NVIDIA-B200" is not priced in accelerator_types`},
 		"a shape of a type in another casing": {productionConfig(t) + shape("nvidia.com/gpu.product=NVIDIA-l40"),
-			`cloud_compute a shape "gpu": accelerator type "nvidia.com/gpu.product=NVIDIA-l40" must be written`},
+			`cloud_compute a shape "gpu": accelerator_type "nvidia.com/gpu.product=NVIDIA-l40" is not priced in accelerator_types`},
 	} {
 		if err := loadText(t, tc.text); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: got %v, want an error saying %q", name, err, tc.want)

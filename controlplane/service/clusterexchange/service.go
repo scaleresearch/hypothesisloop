@@ -6,7 +6,6 @@ package clusterexchange
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -87,7 +86,7 @@ type Service struct {
 func NewService(store Store, connectedWithin time.Duration, metrics *metricsdb.Store, observationCadence time.Duration, dataStore *objectstore.Client, maxCheckpointGrace time.Duration, pricedAcceleratorTypes []string, maxLogLineChars int, signingSecret, proxyURL string, pulls ImagePulls, logger *zap.Logger) *Service {
 	priced := make(map[string]bool, len(pricedAcceleratorTypes))
 	for _, name := range pricedAcceleratorTypes {
-		priced[strings.ToLower(name)] = true
+		priced[name] = true
 	}
 	return &Service{store: store, connectedWithin: connectedWithin, metrics: metrics, observationCadence: observationCadence,
 		dataStore: dataStore, maxCheckpointGrace: maxCheckpointGrace,
@@ -96,7 +95,7 @@ func NewService(store Store, connectedWithin time.Duration, metrics *metricsdb.S
 
 // keepPricedAccelerators drops every accelerator type outside the priced catalog from report.
 func (s *Service) keepPricedAccelerators(report *clusterapi.ReconcileRequest) {
-	unpriced := func(acceleratorType string) bool { return !s.pricedAcceleratorTypes[strings.ToLower(acceleratorType)] }
+	unpriced := func(acceleratorType string) bool { return !s.pricedAcceleratorTypes[acceleratorType] }
 	for _, byType := range []map[string]int64{report.AcceleratorAvailableByType, report.AcceleratorTotalByType} {
 		for acceleratorType := range byType {
 			if unpriced(acceleratorType) {

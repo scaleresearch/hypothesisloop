@@ -113,7 +113,7 @@ func (s *Store) OnCoresOnly(ctx context.Context, ids []string) (map[string]bool,
 		return map[string]bool{}, nil
 	}
 	rows, err := s.pool.pool.Query(ctx, `SELECT platform_experiment_id FROM experiments WHERE platform_experiment_id = ANY($1)
-GROUP BY platform_experiment_id HAVING bool_and(lower(accelerator_type) = lower($2))`, ids, string(domain.CPUType))
+GROUP BY platform_experiment_id HAVING bool_and(accelerator_type = $2)`, ids, string(domain.CPUType))
 	if err != nil {
 		return nil, fmt.Errorf("experiments_store.OnCoresOnly: %w", err)
 	}

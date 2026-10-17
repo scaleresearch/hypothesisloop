@@ -22,7 +22,7 @@ import (
 // The key carries its vendor domain, so matching is a plain lookup against live inventory rather
 // than a rule about which field a given vendor calls its model name. Runtime code contains no
 // vendor/model enum, and the operator's catalog (hypothesisloop.yaml) only attaches a price to
-// these strings — it never defines or renames them. Types compare without regard to case (Is).
+// these strings — it never defines or renames them. Types compare exactly, case included (Is).
 type AcceleratorType string
 
 // CPUType is the one type whose unit is a CPU core. A runtime offers its nodes' whole cores as
@@ -97,15 +97,13 @@ func (g AcceleratorType) split() (key, value string, ok bool) {
 	return s[:eq], s[eq+1:], true
 }
 
-// MatchesLabels reports whether a node publishing these labels carries this type. The value
-// compares without regard to case, since discovery mechanisms case the same hardware
-// differently; the key compares exact.
+// MatchesLabels reports whether a node publishing these labels carries this type.
 func (g AcceleratorType) MatchesLabels(labels map[string]string) bool {
 	key, value, ok := g.split()
 	if !ok {
 		return false
 	}
-	return strings.EqualFold(labels[key], value)
+	return labels[key] == value
 }
 
 // MatchesAttributes reports whether a DRA device of driver publishing these attributes, keyed by
@@ -116,10 +114,10 @@ func (g AcceleratorType) MatchesAttributes(driver string, attributes map[string]
 		return false
 	}
 	bare := key[strings.Index(key, "/")+1:]
-	return strings.EqualFold(attributes[bare], value)
+	return attributes[bare] == value
 }
 
-// Is reports whether g and other name the same type, without regard to case.
+// Is reports whether g and other name the same type.
 func (g AcceleratorType) Is(other AcceleratorType) bool {
-	return strings.ToLower(string(g)) == strings.ToLower(string(other))
+	return g == other
 }

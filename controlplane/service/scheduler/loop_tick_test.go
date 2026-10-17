@@ -51,7 +51,7 @@ func TestHoldersCountTheJobsThatHoldWhatIsShortOnTheCluster(t *testing.T) {
 	if got := holdersOf(claimed, "box-b", domain.Footprint{cpuKey: 16000}, waiting); got != (holders{own: 1, others: 1}) {
 		t.Errorf("short of cores: got = %+v, want one of its own experiment and one of another, itself and the job that holds no cores left out", got)
 	}
-	if got := holdersOf(claimed, "box-b", domain.Footprint{acceleratorKey("tenstorrent.com/chiparch=blackhole"): 1}, waiting); got != (holders{others: 1}) {
+	if got := holdersOf(claimed, "box-b", domain.Footprint{acceleratorKey("tenstorrent.com/chipArch=blackhole"): 1}, waiting); got != (holders{others: 1}) {
 		t.Errorf("short of a chip: got = %+v, want the one job that holds a chip", got)
 	}
 }

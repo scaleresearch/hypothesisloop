@@ -7,7 +7,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-const l40 = "nvidia.com/gpu.product=nvidia-l40"
+const l40 = "nvidia.com/gpu.product=NVIDIA-L40"
 
 // An org's two clusters and the platform's shared one. The names sort against the priorities, so
 // a search that still went by name would answer differently.

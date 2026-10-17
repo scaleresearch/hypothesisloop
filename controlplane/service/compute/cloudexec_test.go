@@ -245,25 +245,19 @@ func TestAJobIsRentedInExactlyTheSlotItWasAdmittedTo(t *testing.T) {
 	}
 }
 
-// Admission folds the case of an accelerator type, so a job that wrote its type in another
-// casing than the shape is admitted to the slot. Refused here it went round admit, refuse and
-// evict for as long as it had requeues left.
-func TestAJobIsNotRefusedForHowItCasedItsAcceleratorType(t *testing.T) {
+// Types compare exactly, so a job of another type, or of the slot's in another casing, is
+// refused the slot.
+func TestAJobOfAnotherTypeIsRefusedTheSlot(t *testing.T) {
 	e, p := newTestExecutor(t)
-	lowercase := job(t, "exp-1", 0, 1)
-	lowercase.AcceleratorType = "nvidia.com/gpu.product=nvidia-h100"
-	mustCreate(t, e, lowercase)
-	p.Start("hl-job-t1-exp-1-a0-h100-0")
-	// What is reported is the shape's type, which the control plane reads as the one asked for.
-	admitted, _, _, err := e.ResolveAdmittedAcceleratorType(context.Background(), "exp-1")
-	if err != nil || !admitted.Is(lowercase.AcceleratorType) {
-		t.Fatalf("admitted %q, %v", admitted, err)
+	for id, acceleratorType := range map[string]clusterapi.AcceleratorType{"exp-1": "nvidia.com/gpu.product=NVIDIA-L40", "exp-2": "nvidia.com/gpu.product=nvidia-h100"} {
+		another := on(job(t, id, 0, 1), "h100-1")
+		another.AcceleratorType = acceleratorType
+		if err := e.CreateWorkload(context.Background(), another); err == nil || !strings.Contains(err.Error(), "is not the slot's") {
+			t.Errorf("%s: err = %v", acceleratorType, err)
+		}
 	}
-
-	another := on(job(t, "exp-2", 0, 1), "h100-1")
-	another.AcceleratorType = "nvidia.com/gpu.product=NVIDIA-L40"
-	if err := e.CreateWorkload(context.Background(), another); err == nil || !strings.Contains(err.Error(), "is not the slot's") {
-		t.Fatalf("another type: err = %v", err)
+	if names := p.Names(); len(names) != 0 {
+		t.Fatalf("a refused job was rented: %v", names)
 	}
 }
 
@@ -553,7 +547,7 @@ func TestTheConfigurationIsValidatedAtStartup(t *testing.T) {
 		"type without count":     func(c *Config) { c.Shapes[0].Accelerators = 0 },
 		"count without type":     func(c *Config) { c.Shapes[0].AcceleratorType = "" },
 		"type not a label":       func(c *Config) { c.Shapes[0].AcceleratorType = "H100" },
-		"type in another casing": func(c *Config) { c.Shapes[0].AcceleratorType = "nvidia.com/gpu.product=nvidia-h100" },
+		"type GFD never labels":  func(c *Config) { c.Shapes[0].AcceleratorType = "nvidia.com/gpu.product=NVIDIA H100" },
 		"no memory":              func(c *Config) { c.Shapes[0].MemoryBytes = 0 },
 		"two shapes of one name": func(c *Config) { c.Shapes = append(c.Shapes, c.Shapes[0]) },
 		"no namespace":           func(c *Config) { c.Namespace = "" },

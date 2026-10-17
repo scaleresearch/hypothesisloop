@@ -124,8 +124,8 @@ done <<< "${GFD_LABELS}"
 GPU_PRODUCT="$(kubectl --context "${CONTEXT_NAME}" get node "${NODE_NAME}" -o jsonpath='{.metadata.labels.nvidia\.com/gpu\.product}')"
 echo "    node labeled nvidia.com/gpu.product=${GPU_PRODUCT}"
 
-grep -qFi "nvidia.com/gpu.product=${GPU_PRODUCT}" "${ROOT}/controlplane/settings/hypothesisloop.yaml" \
-  || echo "    WARNING: ${GPU_PRODUCT} has no acch_rate in controlplane/settings/hypothesisloop.yaml — add one or jobs of this type can never be admitted (matching is case-insensitive, see domain.AcceleratorType.MatchesLabels, so exact casing here doesn't matter)."
+grep -qF "nvidia.com/gpu.product=${GPU_PRODUCT}" "${ROOT}/controlplane/settings/hypothesisloop.yaml" \
+  || echo "    WARNING: ${GPU_PRODUCT} has no acch_rate in controlplane/settings/hypothesisloop.yaml: add one, written exactly as the label is, or jobs of this type can never be admitted."
 
 echo "==> Cluster ready. Context: ${CONTEXT_NAME}"
 echo "    Register it there (OWNED_COMPUTE_CLUSTERS in .env, or hl cluster add) and attach it with make cluster-agent-up CLUSTER=k3s-nvidia."

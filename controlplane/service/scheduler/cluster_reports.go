@@ -269,30 +269,13 @@ func validateClusterSnapshot(
 
 // GetAcceleratorCapacityByNode returns fresh actual per-node capacity for topology-aware
 // distributed admission. Missing/stale nodes are absent and can't satisfy a hard spread requirement.
-// A type is keyed in lower case, the form a footprint names it in: a node reports it as its
-// driver cases it, and an accelerator type is one type however it is cased
-// (domain.AcceleratorType.Is), so every reader looks it up exactly.
+// A type is keyed as its node reports it, the form a footprint names it in.
 func (b *ClusterReports) GetAcceleratorCapacityByNode(ctx context.Context) (map[string]map[string]map[string]int64, error) {
 	reported, err := b.metrics.LiveClusterNodeAcceleratorCapacity(ctx, b.connectedWithin)
 	if err != nil {
 		return nil, err
 	}
-	return lowerAcceleratorTypes(reported), nil
-}
-
-func lowerAcceleratorTypes(reported map[string]map[string]map[string]int64) map[string]map[string]map[string]int64 {
-	out := make(map[string]map[string]map[string]int64, len(reported))
-	for cluster, byNode := range reported {
-		out[cluster] = make(map[string]map[string]int64, len(byNode))
-		for node, byType := range byNode {
-			lowered := make(map[string]int64, len(byType))
-			for acceleratorType, free := range byType {
-				lowered[strings.ToLower(acceleratorType)] += free
-			}
-			out[cluster][node] = lowered
-		}
-	}
-	return out
+	return reported, nil
 }
 
 // GetNodeResourceCapacity reports fresh free CPU/memory/storage per node as

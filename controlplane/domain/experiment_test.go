@@ -46,7 +46,7 @@ func TestJobSpecFootprintScalesEveryDimensionByNodeCount(t *testing.T) {
 		{Kind: ResourceKindCPU}:     12000,            // 4 cores x 3
 		{Kind: ResourceKindMemory}:  3 * 8 * 1 << 30,  // 8Gi x 3
 		{Kind: ResourceKindStorage}: 3 * 10 * 1 << 30, // 10Gi x 3
-		{Kind: ResourceKindAccelerator, Name: "nvidia.com/gpu.product=nvidia-h100-80gb-hbm3"}: 6,  // 2 x 3
+		{Kind: ResourceKindAccelerator, Name: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"}: 6,  // 2 x 3
 		{Kind: ResourceKindExtended, Name: "google.com/tpu"}:                                  24, // 8 x 3
 	}
 	for key, wantAmount := range want {
@@ -85,7 +85,7 @@ func TestGroupedJobSpecFootprintSumsTheGroupsInsteadOfMultiplyingOne(t *testing.
 		{Kind: ResourceKindCPU}:     80000,               // 16 + 64 x 1 cores
 		{Kind: ResourceKindMemory}:  384 * 1 << 30,       // 128Gi + 64 x 4Gi
 		{Kind: ResourceKindStorage}: (10 + 64) * 1 << 30, // 10Gi + 64 x 1Gi
-		{Kind: ResourceKindAccelerator, Name: "nvidia.com/gpu.product=nvidia-h100-80gb-hbm3"}: 8, // 8 + 64 x 0
+		{Kind: ResourceKindAccelerator, Name: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"}: 8, // 8 + 64 x 0
 	}
 	for key, wantAmount := range want {
 		if got := fp[key]; got != wantAmount {
@@ -126,7 +126,7 @@ func TestGroupedExperimentFootprintSumsTheGroupsLikeTheJobSpecDoes(t *testing.T)
 	if got := fp[ResourceKey{Kind: ResourceKindMemory}]; got != 384*1<<30 {
 		t.Fatalf("Experiment.Footprint()[memory] = %d bytes, want %d (384Gi)", got, int64(384)*1<<30)
 	}
-	if got := fp[ResourceKey{Kind: ResourceKindAccelerator, Name: "nvidia.com/gpu.product=nvidia-h100-80gb-hbm3"}]; got != 8 {
+	if got := fp[ResourceKey{Kind: ResourceKindAccelerator, Name: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"}]; got != 8 {
 		t.Fatalf("Experiment.Footprint()[accelerator] = %d, want 8 — the accelerator dimension is the experiment's own total, and a grouped job's total is the sum of its groups", got)
 	}
 }

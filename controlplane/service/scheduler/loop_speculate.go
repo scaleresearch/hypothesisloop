@@ -3,7 +3,6 @@ package scheduler
 import (
 	"context"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
@@ -176,7 +175,7 @@ func negativeInDimension(avail domain.Footprint, acceleratorType domain.Accelera
 	if avail == nil {
 		return false
 	}
-	key := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Name: strings.ToLower(string(acceleratorType))}
+	key := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Name: string(acceleratorType)}
 	v, ok := avail[key]
 	if !ok {
 		// An accelerator type this footprint never mentions is not "waiting for scale-up" — that is the

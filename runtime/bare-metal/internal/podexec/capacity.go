@@ -226,15 +226,12 @@ func (e *Executor) GetLiveAcceleratorCapacitySnapshot(ctx context.Context) (avai
 	}
 	cores := string(clusterapi.CPUType)
 	total[cores] = int64(totalCPUCores())
-	// Folded: total's label casing and a running job's requested casing can differ (see
-	// clusterapi.AcceleratorType.MatchesLabels); joining on exact match previously undercounted
-	// in-use devices, letting a second job double-book an occupied one.
 	for label, count := range requests.accelerators {
-		inUse[strings.ToLower(label)] += count
+		inUse[label] += count
 	}
 	available = map[string]int64{}
 	for label, t := range total {
-		available[label] = requests.left(t, inUse[strings.ToLower(label)])
+		available[label] = requests.left(t, inUse[label])
 	}
 	// Every job holds cores, an accelerator job too, so the cores free are those no running job
 	// was given, whatever its type.
@@ -316,9 +313,7 @@ func (p *passExecutor) GetNodeTotalCapacity(ctx context.Context) (map[string]map
 	}}, nil
 }
 
-// devicesInUseExcluding returns the set of host device paths (case-folded, matching the
-// case-insensitive comparison already used by GetLiveAcceleratorCapacitySnapshot above) actually
-// bound to a managed container that holds them (holds) or held by an operation in flight, skipping
+// devicesInUseExcluding returns the set of host device paths (case-folded) actually bound to a managed container that holds them (holds) or held by an operation in flight, skipping
 // excludeExperimentID's own: counting a job's devices against its own placement would move it to
 // a different device every pass, flip its spec hash and recreate it forever.
 //
@@ -449,7 +444,7 @@ func (e *Executor) resolvePlacementFor(ctx context.Context, exp *clusterapi.Desi
 
 func hasLabel(labels []string, want string) bool {
 	for _, l := range labels {
-		if strings.EqualFold(l, want) {
+		if l == want {
 			return true
 		}
 	}

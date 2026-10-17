@@ -339,13 +339,13 @@ object_store:
 # count as a plain integer in job.yaml's accelerator_count, never a k8s resource string.
 
 accelerator_types:
-  - name:      nvidia.com/gpu.product=TESLA-T4
+  - name:      nvidia.com/gpu.product=Tesla-T4
     acch_rate: 0.125
 
   - name:      nvidia.com/gpu.product=NVIDIA-L40
     acch_rate: 0.25
 
-  - name:      nvidia.com/gpu.product=NVIDIA-A100-80GB-PCIE
+  - name:      nvidia.com/gpu.product=NVIDIA-A100-80GB-PCIe
     acch_rate: 0.375
 
   - name:      nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3
@@ -354,13 +354,13 @@ accelerator_types:
   - name:      nvidia.com/gpu.product=NVIDIA-H200
     acch_rate: 1.25
 
-  - name:      nvidia.com/gpu.product=NVIDIA-GEFORCE-RTX-4070-TI
+  - name:      nvidia.com/gpu.product=NVIDIA-GeForce-RTX-4070-Ti
     acch_rate: 0.1
 
-  - name:      nvidia.com/gpu.product=NVIDIA-GEFORCE-RTX-4090
+  - name:      nvidia.com/gpu.product=NVIDIA-GeForce-RTX-4090
     acch_rate: 0.15
 
-  - name:      nvidia.com/gpu.product=NVIDIA-GEFORCE-GTX-1070-TI
+  - name:      nvidia.com/gpu.product=NVIDIA-GeForce-GTX-1070-Ti
     acch_rate: 0.05
 
   # Add a rate when jobs may request another accelerator type.

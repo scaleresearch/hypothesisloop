@@ -89,14 +89,14 @@ cloud_compute:
     # reported as a node on every poll, which is the one reason the number is not larger.
     shapes:
       - name: rtx4090
-        accelerator_type: nvidia.com/gpu.product=NVIDIA-GEFORCE-RTX-4090
+        accelerator_type: nvidia.com/gpu.product=NVIDIA-GeForce-RTX-4090
         accelerators: 1
         cpu: "8"
         memory: 32Gi
         storage: 100Gi
         max_instances: 200
       - name: a100
-        accelerator_type: nvidia.com/gpu.product=NVIDIA-A100-80GB-PCIE
+        accelerator_type: nvidia.com/gpu.product=NVIDIA-A100-80GB-PCIe
         accelerators: 1
         cpu: "8"
         memory: 64Gi

@@ -638,7 +638,7 @@ func TestAJobNoIdleClusterHoldsIsRefusedAtSubmit(t *testing.T) {
 	if refused == nil || refused.Reason != domain.NotAdmittedExceedsClusterCapacity || AdmissionStatus(refused.Reason) != http.StatusUnprocessableEntity {
 		t.Fatalf("more storage than the node's disk: got = %v, want a 422 %s", err, domain.NotAdmittedExceedsClusterCapacity)
 	}
-	for _, said := range []string{"3.9 TiB storage", "8 cores", "16 GiB memory", "box-b has 1 x " + strings.ToLower(chip), "3.6 TiB storage"} {
+	for _, said := range []string{"3.9 TiB storage", "8 cores", "16 GiB memory", "box-b has 1 x " + chip, "3.6 TiB storage"} {
 		if !strings.Contains(refused.Message, said) {
 			t.Errorf("the refusal does not say %q: %s", said, refused.Message)
 		}

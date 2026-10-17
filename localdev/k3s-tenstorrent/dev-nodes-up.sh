@@ -22,7 +22,7 @@ K3S_VERSION="$(kubectl --context "${CONTEXT}" version -o json | python3 -c 'impo
 IMAGE="docker.io/rancher/k3s:${K3S_VERSION}"
 # H100 x2: distributed-jobs.sh needs two distinct hosts of the same accelerator type (anti-affinity).
 # H200 dropped to keep 4 node slots total (other scenarios tolerate zero H200 capacity).
-ACCELERATOR_TYPES=(H100:NVIDIA-H100-80GB-HBM3 H100:NVIDIA-H100-80GB-HBM3 L40:NVIDIA-L40 A100:NVIDIA-A100-80GB-PCIE)
+ACCELERATOR_TYPES=(H100:NVIDIA-H100-80GB-HBM3 H100:NVIDIA-H100-80GB-HBM3 L40:NVIDIA-L40 A100:NVIDIA-A100-80GB-PCIe)
 
 SERVER_URL="https://${HOST_ADDRESS}:6443"
 TOKEN="$(sudo cat /var/lib/rancher/k3s/server/node-token)"

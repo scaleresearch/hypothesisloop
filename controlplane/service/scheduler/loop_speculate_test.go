@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -214,7 +213,7 @@ func TestSpeculativeCandidatesExcludesClusterAlreadyWaitingForItsOwnScaleUp(t *t
 	connected := map[string]bool{"cluster-a": true}
 	clusterIDs := map[string]string{"cluster-a": "cid-a"}
 	desiredFree := domain.NewFootprint()
-	desiredFree.Add(domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Name: strings.ToLower(h100)}, -2)
+	desiredFree.Add(domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Name: h100}, -2)
 
 	got, _, err := l.speculativeCandidates(context.Background(), newResolutionCache(l), exp, autoscaler, connected, clusterIDs, nil, singleOrg, accel, resources, nil, nil, map[string]domain.Footprint{"cluster-a": desiredFree})
 	if err != nil {
@@ -400,14 +399,14 @@ func TestSubmitJobSpeculativeWithProvenFitAndNoCapIsUnbounded(t *testing.T) {
 }
 
 func TestNegativeInDimension(t *testing.T) {
-	avail := domain.Footprint{{Kind: domain.ResourceKindAccelerator, Name: strings.ToLower(h100)}: -2}
+	avail := domain.Footprint{{Kind: domain.ResourceKindAccelerator, Name: h100}: -2}
 	if !negativeInDimension(avail, domain.AcceleratorType(h100)) {
-		t.Fatal("a negative desired-free entry for this accelerator type must be detected regardless of case")
+		t.Fatal("a negative desired-free entry for this accelerator type must be detected")
 	}
 	if negativeInDimension(avail, "a100") {
 		t.Fatal("a different accelerator type's negative entry must not match")
 	}
-	saturated := domain.Footprint{{Kind: domain.ResourceKindAccelerator, Name: strings.ToLower(h100)}: 0}
+	saturated := domain.Footprint{{Kind: domain.ResourceKindAccelerator, Name: h100}: 0}
 	if negativeInDimension(saturated, domain.AcceleratorType(h100)) {
 		t.Fatal("a saturated cluster with no claim above its total is not waiting for a scale-up")
 	}

@@ -89,7 +89,7 @@ func (c *slotFixture) capacity() domain.Footprint {
 		out.Add(domain.ResourceKey{Kind: domain.ResourceKindMemory}, free[domain.NodeResourceMemoryBytes])
 		out.Add(domain.ResourceKey{Kind: domain.ResourceKindStorage}, free[domain.NodeResourceStorageBytes])
 		for acceleratorType, count := range c.accelerators[node] {
-			out.Add(domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Name: strings.ToLower(acceleratorType)}, count)
+			out.Add(domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Name: acceleratorType}, count)
 		}
 	}
 	return out
@@ -164,7 +164,7 @@ func TestAJobIsSizedToTheSlotItHolds(t *testing.T) {
 func TestOnlyASlotOfTheJobsOwnShapeTakesIt(t *testing.T) {
 	c := twoH100AndACPU()
 	otherType := h100Job("other-type", "2")
-	otherType.AcceleratorType = "nvidia.com/gpu.product=nvidia-l40"
+	otherType.AcceleratorType = "nvidia.com/gpu.product=NVIDIA-L40"
 	twoDevices := h100Job("two-devices", "2")
 	twoDevices.AcceleratorCount, twoDevices.Job.AcceleratorCount = 2, 2
 	twoNodes := cpuJob("two-nodes", "2")
@@ -182,11 +182,10 @@ func TestOnlyASlotOfTheJobsOwnShapeTakesIt(t *testing.T) {
 			t.Errorf("%s: resolved to %+v, misfit %q", exp.ID, resolved, misfit)
 		}
 	}
-	// The type is the one the planner would match: the value folds case, as node labels do.
 	lowercase := h100Job("lowercase", "2")
 	lowercase.AcceleratorType = domain.AcceleratorType(strings.ToLower(h100))
-	if _, misfit := placement.ResolveOntoSlot(lowercase, rented, c.sizes, c.free, c.labels); misfit != "" {
-		t.Errorf("a type in another casing: %s", misfit)
+	if _, misfit := placement.ResolveOntoSlot(lowercase, rented, c.sizes, c.free, c.labels); misfit == "" {
+		t.Error("a type in another casing than the slot's took the slot")
 	}
 }
 
@@ -650,7 +649,7 @@ func TestSlotsHeldBySmallJobsArePromisedToNoOne(t *testing.T) {
 	if domain.Fits(desiredFree[rented], waiting.Footprint()) {
 		t.Fatalf("desired-free %v reads as room for %v", desiredFree[rented], waiting.Footprint())
 	}
-	accelerator := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Name: strings.ToLower(h100)}
+	accelerator := domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Name: h100}
 	if got := desiredFree[rented]; got[accelerator] != 0 || got[domain.ResourceKey{Kind: domain.ResourceKindCPU}] != 4000 {
 		t.Fatalf("desired-free = %v, want only the free cpu slot", got)
 	}

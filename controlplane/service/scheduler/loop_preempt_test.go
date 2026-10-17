@@ -101,7 +101,7 @@ var fullNodeA = map[string]int64{"node-a": 0}
 // observed work loses, because that is the least work destroyed. Every candidate here is identical
 // apart from how long it has been observed running, so nothing else can explain the choice.
 func TestPreemptEvictsTheLeastProgressedVictim(t *testing.T) {
-	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
+	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3")
 	candidates := []*domain.Experiment{
 		burstVictim("nearly-done", acceleratorType),
 		burstVictim("just-started", acceleratorType),
@@ -137,7 +137,7 @@ func TestPreemptEvictsTheLeastProgressedVictim(t *testing.T) {
 // treating it as zero observed hours would sort it to the front and make the job nobody can
 // measure the first one destroyed. It must be dropped from consideration instead.
 func TestPreemptSkipsUnrankableCandidatesRatherThanEvictingThemFirst(t *testing.T) {
-	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
+	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3")
 	candidates := []*domain.Experiment{
 		burstVictim("unmeasurable", acceleratorType),
 		burstVictim("measurable", acceleratorType),
@@ -172,7 +172,7 @@ func TestPreemptSkipsUnrankableCandidatesRatherThanEvictingThemFirst(t *testing.
 // broken metrics series must not block preemption platform-wide, and with nothing rankable there
 // is simply no plan. Reporting an error here would abort the caller's whole tick.
 func TestPreemptDoesNothingWhenNoCandidateCanBeRanked(t *testing.T) {
-	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
+	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3")
 	store := &preemptStore{}
 	l, _ := preemptLoop(store, fakeObserved{err: errors.New("metrics store unreachable")})
 
@@ -193,7 +193,7 @@ func TestPreemptDoesNothingWhenNoCandidateCanBeRanked(t *testing.T) {
 // The shortage needs three accelerators and only two are available across every candidate, so
 // evicting both would destroy live work and still leave the preemptor unable to run.
 func TestPreemptNeverExecutesAPartialPlan(t *testing.T) {
-	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
+	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3")
 	candidates := []*domain.Experiment{burstVictim("a", acceleratorType), burstVictim("b", acceleratorType)}
 	store := &preemptStore{}
 	l, settler := preemptLoop(store, onNodeA(fakeObserved{elapsed: map[string]float64{"a": 1, "b": 2}}, "a", "b"))
@@ -217,7 +217,7 @@ func TestPreemptNeverExecutesAPartialPlan(t *testing.T) {
 // available and one suffices; selecting a victim that the plan does not need is work destroyed for
 // no admission.
 func TestPreemptEvictsNoMoreThanTheShortageNeeds(t *testing.T) {
-	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
+	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3")
 	candidates := []*domain.Experiment{
 		burstVictim("a", acceleratorType), burstVictim("b", acceleratorType), burstVictim("c", acceleratorType),
 	}
@@ -239,8 +239,8 @@ func TestPreemptEvictsNoMoreThanTheShortageNeeds(t *testing.T) {
 // TestPreemptIgnoresVictimsHoldingADifferentAcceleratorType: evicting an L40 job frees nothing for a job that needs an H100, so it must never be
 // chosen to cover an H100 shortage — however little progress it has made.
 func TestPreemptIgnoresVictimsHoldingADifferentAcceleratorType(t *testing.T) {
-	const wanted = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
-	const other = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-l40")
+	const wanted = domain.AcceleratorType("nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3")
+	const other = domain.AcceleratorType("nvidia.com/gpu.product=NVIDIA-L40")
 	candidates := []*domain.Experiment{
 		burstVictim("wrong-type", other), // least progress, so ranked first
 		burstVictim("right-type", wanted),
@@ -268,7 +268,7 @@ func TestPreemptIgnoresVictimsHoldingADifferentAcceleratorType(t *testing.T) {
 // preempted twice has the first stint's hours charged again and its estimate collapses while most
 // of the work is still ahead.
 func TestPreemptRescalesTheVictimAgainstItsOwnStint(t *testing.T) {
-	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
+	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3")
 	victim := burstVictim("victim", acceleratorType)
 	store := &preemptStore{}
 	// Lifetime elapsed (9) is deliberately far from this stint's (4): only the stint may be used.
@@ -290,7 +290,7 @@ func TestPreemptRescalesTheVictimAgainstItsOwnStint(t *testing.T) {
 // plan did not complete. It must surface as an error so the caller stands down rather than letting
 // the disbalance evictor terminate more live work against the same stale numbers.
 func TestPreemptReportsAPartiallyExecutedPlanAsAnError(t *testing.T) {
-	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
+	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3")
 	candidates := []*domain.Experiment{burstVictim("a", acceleratorType), burstVictim("b", acceleratorType)}
 	// "b" reaches a terminal status between selection and requeue, so its requeue is refused.
 	store := &preemptStore{refuse: map[string]bool{"b": true}}
@@ -307,7 +307,7 @@ func TestPreemptReportsAPartiallyExecutedPlanAsAnError(t *testing.T) {
 
 // TestPreemptDoesNothingWithoutCandidatesOrShortage covers the degenerate entries.
 func TestPreemptDoesNothingWithoutCandidatesOrShortage(t *testing.T) {
-	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
+	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3")
 	store := &preemptStore{}
 	l, _ := preemptLoop(store, onNodeA(fakeObserved{}, "a"))
 
@@ -355,7 +355,7 @@ func (f failingFor) LatestExperimentNode(ctx context.Context, id string, created
 }
 
 func TestPreemptNeverReservesMoreThanTheStintLeft(t *testing.T) {
-	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
+	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3")
 	for name, tc := range map[string]struct{ estimate, stint, want float64 }{
 		"a remainder under the floor is kept":      {1, 0.9, 0.1},
 		"a stint past its estimate gets the floor": {1, 1.2, domain.MinRemainingHours},
@@ -395,7 +395,7 @@ func TestAQuotaRefusalAtClaimHasItsOwnReason(t *testing.T) {
 // The job needs four accelerators on one node. node-a has two free and node-b none, so only a
 // victim on node-a makes a node able to host it, whatever the ranking says.
 func TestPreemptTakesOnlyVictimsOnANodeThatCanThenHostTheJob(t *testing.T) {
-	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
+	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3")
 	twoOn := func(id string) *domain.Experiment {
 		v := burstVictim(id, acceleratorType)
 		v.AcceleratorCount, v.Job.AcceleratorCount = 2, 2
@@ -440,7 +440,7 @@ func TestPreemptTakesOnlyVictimsOnANodeThatCanThenHostTheJob(t *testing.T) {
 // One node is recorded per experiment, so a gang is proven to hold one rank on it and nothing is
 // known about where its other ranks are.
 func TestPreemptCreditsAGangOneRankOnItsRecordedNode(t *testing.T) {
-	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=nvidia-h100-80gb-hbm3")
+	const acceleratorType = domain.AcceleratorType("nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3")
 	gang := func() *domain.Experiment {
 		g := burstVictim("gang", acceleratorType)
 		g.AcceleratorCount = 4

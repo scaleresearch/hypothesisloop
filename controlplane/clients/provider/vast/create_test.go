@@ -181,15 +181,15 @@ func TestCreateSendsAnEmptyEnvAsAnObject(t *testing.T) {
 	}
 }
 
-func TestCreateMatchesTheAcceleratorTypeIgnoringCase(t *testing.T) {
+func TestCreateRefusesATypeInAnotherCasing(t *testing.T) {
 	api := newFakeAPI(t)
 	rentable(api, "hl-exp1-a2")
 	p := newTestProvider(t, api, gpuSettings())
 	spec := gpuSpec()
-	spec.AcceleratorType = "NVIDIA.com/gpu.product=nvidia-geforce-rtx-4090"
+	spec.AcceleratorType = "nvidia.com/gpu.product=nvidia-geforce-rtx-4090"
 
-	if _, err := p.Create(context.Background(), spec); err != nil {
-		t.Fatalf("Create: %v", err)
+	if _, err := p.Create(context.Background(), spec); err == nil {
+		t.Fatal("Create rented a type in another casing than the accelerators' entries")
 	}
 }
 

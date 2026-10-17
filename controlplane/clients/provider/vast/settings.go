@@ -3,7 +3,6 @@ package vast
 import (
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/contract/acceleratorname"
 )
@@ -54,10 +53,10 @@ func (c Settings) validate() error {
 	return nil
 }
 
-// accelerator resolves a catalog string the way the catalog itself matches labels: ignoring case.
+// accelerator resolves a catalog string to the entry whose product it is made of.
 func (c Settings) accelerator(catalogType string) (Accelerator, error) {
 	for _, accelerator := range c.Accelerators {
-		if strings.EqualFold(acceleratorname.NVIDIAProductLabel(accelerator.Product), catalogType) {
+		if acceleratorname.NVIDIAProductLabel(accelerator.Product) == catalogType {
 			return accelerator, nil
 		}
 	}

@@ -1,10 +1,6 @@
 package domain
 
-import (
-	"strings"
-
-	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
-)
+import "github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 
 // The accelerator vocabulary is the cluster contract's own (clusterapi), so admission and a
 // runtime read a type alike.
@@ -22,13 +18,9 @@ const (
 	CapacityBurst       = clusterapi.CapacityBurst
 )
 
-// foldKey normalizes an accelerator type string for case-insensitive map lookups.
-func foldKey(s string) string { return strings.ToLower(s) }
-
 // acceleratorRateRegistry is populated by SetAcceleratorRates() at startup from hypothesisloop.yaml.
 // Rates are in accelerator-hours (AccH), H100-equivalent: 1 AccH = 1 H100-hour, so H100 is
-// exactly 1.0 and every other tier is its H100-relative fraction. Keyed by foldKey (see
-// MatchesLabels re: casing).
+// exactly 1.0 and every other tier is its H100-relative fraction.
 var acceleratorRateRegistry = map[string]float64{}
 
 // SetAcceleratorRates registers AccH rates loaded from config. Call once at startup.
@@ -38,7 +30,7 @@ func SetAcceleratorRates(rates map[string]float64) {
 		if name == "" || rate <= 0 {
 			panic("accelerator catalog contains an empty name or non-positive rate")
 		}
-		next[foldKey(name)] = rate
+		next[name] = rate
 	}
 	if len(next) == 0 {
 		panic("accelerator catalog is empty")
@@ -50,18 +42,14 @@ func SetAcceleratorRates(rates map[string]float64) {
 // hugepages a Tenstorrent chip's driver maps, by type as the settings' catalog names it.
 type PodResources map[string]map[string]string
 
-// NewPodResources keys the catalog's pod resources so that any spelling of a type finds its own.
+// NewPodResources is the catalog's pod resources by type.
 func NewPodResources(byType map[string]map[string]string) PodResources {
-	out := make(PodResources, len(byType))
-	for name, resources := range byType {
-		out[foldKey(name)] = resources
-	}
-	return out
+	return PodResources(byType)
 }
 
 // Of is what every node of a job on t needs beside the device.
 func (p PodResources) Of(t AcceleratorType) map[string]string {
-	return p[foldKey(string(t))]
+	return p[string(t)]
 }
 
 // Over is a job's accelerator_pod_resources as it runs on t: what the job stated, and over it
@@ -86,7 +74,7 @@ var TypeKinds = []TypeKind{TypeKindAccelerator, TypeKindCPU}
 
 // LookupAcceleratorCost returns this type's registered AccH rate and whether it was found.
 func LookupAcceleratorCost(g AcceleratorType) (float64, bool) {
-	r, ok := acceleratorRateRegistry[foldKey(string(g))]
+	r, ok := acceleratorRateRegistry[string(g)]
 	return r, ok
 }
 

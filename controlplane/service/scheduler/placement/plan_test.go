@@ -3,14 +3,13 @@ package placement
 import (
 	"fmt"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-const h100 = "nvidia.com/gpu.product=nvidia-h100-80gb-hbm3"
+const h100 = "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"
 
 // groupedExperiment is a heterogeneous job: one group per shape, in the order given.
 func groupedExperiment(groups ...domain.JobGroup) *domain.Experiment {
@@ -254,20 +253,6 @@ func TestPlaceAtAcceleratorTypeReturnsFalseWhenNoClusterHasLayout(t *testing.T) 
 	}
 }
 
-// A job names its type as its agent cased it and a node's free accelerators are keyed in lower
-// case where they are read (ClusterReports), so the placement of a job whose type is cased
-// otherwise finds them with an exact lookup.
-func TestAJobIsPlacedOnANodeWhateverCaseItNamesItsTypeIn(t *testing.T) {
-	exp := distributedExperiment(1, 2)
-	exp.AcceleratorType = domain.AcceleratorType(strings.ToUpper(h100))
-	byNode := map[string]map[string]int64{"node-a": {strings.ToLower(h100): 2}}
-	resources := map[string]map[string]int64{"node-a": {domain.NodeResourceCPUMillicores: 1 << 40, domain.NodeResourceMemoryBytes: 1 << 50, domain.NodeResourceStorageBytes: 1 << 50}}
-	plan, ok := planPlacement(byNode, resources, map[string]map[string]string{"node-a": {}}, []*domain.Experiment{exp})
-	if !ok || len(plan) != 1 || plan[0].node != "node-a" || byNode["node-a"][strings.ToLower(h100)] != 0 {
-		t.Fatalf("plan %+v, ok %v, node left with %v: want the job on node-a holding both accelerators", plan, ok, byNode["node-a"])
-	}
-}
-
 // The placement search must degrade to "does not fit" — never hang or panic — when an
 // adversarial layout burns through its whole search budget. Lowering the budget to a handful of
 // trials on a job that genuinely needs backtracking exercises that path directly rather than
@@ -317,7 +302,7 @@ func TestNodeHasRoomEdgeCases(t *testing.T) {
 // preemption path reasons about the accelerator type the job actually asked for) and return the requested
 // accelerator type's own best-fit fallback, not the alternate's.
 func TestResolveClusterAndFootprintRestoresRequestedAcceleratorTypeWhenNothingFits(t *testing.T) {
-	const altAcceleratorType = "nvidia.com/gpu.product=nvidia-a100-80gb"
+	const altAcceleratorType = "nvidia.com/gpu.product=NVIDIA-A100-80GB"
 	exp := distributedExperiment(1, 8) // 8 accelerators, too many for either cluster below
 	exp.Job.AcceptableAcceleratorTypes = []domain.AcceleratorType{altAcceleratorType}
 	fpRequested := exp.Footprint()

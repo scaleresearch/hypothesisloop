@@ -240,7 +240,7 @@ func (scaleUpWaitingWorkload) GetAcceleratorTypeCapacity(context.Context) (map[s
 	// GetAcceleratorTypeCapacity's real implementations always build this via CapacityFootprint, which
 	// lowercases the accelerator type key — matched here so negativeInDimension's lookup (keyed off
 	// exp.AcceleratorType, lowercased) finds it, exactly as it would against real capacity.
-	fp.Add(domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Name: strings.ToLower(h100)}, -2)
+	fp.Add(domain.ResourceKey{Kind: domain.ResourceKindAccelerator, Name: h100}, -2)
 	return map[string]domain.Footprint{"cluster-a": fp}, map[string]domain.Footprint{"cluster-a": domain.NewFootprint()}, nil
 }
 func (scaleUpWaitingWorkload) GetAcceleratorCapacityByNode(context.Context) (map[string]map[string]map[string]int64, error) {
@@ -442,7 +442,7 @@ func TestTickTellsAJobAboveInstalledCapacityFromOneThatWaits(t *testing.T) {
 
 // --- Tick-level: a waiting guaranteed job holds free capacity against the burst pass ---
 
-const l40 = "nvidia.com/gpu.product=nvidia-l40"
+const l40 = "nvidia.com/gpu.product=NVIDIA-L40"
 
 // holdWorkload is cluster-a with four h100 installed and three free, two free l40, and cluster-b
 // with one free h100. cpuCores is what cluster-a has free, terminating the h100 on cluster-a that

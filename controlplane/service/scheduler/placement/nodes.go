@@ -8,10 +8,10 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// AcceleratorKey is the key a node's free accelerators of a type are under: the type in lower
-// case, as the capacity read keys them (scheduler.ClusterReports.GetAcceleratorCapacityByNode).
+// AcceleratorKey is the key a node's free accelerators of a type are under, as the capacity read
+// keys them (scheduler.ClusterReports.GetAcceleratorCapacityByNode).
 func AcceleratorKey(t domain.AcceleratorType) string {
-	return strings.ToLower(string(t))
+	return string(t)
 }
 
 func RequiresDistinctHosts(exp *domain.Experiment) bool {

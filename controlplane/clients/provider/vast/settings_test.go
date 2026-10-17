@@ -56,10 +56,10 @@ func TestNewRefusesAnAcceleratorTypeTheSettingsCannotRent(t *testing.T) {
 		Accelerators:    []Accelerator{{Product: "NVIDIA GeForce RTX 4090", GPUName: "RTX 4090"}},
 	}
 
-	if _, err := New(settings, testKey, []string{"nvidia.com/gpu.product=NVIDIA-GEFORCE-RTX-4090"}, t.Logf); err != nil {
+	if _, err := New(settings, testKey, []string{"nvidia.com/gpu.product=NVIDIA-GeForce-RTX-4090"}, t.Logf); err != nil {
 		t.Fatalf("a type with an entry: %v", err)
 	}
-	_, err := New(settings, testKey, []string{"nvidia.com/gpu.product=NVIDIA-GEFORCE-RTX-4090", "nvidia.com/gpu.product=NVIDIA-H200"}, t.Logf)
+	_, err := New(settings, testKey, []string{"nvidia.com/gpu.product=NVIDIA-GeForce-RTX-4090", "nvidia.com/gpu.product=NVIDIA-H200"}, t.Logf)
 	if err == nil || !strings.Contains(err.Error(), "NVIDIA-H200") {
 		t.Fatalf("err = %v, want one naming the type with no entry", err)
 	}

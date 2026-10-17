@@ -309,9 +309,7 @@ func (e *Experiment) Footprint() Footprint {
 		fp.AddFootprint(perNode.Scale(int64(group.Replicas)))
 	}
 	if e.AcceleratorCount > 0 && e.AcceleratorType != "" {
-		// Lowercased so Fits()'s exact-match join works regardless of casing (see
-		// AcceleratorType.MatchesLabels).
-		fp.Add(ResourceKey{Kind: ResourceKindAccelerator, Name: strings.ToLower(string(e.AcceleratorType))}, int64(e.AcceleratorCount))
+		fp.Add(ResourceKey{Kind: ResourceKindAccelerator, Name: string(e.AcceleratorType)}, int64(e.AcceleratorCount))
 	}
 	return fp
 }
