@@ -11,6 +11,9 @@ const module = "github.com/scaleresearch/hypothesisloop/"
 
 const storagePath = module + "controlplane/storage/"
 
+// contractPath holds leaf packages shared with the CLI: any layer may import them, and they import nothing of the control plane.
+const contractPath = "contract"
+
 var datastores = []string{"db", "graphdb", "metricsdb", "objectstore"}
 
 func TestDatastoresDoNotImportEachOther(t *testing.T) {
@@ -45,14 +48,14 @@ type layer struct {
 var (
 	base     = []string{"controlplane/domain", "controlplane/refusal"}
 	services = append([]string{"controlplane/storage", "controlplane/clients", "controlplane/auth", "controlplane/obsmetrics",
-		"controlplane/config", "contract"}, base...)
+		"controlplane/config"}, base...)
 )
 
 // layers is matched by the longest path. A package no layer names is refused, so a new top-level
 // package states where it stands.
 var layers = []layer{
 	// domain imports huma for a schema transform (cpu_quantity.go), the one accepted exception.
-	{path: "controlplane/domain", may: []string{"contract/clusterapi"}, own: true, web: true},
+	{path: "controlplane/domain", own: true, web: true},
 	{path: "controlplane/refusal"},
 	{path: "controlplane/config", may: []string{"controlplane/domain"}},
 	{path: "controlplane/auth", may: []string{"controlplane/config", "controlplane/domain"}},
@@ -68,7 +71,7 @@ var layers = []layer{
 	{path: "controlplane/service", may: services},
 	{path: "controlplane/service/scheduler", may: services, own: true},
 	{path: "controlplane/service/platformexperiments/platformexperimentstest", may: []string{"controlplane/domain", "controlplane/storage/db"}},
-	{path: "controlplane/httpapi", may: append([]string{"controlplane/service", "controlplane/auth", "controlplane/config", "contract"}, base...), own: true, web: true},
+	{path: "controlplane/httpapi", may: append([]string{"controlplane/service", "controlplane/auth", "controlplane/config"}, base...), own: true, web: true},
 	// The change stream reads the event store as it is written, the one HTTP package that does.
 	{path: "controlplane/httpapi/watch", may: []string{"controlplane/storage/db", "controlplane/auth", "controlplane/domain"}},
 	// The git proxy forwards git's smart HTTP to the git host.
@@ -76,13 +79,13 @@ var layers = []layer{
 	// The model proxy records each model call it forwards in the metrics store.
 	{path: "controlplane/httpapi/modelproxy", may: []string{"controlplane/auth", "controlplane/domain", "controlplane/storage/metricsdb"}},
 	// Metrics ingest writes what node-agents push into the metrics store.
-	{path: "controlplane/httpapi/metricsingest", may: []string{"contract/clusterapi", "controlplane/auth", "controlplane/domain", "controlplane/storage/metricsdb"}},
+	{path: "controlplane/httpapi/metricsingest", may: []string{"controlplane/auth", "controlplane/domain", "controlplane/storage/metricsdb"}},
 	{path: "controlplane/httpapi/middleware", may: []string{"controlplane/auth"}},
 	// What rents machines elsewhere reaches the control plane only through interfaces wired in cmd.
-	{path: "controlplane/cloud", may: []string{"controlplane/cloud/provider", "contract", "runtime/shared"}, own: true},
-	{path: "controlplane/cmd", may: []string{"controlplane", "contract", "runtime/shared"}, own: true, web: true},
+	{path: "controlplane/cloud", may: []string{"controlplane/cloud/provider", "runtime/shared"}, own: true},
+	{path: "controlplane/cmd", may: []string{"controlplane", "runtime/shared"}, own: true, web: true},
 	// metrics-service serves node-agent pushes only, so it never mounts the API.
-	{path: "controlplane/cmd/metrics-service", may: []string{"controlplane", "contract", "runtime/shared"}, never: []string{"controlplane/httpapi"}, web: true},
+	{path: "controlplane/cmd/metrics-service", may: []string{"controlplane", "runtime/shared"}, never: []string{"controlplane/httpapi"}, web: true},
 	{path: "controlplane/cmd/hl-admin", may: []string{"controlplane/auth", "controlplane/config", "controlplane/domain",
 		"controlplane/clients/githost/github", "controlplane/storage/db"}, exact: true},
 	{path: "controlplane/internal", may: []string{"controlplane"}, own: true, web: true},
@@ -105,6 +108,9 @@ func within(path, prefix string) bool {
 }
 
 func admits(l layer, imported string) bool {
+	if within(imported, contractPath) {
+		return true
+	}
 	if slices.Contains(l.never, imported) {
 		return false
 	}
@@ -146,6 +152,17 @@ func TestEveryPackageImportsOnlyWhatItsLayerAdmits(t *testing.T) {
 			imported = strings.TrimPrefix(imported, module)
 			if !admits(l, imported) {
 				t.Errorf("%s imports %s", pkg, imported)
+			}
+		}
+	}
+}
+
+func TestContractImportsNothingOfTheControlPlane(t *testing.T) {
+	for _, line := range goListLines(t, "-f", `{{.ImportPath}} {{join .Imports " "}}`, module+contractPath+"/...") {
+		fields := strings.Fields(line)
+		for _, imported := range fields[1:] {
+			if within(strings.TrimPrefix(imported, module), "controlplane") {
+				t.Errorf("%s imports %s", strings.TrimPrefix(fields[0], module), strings.TrimPrefix(imported, module))
 			}
 		}
 	}
