@@ -16,8 +16,8 @@ func TestOnlyTheCodeUnreachableExitIsTheEnvironmentsFailure(t *testing.T) {
 		}
 	}
 
-	eviction, environment := PhaseDetail{Reason: PhaseReasonCodeUnreachable, Message: "command exited with code 75: hl-clone: no answer\nmore"}.EvictionOfFailure()
-	if !environment || eviction != "code_unreachable: command exited with code 75: hl-clone: no answer" || !IsInfrastructureFault(eviction) {
+	eviction, environment := PhaseDetail{Reason: PhaseReasonCodeUnreachable, Message: "command exited with code 75: launch: the repository did not answer in 7 tries\nmore"}.EvictionOfFailure()
+	if !environment || eviction != "code_unreachable: command exited with code 75: launch: the repository did not answer in 7 tries" || !IsInfrastructureFault(eviction) {
 		t.Fatalf("got %q %v, infrastructure %v", eviction, environment, IsInfrastructureFault(eviction))
 	}
 	if eviction, environment := (PhaseDetail{Reason: PhaseReasonCodeUnreachable}).EvictionOfFailure(); !environment || eviction != EvictionCodeUnreachable {

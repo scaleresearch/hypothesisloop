@@ -13,7 +13,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-const cloneSaid = "command exited with code 75: hl-clone: could not fetch the code: 4 tries failed"
+const cloneSaid = "command exited with code 75: launch: the repository did not answer in 7 tries, so the command never ran"
 
 func TestAJobWhoseCodeWasUnreachableIsRequeuedAndNeverFailed(t *testing.T) {
 	for _, status := range []domain.ExperimentStatus{domain.StatusSubmitted, domain.StatusRunning} {

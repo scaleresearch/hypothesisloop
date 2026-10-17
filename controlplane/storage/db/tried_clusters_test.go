@@ -77,7 +77,7 @@ func TestARequeueThatIsNotTheClustersFaultLeavesTheTriedListAlone(t *testing.T) 
 	ctx := context.Background()
 	w.bound(t, w.ofA)
 	for name, reason := range map[string]string{
-		"code":  string(domain.EvictionCodeUnreachable) + ": command exited with code 75: hl-clone: no answer",
+		"code":  string(domain.EvictionCodeUnreachable) + ": command exited with code 75: launch: the repository did not answer in 7 tries",
 		"offer": string(domain.EvictionNoOffer) + ": no machine to rent in 3m0s of asking",
 	} {
 		id := w.placed(t, "untried-"+name, w.peA, w.ofA, domain.StatusSubmitted)

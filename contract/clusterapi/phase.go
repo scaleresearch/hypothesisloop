@@ -79,7 +79,8 @@ const (
 
 // ExitCodeCodeUnreachable is the one exit code with a meaning to the platform: the launch script
 // (DesiredJob.Launch) ends with it when neither the platform's git proxy nor the repository
-// answered, so the job's own command never started. It is EX_TEMPFAIL of sysexits.h.
+// answered, so the job's own command never started, and ends with 1 when the command itself
+// exits with it. It is EX_TEMPFAIL of sysexits.h.
 const ExitCodeCodeUnreachable = 75
 
 // PhaseReasonOfExit is the reason a process that ended with a non-zero code is reported under.

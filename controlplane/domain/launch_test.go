@@ -141,22 +141,27 @@ func launch(t *testing.T, shell, gitURL, commit, grace string, signal syscall.Si
 		jobenv.CodeRef + "=https://github.com/acme/model.git@" + commit,
 		jobenv.StopGrace + "=" + grace,
 	}
-	// Output goes to a file: the stop grace's sleeper outlives a script that ended in time, and
-	// would hold a pipe open.
 	cmd.Stdout, cmd.Stderr = output, output
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	start := time.Now()
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) })
+	group := -cmd.Process.Pid
+	t.Cleanup(func() {
+		_ = syscall.Kill(group, syscall.SIGKILL)
+		_ = cmd.Wait()
+		if !groupEnds(group, 10*time.Second) {
+			t.Errorf("process group %d outlived SIGKILL", -group)
+		}
+	})
 	if signal != 0 {
 		for deadline := time.Now().Add(20 * time.Second); ; time.Sleep(20 * time.Millisecond) {
 			if _, err := os.Stat(ready); err == nil {
 				break
 			}
 			if time.Now().After(deadline) {
-				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+				_ = syscall.Kill(group, syscall.SIGKILL)
 				_ = cmd.Wait()
 				raw, _ := os.ReadFile(out)
 				t.Fatalf("the command never started:\n%s", raw)
@@ -168,6 +173,10 @@ func launch(t *testing.T, shell, gitURL, commit, grace string, signal syscall.Si
 	}
 	_ = cmd.Wait()
 	took := time.Since(start)
+	if !groupEnds(group, 2*time.Second) {
+		left, _ := exec.Command("ps", "-o", "pid,ppid,pgid,command", "-g", strconv.Itoa(-group)).CombinedOutput()
+		t.Errorf("a process of the launch outlived it by 2s:\n%s", left)
+	}
 	raw, err := os.ReadFile(out)
 	if err != nil {
 		t.Fatal(err)
@@ -180,6 +189,18 @@ func launch(t *testing.T, shell, gitURL, commit, grace string, signal syscall.Si
 		result.sleeps = strings.Fields(string(recorded))
 	}
 	return result
+}
+
+// groupEnds reports whether no process is left in group, negative as kill takes it, within wait.
+func groupEnds(group int, wait time.Duration) bool {
+	for deadline := time.Now().Add(wait); ; time.Sleep(20 * time.Millisecond) {
+		if syscall.Kill(group, 0) == syscall.ESRCH {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+	}
 }
 
 // The commit is fetched with the token as a header and checked out, the command runs in it with
@@ -295,6 +316,21 @@ func TestTheExitLineIsWhatTheRuntimesParse(t *testing.T) {
 		}
 		if !strings.Contains(got.output, "\n"+clusterapi.ExitLinePrefix+" code=4 started="+strconv.FormatInt(got.exitLine(t).StartedAt.Unix(), 10)+" ended=") {
 			t.Errorf("exit line not in the form %q:\n%s", clusterapi.ExitLinePrefix+" code=<n> started=<s> ended=<s>", got.output)
+		}
+	})
+}
+
+// Only the script reports its code unreachable: the command's own exit with that code is a
+// failure of the command, which queueing it again for free would only repeat.
+func TestACommandThatExitsWithCodeUnreachableEndsTheLaunchWith1(t *testing.T) {
+	if codeUnreachable != strconv.Itoa(clusterapi.ExitCodeCodeUnreachable) {
+		t.Fatalf("the script writes %s for clusterapi.ExitCodeCodeUnreachable %d", codeUnreachable, clusterapi.ExitCodeCodeUnreachable)
+	}
+	eachShell(t, func(t *testing.T, shell string) {
+		url, commit := gitServer(t, "exit "+codeUnreachable+"\n")
+		got := launch(t, shell, url, commit, "30", 0, "sh", "job.sh")
+		if line := got.exitLine(t); got.code != 1 || line.Code != 1 {
+			t.Fatalf("exit %d, exit line %+v, want 1:\n%s", got.code, line, got.output)
 		}
 	})
 }
