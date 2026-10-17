@@ -1,5 +1,5 @@
 import { budgetUnit } from '@/lib/units'
-import type { TypeKind } from '@/lib/units'
+import type { TypeKind } from '@/types/api'
 import { Disclosure } from '@/components/ui/disclosure'
 import { FieldGroup, FormField } from '@/components/ui/form-field'
 import { InfoTip } from '@/components/ui/info-tip'

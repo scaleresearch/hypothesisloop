@@ -1,6 +1,7 @@
+import type { TypeKind } from '@/types/api'
+
 // A priced type counts devices or, for the one CPU type, cores. Counts of the two are shown apart
 // and a count of cores says so.
-export type TypeKind = 'accelerator' | 'cpu'
 
 // The type every runtime offers its cores as (domain.CPUType). A job that states cpu and no
 // accelerator holds that many units of it.
