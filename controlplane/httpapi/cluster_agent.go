@@ -93,22 +93,16 @@ func RegisterClusterAgent(doc *Doc, exchange *clusterexchange.Service) {
 	}, a.pushStatus)
 }
 
-func (a clusterAgentAPI) list(ctx context.Context, _ *struct{}) (*struct {
-	Body struct {
-		Clusters []clusterexchange.ClusterInfo `json:"clusters"`
-	}
-}, error) {
+type allClusters struct {
+	Clusters []clusterexchange.ClusterInfo `json:"clusters"`
+}
+
+func (a clusterAgentAPI) list(ctx context.Context, _ *struct{}) (*struct{ Body allClusters }, error) {
 	clusters, err := a.exchange.Clusters(ctx)
 	if err != nil {
 		return nil, err
 	}
-	resp := &struct {
-		Body struct {
-			Clusters []clusterexchange.ClusterInfo `json:"clusters"`
-		}
-	}{}
-	resp.Body.Clusters = clusters
-	return resp, nil
+	return &struct{ Body allClusters }{Body: allClusters{Clusters: clusters}}, nil
 }
 
 func (a clusterAgentAPI) access(ctx context.Context, in *struct {
