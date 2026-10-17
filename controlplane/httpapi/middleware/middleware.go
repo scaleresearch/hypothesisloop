@@ -1,4 +1,4 @@
-package api
+package middleware
 
 import (
 	"bufio"
@@ -13,8 +13,8 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 )
 
-// CORSMiddleware lets one browser origin, the UI's, call the API.
-func CORSMiddleware(origin string) func(http.Handler) http.Handler {
+// CORS lets one browser origin, the UI's, call the API.
+func CORS(origin string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler { return corsHandler(origin, next) }
 }
 
@@ -38,9 +38,9 @@ func corsHandler(origin string, next http.Handler) http.Handler {
 	})
 }
 
-// LoggingMiddleware returns a middleware that logs method, path, status code,
+// Logging returns a middleware that logs method, path, status code,
 // and request duration at INFO level.
-func LoggingMiddleware(logger *zap.Logger) func(http.Handler) http.Handler {
+func Logging(logger *zap.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
@@ -59,11 +59,11 @@ func LoggingMiddleware(logger *zap.Logger) func(http.Handler) http.Handler {
 	}
 }
 
-// RecoveryMiddleware returns a middleware that catches panics, logs them with a
+// Recovery returns a middleware that catches panics, logs them with a
 // stack trace, and responds with HTTP 500. http.ErrAbortHandler is a handler cutting its own
 // response on purpose, as a cut stream does: it goes on to the server, which drops the
 // connection without logging it, and nothing is written after what was already sent.
-func RecoveryMiddleware(logger *zap.Logger) func(http.Handler) http.Handler {
+func Recovery(logger *zap.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {

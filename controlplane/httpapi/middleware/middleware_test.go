@@ -1,4 +1,4 @@
-package api
+package middleware
 
 import (
 	"bufio"
@@ -21,7 +21,7 @@ import (
 // still be unusable. This asserts the property those tests cannot see.
 func TestLoggingMiddlewarePreservesConnectionHijacking(t *testing.T) {
 	var innerCanHijack bool
-	handler := LoggingMiddleware(zap.NewNop())(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := Logging(zap.NewNop())(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, innerCanHijack = w.(http.Hijacker)
 	}))
 

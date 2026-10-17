@@ -25,6 +25,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/gitproxy"
+	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/middleware"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/modelproxy"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/watch"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
@@ -34,7 +35,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/settlement"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/graphdb"
@@ -331,9 +331,9 @@ var webSockets = map[string]string{"/watch": watch.Subprotocol}
 // preflight passes before any handler runs.
 func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.Router {
 	r := chi.NewRouter()
-	r.Use(api.RecoveryMiddleware(logger))
-	r.Use(api.LoggingMiddleware(logger))
-	r.Use(api.CORSMiddleware(uiOrigin))
+	r.Use(middleware.Recovery(logger))
+	r.Use(middleware.Logging(logger))
+	r.Use(middleware.CORS(uiOrigin))
 	r.Use(auth.Gate(gate.tokens, logger, webSockets))
 	r.Handle("/metrics", auth.RequireStaff(logger, promhttp.Handler()))
 	for _, path := range []string{"/health", "/healthz"} {

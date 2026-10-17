@@ -21,7 +21,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/middleware"
 )
 
 const (
@@ -145,7 +145,7 @@ func newWorld(t *testing.T) *world {
 	core, logs := observer.New(zap.DebugLevel)
 	w.logs = logs
 	logger := zap.New(core)
-	handler := api.LoggingMiddleware(logger)(auth.Gate(principals, logger, nil)(New(w.store, plain, logger)))
+	handler := middleware.Logging(logger)(auth.Gate(principals, logger, nil)(New(w.store, plain, logger)))
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 	w.proxyBase = server.URL + "/git"

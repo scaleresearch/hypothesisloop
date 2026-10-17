@@ -18,7 +18,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
+	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/middleware"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
@@ -149,7 +149,7 @@ func newAPI(t *testing.T, upstream string, usage Usage) *httptest.Server {
 		t.Fatal(err)
 	}
 	r := chi.NewRouter()
-	r.Use(api.LoggingMiddleware(zap.NewNop()))
+	r.Use(middleware.Logging(zap.NewNop()))
 	r.Use(auth.Gate(authenticator, zap.NewNop(), nil))
 	r.Handle(Prefix+"*", proxy)
 	server := httptest.NewServer(r)
