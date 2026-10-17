@@ -178,6 +178,11 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 			return &AdmissionError{Reason: ReasonMalformed, Field: "job.node_selector", Message: fmt.Sprintf("job.node_selector may not name %q: labels under %s are set by the platform", label, domain.NodeLabelReservedPrefix)}
 		}
 	}
+	// A host path names the node's own filesystem, its container runtime socket and the
+	// runtime's token among it, so a job that chose one would hold the node and every job on it.
+	if len(exp.Job.HostMounts) > 0 {
+		return &AdmissionError{Reason: ReasonMalformed, Field: "job.host_mounts", Message: "job.host_mounts is not accepted: a job reads its data from its data URI"}
+	}
 	if err := quantitiesStated(exp.Job); err != nil {
 		return err
 	}
