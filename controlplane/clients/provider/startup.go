@@ -13,3 +13,11 @@ type Sizer interface {
 type Accounted interface {
 	Account() string
 }
+
+// ImageNeeder is a provider whose instances run something of its own beside the job's command,
+// which needs programs in the job's image. A caller asks it when it starts and tells whoever
+// builds an image.
+type ImageNeeder interface {
+	// ImageNeeds are the programs the job's image must have on its PATH.
+	ImageNeeds() []string
+}

@@ -1,6 +1,7 @@
 package vast
 
 import (
+	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider/supervise"
 )
 
@@ -71,3 +72,8 @@ const stopPollSeconds = "3"
 func supervised(command []string) (entrypoint string, args []string) {
 	return "/bin/sh", append([]string{"-c", supervisor(), "hl-supervisor"}, command...)
 }
+
+var _ provider.ImageNeeder = (*Provider)(nil)
+
+// ImageNeeds are what supervisor runs beside sh, which every image has.
+func (p *Provider) ImageNeeds() []string { return []string{"curl", "sleep"} }

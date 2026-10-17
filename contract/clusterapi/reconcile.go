@@ -23,6 +23,9 @@ const (
 	// NodeSlotNoOfferLabel is on a slot no instance holds and no machine can be rented for right
 	// now. Its value is the runtime's reason, in words a person reads.
 	NodeSlotNoOfferLabel = NodeLabelReservedPrefix + "slot-no-offer"
+	// NodeImageNeedsLabel is on a node whose runtime runs something of its own beside a job's
+	// command: the programs, comma-separated, a job's image must have on its PATH there.
+	NodeImageNeedsLabel = NodeLabelReservedPrefix + "image-needs"
 	// NodeArchitectureLabel is on every node a runtime reports: the architecture of its CPU as Go
 	// and image manifests name it (amd64, arm64). A job runs only on a node of its image's.
 	NodeArchitectureLabel = "kubernetes.io/arch"

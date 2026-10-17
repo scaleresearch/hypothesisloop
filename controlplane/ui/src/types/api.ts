@@ -2547,6 +2547,8 @@ export interface components {
             /** @description The architectures of the cluster's nodes (amd64, arm64). A job runs only on nodes of its platform experiment's image's architecture. */
             architectures?: string[];
             cluster_name: string;
+            /** @description Programs a job's image must have on its PATH to run on the cluster, beside what the job itself runs, such as what the runtime of a rented machine uses to stop it when the job ends. */
+            image_needs?: string[];
             /** @description On a cluster that rents on demand: why it has no machine to rent now for some of its slots, as its runtime words it, such as which of the provider filters leave out every offer of a shape. A job that needs such a slot waits until one comes on offer. */
             no_offer?: string[];
             on_demand?: boolean;

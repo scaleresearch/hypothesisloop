@@ -194,7 +194,8 @@ cluster that prints that line. The accelerator_type strings printed here are the
 job spec or a proposal takes, copied verbatim; a type with none available queues and never
 errors. architectures names those of the cluster's nodes: a job runs only on nodes of its
 platform experiment's image's architecture (hl image show), so pick an image of the
-architecture of the hardware you mean to run on. A line with
+architecture of the hardware you mean to run on. image_needs names programs a job's image must
+have on its PATH to run on the cluster, beside what the job runs itself. A line with
 on_demand is of a cluster that rents a machine when a job needs one: nothing stands by, total is
 the most it rents at once and available is what it may still rent, so a job there starts after
 its machine is rented. A line with no_offer is of such a cluster that has no machine to rent now
@@ -215,6 +216,7 @@ key and an agent token have one org and need no --org. A person in several orgs 
 		Clusters []struct {
 			Name          string            `json:"cluster_name"`
 			Architectures []string          `json:"architectures"`
+			ImageNeeds    []string          `json:"image_needs"`
 			OnDemand      bool              `json:"on_demand"`
 			NoOffer       []string          `json:"no_offer"`
 			Resources     json.RawMessage   `json:"resources"`
@@ -236,6 +238,9 @@ key and an agent token have one org and need no --org. A person in several orgs 
 		}
 		if cl.OnDemand {
 			prefix = append(prefix, "on_demand", "true")
+		}
+		if len(cl.ImageNeeds) > 0 {
+			prefix = append(prefix, "image_needs", strings.Join(cl.ImageNeeds, ","))
 		}
 		if present(cl.Resources) || present(cl.PerNode) {
 			line, err := withPerNode(cl.Resources, cl.PerNode)

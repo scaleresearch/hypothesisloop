@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 	"testing"
@@ -300,5 +301,17 @@ func TestSupervisorRefusesToRunTheCommandInAnImageWithoutItsTools(t *testing.T) 
 				t.Error("the command ran in an image the supervisor cannot stop")
 			}
 		})
+	}
+}
+
+func TestTheImageNeedsWhatTheSupervisorRuns(t *testing.T) {
+	p := &Provider{}
+	for _, program := range p.ImageNeeds() {
+		if !strings.Contains(supervisor(), program+" ") {
+			t.Errorf("the supervisor does not run %s", program)
+		}
+	}
+	if got := p.ImageNeeds(); !reflect.DeepEqual(got, []string{"curl", "sleep"}) {
+		t.Errorf("ImageNeeds = %v", got)
 	}
 }

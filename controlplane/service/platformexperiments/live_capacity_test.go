@@ -196,3 +196,23 @@ func TestCapacityNamesTheArchitecturesOfEachClustersNodes(t *testing.T) {
 		t.Errorf("unlabelled: %s, want no architectures", raw)
 	}
 }
+
+// Capacity names what a cluster's nodes need in a job's image, once each, and nothing for a
+// cluster whose nodes need nothing.
+func TestCapacityNamesWhatEachClustersNodesNeedInAnImage(t *testing.T) {
+	clusters := []ClusterCapacity{{ClusterName: "rented"}, {ClusterName: "box"}}
+	withOnDemand(clusters, map[string]map[string]map[string]string{
+		"rented": {
+			"gpu-0": {domain.NodeSlotLabel: "gpu-0", domain.NodeImageNeedsLabel: "curl,sleep"},
+			"cpu-0": {domain.NodeSlotLabel: "cpu-0", domain.NodeImageNeedsLabel: "curl,sleep"},
+		},
+		"box": {"node-1": {domain.NodeArchitectureLabel: "amd64"}},
+	})
+	if got := clusters[0].ImageNeeds; !reflect.DeepEqual(got, []string{"curl", "sleep"}) {
+		t.Errorf("rented: %v, want curl and sleep", got)
+	}
+	raw, _ := json.Marshal(clusters[1])
+	if clusters[1].ImageNeeds != nil || strings.Contains(string(raw), "image_needs") {
+		t.Errorf("box: %s, want no image_needs", raw)
+	}
+}

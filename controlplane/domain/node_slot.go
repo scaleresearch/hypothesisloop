@@ -22,4 +22,5 @@ const (
 	NodeSlotLabel             = clusterapi.NodeSlotLabel
 	NodeSlotAcceleratorsLabel = clusterapi.NodeSlotAcceleratorsLabel
 	NodeSlotNoOfferLabel      = clusterapi.NodeSlotNoOfferLabel
+	NodeImageNeedsLabel       = clusterapi.NodeImageNeedsLabel
 )

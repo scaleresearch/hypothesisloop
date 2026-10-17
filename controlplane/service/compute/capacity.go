@@ -163,14 +163,17 @@ func (e *Executor) configured(name string) (shape Shape, index int, ok bool) {
 
 // labels are the node labels of a slot: the one that makes it a slot and names it, so admission
 // sizes one job to it and says which slot it placed the job on, its architecture where it has one
-// (a vendor may not say that of a machine it rented), for a slot with
+// (a vendor may not say that of a machine it rented), what a job's image needs there, for a slot with
 // accelerators how many it has and the label its type stands for, as a device plugin would
 // publish it, and for an offerless slot that it is one, so a job waiting for it is told what it
 // waits for.
-func (s slot) labels() map[string]string {
+func (s slot) labels(imageNeeds []string) map[string]string {
 	labels := map[string]string{clusterapi.NodeSlotLabel: s.name}
 	if s.architecture != "" {
 		labels[clusterapi.NodeArchitectureLabel] = s.architecture
+	}
+	if len(imageNeeds) > 0 {
+		labels[clusterapi.NodeImageNeedsLabel] = strings.Join(imageNeeds, ",")
 	}
 	if s.offerless() {
 		labels[clusterapi.NodeSlotNoOfferLabel] = s.noOffer
@@ -283,7 +286,7 @@ func (e *Executor) GetLiveAcceleratorCapacitySnapshot(ctx context.Context) (avai
 	byNode = map[string]map[string]int64{}
 	nodeLabels = make(map[string]map[string]string, len(slots))
 	for _, s := range slots {
-		nodeLabels[s.name] = s.labels()
+		nodeLabels[s.name] = s.labels(e.imageNeeds)
 		unit, units := s.shape.units()
 		free := units
 		if !s.free() {

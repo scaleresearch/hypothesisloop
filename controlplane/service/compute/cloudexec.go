@@ -65,10 +65,13 @@ type Executor struct {
 	// market is the provider's Market capability, nil for a vendor that has none.
 	market        provider.Market
 	architectures []string
-	offerWait     time.Duration
-	startup       time.Duration
-	log           func(format string, args ...any)
-	pass          *view
+	// imageNeeds is what the provider's ImageNeeder says a job's image must have, nil for one
+	// that is no ImageNeeder.
+	imageNeeds []string
+	offerWait  time.Duration
+	startup    time.Duration
+	log        func(format string, args ...any)
+	pass       *view
 }
 
 var (
@@ -93,6 +96,10 @@ func New(cfg Config) (*Executor, error) {
 	}
 	rented := provider.Bounded(cfg.Provider)
 	market, _ := rented.(provider.Market)
+	var imageNeeds []string
+	if needer, needs := cfg.Provider.(provider.ImageNeeder); needs {
+		imageNeeds = needer.ImageNeeds()
+	}
 	architectures := rented.Architectures()
 	if len(architectures) == 0 {
 		return nil, fmt.Errorf("cloudcompute: the provider rents machines of no architecture")
@@ -100,6 +107,7 @@ func New(cfg Config) (*Executor, error) {
 	return &Executor{
 		market:        market,
 		architectures: architectures,
+		imageNeeds:    imageNeeds,
 		clusterID:     cfg.ClusterID,
 		prefix:        cfg.prefix(),
 		apiURL:        cfg.APIURL,

@@ -6,6 +6,7 @@ import (
 	"maps"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
@@ -60,6 +61,8 @@ type ClusterCapacity struct {
 	NoOffer []string `json:"no_offer,omitempty" doc:"On a cluster that rents on demand: why it has no machine to rent now for some of its slots, as its runtime words it, such as which of the provider filters leave out every offer of a shape. A job that needs such a slot waits until one comes on offer."`
 	// Architectures are those of the cluster's nodes (domain.NodeArchitectureLabel).
 	Architectures []string `json:"architectures,omitempty" doc:"The architectures of the cluster's nodes (amd64, arm64). A job runs only on nodes of its platform experiment's image's architecture."`
+	// ImageNeeds are the programs its nodes need in a job's image (domain.NodeImageNeedsLabel).
+	ImageNeeds []string `json:"image_needs,omitempty" doc:"Programs a job's image must have on its PATH to run on the cluster, beside what the job itself runs, such as what the runtime of a rented machine uses to stop it when the job ends."`
 	// Resources is the cluster's cores and memory, which is all a job that asks for no
 	// accelerator needs to know. Absent for a cluster that reported none in the window.
 	Resources *ResourceCapacity `json:"resources,omitempty"`
@@ -231,13 +234,18 @@ func withResources(clusters []ClusterCapacity, cpuAvailable, cpuTotal map[string
 
 // withOnDemand marks the clusters whose nodes are slots, each a machine the runtime may rent,
 // says why the runtime has nothing to rent for the slots it has none for, and names the
-// architectures of their nodes.
+// architectures of their nodes and what their nodes need in a job's image.
 func withOnDemand(clusters []ClusterCapacity, nodeLabels map[string]map[string]map[string]string) {
 	for i := range clusters {
-		noOffer, architectures := map[string]bool{}, map[string]bool{}
+		noOffer, architectures, imageNeeds := map[string]bool{}, map[string]bool{}, map[string]bool{}
 		for _, labels := range nodeLabels[clusters[i].ClusterName] {
 			if arch := labels[domain.NodeArchitectureLabel]; arch != "" {
 				architectures[arch] = true
+			}
+			if needs := labels[domain.NodeImageNeedsLabel]; needs != "" {
+				for _, program := range strings.Split(needs, ",") {
+					imageNeeds[program] = true
+				}
 			}
 			if labels[domain.NodeSlotLabel] != "" {
 				clusters[i].OnDemand = true
@@ -248,6 +256,7 @@ func withOnDemand(clusters []ClusterCapacity, nodeLabels map[string]map[string]m
 		}
 		clusters[i].NoOffer = slices.Sorted(maps.Keys(noOffer))
 		clusters[i].Architectures = slices.Sorted(maps.Keys(architectures))
+		clusters[i].ImageNeeds = slices.Sorted(maps.Keys(imageNeeds))
 	}
 }
 

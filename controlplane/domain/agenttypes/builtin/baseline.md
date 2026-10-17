@@ -39,8 +39,8 @@ What it takes:
     memory and storage of its proposal. `hl repo check` says what is left.
   - The image: every job runs in the one image the platform experiment records, on nodes of its
     architecture; a job fetches its commit into /workspace/code when it starts and runs its
-    command there, so the image needs sh and git, and curl for a cluster `hl capacity` shows
-    on_demand. `hl image set REF` records an image by
+    command there, so the image needs sh and git, and every program `hl capacity` lists under
+    image_needs for the clusters its jobs run on. `hl image set REF` records an image by
     digest and `hl image show` says which. Start from a public base suited to the hardware the
     spec asks for and to the architecture `hl capacity` names for it (the vendor's CUDA or
     accelerator image, else a slim Python). Where the base lacks what the control and every

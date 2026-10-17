@@ -242,3 +242,24 @@ func TestAnArchitectureWithNothingToRentStillNamesAnOfferlessSlot(t *testing.T) 
 		t.Fatalf("h100-1 %v, want an offerless arm64 slot saying why", labels["h100-1"])
 	}
 }
+
+type needing struct{ *fake.Provider }
+
+func (needing) ImageNeeds() []string { return []string{"curl", "sleep"} }
+
+// A provider that needs programs in a job's image says so on every slot.
+func TestEverySlotSaysWhatTheProviderNeedsInAJobsImage(t *testing.T) {
+	e, err := New(testConfig(needing{fake.New()}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, labels, err := e.GetLiveAcceleratorCapacitySnapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, slot := range []string{"h100-0", "h100-1", "cpu-0"} {
+		if got := labels[slot][clusterapi.NodeImageNeedsLabel]; got != "curl,sleep" {
+			t.Errorf("slot %s says it needs %q", slot, got)
+		}
+	}
+}
