@@ -1,6 +1,9 @@
 package jobspec
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // Milli-suffixed CPU is the form Kubernetes-shaped specs are usually written in, and it is the one
 // a naive numeric parse gets wrong by a factor of a thousand, in the direction that admits a job
@@ -56,6 +59,34 @@ func TestANodeStatesEachQuantity(t *testing.T) {
 		err := CheckNode("job", c.cpu, c.memory, c.storage)
 		if err == nil || err.Field != c.field || err.Unstated != c.unstated {
 			t.Errorf("CheckNode(%q, %q, %q) = %+v, want field %s unstated %v", c.cpu, c.memory, c.storage, err, c.field, c.unstated)
+		}
+	}
+}
+
+// Each quantity is named by the node that states it, a group by its own field, and the first
+// one wrong is the one answered. A field that names nothing reads as its quantity alone.
+func TestANodeErrorNamesTheFieldOfTheNodeThatStatesIt(t *testing.T) {
+	for _, c := range []struct {
+		owner, cpu, memory, storage string
+		field, quantity, says       string
+		unstated                    bool
+	}{
+		{`job.groups["b"]`, "2", "-100Gi", "4Gi", `job.groups["b"].memory`, "memory", "negative", false},
+		{`job.groups["a"]`, "max", "8Gi", "4Gi", `job.groups["a"].cpu`, "cpu", "never as a share of the node", true},
+		{"job", "2", "8Gi", "", "job.storage", "storage", "storage: 4Gi", true},
+		{"job", "2", "8Gi", "max", "job.storage", "storage", "never as a share of the node", true},
+		{"", "2", "eight", "4Gi", "memory", "memory", "memory", false},
+		{"job", "", "", "", "job.cpu", "cpu", "cpu: 2", true},
+		{"job", "1 Gi", "8Gi", "-", "job.cpu", "cpu", "job.cpu", false},
+	} {
+		err := CheckNode(c.owner, c.cpu, c.memory, c.storage)
+		if err == nil || err.Field != c.field || err.Quantity != c.quantity || err.Unstated != c.unstated || !strings.Contains(err.Message, c.says) || err.Error() != err.Message {
+			t.Errorf("CheckNode(%q, %q, %q, %q) = %+v, want %s (%s) unstated %v saying %q", c.owner, c.cpu, c.memory, c.storage, err, c.field, c.quantity, c.unstated, c.says)
+		}
+	}
+	for _, node := range [][3]string{{"500m", "512Mi", "1G"}, {"0.5", "1Gi", "0"}, {"64", "2Ti", "100Gi"}} {
+		if err := CheckNode(`job.groups["a"]`, node[0], node[1], node[2]); err != nil {
+			t.Errorf("CheckNode(%v) = %v, want a node that states each quantity taken", node, err)
 		}
 	}
 }
