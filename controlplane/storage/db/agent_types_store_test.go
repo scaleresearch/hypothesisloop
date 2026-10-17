@@ -57,7 +57,7 @@ func actions(t *testing.T, store *Store, orgID, id string) []string {
 }
 
 // An edit inserts the next version and leaves the one before as it was. No write of the store
-// updates or deletes a version or an event (TestTheAppendOnlyTablesAreOnlyAppended).
+// updates or deletes a version or an event (TestEveryAnnouncedWriteAnnouncesAndAppendOnlyTablesAreOnlyAppended).
 func TestAnEditKeepsEveryVersionAsItWas(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
