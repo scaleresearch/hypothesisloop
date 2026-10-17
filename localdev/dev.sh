@@ -215,11 +215,15 @@ rented_inputs() {
   tag="$(lib_env_value IMAGE_TAG)"
 }
 
-start_control_plane() {
+require_settings() {
   if [[ ! -f "${settings}" ]]; then
     echo "dev: no settings rendered yet; run make dev or make dev-rented first" >&2
     exit 1
   fi
+}
+
+start_control_plane() {
+  require_settings
   # Built before anything is stopped: a tree that does not compile leaves what runs running.
   (cd controlplane && go build -o "${repo}/${bin}/" ./cmd/control-service ./cmd/metrics-service)
   # hl beside them, built from the same tree, so localdev/.bin/hl never lags the API it calls.
@@ -357,6 +361,9 @@ case "${action}" in
     status
     ;;
   ui)
+    require_settings
+    # Written afresh so the restarted UI serves with what .env says now.
+    lib_env_files "${settings}"
     stop ui
     start_ui
     status
