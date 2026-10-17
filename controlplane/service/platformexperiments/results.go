@@ -187,12 +187,7 @@ func (s *Service) setAgainstBaseline(ctx context.Context, pe *domain.PlatformExp
 func setAgainstLeader(out *PlatformExperimentResults) {
 	for i := range out.References {
 		reference := &out.References[i]
-		better := func(a, b float64) bool {
-			if reference.Direction == "minimize" {
-				return a < b
-			}
-			return a > b
-		}
+		better := domain.MetricDefinition{Direction: reference.Direction}.Better
 		for _, v := range reference.Values {
 			if v.ConstraintsMet != metricsdb.ConstraintsHeld {
 				continue
@@ -414,10 +409,7 @@ func order(metric domain.MetricDefinition, best map[string]metricsdb.AgentBest, 
 	}
 	sort.Slice(standings, func(i, j int) bool {
 		if standings[i].Best != standings[j].Best {
-			if metric.Direction == "minimize" {
-				return standings[i].Best < standings[j].Best
-			}
-			return standings[i].Best > standings[j].Best
+			return metric.Better(standings[i].Best, standings[j].Best)
 		}
 		return standings[i].AgentID < standings[j].AgentID
 	})

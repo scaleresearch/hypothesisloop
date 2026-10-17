@@ -196,10 +196,7 @@ func cutBottom(order []ranked, direction string, evictPct float64) []string {
 		if !a.hasData {
 			return false
 		}
-		if direction == "minimize" {
-			return a.value > b.value
-		}
-		return a.value < b.value
+		return domain.MetricDefinition{Direction: direction}.Better(b.value, a.value)
 	})
 
 	k := int(evictPct / 100.0 * float64(len(order)))

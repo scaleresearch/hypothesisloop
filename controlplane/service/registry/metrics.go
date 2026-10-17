@@ -148,14 +148,14 @@ func (s *Service) checkUnderperformance(ctx context.Context, exp *domain.Experim
 	if err != nil || !found {
 		return
 	}
-	var direction string
+	var ranking *domain.MetricDefinition
 	for _, m := range metrics {
 		if m.Key == metricName && m.EffectiveRole() == domain.MetricRoleRanking {
-			direction = m.Direction
+			ranking = &m
 			break
 		}
 	}
-	if direction == "" {
+	if ranking == nil {
 		// Not a ranking metric (or not declared at all) — nothing to rank it against.
 		return
 	}
@@ -211,13 +211,6 @@ func (s *Service) checkUnderperformance(ctx context.Context, exp *domain.Experim
 		return
 	}
 
-	score := func(v float64) float64 {
-		if direction == "minimize" {
-			return -v
-		}
-		return v
-	}
-
 	var siblingScores []float64
 	for _, s := range series {
 		if s.ExperimentID == exp.ID || completed[s.ExperimentID] && !rankable[s.ExperimentID] {
@@ -248,7 +241,7 @@ func (s *Service) checkUnderperformance(ctx context.Context, exp *domain.Experim
 		if !reached {
 			continue
 		}
-		siblingScores = append(siblingScores, score(atSameProgress))
+		siblingScores = append(siblingScores, ranking.Score(atSameProgress))
 	}
 	if len(siblingScores) < underperformCohortMinSize {
 		return
@@ -265,7 +258,7 @@ func (s *Service) checkUnderperformance(ctx context.Context, exp *domain.Experim
 	if margin <= 0 {
 		margin = underperformSeparation * math.Abs(worst)
 	}
-	if worst-score(value) < margin {
+	if worst-ranking.Score(value) < margin {
 		return
 	}
 	if err := s.store.MarkUnderperforming(ctx, exp.ID, metricName); err != nil {

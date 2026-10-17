@@ -232,7 +232,7 @@ func bestOf(metric domain.MetricDefinition, samples []VectorSample, rankable map
 		}
 		cand := AgentBest{Value: sm.Value, ExperimentID: sm.Labels["job_id"]}
 		cur, exists := best[agentID]
-		if !exists || betterOn(metric.Direction, cand, cur) {
+		if !exists || betterOn(metric, cand, cur) {
 			best[agentID] = cand
 		}
 	}
@@ -326,7 +326,7 @@ func anyOf(values []string) string {
 	return strings.Join(quoted, "|")
 }
 
-// betterOn reports whether a beats b for a metric ranked in the given direction. Exact ties fall
+// betterOn reports whether a beats b on metric. Exact ties fall
 // back to the lower job id: two jobs of one agent can legitimately hit the same best value, and
 // without a tiebreak the winning value's reported job — and the code ref shown alongside it —
 // would be whichever sample the backend listed first, changing between identical reads.
@@ -334,14 +334,11 @@ func anyOf(values []string) string {
 // Every sample reaching here already passed QueryVector's own finite-value check (see
 // metricsdb.go), so a and b are never NaN/Inf — a malformed sample fails the whole query with an
 // error long before it could reach a per-agent comparison.
-func betterOn(direction string, a, b AgentBest) bool {
+func betterOn(metric domain.MetricDefinition, a, b AgentBest) bool {
 	if a.Value == b.Value {
 		return a.ExperimentID < b.ExperimentID
 	}
-	if direction == "minimize" {
-		return a.Value < b.Value
-	}
-	return a.Value > b.Value
+	return metric.Better(a.Value, b.Value)
 }
 
 func sortedKeys(set map[string]bool) []string {

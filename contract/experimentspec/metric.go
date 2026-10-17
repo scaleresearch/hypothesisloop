@@ -79,13 +79,17 @@ func (d MetricDefinition) Holds(value float64) bool {
 	return value >= *d.Bound
 }
 
-// Better reports whether a is strictly better than b in the metric's direction.
-func (d MetricDefinition) Better(a, b float64) bool {
+// Score is value turned so that higher is better: itself for a metric maximized, its negation
+// for one minimized.
+func (d MetricDefinition) Score(value float64) float64 {
 	if d.Direction == "minimize" {
-		return a < b
+		return -value
 	}
-	return a > b
+	return value
 }
+
+// Better reports whether a is strictly better than b in the metric's direction.
+func (d MetricDefinition) Better(a, b float64) bool { return d.Score(a) > d.Score(b) }
 
 // ValidateMetricDefinitions enforces the metric contract at creation, so nothing downstream
 // (stage cuts, standings) needs to defend against a malformed one.

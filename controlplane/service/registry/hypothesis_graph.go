@@ -203,14 +203,8 @@ func (s *Service) evidence(ctx context.Context, metrics []domain.MetricDefinitio
 		if job.Status != domain.StatusCompleted || job.Metric == nil || job.Metric.Basis != "raw" {
 			continue
 		}
-		if cur := best[job.HypothesisID]; cur != nil {
-			better := job.Metric.Value > cur.Metric.Value
-			if primary.Direction == "minimize" {
-				better = job.Metric.Value < cur.Metric.Value
-			}
-			if !better {
-				continue
-			}
+		if cur := best[job.HypothesisID]; cur != nil && !primary.Better(job.Metric.Value, cur.Metric.Value) {
+			continue
 		}
 		best[job.HypothesisID] = job
 	}
