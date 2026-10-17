@@ -12,21 +12,6 @@ import (
 // One row per (experiment_id, ts), latest replaces — a cluster-agent's status push always
 // reports its current read of the runtime, not an accumulating history of past ones.
 
-// phase_message, not message: GreptimeDB's SQL parser reserves "message" as a keyword and
-// rejects it as a bare column name.
-const ensureJobPhaseDetailTableSQL = `CREATE TABLE IF NOT EXISTS job_phase_detail (
-	experiment_id STRING,
-	cluster_name STRING,
-	reason STRING,
-	phase_message STRING,
-	restart_count BIGINT,
-	scheduled_nodes BIGINT,
-	scheduling_reason STRING,
-	attempt BIGINT,
-	ts TIMESTAMP TIME INDEX,
-	PRIMARY KEY(experiment_id)
-) WITH(ttl='30d')`
-
 // RecordPhaseDetail stores the runtime's current explanation for experimentID's phase — why its
 // container hasn't started, or why it has been restarting — plus the gang-readiness facts the
 // scale-up-timeout watcher needs: scheduledNodes (pods with PodScheduled=True) and

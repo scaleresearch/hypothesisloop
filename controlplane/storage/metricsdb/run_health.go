@@ -48,23 +48,23 @@ func healthLabels(platformExperimentID, agentID, role string) map[string]string 
 // RecordRunHealth writes where each agent stands at at, in one request. A first-job series
 // starts once there is a first job.
 func (s *Store) RecordRunHealth(ctx context.Context, at time.Time, agents []domain.AgentHealth) error {
-	var samples []GaugeSample
+	var samples []gauge
 	for _, a := range agents {
 		labels := healthLabels(a.PlatformExperimentID, a.AgentID, a.Role)
-		gauge := func(name string, value float64) {
-			samples = append(samples, GaugeSample{MetricName: name, Labels: labels, Value: value, At: at})
+		record := func(t *table, value float64) {
+			samples = append(samples, gauge{table: t, labels: labels, value: value, at: at})
 		}
 		if a.FirstJobSeconds != nil {
-			gauge(agentFirstJobSecondsMetric, *a.FirstJobSeconds)
+			record(agentFirstJobSeconds, *a.FirstJobSeconds)
 		}
 		if a.FirstCompletedSeconds != nil {
-			gauge(agentFirstCompletedJobSecondsMetric, *a.FirstCompletedSeconds)
+			record(agentFirstCompletedJobSeconds, *a.FirstCompletedSeconds)
 		}
-		gauge(agentJobsInFlightMetric, float64(a.JobsInFlight))
-		gauge(agentRestartsMetric, float64(a.Restarts))
-		gauge(agentCoordinatorMessagesMetric, float64(a.CoordinatorMessages))
+		record(agentJobsInFlight, float64(a.JobsInFlight))
+		record(agentRestarts, float64(a.Restarts))
+		record(agentCoordinatorMessages, float64(a.CoordinatorMessages))
 	}
-	if err := s.WriteGaugesAt(ctx, samples); err != nil {
+	if err := s.writeGauges(ctx, samples); err != nil {
 		return fmt.Errorf("metricsdb.RecordRunHealth: %w", err)
 	}
 	return nil
@@ -73,40 +73,40 @@ func (s *Store) RecordRunHealth(ctx context.Context, at time.Time, agents []doma
 // RecordHarnessState writes what each hosted harness last said of itself, read at at, in one
 // request: its subagents, its turn, and the rate limit when it has read one.
 func (s *Store) RecordHarnessState(ctx context.Context, at time.Time, states []domain.HarnessState) error {
-	var samples []GaugeSample
+	var samples []gauge
 	for _, s := range states {
 		labels := healthLabels(s.PlatformExperimentID, s.AgentID, s.Role)
-		gauge := func(name string, value float64) {
-			samples = append(samples, GaugeSample{MetricName: name, Labels: labels, Value: value, At: at})
+		record := func(t *table, value float64) {
+			samples = append(samples, gauge{table: t, labels: labels, value: value, at: at})
 		}
-		gauge(agentStateReportedAtMetric, float64(at.Unix()))
-		gauge(agentSubagentsMetric, float64(s.Subagents))
-		gauge(agentTurnWaitingMetric, boolGauge(s.TurnWaiting))
-		gauge(agentTurnSinceMetric, float64(s.TurnSince.Unix()))
+		record(agentStateReportedAt, float64(at.Unix()))
+		record(agentSubagents, float64(s.Subagents))
+		record(agentTurnWaiting, boolGauge(s.TurnWaiting))
+		record(agentTurnSince, float64(s.TurnSince.Unix()))
 		if s.InstructionsDigest != "" {
 			digest, err := strconv.ParseUint(s.InstructionsDigest, 16, 64)
 			if err != nil {
 				return fmt.Errorf("metricsdb.RecordHarnessState: instructions digest %q: %w", s.InstructionsDigest, err)
 			}
-			gauge(agentInstructionsDigestMetric, float64(digest))
+			record(agentInstructionsDigest, float64(digest))
 		}
 		if s.AgentTypeVersion > 0 {
 			versionLabels := healthLabels(s.PlatformExperimentID, s.AgentID, s.Role)
 			versionLabels["agent_type"] = s.AgentType
-			samples = append(samples, GaugeSample{MetricName: agentInstructionsVersionMetric, Labels: versionLabels, Value: float64(s.AgentTypeVersion), At: at})
+			samples = append(samples, gauge{table: agentInstructionsVersion, labels: versionLabels, value: float64(s.AgentTypeVersion), at: at})
 		}
 		if s.Model == (domain.RateLimit{}) {
 			continue
 		}
-		gauge(agentRateLimitRejectedMetric, boolGauge(s.Model.Rejected))
+		record(agentRateLimitRejected, boolGauge(s.Model.Rejected))
 		if s.Model.Utilization != nil {
-			gauge(agentRateLimitUtilizationMetric, *s.Model.Utilization)
+			record(agentRateLimitUtilization, *s.Model.Utilization)
 		}
 		if s.Model.ResetsAt != nil {
-			gauge(agentRateLimitResetsAtMetric, float64(s.Model.ResetsAt.Unix()))
+			record(agentRateLimitResetsAt, float64(s.Model.ResetsAt.Unix()))
 		}
 	}
-	if err := s.WriteGaugesAt(ctx, samples); err != nil {
+	if err := s.writeGauges(ctx, samples); err != nil {
 		return fmt.Errorf("metricsdb.RecordHarnessState: %w", err)
 	}
 	return nil

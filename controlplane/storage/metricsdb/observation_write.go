@@ -2,8 +2,6 @@ package metricsdb
 
 import (
 	"context"
-	"fmt"
-	"strings"
 	"time"
 )
 
@@ -22,93 +20,37 @@ const aliveHeartbeatMetric = "experiment_alive_heartbeat"
 // unbroken run, and be billed for the time it waited in the queue.
 const admissionMetric = "experiment_admitted"
 
-// The two series a job's own reporting writes: its metric values, and how far through the run each
-// was recorded. Exported because the writer (registry.RecordMetric) and every reader must name the
-// same series — a mistyped metric name in a PromQL selector is not an error, it is an empty result,
-// which reads downstream as "this run produced no measurements".
+// The two series a job's own reporting writes (RecordJobMetric): its metric values, and how far
+// through the run each was recorded. Exported because every reader must name the same series — a
+// mistyped metric name in a PromQL selector is not an error, it is an empty result, which reads
+// downstream as "this run produced no measurements".
 const (
 	ExperimentMetricValue    = "experiment_metric_value"
 	ExperimentMetricFraction = "experiment_metric_fraction"
 )
 
-// Every table a SQL read names, as its first write would create it, declared up front with every
-// column a reader filters on: a read of a missing table is a fault and never an empty answer.
-var ensureObservationTablesSQL = []string{
-	`CREATE TABLE IF NOT EXISTS greptime_physical_table (
-	greptime_timestamp TIMESTAMP(3) NOT NULL,
-	greptime_value DOUBLE NULL,
-	TIME INDEX (greptime_timestamp)
-) ENGINE=metric WITH ("physical_metric_table" = "")`,
-	`CREATE TABLE IF NOT EXISTS ` + aliveHeartbeatMetric + ` (
-	greptime_timestamp TIMESTAMP(3) NOT NULL,
-	greptime_value DOUBLE NULL,
-	experiment_id STRING NULL,
-	TIME INDEX (greptime_timestamp),
-	PRIMARY KEY (experiment_id)
-) ENGINE=metric WITH ("on_physical_table" = "greptime_physical_table")`,
-	`CREATE TABLE IF NOT EXISTS ` + admissionMetric + ` (
-	greptime_timestamp TIMESTAMP(3) NOT NULL,
-	greptime_value DOUBLE NULL,
-	experiment_id STRING NULL,
-	TIME INDEX (greptime_timestamp),
-	PRIMARY KEY (experiment_id)
-) ENGINE=metric WITH ("on_physical_table" = "greptime_physical_table")`,
-	`CREATE TABLE IF NOT EXISTS ` + ExperimentMetricValue + ` (
-	greptime_timestamp TIMESTAMP(3) NOT NULL,
-	greptime_value DOUBLE NULL,
-	agent_id STRING NULL,
-	job_id STRING NULL,
-	metric_basis STRING NULL,
-	metric_name STRING NULL,
-	platform_experiment_id STRING NULL,
-	TIME INDEX (greptime_timestamp),
-	PRIMARY KEY (agent_id, job_id, metric_basis, metric_name, platform_experiment_id)
-) ENGINE=metric WITH ("on_physical_table" = "greptime_physical_table")`,
-	metricTableSQL(ExperimentMetricFraction, "agent_id", "job_id", "metric_basis", "metric_name", "platform_experiment_id"),
-	metricTableSQL(experimentNodeMetric, "experiment_id", "node",
-		machineInstanceLabel, machineHostLabel, machineAcceleratorLabel, machineCPULabel, machinePriceLabel),
-	metricTableSQL(clusterJobSnapshotMetric, "cluster_name", "sample_kind"),
-	metricTableSQL(clusterJobPhaseMetric, "cluster_name", "experiment_id", "sample_kind"),
-	metricTableSQL(clusterJobObservedAtMetric, "cluster_name", "experiment_id", "sample_kind"),
-	metricTableSQL(clusterHeartbeatMetric, "agent_version", "cluster_id", "cluster_name"),
-	metricTableSQL(clusterAcceleratorAvailableMetric, "accelerator_type", "cluster_name"),
-	metricTableSQL(clusterAcceleratorTotalMetric, "accelerator_type", "cluster_name"),
-	metricTableSQL(clusterNodeAcceleratorAvailableMetric, "accelerator_type", "cluster_name", "node"),
-	metricTableSQL(clusterNodeResourceAvailableMetric, "cluster_name", "node", "resource"),
-	metricTableSQL(clusterNodeResourceTotalMetric, "cluster_name", "node", "resource"),
-	metricTableSQL(clusterNodeLabelMetric, "cluster_name", "label_key", "label_value", "node"),
-	ensureJobLogsTableSQL,
-	ensureJobPhaseDetailTableSQL,
-	ensureModelUsageTableSQL,
-	// The gang-readiness columns, for a job_phase_detail created before them.
-	`ALTER TABLE job_phase_detail ADD COLUMN IF NOT EXISTS scheduled_nodes BIGINT`,
-	`ALTER TABLE job_phase_detail ADD COLUMN IF NOT EXISTS scheduling_reason STRING`,
-	`ALTER TABLE job_phase_detail ADD COLUMN IF NOT EXISTS attempt BIGINT`,
+// JobMetric is one value of a declared metric a job reported, and how far through its run it was.
+type JobMetric struct {
+	JobID, PlatformExperimentID, AgentID string
+	Name, Basis                          string
+	Value, FractionComplete              float64
+	At                                   time.Time
 }
 
-// metricTableSQL is the logical table remote write creates for a metric on its first sample,
-// with the labels it is written with as its tags.
-// Labels are quoted: a label may be an SQL keyword (resource).
-func metricTableSQL(metric string, labels ...string) string {
-	var columns strings.Builder
-	quoted := make([]string, len(labels))
-	for i, label := range labels {
-		quoted[i] = `"` + label + `"`
-		columns.WriteString("\t" + quoted[i] + " STRING NULL,\n")
+// RecordJobMetric writes a job's metric value and its fraction complete under one timestamp, so a
+// reader zips the two series back together point for point.
+func (s *Store) RecordJobMetric(ctx context.Context, m JobMetric) error {
+	labels := map[string]string{
+		"job_id":                 m.JobID,
+		"platform_experiment_id": m.PlatformExperimentID,
+		"agent_id":               m.AgentID,
+		"metric_name":            m.Name,
+		"metric_basis":           m.Basis,
 	}
-	return "CREATE TABLE IF NOT EXISTS " + metric + " (\n\tgreptime_timestamp TIMESTAMP(3) NOT NULL,\n\tgreptime_value DOUBLE NULL,\n" +
-		columns.String() + "\tTIME INDEX (greptime_timestamp),\n\tPRIMARY KEY (" + strings.Join(quoted, ", ") + ")\n" +
-		`) ENGINE=metric WITH ("on_physical_table" = "greptime_physical_table")`
-}
-
-// EnsureObservationTables creates every table a SQL read names. Idempotent; run once at startup.
-func (s *Store) EnsureObservationTables(ctx context.Context) error {
-	for _, ddl := range ensureObservationTablesSQL {
-		if err := s.execSQL(ctx, ddl); err != nil {
-			return fmt.Errorf("metricsdb.EnsureObservationTables: %w", err)
-		}
-	}
-	return nil
+	return s.writeGauges(ctx, []gauge{
+		{table: experimentMetric, labels: labels, value: m.Value, at: m.At},
+		{table: experimentFraction, labels: labels, value: m.FractionComplete, at: m.At},
+	})
 }
 
 // Observation is one pod's "experimentID was alive" reading at its collection time. ExtraLabels
@@ -123,25 +65,25 @@ type Observation struct {
 // pods' readings in hand from a single payload and would otherwise issue one HTTP round trip per
 // pod for what is, from GreptimeDB's point of view, one write.
 func (s *Store) RecordObservations(ctx context.Context, observations []Observation) error {
-	samples := make([]GaugeSample, 0, len(observations))
+	samples := make([]gauge, 0, len(observations))
 	for _, o := range observations {
 		samples = append(samples, observationSample(o.ExperimentID, o.At, o.ExtraLabels))
 	}
-	return s.WriteGaugesAt(ctx, samples)
+	return s.writeGauges(ctx, samples)
 }
 
 // RecordAdmission records that experimentID is being given capacity at `at`. Written before the
 // admission is claimed: observations on either side of it are never counted as one run.
 func (s *Store) RecordAdmission(ctx context.Context, experimentID string, at time.Time) error {
-	return s.WriteGaugesAt(ctx, []GaugeSample{{
-		MetricName: admissionMetric, Labels: map[string]string{"experiment_id": experimentID}, Value: 1, At: at,
+	return s.writeGauges(ctx, []gauge{{
+		table: admission, labels: map[string]string{"experiment_id": experimentID}, value: 1, at: at,
 	}})
 }
 
-func observationSample(experimentID string, at time.Time, extraLabels map[string]string) GaugeSample {
+func observationSample(experimentID string, at time.Time, extraLabels map[string]string) gauge {
 	labels := map[string]string{"experiment_id": experimentID}
 	for k, v := range extraLabels {
 		labels[k] = v
 	}
-	return GaugeSample{MetricName: aliveHeartbeatMetric, Labels: labels, Value: 1, At: at}
+	return gauge{table: aliveHeartbeat, labels: labels, value: 1, at: at}
 }

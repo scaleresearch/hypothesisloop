@@ -53,7 +53,7 @@ func (s *Store) RecordJobStatuses(ctx context.Context, clusterName string, at ti
 		return fmt.Errorf("metricsdb.RecordJobStatuses: cluster and snapshot time are required")
 	}
 	observedAt := float64(at.UnixMilli()) / 1000
-	samples := []GaugeSample{{MetricName: clusterJobSnapshotMetric, Labels: map[string]string{"cluster_name": clusterName, "sample_kind": "snapshot"}, Value: observedAt, At: at}}
+	samples := []gauge{{table: clusterJobSnapshot, labels: map[string]string{"cluster_name": clusterName, "sample_kind": "snapshot"}, value: observedAt, at: at}}
 	for _, status := range statuses {
 		value, ok := phaseValue[status.Phase]
 		if !ok {
@@ -65,29 +65,29 @@ func (s *Store) RecordJobStatuses(ctx context.Context, clusterName string, at ti
 		if status.ClusterName != clusterName || !status.At.Equal(at) {
 			return fmt.Errorf("metricsdb.RecordJobStatuses: every report must belong to the complete cluster snapshot")
 		}
-		samples = append(samples, GaugeSample{
-			MetricName: clusterJobPhaseMetric,
-			Labels: map[string]string{
+		samples = append(samples, gauge{
+			table: clusterJobPhase,
+			labels: map[string]string{
 				"experiment_id": status.ExperimentID,
 				"cluster_name":  status.ClusterName,
 				"sample_kind":   "phase",
 			},
-			Value: value,
-			At:    status.At,
+			value: value,
+			at:    status.At,
 		})
-		samples = append(samples, GaugeSample{MetricName: clusterJobObservedAtMetric, Labels: map[string]string{
+		samples = append(samples, gauge{table: clusterJobObservedAt, labels: map[string]string{
 			"experiment_id": status.ExperimentID, "cluster_name": status.ClusterName, "sample_kind": "observed_at",
-		}, Value: observedAt, At: status.At})
+		}, value: observedAt, at: status.At})
 		if status.AdmittedNode != "" {
-			samples = append(samples, GaugeSample{MetricName: experimentNodeMetric, Labels: nodeLabels(status), Value: 1, At: status.At})
+			samples = append(samples, gauge{table: experimentNode, labels: nodeLabels(status), value: 1, at: status.At})
 		}
 		if status.AdmittedAcceleratorType != "" {
-			samples = append(samples, GaugeSample{MetricName: acceleratorTypeMetric, Labels: map[string]string{
+			samples = append(samples, gauge{table: acceleratorType, labels: map[string]string{
 				"experiment_id": status.ExperimentID, "accelerator_type": status.AdmittedAcceleratorType,
-			}, Value: 1, At: status.At})
+			}, value: 1, at: status.At})
 		}
 	}
-	return s.WriteGaugesAt(ctx, samples)
+	return s.writeGauges(ctx, samples)
 }
 
 // SnapshotPresence answers, in one round trip, the two independent questions the eviction path

@@ -53,49 +53,49 @@ type ClusterCapacitySnapshot struct {
 func (s *Store) RecordClusterCapacitySnapshot(ctx context.Context, snapshot ClusterCapacitySnapshot) error {
 	labels := map[string]string{"cluster_name": snapshot.ClusterName}
 	heartbeatLabels := map[string]string{"cluster_name": snapshot.ClusterName, "cluster_id": snapshot.ClusterID, "agent_version": snapshot.AgentVersion}
-	samples := []GaugeSample{
-		{MetricName: clusterCPUAvailableMetric, Labels: labels, Value: snapshot.CPUAvailable, At: snapshot.At},
-		{MetricName: clusterCPUTotalMetric, Labels: labels, Value: snapshot.CPUTotal, At: snapshot.At},
-		{MetricName: clusterRAMAvailableMetric, Labels: labels, Value: float64(snapshot.RAMAvailable), At: snapshot.At},
-		{MetricName: clusterRAMTotalMetric, Labels: labels, Value: float64(snapshot.RAMTotal), At: snapshot.At},
-		{MetricName: clusterStorageAvailableMetric, Labels: labels, Value: float64(snapshot.StorageAvailable), At: snapshot.At},
-		{MetricName: clusterStorageTotalMetric, Labels: labels, Value: float64(snapshot.StorageTotal), At: snapshot.At},
-		{MetricName: clusterMultiNodeCapableMetric, Labels: labels, Value: boolGauge(snapshot.MultiNodeCapable), At: snapshot.At},
-		{MetricName: clusterAutoscalerEnabledMetric, Labels: labels, Value: boolGauge(snapshot.AutoscalerEnabled), At: snapshot.At},
+	samples := []gauge{
+		{table: clusterCPUAvailable, labels: labels, value: snapshot.CPUAvailable, at: snapshot.At},
+		{table: clusterCPUTotal, labels: labels, value: snapshot.CPUTotal, at: snapshot.At},
+		{table: clusterRAMAvailable, labels: labels, value: float64(snapshot.RAMAvailable), at: snapshot.At},
+		{table: clusterRAMTotal, labels: labels, value: float64(snapshot.RAMTotal), at: snapshot.At},
+		{table: clusterStorageAvailable, labels: labels, value: float64(snapshot.StorageAvailable), at: snapshot.At},
+		{table: clusterStorageTotal, labels: labels, value: float64(snapshot.StorageTotal), at: snapshot.At},
+		{table: clusterMultiNodeCapable, labels: labels, value: boolGauge(snapshot.MultiNodeCapable), at: snapshot.At},
+		{table: clusterAutoscalerEnabled, labels: labels, value: boolGauge(snapshot.AutoscalerEnabled), at: snapshot.At},
 	}
 	for acceleratorType, available := range snapshot.AcceleratorAvailable {
-		samples = append(samples, GaugeSample{MetricName: clusterAcceleratorAvailableMetric, Labels: map[string]string{"cluster_name": snapshot.ClusterName, "accelerator_type": acceleratorType}, Value: float64(available), At: snapshot.At})
+		samples = append(samples, gauge{table: clusterAcceleratorAvailable, labels: map[string]string{"cluster_name": snapshot.ClusterName, "accelerator_type": acceleratorType}, value: float64(available), at: snapshot.At})
 	}
 	for acceleratorType, total := range snapshot.AcceleratorTotal {
-		samples = append(samples, GaugeSample{MetricName: clusterAcceleratorTotalMetric, Labels: map[string]string{"cluster_name": snapshot.ClusterName, "accelerator_type": acceleratorType}, Value: float64(total), At: snapshot.At})
+		samples = append(samples, gauge{table: clusterAcceleratorTotal, labels: map[string]string{"cluster_name": snapshot.ClusterName, "accelerator_type": acceleratorType}, value: float64(total), at: snapshot.At})
 	}
 	for node, byType := range snapshot.AcceleratorAvailableByNode {
 		for acceleratorType, available := range byType {
-			samples = append(samples, GaugeSample{MetricName: clusterNodeAcceleratorAvailableMetric, Labels: map[string]string{"cluster_name": snapshot.ClusterName, "node": node, "accelerator_type": acceleratorType}, Value: float64(available), At: snapshot.At})
+			samples = append(samples, gauge{table: clusterNodeAcceleratorAvailable, labels: map[string]string{"cluster_name": snapshot.ClusterName, "node": node, "accelerator_type": acceleratorType}, value: float64(available), at: snapshot.At})
 		}
 	}
 	for node, byResource := range snapshot.NodeResourcesByNode {
 		for resource, available := range byResource {
-			samples = append(samples, GaugeSample{MetricName: clusterNodeResourceAvailableMetric, Labels: map[string]string{"cluster_name": snapshot.ClusterName, "node": node, "resource": resource}, Value: float64(available), At: snapshot.At})
+			samples = append(samples, gauge{table: clusterNodeResourceAvailable, labels: map[string]string{"cluster_name": snapshot.ClusterName, "node": node, "resource": resource}, value: float64(available), at: snapshot.At})
 		}
 	}
 	for node, byResource := range snapshot.NodeResourcesTotalByNode {
 		for resource, total := range byResource {
-			samples = append(samples, GaugeSample{MetricName: clusterNodeResourceTotalMetric, Labels: map[string]string{"cluster_name": snapshot.ClusterName, "node": node, "resource": resource}, Value: float64(total), At: snapshot.At})
+			samples = append(samples, gauge{table: clusterNodeResourceTotal, labels: map[string]string{"cluster_name": snapshot.ClusterName, "node": node, "resource": resource}, value: float64(total), at: snapshot.At})
 		}
 	}
 	for node, labels := range snapshot.NodeLabelsByNode {
 		for key, value := range labels {
-			samples = append(samples, GaugeSample{MetricName: clusterNodeLabelMetric, Labels: map[string]string{"cluster_name": snapshot.ClusterName, "node": node, "label_key": key, "label_value": value}, Value: 1, At: snapshot.At})
+			samples = append(samples, gauge{table: clusterNodeLabel, labels: map[string]string{"cluster_name": snapshot.ClusterName, "node": node, "label_key": key, "label_value": value}, value: 1, at: snapshot.At})
 		}
 	}
-	if err := s.WriteGaugesAt(ctx, samples); err != nil {
+	if err := s.writeGauges(ctx, samples); err != nil {
 		return fmt.Errorf("metricsdb.RecordClusterCapacitySnapshot: %w", err)
 	}
 	// Readers take a snapshot at its heartbeat's timestamp, and one write is not atomic across
 	// metric tables, so the heartbeat is written only once every sample it vouches for is stored.
-	heartbeat := []GaugeSample{{MetricName: clusterHeartbeatMetric, Labels: heartbeatLabels, Value: 1, At: snapshot.At}}
-	if err := s.WriteGaugesAt(ctx, heartbeat); err != nil {
+	heartbeat := []gauge{{table: clusterHeartbeat, labels: heartbeatLabels, value: 1, at: snapshot.At}}
+	if err := s.writeGauges(ctx, heartbeat); err != nil {
 		return fmt.Errorf("metricsdb.RecordClusterCapacitySnapshot: heartbeat: %w", err)
 	}
 	return nil

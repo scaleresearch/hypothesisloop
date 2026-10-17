@@ -6,24 +6,6 @@ import (
 	"time"
 )
 
-// model_usage holds one row per model call a hosted agent made through the control plane's model
-// proxy: what the provider counted for it, under the org, platform experiment and agent it was
-// made for. append_mode keeps two calls of one agent on one model in the same millisecond as two
-// rows, where a primary key and a timestamp alike would otherwise keep the last.
-const ensureModelUsageTableSQL = `CREATE TABLE IF NOT EXISTS model_usage (
-	org_id STRING,
-	platform_experiment_id STRING,
-	agent_id STRING,
-	provider STRING,
-	model STRING,
-	input_tokens BIGINT,
-	output_tokens BIGINT,
-	cache_creation_input_tokens BIGINT,
-	cache_read_input_tokens BIGINT,
-	ts TIMESTAMP(3) TIME INDEX,
-	PRIMARY KEY (org_id, platform_experiment_id, agent_id, provider, model)
-) WITH ('append_mode' = 'true')`
-
 // ModelCall is what the provider counted for one model call.
 type ModelCall struct {
 	OrgID                    string

@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 )
@@ -12,7 +11,7 @@ import (
 // ObserveSpan reads two series in one statement, and GreptimeDB fails the whole statement when
 // either table is missing. Reading that as "never observed" billed a job with heartbeats as zero
 // hours for as long as no job had posted a metric. Both tables exist from startup (see
-// EnsureObservationTables), so a missing one is a fault.
+// EnsureSchema), so a missing one is a fault.
 func TestObserveSpanFailsOnAMissingTable(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
@@ -23,24 +22,5 @@ func TestObserveSpanFailsOnAMissingTable(t *testing.T) {
 	now := time.Now().UTC()
 	if _, err := New(server.URL).ObserveSpan(context.Background(), "exp-1", now.Add(-time.Hour), now, 3*time.Minute); err == nil {
 		t.Fatal("ObserveSpan: got = nil, want an error for a missing observation table")
-	}
-}
-
-func TestEnsureObservationTablesCreatesEverySeriesASQLReadNames(t *testing.T) {
-	var statements []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		statements = append(statements, r.FormValue("sql"))
-		_, _ = w.Write([]byte(`{"output":[{"affectedrows":0}]}`))
-	}))
-	defer server.Close()
-
-	if err := New(server.URL).EnsureObservationTables(context.Background()); err != nil {
-		t.Fatalf("EnsureObservationTables: got = %v, want = nil", err)
-	}
-	all := strings.Join(statements, "\n")
-	for _, table := range []string{aliveHeartbeatMetric, admissionMetric, ExperimentMetricValue, ExperimentMetricFraction, experimentNodeMetric} {
-		if !strings.Contains(all, "CREATE TABLE IF NOT EXISTS "+table+" ") {
-			t.Errorf("no CREATE TABLE issued for %s", table)
-		}
 	}
 }

@@ -71,22 +71,11 @@ func (s *Service) RecordMetric(ctx context.Context, experimentID, metricName, ba
 		return fmt.Errorf("%w: experiment %s is %s (terminal); progress metrics are not accepted", ErrInvalidMetric, experimentID, exp.Status)
 	}
 
-	labels := map[string]string{
-		"job_id":                 experimentID,
-		"platform_experiment_id": exp.PlatformExperimentID,
-		"agent_id":               exp.AgentID,
-		"metric_name":            metricName,
-		"metric_basis":           basis,
-	}
-
-	// Both samples share one timestamp so GetTimeseries/GetPlatformExperimentTimeseries can
-	// zip the two series back together index-for-index (both are pushed at the same cadence).
 	at := time.Now().UTC()
-	samples := []metricsdb.GaugeSample{
-		{MetricName: metricsdb.ExperimentMetricValue, Labels: labels, Value: value, At: at},
-		{MetricName: metricsdb.ExperimentMetricFraction, Labels: labels, Value: fractionComplete, At: at},
-	}
-	if err := s.metrics.WriteGaugesAt(ctx, samples); err != nil {
+	if err := s.metrics.RecordJobMetric(ctx, metricsdb.JobMetric{
+		JobID: experimentID, PlatformExperimentID: exp.PlatformExperimentID, AgentID: exp.AgentID,
+		Name: metricName, Basis: basis, Value: value, FractionComplete: fractionComplete, At: at,
+	}); err != nil {
 		return fmt.Errorf("registry.RecordMetric: %w", err)
 	}
 	s.checkUnderperformance(ctx, exp, metricName, fractionComplete, value, at)

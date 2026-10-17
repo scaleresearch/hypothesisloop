@@ -57,10 +57,10 @@ func main() {
 	seedBuiltins(store, logger)
 
 	metricsCtx, metricsCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	err = metrics.EnsureObservationTables(metricsCtx)
+	err = metrics.EnsureSchema(metricsCtx)
 	metricsCancel()
 	if err != nil {
-		logger.Fatal("control-service: metrics store tables", zap.Error(err))
+		logger.Fatal("control-service: metrics store schema", zap.Error(err))
 	}
 
 	graphCtx, graphCancel := context.WithTimeout(context.Background(), 30*time.Second)

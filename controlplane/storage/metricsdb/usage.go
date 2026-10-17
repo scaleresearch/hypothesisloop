@@ -33,15 +33,15 @@ func labelsFor(agentID, platformExpID, experimentID string, resourceType domain.
 // write. This prevents admission from ever seeing a partially-settled resource vector.
 func (s *Store) SetObservedBatch(ctx context.Context, agentID, platformExpID, experimentID string, tier domain.CapacityTier, amounts map[domain.ResourceType]float64) error {
 	now := time.Now().UTC()
-	samples := make([]GaugeSample, 0, len(amounts))
+	samples := make([]gauge, 0, len(amounts))
 	for resourceType, amount := range amounts {
 		if amount < 0 {
 			return fmt.Errorf("metricsdb.SetObservedBatch: negative %s amount", resourceType)
 		}
-		samples = append(samples, GaugeSample{MetricName: usedHoursMetric,
-			Labels: labelsFor(agentID, platformExpID, experimentID, resourceType, tier), Value: amount, At: now})
+		samples = append(samples, gauge{table: usedHours,
+			labels: labelsFor(agentID, platformExpID, experimentID, resourceType, tier), value: amount, at: now})
 	}
-	return s.WriteGaugesAt(ctx, samples)
+	return s.writeGauges(ctx, samples)
 }
 
 // minObservedLookback floors the last_over_time window so a platform experiment queried the

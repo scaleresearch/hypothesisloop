@@ -58,58 +58,62 @@ func (m *rwWriteRequest) Reset()         {}
 func (m *rwWriteRequest) String() string { return fmt.Sprintf("%d series", len(m.Timeseries)) }
 func (m *rwWriteRequest) ProtoMessage()  {}
 
-// GaugeSample is one (metric_name, labels, value, timestamp) point for WriteGaugesAt.
-type GaugeSample struct {
-	MetricName string
-	Labels     map[string]string
-	Value      float64
-	At         time.Time
+// gauge is one sample of a metric table at the moment it was observed, so a delayed delivery is
+// not counted as elapsed time.
+type gauge struct {
+	table  *table
+	labels map[string]string
+	value  float64
+	at     time.Time
 }
 
-// WriteGaugesAt pushes any number of samples to GreptimeDB in a single Prometheus remote-write
-// request. Prometheus remote write is designed to carry a batch of timeseries per request; a
-// caller with several related samples to write at once (e.g. the node-agent's per-node push,
-// which reports every pod on the node in one payload) should batch them here rather than issuing
-// one HTTP round trip per sample. Each sample carries the moment it
-// was observed, so a delayed delivery is not counted as elapsed time.
-func (s *Store) WriteGaugesAt(ctx context.Context, samples []GaugeSample) error {
+// writeGauges pushes samples to GreptimeDB in one Prometheus remote-write request; a caller with
+// several related samples batches them here rather than issuing one round trip per sample. A
+// label its table does not declare is refused here, and the hint has GreptimeDB refuse a table or
+// a column EnsureSchema did not create.
+func (s *Store) writeGauges(ctx context.Context, samples []gauge) error {
 	if len(samples) == 0 {
 		return nil
 	}
 	req := &rwWriteRequest{Timeseries: make([]*rwTimeSeries, 0, len(samples))}
-	for _, s := range samples {
-		ls := []*rwLabel{{Name: "__name__", Value: s.MetricName}}
-		for k, v := range s.Labels {
+	for _, g := range samples {
+		ls := []*rwLabel{{Name: "__name__", Value: g.table.name}}
+		for k, v := range g.labels {
+			if !g.table.tags[k] {
+				return fmt.Errorf("metricsdb.writeGauges: %s declares no label %s", g.table.name, k)
+			}
 			ls = append(ls, &rwLabel{Name: k, Value: v})
 		}
 		req.Timeseries = append(req.Timeseries, &rwTimeSeries{
 			Labels:  ls,
-			Samples: []*rwSample{{Value: s.Value, Timestamp: s.At.UnixMilli()}},
+			Samples: []*rwSample{{Value: g.value, Timestamp: g.at.UnixMilli()}},
 		})
 	}
 
 	raw, err := proto.Marshal(req)
 	if err != nil {
-		return fmt.Errorf("metricsdb.WriteGaugesAt: marshal: %w", err)
+		return fmt.Errorf("metricsdb.writeGauges: marshal: %w", err)
 	}
 	compressed := snappy.Encode(nil, raw)
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		s.url+"/v1/prometheus/write", bytes.NewReader(compressed))
 	if err != nil {
-		return fmt.Errorf("metricsdb.WriteGaugesAt: build request: %w", err)
+		return fmt.Errorf("metricsdb.writeGauges: build request: %w", err)
 	}
 	httpReq.Header.Set("Content-Encoding", "snappy")
 	httpReq.Header.Set("Content-Type", "application/x-protobuf")
 	httpReq.Header.Set("X-Prometheus-Remote-Write-Version", "0.1.0")
+	httpReq.Header.Set("X-Greptime-Hints", "auto_create_table=false")
 
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
-		return fmt.Errorf("metricsdb.WriteGaugesAt: post: %w", err)
+		return fmt.Errorf("metricsdb.writeGauges: post: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("metricsdb.WriteGaugesAt: greptimedb returned %d", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return fmt.Errorf("metricsdb.writeGauges: greptimedb returned %d: %s", resp.StatusCode, body)
 	}
 	return nil
 }

@@ -20,14 +20,6 @@ import (
 // always takes the single latest row for an experiment_id, same "latest snapshot" idiom as
 // LatestJobPhase/LatestExperimentNode elsewhere in this package.
 
-const ensureJobLogsTableSQL = `CREATE TABLE IF NOT EXISTS job_logs (
-	experiment_id STRING,
-	cluster_name STRING,
-	lines_json STRING,
-	ts TIMESTAMP TIME INDEX,
-	PRIMARY KEY(experiment_id)
-) WITH(ttl='30d')`
-
 // RecordLogTail stores lines as the current log tail for experimentID, reported by a
 // cluster-agent for clusterName at time at. Replaces whatever was previously stored for this
 // experiment — not an accumulating archive.
@@ -108,7 +100,7 @@ func (s *Store) execSQL(ctx context.Context, sql string) error {
 }
 
 // querySQLRows runs a SQL query and returns its result rows. Every table it reads is created at
-// boot (EnsureObservationTables), so one that is missing is an error.
+// boot (EnsureSchema), so one that is missing is an error.
 func (s *Store) querySQLRows(ctx context.Context, sql string) ([][]any, error) {
 	resp, err := s.doSQL(ctx, sql)
 	if err != nil {
