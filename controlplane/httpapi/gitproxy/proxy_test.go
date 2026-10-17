@@ -25,16 +25,31 @@ import (
 const (
 	hostUser     = "platform"
 	hostPassword = "host-password-no-agent-may-see"
-	repository   = "model.git"
+	repository   = "org-1/model.git"
 )
 
 type fakeStore struct {
 	closed, draft bool
 	signups       map[string]domain.AgentSignup
+	// elsewhere, when set, is the repository the platform experiment names in place of its own.
+	elsewhere string
 }
 
 func (s *fakeStore) PlatformExperimentRepository(_ context.Context, id string) (string, string, bool, bool, error) {
+	if s.elsewhere != "" {
+		return "prj-1", s.elsewhere, s.closed, s.draft, nil
+	}
 	return "prj-1", repository, s.closed, s.draft, nil
+}
+
+// projects is prj-1 of org-1.
+type projects struct{}
+
+func (projects) GetProject(_ context.Context, id string) (*domain.Project, error) {
+	if id != "prj-1" {
+		return nil, nil
+	}
+	return &domain.Project{ID: id, OrgID: "org-1"}, nil
 }
 
 func (s *fakeStore) GetAgentSignup(_ context.Context, _, agentID string) (*domain.AgentSignup, error) {
@@ -129,7 +144,7 @@ func newWorld(t *testing.T) *world {
 		backend.ServeHTTP(rw, r)
 	}))
 	t.Cleanup(host.Close)
-	plain, err := githost.NewPlain(host.URL, hostUser, hostPassword, "experiment-template")
+	plain, err := githost.NewPlain(host.URL, hostUser, hostPassword, "experiment-template", projects{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,5 +414,19 @@ func TestAnAgentWhoseNameMakesAnotherAgentsBranchNamesPushesNothing(t *testing.T
 	w.commitOn(dir, "hl/pe-1/researcher-2/x")
 	if out, err := w.git("tok-researcher-2", dir, "push", "origin", "hl/pe-1/researcher-2/x"); err == nil || !strings.Contains(out, "make the same branch names") {
 		t.Errorf("pushing beside an agent of the same branch names: %v: %s, want it refused", err, out)
+	}
+}
+
+// A platform experiment that names a repository outside its org's directory on the host, as one
+// of another org, is served nothing: the host's credential is never minted for it.
+func TestARepositoryOfAnotherOrgIsNotServed(t *testing.T) {
+	w := newWorld(t)
+	other := filepath.Join(w.root, "host", "org-2", "model.git")
+	w.run("", "init", "--quiet", "--bare", "-b", "main", other)
+	for _, elsewhere := range []string{"org-2/model.git", "model.git"} {
+		w.store.elsewhere = elsewhere
+		if out, err := w.git("tok-researcher-2", w.root, "ls-remote", w.proxy); err == nil {
+			t.Errorf("%s was served through the proxy: %s", elsewhere, out)
+		}
 	}
 }

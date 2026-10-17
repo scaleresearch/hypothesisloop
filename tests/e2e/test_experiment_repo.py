@@ -248,11 +248,11 @@ def test_on_a_plain_git_host_a_repository_is_named_and_an_agent_pushes_its_branc
     try:
         for _ in range(2):
             ensured = _call(a.api, "POST", f"/projects/{a.project_id}/repositories", {"repository": missing})
-            assert ensured.status_code == 200 and ensured.json()["repository"] == missing, ensured.text
+            assert ensured.status_code == 200 and ensured.json()["repository"] == f"{a.api.org_id}/{missing}", ensured.text
             assert ensured.json()["repository_url"].endswith("/" + missing), ensured.text
     finally:
         if os.environ.get("HL_E2E_GIT_ROOT"):
-            shutil.rmtree(Path(os.environ["HL_E2E_GIT_ROOT"]) / missing, ignore_errors=True)
+            shutil.rmtree(Path(os.environ["HL_E2E_GIT_ROOT"]) / a.api.org_id / missing, ignore_errors=True)
     unread = _call(a.api, "GET", f"/projects/{a.project_id}/experiment-file?repository={repository}&branch=main")
     assert unread.status_code == 422 and unread.json()["reason"] == "experiment_file_unsupported", unread.text
 

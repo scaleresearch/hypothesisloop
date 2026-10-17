@@ -245,9 +245,10 @@ runtimes:
 #       base_url: https://git.example.com/experiments
 #       username: platform
 #
-#   base_url   the https root of any git host. A repository is a name under it. The platform creates
-#              one by pushing the template's files to it, which a host that creates a repository
-#              on its first push takes, and reads no experiment file from one. It runs git for that.
+#   base_url   the https root of any git host. An org's repository is a name under the org's id
+#              under it, and a name an org gives is read there. The platform creates one by pushing
+#              the template's files to it, which a host that creates a repository on its first push
+#              takes, and reads no experiment file from one. It runs git for that.
 #   allow_http true lets base_url be http, for a host on the deployment's own network, as local
 #              development's is. The credential then travels in the clear.
 #   username   the account the host takes, left out for a host that asks for nothing. Its password

@@ -74,15 +74,14 @@ function hlAdmin(...args) {
 // Every experiment keeps its code in a repository. On a stack with a GitHub App one that names
 // none has the platform create a new one on github.com, so the run names the sandbox repository
 // of .env on every create a page sends without one, and connects the installation that covers
-// it to the org that creates. On a stack with none the platform creates no repository, so the
-// run makes one on the local git server and names that.
+// it to the org that creates. On a stack with none the run names one repository of the local git
+// server, which the first create of each org has the platform create in that org's directory from
+// the experiment template.
 let sandbox = null
 
 async function findSandbox(token) {
   if ((await api(token, '/github/app')).status !== 200) {
-    const repository = `ui-e2e-${run}.git`
-    execFileSync('bash', ['-c', '. localdev/lib/auth.sh && git init -q --bare "${HL_GIT_ROOT}/$1"', 'git', repository], { cwd: repo })
-    sandbox = { repository }
+    sandbox = { repository: `ui-e2e-${run}.git` }
     return
   }
   const value = key => execFileSync('bash', ['-c', '. localdev/lib/auth.sh && lib_env_value "$1"', 'env', key], { cwd: repo, encoding: 'utf8' }).trim()

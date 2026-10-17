@@ -221,8 +221,9 @@ class API:
         stack whose git host is GitHub it is the sandbox one, since a create that names none would
         have the platform create a new repository on github.com each time, and the installation
         that covers it is connected to this caller's org first. On any other stack it is one name
-        for the session under the directory the local git server serves (HL_E2E_GIT_ROOT), which
-        the first create that names it has the platform create from the experiment template."""
+        for the session in the caller's org's directory under the one the local git server serves
+        (HL_E2E_GIT_ROOT), which the first create that names it has the platform create from the
+        experiment template."""
         if API._github_app is None:
             API._github_app = self.get("/github/app").status_code != 503
         if not API._github_app:
@@ -232,7 +233,7 @@ class API:
                     raise RuntimeError(
                         "this stack keeps its code on its own git server: set HL_E2E_GIT_ROOT to the directory that server serves (make e2e does)")
                 API.local_repository = Path(root) / f"e2e-{uuid.uuid4().hex[:8]}.git"
-            return API.local_repository.name
+            return f"{self.org_id}/{API.local_repository.name}"
         installation, repository = os.environ.get("TEST_GIT_HOST_GITHUB_INSTALLATION"), os.environ.get("TEST_GIT_HOST_GITHUB_REPOSITORY")
         if not installation or not repository:
             raise RuntimeError(

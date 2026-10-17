@@ -6,17 +6,36 @@ import (
 	"net/http"
 	"net/http/cgi"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 )
 
+// projects is prj-a of org-a and prj-b of org-b.
+type projects struct{}
+
+func (projects) GetProject(_ context.Context, id string) (*domain.Project, error) {
+	org, ok := map[string]string{"prj-a": "org-a", "prj-b": "org-b"}[id]
+	if !ok {
+		return nil, nil
+	}
+	return &domain.Project{ID: id, OrgID: org}, nil
+}
+
 // gitHost serves the bare repositories under a temp dir with git's own HTTP backend, asking for
-// the credential when one is given. It returns the host's address.
+// the credential when one is given, and creating a repository on its first push. It returns the
+// host's address.
 func gitHost(t *testing.T, username, password string, repositories ...string) string {
+	address, _ := gitHostAt(t, username, password, repositories...)
+	return address
+}
+
+func gitHostAt(t *testing.T, username, password string, repositories ...string) (string, string) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not installed")
@@ -33,7 +52,7 @@ func gitHost(t *testing.T, username, password string, repositories ...string) st
 	}
 	backend := &cgi.Handler{
 		Path: filepath.Join(strings.TrimSpace(string(execPath)), "git-http-backend"),
-		Env:  []string{"GIT_PROJECT_ROOT=" + root, "GIT_HTTP_EXPORT_ALL=1"},
+		Env:  []string{"GIT_PROJECT_ROOT=" + root, "GIT_HTTP_EXPORT_ALL=1", "REMOTE_USER=test"},
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if given, secret, _ := r.BasicAuth(); username != "" && (given != username || secret != password) {
@@ -41,10 +60,17 @@ func gitHost(t *testing.T, username, password string, repositories ...string) st
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
+		if repository, ok := strings.CutSuffix(r.URL.Path, "/info/refs"); ok && r.URL.Query().Get("service") == "git-receive-pack" {
+			if _, err := os.Stat(filepath.Join(root, repository)); err != nil {
+				if out, err := exec.Command("git", "init", "--bare", "--quiet", filepath.Join(root, repository)).CombinedOutput(); err != nil {
+					t.Errorf("git init %s: %v\n%s", repository, err, out)
+				}
+			}
+		}
 		backend.ServeHTTP(w, r)
 	}))
 	t.Cleanup(server.Close)
-	return server.URL
+	return server.URL, root
 }
 
 func refused(err error) (int, string) {
@@ -57,31 +83,32 @@ func refused(err error) (int, string) {
 
 func newPlain(t *testing.T, baseURL, username, password string) *Plain {
 	t.Helper()
-	plain, err := NewPlain(baseURL, username, password, "experiment-template")
+	plain, err := NewPlain(baseURL, username, password, "experiment-template", projects{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return plain
 }
 
-func TestAPlainRepositoryIsANameUnderTheRootThatAnswersGit(t *testing.T) {
-	address := gitHost(t, "", "", "model.git", "team/sweep")
+func TestAPlainRepositoryIsANameUnderTheOrgsDirectoryThatAnswersGit(t *testing.T) {
+	address := gitHost(t, "", "", "org-a/model.git", "org-a/team/sweep")
 	plain := newPlain(t, address+"/", "", "")
 	ctx := context.Background()
-	for _, name := range []string{"model.git", "team/sweep"} {
-		if named, err := plain.Reachable(ctx, "prj-a", name); err != nil || named != name {
-			t.Errorf("Reachable(%s) = %q, %v, want the name", name, named, err)
+	for name, want := range map[string]string{"model.git": "org-a/model.git", "team/sweep": "org-a/team/sweep", "org-a/model.git": "org-a/model.git"} {
+		if named, err := plain.Reachable(ctx, "prj-a", name); err != nil || named != want {
+			t.Errorf("Reachable(%s) = %q, %v, want %s", name, named, err, want)
 		}
-		if got := plain.URL(name); got != address+"/"+name {
-			t.Errorf("URL(%s) = %q, want it under the root", name, got)
+		if got := plain.URL(want); got != address+"/"+want {
+			t.Errorf("URL(%s) = %q, want it under the root", want, got)
 		}
-		if out, err := exec.Command("git", "ls-remote", plain.URL(name)).CombinedOutput(); err != nil {
-			t.Errorf("git ls-remote %s: %v\n%s", plain.URL(name), err, out)
+		if out, err := exec.Command("git", "ls-remote", plain.URL(want)).CombinedOutput(); err != nil {
+			t.Errorf("git ls-remote %s: %v\n%s", plain.URL(want), err, out)
 		}
 	}
 	for name, tc := range map[string]struct{ repository, reason string }{
 		"a name nothing is under":     {"missing.git", "repository_not_reachable"},
 		"a directory that is no repo": {"team", "repository_not_reachable"},
+		"the org's directory":         {"org-a", "repository_not_reachable"},
 		"a path out of the root":      {"../model.git", "invalid_repository"},
 		"an address":                  {address + "/model.git", "invalid_repository"},
 		"an option for git":           {"-model", "invalid_repository"},
@@ -92,6 +119,9 @@ func TestAPlainRepositoryIsANameUnderTheRootThatAnswersGit(t *testing.T) {
 			t.Errorf("%s: Reachable = %q, %v, want 422 %s", name, named, err, tc.reason)
 		}
 	}
+	if _, err := plain.Reachable(ctx, "prj-gone", "model.git"); err == nil {
+		t.Error("a project with no row reached a repository")
+	}
 	gone := newPlain(t, "http://127.0.0.1:1", "", "")
 	_, err := gone.Reachable(ctx, "prj-a", "model.git")
 	if status, reason := refused(err); status != 422 || reason != "repository_not_reachable" {
@@ -101,9 +131,9 @@ func TestAPlainRepositoryIsANameUnderTheRootThatAnswersGit(t *testing.T) {
 
 func TestAPlainHostIsReachedWithTheDeploymentsOneCredential(t *testing.T) {
 	const password = "s3cret-of-the-deployment"
-	address := gitHost(t, "platform", password, "model.git")
+	address := gitHost(t, "platform", password, "org-a/model.git")
 	ctx := context.Background()
-	if named, err := newPlain(t, address, "platform", password).Reachable(ctx, "prj-a", "model.git"); err != nil || named != "model.git" {
+	if named, err := newPlain(t, address, "platform", password).Reachable(ctx, "prj-a", "model.git"); err != nil || named != "org-a/model.git" {
 		t.Fatalf("with the credential: Reachable = %q, %v", named, err)
 	}
 	for name, plain := range map[string]*Plain{
@@ -117,14 +147,76 @@ func TestAPlainHostIsReachedWithTheDeploymentsOneCredential(t *testing.T) {
 	}
 	plain := newPlain(t, address, "platform", password)
 	for _, write := range []bool{false, true} {
-		credential, err := plain.Credential(ctx, "prj-a", "model.git", write)
+		credential, err := plain.Credential(ctx, "prj-a", "org-a/model.git", write)
 		if err != nil || credential.Username != "platform" || credential.Password != password || !credential.ExpiresAt.IsZero() {
 			t.Errorf("Credential(write %v) = %+v, %v, want the deployment's, which does not run out", write, credential, err)
 		}
 	}
-	_, err := newPlain(t, address, "", "").Credential(ctx, "prj-a", "model.git", true)
+	_, err := newPlain(t, address, "", "").Credential(ctx, "prj-a", "org-a/model.git", true)
 	if status, reason := refused(err); status != 404 || reason != "not_found" {
 		t.Errorf("a host that takes no credential: %v, want 404 not_found", err)
+	}
+}
+
+// The host knows no orgs, so another org's repository is out of reach whatever names it: a name a
+// request gives is read under the org's own directory, and every access to a repository outside
+// it is refused, the credential first.
+func TestAnOrgReachesNoRepositoryOfAnotherOnAPlainHost(t *testing.T) {
+	const password = "s3cret-of-the-deployment"
+	address := gitHost(t, "platform", password, "org-a/model.git", "experiment-template")
+	plain := newPlain(t, address, "platform", password)
+	ctx := context.Background()
+	for _, name := range []string{"org-a/model.git", "../org-a/model.git", "experiment-template"} {
+		if named, err := plain.Reachable(ctx, "prj-b", name); err == nil {
+			t.Errorf("org-b reached %s as %s", name, named)
+		}
+	}
+	for _, name := range []string{"org-a/model.git", "model.git", "experiment-template"} {
+		if credential, err := plain.Credential(ctx, "prj-b", name, true); credential != nil || err == nil {
+			t.Errorf("org-b was handed a credential for %s", name)
+		} else if status, reason := refused(err); status != 422 || reason != "repository_not_reachable" || strings.Contains(err.Error(), password) {
+			t.Errorf("Credential(%s) = %v, want 422 repository_not_reachable", name, err)
+		}
+		if _, err := plain.HasBranch(ctx, "prj-b", name, "main"); err == nil {
+			t.Errorf("org-b read the branches of %s", name)
+		}
+		if _, err := plain.FileAt(ctx, "prj-b", name, "main", "environment.yaml"); errors.Is(err, ErrFileNotFound) || err == nil {
+			t.Errorf("FileAt(%s) for org-b = %v, want it refused", name, err)
+		}
+	}
+	if _, err := plain.FileAt(ctx, "prj-a", "org-a/model.git", "main", "environment.yaml"); !errors.Is(err, ErrFileNotFound) {
+		t.Errorf("FileAt of the org's own repository = %v, want ErrFileNotFound", err)
+	}
+}
+
+func TestAPlainRepositoryIsCreatedFromTheTemplateUnderTheOrgsDirectory(t *testing.T) {
+	address, root := gitHostAt(t, "", "", "experiment-template")
+	work := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "--quiet", "--initial-branch=main"}, {"commit", "--quiet", "--allow-empty", "-m", "template"},
+		{"push", "--quiet", filepath.Join(root, "experiment-template"), "main"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = work
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t.invalid", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t.invalid")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	plain := newPlain(t, address, "", "")
+	ctx := context.Background()
+	created, branch, err := plain.Create(ctx, "prj-b", "fresh.git", "")
+	if err != nil || created != "org-b/fresh.git" || branch != "main" {
+		t.Fatalf("Create = %q %q, %v, want org-b/fresh.git at main", created, branch, err)
+	}
+	if has, err := plain.HasBranch(ctx, "prj-b", created, "main"); err != nil || !has {
+		t.Fatalf("HasBranch = %v, %v, want main", has, err)
+	}
+	if _, _, err := plain.Create(ctx, "prj-b", created, ""); refusal.ReasonOf(err) != "repository_exists" {
+		t.Fatalf("a second create = %v, want repository_exists", err)
+	}
+	if again, _, err := plain.Create(ctx, "prj-a", created, ""); err != nil || again != "org-a/org-b/fresh.git" {
+		t.Fatalf("org-a naming org-b's repository = %q, %v, want one of its own under org-a", again, err)
 	}
 }
 
@@ -179,7 +271,7 @@ func TestAPlainHostIsRefusedWithoutAWholeRootOrWithHalfACredential(t *testing.T)
 		"no template":           {"https://git.example", "", "", ""},
 		"a template out of it":  {"https://git.example", "", "", "../template"},
 	} {
-		if plain, err := NewPlain(tc[0], tc[1], tc[2], tc[3]); err == nil {
+		if plain, err := NewPlain(tc[0], tc[1], tc[2], tc[3], projects{}); err == nil {
 			t.Errorf("%s: NewPlain = %+v, want it refused", name, plain)
 		}
 	}

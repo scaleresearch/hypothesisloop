@@ -185,7 +185,7 @@ func newGitHost(pcfg *hypothesisloopcfg.ControlService, store *db.Store, logger 
 	case hypothesisloopcfg.GitHostProviderPlain:
 		plain := pcfg.GitHost.Plain
 		var err error
-		gitHost, err = githost.NewPlain(plain.BaseURL, plain.Username, pcfg.GitPassword, pcfg.GitHost.ExperimentTemplateRepository)
+		gitHost, err = githost.NewPlain(plain.BaseURL, plain.Username, pcfg.GitPassword, pcfg.GitHost.ExperimentTemplateRepository, store)
 		if err != nil {
 			logger.Fatal("control-service: configure the git host", zap.Error(err))
 		}
