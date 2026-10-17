@@ -70,8 +70,7 @@ func openAPISpec(t *testing.T) map[string]any {
 	httpapi.RegisterMessages(doc, nil, zap.NewNop())
 	httpapi.RegisterExperimentAgents(doc, nil, struct{ platformexperiments.Hypotheses }{}, launch, zap.NewNop())
 	httpapi.RegisterPlanning(doc, platformExperiments, zap.NewNop())
-	scheduler.RegisterHuma(doc, scheduler.NewHandler(
-		scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{})))
+	httpapi.RegisterJobs(doc, scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{}), zap.NewNop())
 	httpapi.RegisterRegistry(doc, nil, nil)
 	doc.MountExplore(r)
 

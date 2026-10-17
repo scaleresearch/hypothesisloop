@@ -45,7 +45,7 @@ func TestARunningExperimentsBaselineIsRaisedToAStrongerJobOfTheControl(t *testin
 		"its coordinator": {theCoordinator, domain.ActorCoordinator, "its coordinator"},
 		"its owner":       {auth.Principal(ownerOfA), domain.ActorUser, "its owner"},
 	} {
-		store, patch := jobsAPI(t, runningOnBaseline(), []*platformexperiments.Baseline{measuredBaseline(), strongerControl()}, c.caller)
+		store, patch := declareJobsAPI(t, runningOnBaseline(), []*platformexperiments.Baseline{measuredBaseline(), strongerControl()}, c.caller)
 		code, out := patch(raise)
 		stored := store.created[0]
 		wantBrief := "Train train.py and report val_loss.\n\n" + platformexperiments.MeasuredBaselineHeader + "\njob: job-2\ncode_ref: git://seed@abc\nenv: CODER=rans\nmeasured: val_loss = 1.6, exact_match = 1"
@@ -66,7 +66,7 @@ func TestARunningExperimentsBaselineIsRaisedToAStrongerJobOfTheControl(t *testin
 	}
 
 	// A brief rewritten in the same request keeps what its author wrote, with the new block.
-	store, patch := jobsAPI(t, runningOnBaseline(), []*platformexperiments.Baseline{measuredBaseline(), strongerControl()}, theCoordinator)
+	store, patch := declareJobsAPI(t, runningOnBaseline(), []*platformexperiments.Baseline{measuredBaseline(), strongerControl()}, theCoordinator)
 	if code, out := patch(map[string]any{"baseline_job_id": "job-2", "baseline_reason": raiseReason, "description": "Start from the rANS coder."}); code != http.StatusOK ||
 		!strings.HasPrefix(store.created[0].Description, "Start from the rANS coder.\n\n"+platformexperiments.MeasuredBaselineHeader+"\njob: job-2") {
 		t.Errorf("raised with a new brief: got = %d %v, brief %q", code, out, store.created[0].Description)
@@ -102,7 +102,7 @@ func TestARunningExperimentsBaselineIsRaisedToAStrongerJobOfTheControl(t *testin
 		if c.status == 409 {
 			caller = auth.Principal(ownerOfA)
 		}
-		store, patch := jobsAPI(t, runningOnBaseline(), []*platformexperiments.Baseline{current, candidate}, caller)
+		store, patch := declareJobsAPI(t, runningOnBaseline(), []*platformexperiments.Baseline{current, candidate}, caller)
 		code, out := patch(c.body)
 		if stored := store.created[0]; code != c.status || out["reason"] != c.reason || stored.BaselineJobID != "job-1" || len(stored.BaselineRaises) != 0 || strings.Contains(stored.Description, "job-2") {
 			t.Errorf("%s: got = %d %v, stored %q, want %d %s and nothing changed", name, code, out, stored.BaselineJobID, c.status, c.reason)
@@ -113,7 +113,7 @@ func TestARunningExperimentsBaselineIsRaisedToAStrongerJobOfTheControl(t *testin
 	candidate := strongerControl()
 	ranIn(candidate, branchEnvironment)
 	candidate.Declared = &[]string{branchEnvironment}[0]
-	store, patch = jobsAPI(t, runningOnBaseline(), []*platformexperiments.Baseline{measuredBaseline(), candidate}, theCoordinator)
+	store, patch = declareJobsAPI(t, runningOnBaseline(), []*platformexperiments.Baseline{measuredBaseline(), candidate}, theCoordinator)
 	if code, out := patch(raise); code != http.StatusOK || store.created[0].BaselineJobID != "job-2" {
 		t.Errorf("a job of another branch in the baseline's environment: got = %d %v, want raised", code, out)
 	}
@@ -123,13 +123,13 @@ func TestARunningExperimentsBaselineIsRaisedToAStrongerJobOfTheControl(t *testin
 // is declared; once it is closed nothing changes. A raise is refused in both.
 func TestTheBaselineIsRaisedOnlyWhileTheRunGoesOn(t *testing.T) {
 	raise := map[string]any{"baseline_job_id": "job-2", "baseline_reason": raiseReason}
-	store, patch := jobsAPI(t, openExperiment(), []*platformexperiments.Baseline{measuredBaseline(), strongerControl()}, theCoordinator)
+	store, patch := declareJobsAPI(t, openExperiment(), []*platformexperiments.Baseline{measuredBaseline(), strongerControl()}, theCoordinator)
 	if code, out := patch(raise); code != http.StatusConflict || out["reason"] != "baseline_not_running" || store.created[0].BaselineJobID != "" {
 		t.Errorf("open: got = %d %v, want 409 baseline_not_running and nothing declared", code, out)
 	}
 	closed := runningOnBaseline()
 	closed.Status = domain.PlatformExpClosed
-	store, patch = jobsAPI(t, closed, []*platformexperiments.Baseline{measuredBaseline(), strongerControl()}, theCoordinator)
+	store, patch = declareJobsAPI(t, closed, []*platformexperiments.Baseline{measuredBaseline(), strongerControl()}, theCoordinator)
 	if code, out := patch(raise); code != http.StatusConflict || out["reason"] != "experiment_not_editable" || store.created[0].BaselineJobID != "job-1" {
 		t.Errorf("closed: got = %d %v, want 409 experiment_not_editable and the baseline kept", code, out)
 	}

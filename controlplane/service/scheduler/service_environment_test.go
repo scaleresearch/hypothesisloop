@@ -57,7 +57,7 @@ func TestAnEnvironmentBuiltAheadIsTheOneItsJobWaitsFor(t *testing.T) {
 	if job.EnvironmentKey != env.Key {
 		t.Errorf("the job of that commit waits for %q, want the one built ahead, %q", job.EnvironmentKey, env.Key)
 	}
-	if got := answerEnvironment(env); got.State != domain.EnvironmentBuilding || !strings.Contains(got.Message, "It builds on cluster builder-a, attempt 1") {
+	if got := AnswerEnvironment(env); got.State != domain.EnvironmentBuilding || !strings.Contains(got.Message, "It builds on cluster builder-a, attempt 1") {
 		t.Errorf("answered %+v, want it building on builder-a", got)
 	}
 }
@@ -95,7 +95,7 @@ func TestAnEnvironmentIsReadWithoutBuildingIt(t *testing.T) {
 	if err != nil || env != failed || len(assigned) != 0 {
 		t.Fatalf("got %+v, %v with %v assigned, want the failed one as it is and nothing assigned", env, err, assigned)
 	}
-	if got := answerEnvironment(env); got.State != domain.EnvironmentFailed || !strings.Contains(got.Message, "--locked=false") {
+	if got := AnswerEnvironment(env); got.State != domain.EnvironmentFailed || !strings.Contains(got.Message, "--locked=false") {
 		t.Errorf("answered %+v, want it failed with the end of its output", got)
 	}
 

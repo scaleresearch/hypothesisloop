@@ -34,7 +34,7 @@ func TestACancelOfAnEndedJobIsRefusedInTheStatusItIsAnsweredWith(t *testing.T) {
 		{domain.StatusCompleted, "", "COMPLETED"},
 	} {
 		s := &Service{store: &endedJobStore{status: c.stored, reason: c.reason}}
-		refusal := admissionStatusError(s.CancelExperiment(context.Background(), "job-1"))
+		refusal := ChangeRefusal(s.CancelExperiment(context.Background(), "job-1"))
 		if refusal == nil || refusal.GetStatus() != http.StatusConflict {
 			t.Fatalf("cancel of a job stored %s (%s): got = %v, want a 409", c.stored, c.reason, refusal)
 		}

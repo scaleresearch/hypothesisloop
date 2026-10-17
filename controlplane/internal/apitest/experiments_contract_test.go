@@ -18,6 +18,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
@@ -89,7 +90,7 @@ func schedulerRouter(t *testing.T, store scheduler.Store) chi.Router {
 	t.Cleanup(metrics.Close)
 	r := authtest.Router(authtest.Staff)
 	d := apidocs.New(r, "scheduler", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	scheduler.RegisterHuma(d, scheduler.NewHandler(scheduler.NewService(store, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, metrics.URL, zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{})))
+	httpapi.RegisterJobs(d, scheduler.NewService(store, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, metrics.URL, zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{}), zap.NewNop())
 	return r
 }
 

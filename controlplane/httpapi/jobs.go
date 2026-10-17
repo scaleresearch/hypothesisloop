@@ -1,4 +1,4 @@
-package scheduler
+package httpapi
 
 import (
 	"context"
@@ -8,30 +8,13 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
-	"go.uber.org/zap"
-
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
+	"go.uber.org/zap"
 )
-
-// Handler wires the Scheduler Service to HTTP endpoints. Routes are registered
-// via RegisterHuma (see below); the transport layer is Huma.
-type Handler struct {
-	svc *Service
-}
-
-// NewHandler creates a Handler for the given Service.
-func NewHandler(svc *Service) *Handler {
-	// The submit and cancel routes below wake the scheduler loop, and the Service/Loop pair is
-	// necessarily wired in two steps (each needs the other). Asserting it here, once, is what
-	// lets those routes call Trigger without re-checking on every request.
-	if svc.loop == nil {
-		panic("scheduler: NewHandler requires a Service with WithLoop already applied")
-	}
-	return &Handler{svc: svc}
-}
 
 type summaryReply struct {
 	Status       string                  `json:"status"`
@@ -89,11 +72,30 @@ type submitMeta struct {
 	PlatformExperimentID string `json:"platform_experiment_id,omitempty" required:"false" doc:"Where it runs. Absent with an agent's token, it is that agent's platform experiment."`
 }
 
-// RegisterHuma registers the public, research-agent-facing scheduler operations
-// at their full paths (/experiments...).
-func RegisterHuma(doc *apidocs.Doc, h *Handler) {
-	access := doc.Access
+// Every GET /experiments page is bounded the same way the agent, hypothesis and
+// platform-experiment lists bound theirs. experiments is the fastest-growing table here, so
+// an omitted ?limit must not mean "every row ever submitted" — and the default sits far
+// below the maximum because the caller is an agent reading the response into a bounded
+// context window, not a browser scrolling a table. See db.defaultAgentListLimit.
+const (
+	defaultExperimentListLimit = 20
+	// Lowered from 200 (2026-09-11): each experiment record duplicates its full job/
+	// resolved_job env and repeats hypothesis and theory text, so even a max-size page
+	// was ~580KB raw -- too large for an agent to read into context in one call regardless of
+	// how it's asked for. 50 caps a raw page at roughly a tenth of that.
+	maxExperimentListLimit = 50
+)
 
+type jobsAPI struct {
+	jobs   *scheduler.Service
+	access *auth.Access
+	logger *zap.Logger
+}
+
+// RegisterJobs registers the public, research-agent-facing scheduler operations at their full
+// paths (/experiments...), then the environment and image credential operations.
+func RegisterJobs(doc *apidocs.Doc, jobs *scheduler.Service, logger *zap.Logger) {
+	a := jobsAPI{jobs: jobs, access: doc.Access, logger: logger}
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "submit-experiment", Method: "POST", Path: "/experiments",
 		Summary: "Submit one job", Tags: []string{"experiments"},
@@ -117,48 +119,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"Two fields have a default, answered on the job as applied: metadata.capacity_tier left out is guaranteed, and job.max_retries left out is 0. " +
 			"503 object_store_unavailable while the platform's object store does not answer: a submit measures the agent's durable data there and creates the job's data key in it, so nothing was stored and the same submit is repeated later. " +
 			"Rejections return {reason,message}; an accepted job remains QUEUED until current capacity fits. Every not_admitted_reason comes with its sentence in not_admitted_message.",
-	}, func(ctx context.Context, in *struct{ Body submitRequest }) (*struct{ Body *domain.Experiment }, error) {
-		req := in.Body
-		meta := req.Metadata
-		var err error
-		if meta.PlatformExperimentID, meta.AgentID, err = access.Spender(ctx, meta.PlatformExperimentID, meta.AgentID); err != nil {
-			return nil, err
-		}
-		caller, ok := auth.FromContext(ctx)
-		if !ok {
-			return nil, auth.Internal(h.svc.logger, "submit experiment", errNoCaller)
-		}
-		exp, err := newJob(req, meta, caller.Actor())
-		if err != nil {
-			return nil, auth.Internal(h.svc.logger, "submit experiment", err)
-		}
-		if err := h.svc.Submit(ctx, exp); err != nil {
-			var admErr *AdmissionError
-			if errors.As(err, &admErr) {
-				return nil, refusal.Refuse(admissionHTTPStatus(admErr.Reason), admErr.Reason, admErr.Message)
-			}
-			return nil, auth.Internal(h.svc.logger, "submit experiment", err)
-		}
-		if err := h.svc.NameJobs(ctx, exp); err != nil {
-			return nil, auth.Internal(h.svc.logger, "submit experiment", err)
-		}
-		return answerJob(exp), nil
-	})
-
-	// Every GET /experiments page is bounded the same way the agent, hypothesis and
-	// platform-experiment lists bound theirs. experiments is the fastest-growing table here, so
-	// an omitted ?limit must not mean "every row ever submitted" — and the default sits far
-	// below the maximum because the caller is an agent reading the response into a bounded
-	// context window, not a browser scrolling a table. See db.defaultAgentListLimit.
-	const (
-		defaultExperimentListLimit = 20
-		// Lowered from 200 (2026-09-11): each experiment record duplicates its full job/
-		// resolved_job env and repeats hypothesis and theory text, so even a max-size page
-		// was ~580KB raw -- too large for an agent to read into context in one call regardless of
-		// how it's asked for. 50 caps a raw page at roughly a tenth of that.
-		maxExperimentListLimit = 50
-	)
-
+	}, a.submit)
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "list-experiments", Method: "GET", Path: "/experiments",
 		Summary: "List experiments", Tags: []string{"experiments"},
@@ -171,89 +132,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"Each carries metrics: its one value on each declared metric it reported, the last it reported, and metric, the one on the first ranking metric. " +
 			"Each also carries agent_name, what its agent is called now. " +
 			"Total match count is returned in the X-Total-Count response header.",
-	}, func(ctx context.Context, in *struct {
-		Agent                string `query:"agent_id" doc:"Only this agent's experiments."`
-		PlatformExperimentID string `query:"platform_experiment_id" doc:"Only experiments submitted under this platform experiment."`
-		HypothesisID         string `query:"hypothesis_id" doc:"Only experiments testing this hypothesis."`
-		ProjectID            string `query:"project_id" doc:"Only experiments in this project."`
-		Status               string `query:"status" doc:"One of QUEUED, SUBMITTED, RUNNING, COMPLETED, FAILED, EVICTED, REJECTED, CANCELLED. Anything else is rejected rather than ignored, so a typo cannot silently widen the result."`
-		Since                string `query:"since" doc:"RFC3339. Only experiments created at or after this instant -- the cheap way to catch up on what changed since a previous session."`
-		Search               string `query:"q" doc:"Case-insensitive substring match against hypothesis and theory."`
-		Limit                int    `query:"limit" doc:"Page size, default 20, maximum 50: a larger one is refused with 422 invalid_page. The default is small because the whole response is meant to be read by an agent: ask for more deliberately, using X-Total-Count to decide."`
-		Offset               int    `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
-		Sort                 string `query:"sort" doc:"created_at, updated_at, priority_score or status, optionally prefixed with '-' for descending. Default -created_at, newest first."`
-	}) (*struct {
-		Body       []*domain.Experiment
-		TotalCount int `header:"X-Total-Count" doc:"Total experiments matching the filter, ignoring limit/offset."`
-	}, error) {
-		if in.Status != "" && !domain.ValidExperimentStatus(domain.ExperimentStatus(in.Status)) {
-			return nil, huma.Error400BadRequest("unknown status " + in.Status)
-		}
-		if !domain.ValidSortField(in.Sort, domain.ExperimentSortFields) {
-			return nil, huma.Error400BadRequest("unknown sort field " + in.Sort)
-		}
-		if in.Sort == "" {
-			in.Sort = "-created_at"
-		}
-		if in.Limit < 0 || in.Limit > maxExperimentListLimit || in.Offset < 0 {
-			return nil, refusal.Refuse(http.StatusUnprocessableEntity, "invalid_page", "limit must be 1 to "+strconv.Itoa(maxExperimentListLimit)+" and offset must not be negative")
-		}
-		if in.Limit == 0 {
-			in.Limit = defaultExperimentListLimit
-		}
-		var since time.Time
-		if in.Since != "" {
-			parsed, err := time.Parse(time.RFC3339, in.Since)
-			if err != nil {
-				return nil, huma.Error400BadRequest("since must be RFC3339, got " + in.Since)
-			}
-			since = parsed
-		}
-		scope, err := access.ListScope(ctx, in.ProjectID)
-		if err != nil {
-			return nil, err
-		}
-		filter := domain.ExperimentFilter{
-			Scope:                scope,
-			AgentID:              in.Agent,
-			PlatformExperimentID: in.PlatformExperimentID,
-			HypothesisID:         in.HypothesisID,
-			Status:               domain.ExperimentStatus(in.Status),
-			Since:                since,
-			Search:               in.Search,
-			Limit:                in.Limit,
-			Offset:               in.Offset,
-			Sort:                 in.Sort,
-		}
-		exps, err := h.svc.store.ListExperiments(ctx, filter)
-		if err != nil {
-			return nil, auth.Internal(h.svc.logger, "list experiments", err)
-		}
-		if err := h.svc.NameJobs(ctx, exps...); err != nil {
-			return nil, auth.Internal(h.svc.logger, "list experiments", err)
-		}
-		total, err := h.svc.store.CountExperiments(ctx, filter)
-		if err != nil {
-			return nil, auth.Internal(h.svc.logger, "list experiments", err)
-		}
-		if err := h.svc.mergePhaseDetails(ctx, exps); err != nil {
-			return nil, auth.Internal(h.svc.logger, "list experiments", err)
-		}
-		if err := h.svc.mergeRanOn(ctx, exps); err != nil {
-			return nil, auth.Internal(h.svc.logger, "list experiments", err)
-		}
-		if err := h.svc.mergeBuildProgress(ctx, exps); err != nil {
-			return nil, auth.Internal(h.svc.logger, "list experiments", err)
-		}
-		if err := h.svc.mergeMetrics(ctx, exps); err != nil {
-			return nil, auth.Internal(h.svc.logger, "list experiments", err)
-		}
-		return &struct {
-			Body       []*domain.Experiment
-			TotalCount int `header:"X-Total-Count" doc:"Total experiments matching the filter, ignoring limit/offset."`
-		}{Body: exps, TotalCount: total}, nil
-	})
-
+	}, a.list)
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "experiment-stats", Method: "GET", Path: "/experiments/stats",
 		Summary: "Count experiments by status, capacity tier and eviction reason", Tags: []string{"experiments"},
@@ -272,49 +151,7 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"accelerator type, and in_flight_cores does so for jobs on CPU cores. " +
 			"?group_by=agent or ?group_by=hypothesis adds groups: the same counts once per " +
 			"agent or hypothesis that has a matching experiment, keyed by its id.",
-	}, func(ctx context.Context, in *struct {
-		Agent                string `query:"agent_id" doc:"Only this agent's experiments."`
-		PlatformExperimentID string `query:"platform_experiment_id" doc:"Only experiments submitted under this platform experiment."`
-		HypothesisID         string `query:"hypothesis_id" doc:"Only experiments testing this hypothesis."`
-		ProjectID            string `query:"project_id" doc:"Only experiments in this project."`
-		Status               string `query:"status" doc:"Restrict the counts to one status; see GET /experiments for the valid set."`
-		Since                string `query:"since" doc:"RFC3339. Only experiments created at or after this instant."`
-		Search               string `query:"q" doc:"Case-insensitive substring match against hypothesis and theory."`
-		GroupBy              string `query:"group_by" doc:"agent or hypothesis: also return the counts per agent or per hypothesis, under groups."`
-	}) (*struct{ Body *domain.ExperimentStats }, error) {
-		if _, ok := domain.ExperimentStatsGroupFields[in.GroupBy]; in.GroupBy != "" && !ok {
-			return nil, huma.Error400BadRequest("unknown group_by " + in.GroupBy)
-		}
-		if in.Status != "" && !domain.ValidExperimentStatus(domain.ExperimentStatus(in.Status)) {
-			return nil, huma.Error400BadRequest("unknown status " + in.Status)
-		}
-		var since time.Time
-		if in.Since != "" {
-			parsed, err := time.Parse(time.RFC3339, in.Since)
-			if err != nil {
-				return nil, huma.Error400BadRequest("since must be RFC3339, got " + in.Since)
-			}
-			since = parsed
-		}
-		scope, err := access.ListScope(ctx, in.ProjectID)
-		if err != nil {
-			return nil, err
-		}
-		stats, err := h.svc.store.ExperimentStats(ctx, domain.ExperimentFilter{
-			Scope:                scope,
-			AgentID:              in.Agent,
-			PlatformExperimentID: in.PlatformExperimentID,
-			HypothesisID:         in.HypothesisID,
-			Status:               domain.ExperimentStatus(in.Status),
-			Since:                since,
-			Search:               in.Search,
-		}, in.GroupBy)
-		if err != nil {
-			return nil, auth.Internal(h.svc.logger, "experiment stats", err)
-		}
-		return &struct{ Body *domain.ExperimentStats }{Body: stats}, nil
-	})
-
+	}, a.stats)
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "get-experiment", Method: "GET", Path: "/experiments/{id}",
 		Summary: "Get one experiment", Tags: []string{"experiments"},
@@ -323,48 +160,12 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"and metrics: its one value on each declared metric it reported, the last it reported, with metric the one on the first ranking metric. " +
 			"A COMPLETED job of a platform experiment with a constraint metric carries rankable, and when that is false not_rankable_reason: " +
 			"such a job is in no standing.",
-	}, func(ctx context.Context, in *struct {
-		ID string `path:"id"`
-	}) (*struct{ Body *domain.Experiment }, error) {
-		if err := access.Experiment(ctx, in.ID); err != nil {
-			return nil, err
-		}
-		exp, err := h.svc.GetExperiment(ctx, in.ID)
-		if err != nil {
-			return nil, auth.Internal(h.svc.logger, "get experiment", err, zap.String("id", in.ID))
-		}
-		if exp == nil {
-			return nil, huma.Error404NotFound("experiment not found")
-		}
-		return answerJob(exp), nil
-	})
-
+	}, a.get)
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "cancel-experiment", Method: "POST", Path: "/experiments/{id}/cancel",
 		Summary: "Cancel a QUEUED or RUNNING experiment", Tags: []string{"experiments"},
 		Description: "Credits are refunded. Answers the job, whose status is CANCELLED from then on. 409 invalid_transition for a job that has ended, with the status it ended in: a cancelled one is CANCELLED there as everywhere.",
-	}, func(ctx context.Context, in *struct {
-		ID string `path:"id"`
-	}) (*struct{ Body *domain.Experiment }, error) {
-		if err := access.OwnExperiment(ctx, in.ID); err != nil {
-			return nil, err
-		}
-		if err := h.svc.CancelExperiment(ctx, in.ID); err != nil {
-			if e := admissionStatusError(err); e != nil {
-				return nil, e
-			}
-			return nil, auth.Internal(h.svc.logger, "cancel experiment", err, zap.String("id", in.ID))
-		}
-		exp, err := h.svc.GetExperiment(ctx, in.ID)
-		if err != nil {
-			return nil, auth.Internal(h.svc.logger, "cancel experiment", err, zap.String("id", in.ID))
-		}
-		if exp == nil {
-			return nil, huma.Error404NotFound("experiment not found")
-		}
-		return answerJob(exp), nil
-	})
-
+	}, a.cancel)
 	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
 		OperationID: "write-experiment-summary", Method: "POST", Path: "/experiments/{id}/summary",
 		Summary: "File a summary for a finished job", Tags: []string{"experiments"},
@@ -373,37 +174,212 @@ func RegisterHuma(doc *apidocs.Doc, h *Handler) {
 			"hypothesis_id and verdict name the job's hypothesis and its status when that verdict is yours to set. " +
 			"The job of an agent of role baseline tests no hypothesis: its finding is kept on the objective and the answer names neither. " +
 			"The finding is the job's agent's, and who filed it is the caller, answered as actor where the finding is read.",
-	}, func(ctx context.Context, in *struct {
-		ID   string `path:"id"`
-		Body struct {
-			Summary string `json:"summary"`
+	}, a.writeSummary)
+	registerEnvironments(doc, a)
+	registerImageCredentials(doc, a)
+}
+
+func (a jobsAPI) submit(ctx context.Context, in *struct{ Body submitRequest }) (*struct{ Body *domain.Experiment }, error) {
+	req := in.Body
+	meta := req.Metadata
+	var err error
+	if meta.PlatformExperimentID, meta.AgentID, err = a.access.Spender(ctx, meta.PlatformExperimentID, meta.AgentID); err != nil {
+		return nil, err
+	}
+	caller, ok := auth.FromContext(ctx)
+	if !ok {
+		return nil, auth.Internal(a.logger, "submit experiment", scheduler.ErrNoCaller)
+	}
+	exp, err := newJob(req, meta, caller.Actor())
+	if err != nil {
+		return nil, auth.Internal(a.logger, "submit experiment", err)
+	}
+	if err := a.jobs.Submit(ctx, exp); err != nil {
+		var admErr *scheduler.AdmissionError
+		if errors.As(err, &admErr) {
+			return nil, refusal.Refuse(scheduler.AdmissionStatus(admErr.Reason), admErr.Reason, admErr.Message)
 		}
-	}) (*struct{ Body summaryReply }, error) {
-		if err := access.OwnExperiment(ctx, in.ID); err != nil {
-			return nil, err
-		}
-		if in.Body.Summary == "" {
-			return nil, huma.Error400BadRequest("summary is required")
-		}
-		caller, ok := auth.FromContext(ctx)
-		if !ok {
-			return nil, auth.Internal(h.svc.logger, "write experiment summary", errNoCaller, zap.String("id", in.ID))
-		}
-		hypothesis, err := h.svc.WriteExperimentSummary(ctx, in.ID, caller.Actor(), in.Body.Summary)
+		return nil, auth.Internal(a.logger, "submit experiment", err)
+	}
+	if err := a.jobs.NameJobs(ctx, exp); err != nil {
+		return nil, auth.Internal(a.logger, "submit experiment", err)
+	}
+	return answerJob(exp), nil
+}
+
+func (a jobsAPI) list(ctx context.Context, in *struct {
+	Agent                string `query:"agent_id" doc:"Only this agent's experiments."`
+	PlatformExperimentID string `query:"platform_experiment_id" doc:"Only experiments submitted under this platform experiment."`
+	HypothesisID         string `query:"hypothesis_id" doc:"Only experiments testing this hypothesis."`
+	ProjectID            string `query:"project_id" doc:"Only experiments in this project."`
+	Status               string `query:"status" doc:"One of QUEUED, SUBMITTED, RUNNING, COMPLETED, FAILED, EVICTED, REJECTED, CANCELLED. Anything else is rejected rather than ignored, so a typo cannot silently widen the result."`
+	Since                string `query:"since" doc:"RFC3339. Only experiments created at or after this instant -- the cheap way to catch up on what changed since a previous session."`
+	Search               string `query:"q" doc:"Case-insensitive substring match against hypothesis and theory."`
+	Limit                int    `query:"limit" doc:"Page size, default 20, maximum 50: a larger one is refused with 422 invalid_page. The default is small because the whole response is meant to be read by an agent: ask for more deliberately, using X-Total-Count to decide."`
+	Offset               int    `query:"offset" doc:"Rows to skip, for paging through X-Total-Count total matches."`
+	Sort                 string `query:"sort" doc:"created_at, updated_at, priority_score or status, optionally prefixed with '-' for descending. Default -created_at, newest first."`
+}) (*struct {
+	Body       []*domain.Experiment
+	TotalCount int `header:"X-Total-Count" doc:"Total experiments matching the filter, ignoring limit/offset."`
+}, error) {
+	if in.Status != "" && !domain.ValidExperimentStatus(domain.ExperimentStatus(in.Status)) {
+		return nil, huma.Error400BadRequest("unknown status " + in.Status)
+	}
+	if !domain.ValidSortField(in.Sort, domain.ExperimentSortFields) {
+		return nil, huma.Error400BadRequest("unknown sort field " + in.Sort)
+	}
+	if in.Sort == "" {
+		in.Sort = "-created_at"
+	}
+	if in.Limit < 0 || in.Limit > maxExperimentListLimit || in.Offset < 0 {
+		return nil, refusal.Refuse(http.StatusUnprocessableEntity, "invalid_page", "limit must be 1 to "+strconv.Itoa(maxExperimentListLimit)+" and offset must not be negative")
+	}
+	if in.Limit == 0 {
+		in.Limit = defaultExperimentListLimit
+	}
+	var since time.Time
+	if in.Since != "" {
+		parsed, err := time.Parse(time.RFC3339, in.Since)
 		if err != nil {
-			if e := admissionStatusError(err); e != nil {
-				return nil, e
-			}
-			return nil, auth.Internal(h.svc.logger, "write experiment summary", err, zap.String("id", in.ID))
+			return nil, huma.Error400BadRequest("since must be RFC3339, got " + in.Since)
 		}
-		reply := summaryReply{Status: "ok"}
-		if hypothesis != nil {
-			reply.HypothesisID, reply.Verdict = hypothesis.ID, hypothesis.Status
+		since = parsed
+	}
+	scope, err := a.access.ListScope(ctx, in.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	filter := domain.ExperimentFilter{
+		Scope:                scope,
+		AgentID:              in.Agent,
+		PlatformExperimentID: in.PlatformExperimentID,
+		HypothesisID:         in.HypothesisID,
+		Status:               domain.ExperimentStatus(in.Status),
+		Since:                since,
+		Search:               in.Search,
+		Limit:                in.Limit,
+		Offset:               in.Offset,
+		Sort:                 in.Sort,
+	}
+	exps, total, err := a.jobs.List(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	return &struct {
+		Body       []*domain.Experiment
+		TotalCount int `header:"X-Total-Count" doc:"Total experiments matching the filter, ignoring limit/offset."`
+	}{Body: exps, TotalCount: total}, nil
+}
+
+func (a jobsAPI) stats(ctx context.Context, in *struct {
+	Agent                string `query:"agent_id" doc:"Only this agent's experiments."`
+	PlatformExperimentID string `query:"platform_experiment_id" doc:"Only experiments submitted under this platform experiment."`
+	HypothesisID         string `query:"hypothesis_id" doc:"Only experiments testing this hypothesis."`
+	ProjectID            string `query:"project_id" doc:"Only experiments in this project."`
+	Status               string `query:"status" doc:"Restrict the counts to one status; see GET /experiments for the valid set."`
+	Since                string `query:"since" doc:"RFC3339. Only experiments created at or after this instant."`
+	Search               string `query:"q" doc:"Case-insensitive substring match against hypothesis and theory."`
+	GroupBy              string `query:"group_by" doc:"agent or hypothesis: also return the counts per agent or per hypothesis, under groups."`
+}) (*struct{ Body *domain.ExperimentStats }, error) {
+	if _, ok := domain.ExperimentStatsGroupFields[in.GroupBy]; in.GroupBy != "" && !ok {
+		return nil, huma.Error400BadRequest("unknown group_by " + in.GroupBy)
+	}
+	if in.Status != "" && !domain.ValidExperimentStatus(domain.ExperimentStatus(in.Status)) {
+		return nil, huma.Error400BadRequest("unknown status " + in.Status)
+	}
+	var since time.Time
+	if in.Since != "" {
+		parsed, err := time.Parse(time.RFC3339, in.Since)
+		if err != nil {
+			return nil, huma.Error400BadRequest("since must be RFC3339, got " + in.Since)
 		}
-		return &struct{ Body summaryReply }{Body: reply}, nil
-	})
-	registerEnvironments(doc, h)
-	registerImageCredentials(doc, h)
+		since = parsed
+	}
+	scope, err := a.access.ListScope(ctx, in.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	stats, err := a.jobs.Stats(ctx, domain.ExperimentFilter{
+		Scope:                scope,
+		AgentID:              in.Agent,
+		PlatformExperimentID: in.PlatformExperimentID,
+		HypothesisID:         in.HypothesisID,
+		Status:               domain.ExperimentStatus(in.Status),
+		Since:                since,
+		Search:               in.Search,
+	}, in.GroupBy)
+	if err != nil {
+		return nil, err
+	}
+	return &struct{ Body *domain.ExperimentStats }{Body: stats}, nil
+}
+
+func (a jobsAPI) get(ctx context.Context, in *struct {
+	ID string `path:"id"`
+}) (*struct{ Body *domain.Experiment }, error) {
+	if err := a.access.Experiment(ctx, in.ID); err != nil {
+		return nil, err
+	}
+	exp, err := a.jobs.GetExperiment(ctx, in.ID)
+	if err != nil {
+		return nil, auth.Internal(a.logger, "get experiment", err, zap.String("id", in.ID))
+	}
+	if exp == nil {
+		return nil, huma.Error404NotFound("experiment not found")
+	}
+	return answerJob(exp), nil
+}
+
+func (a jobsAPI) cancel(ctx context.Context, in *struct {
+	ID string `path:"id"`
+}) (*struct{ Body *domain.Experiment }, error) {
+	if err := a.access.OwnExperiment(ctx, in.ID); err != nil {
+		return nil, err
+	}
+	if err := a.jobs.CancelExperiment(ctx, in.ID); err != nil {
+		if e := scheduler.ChangeRefusal(err); e != nil {
+			return nil, e
+		}
+		return nil, auth.Internal(a.logger, "cancel experiment", err, zap.String("id", in.ID))
+	}
+	exp, err := a.jobs.GetExperiment(ctx, in.ID)
+	if err != nil {
+		return nil, auth.Internal(a.logger, "cancel experiment", err, zap.String("id", in.ID))
+	}
+	if exp == nil {
+		return nil, huma.Error404NotFound("experiment not found")
+	}
+	return answerJob(exp), nil
+}
+
+func (a jobsAPI) writeSummary(ctx context.Context, in *struct {
+	ID   string `path:"id"`
+	Body struct {
+		Summary string `json:"summary"`
+	}
+}) (*struct{ Body summaryReply }, error) {
+	if err := a.access.OwnExperiment(ctx, in.ID); err != nil {
+		return nil, err
+	}
+	if in.Body.Summary == "" {
+		return nil, huma.Error400BadRequest("summary is required")
+	}
+	caller, ok := auth.FromContext(ctx)
+	if !ok {
+		return nil, auth.Internal(a.logger, "write experiment summary", scheduler.ErrNoCaller, zap.String("id", in.ID))
+	}
+	hypothesis, err := a.jobs.WriteExperimentSummary(ctx, in.ID, caller.Actor(), in.Body.Summary)
+	if err != nil {
+		if e := scheduler.ChangeRefusal(err); e != nil {
+			return nil, e
+		}
+		return nil, auth.Internal(a.logger, "write experiment summary", err, zap.String("id", in.ID))
+	}
+	reply := summaryReply{Status: "ok"}
+	if hypothesis != nil {
+		reply.HypothesisID, reply.Verdict = hypothesis.ID, hypothesis.Status
+	}
+	return &struct{ Body summaryReply }{Body: reply}, nil
 }
 
 func primaryAcceleratorType(job domain.JobSpec) domain.AcceleratorType {
@@ -414,41 +390,4 @@ func primaryAcceleratorType(job domain.JobSpec) domain.AcceleratorType {
 // type of its own, so Experiment.MarshalJSON never runs on it and the answer is made here.
 func answerJob(exp *domain.Experiment) *struct{ Body *domain.Experiment } {
 	return &struct{ Body *domain.Experiment }{Body: exp.Answer()}
-}
-
-// ReasonSummaryExists is the reason of the 409 a second summary on one job is answered with.
-const ReasonSummaryExists = "summary_exists"
-
-// admissionStatusError is the refusal a cancel or a summary answers an AdmissionError with.
-func admissionStatusError(err error) huma.StatusError {
-	var admErr *AdmissionError
-	if !errors.As(err, &admErr) {
-		return nil
-	}
-	status := http.StatusUnprocessableEntity
-	switch admErr.Reason {
-	case "not_found":
-		status = http.StatusNotFound
-	case ReasonInvalidTransition, ReasonSummaryExists:
-		status = http.StatusConflict
-	}
-	return refusal.Refuse(status, admErr.Reason, admErr.Message)
-}
-
-// admissionHTTPStatus maps an admission reason to the appropriate HTTP status code.
-func admissionHTTPStatus(reason string) int {
-	switch reason {
-	case ReasonInsufficientCredits:
-		return http.StatusPaymentRequired
-	case ReasonDuplicate:
-		return http.StatusConflict
-	case ReasonMalformed:
-		return http.StatusBadRequest
-	case ReasonRateLimited:
-		return http.StatusTooManyRequests
-	case ReasonImageUnresolved:
-		return http.StatusServiceUnavailable
-	default:
-		return http.StatusUnprocessableEntity
-	}
 }

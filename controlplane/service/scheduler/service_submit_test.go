@@ -297,7 +297,7 @@ func TestBeforeTheStartOnlyTheJobThatMeasuresTheBaselineIsAccepted(t *testing.T)
 	// The refusal is worded for its caller, so a request with none is the platform's failure.
 	nobody := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, environments: declared{}, store: unstartedStore{status: domain.PlatformExpOpen, signup: researcher}, quota: waitingQuota{}, hypotheses: humanHypothesis("pe-1")}
 	var admission *AdmissionError
-	if err := nobody.Submit(context.Background(), humanIdeaSubmission()); !errors.Is(err, errNoCaller) || errors.As(err, &admission) {
+	if err := nobody.Submit(context.Background(), humanIdeaSubmission()); !errors.Is(err, ErrNoCaller) || errors.As(err, &admission) {
 		t.Errorf("a submit with no caller in its context: got = %v, want the platform's error and no refusal", err)
 	}
 
@@ -542,7 +542,7 @@ func TestSubmitTakesSecretEnvOffTheSpec(t *testing.T) {
 	clash.Job.Env = map[string]string{"HF_TOKEN": "open"}
 	clash.Job.SecretEnv = map[string]string{"HF_TOKEN": "the-secret-value"}
 	var refused *AdmissionError
-	if err := s.Submit(context.Background(), clash); !errors.As(err, &refused) || refused.Reason != ReasonMalformed || admissionHTTPStatus(refused.Reason) != 400 {
+	if err := s.Submit(context.Background(), clash); !errors.As(err, &refused) || refused.Reason != ReasonMalformed || AdmissionStatus(refused.Reason) != 400 {
 		t.Fatalf("a name in both env and secret_env: got = %v, want a malformed submission answered 400", err)
 	}
 	if strings.Contains(refused.Message, "the-secret-value") {
@@ -571,7 +571,7 @@ func TestAJobImageIsStoredAsAnAddressAndABareNameIsRefused(t *testing.T) {
 		exp := humanIdeaSubmission()
 		exp.Job.Image = stated
 		var refused *AdmissionError
-		if err := s.Submit(context.Background(), exp); !errors.As(err, &refused) || refused.Reason != domain.ReasonUnknownJobImage || admissionHTTPStatus(refused.Reason) != http.StatusUnprocessableEntity {
+		if err := s.Submit(context.Background(), exp); !errors.As(err, &refused) || refused.Reason != domain.ReasonUnknownJobImage || AdmissionStatus(refused.Reason) != http.StatusUnprocessableEntity {
 			t.Fatalf("job.image %q: got = %v, want a 422 %s", stated, err, domain.ReasonUnknownJobImage)
 		}
 		if !strings.Contains(refused.Message, "python, pytorch-cuda") {
@@ -616,7 +616,7 @@ func TestAJobThatNamesNoImageIsRefusedAtSubmit(t *testing.T) {
 	exp := humanIdeaSubmission()
 	exp.Job.Image = ""
 	var refused *AdmissionError
-	if err := s.Submit(context.Background(), exp); !errors.As(err, &refused) || refused.Reason != ReasonImageRequired || admissionHTTPStatus(refused.Reason) != http.StatusUnprocessableEntity {
+	if err := s.Submit(context.Background(), exp); !errors.As(err, &refused) || refused.Reason != ReasonImageRequired || AdmissionStatus(refused.Reason) != http.StatusUnprocessableEntity {
 		t.Fatalf("a job with no image: got = %v, want a 422 %s", err, ReasonImageRequired)
 	}
 	if !strings.Contains(refused.Message, "job.image is required") || !strings.Contains(refused.Message, "hl capacity") {
@@ -747,7 +747,7 @@ func TestAJobNoIdleClusterHoldsIsRefusedAtSubmit(t *testing.T) {
 		t.Fatalf("a job the idle cluster holds: got = %v, want it accepted", err)
 	}
 	refused, err := submit(installedCapacity{installed: installed, nodes: oneNode}, "4000Gi", 1)
-	if refused == nil || refused.Reason != domain.NotAdmittedExceedsClusterCapacity || admissionHTTPStatus(refused.Reason) != http.StatusUnprocessableEntity {
+	if refused == nil || refused.Reason != domain.NotAdmittedExceedsClusterCapacity || AdmissionStatus(refused.Reason) != http.StatusUnprocessableEntity {
 		t.Fatalf("more storage than the node's disk: got = %v, want a 422 %s", err, domain.NotAdmittedExceedsClusterCapacity)
 	}
 	for _, said := range []string{"3.9 TiB storage", "8 cores", "16 GiB memory", "box-b has 1 x " + strings.ToLower(chip), "3.6 TiB storage"} {
@@ -822,7 +822,7 @@ func (*summarisedJobStore) CreateHypothesisFinding(_ context.Context, _, _, expe
 func TestASecondSummaryOnAJobIsRefusedAsAConflict(t *testing.T) {
 	s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, environments: declared{}, store: &summarisedJobStore{}, hypotheses: oneHypothesis{h: &domain.Hypothesis{ID: "hyp-1", AgentID: "agent-1"}}}
 	_, err := s.WriteExperimentSummary(context.Background(), "job-1", domain.Actor{Kind: domain.ActorAgent, ID: "agent-1"}, "again")
-	refusal := admissionStatusError(err)
+	refusal := ChangeRefusal(err)
 	if refusal == nil || refusal.GetStatus() != http.StatusConflict {
 		t.Fatalf("a second summary: got = %v (%v), want a 409", refusal, err)
 	}

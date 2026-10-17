@@ -41,8 +41,7 @@ func TestSmoke(t *testing.T) {
 	httpapi.RegisterPlatformExperiments(doc, peHandler, zap.NewNop())
 	httpapi.RegisterSituation(doc, nil, nil)
 	httpapi.RegisterPlatformExperimentBudget(doc, peHandler, zap.NewNop())
-	scheduler.RegisterHuma(doc, scheduler.NewHandler(
-		scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{})))
+	httpapi.RegisterJobs(doc, scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{}), zap.NewNop())
 	httpapi.RegisterRegistry(doc, nil, nil)
 	httpapi.RegisterExperimentData(doc, nil, zap.NewNop())
 	httpapi.RegisterSessions(doc, nil, zap.NewNop())

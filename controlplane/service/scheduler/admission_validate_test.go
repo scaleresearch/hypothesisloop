@@ -172,7 +172,7 @@ func TestAJobStatesItsCPUMemoryAndStorageAsQuantities(t *testing.T) {
 		}
 	}
 	for _, reason := range []string{ReasonCPURequired, ReasonMemoryRequired, ReasonStorageRequired} {
-		if got := admissionHTTPStatus(reason); got != http.StatusUnprocessableEntity {
+		if got := AdmissionStatus(reason); got != http.StatusUnprocessableEntity {
 			t.Errorf("%s answers %d, want 422", reason, got)
 		}
 	}

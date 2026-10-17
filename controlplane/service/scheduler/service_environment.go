@@ -4,15 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 
-	"github.com/danielgtaylor/huma/v2"
-
-	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 )
 
 // ReasonNoEnvironmentFile refuses to build the environment of a commit that declares none.
@@ -137,19 +132,12 @@ func (s *Service) environmentJob(ctx context.Context, peID, codeRef, image strin
 	return pe, exp, nil
 }
 
-// environmentRequest is the wire shape of POST /environments.
-type environmentRequest struct {
-	PlatformExperimentID string `json:"platform_experiment_id,omitempty" required:"false" doc:"The platform experiment whose repository holds the commit. Absent with an agent's token, it is that agent's."`
-	CodeRef              string `json:"code_ref" doc:"The commit whose .hypothesisloop/Dockerfile is built: the platform experiment's repository_url@<40-character sha>, as metadata.code_ref of a job."`
-	Image                string `json:"image" doc:"The image it is built on: job.image of the job that is to run in it, a job image name or a whole address."`
-}
-
 // environmentLoaded answers a building environment whose image one cluster holds on a node before
 // it is pushed: its jobs run there now. It is never stored.
 const environmentLoaded domain.EnvironmentState = "loaded"
 
-// environmentAnswer is an environment as POST /environments answers it.
-type environmentAnswer struct {
+// EnvironmentAnswer is an environment as POST /environments answers it.
+type EnvironmentAnswer struct {
 	Key           string                  `json:"key" doc:"The environment, as environment_key of every job of the commit that names the image."`
 	State         domain.EnvironmentState `json:"state" doc:"building; loaded, built and held on a node of loaded_cluster while it is pushed, so a job that fits there runs there now and any other once the push ends; ready, pushed, so a job runs in it on any cluster; or failed."`
 	Base          string                  `json:"base" doc:"The image it is built on."`
@@ -160,8 +148,8 @@ type environmentAnswer struct {
 	Message       string                  `json:"message" doc:"Where the build is, in a sentence, and once the file failed the end of its output."`
 }
 
-func answerEnvironment(env *domain.Environment) environmentAnswer {
-	answer := environmentAnswer{Key: env.Key, State: env.State, Base: env.Base, Fault: env.Fault}
+func AnswerEnvironment(env *domain.Environment) EnvironmentAnswer {
+	answer := EnvironmentAnswer{Key: env.Key, State: env.State, Base: env.Base, Fault: env.Fault}
 	switch {
 	case env.State == domain.EnvironmentReady:
 		answer.Image = env.Image
@@ -177,80 +165,4 @@ func answerEnvironment(env *domain.Environment) environmentAnswer {
 		answer.Message = "the platform could not build it, no fault of the file's: ask again and it is built again"
 	}
 	return answer
-}
-
-func registerEnvironments(doc *apidocs.Doc, h *Handler) {
-	access := doc.Access
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
-		OperationID: "build-environment", Method: "POST", Path: "/environments",
-		Summary: "Build the environment a commit declares, ahead of its job", Tags: []string{"experiments"},
-		Description: "Starts building the .hypothesisloop/Dockerfile of commit code_ref on image, the build a job of that commit naming that image waits for (environment_key), so the job finds it built or building when it is submitted. " +
-			"Asking again is safe: it answers the one environment as it is then, and builds again one that failed. " +
-			"An agent that asks while it builds is told as environment.status on its event stream once a cluster loaded it (loaded: submit its jobs then), or else once the build ends, ready or failed; a failure is told either way. " +
-			"422 no_environment_file for a commit without the file, invalid_environment_file for one the platform does not build, no_environment_builder while no cluster the org may use builds, " +
-			"unknown_job_image and code_ref_not_in_repository as a submit answers them.",
-	}, func(ctx context.Context, in *struct{ Body environmentRequest }) (*struct{ Body environmentAnswer }, error) {
-		caller, ok := auth.FromContext(ctx)
-		if !ok {
-			return nil, auth.Internal(h.svc.logger, "build environment", errNoCaller)
-		}
-		peID, agentID := in.Body.PlatformExperimentID, ""
-		if caller.Kind == auth.KindAgent {
-			agentID = caller.AgentID
-			if peID == "" {
-				peID = caller.PlatformExperimentID
-			}
-		}
-		if err := access.PlatformExperiment(ctx, peID); err != nil {
-			return nil, err
-		}
-		env, err := h.svc.BuildEnvironment(ctx, peID, agentID, in.Body.CodeRef, in.Body.Image)
-		if err != nil {
-			var refused *AdmissionError
-			if errors.As(err, &refused) {
-				return nil, refusal.Refuse(admissionHTTPStatus(refused.Reason), refused.Reason, refused.Message)
-			}
-			return nil, auth.Internal(h.svc.logger, "build environment", err)
-		}
-		return &struct{ Body environmentAnswer }{Body: answerEnvironment(env)}, nil
-	})
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
-		OperationID: "get-environment", Method: "GET", Path: "/environments",
-		Summary: "Read the environment a commit declares, building nothing", Tags: []string{"experiments"},
-		Description: "Answers the environment the .hypothesisloop/Dockerfile of commit code_ref on image is, as POST /environments answers it, and starts no build: one that failed stays failed. " +
-			"An agent that reads it building is told as environment.status once it is loaded or ends, as POST /environments says. " +
-			"404 environment_not_requested while nothing asked for its build; 422 no_environment_file and invalid_environment_file as POST /environments answers them.",
-	}, func(ctx context.Context, in *struct {
-		PlatformExperimentID string `query:"platform_experiment_id" required:"false" doc:"The platform experiment whose repository holds the commit. Absent with an agent's token, it is that agent's."`
-		CodeRef              string `query:"code_ref" required:"true" doc:"The commit, as code_ref of POST /environments."`
-		Image                string `query:"image" required:"true" doc:"The image it is built on, as image of POST /environments."`
-	}) (*struct{ Body environmentAnswer }, error) {
-		caller, ok := auth.FromContext(ctx)
-		if !ok {
-			return nil, auth.Internal(h.svc.logger, "get environment", errNoCaller)
-		}
-		peID, agentID := in.PlatformExperimentID, ""
-		if caller.Kind == auth.KindAgent {
-			agentID = caller.AgentID
-			if peID == "" {
-				peID = caller.PlatformExperimentID
-			}
-		}
-		if err := access.PlatformExperiment(ctx, peID); err != nil {
-			return nil, err
-		}
-		env, err := h.svc.FindEnvironment(ctx, peID, agentID, in.CodeRef, in.Image)
-		if err != nil {
-			var refused *AdmissionError
-			if errors.As(err, &refused) {
-				status := admissionHTTPStatus(refused.Reason)
-				if refused.Reason == ReasonEnvironmentNotRequested {
-					status = http.StatusNotFound
-				}
-				return nil, refusal.Refuse(status, refused.Reason, refused.Message)
-			}
-			return nil, auth.Internal(h.svc.logger, "get environment", err)
-		}
-		return &struct{ Body environmentAnswer }{Body: answerEnvironment(env)}, nil
-	})
 }

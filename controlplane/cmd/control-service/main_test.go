@@ -25,7 +25,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
-	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler"
 )
 
 // public is every route control-service answers without a token.
@@ -62,7 +61,6 @@ func testRouter(t *testing.T) chi.Router {
 		accounts:            &accounts.Handler{},
 		agentTypes:          &accounts.AgentTypesHandler{},
 		repositories:        &accounts.Repositories{},
-		scheduler:           &scheduler.Handler{},
 		watch:               &watch.Handler{},
 		clusterAgent:        &clusterexchange.Handler{},
 		modelProxy:          modelProxy,

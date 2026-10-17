@@ -32,9 +32,9 @@ func unestimatedLimit(pe *domain.PlatformExperiment, now time.Time) float64 {
 	return left
 }
 
-// errNoCaller is a request that reached the service with no authenticated caller: every route
+// ErrNoCaller is a request that reached the service with no authenticated caller: every route
 // is behind the token check, so it is the platform's fault and never the submitter's.
-var errNoCaller = errors.New("scheduler: no authenticated caller in the request context")
+var ErrNoCaller = errors.New("scheduler: no authenticated caller in the request context")
 
 // Submit runs the admission gate for an experiment. On success the experiment is
 // transitioned to QUEUED. On rejection an *AdmissionError is returned.
@@ -72,7 +72,7 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 			// whoever asks, and is said there alone.
 			reader, ok := auth.FromContext(ctx)
 			if !ok {
-				return errNoCaller
+				return ErrNoCaller
 			}
 			if err := s.quota.Describe(ctx, pe, reader); err != nil {
 				return fmt.Errorf("scheduler: describe platform experiment: %w", err)

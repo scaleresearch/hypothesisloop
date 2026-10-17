@@ -35,11 +35,11 @@ func openExperiment() *domain.PlatformExperiment {
 // baseline of whichever job is named.
 func declareAPI(t *testing.T, pe *domain.PlatformExperiment, baseline *platformexperiments.Baseline, caller auth.Principal) (*createdStore, func(body map[string]any) (int, map[string]any)) {
 	t.Helper()
-	return jobsAPI(t, pe, []*platformexperiments.Baseline{baseline}, caller)
+	return declareJobsAPI(t, pe, []*platformexperiments.Baseline{baseline}, caller)
 }
 
-// jobsAPI is declareAPI with the platform's records of each of jobs.
-func jobsAPI(t *testing.T, pe *domain.PlatformExperiment, jobs []*platformexperiments.Baseline, caller auth.Principal) (*createdStore, func(body map[string]any) (int, map[string]any)) {
+// declareJobsAPI is declareAPI with the platform's records of each of jobs.
+func declareJobsAPI(t *testing.T, pe *domain.PlatformExperiment, jobs []*platformexperiments.Baseline, caller auth.Principal) (*createdStore, func(body map[string]any) (int, map[string]any)) {
 	t.Helper()
 	store := &createdStore{created: []*domain.PlatformExperiment{pe}}
 	svc := platformexperiments.NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), "", time.Minute)

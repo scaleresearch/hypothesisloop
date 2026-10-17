@@ -266,8 +266,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 	httpapi.RegisterSessions(doc, nil, logger)
 	httpapi.RegisterExperimentDrafts(doc, nil)
 	accounts.RegisterHuma(doc, accounts.NewHandler(nil, nil, nil, nil, nil, worldSecret, accounts.RuntimeAddresses{}, accounts.Limits{MaxOrgsPerUser: 3, MaxProjectsPerOrg: 10}, logger))
-	scheduler.RegisterHuma(doc, scheduler.NewHandler(
-		scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", logger).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{})))
+	httpapi.RegisterJobs(doc, scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", logger).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{}), logger)
 	httpapi.RegisterRegistry(doc, registry.New(nil, worldGraph{world: w}, nil, logger, "http://metrics.invalid", nil), logger)
 	httpapi.RegisterWatchKinds(doc)
 

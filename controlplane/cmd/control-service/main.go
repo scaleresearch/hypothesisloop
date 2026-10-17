@@ -310,7 +310,7 @@ type routes struct {
 	accounts            *accounts.Handler
 	agentTypes          *accounts.AgentTypesHandler
 	repositories        *accounts.Repositories
-	scheduler           *scheduler.Handler
+	scheduler           *scheduler.Service
 	registry            *registry.Service
 	watch               *watch.Handler
 	clusterAgent        *clusterexchange.Handler
@@ -380,7 +380,7 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 	accounts.RegisterHuma(doc, h.accounts)
 	accounts.RegisterAgentTypesHuma(doc, h.agentTypes)
 	accounts.RegisterRepositoriesHuma(doc, h.repositories)
-	scheduler.RegisterHuma(doc, h.scheduler)
+	httpapi.RegisterJobs(doc, h.scheduler, logger)
 	httpapi.RegisterModelUsage(doc, h.experiments, logger)
 	httpapi.RegisterRegistry(doc, h.registry, logger)
 	// /watch itself cannot be registered here (it is an upgrade), but its vocabulary can be, so
@@ -398,7 +398,7 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 // newSchedulerParts builds the scheduler's handler and starts its background loops, returning
 // the handlers newRouter serves: the scheduler's on the shared API doc, the cluster-agents' under
 // its own prefix.
-func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environmentsSvc *environments.Service, pool *db.Pool, store *db.Store, graph *graphdb.Store, expQuotaSvc *platformexperiments.PlatformExperimentsService, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL string, dataStore *objectstore.Client, logger *zap.Logger) (*scheduler.Handler, *clusterexchange.Handler) {
+func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environmentsSvc *environments.Service, pool *db.Pool, store *db.Store, graph *graphdb.Store, expQuotaSvc *platformexperiments.PlatformExperimentsService, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL string, dataStore *objectstore.Client, logger *zap.Logger) (*scheduler.Service, *clusterexchange.Handler) {
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
 
 	clusterReports, err := scheduler.NewClusterReports(store, metricsDBURL,
@@ -485,7 +485,7 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environ
 		func(ctx context.Context) { watcher.Start(ctx, pass) },
 	}, rented...)...)
 
-	return scheduler.NewHandler(schedulerSvc), clusterAgentHandler
+	return schedulerSvc, clusterAgentHandler
 }
 
 // newEnvironmentRegistry is where assigned environment builds push to and the logins to it, and

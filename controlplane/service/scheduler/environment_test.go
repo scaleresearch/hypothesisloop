@@ -345,7 +345,7 @@ func TestAJobWaitingForALoadedEnvironmentSaysWhereItRunsNow(t *testing.T) {
 		!strings.HasSuffix(got, "It waits for a live cluster that builds for its org to have room") {
 		t.Errorf("after a failed push: %q", got)
 	}
-	answer := answerEnvironment(loaded)
+	answer := AnswerEnvironment(loaded)
 	if answer.State != "loaded" || answer.LoadedCluster != "builder-a" || answer.LoadedNode != "node-1" || answer.Image != "" ||
 		!strings.Contains(answer.Message, "loaded on node node-1 of cluster builder-a") {
 		t.Errorf("answered %+v, want it loaded on builder-a's node-1", answer)

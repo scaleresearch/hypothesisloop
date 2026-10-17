@@ -58,9 +58,9 @@ func platformRoutes(caller auth.Principal) http.Handler {
 	httpapi.RegisterExperimentData(doc, nil, logger)
 	httpapi.RegisterSessions(doc, nil, logger)
 	accounts.RegisterHuma(doc, accounts.NewHandler(nil, nil, nil, nil, nil, "secret", accounts.RuntimeAddresses{}, accounts.Limits{MaxOrgsPerUser: 1, MaxProjectsPerOrg: 1}, logger))
-	scheduler.RegisterHuma(doc, scheduler.NewHandler(scheduler.NewService(nil, nil, nil,
+	httpapi.RegisterJobs(doc, scheduler.NewService(nil, nil, nil,
 		struct{ scheduler.CodeHost }{}, struct{ scheduler.InstalledCapacity }{}, struct{ scheduler.QuotaSettler }{}, "http://metrics.invalid", logger).
-		WithLoop(struct{ scheduler.Triggerable }{})))
+		WithLoop(struct{ scheduler.Triggerable }{}), logger)
 	httpapi.RegisterRegistry(doc, registry.New(nil, nil, nil, logger, "http://metrics.invalid", nil), logger)
 	httpapi.RegisterWatchKinds(doc)
 	access := auth.NewAccess(authtest.Placement{})

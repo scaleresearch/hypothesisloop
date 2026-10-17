@@ -105,7 +105,7 @@ func TestEachRefusalOfTheAdmissionTransactionIsAnsweredWithItsOwnReason(t *testi
 		s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, environments: declared{}, store: admittingStore{}, hypotheses: humanHypothesis("pe-1"),
 			quota: refusingQuota{err: &db.AdmitRefusal{Reason: reason, Message: "the sentence of " + reason}}}
 		var refused *AdmissionError
-		if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.As(err, &refused) || refused.Reason != reason || admissionHTTPStatus(refused.Reason) != status {
+		if err := s.Submit(context.Background(), humanIdeaSubmission()); !errors.As(err, &refused) || refused.Reason != reason || AdmissionStatus(refused.Reason) != status {
 			t.Fatalf("%s: got = %v, want that reason answered %d", reason, err, status)
 		}
 		if outlook := strings.Contains(refused.Message, "share"); outlook != (reason == db.RefusedInsufficientQuota) || !strings.HasPrefix(refused.Message, "the sentence of "+reason) {
