@@ -437,6 +437,7 @@ func (c *JobWorkloadClient) compileJob(exp *clusterapi.DesiredJob, placement Acc
 				},
 				Spec: corev1.PodSpec{
 					PriorityClassName:             priorityClass,
+					AutomountServiceAccountToken:  new(bool),
 					RestartPolicy:                 restartPolicy,
 					Containers:                    []corev1.Container{container},
 					Volumes:                       volumes,

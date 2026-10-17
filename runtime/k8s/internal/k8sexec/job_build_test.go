@@ -103,6 +103,27 @@ func TestBuildJobPodTemplateCarriesTheAttemptLabel(t *testing.T) {
 	}
 }
 
+func TestBuildJobPodGetsNoServiceAccountToken(t *testing.T) {
+	c := &JobWorkloadClient{apiURL: testAPIURL}
+	exp := &clusterapi.DesiredJob{Image: testImage, Launch: "true",
+		Data: testDataAccess(), Token: "test-job-token", GitURL: "https://api.test/git/pe-1.git",
+		ID: "sa-token-test", AgentID: "agent", ProjectID: "project",
+		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
+		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
+		Job: clusterapi.JobSpec{
+			CPU: "2", Memory: "8Gi", Storage: "5Gi", MaxRetries: intPtr(3), TerminationGracePeriodSeconds: int64Ptr(5),
+			AcceleratorCount: 1, AcceleratorType: "tenstorrent.com/chipArch=blackhole",
+		},
+	}
+	job, err := c.BuildJob(exp, AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mount := job.Spec.Template.Spec.AutomountServiceAccountToken; mount == nil || *mount {
+		t.Fatalf("AutomountServiceAccountToken = %v, want false: the job runs customer code", mount)
+	}
+}
+
 func TestBuildJobAddsReadOnlyHostPathVolumeForHostMounts(t *testing.T) {
 	c := &JobWorkloadClient{apiURL: testAPIURL}
 	exp := &clusterapi.DesiredJob{Image: testImage, Launch: "true",
