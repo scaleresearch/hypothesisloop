@@ -6,10 +6,8 @@ import { fetchHypothesisStats } from '@/lib/api/hypotheses'
 import { fetchPlatformExperimentQuotas } from '@/lib/api/quotas'
 import { useRouter } from 'next/navigation'
 import { experimentPath } from '@/lib/routes'
-import { isReadOnly } from '@/lib/read-only'
 import { formatAccH, isZeroDate } from '@/lib/format'
 import { budgetKind, budgetUnit } from '@/lib/units'
-import { useTenant } from '@/lib/tenant'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { SharedBadge } from '@/components/shared-badge'
@@ -23,13 +21,10 @@ import type { AgentQuotaView, PlatformExperiment } from '@/types/api'
 
 const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' })
 
-// The API takes an edit of an open or a running experiment only.
-const EDITABLE: string[] = ['open', 'running']
-
 /**
  * One platform experiment in a list, on one line, opening its page. It shows the figures its
- * state gives a meaning to and none that are zero. One the caller only reads offers no edit and
- * no removal.
+ * state gives a meaning to and none that are zero. It offers the edit and the removal the API lists
+ * for the caller.
  */
 export function PlatformExperimentCard({
   pe,
@@ -39,8 +34,6 @@ export function PlatformExperimentCard({
   onEdit: (pe: PlatformExperiment) => void
 }) {
   const router = useRouter()
-  const { me } = useTenant()
-  const readOnly = isReadOnly(me, pe)
   const href = experimentPath(pe.id)
   const started = pe.status !== 'draft'
 
@@ -103,10 +96,10 @@ export function PlatformExperimentCard({
           {figures.map(f => <span key={f.text} title={f.title} className={clsx(f.title && 'text-danger')}>{f.text}</span>)}
           {daysLeft != null && daysLeft > 0 && <span className={clsx(daysLeft < 2 && 'text-danger')}>{daysLeft}d left</span>}
           {when && <span>{when}</span>}
-          {!readOnly && EDITABLE.includes(pe.status) && (
+          {pe.editable.some(field => field !== 'goal') && (
             <Button size="sm" onClick={e => { e.stopPropagation(); onEdit(pe) }}>Edit</Button>
           )}
-          {!readOnly && (
+          {pe.actions.includes('remove') && (
             // The dialog is rendered in a portal, and its clicks and keys still bubble to the row through React.
             <span onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
               <RemoveExperiment pe={pe} label="Remove" />

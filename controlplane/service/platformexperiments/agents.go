@@ -212,9 +212,12 @@ func (s *Service) AddAgent(ctx context.Context, platformExpID string, req AddAge
 			return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
 		}
 	}
+	if !member && !takesSignup(pe.Status, role) {
+		return nil, enrolRefused(db.ErrSignupClosed, pe, req.Name)
+	}
 	var late *db.LateJoin
 	if pe.Status == domain.PlatformExpRunning && !member {
-		if late, err = s.lateJoin(ctx, pe, role, by); err != nil {
+		if late, err = s.lateJoin(ctx, pe, by); err != nil {
 			return nil, err
 		}
 	}
@@ -236,10 +239,7 @@ func (s *Service) AddAgent(ctx context.Context, platformExpID string, req AddAge
 // lateJoin is what a researcher joining the running pe takes its quota from. Once the run started
 // only a researcher joins, in the place of one that ended or one a raised max_agents gave, and its
 // coordinator or a person adds it.
-func (s *Service) lateJoin(ctx context.Context, pe *domain.PlatformExperiment, role domain.SignupRole, by domain.Actor) (*db.LateJoin, error) {
-	if role != domain.SignupRoleCompetitor {
-		return nil, refuseSignup(409, "signup_closed", "platform experiment %s is running, and only a researcher (role competitor) joins it then", pe.ID)
-	}
+func (s *Service) lateJoin(ctx context.Context, pe *domain.PlatformExperiment, by domain.Actor) (*db.LateJoin, error) {
 	if by.Kind == domain.ActorAgent {
 		return nil, refuseSignup(403, "not_coordinator", "an agent adds no agent to a running platform experiment: its coordinator or its owner does")
 	}

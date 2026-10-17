@@ -9,7 +9,7 @@ import { Inline, Stack } from '@/components/ui/stack'
 import { Eyebrow, Text } from '@/components/ui/text'
 import { HypothesisPicker } from '@/components/hypotheses/search'
 import { AgentLabel } from '@/components/agent-label'
-import { useReadOnly } from '@/lib/read-only'
+import { useExperimentActions } from '@/lib/experiment-actions'
 import { LINK_KINDS, LINK_KIND_HINTS, LINK_KIND_LABELS } from '@/lib/hypothesis-graph'
 import { errorMessage } from '@/lib/errors'
 import type { HypothesisWithJobs, LinkType } from '@/types/api'
@@ -20,9 +20,9 @@ export function AddLinkForm({ hypothesis, onAdded }: { hypothesis: HypothesisWit
   const [target, setTarget] = useState<HypothesisSearchHit | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const readOnly = useReadOnly()
+  const actions = useExperimentActions()
 
-  if (readOnly) return null
+  if (!actions.includes('add_idea')) return null
   if (hypothesis.agent_id) {
     return (
       <Text variant="hint" className="mt-3">
@@ -75,7 +75,7 @@ export function AddCommentForm({ hypothesisID, onAdded }: { hypothesisID: string
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const readOnly = useReadOnly()
+  const actions = useExperimentActions()
 
   async function submit() {
     setBusy(true)
@@ -91,7 +91,7 @@ export function AddCommentForm({ hypothesisID, onAdded }: { hypothesisID: string
     }
   }
 
-  if (readOnly) return null
+  if (!actions.includes('add_idea')) return null
   return (
     <Stack gap="sm" className="mt-3 max-w-3xl">
       <Textarea

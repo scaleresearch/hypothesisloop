@@ -1,15 +1,12 @@
 'use client'
 
-import { isReadOnly } from '@/lib/read-only'
-import { useTenant } from '@/lib/tenant'
 import { Pill } from '@/components/ui/text'
 import type { PlatformExperiment } from '@/types/api'
 
 /** Marks a platform experiment the platform shares with every account, wherever one is shown. */
-export function SharedBadge({ pe }: { pe: Pick<PlatformExperiment, 'shared' | 'project_id'> }) {
-  const { me } = useTenant()
+export function SharedBadge({ pe }: { pe: Pick<PlatformExperiment, 'shared' | 'actions'> }) {
   if (!pe.shared) return null
-  const readOnly = isReadOnly(me, pe)
+  const readOnly = pe.actions.length === 0
   return (
     <Pill
       tone="neutral"

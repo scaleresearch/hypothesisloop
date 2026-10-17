@@ -86,11 +86,10 @@ function baselineAgent(agents: JoinedAgent[] | undefined): JoinedAgent | undefin
  * theirs nor that none is. Past its proposal, the Proposal step opens the proposal as it was
  * accepted, to read.
  */
-export function PhaseStrip({ pe, jobs = [], stages, readOnly = false, children }: {
+export function PhaseStrip({ pe, jobs = [], stages, children }: {
   pe: PlatformExperiment
   jobs?: Experiment[]
   stages?: StagesStatus
-  readOnly?: boolean
   children?: ReactNode
 }) {
   const phase = phaseOf(pe)
@@ -105,7 +104,7 @@ export function PhaseStrip({ pe, jobs = [], stages, readOnly = false, children }
   // Present only in answers to staff.
   const operatorDetail = reasonOf(pe).operator_detail
   // A closed experiment waits for nobody, and a reader is told neither whose move it is.
-  const who = readOnly || phase === 'closed' ? undefined : waitsFor(pe)
+  const who = pe.actions.length === 0 || phase === 'closed' ? undefined : waitsFor(pe)
   const planner = agents?.find(agent => agent.agent_type === 'planner')
   const baseline = baselineAgent(agents)
   const [showProposal, setShowProposal] = useState(false)
@@ -120,7 +119,7 @@ export function PhaseStrip({ pe, jobs = [], stages, readOnly = false, children }
           open={pastProposal ? ['proposal'] : []} shown={showProposal ? 'proposal' : undefined} onOpen={() => setShowProposal(shown => !shown)}
         />
         {phase === 'running' && pe.started_at && stages && stages.stages.length > 0 && <RunProgress status={stages} />}
-        {phase === 'planning' ? <PlanningProgress pe={pe} planner={planner} readOnly={readOnly} /> : !who ? why : who === 'owner' ? (
+        {phase === 'planning' ? <PlanningProgress pe={pe} planner={planner} /> : !who ? why : who === 'owner' ? (
           <Callout tone="warning" className="grid justify-items-start gap-1.5">
             <Eyebrow tone="warning">Your move</Eyebrow>
             {why}

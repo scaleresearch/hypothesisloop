@@ -28,7 +28,6 @@ import { errorMessage } from '@/lib/errors'
 import { Select } from '@/components/ui/select'
 import { relTime } from '@/lib/format'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
-import { useReadOnly } from '@/lib/read-only'
 import type { Tone } from '@/lib/colors'
 import { keys } from '@/lib/keys'
 import type { AgentMessage, CurrentAgentType, JoinedAgent, PlatformExperiment } from '@/types/api'
@@ -215,7 +214,7 @@ function AgentDetails({ agent, messages, catalog }: { agent: JoinedAgent; messag
 /** The anchor of the agents card, for a link that says to add a researcher. */
 export const AGENTS_CARD = 'agents'
 
-/** Who takes part in a platform experiment, and while it has not started, adding and removing them. */
+/** Who takes part in a platform experiment, and adding and removing them as the API allows the caller. */
 export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
   const { data: agents, error, mutate } = useRoster(pe)
   const [rowError, setRowError] = useState('')
@@ -224,7 +223,6 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
   const [removing, setRemoving] = useState<JoinedAgent | null>(null)
   const [messaging, setMessaging] = useState<JoinedAgent | null>(null)
   const [open, setOpen] = useState<string | null>(null)
-  const readOnly = useReadOnly()
   const { org } = useTenant()
   const { data: catalog } = useAgentTypes(org.id)
   // Quota is divided at the start over the agents present, so the roster is fixed from then on.
@@ -263,7 +261,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
   return (
     <Section id={AGENTS_CARD} title="Agents" note={agents && `(${agents.length})`} scrollX>
         <Stack>
-          {!readOnly && !started && <AddAgents pe={pe} onAdded={joined => { show(joined); return mutate() }} />}
+          {pe.actions.includes('add_agent') && <AddAgents pe={pe} onAdded={joined => { show(joined); return mutate() }} />}
           {shown.map(agent => (
             <Secret
               key={agent.agent_id}
@@ -332,7 +330,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
                         <td className="whitespace-nowrap text-xs"><AgentTypeLabel agent={agent} catalog={catalog} /></td>
                         <td><StatusLabel tone={status.tone} title={status.detail}>{status.label}</StatusLabel></td>
                         <td>
-                          {!readOnly && (
+                          {pe.actions.length > 0 && (
                             <Inline gap="xs" nowrap className="justify-end">
                               {at && !agent.finished_at && agent.role !== 'planner' && (
                                 <Button size="sm" onClick={() => setMessaging(agent)}>Message</Button>

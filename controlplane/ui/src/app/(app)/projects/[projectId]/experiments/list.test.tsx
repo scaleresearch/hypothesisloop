@@ -37,9 +37,12 @@ const me: Me = {
   projects: [{ id: 'prj_1', org_id: 'org_a', name: 'default', created_at: at }],
 }
 
+// As the API lists it: a running one of the caller's own project is theirs to edit and close.
 function experiment(id: string, name: string, projectID: string, shared: boolean): PlatformExperiment {
+  const own = projectID === 'prj_1'
   return {
     id, name, project_id: projectID, status: 'running', shared,
+    editable: own ? ['name', 'description', 'duration_hours'] : [], actions: own ? ['remove', 'close', 'add_agent', 'add_idea'] : [],
     budget_accelerator_hours: 100, max_agents: 4, signup_count: 3, stages: [], current_stage: 1, created_at: at,
     description: '', metrics: [], researchers: [], coordinator_hosted: false, max_hosted: 0, report_interval_seconds: 60, starts_at: at, updated_at: at,
   }

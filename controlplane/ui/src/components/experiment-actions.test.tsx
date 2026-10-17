@@ -6,7 +6,7 @@ import { fetchPlatformExperimentAgents } from '@/lib/api/agents'
 import { fetchHypothesisStats } from '@/lib/api/hypotheses'
 import { fetchExperimentStats } from '@/lib/api/jobs'
 import { fetchPlatformExperimentQuotas } from '@/lib/api/quotas'
-import { ReadOnlyProvider, useReadOnly } from '@/lib/read-only'
+import { ExperimentActionsProvider, useExperimentActions } from '@/lib/experiment-actions'
 import { GraphEditorProvider, useGraphEditor } from '@/components/hypotheses/editor'
 import { AddIdeaButton } from '@/components/hypotheses/editor-controls'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
@@ -41,7 +41,10 @@ const pe = {
   id: 'pe-x', project_id: 'prj_platform', name: 'Vision benchmark', status: 'open' as const, shared: true,
   budget_accelerator_hours: 100, max_agents: 4, signup_count: 2, stages: [], current_stage: 1, created_at: at,
   description: '', metrics: [], researchers: [], coordinator_hosted: false, max_hosted: 0, report_interval_seconds: 60, starts_at: at, updated_at: at,
+  editable: [], actions: [],
 } as PlatformExperiment
+// The same experiment as the API answers it to its owner.
+const owned: PlatformExperiment = { ...pe, project_id: 'prj_1', editable: ['name', 'description'], actions: ['remove', 'close', 'add_agent', 'add_idea'] }
 const node = {
   id: 'hyp-1', platform_experiment_id: 'pe-x', text: 'warmup helps', status: 'open', actor: { kind: 'user', id: 'u1', name: 'Ada' }, agent_id: '',
   created_at: at, builds_on: ['pe-x'], finding_count: 0, comment_count: 0, child_count: 0,
@@ -50,8 +53,8 @@ const graph: HypothesisGraph = { root: 'pe-x', objective: {}, nodes: [node], edg
 
 // As the hypotheses page wires them: an account that only reads writes nothing.
 function GraphPanels() {
-  const readOnly = useReadOnly()
-  const editor = useGraphEditor({ graph, rootLabel: pe.name, canWrite: !readOnly, mutate: vi.fn(), onSelect: () => {} })
+  const actions = useExperimentActions()
+  const editor = useGraphEditor({ graph, rootLabel: pe.name, canWrite: actions.includes('add_idea'), mutate: vi.fn(), onSelect: () => {} })
   return (
     <GraphEditorProvider value={editor}>
       <AddIdeaButton />
@@ -63,13 +66,13 @@ function GraphPanels() {
 
 // Each case renders the same thing twice: as the owner sees it, where the control must be there
 // for its absence to mean anything, and as an account that only reads the shared experiment.
-function show(ui: ReactNode, readOnly: boolean) {
+function show(ui: ReactNode, experiment: PlatformExperiment) {
   const resolved = resolveTenant(me, '')
   if (resolved.state !== 'selected') throw new Error('no tenant')
   return render(
     <SWRConfig value={{ provider: () => new Map() }}>
       <TenantContext.Provider value={resolved.tenant}>
-        <ReadOnlyProvider value={readOnly}>{ui}</ReadOnlyProvider>
+        <ExperimentActionsProvider value={experiment.actions}>{ui}</ExperimentActionsProvider>
       </TenantContext.Provider>
     </SWRConfig>,
   )
@@ -90,23 +93,23 @@ beforeEach(() => {
 
 describe('a shared platform experiment of another org shows no control that writes', () => {
   it('to its agents: no add, no token, no remove', async () => {
-    const own = show(<ExperimentAgents pe={pe} />, false)
+    const own = show(<ExperimentAgents pe={owned} />, owned)
     await screen.findByRole('cell', { name: 'ag-self' })
     expect(names('button')).toEqual(expect.arrayContaining(['Add agent', 'Show token', 'Remove']))
     own.unmount()
 
-    show(<ExperimentAgents pe={pe} />, true)
+    show(<ExperimentAgents pe={pe} />, pe)
     await screen.findByRole('cell', { name: 'ag-self' })
     expect(names('button')).toEqual(['Details of ag-self'])
     expect(names('textbox')).toEqual([])
   })
 
   it('to its hypothesis graph: no idea under the objective or under a hypothesis', () => {
-    const own = show(<GraphPanels />, false)
+    const own = show(<GraphPanels />, owned)
     expect(names('button')).toEqual(expect.arrayContaining(['Add idea', 'Link to…']))
     own.unmount()
 
-    show(<GraphPanels />, true)
+    show(<GraphPanels />, pe)
     expect(names('button').filter(n => n?.includes('Add idea') || n?.includes('Link to'))).toEqual([])
     // Reading on stays possible, from the reader's own project.
     expect(screen.getByRole('link', { name: 'Open detail →' }).getAttribute('href')).toBe('/experiments/pe-x/hypotheses/hyp-1')
@@ -121,27 +124,27 @@ describe('a shared platform experiment of another org shows no control that writ
         <AddCommentForm hypothesisID="hyp-1" onAdded={() => {}} />
       </>
     )
-    const own = show(forms, false)
+    const own = show(forms, owned)
     expect(names('button')).toEqual(expect.arrayContaining(['Add comment']))
     expect(screen.getByText('Add link')).toBeTruthy()
     own.unmount()
 
-    const shared = show(forms, true)
+    const shared = show(forms, pe)
     expect(shared.container.textContent).toBe('')
   })
 
   it('to the experiment in the list: no edit, and a badge that says why', () => {
-    const own = show(<PlatformExperimentCard pe={{ ...pe, project_id: 'prj_1' }} onEdit={() => {}} />, false)
+    const own = show(<PlatformExperimentCard pe={owned} onEdit={() => {}} />, owned)
     expect(names('button')).toContain('Edit')
     expect(screen.getByText('Shared')).toBeTruthy()
     own.unmount()
 
-    const plain = show(<PlatformExperimentCard pe={{ ...pe, shared: false, project_id: 'prj_1' }} onEdit={() => {}} />, false)
+    const plain = show(<PlatformExperimentCard pe={{ ...owned, shared: false }} onEdit={() => {}} />, owned)
     expect(screen.queryByText(/Shared/)).toBeNull()
     plain.unmount()
 
     // The card tells from the experiment itself: it sits in the list of the reader's own project.
-    show(<PlatformExperimentCard pe={pe} onEdit={() => {}} />, false)
+    show(<PlatformExperimentCard pe={pe} onEdit={() => {}} />, pe)
     expect(screen.getByText('Vision benchmark')).toBeTruthy()
     expect(screen.getByText('Shared · read only')).toBeTruthy()
     expect(names('button')).toEqual([])

@@ -27,13 +27,14 @@ import type { PlatformExperiment } from '@/types/api'
  * proposed, accept it now, edit it and accept it at a cost they state, change the goal, or reject
  * it. A reader of a shared draft is shown none of these.
  */
-export function DraftView({ draft, readOnly = false }: { draft: PlatformExperiment; readOnly?: boolean }) {
+export function DraftView({ draft }: { draft: PlatformExperiment }) {
   const router = useRouter()
   const { project } = useTenant()
   const { mutate } = useSWRConfig()
   const [confirming, setConfirming] = useState(false)
   const state = reasonOf(draft).reason
   const proposal = proposalOf(draft)
+  const accepts = draft.actions.includes('accept')
   const reread = () => void mutate(keys.experiment(draft.id))
 
   async function abandon() {
@@ -47,7 +48,7 @@ export function DraftView({ draft, readOnly = false }: { draft: PlatformExperime
       title={draft.name}
       description={<Text as="span" variant="hint">Draft, {state === 'proposed' || state === 'declined' ? 'waiting for you' : state === 'accepting' ? 'starting in a moment' : PLANNING_MOVES.has(state) ? 'being planned' : 'planning on hold'}</Text>}
     >
-      <PhaseStrip pe={draft} readOnly={readOnly} />
+      <PhaseStrip pe={draft} />
       <GoalEditor pe={draft} onSaved={reread} />
       {draft.declined_reason && (
         <Section title="What the planner needs">
@@ -62,9 +63,9 @@ export function DraftView({ draft, readOnly = false }: { draft: PlatformExperime
         </Section>
       )}
       {proposal && (
-        <ProposalForm key={draft.proposed_at} draft={draft} proposal={proposal} editable={!readOnly && state === 'proposed'} accepting={!readOnly && state === 'accepting'} onDone={reread} />
+        <ProposalForm key={draft.proposed_at} draft={draft} proposal={proposal} editable={accepts && state === 'proposed'} accepting={accepts && state === 'accepting'} onDone={reread} />
       )}
-      {!readOnly && (
+      {draft.actions.includes('abandon') && (
         <Inline gap="md">
           <Button variant="ghost" onClick={() => setConfirming(true)}>Abandon this draft</Button>
           <ConfirmDialog open={confirming} title="Abandon this draft?" confirmLabel="Abandon draft" onConfirm={abandon} onClose={() => setConfirming(false)}>

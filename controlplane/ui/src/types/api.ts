@@ -3694,6 +3694,8 @@ export interface components {
              * @description On a proposed draft: when the platform accepts the proposal as proposed, unless a person accepts it sooner, holds it to edit it (POST /platform-experiments/{id}/hold), changes its goal or closes it. Its baseline agent's machine starts with the proposal and runs while this is set. Absent on a draft that waits for a person.
              */
             accepts_at?: string;
+            /** @description What the reader may do to it now, each a write the API accepts from them: close (POST /platform-experiments/{id}/close of one that is open or running), abandon (the same close of a draft), remove (DELETE /platform-experiments/{id}), accept (POST /platform-experiments/{id}/accept of a draft whose proposal stands, and its hold), add_agent (POST /platform-experiments/{id}/agents of a researcher) and add_idea (POST /hypotheses in it). Empty for a reader who writes nothing of it. */
+            actions: components["schemas"]["PlatformExperimentAction"][];
             /** @description On a draft whose planner's machine is up: what the planner is doing now and since when, as on each agent of GET /platform-experiments/{id}/agents. Absent on anything but a draft, where each agent's is in the roster and the coordinator's on coordinator. */
             activity?: components["schemas"]["AgentActivity"];
             actor?: components["schemas"]["Actor"];
@@ -3748,8 +3750,8 @@ export interface components {
              * @description How long the run lasts, the research time, counted from the moment it starts, once its baseline is declared. Measuring the baseline takes nothing from it: baseline_due_at bounds that. Absent on a draft.
              */
             duration_hours?: number;
-            /** @description The fields of PATCH /platform-experiments/{id} the reader may change now, for its status and its credential. Absent for a reader who changes nothing of it, and on a list. A field left out is refused with 409 not_editable. */
-            editable?: string[];
+            /** @description The fields of PATCH /platform-experiments/{id} the reader may change now, for its status and its credential, empty for a reader who changes nothing of it. A field left out is refused with 409 not_editable. */
+            editable: string[];
             /**
              * Format: date-time
              * @description When the run ends and the platform closes it: starts_at, the start of the run, plus duration_hours. Absent until the run starts.
@@ -3839,6 +3841,8 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        /** @enum {string} */
+        PlatformExperimentAction: "close" | "abandon" | "remove" | "accept" | "add_agent" | "add_idea";
         PlatformExperimentPatch: {
             /** @description While the platform experiment is open, declares the baseline: the completed job of an agent of role baseline that measured it, with its finding filed. While it runs, raises the baseline to a stronger completed job of the experiment that ran the baseline's code_ref unchanged in a better configuration, with baseline_reason. */
             baseline_job_id?: string;
@@ -4724,6 +4728,7 @@ export type OrgMember = components['schemas']['OrgMember'];
 export type OrgRole = components['schemas']['OrgRole'];
 export type PhaseDetail = components['schemas']['PhaseDetail'];
 export type PlatformExperiment = components['schemas']['PlatformExperiment'];
+export type PlatformExperimentAction = components['schemas']['PlatformExperimentAction'];
 export type PlatformExperimentPatch = components['schemas']['PlatformExperimentPatch'];
 export type PlatformExperimentResults = components['schemas']['PlatformExperimentResults'];
 export type PlatformExperimentStatus = components['schemas']['PlatformExperimentStatus'];
@@ -8855,6 +8860,7 @@ export const metricReferenceDirectionValues: ReadonlyArray<FlattenedDeepRequired
 export const metricStandingsDirectionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["MetricStandings"]["direction"]> = ["maximize", "minimize"];
 export const orgGitHubInstallationAccount_typeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["OrgGitHubInstallation"]["account_type"]> = ["User", "Organization"];
 export const orgRoleValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["OrgRole"]> = ["owner", "member"];
+export const platformExperimentActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["PlatformExperimentAction"]> = ["close", "abandon", "remove", "accept", "add_agent", "add_idea"];
 export const platformExperimentStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["PlatformExperimentStatus"]> = ["draft", "open", "running", "closed"];
 export const referenceValueConstraints_metValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ReferenceValue"]["constraints_met"]> = ["true", "false", "unknown"];
 export const signupReplyEndedValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SignupReply"]["ended"]> = ["", "closed", "cut", "finished", "planned"];

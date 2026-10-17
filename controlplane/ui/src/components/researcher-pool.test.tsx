@@ -5,7 +5,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchAgentTypes } from '@/lib/api/agent-types'
 import { fetchPlatformExperimentAgents } from '@/lib/api/agents'
 import { updatePlatformExperiment } from '@/lib/api/platform-experiments'
-import { ReadOnlyProvider } from '@/lib/read-only'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { ResearcherPool } from '@/components/researcher-pool'
 import { CATALOG } from '@/test-agent-types'
@@ -36,13 +35,13 @@ const pe = {
   researchers_at_work: { total: 3, pool: [{ agent_type: 'generalist', model: 'm', at_work: 2 }, { agent_type: 'at-lr', model: 'm', at_work: 1 }], outside_pool: 0 },
 } as PlatformExperiment
 
-function show(readOnly = false, experiment = pe) {
+function show(experiment = pe) {
   const resolved = resolveTenant(me, '')
   if (resolved.state !== 'selected') throw new Error('no tenant')
   return render(
     <SWRConfig value={{ provider: () => new Map() }}>
       <TenantContext.Provider value={resolved.tenant}>
-        <ReadOnlyProvider value={readOnly}><ResearcherPool pe={experiment} /></ReadOnlyProvider>
+        <ResearcherPool pe={experiment} />
       </TenantContext.Provider>
     </SWRConfig>,
   )
@@ -65,7 +64,7 @@ describe('the researchers of an experiment', () => {
   })
 
   it('counts what the coordinator added beyond the pool on its own row', async () => {
-    show(false, { ...pe, researchers_at_work: { ...pe.researchers_at_work!, total: 5, outside_pool: 2 } })
+    show({ ...pe, researchers_at_work: { ...pe.researchers_at_work!, total: 5, outside_pool: 2 } })
     expect(await screen.findByText('5 at work of 4 max')).toBeTruthy()
     const rows = within(screen.getByRole('table', { name: 'Pool' })).getAllByRole('row').slice(1).map(r => r.textContent)
     expect(rows).toEqual(['Generalistm22', 'LR sweeperm11', 'Added by the coordinator beyond the pool2'])
@@ -115,11 +114,11 @@ describe('the researchers of an experiment', () => {
   })
 
   it('offers no edit where the API lists no researchers in editable: to a reader, or on a closed one', async () => {
-    const { unmount } = show(true, { ...pe, editable: undefined })
+    const { unmount } = show({ ...pe, editable: [] })
     await screen.findByText('3 at work of 4 max')
     expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
     unmount()
-    show(false, { ...pe, status: 'closed', editable: undefined })
+    show({ ...pe, status: 'closed', editable: [] })
     await screen.findByText('3 at work of 4 max')
     expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
   })

@@ -468,14 +468,8 @@ func (s *Service) accept(ctx context.Context, id string, req AcceptRequest, by d
 	if pe == nil {
 		return nil, ErrPlatformExperimentNotFound
 	}
-	if pe.Status != domain.PlatformExpDraft {
-		return nil, invalidTransition("platform experiment %s is %s: only a draft is accepted", id, pe.Status)
-	}
-	if pe.DeclinedAt != nil {
-		return nil, invalidTransition("draft %s has no proposal to accept: its planner declined (declined_reason). Change its goal with PATCH /platform-experiments/%s, or close it", id, id)
-	}
-	if pe.ProposedAt == nil {
-		return nil, invalidTransition("draft %s has no proposal to accept yet: its planner is still working", id)
+	if err := acceptable(pe); err != nil {
+		return nil, err
 	}
 	var proposal Proposal
 	if err := json.Unmarshal(pe.Proposal, &proposal); err != nil {

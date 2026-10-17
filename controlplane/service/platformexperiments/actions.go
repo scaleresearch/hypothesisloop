@@ -50,6 +50,69 @@ func Editable(pe *domain.PlatformExperiment, caller auth.Principal) []string {
 	return nil
 }
 
+// Permit sets on pe what caller may change of it and do to it now: nothing when caller does not
+// write it.
+func Permit(pe *domain.PlatformExperiment, caller auth.Principal, writes bool) {
+	pe.Editable, pe.Actions = []string{}, []domain.PlatformExperimentAction{}
+	if writes {
+		pe.Editable = append(pe.Editable, Editable(pe, caller)...)
+		pe.Actions = append(pe.Actions, actions(pe, caller)...)
+	}
+}
+
+// actions is what caller, who writes pe, may do to it now, by the rules the writes refuse by.
+func actions(pe *domain.PlatformExperiment, caller auth.Principal) []domain.PlatformExperimentAction {
+	var actions []domain.PlatformExperimentAction
+	if auth.AudienceAgent.Admits(caller, "") && caller.Actor().Kind != "" && pe.Status != domain.PlatformExpClosed {
+		actions = append(actions, domain.PlatformExpActionAddIdea)
+	}
+	if !auth.AudienceCoordinator.Admits(caller, "") {
+		return actions
+	}
+	actions = append(actions, domain.PlatformExpActionRemove)
+	switch {
+	case closes(pe) != nil:
+	case pe.Status == domain.PlatformExpDraft:
+		actions = append(actions, domain.PlatformExpActionAbandon)
+	default:
+		actions = append(actions, domain.PlatformExpActionClose)
+	}
+	if acceptable(pe) == nil {
+		actions = append(actions, domain.PlatformExpActionAccept)
+	}
+	if takesSignup(pe.Status, domain.SignupRoleCompetitor) {
+		actions = append(actions, domain.PlatformExpActionAddAgent)
+	}
+	return actions
+}
+
+// closes refuses to close pe once it is closed.
+func closes(pe *domain.PlatformExperiment) error {
+	if pe.Status == domain.PlatformExpClosed {
+		return invalidTransition("platform experiment %s is already closed", pe.ID)
+	}
+	return nil
+}
+
+// acceptable refuses to accept pe unless it is a draft whose planner's proposal stands.
+func acceptable(pe *domain.PlatformExperiment) error {
+	switch {
+	case pe.Status != domain.PlatformExpDraft:
+		return invalidTransition("platform experiment %s is %s: only a draft is accepted", pe.ID, pe.Status)
+	case pe.DeclinedAt != nil:
+		return invalidTransition("draft %s has no proposal to accept: its planner declined (declined_reason). Change its goal with PATCH /platform-experiments/%s, or close it", pe.ID, pe.ID)
+	case pe.ProposedAt == nil:
+		return invalidTransition("draft %s has no proposal to accept yet: its planner is still working", pe.ID)
+	}
+	return nil
+}
+
+// takesSignup says an agent of role joins a platform experiment in status: any while it is open,
+// and once it runs a researcher only.
+func takesSignup(status domain.PlatformExperimentStatus, role domain.SignupRole) bool {
+	return status == domain.PlatformExpOpen || status == domain.PlatformExpRunning && role == domain.SignupRoleCompetitor
+}
+
 // notEditable refuses the fields of pe that no PATCH changes in its status.
 func notEditable(pe *domain.PlatformExperiment, fields []string) error {
 	var message string

@@ -25,8 +25,8 @@ func (s *Service) Close(ctx context.Context, id string, by *domain.Actor, messag
 	if err != nil {
 		return nil, err
 	}
-	if pe.Status == domain.PlatformExpClosed {
-		return nil, invalidTransition("platform experiment %s is already closed", id)
+	if err := closes(pe); err != nil {
+		return nil, err
 	}
 	return s.close(ctx, pe, topResults, func() error {
 		return s.store.ClosePlatformExperiment(ctx, id, by, domain.EventDetail(message))

@@ -322,6 +322,20 @@ func (a platformExperimentsAPI) listPlatformExperiments(ctx context.Context, in 
 	if err != nil {
 		return nil, err
 	}
+	reader, err := caller(ctx, a.logger)
+	if err != nil {
+		return nil, err
+	}
+	for _, pe := range pes {
+		// Only a shared one is listed past the caller's scope.
+		writes := !pe.Shared
+		if pe.Shared {
+			if writes, err = a.access.Writes(ctx, pe.ID); err != nil {
+				return nil, auth.Internal(a.logger, "list platform experiments", err, zap.String("id", pe.ID))
+			}
+		}
+		platformexperiments.Permit(pe, reader, writes)
+	}
 	return &struct {
 		Body       []*domain.PlatformExperiment
 		TotalCount int `header:"X-Total-Count"`
@@ -510,9 +524,7 @@ func (a platformExperimentsAPI) answer(ctx context.Context, pe *domain.PlatformE
 	if err != nil {
 		return nil, auth.Internal(a.logger, "describe platform experiment", err, zap.String("id", pe.ID))
 	}
-	if writes {
-		pe.Editable = platformexperiments.Editable(pe, reader)
-	}
+	platformexperiments.Permit(pe, reader, writes)
 	if pe.Repository != "" {
 		if pe.GitURL, err = a.experiments.GitURL(pe.ID); err != nil {
 			return nil, auth.Internal(a.logger, "describe platform experiment", err, zap.String("id", pe.ID))

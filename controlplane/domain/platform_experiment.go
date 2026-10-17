@@ -32,6 +32,21 @@ func ValidPlatformExperimentStatus(s PlatformExperimentStatus) bool {
 	return slices.Contains(PlatformExperimentStatuses, s)
 }
 
+// PlatformExperimentAction is something the reader of a platform experiment may do to it now.
+type PlatformExperimentAction string
+
+const (
+	PlatformExpActionClose    PlatformExperimentAction = "close"
+	PlatformExpActionAbandon  PlatformExperimentAction = "abandon"
+	PlatformExpActionRemove   PlatformExperimentAction = "remove"
+	PlatformExpActionAccept   PlatformExperimentAction = "accept"
+	PlatformExpActionAddAgent PlatformExperimentAction = "add_agent"
+	PlatformExpActionAddIdea  PlatformExperimentAction = "add_idea"
+)
+
+var PlatformExperimentActions = []PlatformExperimentAction{PlatformExpActionClose, PlatformExpActionAbandon, PlatformExpActionRemove,
+	PlatformExpActionAccept, PlatformExpActionAddAgent, PlatformExpActionAddIdea}
+
 // MetricRole classifies what a declared MetricDefinition is for (experimentspec.MetricRole).
 type MetricRole = experimentspec.MetricRole
 
@@ -141,8 +156,10 @@ type PlatformExperiment struct {
 	// StatusReason is why the platform experiment is in its status, in every status. Worked out
 	// when one is read and stored nowhere.
 	StatusReason *StatusReason `json:"status_reason,omitempty" doc:"Why it is in its status, in every answer that is one platform experiment (a read of it and each write that answers it, never a list). Any that is not closed reads repository_creating while the platform creates its repository, before any machine of it starts. A draft's reason is then planning, revising, accepting (proposed, and accepted as proposed at accepts_at unless a person acts first), proposed (it waits for a person to accept) or declined (its planner proposed nothing, for declined_reason, and it waits for a person to change its goal or close it). revising is a draft whose goal changed, planned again until its planner answers. An open one's is why it is not running yet: without a baseline baseline_measuring, baseline_required, baseline_undeclared, baseline_declaring or the reason the platform's declaration of the measured job is refused for (budget_below_baseline, baseline_breaks_constraint, baseline_missing_metric), and with one starts_at_ahead, no_researchers, budget_spent, or starting once nothing is missing.A running one's is agents_starting while no researcher's machine is running yet, when the platform closes it at agents_due_at, and running from then. A closed one's is its close_reason, or closed on one closed before reasons were kept. message says what the state waits for or how it came about and who acts, the command included, and to an agent that reads an open one it begins with the agent's own next step."`
-	// Editable is what its reader may change of it now, set on an answer to one who writes it.
-	Editable []string `json:"editable,omitempty" doc:"The fields of PATCH /platform-experiments/{id} the reader may change now, for its status and its credential. Absent for a reader who changes nothing of it, and on a list. A field left out is refused with 409 not_editable."`
+	// Editable and Actions are what its reader may change of it and do to it now, set on every
+	// answer (platformexperiments.Permit).
+	Editable []string                   `json:"editable" doc:"The fields of PATCH /platform-experiments/{id} the reader may change now, for its status and its credential, empty for a reader who changes nothing of it. A field left out is refused with 409 not_editable."`
+	Actions  []PlatformExperimentAction `json:"actions" doc:"What the reader may do to it now, each a write the API accepts from them: close (POST /platform-experiments/{id}/close of one that is open or running), abandon (the same close of a draft), remove (DELETE /platform-experiments/{id}), accept (POST /platform-experiments/{id}/accept of a draft whose proposal stands, and its hold), add_agent (POST /platform-experiments/{id}/agents of a researcher) and add_idea (POST /hypotheses in it). Empty for a reader who writes nothing of it."`
 	// Stages is the elimination ladder, fixed at creation.
 	Stages []Stage `json:"stages"`
 	// CurrentStage is the 1-based index into Stages of the stage currently running.

@@ -59,9 +59,14 @@ function draft(reason: 'planning' | 'revising' | 'accepting' | 'proposed' | 'dec
   return {
     id: 'pe-1', project_id: 'prj_1', name: 'Does a cosine schedule beat…', status: 'draft',
     status_reason: { reason, message: '', waits_for: reason === 'proposed' || reason === 'declined' ? 'owner' : 'platform' },
-    goal: 'Does a cosine schedule beat a constant one?', goal_version: 1, editable: ['goal'], planning_ends_at: '2026-10-05T12:30:00Z', ...more,
+    goal: 'Does a cosine schedule beat a constant one?', goal_version: 1, editable: ['goal'],
+    actions: ['remove', 'abandon', ...(reason === 'proposed' || reason === 'accepting' ? ['accept' as const] : [])],
+    planning_ends_at: '2026-10-05T12:30:00Z', ...more,
   } as PlatformExperiment
 }
+
+// As the API answers a draft to one who writes nothing of it.
+const reader = (d: PlatformExperiment): PlatformExperiment => ({ ...d, editable: [], actions: [] })
 
 function show(d: PlatformExperiment) {
   return render(<SWRConfig value={{ provider: () => new Map() }}><TenantContext.Provider value={tenant}><DraftView draft={d} /></TenantContext.Provider></SWRConfig>)
@@ -178,7 +183,7 @@ describe('a proposed draft', () => {
   })
 
   it('shows a reader of a shared draft the proposal and no control that writes', async () => {
-    render(<SWRConfig value={{ provider: () => new Map() }}><TenantContext.Provider value={tenant}><DraftView draft={{ ...proposed(), editable: undefined }} readOnly /></TenantContext.Provider></SWRConfig>)
+    render(<SWRConfig value={{ provider: () => new Map() }}><TenantContext.Provider value={tenant}><DraftView draft={reader(proposed())} /></TenantContext.Provider></SWRConfig>)
     expect(screen.getByLabelText('Name')).toMatchObject({ value: 'Cosine or constant', disabled: true })
     expect(screen.getByLabelText('Budget (accelerator-hours)')).toHaveProperty('disabled', true)
     expect(screen.getByText('val_loss, lower is better, target -20% against the baseline')).toBeTruthy()
@@ -245,7 +250,7 @@ describe('a proposal the platform accepts by itself unless the person acts first
   })
 
   it('shows a reader the proposal and no countdown', () => {
-    render(<SWRConfig value={{ provider: () => new Map() }}><TenantContext.Provider value={tenant}><DraftView draft={accepting()} readOnly /></TenantContext.Provider></SWRConfig>)
+    render(<SWRConfig value={{ provider: () => new Map() }}><TenantContext.Provider value={tenant}><DraftView draft={reader(accepting())} /></TenantContext.Provider></SWRConfig>)
     expect(countdown()).toBeUndefined()
     for (const name of ['Accept now', 'Edit', 'Reject']) expect(screen.queryByRole('button', { name })).toBeNull()
   })
@@ -278,7 +283,7 @@ describe('a proposal with questions', () => {
   })
 
   it('shows a reader the questions and answers with nothing to edit', () => {
-    render(<SWRConfig value={{ provider: () => new Map() }}><TenantContext.Provider value={tenant}><DraftView draft={asking()} readOnly /></TenantContext.Provider></SWRConfig>)
+    render(<SWRConfig value={{ provider: () => new Map() }}><TenantContext.Provider value={tenant}><DraftView draft={reader(asking())} /></TenantContext.Provider></SWRConfig>)
     expect(screen.getByLabelText('How big a win counts?')).toMatchObject({ value: 'A 20% lower val_loss.', disabled: true })
   })
 })

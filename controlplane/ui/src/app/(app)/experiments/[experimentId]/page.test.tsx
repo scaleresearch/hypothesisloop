@@ -44,7 +44,7 @@ function show(search: string, more: Partial<PlatformExperiment>) {
     id: 'pe-x', name: 'Vision benchmark', project_id: 'prj_platform', status, shared: true,
     status_reason: { reason, message: `the API's sentence for ${reason}`, summary: `The summary for ${reason}.`, ...(status === 'closed' ? {} : { waits_for: 'platform' as const }) },
     budget_accelerator_hours: 100, max_agents: 4, signup_count: 1, stages: [], current_stage: 1, created_at: at,
-    description: '', metrics: [], researchers: [], coordinator_hosted: false, max_hosted: 0, report_interval_seconds: 60, starts_at: at, updated_at: at, ...more,
+    description: '', metrics: [], researchers: [], coordinator_hosted: false, max_hosted: 0, report_interval_seconds: 60, starts_at: at, updated_at: at, editable: [], actions: [], ...more,
   })
   const resolved = resolveTenant(me, '')
   if (resolved.state !== 'selected') throw new Error('no tenant')
@@ -158,7 +158,7 @@ describe('the references of a platform experiment', () => {
 
 describe('a shared platform experiment of the caller\'s own org', () => {
   it('is theirs to change, marked shared, with no read-only note', async () => {
-    show('', { project_id: 'prj_1' })
+    show('', { project_id: 'prj_1', editable: ['name'], actions: ['remove', 'close', 'add_agent', 'add_idea'] })
     expect(await screen.findByRole('button', { name: 'Add agent' })).toBeTruthy()
     expect(await screen.findByRole('button', { name: 'Show token' })).toBeTruthy()
     expect(screen.getByText('Shared')).toBeTruthy()

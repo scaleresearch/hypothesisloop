@@ -27,6 +27,9 @@ func (ExperimentStatus) Schema(r huma.Registry) *huma.Schema {
 func (PlatformExperimentStatus) Schema(r huma.Registry) *huma.Schema {
 	return enumSchema(r, PlatformExperimentStatuses)
 }
+func (PlatformExperimentAction) Schema(r huma.Registry) *huma.Schema {
+	return enumSchema(r, PlatformExperimentActions)
+}
 func (HypothesisStatus) Schema(r huma.Registry) *huma.Schema {
 	return enumSchema(r, HypothesisStatuses)
 }

@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { isReadOnly, ReadOnlyProvider } from '@/lib/read-only'
+import { ExperimentActionsProvider } from '@/lib/experiment-actions'
 import { projectPath } from '@/lib/routes'
 import { useTenant } from '@/lib/tenant'
 import { AgentNames } from '@/components/agent-label'
@@ -54,7 +54,7 @@ export default function PlatformExperimentDetailPage({ params }: { params: { exp
 function PlatformExperimentDetail({ id }: { id: string }) {
   const router = useRouter()
   const [editing, setEditing] = useState(false)
-  const { me, project } = useTenant()
+  const { project } = useTenant()
   const reads = useOverview(id)
   const { data: pe, error: peError, isLoading: peLoading, mutate: mutatePE } = reads.experiment
   const { data: roster } = useRoster(pe)
@@ -62,7 +62,7 @@ function PlatformExperimentDetail({ id }: { id: string }) {
 
   if (peLoading) return <Loading />
   if (peError) return <ErrorMessage>Could not load this platform experiment: {peError.message}</ErrorMessage>
-  if (pe?.status === 'draft') return <DraftView draft={pe} readOnly={isReadOnly(me, pe)} />
+  if (pe?.status === 'draft') return <DraftView draft={pe} />
   if (reads.failed.length > 0) return <ErrorMessage>Could not load {reads.failed.join(', ')} for this platform experiment.</ErrorMessage>
   if (!pe) return <ErrorMessage>Experiment not found.</ErrorMessage>
 
@@ -81,7 +81,6 @@ function PlatformExperimentDetail({ id }: { id: string }) {
   const running = reads.running ?? []
   const jobRows = [...running, ...(experiments ?? []).filter(exp => !running.some(r => r.id === exp.id))]
 
-  const readOnly = isReadOnly(me, pe)
   // Nobody is ranked and nothing is charted before the run starts: until then the phase strip says what happens.
   const phase = phaseOf(pe)
   const started = phase === 'running' || phase === 'closed'
@@ -96,15 +95,15 @@ function PlatformExperimentDetail({ id }: { id: string }) {
   const findingsSection = <Findings experimentId={id} findings={findings ?? []} direction={primary?.direction} />
 
   return (
-    <ReadOnlyProvider value={readOnly}>
+    <ExperimentActionsProvider value={pe.actions}>
     <Page
       back={{ label: 'Experiments', onClick: () => router.push(projectPath(project.id, 'experiments')) }}
       title={pe.name}
-      actions={!readOnly && (
+      actions={(
         <Inline gap="sm">
-          {pe.editable?.some(field => field !== 'goal') && <Button size="sm" onClick={() => setEditing(true)}>Edit</Button>}
-          {pe.status !== 'closed' && <CloseExperiment pe={pe} onClosed={() => void mutatePE()} />}
-          <RemoveExperiment pe={pe} onRemoved={() => router.push(projectPath(project.id, 'experiments'))} />
+          {pe.editable.some(field => field !== 'goal') && <Button size="sm" onClick={() => setEditing(true)}>Edit</Button>}
+          {pe.actions.includes('close') && <CloseExperiment pe={pe} onClosed={() => void mutatePE()} />}
+          {pe.actions.includes('remove') && <RemoveExperiment pe={pe} onRemoved={() => router.push(projectPath(project.id, 'experiments'))} />}
         </Inline>
       )}
       description={
@@ -117,7 +116,7 @@ function PlatformExperimentDetail({ id }: { id: string }) {
       }
     >
       {editing && <PlatformExperimentDialog initial={pe} onClose={() => setEditing(false)} onSaved={() => void mutatePE()} />}
-      <PhaseStrip pe={pe} jobs={jobRows} stages={stages} readOnly={readOnly}>
+      <PhaseStrip pe={pe} jobs={jobRows} stages={stages}>
         <HostedMachines pe={pe} jobs={stats?.total ?? 0} />
       </PhaseStrip>
 
@@ -163,6 +162,6 @@ function PlatformExperimentDetail({ id }: { id: string }) {
 
       <JobsTable experimentId={id} jobs={jobRows} total={stats?.total ?? 0} rankingMetric={primary?.metric} />
     </Page>
-    </ReadOnlyProvider>
+    </ExperimentActionsProvider>
   )
 }

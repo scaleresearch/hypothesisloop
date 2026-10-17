@@ -6,7 +6,7 @@ import { fetchHypothesisGraph } from '@/lib/api/hypotheses'
 import { fetchPlatformExperiment } from '@/lib/api/platform-experiments'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import HypothesesPage from '@/app/(app)/experiments/[experimentId]/hypotheses/page'
-import type { HypothesisGraph, Me, PlatformExperiment } from '@/types/api'
+import type { HypothesisGraph, Me, PlatformExperiment, PlatformExperimentAction } from '@/types/api'
 
 const navigation = vi.hoisted(() => ({ search: '', push: vi.fn(), replace: vi.fn() }))
 
@@ -43,7 +43,9 @@ const graph = {
 
 function show(search: string, pe: Partial<PlatformExperiment>) {
   navigation.search = search
-  vi.mocked(fetchPlatformExperiment).mockResolvedValue({ id: 'pe-x', name: 'Vision benchmark', ...pe } as PlatformExperiment)
+  // As the API answers it: its own org acts on it, and a reader from another does nothing.
+  const actions: PlatformExperimentAction[] = pe.project_id !== 'prj_1' ? [] : pe.status === 'closed' ? ['remove'] : ['remove', 'close', 'add_agent', 'add_idea']
+  vi.mocked(fetchPlatformExperiment).mockResolvedValue({ id: 'pe-x', name: 'Vision benchmark', editable: [], actions, ...pe } as PlatformExperiment)
   const resolved = resolveTenant(me, '')
   if (resolved.state !== 'selected') throw new Error('no tenant')
   return render(

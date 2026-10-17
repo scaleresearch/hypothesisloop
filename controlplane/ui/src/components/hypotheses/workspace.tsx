@@ -29,8 +29,7 @@ import { HypothesisPanel, ObjectiveBar } from '@/components/hypotheses/panel'
 import { SearchBox, SearchHits, useHypothesisSearch } from '@/components/hypotheses/search'
 import { useQueryParam } from '@/lib/query-state'
 import { withQuery } from '@/lib/routes'
-import { useTenant } from '@/lib/tenant'
-import { isReadOnly, ReadOnlyProvider } from '@/lib/read-only'
+import { ExperimentActionsProvider } from '@/lib/experiment-actions'
 import { HUMAN_OWNER, extendLayout, graphHref, layoutGraph, matchesFilters, shareUnchanged } from '@/lib/hypothesis-graph'
 import type { GraphFilters, Position } from '@/lib/hypothesis-graph'
 import { keys } from '@/lib/keys'
@@ -85,7 +84,6 @@ function useStableLayout(graph: HypothesisGraph) {
  * in the project's hypotheses page, that page does both.
  */
 export function ExperimentHypotheses({ peID, embedded = false }: { peID: string; embedded?: boolean }) {
-  const { me } = useTenant()
   const router = useRouter()
   const [view, setView] = useQueryParam('view', HYPOTHESES_VIEW)
   const [statusFilter, setStatusFilter] = useQueryParam('status')
@@ -110,9 +108,7 @@ export function ExperimentHypotheses({ peID, embedded = false }: { peID: string;
     router.push(withQuery(graphHref(next), { view: view === HYPOTHESES_VIEW ? undefined : view }))
   }
 
-  // Nothing is added to a graph whose experiment has not been read yet, nor to a closed one.
   const closed = pe?.status === 'closed'
-  const readOnly = pe ? isReadOnly(me, pe) || closed : true
 
   // The toolbar heads the workspace once the graph is read, with the action that adds an idea to it.
   const toolbar = (action?: ReactNode) => (
@@ -171,7 +167,7 @@ export function ExperimentHypotheses({ peID, embedded = false }: { peID: string;
           graph={graph}
           pe={pe}
           mutate={mutate}
-          canWrite={!readOnly}
+          canWrite={pe.actions.includes('add_idea')}
           closed={closed}
           view={view}
           q={q}
@@ -185,7 +181,7 @@ export function ExperimentHypotheses({ peID, embedded = false }: { peID: string;
     </>
   )
   const page = (
-    <ReadOnlyProvider value={readOnly}>
+    <ExperimentActionsProvider value={pe?.actions ?? []}>
       {embedded ? content : (
         <Page
           fill
@@ -194,7 +190,7 @@ export function ExperimentHypotheses({ peID, embedded = false }: { peID: string;
           {content}
         </Page>
       )}
-    </ReadOnlyProvider>
+    </ExperimentActionsProvider>
   )
   return <AgentNames platformExperimentID={peID}>{page}</AgentNames>
 }

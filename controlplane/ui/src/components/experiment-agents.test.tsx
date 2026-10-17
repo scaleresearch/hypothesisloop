@@ -9,7 +9,7 @@ import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { choose } from '@/test-select'
 import { CATALOG } from '@/test-agent-types'
 import { ExperimentAgents } from '@/components/experiment-agents'
-import type { AgentMessage, JoinedAgent, Me, PlatformExperiment } from '@/types/api'
+import type { AgentMessage, JoinedAgent, Me, PlatformExperiment, PlatformExperimentAction } from '@/types/api'
 
 class ApiError extends Error {
   constructor(readonly status: number, message: string, readonly reason?: string) { super(message) }
@@ -34,8 +34,14 @@ function signup(id: string, hosted: boolean, agentType = ''): JoinedAgent {
   return { platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, hosted, agent_type: agentType, model: '', hyperparameters: null, at_work: true, signed_up_at: at }
 }
 
+// As the API lists them to the experiment's owner: a researcher joins it while it is open or runs.
+function ownerActions(status: string): PlatformExperimentAction[] {
+  if (status === 'closed') return ['remove']
+  return ['remove', 'close', 'add_idea', 'add_agent']
+}
+
 function show(status = 'open', more: Partial<PlatformExperiment> = {}) {
-  const pe = { id: 'pe-1', project_id: 'prj_1', status, ...more } as PlatformExperiment
+  const pe = { id: 'pe-1', project_id: 'prj_1', status, editable: [], actions: ownerActions(status), ...more } as PlatformExperiment
   const resolved = resolveTenant(me, '')
   if (resolved.state !== 'selected') throw new Error('no tenant')
   return render(
@@ -197,8 +203,15 @@ describe('removing an agent', () => {
 })
 
 describe('once the experiment has started', () => {
-  it.each(['running', 'closed'])('shows the roster and nothing to change it with: %s', async status => {
-    show(status)
+  it('takes a researcher in the place of one while it runs, and removes nobody', async () => {
+    show('running')
+    expect(await screen.findByRole('cell', { name: 'ag-old' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Add agent' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull()
+  })
+
+  it('shows the roster of a closed one and nothing to change it with', async () => {
+    show('closed')
     expect(await screen.findByRole('cell', { name: 'ag-old' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^Add/ })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull()

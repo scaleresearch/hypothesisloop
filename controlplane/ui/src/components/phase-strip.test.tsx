@@ -23,6 +23,7 @@ const at = '2026-10-05T12:30:00Z'
 function experiment(status: `${PlatformExperimentStatus}`, reason: string, more: Partial<PlatformExperiment> = {}, said: Partial<StatusReason> = {}): PlatformExperiment {
   return {
     id: 'pe-1', project_id: 'prj_1', name: 'Cosine or constant', status,
+    editable: [], actions: status === 'closed' ? ['remove'] : ['remove', status === 'draft' ? 'abandon' : 'close'],
     status_reason: { reason, message: `the API's sentence for ${reason}`, ...(status === 'closed' ? {} : { waits_for: 'platform' as const }), ...said }, ...more,
   } as PlatformExperiment
 }
@@ -129,7 +130,7 @@ describe('whose move it is', () => {
   })
 
   it('tells a reader of a shared experiment neither, and a closed one needs nobody', () => {
-    const shared = render(<SWRConfig value={{ provider: () => new Map() }}><PhaseStrip pe={waits('no_researchers', 'owner')} readOnly /></SWRConfig>)
+    const shared = render(<SWRConfig value={{ provider: () => new Map() }}><PhaseStrip pe={{ ...waits('no_researchers', 'owner'), actions: [] }} /></SWRConfig>)
     expect(sentence()).toBe('It waits: no_researchers.')
     expect(strip().queryByText('Your move')).toBeNull()
     expect(strip().queryByRole('link')).toBeNull()

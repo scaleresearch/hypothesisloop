@@ -62,7 +62,7 @@ function SetUpMyself({ pe }: { pe: PlatformExperiment }) {
  * holds planning up, what that is in the platform's words, what it means for the person and what
  * they can do.
  */
-export function PlanningProgress({ pe, planner, readOnly }: { pe: PlatformExperiment; planner: JoinedAgent | undefined; readOnly: boolean }) {
+export function PlanningProgress({ pe, planner }: { pe: PlatformExperiment; planner: JoinedAgent | undefined }) {
   useTick(1_000)
   const reason = reasonOf(pe)
   const revising = reason.reason === 'revising'
@@ -79,7 +79,7 @@ export function PlanningProgress({ pe, planner, readOnly }: { pe: PlatformExperi
             {pe.planning_ends_at && ` If it cannot start by ${formatDate(pe.planning_ends_at)}, the draft closes.`}
           </>
         )}
-        actions={!readOnly && <SetUpMyself pe={pe} />}
+        actions={pe.actions.includes('abandon') && <SetUpMyself pe={pe} />}
       />
     )
   }

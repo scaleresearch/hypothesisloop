@@ -33,7 +33,7 @@ import { statusTone } from '@/lib/colors'
 import { evictionCode, evictionCodeLabel, evictionDetailLines, faultBreakdown, notAdmittedLabel } from '@/lib/eviction'
 import { experimentPath, jobPath, projectPath, withQuery } from '@/lib/routes'
 import { useTenant } from '@/lib/tenant'
-import { listProject, useExperimentAccess } from '@/lib/read-only'
+import { listProject, useExperimentAccess } from '@/lib/experiment-actions'
 import { variedEnvByHypothesis, variedEnvSettings } from '@/lib/hypothesis-progress'
 import { BASELINE_JOB, JobHypothesis, measuresBaseline } from '@/components/job-hypothesis'
 import { keys } from '@/lib/keys'
@@ -76,6 +76,7 @@ function JobsListContent({ peFilter }: { peFilter: string }) {
   const access = useExperimentAccess(peFilter || undefined)
   const scope = listProject(project, access)
   const scopeKey = scope.project_id ?? 'shared'
+  const readOnly = peFilter !== '' && !access.pe?.actions.length
   const statusFilter = searchParams.get('status') ?? ''
   const [confirming, setConfirming] = useState<string | null>(null)
   const [page, setPage] = useState(0)
@@ -218,7 +219,7 @@ function JobsListContent({ peFilter }: { peFilter: string }) {
                 <th className="w-24 text-right" title="The last value the job reported on the ranking metric, which it is ranked by">Last metric</th>
                 <th className="hidden w-32 text-right xl:table-cell">Est. cost</th>
                 <SortableTh className="hidden w-28 xl:table-cell" sorted={sortKey === 'created_at' && sortDir} onSort={() => toggleSort('created_at')}>Submitted</SortableTh>
-                {!access.readOnly && <th className="w-[5.5rem]"><span className="sr-only">Actions</span></th>}
+                {!readOnly && <th className="w-[5.5rem]"><span className="sr-only">Actions</span></th>}
               </tr>
             </thead>
             <tbody>
@@ -238,7 +239,7 @@ function JobsListContent({ peFilter }: { peFilter: string }) {
                   showExperiment={!peFilter}
                   varied={variedEnvSettings(job, variedByHypothesis)}
                   connected={job.cluster_name ? connectedByCluster.get(job.cluster_name) : undefined}
-                  onCancel={access.readOnly ? undefined : () => setConfirming(job.id)}
+                  onCancel={readOnly ? undefined : () => setConfirming(job.id)}
                 />
               ))}
             </tbody>

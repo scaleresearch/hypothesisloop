@@ -6,5 +6,5 @@ export type EditableField = 'goal' | 'name' | 'description' | 'budget_accelerato
 
 /** Whether the reader may change field of pe now, as the API says in editable. */
 export function canEdit(pe: Pick<PlatformExperiment, 'editable'>, field: EditableField): boolean {
-  return pe.editable?.includes(field) ?? false
+  return pe.editable.includes(field)
 }
