@@ -18,6 +18,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi"
+	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/watch"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/registry"
@@ -42,7 +43,7 @@ func principalOf(token string) auth.Principal {
 func platformRoutes(caller auth.Principal) http.Handler {
 	logger := zap.NewNop()
 	r := chi.NewRouter()
-	r.Use(auth.Gate(authtest.As(caller), logger, map[string]string{"/watch": registry.WatchSubprotocol}))
+	r.Use(auth.Gate(authtest.As(caller), logger, map[string]string{"/watch": watch.Subprotocol}))
 	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", "", auth.NewAccess(authtest.Placement{}), logger)
 	launch := platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model", SigningSecret: "secret", MaxHosted: 1}
 	experiments := platformexperiments.NewPlatformExperimentsService(nil, domain.QuotaConfig{}, logger, "", time.Minute).WithRepositories(struct{ githost.Provider }{}).
@@ -61,9 +62,9 @@ func platformRoutes(caller auth.Principal) http.Handler {
 		struct{ scheduler.CodeHost }{}, struct{ scheduler.InstalledCapacity }{}, struct{ scheduler.QuotaSettler }{}, "http://metrics.invalid", logger).
 		WithLoop(struct{ scheduler.Triggerable }{})))
 	httpapi.RegisterRegistry(doc, registry.New(nil, nil, nil, logger, "http://metrics.invalid", nil), logger)
-	registry.RegisterWatchHuma(doc)
+	httpapi.RegisterWatchKinds(doc)
 	access := auth.NewAccess(authtest.Placement{})
-	r.Get("/watch", registry.NewWatchHandler(nil, nil, access, logger).ServeHTTP)
+	r.Get("/watch", watch.NewHandler(nil, nil, access, logger).ServeHTTP)
 	return r
 }
 

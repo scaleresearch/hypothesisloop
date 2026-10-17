@@ -26,6 +26,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/gitproxy"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/modelproxy"
+	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/watch"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/environments"
@@ -234,10 +235,10 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	schedulerHandler, clusterAgentHandler := newSchedulerParts(runCtx, gitHost, environmentsSvc, pool, store, graph, peSvc, quotaCfg, pcfg, metricsDBURL, dataStore, logger)
 	// The change stream: one LISTEN connection for this process, fanned out to whatever /watch
 	// connections are open. Nothing is persisted for it and nothing is held between connections
-	// — see service/registry/watch.go.
+	// — see httpapi/watch/watch.go.
 	events := db.NewEventsStore(pool, graph)
 	registrySvc := registry.New(store, graph, events, logger, metricsDBURL, dataStore)
-	watchHandler := registry.NewWatchHandler(events, store, gate.access, logger)
+	watchHandler := watch.NewHandler(events, store, gate.access, logger)
 	watchHandler.Start(runCtx)
 	connectedClusters := func(ctx context.Context) (map[string]bool, error) {
 		return metricsdb.LiveClusterHeartbeats(ctx, metricsDBURL, connectedWithin)
@@ -311,7 +312,7 @@ type routes struct {
 	repositories        *accounts.Repositories
 	scheduler           *scheduler.Handler
 	registry            *registry.Service
-	watch               *registry.WatchHandler
+	watch               *watch.Handler
 	clusterAgent        *clusterexchange.Handler
 	gitProxy            *gitproxy.Proxy
 	modelProxy          *modelproxy.Proxy
@@ -324,7 +325,7 @@ type routes struct {
 // longer is listed with none.
 const clusterContactLookback = 30 * 24 * time.Hour
 
-var webSockets = map[string]string{"/watch": registry.WatchSubprotocol}
+var webSockets = map[string]string{"/watch": watch.Subprotocol}
 
 // newRouter mounts every route of the API behind auth.Gate, which every request but a CORS
 // preflight passes before any handler runs.
@@ -384,7 +385,7 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 	httpapi.RegisterRegistry(doc, h.registry, logger)
 	// /watch itself cannot be registered here (it is an upgrade), but its vocabulary can be, so
 	// an agent reading /explore learns what the stream carries rather than having to be told.
-	registry.RegisterWatchHuma(doc)
+	httpapi.RegisterWatchKinds(doc)
 	// /explore is the agent-only digest: nothing an agent isn't permitted to call.
 	// /explore/coordinator is the same registrations' operator/dashboard-admin-only view, and
 	// /explore/rules the rules alone, which the instructions the platform serves an agent carry.

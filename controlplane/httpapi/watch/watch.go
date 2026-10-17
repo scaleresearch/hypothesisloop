@@ -1,4 +1,4 @@
-package registry
+package watch
 
 import (
 	"context"
@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
@@ -98,10 +97,10 @@ func (h *hub) filterOf(sub *subscriber) domain.EventFilter {
 	return sub.filter
 }
 
-// WatchSubscription is what one live connection is subscribed to. It is derived from the filter
+// Subscription is what one live connection is subscribed to. It is derived from the filter
 // the server is actually matching against, never from what the client asked for, so it cannot
 // report a subscription the server is not serving.
-type WatchSubscription struct {
+type Subscription struct {
 	PlatformExperimentID string   `json:"platform_experiment_id"`
 	ExperimentID         string   `json:"experiment_id"`
 	AgentID              string   `json:"agent_id"`
@@ -112,13 +111,13 @@ type WatchSubscription struct {
 	Since int64 `json:"since"`
 }
 
-func describe(filter domain.EventFilter, since int64) WatchSubscription {
+func describe(filter domain.EventFilter, since int64) Subscription {
 	kinds := make([]string, 0, len(filter.Kinds))
 	for kind := range filter.Kinds {
 		kinds = append(kinds, kind)
 	}
 	sort.Strings(kinds)
-	return WatchSubscription{
+	return Subscription{
 		PlatformExperimentID: filter.PlatformExperimentID,
 		ExperimentID:         filter.ExperimentID,
 		AgentID:              filter.AgentID,
@@ -160,11 +159,11 @@ func (h *hub) dropAll() {
 	}
 }
 
-// WatchHandler serves GET /watch. It is registered on the chi router directly rather than through
+// Handler serves GET /watch. It is registered on the chi router directly rather than through
 // apidocs/Huma: a WebSocket upgrade needs the raw connection, and Huma owns the response for
 // every operation registered with it. The honest place for it is therefore beside the router, and
-// the contract a caller reads for it is GET /watch/kinds (RegisterWatchHuma) and hl watch --help.
-type WatchHandler struct {
+// the contract a caller reads for it is GET /watch/kinds (httpapi.RegisterWatchKinds) and hl watch --help.
+type Handler struct {
 	source EventSource
 	// experiments resolves the platform experiment a job belongs to, so a caller that knows
 	// only its own job id — which is all a running job is told — can subscribe without first
@@ -181,18 +180,18 @@ type experimentLookup interface {
 	GetExperiment(ctx context.Context, id string) (*domain.Experiment, error)
 }
 
-// NewWatchHandler returns a handler over source. Start must be called once to begin listening.
+// NewHandler returns a handler over source. Start must be called once to begin listening.
 // Its requests must pass auth.Gate first, which reads the token from the subprotocol
-// (WatchSubprotocol) before the upgrade.
-func NewWatchHandler(source EventSource, experiments experimentLookup, access *auth.Access, logger *zap.Logger) *WatchHandler {
-	return &WatchHandler{source: source, experiments: experiments, access: access, hub: newHub(), logger: logger, recheckEvery: watchPingInterval}
+// (Subprotocol) before the upgrade.
+func NewHandler(source EventSource, experiments experimentLookup, access *auth.Access, logger *zap.Logger) *Handler {
+	return &Handler{source: source, experiments: experiments, access: access, hub: newHub(), logger: logger, recheckEvery: watchPingInterval}
 }
 
 // Start runs the single LISTEN connection for this process until ctx ends, re-establishing it
 // when it breaks. A client that connected while nothing was listening replayed before LISTEN took
 // effect, so events committed in between reached neither its replay nor its stream: every
 // connection is dropped again once LISTEN is in effect, and replays.
-func (h *WatchHandler) Start(ctx context.Context) {
+func (h *Handler) Start(ctx context.Context) {
 	go func() {
 		for ctx.Err() == nil {
 			events := make(chan domain.Event, listenerBuffer)
@@ -223,7 +222,7 @@ func (h *WatchHandler) Start(ctx context.Context) {
 	}()
 }
 
-func (h *WatchHandler) admit(ctx context.Context, principal auth.Principal) (context.Context, error) {
+func (h *Handler) admit(ctx context.Context, principal auth.Principal) (context.Context, error) {
 	if !apidocs.AudienceAgent.Admits(principal, "") {
 		return nil, auth.Forbidden("forbidden: a " + string(principal.Kind) + " token may not watch")
 	}
@@ -234,7 +233,7 @@ func (h *WatchHandler) admit(ctx context.Context, principal auth.Principal) (con
 
 // stillAdmitted asks again what the upgrade asked: a stream outlives the request that opened
 // it, and the token may have died or lost the platform experiment since.
-func (h *WatchHandler) stillAdmitted(ctx context.Context, platformExperimentID string) error {
+func (h *Handler) stillAdmitted(ctx context.Context, platformExperimentID string) error {
 	principal, err := auth.Recheck(ctx)
 	if err != nil {
 		return err
@@ -260,7 +259,7 @@ func (h *WatchHandler) stillAdmitted(ctx context.Context, platformExperimentID s
 // is written as desired state the runtime fetches; anything a job or an agent could be *told* down
 // this socket would be a second path to an effect that already has one, and the two would disagree
 // the first time this connection dropped.
-func (h *WatchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	principal, ok := auth.FromContext(r.Context())
 	if !ok {
 		auth.WriteError(w, h.logger, auth.Internal(h.logger, "watch: reached without passing auth.Gate", errors.New("no principal")))
@@ -452,8 +451,8 @@ type watchControl struct {
 // an event — an event has a `kind`, this has a `subscription` or an `error` — so a client reading
 // one stream of text frames can tell an answer from news without a mode flag.
 type watchFrame struct {
-	Subscription *WatchSubscription `json:"subscription,omitempty"`
-	Error        string             `json:"error,omitempty"`
+	Subscription *Subscription `json:"subscription,omitempty"`
+	Error        string        `json:"error,omitempty"`
 }
 
 // applyControl answers, and if asked re-scopes, on the writer's own goroutine — so the filter
@@ -474,7 +473,7 @@ type watchFrame struct {
 // ever start live. Every other kind widens the same way a fresh
 // connection opens -- a connection that carried no floor for it yet is treated as `since=0`,
 // which Replay answers with that kind's current snapshot, not silence.
-func (h *WatchHandler) applyControl(ctx context.Context, conn *wsConn, sub *subscriber, payload []byte, delivered *served) error {
+func (h *Handler) applyControl(ctx context.Context, conn *wsConn, sub *subscriber, payload []byte, delivered *served) error {
 	var control watchControl
 	if err := json.Unmarshal(payload, &control); err != nil {
 		return writeFrame(conn, watchFrame{Error: "a control frame must be a JSON object, optionally carrying \"kinds\""})
@@ -548,44 +547,6 @@ var knownKinds = func() map[string]bool {
 	}
 	return kinds
 }()
-
-// RegisterWatchHuma documents the change stream in the one place an agent already looks. The
-// socket itself cannot be a Huma operation — an upgrade needs the raw connection, and Huma owns
-// the response of everything registered with it — so its vocabulary is served as an ordinary GET
-// beside it. That makes it discoverable from /explore instead of folklore an agent could only
-// learn by being told; the instructions the platform serves an agent carry only the rules, as /explore/rules.
-//
-// The body is domain.EventKinds itself, the same slice parseWatchQuery validates against, so this
-// cannot describe a stream the server does not serve.
-func RegisterWatchHuma(doc *apidocs.Doc) {
-	apidocs.Register(doc, apidocs.AudienceAgent, huma.Operation{
-		OperationID: "list-watch-kinds", Method: "GET", Path: "/watch/kinds",
-		Summary: "List the event kinds GET /watch can carry", Tags: []string{"watch"},
-		Description: "GET /watch is a WebSocket that pushes small typed records (kind, subject, value, detail, position, occurred_at, cursor) " +
-			"so you can wait on a change instead of polling for it. Every event is a pointer, never a copy: follow one " +
-			"with the ordinary GET when you want detail. `occurred_at` is when the change was made, the same on a live event and on its replay, and absent on the replay of a change from before the platform kept it.\n\n" +
-			"Scope a subscription with `platform_experiment_id` or `experiment_id` (one is required), narrow it with " +
-			"`agent` and a comma-separated `kinds`, and resume it with `since=<largest cursor you saw>`. A resume never " +
-			"skips an event; it can repeat ones you already have, which carry the same `position` (the transaction " +
-			"that made the change). A `since` this platform never issued is refused with 410: reconnect without it. " +
-			"Omit `since` (or pass 0) and you get the current snapshot of everything your subscription admits before " +
-			"going live.\n\n" +
-			"`agent` scopes the stream to that agent's own resources, as `agent_scope` below says per kind: the terminal " +
-			"status of its jobs and a queue reason that waiting will not clear, its quota and cut, ladder advances, the run's status and brief, and " +
-			"other people's comments, findings and links on hypotheses it registered. Its own actions are not echoed back. " +
-			"Without `agent` you get the whole platform experiment.\n\n" +
-			"Omit `kinds` and you get every kind marked `default` below; only `metric.point` is left out, the " +
-			"highest-volume kind and the one a reconnect cannot replay. An unknown kind is refused.\n\n" +
-			"A connected client can inspect and re-scope itself without reconnecting: send a text frame `{}` to be " +
-			"told the filter in force, or `{\"kinds\": \"a,b\"}` to change it (`{\"kinds\": \"\"}` restores the " +
-			"default). The answer is a `{\"subscription\": {...}}` frame. Widening replays the added kinds from where " +
-			"you last saw them; narrowing stops delivery. Nothing else may be sent up the socket.\n\n" +
-			"`hl watch` holds the socket for you: with an agent's token it watches that agent's own resources, " +
-			"resumes from the cursor it saved last time, and returns with the first batch of events.",
-	}, func(context.Context, *struct{}) (*struct{ Body []domain.EventKindDoc }, error) {
-		return &struct{ Body []domain.EventKindDoc }{Body: domain.EventKinds}, nil
-	})
-}
 
 func parseWatchQuery(r *http.Request) (domain.EventFilter, int64, error) {
 	q := r.URL.Query()

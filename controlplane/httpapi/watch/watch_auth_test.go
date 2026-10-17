@@ -1,4 +1,4 @@
-package registry
+package watch
 
 import (
 	"context"
@@ -33,14 +33,14 @@ var watchTenancy = authtest.Placement{
 }
 
 // gated is the watch handler behind auth.Gate, as control-service mounts it.
-func gated(tokens auth.Tokens, handler *WatchHandler) http.Handler {
-	return auth.Gate(tokens, zap.NewNop(), map[string]string{"/watch": WatchSubprotocol})(handler)
+func gated(tokens auth.Tokens, handler *Handler) http.Handler {
+	return auth.Gate(tokens, zap.NewNop(), map[string]string{"/watch": Subprotocol})(handler)
 }
 
 func watchServerAs(t *testing.T, principal auth.Principal) *httptest.Server {
 	t.Helper()
 	source := newFakeEvents()
-	handler := NewWatchHandler(source, &lookupStore{exp: &domain.Experiment{ID: "exp-1", PlatformExperimentID: "pe-1"}},
+	handler := NewHandler(source, &lookupStore{exp: &domain.Experiment{ID: "exp-1", PlatformExperimentID: "pe-1"}},
 		auth.NewAccess(watchTenancy), zap.NewNop())
 	ctx, cancel := context.WithCancel(context.Background())
 	handler.Start(ctx)
@@ -80,12 +80,12 @@ func TestWatchTakesItsTokenFromTheSubprotocolOnly(t *testing.T) {
 		want      int
 	}{
 		"no subprotocol":            {nil, http.StatusUnauthorized},
-		"subprotocol without token": {[]string{WatchSubprotocol}, http.StatusUnauthorized},
+		"subprotocol without token": {[]string{Subprotocol}, http.StatusUnauthorized},
 		"token without subprotocol": {[]string{"test"}, http.StatusUnauthorized},
-		"token first":               {[]string{"test, " + WatchSubprotocol}, http.StatusUnauthorized},
-		"a third value":             {[]string{WatchSubprotocol + ", test, extra"}, http.StatusUnauthorized},
-		"one header":                {[]string{WatchSubprotocol + ", test"}, http.StatusBadRequest},
-		"two headers":               {[]string{WatchSubprotocol, "test"}, http.StatusBadRequest},
+		"token first":               {[]string{"test, " + Subprotocol}, http.StatusUnauthorized},
+		"a third value":             {[]string{Subprotocol + ", test, extra"}, http.StatusUnauthorized},
+		"one header":                {[]string{Subprotocol + ", test"}, http.StatusBadRequest},
+		"two headers":               {[]string{Subprotocol, "test"}, http.StatusBadRequest},
 	} {
 		if got := watchStatus(t, server, query, tc.protocols...); got != tc.want {
 			t.Errorf("%s: got = %d, want = %d", name, got, tc.want)
@@ -105,7 +105,7 @@ func TestWatchTakesItsTokenFromTheSubprotocolOnly(t *testing.T) {
 }
 
 func TestWatchKeepsToTheCallersScope(t *testing.T) {
-	offer := WatchSubprotocol + ", test"
+	offer := Subprotocol + ", test"
 	orgA := []string{"org-a"}
 	for name, tc := range map[string]struct {
 		principal auth.Principal
@@ -189,7 +189,7 @@ func TestAnOpenWatchStreamClosesOnceItsTokenIsRefused(t *testing.T) {
 	} {
 		source := newFakeEvents()
 		caller := &switchable{principal: inOrgA}
-		handler := NewWatchHandler(source, &lookupStore{exp: &domain.Experiment{ID: "exp-1", PlatformExperimentID: "pe-1"}},
+		handler := NewHandler(source, &lookupStore{exp: &domain.Experiment{ID: "exp-1", PlatformExperimentID: "pe-1"}},
 			auth.NewAccess(watchTenancy), zap.NewNop())
 		handler.recheckEvery = 20 * time.Millisecond
 		ctx, cancel := context.WithCancel(context.Background())

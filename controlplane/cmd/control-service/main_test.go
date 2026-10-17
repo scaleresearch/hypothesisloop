@@ -21,10 +21,10 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/modelproxy"
+	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/watch"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
-	"github.com/scaleresearch/hypothesisloop/controlplane/service/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler"
 )
 
@@ -63,7 +63,7 @@ func testRouter(t *testing.T) chi.Router {
 		agentTypes:          &accounts.AgentTypesHandler{},
 		repositories:        &accounts.Repositories{},
 		scheduler:           &scheduler.Handler{},
-		watch:               &registry.WatchHandler{},
+		watch:               &watch.Handler{},
 		clusterAgent:        &clusterexchange.Handler{},
 		modelProxy:          modelProxy,
 	}, zap.NewNop())
@@ -120,7 +120,7 @@ func TestTheWatchUpgradeIsRefusedWithoutAToken(t *testing.T) {
 	for name, headers := range map[string]map[string]string{
 		"no subprotocol":            {},
 		"the token as a header":     {"Authorization": "Bearer t"},
-		"the subprotocol alone":     {"Sec-WebSocket-Protocol": registry.WatchSubprotocol},
+		"the subprotocol alone":     {"Sec-WebSocket-Protocol": watch.Subprotocol},
 		"another subprotocol first": {"Sec-WebSocket-Protocol": "other, t"},
 	} {
 		request := httptest.NewRequest(http.MethodGet, "/watch?platform_experiment_id=pe-1", nil)
@@ -132,7 +132,7 @@ func TestTheWatchUpgradeIsRefusedWithoutAToken(t *testing.T) {
 		}
 		recorder := httptest.NewRecorder()
 		r.ServeHTTP(recorder, request)
-		if recorder.Code != http.StatusUnauthorized || !strings.Contains(recorder.Body.String(), "Sec-WebSocket-Protocol: "+registry.WatchSubprotocol) {
+		if recorder.Code != http.StatusUnauthorized || !strings.Contains(recorder.Body.String(), "Sec-WebSocket-Protocol: "+watch.Subprotocol) {
 			t.Errorf("%s: got = %d %s, want = 401 naming the subprotocol", name, recorder.Code, recorder.Body)
 		}
 	}

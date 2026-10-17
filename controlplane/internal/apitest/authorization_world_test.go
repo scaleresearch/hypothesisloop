@@ -20,6 +20,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi"
+	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/watch"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
@@ -237,12 +238,12 @@ func newWorldAPI(t *testing.T) *worldAPI {
 
 	api := &worldAPI{router: chi.NewRouter(), docs: map[string]*apidocs.Doc{}, tokens: map[string]string{"none": ""}}
 	api.router.Use(tripwire)
-	api.router.Use(auth.Gate(authenticator, logger, map[string]string{"/watch": registry.WatchSubprotocol}))
+	api.router.Use(auth.Gate(authenticator, logger, map[string]string{"/watch": watch.Subprotocol}))
 	api.router.Handle("/metrics", auth.RequireStaff(logger, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})))
-	watch := registry.NewWatchHandler(nil, nil, access, logger)
-	api.router.Get("/watch", watch.ServeHTTP)
+	watcher := watch.NewHandler(nil, nil, access, logger)
+	api.router.Get("/watch", watcher.ServeHTTP)
 
 	clusters := chi.NewRouter()
 	api.docs["/internal/clusters"] = apidocs.New(clusters, "cluster-agent", "1.0.0", "", access, logger)
@@ -268,7 +269,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(
 		scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", logger).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{})))
 	httpapi.RegisterRegistry(doc, registry.New(nil, worldGraph{world: w}, nil, logger, "http://metrics.invalid", nil), logger)
-	registry.RegisterWatchHuma(doc)
+	httpapi.RegisterWatchKinds(doc)
 
 	mint := func(scope string) string {
 		token, err := auth.Mint(worldSecret, scope)

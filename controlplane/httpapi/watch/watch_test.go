@@ -1,4 +1,4 @@
-package registry
+package watch
 
 import (
 	"bufio"
@@ -136,10 +136,8 @@ func (f *fakeEvents) ListenEvents(ctx context.Context, out chan<- domain.Event, 
 	}
 }
 
-// lookupStore embeds Store so any method a test did not think about panics instead of quietly
-// answering zero.
+// lookupStore places every job in exp's platform experiment.
 type lookupStore struct {
-	Store
 	exp *domain.Experiment
 }
 
@@ -149,7 +147,7 @@ func (s *lookupStore) GetExperiment(context.Context, string) (*domain.Experiment
 
 func watchServer(t *testing.T, source *fakeEvents) *httptest.Server {
 	t.Helper()
-	handler := NewWatchHandler(source, &lookupStore{exp: &domain.Experiment{ID: "exp-1", PlatformExperimentID: "pe-1"}}, auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	handler := NewHandler(source, &lookupStore{exp: &domain.Experiment{ID: "exp-1", PlatformExperimentID: "pe-1"}}, auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	ctx, cancel := context.WithCancel(context.Background())
 	handler.Start(ctx)
 	if source.listenGate == nil {
@@ -188,7 +186,7 @@ func dialWatch(t *testing.T, server *httptest.Server, query url.Values) *watchCl
 		"Upgrade: websocket\r\n" +
 		"Connection: Upgrade\r\n" +
 		"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
-		"Sec-WebSocket-Protocol: " + WatchSubprotocol + ", test\r\n" +
+		"Sec-WebSocket-Protocol: " + Subprotocol + ", test\r\n" +
 		"Sec-WebSocket-Version: 13\r\n\r\n"
 	if _, err := conn.Write([]byte(request)); err != nil {
 		t.Fatalf("write handshake: got = %v, want = nil", err)
@@ -488,7 +486,7 @@ func TestAnUnknownKindIsRefusedRatherThanSilentlyIgnored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build request: got = %v, want = nil", err)
 	}
-	request.Header.Set("Sec-WebSocket-Protocol", WatchSubprotocol+", test")
+	request.Header.Set("Sec-WebSocket-Protocol", Subprotocol+", test")
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatalf("request: got = %v, want = nil", err)
@@ -821,7 +819,7 @@ func TestNamingMetricPointExplicitlyStillDeliversItAndNothingElse(t *testing.T) 
 // readSubscription reads frames until the server's answer to a control frame arrives, and returns
 // it. Events keep flowing while a control frame is in flight, so an answer is something to wait
 // for among them rather than the next thing on the wire.
-func readSubscription(t *testing.T, client *watchClient) WatchSubscription {
+func readSubscription(t *testing.T, client *watchClient) Subscription {
 	t.Helper()
 	for i := 0; i < 32; i++ {
 		var frame watchFrame
@@ -837,7 +835,7 @@ func readSubscription(t *testing.T, client *watchClient) WatchSubscription {
 		}
 	}
 	t.Fatalf("server answer to a control frame: got = %v, want = a subscription frame", "none in 32 frames")
-	return WatchSubscription{}
+	return Subscription{}
 }
 
 // An agent that cannot see what it is subscribed to is back to believing what it asked for. The

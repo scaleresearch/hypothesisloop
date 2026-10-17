@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/service/registry"
+	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/watch"
 )
 
 // The callers of the table, none of them staff: a signed-in owner of org-a (user), a signed-in
@@ -79,7 +79,7 @@ func (api *worldAPI) call(method, target, body, token string) int {
 		request = httptest.NewRequest(method, "/watch?platform_experiment_id=pe-a1", nil)
 		request.Header.Set("Authorization", "Bearer "+token)
 	case strings.HasPrefix(target, "/watch?"):
-		request.Header.Set("Sec-WebSocket-Protocol", registry.WatchSubprotocol+", "+token)
+		request.Header.Set("Sec-WebSocket-Protocol", watch.Subprotocol+", "+token)
 	default:
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
