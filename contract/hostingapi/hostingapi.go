@@ -68,3 +68,25 @@ type HeldMachine struct {
 	Name    string
 	Machine string
 }
+
+// The lines a hosted agent's harness prints while it works, which the launcher reads from its
+// output: a progress marker, a sentence of what the agent is doing, and what the harness observes
+// of itself. Each is its prefix and a space before what it says: the launcher takes a marker and a
+// state of at most their bound of characters, and cuts a sentence to its own.
+const (
+	ProgressPrefix    = "hl-progress"
+	ActivityPrefix    = "hl-activity"
+	StatePrefix       = "hl-state"
+	MaxProgressMarker = 64
+	MaxActivityLength = 120
+	MaxStateLength    = 200
+	// ProgressIntervalSeconds is how often a healthy harness prints its progress marker.
+	ProgressIntervalSeconds = 15
+)
+
+// The environment a hosted agent's machine is started with: where the platform is and the
+// agent's token.
+const (
+	EnvAPIURL = "API_URL"
+	EnvToken  = "HL_TOKEN"
+)

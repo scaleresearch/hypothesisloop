@@ -383,13 +383,10 @@ const (
 // plane's to give a meaning to: progress is a marker, activity a sentence it shows of what the
 // agent is doing, and state what the harness runs and the rate limit it last read.
 var (
-	progressPattern     = regexp.MustCompile(`^hl-progress ([A-Za-z0-9._:-]{1,64})$`)
-	activityPattern     = regexp.MustCompile(`^hl-activity (.+)$`)
-	harnessStatePattern = regexp.MustCompile(`^hl-state (.{1,200})$`)
+	progressPattern     = regexp.MustCompile(fmt.Sprintf(`^%s ([A-Za-z0-9._:-]{1,%d})$`, hostingapi.ProgressPrefix, hostingapi.MaxProgressMarker))
+	activityPattern     = regexp.MustCompile(fmt.Sprintf(`^%s (.+)$`, hostingapi.ActivityPrefix))
+	harnessStatePattern = regexp.MustCompile(fmt.Sprintf(`^%s (.{1,%d})$`, hostingapi.StatePrefix, hostingapi.MaxStateLength))
 )
-
-// maxActivityLength is the longest sentence the control plane takes, in characters.
-const maxActivityLength = 120
 
 // lastMatch is what pattern captures of the newest of lines it matches, or "" when none does.
 func lastMatch(lines []string, pattern *regexp.Regexp) string {
@@ -405,8 +402,8 @@ func lastMatch(lines []string, pattern *regexp.Regexp) string {
 // newest sentence, cut to what the control plane takes.
 func activityOf(lines []string) string {
 	said := []rune(lastMatch(lines, activityPattern))
-	if len(said) > maxActivityLength {
-		said = said[:maxActivityLength]
+	if len(said) > hostingapi.MaxActivityLength {
+		said = said[:hostingapi.MaxActivityLength]
 	}
 	return string(said)
 }

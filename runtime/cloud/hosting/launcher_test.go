@@ -1071,8 +1071,8 @@ func TestWhatARunningAgentSaysItIsDoingIsReportedWithItsProgress(t *testing.T) {
 	if told[1].Activity != "" {
 		t.Fatalf("b, which printed no such line: told activity %q, want none", told[1].Activity)
 	}
-	if got := []rune(told[2].Activity); len(got) != maxActivityLength || !strings.HasPrefix(told[2].Activity, "running hl job wait é") {
-		t.Fatalf("c: told %d characters %q, want this launcher's own environment taken out and the sentence cut to %d", len(got), told[2].Activity, maxActivityLength)
+	if got := []rune(told[2].Activity); len(got) != hostingapi.MaxActivityLength || !strings.HasPrefix(told[2].Activity, "running hl job wait é") {
+		t.Fatalf("c: told %d characters %q, want this launcher's own environment taken out and the sentence cut to %d", len(got), told[2].Activity, hostingapi.MaxActivityLength)
 	}
 	if reads := h.rented.Calls("Logs") - before; reads != 3 {
 		t.Fatalf("the pass read the output of 3 running instances %d times, want once each", reads)

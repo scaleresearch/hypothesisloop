@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
+	"github.com/scaleresearch/hypothesisloop/contract/hostingapi"
 )
 
 // AgentSignup is one agent's place in one platform experiment, and for an agent the platform
@@ -354,7 +355,7 @@ const AgentInstanceRestartWindow = 6 * time.Hour
 // marker (agents/harness, progress.py), and MinAgentProgressLimitSeconds the shortest
 // silence the platform may be configured to give up on.
 const (
-	AgentProgressIntervalSeconds = 15
+	AgentProgressIntervalSeconds = hostingapi.ProgressIntervalSeconds
 	MinAgentProgressLimitSeconds = 8 * AgentProgressIntervalSeconds
 )
 

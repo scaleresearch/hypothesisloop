@@ -224,7 +224,7 @@ func (h *Decider) Reconcile(ctx context.Context, observed hostingapi.Observed) (
 					states = append(states, state)
 				}
 			}
-			after, ended, err := h.observe(ctx, one, seen, instance.Env["HL_TOKEN"])
+			after, ended, err := h.observe(ctx, one, seen, instance.Env[hostingapi.EnvToken])
 			if err != nil {
 				log.Error("record instance outcome failed", zap.Error(err))
 				out.Instances = append(out.Instances, instance)
