@@ -22,6 +22,7 @@ import requests
 
 from support import admin
 from support.api import API, WATCH_SUBPROTOCOL
+from support.settings import setting
 from support.wait import eventually
 
 # Exclusive: an org made here owns no cluster that runs anything, so its platform experiment is
@@ -503,7 +504,7 @@ def _metrics_service(api: API) -> str:
     if os.environ.get("METRICS_URL"):
         return os.environ["METRICS_URL"].rstrip("/")
     parts = urlsplit(api.base_url)
-    return urlunsplit((parts.scheme, f"{parts.hostname}:8084", "", "", ""))
+    return urlunsplit((parts.scheme, f"{parts.hostname}:{setting('metric_controller_port')}", "", "", ""))
 
 
 def _push(url: str, token: str | None, job_id: str, at: datetime) -> int:

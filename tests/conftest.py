@@ -18,6 +18,7 @@ import requests
 
 from support import admin
 from support.api import API
+from support.settings import setting
 from support.cluster import wait_scope_idle
 from support.wait import Deadline
 
@@ -26,7 +27,7 @@ API_URL = os.environ.get("API_URL")
 if not API_URL:
     raise pytest.UsageError(
         "API_URL is required: set it to the control plane's base URL, "
-        "e.g. API_URL=http://localhost:8081 for the local stack (make e2e passes it)."
+        f"e.g. API_URL=http://localhost:{setting('api_port')} for the local stack (make e2e passes it)."
     )
 HL_TOKEN = os.environ.get("HL_TOKEN")
 if not HL_TOKEN:

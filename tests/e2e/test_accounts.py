@@ -18,6 +18,7 @@ import requests
 
 from support import admin
 from support.api import API, HLError
+from support.settings import setting
 from support.wait import Deadline, eventually
 
 
@@ -261,8 +262,8 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
         r"  --namespace hypothesisloop --create-namespace --take-ownership \\\n"
         r"  --set-file runtimeToken=/dev/stdin \\\n"
         rf"  --set-string 'clusterName={name}' \\\n"
-        r"  --set-string 'apiURL=(http://\S+:8081)' \\\n"
-        r"  --set-string 'metricsURL=(http://\S+:8084)' \\\n"
+        rf"  --set-string 'apiURL=(http://\S+:{setting('api_port')})' \\\n"
+        rf"  --set-string 'metricsURL=(http://\S+:{setting('metric_controller_port')})' \\\n"
         r"  --set-string 'images\.registry=([^' ]+)' \\\n"
         r"  --set-string 'images\.tag=([^' ]+)'\n"
         rf"\nIt asks for the runtime token of {name}:\n(hls_\S+)\n", printed)

@@ -52,7 +52,7 @@ def _proposal(accelerator_type: str, image: str, **more) -> dict:
             "description": "Vary the hidden layer of the sample classifier and report val_accuracy. BASELINE config: the sample classifier as it is measured: not yet established",
             "metrics": [{"key": "val_accuracy", "direction": "maximize"}], "report_interval_seconds": 10,
         },
-        "goal_version": 1, "accelerator_type": accelerator_type, "image": image,
+        "goal_version": 1, "accelerator_type": accelerator_type, "image": image, "cpu": "1", "memory": "1Gi", "storage": "1Gi",
         "budget_accelerator_hours": 2, "duration_hours": 3, "baseline_minutes": 45, "agents": [{"agent_type": "hyperparameter-search"}, {}],
         "metric_reason": "Validation accuracy is what the goal asks about.",
         "measurement": "The sample workload scores a split it does not train on.",
