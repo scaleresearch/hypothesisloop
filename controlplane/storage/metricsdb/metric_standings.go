@@ -198,6 +198,16 @@ func (s *Store) BestPerAgentOnMetric(ctx context.Context, pe *domain.PlatformExp
 	if err != nil {
 		return nil, nil, err
 	}
+	return s.bestOver(ctx, pe, metric, rankable)
+}
+
+// ReportedBestPerAgentOnMetric is BestPerAgentOnMetric over every job in completed, whether it
+// holds the constraints or not: what each agent measured, which ranks nowhere.
+func (s *Store) ReportedBestPerAgentOnMetric(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition, completed map[string]bool) (map[string]AgentBest, []string, error) {
+	return s.bestOver(ctx, pe, metric, completed)
+}
+
+func (s *Store) bestOver(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition, jobs map[string]bool) (map[string]AgentBest, []string, error) {
 	// last is a range function and no aggregation operator. Each (agent, basis, job) is one
 	// series, so the outer aggregation only drops labels.
 	promQL := fmt.Sprintf(`max by (agent_id, metric_basis, job_id) (last_over_time(%s{platform_experiment_id=%q, metric_name=%q}[%s]))`,
@@ -206,7 +216,7 @@ func (s *Store) BestPerAgentOnMetric(ctx context.Context, pe *domain.PlatformExp
 	if err != nil {
 		return nil, nil, fmt.Errorf("metricsdb.BestPerAgentOnMetric: %s: %w", metric.Key, err)
 	}
-	return bestOf(metric, samples, rankable)
+	return bestOf(metric, samples, jobs)
 }
 
 // bestOf is each agent's best on metric over the rankable jobs among samples, one per agent,

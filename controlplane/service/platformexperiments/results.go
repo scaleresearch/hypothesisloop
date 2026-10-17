@@ -123,19 +123,27 @@ func (s *Service) Results(ctx context.Context, id string) (*PlatformExperimentRe
 		References:           []MetricReference{},
 		Bests:                make([]MetricBests, 0, len(pe.Metrics)),
 	}
+	completed, err := s.store.CompletedJobIDs(ctx, pe.ID)
+	if err != nil {
+		return nil, fmt.Errorf("results: %w", err)
+	}
 	for _, metric := range pe.Metrics {
-		best, nonRawAgents, err := s.bestPerAgent(ctx, pe, metric)
+		reported, nonRawAgents, err := s.metrics.ReportedBestPerAgentOnMetric(ctx, pe, metric, completed)
 		if err != nil {
 			return nil, fmt.Errorf("results: %w", err)
 		}
-		bests := MetricBests{Metric: metric.Key, Agents: make([]AgentBest, 0, len(best)), NonRawBasisAgents: nonRawAgents}
-		for agentID, b := range best {
+		bests := MetricBests{Metric: metric.Key, Agents: make([]AgentBest, 0, len(reported)), NonRawBasisAgents: nonRawAgents}
+		for agentID, b := range reported {
 			bests.Agents = append(bests.Agents, AgentBest{AgentID: agentID, Best: b.Value, ExperimentID: b.ExperimentID})
 		}
 		sort.Slice(bests.Agents, func(i, j int) bool { return bests.Agents[i].AgentID < bests.Agents[j].AgentID })
 		out.Bests = append(out.Bests, bests)
 		if metric.EffectiveRole() != domain.MetricRoleRanking {
 			continue
+		}
+		best, rankedNonRaw, err := s.metrics.BestPerAgentOnMetric(ctx, pe, metric, completed)
+		if err != nil {
+			return nil, fmt.Errorf("results: %w", err)
 		}
 		standings, err := s.rank(ctx, pe, metric, best)
 		if err != nil {
@@ -145,7 +153,7 @@ func (s *Service) Results(ctx context.Context, id string) (*PlatformExperimentRe
 			Metric:            metric.Key,
 			Direction:         metric.Direction,
 			Standings:         standings,
-			NonRawBasisAgents: nonRawAgents,
+			NonRawBasisAgents: rankedNonRaw,
 		}
 		if err := s.setAgainstBaseline(ctx, pe, metric, &ranked); err != nil {
 			return nil, fmt.Errorf("results: %w", err)
