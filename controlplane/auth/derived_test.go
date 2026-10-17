@@ -20,7 +20,6 @@ func TestMintedTokensVerifyToTheScopeTheyWereMintedFor(t *testing.T) {
 		{scope.Agent("pe-1", "agent-1"), Principal{Kind: KindAgent, PlatformExperimentID: "pe-1", AgentID: "agent-1"}},
 		{scope.Coordinator("pe-1"), Principal{Kind: KindCoordinator, PlatformExperimentID: "pe-1"}},
 		{scope.Runtime("local"), Principal{Kind: KindRuntime, ClusterName: "local"}},
-		{scope.Build("local", "abc123", 2), Principal{Kind: KindBuild, Build: BuildRef{Cluster: "local", Key: "abc123", Attempt: 2}}},
 	} {
 		token, err := Mint(testSecret, tc.scope)
 		if err != nil {
@@ -96,7 +95,7 @@ func mustMint(t *testing.T, secret, scope string) string {
 func samePrincipal(a, b Principal) bool {
 	return a.Kind == b.Kind && a.UserID == b.UserID && a.Name == b.Name && a.ProjectID == b.ProjectID &&
 		a.PlatformExperimentID == b.PlatformExperimentID && a.AgentID == b.AgentID && a.ExperimentID == b.ExperimentID &&
-		a.ClusterName == b.ClusterName && a.Build == b.Build && strings.Join(a.OrgIDs, ",") == strings.Join(b.OrgIDs, ",")
+		a.ClusterName == b.ClusterName && strings.Join(a.OrgIDs, ",") == strings.Join(b.OrgIDs, ",")
 }
 
 func TestAPIKeysAreDistinctAndHashStably(t *testing.T) {

@@ -16,7 +16,6 @@
       "config_hash": "cfg-1",
       "data_ref": "data-1",
       "job": {
-        "image": "registry.test/job:1",
         "command": [
           "bash",
           "-c",
@@ -42,7 +41,6 @@
         "shm_size": "8Gi"
       },
       "resolved_job": {
-        "image": "registry.test/job:1",
         "command": [
           "bash",
           "-c",
@@ -73,7 +71,6 @@
         "checkpoint_grace_seconds": 120,
         "shm_size": "8Gi"
       },
-      "environment_key": "env-abc",
       "hypothesis": "",
       "accelerator_type": "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3",
       "accelerator_count": 1,
@@ -96,27 +93,12 @@
       "attempt_count": 3,
       "infra_requeue_count": 0,
       "created_at": "0001-01-01T00:00:00Z",
-      "updated_at": "0001-01-01T00:00:00Z"
+      "updated_at": "0001-01-01T00:00:00Z",
+      "image": "registry.test/org/repo@sha256:abababababababababababababababababababababababababababababababab",
+      "launch": "set -u\nstarted=$(date +%s)\nfinish() {\n\tprintf '\\nhl-launch: code=%d started=%d ended=%d\\n' \"$1\" \"$started\" \"$(date +%s)\"\n\texit \"$1\"\n}\nsay() { echo \"launch: $*\" >&2; }\npid=\nstop() {\n\ttrap '' TERM\n\t[ -n \"$pid\" ] || finish 143\n\tkill -s TERM 0\n\t(sleep \"$HYPOTHESISLOOP_STOP_GRACE\"; kill -s KILL \"$pid\" 2>/dev/null) &\n}\ntrap stop TERM\nfetch() { git -c \"http.extraHeader=Authorization: Bearer $HYPOTHESISLOOP_TOKEN\" \"$@\"; }\ncommit=${HYPOTHESISLOOP_CODE_REF##*@}\nmkdir -p /workspace/code && git -C /workspace/code init -q || { say \"could not make a git repository at /workspace/code: the image's user must be able to create it\"; finish 1; }\ntry=1\npause=5\nwhile ! said=$(fetch -C /workspace/code fetch -q --depth 1 \"$HYPOTHESISLOOP_GIT_URL\" \"$commit\" 2>&1); do\n\tsaid=$(printf '%s' \"$said\" | tr '\\n' ' ')\n\tif [ \"$try\" -ge 7 ]; then\n\t\tif fetch ls-remote -q \"$HYPOTHESISLOOP_GIT_URL\" HEAD >/dev/null 2>&1; then\n\t\t\tsay \"commit $commit is not in the repository, which answers: $said\"\n\t\t\tfinish 1\n\t\tfi\n\t\tsay \"the repository did not answer in $try tries, so the command never ran and the platform queues the job again: $said\"\n\t\tfinish 75\n\tfi\n\tsay \"try $try of 7 to fetch commit $commit failed, the next in ${pause}s: $said\"\n\ttry=$((try + 1))\n\tsleep \"$pause\"\n\tpause=$((pause * 2 > 60 ? 60 : pause * 2))\ndone\ngit -C /workspace/code checkout -q FETCH_HEAD && cd /workspace/code || finish 1\n\"$@\" &\npid=$!\nwhile :; do\n\twait \"$pid\"\n\tcode=$?\n\tkill -0 \"$pid\" 2>/dev/null || break\ndone\nfinish \"$code\"\n"
     }
   ],
   "checkpoint_window": [
     "job-0"
-  ],
-  "builds": [
-    {
-      "key": "env-def",
-      "attempt": 1,
-      "base": "registry.test/job@sha256:aa",
-      "tools": "registry.test/tools@sha256:bb",
-      "dockerfile": "ARG BASE\nFROM ${BASE}\n",
-      "repository": "registry.test/envs",
-      "cache_scope": "hl-0123"
-    }
-  ],
-  "registry_pull": {
-    "registry": "registry.test",
-    "username": "puller",
-    "password": "pw",
-    "expires_at": "2026-10-01T13:30:00Z"
-  }
+  ]
 }

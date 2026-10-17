@@ -18,12 +18,10 @@ import (
 
 // controlPlane answers reconcile with the desired jobs it holds and keeps what was sent to it.
 type controlPlane struct {
-	mu      sync.Mutex
-	desired string
-	// registryPull is the answer's registry_pull, as JSON. Empty sends none.
-	registryPull string
-	reconcile    []map[string]any
-	statuses     [][]clusterapi.StatusReport
+	mu        sync.Mutex
+	desired   string
+	reconcile []map[string]any
+	statuses  [][]clusterapi.StatusReport
 }
 
 func (c *controlPlane) serve(t *testing.T) *httptest.Server {
@@ -37,9 +35,6 @@ func (c *controlPlane) serve(t *testing.T) *httptest.Server {
 			_ = json.Unmarshal(body, &sent)
 			c.reconcile = append(c.reconcile, sent)
 			answer := `{"experiments":` + c.desired
-			if c.registryPull != "" {
-				answer += `,"registry_pull":` + c.registryPull
-			}
 			_, _ = w.Write([]byte(answer + `}`))
 			return
 		}
@@ -146,68 +141,22 @@ func TestARefusedCreateIsNotReportedOverAWorkloadThatExists(t *testing.T) {
 	}
 }
 
-// A runtime that runs any image reports none, and no runtime says an image is only a default.
-func TestTheReconcileReportCarriesTheOneImageTheRuntimeRuns(t *testing.T) {
-	for _, image := range []string{"registry.test/platform-job:7", ""} {
-		cp := &controlPlane{desired: `[]`}
-		if err := newTestAgent(cp.serve(t), &captureExecutor{onlyImage: image}).reconcileOnce(context.Background()); err != nil {
-			t.Fatal(err)
-		}
-		if got := cp.reconcile[0]["job_image"]; got != image {
-			t.Fatalf("job_image = %v, want %q", got, image)
-		}
-		if _, sent := cp.reconcile[0]["job_image_default"]; sent {
-			t.Fatal("the report carries job_image_default")
-		}
-	}
-}
-
-// The answer's registry_pull is what every job created in the pass is handed, and a pass whose
-// answer has none hands none.
-func TestEveryJobCreatedIsHandedTheAnswersPullLogin(t *testing.T) {
-	exec := &captureExecutor{}
-	cp := &controlPlane{
-		desired:      `[{"id":"exp-env","environment_key":"k1"},{"id":"exp-plain"}]`,
-		registryPull: `{"registry":"europe-west1-docker.pkg.dev","username":"oauth2accesstoken","password":"pull-token","expires_at":"2030-01-01T00:00:00Z"}`,
-	}
-	agent := newTestAgent(cp.serve(t), exec)
-	if err := agent.reconcileOnce(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	for _, id := range []string{"exp-env", "exp-plain"} {
-		if pull := exec.pulls[id]; pull == nil || pull.Registry != "europe-west1-docker.pkg.dev" || pull.Username != "oauth2accesstoken" || pull.Password != "pull-token" {
-			t.Fatalf("%s was handed %+v, want the answer's registry_pull", id, pull)
-		}
-	}
-
-	cp.mu.Lock()
-	cp.desired, cp.registryPull = `[{"id":"exp-next"}]`, ""
-	cp.mu.Unlock()
-	if err := agent.reconcileOnce(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if pull, created := exec.pulls["exp-next"]; !created || pull != nil {
-		t.Fatalf("exp-next was handed %+v, want no login from an answer that has none", pull)
-	}
-}
-
 type refreshingExecutor struct {
 	*captureExecutor
 	refreshed map[string]string
 }
 
-func (e *refreshingExecutor) RefreshPull(_ context.Context, exp *clusterapi.DesiredJob, pull *clusterapi.RegistryLogin) error {
-	e.refreshed[exp.ID] = pull.Password
+func (e *refreshingExecutor) RefreshPull(_ context.Context, exp *clusterapi.DesiredJob) error {
+	e.refreshed[exp.ID] = exp.ImagePull.Password
 	return nil
 }
 
-// Every pass hands the answer's registry_pull to each live job that runs in an environment, so a
-// pod that pulls again after its first login expired pulls with the current one.
-func TestEveryLiveJobInAnEnvironmentIsHandedTheCurrentPullLogin(t *testing.T) {
+// Every pass hands each live job that pulls its image with a login its current one, so a pod
+// that pulls again after its first login expired pulls with the current one.
+func TestEveryLiveJobWithAPullLoginIsHandedTheCurrentOne(t *testing.T) {
 	exec := &refreshingExecutor{captureExecutor: &captureExecutor{managed: []string{"exp-env", "exp-plain"}}, refreshed: map[string]string{}}
 	cp := &controlPlane{
-		desired:      `[{"id":"exp-env","environment_key":"k1"},{"id":"exp-plain"}]`,
-		registryPull: `{"registry":"europe-west1-docker.pkg.dev","username":"oauth2accesstoken","password":"pull-token","expires_at":"2030-01-01T00:00:00Z"}`,
+		desired: `[{"id":"exp-env","image_pull":{"registry":"europe-west1-docker.pkg.dev","username":"oauth2accesstoken","password":"pull-token","expires_at":"2030-01-01T00:00:00Z"}},{"id":"exp-plain"}]`,
 	}
 	agent := newTestAgent(cp.serve(t), nil)
 	agent.Executor = exec
@@ -220,4 +169,16 @@ func TestEveryLiveJobInAnEnvironmentIsHandedTheCurrentPullLogin(t *testing.T) {
 	if exec.created != 0 {
 		t.Fatalf("created %d live jobs again", exec.created)
 	}
+}
+
+// agentLog is what an agent logs.
+type agentLog struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (l *agentLog) log(format string, args ...any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.lines = append(l.lines, fmt.Sprintf(format, args...))
 }

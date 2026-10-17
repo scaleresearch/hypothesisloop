@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/contract/exitline"
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 )
 
 // Every runtime reads runtime/shared/testdata/grace_answer.json (k8sexec and podexec have the twin
@@ -24,7 +24,7 @@ func TestGraceFromTheSharedReconcileAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := exitline.Wrap(golden.CheckpointStopGraceSeconds, append(append([]string(nil), exp.ResolvedJob.Command...), exp.ResolvedJob.Args...)); !reflect.DeepEqual(spec.Command, want) {
+	if want := clusterapi.LaunchCommand(exp.Launch, exp.ResolvedJob.Command, exp.ResolvedJob.Args); !reflect.DeepEqual(spec.Command, want) {
 		t.Fatalf("command = %q, want %q", spec.Command, want)
 	}
 	ordinary, _, err := exp.EffectiveJob().ResolvedGrace()

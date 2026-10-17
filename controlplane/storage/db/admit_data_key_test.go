@@ -35,7 +35,7 @@ func admitDataKeyFixture(t *testing.T) (*Store, *domain.Experiment) {
 		CodeRef: "repo@" + fortyHexChars(), Branch: "hl/pe/researcher-1/idea-abc123", ConfigHash: "cfg", DataRef: "none",
 		HypothesisID: "h", Hypothesis: "h", AcceleratorType: "cpu",
 		EstimatedDurationHours: 1, CapacityTier: domain.CapacityGuaranteed, Status: domain.StatusQueued, CreatedAt: now, UpdatedAt: now,
-		Job:     domain.JobSpec{Image: "img", CPU: "1", Memory: "1Gi", Storage: "1Gi", MaxRetries: &retries},
+		Job:     domain.JobSpec{CPU: "1", Memory: "1Gi", Storage: "1Gi", MaxRetries: &retries},
 		DataKey: domain.DataKey{AccessKeyID: "AK-" + suffix, SecretAccessKey: "SK-" + suffix},
 	}
 	return store, exp

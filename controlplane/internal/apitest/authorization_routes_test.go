@@ -239,7 +239,7 @@ var staffOnly = only(nil, 0)
 const metricsUnreachable = http.StatusInternalServerError
 
 const (
-	job1      = `{"id":"job-new","metadata":{"platform_experiment_id":"<pe>","agent_id":"<agent>","hypothesis_id":"hyp-own","code_ref":"r@0","config_hash":"h","data_ref":"d","theory":"t","estimated_duration_hours":1},"job":{"image":"i","cpu":1,"memory":"1Gi","storage":"1Gi","max_retries":0}}`
+	job1      = `{"id":"job-new","metadata":{"platform_experiment_id":"<pe>","agent_id":"<agent>","hypothesis_id":"hyp-own","code_ref":"r@0","config_hash":"h","data_ref":"d","theory":"t","estimated_duration_hours":1},"job":{"cpu":1,"memory":"1Gi","storage":"1Gi","max_retries":0}}`
 	pe1       = `{"project_id":"<prj>","name":"n","description":"d","budget_accelerator_hours":1,"max_agents":2,"metrics":[{"key":"loss","direction":"minimize","role":"ranking"}],"report_interval_seconds":60,"starts_at":"2030-01-01T00:00:00Z","duration_hours":24}`
 	capacity1 = `{"cpu_available_cores":1,"cpu_total_cores":1,"accelerator_available_by_type":{},"accelerator_total_by_type":{},"accelerator_available_by_node":{},"node_resources_by_node":{},"node_resources_total_by_node":{},"node_labels_by_node":{},"multi_node_capable":false,"autoscaler_enabled":false,"cluster_id":"","ram_available_bytes":1,"ram_total_bytes":1,"storage_available_bytes":1,"storage_total_bytes":1}`
 )
@@ -257,9 +257,6 @@ var routes = []route{
 	{method: "POST", path: "/experiments/{id}/metrics", request: "/experiments/<job>/metrics", body: `{"metric_name":"loss","fraction_complete":0.5,"metric_value":1}`, rule: ownedOrTheJob(reached)},
 	{method: "GET", path: "/experiments/{id}/logs", request: "/experiments/<job>/logs", rule: scoped(agentAudience, reached), sharedRead: true},
 	{method: "GET", path: "/experiments/{id}/cost", request: "/experiments/<job>/cost", rule: scoped(agentAudience, reached), sharedRead: true},
-	{method: "POST", path: "/experiments/{id}/image-credentials", request: "/experiments/<job>/image-credentials", rule: scoped(agentAudience, reached)},
-	{method: "POST", path: "/environments", body: `{"platform_experiment_id":"<pe>","code_ref":"r@0","image":"i"}`, rule: scoped(agentAudience, reached)},
-	{method: "GET", path: "/environments", request: "/environments?platform_experiment_id=<pe>&code_ref=r@0&image=i", rule: scoped(agentAudience, reached), sharedRead: true},
 
 	// ---- cluster settings ----
 
@@ -313,7 +310,9 @@ var routes = []route{
 	{method: "POST", path: "/platform-experiments/{id}/accept", request: "/platform-experiments/<pe>/accept", body: `{"budget_accelerator_hours":1,"duration_hours":1,"baseline_minutes":1,"agents":[{}]}`, rule: scoped(coordinatorAudience, reached)},
 	{method: "POST", path: "/platform-experiments/{id}/hold", request: "/platform-experiments/<pe>/hold", rule: scoped(coordinatorAudience, reached)},
 	{method: "PUT", path: "/platform-experiments/{id}/decline", request: "/platform-experiments/<pe>/decline", body: `{"reason":"nothing here can be measured","goal_version":1}`, rule: plannerOnly(agentAudience)},
-	{method: "PUT", path: "/platform-experiments/{id}/proposal", request: "/platform-experiments/<pe>/proposal", body: `{"goal_version":1,"experiment":{},"budget_accelerator_hours":1,"duration_hours":1,"baseline_minutes":1,"agents":[{}],"accelerator_type":"nvidia.com/gpu.product=A","image":"torch","cpu":"1","memory":"1Gi","storage":"1Gi","metric_reason":"r","measurement":"m","sizing_reason":"s"}`, rule: plannerOnly(agentAudience)},
+	{method: "PUT", path: "/platform-experiments/{id}/proposal", request: "/platform-experiments/<pe>/proposal", body: `{"goal_version":1,"experiment":{},"budget_accelerator_hours":1,"duration_hours":1,"baseline_minutes":1,"agents":[{}],"accelerator_type":"nvidia.com/gpu.product=A","cpu":"1","memory":"1Gi","storage":"1Gi","metric_reason":"r","measurement":"m","sizing_reason":"s"}`, rule: plannerOnly(agentAudience)},
+	{method: "PUT", path: "/platform-experiments/{id}/image", request: "/platform-experiments/<pe>/image", body: `{"image":"registry.test/i:1"}`, rule: scoped(agentAudience, reached)},
+	{method: "POST", path: "/platform-experiments/{id}/registry-credentials", request: "/platform-experiments/<pe>/registry-credentials", rule: scoped(agentAudience, http.StatusConflict)},
 	{method: "PUT", path: "/platform-experiments/{id}/summary", request: "/platform-experiments/<pe>/summary", body: `{"summary":"s"}`, rule: scoped(coordinatorAudience, reached)},
 	{method: "GET", path: "/platform-experiments/{id}/quotas", request: "/platform-experiments/<pe>/quotas", rule: scoped(agentAudience, reached), sharedRead: true},
 	{method: "GET", path: "/platform-experiments/{id}/quotas/{agent_id}", request: "/platform-experiments/<pe>/quotas/<agent>", rule: scoped(agentAudience, reached), sharedRead: true},
@@ -396,11 +395,6 @@ var routes = []route{
 	{method: "GET", path: "/internal/clusters/{name}/access", request: "/internal/clusters/<cluster>/access", rule: ofCluster(http.StatusNoContent)},
 	{method: "DELETE", path: "/internal/clusters/{name}", request: "/internal/clusters/<cluster>", rule: ofCluster(reached)},
 	{method: "POST", path: "/internal/clusters/{name}/status", request: "/internal/clusters/<cluster>/status", body: `{"reports":[]}`, rule: ofCluster(reached)},
-	{method: "POST", path: "/internal/clusters/{name}/builds/{key}/credential", request: "/internal/clusters/<cluster>/builds/key-1/credential", body: `{"attempt":1}`, rule: ofCluster(reached)},
-	{method: "POST", path: "/internal/clusters/{name}/builds/{key}/git-credential", request: "/internal/clusters/<cluster>/builds/key-1/git-credential", body: `{"attempt":1}`, rule: ofCluster(reached)},
-	{method: "POST", path: "/internal/clusters/{name}/builds/{key}/progress", request: "/internal/clusters/<cluster>/builds/key-1/progress", body: `{"attempt":1,"step":"[1/2] FROM base: started"}`, rule: ofCluster(reached)},
-	{method: "POST", path: "/internal/clusters/{name}/builds/{key}/loaded", request: "/internal/clusters/<cluster>/builds/key-1/loaded", body: `{"attempt":1,"node":"node-1","digest":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}`, rule: ofCluster(reached)},
-	{method: "POST", path: "/internal/clusters/{name}/builds/{key}", request: "/internal/clusters/<cluster>/builds/key-1", body: `{"attempt":1,"outcome":"pushed","digest":"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}`, rule: ofCluster(reached)},
 }
 
 // inOrgOf is a write that names the org it lands in.
@@ -483,9 +477,9 @@ var cases = []struct {
 	{"an agent reading the comments on the objective of its platform experiment", "agent", "GET", "/hypotheses/pe-a1/comments", "", reached},
 	{"an agent reading the comments on the objective of another org's platform experiment", "agent", "GET", "/hypotheses/pe-b/comments", "", 404},
 
-	{"an agent submitting a job as another agent", "agent", "POST", "/experiments", `{"id":"job-new","metadata":{"platform_experiment_id":"pe-a1","agent_id":"agent-2","hypothesis_id":"hyp-own","code_ref":"r@0","config_hash":"h","data_ref":"d","theory":"t","estimated_duration_hours":1},"job":{"image":"i","cpu":"1","memory":"1Gi","storage":"1Gi","max_retries":0}}`, 403},
-	{"an agent submitting a job and naming neither itself nor its experiment", "agent", "POST", "/experiments", `{"id":"job-new","metadata":{"hypothesis_id":"hyp-own","code_ref":"r@0","config_hash":"h","data_ref":"d","theory":"t","estimated_duration_hours":1},"job":{"image":"i","cpu":"1","memory":"1Gi","storage":"1Gi","max_retries":0}}`, reached},
-	{"a user submitting a job for no agent", "user", "POST", "/experiments", `{"id":"job-new","metadata":{"platform_experiment_id":"pe-a1","hypothesis_id":"hyp-own","code_ref":"r@0","config_hash":"h","data_ref":"d","theory":"t","estimated_duration_hours":1},"job":{"image":"i","cpu":"1","memory":"1Gi","storage":"1Gi","max_retries":0}}`, 404},
+	{"an agent submitting a job as another agent", "agent", "POST", "/experiments", `{"id":"job-new","metadata":{"platform_experiment_id":"pe-a1","agent_id":"agent-2","hypothesis_id":"hyp-own","code_ref":"r@0","config_hash":"h","data_ref":"d","theory":"t","estimated_duration_hours":1},"job":{"cpu":"1","memory":"1Gi","storage":"1Gi","max_retries":0}}`, 403},
+	{"an agent submitting a job and naming neither itself nor its experiment", "agent", "POST", "/experiments", `{"id":"job-new","metadata":{"hypothesis_id":"hyp-own","code_ref":"r@0","config_hash":"h","data_ref":"d","theory":"t","estimated_duration_hours":1},"job":{"cpu":"1","memory":"1Gi","storage":"1Gi","max_retries":0}}`, reached},
+	{"a user submitting a job for no agent", "user", "POST", "/experiments", `{"id":"job-new","metadata":{"platform_experiment_id":"pe-a1","hypothesis_id":"hyp-own","code_ref":"r@0","config_hash":"h","data_ref":"d","theory":"t","estimated_duration_hours":1},"job":{"cpu":"1","memory":"1Gi","storage":"1Gi","max_retries":0}}`, 404},
 	{"a coordinator creating a second platform experiment in its own project", "coordinator", "POST", "/platform-experiments", `{"project_id":"prj-a1","name":"n","description":"d","budget_accelerator_hours":1,"max_agents":2,"metrics":[{"key":"loss","direction":"minimize","role":"ranking"}],"report_interval_seconds":60,"starts_at":"2030-01-01T00:00:00Z","duration_hours":24}`, 403},
 
 	{"a link to a hypothesis of another org", "user", "POST", "/hypotheses/hyp-own/links", `{"agent_id":"agent-1","type":"related","to":"hyp-foreign"}`, 404},

@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
-	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // worldRepositories is a git host that has every repository asked of it under one root.
@@ -45,15 +44,4 @@ func (worldRepositories) Create(_ context.Context, _, repository, _ string) (str
 
 func (worldRepositories) HasBranch(context.Context, string, string, string) (bool, error) {
 	return true, nil
-}
-
-// noEnvironments is a git host whose commits declare no environment.
-type noEnvironments struct{}
-
-func (noEnvironments) Declared(context.Context, string, string, string, string, string) (*domain.Environment, error) {
-	return nil, nil
-}
-
-func (noEnvironments) Find(context.Context, string, string, string, string, string) (*domain.Environment, bool, error) {
-	return nil, false, nil
 }

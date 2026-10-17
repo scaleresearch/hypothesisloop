@@ -68,7 +68,7 @@ func openAPISpec(t *testing.T) map[string]any {
 		PlatformExperiments: platformExperiments,
 		Hypotheses:          struct{ platformexperiments.Hypotheses }{},
 		Launch:              launch,
-		Scheduler:           scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, metricsdb.New("http://metrics.invalid"), zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{}),
+		Scheduler:           scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, metricsdb.New("http://metrics.invalid"), zap.NewNop()).WithLoop(noopLoop{}),
 	})
 	doc.MountExplore(r)
 

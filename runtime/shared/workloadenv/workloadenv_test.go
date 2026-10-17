@@ -1,13 +1,14 @@
 package workloadenv
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 )
 
 func TestPlatformRewritesOnlyTheURLsAndRefusesAJobWithNowhereToSave(t *testing.T) {
-	exp := &clusterapi.DesiredJob{ID: "exp-1", AgentID: "agent-1", AttemptCount: 2,
+	exp := &clusterapi.DesiredJob{ID: "exp-1", Image: "registry.test/image@sha256:aa", Launch: "exec \"$@\"", ResolvedJob: gracedJob(), AgentID: "agent-1", AttemptCount: 2,
 		Data: &clusterapi.DataAccess{Endpoint: "http://localhost:9000", URI: "s3://bucket/exp-1"}, Token: "job-token", GitURL: "https://api.test/git/pe-1.git"}
 	reach := func(url string) string { return url + "/reached" }
 
@@ -42,14 +43,14 @@ func TestPlatformRewritesOnlyTheURLsAndRefusesAJobWithNowhereToSave(t *testing.T
 // The k8s runtime hashes the variable list, so a variable added anywhere but the end would
 // change the hash of every position after it. The repository address came after the token.
 func TestPlatformEmitsTheJobTokenAndRepositoryLastAndRefusesAJobWithoutThem(t *testing.T) {
-	exp := &clusterapi.DesiredJob{ID: "exp-1", Data: &clusterapi.DataAccess{Endpoint: "http://store:9000"}, Token: "job-token", GitURL: "https://api.test/git/pe-1.git"}
+	exp := &clusterapi.DesiredJob{ID: "exp-1", Image: "registry.test/image@sha256:aa", Launch: "exec \"$@\"", ResolvedJob: gracedJob(), Data: &clusterapi.DataAccess{Endpoint: "http://store:9000"}, Token: "job-token", GitURL: "https://api.test/git/pe-1.git"}
 	same := func(url string) string { return url }
 	vars, err := Platform(exp, clusterapi.JobGroup{}, "http://api:8081", same)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if token, repository := vars[len(vars)-2], vars[len(vars)-1]; token != (Var{"HYPOTHESISLOOP_TOKEN", "job-token"}) || repository != (Var{"HYPOTHESISLOOP_GIT_URL", exp.GitURL}) {
-		t.Errorf("last variables = %+v, %+v, want HYPOTHESISLOOP_TOKEN=job-token, then HYPOTHESISLOOP_GIT_URL", token, repository)
+	if token, repository := vars[len(vars)-3], vars[len(vars)-2]; token != (Var{"HYPOTHESISLOOP_TOKEN", "job-token"}) || repository != (Var{"HYPOTHESISLOOP_GIT_URL", exp.GitURL}) {
+		t.Errorf("last variables = %+v, %+v, want HYPOTHESISLOOP_TOKEN=job-token, then HYPOTHESISLOOP_GIT_URL, before the stop grace", token, repository)
 	}
 	exp.GitURL = ""
 	if _, err := Platform(exp, clusterapi.JobGroup{}, "http://api:8081", same); err == nil {
@@ -69,7 +70,7 @@ func TestJobLayersTheGroupEnvironmentOverTheJobs(t *testing.T) {
 }
 
 func TestMergedKeepsTheJobsOwnValueOverThePlatforms(t *testing.T) {
-	exp := &clusterapi.DesiredJob{ID: "exp-1", Data: &clusterapi.DataAccess{Region: "eu"}, Token: "job-token", GitURL: "https://api.test/git/pe-1.git"}
+	exp := &clusterapi.DesiredJob{ID: "exp-1", Image: "registry.test/image@sha256:aa", Launch: "exec \"$@\"", ResolvedJob: gracedJob(), Data: &clusterapi.DataAccess{Region: "eu"}, Token: "job-token", GitURL: "https://api.test/git/pe-1.git"}
 	spec := clusterapi.JobSpec{Env: map[string]string{"LR": "0.1", "AWS_REGION": "us"}}
 	group := clusterapi.JobGroup{Env: map[string]string{"LR": "0.3", "ROLE": "learner"}}
 
@@ -91,16 +92,16 @@ func TestMergedKeepsTheJobsOwnValueOverThePlatforms(t *testing.T) {
 	}
 }
 
-func TestCommandIsTheGroupsOwnWhenItNamesOne(t *testing.T) {
+func TestCommandIsTheLaunchScriptAroundTheGroupsOwnWhenItNamesOne(t *testing.T) {
+	exp := &clusterapi.DesiredJob{Launch: "exec \"$@\""}
 	spec := clusterapi.JobSpec{Command: []string{"python", "train.py"}, Args: []string{"--all"}}
-	command, args := Command(spec, clusterapi.JobGroup{})
-	if command[1] != "train.py" || args[0] != "--all" {
-		t.Errorf("no group command: %q %q", command, args)
+	if got, want := Command(exp, spec, clusterapi.JobGroup{}), clusterapi.LaunchCommand(exp.Launch, spec.Command, spec.Args); !slices.Equal(got, want) {
+		t.Errorf("no group command: %q, want %q", got, want)
 	}
 	// The group's command comes with the group's args, never the job's.
-	command, args = Command(spec, clusterapi.JobGroup{Command: []string{"python", "actor.py"}})
-	if command[1] != "actor.py" || len(args) != 0 {
-		t.Errorf("group command: %q %q", command, args)
+	group := clusterapi.JobGroup{Command: []string{"python", "actor.py"}}
+	if got, want := Command(exp, spec, group), clusterapi.LaunchCommand(exp.Launch, group.Command, nil); !slices.Equal(got, want) {
+		t.Errorf("group command: %q, want %q", got, want)
 	}
 }
 
@@ -115,7 +116,7 @@ func TestJobCarriesTheSecretEnvironment(t *testing.T) {
 // A container sees all of its node's cores, so the job is told the whole cores its cpu holds,
 // and a thread pool it sizes itself still wins.
 func TestPlatformTellsTheJobTheCoresItHolds(t *testing.T) {
-	exp := &clusterapi.DesiredJob{ID: "exp-1", Data: &clusterapi.DataAccess{}, Token: "job-token", GitURL: "https://api.test/git/pe-1.git"}
+	exp := &clusterapi.DesiredJob{ID: "exp-1", Image: "registry.test/image@sha256:aa", Launch: "exec \"$@\"", ResolvedJob: gracedJob(), Data: &clusterapi.DataAccess{}, Token: "job-token", GitURL: "https://api.test/git/pe-1.git"}
 	same := func(url string) string { return url }
 	for cpu, want := range map[string]string{"4": "4", "500m": "1", "2.5": "3", "": ""} {
 		env, err := Merged(exp, clusterapi.JobSpec{}, clusterapi.JobGroup{CPU: cpu}, "http://api", same)
@@ -133,4 +134,9 @@ func TestPlatformTellsTheJobTheCoresItHolds(t *testing.T) {
 	if _, err := Platform(exp, clusterapi.JobGroup{CPU: "four"}, "http://api", same); err == nil {
 		t.Error("Platform for cpu \"four\": got nil, want an error")
 	}
+}
+
+func gracedJob() *clusterapi.JobSpec {
+	shutdown, checkpoint := int64(30), int64(600)
+	return &clusterapi.JobSpec{TerminationGracePeriodSeconds: &shutdown, CheckpointGraceSeconds: &checkpoint}
 }

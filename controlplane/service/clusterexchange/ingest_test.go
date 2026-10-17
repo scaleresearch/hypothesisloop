@@ -1,6 +1,7 @@
 package clusterexchange
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"testing"
@@ -47,7 +48,7 @@ func TestReconcileHandsEachJobItsOwnToken(t *testing.T) {
 	h.signingSecret = secret
 	tokens := map[string]string{}
 	for _, id := range []string{"job-1", "job-2", "job-1"} {
-		job, err := h.desiredJob(&domain.Experiment{ID: id, PlatformExperimentID: "pe-1"})
+		job, err := h.desiredJob(context.Background(), &domain.Experiment{Image: wireImage, ID: id, PlatformExperimentID: "pe-1"})
 		if err != nil {
 			t.Fatalf("desired job: %v", err)
 		}
@@ -64,7 +65,7 @@ func TestReconcileHandsEachJobItsOwnToken(t *testing.T) {
 		t.Error("two jobs were handed the same token")
 	}
 	h.signingSecret = ""
-	if _, err := h.desiredJob(&domain.Experiment{ID: "job-1"}); err == nil {
+	if _, err := h.desiredJob(context.Background(), &domain.Experiment{Image: wireImage, ID: "job-1"}); err == nil {
 		t.Error("desired job with no signing secret: got = nil, want an error")
 	}
 }

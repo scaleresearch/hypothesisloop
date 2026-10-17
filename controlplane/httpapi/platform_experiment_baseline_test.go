@@ -78,7 +78,7 @@ var theCoordinator = auth.Principal{Kind: auth.KindCoordinator, OrgIDs: []string
 
 // theMeasuredBlock is what the platform writes into the brief of an experiment whose baseline is
 // measuredBaseline.
-const theMeasuredBlock = "\n\n" + platformexperiments.MeasuredBaselineHeader + "\njob: job-1\ncode_ref: git://seed@abc\nmeasured: val_loss = 1.8, exact_match = 1"
+const theMeasuredBlock = "\n\n" + platformexperiments.MeasuredBaselineHeader + "\njob: job-1\ncode_ref: git://seed@abc\nimage: registry.test/image@sha256:aa\nmeasured: val_loss = 1.8, exact_match = 1"
 
 // A baseline was something only a draft's planner could give an experiment, inside its proposal.
 // It is declared on the open experiment, by its coordinator or its owner, and the platform reads

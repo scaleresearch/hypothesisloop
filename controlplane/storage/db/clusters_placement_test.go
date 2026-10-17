@@ -55,7 +55,7 @@ func (w *twoOrgs) queued(t *testing.T, id, peID string) string {
 
 func (w *twoOrgs) claim(t *testing.T, id, cluster string) bool {
 	t.Helper()
-	claimed, err := w.exps.ClaimSubmitted(context.Background(), id, cluster, &domain.JobSpec{Image: "registry.test/job:1", AcceleratorCount: 1}, nil)
+	claimed, err := w.exps.ClaimSubmitted(context.Background(), id, cluster, &domain.JobSpec{AcceleratorCount: 1}, nil)
 	if err != nil {
 		t.Fatalf("ClaimSubmitted(%s, %s): %v", id, cluster, err)
 	}
@@ -138,7 +138,7 @@ func TestAClaimInASingleOrgDeploymentLandsOnEveryRegisteredCluster(t *testing.T)
 		}
 		id := "job-" + suffix + "-" + string(rune('a'+i))
 		seedExperimentForCapTest(t, pool, id, agent, pe, 1, domain.StatusQueued)
-		claimed, err := exps.ClaimSubmitted(context.Background(), id, name, &domain.JobSpec{Image: "registry.test/job:1", AcceleratorCount: 1}, nil)
+		claimed, err := exps.ClaimSubmitted(context.Background(), id, name, &domain.JobSpec{AcceleratorCount: 1}, nil)
 		if err != nil || !claimed {
 			t.Fatalf("claim on %s = %v, %v, want it placed", name, claimed, err)
 		}
@@ -244,7 +244,7 @@ func TestAClaimWaitingBehindTheEndOfSharingIsRefused(t *testing.T) {
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		claimed, err := w.exps.ClaimSubmitted(ctx, job, w.ofA, &domain.JobSpec{Image: "registry.test/job:1", AcceleratorCount: 1}, nil)
+		claimed, err := w.exps.ClaimSubmitted(ctx, job, w.ofA, &domain.JobSpec{AcceleratorCount: 1}, nil)
 		done <- outcome{claimed, err}
 	}()
 	select {
@@ -391,70 +391,5 @@ func TestAClusterIdentityIsBoundOnceAndOnlyClearingReleasesIt(t *testing.T) {
 	}
 	if err := w.clusters.BindReportedID(ctx, w.ofA, rebuilt); err != nil {
 		t.Fatalf("bind the rebuilt cluster after clearing: %v", err)
-	}
-}
-
-// The write that places a job holds the image rule too (domain.Cluster.Runs): what a tick
-// filtered in memory is checked again against the cluster's row as it stands.
-func TestAClaimPlacesAJobOnlyWhereItsImageRuns(t *testing.T) {
-	w := newTwoOrgs(t)
-	ctx := context.Background()
-	const platformImage = "registry.test/platform-job:7"
-	setImage := func(id, image string) {
-		t.Helper()
-		if _, err := w.pool.pool.Exec(ctx, `UPDATE experiments SET job_spec = job_spec - 'image' || CASE WHEN $2 = '' THEN '{}'::jsonb ELSE jsonb_build_object('image', $2::text) END WHERE id = $1`, id, image); err != nil {
-			t.Fatal(err)
-		}
-	}
-	named, bare, platform := w.queued(t, "named", w.peA), w.queued(t, "bare", w.peA), w.queued(t, "platform", w.peA)
-	setImage(bare, "")
-	setImage(platform, platformImage)
-
-	// The cluster runs each job in its own image: a job that names none has nothing to run in.
-	if w.claim(t, bare, w.ofA) {
-		t.Fatal("a job with no image was placed on a cluster that has none of its own")
-	}
-	if got, err := w.clusters.GetCluster(ctx, w.ofA); err != nil || got.JobImage != "" {
-		t.Fatalf("a cluster nothing was reported for: job_image %q, %v", got.JobImage, err)
-	}
-
-	// Its runtime reports one image for every job.
-	for range 2 {
-		if err := w.clusters.RecordJobImage(ctx, w.ofA, platformImage); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if got, _ := w.clusters.GetCluster(ctx, w.ofA); got.JobImage != platformImage {
-		t.Fatalf("job_image = %q, want the one reported", got.JobImage)
-	}
-	if registered, _ := w.clusters.RegisteredClusters(ctx); registered[w.ofA].JobImage != platformImage {
-		t.Fatalf("the registered clusters do not carry the image: %+v", registered[w.ofA])
-	}
-	if w.claim(t, named, w.ofA) {
-		t.Fatal("a job naming its own image was placed on a cluster that runs every job in another")
-	}
-	if got := w.get(t, named); got.Status != domain.StatusQueued || got.ClusterName != "" {
-		t.Fatalf("after the refused claim: %s on %q, want still queued", got.Status, got.ClusterName)
-	}
-	// Submit refuses a job that names no image, so one stored without is placed nowhere.
-	if w.claim(t, bare, w.ofA) {
-		t.Fatal("a job with no image was placed on a cluster that runs one image")
-	}
-	if !w.claim(t, platform, w.ofA) {
-		t.Fatal("a job was refused on the cluster whose image it names")
-	}
-	if got := w.get(t, platform); got.ResolvedJob.Image != platformImage || got.Job.Image != platformImage {
-		t.Fatalf("it is to run in %q and names %q, want the cluster's image written at admission and the job as submitted", got.ResolvedJob.Image, got.Job.Image)
-	}
-
-	// The runtime is replaced by one that runs a job in the image it names.
-	if err := w.clusters.RecordJobImage(ctx, w.ofA, ""); err != nil {
-		t.Fatal(err)
-	}
-	if !w.claim(t, named, w.ofA) {
-		t.Fatal("a job naming an image was refused on a cluster that runs each job in its own")
-	}
-	if got := w.get(t, named); got.ResolvedJob.Image != got.Job.Image || got.Job.Image == "" {
-		t.Fatalf("named is to run in %q, want the %q it names", got.ResolvedJob.Image, got.Job.Image)
 	}
 }

@@ -59,7 +59,7 @@ func (capExceeded) ConcurrencyCapExceeded() bool { return true }
 func TestEveryNotAdmittedReasonIsStoredWithASentence(t *testing.T) {
 	exp := holdJob("job", domain.CapacityGuaranteed, h100, 1, "1")
 	exp.RanOnAcceleratorType = h100
-	imageChoice := map[string]domain.Cluster{"rented": {Name: "rented", JobImage: "registry.test/only:1"}, "metal": {Name: "metal"}}
+	imageChoice := map[string]domain.Cluster{"rented": {Name: "rented"}, "metal": {Name: "metal"}}
 	short := domain.NewFootprint()
 	short.Add(domain.ResourceKey{Kind: domain.ResourceKindMemory}, 1<<30)
 	produced := map[string][]string{
@@ -73,18 +73,14 @@ func TestEveryNotAdmittedReasonIsStoredWithASentence(t *testing.T) {
 			notAdmittedReasonFor(false, false, true, short, "cluster-a", holders{}),
 			waitingForSlotReason("cluster-a", "h100-0"),
 		},
-		domain.NotAdmittedOutranked:          {notAdmittedReasonFor(true, false, false, short, "cluster-a", holders{})},
-		domain.NotAdmittedStageCut:           {stageCutReason()},
-		domain.NotAdmittedJobTooLong:         {jobTooLongReason(2, 0.5)},
-		domain.NotAdmittedWorkloadCreation:   {workloadCreationReason(), notAdmittedReasonForSubmitError(errors.New("boom"))},
-		domain.NotAdmittedInsufficientQuota:  {ranOnTypeUncoveredReason(exp)},
-		domain.NotAdmittedNoMultiNodeCluster: {noMultiNodeClusterReason(2)},
-		domain.NotAdmittedNoClusterForOrg:    {noClusterForOrgReason()},
-		domain.NotAdmittedClustersDisabled:   {clustersDisabledReason()},
-		domain.NotAdmittedNoClusterForImage: {
-			noClusterRunsImageReason([]domain.Cluster{{Name: "rented", JobImage: "registry.test/only:1"}}, exp),
-			installed{registered: imageChoice, totals: map[string]domain.Footprint{"metal": {}, "rented": domain.CapacityFootprint(8, map[string]int64{h100: 1}, 64<<30, 64<<30)}}.neverFitsReason(exp),
-		},
+		domain.NotAdmittedOutranked:               {notAdmittedReasonFor(true, false, false, short, "cluster-a", holders{})},
+		domain.NotAdmittedStageCut:                {stageCutReason()},
+		domain.NotAdmittedJobTooLong:              {jobTooLongReason(2, 0.5)},
+		domain.NotAdmittedWorkloadCreation:        {workloadCreationReason(), notAdmittedReasonForSubmitError(errors.New("boom"))},
+		domain.NotAdmittedInsufficientQuota:       {ranOnTypeUncoveredReason(exp)},
+		domain.NotAdmittedNoMultiNodeCluster:      {noMultiNodeClusterReason(2)},
+		domain.NotAdmittedNoClusterForOrg:         {noClusterForOrgReason()},
+		domain.NotAdmittedClustersDisabled:        {clustersDisabledReason()},
 		domain.NotAdmittedWaitingForScaleUp:       {waitingForScaleUpReason("cluster-a")},
 		domain.NotAdmittedNoScalableCapacity:      {noScalableCapacityReason()},
 		domain.NotAdmittedConcurrencyCap:          {concurrencyCapReason(), notAdmittedReasonForSubmitError(capExceeded{errors.New("cap")})},

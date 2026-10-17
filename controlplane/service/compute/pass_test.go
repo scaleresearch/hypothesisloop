@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
-	"github.com/scaleresearch/hypothesisloop/contract/exitline"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider/fake"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentloop"
 )
@@ -101,7 +100,7 @@ func rented(t *testing.T, e *Executor, p *fake.Provider) (keep, done, booting *c
 	p.Start("hl-job-t1-exp-keep-a0-h100-0")
 	p.Print("hl-job-t1-exp-keep-a0-h100-0", "epoch 1")
 	p.Start("hl-job-t1-exp-done-a2-cpu-0")
-	p.Exit("hl-job-t1-exp-done-a2-cpu-0", exitline.Format(0))
+	p.Exit("hl-job-t1-exp-done-a2-cpu-0", exitLine(0))
 	return keep, done, booting
 }
 
@@ -167,7 +166,7 @@ func TestAPassFollowsItsOwnChangesAndIsReadAgainForTheNext(t *testing.T) {
 	}
 	pass := scoped.(*Executor)
 	mustCreate(t, pass, job(t, "exp-2", 0, 1))
-	if err := pass.CreateWorkload(ctx, on(job(t, "exp-3", 0, 1), "h100-0"), nil); err == nil {
+	if err := pass.CreateWorkload(ctx, on(job(t, "exp-3", 0, 1), "h100-0")); err == nil {
 		t.Fatal("a slot rented earlier in the pass was rented again")
 	}
 	if err := pass.DeleteWorkload(ctx, "exp-1", false); err != nil {
@@ -263,7 +262,7 @@ func TestTheLoopNeverReportsAPreemptedRunsExitAsTheReadmittedJobsResult(t *testi
 	const old, placed = "hl-job-t1-exp-1-a3-h100-0", "hl-job-t1-exp-1-a3-h100-1"
 	mustCreate(t, e, job(t, "exp-1", 3, 1))
 	p.Start(old)
-	p.Exit(old, "Terminated", exitline.Format(143))
+	p.Exit(old, "Terminated", exitLine(143))
 	cp := newControlPlane(t, p, on(job(t, "exp-1", 3, 1), "h100-1"))
 
 	run(t, e, cp, 5*time.Millisecond, 5*time.Millisecond, func() bool {

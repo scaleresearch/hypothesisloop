@@ -37,7 +37,7 @@ func acceleratorExperiment(acceleratorCount int, cpu, storage string) *domain.Ex
 		ID:               "exp-share",
 		AcceleratorType:  testAccelerator,
 		AcceleratorCount: acceleratorCount,
-		Job: domain.JobSpec{Image: "registry.test/job:1",
+		Job: domain.JobSpec{
 			CPU: cpu, Memory: "1Gi", Storage: storage,
 			AcceleratorCount: acceleratorCount, AcceleratorType: testAccelerator,
 		},
@@ -149,7 +149,7 @@ func TestResolveClusterLocalResourcesGroupedJobUsesPerGroupAcceleratorCount(t *t
 		loop := resolveTestLoop()
 		exp := &domain.Experiment{
 			ID: "exp-grouped", AcceleratorType: testAccelerator, AcceleratorCount: 3,
-			Job: domain.JobSpec{Image: "registry.test/job:1", AcceleratorType: testAccelerator,
+			Job: domain.JobSpec{AcceleratorType: testAccelerator,
 				Groups: []domain.JobGroup{
 					{Name: "learner", Replicas: 1, CPU: tc.learner, Memory: "1Gi", Storage: "1Gi", AcceleratorCount: 2},
 					{Name: "actor", Replicas: 1, CPU: tc.actor, Memory: "1Gi", Storage: "1Gi", AcceleratorCount: 1},
@@ -180,7 +180,7 @@ func TestInstalledAcceleratorsByNodeExcludesMultiNodeSpanButCountsHighSingleNode
 		AcceleratorType:  acceleratorType,
 		AcceleratorCount: 4,
 		CreatedAt:        pastTime(),
-		Job: domain.JobSpec{Image: "registry.test/job:1",
+		Job: domain.JobSpec{
 			AcceleratorType:  acceleratorType,
 			AcceleratorCount: 4,
 			NumNodes:         2, // spans 2 nodes: Nodes() > 1
@@ -192,7 +192,7 @@ func TestInstalledAcceleratorsByNodeExcludesMultiNodeSpanButCountsHighSingleNode
 		AcceleratorType:  acceleratorType,
 		AcceleratorCount: 5,
 		CreatedAt:        pastTime(),
-		Job: domain.JobSpec{Image: "registry.test/job:1",
+		Job: domain.JobSpec{
 			AcceleratorType:  acceleratorType,
 			AcceleratorCount: 5, // 5 accelerators, but on ONE node: Nodes() == 1
 			NumNodes:         1,
@@ -229,7 +229,7 @@ func TestInstalledAcceleratorsByNodeCountsSubmittedNotJustRunning(t *testing.T) 
 			AcceleratorType:  acceleratorType,
 			AcceleratorCount: count,
 			CreatedAt:        pastTime(),
-			Job:              domain.JobSpec{Image: "registry.test/job:1", AcceleratorType: acceleratorType, AcceleratorCount: count, NumNodes: 1},
+			Job:              domain.JobSpec{AcceleratorType: acceleratorType, AcceleratorCount: count, NumNodes: 1},
 		}
 	}
 	claimed := []*domain.Experiment{

@@ -150,29 +150,25 @@ func TestARouteRequirementWithoutTheGateFailsClosed(t *testing.T) {
 	}
 }
 
-// git sends what its credential helper answers as Basic authentication, and only after a 401
-// asks for it. Only the git proxy takes a token that way.
-func TestGateTakesATokenAsTheBasicPasswordOnTheGitPathsAlone(t *testing.T) {
-	h, seen := gated(t)
+// git sends the token as a Bearer header, the only way the git proxy takes it: Basic
+// authentication is no credential anywhere, and nothing asks for it.
+func TestGateTakesATokenOnTheGitPathsAsBearerAlone(t *testing.T) {
+	h, _ := gated(t)
 	basic := func(user, password string) map[string]string {
 		request := httptest.NewRequest(http.MethodGet, "/", nil)
 		request.SetBasicAuth(user, password)
 		return map[string]string{"Authorization": request.Header.Get("Authorization")}
 	}
 	unauthenticated := serve(h, "/git/pe-1/info/refs", nil)
-	if unauthenticated.Code != http.StatusUnauthorized || !strings.HasPrefix(unauthenticated.Header().Get("WWW-Authenticate"), "Basic ") {
-		t.Fatalf("no token on /git/: got = %d with WWW-Authenticate %q, want 401 asking for Basic", unauthenticated.Code, unauthenticated.Header().Get("WWW-Authenticate"))
-	}
-	if got := serve(h, "/git/pe-1/info/refs", basic("anyone", "staff")); got.Code != http.StatusTeapot || seen.Kind != KindStaff || got.Header().Get("WWW-Authenticate") != "" {
-		t.Errorf("the token as the Basic password: got = %d as %q, want it served as staff", got.Code, seen.Kind)
+	if unauthenticated.Code != http.StatusUnauthorized || unauthenticated.Header().Get("WWW-Authenticate") != "" {
+		t.Fatalf("no token on /git/: got = %d with WWW-Authenticate %q, want 401 asking for nothing", unauthenticated.Code, unauthenticated.Header().Get("WWW-Authenticate"))
 	}
 	if got := serve(h, "/git/pe-1/info/refs", map[string]string{"Authorization": "Bearer staff"}); got.Code != http.StatusTeapot {
 		t.Errorf("a Bearer token on /git/: got = %d, want it served", got.Code)
 	}
-	if got := serve(h, "/git/pe-1/info/refs", basic("staff", "")); got.Code != http.StatusUnauthorized {
-		t.Errorf("a username with no password: got = %d, want 401", got.Code)
-	}
-	if got := serve(h, "/me", basic("anyone", "staff")); got.Code != http.StatusUnauthorized || got.Header().Get("WWW-Authenticate") != "" {
-		t.Errorf("Basic authentication off /git/: got = %d with WWW-Authenticate %q, want 401 asking for nothing", got.Code, got.Header().Get("WWW-Authenticate"))
+	for _, path := range []string{"/git/pe-1/info/refs", "/me"} {
+		if got := serve(h, path, basic("anyone", "staff")); got.Code != http.StatusUnauthorized || got.Header().Get("WWW-Authenticate") != "" {
+			t.Errorf("Basic authentication on %s: got = %d with WWW-Authenticate %q, want 401 asking for nothing", path, got.Code, got.Header().Get("WWW-Authenticate"))
+		}
 	}
 }

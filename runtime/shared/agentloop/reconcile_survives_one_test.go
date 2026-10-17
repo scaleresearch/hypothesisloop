@@ -36,7 +36,6 @@ func newTestAgent(server *httptest.Server, exec *captureExecutor) *Agent {
 	return &Agent{
 		ClusterName:       "test",
 		ControlPlane:      remote,
-		Builds:            remote,
 		Executor:          exec,
 		ReconcileInterval: time.Second,
 		StatusInterval:    time.Second,

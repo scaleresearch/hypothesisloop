@@ -323,7 +323,7 @@ func TestAJobsCPUIsReadAsANumberOrAStringAndAnsweredAsTheString(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"image":"i","cpu":true}`), &job); err == nil {
 		t.Error("cpu: true was accepted")
 	}
-	if err := json.Unmarshal([]byte(`{"image":"i","cpu":4,"memory":"1Gi"}`), &job); err != nil || job.Image != "i" || job.Memory != "1Gi" {
+	if err := json.Unmarshal([]byte(`{"cpu":4,"memory":"1Gi"}`), &job); err != nil || job.Memory != "1Gi" {
 		t.Fatalf("the fields beside cpu: got = %+v, %v", job, err)
 	}
 	out, err := json.Marshal(job)

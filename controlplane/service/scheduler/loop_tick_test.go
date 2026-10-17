@@ -60,7 +60,7 @@ func TestHoldersCountTheJobsThatHoldWhatIsShortOnTheCluster(t *testing.T) {
 // single-node and therefore cannot run on every runtime.
 func groupedTwoNodeExperiment() *domain.Experiment {
 	return &domain.Experiment{
-		Job: domain.JobSpec{Image: "registry.test/job:1", Groups: []domain.JobGroup{
+		Job: domain.JobSpec{Groups: []domain.JobGroup{
 			{Name: "learner", Replicas: 1, CPU: "16", Memory: "128Gi", Storage: "10Gi"},
 			{Name: "actor", Replicas: 1, CPU: "1", Memory: "4Gi", Storage: "1Gi"},
 		}},
@@ -107,7 +107,7 @@ func TestASingleNodeJobStillSeesEveryClusterRegardlessOfMultiNodeCapability(t *t
 		"bare-metal": {cpuKey: 100000},
 		"k8s":        {cpuKey: 100000},
 	}
-	exp := &domain.Experiment{Job: domain.JobSpec{Image: "registry.test/job:1", CPU: "1", Memory: "1Gi", Storage: "1Gi"}}
+	exp := &domain.Experiment{Job: domain.JobSpec{CPU: "1", Memory: "1Gi", Storage: "1Gi"}}
 
 	candidates, _ := eligibleClusters(avail, map[string]bool{}, ownClusters(avail), exp)
 	if len(candidates) != 2 {
@@ -122,7 +122,7 @@ func TestASingleNodeJobStillSeesEveryClusterRegardlessOfMultiNodeCapability(t *t
 // job had been refused for spanning hosts it never asked to span, and pointed it at a shrink it
 // cannot make.
 func TestASingleNodeJobIsNeverReportedAsNarrowedByTheMultiNodeFilter(t *testing.T) {
-	exp := &domain.Experiment{Job: domain.JobSpec{Image: "registry.test/job:1", CPU: "1", Memory: "1Gi", Storage: "1Gi"}}
+	exp := &domain.Experiment{Job: domain.JobSpec{CPU: "1", Memory: "1Gi", Storage: "1Gi"}}
 
 	candidates, ineligible := eligibleClusters(map[string]domain.Footprint{}, map[string]bool{}, singleOrg, exp)
 	if len(candidates) != 0 {

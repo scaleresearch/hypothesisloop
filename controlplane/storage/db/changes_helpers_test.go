@@ -187,7 +187,7 @@ func jobOf(agentID, peID, hypothesisID, jobID, reason string) *domain.Experiment
 		CodeRef: "r@0", ConfigHash: "h", DataRef: "d", HypothesisID: hypothesisID, Hypothesis: "claim",
 		AcceleratorType: "test-accelerator", EstimatedDurationHours: 1, EstimatedCostAccH: 1,
 		CapacityTier: domain.CapacityGuaranteed, Status: domain.StatusQueued, NotAdmittedReason: reason,
-		Job:       domain.JobSpec{Image: "registry.test/job:1", AcceleratorType: "test-accelerator"},
+		Job:       domain.JobSpec{AcceleratorType: "test-accelerator"},
 		DataKey:   domain.DataKey{AccessKeyID: "AK", SecretAccessKey: "SK"},
 		CreatedAt: now, UpdatedAt: now,
 	}

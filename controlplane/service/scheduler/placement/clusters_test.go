@@ -35,7 +35,7 @@ func holdJob(id string, tier domain.CapacityTier, acceleratorType domain.Acceler
 	return &domain.Experiment{
 		ID: id, AgentID: "agent-" + id, PlatformExperimentID: "pe-1", CapacityTier: tier,
 		AcceleratorType: acceleratorType, AcceleratorCount: count,
-		Job: domain.JobSpec{Image: "registry.test/job:1", CPU: cpu, Memory: "1Gi", Storage: "1Gi", AcceleratorType: acceleratorType, AcceleratorCount: count},
+		Job: domain.JobSpec{CPU: cpu, Memory: "1Gi", Storage: "1Gi", AcceleratorType: acceleratorType, AcceleratorCount: count},
 	}
 }
 
@@ -171,31 +171,24 @@ func TestThePreemptionTargetIsTheHighestPriorityClusterWithTheHardware(t *testin
 
 // The scheduler once placed 7 of 9 researcher jobs on the first name that fit, a box of 12 cores, while one
 // of 28 of the same priority sat mostly idle. Within a tier a job goes where the most jobs like
-// it still fit, and the cluster that built its environment wins only a tie.
+// it still fit.
 func TestAJobGoesToTheClusterOfItsTierWithTheMostRoom(t *testing.T) {
 	registered := rankedClusters()
 	registered["b-second"] = domain.Cluster{Name: "b-second", OrgID: "org-a", Priority: 100}
-	place := func(byCluster map[string]map[string]int64, built string) string {
+	place := func(byCluster map[string]map[string]int64) string {
 		t.Helper()
 		exp := holdJob("a1", domain.CapacityBurst, h100, 1, "1")
-		exp.EnvironmentCluster = built
 		avail, nodes, resources := free(byCluster)
 		cluster, _ := ClusterAndFootprint(avail, registered, nodes, resources, nil, exp)
 		return cluster
 	}
-	if got := place(map[string]map[string]int64{"b-second": {h100: 1}, "m-second": {h100: 3}}, ""); got != "m-second" {
+	if got := place(map[string]map[string]int64{"b-second": {h100: 1}, "m-second": {h100: 3}}); got != "m-second" {
 		t.Errorf("one h100 free on b-second and three on m-second: placed on %q, want m-second", got)
 	}
-	if got := place(map[string]map[string]int64{"b-second": {h100: 1}, "m-second": {h100: 3}}, "b-second"); got != "m-second" {
-		t.Errorf("the environment built on the cluster with less room: placed on %q, want m-second", got)
-	}
-	if got := place(map[string]map[string]int64{"b-second": {h100: 2}, "m-second": {h100: 2}}, "m-second"); got != "m-second" {
-		t.Errorf("equal room, the environment built on m-second: placed on %q, want m-second", got)
-	}
-	if got := place(map[string]map[string]int64{"b-second": {h100: 2}, "m-second": {h100: 2}}, ""); got != "b-second" {
+	if got := place(map[string]map[string]int64{"b-second": {h100: 2}, "m-second": {h100: 2}}); got != "b-second" {
 		t.Errorf("equal room and no environment: placed on %q, want b-second by name", got)
 	}
-	if got := place(map[string]map[string]int64{"z-first": {h100: 1}, "m-second": {h100: 3}}, ""); got != "z-first" {
+	if got := place(map[string]map[string]int64{"z-first": {h100: 1}, "m-second": {h100: 3}}); got != "z-first" {
 		t.Errorf("room on a higher priority: placed on %q, want z-first", got)
 	}
 }

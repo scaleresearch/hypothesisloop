@@ -163,6 +163,7 @@ func TestBuildContainerSpecInjectsPerNodeAcceleratorCount(t *testing.T) {
 		apiURL: "http://example.invalid:8083",
 	}
 	exp := &clusterapi.DesiredJob{
+		Image: testImage, Launch: "true",
 		Data: testDataAccess(), Token: "test-job-token", GitURL: "https://api.test/git/pe-1.git",
 		ID: "per-node-count", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole",
@@ -170,7 +171,7 @@ func TestBuildContainerSpecInjectsPerNodeAcceleratorCount(t *testing.T) {
 		AcceleratorCount:       8,
 		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
 		Job: clusterapi.JobSpec{
-			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi",
+			CPU: "2", Memory: "8Gi", Storage: "5Gi",
 			MaxRetries: maxRetriesPtr(0), TerminationGracePeriodSeconds: int64Ptr(5), AcceleratorCount: 2,
 			AcceleratorType: "tenstorrent.com/chipArch=blackhole",
 		},
@@ -220,13 +221,14 @@ func TestBuildContainerSpecInjectsDurableDataAddressFromDesiredState(t *testing.
 		apiURL: "http://example.invalid:8083",
 	}
 	exp := &clusterapi.DesiredJob{
+		Image: testImage, Launch: "true",
 		Data: testDataAccess(), Token: "test-job-token", GitURL: "https://api.test/git/pe-1.git",
 		ID: "data-env", AgentID: "agent", ProjectID: "project",
 		AcceleratorType:        "tenstorrent.com/chipArch=blackhole",
 		AcceleratorCount:       1,
 		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
 		Job: clusterapi.JobSpec{
-			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi",
+			CPU: "2", Memory: "8Gi", Storage: "5Gi",
 			MaxRetries: maxRetriesPtr(0), TerminationGracePeriodSeconds: int64Ptr(5), AcceleratorCount: 1,
 			AcceleratorType: "tenstorrent.com/chipArch=blackhole",
 		},
@@ -314,11 +316,12 @@ func TestTwoGroupJobIsRejectedByTheSameSingleNodeRuleNumNodesMeets(t *testing.T)
 		apiURL: "http://example.invalid:8083",
 	}
 	exp := &clusterapi.DesiredJob{
+		Image: testImage, Launch: "true",
 		Data: testDataAccess(), Token: "test-job-token", GitURL: "https://api.test/git/pe-1.git",
 		ID: "grouped", AgentID: "agent", ProjectID: "project",
 		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
 		Job: clusterapi.JobSpec{
-			Image: "example.invalid/workload", MaxRetries: maxRetriesPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
+			MaxRetries: maxRetriesPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
 			Groups: []clusterapi.JobGroup{
 				{Name: "learner", Replicas: 1, CPU: "2", Memory: "8Gi", Storage: "5Gi"},
 				{Name: "actor", Replicas: 3, CPU: "1", Memory: "1Gi", Storage: "1Gi"},
@@ -347,12 +350,13 @@ func TestSingleReplicaGroupRunsAndTakesItsShapeFromTheGroup(t *testing.T) {
 		apiURL: "http://example.invalid:8083",
 	}
 	exp := &clusterapi.DesiredJob{
+		Image: testImage, Launch: "true",
 		Data: testDataAccess(), Token: "test-job-token", GitURL: "https://api.test/git/pe-1.git",
 		ID: "one-group", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 2,
 		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
 		Job: clusterapi.JobSpec{
-			Image: "example.invalid/workload", MaxRetries: maxRetriesPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
+			MaxRetries: maxRetriesPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
 			AcceleratorType: "tenstorrent.com/chipArch=blackhole",
 			Groups: []clusterapi.JobGroup{
 				{Name: "solo", Replicas: 1, AcceleratorCount: 2, CPU: "2", Memory: "8Gi", Storage: "5Gi",
@@ -368,7 +372,7 @@ func TestSingleReplicaGroupRunsAndTakesItsShapeFromTheGroup(t *testing.T) {
 	if got := cs.Env["HYPOTHESISLOOP_ACCELERATOR_COUNT"]; got != "2" {
 		t.Fatalf("HYPOTHESISLOOP_ACCELERATOR_COUNT = %q, want 2 — the group's own per-replica count, since a grouped job states it nowhere else", got)
 	}
-	if len(cs.Command) != 2 || cs.Command[1] != "solo.py" {
+	if len(cs.Command) == 0 || cs.Command[len(cs.Command)-1] != "solo.py" {
 		t.Fatalf("command = %v, want the group's own — a grouped job's process is stated per group", cs.Command)
 	}
 }
@@ -428,12 +432,13 @@ func TestAJobWithoutResolvedGraceIsRefused(t *testing.T) {
 
 func checkpointWindowExperiment(checkpointGrace *int64) *clusterapi.DesiredJob {
 	return &clusterapi.DesiredJob{
+		Image: testImage, Launch: "true",
 		Data: testDataAccess(), Token: "test-job-token", GitURL: "https://api.test/git/pe-1.git",
 		ID: "checkpoint-window", AgentID: "agent", ProjectID: "project",
 		AcceleratorType: "tenstorrent.com/chipArch=blackhole", AcceleratorCount: 1,
 		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
 		Job: clusterapi.JobSpec{
-			Image: "example.invalid/workload", CPU: "2", Memory: "8Gi", Storage: "5Gi",
+			CPU: "2", Memory: "8Gi", Storage: "5Gi",
 			MaxRetries: maxRetriesPtr(0), TerminationGracePeriodSeconds: int64Ptr(5), AcceleratorCount: 1,
 			AcceleratorType:        "tenstorrent.com/chipArch=blackhole",
 			CheckpointGraceSeconds: checkpointGrace,

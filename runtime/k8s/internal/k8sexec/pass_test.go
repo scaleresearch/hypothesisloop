@@ -74,9 +74,9 @@ func TestAPassListsTheClustersNodesAndPodsOnce(t *testing.T) {
 		deviceClassGVR: "DeviceClassList", resourceClaimTemplateGVR: "ResourceClaimTemplateList",
 	})
 	c := &JobWorkloadClient{apiURL: testAPIURL, kube: kube, dyn: dyn}
-	running, gone, created := pullTestExperiment("running", "", "busybox"), pullTestExperiment("gone", "", "busybox"), pullTestExperiment("new", "", "busybox")
+	running, gone, created := pullTestExperiment("running", "busybox", nil), pullTestExperiment("gone", "busybox", nil), pullTestExperiment("new", "busybox", nil)
 	for _, exp := range []*clusterapi.DesiredJob{running, gone} {
-		if err := c.CreateWorkload(ctx, exp, nil); err != nil {
+		if err := c.CreateWorkload(ctx, exp); err != nil {
 			t.Fatal(err)
 		}
 		if err := kube.Tracker().Add(passTestPod("exp-"+exp.ID+"-pod", exp.ID, "worker-a")); err != nil {

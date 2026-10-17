@@ -46,7 +46,7 @@ func disbalanceJob(id, cpu string, accelerators int) *domain.Experiment {
 		Status:           domain.StatusRunning,
 		AcceleratorType:  disbalanceAcceleratorType,
 		AcceleratorCount: accelerators,
-		Job: domain.JobSpec{Image: "registry.test/job:1",
+		Job: domain.JobSpec{
 			CPU:              cpu,
 			Memory:           "8Gi",
 			AcceleratorCount: accelerators,
@@ -401,7 +401,7 @@ func groupedDisbalanceJob(id, cpu string) *domain.Experiment {
 		Status:           domain.StatusQueued,
 		AcceleratorType:  disbalanceAcceleratorType,
 		AcceleratorCount: 2,
-		Job: domain.JobSpec{Image: "registry.test/job:1",
+		Job: domain.JobSpec{
 			AcceleratorType: disbalanceAcceleratorType,
 			Topology:        &domain.TopologySpec{SpreadAcrossHosts: new(bool)},
 			Groups: []domain.JobGroup{

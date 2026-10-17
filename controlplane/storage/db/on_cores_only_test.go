@@ -36,7 +36,7 @@ func TestOnCoresOnlyNamesThoseWithJobsAllOnCores(t *testing.T) {
 			ID: peID + "-job-" + string(rune('a'+n)), AgentID: agent, Actor: domain.Actor{Kind: domain.ActorAgent, ID: agent}, PlatformExperimentID: peID,
 			HypothesisID: "h-" + peID, Hypothesis: "h", AcceleratorType: acceleratorType, AcceleratorCount: count,
 			EstimatedDurationHours: 1, EstimatedCostAccH: 1, CapacityTier: domain.CapacityGuaranteed, Status: domain.StatusQueued,
-			Job:     domain.JobSpec{Image: "registry.test/job:1", AcceleratorType: acceleratorType, AcceleratorCount: count, CPU: "1", Memory: "1Gi", Storage: "1Gi"},
+			Job:     domain.JobSpec{AcceleratorType: acceleratorType, AcceleratorCount: count, CPU: "1", Memory: "1Gi", Storage: "1Gi"},
 			DataKey: domain.DataKey{AccessKeyID: "AK", SecretAccessKey: "SK"},
 		}
 		if err := insertExperiment(ctx, pool, exp); err != nil {

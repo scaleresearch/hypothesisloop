@@ -32,21 +32,16 @@ type captureExecutor struct {
 	drifted bool
 	// uncreatable is what creating a job answers, by job, for the ones that cannot be created.
 	uncreatable map[string]error
-	// onlyImage is the one image the runtime runs.
-	onlyImage string
 	// startedAt and endedAt are when the runtime says every job's command ran.
 	startedAt, endedAt time.Time
 	mu                 sync.Mutex
 	deleted            []string
 	created            int
-	// pulls is the registry login each created job was handed.
-	pulls map[string]*clusterapi.RegistryLogin
 }
 
 func (e *captureExecutor) ListManagedJobs(context.Context) ([]string, error) { return e.managed, nil }
 
 func (e *captureExecutor) SupportsMultiNodeJobs() bool { return true }
-func (e *captureExecutor) OnlyImage() string           { return e.onlyImage }
 
 // The same set as ListManagedJobs here: these tests never exercise the delete-and-recreate window
 // the two lists exist to differ across, and leaving it on the embedded nil Executor made every
@@ -65,17 +60,13 @@ func (e *captureExecutor) ReapTerminal(context.Context, map[string]*clusterapi.D
 func (e *captureExecutor) WorkloadMatchesDesired(context.Context, *clusterapi.DesiredJob) (bool, error) {
 	return !e.drifted, nil
 }
-func (e *captureExecutor) CreateWorkload(_ context.Context, exp *clusterapi.DesiredJob, pull *clusterapi.RegistryLogin) error {
+func (e *captureExecutor) CreateWorkload(_ context.Context, exp *clusterapi.DesiredJob) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if err := e.uncreatable[exp.ID]; err != nil {
 		return err
 	}
 	e.created++
-	if e.pulls == nil {
-		e.pulls = map[string]*clusterapi.RegistryLogin{}
-	}
-	e.pulls[exp.ID] = pull
 	return nil
 }
 func (e *captureExecutor) PollJobStatus(_ context.Context, id string) (agentexec.JobStatus, error) {

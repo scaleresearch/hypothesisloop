@@ -15,7 +15,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
-	"github.com/scaleresearch/hypothesisloop/contract/exitline"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider/fake"
 )
@@ -25,8 +24,6 @@ const (
 	h100      = "nvidia.com/gpu.product=NVIDIA-H100"
 	testAPI   = "https://api.example.invalid"
 	testImage = "registry.example.invalid/job:1"
-	// testEnvironments is the repository the environments built on testImage are in.
-	testEnvironments = "registry.test/hl-environments/environment"
 )
 
 var testShapes = []Shape{
@@ -45,7 +42,7 @@ func newTestExecutor(t *testing.T) (*Executor, *fake.Provider) {
 }
 
 func testConfig(p provider.Provider) Config {
-	return Config{ClusterID: "fake-account-1", Namespace: "t1", APIURL: testAPI, JobImage: testImage, EnvironmentsRepository: testEnvironments, OfferWait: 3 * time.Minute, Startup: 4 * time.Minute, Shapes: testShapes, Provider: p, Log: log.Printf}
+	return Config{ClusterID: "fake-account-1", Namespace: "t1", APIURL: testAPI, OfferWait: 3 * time.Minute, Startup: 4 * time.Minute, Shapes: testShapes, Provider: p, Log: log.Printf}
 }
 
 type goldenAnswer struct {
@@ -74,9 +71,9 @@ func job(t *testing.T, id string, attempt, accelerators int) *clusterapi.Desired
 	t.Helper()
 	exp := readGolden(t).Experiment
 	exp.ID, exp.AttemptCount = id, attempt
+	exp.Image = testImage
 	resolved := *exp.ResolvedJob
 	resolved.Command, resolved.Args = []string{"python", "train.py"}, []string{"--epochs", "3"}
-	resolved.Image = testImage
 	resolved.NodeSelector = map[string]string{clusterapi.NodeSlotLabel: "cpu-0"}
 	if accelerators > 0 {
 		resolved.NodeSelector = map[string]string{clusterapi.NodeSlotLabel: "h100-0"}
@@ -109,7 +106,7 @@ func asHanded(t *testing.T, exp *clusterapi.DesiredJob) *clusterapi.DesiredJob {
 
 func mustCreate(t *testing.T, e *Executor, exp *clusterapi.DesiredJob) {
 	t.Helper()
-	if err := e.CreateWorkload(context.Background(), exp, nil); err != nil {
+	if err := e.CreateWorkload(context.Background(), exp); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -152,12 +149,12 @@ func TestAnInstanceNameIsReadBackAsWhatItWasBuiltFrom(t *testing.T) {
 	}
 }
 
-func TestAJobIsRentedAsOneInstanceRunningItsCommandUnderTheWrapper(t *testing.T) {
+func TestAJobIsRentedAsOneInstanceRunningItsCommandUnderTheLaunchScript(t *testing.T) {
 	e, p := newTestExecutor(t)
 	mustCreate(t, e, job(t, "exp-1", 0, 1))
 
 	spec := p.Spec("hl-job-t1-exp-1-a0-h100-0")
-	wantCommand := []string{"hl", "exec", "--stop-grace", "600", "--", "python", "train.py", "--epochs", "3"}
+	wantCommand := clusterapi.LaunchCommand(readGolden(t).Experiment.Launch, []string{"python", "train.py"}, []string{"--epochs", "3"})
 	if !reflect.DeepEqual(spec.Command, wantCommand) {
 		t.Errorf("command = %q", spec.Command)
 	}
@@ -175,16 +172,14 @@ func TestAJobIsRentedAsOneInstanceRunningItsCommandUnderTheWrapper(t *testing.T)
 	}
 }
 
-func TestAJobThatCannotRunAsOneWrappedInstanceIsRefused(t *testing.T) {
+func TestAJobThatCannotRunAsOneInstanceIsRefused(t *testing.T) {
 	e, p := newTestExecutor(t)
-	noCommand := job(t, "exp-1", 0, 0)
-	noCommand.ResolvedJob.Command = nil
 	twoNodes := job(t, "exp-2", 0, 0)
 	twoNodes.ResolvedJob.NumNodes = 2
 	hostMount := job(t, "exp-3", 0, 0)
 	hostMount.ResolvedJob.HostMounts = map[string]string{"/data": "/mnt/data"}
-	for _, exp := range []*clusterapi.DesiredJob{noCommand, twoNodes, hostMount} {
-		if err := e.CreateWorkload(context.Background(), exp, nil); err == nil {
+	for _, exp := range []*clusterapi.DesiredJob{twoNodes, hostMount} {
+		if err := e.CreateWorkload(context.Background(), exp); err == nil {
 			t.Errorf("%s was rented", exp.ID)
 		}
 	}
@@ -193,20 +188,15 @@ func TestAJobThatCannotRunAsOneWrappedInstanceIsRefused(t *testing.T) {
 	}
 }
 
-// An instance boots the image desired state names: the job image, or an environment of the
-// environments repository by digest, which it pulls with the reconcile answer's login. Any other
-// image, or none, is one it does not rent for.
-func TestAnInstanceBootsTheJobImageOrAnEnvironmentAndNothingElse(t *testing.T) {
+// An instance boots the image desired state names, and pulls it with the login desired state
+// carries, if it carries one.
+func TestAnInstanceBootsTheImageOfDesiredStateWithItsPullLogin(t *testing.T) {
 	e, p := newTestExecutor(t)
 	pull := &clusterapi.RegistryLogin{Registry: "registry.test", Username: "oauth2accesstoken", Password: "pull-token"}
-	if err := e.CreateWorkload(context.Background(), job(t, "exp-1", 0, 0), pull); err != nil {
-		t.Fatal(err)
-	}
-	environment := on(job(t, "exp-2", 0, 0), "h100-1")
-	environment.ResolvedJob.Image = testEnvironments + "@sha256:" + strings.Repeat("ab", 32)
-	if err := e.CreateWorkload(context.Background(), environment, pull); err != nil {
-		t.Fatal(err)
-	}
+	mustCreate(t, e, job(t, "exp-1", 0, 0))
+	private := on(job(t, "exp-2", 0, 0), "h100-1")
+	private.Image, private.ImagePull = "registry.test/org/repo@sha256:"+strings.Repeat("ab", 32), pull
+	mustCreate(t, e, private)
 	names := p.Names()
 	if len(names) != 2 {
 		t.Fatalf("rented %v, want both jobs", names)
@@ -215,32 +205,11 @@ func TestAnInstanceBootsTheJobImageOrAnEnvironmentAndNothingElse(t *testing.T) {
 		spec := p.Spec(name)
 		want, wantLogin := testImage, (*provider.ImageLogin)(nil)
 		if strings.Contains(name, "-exp-2-") {
-			want, wantLogin = environment.ResolvedJob.Image, &provider.ImageLogin{Registry: "registry.test", Username: "oauth2accesstoken", Password: "pull-token"}
+			want, wantLogin = private.Image, &provider.ImageLogin{Registry: "registry.test", Username: "oauth2accesstoken", Password: "pull-token"}
 		}
 		if spec.Image != want || !reflect.DeepEqual(spec.ImageLogin, wantLogin) {
 			t.Errorf("%s boots %q with login %+v, want %q with %+v", name, spec.Image, spec.ImageLogin, want, wantLogin)
 		}
-	}
-
-	if err := e.CreateWorkload(context.Background(), on(environment, "cpu-0"), nil); err == nil || !strings.Contains(err.Error(), "registry_pull") {
-		t.Fatalf("an environment with no login: err = %v, want one naming registry_pull", err)
-	}
-	for image, why := range map[string]string{
-		"":                                  "no image",
-		"registry.test/someone-else:latest": "another image",
-		testEnvironments + ":latest":        "an environment by tag",
-		testEnvironments + "@sha256:abc":    "a malformed digest",
-		testEnvironments + "-other@sha256:" + strings.Repeat("ab", 32): "another repository",
-	} {
-		other := on(job(t, "exp-3", 0, 0), "cpu-0")
-		other.ResolvedJob.Image = image
-		var unrunnable *agentexec.Unrunnable
-		if err := e.CreateWorkload(context.Background(), other, pull); !errors.As(err, &unrunnable) {
-			t.Errorf("%s (%q): err = %v, want it unrunnable", why, image, err)
-		}
-	}
-	if len(p.Names()) != 2 {
-		t.Fatalf("rented %v, want nothing beyond the two jobs", p.Names())
 	}
 }
 
@@ -267,7 +236,7 @@ func TestAJobIsRentedInExactlyTheSlotItWasAdmittedTo(t *testing.T) {
 		"exceed the slot":        tooLarge,
 		"is not the slot's \"\"": otherType,
 	} {
-		if err := e.CreateWorkload(ctx, exp, nil); err == nil || !strings.Contains(err.Error(), want) {
+		if err := e.CreateWorkload(ctx, exp); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: err = %v, want one saying %q", exp.ID, err, want)
 		}
 	}
@@ -293,7 +262,7 @@ func TestAJobIsNotRefusedForHowItCasedItsAcceleratorType(t *testing.T) {
 
 	another := on(job(t, "exp-2", 0, 1), "h100-1")
 	another.AcceleratorType = "nvidia.com/gpu.product=NVIDIA-L40"
-	if err := e.CreateWorkload(context.Background(), another, nil); err == nil || !strings.Contains(err.Error(), "is not the slot's") {
+	if err := e.CreateWorkload(context.Background(), another); err == nil || !strings.Contains(err.Error(), "is not the slot's") {
 		t.Fatalf("another type: err = %v", err)
 	}
 }
@@ -301,7 +270,7 @@ func TestAJobIsNotRefusedForHowItCasedItsAcceleratorType(t *testing.T) {
 func TestAnInstanceNameThatTheProviderCannotHoldIsRefused(t *testing.T) {
 	e, p := newTestExecutor(t)
 	for _, id := range []string{strings.Repeat("x", 120), "Exp_1"} {
-		if err := e.CreateWorkload(context.Background(), job(t, id, 0, 0), nil); err == nil || len(p.Names()) != 0 {
+		if err := e.CreateWorkload(context.Background(), job(t, id, 0, 0)); err == nil || len(p.Names()) != 0 {
 			t.Errorf("%q: err = %v, rented %v", id, err, p.Names())
 		}
 	}
@@ -313,8 +282,8 @@ func TestASlotIsHeldUntilItsInstanceIsDestroyed(t *testing.T) {
 	mustCreate(t, e, job(t, "exp-1", 0, 1))
 	mustCreate(t, e, on(job(t, "exp-2", 0, 1), "h100-1"))
 	// An exited instance is still rented, so it still holds its slot.
-	p.Exit("hl-job-t1-exp-1-a0-h100-0", exitline.Format(0))
-	if err := e.CreateWorkload(context.Background(), job(t, "exp-3", 0, 1), nil); err == nil {
+	p.Exit("hl-job-t1-exp-1-a0-h100-0", exitLine(0))
+	if err := e.CreateWorkload(context.Background(), job(t, "exp-3", 0, 1)); err == nil {
 		t.Fatal("a slot held by an exited instance was rented again")
 	}
 	if err := e.ReapTerminal(context.Background(), nil); err != nil {
@@ -338,7 +307,7 @@ func TestCapacityIsTheShapesMinusWhatIsRentedRightNow(t *testing.T) {
 		}
 		available, total, byNode, labels, err := e.GetLiveAcceleratorCapacitySnapshot(ctx)
 		if err != nil || total[h100] != 2 || len(labels) != 3 || labels["h100-1"]["nvidia.com/gpu.product"] != "NVIDIA-H100" ||
-			labels["h100-1"][clusterapi.NodeSlotLabel] != "h100-1" || labels["h100-1"][clusterapi.NodeSlotAcceleratorsLabel] != "1" || !reflect.DeepEqual(labels["cpu-0"], map[string]string{clusterapi.NodeSlotLabel: "cpu-0"}) {
+			labels["h100-1"][clusterapi.NodeSlotLabel] != "h100-1" || labels["h100-1"][clusterapi.NodeSlotAcceleratorsLabel] != "1" || !reflect.DeepEqual(labels["cpu-0"], map[string]string{clusterapi.NodeSlotLabel: "cpu-0", clusterapi.NodeArchitectureLabel: "amd64"}) {
 			t.Fatalf("accelerator snapshot = %v %v %v, %v", total, byNode, labels, err)
 		}
 		nodes, err = e.GetLiveNodeResourceCapacity(ctx)
@@ -438,13 +407,13 @@ func TestTheExitLineDecidesHowAnExitedInstanceEnded(t *testing.T) {
 		reason      string
 		messagePart string
 	}{
-		"zero":     {[]string{"done", exitline.Format(0)}, clusterapi.JobPhaseSucceeded, "", ""},
-		"non-zero": {[]string{"Traceback", exitline.Format(3), "late stderr"}, clusterapi.JobPhaseFailed, clusterapi.PhaseReasonContainerFailed, "code 3"},
+		"zero":     {[]string{"done", exitLine(0)}, clusterapi.JobPhaseSucceeded, "", ""},
+		"non-zero": {[]string{"Traceback", exitLine(3), "late stderr"}, clusterapi.JobPhaseFailed, clusterapi.PhaseReasonContainerFailed, "code 3"},
 		// The wrapper died with its machine: an infrastructure outcome, never the job's failure.
 		"no exit line": {[]string{"epoch 4", "Killed"}, clusterapi.JobPhaseGone, "", ""},
 		"no output":    {nil, clusterapi.JobPhaseGone, "", ""},
 		// A job that prints the line itself and goes on is judged by the wrapper's, the last.
-		"last line wins": {[]string{exitline.Format(0), "more", exitline.Format(7)}, clusterapi.JobPhaseFailed, clusterapi.PhaseReasonContainerFailed, "code 7"},
+		"last line wins": {[]string{exitLine(0), "more", exitLine(7)}, clusterapi.JobPhaseFailed, clusterapi.PhaseReasonContainerFailed, "code 7"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			e, p := newTestExecutor(t)
@@ -481,7 +450,7 @@ func TestAGrantedTerminationStopsARunningInstanceAndLeavesItToExit(t *testing.T)
 		t.Fatalf("actual = %v", ids)
 	}
 
-	p.Exit(name, "checkpoint saved", exitline.Format(0))
+	p.Exit(name, "checkpoint saved", exitLine(0))
 	if ids, _ := e.ListManagedJobs(ctx); len(ids) != 0 {
 		t.Fatalf("an exited instance is still actual: %v", ids)
 	}
@@ -590,9 +559,6 @@ func TestTheConfigurationIsValidatedAtStartup(t *testing.T) {
 		"no namespace":           func(c *Config) { c.Namespace = "" },
 		"dash in namespace":      func(c *Config) { c.Namespace = "team-a" },
 		"namespace too long":     func(c *Config) { c.Namespace = "a1234567890123456" },
-		"no job image":           func(c *Config) { c.JobImage = "" },
-		"environments by digest": func(c *Config) { c.EnvironmentsRepository = testEnvironments + "@sha256:abc" },
-		"environments no path":   func(c *Config) { c.EnvironmentsRepository = "registry.test" },
 		"name beyond the provider": func(c *Config) {
 			c.Namespace, c.Shapes[0].Name, c.Shapes[0].MaxInstances = "a123456789012345", "b123456789012345", 1<<62
 		},
@@ -611,20 +577,16 @@ func TestTheConfigurationIsValidatedAtStartup(t *testing.T) {
 // vendor that refuses a create is not that: the same job may be rented on the next pass.
 func TestAJobARentedInstanceCanNeverRunIsUnrunnableAndAFailedRentIsNot(t *testing.T) {
 	e, p := newTestExecutor(t)
-	if e.OnlyImage() != testImage {
-		t.Fatalf("OnlyImage() = %q, want the image every instance boots", e.OnlyImage())
-	}
 	for name, c := range map[string]struct {
 		spoil func(*clusterapi.JobSpec)
 		says  string
 	}{
 		"host mounts": {func(s *clusterapi.JobSpec) { s.HostMounts = map[string]string{"/data": "/data"} }, "host_mounts"},
-		"no command":  {func(s *clusterapi.JobSpec) { s.Command, s.Args = nil, nil }, "no command"},
 		"two nodes":   {func(s *clusterapi.JobSpec) { s.NumNodes = 2 }, "2 nodes"},
 	} {
 		exp := job(t, "exp-"+strings.ReplaceAll(name, " ", "-"), 0, 0)
 		c.spoil(exp.ResolvedJob)
-		err := e.CreateWorkload(context.Background(), exp, nil)
+		err := e.CreateWorkload(context.Background(), exp)
 		var unrunnable *agentexec.Unrunnable
 		if !errors.As(err, &unrunnable) || !strings.Contains(unrunnable.Why, c.says) {
 			t.Errorf("%s: err = %v, want an Unrunnable that says %q", name, err, c.says)
@@ -640,7 +602,7 @@ func TestAJobARentedInstanceCanNeverRunIsUnrunnableAndAFailedRentIsNot(t *testin
 		}
 		return nil
 	}
-	err := e.CreateWorkload(context.Background(), job(t, "exp-later", 0, 1), nil)
+	err := e.CreateWorkload(context.Background(), job(t, "exp-later", 0, 1))
 	var unrunnable *agentexec.Unrunnable
 	if err == nil || errors.As(err, &unrunnable) {
 		t.Fatalf("a rent the vendor refused: err = %v, want an error that is not Unrunnable", err)

@@ -13,11 +13,11 @@ import (
 )
 
 func attemptTestExperiment(attempt int) *clusterapi.DesiredJob {
-	return &clusterapi.DesiredJob{
+	return &clusterapi.DesiredJob{Image: testImage, Launch: "true",
 		Data: testDataAccess(), Token: "test-job-token", GitURL: "https://api.test/git/pe-1.git", ID: "attempt-test", AgentID: "agent",
 		AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3", AcceleratorCount: 1,
 		EstimatedDurationHours: 1, CapacityTier: clusterapi.CapacityGuaranteed, AttemptCount: attempt,
-		Job: clusterapi.JobSpec{Image: "image:v1", CPU: "1", Memory: "1Gi", Storage: "1Gi",
+		Job: clusterapi.JobSpec{CPU: "1", Memory: "1Gi", Storage: "1Gi",
 			MaxRetries: intPtr(1), TerminationGracePeriodSeconds: int64Ptr(5), AcceleratorCount: 1,
 			AcceleratorType: "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"},
 	}
@@ -114,7 +114,7 @@ func TestAWorkloadIsNotRecreatedWhileAPodOfItsPreviousGenerationExists(t *testin
 	c.kube = chartKube(t, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
 		Name: "old", Namespace: HypothesisLoopNamespace, Labels: map[string]string{workloadkeys.ExperimentID: exp.ID},
 	}})
-	if err := c.CreateWorkload(context.Background(), exp, nil); err == nil || !strings.Contains(err.Error(), "previous generation") {
+	if err := c.CreateWorkload(context.Background(), exp); err == nil || !strings.Contains(err.Error(), "previous generation") {
 		t.Fatalf("CreateWorkload beside a pod of the previous generation returned %v, want a retry error naming it", err)
 	}
 	jobs, err := c.kube.BatchV1().Jobs(HypothesisLoopNamespace).List(context.Background(), metav1.ListOptions{})

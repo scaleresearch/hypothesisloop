@@ -1,6 +1,7 @@
 package clusterexchange
 
 import (
+	"context"
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
@@ -17,13 +18,13 @@ func TestTheDesiredJobCarriesItsOwnStoredKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &Service{dataStore: store, signingSecret: "test-signing-secret-of-enough-length", proxyURL: "https://api.test/git"}
-	a, err := h.desiredJob(&domain.Experiment{ID: "exp-1", AgentID: "agent-a", PlatformExperimentID: "pe-1",
+	h := &Service{dataStore: store, signingSecret: "test-signing-secret-of-enough-length", proxyURL: "https://api.test/git", pulls: noPull}
+	a, err := h.desiredJob(context.Background(), &domain.Experiment{Image: wireImage, ID: "exp-1", AgentID: "agent-a", PlatformExperimentID: "pe-1",
 		DataKey: domain.DataKey{AccessKeyID: "AK1", SecretAccessKey: "SK1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := h.desiredJob(&domain.Experiment{ID: "exp-2", AgentID: "agent-b", PlatformExperimentID: "pe-1",
+	b, err := h.desiredJob(context.Background(), &domain.Experiment{Image: wireImage, ID: "exp-2", AgentID: "agent-b", PlatformExperimentID: "pe-1",
 		DataKey: domain.DataKey{AccessKeyID: "AK2", SecretAccessKey: "SK2"}})
 	if err != nil {
 		t.Fatal(err)

@@ -142,7 +142,7 @@ func (noopSettler) Settle(context.Context, *domain.Experiment) error { return ni
 func gangExperiment(nodes, maxRetries int) *domain.Experiment {
 	return &domain.Experiment{
 		ID: "gang-1", Status: domain.StatusRunning,
-		Job: domain.JobSpec{Image: "registry.test/job:1", NumNodes: nodes, MaxRetries: &maxRetries},
+		Job: domain.JobSpec{NumNodes: nodes, MaxRetries: &maxRetries},
 	}
 }
 

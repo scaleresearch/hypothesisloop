@@ -36,7 +36,7 @@ const (
 	rents        = "\nsandbox:\n  provider: fly\n  name: main\n  reconcile_interval_seconds: 5\n  create_pause_milliseconds: 0\n  warm_pool_size: 0\n  fly: {}\n" +
 		"  instance:\n    command: [run]\n    cpu: \"1\"\n    memory: 1Gi\n    storage: 1Gi\n" +
 		"cloud_compute:\n" + cluster
-	cluster = "  - cluster_name: a\n    job_image: registry.example.invalid/job:1\n    namespace: main\n    reconcile_interval_seconds: 10\n    status_interval_seconds: 30\n" +
+	cluster = "  - cluster_name: a\n    namespace: main\n    reconcile_interval_seconds: 10\n    status_interval_seconds: 30\n" +
 		"    offer_wait_seconds: 60\n    startup_seconds: 60\n    provider: vast\n    vast:\n      account_id: \"1\"\n"
 )
 

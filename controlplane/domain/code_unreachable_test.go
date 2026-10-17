@@ -1,11 +1,6 @@
 package domain
 
 import (
-	"errors"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
@@ -31,44 +26,6 @@ func TestOnlyTheCodeUnreachableExitIsTheEnvironmentsFailure(t *testing.T) {
 	for _, reason := range []string{PhaseReasonContainerFailed, PhaseReasonOOMKilled, ""} {
 		if eviction, environment := (PhaseDetail{Reason: reason, Message: "boom"}).EvictionOfFailure(); environment {
 			t.Fatalf("%q is the environment's failure: %q", reason, eviction)
-		}
-	}
-}
-
-// hl-clone is the one program that ends with ExitCodeCodeUnreachable, and only where the
-// repository does not answer: a commit a repository that answers does not hold is the job's own.
-func TestHLCloneExitsWithTheCodeUnreachableCodeOnlyWhereTheRepositoryDoesNotAnswer(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git is not installed")
-	}
-	script, err := filepath.Abs(filepath.Join("..", "..", "runtime", "job", "hl-clone"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	bin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "sleep"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	origin := filepath.Join(t.TempDir(), "origin.git")
-	if out, err := exec.Command("git", "init", "-q", "--bare", origin).CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v: %s", err, out)
-	}
-	sha := strings.Repeat("a", 40)
-
-	cases := map[string]struct {
-		url  string
-		code int
-		says string
-	}{
-		"no answer":         {"file://" + filepath.Join(t.TempDir(), "no-such-repository"), ExitCodeCodeUnreachable, "does not answer"},
-		"commit not pushed": {"file://" + origin, 1, "the commit is not in it"},
-	}
-	for name, c := range cases {
-		out, err := exec.Command("sh", script, c.url+"@"+sha, filepath.Join(t.TempDir(), "code")).CombinedOutput()
-		var exit *exec.ExitError
-		if !errors.As(err, &exit) || exit.ExitCode() != c.code || !strings.Contains(string(out), c.says) {
-			t.Errorf("%s: %v, want exit %d saying %q:\n%s", name, err, c.code, c.says, out)
 		}
 	}
 }

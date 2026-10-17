@@ -33,7 +33,7 @@ func TestSlotFor(t *testing.T) {
 	allFree := CloneNodes(sizes)
 	smallTaken := CloneNodes(sizes)
 	smallTaken["small-gpu"] = map[string]int64{}
-	cpuJob := &domain.Experiment{Job: domain.JobSpec{Image: "registry.test/job:1", CPU: "2", Memory: "1Gi", Storage: "1Gi"}}
+	cpuJob := &domain.Experiment{Job: domain.JobSpec{CPU: "2", Memory: "1Gi", Storage: "1Gi"}}
 	for name, tc := range map[string]struct {
 		exp        *domain.Experiment
 		free       map[string]map[string]int64

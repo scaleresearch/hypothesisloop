@@ -3,12 +3,21 @@ package compute
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
-	"github.com/scaleresearch/hypothesisloop/contract/exitline"
 )
+
+func exitLine(code int) string {
+	return exitLineAt(code, time.Unix(1000, 0), time.Unix(1001, 0))
+}
+
+func exitLineAt(code int, started, ended time.Time) string {
+	return fmt.Sprintf("%s code=%d started=%d ended=%d", clusterapi.ExitLinePrefix, code, started.Unix(), ended.Unix())
+}
 
 // A requeue reuses the experiment id. The attempt in the instance name is what keeps the
 // instance of the attempt just replaced from being read as the one the control plane waits on.
@@ -51,7 +60,7 @@ func TestAnExitedInstanceOfThePreviousAttemptIsNeitherReusedNorReportedAsTheNewO
 	ctx := context.Background()
 	mustCreate(t, e, job(t, "exp-1", 1, 1))
 	p.Start("hl-job-t1-exp-1-a1-h100-0")
-	p.Exit("hl-job-t1-exp-1-a1-h100-0", exitline.Format(1))
+	p.Exit("hl-job-t1-exp-1-a1-h100-0", exitLine(1))
 	if phase, attempt := status(t, e, "exp-1"); phase != clusterapi.JobPhaseFailed || attempt != 1 {
 		t.Fatalf("status = %v attempt %d", phase, attempt)
 	}
@@ -80,11 +89,11 @@ func TestALeftoverThatCannotBeDestroyedHoldsBackTheNewInstance(t *testing.T) {
 	e, p := newTestExecutor(t)
 	mustCreate(t, e, job(t, "exp-1", 1, 1))
 	p.Start("hl-job-t1-exp-1-a1-h100-0")
-	p.Exit("hl-job-t1-exp-1-a1-h100-0", exitline.Format(1))
+	p.Exit("hl-job-t1-exp-1-a1-h100-0", exitLine(1))
 	p.Fail = failing("Destroy", "")
 
 	requeued := on(job(t, "exp-1", 2, 1), "h100-1")
-	if err := e.CreateWorkload(context.Background(), requeued, nil); !errors.Is(err, errVendor) {
+	if err := e.CreateWorkload(context.Background(), requeued); !errors.Is(err, errVendor) {
 		t.Fatalf("err = %v", err)
 	}
 	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a1-h100-0"}) {
@@ -113,7 +122,7 @@ func TestAPreemptedJobReadmittedUnderTheSameAttemptIsRentedOnItsNewSlot(t *testi
 	if err != nil || matches {
 		t.Fatalf("the instance on the slot the job was preempted from matched: %v, %v", matches, err)
 	}
-	if err := e.CreateWorkload(ctx, readmitted, nil); err == nil {
+	if err := e.CreateWorkload(ctx, readmitted); err == nil {
 		t.Fatal("the job was rented a second time while its old instance still runs")
 	}
 	// What the reconcile pass does with a mismatch: delete without a window, create next pass.
@@ -140,7 +149,7 @@ func TestTheExitOfTheInstanceAJobWasPreemptedFromIsNotItsResult(t *testing.T) {
 			const old, placed = "hl-job-t1-exp-1-a3-h100-0", "hl-job-t1-exp-1-a3-h100-1"
 			mustCreate(t, e, job(t, "exp-1", 3, 1))
 			p.Start(old)
-			p.Exit(old, exitline.Format(143))
+			p.Exit(old, exitLine(143))
 			readmitted := on(job(t, "exp-1", 3, 1), "h100-1")
 
 			if reapFirst {

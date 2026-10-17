@@ -25,7 +25,7 @@ func seedPricedExperiment(t *testing.T, pool *Pool, agentID, peID string, accele
 		HypothesisID: "priced-hypothesis-" + id, Hypothesis: "h",
 		AcceleratorType: acceleratorType, AcceleratorCount: count, EstimatedDurationHours: 3, EstimatedCostAccH: cost,
 		CapacityTier: domain.CapacityGuaranteed, Status: domain.StatusQueued,
-		Job:     domain.JobSpec{Image: "registry.test/job:1", AcceleratorType: acceleratorType, AcceleratorCount: count},
+		Job:     domain.JobSpec{AcceleratorType: acceleratorType, AcceleratorCount: count},
 		DataKey: domain.DataKey{AccessKeyID: "AK", SecretAccessKey: "SK"},
 	}
 	if err := insertExperiment(context.Background(), pool, exp); err != nil {

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -17,7 +16,6 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
-	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
@@ -34,88 +32,13 @@ type reconcileStore struct {
 	boundTo   map[string]string
 	bindErr   error
 	binds     []string
-	jobImages []string
 	// runReportedAt is when the end of each job's run was first reported, and runsAsked the jobs
 	// each status push asked it of.
 	runReportedAt map[string]time.Time
 	runsAsked     [][]string
-	// builds is what each cluster's runtime last said of building, assigned the builds of each
-	// cluster, and finished the outcomes recorded.
-	builds   map[string]bool
-	assigned map[string][]*domain.Environment
-	finished []string
-	progress []string
-	loaded   []string
 	// refusals is what each reconcile was refused with, empty for one accepted, as
 	// RecordContactRefusal kept it.
 	refusals []string
-}
-
-func (s *reconcileStore) RecordEnvironmentLoaded(ctx context.Context, cluster, key string, attempt int, node, image string) (bool, error) {
-	env, _ := s.AssignedEnvironmentBuild(ctx, cluster, key, attempt)
-	if env == nil {
-		return false, nil
-	}
-	s.loaded = append(s.loaded, key+" "+node+" "+image)
-	return true, nil
-}
-
-func (s *reconcileStore) RecordEnvironmentProgress(ctx context.Context, cluster, key string, attempt int, step string) (bool, error) {
-	env, _ := s.AssignedEnvironmentBuild(ctx, cluster, key, attempt)
-	if env == nil {
-		return false, nil
-	}
-	s.progress = append(s.progress, key+" "+step)
-	return true, nil
-}
-
-func (s *reconcileStore) RecordBuilds(_ context.Context, name string, builds bool) error {
-	s.builds[name] = builds
-	return nil
-}
-
-func (s *reconcileStore) AssignedEnvironmentBuilds(_ context.Context, cluster string) ([]*domain.Environment, error) {
-	return s.assigned[cluster], nil
-}
-
-func (s *reconcileStore) AssignedEnvironmentBuild(_ context.Context, cluster, key string, attempt int) (*domain.Environment, error) {
-	for _, env := range s.assigned[cluster] {
-		if env.Key == key && env.Attempt == attempt {
-			return env, nil
-		}
-	}
-	return nil, nil
-}
-
-func (s *reconcileStore) FinishEnvironmentBuild(ctx context.Context, cluster, key string, attempt int, outcome domain.EnvironmentBuildOutcome) (bool, error) {
-	env, _ := s.AssignedEnvironmentBuild(ctx, cluster, key, attempt)
-	if env == nil {
-		return false, nil
-	}
-	s.finished = append(s.finished, fmt.Sprintf("%s fault=%q image=%q log=%q", key, outcome.Fault, outcome.Image, outcome.LogTail))
-	return true, nil
-}
-
-// buildsRepository is where the builds of the tests push to.
-const buildsRepository = "registry.test/environments/environment"
-
-// logins hands out numbered logins and counts them.
-type logins struct {
-	pushes, pulls int
-	pullErr       error
-}
-
-func (l *logins) Push(context.Context) (domain.RegistryLogin, error) {
-	l.pushes++
-	return domain.RegistryLogin{Registry: "registry.test", Username: "oauth2accesstoken", Password: fmt.Sprintf("push-%d", l.pushes)}, nil
-}
-
-func (l *logins) Pull(context.Context) (domain.RegistryLogin, error) {
-	l.pulls++
-	if l.pullErr != nil {
-		return domain.RegistryLogin{}, l.pullErr
-	}
-	return domain.RegistryLogin{Registry: "registry.test", Username: "oauth2accesstoken", Password: fmt.Sprintf("pull-%d", l.pulls)}, nil
 }
 
 func (s *reconcileStore) RunFirstReportedAt(_ context.Context, ids []string) (map[string]time.Time, error) {
@@ -131,11 +54,6 @@ func (s *reconcileStore) ListRecentlyUndesiredWorkloads(_ context.Context, clust
 	return s.undesired[cluster], nil
 }
 
-func (s *reconcileStore) RecordJobImage(_ context.Context, name, image string) error {
-	s.jobImages = append(s.jobImages, name+"="+image)
-	return nil
-}
-
 func (s *reconcileStore) BindReportedID(_ context.Context, name, id string) error {
 	s.binds = append(s.binds, name+"="+id)
 	if s.bindErr != nil {
@@ -147,14 +65,11 @@ func (s *reconcileStore) BindReportedID(_ context.Context, name, id string) erro
 
 type reconcileWorld struct {
 	store  *reconcileStore
-	logins *logins
 	router http.Handler
 	// metricsWrites counts the series written, and sqlDown fails the statements that write a
 	// job's log tail and phase detail.
 	metricsWrites atomic.Int32
 	sqlDown       atomic.Bool
-	// wakes counts the times admission was woken.
-	wakes atomic.Int32
 }
 
 func newReconcileWorld(t *testing.T, cluster string) *reconcileWorld {
@@ -165,22 +80,7 @@ func newReconcileWorld(t *testing.T, cluster string) *reconcileWorld {
 // newReconcileWorldWith serves the handler over the store wrap makes of the world's own.
 func newReconcileWorldWith(t *testing.T, cluster string, wrap func(*reconcileStore) clusterexchange.Store) *reconcileWorld {
 	t.Helper()
-	return newWorld(t, cluster, wrap, true)
-}
-
-// newWorld is a world on a deployment that builds environments, or one that builds none.
-func newWorld(t *testing.T, cluster string, wrap func(*reconcileStore) clusterexchange.Store, buildsEnvironments bool) *reconcileWorld {
-	t.Helper()
-	w := &reconcileWorld{logins: &logins{}, store: &reconcileStore{desired: map[string][]*domain.Experiment{}, undesired: map[string][]*domain.Experiment{}, boundTo: map[string]string{},
-		builds: map[string]bool{}, assigned: map[string][]*domain.Environment{}}}
-	var environments *clusterexchange.EnvironmentRegistry
-	if buildsEnvironments {
-		git, err := githost.NewPlain("https://git.test", "platform", "host-password", "experiment-template")
-		if err != nil {
-			t.Fatal(err)
-		}
-		environments = &clusterexchange.EnvironmentRegistry{Repository: buildsRepository, Logins: w.logins, Git: git}
-	}
+	w := &reconcileWorld{store: &reconcileStore{desired: map[string][]*domain.Experiment{}, undesired: map[string][]*domain.Experiment{}, boundTo: map[string]string{}}}
 	metrics := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/sql" {
 			answer := `{"output":[{"affectedrows":1}]}`
@@ -198,8 +98,7 @@ func newWorld(t *testing.T, cluster string, wrap func(*reconcileStore) clusterex
 	caller := authtest.As{Kind: auth.KindRuntime, ClusterName: cluster, OrgIDs: []string{"org-a"}}
 	router := authtest.Router(caller)
 	doc := NewDoc(router, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{Clusters: map[string]string{cluster: "org-a"}}), zap.NewNop())
-	RegisterClusterAgent(doc, clusterexchange.NewService(wrap(w.store), time.Minute, metricsdb.New(metrics.URL), 90*time.Second, data, time.Minute, nil, 100, "test-signing-secret-of-enough-length", "https://api.test/git", environments, zap.NewNop()).
-		WithBuildReported(func() { w.wakes.Add(1) }))
+	RegisterClusterAgent(doc, clusterexchange.NewService(wrap(w.store), time.Minute, metricsdb.New(metrics.URL), 90*time.Second, data, time.Minute, nil, 100, "test-signing-secret-of-enough-length", "https://api.test/git", func(context.Context, string, string) (*domain.RegistryLogin, error) { return nil, nil }, zap.NewNop()))
 	w.router = router
 	return w
 }
@@ -235,10 +134,10 @@ func (w *reconcileWorld) reconcile(t *testing.T, cluster string, report map[stri
 
 func placedJob(id, org string) *domain.Experiment {
 	return &domain.Experiment{
-		ID: id, AgentID: "agent-" + id, OrgID: org, PlatformExperimentID: "pe-" + id, ProjectID: "prj-" + id,
+		Image: "registry.test/image@sha256:aa", ID: id, AgentID: "agent-" + id, OrgID: org, PlatformExperimentID: "pe-" + id, ProjectID: "prj-" + id,
 		HypothesisID: "hyp-" + id, Hypothesis: "the hypothesis of " + org, Theory: "the theory of " + org,
 		ClusterName: "of-a", Status: domain.StatusRunning, AttemptCount: 2,
-		Job:     domain.JobSpec{Image: "example.invalid/workload"},
+		Job:     domain.JobSpec{},
 		DataKey: domain.DataKey{AccessKeyID: "AK-" + id, SecretAccessKey: "SK-" + id},
 	}
 }
@@ -343,7 +242,7 @@ func TestReconcileHandsARuntimeTheSecretEnvOfItsJobs(t *testing.T) {
 	w := newReconcileWorld(t, "of-a")
 	withSecret := placedJob("job-secret", "org-a")
 	withSecret.SecretEnv = map[string]string{"HF_TOKEN": "the-secret-value"}
-	withSecret.ResolvedJob = &domain.JobSpec{Image: "example.invalid/workload", CPU: "2"}
+	withSecret.ResolvedJob = &domain.JobSpec{CPU: "2"}
 	w.store.desired["of-a"] = []*domain.Experiment{withSecret, placedJob("job-plain", "org-a")}
 
 	rec := w.reconcile(t, "of-a", idleReport("id-of-a"))
@@ -364,33 +263,5 @@ func TestReconcileHandsARuntimeTheSecretEnvOfItsJobs(t *testing.T) {
 	}
 	if answer.Experiments[1].Job.SecretEnv != nil || strings.Count(rec.Body.String(), "the-secret-value") != 2 {
 		t.Fatalf("the secret is handed with a job it is not of: %s", rec.Body)
-	}
-}
-
-// The one image a runtime runs is kept on each report, and a runtime that reports none clears
-// it: placement reads the cluster as it last described itself.
-func TestReconcileKeepsTheImageTheRuntimeRunsEveryJobIn(t *testing.T) {
-	w := newReconcileWorld(t, "of-a")
-	report := idleReport("id-of-a")
-	report["job_image"] = "registry.test/platform-job:7"
-	if rec := w.reconcile(t, "of-a", report); rec.Code != http.StatusOK {
-		t.Fatalf("got = %d %s, want = 200", rec.Code, rec.Body)
-	}
-	if rec := w.reconcile(t, "of-a", idleReport("id-of-a")); rec.Code != http.StatusOK {
-		t.Fatalf("got = %d %s, want = 200", rec.Code, rec.Body)
-	}
-	// An older runtime that runs any image says its job image is only a default.
-	report["job_image_default"] = true
-	if rec := w.reconcile(t, "of-a", report); rec.Code != http.StatusOK {
-		t.Fatalf("got = %d %s, want = 200", rec.Code, rec.Body)
-	}
-	if want := []string{"of-a=registry.test/platform-job:7", "of-a=", "of-a="}; !slices.Equal(w.store.jobImages, want) {
-		t.Fatalf("recorded %v, want %v", w.store.jobImages, want)
-	}
-	w.store.jobImages = w.store.jobImages[:2]
-	written := w.metricsWrites.Load()
-	report["job_image"] = strings.Repeat("i", domain.MaxJobImageLength+1)
-	if rec := w.reconcile(t, "of-a", report); rec.Code != http.StatusUnprocessableEntity || len(w.store.jobImages) != 2 || w.metricsWrites.Load() != written {
-		t.Fatalf("an image name too long to be one: got = %d %s, want 422 before anything is stored", rec.Code, rec.Body)
 	}
 }

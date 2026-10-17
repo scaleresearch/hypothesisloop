@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
-	"github.com/scaleresearch/hypothesisloop/contract/exitline"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 )
@@ -91,7 +90,7 @@ func TestWhatAPassRentsAvoidsTheHostsOfTheInstancesItFoundOverdue(t *testing.T) 
 	if err := pass.DeleteWorkload(ctx, "exp-1", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := pass.CreateWorkload(ctx, job(t, "exp-3", 0, 0), nil); err != nil {
+	if err := pass.CreateWorkload(ctx, job(t, "exp-3", 0, 0)); err != nil {
 		t.Fatal(err)
 	}
 	if avoided := p.Spec("hl-job-t1-exp-3-a0-cpu-0").AvoidHosts; !reflect.DeepEqual(avoided, []string{"124592"}) {
@@ -222,7 +221,7 @@ func TestAnUnreadableProviderFailsEveryReadInsteadOfAnsweringEmpty(t *testing.T)
 		"GetLiveStorageCapacity": storageErr, "GetLiveNodeResourceCapacity": nodeErr,
 		"GetLiveAcceleratorCapacitySnapshot": acceleratorErr, "FetchLogTail": tailErr, "PollPhaseDetail": detailErr,
 		"ResolveAdmittedAcceleratorType": admittedErr,
-		"CreateWorkload":                 e.CreateWorkload(ctx, job(t, "exp-2", 0, 1), nil),
+		"CreateWorkload":                 e.CreateWorkload(ctx, job(t, "exp-2", 0, 1)),
 		"DeleteWorkload":                 e.DeleteWorkload(ctx, "exp-1", false),
 		"ReapTerminal":                   e.ReapTerminal(ctx, nil),
 	} {
@@ -242,7 +241,7 @@ func TestAFailedCreateRentsNothingAndTheNextPassTriesAgain(t *testing.T) {
 	ctx := context.Background()
 	exp := job(t, "exp-1", 0, 1)
 	p.Fail = failing("Create", "")
-	if err := e.CreateWorkload(ctx, exp, nil); !errors.Is(err, errVendor) {
+	if err := e.CreateWorkload(ctx, exp); !errors.Is(err, errVendor) {
 		t.Fatalf("err = %v", err)
 	}
 	if phase, _ := status(t, e, "exp-1"); phase != clusterapi.JobPhaseGone || len(p.Names()) != 0 {
@@ -261,13 +260,13 @@ func TestAFailedCreateRentsNothingAndTheNextPassTriesAgain(t *testing.T) {
 	exp.SubmittedAt = &admitted
 	exp = asHanded(t, exp)
 	var waiting *agentexec.Waiting
-	if err := e.CreateWorkload(ctx, exp, nil); !errors.As(err, &waiting) || waiting.Reason != clusterapi.PhaseReasonWaitingForOffer || !strings.Contains(waiting.Why, "h100") {
+	if err := e.CreateWorkload(ctx, exp); !errors.As(err, &waiting) || waiting.Reason != clusterapi.PhaseReasonWaitingForOffer || !strings.Contains(waiting.Why, "h100") {
 		t.Fatalf("no offer yet: err = %v, want the job waiting for one for its shape", err)
 	}
 	admitted = time.Now().Add(-time.Hour)
 	exp.SubmittedAt = &admitted
 	var unrunnable *agentexec.Unrunnable
-	if err := e.CreateWorkload(ctx, exp, nil); !errors.As(err, &unrunnable) || unrunnable.Reason != clusterapi.PhaseReasonNoOffer {
+	if err := e.CreateWorkload(ctx, exp); !errors.As(err, &unrunnable) || unrunnable.Reason != clusterapi.PhaseReasonNoOffer {
 		t.Fatalf("no offer past the bound: err = %v, want no_offer", err)
 	}
 
@@ -286,7 +285,7 @@ func TestOneFailedDestroyStillDestroysTheRest(t *testing.T) {
 	mustCreate(t, e, on(job(t, "exp-2", 0, 1), "h100-1"))
 	mustCreate(t, e, job(t, "exp-3", 0, 0))
 	for _, name := range p.Names() {
-		p.Exit(name, exitline.Format(0))
+		p.Exit(name, exitLine(0))
 	}
 	p.Fail = failing("Destroy", "hl-job-t1-exp-1-a0-h100-0")
 
@@ -336,7 +335,7 @@ func TestAnExitedInstanceWithUnreadableOutputIsReportedGone(t *testing.T) {
 	exp := job(t, "exp-1", 0, 0)
 	mustCreate(t, e, exp)
 	p.Start(name)
-	p.Exit(name, exitline.Format(0))
+	p.Exit(name, exitLine(0))
 	p.Fail = failing("Logs", name)
 
 	observed, err := e.PollJobStatus(ctx, "exp-1")
@@ -405,7 +404,7 @@ func TestDuplicateInstancesOfOneAttemptAreReducedToTheLowestID(t *testing.T) {
 			}
 			p.Start(instance)
 			if exited {
-				p.Exit(instance, exitline.Format(0))
+				p.Exit(instance, exitLine(0))
 			}
 			other := on(job(t, "exp-2", 0, 1), "h100-0")
 			mustCreate(t, e, other)
@@ -505,7 +504,7 @@ func TestARestartedAgentTakesOverTheInstancesAlreadyRented(t *testing.T) {
 	}
 	p.Start("hl-job-t1-exp-running-a1-h100-0")
 	p.Start("hl-job-t1-exp-finished-a0-cpu-0")
-	p.Exit("hl-job-t1-exp-finished-a0-cpu-0", exitline.Format(0))
+	p.Exit("hl-job-t1-exp-finished-a0-cpu-0", exitLine(0))
 	rented := p.Names()
 
 	after, err := New(testConfig(p))
@@ -539,7 +538,7 @@ func TestARestartedAgentTakesOverTheInstancesAlreadyRented(t *testing.T) {
 	if err := after.DeleteWorkload(ctx, "exp-running", true); err != nil || p.Stops("hl-job-t1-exp-running-a1-h100-0") != 2 {
 		t.Fatalf("stop after restart: %v, %d stops", err, p.Stops("hl-job-t1-exp-running-a1-h100-0"))
 	}
-	p.Exit("hl-job-t1-exp-running-a1-h100-0", exitline.Format(0))
+	p.Exit("hl-job-t1-exp-running-a1-h100-0", exitLine(0))
 	delete(desired, "exp-running")
 	if err := after.ReapTerminal(ctx, desired); err != nil {
 		t.Fatal(err)

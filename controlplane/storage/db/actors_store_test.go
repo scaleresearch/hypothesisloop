@@ -130,7 +130,7 @@ func TestAJobAndItsFindingKeepWhoseTheyAreAndWhoMadeThem(t *testing.T) {
 			HypothesisID: "hyp-" + peID, Hypothesis: "h",
 			AcceleratorType: "nvidia.com/gpu.product=NVIDIA-L40", AcceleratorCount: 1,
 			EstimatedDurationHours: 1, EstimatedCostAccH: 1, CapacityTier: domain.CapacityGuaranteed, Status: domain.StatusQueued,
-			Job:     domain.JobSpec{Image: "registry.test/job:1", AcceleratorType: "nvidia.com/gpu.product=NVIDIA-L40", AcceleratorCount: 1},
+			Job:     domain.JobSpec{AcceleratorType: "nvidia.com/gpu.product=NVIDIA-L40", AcceleratorCount: 1},
 			DataKey: domain.DataKey{AccessKeyID: "AK", SecretAccessKey: "SK"},
 		}
 	}

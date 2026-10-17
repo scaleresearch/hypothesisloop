@@ -16,7 +16,7 @@ type measuredStore struct {
 }
 
 func (s measuredStore) GetPlatformExperiment(_ context.Context, id string) (*domain.PlatformExperiment, error) {
-	return &domain.PlatformExperiment{ID: id, Status: domain.PlatformExpRunning, Repository: "repo.git", RepositoryURL: "https://example.com/repo.git", JobEstimatedDurationHours: s.measured}, nil
+	return &domain.PlatformExperiment{ID: id, Status: domain.PlatformExpRunning, Repository: "repo.git", RepositoryURL: "https://example.com/repo.git", Image: testExperimentImage, JobEstimatedDurationHours: s.measured}, nil
 }
 
 func (measuredStore) GetAgentSignup(context.Context, string, string) (*domain.AgentSignup, error) {
@@ -29,7 +29,7 @@ type baselineStore struct {
 }
 
 func (s baselineStore) GetPlatformExperiment(_ context.Context, id string) (*domain.PlatformExperiment, error) {
-	return &domain.PlatformExperiment{ID: id, Status: domain.PlatformExpOpen, Repository: "repo.git", RepositoryURL: "https://example.com/repo.git",
+	return &domain.PlatformExperiment{ID: id, Status: domain.PlatformExpOpen, Repository: "repo.git", RepositoryURL: "https://example.com/repo.git", Image: testExperimentImage,
 		Stages: []domain.Stage{{LengthPct: 100, MaxJobHours: s.maxJobHours}}, CurrentStage: 1}, nil
 }
 
@@ -49,7 +49,7 @@ func TestABaselineJobThatStatesNoEstimateIsSizedByTheAdmission(t *testing.T) {
 		"no estimate, a per-job limit": {0, 0.125},
 		"a stated one stands":          {0.0625, 0.125},
 	} {
-		s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, environments: declared{}, store: baselineStore{maxJobHours: tc.maxJobHours}, hypotheses: oneHypothesis{}}
+		s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, store: baselineStore{maxJobHours: tc.maxJobHours}, hypotheses: oneHypothesis{}}
 		exp := baselineSubmission()
 		exp.EstimatedDurationHours = tc.stated
 		wantLimit := tc.maxJobHours
@@ -66,7 +66,7 @@ func TestABaselineJobThatStatesNoEstimateIsSizedByTheAdmission(t *testing.T) {
 
 	// A researcher's job has the measured estimate or states one: the largest that fits would hold
 	// its whole share for one trial.
-	s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, environments: declared{}, store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-1")}
+	s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, store: poolOnlyStore{}, hypotheses: humanHypothesis("pe-1")}
 	exp := humanIdeaSubmission()
 	exp.EstimatedDurationHours = 0
 	var refused *AdmissionError
@@ -116,7 +116,7 @@ func TestAJobThatStatesNoEstimateTakesTheOneItsExperimentMeasured(t *testing.T) 
 		"not stated, and one was measured": {0.025, 0, "not_signed_up", 0.025},
 		"not stated, and none measured":    {0, 0, ReasonRequired, 0},
 	} {
-		s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, environments: declared{}, store: measuredStore{measured: tc.measured}, hypotheses: humanHypothesis("pe-1")}
+		s := &Service{credits: testCaps, clusters: installedCapacity{}, codeHost: testCodeHost{}, store: measuredStore{measured: tc.measured}, hypotheses: humanHypothesis("pe-1")}
 		exp := humanIdeaSubmission()
 		exp.EstimatedDurationHours = tc.stated
 		var admission *AdmissionError

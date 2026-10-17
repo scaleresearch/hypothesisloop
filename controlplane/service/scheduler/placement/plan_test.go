@@ -14,7 +14,7 @@ const h100 = "nvidia.com/gpu.product=nvidia-h100-80gb-hbm3"
 
 // groupedExperiment is a heterogeneous job: one group per shape, in the order given.
 func groupedExperiment(groups ...domain.JobGroup) *domain.Experiment {
-	job := domain.JobSpec{Image: "registry.test/job:1", AcceleratorType: h100, Groups: groups}
+	job := domain.JobSpec{AcceleratorType: h100, Groups: groups}
 	return &domain.Experiment{AcceleratorType: h100, AcceleratorCount: job.TotalAccelerators(), Job: job}
 }
 
@@ -79,7 +79,7 @@ func TestDesiredPlacementFitsGreedyReplayFalseNegative(t *testing.T) {
 	candidate := distributedExperiment(1, 2)
 	candidate.Job.Topology = &domain.TopologySpec{SpreadAcrossHosts: &spread}
 	byNode := map[string]map[string]int64{"node-a": {h100: 2}, "node-b": {h100: 1}}
-	if !DesiredFits(byNode, nil, nil, []*domain.Experiment{pending}, candidate, &domain.JobSpec{Image: "registry.test/job:1"}) {
+	if !DesiredFits(byNode, nil, nil, []*domain.Experiment{pending}, candidate, &domain.JobSpec{}) {
 		t.Fatal("pending→node-b leaves node-a for the 2-GPU candidate, but the greedy replay put pending on node-a and rejected the claim")
 	}
 }
@@ -108,7 +108,7 @@ func TestReservePlacementFailureLeavesInputUntouched(t *testing.T) {
 // the agent protocol carries extended resources per node; the assertion below is the contract.
 func TestTopologyFitsIgnoresExtraResourcesPerNode(t *testing.T) {
 	t.Skip("per-node extended resources are not reported by cluster agents yet")
-	exp := &domain.Experiment{Job: domain.JobSpec{Image: "registry.test/job:1", NumNodes: 1, CPU: "1", ExtraResources: map[string]string{"example.com/fpga": "2"}}}
+	exp := &domain.Experiment{Job: domain.JobSpec{NumNodes: 1, CPU: "1", ExtraResources: map[string]string{"example.com/fpga": "2"}}}
 	resources := map[string]map[string]int64{
 		"node-a": {domain.NodeResourceCPUMillicores: 4000, "example.com/fpga": 1},
 		"node-b": {domain.NodeResourceCPUMillicores: 4000, "example.com/fpga": 1},
@@ -124,7 +124,7 @@ func TestTopologyFitsIgnoresExtraResourcesPerNode(t *testing.T) {
 // cluster-a on the scalar total alone and the tick then failed TopologyFits there and went to
 // preemption instead of using cluster-b.
 func TestResolveClusterAndFootprintCPUOnlySkipsTopologyCheck(t *testing.T) {
-	exp := &domain.Experiment{Job: domain.JobSpec{Image: "registry.test/job:1", NumNodes: 1, CPU: "6"}}
+	exp := &domain.Experiment{Job: domain.JobSpec{NumNodes: 1, CPU: "6"}}
 	fp := exp.Footprint()
 	avail := map[string]domain.Footprint{"cluster-a": fp, "cluster-b": fp}
 	resources := map[string]map[string]map[string]int64{
@@ -224,7 +224,7 @@ func TestReservePlacementCommitsExactlyThePlan(t *testing.T) {
 // This documents that fallback rather than assuming ClusterAndFootprint itself proves
 // feasibility for a CPU-only job when nothing actually fits.
 func TestResolveClusterAndFootprintCPUOnlyFallsBackWhenNoNodeFits(t *testing.T) {
-	exp := &domain.Experiment{Job: domain.JobSpec{Image: "registry.test/job:1", NumNodes: 1, CPU: "6"}}
+	exp := &domain.Experiment{Job: domain.JobSpec{NumNodes: 1, CPU: "6"}}
 	fp := exp.Footprint()
 	avail := map[string]domain.Footprint{"cluster-a": fp}
 	resources := map[string]map[string]map[string]int64{

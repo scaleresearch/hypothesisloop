@@ -68,7 +68,7 @@ func scaleUpExperiment(nodes int, submittedAgo time.Duration) *domain.Experiment
 	at := time.Now().Add(-submittedAgo)
 	return &domain.Experiment{
 		ID: "exp-su", Status: domain.StatusSubmitted, ClusterName: "cluster-a",
-		Job:         domain.JobSpec{Image: "registry.test/job:1", NumNodes: nodes},
+		Job:         domain.JobSpec{NumNodes: nodes},
 		SubmittedAt: &at,
 	}
 }
@@ -332,7 +332,7 @@ func TestAJobIsNotStuckPendingWhileItsCheckpointWindowMayStillBeRunning(t *testi
 			backend := &scaleUpBackend{phase: phase, phaseDetailFound: &found}
 			w := NewJobWatcher(store, backend, noopSettler{}, zap.NewNop()).WithStuckPendingTimeout(5 * time.Minute)
 			exp := scaleUpExperiment(1, tc.submittedAgo)
-			exp.ResolvedJob = &domain.JobSpec{Image: "registry.test/job:1", NumNodes: 1, CheckpointGraceSeconds: &window}
+			exp.ResolvedJob = &domain.JobSpec{NumNodes: 1, CheckpointGraceSeconds: &window}
 
 			if err := w.reconcileOne(context.Background(), exp, nil, clusterA); err != nil {
 				t.Fatal(err)
@@ -379,7 +379,7 @@ func TestABoundJobThatNeverStartsIsEvictedAtItsDeadline(t *testing.T) {
 			WithStuckPendingTimeout(5 * time.Minute).WithStartTimeout(30 * time.Minute)
 		exp := scaleUpExperiment(1, tc.submittedAgo)
 		exp.Status = tc.status
-		exp.ResolvedJob = &domain.JobSpec{Image: "registry.test/job:1", NumNodes: 1, CheckpointGraceSeconds: tc.checkpoint}
+		exp.ResolvedJob = &domain.JobSpec{NumNodes: 1, CheckpointGraceSeconds: tc.checkpoint}
 
 		err := w.reconcileOne(context.Background(), exp, nil, clusterA)
 		if !errors.Is(err, tc.phaseErr) {

@@ -141,9 +141,9 @@ func googleCredentialFiles(release *Release, secretName string) map[string]strin
 	return files
 }
 
-// A deployment that builds environments names its registry's provider, the two service accounts
-// and the environments repository in the config, and control-service reads its own Google identity, which mints their tokens, as a
-// file of the Secret in a mounted directory. One that builds none reads no Google credential.
+// A deployment with a container registry names its provider, project and location in the config,
+// and control-service reads its own Google identity, which mints the logins, as a file of the
+// Secret in a mounted directory. One with none reads no Google credential.
 func TestTheContainerRegistryOfTheValuesReachesTheConfigWithTheGoogleIdentityThatMintsItsTokens(t *testing.T) {
 	release := Render(t, External)
 	env := release.Env(t, "hypothesisloop-control-service", secretNames[External])
@@ -161,19 +161,18 @@ func TestTheContainerRegistryOfTheValuesReachesTheConfigWithTheGoogleIdentityTha
 	}
 	for deployment := range programs {
 		got := loadRendered(t, release, External, deployment).ContainerRegistry
-		want := config.GCPRegistryConfig{Pusher: "env-pusher@made-up-project.iam.gserviceaccount.com", Puller: "env-puller@made-up-project.iam.gserviceaccount.com"}
-		if got == nil || got.Provider != config.RegistryProviderGCP || got.GCP == nil || *got.GCP != want ||
-			got.EnvironmentsRepository != "europe-west1-docker.pkg.dev/made-up-project/hypothesisloop-environments/environment" {
+		want := config.GCPRegistryConfig{Project: "made-up-project", Location: "europe-west1"}
+		if got == nil || got.Provider != config.RegistryProviderGCP || got.GCP == nil || *got.GCP != want {
 			t.Errorf("%s: container_registry = %+v, want the values'", deployment, got)
 		}
 	}
 
 	inCluster := Render(t, InCluster)
 	if env := inCluster.Env(t, "hypothesisloop-control-service", secretNames[InCluster]); env["GOOGLE_APPLICATION_CREDENTIALS"] != "" {
-		t.Errorf("GOOGLE_APPLICATION_CREDENTIALS = %q on a deployment that builds no environments", env["GOOGLE_APPLICATION_CREDENTIALS"])
+		t.Errorf("GOOGLE_APPLICATION_CREDENTIALS = %q on a deployment with no container registry", env["GOOGLE_APPLICATION_CREDENTIALS"])
 	}
 	if files := googleCredentialFiles(inCluster, secretNames[InCluster]); len(files) != 0 {
-		t.Errorf("mounted %v on a deployment that builds no environments", files)
+		t.Errorf("mounted %v on a deployment with no container registry", files)
 	}
 	if cfg := loadRendered(t, inCluster, InCluster, "hypothesisloop-control-service"); cfg.ContainerRegistry != nil {
 		t.Errorf("container_registry = %+v, want none", cfg.ContainerRegistry)
@@ -220,10 +219,9 @@ func TestValuesTheChartCannotUseAreRefusedWithTheirName(t *testing.T) {
 		"no agent image":              {InCluster, `agents.image=""`, "agents.image is required"},
 		"no API address":              {InCluster, `publicAPIURL=""`, "publicAPIURL is required"},
 		"an environment builder":      {InCluster, `environmentBuilder.address=tcp://builder.example.invalid:31234`, "environmentBuilder"},
-		"a registry with no pusher":   {External, `containerRegistry.gcp.pusher=""`, "containerRegistry.gcp.pusher is required"},
-		"a registry with no puller":   {External, `containerRegistry.gcp.puller=""`, "containerRegistry.gcp.puller is required"},
+		"a registry with no project":  {External, `containerRegistry.gcp.project=""`, "containerRegistry.gcp.project is required"},
+		"a registry with no location": {External, `containerRegistry.gcp.location=""`, "containerRegistry.gcp.location is required"},
 		"accounts of no provider":     {External, `containerRegistry.provider=""`, "without containerRegistry.provider"},
-		"a registry with no repo":     {External, `containerRegistry.environmentsRepository=""`, "containerRegistry.environmentsRepository is required"},
 		"the removed environments":    {External, `environments.repository=x`, "environments"},
 		"no template repository":      {External, `gitHost.experimentTemplateRepository=""`, "gitHost.experimentTemplateRepository is required"},
 		"a sandbox of no provider":    {External, `sandbox.provider=null`, "sandbox"},

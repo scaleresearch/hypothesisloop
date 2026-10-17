@@ -17,7 +17,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
 
-const environmentImage = "europe-west1-docker.pkg.dev/p/hl-environments/environment@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+const privateImage = "europe-west1-docker.pkg.dev/p/hl-environments/environment@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 func pullTestClient(t *testing.T, objects ...runtime.Object) *JobWorkloadClient {
 	listKinds := map[schema.GroupVersionResource]string{resourceClaimTemplateGVR: "ResourceClaimTemplateList"}
@@ -28,11 +28,12 @@ func pullTestClient(t *testing.T, objects ...runtime.Object) *JobWorkloadClient 
 	}
 }
 
-func pullTestExperiment(id, environmentKey, image string) *clusterapi.DesiredJob {
+func pullTestExperiment(id, image string, pull *clusterapi.RegistryLogin) *clusterapi.DesiredJob {
 	return &clusterapi.DesiredJob{
-		Data: testDataAccess(), Token: "test-job-token", GitURL: "https://api.test/git/pe-1.git", ID: id, AgentID: "agent", EnvironmentKey: environmentKey,
+		Image: image, ImagePull: pull, Launch: "exec \"$@\"",
+		Data: testDataAccess(), Token: "test-job-token", GitURL: "https://api.test/git/pe-1.git", ID: id, AgentID: "agent",
 		EstimatedDurationHours: 1, CapacityTier: clusterapi.CapacityGuaranteed,
-		Job: clusterapi.JobSpec{Image: image, Command: []string{"python", "train.py"}, CPU: "1", Memory: "1Gi", Storage: "1Gi",
+		Job: clusterapi.JobSpec{Command: []string{"python", "train.py"}, CPU: "1", Memory: "1Gi", Storage: "1Gi",
 			MaxRetries: intPtr(1), TerminationGracePeriodSeconds: int64Ptr(5)},
 	}
 }
@@ -57,13 +58,13 @@ func secretLogin(t *testing.T, secret *corev1.Secret, registry string) (username
 	return entry.Username, entry.Password, entry.Auth
 }
 
-// A job that runs in an environment pulls its image with the login of the reconcile answer, kept
+// A job whose image needs a login pulls it with the login desired state carries, kept
 // in a Secret of its own from before its pods exist until its workload is deleted.
-func TestAJobInAnEnvironmentPullsWithASecretThatGoesWithIt(t *testing.T) {
+func TestAJobWithAPullLoginPullsWithASecretThatGoesWithIt(t *testing.T) {
 	ctx := context.Background()
 	c := pullTestClient(t)
-	exp := pullTestExperiment("exp-env", "key-1", environmentImage)
-	if err := c.CreateWorkload(ctx, exp, pullLogin("pull-token")); err != nil {
+	exp := pullTestExperiment("exp-env", privateImage, pullLogin("pull-token"))
+	if err := c.CreateWorkload(ctx, exp); err != nil {
 		t.Fatal(err)
 	}
 
@@ -75,7 +76,7 @@ func TestAJobInAnEnvironmentPullsWithASecretThatGoesWithIt(t *testing.T) {
 		t.Fatalf("pull secret = type %s, labels %v", secret.Type, secret.Labels)
 	}
 	if username, password, auth := secretLogin(t, secret, "europe-west1-docker.pkg.dev"); username != "oauth2accesstoken" || password != "pull-token" || auth != "b2F1dGgyYWNjZXNzdG9rZW46cHVsbC10b2tlbg==" {
-		t.Fatalf("pull secret holds %s / %s / %s, want the reconcile answer's login", username, password, auth)
+		t.Fatalf("pull secret holds %s / %s / %s, want the desired state's login", username, password, auth)
 	}
 	jobs, err := c.managedJobsFor(ctx, exp.ID)
 	if err != nil || len(jobs) != 1 {
@@ -119,7 +120,7 @@ func TestALeftoverPullSecretIsReplacedOrReportedAsAnOrphan(t *testing.T) {
 		t.Fatalf("auxiliary = %v, want both experiments the secrets name", auxiliary)
 	}
 
-	if err := c.CreateWorkload(ctx, pullTestExperiment("exp-env", "key-1", environmentImage), pullLogin("fresh-token")); err != nil {
+	if err := c.CreateWorkload(ctx, pullTestExperiment("exp-env", privateImage, pullLogin("fresh-token"))); err != nil {
 		t.Fatal(err)
 	}
 	secret, err := c.kube.CoreV1().Secrets(HypothesisLoopNamespace).Get(ctx, pullSecretName("exp-env"), metav1.GetOptions{})
@@ -131,26 +132,17 @@ func TestALeftoverPullSecretIsReplacedOrReportedAsAnOrphan(t *testing.T) {
 	}
 }
 
-// A job on a job image pulls with nothing, whatever login the answer carries, and a job in an
-// environment is not created without one.
-func TestOnlyAJobInAnEnvironmentHasAPullSecretAndItNeedsALogin(t *testing.T) {
+// A job whose desired state carries no pull login pulls with nothing.
+func TestAJobWithNoPullLoginHasNoPullSecret(t *testing.T) {
 	ctx := context.Background()
 	c := pullTestClient(t)
-	plain := pullTestExperiment("exp-plain", "", "registry.test/hypothesisloop-job:7")
-	if err := c.CreateWorkload(ctx, plain, pullLogin("pull-token")); err != nil {
+	plain := pullTestExperiment("exp-plain", "registry.test/public@sha256:aa", nil)
+	if err := c.CreateWorkload(ctx, plain); err != nil {
 		t.Fatal(err)
 	}
 	jobs, err := c.managedJobsFor(ctx, plain.ID)
 	if err != nil || len(jobs) != 1 || len(jobs[0].Spec.Template.Spec.ImagePullSecrets) != 0 {
-		t.Fatalf("a job on a job image = %v, %v, want one job that names no pull secret", jobs, err)
-	}
-
-	err = c.CreateWorkload(ctx, pullTestExperiment("exp-env", "key-1", environmentImage), nil)
-	if err == nil || !strings.Contains(err.Error(), "registry_pull") {
-		t.Fatalf("a job in an environment with no login = %v, want an error naming registry_pull", err)
-	}
-	if jobs, _ := c.managedJobsFor(ctx, "exp-env"); len(jobs) != 0 {
-		t.Fatal("a job in an environment was created with no login to pull it with")
+		t.Fatalf("a job with no login = %v, %v, want one job that names no pull secret", jobs, err)
 	}
 	secrets, err := c.kube.CoreV1().Secrets(HypothesisLoopNamespace).List(ctx, metav1.ListOptions{})
 	if err != nil || len(secrets.Items) != 0 {
@@ -163,8 +155,8 @@ func TestOnlyAJobInAnEnvironmentHasAPullSecretAndItNeedsALogin(t *testing.T) {
 func TestALiveJobsPullSecretFollowsTheCurrentLogin(t *testing.T) {
 	ctx := context.Background()
 	c := pullTestClient(t)
-	exp := pullTestExperiment("exp-env", "key-1", environmentImage)
-	if err := c.CreateWorkload(ctx, exp, pullLogin("first-token")); err != nil {
+	exp := pullTestExperiment("exp-env", privateImage, pullLogin("first-token"))
+	if err := c.CreateWorkload(ctx, exp); err != nil {
 		t.Fatal(err)
 	}
 	kube := c.kube.(*fake.Clientset)
@@ -178,14 +170,15 @@ func TestALiveJobsPullSecretFollowsTheCurrentLogin(t *testing.T) {
 		return n
 	}
 
-	if err := c.RefreshPull(ctx, exp, pullLogin("first-token")); err != nil {
+	if err := c.RefreshPull(ctx, exp); err != nil {
 		t.Fatal(err)
 	}
 	if got := writes(); got != 1 {
 		t.Fatalf("%d secret writes after a refresh with the same login, want only the create", got)
 	}
 
-	if err := c.RefreshPull(ctx, exp, pullLogin("second-token")); err != nil {
+	exp.ImagePull = pullLogin("second-token")
+	if err := c.RefreshPull(ctx, exp); err != nil {
 		t.Fatal(err)
 	}
 	if got := writes(); got != 2 {

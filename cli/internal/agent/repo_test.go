@@ -14,17 +14,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/cli/internal/clitest"
 )
 
-// A job spec with no image names the one its experiment was proposed with in hl repo check. A
-// submit of it is the platform's to refuse (required).
-func TestAJobThatNamesNoImageIsToldTheImageOfItsExperiment(t *testing.T) {
-	clone := cloneOf(t, proposed)
-	write(t, clone, experimentspec.JobSpec, "job:\n  command: [\"python\", \"bench.py\"]\n  cpu: 2\n  memory: 8Gi\n  storage: 4Gi\n")
-	want := "states no job.image: every job names the image it runs in, and platform experiment pe-1 was proposed with image: torch"
-	if code, out := repo(t, RepoCheck); code != 1 || !strings.Contains(out, "job-spec: "+experimentspec.JobSpec+" "+want) {
-		t.Fatalf("hl repo check = %d, want %q in\n%s", code, want, out)
-	}
-}
-
 func repo(t *testing.T, f command.Func) (int, string) {
 	t.Helper()
 	code, stdout, stderr := clitest.Output(t, f)
@@ -103,7 +92,7 @@ func write(t *testing.T, clone, path, content string) {
 
 const (
 	filledExperiment = "name: sweep\ndescription: |\n  the brief\nmetrics:\n  - key: val_accuracy\n    direction: maximize\nbudget_accelerator_hours: 2\nmax_agents: 3\nduration_hours: 4\n"
-	filledJobSpec    = "job:\n  image: registry/job:1\n  command: [\"python\", \"train.py\"]\n  cpu: 2\n  memory: 8Gi\n  storage: 4Gi\n"
+	filledJobSpec    = "job:\n  command: [\"python\", \"train.py\"]\n  cpu: 2\n  memory: 8Gi\n  storage: 4Gi\n"
 )
 
 // The unfilled files of the experiment template: a README and a job spec with what is left to
@@ -111,7 +100,7 @@ const (
 func writeUnfilled(t *testing.T, clone string) {
 	t.Helper()
 	write(t, clone, experimentspec.Readme, "# "+experimentspec.Placeholder+"-THE-EXPERIMENT-NAME\n")
-	write(t, clone, experimentspec.JobSpec, "job:\n  image: registry/job:1\n  command: [\""+experimentspec.Placeholder+"-THE-COMMAND-OF-ONE-TRIAL\"]\n  cpu: 2\n  memory: 8Gi\n  storage: 4Gi\n")
+	write(t, clone, experimentspec.JobSpec, "job:\n  command: [\""+experimentspec.Placeholder+"-THE-COMMAND-OF-ONE-TRIAL\"]\n  cpu: 2\n  memory: 8Gi\n  storage: 4Gi\n")
 	write(t, clone, experimentspec.MetricsHelper, "def post_metric(fraction_complete, value, key): ...\n")
 }
 
@@ -182,18 +171,17 @@ func TestRepoCheckNamesWhatAClonesFilesLack(t *testing.T) {
 		"free text with a colon in it":      {experimentspec.ExperimentFile, "name: sweep: wide\ndescription: d\nmetrics: []\n", "experiment: " + experimentspec.ExperimentFile + " is no valid experiment spec: not YAML: line 1, column 12: mapping values are not allowed in this context, where the line reads: name: sweep: wide"},
 		"no ranking metric":                 {experimentspec.ExperimentFile, strings.Replace(filledExperiment, "direction: maximize", "direction: maximize\n    role: constraint\n    bound: 0.5", 1), `at least one metric must have role "ranking"`},
 		"no budget":                         {experimentspec.ExperimentFile, strings.Replace(filledExperiment, "budget_accelerator_hours: 2\n", "", 1), "budget_accelerator_hours is required"},
-		"a job spec that is not YAML":       {experimentspec.JobSpec, "job:\n  image: a\n command: b\n", "job-spec: " + experimentspec.JobSpec + " is not the YAML of a job spec: line 3, column 2: did not find expected key, where the line reads: command: b"},
+		"a job spec that is not YAML":       {experimentspec.JobSpec, "job:\n  cpu: a\n command: b\n", "job-spec: " + experimentspec.JobSpec + " is not the YAML of a job spec: line 3, column 2: did not find expected key, where the line reads: command: b"},
 		"a job spec with no job":            {experimentspec.JobSpec, "metadata:\n  theory: t\n", "states no job"},
-		// A spec with no image passed three checks, was submitted and sat in the queue.
-		"a job spec with no image":       {experimentspec.JobSpec, "job:\n  cpu: 2\n  memory: 8Gi\n  storage: 4Gi\n", "states no job.image: every job names the image it runs in, a job_image of hl capacity"},
-		"a job spec with no cpu":         {experimentspec.JobSpec, "job:\n  image: a\n  memory: 8Gi\n  storage: 4Gi\n", "job.cpu is required: state the cores one node of the job uses, as in cpu: 2"},
-		"a job spec with no memory":      {experimentspec.JobSpec, "job:\n  image: a\n  cpu: 2\n  storage: 4Gi\n", "job.memory is required"},
-		"a job spec with no storage":     {experimentspec.JobSpec, "job:\n  image: a\n  cpu: 2\n  memory: 8Gi\n", "job.storage is required"},
-		"memory as a share of the node":  {experimentspec.JobSpec, "job:\n  image: a\n  cpu: 2\n  memory: max\n  storage: 4Gi\n", `job.memory is "max"`},
-		"storage as a share of the node": {experimentspec.JobSpec, "job:\n  image: a\n  cpu: 2\n  memory: 8Gi\n  storage: max\n", `job.storage is "max"`},
-		"a group with no memory":         {experimentspec.JobSpec, "job:\n  image: a\n  groups:\n    - name: w\n      cpu: 2\n      memory: 8Gi\n      storage: 4Gi\n    - name: ps\n      cpu: 1\n", "job.groups[1].memory is required"},
-		"a negative storage":             {experimentspec.JobSpec, "job:\n  image: a\n  cpu: 2\n  memory: 8Gi\n  storage: -4Gi\n", `job.storage: quantity "-4Gi" is negative`},
-		"a secret in the committed spec": {experimentspec.JobSpec, filledJobSpec + "  secret_env:\n    TOKEN: x\n", "sets job.secret_env"},
+		"a job spec that states an image":   {experimentspec.JobSpec, "job:\n  image: a\n  cpu: 2\n  memory: 8Gi\n  storage: 4Gi\n", "states job.image: every job runs in the image its platform experiment records (hl image show, hl image set)"},
+		"a job spec with no cpu":            {experimentspec.JobSpec, "job:\n  memory: 8Gi\n  storage: 4Gi\n", "job.cpu is required: state the cores one node of the job uses, as in cpu: 2"},
+		"a job spec with no memory":         {experimentspec.JobSpec, "job:\n  cpu: 2\n  storage: 4Gi\n", "job.memory is required"},
+		"a job spec with no storage":        {experimentspec.JobSpec, "job:\n  cpu: 2\n  memory: 8Gi\n", "job.storage is required"},
+		"memory as a share of the node":     {experimentspec.JobSpec, "job:\n  cpu: 2\n  memory: max\n  storage: 4Gi\n", `job.memory is "max"`},
+		"storage as a share of the node":    {experimentspec.JobSpec, "job:\n  cpu: 2\n  memory: 8Gi\n  storage: max\n", `job.storage is "max"`},
+		"a group with no memory":            {experimentspec.JobSpec, "job:\n  groups:\n    - name: w\n      cpu: 2\n      memory: 8Gi\n      storage: 4Gi\n    - name: ps\n      cpu: 1\n", "job.groups[1].memory is required"},
+		"a negative storage":                {experimentspec.JobSpec, "job:\n  cpu: 2\n  memory: 8Gi\n  storage: -4Gi\n", `job.storage: quantity "-4Gi" is negative`},
+		"a secret in the committed spec":    {experimentspec.JobSpec, filledJobSpec + "  secret_env:\n    TOKEN: x\n", "sets job.secret_env"},
 	} {
 		write(t, clone, experimentspec.ExperimentFile, filledExperiment)
 		write(t, clone, experimentspec.JobSpec, filledJobSpec)

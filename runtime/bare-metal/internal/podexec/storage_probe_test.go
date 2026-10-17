@@ -114,11 +114,12 @@ func TestAProbeImageTheEngineKeepsFailsTheProbeAndIsNamed(t *testing.T) {
 
 func sizedExperiment() *clusterapi.DesiredJob {
 	return &clusterapi.DesiredJob{
+		Image: testImage, Launch: "true",
 		Data: testDataAccess(), Token: "test-job-token", GitURL: "https://api.test/git/pe-1.git",
 		ID: "sized", AgentID: "agent", ProjectID: "project",
 		EstimatedDurationHours: 0.02, CapacityTier: clusterapi.CapacityGuaranteed,
 		Job: clusterapi.JobSpec{
-			Image: "example.invalid/workload", CPU: "1", Memory: "1Gi", Storage: "128Mi",
+			CPU: "1", Memory: "1Gi", Storage: "128Mi",
 			MaxRetries: maxRetriesPtr(0), TerminationGracePeriodSeconds: int64Ptr(5),
 		},
 	}
@@ -156,20 +157,19 @@ func TestStorageIsMeasuredOnTheEnginesStoreOrNotAtAll(t *testing.T) {
 // none is not started: the control plane decides the image, and the node has none to put in.
 func TestAContainerRunsInExactlyTheImageDesiredStateNames(t *testing.T) {
 	e := &Executor{apiURL: "http://example.invalid:8083"}
-	if e.OnlyImage() != "" {
-		t.Fatalf("the node reports it runs only %q, want any image", e.OnlyImage())
-	}
 	named := sizedExperiment()
 	cs, err := e.BuildContainerSpec(named, Placement{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cs.Image != named.Job.Image {
-		t.Errorf("the container runs in %q, want %q", cs.Image, named.Job.Image)
+	if cs.Image != named.Image {
+		t.Errorf("the container runs in %q, want %q", cs.Image, named.Image)
 	}
 	unnamed := sizedExperiment()
-	unnamed.Job.Image = ""
+	unnamed.Image = ""
 	if _, err := e.BuildContainerSpec(unnamed, Placement{}); err == nil {
 		t.Error("a job with no image in desired state was built")
 	}
 }
+
+const testImage = "registry.test/image@sha256:abababababababababababababababababababababababababababababababab"

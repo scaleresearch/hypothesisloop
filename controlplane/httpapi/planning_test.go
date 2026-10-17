@@ -29,7 +29,7 @@ import (
 func measuredBaseline() *platformexperiments.Baseline {
 	domain.SetAcceleratorRates(map[string]float64{"h100": 1.0})
 	return &platformexperiments.Baseline{
-		Job: &domain.Experiment{ID: "job-1", AgentID: "ag-baseline", PlatformExperimentID: "pe-1", Branch: "hl/pe-1/baseline", Status: domain.StatusCompleted, CodeRef: "git://seed@abc",
+		Job: &domain.Experiment{ID: "job-1", AgentID: "ag-baseline", PlatformExperimentID: "pe-1", Branch: "hl/pe-1/baseline", Status: domain.StatusCompleted, CodeRef: "git://seed@abc", Image: "registry.test/image@sha256:aa",
 			AcceleratorType: "h100", AcceleratorCount: 2, EstimatedDurationHours: 5},
 		OwnerRole: domain.SignupRoleBaseline, Finding: true, Reported: map[string]float64{"val_loss": 1.8, "exact_match": 1}, ObservedHours: 0.2,
 	}
@@ -52,8 +52,7 @@ func planningRouter(t *testing.T, store platformexperiments.Store, caller auth.P
 	planningRepositories = &fakeRepositories{files: map[string]string{"prj-a": ""}}
 	svc.WithRepositories(planningRepositories)
 	handler := svc.WithRepositories(planningRepositories).WithPlanning(testPlanning).WithGitProxy("https://api.test/git").
-		WithAgentLaunch(platformexperiments.AgentLaunch{AgentSandbox: true, DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxAgentSandboxes: createMaxAgentSandboxes}).
-		WithJobImages([]domain.JobImage{{Name: "torch", Image: "registry.example.com/hl/torch:1"}})
+		WithAgentLaunch(platformexperiments.AgentLaunch{AgentSandbox: true, DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxAgentSandboxes: createMaxAgentSandboxes})
 	if drafts, ok := store.(*draftStore); ok {
 		svc.WithReachable(func(context.Context, string) (map[string][]domain.Cluster, error) { return drafts.reachable, nil })
 	}
@@ -401,7 +400,6 @@ func aProposal(more map[string]any) map[string]any {
 		"goal_version":             1,
 		"budget_accelerator_hours": 6, "duration_hours": 4, "baseline_minutes": 30, "agents": []map[string]any{{"agent_type": "hyperparameter-search"}, {}},
 		"accelerator_type": "rtx-4090",
-		"image":            "torch",
 		"cpu":              "8",
 		"memory":           "32Gi",
 		"storage":          "100Gi",
@@ -499,8 +497,6 @@ func TestAProposalIsStoredOnlyFromThePlannerAndOnlyWhenItHoldsTogether(t *testin
 		"a question with no answer planned on":    {map[string]any{"questions": []map[string]any{{"question": "How big a win counts?", "answer": " "}}}, "too_long"},
 		"a type nobody has now":                   {map[string]any{"accelerator_type": "a100"}, "accelerator_unreachable"},
 		"no type":                                 {map[string]any{"accelerator_type": ""}, "accelerator_unreachable"},
-		"an image by a word of its own":           {map[string]any{"image": "pytorch"}, "unknown_job_image"},
-		"no image":                                {map[string]any{"image": ""}, "unknown_job_image"},
 		"memory that is no quantity":              {map[string]any{"memory": "lots"}, "invalid_resources"},
 		"negative storage":                        {map[string]any{"storage": "-100Gi"}, "invalid_resources"},
 	} {
@@ -521,19 +517,6 @@ func TestAProposalIsStoredOnlyFromThePlannerAndOnlyWhenItHoldsTogether(t *testin
 		if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusForbidden || store.created[0].ProposedAt != nil {
 			t.Errorf("%s: got = %d %v, want 403", name, code, out)
 		}
-	}
-
-	// A brief named an image the one cluster of its type did not run, and three baseline jobs
-	// were refused for it after a person had accepted.
-	ownImage := draftWithPlanner()
-	ownImage.reachable = map[string][]domain.Cluster{"rtx-4090": {{Name: "box", JobImage: "registry.example.com/hl/box:1"}}}
-	_, call = planningRouter(t, ownImage, thePlanner)
-	code, out = call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil))
-	if message, _ := out["message"].(string); code != http.StatusUnprocessableEntity || out["reason"] != "no_cluster_for_image" || !strings.Contains(message, "box runs every job in registry.example.com/hl/box:1") || ownImage.created[0].ProposedAt != nil {
-		t.Errorf("an image no cluster of the type runs: got = %d %v, want 422 no_cluster_for_image naming the cluster's image and nothing stored", code, out)
-	}
-	if code, out := call("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"image": "registry.example.com/hl/box:1"})); code != http.StatusOK {
-		t.Errorf("the image the cluster runs: got = %d %v, want 200", code, out)
 	}
 
 	accepted := draftWithPlanner()
@@ -1229,8 +1212,7 @@ func TestAProposalIsAcceptedAsProposedUnlessAPersonActsFirst(t *testing.T) {
 		}
 		svc, call := planningRouter(t, store, planner)
 		handler := svc.WithRepositories(planningRepositories).WithPlanning(testPlanning).WithGitProxy("https://api.test/git").
-			WithAgentLaunch(platformexperiments.AgentLaunch{AgentSandbox: true, DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxAgentSandboxes: createMaxAgentSandboxes}).
-			WithJobImages([]domain.JobImage{{Name: "torch", Image: "registry.example.com/hl/torch:1"}})
+			WithAgentLaunch(platformexperiments.AgentLaunch{AgentSandbox: true, DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxAgentSandboxes: createMaxAgentSandboxes})
 		return store, handler, call
 	}
 	due := func(store *draftStore) {
@@ -1332,8 +1314,7 @@ func TestAProposalWithQuestionsWaitsForAPersonWhoseAnswersGoIntoTheBrief(t *test
 		}
 		svc, call := planningRouter(t, store, planner)
 		handler := svc.WithRepositories(planningRepositories).WithPlanning(testPlanning).WithGitProxy("https://api.test/git").
-			WithAgentLaunch(platformexperiments.AgentLaunch{AgentSandbox: true, DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxAgentSandboxes: createMaxAgentSandboxes}).
-			WithJobImages([]domain.JobImage{{Name: "torch", Image: "registry.example.com/hl/torch:1"}})
+			WithAgentLaunch(platformexperiments.AgentLaunch{AgentSandbox: true, DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxAgentSandboxes: createMaxAgentSandboxes})
 		return store, handler, call
 	}
 	accept := func(answers any) map[string]any {

@@ -57,9 +57,8 @@ func TestTheLocalSettingsAsRenderedLoad(t *testing.T) {
 	if cfg, err = LoadSettings(rendered); err != nil {
 		t.Fatalf("the rendered local settings with environments do not load: %v", err)
 	}
-	want := GCPRegistryConfig{Pusher: "env-pusher@my-project.iam.gserviceaccount.com", Puller: "env-puller@my-project.iam.gserviceaccount.com"}
-	if got := cfg.ContainerRegistry; got == nil || got.Provider != RegistryProviderGCP || got.GCP == nil || *got.GCP != want ||
-		got.EnvironmentsRepository != "europe-west1-docker.pkg.dev/my-project/images-environments/environment" {
+	want := GCPRegistryConfig{Project: "my-project", Location: "europe-west1"}
+	if got := cfg.ContainerRegistry; got == nil || got.Provider != RegistryProviderGCP || got.GCP == nil || *got.GCP != want {
 		t.Errorf("container_registry = %+v, want the registry's", got)
 	}
 

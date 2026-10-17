@@ -98,7 +98,7 @@ func TestFitsWhenIdle(t *testing.T) {
 		exp.Job.AcceptableAcceleratorTypes = acceptable
 		return exp
 	}
-	cpuOnly := &domain.Experiment{Job: domain.JobSpec{Image: "registry.test/job:1", CPU: "4", Memory: "1Gi", Storage: "1Gi"}}
+	cpuOnly := &domain.Experiment{Job: domain.JobSpec{CPU: "4", Memory: "1Gi", Storage: "1Gi"}}
 	node := func(cores int64) map[string]int64 {
 		return map[string]int64{domain.NodeResourceCPUMillicores: cores * 1000, domain.NodeResourceMemoryBytes: 64 << 30, domain.NodeResourceStorageBytes: 64 << 30}
 	}
@@ -134,7 +134,7 @@ func TestHardestNodeShape(t *testing.T) {
 	if got.AcceleratorCount != 1 || got.Resources[domain.NodeResourceCPUMillicores] != 4000 {
 		t.Fatalf("HardestNodeShape = %+v, want the learner with a device and the most cpu", got)
 	}
-	if got := HardestNodeShape(&domain.Experiment{Job: domain.JobSpec{Image: "registry.test/job:1", CPU: "2"}}); got.Resources[domain.NodeResourceCPUMillicores] != 2000 {
+	if got := HardestNodeShape(&domain.Experiment{Job: domain.JobSpec{CPU: "2"}}); got.Resources[domain.NodeResourceCPUMillicores] != 2000 {
 		t.Fatalf("HardestNodeShape of an ungrouped job = %+v, want its one shape", got)
 	}
 }

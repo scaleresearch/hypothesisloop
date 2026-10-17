@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
-	"github.com/scaleresearch/hypothesisloop/contract/exitline"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentloop"
 )
 
@@ -32,7 +31,7 @@ func TestAnExitedInstanceKeepsItsOutcomeAndOutputUntilTheControlPlaneLetsGo(t *t
 	exp := job(t, "exp-1", 0, 0)
 	mustCreate(t, e, exp)
 	p.Start("hl-job-t1-exp-1-a0-cpu-0")
-	p.Exit("hl-job-t1-exp-1-a0-cpu-0", "RuntimeError: device crashed", exitline.Format(1))
+	p.Exit("hl-job-t1-exp-1-a0-cpu-0", "RuntimeError: device crashed", exitLine(1))
 
 	desired := map[string]*clusterapi.DesiredJob{"exp-1": exp}
 	for pass := 0; pass < 2; pass++ {

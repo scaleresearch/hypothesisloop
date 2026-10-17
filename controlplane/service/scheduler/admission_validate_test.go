@@ -34,7 +34,6 @@ func validSubmission() *domain.Experiment {
 		AcceleratorType:        h100,
 		EstimatedDurationHours: 1,
 		Job: domain.JobSpec{
-			Image:            "example/image:v1",
 			AcceleratorCount: 1,
 			AcceleratorType:  h100,
 			CPU:              "2",

@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -76,7 +74,7 @@ func TestJobSubmitRefusesAHeadOnNoBranchOfThePlatformExperiment(t *testing.T) {
 // baseline's branch, which the submit pushes like any other.
 func TestJobSubmitWithNoHypothesisIsTheBaselinesOnItsBranch(t *testing.T) {
 	clone, origin := clitest.PushedClone(t)
-	clitest.WriteJob(t, filepath.Join(clone, "job.yaml"), "job:\n  image: foo\n")
+	clitest.WriteJob(t, filepath.Join(clone, "job.yaml"), "job:\n")
 	clitest.MustGit(t, clone, "commit", "-q", "-am", "the baseline's spec")
 	code, stderr, sent := submit(t, "job.yaml")
 	if code != 1 || sent != nil || !strings.Contains(stderr, "git checkout -b hl/pe-1/baseline") || !strings.Contains(stderr, "--hypothesis ID") {
@@ -103,7 +101,7 @@ func TestJobSubmitWithNoHypothesisIsTheBaselinesOnItsBranch(t *testing.T) {
 
 func TestJobSubmitRefusesDirtyTree(t *testing.T) {
 	clone, _ := clitest.PushedClone(t)
-	clitest.WriteJob(t, filepath.Join(clone, "job.yaml"), "metadata:\n  hypothesis_id: h2\njob:\n  image: foo\n")
+	clitest.WriteJob(t, filepath.Join(clone, "job.yaml"), "metadata:\n  hypothesis_id: h2\njob:\n")
 	code, stderr, sent := submit(t, "job.yaml")
 	if code == 0 || sent != nil || !strings.Contains(stderr, "uncommitted changes") {
 		t.Fatalf("exit code = %d, sent = %v, stderr = %s", code, sent, stderr)
@@ -114,7 +112,7 @@ func TestJobSubmitKeepsExplicitCodeRef(t *testing.T) {
 	clone, _ := clitest.PushedClone(t)
 	clitest.MustGit(t, clone, "commit", "-q", "--allow-empty", "-m", "local only")
 	explicit := "git://elsewhere@" + strings.Repeat("b", 40)
-	clitest.WriteJob(t, filepath.Join(clone, "job.yaml"), "metadata:\n  code_ref: "+explicit+"\njob:\n  image: foo\n")
+	clitest.WriteJob(t, filepath.Join(clone, "job.yaml"), "metadata:\n  code_ref: "+explicit+"\njob:\n")
 	code, stderr, sent := submit(t, "job.yaml")
 	if code != 0 || sent["code_ref"] != explicit {
 		t.Fatalf("exit code = %d, code_ref = %v, stderr = %s", code, sent["code_ref"], stderr)
@@ -125,7 +123,7 @@ func TestJobSubmitOutsideRepoWithoutCodeRefFails(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
 	t.Chdir(dir)
-	clitest.WriteJob(t, "job.yaml", "metadata:\n  hypothesis_id: h1\njob:\n  image: foo\n")
+	clitest.WriteJob(t, "job.yaml", "metadata:\n  hypothesis_id: h1\njob:\n")
 	code, stderr, _ := submit(t, "job.yaml")
 	if code != 1 || !strings.Contains(stderr, "submit from your clone") {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr)
@@ -173,7 +171,7 @@ func TestJobSubmitRefusesSecretEnvInTheSpecFile(t *testing.T) {
 	clone, _ := clitest.PushedClone(t)
 	asked := false
 	clitest.SetAPIURL(t, clitest.WithServer(t, func(http.ResponseWriter, *http.Request) { asked = true }))
-	clitest.WriteJob(t, filepath.Join(clone, "secret.yaml"), "metadata:\n  hypothesis_id: h1\njob:\n  image: foo\n  secret_env:\n    HF_TOKEN: the-secret-value\n")
+	clitest.WriteJob(t, filepath.Join(clone, "secret.yaml"), "metadata:\n  hypothesis_id: h1\njob:\n  secret_env:\n    HF_TOKEN: the-secret-value\n")
 	var stdout, stderr bytes.Buffer
 	code := clitest.Run(JobSubmit, []string{"secret.yaml", "--agent", "jane"}, &stdout, &stderr)
 	if code != 2 || asked || !strings.Contains(stderr.String(), "FILE carries job.secret_env") || strings.Contains(stderr.String(), "the-secret-value") {
@@ -192,63 +190,6 @@ func TestJobSubmitWithNoOriginSaysToWorkInTheClone(t *testing.T) {
 	}
 	if _, err := checkoutBranch(t.TempDir(), "hl/pe-1/a/b", "", ""); err == nil || !strings.Contains(err.Error(), "(hl platform-experiments get names repository_url)") {
 		t.Fatalf("a checkout outside a repository: %v, want the same command named", err)
-	}
-}
-
-func TestHLCloneGivesUpNamingTheCauseAfterItsTries(t *testing.T) {
-	script, err := filepath.Abs(filepath.Join("..", "..", "..", "runtime", "job", "hl-clone"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	bin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "sleep"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	missing := "file://" + filepath.Join(t.TempDir(), "no-such-repository")
-	cmd := exec.Command("sh", script, missing+"@"+strings.Repeat("a", 40), filepath.Join(t.TempDir(), "code"))
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	err = cmd.Run()
-	lines := strings.Split(strings.TrimSpace(stderr.String()), "\n")
-	if err == nil || stdout.Len() != 0 || len(lines) != 7 || !strings.HasPrefix(lines[0], "hl-clone: try 1 of 7") ||
-		!strings.HasPrefix(lines[1], "hl-clone: try 2 of 7") || !strings.Contains(lines[1], "the next is in 10s") ||
-		!strings.Contains(lines[5], "the next is in 60s") ||
-		!strings.HasPrefix(lines[6], "hl-clone: could not fetch the code: 7 tries") || !strings.Contains(lines[6], "no-such-repository") {
-		t.Fatalf("hl-clone: %v, stdout %q, stderr:\n%s", err, stdout.String(), stderr.String())
-	}
-}
-
-// hl-clone is what a job and an agent take a code_ref's commit back with.
-func TestHLCloneChecksOutTheCommitOfACodeRef(t *testing.T) {
-	script, err := filepath.Abs(filepath.Join("..", "..", "..", "runtime", "job", "hl-clone"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	clone, origin := clitest.PushedClone(t)
-	sha := clitest.MustGit(t, clone, "rev-parse", "HEAD")
-	clitest.MustGit(t, clone, "commit", "-q", "--allow-empty", "-m", "a later commit")
-	clitest.MustGit(t, clone, "push", "-q", "origin", "HEAD")
-	out := filepath.Join(t.TempDir(), "code")
-	if printed, err := exec.Command("sh", script, "file://"+origin+"@"+sha, out).CombinedOutput(); err != nil || strings.TrimSpace(string(printed)) != out {
-		t.Fatalf("hl-clone: %v: %s", err, printed)
-	}
-	if got := clitest.MustGit(t, out, "rev-parse", "HEAD"); got != sha {
-		t.Fatalf("checked out %s, want %s", got, sha)
-	}
-	if _, err := os.Stat(filepath.Join(out, "job.yaml")); err != nil {
-		t.Fatalf("the commit's files are not there: %v", err)
-	}
-
-	// A job fetches through the platform's git proxy, whatever address its code_ref names.
-	proxied := filepath.Join(t.TempDir(), "code")
-	cmd := exec.Command("sh", script, "https://git-host.invalid/acme/model.git@"+sha, proxied)
-	cmd.Env = append(os.Environ(), "HYPOTHESISLOOP_GIT_URL=file://"+origin)
-	if printed, err := cmd.CombinedOutput(); err != nil || strings.TrimSpace(string(printed)) != proxied {
-		t.Fatalf("hl-clone through HYPOTHESISLOOP_GIT_URL: %v: %s", err, printed)
-	}
-	if got := clitest.MustGit(t, proxied, "rev-parse", "HEAD"); got != sha {
-		t.Fatalf("checked out %s through the proxy, want %s", got, sha)
 	}
 }
 

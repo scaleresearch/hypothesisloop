@@ -98,7 +98,7 @@ func TestJobSubmitFromYAML(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 	jobFile := dir + "/job.yaml"
-	if err := os.WriteFile(jobFile, []byte("metadata:\n  code_ref: repo@abc\njob:\n  image: foo:latest\n"), 0o644); err != nil {
+	if err := os.WriteFile(jobFile, []byte("metadata:\n  code_ref: repo@abc\njob:\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
@@ -132,7 +132,7 @@ func TestJobSubmitBeforeTheStartPrintsTheRefusalAndAsksNothingMore(t *testing.T)
 	})
 	clitest.SetAPIURL(t, url)
 	jobFile := t.TempDir() + "/job.yaml"
-	if err := os.WriteFile(jobFile, []byte("metadata:\n  code_ref: repo@abc\n  platform_experiment_id: pe-1\njob:\n  image: foo:latest\n"), 0o644); err != nil {
+	if err := os.WriteFile(jobFile, []byte("metadata:\n  code_ref: repo@abc\n  platform_experiment_id: pe-1\njob:\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer

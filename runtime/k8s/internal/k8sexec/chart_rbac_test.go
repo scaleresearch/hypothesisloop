@@ -234,7 +234,7 @@ func TestTheChartGrantsAreReadAsTheClusterEnforcesThem(t *testing.T) {
 	}
 }
 
-// Every operation the cluster-agent runs, once each on a distributed DRA job in an environment,
+// Every operation the cluster-agent runs, once each on a distributed DRA job that pulls with a login,
 // against fakes that hold it to the chart: a call no other test reaches is still checked here.
 func TestEveryCallTheAgentMakesIsOneTheChartGrants(t *testing.T) {
 	ctx := context.Background()
@@ -251,7 +251,7 @@ func TestEveryCallTheAgentMakesIsOneTheChartGrants(t *testing.T) {
 	}, tenstorrentDeviceClass(),
 		tenstorrentResourceSlice("slice-a", "worker-a", "chip-0", "chip-1"),
 		tenstorrentResourceSlice("slice-b", "worker-b", "chip-0", "chip-1"))}
-	exp := pullTestExperiment("everything", "key-1", environmentImage)
+	exp := pullTestExperiment("everything", privateImage, pullLogin("token"))
 	exp.AcceleratorType, exp.AcceleratorCount = "tenstorrent.com/chipArch=blackhole", 4
 	exp.Job.AcceleratorType, exp.Job.AcceleratorCount, exp.Job.NumNodes = exp.AcceleratorType, 2, 2
 
@@ -264,9 +264,10 @@ func TestEveryCallTheAgentMakesIsOneTheChartGrants(t *testing.T) {
 	must("SetupCluster", c.SetupCluster(ctx))
 	_, err := c.GetClusterID(ctx)
 	must("GetClusterID", err)
-	must("CreateWorkload", c.CreateWorkload(ctx, exp, pullLogin("token")))
-	must("CreateWorkload again", c.CreateWorkload(ctx, exp, pullLogin("token")))
-	must("RefreshPull", c.RefreshPull(ctx, exp, pullLogin("next-token")))
+	must("CreateWorkload", c.CreateWorkload(ctx, exp))
+	must("CreateWorkload again", c.CreateWorkload(ctx, exp))
+	exp.ImagePull = pullLogin("next-token")
+	must("RefreshPull", c.RefreshPull(ctx, exp))
 	_, err = c.WorkloadMatchesDesired(ctx, exp)
 	must("WorkloadMatchesDesired", err)
 

@@ -1,6 +1,7 @@
 package clusterexchange
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -16,9 +17,9 @@ import (
 // newAnswer is the reconcile answer the handler now gives for c.
 func newAnswer(t *testing.T, h *Service, c wireCase) clusterapi.ReconcileAnswer {
 	t.Helper()
-	answer := clusterapi.ReconcileAnswer{Jobs: make([]*clusterapi.DesiredJob, len(c.exps)), CheckpointWindow: c.checkpointWindow, Builds: c.builds, RegistryPull: c.registryPull}
+	answer := clusterapi.ReconcileAnswer{Jobs: make([]*clusterapi.DesiredJob, len(c.exps)), CheckpointWindow: c.checkpointWindow}
 	for i, exp := range c.exps {
-		job, err := h.desiredJob(exp)
+		job, err := h.desiredJob(context.Background(), exp)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -48,6 +49,12 @@ func TestTheReconcileAnswerIsTheOneRuntimesAlreadyRead(t *testing.T) {
 			}
 			var old, now map[string]any
 			if err := json.Unmarshal(golden, &old); err != nil {
+				t.Fatal(err)
+			}
+			for _, job := range old["experiments"].([]any) {
+				job.(map[string]any)["launch"] = domain.LaunchScript
+			}
+			if golden, err = json.Marshal(old); err != nil {
 				t.Fatal(err)
 			}
 			if err := json.Unmarshal(wire, &now); err != nil {
@@ -98,10 +105,10 @@ func TestTheReconcileAnswerIsTheOneRuntimesAlreadyRead(t *testing.T) {
 // onto no job the platform holds.
 func TestSecretEnvReachesTheRuntimeOnBothSpecsOnly(t *testing.T) {
 	exp := &domain.Experiment{
-		ID: "job-1", Job: domain.JobSpec{Image: "img"}, ResolvedJob: &domain.JobSpec{Image: "img"},
+		ID: "job-1", Job: domain.JobSpec{}, Image: wireImage, ResolvedJob: &domain.JobSpec{},
 		SecretEnv: map[string]string{"HF_TOKEN": "the-secret-value"},
 	}
-	job, err := wireHandler(t).desiredJob(exp)
+	job, err := wireHandler(t).desiredJob(context.Background(), exp)
 	if err != nil {
 		t.Fatal(err)
 	}

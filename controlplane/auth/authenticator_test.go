@@ -33,8 +33,6 @@ type fakeDirectory struct {
 	// notSignedUp is read by the methods in roster_test.go.
 	notSignedUp map[string]bool
 	clusters    map[string]string
-	// builds are the builds building now, by scope.Build.
-	builds      map[string]bool
 	staff       map[string]bool
 	homes       map[string][]string
 	names       map[string]string

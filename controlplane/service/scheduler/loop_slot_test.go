@@ -97,7 +97,7 @@ func (c *slotFixture) capacity() domain.Footprint {
 
 func cpuJob(id, cpu string) *domain.Experiment {
 	return &domain.Experiment{ID: id, AgentID: "agent-1", CapacityTier: domain.CapacityBurst, EstimatedDurationHours: 1,
-		Job: domain.JobSpec{Image: "job", CPU: cpu, Memory: "1Gi", Storage: "1Gi"}}
+		Job: domain.JobSpec{CPU: cpu, Memory: "1Gi", Storage: "1Gi"}}
 }
 
 // slotCoresJob is a job on CPU as submission leaves it: of the CPU type, its count its cores.
@@ -155,7 +155,7 @@ func TestAJobIsSizedToTheSlotItHolds(t *testing.T) {
 
 	// A grouped job of one node is resolved on its group.
 	grouped := h100Job("grouped", "")
-	grouped.Job = domain.JobSpec{Image: "registry.test/job:1", Groups: []domain.JobGroup{{Name: "only", Replicas: 1, CPU: "2", Memory: "1Gi", Storage: "1Gi", AcceleratorCount: 1, AcceleratorType: h100}}}
+	grouped.Job = domain.JobSpec{Groups: []domain.JobGroup{{Name: "only", Replicas: 1, CPU: "2", Memory: "1Gi", Storage: "1Gi", AcceleratorCount: 1, AcceleratorType: h100}}}
 	if job := sized(t, c, grouped).EffectiveJob(); job.Groups[0].CPU != "8" || job.Groups[0].Memory != "32Gi" || grouped.Job.Groups[0].CPU != "2" {
 		t.Fatalf("grouped job resolved to %+v, submitted %+v", job.Groups[0], grouped.Job.Groups[0])
 	}

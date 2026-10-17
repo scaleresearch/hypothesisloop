@@ -21,8 +21,8 @@ func TestNoAnswerOfTheAPICarriesTheClustersAJobWasTriedOn(t *testing.T) {
 // A job's secret_env is on no JSON of the job: only the desired state of its runtime carries it.
 func TestSecretEnvIsOnNoJSONOfTheJob(t *testing.T) {
 	exp := &Experiment{
-		ID: "job-1", Job: JobSpec{Image: "img", Env: map[string]string{"LR": "0.1"}},
-		ResolvedJob: &JobSpec{Image: "img"},
+		ID: "job-1", Job: JobSpec{Env: map[string]string{"LR": "0.1"}},
+		ResolvedJob: &JobSpec{},
 		SecretEnv:   map[string]string{"HF_TOKEN": "the-secret-value"},
 	}
 	wire, err := json.Marshal(exp)

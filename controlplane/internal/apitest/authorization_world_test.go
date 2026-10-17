@@ -44,7 +44,6 @@ const (
 	worldSecret   = "the-authorization-table-signing-secret"
 	worldIssuer   = "https://issuer.test/auth/v1"
 	worldAudience = "hypothesisloop-test"
-	worldBuildKey = "key-building"
 	worldMember   = "user-m"
 	// worldShared is the one platform experiment of org-b that staff shared with every account.
 	worldShared = "pe-show"
@@ -159,13 +158,6 @@ func (w *world) OrgRole(_ context.Context, _ string, userID string) (domain.OrgR
 	return domain.OrgRoleOwner, true, nil
 }
 
-func (w *world) AssignedEnvironmentBuild(_ context.Context, cluster, key string, attempt int) (*domain.Environment, error) {
-	if cluster != "cluster-a" || key != worldBuildKey || attempt != 1 {
-		return nil, nil
-	}
-	return &domain.Environment{Key: key, OrgID: "org-a", ProjectID: "prj-a1", ClusterName: cluster, Attempt: attempt, State: domain.EnvironmentBuilding}, nil
-}
-
 func (w *world) GetProject(_ context.Context, id string) (*domain.Project, error) {
 	org, ok := worldOrgOf[id]
 	if !ok {
@@ -253,7 +245,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 
 	clusters := chi.NewRouter()
 	api.docs["/internal/clusters"] = httpapi.NewDoc(clusters, "cluster-agent", "1.0.0", "", access, logger)
-	httpapi.RegisterClusterAgent(api.docs["/internal/clusters"], clusterexchange.NewService(nil, 0, nil, 0, nil, 0, nil, 0, worldSecret, "https://api.test/git", &clusterexchange.EnvironmentRegistry{Repository: "registry.test/environments/environment"}, logger))
+	httpapi.RegisterClusterAgent(api.docs["/internal/clusters"], clusterexchange.NewService(nil, 0, nil, 0, nil, 0, nil, 0, worldSecret, "https://api.test/git", nil, logger))
 	api.router.Mount("/internal/clusters", clusters)
 
 	doc := httpapi.NewDoc(api.router, "hypothesisloop API", "1.0.0", "", access, logger)
@@ -266,7 +258,7 @@ func newWorldAPI(t *testing.T) *worldAPI {
 		Hypotheses:          worldGraph{world: w},
 		Launch:              launch,
 		Accounts:            accounts.NewService(nil, nil, nil, 0, worldSecret, accounts.RuntimeAddresses{}, accounts.Limits{MaxOrgsPerUser: 3, MaxProjectsPerOrg: 10}, doc.Access, logger),
-		Scheduler:           scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, metricsdb.New("http://metrics.invalid"), logger).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{}),
+		Scheduler:           scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, metricsdb.New("http://metrics.invalid"), logger).WithLoop(noopLoop{}),
 		Registry:            registry.New(nil, worldGraph{world: w}, nil, logger, metricsdb.New("http://metrics.invalid"), nil),
 		AgentTypes:          accounts.NewAgentTypes(tripAgentTypes{}, doc.Access, logger),
 		Repositories:        accounts.NewRepositories(tripInstallations{}, nil, doc.Access, logger),
@@ -296,7 +288,6 @@ func newWorldAPI(t *testing.T) *worldAPI {
 	api.tokens["coordinator"] = mint(scope.Coordinator("pe-a1"))
 	api.tokens["job"] = mint(scope.Job("job-own"))
 	api.tokens["runtime"] = mint(scope.Runtime("cluster-a"))
-	api.tokens["build"] = mint(scope.Build("cluster-a", worldBuildKey, 1))
 	api.tokens["staff"] = mint(scope.Staff)
 	api.serve = answering(t, doc.API, api.router)
 	return api

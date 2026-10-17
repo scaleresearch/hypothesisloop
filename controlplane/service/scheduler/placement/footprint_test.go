@@ -107,7 +107,7 @@ func groupedAcceleratorExperiment() *domain.Experiment {
 	return &domain.Experiment{
 		AcceleratorType:  acceleratorType,
 		AcceleratorCount: 3,
-		Job: domain.JobSpec{Image: "registry.test/job:1",
+		Job: domain.JobSpec{
 			AcceleratorType: acceleratorType,
 			Groups: []domain.JobGroup{
 				{Name: "learner", Replicas: 1, CPU: "1", Memory: "1Gi", Storage: "1Gi", AcceleratorCount: 2},
@@ -150,7 +150,7 @@ func TestAGroupedJobIsPlacedOnAClusterWhoseNodesActuallyHaveItsAccelerators(t *t
 // groupedTwoNodeExperiment is a heterogeneous job of two nodes.
 func groupedTwoNodeExperiment() *domain.Experiment {
 	return &domain.Experiment{
-		Job: domain.JobSpec{Image: "registry.test/job:1", Groups: []domain.JobGroup{
+		Job: domain.JobSpec{Groups: []domain.JobGroup{
 			{Name: "learner", Replicas: 1, CPU: "16", Memory: "128Gi", Storage: "10Gi"},
 			{Name: "actor", Replicas: 1, CPU: "1", Memory: "4Gi", Storage: "1Gi"},
 		}},

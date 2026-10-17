@@ -48,7 +48,7 @@ func TestStatusReasonOfAnOpenPlatformExperimentSaysWhereItsBaselineStands(t *tes
 
 	check := job("job-2")
 	check.Branch = "hl/pe-1/baseline-check"
-	building := &domain.Experiment{ID: "job-9", Status: domain.StatusQueued, NotAdmittedReason: domain.NotAdmittedEnvironmentBuilding, EstimatedDurationHours: 0.5}
+	building := &domain.Experiment{ID: "job-9", Status: domain.StatusQueued, NotAdmittedReason: domain.NotAdmittedCapacityUnavailable, EstimatedDurationHours: 0.5}
 	quick := &domain.Experiment{ID: "job-8", Status: domain.StatusSubmitted, EstimatedDurationHours: 0.1}
 	for name, c := range map[string]struct {
 		reader       auth.Principal
@@ -71,7 +71,7 @@ func TestStatusReasonOfAnOpenPlatformExperimentSaysWhereItsBaselineStands(t *tes
 		"one that left the control and its check":          {waitingPerson, []domain.AgentSignup{done}, []*domain.Experiment{job("job-1"), check}, nil, 6, "baseline_declaring", []string{"job-1"}, []string{"job-2", add, declare}},
 		"the baseline agent":                               {waitingAgent("ag-b"), []domain.AgentSignup{measuring, researcher}, nil, nil, 6, "baseline_measuring", []string{"Your job is admitted now", "hl job summary", "agents finish", "baseline_due_at is " + due.Format(time.RFC3339) + ", 9 minutes from now", "The run lasts its duration_hours, 1, from the moment the platform starts it, once its baseline is declared"}, []string{add, "cannot be met"}},
 		"the baseline agent whose job cannot end in time": {waitingAgent("ag-b"), []domain.AgentSignup{measuring, researcher}, nil, []*domain.Experiment{quick, building}, 6, "baseline_measuring",
-			[]string{"job job-9 is QUEUED (environment_building) and its estimated_duration_hours is 0.5: started now it ends after baseline_due_at, 9 minutes from now, so baseline_due_at cannot be met by it"}, []string{"job-8"}},
+			[]string{"job job-9 is QUEUED (capacity_unavailable) and its estimated_duration_hours is 0.5: started now it ends after baseline_due_at, 9 minutes from now, so baseline_due_at cannot be met by it"}, []string{"job-8"}},
 		"a baseline agent that finished": {waitingAgent("ag-b"), []domain.AgentSignup{done, second}, nil, nil, 6, "baseline_measuring", nil, []string{"Your job is admitted now", "Every job you submit"}},
 		"a researcher":                   {waitingAgent("ag-r"), []domain.AgentSignup{measuring, researcher}, nil, nil, 6, "baseline_measuring", []string{"Every job you submit is refused until the platform starts the run", "end your turn", "The run lasts its duration_hours, 1"}, []string{add, "baseline_due_at is"}},
 	} {
@@ -334,8 +334,8 @@ type tendedStore struct {
 }
 
 func (f *tendedStore) HoldBaselineClock(_ context.Context, _ string, held bool, most time.Duration) error {
-	if most != domain.MaxEnvironmentBuildTime {
-		return fmt.Errorf("bound %v, want the longest the platform spends on a build", most)
+	if most != domain.MaxBaselineHold {
+		return fmt.Errorf("bound %v, want the longest the platform holds the baseline", most)
 	}
 	f.held = append(f.held, held)
 	if held {
@@ -356,7 +356,7 @@ func (f *tendedStore) MarkBaselineLate(_ context.Context, id, reason string) err
 // job that cannot end by it.
 func TestTheBaselineSweepCountsThePlatformsTimeAsThePlatformsAndWakesALateBaseline(t *testing.T) {
 	due := time.Now().UTC().Add(10 * time.Minute)
-	building := &domain.Experiment{ID: "job-building", Status: domain.StatusQueued, NotAdmittedReason: domain.NotAdmittedEnvironmentBuilding, EstimatedDurationHours: 0.75}
+	building := &domain.Experiment{ID: "job-building", Status: domain.StatusQueued, NotAdmittedReason: domain.NotAdmittedCapacityUnavailable, EstimatedDurationHours: 0.75}
 	pulling := &domain.Experiment{ID: "job-pulling", Status: domain.StatusSubmitted, EstimatedDurationHours: 0.1}
 	capacity := &domain.Experiment{ID: "job-capacity", Status: domain.StatusQueued, NotAdmittedReason: "capacity_unavailable", EstimatedDurationHours: 0.1}
 	running := &domain.Experiment{ID: "job-running", Status: domain.StatusRunning, EstimatedDurationHours: 2}
@@ -367,10 +367,10 @@ func TestTheBaselineSweepCountsThePlatformsTimeAsThePlatformsAndWakesALateBaseli
 		late     []string
 		due      time.Time
 	}{
-		"a job whose environment is built": {[]*domain.Experiment{building}, "", []bool{true}, []string{"job-building"}, due.Add(time.Minute)},
-		"a job its cluster is starting":    {[]*domain.Experiment{pulling, running}, "", []bool{true}, nil, due.Add(time.Minute)},
-		"a job that waits for room":        {[]*domain.Experiment{capacity}, "", []bool{false}, nil, due},
-		"a baseline declared":              {[]*domain.Experiment{building}, "job-1", nil, nil, due},
+		"a queued job that cannot end in time": {[]*domain.Experiment{building}, "", []bool{false}, []string{"job-building"}, due},
+		"a job its cluster is starting":        {[]*domain.Experiment{pulling, running}, "", []bool{true}, nil, due.Add(time.Minute)},
+		"a job that waits for room":            {[]*domain.Experiment{capacity}, "", []bool{false}, nil, due},
+		"a baseline declared":                  {[]*domain.Experiment{building}, "job-1", nil, nil, due},
 	} {
 		store := &tendedStore{toldStore: &toldStore{rosterStore: newRosterStore(domain.PlatformExpOpen, 2)}, late: map[string]string{}, moveBy: time.Minute}
 		store.pe.BaselineDueAt, store.pe.BaselineJobID, store.objective = due, c.declared, c.jobs
@@ -385,7 +385,7 @@ func TestTheBaselineSweepCountsThePlatformsTimeAsThePlatformsAndWakesALateBaseli
 		}
 		for _, id := range c.late {
 			reason := store.late[id]
-			for _, want := range []string{domain.HeldBaselineLate + ": job " + id + " is QUEUED (environment_building)", "baseline_due_at cannot be met by it",
+			for _, want := range []string{domain.HeldBaselineLate + ": job " + id + " is QUEUED (capacity_unavailable)", "baseline_due_at cannot be met by it",
 				"baseline_due_at is " + c.due.Format(time.RFC3339), "moves out by that time, at most 90 minutes in all."} {
 				if !strings.Contains(reason, want) {
 					t.Errorf("%s: told %s %q, want it to say %q", name, id, reason, want)

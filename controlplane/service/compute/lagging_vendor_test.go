@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
-	"github.com/scaleresearch/hypothesisloop/contract/exitline"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider/fake"
 )
@@ -59,10 +58,10 @@ func TestARunIsTimedByTheWrapperHoweverLateTheVendorReportsIt(t *testing.T) {
 			const instance = "hl-job-t1-exp-1-a0-cpu-0"
 			mustCreate(t, e, job(t, "exp-1", 0, 0))
 
-			started := time.Now().Add(-time.Hour).UTC().Truncate(time.Millisecond)
-			ended := started.Add(12345 * time.Millisecond)
+			started := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
+			ended := started.Add(12 * time.Second)
 			vendor.Start(instance)
-			vendor.Exit(instance, "epoch 1", exitline.FormatRun(started, ended), exitline.Format(0))
+			vendor.Exit(instance, "epoch 1", exitLineAt(0, started, ended))
 
 			for read := 0; read < behind; read++ {
 				observed, err := e.PollJobStatus(ctx, "exp-1")
@@ -80,15 +79,13 @@ func TestARunIsTimedByTheWrapperHoweverLateTheVendorReportsIt(t *testing.T) {
 
 func TestARunIsReportedOnlyWithTheExitLineThatEndsIt(t *testing.T) {
 	started := time.Now().Add(-time.Minute)
-	run := exitline.FormatRun(started, started.Add(time.Second))
 	for name, tc := range map[string]struct {
 		lines []string
 		phase clusterapi.JobPhase
 		timed bool
 	}{
-		"failed":                       {[]string{run, exitline.Format(3)}, clusterapi.JobPhaseFailed, true},
-		"a wrapper that timed nothing": {[]string{exitline.Format(0)}, clusterapi.JobPhaseSucceeded, false},
-		"a run line the job printed":   {[]string{run, "Killed"}, clusterapi.JobPhaseGone, false},
+		"failed":                 {[]string{exitLineAt(3, started, started.Add(time.Second))}, clusterapi.JobPhaseFailed, true},
+		"an exit line cut short": {[]string{clusterapi.ExitLinePrefix + " code=0", "Killed"}, clusterapi.JobPhaseGone, false},
 	} {
 		e, p := newTestExecutor(t)
 		mustCreate(t, e, job(t, "exp-1", 0, 0))
