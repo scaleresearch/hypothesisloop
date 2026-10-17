@@ -42,7 +42,7 @@ func newTestExecutor(t *testing.T) (*Executor, *fake.Provider) {
 }
 
 func testConfig(p provider.Provider) Config {
-	return Config{ClusterID: "fake-account-1", Namespace: "t1", APIURL: testAPI, OfferWait: 3 * time.Minute, Startup: 4 * time.Minute, Shapes: testShapes, Provider: p, Log: log.Printf}
+	return Config{ClusterID: "fake-account-1", Namespace: "t1", APIURL: testAPI, OfferWait: 3 * time.Minute, Startup: 4 * time.Minute, Shapes: testShapes, Provider: p, Demand: everySlotWaitedFor, Log: log.Printf}
 }
 
 type goldenAnswer struct {

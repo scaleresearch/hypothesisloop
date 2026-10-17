@@ -3,6 +3,7 @@ package compute
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -13,9 +14,9 @@ import (
 // slot is room for one instance of one shape, reported as a node. It is taken while any instance
 // carries its name, whatever that instance's state, since an instance is billed until it is
 // destroyed. It is offerless when no instance holds it and the vendor has no machine to rent for
-// it right now: the configuration allows the instance and the market does not. noOffer then says
-// why, for whoever waits for the slot. architecture is that of the instance's machine, and for a
-// slot no instance holds the one it is dealt (deal).
+// it right now, or its market was not read because no job waits for it. noOffer then says why,
+// for whoever waits for the slot. architecture is that of the instance's machine, and for a slot
+// no instance holds the one it is dealt (slotsAgainst).
 type slot struct {
 	shape        Shape
 	name         string
@@ -50,16 +51,25 @@ type onOffer struct {
 // marketKey names the market of one shape on one architecture.
 func marketKey(shape, arch string) string { return shape + " on " + arch }
 
-// rentable is what the vendor has to rent of each shape on each architecture, by marketKey, at
-// the size Create rents a slot at, asked once per view. It is nil for a provider with no market,
-// where every slot no instance holds can be rented. A market that cannot be read has nothing to
-// rent until it can, and says why.
-func (e *Executor) rentable(ctx context.Context, v *view) map[string]onOffer {
-	if e.market == nil || v.rentable != nil {
-		return v.rentable
+// market is what the vendor has to rent of each shape on each architecture and how many waiting
+// jobs could take each, by marketKey.
+type market struct {
+	offers map[string]onOffer
+	wanted map[string]int
+}
+
+// rentable reads the market once per view, only for the shapes on the architectures some waiting
+// job could take, asking for about as many machines as wait for each. With nothing waiting it
+// reads nothing. It is nil for a provider with no market, where every slot no instance holds can
+// be rented. A market that cannot be read has nothing to rent until it can, and says why.
+func (e *Executor) rentable(ctx context.Context, v *view) *market {
+	if e.market == nil || v.market != nil {
+		return v.market
 	}
+	m := &market{offers: map[string]onOffer{}}
+	wanted, err := e.wanted(ctx)
+	m.wanted = wanted
 	taken := takenSlots(v)
-	rentable := make(map[string]onOffer, len(e.shapes)*len(e.architectures))
 	for _, shape := range e.shapes {
 		open := 0
 		for n := 0; n < shape.MaxInstances; n++ {
@@ -68,24 +78,29 @@ func (e *Executor) rentable(ctx context.Context, v *view) map[string]onOffer {
 			}
 		}
 		for _, arch := range e.architectures {
-			rentable[marketKey(shape.Name, arch)] = e.onOffer(ctx, shape, arch, open)
+			key := marketKey(shape.Name, arch)
+			switch {
+			case err != nil:
+				m.offers[key] = onOffer{why: "shape " + key + ": the jobs waiting for the cluster could not be read: " + err.Error()}
+			case wanted[key] == 0 || open == 0:
+				m.offers[key] = onOffer{why: "shape " + key + ": no job waits for it, and its market is read once one does"}
+			default:
+				m.offers[key] = e.onOffer(ctx, shape, arch, min(open, wanted[key]+demandMargin))
+			}
 		}
 	}
-	v.rentable = rentable
-	return rentable
+	v.market = m
+	return m
 }
 
-// onOffer asks the market of one shape on one architecture for up to open machines.
-func (e *Executor) onOffer(ctx context.Context, shape Shape, arch string, open int) onOffer {
-	if open == 0 {
-		return onOffer{}
-	}
+// onOffer asks the market of one shape on one architecture for up to atMost machines.
+func (e *Executor) onOffer(ctx context.Context, shape Shape, arch string, atMost int) onOffer {
 	key := marketKey(shape.Name, arch)
 	supply, err := e.market.Rentable(ctx, provider.Spec{
 		Architecture:    arch,
 		AcceleratorType: shape.AcceleratorType, AcceleratorCount: shape.Accelerators,
 		CPUMillis: shape.CPUMillis, MemoryBytes: shape.MemoryBytes, DiskBytes: shape.StorageBytes,
-	}, open)
+	}, atMost)
 	if err != nil {
 		return onOffer{why: "shape " + key + ": the provider's market could not be read: " + err.Error()}
 	}
@@ -104,23 +119,22 @@ func takenSlots(v *view) map[string]string {
 	return taken
 }
 
-// slotsAgainst marks the slots of v, dealing each shape's slots that no instance holds to the
-// architectures the provider rents (deal). rentable bounds how many of them each architecture
-// has free, and nil bounds none.
-func (e *Executor) slotsAgainst(v *view, rentable map[string]onOffer) []slot {
+// slotsAgainst marks the slots of v. Each shape's slots that no instance holds are dealt in turn,
+// lowest index first, to every architecture the provider rents, whatever the market has: the
+// architectures a cluster names do not wait on a read. Those some job waits for on the shape come
+// first, so a shape with a single open slot names the one wanted. m bounds how many slots of
+// each architecture are free, and nil bounds none.
+func (e *Executor) slotsAgainst(v *view, m *market) []slot {
 	taken := takenSlots(v)
 	var slots []slot
 	for _, shape := range e.shapes {
-		left := make(map[string]int, len(e.architectures))
-		var offered []string
-		for _, arch := range e.architectures {
-			left[arch] = rentable[marketKey(shape.Name, arch)].left
-			if rentable == nil || left[arch] > 0 {
-				offered = append(offered, arch)
+		order := e.architectures
+		left := map[string]int{}
+		if m != nil {
+			order = m.order(shape.Name, e.architectures)
+			for _, arch := range order {
+				left[arch] = m.offers[marketKey(shape.Name, arch)].left
 			}
-		}
-		if len(offered) == 0 {
-			offered = e.architectures
 		}
 		turn := 0
 		for n := 0; n < shape.MaxInstances; n++ {
@@ -130,10 +144,14 @@ func (e *Executor) slotsAgainst(v *view, rentable map[string]onOffer) []slot {
 				slots = append(slots, s)
 				continue
 			}
-			var free bool
-			s.architecture, free = deal(&turn, offered, left, rentable == nil)
-			if !free {
-				s.noOffer = rentable[marketKey(shape.Name, s.architecture)].why
+			s.architecture = order[turn%len(order)]
+			turn++
+			if m != nil {
+				if left[s.architecture] > 0 {
+					left[s.architecture]--
+				} else {
+					s.noOffer = m.offers[marketKey(shape.Name, s.architecture)].why
+				}
 			}
 			slots = append(slots, s)
 		}
@@ -141,23 +159,20 @@ func (e *Executor) slotsAgainst(v *view, rentable map[string]onOffer) []slot {
 	return slots
 }
 
-// deal is the architecture of a shape's next slot that no instance holds, lowest index first: in
-// turn each of offered, the architectures the market has machines of for the shape (all the
-// provider rents when it has none of any), skipping one with no machine left while another has.
-// The slot is free when its architecture has a machine left, and offerless otherwise. A shape
-// then names an architecture only while it can be rented on it, or every one while none can.
-func deal(turn *int, offered []string, left map[string]int, unbounded bool) (arch string, free bool) {
-	for range offered {
-		arch = offered[*turn%len(offered)]
-		*turn++
-		if unbounded || left[arch] > 0 {
-			left[arch]--
-			return arch, true
+// order is architectures with those some job waits for on shape first.
+func (m *market) order(shape string, architectures []string) []string {
+	ordered := slices.Clone(architectures)
+	slices.SortStableFunc(ordered, func(a, b string) int {
+		wantA, wantB := m.wanted[marketKey(shape, a)] > 0, m.wanted[marketKey(shape, b)] > 0
+		switch {
+		case wantA == wantB:
+			return 0
+		case wantA:
+			return -1
 		}
-	}
-	arch = offered[*turn%len(offered)]
-	*turn++
-	return arch, false
+		return 1
+	})
+	return ordered
 }
 
 // configured returns the shape of the slot called name, if the configuration has such a slot.

@@ -51,7 +51,9 @@ type Config struct {
 	// Startup is how long a rented instance may take to start its command. Past it the instance
 	// is destroyed and another rented, so nothing rented and not running is paid for longer.
 	Startup time.Duration
-	Log     func(format string, args ...any)
+	// Demand is what waits for the cluster, required for a provider with a market.
+	Demand Demand
+	Log    func(format string, args ...any)
 }
 
 // Executor keeps nothing about instances. Every method reads the account, unless the executor
@@ -64,6 +66,7 @@ type Executor struct {
 	provider  provider.Provider
 	// market is the provider's Market capability, nil for a vendor that has none.
 	market        provider.Market
+	demand        Demand
 	architectures []string
 	// imageNeeds is what the provider's ImageNeeder says a job's image must have, nil for one
 	// that is no ImageNeeder.
@@ -96,6 +99,9 @@ func New(cfg Config) (*Executor, error) {
 	}
 	rented := provider.Bounded(cfg.Provider)
 	market, _ := rented.(provider.Market)
+	if market != nil && cfg.Demand == nil {
+		return nil, fmt.Errorf("cloudcompute: a provider with a market needs the cluster's Demand")
+	}
 	var imageNeeds []string
 	if needer, needs := cfg.Provider.(provider.ImageNeeder); needs {
 		imageNeeds = needer.ImageNeeds()
@@ -106,6 +112,7 @@ func New(cfg Config) (*Executor, error) {
 	}
 	return &Executor{
 		market:        market,
+		demand:        cfg.Demand,
 		architectures: architectures,
 		imageNeeds:    imageNeeds,
 		clusterID:     cfg.ClusterID,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
@@ -54,6 +55,27 @@ func TestFreeCapacityIsWhatTheVendorHasOnOfferWithinTheShapes(t *testing.T) {
 		t.Fatalf("one rented and none on offer: available %v, labels %v, %v", available, labels, err)
 	}
 }
+
+// waitingFor is a Demand of the jobs it lists.
+type waitingFor []Waiting
+
+func (w waitingFor) Waiting(context.Context) ([]Waiting, error) { return w, nil }
+
+type demandDown struct{}
+
+func (demandDown) Waiting(context.Context) ([]Waiting, error) { return nil, errors.New("queue unreadable") }
+
+func waitingJob(acceleratorType clusterapi.AcceleratorType, count int, cpu, memory, storage, arch string) Waiting {
+	return Waiting{AcceleratorType: acceleratorType, Job: clusterapi.JobSpec{
+		AcceleratorCount: count, CPU: cpu, Memory: memory, Storage: storage,
+		NodeSelector: map[string]string{clusterapi.NodeArchitectureLabel: arch},
+	}}
+}
+
+func waitingH100(arch string) Waiting { return waitingJob(h100, 1, "8", "32Gi", "100Gi", arch) }
+
+// everySlotWaitedFor waits for every slot of testShapes on amd64.
+var everySlotWaitedFor = waitingFor{waitingH100("amd64"), waitingH100("amd64"), waitingJob(clusterapi.CPUType, 4, "4", "16Gi", "50Gi", "amd64")}
 
 func supplyOf(count int) provider.Supply {
 	if count == 0 {
@@ -157,13 +179,14 @@ func TestAProviderWithoutAMarketReportsEverySlotNoInstanceHoldsFree(t *testing.T
 	}
 }
 
-// A shape allowed more instances than one read used to ask for counts every slot the vendor has
-// a machine for, up to its max_instances.
+// As many jobs waiting as a shape has slots count every slot the vendor has a machine for, up
+// to its max_instances.
 func TestAShapeCountsAsManyRentableSlotsAsItsMaxInstances(t *testing.T) {
 	p := fake.New()
 	cfg := testConfig(p)
 	cfg.Shapes = []Shape{testShapes[0]}
 	cfg.Shapes[0].MaxInstances = 12
+	cfg.Demand = waitingFor(slices.Repeat([]Waiting{waitingH100("amd64")}, 12))
 	e, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -181,12 +204,15 @@ func TestAShapeCountsAsManyRentableSlotsAsItsMaxInstances(t *testing.T) {
 	}
 }
 
-// A provider that rents two architectures deals each shape's open slots in turn to those the
-// market has machines of. A job is rented on its own architecture, which its slot then reports.
+// A provider that rents two architectures deals each shape's open slots in turn to every one of
+// them, those some job waits for first. A job is rented on its own architecture, which its slot
+// then reports.
 func TestOpenSlotsAreDealtToEveryArchitectureTheProviderRents(t *testing.T) {
 	p := fake.New()
 	p.Rents = []string{"amd64", "arm64"}
-	e, err := New(testConfig(p))
+	cfg := testConfig(p)
+	cfg.Demand = waitingFor{waitingH100("amd64"), waitingH100("arm64")}
+	e, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,37 +243,125 @@ func TestOpenSlotsAreDealtToEveryArchitectureTheProviderRents(t *testing.T) {
 	}
 }
 
-// A shape names only the architectures it can be rented on now: with no arm64 machine of it, its
-// slots are amd64, the ones beyond the amd64 machines offerless. With nothing to rent on any, it
-// names every architecture, each slot saying why.
-func TestAShapeNamesOnlyTheArchitecturesItCanBeRentedOn(t *testing.T) {
+// What architectures a shape names never waits on the market: with nothing on offer on arm64, or
+// on any, its slots still name both, each without a machine saying why. A shape with one open slot
+// names the architecture a job waits for on it.
+func TestAShapeNamesEveryArchitectureWhateverTheMarketHas(t *testing.T) {
 	p := fake.New()
 	p.Rents = []string{"amd64", "arm64"}
-	e, err := New(testConfig(p))
+	cfg := testConfig(p)
+	cfg.Demand = waitingFor{waitingH100("amd64"), waitingH100("arm64"), waitingJob(clusterapi.CPUType, 4, "4", "16Gi", "50Gi", "arm64")}
+	e, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	onOffer := map[string]int{"amd64": 1}
 	p.Market = func(spec provider.Spec) provider.Supply { return supplyOf(onOffer[spec.Architecture]) }
-	_, _, _, labels, err := e.GetLiveAcceleratorCapacitySnapshot(context.Background())
-	if err != nil {
-		t.Fatal(err)
+	for _, offered := range []map[string]int{{"amd64": 1}, {}} {
+		onOffer = offered
+		_, _, _, labels, err := e.GetLiveAcceleratorCapacitySnapshot(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if labels["h100-0"][clusterapi.NodeArchitectureLabel] != "amd64" || labels["h100-1"][clusterapi.NodeArchitectureLabel] != "arm64" ||
+			labels["h100-1"][clusterapi.NodeSlotNoOfferLabel] != "shape h100 on arm64: no offer passes the filters" {
+			t.Fatalf("on offer %v: h100-0 %v, h100-1 %v, want both architectures, arm64 offerless", offered, labels["h100-0"], labels["h100-1"])
+		}
+		if (labels["h100-0"][clusterapi.NodeSlotNoOfferLabel] == "") != (offered["amd64"] > 0) {
+			t.Fatalf("on offer %v: h100-0 %v", offered, labels["h100-0"])
+		}
+		if labels["cpu-0"][clusterapi.NodeArchitectureLabel] != "arm64" {
+			t.Fatalf("the one cpu slot names %v, want the arm64 a job waits for", labels["cpu-0"])
+		}
 	}
-	if labels["h100-0"][clusterapi.NodeArchitectureLabel] != "amd64" || labels["h100-0"][clusterapi.NodeSlotNoOfferLabel] != "" {
-		t.Fatalf("h100-0 %v, want a free amd64 slot", labels["h100-0"])
-	}
-	if labels["h100-1"][clusterapi.NodeArchitectureLabel] != "amd64" || labels["h100-1"][clusterapi.NodeSlotNoOfferLabel] == "" {
-		t.Fatalf("h100-1 %v, want an offerless amd64 slot", labels["h100-1"])
-	}
+}
 
-	onOffer = map[string]int{}
-	_, _, _, labels, err = e.GetLiveAcceleratorCapacitySnapshot(context.Background())
+// With no job waiting the market is not read at all: every open slot is offerless and says the
+// market is read once a job waits, and the architectures and totals stay the configuration's.
+func TestNoJobWaitingReadsNoMarket(t *testing.T) {
+	p := fake.New()
+	p.Rents = []string{"amd64", "arm64"}
+	cfg := testConfig(p)
+	cfg.Demand = waitingFor{}
+	e, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if labels["h100-0"][clusterapi.NodeArchitectureLabel] != "amd64" || labels["h100-1"][clusterapi.NodeArchitectureLabel] != "arm64" ||
-		labels["h100-1"][clusterapi.NodeSlotNoOfferLabel] != "shape h100 on arm64: no offer passes the filters" {
-		t.Fatalf("nothing on offer: h100-0 %v, h100-1 %v, want both architectures named offerless", labels["h100-0"], labels["h100-1"])
+	for range 3 {
+		pass, err := e.ForPass(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		available, total, _, labels, err := pass.GetLiveAcceleratorCapacitySnapshot(context.Background())
+		if err != nil || available[h100] != 0 || total[h100] != 2 {
+			t.Fatalf("available %v of %v, %v", available, total, err)
+		}
+		if labels["h100-1"][clusterapi.NodeArchitectureLabel] != "arm64" || labels["h100-1"][clusterapi.NodeSlotNoOfferLabel] != "shape h100 on arm64: no job waits for it, and its market is read once one does" {
+			t.Fatalf("h100-1 %v", labels["h100-1"])
+		}
+	}
+	if calls := p.Calls("Rentable"); calls != 0 {
+		t.Fatalf("%d market reads with nothing waiting", calls)
+	}
+}
+
+// The market is read only for the shapes on the architectures a waiting job could be placed on,
+// for as many machines as wait there plus demandMargin, never more than the open slots. A job
+// no shape takes, by its size, accelerators or architecture, reads nothing.
+func TestTheMarketIsReadOnlyForWhatWaitingJobsCouldTake(t *testing.T) {
+	p := fake.New()
+	p.Rents = []string{"amd64", "arm64"}
+	cfg := testConfig(p)
+	cfg.Shapes = []Shape{testShapes[0], testShapes[1]}
+	cfg.Shapes[0].MaxInstances = 200
+	cfg.Demand = waitingFor{
+		waitingH100("arm64"), waitingH100("arm64"),
+		waitingJob(h100, 1, "64", "32Gi", "100Gi", "amd64"),
+		waitingJob(h100, 2, "8", "32Gi", "100Gi", "amd64"),
+		waitingJob("nvidia.com/gpu.product=NVIDIA-A100-80GB-PCIe", 1, "8", "32Gi", "100Gi", "amd64"),
+		waitingJob(clusterapi.CPUType, 4, "4", "16Gi", "50Gi", "riscv64"),
+	}
+	e, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var asked []string
+	p.Market = func(spec provider.Spec) provider.Supply {
+		asked = append(asked, spec.AcceleratorType+" on "+spec.Architecture)
+		return supplyOf(100)
+	}
+	available, _, _, _, err := e.GetLiveAcceleratorCapacitySnapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{h100 + " on arm64"}; !reflect.DeepEqual(asked, want) {
+		t.Fatalf("read %v, want %v", asked, want)
+	}
+	if available[h100] != 2+demandMargin {
+		t.Fatalf("%d h100 slots free, want the %d asked about", available[h100], 2+demandMargin)
+	}
+}
+
+func TestAQueueThatCannotBeReadReadsNoMarketAndSaysWhy(t *testing.T) {
+	_, p := newTestExecutor(t)
+	cfg := testConfig(p)
+	cfg.Demand = demandDown{}
+	e, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	available, _, _, labels, err := e.GetLiveAcceleratorCapacitySnapshot(context.Background())
+	if err != nil || available[h100] != 0 || p.Calls("Rentable") != 0 ||
+		labels["h100-0"][clusterapi.NodeSlotNoOfferLabel] != "shape h100 on amd64: the jobs waiting for the cluster could not be read: queue unreadable" {
+		t.Fatalf("available %v, labels %v, %d reads, %v", available, labels["h100-0"], p.Calls("Rentable"), err)
+	}
+}
+
+func TestAProviderWithAMarketNeedsTheClustersDemand(t *testing.T) {
+	cfg := testConfig(fake.New())
+	cfg.Demand = nil
+	if _, err := New(cfg); err == nil {
+		t.Fatal("built without a demand")
 	}
 }
 

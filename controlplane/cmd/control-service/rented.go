@@ -107,7 +107,8 @@ func newCloudCluster(pcfg *hypothesisloopcfg.ControlService, cc hypothesisloopcf
 			APIURL: pcfg.Services.PublicAPIURL,
 			Shapes: shapes, Provider: rented,
 			OfferWait: time.Duration(cc.OfferWaitSeconds) * time.Second, Startup: time.Duration(cc.StartupSeconds) * time.Second,
-			Log: log.Sugar().Infof,
+			Demand: queuedFor{store: store, cluster: cc.ClusterName},
+			Log:    log.Sugar().Infof,
 		},
 		Exchange: clusters, Registry: store, Version: pcfg.Runtimes.ImageTag,
 		ReconcileInterval: time.Duration(cc.ReconcileIntervalSeconds) * time.Second,
@@ -119,4 +120,28 @@ func newCloudCluster(pcfg *hypothesisloopcfg.ControlService, cc hypothesisloopcf
 	log.Info("jobs of the cluster run on the cloud compute provider", zap.String("provider", cc.Provider),
 		zap.Strings("capabilities", provider.Capabilities(rented)), zap.Int("shapes", len(shapes)))
 	return cluster, id, nil
+}
+
+// queuedFor is the jobs queued that cluster may run: those of the orgs it hosts.
+type queuedFor struct {
+	store   *db.Store
+	cluster string
+}
+
+func (q queuedFor) Waiting(ctx context.Context) ([]compute.Waiting, error) {
+	cluster, err := q.store.GetCluster(ctx, q.cluster)
+	if err != nil || cluster == nil {
+		return nil, err
+	}
+	queued, err := q.store.ListQueuedExperiments(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var waiting []compute.Waiting
+	for _, exp := range queued {
+		if cluster.Hosts(exp.OrgID) {
+			waiting = append(waiting, compute.Waiting{AcceleratorType: exp.AcceleratorType, Job: exp.Job})
+		}
+	}
+	return waiting, nil
 }
