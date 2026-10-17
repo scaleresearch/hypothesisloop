@@ -93,8 +93,6 @@ vendor/
 # Claude Code session state (worktrees, local agent scratch)
 .claude/
 
-# A coordinator's own experiments stay on its machine. The tracked ones are examples/.
-agents/coordinator/experiments/
 controlplane/settings/.hypothesisloop.rendered.yaml
 controlplane/settings/.hypothesisloop.dev.yaml
 localdev/.bin/

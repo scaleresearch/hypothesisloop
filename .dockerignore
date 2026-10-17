@@ -51,10 +51,6 @@ controlplane/settings/.*.yaml
 *.log
 logs/
 
-# A coordinator's own experiments (git-ignored) can reach tens of GB, and no image is built from
-# them: the experimentator image carries examples/.
-agents/coordinator/experiments/
-
 # Agent worktrees and Python virtualenvs: copies of the repo and installed packages, over a
 # gigabyte that every image's COPY wrote into the build VM and no image runs from.
 .claude/
