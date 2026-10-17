@@ -136,7 +136,7 @@ type Store interface {
 	// JoinRunning gives a researcher a place in a running platform experiment and its quota,
 	// creating agent first when it is not nil, or does neither.
 	JoinRunning(ctx context.Context, platformExpID string, agent *domain.Agent, signup domain.AgentSignup, late db.LateJoin) error
-	RemoveAgent(ctx context.Context, platformExpID, agentID string, deleteDataKey func(ctx context.Context, accessKeyID string) error) error
+	RemoveAgent(ctx context.Context, platformExpID, agentID string) error
 	// FinishAgent records that an agent has nothing left to do: domain.ErrNotSignedUp,
 	// db.ErrSignupClosed where the agent has no work to finish, db.ErrWorkUnfinished.
 	FinishAgent(ctx context.Context, platformExpID, agentID, reason string) error
@@ -197,7 +197,6 @@ type Store interface {
 	RecordTop3(ctx context.Context, platformExpID, agentID string, finalMetric float64) error
 	ListCutAgents(ctx context.Context, platformExpID string) ([]domain.AgentCut, error)
 	ListStageAdvances(ctx context.Context, platformExpID string) ([]domain.StageAdvance, error)
-	AgentDataKey(ctx context.Context, platformExperimentID, agentID string, create func(context.Context) (domain.DataKey, error)) (domain.DataKey, error)
 }
 
 // Service manages the Platform Experiment lifecycle.

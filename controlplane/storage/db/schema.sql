@@ -389,9 +389,6 @@ CREATE TABLE experiment_signups (
     model                  TEXT,
     hyperparameters        JSONB,
 
-    data_access_key_id     TEXT        NOT NULL DEFAULT '',
-    data_secret_access_key TEXT        NOT NULL DEFAULT '',
-
     replaces               TEXT        NOT NULL DEFAULT '',
     finished_at            TIMESTAMPTZ,
     finished_reason        TEXT        NOT NULL DEFAULT '',

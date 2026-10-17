@@ -507,7 +507,7 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	if err := pes.SpawnAgent(ctx, id, second, another); err != nil || second.Name != "Baseline 2" {
 		t.Fatalf("a second baseline agent once the first's machine stopped: got = %v, named %q, want it added as Baseline 2", err, second.Name)
 	}
-	if err := pes.RemoveAgent(ctx, id, second.ID, func(context.Context, string) error { return nil }); err != nil {
+	if err := pes.RemoveAgent(ctx, id, second.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.pool.Exec(ctx, `INSERT INTO agentsandbox_instances (platform_experiment_id, agent_id, stopped) VALUES ($1, $2, false) ON CONFLICT (platform_experiment_id, agent_id) DO UPDATE SET stopped = EXCLUDED.stopped`, id, baseline.ID); err != nil {
@@ -573,7 +573,7 @@ func TestABaselineAgentHoldsItsQuotaFromSignupUntilItIsRemoved(t *testing.T) {
 	if err := pes.FinishAgent(ctx, id, agents[2], "too early"); !errors.Is(err, ErrSignupClosed) {
 		t.Errorf("a researcher finishing before the start: got = %v, want ErrSignupClosed", err)
 	}
-	if err := pes.RemoveAgent(ctx, id, agents[0], nil); err != nil {
+	if err := pes.RemoveAgent(ctx, id, agents[0]); err != nil {
 		t.Fatal(err)
 	}
 	if quota, err := pes.GetAgentQuota(ctx, agents[0], id); err != nil || quota != nil {

@@ -156,7 +156,6 @@ def test_a_project_key_reads_and_writes_nothing_of_its_orgs_other_project(org: O
             ("GET", f"/experiments?project_id={second}", None, 404),
             ("POST", "/platform-experiments", _platform_experiment_body("outside", second), 404),
             ("POST", f"/platform-experiments/{pe_id}/close", {"top_results": []}, 404),
-            ("POST", f"/platform-experiments/{pe_id}/data-key", {"agent_id": other.agent}, 404),
             ("POST", f"/experiments/{other.job_id}/cancel", None, 404),
             ("POST", f"/experiments/{other.job_id}/summary", {"summary": "s"}, 404),
             ("POST", f"/experiments/{other.job_id}/metrics", SAMPLE, 404),
@@ -206,7 +205,6 @@ def test_an_agent_token_acts_as_its_own_agent_and_on_its_own_work_only(org: Org,
         ("POST", f"/experiments/{theirs.job_id}/summary", {"summary": "written by a rival"}, 403),
         ("POST", f"/experiments/{theirs.job_id}/metrics", SAMPLE, 403),
         ("POST", "/experiments", job_as_them, 403),
-        ("POST", f"/platform-experiments/{pe_id}/data-key", {"agent_id": theirs.agent}, 403),
         ("POST", "/hypotheses", _hypothesis_body(pe_id, _claim("as the rival"), agent_id=theirs.agent), 403),
         ("POST", "/hypotheses", _hypothesis_body(pe_id, _claim("as a person"), author="Mallory"), 422),
         ("POST", "/hypotheses", _hypothesis_body(pe_id, _claim("as both"), agent_id=mine.agent, author="Mallory"), 422),
@@ -383,7 +381,6 @@ def test_tokens_after_a_close(org: Org, run_id: str):
         ("GET", f"/platform-experiments/{pe_id}", None, 200),
         ("GET", f"/experiments/{member.job_id}", None, 200),
         ("POST", "/experiments", new_job, 422),
-        ("POST", f"/platform-experiments/{pe_id}/data-key", {"agent_id": member.agent}, 409),
     ]
     _assert_each(member.token, "the agent just after the close", in_the_window)
     submitted, text = _status(member.token, "POST", "/experiments", new_job)
@@ -396,7 +393,6 @@ def test_tokens_after_a_close(org: Org, run_id: str):
         ("POST", "/hypotheses/query", {"platform_experiment_id": pe_id, "cypher": "MATCH (h:Hypothesis) RETURN count(h)", "params": {}}, 200),
         ("PATCH", f"/platform-experiments/{pe_id}", {"description": "reopened"}, 403),
         ("POST", f"/platform-experiments/{pe_id}/agents", {}, 403),
-        ("POST", f"/platform-experiments/{pe_id}/data-key", {"agent_id": member.agent}, 403),
         ("POST", "/experiments", new_job, 403),
     ])
     for method, path, body in [

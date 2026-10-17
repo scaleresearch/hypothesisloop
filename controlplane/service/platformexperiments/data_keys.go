@@ -11,21 +11,21 @@ import (
 
 // DataKeyStore is what the data key sweep reads and writes (db.Store).
 type DataKeyStore interface {
-	EndedDataKeys(ctx context.Context, grace db.DataKeyGrace) ([]db.EndedDataKey, error)
-	DropDataKey(ctx context.Context, key db.EndedDataKey, grace db.DataKeyGrace, deleteKey func(ctx context.Context, accessKeyID string) error) error
+	EndedDataKeys(ctx context.Context, grace time.Duration) ([]db.EndedDataKey, error)
+	DropDataKey(ctx context.Context, key db.EndedDataKey, grace time.Duration, deleteKey func(ctx context.Context, accessKeyID string) error) error
 }
 
-// DataKeySweep takes the object-store key of every job and agent whose access ended out of the
-// store. It is the one path a key leaves by once its holder ends, so a deletion that failed or a
-// restart in between leaves the key to the next pass.
+// DataKeySweep takes the object-store key of every job that ended out of the store. It is the
+// one path a key leaves by once its job ends, so a deletion that failed or a restart in between
+// leaves the key to the next pass.
 type DataKeySweep struct {
 	store     DataKeyStore
 	deleteKey func(ctx context.Context, accessKeyID string) error
-	grace     db.DataKeyGrace
+	grace     time.Duration
 	logger    *zap.Logger
 }
 
-func NewDataKeySweep(store DataKeyStore, deleteKey func(ctx context.Context, accessKeyID string) error, grace db.DataKeyGrace, logger *zap.Logger) *DataKeySweep {
+func NewDataKeySweep(store DataKeyStore, deleteKey func(ctx context.Context, accessKeyID string) error, grace time.Duration, logger *zap.Logger) *DataKeySweep {
 	return &DataKeySweep{store: store, deleteKey: deleteKey, grace: grace, logger: logger}
 }
 
@@ -55,12 +55,10 @@ func (d *DataKeySweep) Sweep(ctx context.Context) error {
 	}
 	for _, key := range keys {
 		if err := d.store.DropDataKey(ctx, key, d.grace, d.deleteKey); err != nil {
-			d.logger.Warn("data_key_sweep: drop key", zap.String("experimentID", key.ExperimentID),
-				zap.String("platformExpID", key.PlatformExperimentID), zap.String("agentID", key.AgentID), zap.Error(err))
+			d.logger.Warn("data_key_sweep: drop key", zap.String("experimentID", key.ExperimentID), zap.Error(err))
 			continue
 		}
-		d.logger.Info("data_key_sweep: dropped key", zap.String("experimentID", key.ExperimentID),
-			zap.String("platformExpID", key.PlatformExperimentID), zap.String("agentID", key.AgentID))
+		d.logger.Info("data_key_sweep: dropped key", zap.String("experimentID", key.ExperimentID))
 	}
 	return nil
 }

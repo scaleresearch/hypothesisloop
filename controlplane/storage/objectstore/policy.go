@@ -46,13 +46,6 @@ func JobPolicy(bucket, platformExperimentID, agentID, experimentID string) (Poli
 		policyID{"agent_id", agentID}, policyID{"experiment_id", experimentID})
 }
 
-// AgentPolicy is the grant an agent holds outside its jobs: the same read span, and write
-// confined to the prefix its own jobs write under.
-func AgentPolicy(bucket, platformExperimentID, agentID string) (Policy, error) {
-	return prefixPolicy(bucket, platformExperimentID, AgentPrefix(platformExperimentID, agentID),
-		policyID{"agent_id", agentID})
-}
-
 type policyID struct{ kind, value string }
 
 // prefixPolicy grants list and read across the platform experiment, and write under writePrefix.

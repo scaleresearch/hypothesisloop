@@ -90,9 +90,9 @@ func registerRegistry(doc *Doc, svc *registry.Service, logger *zap.Logger) {
 		Summary: "List what a job wrote to durable storage", Tags: []string{"experiments"},
 		Description: "Checkpoints and datasets the job left under its own prefix, listed live from the object store. " +
 			"A job that kept nothing lists as an empty array — that is the ordinary case, not an error. " +
-			"Read any of them from a job, or from your own shell after `eval \"$(hl data-key)\"`: " +
-			"HYPOTHESISLOOP_DATA_SHARED spans the whole platform experiment. Each object carries a url a plain GET reads it by for 12 hours, " +
-			"with no key: how the data of a job of a prior run is read, since no data key reaches another run.",
+			"A job reads any of them with its own key, under HYPOTHESISLOOP_DATA_SHARED, which spans the whole platform experiment. " +
+			"Each object carries a url a plain GET reads it by for 12 hours, with no key: how it is read anywhere else, " +
+			"and how the data of a job of a prior run is read, since no job's key reaches another run.",
 	}, r.listData)
 
 	// ---- metrics ----

@@ -89,7 +89,6 @@ def test_a_shared_platform_experiment_is_read_by_every_account_and_written_by_it
             ("PUT", f"/platform-experiments/{pe_id}/summary", {"summary": "an intruding summary"}),
             ("POST", f"/platform-experiments/{pe_id}/agents", {"agent_id": agent}),
             ("DELETE", f"/platform-experiments/{pe_id}/agents/{agent}", None),
-            ("POST", f"/platform-experiments/{pe_id}/data-key", {"agent_id": agent}),
         ]
         listings = [f"/hypotheses?platform_experiment_id={pe_id}", f"/experiments?platform_experiment_id={pe_id}",
                     f"/agents?platform_experiment_id={pe_id}"]

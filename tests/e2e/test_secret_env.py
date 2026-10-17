@@ -2,14 +2,13 @@
 event and no log of the platform shows it."""
 from __future__ import annotations
 
-import shlex
 import uuid
 
 import pytest
+import requests
 import yaml
 
 from conftest import make_agent
-from support import s3
 from support.api import JobRequest
 from support.wait import eventually
 
@@ -49,16 +48,12 @@ def test_secret_env_reaches_the_workload_and_no_read_of_the_job(api, experiment,
         deadline=deadline,
     )
 
-    key = {}
-    for line in api.hl("data-key", "--platform-experiment", pe_id, "--agent", agent).splitlines():
-        name, _, value = line.removeprefix("export ").partition("=")
-        key[name] = shlex.split(value)[0]
-    store = s3.client(key)
-    bucket, shared_prefix = store.split_s3_uri(key["HYPOTHESISLOOP_DATA_SHARED"])
-    written = [k for k in store.list_keys(bucket, shared_prefix) if k.startswith(f"{pe_id}/{agent}/{job_id}/")]
-    assert len(written) == 1, f"the job left {written}, want its one checkpoint"
-    status, body = store.s3("GET", store.object_path(bucket, written[0]))
-    assert (status, body.decode()) == (200, secret), f"the workload did not find the secret in its environment: {status} {body[:200]!r}"
+    listed = api.experiment_data(job_id)
+    assert listed.status_code == 200, f"GET /experiments/{job_id}/data: HTTP {listed.status_code}: {listed.text[:300]}"
+    written = listed.json()
+    assert len(written) == 1, f"the job left {[o['key'] for o in written]}, want its one checkpoint"
+    body = requests.get(written[0]["url"], timeout=30)
+    assert (body.status_code, body.text) == (200, secret), f"the workload did not find the secret in its environment: {body.status_code} {body.text[:200]!r}"
 
     reads = {
         "GET /experiments/{id}": api.get(f"/experiments/{job_id}"),

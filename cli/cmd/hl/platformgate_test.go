@@ -229,7 +229,6 @@ func TestNoCommandAnAgentRunsCallsARouteAnAgentMayNot(t *testing.T) {
 		{"results"},
 		{"capacity"},
 		{"situation"},
-		{"data-key"},
 		{"watch", "--wake", "experiment.status", "--no-wait"},
 	}
 	for _, command := range sent {

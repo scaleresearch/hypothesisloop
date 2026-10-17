@@ -9,11 +9,10 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// NewDataKey draws a fresh key for a job or an agent. A job's is created in the store once at
-// submission, an agent's on its first request; either is stored and never rotated, so a
-// restarted pod or agent starts with the same working key. It is deleted when the agent is
-// removed before the start, and otherwise once its holder ended (platformexperiments.DataKeySweep). The store bounds access keys to 3..20 characters and secrets to
-// 8..40; 12 and 25 random bytes encode to exactly 20 and 40.
+// NewDataKey draws a fresh key for a job. It is created in the store once at submission, stored
+// and never rotated, so a restarted pod starts with the same working key, and deleted once the
+// job ended (platformexperiments.DataKeySweep). The store bounds access keys to 3..20 characters
+// and secrets to 8..40; 12 and 25 random bytes encode to exactly 20 and 40.
 func NewDataKey() (domain.DataKey, error) {
 	access := make([]byte, 12)
 	secret := make([]byte, 25)
@@ -27,7 +26,7 @@ func NewDataKey() (domain.DataKey, error) {
 	return domain.DataKey{AccessKeyID: enc.EncodeToString(access), SecretAccessKey: enc.EncodeToString(secret)}, nil
 }
 
-// KeyIssuer registers the data keys jobs and agents reach the store with, each limited by an IAM
+// KeyIssuer registers the data keys jobs reach the store with, each limited by an IAM
 // policy document, and takes them out again. How is the store's own: one sub-package per provider.
 type KeyIssuer interface {
 	CreateKey(ctx context.Context, key domain.DataKey, policy []byte, description string) error
@@ -44,16 +43,7 @@ func (c *Client) CreateDataKey(ctx context.Context, key domain.DataKey, platform
 	return c.createKey(ctx, key, policy, "job "+JobPrefix(platformExperimentID, agentID, experimentID))
 }
 
-// CreateAgentDataKey is CreateDataKey for an agent's own key, limited by AgentPolicy.
-func (c *Client) CreateAgentDataKey(ctx context.Context, key domain.DataKey, platformExperimentID, agentID string) error {
-	policy, err := AgentPolicy(c.Bucket, platformExperimentID, agentID)
-	if err != nil {
-		return err
-	}
-	return c.createKey(ctx, key, policy, "agent "+AgentPrefix(platformExperimentID, agentID))
-}
-
-// DeleteDataKey takes a key CreateDataKey or CreateAgentDataKey registered out of the store, after
+// DeleteDataKey takes a key CreateDataKey registered out of the store, after
 // which it opens nothing. A key the store no longer has is deleted already, so a removal whose
 // first attempt lost the store's answer can be repeated.
 func (c *Client) DeleteDataKey(ctx context.Context, accessKeyID string) error {

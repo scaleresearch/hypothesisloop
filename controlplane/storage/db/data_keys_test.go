@@ -9,14 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore/minio"
 )
 
-var testGrace = DataKeyGrace{Job: 10 * time.Minute, Agent: domain.AgentWindDown}
+const testGrace = 10 * time.Minute
 
 func liveDataStore(t *testing.T) *objectstore.Client {
 	t.Helper()
@@ -114,70 +112,6 @@ func TestDropDataKeyTakesAnEndedJobsKeyOutOfTheStore(t *testing.T) {
 		t.Fatal("a key whose deletion failed is no longer listed")
 	}
 
-	if err := store.DropDataKey(ctx, want, testGrace, root.DeleteDataKey); err != nil {
-		t.Fatalf("DropDataKey: %v", err)
-	}
-	if got := putAs(t, root, key, object); got != http.StatusForbidden {
-		t.Fatalf("write with the dropped key: status %d, want 403", got)
-	}
-	got, err := store.GetExperiment(ctx, exp.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.DataKey != (domain.DataKey{}) {
-		t.Fatalf("row keeps key %+v after the drop", got.DataKey)
-	}
-	if slices.Contains(endedKeysOf(t, store), want) {
-		t.Fatal("a dropped key is still listed")
-	}
-}
-
-// An agent's key outlives the end of its run by its wind-down and then goes; one whose run
-// goes on, or whose key changed since it was listed, is left alone.
-func TestDropDataKeyTakesAnEndedAgentsKeyOutOfTheStore(t *testing.T) {
-	root := liveDataStore(t)
-	pool := eventsTestDB(t)
-	store := NewStore(pool, 3)
-	ctx := context.Background()
-	suffix := uuid.New().String()[:8]
-	agent, pe := "dk-agent-"+suffix, "dk-pe-"+suffix
-	createTestAgent(t, pool, agent)
-	createTestPE(t, pool, pe, 10)
-	if ok, err := store.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: agent, Role: domain.SignupRoleCompetitor}); err != nil || !ok {
-		t.Fatalf("signup: %v %v", ok, err)
-	}
-	key, err := store.AgentDataKey(ctx, pe, agent, func(ctx context.Context) (domain.DataKey, error) {
-		key, err := objectstore.NewDataKey()
-		if err != nil {
-			return domain.DataKey{}, err
-		}
-		return key, root.CreateAgentDataKey(ctx, key, pe, agent)
-	})
-	if err != nil {
-		t.Fatalf("AgentDataKey: %v", err)
-	}
-	object := objectstore.AgentPrefix(pe, agent) + "note"
-	if got := putAs(t, root, key, object); got != http.StatusOK {
-		t.Fatalf("write with the agent's key: status %d, want 200", got)
-	}
-	want := EndedDataKey{PlatformExperimentID: pe, AgentID: agent, AccessKeyID: key.AccessKeyID}
-
-	if slices.Contains(endedKeysOf(t, store), want) {
-		t.Fatal("the key of an agent at work is listed")
-	}
-	if _, err := pool.pool.Exec(ctx, `UPDATE experiment_signups SET finished_at = now() WHERE platform_experiment_id = $1 AND agent_id = $2`, pe, agent); err != nil {
-		t.Fatal(err)
-	}
-	if slices.Contains(endedKeysOf(t, store), want) {
-		t.Fatal("the key of an agent in its wind-down is listed")
-	}
-	if _, err := pool.pool.Exec(ctx, `UPDATE experiment_signups SET finished_at = now() - interval '3 minutes' WHERE platform_experiment_id = $1 AND agent_id = $2`, pe, agent); err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Contains(endedKeysOf(t, store), want) {
-		t.Fatal("the key of an agent past its wind-down is not listed")
-	}
-
 	stale := want
 	stale.AccessKeyID = "other"
 	deleted := 0
@@ -190,6 +124,13 @@ func TestDropDataKeyTakesAnEndedAgentsKeyOutOfTheStore(t *testing.T) {
 	}
 	if got := putAs(t, root, key, object); got != http.StatusForbidden {
 		t.Fatalf("write with the dropped key: status %d, want 403", got)
+	}
+	got, err := store.GetExperiment(ctx, exp.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DataKey != (domain.DataKey{}) {
+		t.Fatalf("row keeps key %+v after the drop", got.DataKey)
 	}
 	if slices.Contains(endedKeysOf(t, store), want) {
 		t.Fatal("a dropped key is still listed")

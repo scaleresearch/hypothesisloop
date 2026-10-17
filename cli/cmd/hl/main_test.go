@@ -173,7 +173,6 @@ func TestATokenThatNamesNoAgentOrExperimentLeavesBothToTheFlags(t *testing.T) {
 		{"quota"},
 		{"quota", "--agent", "jane"},
 		{"results"},
-		{"data-key"},
 		{"platform-experiments", "get"},
 		{"platform-experiments", "agents", "list"},
 	} {

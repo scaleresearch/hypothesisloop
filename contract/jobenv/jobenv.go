@@ -3,7 +3,7 @@
 package jobenv
 
 // The object store a job writes its durable data to: the job's own key, the store's address, and
-// the two prefixes the key opens. hl data-key prints the same names for an agent's own key.
+// the two prefixes the key opens.
 const (
 	AccessKeyID     = "AWS_ACCESS_KEY_ID"
 	SecretAccessKey = "AWS_SECRET_ACCESS_KEY"

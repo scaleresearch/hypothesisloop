@@ -80,7 +80,6 @@ func init() {
 		{Name: "results", About: "standings on the declared metrics", Run: shared.Results},
 		{Name: "capacity", About: "live accelerators per cluster, available and total", Run: shared.Capacity},
 		{Name: "situation", About: "the run now: time, objective, capacity, budget and each agent's work and allowances", Run: shared.Situation},
-		{Name: "data-key", About: `your S3 key to the experiment's data: eval "$(hl data-key)"`, Run: agent.DataKey},
 		{Name: "hypothesis", Run: hypothesis, Subs: []command.Command{
 			{Name: "submit", About: "register an idea under the objective or the hypotheses it builds on", Run: shared.HypothesisSubmit},
 			{Name: "checkout", About: "put the clone on your branch for a hypothesis, made from what the hypothesis builds on, and record you as working on it", Run: agent.HypothesisCheckout},

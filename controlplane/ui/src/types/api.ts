@@ -201,7 +201,7 @@ export interface paths {
         };
         /**
          * List what a job wrote to durable storage
-         * @description Checkpoints and datasets the job left under its own prefix, listed live from the object store. A job that kept nothing lists as an empty array — that is the ordinary case, not an error. Read any of them from a job, or from your own shell after `eval "$(hl data-key)"`: HYPOTHESISLOOP_DATA_SHARED spans the whole platform experiment. Each object carries a url a plain GET reads it by for 12 hours, with no key: how the data of a job of a prior run is read, since no data key reaches another run.
+         * @description Checkpoints and datasets the job left under its own prefix, listed live from the object store. A job that kept nothing lists as an empty array — that is the ordinary case, not an error. A job reads any of them with its own key, under HYPOTHESISLOOP_DATA_SHARED, which spans the whole platform experiment. Each object carries a url a plain GET reads it by for 12 hours, with no key: how it is read anywhere else, and how the data of a job of a prior run is read, since no job's key reaches another run.
          */
         get: operations["list-experiment-data"];
         put?: never;
@@ -1379,26 +1379,6 @@ export interface paths {
          */
         put: operations["put-coordinator-session"];
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/platform-experiments/{id}/data-key": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Get an agent's own key to the platform experiment's data
-         * @description S3 credentials for a signed-up agent: read everything under shared, write under uri, the prefix its jobs write below. The same key on every call, with no expiry. Refused once the platform experiment is closed. `hl data-key` prints it as environment variables.
-         */
-        post: operations["get-agent-data-key"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2708,17 +2688,6 @@ export interface components {
             role: components["schemas"]["OrgRole"];
             /** @description The secret the invited person accepts with. Returned by this call only: the platform stores its hash. */
             token: string;
-        };
-        DataAccess: {
-            access_key_id: string;
-            endpoint: string;
-            region: string;
-            secret_access_key: string;
-            shared: string;
-            uri: string;
-        };
-        DataKeyRequest: {
-            agent_id: string;
         };
         DataUsage: {
             by_agent: components["schemas"]["AgentDataCost"][];
@@ -4830,8 +4799,6 @@ export type CreateOrgRequest = components['schemas']['CreateOrgRequest'];
 export type CreatePlatformExperimentRequest = components['schemas']['CreatePlatformExperimentRequest'];
 export type CreatedAPIKey = components['schemas']['CreatedAPIKey'];
 export type CreatedInvite = components['schemas']['CreatedInvite'];
-export type DataAccess = components['schemas']['DataAccess'];
-export type DataKeyRequest = components['schemas']['DataKeyRequest'];
 export type DataUsage = components['schemas']['DataUsage'];
 export type DeclineRequest = components['schemas']['DeclineRequest'];
 export type EditAgentTypeRequest = components['schemas']['EditAgentTypeRequest'];
@@ -7898,41 +7865,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StoredSession"];
-                };
-            };
-            /** @description Error */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorModel"];
-                };
-            };
-        };
-    };
-    "get-agent-data-key": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DataKeyRequest"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataAccess"];
                 };
             };
             /** @description Error */

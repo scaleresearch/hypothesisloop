@@ -76,20 +76,6 @@ func TestCreateDataKeyAsksTheProviderForTheJobsScope(t *testing.T) {
 	}
 }
 
-func TestCreateAgentDataKeyAsksTheProviderForTheAgentsScope(t *testing.T) {
-	keys := &issued{}
-	if err := clientIssuing(t, keys).CreateAgentDataKey(context.Background(), domain.DataKey{AccessKeyID: "AK", SecretAccessKey: "SK"}, testPE, testAgent); err != nil {
-		t.Fatalf("CreateAgentDataKey: %v", err)
-	}
-	if keys.description != "agent pe-1/agent-a/" {
-		t.Fatalf("provider was asked for %q", keys.description)
-	}
-	if !allows(keys.policy, "s3:PutObject", "arn:aws:s3:::hl-data/pe-1/agent-a/x") ||
-		allows(keys.policy, "s3:PutObject", "arn:aws:s3:::hl-data/pe-1/agent-b/x") {
-		t.Fatalf("key policy is not the agent's write scope: %+v", keys.policy)
-	}
-}
-
 // A refusal must reach the submitter as an error: a key the store never created would be stored
 // with the job and hand it credentials that work nowhere.
 func TestCreateDataKeyReportsTheProvidersRefusal(t *testing.T) {

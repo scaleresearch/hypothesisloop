@@ -97,10 +97,8 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, imageRe
 	}
 
 	pass := pcfg.Scheduler.PassTimeout()
-	dataKeySweep := platformexperiments.NewDataKeySweep(store, dataStore.DeleteDataKey, db.DataKeyGrace{
-		Job:   time.Duration(pcfg.Scheduler.MaxCheckpointGraceSeconds+pcfg.Scheduler.MaxTerminationGracePeriodSeconds) * time.Second,
-		Agent: domain.AgentWindDown,
-	}, logger)
+	dataKeySweep := platformexperiments.NewDataKeySweep(store, dataStore.DeleteDataKey,
+		time.Duration(pcfg.Scheduler.MaxCheckpointGraceSeconds+pcfg.Scheduler.MaxTerminationGracePeriodSeconds)*time.Second, logger)
 	leaderLoops := []func(context.Context){
 		func(ctx context.Context) { settlementReconciler.Start(ctx, pass) },
 		// Auto-close platform experiments past their ends_at deadline.

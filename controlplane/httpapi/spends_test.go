@@ -24,11 +24,9 @@ func TestARunOverTokenSpendsAndStartsNothing(t *testing.T) {
 	placement.Agents = map[string]string{"ag-1": "org-a"}
 	doc := NewDoc(r, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop())
 	registerJobs(doc, nil, zap.NewNop())
-	registerExperimentData(doc, nil, zap.NewNop())
 	registerExperimentImage(doc, nil, zap.NewNop())
 	for _, call := range []struct{ method, path, body string }{
 		{"POST", "/experiments", `{"metadata":{"platform_experiment_id":"pe-1","agent_id":"ag-1","code_ref":"abc1234"},"job":{"command":["true"]}}`},
-		{"POST", "/platform-experiments/pe-1/data-key", `{"agent_id":"ag-1"}`},
 		{"PUT", "/platform-experiments/pe-1/image", `{"image":"docker.io/library/python:3.12"}`},
 		{"POST", "/platform-experiments/pe-1/registry-credentials", ``},
 	} {

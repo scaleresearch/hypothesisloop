@@ -18,10 +18,8 @@ import (
 // baseline agent held with it: the agent itself
 // stays in its org however it came to be, as every agent that ever joined does, and can be added
 // again by its id. The experiment row is locked as in
-// enrol, so a removal and a start cannot both believe they came first. The signup holds the only
-// record of the agent's object-store key, so deleteDataKey takes that key out of the store before
-// the row goes, and a key that could not be deleted keeps the signup.
-func (s *Store) RemoveAgent(ctx context.Context, platformExpID, agentID string, deleteDataKey func(ctx context.Context, accessKeyID string) error) error {
+// enrol, so a removal and a start cannot both believe they came first.
+func (s *Store) RemoveAgent(ctx context.Context, platformExpID, agentID string) error {
 	return s.write(ctx, func(tx *Write) error {
 		var err error
 		// A submission of this agent in flight commits or rolls back first, as in FinishAgent, so the
@@ -40,14 +38,12 @@ func (s *Store) RemoveAgent(ctx context.Context, platformExpID, agentID string, 
 		if status != string(domain.PlatformExpOpen) {
 			return ErrSignupClosed
 		}
-		var accessKeyID string
 		var inFlight bool
 		err = tx.QueryRow(ctx, `
-SELECT s.data_access_key_id,
-       EXISTS (SELECT 1 FROM experiments
+SELECT EXISTS (SELECT 1 FROM experiments
                WHERE platform_experiment_id = s.platform_experiment_id AND agent_id = s.agent_id AND status IN `+unfinishedSQL+`)
 FROM experiment_signups s
-WHERE s.platform_experiment_id=$1 AND s.agent_id=$2 FOR UPDATE OF s`, platformExpID, agentID).Scan(&accessKeyID, &inFlight)
+WHERE s.platform_experiment_id=$1 AND s.agent_id=$2 FOR UPDATE OF s`, platformExpID, agentID).Scan(&inFlight)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ErrNotSignedUp
 		}
@@ -58,11 +54,6 @@ WHERE s.platform_experiment_id=$1 AND s.agent_id=$2 FOR UPDATE OF s`, platformEx
 		// quota by every pass of the controller: the job ends first.
 		if inFlight {
 			return ErrWorkUnfinished
-		}
-		if accessKeyID != "" {
-			if err := deleteDataKey(ctx, accessKeyID); err != nil {
-				return fmt.Errorf("platform_experiments_store.RemoveAgent: delete data key: %w", err)
-			}
 		}
 		keys, err := signupKeysTx(ctx, tx, platformExpID, []string{agentID})
 		if err != nil {

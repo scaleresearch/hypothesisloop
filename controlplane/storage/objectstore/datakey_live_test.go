@@ -141,22 +141,22 @@ func TestLiveStoreRefusesADeletedKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := root.CreateAgentDataKey(context.Background(), key, pe, "agent"); err != nil {
-		t.Fatalf("CreateAgentDataKey: %v", err)
+	if err := root.CreateDataKey(context.Background(), key, pe, "agent", "job"); err != nil {
+		t.Fatalf("CreateDataKey: %v", err)
 	}
-	agent, err := New(root.Endpoint, root.Endpoint, root.Region, root.Bucket, key.AccessKeyID, key.SecretAccessKey, minioKeys)
+	holder, err := New(root.Endpoint, root.Endpoint, root.Region, root.Bucket, key.AccessKeyID, key.SecretAccessKey, minioKeys)
 	if err != nil {
 		t.Fatal(err)
 	}
-	object := AgentPrefix(pe, "agent") + "note"
+	object := JobPrefix(pe, "agent", "job") + "note"
 	t.Cleanup(func() { storeStatus(t, root, http.MethodDelete, object, nil) })
-	if got := putStatus(t, agent, object); got != http.StatusOK {
+	if got := putStatus(t, holder, object); got != http.StatusOK {
 		t.Fatalf("write with a live key: status %d, want 200", got)
 	}
 	if err := root.DeleteDataKey(context.Background(), key.AccessKeyID); err != nil {
 		t.Fatalf("DeleteDataKey: %v", err)
 	}
-	if got := putStatus(t, agent, object); got != http.StatusForbidden {
+	if got := putStatus(t, holder, object); got != http.StatusForbidden {
 		t.Fatalf("write with a deleted key: status %d, want 403", got)
 	}
 	if err := root.DeleteDataKey(context.Background(), key.AccessKeyID); err != nil {

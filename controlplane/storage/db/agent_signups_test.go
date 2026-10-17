@@ -180,21 +180,21 @@ func TestAnAgentIsRemovedOnlyBeforeTheExperimentStarts(t *testing.T) {
 	createTestPE(t, pool, pe, 10)
 	ids := spawnTestAgents(t, pes, pe, domain.AgentSignup{}, domain.AgentSignup{})
 
-	if err := pes.RemoveAgent(ctx, pe, ids[0], nil); err != nil {
+	if err := pes.RemoveAgent(ctx, pe, ids[0]); err != nil {
 		t.Fatalf("remove from an open experiment: got = %v, want = nil", err)
 	}
 	if in, _ := pes.IsSignedUp(ctx, pe, ids[0]); in {
 		t.Error("the removed agent is still signed up")
 	}
-	if err := pes.RemoveAgent(ctx, pe, ids[0], nil); !errors.Is(err, domain.ErrNotSignedUp) {
+	if err := pes.RemoveAgent(ctx, pe, ids[0]); !errors.Is(err, domain.ErrNotSignedUp) {
 		t.Errorf("remove twice: got = %v, want = domain.ErrNotSignedUp", err)
 	}
-	if err := pes.RemoveAgent(ctx, "pe-that-does-not-exist", ids[1], nil); !errors.Is(err, ErrSignupClosed) {
+	if err := pes.RemoveAgent(ctx, "pe-that-does-not-exist", ids[1]); !errors.Is(err, ErrSignupClosed) {
 		t.Errorf("remove from no experiment: got = %v, want = ErrSignupClosed", err)
 	}
 	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpRunning, domain.PlatformExpClosed} {
 		setPEStatus(t, pool, pe, status, 0)
-		if err := pes.RemoveAgent(ctx, pe, ids[1], nil); !errors.Is(err, ErrSignupClosed) {
+		if err := pes.RemoveAgent(ctx, pe, ids[1]); !errors.Is(err, ErrSignupClosed) {
 			t.Errorf("remove from a %s experiment: got = %v, want = ErrSignupClosed", status, err)
 		}
 	}
@@ -460,7 +460,7 @@ func TestARemovedAgentStaysInItsOrgAndJoinsAgainByItsID(t *testing.T) {
 	pe := "pe-" + uuid.New().String()[:8]
 	createTestPEIn(t, pool, pe, defaultProjectOf(t, accounts, orgID).ID)
 	agent := spawnTestAgents(t, pes, pe, domain.AgentSignup{})[0]
-	if err := pes.RemoveAgent(ctx, pe, agent, nil); err != nil {
+	if err := pes.RemoveAgent(ctx, pe, agent); err != nil {
 		t.Fatal(err)
 	}
 	if got, found, err := accounts.AgentOrg(ctx, agent); err != nil || !found || got != orgID {
@@ -519,7 +519,7 @@ func TestAgentsOfAPlatformExperimentAreNamedByRoleAndNoTwoAlike(t *testing.T) {
 	want(domain.SignupRoleCompetitor, "Researcher 2")
 	want(domain.SignupRoleReviewer, "Reviewer 1")
 
-	if err := pes.RemoveAgent(ctx, pe, first.ID, nil); err != nil {
+	if err := pes.RemoveAgent(ctx, pe, first.ID); err != nil {
 		t.Fatalf("remove: got = %v, want = nil", err)
 	}
 	want(domain.SignupRoleCompetitor, "Researcher 1")
@@ -598,7 +598,7 @@ func TestABaselineAgentHoldsItsQuotaForAsLongAsAJobOfItIsInFlight(t *testing.T) 
 				t.Fatal(err)
 			}
 		}
-		if err := pes.RemoveAgent(ctx, pe, baseline, nil); !errors.Is(err, ErrWorkUnfinished) {
+		if err := pes.RemoveAgent(ctx, pe, baseline); !errors.Is(err, ErrWorkUnfinished) {
 			t.Fatalf("removing it with a job %s: got = %v, want ErrWorkUnfinished", status, err)
 		}
 		holds("with a job " + string(status))
@@ -611,7 +611,7 @@ func TestABaselineAgentHoldsItsQuotaForAsLongAsAJobOfItIsInFlight(t *testing.T) 
 	if _, err := pool.pool.Exec(ctx, `UPDATE experiments SET status = 'FAILED' WHERE id = $1`, job); err != nil {
 		t.Fatal(err)
 	}
-	if err := pes.RemoveAgent(ctx, pe, baseline, nil); err != nil {
+	if err := pes.RemoveAgent(ctx, pe, baseline); err != nil {
 		t.Fatalf("removing it once its job ended: %v", err)
 	}
 	if quota, err := pes.GetAgentQuota(ctx, baseline, pe); err != nil || quota != nil {

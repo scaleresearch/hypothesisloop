@@ -294,7 +294,7 @@ func (f *rosterStore) GetAgentSignup(_ context.Context, _, agentID string) (*dom
 
 func (f *rosterStore) NameActors(context.Context, []*domain.Actor) error { return nil }
 
-func (f *rosterStore) RemoveAgent(_ context.Context, _, agentID string, _ func(context.Context, string) error) error {
+func (f *rosterStore) RemoveAgent(_ context.Context, _, agentID string) error {
 	if f.pe.Status != domain.PlatformExpOpen {
 		return db.ErrSignupClosed
 	}

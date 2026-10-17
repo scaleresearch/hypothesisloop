@@ -324,46 +324,6 @@ ORDER BY signed_up_at ASC`
 	return agents, rows.Err()
 }
 
-// AgentDataKey returns the agent's object-store key in a platform experiment. The first call
-// stores what create returns; the signup row is locked meanwhile, so a concurrent first call
-// waits and reads that same key. A failed create stores nothing.
-func (s *Store) AgentDataKey(ctx context.Context, platformExpID, agentID string, create func(context.Context) (domain.DataKey, error)) (domain.DataKey, error) {
-	var key domain.DataKey
-	if err := s.write(ctx, func(tx *Write) error {
-		var err error
-		var status string
-		err = tx.QueryRow(ctx, `
-SELECT s.data_access_key_id, s.data_secret_access_key, pe.status
-FROM experiment_signups s JOIN platform_experiments pe ON pe.id = s.platform_experiment_id
-WHERE s.platform_experiment_id = $1 AND s.agent_id = $2
-FOR UPDATE OF s`, platformExpID, agentID).Scan(&key.AccessKeyID, &key.SecretAccessKey, &status)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return domain.ErrNotSignedUp
-		}
-		if err != nil {
-			return fmt.Errorf("platform_experiments_store.AgentDataKey: %w", err)
-		}
-		if status == string(domain.PlatformExpClosed) {
-			return domain.ErrPlatformExperimentClosed
-		}
-		if key.AccessKeyID != "" {
-			return nil
-		}
-		if key, err = create(ctx); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `
-UPDATE experiment_signups SET data_access_key_id = $3, data_secret_access_key = $4
-WHERE platform_experiment_id = $1 AND agent_id = $2`, platformExpID, agentID, key.AccessKeyID, key.SecretAccessKey); err != nil {
-			return fmt.Errorf("platform_experiments_store.AgentDataKey: store key: %w", err)
-		}
-		return nil
-	}); err != nil {
-		return domain.DataKey{}, err
-	}
-	return key, nil
-}
-
 // IsSignedUp returns true if the agent is signed up for the platform experiment.
 func (s *Store) IsSignedUp(ctx context.Context, platformExpID, agentID string) (bool, error) {
 	const q = `

@@ -215,7 +215,6 @@ def test_another_org_writes_nothing(tenants):
         ("PATCH", f"/platform-experiments/{b.pe_id}", {"name": "taken over"}),
         ("POST", f"/platform-experiments/{b.pe_id}/close", {"top_results": []}),
         ("PUT", f"/platform-experiments/{b.pe_id}/summary", {"summary": "taken over"}),
-        ("POST", f"/platform-experiments/{b.pe_id}/data-key", {"agent_id": a.agent}),
         ("POST", "/platform-experiments", _platform_experiment_body("intruding", project_id=b.project_id)),
         ("POST", "/agents", {"id": f"agent-intruder-{uuid.uuid4().hex[:8]}", "name": "Intruder", "org_id": b.org_id}),
         ("POST", "/experiments", body_naming_b),

@@ -113,56 +113,6 @@ func TestJobPolicyRefusesAnEmptyIdentifier(t *testing.T) {
 	}
 }
 
-func TestAgentPolicyWritesTheAgentsPrefixAndReadsThePlatformExperiment(t *testing.T) {
-	policy, err := AgentPolicy(testBucket, testPE, testAgent)
-	if err != nil {
-		t.Fatalf("AgentPolicy: %v", err)
-	}
-	for _, own := range []string{
-		"arn:aws:s3:::hl-data/pe-1/agent-a/notes.md",
-		"arn:aws:s3:::hl-data/pe-1/agent-a/exp-7/checkpoint.pt",
-	} {
-		for _, action := range []string{"s3:PutObject", "s3:DeleteObject", "s3:AbortMultipartUpload"} {
-			if !allows(policy, action, own) {
-				t.Errorf("policy denies %s on %s, inside the agent's own prefix", action, own)
-			}
-		}
-	}
-	for _, other := range []string{
-		"arn:aws:s3:::hl-data/pe-1/agent-b/exp-9/checkpoint.pt",
-		"arn:aws:s3:::hl-data/pe-1/agent-ab/x",
-		"arn:aws:s3:::hl-data/pe-1/rogue.pt",
-		"arn:aws:s3:::hl-data/pe-2/agent-a/x",
-	} {
-		for _, action := range []string{"s3:PutObject", "s3:DeleteObject"} {
-			if allows(policy, action, other) {
-				t.Errorf("policy allows %s on %s, outside the agent's own prefix", action, other)
-			}
-		}
-	}
-	if !allows(policy, "s3:GetObject", "arn:aws:s3:::hl-data/pe-1/agent-b/exp-9/checkpoint.pt") {
-		t.Error("policy denies reading another agent's object in the same platform experiment")
-	}
-	if allows(policy, "s3:GetObject", "arn:aws:s3:::hl-data/pe-2/agent-a/x") {
-		t.Error("policy allows reading another platform experiment")
-	}
-	document, err := policy.JSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(document, `"s3:prefix":["pe-1/*"]`) {
-		t.Errorf("listing is not scoped to pe-1/: %s", document)
-	}
-}
-
-func TestAgentPolicyRefusesAWildcardOrEmptyIdentifier(t *testing.T) {
-	for _, bad := range []struct{ pe, agent string }{{testPE, "agent-*"}, {"pe-?", testAgent}, {testPE, ""}} {
-		if _, err := AgentPolicy(testBucket, bad.pe, bad.agent); err == nil {
-			t.Errorf("AgentPolicy accepted platform experiment %q, agent %q", bad.pe, bad.agent)
-		}
-	}
-}
-
 // allows reports whether the policy grants action on resource. IAM's rule is that anything not
 // explicitly allowed is denied, so this is the whole evaluation: the write-scoping guarantee is
 // "no statement allows a write outside the job's own prefix", not "a Deny statement forbids it".

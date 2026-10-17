@@ -425,7 +425,7 @@ func (s *Service) RemoveAgent(ctx context.Context, platformExpID, agentID string
 	if err := removesAgent(pe, *signup, by); err != nil {
 		return err
 	}
-	err = s.store.RemoveAgent(ctx, platformExpID, agentID, s.dataStore.DeleteDataKey)
+	err = s.store.RemoveAgent(ctx, platformExpID, agentID)
 	switch {
 	case errors.Is(err, domain.ErrNotSignedUp):
 		return refuseSignup(404, "not_signed_up", "agent %s is not in platform experiment %s", agentID, platformExpID)

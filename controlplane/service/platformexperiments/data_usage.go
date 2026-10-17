@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
 )
 
@@ -24,29 +23,6 @@ type AgentDataCost struct {
 	AgentID     string `json:"agent_id"`
 	Bytes       int64  `json:"bytes"`
 	ObjectCount int    `json:"object_count"`
-}
-
-// AgentDataAccess is the agent's key and the two prefixes it opens. The key is created in the
-// object store on the first call and read from the signup afterwards.
-func (s *Service) AgentDataAccess(ctx context.Context, platformExperimentID, agentID string) (*domain.DataAccess, error) {
-	key, err := s.store.AgentDataKey(ctx, platformExperimentID, agentID, func(ctx context.Context) (domain.DataKey, error) {
-		key, err := objectstore.NewDataKey()
-		if err != nil {
-			return domain.DataKey{}, err
-		}
-		return key, s.dataStore.CreateAgentDataKey(ctx, key, platformExperimentID, agentID)
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &domain.DataAccess{
-		URI:             s.dataStore.URI(objectstore.AgentPrefix(platformExperimentID, agentID)),
-		Shared:          s.dataStore.URI(objectstore.PlatformExperimentPrefix(platformExperimentID)),
-		Endpoint:        s.dataStore.Endpoint,
-		Region:          s.dataStore.Region,
-		AccessKeyID:     key.AccessKeyID,
-		SecretAccessKey: key.SecretAccessKey,
-	}, nil
 }
 
 // DataUsage lists the platform experiment's whole prefix once and attributes each object to the agent
