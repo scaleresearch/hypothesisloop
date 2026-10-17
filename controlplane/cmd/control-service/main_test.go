@@ -66,7 +66,6 @@ func testRouter(t *testing.T) chi.Router {
 		watch:               &registry.WatchHandler{},
 		clusterAgent:        &clusterexchange.Handler{},
 		modelProxy:          modelProxy,
-		modelUsage:          modelproxy.MetricsDB{},
 	}, zap.NewNop())
 }
 

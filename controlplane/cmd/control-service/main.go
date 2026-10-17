@@ -23,6 +23,7 @@ import (
 	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes"
+	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/gitproxy"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/modelproxy"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
@@ -286,7 +287,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 			*db.EnvironmentsStore
 		}{db.NewPlatformExperimentsStore(pool), store.EnvironmentsStore}, gitHost, logger),
 		modelProxy: modelProxy,
-		modelUsage: modelproxy.MetricsDB{URL: metricsDBURL},
+		modelUsage: peSvc,
 	}, logger)
 
 	return &http.Server{
@@ -318,7 +319,7 @@ type routes struct {
 	clusterAgent        *clusterexchange.Handler
 	gitProxy            *gitproxy.Proxy
 	modelProxy          *modelproxy.Proxy
-	modelUsage          modelproxy.UsageReader
+	modelUsage          *platformexperiments.PlatformExperimentsService
 }
 
 // webSockets are the paths a WebSocket client opens, with the subprotocol that carries its token.
@@ -378,7 +379,7 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 	accounts.RegisterAgentTypesHuma(doc, h.agentTypes)
 	accounts.RegisterRepositoriesHuma(doc, h.repositories)
 	scheduler.RegisterHuma(doc, h.scheduler)
-	modelproxy.RegisterHuma(doc, h.modelUsage, logger)
+	httpapi.RegisterModelUsage(doc, h.modelUsage, logger)
 	registry.RegisterHuma(doc, h.registry)
 	// /watch itself cannot be registered here (it is an upgrade), but its vocabulary can be, so
 	// an agent reading /explore learns what the stream carries rather than having to be told.
