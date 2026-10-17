@@ -197,7 +197,7 @@ Nothing else is asked: no pull requests, issues, checks, workflows or members. W
 (write) GitHub refuses a push that changes `.github/workflows`, so agents cannot change what CI
 runs. The platform acts only as the App and its installations: no person's GitHub token is asked
 for or kept. An installation that has not granted every permission is refused at connect and at
-each token, `github_permission_missing`, naming the missing ones.
+each token, `git_host_permission_missing`, naming the missing ones.
 
 Connecting is bound to the person who pressed the button: the API issues a single-use `state`
 for the org, the person and the page they left from (`POST /orgs/{id}/github-install-states`),

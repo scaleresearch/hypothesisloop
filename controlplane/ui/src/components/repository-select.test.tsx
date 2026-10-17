@@ -192,7 +192,7 @@ describe('the repository of a new platform experiment', () => {
   })
 
   it('leads to the installation\'s page on GitHub for a permission the App was not granted', async () => {
-    vi.mocked(checkRepository).mockRejectedValue(new ApiError(422, 'github_permission_missing: administration:write. The GitHub App installation has not granted that', 'github_permission_missing'))
+    vi.mocked(checkRepository).mockRejectedValue(new ApiError(422, 'git_host_permission_missing: administration:write. The GitHub App installation has not granted that', 'git_host_permission_missing'))
     show()
     expect((await screen.findByText('Missing permission')).closest('[title]')!.getAttribute('title')).toContain('administration (write)')
     expect(screen.getByRole('link', { name: 'Review on GitHub' }).getAttribute('href')).toBe('https://github.com/organizations/acme/settings/installations/7')

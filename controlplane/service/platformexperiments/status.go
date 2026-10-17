@@ -186,7 +186,7 @@ func (s *Service) closedReason(ctx context.Context, pe *domain.PlatformExperimen
 		domain.CloseProposalExpired:      "no person accepted its planner's answer or changed its goal by proposal_expires_at and the platform closed the draft",
 		domain.ClosePlannerStopped:       "its planner's machine ended before it answered and the platform had restarted it as often as it restarts one, so it closed the draft: the planner's instance in the roster says how the last machine ended (end_reason, exit_log)",
 		domain.CloseAgentsNotStarted:     "it started and no researcher's machine was running by agents_due_at, so the platform closed it. Each agent's instance says why its machine did not come up",
-		domain.CloseRepositoryNotCreated: "the platform could not create its repository, so none of its machines started. GitHub answered: " + pe.RepositoryError,
+		domain.CloseRepositoryNotCreated: "the platform could not create its repository, so none of its machines started. The git host answered: " + pe.RepositoryError,
 	}
 	if pe.CloseReason == domain.CloseBaselineLimitReached {
 		submitted, err := s.jobsSubmitted(ctx, pe.ID)
@@ -256,7 +256,7 @@ func (s *Service) Describe(ctx context.Context, pe *domain.PlatformExperiment, r
 	now := time.Now().UTC()
 	switch {
 	case pe.AwaitsRepository():
-		why = &domain.StatusReason{Reason: "repository_creating", Message: "the platform is creating its repository on GitHub, and none of its machines starts before the repository is there"}
+		why = &domain.StatusReason{Reason: "repository_creating", Message: "the platform is creating its repository on the git host, and none of its machines starts before the repository is there"}
 	case pe.Status == domain.PlatformExpDraft:
 		why = draftReason(pe)
 	case pe.Status == domain.PlatformExpRunning:

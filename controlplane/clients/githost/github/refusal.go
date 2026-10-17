@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
+	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 )
 
@@ -18,10 +19,8 @@ const (
 	ReasonInstallationNotConnected       = "installation_not_connected"
 	ReasonInstallationGone               = "installation_gone"
 	ReasonInstallationSuspended          = "installation_suspended"
-	ReasonPermissionMissing              = "github_permission_missing"
 	ReasonInvalidRepository              = "invalid_repository"
 	ReasonRepositoryNotReachable         = "repository_not_reachable"
-	ReasonGitHubNotConnected             = "github_not_connected"
 	ReasonRepositoryNotCreated           = "repository_not_created"
 	ReasonRepositoryExists               = "repository_exists"
 	ReasonRepositoryCreationNotPermitted = "repository_creation_not_permitted"
@@ -29,7 +28,6 @@ const (
 	ReasonRepositoryAccountRequired      = "repository_account_required"
 	ReasonUnreadableFile                 = "unreadable_file"
 	ReasonUnavailable                    = "unavailable"
-	ReasonGitHubFailed                   = "github_failed"
 )
 
 // ErrNotConnected reports a repository whose owner is no GitHub account the org connected.
@@ -63,7 +61,7 @@ func (e *InstallationGoneError) Unwrap() error {
 // Refusal turns what GitHub refused into what the caller is told. gone is the status of a
 // repository the org's installations do not reach: 422 where a request names it, 409 where a
 // platform experiment already does. GitHub failing a call for an installation is 502
-// github_failed, naming the installation and what GitHub answered. Anything else is the
+// git_host_failed, naming the installation and what GitHub answered. Anything else is the
 // platform's failure or GitHub's: it is logged and answered without its text, but for a create
 // GitHub refused, whose answer is GitHub's own message.
 func Refusal(logger *zap.Logger, op string, err error, gone int) error {
@@ -87,7 +85,7 @@ func Refusal(logger *zap.Logger, op string, err error, gone int) error {
 	case errors.Is(err, ErrInvalidRepository):
 		return refusal.Invalid(ReasonInvalidRepository, "repository must be owner/name, as in the repository's address on GitHub")
 	case errors.Is(err, ErrNoInstallation):
-		return refusal.Invalid(ReasonGitHubNotConnected, "a platform experiment keeps its code in a GitHub repository, and the org has connected no GitHub account: an owner of the org installs the GitHub App on a GitHub account in Settings, GitHub, and the experiment then names a repository there or the platform creates one")
+		return refusal.Invalid(githost.ReasonNotConnected, "a platform experiment keeps its code in a GitHub repository, and the org has connected no GitHub account: an owner of the org installs the GitHub App on a GitHub account in Settings, GitHub, and the experiment then names a repository there or the platform creates one")
 	case errors.As(err, &notPermitted):
 		accepted := ""
 		if notPermitted.Accepted != "" {
@@ -112,9 +110,9 @@ func Refusal(logger *zap.Logger, op string, err error, gone int) error {
 	case errors.Is(err, ErrInstallationGone):
 		return refusal.Refuse(gone, ReasonInstallationGone, "the GitHub App installation was removed on GitHub: its owner installs the App again from Settings, GitHub")
 	case errors.As(err, &missing):
-		return refusal.Refuse(gone, ReasonPermissionMissing, "permissions not granted: "+strings.Join(missing.Missing, ", ")+". The GitHub App installation has not granted that, which the platform needs: its owner accepts the App's permissions on GitHub (the account's Settings, Applications, Configure)")
+		return refusal.Refuse(gone, githost.ReasonPermissionMissing, "permissions not granted: "+strings.Join(missing.Missing, ", ")+". The GitHub App installation has not granted that, which the platform needs: its owner accepts the App's permissions on GitHub (the account's Settings, Applications, Configure)")
 	case errors.Is(err, ErrPermissionNotGranted):
-		return refusal.Refuse(gone, ReasonPermissionMissing, "the GitHub App installation has not granted the access the App asks for: its owner accepts the App's permissions on GitHub (the account's Settings, Applications, Configure)")
+		return refusal.Refuse(gone, githost.ReasonPermissionMissing, "the GitHub App installation has not granted the access the App asks for: its owner accepts the App's permissions on GitHub (the account's Settings, Applications, Configure)")
 	case errors.Is(err, ErrRateLimited):
 		logger.Warn("github is rate limiting the platform", zap.String("operation", op))
 		return refusal.Refuse(http.StatusServiceUnavailable, ReasonUnavailable, "GitHub is rate limiting the platform: try again shortly")
@@ -127,7 +125,7 @@ func Refusal(logger *zap.Logger, op string, err error, gone int) error {
 		if githubFailed.Status != 0 {
 			answered = "answered " + strconv.Itoa(githubFailed.Status) + " " + strconv.Quote(githubFailed.Message)
 		}
-		return refusal.Refuse(http.StatusBadGateway, ReasonGitHubFailed, "GitHub failed the platform's call for GitHub App installation "+strconv.FormatInt(githubFailed.Installation, 10)+": it "+answered+". Try again later, and if GitHub keeps failing, the owner of the GitHub App reports it to GitHub Support with the installation id")
+		return refusal.Refuse(http.StatusBadGateway, githost.ReasonFailed, "GitHub failed the platform's call for GitHub App installation "+strconv.FormatInt(githubFailed.Installation, 10)+": it "+answered+". Try again later, and if GitHub keeps failing, the owner of the GitHub App reports it to GitHub Support with the installation id")
 	default:
 		return auth.Internal(logger, "github request failed", err, zap.String("operation", op))
 	}

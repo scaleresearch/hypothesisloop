@@ -51,7 +51,7 @@ function newRepositoryURL(form: string, accounts: OrgGitHubInstallation[]): stri
 
 // What GitHub says of an installation that leaves it no account to create on: removed, suspended,
 // or without a permission the App asks for. GitHub failing to answer says nothing of it.
-const UNUSABLE = new Set(['installation_gone', 'installation_suspended', 'github_permission_missing'])
+const UNUSABLE = new Set(['installation_gone', 'installation_suspended', 'git_host_permission_missing'])
 
 // The installations GitHub says are unusable, asked by the check Settings runs on each.
 async function unusable(orgID: string, accounts: OrgGitHubInstallation[]): Promise<number[]> {

@@ -51,7 +51,7 @@ func registerRepositories(doc *Doc, repositories *accounts.Repositories) {
 			"and have been made or changed after the state was issued. An installation the org connected before is answered as it is; a new one is connected, and is the org's default for new repositories when it is the org's first. " +
 			"account_type says whether the account is a person's own (User) or an organisation. " +
 			"422 install_state_invalid (made up, used, expired or another person's), installation_not_new (last changed before the install started), installation_gone, installation_suspended, " +
-			"github_permission_missing naming each permission missing as name:level. 502 github_failed, 503 github_not_configured.",
+			"git_host_permission_missing naming each permission missing as name:level. 502 git_host_failed, 503 github_not_configured.",
 	}, a.finishInstall)
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "list-github-installations", Method: "GET", Path: "/orgs/{id}/github-installations",
@@ -80,8 +80,8 @@ func registerRepositories(doc *Doc, repositories *accounts.Repositories) {
 		OperationID: "check-github-installation", Method: "GET", Path: "/orgs/{id}/github-installations/{installation_id}/check", DefaultStatus: http.StatusNoContent,
 		Summary: "Check with GitHub that a connected installation still works", Tags: []string{"github"},
 		Description: "For any member of the org. Asks GitHub now whether the App is still installed on the account and has granted every permission the App asks for (app-manifest.json), " +
-			"the check a create runs on the account it creates on. 204 when it has. 422 installation_gone when GitHub removed it, installation_suspended when its owner suspended it, github_permission_missing naming what it has not granted, " +
-			"each with what to do. 404 not_found when the org has not connected it. 502 github_failed, 503 github_not_configured.",
+			"the check a create runs on the account it creates on. 204 when it has. 422 installation_gone when GitHub removed it, installation_suspended when its owner suspended it, git_host_permission_missing naming what it has not granted, " +
+			"each with what to do. 404 not_found when the org has not connected it. 502 git_host_failed, 503 github_not_configured.",
 	}, a.check)
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "list-github-repositories", Method: "GET", Path: "/orgs/{id}/github-repositories",
@@ -90,7 +90,7 @@ func registerRepositories(doc *Doc, repositories *accounts.Repositories) {
 			"repositories whose owner/name contains it, whatever the casing. Nothing is kept between calls: each one asks GitHub for every " +
 			"repository of every connected installation, a hundred to a request, and pages the result here, so X-Total-Count is exact and a call " +
 			"costs as many GitHub requests as the installations hold hundreds of repositories. An installation removed on GitHub is left out. " +
-			"502 github_failed when GitHub answers 5xx or not at all for an installation, the message naming it and GitHub's answer. " +
+			"502 git_host_failed when GitHub answers 5xx or not at all for an installation, the message naming it and GitHub's answer. " +
 			"503 github_not_configured.",
 	}, a.repositoriesOf)
 }

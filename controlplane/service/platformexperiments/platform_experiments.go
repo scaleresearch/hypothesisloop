@@ -348,8 +348,8 @@ func NewService(store Store, cfg domain.QuotaConfig, logger *zap.Logger, metrics
 type CreatePlatformExperimentRequest struct {
 	experimentspec.Spec
 	experimentspec.Placement
-	// RepositoryAccount is the connected GitHub account a new repository is created on.
-	RepositoryAccount string    `json:"repository_account,omitempty" doc:"The GitHub account, one the org connected, on which the platform creates the repository when repository is left out. Required then only when the org connected several."`
+	// RepositoryAccount is the connected git host account a new repository is created on.
+	RepositoryAccount string    `json:"repository_account,omitempty" doc:"The account on the git host, one the org connected, on which the platform creates the repository when repository is left out. Required then only when the org connected several."`
 	Continues         string    `json:"continues,omitempty" doc:"The id of a closed platform experiment of the same project to carry on, which keeps its code in the repository this one names. Its baseline starts from the commit of that run's baseline job, so both are measured by the same harness. It keeps the metric keys and directions of that run: 422 invalid_metrics for others. Left out, it starts fresh. 422 invalid_continues for one that is no closed platform experiment of the project, keeps its code in another repository or declared no baseline."`
 	StartsAt          time.Time `json:"starts_at" required:"false" doc:"When its baseline begins to be measured, for a later start than this create. Left out, or past, it is this create."`
 

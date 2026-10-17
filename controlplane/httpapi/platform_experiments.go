@@ -45,19 +45,19 @@ func registerPlatformExperiments(doc *Doc, experiments *platformexperiments.Serv
 		Description: "Answers repository as the git host names it, with repository_url, when the org of the project reaches it, and otherwise creates it from the deployment's experiment template " +
 			"(git_host.experiment_template_repository): its default branch holds one commit of the template's files. POST /platform-experiments does the same for the repository it names; " +
 			"this is for a client that pushes its own branch to the repository before it creates the experiment there. " +
-			"Refused with the reasons of that create: 422 invalid_repository, github_not_connected, installation_not_connected, installation_gone, installation_suspended, github_permission_missing, " +
-			"repository_creation_not_permitted, repository_not_reachable when it exists and the platform cannot reach it; 502 github_failed and repository_not_created when the git host did not create it.",
+			"Refused with the reasons of that create: 422 invalid_repository, git_host_not_connected, installation_not_connected, installation_gone, installation_suspended, git_host_permission_missing, " +
+			"repository_creation_not_permitted, repository_not_reachable when it exists and the platform cannot reach it; 502 git_host_failed and repository_not_created when the git host did not create it.",
 	}, a.ensureRepository)
 
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "check-repository", Method: "GET", Path: "/projects/{id}/repository-check",
 		Summary: "Check where a platform experiment would keep its code, before creating it", Tags: []string{"platform-experiments"},
 		Description: "Runs the repository checks of POST /platform-experiments and POST /platform-experiments/drafts for repository and repository_account as they would be sent, and creates nothing. " +
-			"A repository named must be reachable through an installation the org connected and the App allowed to push to it: it is answered as GitHub names it, with repository_url. " +
-			"With none named, the account a new repository would be created on is answered in repository_account, after GitHub confirms the App is still installed there and has granted " +
-			"every permission the App asks for. " +
-			"Refused with the reasons of those creates: 422 github_not_connected, repository_account_required, installation_not_connected, installation_gone, installation_suspended, github_permission_missing, " +
-			"repository_not_reachable, invalid_repository, invalid_request; 502 github_failed; on a plain git host 422 repository_required and repository_not_reachable.",
+			"A repository named must be one the org reaches on the git host and the platform may push to: it is answered as the git host names it, with repository_url. " +
+			"With none named, the account a new repository would be created on is answered in repository_account, after the git host confirms the platform may still create there " +
+			"(on GitHub, that the App is still installed there and has granted every permission the App asks for). " +
+			"Refused with the reasons of those creates: 422 git_host_not_connected, repository_account_required, installation_not_connected, installation_gone, installation_suspended, git_host_permission_missing, " +
+			"repository_not_reachable, invalid_repository, invalid_request; 502 git_host_failed; on a plain git host 422 repository_required and repository_not_reachable.",
 	}, a.checkRepository)
 
 	register(doc, auth.AudienceCoordinator, huma.Operation{
@@ -77,22 +77,22 @@ func registerPlatformExperiments(doc *Doc, experiments *platformexperiments.Serv
 			"coordinator_in_agentsandbox: true has the platform run the coordinator as one more machine beside the agents', on coordinator_model or the platform's coordinator default: " +
 			"it holds this platform experiment's coordinator token, is no agent of it, holds no quota and is not ranked. " + platformexperiments.CoordinatorWanted + " " +
 			"It is fixed from then on. " +
-			"repository is the code the platform experiment works on, owner/name on GitHub: agents clone it and push their branches to it, jobs check it out, and repository_url in the answer is where from. " +
+			"repository is the code the platform experiment works on, named as the git host names it (owner/name on GitHub): agents clone it and push their branches to it, jobs check it out, and repository_url in the answer is where from. " +
 			"branch, required with repository, is the branch the agents clone and start from and none of them pushes to: 422 invalid_branch for one git takes no name of or one under hl/, branch_not_found for one the repository does not have. " +
-			"A repository named that the org's installation cannot reach is created from the experiment template (git_host.experiment_template_repository) before anything else, as POST /projects/{id}/repositories does: " +
+			"A repository named that the org cannot reach is created from the experiment template (git_host.experiment_template_repository) before anything else, as POST /projects/{id}/repositories does: " +
 			"its default branch holds one commit of the template's files. " +
-			"Left out, the platform creates a private one on the GitHub account the org connected, named from the experiment and its id and generated from the experiment template, " +
+			"Left out, the platform creates a private one on the account the org connected on the git host, named from the experiment and its id and generated from the experiment template, " +
 			"after the create answered: the answer has no repository yet and status_reason repository_creating, no machine of it starts before the repository is recorded, and a read then names it in repository, repository_url and branch, its default branch. " +
-			"branch is refused without repository (422 invalid_request). The installation covers a repository it created whichever repositories its owner selected. " +
+			"branch is refused without repository (422 invalid_request). On GitHub, the installation covers a repository it created whichever repositories its owner selected. " +
 			"With several accounts connected, repository_account says which, and 422 repository_account_required lists them when it is left out; it is never stated with repository (422 invalid_request). " +
-			"422 github_not_connected when the org has connected no GitHub account, and installation_not_connected when repository_account is none it connected: those are answered before anything is created. " +
-			"When GitHub does not create it (the authorisation is gone, GitHub refuses the creation, the name is taken), " +
-			"the platform experiment is closed with close_reason repository_not_created, and its status_reason message carries what GitHub answered. A repository the request names is never written to. " +
-			"Named, an installation of the platform's GitHub App that the org connected must cover the account that owns it " +
+			"422 git_host_not_connected when the org has connected no account on the git host, and installation_not_connected when repository_account is none it connected: those are answered before anything is created. " +
+			"When the git host does not create it (the authorisation is gone, the host refuses the creation, the name is taken), " +
+			"the platform experiment is closed with close_reason repository_not_created, and its status_reason message carries what the git host answered. A repository the request names is never written to. " +
+			"Named on GitHub, an installation of the platform's GitHub App that the org connected must cover the account that owns it " +
 			"(GET /orgs/{id}/github-repositories lists what may be named): 422 invalid_repository when it is not owner/name, installation_not_connected when " +
 			"the org connected no installation on the account that owns it, repository_not_reachable when it exists and the installation does not cover it, " +
 			"and installation_gone when the App was removed on GitHub. " +
-			"502 github_failed when GitHub answers 5xx or not at all for the installation, the message naming it and GitHub's answer. " +
+			"502 git_host_failed when the git host answers 5xx or not at all, the message naming what it was asked for and its answer. " +
 			"On a deployment whose git host is plain, repository is a name under the host's root, created there from the template when it does not exist, and is required: 422 repository_required without it. " +
 			"agent_image is the image the sandboxed agents and the coordinator run, built FROM the platform's agent image so the harness is in it. Left out, " +
 			"it is the platform's own. 422 invalid_agent_image when it is no image reference. Both are fixed from then on. " +
@@ -135,7 +135,7 @@ func registerPlatformExperiments(doc *Doc, experiments *platformexperiments.Serv
 	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "get-platform-experiment", Method: "GET", Path: "/platform-experiments/{id}",
 		Summary: "Get a platform experiment", Tags: []string{"platform-experiments"},
-		Description: "Returns status, budget, the stage ladder, the list of signed-up agents and prior_runs, the closed runs of the same project and repository that its agents and coordinator read as their own. consumed_accelerator_hours is what it has spent of its budget, the whole spend once it is closed. status_reason says why it is in its status, in every status. duration_hours count from the moment the run starts, which a running one holds in starts_at, and ends_at is that start plus duration_hours. A running one reads agents_starting while no researcher's machine is running yet: the first one that is sets started_at, and the platform closes it at agents_due_at (close_reason agents_not_started) when none comes up. From then it reads running, and researchers_done once every researcher has finished, was cut or lost its machine with no restart left: nobody is left to submit a job, the platform still closes it only at ends_at, and waits_for names who writes the summary and closes it before, its coordinator where the platform hosts one and its owner otherwise. A closed one reads its close_reason. An open one says why it is not running yet. Without a baseline that is where the measuring stands: baseline_measuring (an agent of role baseline is at work, and the platform declares its job when it finishes), baseline_required (none is at work and none left a job to declare: one is added), baseline_undeclared (they left several jobs and one is declared with PATCH), baseline_declaring (the platform is about to declare the one job), or what the platform's declaration of that one job is refused for, by the reasons of PATCH baseline_job_id: budget_below_baseline, baseline_breaks_constraint, baseline_missing_metric. With a baseline: starts_at_ahead, no_researchers, budget_spent, or starting when nothing is missing: the request that declares the baseline or adds the researcher starts the run itself. The message says what the state waits for and who acts, with the hl command, and to an agent it begins with that agent's own next step: an agent of role baseline is told to measure, and any other that its jobs are refused until the start. Nothing else says what an open platform experiment waits for.repository is the code it works on, owner/name on GitHub, " +
+		Description: "Returns status, budget, the stage ladder, the list of signed-up agents and prior_runs, the closed runs of the same project and repository that its agents and coordinator read as their own. consumed_accelerator_hours is what it has spent of its budget, the whole spend once it is closed. status_reason says why it is in its status, in every status. duration_hours count from the moment the run starts, which a running one holds in starts_at, and ends_at is that start plus duration_hours. A running one reads agents_starting while no researcher's machine is running yet: the first one that is sets started_at, and the platform closes it at agents_due_at (close_reason agents_not_started) when none comes up. From then it reads running, and researchers_done once every researcher has finished, was cut or lost its machine with no restart left: nobody is left to submit a job, the platform still closes it only at ends_at, and waits_for names who writes the summary and closes it before, its coordinator where the platform hosts one and its owner otherwise. A closed one reads its close_reason. An open one says why it is not running yet. Without a baseline that is where the measuring stands: baseline_measuring (an agent of role baseline is at work, and the platform declares its job when it finishes), baseline_required (none is at work and none left a job to declare: one is added), baseline_undeclared (they left several jobs and one is declared with PATCH), baseline_declaring (the platform is about to declare the one job), or what the platform's declaration of that one job is refused for, by the reasons of PATCH baseline_job_id: budget_below_baseline, baseline_breaks_constraint, baseline_missing_metric. With a baseline: starts_at_ahead, no_researchers, budget_spent, or starting when nothing is missing: the request that declares the baseline or adds the researcher starts the run itself. The message says what the state waits for and who acts, with the hl command, and to an agent it begins with that agent's own next step: an agent of role baseline is told to measure, and any other that its jobs are refused until the start. Nothing else says what an open platform experiment waits for.repository is the code it works on, as the git host names it, " +
 			"and repository_url the address agents clone and jobs check out. Both are absent when it names none. " +
 			"One made from a sentence carries goal and goal_version, and while it is a draft what its planner proposed (proposal, proposed_at). Once accepted it keeps proposal as proposed, with accepted_at, accepted_by (absent when the platform accepted it by itself) and accepted_answers, the answers given to proposal.questions. " +
 			"For a draft, " +
@@ -230,7 +230,7 @@ func registerPlatformExperiments(doc *Doc, experiments *platformexperiments.Serv
 
 func (a platformExperimentsAPI) getExperimentFile(ctx context.Context, in *struct {
 	ID         string `path:"id"`
-	Repository string `query:"repository" required:"true" doc:"owner/name on GitHub"`
+	Repository string `query:"repository" required:"true" doc:"The repository as the git host names it, owner/name on GitHub."`
 	Branch     string `query:"branch" required:"true" doc:"The branch the file is read at."`
 }) (*struct {
 	Body *platformexperiments.ExperimentFile

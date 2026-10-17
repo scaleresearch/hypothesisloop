@@ -153,9 +153,9 @@ func TestACreateRequiresWhatOnlyTheCallerCanSay(t *testing.T) {
 	if rec := call("POST", "/platform-experiments", invalid); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "invalid_metrics") {
 		t.Errorf("a body with no ranking metric: got = %d %s, want 422 invalid_metrics", rec.Code, rec.Body)
 	}
-	repos.notOn = refusal.Refuse(http.StatusUnprocessableEntity, "github_not_connected", "the org has connected no GitHub account")
-	if rec := call("POST", "/platform-experiments", whole()); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "github_not_connected") {
-		t.Errorf("when the org has connected no GitHub account: got = %d %s, want 422 github_not_connected", rec.Code, rec.Body)
+	repos.notOn = refusal.Refuse(http.StatusUnprocessableEntity, "git_host_not_connected", "the org has connected no GitHub account")
+	if rec := call("POST", "/platform-experiments", whole()); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "git_host_not_connected") {
+		t.Errorf("when the org has connected no GitHub account: got = %d %s, want 422 git_host_not_connected", rec.Code, rec.Body)
 	}
 	if len(store.created) != 2 {
 		t.Fatalf("created %d, want nothing more stored", len(store.created))

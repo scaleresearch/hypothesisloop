@@ -1,13 +1,13 @@
 import { apiCall, apiFetch, apiFetchPage, apiSend, MAX_LIST_PAGE_SIZE, withQuery } from '@/lib/api/request'
 import type { Page } from '@/lib/api/request'
-import type { App, InstallFinished, InstallStart, OrgGitHubInstallation, Repository } from '@/types/api'
+import type { GitHubAddresses, InstallFinished, InstallStart, OrgGitHubInstallation, Repository } from '@/types/api'
 
 /** The reason the API gives on a deployment whose git host is not GitHub. */
 export const GITHUB_NOT_CONFIGURED = 'github_not_configured'
 
 // Answered 503 github_not_configured on a deployment whose git host is not GitHub.
-export function fetchGitHubApp(): Promise<App> {
-  return apiFetch<App>('/github/app')
+export function fetchGitHubApp(): Promise<GitHubAddresses> {
+  return apiFetch<GitHubAddresses>('/github/app')
 }
 
 // Oldest first, as recorded at connect: GitHub is not asked.

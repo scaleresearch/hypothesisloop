@@ -6,6 +6,14 @@ import (
 	"time"
 )
 
+// The reasons of a refusal any git host gives a client, which tells them apart whatever the
+// provider.
+const (
+	ReasonNotConnected      = "git_host_not_connected"
+	ReasonPermissionMissing = "git_host_permission_missing"
+	ReasonFailed            = "git_host_failed"
+)
+
 // ErrFileNotFound is FileAt's answer for a path the repository does not hold at that ref.
 var ErrFileNotFound = errors.New("githost: no such file")
 

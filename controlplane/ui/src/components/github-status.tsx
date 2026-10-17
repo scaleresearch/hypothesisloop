@@ -50,7 +50,7 @@ function githubProblem(reason: string | undefined, message: string, account: str
       return { tone: 'danger', label: 'Not installed', explain: `The GitHub App was removed${on}, so experiments cannot use its repositories. Reinstall it to connect again.`, fix: 'install' }
     case 'installation_suspended':
       return { tone: 'warning', label: 'Suspended', explain: `The GitHub App is suspended${on}. Unsuspend it on GitHub to use its repositories again.`, fix: 'review' }
-    case 'github_permission_missing': {
+    case 'git_host_permission_missing': {
       const missing = permissionsIn(message)
       return { tone: 'warning', label: 'Missing permission', explain: `The GitHub App${on} has not been granted ${missing || 'every permission it asks for'}. Accept the permissions on GitHub.`, fix: 'review' }
     }
@@ -59,9 +59,9 @@ function githubProblem(reason: string | undefined, message: string, account: str
     case 'repository_creation_not_permitted':
       return { tone: 'warning', label: 'Cannot create', explain: `GitHub does not let the App create repositories${on}. Review the App's permissions on GitHub, or pick an existing repository.`, fix: 'review' }
     case 'installation_not_connected':
-    case 'github_not_connected':
+    case 'git_host_not_connected':
       return { tone: 'warning', label: 'Not connected', explain: `No GitHub account${on} is connected. Install the GitHub App on it.`, fix: 'install' }
-    case 'github_failed':
+    case 'git_host_failed':
     case 'unavailable':
       return { tone: 'neutral', label: 'No answer', explain: 'GitHub did not answer the check. Try again in a moment.', fix: 'retry' }
     default:

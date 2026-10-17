@@ -67,8 +67,8 @@ describe('a connected GitHub account GitHub refuses', () => {
   const cases: { reason: string; message: string; chip: string; explain: string; action: string; href?: string }[] = [
     { reason: 'installation_gone', message: 'the GitHub App is no longer installed on acme (installation 7): its owner installs the App again from Settings, GitHub', chip: 'Not installed', explain: 'The GitHub App was removed on acme, so experiments cannot use its repositories. Reinstall it to connect again.', action: 'Reinstall' },
     { reason: 'installation_suspended', message: 'the GitHub App is suspended on acme (installation 7): its owner unsuspends it on GitHub', chip: 'Suspended', explain: 'The GitHub App is suspended on acme. Unsuspend it on GitHub to use its repositories again.', action: 'Review on GitHub', href: 'https://github.com/organizations/acme/settings/installations/7' },
-    { reason: 'github_permission_missing', message: 'github_permission_missing: administration:write, contents:write. The GitHub App installation has not granted that', chip: 'Missing permission', explain: 'The GitHub App on acme has not been granted administration (write), contents (write). Accept the permissions on GitHub.', action: 'Review on GitHub', href: 'https://github.com/organizations/acme/settings/installations/7' },
-    { reason: 'github_failed', message: 'GitHub failed the platform\'s call for GitHub App installation 7: it answered 502', chip: 'No answer', explain: 'GitHub did not answer the check. Try again in a moment.', action: 'Check again' },
+    { reason: 'git_host_permission_missing', message: 'git_host_permission_missing: administration:write, contents:write. The GitHub App installation has not granted that', chip: 'Missing permission', explain: 'The GitHub App on acme has not been granted administration (write), contents (write). Accept the permissions on GitHub.', action: 'Review on GitHub', href: 'https://github.com/organizations/acme/settings/installations/7' },
+    { reason: 'git_host_failed', message: 'GitHub failed the platform\'s call for GitHub App installation 7: it answered 502', chip: 'No answer', explain: 'GitHub did not answer the check. Try again in a moment.', action: 'Check again' },
   ]
   for (const tc of cases) {
     it(`shows ${tc.chip} with ${tc.action}, and the API's words nowhere in the row`, async () => {
@@ -96,7 +96,7 @@ describe('a connected GitHub account GitHub refuses', () => {
   })
 
   it('checks again on request', async () => {
-    vi.mocked(checkGitHubInstallation).mockRejectedValue(new ApiError(502, 'no answer', 'github_failed'))
+    vi.mocked(checkGitHubInstallation).mockRejectedValue(new ApiError(502, 'no answer', 'git_host_failed'))
     show()
     await userEvent.click(await screen.findByRole('button', { name: 'Check again' }))
     vi.mocked(checkGitHubInstallation).mockResolvedValue(undefined)

@@ -13,17 +13,51 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
-	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost/github"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
-// GitHubApp is what the platform asks of its GitHub App. *github.Client satisfies it.
+// GitHubApp is what the platform asks of its GitHub App, adapted to it by the github package.
 type GitHubApp interface {
-	App() github.App
-	Installation(ctx context.Context, installationID int64) (*github.Installation, error)
-	Repositories(ctx context.Context, installationID int64) ([]github.Repository, error)
+	Addresses() GitHubAddresses
+	// Installation is one installation as GitHub states it to the App now.
+	Installation(ctx context.Context, installationID int64) (*GitHubInstallation, error)
+	// Repositories lists what an installation covers: ErrInstallationGone for one GitHub removed
+	// or suspended.
+	Repositories(ctx context.Context, installationID int64) ([]GitHubRepository, error)
+	// Check says whether a connected installation still works: installed, not suspended, and
+	// granted every permission the App asks for.
+	Check(ctx context.Context, connected *domain.OrgGitHubInstallation) error
+	// Refusal turns what the App returned refused into what the caller is told, gone the status
+	// of a repository the org's installations do not reach.
+	Refusal(op string, err error, gone int) error
+}
+
+// ErrInstallationGone reports an installation GitHub removed or suspended.
+var ErrInstallationGone = errors.New("the GitHub App installation was removed or suspended")
+
+// GitHubAddresses is what a browser needs to send a person to GitHub.
+type GitHubAddresses struct {
+	Slug       string `json:"slug"`
+	InstallURL string `json:"install_url" doc:"Where a person installs the App on a GitHub account and chooses its repositories. Connecting goes through POST /orgs/{id}/github-install-states, whose install_url carries the state GitHub hands back."`
+	// NewRepositoryURL is GitHub's own form for a new repository.
+	NewRepositoryURL string `json:"new_repository_url" doc:"Where a person creates a repository on GitHub themselves. owner and visibility may be added as query parameters."`
+}
+
+// GitHubInstallation is one installation of the App, on the GitHub account AccountLogin.
+// ChangedAt is when GitHub last made it or changed its repositories or permissions.
+type GitHubInstallation struct {
+	ID           int64
+	AccountLogin string
+	AccountType  string
+	ChangedAt    time.Time
+}
+
+// GitHubRepository is a repository an installation covers, named owner/name.
+type GitHubRepository struct {
+	FullName string
+	Private  bool
 }
 
 // InstallationStore is the persistence of the installations orgs connected and of the installs
@@ -63,7 +97,7 @@ type Repository struct {
 }
 
 // The reasons a client tells a refusal of a connect or a credential apart by. The others are
-// the git host's (github.Reason*).
+// the App's (GitHubApp.Refusal).
 const (
 	ReasonGitHubNotConfigured = "github_not_configured"
 	ReasonInvalidRequest      = "invalid_request"
@@ -84,9 +118,10 @@ const (
 var errNoApp = refusal.Refuse(http.StatusServiceUnavailable, ReasonGitHubNotConfigured,
 	"this deployment has no GitHub App configured, so GitHub cannot be connected and no repository cloned through it")
 
-// gitHubRefusal turns what GitHub or the store refused into what the caller is told: the store's
-// missing rows here, the rest as the git host answers them (github.Refusal).
-func gitHubRefusal(logger *zap.Logger, op string, err error, gone int) error {
+// refusal turns what GitHub or the store refused into what the caller is told: the store's
+// missing rows here, the rest as the App answers them.
+func (r *Repositories) refusal(op string, err error, gone int) error {
+	var status interface{ GetStatus() int }
 	switch {
 	case errors.Is(err, db.ErrOrgNotFound):
 		return refusal.NotFound("org")
@@ -96,8 +131,13 @@ func gitHubRefusal(logger *zap.Logger, op string, err error, gone int) error {
 		return refusal.NotFound("platform experiment")
 	case errors.Is(err, db.ErrGitHubInstallStateInvalid):
 		return refusal.Invalid(ReasonInstallStateInvalid, "this return from GitHub does not match an install you started in the last 15 minutes, or it was used already: press Install GitHub App again")
+	case errors.As(err, &status):
+		return err
+	case r.github != nil:
+		return r.github.Refusal(op, err, gone)
+	default:
+		return auth.Internal(r.logger, "github request failed", err, zap.String("operation", op))
 	}
-	return github.Refusal(logger, op, err, gone)
 }
 
 func (r *Repositories) app() (GitHubApp, error) {
@@ -129,7 +169,7 @@ func (r *Repositories) beginInstall(ctx context.Context, orgID, returnTo string)
 	if err != nil {
 		return nil, err
 	}
-	address, err := url.Parse(app.App().InstallURL)
+	address, err := url.Parse(app.Addresses().InstallURL)
 	if err != nil {
 		return nil, err
 	}
@@ -173,9 +213,6 @@ func (r *Repositories) finishInstall(ctx context.Context, state string, installa
 		return nil, err
 	}
 	live, err := app.Installation(ctx, installationID)
-	if errors.Is(err, github.ErrInstallationGone) {
-		err = &github.InstallationGoneError{Account: "the GitHub account", Installation: installationID, Suspended: errors.Is(err, github.ErrInstallationSuspended)}
-	}
 	if err != nil {
 		return nil, err
 	}
@@ -234,7 +271,7 @@ func (r *Repositories) repositories(ctx context.Context, orgID, q string) ([]Rep
 	out := []Repository{}
 	for _, installation := range installations {
 		covered, err := app.Repositories(ctx, installation.InstallationID)
-		if errors.Is(err, github.ErrInstallationGone) {
+		if errors.Is(err, ErrInstallationGone) {
 			r.logger.Warn("a connected github installation is gone", zap.String("orgID", orgID), zap.Int64("installationID", installation.InstallationID))
 			continue
 		}
@@ -251,26 +288,23 @@ func (r *Repositories) repositories(ctx context.Context, orgID, q string) ([]Rep
 	return out, nil
 }
 
-// GitHubAddresses are the GitHub addresses of the platform's App a browser needs.
-type GitHubAddresses = github.App
-
 // App is the platform's GitHub App, as a browser needs its addresses.
 func (r *Repositories) App(ctx context.Context) (GitHubAddresses, error) {
 	if _, err := r.access.Account(ctx); err != nil {
-		return github.App{}, err
+		return GitHubAddresses{}, err
 	}
 	app, err := r.app()
 	if err != nil {
-		return github.App{}, err
+		return GitHubAddresses{}, err
 	}
-	return app.App(), nil
+	return app.Addresses(), nil
 }
 
 // BeginInstall starts an install of the App for orgID; see beginInstall.
 func (r *Repositories) BeginInstall(ctx context.Context, orgID, returnTo string) (*InstallStart, error) {
 	started, err := r.beginInstall(ctx, orgID, returnTo)
 	if err != nil {
-		return nil, gitHubRefusal(r.logger, "create-github-install-state", err, http.StatusUnprocessableEntity)
+		return nil, r.refusal("create-github-install-state", err, http.StatusUnprocessableEntity)
 	}
 	return started, nil
 }
@@ -279,7 +313,7 @@ func (r *Repositories) BeginInstall(ctx context.Context, orgID, returnTo string)
 func (r *Repositories) FinishInstall(ctx context.Context, state string, installationID int64) (*InstallFinished, error) {
 	finished, err := r.finishInstall(ctx, state, installationID)
 	if err != nil {
-		return nil, gitHubRefusal(r.logger, "create-github-installation", err, http.StatusUnprocessableEntity)
+		return nil, r.refusal("create-github-installation", err, http.StatusUnprocessableEntity)
 	}
 	return finished, nil
 }
@@ -295,7 +329,7 @@ func (r *Repositories) Installations(ctx context.Context, orgID string, page Pag
 	}
 	installations, err := r.store.ListGitHubInstallations(ctx, orgID)
 	if err != nil {
-		return nil, 0, gitHubRefusal(r.logger, "list-github-installations", err, http.StatusConflict)
+		return nil, 0, r.refusal("list-github-installations", err, http.StatusConflict)
 	}
 	return pageOf(installations, limit, offset), len(installations), nil
 }
@@ -303,7 +337,7 @@ func (r *Repositories) Installations(ctx context.Context, orgID string, page Pag
 // Disconnect takes an installation away from orgID.
 func (r *Repositories) Disconnect(ctx context.Context, orgID string, installationID int64) error {
 	if err := r.disconnect(ctx, orgID, installationID); err != nil {
-		return gitHubRefusal(r.logger, "delete-github-installation", err, http.StatusConflict)
+		return r.refusal("delete-github-installation", err, http.StatusConflict)
 	}
 	return nil
 }
@@ -314,7 +348,7 @@ func (r *Repositories) MakeDefault(ctx context.Context, orgID string, installati
 		return err
 	}
 	if err := r.store.MakeGitHubInstallationDefault(ctx, orgID, installationID); err != nil {
-		return gitHubRefusal(r.logger, "make-github-installation-default", err, http.StatusConflict)
+		return r.refusal("make-github-installation-default", err, http.StatusConflict)
 	}
 	return nil
 }
@@ -331,14 +365,14 @@ func (r *Repositories) Check(ctx context.Context, orgID string, installationID i
 	}
 	connected, err := r.store.ListGitHubInstallations(ctx, orgID)
 	if err != nil {
-		return gitHubRefusal(r.logger, op, err, http.StatusUnprocessableEntity)
+		return r.refusal(op, err, http.StatusUnprocessableEntity)
 	}
 	i := slices.IndexFunc(connected, func(one *domain.OrgGitHubInstallation) bool { return one.InstallationID == installationID })
 	if i < 0 {
 		return refusal.NotFound("GitHub installation")
 	}
-	if _, err := github.Installed(ctx, app, connected[i]); err != nil {
-		return gitHubRefusal(r.logger, op, err, http.StatusUnprocessableEntity)
+	if err := app.Check(ctx, connected[i]); err != nil {
+		return r.refusal(op, err, http.StatusUnprocessableEntity)
 	}
 	return nil
 }
@@ -355,7 +389,7 @@ func (r *Repositories) List(ctx context.Context, orgID, q string, page Page) ([]
 	}
 	found, err := r.repositories(ctx, orgID, q)
 	if err != nil {
-		return nil, 0, gitHubRefusal(r.logger, "list-github-repositories", err, http.StatusConflict)
+		return nil, 0, r.refusal("list-github-repositories", err, http.StatusConflict)
 	}
 	return pageOf(found, limit, offset), len(found), nil
 }

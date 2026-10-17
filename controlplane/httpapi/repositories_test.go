@@ -266,7 +266,7 @@ func newGitHubWorld(t *testing.T, withApp bool) *githubWorld {
 	w.app.now = w.store.now
 	access := auth.NewAccess(placement{memStore: w.store})
 	w.host = github.NewHost(w.installations, w.app, experimentTemplate, zap.NewNop())
-	app := accounts.GitHubApp(w.app)
+	var app accounts.GitHubApp = github.NewConnections(w.app, zap.NewNop())
 	if !withApp {
 		app = nil
 	}
@@ -444,7 +444,7 @@ func TestAnInstallIsRefusedUnlessItsStateAndItsInstallationProveIt(t *testing.T)
 		"an installation missing a permission": {func(w *githubWorld) map[string]any {
 			w.app.notGranted[acme.ID] = []string{"administration:write"}
 			return finishBody(w.begin("owner", w.orgA), acme.ID)
-		}, "owner", 422, github.ReasonPermissionMissing, "administration:write"},
+		}, "owner", 422, githost.ReasonPermissionMissing, "administration:write"},
 		"no installation": {func(w *githubWorld) map[string]any { return finishBody(w.begin("owner", w.orgA), 0) }, "owner", 422, accounts.ReasonInvalidRequest, ""},
 		"no state":        {func(w *githubWorld) map[string]any { return finishBody("", acme.ID) }, "owner", 422, accounts.ReasonInvalidRequest, ""},
 		"github rate limits": {func(w *githubWorld) map[string]any {
@@ -582,12 +582,12 @@ func TestRepositoriesAreReadFromGitHubOnEveryCallAcrossTheOrgsInstallations(t *t
 	}
 	// GitHub failing is told apart from the platform failing, and names the installation.
 	w.app.listErr[200] = &github.FailedError{Installation: 200, Status: 500, Err: errors.New(leak)}
-	message := w.refused("member", "GET", path, nil, http.StatusBadGateway, github.ReasonGitHubFailed)
+	message := w.refused("member", "GET", path, nil, http.StatusBadGateway, githost.ReasonFailed)
 	if !strings.Contains(message, "GitHub") || !strings.Contains(message, "installation 200") || !strings.Contains(message, "answered 500") || strings.Contains(message, leak) {
 		t.Fatalf("GitHub failing: %s, want GitHub, the installation and its status named and nothing else", message)
 	}
 	w.app.listErr[200] = &github.FailedError{Installation: 200, Err: errors.New(leak)}
-	if message := w.refused("member", "GET", path, nil, http.StatusBadGateway, github.ReasonGitHubFailed); !strings.Contains(message, "did not answer") {
+	if message := w.refused("member", "GET", path, nil, http.StatusBadGateway, githost.ReasonFailed); !strings.Contains(message, "did not answer") {
 		t.Fatalf("GitHub not answering: %s", message)
 	}
 	w.app.listErr[200] = errors.New("unexpected " + leak)
@@ -689,12 +689,12 @@ func TestACredentialIsRefusedOnceTheRepositoryCanNoLongerBeReached(t *testing.T)
 		"the org connected only another account's":         {func(w *githubWorld) { w.installations.connected[w.orgA] = nil; w.connect(w.orgA, rival) }, 409, github.ReasonInstallationNotConnected},
 		"the repository was taken out of the installation": {func(w *githubWorld) { w.app.covers[100] = w.app.covers[100][:1] }, 409, github.ReasonRepositoryNotReachable},
 		"the app was removed on github":                    {func(w *githubWorld) { delete(w.app.covers, 100) }, 409, github.ReasonInstallationGone},
-		"the installation withholds the access":            {func(w *githubWorld) { w.app.tokenErr = github.ErrPermissionNotGranted }, 409, github.ReasonPermissionMissing},
+		"the installation withholds the access":            {func(w *githubWorld) { w.app.tokenErr = github.ErrPermissionNotGranted }, 409, githost.ReasonPermissionMissing},
 		"github rate limits":                               {func(w *githubWorld) { w.app.tokenErr = github.ErrRateLimited }, 503, github.ReasonUnavailable},
 		"the app key expired":                              {func(w *githubWorld) { w.app.tokenErr = fmt.Errorf("%w (%s)", github.ErrAppCredentials, leak) }, 502, github.ReasonUnavailable},
 		"github fails": {func(w *githubWorld) {
 			w.app.tokenErr = &github.FailedError{Installation: 100, Status: 500, Err: errors.New(leak)}
-		}, 502, github.ReasonGitHubFailed},
+		}, 502, githost.ReasonFailed},
 	} {
 		t.Run(name, func(t *testing.T) {
 			w := newGitHubWorld(t, true)
@@ -769,8 +769,8 @@ func TestARepositoryIsReachableThroughTheInstallationsOfTheProjectsOrgAlone(t *t
 func TestARepositoryIsCreatedOnTheAccountTheProjectsOrgConnected(t *testing.T) {
 	ctx := context.Background()
 	w := newGitHubWorld(t, true)
-	if named, _, err := w.host.Create(ctx, w.projectA, "acme/sweep-1a2b3c4d", ""); named != "" || statusOf(err) != 422 || reasonOf(err) != github.ReasonGitHubNotConnected {
-		t.Fatalf("for an org that connected no GitHub account: Create = %q, %v, want 422 github_not_connected", named, err)
+	if named, _, err := w.host.Create(ctx, w.projectA, "acme/sweep-1a2b3c4d", ""); named != "" || statusOf(err) != 422 || reasonOf(err) != githost.ReasonNotConnected {
+		t.Fatalf("for an org that connected no GitHub account: Create = %q, %v, want 422 git_host_not_connected", named, err)
 	}
 	w.connect(w.orgA, acme)
 	w.connect(w.orgB, rival)
@@ -889,8 +889,8 @@ func TestWhereARepositoryWouldBeCreatedIsCheckedWithGitHubBeforeAnythingIsMade(t
 		"CreatesOn": func() error { _, err := w.host.CreatesOn(ctx, w.projectA, ""); return err },
 		"Create":    func() error { _, _, err := w.host.Create(ctx, w.projectA, "acme/sweep", ""); return err },
 	} {
-		if err := check(); statusOf(err) != 422 || reasonOf(err) != github.ReasonPermissionMissing || !strings.Contains(err.Error(), "administration:write") {
-			t.Errorf("%s on an installation that may not create: %v, want 422 github_permission_missing naming what to grant", name, err)
+		if err := check(); statusOf(err) != 422 || reasonOf(err) != githost.ReasonPermissionMissing || !strings.Contains(err.Error(), "administration:write") {
+			t.Errorf("%s on an installation that may not create: %v, want 422 git_host_permission_missing naming what to grant", name, err)
 		}
 	}
 	w.app.notGranted[acme.ID] = nil
@@ -998,7 +998,7 @@ func TestAConnectedInstallationIsCheckedWithGitHubOnRequest(t *testing.T) {
 	path := fmt.Sprintf("/orgs/%s/github-installations/%d/check", w.orgA, acme.ID)
 	w.ok("member", "GET", path, nil, http.StatusNoContent, nil)
 	w.app.notGranted[acme.ID] = []string{"administration:write"}
-	if message := w.refused("member", "GET", path, nil, http.StatusUnprocessableEntity, github.ReasonPermissionMissing); !strings.Contains(message, "administration:write") {
+	if message := w.refused("member", "GET", path, nil, http.StatusUnprocessableEntity, githost.ReasonPermissionMissing); !strings.Contains(message, "administration:write") {
 		t.Errorf("an installation that has not granted creation: %s, want what it has not granted", message)
 	}
 	delete(w.app.covers, acme.ID)
