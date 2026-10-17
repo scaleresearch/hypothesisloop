@@ -366,12 +366,14 @@ const changeRule = "Only for an idea a person wrote for no agent, and only while
 	"agent_hypothesis for an agent's hypothesis, not_a_persons_idea for one registered with an API key, a coordinator's or " +
 	"staff's token, and not_the_author for anyone else. 409 experiment_closed once the platform experiment is closed."
 
+type checkOutRequest struct {
+	AgentID string `json:"agent_id,omitempty" required:"false" doc:"The agent that checked it out. Absent, the agent token's own."`
+	Branch  string `json:"branch" doc:"The branch checked out for it."`
+}
+
 func (a hypothesesAPI) checkOut(ctx context.Context, in *struct {
 	ID   string `path:"id"`
-	Body struct {
-		AgentID string `json:"agent_id,omitempty" required:"false" doc:"The agent that checked it out. Absent, the agent token's own."`
-		Branch  string `json:"branch" doc:"The branch checked out for it."`
-	}
+	Body checkOutRequest
 }) (*struct{ Body *registry.Checkout }, error) {
 	if in.Body.Branch == "" {
 		return nil, huma.Error400BadRequest("branch is required")
@@ -400,17 +402,19 @@ func (a hypothesesAPI) checkOut(ctx context.Context, in *struct {
 	return &struct{ Body *registry.Checkout }{Body: out}, nil
 }
 
+type registerHypothesisRequest struct {
+	AgentID              string            `json:"agent_id,omitempty" required:"false" doc:"The agent whose hypothesis this is. Absent, it is the caller's own: an agent token's agent, and for any other caller no agent."`
+	PlatformExperimentID string            `json:"platform_experiment_id"`
+	Text                 string            `json:"text"`
+	Links                []domain.LinkSpec `json:"links,omitempty" required:"false" doc:"Where the hypothesis sits: at least one {type: builds_on, to: <hypothesis id or the platform_experiment_id for the objective>}; contradicts and related links to hypotheses are optional."`
+	DistinctFrom         []string          `json:"distinct_from,omitempty" required:"false" doc:"Ids of hypotheses a 409 listed that you read and judged a different claim from yours."`
+}
+
 func (a hypothesesAPI) register(ctx context.Context, in *struct {
-	Body struct {
-		AgentID              string            `json:"agent_id,omitempty" required:"false" doc:"The agent whose hypothesis this is. Absent, it is the caller's own: an agent token's agent, and for any other caller no agent."`
-		PlatformExperimentID string            `json:"platform_experiment_id"`
-		Text                 string            `json:"text"`
-		Links                []domain.LinkSpec `json:"links,omitempty" required:"false" doc:"Where the hypothesis sits: at least one {type: builds_on, to: <hypothesis id or the platform_experiment_id for the objective>}; contradicts and related links to hypotheses are optional."`
-		DistinctFrom         []string          `json:"distinct_from,omitempty" required:"false" doc:"Ids of hypotheses a 409 listed that you read and judged a different claim from yours."`
-	}
+	Body registerHypothesisRequest
 }) (*struct {
 	Status int
-	Body   registry.HypothesisResponse
+	Body   registry.RegisteredHypothesis
 }, error) {
 	b := in.Body
 	if b.PlatformExperimentID == "" {
@@ -444,17 +448,19 @@ func (a hypothesesAPI) register(ctx context.Context, in *struct {
 	}
 	return &struct {
 		Status int
-		Body   registry.HypothesisResponse
-	}{Status: status, Body: registry.HypothesisResponse{Hypothesis: hyp, AlreadyExisted: existed, Links: links, Similar: append([]domain.SimilarHypothesis{}, similar...)}}, nil
+		Body   registry.RegisteredHypothesis
+	}{Status: status, Body: registry.RegisteredHypothesis{Hypothesis: hyp, AlreadyExisted: existed, Links: links, Similar: append([]domain.SimilarHypothesis{}, similar...)}}, nil
+}
+
+type addLinkRequest struct {
+	AgentID string          `json:"agent_id,omitempty" required:"false" doc:"The agent whose link this is. Absent, it is the caller's own: an agent token's agent, and for any other caller no agent."`
+	Type    domain.LinkType `json:"type" doc:"builds_on, contradicts or related."`
+	To      string          `json:"to" doc:"A hypothesis id, or the platform_experiment_id for the objective (builds_on only)."`
 }
 
 func (a hypothesesAPI) addLink(ctx context.Context, in *struct {
 	ID   string `path:"id"`
-	Body struct {
-		AgentID string          `json:"agent_id,omitempty" required:"false" doc:"The agent whose link this is. Absent, it is the caller's own: an agent token's agent, and for any other caller no agent."`
-		Type    domain.LinkType `json:"type" doc:"builds_on, contradicts or related."`
-		To      string          `json:"to" doc:"A hypothesis id, or the platform_experiment_id for the objective (builds_on only)."`
-	}
+	Body addLinkRequest
 }) (*struct {
 	Status int
 	Body   []domain.Link
@@ -480,12 +486,14 @@ func (a hypothesesAPI) addLink(ctx context.Context, in *struct {
 	}{Status: http.StatusCreated, Body: links}, nil
 }
 
+type graphQueryRequest struct {
+	PlatformExperimentID string         `json:"platform_experiment_id" doc:"The platform experiment whose graph the query reads, bound as $pe."`
+	Cypher               string         `json:"cypher"`
+	Params               map[string]any `json:"params,omitempty" required:"false" doc:"Query parameters, referenced as $name; pe and evidence are bound by the platform and refused here."`
+}
+
 func (a hypothesesAPI) query(ctx context.Context, in *struct {
-	Body struct {
-		PlatformExperimentID string         `json:"platform_experiment_id" doc:"The platform experiment whose graph the query reads, bound as $pe."`
-		Cypher               string         `json:"cypher"`
-		Params               map[string]any `json:"params,omitempty" required:"false" doc:"Query parameters, referenced as $name; pe and evidence are bound by the platform and refused here."`
-	}
+	Body graphQueryRequest
 }) (*struct{ Body *registry.QueryResult }, error) {
 	if in.Body.PlatformExperimentID == "" || in.Body.Cypher == "" {
 		return nil, huma.Error400BadRequest("platform_experiment_id and cypher are required")
@@ -668,11 +676,13 @@ func (a hypothesesAPI) get(ctx context.Context, in *struct {
 	}}, nil
 }
 
+type editHypothesisRequest struct {
+	Text string `json:"text"`
+}
+
 func (a hypothesesAPI) edit(ctx context.Context, in *struct {
 	ID   string `path:"id"`
-	Body struct {
-		Text string `json:"text"`
-	}
+	Body editHypothesisRequest
 }) (*struct{ Body *domain.Hypothesis }, error) {
 	if strings.TrimSpace(in.Body.Text) == "" {
 		return nil, huma.Error400BadRequest("text is required")
@@ -717,12 +727,14 @@ func (a hypothesesAPI) remove(ctx context.Context, in *struct {
 	return nil, nil
 }
 
+type addCommentRequest struct {
+	AgentID string `json:"agent_id,omitempty" required:"false" doc:"The agent whose note this is. Absent, it is the caller's own: an agent token's agent, and for any other caller no agent."`
+	Text    string `json:"text"`
+}
+
 func (a hypothesesAPI) addComment(ctx context.Context, in *struct {
 	ID   string `path:"id"`
-	Body struct {
-		AgentID string `json:"agent_id,omitempty" required:"false" doc:"The agent whose note this is. Absent, it is the caller's own: an agent token's agent, and for any other caller no agent."`
-		Text    string `json:"text"`
-	}
+	Body addCommentRequest
 }) (*struct {
 	Status int
 	Body   *domain.HypothesisComment
@@ -773,14 +785,16 @@ func (a hypothesesAPI) listComments(ctx context.Context, in *struct {
 	}{Body: comments, TotalCount: total}, nil
 }
 
+type verdictRequest struct {
+	AgentID string                  `json:"agent_id,omitempty" required:"false" doc:"The agent the verdict is given as. Absent, it is the caller's own: an agent token's agent, and for any other caller no agent, which settles only a hypothesis no agent owns."`
+	Status  domain.HypothesisStatus `json:"status"`
+	Against string                  `json:"against,omitempty" doc:"The control job a confirmed or refuted verdict compares with."`
+	Despite string                  `json:"despite,omitempty" doc:"Why a confirmed or refuted verdict holds without a repeated run and a control."`
+}
+
 func (a hypothesesAPI) setStatus(ctx context.Context, in *struct {
 	ID   string `path:"id"`
-	Body struct {
-		AgentID string                  `json:"agent_id,omitempty" required:"false" doc:"The agent the verdict is given as. Absent, it is the caller's own: an agent token's agent, and for any other caller no agent, which settles only a hypothesis no agent owns."`
-		Status  domain.HypothesisStatus `json:"status"`
-		Against string                  `json:"against,omitempty" doc:"The control job a confirmed or refuted verdict compares with."`
-		Despite string                  `json:"despite,omitempty" doc:"Why a confirmed or refuted verdict holds without a repeated run and a control."`
-	}
+	Body verdictRequest
 }) (*struct{ Body *domain.Hypothesis }, error) {
 	if !domain.ValidHypothesisStatus(in.Body.Status) {
 		return nil, huma.Error400BadRequest("status must be one of: open, confirmed, refuted, inconclusive")

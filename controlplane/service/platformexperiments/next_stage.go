@@ -66,7 +66,7 @@ func (s *Service) nextStage(ctx context.Context, pe *domain.PlatformExperiment) 
 
 // Stages is where the platform experiment id stands on its ladder: the boundaries crossed, the
 // agents still in and those cut.
-func (s *Service) Stages(ctx context.Context, id string) (*StagesStatusResponse, error) {
+func (s *Service) Stages(ctx context.Context, id string) (*StagesStatus, error) {
 	pe, err := s.store.GetPlatformExperiment(ctx, id)
 	if err != nil {
 		return nil, auth.Internal(s.logger, "get stages", err, zap.String("id", id))
@@ -106,7 +106,7 @@ func (s *Service) Stages(ctx context.Context, id string) (*StagesStatusResponse,
 	if err != nil {
 		return nil, auth.Internal(s.logger, "get stages", err, zap.String("id", id))
 	}
-	return &StagesStatusResponse{
+	return &StagesStatus{
 		Stages:               pe.Stages,
 		CurrentStage:         pe.CurrentStage,
 		Progress:             progress,
@@ -117,10 +117,10 @@ func (s *Service) Stages(ctx context.Context, id string) (*StagesStatusResponse,
 	}, nil
 }
 
-// StagesStatusResponse is the response body for GET /platform-experiments/{id}/stages.
+// StagesStatus is the response body for GET /platform-experiments/{id}/stages.
 // Boundaries are published ahead so agents can plan. The cut line is not here; the standings
 // are public at GET /platform-experiments/{id}/results.
-type StagesStatusResponse struct {
+type StagesStatus struct {
 	Stages       []domain.Stage `json:"stages"`
 	CurrentStage int            `json:"current_stage"`
 	// Progress is max(budget_consumed / total_budget, elapsed / duration) — the single clock

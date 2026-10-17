@@ -55,11 +55,13 @@ func (a experimentDataAPI) usage(ctx context.Context, in *struct {
 	}{Body: usage}, nil
 }
 
+type dataKeyRequest struct {
+	AgentID string `json:"agent_id"`
+}
+
 func (a experimentDataAPI) key(ctx context.Context, in *struct {
 	ID   string `path:"id"`
-	Body struct {
-		AgentID string `json:"agent_id"`
-	}
+	Body dataKeyRequest
 }) (*struct{ Body *domain.DataAccess }, error) {
 	if in.Body.AgentID == "" {
 		return nil, huma.Error400BadRequest("agent_id is required")

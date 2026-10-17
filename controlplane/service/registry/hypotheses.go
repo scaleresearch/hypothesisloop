@@ -580,9 +580,9 @@ func (s *Service) requireAgent(ctx context.Context, agentID string) error {
 	return nil
 }
 
-// HypothesisResponse wraps a Hypothesis with whether registration found a pre-existing
+// RegisteredHypothesis wraps a Hypothesis with whether registration found a pre-existing
 // equivalent row, and its outgoing links.
-type HypothesisResponse struct {
+type RegisteredHypothesis struct {
 	*domain.Hypothesis
 	AlreadyExisted bool          `json:"already_existed"`
 	Links          []domain.Link `json:"links"`

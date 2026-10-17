@@ -88,12 +88,14 @@ func registerPlanning(doc *Doc, experiments *platformexperiments.Service, logger
 	}, a.createDraft)
 }
 
+type declineRequest struct {
+	Reason      string `json:"reason" doc:"Why no experiment is proposed, and what would make the goal plannable."`
+	GoalVersion int    `json:"goal_version" doc:"The goal_version of the draft the decline answers."`
+}
+
 func (a planningAPI) putDecline(ctx context.Context, in *struct {
 	ID   string `path:"id"`
-	Body struct {
-		Reason      string `json:"reason" doc:"Why no experiment is proposed, and what would make the goal plannable."`
-		GoalVersion int    `json:"goal_version" doc:"The goal_version of the draft the decline answers."`
-	}
+	Body declineRequest
 }) (*struct{ Body *domain.PlatformExperiment }, error) {
 	if err := a.access.PlatformExperiment(ctx, in.ID); err != nil {
 		return nil, err
@@ -159,14 +161,16 @@ func (a planningAPI) putProposal(ctx context.Context, in *struct {
 	return a.answer(ctx, pe)
 }
 
+type createDraftRequest struct {
+	ProjectID         string `json:"project_id"`
+	Goal              string `json:"goal" doc:"What you want to find out, in a sentence or two. At most 2000 bytes."`
+	Repository        string `json:"repository,omitempty" required:"false" doc:"owner/name on GitHub, covered by an installation the org connected. Left out, the platform creates a private repository on the GitHub account the org connected."`
+	RepositoryAccount string `json:"repository_account,omitempty" required:"false" doc:"The connected GitHub account the new repository is created on. Required only when the org connected several."`
+	Continues         string `json:"continues,omitempty" required:"false" doc:"The id of a closed platform experiment of the same project to carry on, which keeps its code in the repository this one names. Its baseline starts from the commit of that run's baseline job, so both are measured by the same harness. It keeps the metric keys and directions of that run: 422 invalid_metrics for others. Left out, it starts fresh. 422 invalid_continues for one that is no closed platform experiment of the project, keeps its code in another repository or declared no baseline."`
+}
+
 func (a planningAPI) createDraft(ctx context.Context, in *struct {
-	Body struct {
-		ProjectID         string `json:"project_id"`
-		Goal              string `json:"goal" doc:"What you want to find out, in a sentence or two. At most 2000 bytes."`
-		Repository        string `json:"repository,omitempty" required:"false" doc:"owner/name on GitHub, covered by an installation the org connected. Left out, the platform creates a private repository on the GitHub account the org connected."`
-		RepositoryAccount string `json:"repository_account,omitempty" required:"false" doc:"The connected GitHub account the new repository is created on. Required only when the org connected several."`
-		Continues         string `json:"continues,omitempty" required:"false" doc:"The id of a closed platform experiment of the same project to carry on, which keeps its code in the repository this one names. Its baseline starts from the commit of that run's baseline job, so both are measured by the same harness. It keeps the metric keys and directions of that run: 422 invalid_metrics for others. Left out, it starts fresh. 422 invalid_continues for one that is no closed platform experiment of the project, keeps its code in another repository or declared no baseline."`
-	}
+	Body createDraftRequest
 }) (*struct{ Body *domain.PlatformExperiment }, error) {
 	if in.Body.ProjectID == "" {
 		return nil, huma.Error400BadRequest("project_id is required")

@@ -352,11 +352,13 @@ func (a jobsAPI) cancel(ctx context.Context, in *struct {
 	return &struct{ Body *domain.Experiment }{Body: exp}, nil
 }
 
+type jobSummaryRequest struct {
+	Summary string `json:"summary"`
+}
+
 func (a jobsAPI) writeSummary(ctx context.Context, in *struct {
 	ID   string `path:"id"`
-	Body struct {
-		Summary string `json:"summary"`
-	}
+	Body jobSummaryRequest
 }) (*struct{ Body summaryReply }, error) {
 	if err := a.access.OwnExperiment(ctx, in.ID); err != nil {
 		return nil, err

@@ -172,14 +172,16 @@ func (a experimentAgentsAPI) remove(ctx context.Context, in *struct {
 	return &struct{}{}, nil
 }
 
+type finishAgentRequest struct {
+	Reason        string `json:"reason" minLength:"1" doc:"Why nothing is left to do: quota spent, or what was tried and why no further idea is worth a job."`
+	Blocker       string `json:"blocker,omitempty" doc:"What stops the agent that the time and quota it has left cannot fix. Required of a researcher with more than a tenth of the run's time and of its quota left."`
+	BaselineJobID string `json:"baseline_job_id,omitempty" doc:"For an agent of role baseline: its COMPLETED job the platform declares as the baseline in this request, the control the run is ranked against. Needed when it left several jobs that report the ranking metric."`
+}
+
 func (a experimentAgentsAPI) finish(ctx context.Context, in *struct {
 	ID      string `path:"id"`
 	AgentID string `path:"agent_id"`
-	Body    struct {
-		Reason        string `json:"reason" minLength:"1" doc:"Why nothing is left to do: quota spent, or what was tried and why no further idea is worth a job."`
-		Blocker       string `json:"blocker,omitempty" doc:"What stops the agent that the time and quota it has left cannot fix. Required of a researcher with more than a tenth of the run's time and of its quota left."`
-		BaselineJobID string `json:"baseline_job_id,omitempty" doc:"For an agent of role baseline: its COMPLETED job the platform declares as the baseline in this request, the control the run is ranked against. Needed when it left several jobs that report the ranking metric."`
-	}
+	Body    finishAgentRequest
 }) (*struct{ Body finishedAgentBody }, error) {
 	if err := a.access.PlatformExperiment(ctx, in.ID); err != nil {
 		return nil, err

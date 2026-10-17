@@ -97,11 +97,13 @@ func (a budgetAPI) getPlatformExperimentHealth(ctx context.Context, in *struct {
 	}{Body: health}, nil
 }
 
+type runSummaryRequest struct {
+	Summary string `json:"summary"`
+}
+
 func (a budgetAPI) setPlatformExperimentSummary(ctx context.Context, in *struct {
 	ID   string `path:"id"`
-	Body struct {
-		Summary string `json:"summary"`
-	}
+	Body runSummaryRequest
 }) (*struct{ Body *domain.PlatformExperiment }, error) {
 	if err := a.access.PlatformExperiment(ctx, in.ID); err != nil {
 		return nil, err
@@ -161,7 +163,7 @@ func (a budgetAPI) getAgentQuota(ctx context.Context, in *struct {
 func (a budgetAPI) getStages(ctx context.Context, in *struct {
 	ID string `path:"id"`
 }) (*struct {
-	Body platformexperiments.StagesStatusResponse
+	Body platformexperiments.StagesStatus
 }, error) {
 	if err := a.access.PlatformExperiment(ctx, in.ID); err != nil {
 		return nil, err
@@ -174,18 +176,18 @@ func (a budgetAPI) getStages(ctx context.Context, in *struct {
 		return nil, err
 	}
 	return &struct {
-		Body platformexperiments.StagesStatusResponse
+		Body platformexperiments.StagesStatus
 	}{Body: *stages}, nil
+}
+
+type liveCapacity struct {
+	Clusters  []platformexperiments.ClusterCapacity `json:"clusters"`
+	JobImages []domain.JobImage                     `json:"job_images" doc:"The images the deployment offers a job to run in, each with what it carries. A capacity line names the ones that suit its type. A job names one of these by its name, or any other image by its full registry address, host first: 422 unknown_job_image otherwise, and no_cluster_for_image for one no cluster could run."`
 }
 
 func (a budgetAPI) getResourceCapacity(ctx context.Context, in *struct {
 	OrgID string `query:"org_id" doc:"The org whose clusters to read. Required only when your token reaches more than one org."`
-}) (*struct {
-	Body struct {
-		Clusters  []platformexperiments.ClusterCapacity `json:"clusters"`
-		JobImages []domain.JobImage                     `json:"job_images" doc:"The images the deployment offers a job to run in, each with what it carries. A capacity line names the ones that suit its type. A job names one of these by its name, or any other image by its full registry address, host first: 422 unknown_job_image otherwise, and no_cluster_for_image for one no cluster could run."`
-	}
-}, error) {
+}) (*struct{ Body liveCapacity }, error) {
 	orgID, every, err := a.access.PlacementOrg(ctx, in.OrgID)
 	if err != nil {
 		return nil, err
@@ -194,16 +196,8 @@ func (a budgetAPI) getResourceCapacity(ctx context.Context, in *struct {
 	if err != nil {
 		return nil, auth.Internal(a.logger, "get resource capacity", err)
 	}
-	out := &struct {
-		Body struct {
-			Clusters  []platformexperiments.ClusterCapacity `json:"clusters"`
-			JobImages []domain.JobImage                     `json:"job_images" doc:"The images the deployment offers a job to run in, each with what it carries. A capacity line names the ones that suit its type. A job names one of these by its name, or any other image by its full registry address, host first: 422 unknown_job_image otherwise, and no_cluster_for_image for one no cluster could run."`
-		}
-	}{}
-	out.Body.Clusters = clusters
-	out.Body.JobImages = images
-	if out.Body.JobImages == nil {
-		out.Body.JobImages = []domain.JobImage{}
+	if images == nil {
+		images = []domain.JobImage{}
 	}
-	return out, nil
+	return &struct{ Body liveCapacity }{Body: liveCapacity{Clusters: clusters, JobImages: images}}, nil
 }

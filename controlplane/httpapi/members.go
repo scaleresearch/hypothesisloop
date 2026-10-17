@@ -136,10 +136,12 @@ func (a accountsAPI) revokeInvite(ctx context.Context, in *struct {
 	return &struct{}{}, nil
 }
 
+type acceptInviteRequest struct {
+	Token string `json:"token"`
+}
+
 func (a accountsAPI) acceptInvite(ctx context.Context, in *struct {
-	Body struct {
-		Token string `json:"token"`
-	}
+	Body acceptInviteRequest
 }) (*struct{ Body domain.OrgMember }, error) {
 	member, err := a.accounts.AcceptInvite(ctx, in.Body.Token)
 	if err != nil {

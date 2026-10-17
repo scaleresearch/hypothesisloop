@@ -43,12 +43,14 @@ func registerAgents(doc *Doc, agents *accounts.Agents) {
 
 }
 
+type registerAgentRequest struct {
+	ID    string `json:"id" doc:"Stable unique agent id"`
+	Name  string `json:"name" minLength:"1" doc:"The name the agent is shown under and its branches carry."`
+	OrgID string `json:"org_id,omitempty" required:"false" doc:"The org the agent belongs to. Needed only from a token that is not bound to a single org."`
+}
+
 func (a agentsAPI) register(ctx context.Context, in *struct {
-	Body struct {
-		ID    string `json:"id" doc:"Stable unique agent id"`
-		Name  string `json:"name" minLength:"1" doc:"The name the agent is shown under and its branches carry."`
-		OrgID string `json:"org_id,omitempty" required:"false" doc:"The org the agent belongs to. Needed only from a token that is not bound to a single org."`
-	}
+	Body registerAgentRequest
 }) (*struct{ Body *domain.Agent }, error) {
 	// Validated here rather than only where it is used: an agent id is pasted verbatim into
 	// Kubernetes object names and into the object-store key policy that decides what a

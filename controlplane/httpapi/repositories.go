@@ -103,11 +103,13 @@ func (a repositoriesAPI) app(ctx context.Context, _ *struct{}) (*struct{ Body ac
 	return &struct{ Body accounts.GitHubAddresses }{Body: app}, nil
 }
 
+type beginInstallRequest struct {
+	ReturnTo string `json:"return_to" doc:"A path of the UI, as /settings."`
+}
+
 func (a repositoriesAPI) beginInstall(ctx context.Context, in *struct {
 	ID   string `path:"id"`
-	Body struct {
-		ReturnTo string `json:"return_to" doc:"A path of the UI, as /settings."`
-	}
+	Body beginInstallRequest
 }) (*struct{ Body *accounts.InstallStart }, error) {
 	started, err := a.repositories.BeginInstall(ctx, in.ID, in.Body.ReturnTo)
 	if err != nil {
@@ -116,11 +118,13 @@ func (a repositoriesAPI) beginInstall(ctx context.Context, in *struct {
 	return &struct{ Body *accounts.InstallStart }{Body: started}, nil
 }
 
+type finishInstallRequest struct {
+	State          string `json:"state" doc:"The state of POST /orgs/{id}/github-install-states, as GitHub handed it back."`
+	InstallationID int64  `json:"installation_id" doc:"The installation GitHub handed back."`
+}
+
 func (a repositoriesAPI) finishInstall(ctx context.Context, in *struct {
-	Body struct {
-		State          string `json:"state" doc:"The state of POST /orgs/{id}/github-install-states, as GitHub handed it back."`
-		InstallationID int64  `json:"installation_id" doc:"The installation GitHub handed back."`
-	}
+	Body finishInstallRequest
 }) (*struct{ Body *accounts.InstallFinished }, error) {
 	finished, err := a.repositories.FinishInstall(ctx, in.Body.State, in.Body.InstallationID)
 	if err != nil {

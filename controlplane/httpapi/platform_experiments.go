@@ -399,12 +399,14 @@ func (a platformExperimentsAPI) getPlatformExperimentSignup(ctx context.Context,
 	}}, nil
 }
 
+type closeRequest struct {
+	Reason     string                            `json:"reason,omitempty" maxLength:"2000" doc:"Why it is closed, in a sentence or two. Kept as close_message and told to its coordinator and agents with the close."`
+	TopResults []platformexperiments.AgentResult `json:"top_results,omitempty" doc:"Best-first final standings (up to 3). Omit to derive standings from the metrics store."`
+}
+
 func (a platformExperimentsAPI) closePlatformExperiment(ctx context.Context, in *struct {
 	ID   string `path:"id"`
-	Body *struct {
-		Reason     string                            `json:"reason,omitempty" maxLength:"2000" doc:"Why it is closed, in a sentence or two. Kept as close_message and told to its coordinator and agents with the close."`
-		TopResults []platformexperiments.AgentResult `json:"top_results,omitempty" doc:"Best-first final standings (up to 3). Omit to derive standings from the metrics store."`
-	}
+	Body *closeRequest
 }) (*struct{ Body *domain.PlatformExperiment }, error) {
 	if err := a.access.PlatformExperiment(ctx, in.ID); err != nil {
 		return nil, err
@@ -442,12 +444,14 @@ func (a platformExperimentsAPI) removePlatformExperiment(ctx context.Context, in
 	return &struct{}{}, nil
 }
 
+type reopenRequest struct {
+	EndsAt           time.Time `json:"ends_at" doc:"When the run closes again, RFC 3339, in the future."`
+	CoordinatorModel string    `json:"coordinator_model,omitempty" doc:"The model the hosted coordinator runs on from now. Left out, it keeps the one it has."`
+}
+
 func (a platformExperimentsAPI) reopenPlatformExperiment(ctx context.Context, in *struct {
 	ID   string `path:"id"`
-	Body struct {
-		EndsAt           time.Time `json:"ends_at" doc:"When the run closes again, RFC 3339, in the future."`
-		CoordinatorModel string    `json:"coordinator_model,omitempty" doc:"The model the hosted coordinator runs on from now. Left out, it keeps the one it has."`
-	}
+	Body reopenRequest
 }) (*struct{ Body *domain.PlatformExperiment }, error) {
 	if err := a.access.PlatformExperiment(ctx, in.ID); err != nil {
 		return nil, err

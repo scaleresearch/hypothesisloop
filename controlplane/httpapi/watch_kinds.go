@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"reflect"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -41,7 +42,11 @@ func registerWatchKinds(doc *Doc) {
 			"GET /changes takes the same parameters and `limit` (at most 500) and answers one read as {\"changes\", \"next\", \"caught_up\"}.\n\n" +
 			"`hl watch` holds the socket for you: with an agent's token it watches that agent's own resources, " +
 			"reads on from where it stopped last time, and returns with the first batch of changes.",
+		// No operation answers a change frame, so this one names its schema for the document to keep it.
+		Extensions: map[string]any{"x-change-frame": map[string]string{"$ref": "#/components/schemas/Change"}},
 	}, listWatchKinds)
+	schemas := doc.API.OpenAPI().Components.Schemas
+	schemas.Map()["Change"] = huma.SchemaFromType(schemas, reflect.TypeFor[domain.Event]())
 }
 
 func listWatchKinds(context.Context, *struct{}) (*struct{ Body []domain.EventKindDoc }, error) {

@@ -9,19 +9,19 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
 )
 
+type listedClusters struct {
+	Clusters []accounts.ListedCluster `json:"clusters"`
+}
+
 type clusterList struct {
-	Body struct {
-		Clusters []accounts.ListedCluster `json:"clusters"`
-	}
+	Body listedClusters
 }
 
 func listOfClusters(clusters []accounts.ListedCluster, err error) (*clusterList, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := &clusterList{}
-	out.Body.Clusters = clusters
-	return out, nil
+	return &clusterList{Body: listedClusters{Clusters: clusters}}, nil
 }
 
 // clusterUseDescription ends the description of turning a cluster off and on for an org.
@@ -107,11 +107,13 @@ func (a accountsAPI) listClusters(ctx context.Context, in *struct {
 	return listOfClusters(a.accounts.Clusters(ctx, in.ID))
 }
 
+type orderClustersRequest struct {
+	Names []string `json:"names" doc:"The org's own clusters, first placed first."`
+}
+
 func (a accountsAPI) orderClusters(ctx context.Context, in *struct {
 	ID   string `path:"id"`
-	Body struct {
-		Names []string `json:"names" doc:"The org's own clusters, first placed first."`
-	}
+	Body orderClustersRequest
 }) (*clusterList, error) {
 	return listOfClusters(a.accounts.OrderClusters(ctx, in.ID, in.Body.Names))
 }
@@ -138,13 +140,15 @@ func (a accountsAPI) setClusterEnabled(ctx context.Context, orgID, name string, 
 	return &struct{ Body accounts.ClusterView }{Body: *view}, nil
 }
 
+type updateClusterRequest struct {
+	Shared *bool `json:"shared,omitempty" doc:"Staff only."`
+	domain.ClusterSettings
+}
+
 func (a accountsAPI) updateCluster(ctx context.Context, in *struct {
 	ID   string `path:"id"`
 	Name string `path:"name"`
-	Body struct {
-		Shared *bool `json:"shared,omitempty" doc:"Staff only."`
-		domain.ClusterSettings
-	}
+	Body updateClusterRequest
 }) (*struct{ Body accounts.WithdrawnCluster }, error) {
 	withdrawn, err := a.accounts.UpdateCluster(ctx, in.ID, in.Name, in.Body.Shared, in.Body.ClusterSettings)
 	if err != nil {

@@ -33,12 +33,14 @@ func (a accountsAPI) registerAPIKeys(doc *Doc) {
 	}, a.revokeAPIKey)
 }
 
+type createAPIKeyRequest struct {
+	Name      string `json:"name"`
+	ProjectID string `json:"project_id,omitempty"`
+}
+
 func (a accountsAPI) createAPIKey(ctx context.Context, in *struct {
 	ID   string `path:"id"`
-	Body struct {
-		Name      string `json:"name"`
-		ProjectID string `json:"project_id,omitempty"`
-	}
+	Body createAPIKeyRequest
 }) (*struct{ Body accounts.CreatedAPIKey }, error) {
 	created, err := a.accounts.CreateAPIKey(ctx, in.ID, in.Body.ProjectID, in.Body.Name)
 	if err != nil {
@@ -47,24 +49,18 @@ func (a accountsAPI) createAPIKey(ctx context.Context, in *struct {
 	return &struct{ Body accounts.CreatedAPIKey }{Body: *created}, nil
 }
 
+type orgAPIKeys struct {
+	APIKeys []*domain.APIKey `json:"api_keys"`
+}
+
 func (a accountsAPI) listAPIKeys(ctx context.Context, in *struct {
 	ID string `path:"id"`
-}) (*struct {
-	Body struct {
-		APIKeys []*domain.APIKey `json:"api_keys"`
-	}
-}, error) {
+}) (*struct{ Body orgAPIKeys }, error) {
 	keys, err := a.accounts.APIKeys(ctx, in.ID)
 	if err != nil {
 		return nil, err
 	}
-	out := &struct {
-		Body struct {
-			APIKeys []*domain.APIKey `json:"api_keys"`
-		}
-	}{}
-	out.Body.APIKeys = keys
-	return out, nil
+	return &struct{ Body orgAPIKeys }{Body: orgAPIKeys{APIKeys: keys}}, nil
 }
 
 func (a accountsAPI) revokeAPIKey(ctx context.Context, in *struct {

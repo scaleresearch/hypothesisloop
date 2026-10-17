@@ -52,14 +52,16 @@ func (r jobRecordsAPI) metrics(ctx context.Context, in *struct {
 	return &struct{ Body []*domain.MetricDataPoint }{Body: ts}, nil
 }
 
+type appendMetricRequest struct {
+	MetricName       string  `json:"metric_name"`
+	MetricBasis      string  `json:"metric_basis,omitempty"`
+	FractionComplete float64 `json:"fraction_complete"`
+	MetricValue      float64 `json:"metric_value"`
+}
+
 func (r jobRecordsAPI) appendMetric(ctx context.Context, in *struct {
 	ID   string `path:"id"`
-	Body struct {
-		MetricName       string  `json:"metric_name"`
-		MetricBasis      string  `json:"metric_basis,omitempty"`
-		FractionComplete float64 `json:"fraction_complete"`
-		MetricValue      float64 `json:"metric_value"`
-	}
+	Body appendMetricRequest
 }) (*struct{}, error) {
 	if err := r.access.OwnExperiment(ctx, in.ID); err != nil {
 		return nil, err
@@ -93,16 +95,16 @@ func (r jobRecordsAPI) logTail(ctx context.Context, in *struct {
 	return &struct{ Body []string }{Body: lines}, nil
 }
 
+type metricHistory struct {
+	Series []*domain.AgentMetricSeries `json:"series"`
+}
+
 func (r jobRecordsAPI) timeseries(ctx context.Context, in *struct {
 	ID            string  `path:"id"`
 	MetricName    string  `query:"metric_name" doc:"Required. One of the metric keys this platform experiment declares (GET /platform-experiments/{id} -> metrics[].key)."`
 	LookbackHours float64 `query:"lookback_hours" doc:"How far back to plot, default 24. Each series is downsampled to about 500 points regardless of the window, so a longer window costs resolution rather than response size."`
 	End           string  `query:"end" doc:"RFC3339. Where the window ends, default now; a time still ahead means now. Pass a finished platform experiment's ends_at so the window stays on its run."`
-}) (*struct {
-	Body struct {
-		Series []*domain.AgentMetricSeries `json:"series"`
-	}
-}, error) {
+}) (*struct{ Body metricHistory }, error) {
 	if err := r.access.PlatformExperiment(ctx, in.ID); err != nil {
 		return nil, err
 	}
@@ -125,11 +127,5 @@ func (r jobRecordsAPI) timeseries(ctx context.Context, in *struct {
 	if err != nil {
 		return nil, auth.Internal(r.logger, "platform experiment timeseries", err, zap.String("id", in.ID))
 	}
-	resp := &struct {
-		Body struct {
-			Series []*domain.AgentMetricSeries `json:"series"`
-		}
-	}{}
-	resp.Body.Series = series
-	return resp, nil
+	return &struct{ Body metricHistory }{Body: metricHistory{Series: series}}, nil
 }

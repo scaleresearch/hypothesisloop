@@ -85,11 +85,13 @@ func (a accountsAPI) me(ctx context.Context, _ *struct{}) (*struct{ Body account
 	return &struct{ Body accounts.Me }{Body: *me}, nil
 }
 
+type createOrgRequest struct {
+	Name        string `json:"name"`
+	OwnerUserID string `json:"owner_user_id,omitempty" doc:"Staff only: the user who owns the org."`
+}
+
 func (a accountsAPI) createOrg(ctx context.Context, in *struct {
-	Body struct {
-		Name        string `json:"name"`
-		OwnerUserID string `json:"owner_user_id,omitempty" doc:"Staff only: the user who owns the org."`
-	}
+	Body createOrgRequest
 }) (*struct{ Body domain.Org }, error) {
 	org, err := a.accounts.CreateOrg(ctx, in.Body.OwnerUserID, in.Body.Name)
 	if err != nil {
@@ -109,24 +111,18 @@ func (a accountsAPI) renameOrg(ctx context.Context, in *struct {
 	return &struct{ Body domain.Org }{Body: *org}, nil
 }
 
+type projectList struct {
+	Projects []*domain.Project `json:"projects"`
+}
+
 func (a accountsAPI) listProjects(ctx context.Context, in *struct {
 	ID string `path:"id"`
-}) (*struct {
-	Body struct {
-		Projects []*domain.Project `json:"projects"`
-	}
-}, error) {
+}) (*struct{ Body projectList }, error) {
 	projects, err := a.accounts.Projects(ctx, in.ID)
 	if err != nil {
 		return nil, err
 	}
-	out := &struct {
-		Body struct {
-			Projects []*domain.Project `json:"projects"`
-		}
-	}{}
-	out.Body.Projects = projects
-	return out, nil
+	return &struct{ Body projectList }{Body: projectList{Projects: projects}}, nil
 }
 
 func (a accountsAPI) createProject(ctx context.Context, in *struct {

@@ -147,7 +147,7 @@ func TestAGraphWriteIsMadeByTheCredentialThatSentIt(t *testing.T) {
 				f.do(t, http.MethodPost, "/hypotheses", with(map[string]any{
 					"platform_experiment_id": "pe-1", "text": "cosine decay", "links": []map[string]string{{"type": "builds_on", "to": "pe-1"}}}, tc.fields)),
 				func(body []byte) (written, error) {
-					var got registry.HypothesisResponse
+					var got registry.RegisteredHypothesis
 					if err := json.Unmarshal(body, &got); err != nil {
 						return written{}, err
 					}
@@ -261,7 +261,7 @@ func TestRegisteringAnExistingClaimLeavesWhoRegisteredIt(t *testing.T) {
 	f := newRegistryAs(t, ada)
 	again := f.do(t, http.MethodPost, "/hypotheses", map[string]any{
 		"platform_experiment_id": "pe-1", "text": "Warmup  helps", "links": []map[string]string{{"type": "builds_on", "to": "pe-1"}}})
-	var got registry.HypothesisResponse
+	var got registry.RegisteredHypothesis
 	if err := json.Unmarshal(again.Body.Bytes(), &got); err != nil || again.Code != http.StatusOK || !got.AlreadyExisted {
 		t.Fatalf("registering the same text again: got = %d %s (%v), want 200 and already_existed", again.Code, again.Body, err)
 	}

@@ -186,7 +186,7 @@ func TestAPersonsCloseIdeaIsRegisteredWithItsSimilarOnesAsAHint(t *testing.T) {
 	if len(similar) != 1 || similar[0].ID != "h-close" || similar[0].Actor.Name != "agent-1" {
 		t.Errorf("similar: got = %+v, want h-close with its actor named", similar)
 	}
-	body, err := json.Marshal(HypothesisResponse{Hypothesis: h, Links: []domain.Link{}, Similar: similar})
+	body, err := json.Marshal(RegisteredHypothesis{Hypothesis: h, Links: []domain.Link{}, Similar: similar})
 	if err != nil || !strings.Contains(string(body), `"similar":[{"id":"h-close"`) {
 		t.Errorf("the response: got = %s (%v), want similar beside the hypothesis", body, err)
 	}
