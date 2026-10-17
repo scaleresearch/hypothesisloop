@@ -40,6 +40,9 @@ func (p *Provider) Create(ctx context.Context, spec provider.Spec) (string, erro
 		return "", err
 	}
 	id, err := p.rentFirstAvailable(ctx, offers, newCreateRequest(spec))
+	if errors.Is(err, provider.ErrNoOffer) {
+		p.forgetOffers(spec)
+	}
 	if err != nil {
 		return "", err
 	}

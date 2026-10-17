@@ -153,6 +153,7 @@ func newTestProvider(t *testing.T, api *fakeAPI, cfg Settings) *Provider {
 	p.baseURL = api.server.URL
 	p.poll = 5 * time.Millisecond
 	p.shuffle = func([]offer) {}
+	p.marketFor = 0
 	return p
 }
 

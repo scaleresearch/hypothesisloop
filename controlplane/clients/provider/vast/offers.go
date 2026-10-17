@@ -3,7 +3,9 @@ package vast
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"maps"
 	"math/rand/v2"
 	"net/http"
 	"slices"
@@ -25,7 +27,7 @@ const (
 	// offerCandidates is how many machines one Create chooses among.
 	offerCandidates = 5
 	// sizeSearchLimit is how many offers of a size, cheapest first, Rentable reads to say which
-	// filters leave them out when none passes all of them. The search quota counts every row.
+	// filters leave them out when none passes all of them.
 	sizeSearchLimit = 25
 )
 
@@ -184,12 +186,6 @@ func (h *held) keep(onAccount map[string]bool) {
 	}
 }
 
-func (h *held) count() int {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	return len(h.offers)
-}
-
 // free returns the offers nobody in this process has.
 func (h *held) free(offers []offer) []offer {
 	h.mu.Lock()
@@ -218,7 +214,10 @@ func (p *Provider) candidates(ctx context.Context, spec provider.Spec) ([]offer,
 	if err != nil {
 		return nil, err
 	}
-	found, err := p.search(ctx, query)
+	found, _, err := p.offers(ctx, query, offerSearchLimit, p.marketFor)
+	if errors.Is(err, errSearchBudget) {
+		return nil, fmt.Errorf("vast: %w %q: %w", provider.ErrNoOffer, spec.Name, err)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -236,98 +235,192 @@ func (p *Provider) candidates(ctx context.Context, spec provider.Spec) ([]offer,
 
 var _ provider.Market = (*Provider)(nil)
 
-// marketInterval is how long one read of the offers Rentable counts stands. The search quota
-// (20000 offer rows a day) counts every row, and a caller asks about each of its sizes on every
-// pass: a read asks for as many rows as are wanted, so a size wanted up to N times spends up to
-// N rows a read, 288N a day.
-const marketInterval = 5 * time.Minute
+const (
+	// marketInterval is how long one read of an offer search stands.
+	marketInterval = 5 * time.Minute
+	// shortfallInterval is how long a read of the offers of a size alone stands. It only words
+	// why a size has nothing to rent, which changes slowly.
+	shortfallInterval = time.Hour
+	// dailySearchRows is the most offer rows the adapter asks for in a UTC day. The vendor's quota
+	// is 20000 rows a day and counts every row; a restart forgets what was spent, so this stays
+	// below it.
+	dailySearchRows = 15000
+)
 
-// markets is the last read of each search Rentable makes, by the search without its limit, so
-// one caller's passes share it. Each has its own lock, so a pass waits on the vendor only for a
-// search another pass is making.
-type markets struct {
+var errSearchBudget = errors.New("the day's offer search budget is spent")
+
+// searches is the one place offers are searched from: the last read of each search, by the
+// search without its limit, and the rows the day's reads were answered with, as the vendor counts
+// them. A search books its whole limit until it is answered. Each read has its own lock,
+// so a caller waits on the vendor only for a search another caller is making.
+type searches struct {
+	mu     sync.Mutex
+	reads  map[string]*searchRead
+	day    string
+	asked  int
+	budget int
+	warned string
+}
+
+// searchRead is one search's offers. One that failed is not kept.
+type searchRead struct {
 	mu    sync.Mutex
-	reads map[string]*marketRead
+	at    time.Time
+	asked int
+	found []offer
 }
 
-// marketRead is one search's offers, and when no offer passed the filters what leaves them out.
-// One that failed is not kept, so the next Rentable searches again.
-type marketRead struct {
-	mu        sync.Mutex
-	at        time.Time
-	asked     int
-	found     []offer
-	shortfall provider.Supply
-}
-
-func (m *markets) of(key string) *marketRead {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	read, ok := m.reads[key]
+func (s *searches) of(key string) *searchRead {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	read, ok := s.reads[key]
 	if !ok {
-		read = &marketRead{}
-		m.reads[key] = read
+		read = &searchRead{}
+		s.reads[key] = read
 	}
 	return read
 }
 
+// offers is what the read last found.
+func (r *searchRead) offers() []offer {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.found
+}
+
+func (s *searches) forget(key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.reads, key)
+}
+
+// take books rows of the day's budget, or says it has no room for them. firstRefusal is true
+// for the day's first refusal.
+func (s *searches) take(rows int) (firstRefusal bool, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if today := time.Now().UTC().Format(time.DateOnly); s.day != today {
+		s.day, s.asked = today, 0
+	}
+	if s.asked+rows > s.budget {
+		first := s.warned != s.day
+		s.warned = s.day
+		return first, fmt.Errorf("vast: %w: %d of %d rows read today, and a search for %d more is not made until 00:00 UTC", errSearchBudget, s.asked, s.budget, rows)
+	}
+	s.asked += rows
+	return false, nil
+}
+
+// refund gives back rows booked for a search that did not answer with them.
+func (s *searches) refund(rows int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.asked = max(0, s.asked-rows)
+}
+
+func searchKey(query map[string]any) (string, error) {
+	unlimited := maps.Clone(query)
+	delete(unlimited, "limit")
+	key, err := json.Marshal(unlimited)
+	if err != nil {
+		return "", fmt.Errorf("vast: key a search: %w", err)
+	}
+	return string(key), nil
+}
+
+// offers answers query for up to limit offers from its last read while that is younger than
+// standFor and asked for as many or found fewer than it asked, and from a new read within the
+// day's budget otherwise. fresh says the answer is a new read.
+func (p *Provider) offers(ctx context.Context, query map[string]any, limit int, standFor time.Duration) (found []offer, fresh bool, err error) {
+	key, err := searchKey(query)
+	if err != nil {
+		return nil, false, err
+	}
+	read := p.searches.of(key)
+	read.mu.Lock()
+	defer read.mu.Unlock()
+	if !read.at.IsZero() && time.Since(read.at) < standFor && (limit <= read.asked || len(read.found) < read.asked) {
+		return read.found, false, nil
+	}
+	first, err := p.searches.take(limit)
+	if first {
+		p.log("offer searches stop until 00:00 UTC: %v", err)
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	limited := maps.Clone(query)
+	limited["limit"] = limit
+	found, err = p.search(ctx, limited)
+	if err != nil {
+		p.searches.refund(limit)
+		return nil, false, err
+	}
+	p.searches.refund(limit - len(found))
+	read.at, read.asked, read.found = time.Now(), limit, found
+	return found, true, nil
+}
+
+// forgetOffers drops the read of spec's offers once every one Create tried was taken, so the
+// next Create searches again.
+func (p *Provider) forgetOffers(spec provider.Spec) {
+	query, err := p.offerQuery(spec)
+	if err != nil {
+		return
+	}
+	if key, err := searchKey(query); err == nil {
+		p.searches.forget(key)
+	}
+}
+
 // Rentable counts the offers candidates chooses among: the same search, asked for as many offers
-// as are wanted on top of the ones this process holds, which the search goes on listing. When
-// none passes the filters, a second search reads the offers of the spec's size alone and says
-// which filters leave them out. A read stands for marketInterval, unless more are wanted than it
-// asked for and it found as many; the offers this process holds are left out of it on every
-// answer.
+// as are wanted on top of the ones this process holds that its last read listed, as the search
+// goes on listing them. When
+// none passes the filters, the offers of the spec's size alone say which filters leave them out.
+// Both come through offers, so a read stands for a while and the day's budget bounds them.
 func (p *Provider) Rentable(ctx context.Context, spec provider.Spec, atMost int) (provider.Supply, error) {
 	query, err := p.offerQuery(spec)
 	if err != nil {
 		return provider.Supply{}, err
 	}
-	key, err := json.Marshal(query)
+	key, err := searchKey(query)
 	if err != nil {
-		return provider.Supply{}, fmt.Errorf("vast: key the search of %q: %w", spec.Name, err)
+		return provider.Supply{}, err
 	}
-	read := p.markets.of(string(key))
-	read.mu.Lock()
-	defer read.mu.Unlock()
-	wanted := atMost + p.held.count()
-	if time.Since(read.at) >= p.marketFor || (wanted > read.asked && len(read.found) >= read.asked) {
-		query["limit"] = wanted
-		found, err := p.search(ctx, query)
-		if err != nil {
-			return provider.Supply{}, err
-		}
-		shortfall := provider.Supply{}
-		if len(found) == 0 {
-			if shortfall, err = p.shortfall(ctx, spec); err != nil {
-				return provider.Supply{}, err
-			}
-		}
-		read.at, read.asked, read.found, read.shortfall = time.Now(), wanted, found, shortfall
+	previous := p.searches.of(key).offers()
+	heldHere := len(previous) - len(p.held.free(previous))
+	found, _, err := p.offers(ctx, query, atMost+heldHere, p.marketFor)
+	if err != nil {
+		return provider.Supply{}, err
 	}
-	if open := p.held.free(read.found); len(open) > 0 {
+	if open := p.held.free(found); len(open) > 0 {
 		return provider.Supply{Count: min(atMost, len(open))}, nil
 	}
-	if len(read.found) > 0 {
+	if len(found) > 0 {
 		return provider.Supply{Why: "this agent's own instances hold every vast offer within the filters"}, nil
 	}
-	return read.shortfall, nil
+	return p.shortfall(ctx, spec)
 }
 
 // shortfall says why no offer of spec's size passes the filters: which of them leave out the
-// offers there are. It logs how many each leaves out, as one offer may fail several.
+// offers there are. A new read logs how many each leaves out, as one offer may fail several.
 func (p *Provider) shortfall(ctx context.Context, spec provider.Spec) (provider.Supply, error) {
 	query, err := p.sizeQuery(spec)
 	if err != nil {
 		return provider.Supply{}, err
 	}
-	query["limit"] = sizeSearchLimit
-	sized, err := p.search(ctx, query)
+	sized, fresh, err := p.offers(ctx, query, sizeSearchLimit, shortfallInterval)
 	if err != nil {
 		return provider.Supply{}, err
 	}
+	log := func(format string, args ...any) {
+		if fresh {
+			p.log(format, args...)
+		}
+	}
 	if len(sized) == 0 {
 		why := "vast has no on-demand offer of its size (" + describeSize(spec, p.cfg) + ")"
-		p.log("nothing to rent: %s", why)
+		log("nothing to rent: %s", why)
 		return provider.Supply{Why: why}, nil
 	}
 	filters := p.cfg.filters()
@@ -352,7 +445,7 @@ func (p *Provider) shortfall(ctx context.Context, spec provider.Spec) (provider.
 	if len(failing) > 0 {
 		why = "no vast offer of its size passes " + strings.Join(failing, ", ")
 	}
-	p.log("nothing to rent of %s: %s (%s)", describeSize(spec, p.cfg), why, detail)
+	log("nothing to rent of %s: %s (%s)", describeSize(spec, p.cfg), why, detail)
 	return provider.Supply{Why: why}, nil
 }
 

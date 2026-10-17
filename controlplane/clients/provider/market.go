@@ -10,8 +10,9 @@ type Market interface {
 	// the offers Create would choose among, under every filter it rents within, without the
 	// ones this process holds. Only the sizes, the accelerator and AvoidHosts of spec are read.
 	// It rents nothing, and an offer it counted may be gone by the time Create asks for it.
-	// A caller asks on every pass: an adapter whose vendor meters its search answers from a
-	// read it keeps for a short while.
+	// A caller asks only about what jobs wait for, up to about as many as wait. An adapter whose
+	// vendor meters its search answers from a read it keeps for a short while and bounds what it
+	// asks the vendor for in a day.
 	Rentable(ctx context.Context, spec Spec, atMost int) (Supply, error)
 }
 

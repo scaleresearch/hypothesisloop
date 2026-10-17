@@ -43,17 +43,17 @@ const (
 )
 
 type Provider struct {
-	log     func(format string, args ...any)
-	cfg     Settings
-	apiKey  string
-	baseURL string
-	http    *http.Client
-	poll    time.Duration
-	logWait time.Duration
-	shuffle func([]offer)
-	held    *held
-	limited *limited
-	markets *markets
+	log      func(format string, args ...any)
+	cfg      Settings
+	apiKey   string
+	baseURL  string
+	http     *http.Client
+	poll     time.Duration
+	logWait  time.Duration
+	shuffle  func([]offer)
+	held     *held
+	limited  *limited
+	searches *searches
 	// marketFor is marketInterval, shorter in tests.
 	marketFor time.Duration
 }
@@ -120,7 +120,7 @@ func New(cfg Settings, key string, acceleratorTypes []string, log func(format st
 		shuffle:   shuffleOffers,
 		held:      &held{offers: map[int64]holder{}},
 		limited:   &limited{until: map[string]refusal{}},
-		markets:   &markets{reads: map[string]*marketRead{}},
+		searches:  &searches{reads: map[string]*searchRead{}, budget: dailySearchRows},
 		marketFor: marketInterval,
 	}, nil
 }

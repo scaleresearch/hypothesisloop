@@ -2,11 +2,13 @@ package vast
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider"
 )
@@ -134,6 +136,7 @@ func TestRentableAnswersFromAReadWithinItsInterval(t *testing.T) {
 	ctx := context.Background()
 	api.on(http.MethodPost, searchPath, inSequence(answer(500, `{}`), offersOn(11, 12), offersOn(11, 12), offersOn(11, 12, 13)))
 	p := newTestProvider(t, api, gpuSettings())
+	p.marketFor = time.Hour
 	searches := func() int { return len(api.sent(http.MethodPost, searchPath)) }
 
 	if _, err := p.Rentable(ctx, gpuSpec(), 2); err == nil {
@@ -156,5 +159,117 @@ func TestRentableAnswersFromAReadWithinItsInterval(t *testing.T) {
 	p.marketFor = 0
 	if supply, err := p.Rentable(ctx, gpuSpec(), 9); err != nil || supply.Count != 3 || searches() != 4 {
 		t.Fatalf("an old read: %+v, %v, %d searches", supply, err, searches())
+	}
+}
+
+// A read made for Rentable answers Create when it asked for as many offers, and Rentable a read
+// Create made: the cache is keyed by the search, whoever asks.
+func TestRentableAndCreateShareTheReadOfTheirSearch(t *testing.T) {
+	api := newFakeAPI(t)
+	ctx := context.Background()
+	api.on(http.MethodPost, searchPath, offersOn(11, 12, 13))
+	api.on(http.MethodPut, rentPath, answer(200, `{"success":true,"new_contract":9001}`))
+	api.on(http.MethodGet, listPath, answer(200, instancesPage("", instanceJSON(9001, "hl-exp1-a2", ""))))
+	p := newTestProvider(t, api, gpuSettings())
+	p.marketFor = time.Hour
+
+	if supply, err := p.Rentable(ctx, gpuSpec(), offerSearchLimit); err != nil || supply.Count != 3 {
+		t.Fatalf("Rentable = %+v, %v", supply, err)
+	}
+	if _, err := p.Create(ctx, gpuSpec()); err != nil {
+		t.Fatal(err)
+	}
+	if supply, err := p.Rentable(ctx, gpuSpec(), 2); err != nil || supply.Count != 2 {
+		t.Fatalf("Rentable after a rent = %+v, %v, want the two offers not held", supply, err)
+	}
+	if n := len(api.sent(http.MethodPost, searchPath)); n != 1 {
+		t.Fatalf("%d searches, want the one read every answer came from", n)
+	}
+}
+
+// Rentable asks for as many offers as it is asked about, on top of the ones held: a small
+// demand is a small read.
+func TestRentableAsksForNoMoreRowsThanItIsAskedAbout(t *testing.T) {
+	api := newFakeAPI(t)
+	api.on(http.MethodPost, searchPath, offersOn(11, 12, 13))
+	p := newTestProvider(t, api, gpuSettings())
+	if _, err := p.Rentable(context.Background(), gpuSpec(), 3); err != nil {
+		t.Fatal(err)
+	}
+	if limit := api.sent(http.MethodPost, searchPath)[0].Body["limit"]; limit != float64(3) {
+		t.Fatalf("asked for %v rows, want 3", limit)
+	}
+}
+
+// The reason a size has nothing to rent is read again only after shortfallInterval, however
+// often the empty search is.
+func TestTheSearchOfASizeAloneStandsLongerThanTheSearch(t *testing.T) {
+	api := newFakeAPI(t)
+	api.on(http.MethodPost, searchPath, answer(200, `{"offers":[]}`))
+	p := newTestProvider(t, api, gpuSettings())
+	for range 4 {
+		if supply, err := p.Rentable(context.Background(), gpuSpec(), 2); err != nil || supply.Why == "" {
+			t.Fatalf("Rentable = %+v, %v", supply, err)
+		}
+	}
+	searches := api.sent(http.MethodPost, searchPath)
+	if len(searches) != 5 {
+		t.Fatalf("%d searches, want four filtered ones and one of the size alone", len(searches))
+	}
+	for _, s := range searches[2:] {
+		if _, filtered := s.Body["dph_total"]; !filtered {
+			t.Fatal("the size alone was searched again within its interval")
+		}
+	}
+}
+
+// The day's budget bounds the rows read: a search that could pass it is not made, the answer says
+// why and Create finds no offer, and the log says so once. A search spends the rows it was
+// answered with, a failed one none.
+func TestOfferSearchesStopAtTheDaysBudget(t *testing.T) {
+	api := newFakeAPI(t)
+	ctx := context.Background()
+	api.on(http.MethodPost, searchPath, inSequence(answer(500, `{}`), offersOn(11, 12)))
+	p := newTestProvider(t, api, gpuSettings())
+	p.searches.budget = 26
+	var logged strings.Builder
+	p.log = func(format string, args ...any) { fmt.Fprintf(&logged, format+"\n", args...) }
+
+	if _, err := p.Rentable(ctx, gpuSpec(), 20); err == nil {
+		t.Fatal("a failed search answered")
+	}
+	if supply, err := p.Rentable(ctx, gpuSpec(), 20); err != nil || supply.Count != 2 {
+		t.Fatalf("within the budget once the failed search gave its rows back: %+v, %v", supply, err)
+	}
+	searched := len(api.sent(http.MethodPost, searchPath))
+	_, err := p.Rentable(ctx, gpuSpec(), 29)
+	if !errors.Is(err, errSearchBudget) || !strings.Contains(err.Error(), "00:00 UTC") {
+		t.Fatalf("past the budget: %v", err)
+	}
+	if _, err := p.Create(ctx, gpuSpec()); !errors.Is(err, provider.ErrNoOffer) || !errors.Is(err, errSearchBudget) {
+		t.Fatalf("Create past the budget: %v, want no offer for the budget", err)
+	}
+	if n := len(api.sent(http.MethodPost, searchPath)); n != searched {
+		t.Fatalf("%d searches past the budget", n-searched)
+	}
+	if n := strings.Count(logged.String(), "offer searches stop"); n != 1 {
+		t.Fatalf("logged the budget %d times: %q", n, logged.String())
+	}
+}
+
+// A Create that found every offer of its read taken drops the read, so the next one searches.
+func TestACreateThatFindsEveryOfferTakenSearchesAgainNextTime(t *testing.T) {
+	api := newFakeAPI(t)
+	api.on(http.MethodPost, searchPath, offersOn(11))
+	api.on(http.MethodPut, rentPath, answer(400, taken))
+	p := newTestProvider(t, api, gpuSettings())
+	p.marketFor = time.Hour
+	for range 2 {
+		if _, err := p.Create(context.Background(), gpuSpec()); !errors.Is(err, provider.ErrNoOffer) {
+			t.Fatalf("err = %v", err)
+		}
+	}
+	if n := len(api.sent(http.MethodPost, searchPath)); n != 2 {
+		t.Fatalf("%d searches, want one per Create", n)
 	}
 }
