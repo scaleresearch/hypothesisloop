@@ -93,7 +93,7 @@ var layers = []layer{
 	// The git proxy forwards git's smart HTTP to the git host.
 	{path: "controlplane/httpapi/gitproxy", may: []string{"controlplane/auth", "controlplane/clients/githost", "controlplane/domain", "controlplane/refusal"}, web: true},
 	// The model proxy records each model call it forwards in the metrics store.
-	{path: "controlplane/httpapi/modelproxy", may: []string{"controlplane/auth", "controlplane/domain", "controlplane/storage/metricsdb"}},
+	{path: "controlplane/httpapi/modelproxy", may: []string{"controlplane/auth", "controlplane/domain", "controlplane/refusal", "controlplane/storage/metricsdb"}},
 	// Metrics ingest writes what node-agents push into the metrics store.
 	{path: "controlplane/httpapi/metricsingest", may: []string{"controlplane/auth", "controlplane/domain", "controlplane/refusal", "controlplane/storage/metricsdb"}},
 	{path: "controlplane/httpapi/middleware", may: []string{"controlplane/auth"}},

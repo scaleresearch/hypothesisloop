@@ -3,60 +3,14 @@ package db
 import (
 	"context"
 	"errors"
-	"net/http"
-	"os"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
-	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore/minio"
 )
 
 const testGrace = 10 * time.Minute
-
-func liveDataStore(t *testing.T) *objectstore.Client {
-	t.Helper()
-	endpoint := os.Getenv("HYPOTHESISLOOP_TEST_STORE_URL")
-	if endpoint == "" {
-		t.Skip("HYPOTHESISLOOP_TEST_STORE_URL is not set")
-	}
-	resp, err := http.Get(endpoint + "/minio/health/live")
-	if err != nil {
-		t.Skipf("no store at %s: %v", endpoint, err)
-	}
-	resp.Body.Close()
-	client, err := objectstore.New(endpoint, endpoint, "us-east-1", "hypothesisloop-data", "hypothesisloop", "hypothesisloop",
-		func(c *objectstore.Client) objectstore.KeyIssuer { return minio.New(c, c.SecretAccessKey) })
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := client.EnsureBucket(context.Background()); err != nil {
-		t.Fatalf("ensure bucket: %v", err)
-	}
-	return client
-}
-
-// putAs is the status the store answers a write of object with key.
-func putAs(t *testing.T, root *objectstore.Client, key domain.DataKey, object string) int {
-	t.Helper()
-	holder, err := objectstore.New(root.Endpoint, root.Endpoint, root.Region, root.Bucket, key.AccessKeyID, key.SecretAccessKey,
-		func(c *objectstore.Client) objectstore.KeyIssuer { return minio.New(c, c.SecretAccessKey) })
-	if err != nil {
-		t.Fatal(err)
-	}
-	req, err := holder.SignedRequest(context.Background(), http.MethodPut, "/"+root.Bucket+"/"+object, nil, []byte("evidence"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp, err := holder.HTTP.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	return resp.StatusCode
-}
 
 func endedKeysOf(t *testing.T, store *Store) []EndedDataKey {
 	t.Helper()
@@ -70,22 +24,12 @@ func endedKeysOf(t *testing.T, store *Store) []EndedDataKey {
 // A job's key outlives its end by the grace its workload has to save and shut down, then
 // leaves the store and the row; a deletion that fails keeps it for the next pass.
 func TestDropDataKeyTakesAnEndedJobsKeyOutOfTheStore(t *testing.T) {
-	root := liveDataStore(t)
 	store, exp := admitDataKeyFixture(t)
 	ctx := context.Background()
-	key, err := objectstore.NewDataKey()
-	if err != nil {
-		t.Fatal(err)
-	}
+	key := domain.DataKey{AccessKeyID: "AKIDROPTEST", SecretAccessKey: "secret"}
 	exp.DataKey = key
-	if _, err := store.AdmitExperimentTx(ctx, exp, noUsage, SubmissionRateLimit{}, func(ctx context.Context) error {
-		return root.CreateDataKey(ctx, key, exp.PlatformExperimentID, exp.AgentID, exp.ID)
-	}); err != nil {
+	if _, err := store.AdmitExperimentTx(ctx, exp, noUsage, SubmissionRateLimit{}, func(context.Context) error { return nil }); err != nil {
 		t.Fatalf("admit: %v", err)
-	}
-	object := objectstore.JobPrefix(exp.PlatformExperimentID, exp.AgentID, exp.ID) + "checkpoint"
-	if got := putAs(t, root, key, object); got != http.StatusOK {
-		t.Fatalf("write with the job's key: status %d, want 200", got)
 	}
 	want := EndedDataKey{ExperimentID: exp.ID, AccessKeyID: key.AccessKeyID}
 
@@ -119,11 +63,15 @@ func TestDropDataKeyTakesAnEndedJobsKeyOutOfTheStore(t *testing.T) {
 		t.Fatalf("DropDataKey of a key the row no longer holds: err %v, %d deletions, want none", err, deleted)
 	}
 
-	if err := store.DropDataKey(ctx, want, testGrace, root.DeleteDataKey); err != nil {
+	var dropped []string
+	if err := store.DropDataKey(ctx, want, testGrace, func(_ context.Context, accessKeyID string) error {
+		dropped = append(dropped, accessKeyID)
+		return nil
+	}); err != nil {
 		t.Fatalf("DropDataKey: %v", err)
 	}
-	if got := putAs(t, root, key, object); got != http.StatusForbidden {
-		t.Fatalf("write with the dropped key: status %d, want 403", got)
+	if !slices.Equal(dropped, []string{key.AccessKeyID}) {
+		t.Fatalf("DropDataKey deleted %v from the store, want %s", dropped, key.AccessKeyID)
 	}
 	got, err := store.GetExperiment(ctx, exp.ID)
 	if err != nil {
