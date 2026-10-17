@@ -111,7 +111,7 @@ case "${command}" in
   push)
     for name in "$@"; do
       if [[ "${name}" == chart ]]; then
-        helm package runtime/k8s/infra/chart --version "${chart_version}" --app-version "${tag}" --destination "${session}" >/dev/null
+        helm package deploy/charts/hypothesisloop-cluster-agent --version "${chart_version}" --app-version "${tag}" --destination "${session}" >/dev/null
         helm push --registry-config "${session}/helm.json" "${session}"/hypothesisloop-cluster-agent-*.tgz "oci://${registry}/charts" >&2
         echo "SIZE chart $(du -k "${session}"/hypothesisloop-cluster-agent-*.tgz | cut -f1)K"
         continue

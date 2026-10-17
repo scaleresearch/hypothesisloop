@@ -56,12 +56,21 @@ func (g grant) allows(action k8stesting.Action) bool {
 	return ok && slices.Contains(g.rule.ResourceNames, named.GetName())
 }
 
-var clusterAgentGrants = sync.OnceValues(func() ([]grant, error) {
-	out, err := exec.Command("helm", "template", "hypothesisloop-cluster-agent", "../../infra/chart", "--namespace", "hypothesisloop", "--kube-version", "1.34.0",
+// renderChart is every object the cluster-agent chart renders with its builder enabled.
+var renderChart = sync.OnceValues(func() ([]byte, error) {
+	out, err := exec.Command("helm", "template", "hypothesisloop-cluster-agent", "../../../../deploy/charts/hypothesisloop-cluster-agent", "--namespace", "hypothesisloop", "--kube-version", "1.34.0",
 		"--set-string", "clusterName=edge,apiURL=http://api,metricsURL=http://metrics,runtimeToken=t,images.registry=r,images.tag=t1",
 		"--set", "builder.enabled=true").CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("helm template: %w\n%s", err, out)
+	}
+	return out, nil
+})
+
+var clusterAgentGrants = sync.OnceValues(func() ([]grant, error) {
+	out, err := renderChart()
+	if err != nil {
+		return nil, err
 	}
 	roles, clusterRoles := map[string][]rbacv1.PolicyRule{}, map[string][]rbacv1.PolicyRule{}
 	var bindings []rbacv1.RoleBinding
@@ -161,6 +170,38 @@ func chartDynamic(t *testing.T, listKinds map[schema.GroupVersionResource]string
 	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds, objects...)
 	requireChartGrants(t, &dyn.Fake)
 	return dyn
+}
+
+// The agent holds no right to create them, so a job would never start on a cluster whose chart
+// names them differently from what the agent puts on a pod.
+func TestTheChartInstallsTheNamespaceAndPriorityClassesTheAgentNames(t *testing.T) {
+	out, err := renderChart()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var namespaces, classes []string
+	decoder := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(out), 4096)
+	for {
+		var object unstructured.Unstructured
+		if err := decoder.Decode(&object.Object); err == io.EOF {
+			break
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		switch object.GetKind() {
+		case "Namespace":
+			namespaces = append(namespaces, object.GetName())
+		case "PriorityClass":
+			classes = append(classes, object.GetName())
+		}
+	}
+	slices.Sort(classes)
+	if want := []string{HypothesisLoopNamespace}; !slices.Equal(namespaces, want) {
+		t.Errorf("namespaces = %v, want %v", namespaces, want)
+	}
+	if want := []string{PriorityClassBurst, PriorityClassGuaranteed}; !slices.Equal(classes, want) {
+		t.Errorf("PriorityClasses = %v, want %v", classes, want)
+	}
 }
 
 // The checks above are only as good as their reading of the chart.

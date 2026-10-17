@@ -13,14 +13,14 @@ source "${SCRIPT_DIR}/../lib/auth.sh"
 
 TAG="${TAG:?run make reload, which builds the images and exports their TAG}"
 
-# node-agent/cluster-agent run as manifests pinned to a tag (runtime/k8s/infra/install.sh's
+# node-agent/cluster-agent run as manifests pinned to a tag (deploy/charts/hypothesisloop-cluster-agent/install.sh's
 # TAG), so a plain pod restart alone would keep pulling the OLD tag under IfNotPresent -- the
 # manifest itself must be re-applied with the new TAG for a delete+recreate to fetch anything.
 HOST_ADDRESS="$(cat "${SCRIPT_DIR}/../.host-address")"
 CLUSTER_NAME="local" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
   API_URL="http://host.containers.internal:8081" METRICS_URL="http://host.containers.internal:8084" \
   REGISTRY_URL="${HOST_ADDRESS}:5000" TAG="${TAG}" RUNTIME_TOKEN="$(lib_runtime_token local)" \
-  bash "${SCRIPT_DIR}/../../runtime/k8s/infra/install.sh"
+  bash "${SCRIPT_DIR}/../../deploy/charts/hypothesisloop-cluster-agent/install.sh"
 
 if kubectl --context "${CONTEXT_NAME}" get deploy/hypothesisloop-cluster-agent -n hypothesisloop &>/dev/null; then
 echo "==> Restarting cluster-agent/node-agent pods..."

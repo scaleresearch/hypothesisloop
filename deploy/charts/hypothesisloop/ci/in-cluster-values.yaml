@@ -1,5 +1,5 @@
 # A self-hosted install with every store in the cluster, no identity provider and its own git host. Every value is
-# made up. The chart's tests render it (controlplane/infra/helm/chart_test.go).
+# made up. The chart's tests render it (deploy/charts/hypothesisloop/chart_test.go).
 namespace:
   create: false
 images:

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Installs or upgrades the HypothesisLoop runtime of one Kubernetes cluster from this checkout's
-# chart (chart/). Re-running it upgrades in place. A cluster without a checkout uses the command
+# chart (this directory). Re-running it upgrades in place. A cluster without a checkout uses the command
 # the UI or `hl cluster add` prints, which installs the same chart from the registry.
 #
 # Usage: install.sh [--dry-run]
@@ -9,7 +9,7 @@
 #              agent's image, that a node pulls both images, that the pod reaches the API and the
 #              metrics service, and that the API takes the runtime token. Nothing else is changed.
 #
-# Settings (env vars; chart/values.yaml says what each value means):
+# Settings (env vars; values.yaml says what each value means):
 #   CLUSTER_NAME        -> clusterName (required)
 #   API_URL             -> apiURL (required). Pods resolve it with the cluster's DNS, so a
 #                          control plane on a tailnet is named by its IP, not its tailnet name.
@@ -215,7 +215,7 @@ MANIFEST
 }
 
 if [[ "${DRY_RUN}" == true ]]; then
-  helm template "${RELEASE}" "${SCRIPT_DIR}/chart" --namespace "${NAMESPACE}" --kube-version "${server_version}" \
+  helm template "${RELEASE}" "${SCRIPT_DIR}" --namespace "${NAMESPACE}" --kube-version "${server_version}" \
     "${chart_values[@]}" >/dev/null <<VALUES
 runtimeToken: "${RUNTIME_TOKEN}"
 VALUES
@@ -230,7 +230,7 @@ fi
 
 echo "==> Installing"
 # --take-ownership adopts a jobs namespace that an agent from before the chart created.
-helm upgrade --install "${RELEASE}" "${SCRIPT_DIR}/chart" \
+helm upgrade --install "${RELEASE}" "${SCRIPT_DIR}" \
   --kube-context "${KUBE_CONTEXT}" --namespace "${NAMESPACE}" --create-namespace --take-ownership \
   "${chart_values[@]}" <<VALUES
 runtimeToken: "${RUNTIME_TOKEN}"

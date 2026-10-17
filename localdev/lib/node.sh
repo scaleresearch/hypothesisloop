@@ -156,7 +156,7 @@ lib_registry_reachable_ip() {
 # is dev-only and never TLS-terminated. With LOCAL_REACHABLE_ADDRESS set, the settings name the
 # images under that address, and a local node pulls those through <registry_host> as well, so it
 # never depends on the other network. A remote cluster trusts the registry through the chart's
-# insecureRegistry (runtime/k8s/infra/chart/values.yaml).
+# insecureRegistry (deploy/charts/hypothesisloop-cluster-agent/values.yaml).
 lib_registries_yaml() {
   local registry_host="$1" reachable
   reachable="$(lib_reachable_address)" || return 1

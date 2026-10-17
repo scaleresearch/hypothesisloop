@@ -1,4 +1,4 @@
-package infra
+package clusteragent
 
 import (
 	"bytes"
@@ -13,11 +13,13 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/apimachinery/pkg/util/yaml"
-
-	"github.com/scaleresearch/hypothesisloop/runtime/k8s/internal/k8sexec"
 )
 
 const secretToken = "hls_dGhlLXNlY3JldA.c2lnbmF0dXJl"
+
+// jobsNamespace is where every job runs and the prefix of its PriorityClasses, which the agent
+// names on each pod (k8sexec's chart test holds the agent to them).
+const jobsNamespace = "hypothesisloop-jobs"
 
 // minKubeVersion is the oldest Kubernetes the chart installs on (Chart.yaml kubeVersion).
 const minKubeVersion = "1.34.0"
@@ -297,7 +299,7 @@ func TestTheMakeRecipeDoesNotEchoTheRuntimeToken(t *testing.T) {
 	if strings.Contains(string(out), secretToken) {
 		t.Fatalf("the recipe make would echo carries the token:\n%s", out)
 	}
-	if !strings.Contains(string(out), "runtime/k8s/infra/install.sh") {
+	if !strings.Contains(string(out), "deploy/charts/hypothesisloop-cluster-agent/install.sh") {
 		t.Fatalf("make -n printed no install recipe:\n%s", out)
 	}
 }
@@ -309,7 +311,7 @@ func TestClusterAgentDoesNotTolerateEveryTaint(t *testing.T) {
 	if _, err := exec.LookPath("helm"); err != nil {
 		t.Skip("helm is not installed")
 	}
-	out, err := exec.Command("helm", "template", "chart", "--show-only", "templates/cluster-agent.yaml", "--kube-version", minKubeVersion,
+	out, err := exec.Command("helm", "template", ".", "--show-only", "templates/cluster-agent.yaml", "--kube-version", minKubeVersion,
 		"--set-string", "clusterName=edge,apiURL=http://api,metricsURL=http://metrics,runtimeToken=t,images.registry=r,images.tag=t1").CombinedOutput()
 	if err != nil {
 		t.Fatalf("helm template: %v\n%s", err, out)
@@ -344,7 +346,7 @@ func render(t *testing.T, set ...string) []map[string]any {
 	if _, err := exec.LookPath("helm"); err != nil {
 		t.Skip("helm is not installed")
 	}
-	args := []string{"template", "hypothesisloop-cluster-agent", "chart", "--namespace", "hypothesisloop", "--kube-version", minKubeVersion,
+	args := []string{"template", "hypothesisloop-cluster-agent", ".", "--namespace", "hypothesisloop", "--kube-version", minKubeVersion,
 		"--set-string", "clusterName=edge,apiURL=http://api,metricsURL=http://metrics,runtimeToken=t,images.registry=r,images.tag=t1"}
 	// helm applies --set-string after --set, so a string value replaces one of the defaults above
 	// only as another --set-string: such a value is given as "string:key=value".
@@ -408,7 +410,7 @@ func TestTheRuntimeChangesNothingOutsideTheJobsNamespace(t *testing.T) {
 	}
 	for _, kind := range []string{"Role", "RoleBinding"} {
 		for _, object := range ofKind(objects, kind) {
-			if metadata(object, "namespace") != k8sexec.HypothesisLoopNamespace {
+			if metadata(object, "namespace") != jobsNamespace {
 				t.Errorf("%s %s is in namespace %q", kind, metadata(object, "name"), metadata(object, "namespace"))
 			}
 		}
@@ -420,14 +422,14 @@ func TestTheRuntimeChangesNothingOutsideTheJobsNamespace(t *testing.T) {
 func TestTheChartInstallsTheNamespaceAndPriorityClassesJobsName(t *testing.T) {
 	objects := render(t)
 	namespaces := ofKind(objects, "Namespace")
-	if len(namespaces) != 1 || metadata(namespaces[0], "name") != k8sexec.HypothesisLoopNamespace {
+	if len(namespaces) != 1 || metadata(namespaces[0], "name") != jobsNamespace {
 		t.Fatalf("namespaces rendered: %v", namespaces)
 	}
 	classes := map[string]map[string]any{}
 	for _, class := range ofKind(objects, "PriorityClass") {
 		classes[metadata(class, "name")] = class
 	}
-	guaranteed, burst := classes[k8sexec.PriorityClassGuaranteed], classes[k8sexec.PriorityClassBurst]
+	guaranteed, burst := classes[jobsNamespace+"-guaranteed"], classes[jobsNamespace+"-burst"]
 	if len(classes) != 2 || guaranteed == nil || burst == nil {
 		t.Fatalf("PriorityClasses rendered: %v", classes)
 	}
@@ -641,7 +643,7 @@ func TestTheChartRefusesAKubernetesWithoutDRAv1(t *testing.T) {
 	if _, err := exec.LookPath("helm"); err != nil {
 		t.Skip("helm is not installed")
 	}
-	out, err := exec.Command("helm", "template", "chart", "--kube-version", "1.33.0",
+	out, err := exec.Command("helm", "template", ".", "--kube-version", "1.33.0",
 		"--set-string", "clusterName=edge,apiURL=http://api,metricsURL=http://metrics,runtimeToken=t,images.registry=r,images.tag=t1").CombinedOutput()
 	if err == nil || !strings.Contains(string(out), "kubeVersion") {
 		t.Errorf("helm template on 1.33: err = %v\n%s", err, out)

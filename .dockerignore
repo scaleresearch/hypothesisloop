@@ -21,9 +21,8 @@ docs/
 # UI (not needed in Go images)
 controlplane/ui/
 
-# Infra definitions (not needed at runtime)
-controlplane/infra/
-runtime/k8s/infra/
+# Charts, install scripts and the local stack (not needed at runtime)
+deploy/
 localdev/
 tests/*.sh
 

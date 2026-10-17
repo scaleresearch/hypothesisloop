@@ -1,6 +1,4 @@
-// Package charttest renders the control-plane chart for tests, with no cluster and no secret:
-// what each process would be started with, so its own loader can be run on it.
-package charttest
+package hypothesisloop
 
 import (
 	"bufio"
@@ -11,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -56,24 +53,17 @@ type Release struct {
 	NetworkPolicies map[string]networkingv1.NetworkPolicy
 }
 
-func chartDir() string {
-	_, file, _, _ := runtime.Caller(0)
-	return filepath.Join(filepath.Dir(file), "..", "hypothesisloop")
-}
-
-func settingsFile() string {
-	return filepath.Join(chartDir(), "..", "..", "..", "settings", "hypothesisloop.yaml")
-}
+const settingsFile = "../../../controlplane/settings/hypothesisloop.yaml"
 
 // stage copies the chart beside the settings file as it is now, which is what `make
 // helm-prepare` does in place. A test never reads a copy staged by an earlier run.
 func stage(t testing.TB) string {
 	t.Helper()
 	staged := filepath.Join(t.TempDir(), "hypothesisloop")
-	if err := os.CopyFS(staged, os.DirFS(chartDir())); err != nil {
+	if err := os.CopyFS(staged, os.DirFS(".")); err != nil {
 		t.Fatalf("copy the chart: %v", err)
 	}
-	settings, err := os.ReadFile(settingsFile())
+	settings, err := os.ReadFile(settingsFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +198,7 @@ func env(t testing.TB, deployment string, container corev1.Container, secretName
 		}
 		value, known := Secret[ref.Key]
 		if !known {
-			t.Fatalf("Deployment %s reads Secret key %s, which charttest.Secret does not have", deployment, ref.Key)
+			t.Fatalf("Deployment %s reads Secret key %s, which Secret does not have", deployment, ref.Key)
 		}
 		env[entry.Name] = value
 	}

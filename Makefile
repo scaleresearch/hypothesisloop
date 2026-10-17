@@ -30,7 +30,7 @@ REGISTRY_REACHABLE_IP := $(shell bash -c '. localdev/lib/node.sh && lib_registry
 COMPOSE := podman compose -f $(COMPOSE_FILE) $(if $(REGISTRY_REACHABLE_IP),-f localdev/controlplane/docker-compose.reachable.yml)
 
 # In production REGISTRY names a real registry the operator provisioned and every cluster
-# node already has network access to (see runtime/k8s/infra/install.sh's REGISTRY_URL) --
+# node already has network access to (see deploy/charts/hypothesisloop-cluster-agent/install.sh's REGISTRY_URL) --
 # this default is the local dev registry. TAG names the tree content that was built (localdev/lib/image-tag.sh),
 # so a manifest that pins one tag can never silently start running different bytes under
 # imagePullPolicy: IfNotPresent. Computed once here and exported: every script that deploys an
@@ -176,7 +176,7 @@ controlplane-destroy:
 	$(COMPOSE) down --volumes
 
 # ---- Cluster agent: one per target Kubernetes cluster running jobs ----------
-# Installs/removes the runtime/k8s/infra/chart helm release (node-agent DaemonSet + cluster-agent
+# Installs/removes the deploy/charts/hypothesisloop-cluster-agent helm release (node-agent DaemonSet + cluster-agent
 # Deployment, the only component with real k8s credentials) on the cluster KUBE_CONTEXT/
 # KUBECONFIG_PATH point at (left empty: the current context of ~/.kube/config), pulling the images
 # make images pushed to REGISTRY under TAG.
@@ -199,15 +199,15 @@ cluster-agent-up:
 	@test -n "$$RUNTIME_TOKEN" || { echo "make cluster-agent-up: RUNTIME_TOKEN must be in the environment, the token make -s runtime-token CLUSTER=$(CLUSTER) printed" >&2; exit 1; }
 	CLUSTER_NAME="$(CLUSTER)" API_URL="$(API_URL)" METRICS_URL="$(METRICS_URL)" REGISTRY_URL="$(REGISTRY)" TAG="$(TAG)" \
 	  RUNTIME_TOKEN="$$RUNTIME_TOKEN" KUBECONFIG_PATH="$(KUBECONFIG_PATH)" KUBE_CONTEXT="$(KUBE_CONTEXT)" \
-	  BUILDER="$(BUILDER)" BUILDER_NODE_IMAGES="$(BUILDER_NODE_IMAGES)" INSECURE_REGISTRY="$(INSECURE_REGISTRY)" bash runtime/k8s/infra/install.sh $(INSTALL_FLAGS)
+	  BUILDER="$(BUILDER)" BUILDER_NODE_IMAGES="$(BUILDER_NODE_IMAGES)" INSECURE_REGISTRY="$(INSECURE_REGISTRY)" bash deploy/charts/hypothesisloop-cluster-agent/install.sh $(INSTALL_FLAGS)
 
 cluster-agent-down:
-	bash runtime/k8s/infra/destroy.sh
+	bash deploy/charts/hypothesisloop-cluster-agent/destroy.sh
 
 # ---- Local dev cluster bootstrap --------------------------------------------
 # Spins up a local k3s cluster (control-plane only, tainted no-workload — see install.sh), then
 # installs the cluster-agent bundle onto it (localdev/k3s-macos/install.sh calls
-# runtime/k8s/infra/install.sh itself) and provisions the dev nodes (see k3s-dev-nodes-up below),
+# deploy/charts/hypothesisloop-cluster-agent/install.sh itself) and provisions the dev nodes (see k3s-dev-nodes-up below),
 # so this target alone produces a fully working local dev cluster. Set NODE_COUNT=0 to stay
 # control-plane only.
 k3s-up: render-settings images
@@ -399,7 +399,7 @@ images-remote:
 # matches the images.
 chart-push: check-tag
 	@package="$$(mktemp -d)" && trap 'rm -rf "$$package"' EXIT && \
-	  helm package runtime/k8s/infra/chart --version "0.1.0+$(TAG)" --app-version "$(TAG)" --destination "$$package" >/dev/null && \
+	  helm package deploy/charts/hypothesisloop-cluster-agent --version "0.1.0+$(TAG)" --app-version "$(TAG)" --destination "$$package" >/dev/null && \
 	  $(REGISTRY_LOGIN) && \
 	  helm push "$$package"/hypothesisloop-cluster-agent-*.tgz "oci://$(REGISTRY)/charts" $(if $(filter false,$(REGISTRY_TLS_VERIFY)),--plain-http)
 
@@ -433,18 +433,18 @@ experimentator-base-image:
 # there is exactly one source of truth for platform config) — run before any helm
 # lint/template/install/upgrade. The database schema is not staged: control-service embeds
 # schema.sql and builds it at start (db.EnsureSchema).
-HELM_CHART := controlplane/infra/helm/hypothesisloop
+HELM_CHART := deploy/charts/hypothesisloop
 helm-prepare:
 	mkdir -p $(HELM_CHART)/files
 	cp controlplane/settings/hypothesisloop.yaml $(HELM_CHART)/files/hypothesisloop.yaml
 
 # The two ci values files are the two ways the chart is installed: every store in the cluster, and
 # a database run elsewhere with the runtime processes on. `make test` renders the same two and
-# loads what they render (controlplane/infra/helm/chart_test.go).
+# loads what they render (deploy/charts/hypothesisloop/chart_test.go).
 helm-lint: helm-prepare
 	helm lint $(HELM_CHART) --values $(HELM_CHART)/ci/in-cluster-values.yaml
 	helm lint $(HELM_CHART) --values $(HELM_CHART)/ci/external-values.yaml
-	helm lint runtime/k8s/infra/chart --kube-version 1.34.0 --set-string clusterName=lint,apiURL=http://lint,metricsURL=http://lint,runtimeToken=lint \
+	helm lint deploy/charts/hypothesisloop-cluster-agent --kube-version 1.34.0 --set-string clusterName=lint,apiURL=http://lint,metricsURL=http://lint,runtimeToken=lint \
 		--set-string images.registry=$(REGISTRY),images.tag=$(TAG)
 
 build:

@@ -1,6 +1,6 @@
 # A hosted install: the database runs elsewhere, people sign in through an identity provider,
 # repositories are reached through a GitHub App, and control-service rents from two providers. Every value is made up. The chart's
-# tests render it (controlplane/infra/helm/chart_test.go).
+# tests render it (deploy/charts/hypothesisloop/chart_test.go).
 namespace:
   create: false
 images:

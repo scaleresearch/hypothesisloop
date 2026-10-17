@@ -95,7 +95,9 @@ var layers = []layer{
 	{path: "controlplane/cmd/hl-admin", may: []string{"controlplane/auth", "controlplane/config", "controlplane/domain",
 		"controlplane/clients/githost/github", "controlplane/storage/db"}, exact: true},
 	{path: "controlplane/internal", may: []string{"controlplane"}, own: true, web: true},
-	{path: "controlplane/infra"},
+	// The charts' tests load what the control-plane chart renders with the programs' own loader.
+	{path: "deploy/charts/hypothesisloop", may: []string{"controlplane/config"}},
+	{path: "deploy/charts/hypothesisloop-cluster-agent"},
 }
 
 func layerOf(path string) (layer, bool) {
@@ -134,7 +136,10 @@ func admits(l layer, imported string) bool {
 // Every package of the control plane imports only what its layer admits: handlers call services,
 // services own the stores and clients, and the domain depends on nothing of the platform.
 func TestEveryPackageImportsOnlyWhatItsLayerAdmits(t *testing.T) {
-	for _, line := range goListLines(t, "-f", `{{.ImportPath}} {{join .Imports " "}}`, module+"controlplane/...") {
+	lines := goListLines(t, "-f", `{{.ImportPath}} {{join .Imports " "}}`, module+"controlplane/...")
+	// A chart's package is its tests alone.
+	lines = append(lines, goListLines(t, "-f", `{{.ImportPath}} {{join .TestImports " "}}`, module+"deploy/...")...)
+	for _, line := range lines {
 		fields := strings.Fields(line)
 		pkg := strings.TrimPrefix(fields[0], module)
 		l, ok := layerOf(pkg)

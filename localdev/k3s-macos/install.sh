@@ -184,7 +184,7 @@ echo "==> k3s stage: $(( $(date +%s) - STAGE_T0 ))s"
 
 # The control-plane node donates zero capacity to workloads by default — it never runs
 # training pods, but node-agent's DaemonSet tolerates every taint
-# (runtime/k8s/infra/chart/templates/node-agent.yaml) so it still monitors this node. It pulls
+# (deploy/charts/hypothesisloop-cluster-agent/templates/node-agent.yaml) so it still monitors this node. It pulls
 # hypothesisloop-node-agent from the registry (registries.yaml, written above) the same way
 # every other node does — nothing to import by hand any more.
 CONTROL_PLANE_NODE="$(kubectl --context "${CONTEXT_NAME}" get nodes -o jsonpath='{.items[0].metadata.name}')"
@@ -212,7 +212,7 @@ STAGE_T0=$(date +%s)
 CLUSTER_NAME="local" KUBECONFIG_PATH="${HOME}/.kube/config" KUBE_CONTEXT="${CONTEXT_NAME}" \
   API_URL="http://host.containers.internal:8081" METRICS_URL="http://host.containers.internal:8084" \
   REGISTRY_URL="${HOST_ADDRESS}:5000" RUNTIME_TOKEN="$(lib_runtime_token local)" \
-  bash "${SCRIPT_DIR}/../../runtime/k8s/infra/install.sh"
+  bash "${SCRIPT_DIR}/../../deploy/charts/hypothesisloop-cluster-agent/install.sh"
 echo "==> cluster-agent stage: $(( $(date +%s) - STAGE_T0 ))s"
 
 # Provision the schedulable dev/test nodes (see dev-nodes-up.sh) — on macOS/laptop dev they're the

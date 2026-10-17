@@ -5,7 +5,7 @@
 // scheduler loop (service/scheduler) before this client is ever asked to create a Job, so
 // there's no suspend/admit handshake here. This client just creates a plain batchv1.Job with a
 // native scheduling.k8s.io/v1 PriorityClass so the k8s scheduler orders/preempts pods
-// in tier order. The two priority classes and the namespace are the chart's (runtime/k8s/infra/chart).
+// in tier order. The two priority classes and the namespace are the chart's (deploy/charts/hypothesisloop-cluster-agent).
 //
 // This client belongs exclusively to cluster-agent. The control plane exposes desired state
 // and never owns Kubernetes credentials.

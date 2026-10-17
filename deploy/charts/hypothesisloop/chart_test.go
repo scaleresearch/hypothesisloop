@@ -1,4 +1,4 @@
-package helm_test
+package hypothesisloop
 
 import (
 	"slices"
@@ -6,24 +6,23 @@ import (
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/config"
-	"github.com/scaleresearch/hypothesisloop/controlplane/infra/helm/charttest"
 )
 
 // The Secret each ci values file names.
-var secretNames = map[string]string{charttest.InCluster: "hypothesisloop", charttest.External: "deployment-secrets"}
+var secretNames = map[string]string{InCluster: "hypothesisloop", External: "deployment-secrets"}
 
 // The program each Deployment runs, which loads the settings.
 var programs = map[string]config.Program{"hypothesisloop-control-service": config.ProgramControlService, "hypothesisloop-metrics-service": config.ProgramMetricsService}
 
 // loadRendered runs the loader of deployment's program on the config the chart mounts and the
 // environment it gives the container, and nothing else, and returns the settings it loaded.
-func loadRendered(t *testing.T, release *charttest.Release, values, deployment string) *config.Settings {
+func loadRendered(t *testing.T, release *Release, values, deployment string) *config.Settings {
 	t.Helper()
 	env := release.Env(t, deployment, secretNames[values])
 	if env[config.SettingsPath.Name] != "/settings/hypothesisloop.yaml" {
 		t.Fatalf("%s: %s = %q, want the mounted file", deployment, config.SettingsPath.Name, env[config.SettingsPath.Name])
 	}
-	charttest.Setenv(t, env)
+	Setenv(t, env)
 	for _, key := range config.Keys {
 		if _, set := env[key.Name]; !set {
 			t.Setenv(key.Name, "")
@@ -52,8 +51,8 @@ func loadRendered(t *testing.T, release *charttest.Release, values, deployment s
 
 // Each process is handed exactly the keys its program reads under the settings it is given.
 func TestEachServiceIsGivenExactlyTheKeysItReads(t *testing.T) {
-	for _, values := range []string{charttest.InCluster, charttest.External} {
-		release := charttest.Render(t, values)
+	for _, values := range []string{InCluster, External} {
+		release := Render(t, values)
 		for deployment, program := range programs {
 			t.Run(values+"/"+deployment, func(t *testing.T) {
 				settings := loadRendered(t, release, values, deployment)
@@ -73,7 +72,7 @@ func TestEachServiceIsGivenExactlyTheKeysItReads(t *testing.T) {
 				if !slices.Equal(got, want) {
 					t.Errorf("env = %q, want %q", got, want)
 				}
-				if env[config.DatabaseURL.Name] != charttest.Secret["DATABASE_URL"] || env[config.AuthSigningSecret.Name] != charttest.Secret["AUTH_SIGNING_SECRET"] {
+				if env[config.DatabaseURL.Name] != Secret["DATABASE_URL"] || env[config.AuthSigningSecret.Name] != Secret["AUTH_SIGNING_SECRET"] {
 					t.Error("the database address or the signing secret is not the Secret's")
 				}
 				if settings.DataStore.Bucket != "hypothesisloop-data" || settings.DataStore.MaxBytesPerAgent == 0 || len(settings.AcceleratorTypes) == 0 {
@@ -85,12 +84,12 @@ func TestEachServiceIsGivenExactlyTheKeysItReads(t *testing.T) {
 }
 
 func TestNoSecretIsCreatedAndNoSecretValueIsRendered(t *testing.T) {
-	for _, values := range []string{charttest.InCluster, charttest.External} {
-		release := charttest.Render(t, values)
+	for _, values := range []string{InCluster, External} {
+		release := Render(t, values)
 		if names := release.Kinds["Secret"]; len(names) != 0 {
 			t.Errorf("%s: the chart created Secrets %q; it reads one and creates none", values, names)
 		}
-		for key, value := range charttest.Secret {
+		for key, value := range Secret {
 			if strings.Contains(release.Text, value) {
 				t.Errorf("%s: the value of Secret key %s is in the rendered manifests", values, key)
 			}
@@ -104,7 +103,7 @@ func TestNoSecretIsCreatedAndNoSecretValueIsRendered(t *testing.T) {
 }
 
 func TestEveryPodReadsTheOneNamedSecret(t *testing.T) {
-	release := charttest.Render(t, charttest.External)
+	release := Render(t, External)
 	if strings.Contains(release.Text, "name: hypothesisloop\n") {
 		t.Error("something still reads a Secret by the chart's old default name")
 	}
@@ -121,7 +120,7 @@ func TestEveryPodReadsTheOneNamedSecret(t *testing.T) {
 
 // googleCredentialFiles is each file control-service has mounted from the Secret, by path, and
 // the key it holds.
-func googleCredentialFiles(release *charttest.Release, secretName string) map[string]string {
+func googleCredentialFiles(release *Release, secretName string) map[string]string {
 	pod := release.Deployments["hypothesisloop-control-service"].Spec.Template.Spec
 	var mount string
 	for _, m := range pod.Containers[0].VolumeMounts {
@@ -144,22 +143,22 @@ func googleCredentialFiles(release *charttest.Release, secretName string) map[st
 // the config, and control-service reads its own Google identity, which mints their tokens, as a
 // file of the Secret in a mounted directory. One that builds none reads no Google credential.
 func TestEnvironmentsOfTheValuesReachTheConfigWithTheGoogleIdentityThatMintsTheirTokens(t *testing.T) {
-	release := charttest.Render(t, charttest.External)
-	env := release.Env(t, "hypothesisloop-control-service", secretNames[charttest.External])
+	release := Render(t, External)
+	env := release.Env(t, "hypothesisloop-control-service", secretNames[External])
 	for name := range env {
 		if strings.HasPrefix(name, "HYPOTHESISLOOP_ENVIRONMENT_BUILDER") {
 			t.Errorf("control-service is handed %s", name)
 		}
 	}
-	files := googleCredentialFiles(release, secretNames[charttest.External])
+	files := googleCredentialFiles(release, secretNames[External])
 	if len(files) != 1 || files[env["GOOGLE_APPLICATION_CREDENTIALS"]] != "ENVIRONMENTS_GCP_CREDENTIALS" {
 		t.Errorf("GOOGLE_APPLICATION_CREDENTIALS = %q among the mounted files %v, want the one file of Secret key ENVIRONMENTS_GCP_CREDENTIALS", env["GOOGLE_APPLICATION_CREDENTIALS"], files)
 	}
-	if _, known := charttest.Secret["ENVIRONMENTS_GCP_CREDENTIALS"]; !known {
-		t.Error("charttest.Secret has no ENVIRONMENTS_GCP_CREDENTIALS")
+	if _, known := Secret["ENVIRONMENTS_GCP_CREDENTIALS"]; !known {
+		t.Error("Secret has no ENVIRONMENTS_GCP_CREDENTIALS")
 	}
 	for deployment := range programs {
-		cfg := loadRendered(t, release, charttest.External, deployment)
+		cfg := loadRendered(t, release, External, deployment)
 		want := config.EnvironmentsConfig{Repository: "europe-west1-docker.pkg.dev/made-up-project/hypothesisloop-environments/environment", Provider: config.RegistryProviderGCP,
 			GCP: config.GCPRegistryConfig{Pusher: "env-pusher@made-up-project.iam.gserviceaccount.com", Puller: "env-puller@made-up-project.iam.gserviceaccount.com"}}
 		if cfg.Environments == nil || *cfg.Environments != want {
@@ -167,21 +166,21 @@ func TestEnvironmentsOfTheValuesReachTheConfigWithTheGoogleIdentityThatMintsThei
 		}
 	}
 
-	inCluster := charttest.Render(t, charttest.InCluster)
-	if env := inCluster.Env(t, "hypothesisloop-control-service", secretNames[charttest.InCluster]); env["GOOGLE_APPLICATION_CREDENTIALS"] != "" {
+	inCluster := Render(t, InCluster)
+	if env := inCluster.Env(t, "hypothesisloop-control-service", secretNames[InCluster]); env["GOOGLE_APPLICATION_CREDENTIALS"] != "" {
 		t.Errorf("GOOGLE_APPLICATION_CREDENTIALS = %q on a deployment that builds no environments", env["GOOGLE_APPLICATION_CREDENTIALS"])
 	}
-	if files := googleCredentialFiles(inCluster, secretNames[charttest.InCluster]); len(files) != 0 {
+	if files := googleCredentialFiles(inCluster, secretNames[InCluster]); len(files) != 0 {
 		t.Errorf("mounted %v on a deployment that builds no environments", files)
 	}
-	if cfg := loadRendered(t, inCluster, charttest.InCluster, "hypothesisloop-control-service"); cfg.Environments != nil {
+	if cfg := loadRendered(t, inCluster, InCluster, "hypothesisloop-control-service"); cfg.Environments != nil {
 		t.Errorf("environments = %+v, want none", cfg.Environments)
 	}
 }
 
 func TestTwoRendersOfTheSameValuesAreIdentical(t *testing.T) {
-	for _, values := range []string{charttest.InCluster, charttest.External} {
-		if first, second := charttest.Render(t, values).Text, charttest.Render(t, values).Text; first != second {
+	for _, values := range []string{InCluster, External} {
+		if first, second := Render(t, values).Text, Render(t, values).Text; first != second {
 			t.Errorf("%s: two renders differ, so every upgrade would restart the pods", values)
 		}
 	}
@@ -191,64 +190,64 @@ func TestTwoRendersOfTheSameValuesAreIdentical(t *testing.T) {
 // from the values, or the plain host of the values. Its secret is control-service's alone, from the
 // Secret.
 func TestTheGitHostOfTheValuesReachesTheConfig(t *testing.T) {
-	inCluster := charttest.Render(t, charttest.InCluster)
-	release := charttest.Render(t, charttest.External)
+	inCluster := Render(t, InCluster)
+	release := Render(t, External)
 	for deployment := range programs {
-		plain := loadRendered(t, inCluster, charttest.InCluster, deployment)
+		plain := loadRendered(t, inCluster, InCluster, deployment)
 		if want := (config.PlainGitConfig{BaseURL: "https://git.example.invalid/experiments", Username: "made-up-git-account"}); plain.GitHost.Provider != config.GitHostProviderPlain || plain.GitHost.GitHub != nil || plain.GitHost.Plain == nil || *plain.GitHost.Plain != want {
 			t.Errorf("%s: in-cluster git host is %s, want the values' plain host", deployment, plain.GitHost.Provider)
 		}
-		cfg := loadRendered(t, release, charttest.External, deployment)
+		cfg := loadRendered(t, release, External, deployment)
 		if got := cfg.GitHost; got.Provider != config.GitHostProviderGitHub || got.Plain != nil || got.GitHub == nil || *got.GitHub != (config.GitHubConfig{AppID: 4242, AppSlug: "made-up-app"}) {
 			t.Errorf("%s: the git host is %q, or its App is not the values'", deployment, got.Provider)
 		}
 	}
-	if got := release.Env(t, "hypothesisloop-control-service", secretNames[charttest.External])[config.GitHostGitHubAppPrivateKey.Name]; got != charttest.Secret["GIT_HOST_GITHUB_APP_PRIVATE_KEY"] {
+	if got := release.Env(t, "hypothesisloop-control-service", secretNames[External])[config.GitHostGitHubAppPrivateKey.Name]; got != Secret["GIT_HOST_GITHUB_APP_PRIVATE_KEY"] {
 		t.Errorf("control-service's App key = %q, want the Secret's", got)
 	}
-	if got := inCluster.Env(t, "hypothesisloop-control-service", secretNames[charttest.InCluster])[config.GitHostPlainPassword.Name]; got != charttest.Secret["GIT_HOST_PLAIN_PASSWORD"] {
+	if got := inCluster.Env(t, "hypothesisloop-control-service", secretNames[InCluster])[config.GitHostPlainPassword.Name]; got != Secret["GIT_HOST_PLAIN_PASSWORD"] {
 		t.Errorf("control-service's git password = %q, want the Secret's", got)
 	}
 }
 
 func TestValuesTheChartCannotUseAreRefusedWithTheirName(t *testing.T) {
 	for name, refused := range map[string]struct{ values, set, complaint string }{
-		"no secret name":              {charttest.InCluster, `secretName=""`, "secretName is required"},
-		"no image registry":           {charttest.InCluster, `images.registry=""`, "images.registry is required"},
-		"no image tag":                {charttest.InCluster, `images.tag=""`, "images.tag is required"},
-		"no UI origin":                {charttest.InCluster, `auth.uiOrigin=""`, "auth.uiOrigin is required"},
-		"no agent image":              {charttest.InCluster, `agents.image=""`, "agents.image is required"},
-		"no API address":              {charttest.InCluster, `publicAPIURL=""`, "publicAPIURL is required"},
-		"an environment builder":      {charttest.InCluster, `environmentBuilder.address=tcp://builder.example.invalid:31234`, "environmentBuilder"},
-		"environments with no pusher": {charttest.External, `environments.gcp.pusher=""`, "environments.gcp.pusher is required"},
-		"environments with no puller": {charttest.External, `environments.gcp.puller=""`, "environments.gcp.puller is required"},
-		"environments of no provider": {charttest.External, `environments.provider=""`, "with environments.repository it is gcp"},
-		"accounts with no repository": {charttest.External, `environments.repository=""`, "without environments.repository"},
-		"the API address per reader":  {charttest.InCluster, `agents.apiURL=http://api.example.invalid`, "apiURL"},
-		"no runtime metrics address":  {charttest.InCluster, `runtimes.metricsURL=""`, "runtimes.metricsURL is required"},
-		"no object store address":     {charttest.InCluster, `objectStore.endpoint=""`, "objectStore.endpoint is required"},
-		"a store elsewhere, unnamed":  {charttest.InCluster, `objectStore.enabled=false`, "objectStore.controlPlaneEndpoint is required"},
-		"two addresses for one store": {charttest.InCluster, `objectStore.controlPlaneEndpoint="http://store.example.invalid:9000"`, "objectStore.controlPlaneEndpoint is set while"},
-		"no sign-in service":          {charttest.InCluster, `ui.identity.provider=""`, "with ui.enabled it is supabase"},
-		"no Supabase address":         {charttest.InCluster, `ui.identity.supabase.url=""`, "ui.identity.supabase.url is required"},
-		"no publishable key":          {charttest.InCluster, `ui.identity.supabase.publishableKey=""`, "ui.identity.supabase.publishableKey is required"},
-		"an App with no slug":         {charttest.External, `gitHost.github.appSlug=""`, "gitHost.github.appSlug is required"},
-		"an App with no id":           {charttest.External, `gitHost.github.appId=0`, "gitHost.github.appId is required"},
-		"no git host":                 {charttest.External, `gitHost.provider=""`, "gitHost/provider"},
-		"a git host nobody wrote":     {charttest.External, `gitHost.provider="gitlab"`, "gitHost/provider"},
-		"plain with no root":          {charttest.InCluster, `gitHost.plain.baseURL=""`, "gitHost.plain.baseURL is required"},
-		"providers as text":           {charttest.External, `auth.identityProviders="supabase"`, "/auth/identityProviders"},
-		"a provider with no audience": {charttest.External, `auth.identityProviders=[{"issuer":"https://a.example","jwt_keys":[{"kid":"a","kty":"EC","alg":"ES256"}]}]`, "/auth/identityProviders/0"},
-		"a provider with no keys":     {charttest.External, `auth.identityProviders=[{"issuer":"https://a.example","audience":"a","jwt_keys":[]}]`, "/auth/identityProviders/0/jwt_keys"},
-		"a key field nobody reads":    {charttest.External, `auth.identityProviders=[{"issuer":"https://a.example","audience":"a","jwt_keys":[{"kid":"a","kty":"EC","alg":"ES256","use":"sig"}]}]`, "/auth/identityProviders/0/jwt_keys/0"},
-		"the issuer outside the list": {charttest.External, `auth.issuer="https://a.example"`, "issuer"},
-		"an origin that is a number":  {charttest.External, `auth.uiOrigin=3000`, "/auth/uiOrigin"},
-		"a flag that is text":         {charttest.External, `postgres.enabled="no"`, "/postgres/enabled"},
-		"a secret passed as a value":  {charttest.External, `auth.signingSecret="made-up"`, "signingSecret"},
-		"the removed extra section":   {charttest.External, `config={"extra":"auth: {}"}`, "config"},
-		"a git proxy of its own":      {charttest.External, `gitHost.proxyURL=https://api.example.invalid/git`, "proxyURL"},
+		"no secret name":              {InCluster, `secretName=""`, "secretName is required"},
+		"no image registry":           {InCluster, `images.registry=""`, "images.registry is required"},
+		"no image tag":                {InCluster, `images.tag=""`, "images.tag is required"},
+		"no UI origin":                {InCluster, `auth.uiOrigin=""`, "auth.uiOrigin is required"},
+		"no agent image":              {InCluster, `agents.image=""`, "agents.image is required"},
+		"no API address":              {InCluster, `publicAPIURL=""`, "publicAPIURL is required"},
+		"an environment builder":      {InCluster, `environmentBuilder.address=tcp://builder.example.invalid:31234`, "environmentBuilder"},
+		"environments with no pusher": {External, `environments.gcp.pusher=""`, "environments.gcp.pusher is required"},
+		"environments with no puller": {External, `environments.gcp.puller=""`, "environments.gcp.puller is required"},
+		"environments of no provider": {External, `environments.provider=""`, "with environments.repository it is gcp"},
+		"accounts with no repository": {External, `environments.repository=""`, "without environments.repository"},
+		"the API address per reader":  {InCluster, `agents.apiURL=http://api.example.invalid`, "apiURL"},
+		"no runtime metrics address":  {InCluster, `runtimes.metricsURL=""`, "runtimes.metricsURL is required"},
+		"no object store address":     {InCluster, `objectStore.endpoint=""`, "objectStore.endpoint is required"},
+		"a store elsewhere, unnamed":  {InCluster, `objectStore.enabled=false`, "objectStore.controlPlaneEndpoint is required"},
+		"two addresses for one store": {InCluster, `objectStore.controlPlaneEndpoint="http://store.example.invalid:9000"`, "objectStore.controlPlaneEndpoint is set while"},
+		"no sign-in service":          {InCluster, `ui.identity.provider=""`, "with ui.enabled it is supabase"},
+		"no Supabase address":         {InCluster, `ui.identity.supabase.url=""`, "ui.identity.supabase.url is required"},
+		"no publishable key":          {InCluster, `ui.identity.supabase.publishableKey=""`, "ui.identity.supabase.publishableKey is required"},
+		"an App with no slug":         {External, `gitHost.github.appSlug=""`, "gitHost.github.appSlug is required"},
+		"an App with no id":           {External, `gitHost.github.appId=0`, "gitHost.github.appId is required"},
+		"no git host":                 {External, `gitHost.provider=""`, "gitHost/provider"},
+		"a git host nobody wrote":     {External, `gitHost.provider="gitlab"`, "gitHost/provider"},
+		"plain with no root":          {InCluster, `gitHost.plain.baseURL=""`, "gitHost.plain.baseURL is required"},
+		"providers as text":           {External, `auth.identityProviders="supabase"`, "/auth/identityProviders"},
+		"a provider with no audience": {External, `auth.identityProviders=[{"issuer":"https://a.example","jwt_keys":[{"kid":"a","kty":"EC","alg":"ES256"}]}]`, "/auth/identityProviders/0"},
+		"a provider with no keys":     {External, `auth.identityProviders=[{"issuer":"https://a.example","audience":"a","jwt_keys":[]}]`, "/auth/identityProviders/0/jwt_keys"},
+		"a key field nobody reads":    {External, `auth.identityProviders=[{"issuer":"https://a.example","audience":"a","jwt_keys":[{"kid":"a","kty":"EC","alg":"ES256","use":"sig"}]}]`, "/auth/identityProviders/0/jwt_keys/0"},
+		"the issuer outside the list": {External, `auth.issuer="https://a.example"`, "issuer"},
+		"an origin that is a number":  {External, `auth.uiOrigin=3000`, "/auth/uiOrigin"},
+		"a flag that is text":         {External, `postgres.enabled="no"`, "/postgres/enabled"},
+		"a secret passed as a value":  {External, `auth.signingSecret="made-up"`, "signingSecret"},
+		"the removed extra section":   {External, `config={"extra":"auth: {}"}`, "config"},
+		"a git proxy of its own":      {External, `gitHost.proxyURL=https://api.example.invalid/git`, "proxyURL"},
 	} {
-		if complaint := charttest.RenderError(t, refused.values, refused.set); !strings.Contains(complaint, refused.complaint) {
+		if complaint := RenderError(t, refused.values, refused.set); !strings.Contains(complaint, refused.complaint) {
 			t.Errorf("%s: helm said %q, want it to name %q", name, complaint, refused.complaint)
 		}
 	}
@@ -268,20 +267,20 @@ func TestEachStoreAcceptsOnlyThePodsThatUseIt(t *testing.T) {
 		set    []string
 		want   map[string]access
 	}{
-		"every store in the cluster": {charttest.InCluster, nil, map[string]access{
+		"every store in the cluster": {InCluster, nil, map[string]access{
 			"hypothesisloop-memgraph": memgraph, "hypothesisloop-greptimedb": greptimedb,
 			"hypothesisloop-postgres": {5432, []string{control, metrics}},
 		}},
-		"the database elsewhere": {charttest.External, nil, map[string]access{
+		"the database elsewhere": {External, nil, map[string]access{
 			"hypothesisloop-memgraph": memgraph, "hypothesisloop-greptimedb": greptimedb,
 		}},
-		"every store elsewhere": {charttest.External, []string{
+		"every store elsewhere": {External, []string{
 			`memgraph.external={"enabled":true,"url":"bolt://memgraph.example.invalid:7687"}`,
 			`greptimedb.external={"enabled":true,"url":"http://greptimedb.example.invalid:4000"}`,
 		}, map[string]access{}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			release := charttest.Render(t, rendered.values, rendered.set...)
+			release := Render(t, rendered.values, rendered.set...)
 			if len(release.StatefulSets) == 0 && len(rendered.want) != 0 {
 				t.Fatal("the chart rendered no store")
 			}

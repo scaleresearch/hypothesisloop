@@ -99,7 +99,7 @@ localdev/.bin/
 localdev/.run/
 localdev/.host-address
 localdev/.image-tag
-controlplane/infra/helm/hypothesisloop/files/hypothesisloop.yaml
+deploy/charts/hypothesisloop/files/hypothesisloop.yaml
 local.secrets.env
 
 # Deployment tooling (Pulumi program and stacks, image publishing) is kept locally.
