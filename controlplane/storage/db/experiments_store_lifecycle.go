@@ -71,9 +71,9 @@ func (s *Store) UpdateExperimentPriority(ctx context.Context, id string, score f
 // domain.Experiment.ResolvedJob's doc comment. Its image is decided here and set on resolvedJob:
 // the one image the cluster runs, or on a cluster that runs any, the image the job names.
 //
-// On a shared cluster it is also the one place the platform compute limits (domain.ComputeLimit)
+// On a platform cluster it is also the one place the platform compute limits (domain.ComputeLimit)
 // are kept: under the org's lock, taken after the cluster's, what the org's and the project's
-// placed jobs on shared clusters reserve plus the job's own acch_per_hour stays within each
+// placed jobs on platform clusters reserve plus the job's own acch_per_hour stays within each
 // limit. It returns why it placed nothing, and nil when it placed the job.
 func (s *Store) ClaimSubmitted(ctx context.Context, id, clusterName string, resolvedJob *domain.JobSpec, capacityAvailable func(context.Context, []*domain.Experiment) (bool, error)) (*domain.ClaimRefusal, error) {
 	if resolvedJob == nil {
@@ -124,8 +124,8 @@ ORDER BY submitted_at ASC, id ASC`, clusterName)
 		}
 		// This statement is the one write that places a job, so the placement rule is part of it
 		// (clusterHostsJob), and it starts an attempt, so the reason the last one ended goes with it.
-		// What admission filtered in memory only chose the candidate. Un-sharing,
-		// removing or turning off a cluster takes the admission lock held above, so it either finds
+		// What admission filtered in memory only chose the candidate. Removing or
+		// turning off a cluster takes the admission lock held above, so it either finds
 		// this job already placed or is committed when this statement reads the cluster.
 		q := `UPDATE experiments e
 SET status = 'SUBMITTED', submitted_at = NOW(), cluster_name = $2, last_cluster = $2, eviction_reason = NULL, not_admitted_reason = NULL, updated_at = NOW(),
@@ -149,21 +149,21 @@ RETURNING ` + jobWrittenColumns
 }
 
 // withinComputeLimit is what job id reserves placed (domain.AccHPerHour) and, when clusterName is
-// shared, the refusal of a job that would take its project or its org past its platform compute
+// the platform's, the refusal of a job that would take its project or its org past its platform compute
 // limit. It takes the org's lock: the caller holds the cluster's.
 func withinComputeLimit(ctx context.Context, tx *Write, id, clusterName string) (float64, *domain.ClaimRefusal, error) {
 	var acceleratorType domain.AcceleratorType
 	var count int
-	var shared bool
+	var platform bool
 	var orgID, orgName, projectID, projectName string
 	var limit domain.ComputeLimit
-	err := tx.QueryRow(ctx, `SELECT e.accelerator_type, e.accelerator_count, COALESCE((SELECT c.shared FROM clusters c WHERE c.name = $2), false),
+	err := tx.QueryRow(ctx, `SELECT e.accelerator_type, e.accelerator_count, COALESCE((SELECT `+platformClusterSQL("c")+` FROM clusters c WHERE c.name = $2), false),
 	o.id, o.name, p.id, p.name, o.shared_acch_per_hour, o.project_shared_acch_per_hour
 FROM experiments e
 JOIN platform_experiments pe ON pe.id = e.platform_experiment_id
 JOIN projects p ON p.id = pe.project_id
 JOIN orgs o ON o.id = p.org_id
-WHERE e.id = $1`, id, clusterName).Scan(&acceleratorType, &count, &shared, &orgID, &orgName, &projectID, &projectName, &limit.Org, &limit.Project)
+WHERE e.id = $1`, id, clusterName).Scan(&acceleratorType, &count, &platform, &orgID, &orgName, &projectID, &projectName, &limit.Org, &limit.Project)
 	if err != nil {
 		return 0, nil, fmt.Errorf("compute limit: job: %w", err)
 	}
@@ -171,14 +171,14 @@ WHERE e.id = $1`, id, clusterName).Scan(&acceleratorType, &count, &shared, &orgI
 	if err != nil {
 		return 0, nil, fmt.Errorf("compute limit: job %s: %w", id, err)
 	}
-	if !shared {
+	if !platform {
 		return rate, nil, nil
 	}
 	if err := orgSharedLock(ctx, tx, orgID); err != nil {
 		return 0, nil, fmt.Errorf("compute limit: lock: %w", err)
 	}
 	var orgHeld, projectHeld float64
-	if err := tx.QueryRow(ctx, heldOnSharedSQL, orgID, projectID, id).Scan(&orgHeld, &projectHeld); err != nil {
+	if err := tx.QueryRow(ctx, heldOnPlatformSQL, orgID, projectID, id).Scan(&orgHeld, &projectHeld); err != nil {
 		return 0, nil, fmt.Errorf("compute limit: held: %w", err)
 	}
 	switch {

@@ -92,7 +92,7 @@ func TestEveryNotAdmittedReasonIsStoredWithASentence(t *testing.T) {
 			nodeLabels: map[string]map[string]map[string]string{"metal": {"box": {domain.NodeArchitectureLabel: "arm64"}}}}.neverFitsReason(&amd64Job)},
 		domain.NotAdmittedOrgComputeLimit:     {notAdmittedReasonForSubmitError(computeLimitReached{&domain.ClaimRefusal{Code: domain.NotAdmittedOrgComputeLimit, Holder: "acme", Held: 7, Limit: 8, Needs: 2}})},
 		domain.NotAdmittedProjectComputeLimit: {notAdmittedReasonForSubmitError(computeLimitReached{&domain.ClaimRefusal{Code: domain.NotAdmittedProjectComputeLimit, Holder: "vision", Held: 3, Limit: 4, Needs: 2}})},
-		domain.NotAdmittedExceedsProjectComputeLimit: {installed{registered: map[string]domain.Cluster{"platform": {Name: "platform", Shared: true}},
+		domain.NotAdmittedExceedsProjectComputeLimit: {installed{registered: map[string]domain.Cluster{"platform": {Name: "platform", OrgID: domain.PlatformOrgID}},
 			totals: map[string]domain.Footprint{"platform": {}}, limits: map[string]domain.ComputeLimit{"": {Org: 1, Project: 0.5}}}.neverFitsReason(exp)},
 	}
 	for code, name := range notAdmittedCodes(t) {

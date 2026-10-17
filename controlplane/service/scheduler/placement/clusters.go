@@ -31,7 +31,7 @@ func ClusterAndFootprint(avail map[string]domain.Footprint, registered map[strin
 	if len(types) == 0 {
 		return "", nil
 	}
-	for _, tier := range Tiers(avail, registered) {
+	for _, tier := range Tiers(avail, registered, exp.OrgID) {
 		inTier := within(avail, tier)
 		for _, t := range types {
 			exp.AcceleratorType = t
@@ -43,7 +43,7 @@ func ClusterAndFootprint(avail map[string]domain.Footprint, registered map[strin
 	exp.AcceleratorType = types[0]
 	fallback := exp.Footprint()
 	exp.AcceleratorType = requested
-	return BestFit(avail, registered, fallback), fallback
+	return BestFit(avail, registered, exp.OrgID, fallback), fallback
 }
 
 // AtAcceleratorType names the cluster that can host exp at the accelerator type it currently carries,
@@ -55,7 +55,7 @@ func ClusterAndFootprint(avail map[string]domain.Footprint, registered map[strin
 // can: the caller decides what to do with a job that does not fit anywhere, rather than being
 // handed a cluster that only looks big enough in the scalar.
 func AtAcceleratorType(avail map[string]domain.Footprint, registered map[string]domain.Cluster, nodeAvail, nodeResources map[string]map[string]map[string]int64, nodeLabels map[string]map[string]map[string]string, exp *domain.Experiment) (string, bool) {
-	for _, tier := range Tiers(avail, registered) {
+	for _, tier := range Tiers(avail, registered, exp.OrgID) {
 		best, bestRoom := "", int64(0)
 		for _, candidate := range tier {
 			// The job is not resolved yet, and on a cluster of slots it only fits as the slot it
@@ -105,8 +105,8 @@ func AtAcceleratorType(avail map[string]domain.Footprint, registered map[string]
 // Both steps go by priority before anything else (Tiers): step 1 takes the first fit in
 // placement order, and step 2 answers from the highest-priority tier that holds a cluster which
 // could ever host the request, so the room is made on the compute the org ranked first.
-func BestFit(avail map[string]domain.Footprint, registered map[string]domain.Cluster, footprint domain.Footprint) string {
-	tiers := Tiers(avail, registered)
+func BestFit(avail map[string]domain.Footprint, registered map[string]domain.Cluster, orgID string, footprint domain.Footprint) string {
+	tiers := Tiers(avail, registered, orgID)
 	for _, tier := range tiers {
 		for _, c := range tier {
 			if domain.Fits(avail[c], footprint) {
@@ -137,28 +137,28 @@ func BestFit(avail map[string]domain.Footprint, registered map[string]domain.Clu
 	return ""
 }
 
-// Tiers is the one order every placement tries a job's candidate clusters in: the
-// clusters of the highest priority first, then the next, each tier by name. Within a tier the
+// Tiers is the one order every placement tries a job of orgID's candidate clusters in: the
+// clusters of the highest rank (domain.Cluster.Rank) first, then the next, each tier by name. Within a tier the
 // accelerator type a job prefers decides first, then the room left (AtAcceleratorType), which is why
 // this returns tiers and not one list: the search is tier, then type, then cluster. A name nobody
-// registered ranks with the shared clusters, last.
+// registered ranks with the platform's clusters, last.
 //
 // The order is read off the tick's snapshot of capacity. The claim that follows locks the chosen
 // cluster alone, so room freed on a higher cluster after the snapshot does not move the job.
-func Tiers(candidates map[string]domain.Footprint, registered map[string]domain.Cluster) [][]string {
+func Tiers(candidates map[string]domain.Footprint, registered map[string]domain.Cluster, orgID string) [][]string {
 	names := make([]string, 0, len(candidates))
 	for name := range candidates {
 		names = append(names, name)
 	}
 	sort.Slice(names, func(i, j int) bool {
-		if pi, pj := registered[names[i]].Priority, registered[names[j]].Priority; pi != pj {
+		if pi, pj := registered[names[i]].Rank(orgID), registered[names[j]].Rank(orgID); pi != pj {
 			return pi > pj
 		}
 		return names[i] < names[j]
 	})
 	var tiers [][]string
 	for i, name := range names {
-		if i == 0 || registered[name].Priority != registered[names[i-1]].Priority {
+		if i == 0 || registered[name].Rank(orgID) != registered[names[i-1]].Rank(orgID) {
 			tiers = append(tiers, nil)
 		}
 		tiers[len(tiers)-1] = append(tiers[len(tiers)-1], name)

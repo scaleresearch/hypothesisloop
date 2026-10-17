@@ -61,7 +61,7 @@ func notAdmittedReasonForSubmitError(err error) string {
 	}
 }
 
-// computeLimitReached is a claim on a shared cluster that would take the job's org or project past
+// computeLimitReached is a claim on a platform cluster that would take the job's org or project past
 // its platform compute limit.
 type computeLimitReached struct{ *domain.ClaimRefusal }
 

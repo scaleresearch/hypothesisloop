@@ -20,18 +20,17 @@ const me: Me = {
   projects: [{ id: 'prj_1', org_id: 'org_a', name: 'default', created_at: at }],
 }
 const member: Me = { ...me, orgs: [{ ...me.orgs[0], role: 'member', actions: ['create_api_key'] }] }
-const staff: Me = { ...me, kind: 'staff' }
 
 const owned = (name: string, over: Partial<ListedCluster> = {}): ListedCluster =>
-  ({ name, org_id: 'org_a', shared: false, enabled: true, created_at: at, owned: true, connected: false, autoscaler_enabled: false, actions: [], ...over })
-const platform: ListedCluster = { name: 'platform-gpu', shared: true, enabled: true, created_at: at, owned: false, connected: true, autoscaler_enabled: false, place: 4, actions: [] }
+  ({ name, org_id: 'org_a', enabled: true, created_at: at, owned: true, connected: false, autoscaler_enabled: false, actions: [], ...over })
+const platform: ListedCluster = { name: 'platform-gpu', enabled: true, created_at: at, owned: false, connected: true, autoscaler_enabled: false, place: 4, actions: [] }
 
 // What the API lets the one reading the list do to c: an owner turns any on and off and changes
-// the org's own, staff share one too, and a member does nothing.
+// the org's own, and a member does nothing.
 let viewer: Me
 function withActions(c: ListedCluster): ListedCluster {
   const edits = viewer.orgs[0].actions.includes('edit')
-  const own: ListedCluster['actions'] = c.owned ? ['edit', 'remove', ...(viewer.kind === 'staff' ? ['share' as const] : [])] : []
+  const own: ListedCluster['actions'] = c.owned ? ['edit', 'remove'] : []
   return { ...c, actions: edits ? ['enable', ...own] : [] }
 }
 
@@ -83,7 +82,7 @@ describe('the org\'s clusters', () => {
     expect(within(await rowOf('new')).getByText('Disconnected')).toBeTruthy()
     const shared = await rowOf('platform-gpu')
     expect(within(shared).getByText('Platform')).toBeTruthy()
-    expect(screen.getByRole('columnheader', { name: 'Platform compute, shared with every org, tried after Ada\'s own' })).toBeTruthy()
+    expect(screen.getByRole('columnheader', { name: 'Platform compute, for every org, tried after Ada\'s own' })).toBeTruthy()
     expect(within(shared).getByText('4')).toBeTruthy()
     expect(within(shared).queryByRole('button')).toBeNull()
     expect(names()).toEqual(['lab', 'new', 'spare', 'platform-gpu'])
@@ -188,24 +187,19 @@ describe('a cluster\'s scheduler settings', () => {
     expect(await lab.findByText('scale_up_timeout_seconds must be under 1800')).toBeTruthy()
   })
 
-  it('share their disclosure with removing the cluster, and for staff with sharing it', async () => {
-    const shown = show()
+  it('share their disclosure with removing the cluster', async () => {
+    show()
     const lab = await advanced('lab')
     expect(lab.queryByRole('switch')).toBeNull()
     await userEvent.click(lab.getByRole('button', { name: 'Remove cluster' }))
     await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Remove cluster' }))
     await waitFor(() => expect(removeCluster).toHaveBeenCalledExactlyOnceWith('org_a', 'lab'))
     await waitFor(() => expect(names()).toEqual(['new', 'spare', 'platform-gpu']))
-    shown.unmount()
-
-    show(staff)
-    await userEvent.click((await advanced('new')).getByRole('switch', { name: 'Share new with every org' }))
-    expect(updateCluster).toHaveBeenCalledExactlyOnceWith('org_a', 'new', { shared: true })
   })
 })
 
 describe('turning a cluster off for the org\'s jobs', () => {
-  it('is an owner\'s on every row, the platform\'s shared cluster included, and says what it means', async () => {
+  it('is an owner\'s on every row, the platform\'s cluster included, and says what it means', async () => {
     show()
     const row = await rowOf('platform-gpu')
     const use = within(row).getByRole('switch', { name: 'Use platform-gpu for the jobs of Ada' })

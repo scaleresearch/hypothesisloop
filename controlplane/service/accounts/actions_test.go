@@ -104,7 +104,7 @@ func TestAKeyListsRevokeForWhoeverEndsItUntilItIsRevoked(t *testing.T) {
 
 func TestAClusterListsWhatTheCallerMayDoToItForTheOrg(t *testing.T) {
 	own := &domain.Cluster{Name: "gpu", OrgID: "org_a"}
-	shared := &domain.Cluster{Name: "pool", OrgID: "org_p", Shared: true}
+	platform := &domain.Cluster{Name: "pool", OrgID: domain.PlatformOrgID}
 	for _, c := range []struct {
 		name    string
 		caller  auth.Principal
@@ -112,11 +112,11 @@ func TestAClusterListsWhatTheCallerMayDoToItForTheOrg(t *testing.T) {
 		want    string
 	}{
 		{"owner, its own", owner, own, "[enable edit remove]"},
-		{"owner, a shared one", owner, shared, "[enable]"},
+		{"owner, one of the platform's", owner, platform, "[enable]"},
 		{"member", member, own, "[]"},
 		{"key of a project", projKey, own, "[]"},
-		{"staff, its own", staffUser, own, "[enable edit remove share]"},
-		{"staff, a shared one of another org", staffUser, shared, "[enable]"},
+		{"staff, its own", staffUser, own, "[enable edit remove]"},
+		{"staff, one of the platform's", staffUser, platform, "[enable]"},
 	} {
 		if got := fmt.Sprint(clusterActions(c.cluster, "org_a", c.caller, roleOf(c.caller))); got != c.want {
 			t.Errorf("%s: got = %s, want = %s", c.name, got, c.want)

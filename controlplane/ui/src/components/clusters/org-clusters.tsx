@@ -2,7 +2,7 @@
 
 import { Fragment, useState } from 'react'
 import useSWR from 'swr'
-import { fetchOrgClusters, registerCluster, removeCluster, setClusterEnabled, setClusterOrder, updateCluster, type Registered } from '@/lib/api/clusters'
+import { fetchOrgClusters, registerCluster, removeCluster, setClusterEnabled, setClusterOrder, type Registered } from '@/lib/api/clusters'
 import { useTenant } from '@/lib/tenant'
 import { ClusterSettingsEditor } from '@/components/clusters/settings-editor'
 import { ClusterStatus } from '@/components/clusters/cluster-status'
@@ -27,7 +27,7 @@ import type { ListedCluster } from '@/types/api'
  * the platform provides, which are used last. An owner adds a cluster and reads the command that
  * starts its agent, reorders the org's own by dragging a row or with its up and down buttons,
  * which the API writes as one order, turns a cluster off or on for the org's jobs, and under
- * Advanced changes a cluster's scheduler settings or removes it. Staff share one there too.
+ * Advanced changes a cluster's scheduler settings or removes it.
  */
 export function OrgClusters() {
   const { org } = useTenant()
@@ -43,8 +43,8 @@ export function OrgClusters() {
   const [advanced, setAdvanced] = useState('')
   const [removing, setRemoving] = useState('')
 
-  const own = (data ?? []).filter(c => c.owned && !c.shared)
-  const others = (data ?? []).filter(c => !c.owned || c.shared)
+  const own = (data ?? []).filter(c => c.owned)
+  const others = (data ?? []).filter(c => !c.owned)
   // While a move is written the list shows the order asked for, each in a place of its own as the
   // write gives it; a refusal puts it back.
   const shownOwn = moving
@@ -121,7 +121,6 @@ export function OrgClusters() {
           <td><ClusterStatus cluster={c} /></td>
           <td className="text-xs">
             {c.owned ? org.name : <Badge tone="neutral">Platform</Badge>}
-            {c.shared && <Text as="div" variant="meta">shared with every org</Text>}
           </td>
           <td>
             <Switch
@@ -149,17 +148,6 @@ export function OrgClusters() {
               <Stack start className="py-1">
                 <ClusterSettingsEditor key={c.name} orgID={org.id} cluster={c} onSaved={mutate} />
                 <Inline gap="md">
-                  {c.actions.includes('share') && (
-                    <label className="flex items-center gap-2 text-xs">
-                      <Switch
-                        label={`Share ${c.name} with every org`}
-                        checked={c.shared}
-                        disabled={switching !== ''}
-                        onChange={shared => change(c.name, () => updateCluster(org.id, c.name, { shared }))}
-                      />
-                      Shared with every org · staff only
-                    </label>
-                  )}
                   {c.actions.includes('remove') && <Button size="sm" variant="danger" disabled={switching !== ''} onClick={() => setRemoving(c.name)}>Remove cluster</Button>}
                 </Inline>
               </Stack>
@@ -228,7 +216,7 @@ export function OrgClusters() {
               {shownOwn.map((c, index) => row(c, index))}
               {others.length > 0 && (
                 <tr>
-                  <th colSpan={columns} scope="colgroup" className="bg-surface-inset py-2 text-foreground">Platform compute, shared with every org, tried after {org.name}&apos;s own</th>
+                  <th colSpan={columns} scope="colgroup" className="bg-surface-inset py-2 text-foreground">Platform compute, for every org, tried after {org.name}&apos;s own</th>
                 </tr>
               )}
               {others.map(c => row(c))}

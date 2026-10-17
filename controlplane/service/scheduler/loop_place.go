@@ -12,22 +12,22 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler/placement"
 )
 
-// scalesAbove reports whether a cluster of a higher priority than chosen could be asked to scale
+// scalesAbove reports whether a cluster of a higher rank than chosen could be asked to scale
 // up for exp: connected, scaling, and taking the job.
 func scalesAbove(chosen string, exp *domain.Experiment, autoscalerEnabled, connected map[string]bool, registered map[string]domain.Cluster) bool {
 	for cluster := range autoscalerEnabled {
-		if autoscalerEnabled[cluster] && connected[cluster] && hostsJob(registered, cluster, exp) && registered[cluster].Priority > registered[chosen].Priority {
+		if autoscalerEnabled[cluster] && connected[cluster] && hostsJob(registered, cluster, exp) && registered[cluster].Rank(exp.OrgID) > registered[chosen].Rank(exp.OrgID) {
 			return true
 		}
 	}
 	return false
 }
 
-// above keeps the clusters of a higher priority than chosen, in the order given.
-func above(clusters []string, chosen string, registered map[string]domain.Cluster) []string {
+// above keeps the clusters of a higher rank for orgID than chosen, in the order given.
+func above(clusters []string, chosen string, registered map[string]domain.Cluster, orgID string) []string {
 	out := clusters[:0:0]
 	for _, cluster := range clusters {
-		if registered[cluster].Priority > registered[chosen].Priority {
+		if registered[cluster].Rank(orgID) > registered[chosen].Rank(orgID) {
 			out = append(out, cluster)
 		}
 	}
@@ -151,7 +151,7 @@ func (l *Loop) placeQueued(ctx context.Context, pass string, exp *domain.Experim
 			if cluster, ok := placement.AtAcceleratorType(candidates, c.registered, c.nodeAvail, c.nodeResources, c.nodeLabels, exp); ok {
 				placed.cluster = cluster
 			} else {
-				placed.cluster = placement.BestFit(candidates, c.registered, placed.fp)
+				placed.cluster = placement.BestFit(candidates, c.registered, exp.OrgID, placed.fp)
 			}
 		}
 		cluster := placed.cluster
@@ -212,7 +212,7 @@ type installed struct {
 	scalesUp   map[string]bool
 	multiNode  map[string]bool
 	nodeLabels map[string]map[string]map[string]string
-	// limits is each org's platform compute limit, which a job on a shared cluster is held to.
+	// limits is each org's platform compute limit, which a job on a platform cluster is held to.
 	limits map[string]domain.ComputeLimit
 }
 
@@ -220,7 +220,7 @@ type installed struct {
 // for one that may yet run. Such a job asks for more than every cluster that takes its jobs and
 // reports what it has installed holds when idle (placement.FitsWhenIdle), on each accelerator
 // type the job accepts, or runs in an image of an architecture none of their nodes has, or
-// reserves more of the platform's compute than its project may hold and so runs on no shared
+// reserves more of the platform's compute than its project may hold and so runs on no platform
 // cluster. A cluster that scales up may yet hold it. A cluster that reports nothing is away or
 // not whole: it is named and not judged, and with none judged the job waits. It says what each
 // cluster judged has.
@@ -238,7 +238,7 @@ func (in installed) neverFitsReason(exp *domain.Experiment) string {
 		total, reported := in.totals[c.Name]
 		has := domain.NodeArchitectures(in.nodeLabels[c.Name])
 		switch {
-		case limited && c.Shared:
+		case limited && c.OfPlatform():
 			overLimit++
 			judged = append(judged, c.Name+" is the platform's")
 		case !reported:
@@ -295,9 +295,9 @@ func (in installed) couldHold(candidates map[string]domain.Footprint, exp *domai
 }
 
 // eligibleClusters narrows the clusters a job may be placed on to the ones that may and can run
-// it: registered clusters of the job's own org and shared ones that the org has not turned off,
-// and of those, for a job that spans nodes, the ones that report multi-node execution. This is
-// the one place the platform decides which org's jobs a cluster takes.
+// it: registered clusters that serve the job's org and that the org has not turned off
+// (domain.Cluster.Hosts), and of those, for a job that spans nodes, the ones that report
+// multi-node execution.
 //
 // The returned map shares its Footprint values with avail rather than copying them, so the
 // in-place reservations admission makes against the returned view are the same numbers every

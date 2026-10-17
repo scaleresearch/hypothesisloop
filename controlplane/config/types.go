@@ -58,8 +58,8 @@ type QuotaConfig struct {
 	// its run to its end. Required and positive: until its end an experiment may rent machines.
 	MaxPlatformExperimentDays int `yaml:"max_platform_experiment_days"`
 	// DefaultOrgSharedAccHPerHour and DefaultProjectSharedAccHPerHour are the platform compute
-	// limit (domain.ComputeLimit) an org is created with: the accelerator hours per hour of shared
-	// clusters its placed jobs, and each project's, may reserve. Required, 0 < project <= org.
+	// limit (domain.ComputeLimit) an org is created with: the accelerator hours per hour of the
+	// platform's clusters its placed jobs, and each project's, may reserve. Required, 0 < project <= org.
 	DefaultOrgSharedAccHPerHour     float64 `yaml:"default_org_shared_acch_per_hour"`
 	DefaultProjectSharedAccHPerHour float64 `yaml:"default_project_shared_acch_per_hour"`
 

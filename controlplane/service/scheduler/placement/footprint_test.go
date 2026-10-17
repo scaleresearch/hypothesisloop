@@ -18,7 +18,7 @@ func TestClusterWithBestFitPrefersOutrightFit(t *testing.T) {
 		"a-cluster": {cpuKey: 4000}, // fits
 	}
 	need := domain.Footprint{cpuKey: 2000}
-	got := BestFit(avail, nil, need)
+	got := BestFit(avail, nil, "org-a", need)
 	if got != "a-cluster" {
 		t.Errorf("clusterWithBestFit = %q, want a-cluster (the one that actually fits)", got)
 	}
@@ -30,7 +30,7 @@ func TestClusterWithBestFitFallsBackToSmallestShortage(t *testing.T) {
 		"small-gap": {cpuKey: 1800}, // short by 200
 	}
 	need := domain.Footprint{cpuKey: 2000}
-	got := BestFit(avail, nil, need)
+	got := BestFit(avail, nil, "org-a", need)
 	if got != "small-gap" {
 		t.Errorf("clusterWithBestFit = %q, want small-gap (least total shortage)", got)
 	}
@@ -79,7 +79,7 @@ func TestClusterWithBestFitNeverTargetsAClusterThatDoesNotOwnTheRequestedAcceler
 		// Owns eight L40s, every one of them held by preemptible burst work.
 		"z-saturated-l40-cluster": {cpuKey: 78000, acceleratorKey("type-l40"): 0},
 	}
-	got := BestFit(avail, nil, need)
+	got := BestFit(avail, nil, "org-a", need)
 	if got != "z-saturated-l40-cluster" {
 		t.Errorf("clusterWithBestFit = %q, want z-saturated-l40-cluster (the only cluster preemption could ever unblock)", got)
 	}
@@ -94,7 +94,7 @@ func TestClusterWithBestFitNamesNoClusterWhenNoneOwnsTheRequestedAcceleratorType
 		"cluster-a": {cpuKey: 16000, acceleratorKey("type-l40"): 8},
 		"cluster-b": {cpuKey: 16000, acceleratorKey("type-blackhole"): 4},
 	}
-	if got := BestFit(avail, nil, need); got != "" {
+	if got := BestFit(avail, nil, "org-a", need); got != "" {
 		t.Errorf("clusterWithBestFit = %q, want \"\" (no cluster owns this hardware)", got)
 	}
 }

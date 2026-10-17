@@ -30,6 +30,7 @@ type simBox struct {
 	cores    float64
 	memory   int64
 	priority int
+	org      string
 }
 
 type simRow struct {
@@ -231,7 +232,7 @@ func (s *sim) RegisteredClusters(context.Context) (map[string]domain.Cluster, er
 	s.count("RegisteredClusters")
 	out := map[string]domain.Cluster{}
 	for name, box := range s.boxes {
-		out[name] = domain.Cluster{Name: name, Priority: box.priority}
+		out[name] = domain.Cluster{Name: name, OrgID: box.org, Priority: box.priority}
 	}
 	return out, nil
 }
@@ -754,11 +755,11 @@ func TestALargeJobIsNotStarvedByAStreamOfSmallOnes(t *testing.T) {
 	}
 }
 
-// overflowBoxes is two clusters of the org's and a shared one ranked below them.
+// overflowBoxes is two clusters of the org's and one of the platform's, ranked below them.
 func overflowBoxes() map[string]simBox {
 	boxes := unevenBoxes()
 	delete(boxes, "box-c")
-	boxes["shared-pool"] = simBox{cores: 23.8, memory: 60 << 30, priority: domain.SharedClusterPriority}
+	boxes["shared-pool"] = simBox{cores: 23.8, memory: 60 << 30, priority: domain.ClusterPriorityMax, org: domain.PlatformOrgID}
 	return boxes
 }
 
@@ -792,10 +793,10 @@ func TestUnderLoadPriorityComesFirst(t *testing.T) {
 				}
 				burstOn[exp.ClusterName].AddFootprint(exp.Footprint())
 			}
-			if s.boxes[exp.ClusterName].priority == domain.SharedClusterPriority {
+			if s.boxes[exp.ClusterName].org == domain.PlatformOrgID {
 				lowerPlaced++
 				for name, box := range s.boxes {
-					if box.priority > domain.SharedClusterPriority && !held[name] && domain.Fits(s.freeLocked(name), exp.Footprint()) {
+					if box.org != domain.PlatformOrgID && !held[name] && domain.Fits(s.freeLocked(name), exp.Footprint()) {
 						wrong = append(wrong, fmt.Sprintf("at %v %s went to shared-pool while %s had room", s.now, exp.ID, name))
 					}
 				}
@@ -817,7 +818,7 @@ func TestUnderLoadPriorityComesFirst(t *testing.T) {
 		t.Errorf("%d placements out of order:\n%s", len(wrong), joinFirst(wrong, 5))
 	}
 	if burstPlaced == 0 || lowerPlaced == 0 {
-		t.Errorf("placed %d burst jobs and %d on the shared cluster: the run did not test the order", burstPlaced, lowerPlaced)
+		t.Errorf("placed %d burst jobs and %d on the platform cluster: the run did not test the order", burstPlaced, lowerPlaced)
 	}
 	t.Logf("placed %d burst jobs, %d on the lower cluster", burstPlaced, lowerPlaced)
 }

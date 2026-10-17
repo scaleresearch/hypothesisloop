@@ -203,12 +203,12 @@ for some of its slots, and says why in its runtime's words, such as which of its
 filters leave out every offer of a shape: a job that needs such a slot waits until one comes on
 offer.
 
-A line with limit platform_compute says how much of the platform's shared clusters the org's
+A line with limit platform_compute says how much of the platform's clusters the org's
 placed jobs may reserve (org) and each of its projects' (project), in accelerator hours per hour
 (acch_per_hour times accelerator_count of each placed job), and what they reserve now (org_held,
 and project_held for a token bound to one project). A job that would pass either waits queued.
 
-The clusters are the ones one org's jobs can be placed on: its own and the shared ones. An API
+The clusters are the ones one org's jobs can be placed on: its own and the platform's. An API
 key and an agent token have one org and need no --org. A person in several orgs names one.`, stderr)
 	org := fs.String("org", "", "org whose clusters to read (default $HL_ORG, then the one org this token is bound to)")
 	if err := fs.Parse(args); err != nil {

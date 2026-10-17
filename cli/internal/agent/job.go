@@ -60,7 +60,7 @@ out, the field named in problems); malformed (no job.command); no_experiment_ima
 hl image set); exceeds_cluster_capacity (more than any cluster has idle, with both figures);
 no_cluster_for_architecture (no cluster has nodes of the image's architecture: hl image set one
 built for theirs);
-exceeds_project_compute_limit (the job alone reserves more of the platform's shared clusters than
+exceeds_project_compute_limit (the job alone reserves more of the platform's clusters than
 its project may hold and no cluster of the org's own can hold it: hl capacity shows the limit);
 experiment_not_started (before the start only a baseline agent's job is taken; see status_reason
 of hl platform-experiments get); experiment_closed.

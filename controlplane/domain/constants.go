@@ -76,7 +76,7 @@ const (
 	// runtime for this shape of job.
 	NotAdmittedNoMultiNodeCluster = "no_multi_node_cluster"
 	// NotAdmittedNoClusterForOrg means no connected cluster may take this org's jobs: none is
-	// its own and none is shared. Waiting does not fix it; registering a cluster does.
+	// its own and none is the platform's. Waiting does not fix it; registering a cluster does.
 	NotAdmittedNoClusterForOrg = "no_cluster_for_org"
 	// NotAdmittedClustersDisabled means the org has clusters it can use and has turned every one
 	// of them off for its jobs. Waiting does not fix it; turning one on does.
@@ -109,7 +109,7 @@ const (
 	// help; an image built for one of theirs does.
 	NotAdmittedNoClusterForArchitecture = "no_cluster_for_architecture"
 	// NotAdmittedOrgComputeLimit and NotAdmittedProjectComputeLimit mean the job's org, or its
-	// project, holds so much of the platform's compute (ComputeLimit) that the job on a shared
+	// project, holds so much of the platform's compute (ComputeLimit) that the job on a platform
 	// cluster would pass the limit. Waiting for its placed jobs to end admits it.
 	NotAdmittedOrgComputeLimit     = "org_compute_limit"
 	NotAdmittedProjectComputeLimit = "project_compute_limit"
@@ -281,7 +281,7 @@ const (
 	EvictionNoOffer EvictionReason = "no_offer"
 
 	// EvictionClusterWithdrawn is a job requeued because the cluster it was placed on stopped
-	// taking it: the platform ended the sharing, or the cluster's org removed it. The job did
+	// taking it: the cluster's org removed it. The job did
 	// nothing wrong and spends no retry.
 	EvictionClusterWithdrawn EvictionReason = "cluster_withdrawn"
 )

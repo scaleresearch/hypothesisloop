@@ -68,7 +68,7 @@ func TestClusterTokenPrintsTheTokenOfAClusterTheOrgRegisteredAndRegistersNothing
 	url := clitest.WithServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == "GET" {
-			_, _ = w.Write([]byte(`{"clusters":[{"name":"gpu-east","owned":true},{"name":"platform","owned":false,"shared":true}]}`))
+			_, _ = w.Write([]byte(`{"clusters":[{"name":"gpu-east","owned":true},{"name":"platform","owned":false}]}`))
 			return
 		}
 		var body map[string]string

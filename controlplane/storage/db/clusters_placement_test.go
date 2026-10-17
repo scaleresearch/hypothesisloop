@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -40,11 +39,19 @@ func newTwoOrgs(t *testing.T) *twoOrgs {
 			t.Fatalf("register %s: %v", name, err)
 		}
 	}
-	// The database is shared by the package's tests, and a shared cluster is every org's.
-	t.Cleanup(func() {
-		_, _ = pool.pool.Exec(context.Background(), `UPDATE clusters SET shared = false, priority = 100 WHERE name = ANY($1)`, []string{w.ofA, w.ofB})
-	})
 	return w
+}
+
+// platformCluster registers a cluster of the platform's org, which serves every org. The
+// database is shared by the package's tests, so it is removed when the test ends.
+func (w *twoOrgs) platformCluster(t *testing.T) string {
+	t.Helper()
+	name := "of-platform-" + w.suffix
+	if _, err := w.clusters.RegisterCluster(context.Background(), name, domain.PlatformOrgID); err != nil {
+		t.Fatalf("register %s: %v", name, err)
+	}
+	t.Cleanup(func() { _, _ = w.clusters.RemoveCluster(context.Background(), name) })
+	return name
 }
 
 func (w *twoOrgs) queued(t *testing.T, id, peID string) string {
@@ -108,11 +115,8 @@ func TestAClaimPlacesAJobOnlyOnARegisteredClusterThatTakesItsOrg(t *testing.T) {
 			t.Fatalf("after a refused claim on %s: status %s on %q, want it still queued", cluster, got.Status, got.ClusterName)
 		}
 	}
-	if _, _, err := w.clusters.UpdateCluster(context.Background(), w.ofB, sharedAs(true), domain.ClusterSettings{}); err != nil {
-		t.Fatal(err)
-	}
-	if !w.claim(t, job, w.ofB) {
-		t.Fatal("a job was refused on a shared cluster")
+	if !w.claim(t, job, w.platformCluster(t)) {
+		t.Fatal("a job was refused on a cluster of the platform's org")
 	}
 	own := w.queued(t, "own-a", w.peA)
 	if !w.claim(t, own, w.ofA) {
@@ -136,127 +140,13 @@ func TestAClaimInASingleOrgDeploymentLandsOnEveryRegisteredCluster(t *testing.T)
 		if _, err := clusters.RegisterCluster(context.Background(), name, "default"); err != nil {
 			t.Fatal(err)
 		}
+		t.Cleanup(func() { _, _ = clusters.RemoveCluster(context.Background(), name) })
 		id := "job-" + suffix + "-" + string(rune('a'+i))
 		seedExperimentForCapTest(t, pool, id, agent, pe, 1, domain.StatusQueued)
 		refused, err := exps.ClaimSubmitted(context.Background(), id, name, &domain.JobSpec{AcceleratorCount: 1}, nil)
 		if err != nil || refused != nil {
 			t.Fatalf("claim on %s = %v, %v, want it placed", name, refused, err)
 		}
-	}
-}
-
-func TestEndingTheSharingOfAClusterRequeuesTheOtherOrgsJobsPlacedOnIt(t *testing.T) {
-	w := newTwoOrgs(t)
-	ctx := context.Background()
-	queue := NewStore(w.pool, 3)
-	if _, _, err := w.clusters.UpdateCluster(ctx, w.ofA, sharedAs(true), domain.ClusterSettings{}); err != nil {
-		t.Fatal(err)
-	}
-	submitted := w.placed(t, "b-submitted", w.peB, w.ofA, domain.StatusSubmitted)
-	running := w.placed(t, "b-running", w.peB, w.ofA, domain.StatusRunning)
-	owners := w.placed(t, "a-running", w.peA, w.ofA, domain.StatusRunning)
-	elsewhere := w.placed(t, "b-at-home", w.peB, w.ofB, domain.StatusRunning)
-	before := map[string]*domain.Experiment{submitted: w.get(t, submitted), running: w.get(t, running)}
-
-	if _, requeued, err := w.clusters.UpdateCluster(ctx, w.ofA, sharedAs(true), domain.ClusterSettings{}); err != nil || len(requeued) != 0 {
-		t.Fatalf("sharing a shared cluster again requeued %v, %v, want nothing", requeued, err)
-	}
-	cluster, requeued, err := w.clusters.UpdateCluster(ctx, w.ofA, sharedAs(false), domain.ClusterSettings{})
-	if err != nil || cluster.Shared {
-		t.Fatalf("stop sharing: got = %+v, %v", cluster, err)
-	}
-	if got := map[string]bool{}; len(requeued) != 2 {
-		for _, id := range requeued {
-			got[id] = true
-		}
-		t.Fatalf("requeued %v, want exactly the two jobs of org b placed on %s", got, w.ofA)
-	}
-
-	for id, was := range before {
-		got := w.get(t, id)
-		if got.Status != domain.StatusQueued || got.ClusterName != "" || got.ResolvedJob != nil ||
-			got.NotAdmittedReason != domain.NotAdmittedAwaitingAdmission || got.EvictionReason != string(domain.EvictionClusterWithdrawn) {
-			t.Errorf("%s after the sharing ended: %s on %q, reason %q, eviction %q, want it queued for a new placement", id, got.Status, got.ClusterName, got.NotAdmittedReason, got.EvictionReason)
-		}
-		if got.AttemptCount != was.AttemptCount+1 || got.InfraRequeueCount != was.InfraRequeueCount+1 || got.RetriesUsed() != was.RetriesUsed() {
-			t.Errorf("%s: attempt %d, infra requeues %d, retries used %d, want the attempt advanced and no retry spent", id, got.AttemptCount, got.InfraRequeueCount, got.RetriesUsed())
-		}
-	}
-	for id, cluster := range map[string]string{owners: w.ofA, elsewhere: w.ofB} {
-		if got := w.get(t, id); got.Status != domain.StatusRunning || got.ClusterName != cluster {
-			t.Errorf("%s: %s on %q, want it left running on %s", id, got.Status, got.ClusterName, cluster)
-		}
-	}
-
-	desired, err := queue.ListDesiredWorkloads(ctx, w.ofA)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := ids(desired); len(got) != 1 || !got[owners] {
-		t.Fatalf("desired on %s = %v, want only its own org's job, so its runtime is handed no other org's token", w.ofA, got)
-	}
-	undesired, err := queue.ListRecentlyUndesiredWorkloads(ctx, w.ofA, time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := ids(undesired); len(got) != 2 || !got[submitted] || !got[running] {
-		t.Fatalf("recently undesired on %s = %v, want the two requeued jobs", w.ofA, got)
-	}
-	if grants := domain.CheckpointWindowGrants(undesired); len(grants) != 2 {
-		t.Fatalf("checkpoint windows = %v, want one for each job the platform withdrew", grants)
-	}
-	if other, err := queue.ListRecentlyUndesiredWorkloads(ctx, w.ofB, time.Minute); err != nil || len(other) != 0 {
-		t.Fatalf("recently undesired on %s = %v, %v, want nothing: none of them ran there", w.ofB, ids(other), err)
-	}
-
-	if w.claim(t, submitted, w.ofA) {
-		t.Fatal("a requeued job of org b was placed back on the cluster that stopped being shared")
-	}
-	if !w.claim(t, submitted, w.ofB) {
-		t.Fatal("a requeued job was refused on its own org's cluster")
-	}
-}
-
-// A claim and the end of sharing take the same lock, so a claim that waits behind the decision
-// reads it.
-func TestAClaimWaitingBehindTheEndOfSharingIsRefused(t *testing.T) {
-	w := newTwoOrgs(t)
-	ctx := context.Background()
-	if _, _, err := w.clusters.UpdateCluster(ctx, w.ofA, sharedAs(true), domain.ClusterSettings{}); err != nil {
-		t.Fatal(err)
-	}
-	job := w.queued(t, "b-late", w.peB)
-
-	tx, err := w.pool.pool.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	if _, err := tx.Exec(ctx, clusterAdmissionLock, w.ofA); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tx.Exec(ctx, `UPDATE clusters SET shared = false, priority = 100 WHERE name = $1`, w.ofA); err != nil {
-		t.Fatal(err)
-	}
-	type outcome struct {
-		claimed bool
-		err     error
-	}
-	done := make(chan outcome, 1)
-	go func() {
-		refused, err := w.exps.ClaimSubmitted(ctx, job, w.ofA, &domain.JobSpec{AcceleratorCount: 1}, nil)
-		done <- outcome{refused == nil, err}
-	}()
-	select {
-	case got := <-done:
-		t.Fatalf("the claim finished (%v, %v) while the cluster was being withdrawn, want it to wait", got.claimed, got.err)
-	case <-time.After(300 * time.Millisecond):
-	}
-	if err := tx.Commit(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if got := <-done; got.err != nil || got.claimed {
-		t.Fatalf("the claim after the sharing ended = %v, %v, want it refused", got.claimed, got.err)
 	}
 }
 
@@ -268,7 +158,7 @@ func TestRemovingAClusterRequeuesItsJobsAndForgetsItsIdentityAndSettings(t *test
 		t.Fatal(err)
 	}
 	timeout := 600
-	if _, _, err := w.clusters.UpdateCluster(ctx, w.ofA, nil, domain.ClusterSettings{StuckPendingTimeoutSeconds: &timeout}); err != nil {
+	if _, err := w.clusters.UpdateCluster(ctx, w.ofA, domain.ClusterSettings{StuckPendingTimeoutSeconds: &timeout}); err != nil {
 		t.Fatal(err)
 	}
 	submitted := w.placed(t, "a-submitted", w.peA, w.ofA, domain.StatusSubmitted)
@@ -344,13 +234,13 @@ func TestAClusterIdentityIsBoundOnceAndOnlyClearingReleasesIt(t *testing.T) {
 	// A cluster's settings are set by name, before any agent connects too, and read by the
 	// scheduler under the identity bound to it. A field left out stays, and 0 clears one.
 	timeout, limit, zero := 600, 8, 0
-	if _, _, err := w.clusters.UpdateCluster(ctx, w.ofB, nil, domain.ClusterSettings{MaxSpeculativeAccelerators: &limit}); err != nil {
+	if _, err := w.clusters.UpdateCluster(ctx, w.ofB, domain.ClusterSettings{MaxSpeculativeAccelerators: &limit}); err != nil {
 		t.Fatalf("settings of a cluster no agent has connected to: %v", err)
 	}
-	if _, _, err := w.clusters.UpdateCluster(ctx, w.ofA, nil, domain.ClusterSettings{StuckPendingTimeoutSeconds: &timeout, MaxSpeculativeAccelerators: &limit}); err != nil {
+	if _, err := w.clusters.UpdateCluster(ctx, w.ofA, domain.ClusterSettings{StuckPendingTimeoutSeconds: &timeout, MaxSpeculativeAccelerators: &limit}); err != nil {
 		t.Fatal(err)
 	}
-	changed, _, err := w.clusters.UpdateCluster(ctx, w.ofA, nil, domain.ClusterSettings{MaxSpeculativeAccelerators: &zero})
+	changed, err := w.clusters.UpdateCluster(ctx, w.ofA, domain.ClusterSettings{MaxSpeculativeAccelerators: &zero})
 	if err != nil || changed.MaxSpeculativeAccelerators != nil || changed.StuckPendingTimeoutSeconds == nil || *changed.StuckPendingTimeoutSeconds != timeout {
 		t.Fatalf("clearing one setting: got = %+v, %v, want the cap gone and the timeout kept", changed, err)
 	}
@@ -359,7 +249,7 @@ func TestAClusterIdentityIsBoundOnceAndOnlyClearingReleasesIt(t *testing.T) {
 	}
 	// The silence ceiling is read by name: a cluster that stopped reporting has no fresh identity.
 	ceiling := 21600
-	if _, _, err := w.clusters.UpdateCluster(ctx, w.ofA, nil, domain.ClusterSettings{StatusSilenceCeilingSeconds: &ceiling}); err != nil {
+	if _, err := w.clusters.UpdateCluster(ctx, w.ofA, domain.ClusterSettings{StatusSilenceCeilingSeconds: &ceiling}); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := w.clusters.StatusSilenceCeiling(ctx, w.ofA); err != nil || got == nil || *got != ceiling {
@@ -368,7 +258,7 @@ func TestAClusterIdentityIsBoundOnceAndOnlyClearingReleasesIt(t *testing.T) {
 	if got, err := w.clusters.StatusSilenceCeiling(ctx, w.unregisteredName); err != nil || got != nil {
 		t.Fatalf("silence ceiling of an unregistered name: got = %v, %v, want none", got, err)
 	}
-	if _, _, err := w.clusters.UpdateCluster(ctx, w.ofA, nil, domain.ClusterSettings{StatusSilenceCeilingSeconds: &zero}); err != nil {
+	if _, err := w.clusters.UpdateCluster(ctx, w.ofA, domain.ClusterSettings{StatusSilenceCeilingSeconds: &zero}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := w.clusters.ClearReportedID(ctx, w.unregisteredName); !errors.Is(err, ErrClusterNotFound) {

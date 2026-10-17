@@ -8,10 +8,9 @@ import { Input } from '@/components/ui/input'
 import { Inline, Stack } from '@/components/ui/stack'
 import { InlineError } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
-import type { ListedCluster, UpdateClusterRequest } from '@/types/api'
+import type { ClusterSettings, ListedCluster } from '@/types/api'
 
-type Settings = Omit<UpdateClusterRequest, 'shared'>
-type Field = keyof Settings
+type Field = keyof ClusterSettings
 
 const FIELDS: { key: Field; label: string; placeholder: string; unit: string; autoscaler: boolean }[] = [
   { key: 'stuck_pending_timeout_seconds', label: 'stuck-pending timeout', placeholder: 'seconds', unit: 's', autoscaler: false },
@@ -37,7 +36,7 @@ export function ClusterSettingsEditor({ orgID, cluster, onSaved }: { orgID: stri
   async function save(e: React.FormEvent) {
     e.preventDefault()
     setError('')
-    const change: Settings = {}
+    const change: ClusterSettings = {}
     for (const { key, label } of fields) {
       const text = value(key).trim()
       if (text === saved(key)) continue

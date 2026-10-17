@@ -6,11 +6,11 @@ import (
 )
 
 // ComputeLimit bounds the compute the platform pays for that an org's placed jobs reserve, in
-// accelerator hours per hour on shared clusters: Org for all of its projects together and Project
+// accelerator hours per hour on the platform's clusters: Org for all of its projects together and Project
 // for each one. Admission decides on what placed jobs reserve, so lowering a limit evicts nothing.
 type ComputeLimit struct {
-	Org     float64 `json:"org" doc:"Accelerator hours per hour of the platform's shared clusters the org's placed jobs may reserve together."`
-	Project float64 `json:"project" doc:"Accelerator hours per hour of the platform's shared clusters the placed jobs of any one of the org's projects may reserve."`
+	Org     float64 `json:"org" doc:"Accelerator hours per hour of the platform's clusters the org's placed jobs may reserve together."`
+	Project float64 `json:"project" doc:"Accelerator hours per hour of the platform's clusters the placed jobs of any one of the org's projects may reserve."`
 }
 
 func (l ComputeLimit) Validate() error {
@@ -21,7 +21,7 @@ func (l ComputeLimit) Validate() error {
 }
 
 // ClaimRefusal is why a claim placed nothing: the room was taken (NotAdmittedCapacityUnavailable)
-// or the job on a shared cluster would take Holder, an org or a project, past its limit
+// or the job on a platform cluster would take Holder, an org or a project, past its limit
 // (NotAdmittedOrgComputeLimit, NotAdmittedProjectComputeLimit): it holds Held of Limit and the job
 // needs Needs, each in accelerator hours per hour.
 type ClaimRefusal struct {

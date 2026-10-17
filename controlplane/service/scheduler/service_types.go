@@ -206,11 +206,11 @@ type admissionReads interface {
 	// IsAgentCut reports whether the agent was cut at a stage boundary (see
 	// controller/stages.go) — a cut is terminal, and cut agents may not submit new jobs.
 	IsAgentCut(ctx context.Context, platformExpID, agentID string) (bool, error)
-	// RegisteredClusters returns every registered cluster by name, with its org and whether the
-	// platform shares it: what eligibleClusters decides placement by org against.
+	// RegisteredClusters returns every registered cluster by name, with its org: what
+	// eligibleClusters decides placement by org against.
 	RegisteredClusters(ctx context.Context) (map[string]domain.Cluster, error)
 	// OrgComputeLimits returns every org's platform compute limit by org: what neverFitsReason
-	// holds a job on a shared cluster to.
+	// holds a job on a platform cluster to.
 	OrgComputeLimits(ctx context.Context) (map[string]domain.ComputeLimit, error)
 }
 

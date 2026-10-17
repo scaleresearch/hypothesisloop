@@ -91,8 +91,8 @@ function JobsListContent({ peFilter }: { peFilter: string }) {
   const listPath = (experimentID: string) => experimentID ? experimentPath(experimentID, 'jobs') : projectPath(project.id, 'jobs')
   const statusHref = (status: string) => withQuery(listPath(peFilter), { status })
 
-  // Every cluster a job of this org can be on, its own and the ones the platform shares. A job
-  // on a cluster no longer listed, such as one that stopped being shared, shows its name alone.
+  // Every cluster a job of this org can be on, its own and the platform's. A job on a cluster no
+  // longer listed, such as one that was removed, shows its name alone.
   // Until that read answers, and when it fails, no job shows a connection dot.
   const { data: clusters, error: clustersError } = useSWR(keys.orgClusters(org.id), () => fetchOrgClusters(org.id), { refreshInterval: POLL.reports })
   const connectedByCluster = new Map(clustersError ? [] : clusters?.map(c => [c.name, c.connected]))

@@ -25,14 +25,14 @@ func listOfClusters(clusters []accounts.ListedCluster, err error) (*clusterList,
 }
 
 // clusterUseDescription ends the description of turning a cluster off and on for an org.
-const clusterUseDescription = "The cluster is any the org can use, its own or one the platform shares, and the decision is the org's alone: it changes nothing for another org. " +
+const clusterUseDescription = "The cluster is any the org can use, its own or one of the platform's, and the decision is the org's alone: it changes nothing for another org. " +
 	"An owner of the org, an API key of the whole org and staff decide it. Repeating it changes nothing. A cluster the org cannot use is not found."
 
 func (a accountsAPI) registerClusters(doc *Doc) {
 	accountsRoute(doc, a.accounts, huma.Operation{
 		OperationID: "register-cluster", Method: "POST", Path: "/orgs/{id}/clusters",
 		Summary: "Register a cluster for an org", Tags: []string{"clusters"},
-		Description: "A cluster exists for the platform once its name is registered, and takes the jobs of its org only. " +
+		Description: "A cluster exists for the platform once its name is registered, and takes the jobs of its org only, or of every org for a cluster of the platform's org. " +
 			"Returns what its agents are started with: the runtime token, the two addresses they reach the platform at, and attach_commands, the complete command that starts them on a Kubernetes cluster and on a bare-metal node. " +
 			"The token is derived from the name, so it is never lost: registering a name the org already owns changes nothing " +
 			"and returns the same token and addresses. A name another org owns answers 409.",
@@ -40,16 +40,16 @@ func (a accountsAPI) registerClusters(doc *Doc) {
 	accountsRoute(doc, a.accounts, huma.Operation{
 		OperationID: "list-clusters", Method: "GET", Path: "/orgs/{id}/clusters",
 		Summary: "List the clusters an org's jobs run on", Tags: []string{"clusters"},
-		Description: "The clusters the org registered and the ones the platform shares with every org, in the order a job is placed on them, with whether an agent is connected right now " +
+		Description: "The clusters the org registered and the platform's, which serve every org, in the order a job is placed on them, with whether an agent is connected right now " +
 			"and whether the org has the cluster on for its jobs (enabled). The org may change only the ones it owns, and turns any of them off or on for its own jobs.",
 	}, a.listClusters)
 	accountsRoute(doc, a.accounts, huma.Operation{
 		OperationID: "order-clusters", Method: "PUT", Path: "/orgs/{id}/clusters/order",
 		Summary: "Set the order an org's jobs are placed on its clusters", Tags: []string{"clusters"},
-		Description: "names is every cluster the org registered and the platform does not share, each once, first placed first: anything else answers 422 and changes nothing. " +
+		Description: "names is every cluster the org registered, each once, first placed first: anything else answers 422 and changes nothing. " +
 			"A job is placed on the first cluster that can take it as the scheduler reads capacity at that moment, and on a later one when that is full or has just failed it. " +
 			"The order holds for placements from then on and moves no job that is placed. A cluster registered afterwards comes last until it is ordered, " +
-			"and the clusters the platform shares come after every one of the org's own. Answers the clusters as the list does, in the new order.",
+			"and the platform's clusters come after every one of the org's own. Answers the clusters as the list does, in the new order.",
 	}, a.orderClusters)
 	accountsRoute(doc, a.accounts, huma.Operation{
 		OperationID: "disable-cluster", Method: "POST", Path: "/orgs/{id}/clusters/{name}/disable",
@@ -65,11 +65,8 @@ func (a accountsAPI) registerClusters(doc *Doc) {
 	}, a.enableCluster)
 	accountsRoute(doc, a.accounts, huma.Operation{
 		OperationID: "update-cluster", Method: "PATCH", Path: "/orgs/{id}/clusters/{name}",
-		Summary: "Change a cluster: its scheduler settings, or whether every org shares it", Tags: []string{"clusters"},
+		Summary: "Change a cluster's scheduler settings", Tags: []string{"clusters"},
 		Description: "Takes the fields that change, at least one. " +
-			"shared is staff only. A shared cluster takes jobs of every org. When the sharing ends, the jobs of other orgs placed on the cluster " +
-			"go back to the queue in the same step and are placed elsewhere: the cluster's runtime stops them, giving each its checkpoint window, " +
-			"and none of them spends a retry. requeued names them. The cluster then comes last among its org's own until the org orders them. " +
 			"scale_up_timeout_seconds, max_speculative_accelerators and stuck_pending_timeout_seconds are the cluster's own values in place of the scheduler's defaults, " +
 			"for a cluster whose nodes appear when a job asks for them, and status_silence_ceiling_seconds how long the cluster may report no job status before the jobs it holds are evicted as cluster_unreachable: " +
 			"each takes a value, or 0 to go back to the default.",
@@ -140,21 +137,16 @@ func (a accountsAPI) setClusterEnabled(ctx context.Context, orgID, name string, 
 	return &struct{ Body accounts.ClusterView }{Body: *view}, nil
 }
 
-type updateClusterRequest struct {
-	Shared *bool `json:"shared,omitempty" doc:"Staff only."`
-	domain.ClusterSettings
-}
-
 func (a accountsAPI) updateCluster(ctx context.Context, in *struct {
 	ID   string `path:"id"`
 	Name string `path:"name"`
-	Body updateClusterRequest
-}) (*struct{ Body accounts.WithdrawnCluster }, error) {
-	withdrawn, err := a.accounts.UpdateCluster(ctx, in.ID, in.Name, in.Body.Shared, in.Body.ClusterSettings)
+	Body domain.ClusterSettings
+}) (*struct{ Body accounts.ClusterView }, error) {
+	view, err := a.accounts.UpdateCluster(ctx, in.ID, in.Name, in.Body)
 	if err != nil {
 		return nil, err
 	}
-	return &struct{ Body accounts.WithdrawnCluster }{Body: *withdrawn}, nil
+	return &struct{ Body accounts.ClusterView }{Body: *view}, nil
 }
 
 func (a accountsAPI) removeCluster(ctx context.Context, in *struct {

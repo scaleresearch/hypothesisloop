@@ -92,14 +92,14 @@ const gib = (bytes: number) => Math.round((bytes / 2 ** 30) * 10) / 10
 
 const perHour = (acch: number) => `${Math.round(acch * 100) / 100} ${budgetUnit('accelerator')}/h`
 
-// How much of the platform's shared clusters the org's placed jobs may reserve, and reserve now.
+// How much of the platform's clusters the org's placed jobs may reserve, and reserve now.
 function PlatformComputeLimit({ limit }: { limit: NonNullable<LiveCapacityAnswer['platform_compute_limit']> }) {
   return (
     <div className="grid grid-cols-3 gap-3">
       <StatTile
         label="Platform compute held"
         value={`${perHour(limit.org_held)} of ${perHour(limit.org)}`}
-        sub="Reserved by placed jobs on shared clusters"
+        sub="Reserved by placed jobs on platform clusters"
         tone={limit.org_held >= limit.org ? 'warning' : undefined}
       />
       <StatTile label="Per project" value={perHour(limit.project)} sub="The most one project may hold" />

@@ -59,20 +59,18 @@ func TestAClaimSkipsAClusterItsOrgTurnedOffAndTakesItAgainOnceOn(t *testing.T) {
 	}
 }
 
-func TestOneOrgTurningASharedClusterOffLeavesItOnForTheOther(t *testing.T) {
+func TestOneOrgTurningAPlatformClusterOffLeavesItOnForTheOther(t *testing.T) {
 	w := newTwoOrgs(t)
 	ctx := context.Background()
-	if _, _, err := w.clusters.UpdateCluster(ctx, w.ofA, sharedAs(true), domain.ClusterSettings{}); err != nil {
-		t.Fatal(err)
-	}
-	w.setEnabled(t, w.ofA, w.orgB, false)
+	platform := w.platformCluster(t)
+	w.setEnabled(t, platform, w.orgB, false)
 
 	ofB, ofA := w.queued(t, "b-job", w.peB), w.queued(t, "a-job", w.peA)
-	if w.claim(t, ofB, w.ofA) {
-		t.Fatal("a job of the org that turned the shared cluster off was placed on it")
+	if w.claim(t, ofB, platform) {
+		t.Fatal("a job of the org that turned the platform cluster off was placed on it")
 	}
-	if !w.claim(t, ofA, w.ofA) {
-		t.Fatal("a job of the org that left the shared cluster on was refused")
+	if !w.claim(t, ofA, platform) {
+		t.Fatal("a job of the org that left the platform cluster on was refused")
 	}
 	if !w.claim(t, ofB, w.ofB) {
 		t.Fatal("a job was refused on its org's own cluster, which is on")
@@ -82,8 +80,8 @@ func TestOneOrgTurningASharedClusterOffLeavesItOnForTheOther(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c := registered[w.ofA]; c.Hosts(w.orgB) || !c.Hosts(w.orgA) || !slices.Equal(c.DisabledOrgs, []string{w.orgB}) {
-		t.Fatalf("the shared cluster as admission reads it: %+v, want it off for org b alone", c)
+	if c := registered[platform]; c.Hosts(w.orgB) || !c.Hosts(w.orgA) || !slices.Equal(c.DisabledOrgs, []string{w.orgB}) {
+		t.Fatalf("the platform cluster as admission reads it: %+v, want it off for org b alone", c)
 	}
 	hosting, err := w.clusters.ClustersHosting(ctx, w.orgB)
 	if err != nil {
@@ -93,8 +91,8 @@ func TestOneOrgTurningASharedClusterOffLeavesItOnForTheOther(t *testing.T) {
 	for _, c := range hosting {
 		listed[c.Name] = c.EnabledFor(w.orgB)
 	}
-	if on, ok := listed[w.ofA]; !ok || on {
-		t.Fatalf("the clusters listed to org b = %v, want the shared one among them and off", listed)
+	if on, ok := listed[platform]; !ok || on {
+		t.Fatalf("the clusters listed to org b = %v, want the platform one among them and off", listed)
 	}
 	if !listed[w.ofB] {
 		t.Fatalf("the clusters listed to org b = %v, want its own on", listed)

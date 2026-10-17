@@ -103,7 +103,7 @@ export interface paths {
         put?: never;
         /**
          * Submit one job
-         * @description Submit {metadata, job}. The platform issues the job's id, job-<32 hex>, and answers it as id. AcceleratorType/count are derived from the job spec. submission_key makes the submit safe to repeat when its answer was lost: a second submit of the same agent with the same key creates nothing, holds nothing more of the quota and is answered 202 with the job the first created, as it is then, so its status may no longer be QUEUED. The key is the caller's to choose and to change when it means another job. metadata.agent_id is whose job it is and whose quota it spends, and metadata.platform_experiment_id where it runs. An agent's token says both: it may leave them out, and stating another is refused. Who submitted it is the caller, answered as actor. metadata.estimated_duration_hours is what the job holds of its agent's quota until it ends, answered on the job as it was applied. A stated one is never replaced; left out, it is the platform experiment's job_estimated_duration_hours, which the platform measured on its baseline job, and 422 required where it measured none. Nothing is measured before the job of an agent of role baseline: left out there, it is the largest that agent's quota admits now, within the stage's per-job limit and the time left until baseline_due_at, and what the job does not spend is given back when it ends. metadata.code_ref is the platform experiment's repository at a commit, repository_url@<40-character sha>, with no credential in it: 422 code_ref_not_in_repository for any other address. metadata.branch is the git branch that commit was pushed on, one agent's implementation of the hypothesis, under hl/<platform_experiment_id>/: 422 branch_not_of_experiment for any other. What ran is code_ref, and the branch says which line of work it belongs to. The job runs in the image its platform experiment records at the submit (PUT /platform-experiments/{id}/image), answered on the job as image, repository@digest, and only on nodes of that image's architecture: 422 no_experiment_image while none is recorded. job.command, or each group's, is required, 422 malformed: every node fetches the job's commit into /workspace/code and runs the command there. 422 experiment_not_started before the platform starts the run, when only the job of an agent of role baseline is accepted: on an open platform experiment the message is its status_reason, the reason and the caller's own next step as GET /platform-experiments/{id} words them. job.cpu, job.memory and job.storage, or each group's, are what one node of the job holds, each stated as a quantity (cpu: 2, memory: 8Gi, storage: 4Gi): 422 required, naming the field in problems, where one is left out or is max. A job holds what it states and nothing is sized from the node it lands on. 422 exceeds_cluster_capacity where the job asks for more than every cluster that runs it has with nothing else on it, with what it asks for and what each cluster has: no wait admits such a job. A cluster that scales up may yet hold it. One that reports nothing now is named and not judged, and where none is judged the job is queued. 422 no_cluster_for_architecture where the job's image runs on an architecture no node of the clusters that run it has, naming the image's architecture and the ones those clusters have: a cluster that scales up may yet add a node of it. 422 exceeds_project_compute_limit where the job alone reserves more accelerator hours per hour of the platform's shared clusters than its project may hold (GET /resource-catalog/capacity, platform_compute_limit) and no cluster of the org's own can hold it. metadata.hypothesis_id and metadata.theory are required of every job but that of an agent of role baseline. The baseline is the objective's own measurement: that job states neither, 422 baseline_tests_no_hypothesis when it names a hypothesis, its branch is hl/<platform_experiment_id>/baseline, and it is answered with objective true and no hypothesis_id: it belongs to the objective, which is no hypothesis to look up. Any agent may run its own implementation of any hypothesis of the platform experiment, whoever registered it. same_hypothesis on the answer names the jobs of other agents that test the same hypothesis, queued, running or completed within the hour: the job is queued all the same, and whoever steers the run is told it as job.duplicate. run_best on the answer names the run's best job on the first ranking metric, its value, commit and branch, where it ran another commit than this job: whether this job's commit contains it is git's to say, which hl job submit asks the submitter's checkout. The job is queued all the same. Two fields have a default, answered on the job as applied: metadata.capacity_tier left out is guaranteed, and job.max_retries left out is 0. 503 object_store_unavailable while the platform's object store does not answer: a submit measures the agent's durable data there and creates the job's data key in it, so nothing was stored and the same submit is repeated later. Rejections return {reason,message}; an accepted job remains QUEUED until current capacity fits. Every not_admitted_reason comes with its sentence in not_admitted_message.
+         * @description Submit {metadata, job}. The platform issues the job's id, job-<32 hex>, and answers it as id. AcceleratorType/count are derived from the job spec. submission_key makes the submit safe to repeat when its answer was lost: a second submit of the same agent with the same key creates nothing, holds nothing more of the quota and is answered 202 with the job the first created, as it is then, so its status may no longer be QUEUED. The key is the caller's to choose and to change when it means another job. metadata.agent_id is whose job it is and whose quota it spends, and metadata.platform_experiment_id where it runs. An agent's token says both: it may leave them out, and stating another is refused. Who submitted it is the caller, answered as actor. metadata.estimated_duration_hours is what the job holds of its agent's quota until it ends, answered on the job as it was applied. A stated one is never replaced; left out, it is the platform experiment's job_estimated_duration_hours, which the platform measured on its baseline job, and 422 required where it measured none. Nothing is measured before the job of an agent of role baseline: left out there, it is the largest that agent's quota admits now, within the stage's per-job limit and the time left until baseline_due_at, and what the job does not spend is given back when it ends. metadata.code_ref is the platform experiment's repository at a commit, repository_url@<40-character sha>, with no credential in it: 422 code_ref_not_in_repository for any other address. metadata.branch is the git branch that commit was pushed on, one agent's implementation of the hypothesis, under hl/<platform_experiment_id>/: 422 branch_not_of_experiment for any other. What ran is code_ref, and the branch says which line of work it belongs to. The job runs in the image its platform experiment records at the submit (PUT /platform-experiments/{id}/image), answered on the job as image, repository@digest, and only on nodes of that image's architecture: 422 no_experiment_image while none is recorded. job.command, or each group's, is required, 422 malformed: every node fetches the job's commit into /workspace/code and runs the command there. 422 experiment_not_started before the platform starts the run, when only the job of an agent of role baseline is accepted: on an open platform experiment the message is its status_reason, the reason and the caller's own next step as GET /platform-experiments/{id} words them. job.cpu, job.memory and job.storage, or each group's, are what one node of the job holds, each stated as a quantity (cpu: 2, memory: 8Gi, storage: 4Gi): 422 required, naming the field in problems, where one is left out or is max. A job holds what it states and nothing is sized from the node it lands on. 422 exceeds_cluster_capacity where the job asks for more than every cluster that runs it has with nothing else on it, with what it asks for and what each cluster has: no wait admits such a job. A cluster that scales up may yet hold it. One that reports nothing now is named and not judged, and where none is judged the job is queued. 422 no_cluster_for_architecture where the job's image runs on an architecture no node of the clusters that run it has, naming the image's architecture and the ones those clusters have: a cluster that scales up may yet add a node of it. 422 exceeds_project_compute_limit where the job alone reserves more accelerator hours per hour of the platform's clusters than its project may hold (GET /resource-catalog/capacity, platform_compute_limit) and no cluster of the org's own can hold it. metadata.hypothesis_id and metadata.theory are required of every job but that of an agent of role baseline. The baseline is the objective's own measurement: that job states neither, 422 baseline_tests_no_hypothesis when it names a hypothesis, its branch is hl/<platform_experiment_id>/baseline, and it is answered with objective true and no hypothesis_id: it belongs to the objective, which is no hypothesis to look up. Any agent may run its own implementation of any hypothesis of the platform experiment, whoever registered it. same_hypothesis on the answer names the jobs of other agents that test the same hypothesis, queued, running or completed within the hour: the job is queued all the same, and whoever steers the run is told it as job.duplicate. run_best on the answer names the run's best job on the first ranking metric, its value, commit and branch, where it ran another commit than this job: whether this job's commit contains it is git's to say, which hl job submit asks the submitter's checkout. The job is queued all the same. Two fields have a default, answered on the job as applied: metadata.capacity_tier left out is guaranteed, and job.max_retries left out is 0. 503 object_store_unavailable while the platform's object store does not answer: a submit measures the agent's durable data there and creates the job's data key in it, so nothing was stored and the same submit is repeated later. Rejections return {reason,message}; an accepted job remains QUEUED until current capacity fits. Every not_admitted_reason comes with its sentence in not_admitted_message.
          */
         post: operations["submit-experiment"];
         delete?: never;
@@ -790,13 +790,13 @@ export interface paths {
         };
         /**
          * List the clusters an org's jobs run on
-         * @description The clusters the org registered and the ones the platform shares with every org, in the order a job is placed on them, with whether an agent is connected right now and whether the org has the cluster on for its jobs (enabled). The org may change only the ones it owns, and turns any of them off or on for its own jobs.
+         * @description The clusters the org registered and the platform's, which serve every org, in the order a job is placed on them, with whether an agent is connected right now and whether the org has the cluster on for its jobs (enabled). The org may change only the ones it owns, and turns any of them off or on for its own jobs.
          */
         get: operations["list-clusters"];
         put?: never;
         /**
          * Register a cluster for an org
-         * @description A cluster exists for the platform once its name is registered, and takes the jobs of its org only. Returns what its agents are started with: the runtime token, the two addresses they reach the platform at, and attach_commands, the complete command that starts them on a Kubernetes cluster and on a bare-metal node. The token is derived from the name, so it is never lost: registering a name the org already owns changes nothing and returns the same token and addresses. A name another org owns answers 409.
+         * @description A cluster exists for the platform once its name is registered, and takes the jobs of its org only, or of every org for a cluster of the platform's org. Returns what its agents are started with: the runtime token, the two addresses they reach the platform at, and attach_commands, the complete command that starts them on a Kubernetes cluster and on a bare-metal node. The token is derived from the name, so it is never lost: registering a name the org already owns changes nothing and returns the same token and addresses. A name another org owns answers 409.
          */
         post: operations["register-cluster"];
         delete?: never;
@@ -815,7 +815,7 @@ export interface paths {
         get?: never;
         /**
          * Set the order an org's jobs are placed on its clusters
-         * @description names is every cluster the org registered and the platform does not share, each once, first placed first: anything else answers 422 and changes nothing. A job is placed on the first cluster that can take it as the scheduler reads capacity at that moment, and on a later one when that is full or has just failed it. The order holds for placements from then on and moves no job that is placed. A cluster registered afterwards comes last until it is ordered, and the clusters the platform shares come after every one of the org's own. Answers the clusters as the list does, in the new order.
+         * @description names is every cluster the org registered, each once, first placed first: anything else answers 422 and changes nothing. A job is placed on the first cluster that can take it as the scheduler reads capacity at that moment, and on a later one when that is full or has just failed it. The order holds for placements from then on and moves no job that is placed. A cluster registered afterwards comes last until it is ordered, and the platform's clusters come after every one of the org's own. Answers the clusters as the list does, in the new order.
          */
         put: operations["order-clusters"];
         post?: never;
@@ -843,8 +843,8 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * Change a cluster: its scheduler settings, or whether every org shares it
-         * @description Takes the fields that change, at least one. shared is staff only. A shared cluster takes jobs of every org. When the sharing ends, the jobs of other orgs placed on the cluster go back to the queue in the same step and are placed elsewhere: the cluster's runtime stops them, giving each its checkpoint window, and none of them spends a retry. requeued names them. The cluster then comes last among its org's own until the org orders them. scale_up_timeout_seconds, max_speculative_accelerators and stuck_pending_timeout_seconds are the cluster's own values in place of the scheduler's defaults, for a cluster whose nodes appear when a job asks for them, and status_silence_ceiling_seconds how long the cluster may report no job status before the jobs it holds are evicted as cluster_unreachable: each takes a value, or 0 to go back to the default.
+         * Change a cluster's scheduler settings
+         * @description Takes the fields that change, at least one. scale_up_timeout_seconds, max_speculative_accelerators and stuck_pending_timeout_seconds are the cluster's own values in place of the scheduler's defaults, for a cluster whose nodes appear when a job asks for them, and status_silence_ceiling_seconds how long the cluster may report no job status before the jobs it holds are evicted as cluster_unreachable: each takes a value, or 0 to go back to the default.
          */
         patch: operations["update-cluster"];
         trace?: never;
@@ -860,7 +860,7 @@ export interface paths {
         put?: never;
         /**
          * Turn a cluster off for an org's jobs
-         * @description From here on no job of the org is placed on the cluster, and the capacity the org reads leaves it out. The org's jobs already placed there are not touched: they run to their end. A queued job of an org that turned off every cluster it could use waits with not_admitted_reason clusters_disabled. The cluster is any the org can use, its own or one the platform shares, and the decision is the org's alone: it changes nothing for another org. An owner of the org, an API key of the whole org and staff decide it. Repeating it changes nothing. A cluster the org cannot use is not found.
+         * @description From here on no job of the org is placed on the cluster, and the capacity the org reads leaves it out. The org's jobs already placed there are not touched: they run to their end. A queued job of an org that turned off every cluster it could use waits with not_admitted_reason clusters_disabled. The cluster is any the org can use, its own or one of the platform's, and the decision is the org's alone: it changes nothing for another org. An owner of the org, an API key of the whole org and staff decide it. Repeating it changes nothing. A cluster the org cannot use is not found.
          */
         post: operations["disable-cluster"];
         delete?: never;
@@ -880,7 +880,7 @@ export interface paths {
         put?: never;
         /**
          * Turn a cluster on again for an org's jobs
-         * @description The org's jobs are placed on the cluster again, which is how every cluster starts. The cluster is any the org can use, its own or one the platform shares, and the decision is the org's alone: it changes nothing for another org. An owner of the org, an API key of the whole org and staff decide it. Repeating it changes nothing. A cluster the org cannot use is not found.
+         * @description The org's jobs are placed on the cluster again, which is how every cluster starts. The cluster is any the org can use, its own or one of the platform's, and the decision is the org's alone: it changes nothing for another org. An owner of the org, an API key of the whole org and staff decide it. Repeating it changes nothing. A cluster the org cannot use is not found.
          */
         post: operations["enable-cluster"];
         delete?: never;
@@ -2524,7 +2524,7 @@ export interface components {
             top_results?: components["schemas"]["AgentResult"][];
         };
         /** @enum {string} */
-        ClusterAction: "enable" | "edit" | "remove" | "share";
+        ClusterAction: "enable" | "edit" | "remove";
         ClusterCapacity: {
             accelerators: components["schemas"]["AcceleratorCapacity"][];
             /** @description The architectures of the cluster's nodes (amd64, arm64). A job runs only on nodes of its platform experiment's image's architecture. */
@@ -2537,6 +2537,28 @@ export interface components {
             on_demand?: boolean;
             per_node?: components["schemas"]["NodeCapacity"];
             resources?: components["schemas"]["ResourceCapacity"];
+        };
+        ClusterSettings: {
+            /**
+             * Format: int64
+             * @description The most accelerators that jobs placed on this cluster ahead of capacity hold at once: what its autoscaler can add. Absent, no cap.
+             */
+            max_speculative_accelerators?: number;
+            /**
+             * Format: int64
+             * @description How long a job placed ahead of capacity waits for this cluster's autoscaler to bring a node, under 1800. Absent, the platform's default.
+             */
+            scale_up_timeout_seconds?: number;
+            /**
+             * Format: int64
+             * @description How long this cluster may report no job status at all before the jobs it holds are evicted as cluster_unreachable and queued again. Absent, the platform's default.
+             */
+            status_silence_ceiling_seconds?: number;
+            /**
+             * Format: int64
+             * @description How long a job admitted to this cluster may stay unplaced before it is evicted as stuck_pending. Absent, the platform's default.
+             */
+            stuck_pending_timeout_seconds?: number;
         };
         ClusterView: {
             cluster_id?: string;
@@ -2556,8 +2578,6 @@ export interface components {
              * @description How long a job placed ahead of capacity waits for this cluster's autoscaler to bring a node, under 1800. Absent, the platform's default.
              */
             scale_up_timeout_seconds?: number;
-            /** @description The platform places every org's jobs on a shared cluster. Staff decide it. */
-            shared: boolean;
             /**
              * Format: int64
              * @description How long this cluster may report no job status at all before the jobs it holds are evicted as cluster_unreachable and queued again. Absent, the platform's default.
@@ -3445,7 +3465,7 @@ export interface components {
             role: components["schemas"]["AgentRole"];
         };
         ListedCluster: {
-            /** @description What the caller may do to the cluster now, each a write the API accepts from them: enable (turn it on and off for the org's jobs, and order it), edit (PATCH its settings, and forget its identity), remove, and share (PATCH shared). */
+            /** @description What the caller may do to the cluster now, each a write the API accepts from them: enable (turn it on and off for the org's jobs, and order it), edit (PATCH its settings, and forget its identity), and remove. */
             actions: components["schemas"]["ClusterAction"][];
             /** @description The version, an image tag, the cluster's agent said it runs at its last contact. */
             agent_version?: string;
@@ -3473,11 +3493,11 @@ export interface components {
             max_speculative_accelerators?: number;
             name: string;
             org_id?: string;
-            /** @description The org registered the cluster and may change its settings. False for a cluster of another org that the platform shares: its org_id, cluster_id, settings, agent_version and last_error are left out. */
+            /** @description The org registered the cluster and may change its settings. False for a cluster of the platform's org listed to another org: its org_id, cluster_id, settings, agent_version and last_error are left out. */
             owned: boolean;
             /**
              * Format: int64
-             * @description Where the cluster stands in the order a job of the org is tried on its clusters, 1 first. Clusters of one place are tried together, the one with the most room for the job first. The platform's shared clusters come after every cluster of the org's own. Absent while the org has the cluster turned off.
+             * @description Where the cluster stands in the order a job of the org is tried on its clusters, 1 first. Clusters of one place are tried together, the one with the most room for the job first. The platform's clusters come after every cluster of the org's own. Absent while the org has the cluster turned off.
              */
             place?: number;
             /**
@@ -3485,8 +3505,6 @@ export interface components {
              * @description How long a job placed ahead of capacity waits for this cluster's autoscaler to bring a node, under 1800. Absent, the platform's default.
              */
             scale_up_timeout_seconds?: number;
-            /** @description The platform places every org's jobs on a shared cluster. Staff decide it. */
-            shared: boolean;
             /**
              * Format: int64
              * @description How long this cluster may report no job status at all before the jobs it holds are evicted as cluster_unreachable and queued again. Absent, the platform's default.
@@ -3743,7 +3761,7 @@ export interface components {
         PlatformComputeLimit: {
             /**
              * Format: double
-             * @description Accelerator hours per hour of the platform's shared clusters the org's placed jobs may reserve together.
+             * @description Accelerator hours per hour of the platform's clusters the org's placed jobs may reserve together.
              */
             org: number;
             /**
@@ -3753,7 +3771,7 @@ export interface components {
             org_held: number;
             /**
              * Format: double
-             * @description Accelerator hours per hour of the platform's shared clusters the placed jobs of any one of the org's projects may reserve.
+             * @description Accelerator hours per hour of the platform's clusters the placed jobs of any one of the org's projects may reserve.
              */
             project: number;
             /**
@@ -4189,8 +4207,6 @@ export interface components {
              * @description How long a job placed ahead of capacity waits for this cluster's autoscaler to bring a node, under 1800. Absent, the platform's default.
              */
             scale_up_timeout_seconds?: number;
-            /** @description The platform places every org's jobs on a shared cluster. Staff decide it. */
-            shared: boolean;
             /**
              * Format: int64
              * @description How long this cluster may report no job status at all before the jobs it holds are evicted as cluster_unreachable and queued again. Absent, the platform's default.
@@ -4663,30 +4679,6 @@ export interface components {
         };
         /** @enum {string} */
         TypeKind: "accelerator" | "cpu";
-        UpdateClusterRequest: {
-            /**
-             * Format: int64
-             * @description The most accelerators that jobs placed on this cluster ahead of capacity hold at once: what its autoscaler can add. Absent, no cap.
-             */
-            max_speculative_accelerators?: number;
-            /**
-             * Format: int64
-             * @description How long a job placed ahead of capacity waits for this cluster's autoscaler to bring a node, under 1800. Absent, the platform's default.
-             */
-            scale_up_timeout_seconds?: number;
-            /** @description Staff only. */
-            shared?: boolean;
-            /**
-             * Format: int64
-             * @description How long this cluster may report no job status at all before the jobs it holds are evicted as cluster_unreachable and queued again. Absent, the platform's default.
-             */
-            status_silence_ceiling_seconds?: number;
-            /**
-             * Format: int64
-             * @description How long a job admitted to this cluster may stay unplaced before it is evicted as stuck_pending. Absent, the platform's default.
-             */
-            stuck_pending_timeout_seconds?: number;
-        };
         VerdictRequest: {
             /** @description The control job a confirmed or refuted verdict compares with. */
             against?: string;
@@ -4725,8 +4717,6 @@ export interface components {
              * @description How long a job placed ahead of capacity waits for this cluster's autoscaler to bring a node, under 1800. Absent, the platform's default.
              */
             scale_up_timeout_seconds?: number;
-            /** @description The platform places every org's jobs on a shared cluster. Staff decide it. */
-            shared: boolean;
             /**
              * Format: int64
              * @description How long this cluster may report no job status at all before the jobs it holds are evicted as cluster_unreachable and queued again. Absent, the platform's default.
@@ -4794,6 +4784,7 @@ export type CloseReason = components['schemas']['CloseReason'];
 export type CloseRequest = components['schemas']['CloseRequest'];
 export type ClusterAction = components['schemas']['ClusterAction'];
 export type ClusterCapacity = components['schemas']['ClusterCapacity'];
+export type ClusterSettings = components['schemas']['ClusterSettings'];
 export type ClusterView = components['schemas']['ClusterView'];
 export type CreateAPIKeyRequest = components['schemas']['CreateAPIKeyRequest'];
 export type CreateAgentTypeRequest = components['schemas']['CreateAgentTypeRequest'];
@@ -4953,7 +4944,6 @@ export type Subscription = components['schemas']['Subscription'];
 export type SummaryReply = components['schemas']['SummaryReply'];
 export type TopologySpec = components['schemas']['TopologySpec'];
 export type TypeKind = components['schemas']['TypeKind'];
-export type UpdateClusterRequest = components['schemas']['UpdateClusterRequest'];
 export type VerdictRequest = components['schemas']['VerdictRequest'];
 export type Waiter = components['schemas']['Waiter'];
 export type WatchFrame = components['schemas']['WatchFrame'];
@@ -6710,7 +6700,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["UpdateClusterRequest"];
+                "application/json": components["schemas"]["ClusterSettings"];
             };
         };
         responses: {
@@ -6720,7 +6710,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WithdrawnCluster"];
+                    "application/json": components["schemas"]["ClusterView"];
                 };
             };
             /** @description Error */
@@ -8993,7 +8983,7 @@ export const agentTypeSettingsEffortValues: ReadonlyArray<FlattenedDeepRequired<
 export const capacityTierValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CapacityTier"]> = ["guaranteed", "burst"];
 export const changeKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Change"]["kind"]> = ["experiment.status", "experiment.blocked", "quota.changed", "stage.boundary", "agent.cut", "agent.finished", "agent.replaced", "agent.idle", "agent.instructions", "capacity.idle", "agent.message", "agent.activity", "hypothesis.new", "hypothesis.status", "hypothesis.link", "finding.new", "comment.new", "platform_experiment.status", "platform_experiment.description", "platform_experiment.goal", "platform_experiment.proposal", "platform_experiment.plan", "platform_experiment.baseline", "platform_experiment.removed", "job.held", "job.duplicate", "job.underperforming"];
 export const closeReasonValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CloseReason"]> = ["end_time_reached", "closed_by_request", "planning_limit_reached", "proposal_expired", "baseline_limit_reached", "agents_not_started", "planner_stopped", "repository_not_created"];
-export const clusterActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ClusterAction"]> = ["enable", "edit", "remove", "share"];
+export const clusterActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ClusterAction"]> = ["enable", "edit", "remove"];
 export const endedStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["EndedStatus"]> = ["COMPLETED", "FAILED", "EVICTED", "REJECTED", "CANCELLED"];
 export const experimentActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ExperimentAction"]> = ["cancel"];
 export const experimentStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ExperimentStatus"]> = ["SUBMITTED", "QUEUED", "RUNNING", "COMPLETED", "FAILED", "EVICTED", "REJECTED", "CANCELLED"];

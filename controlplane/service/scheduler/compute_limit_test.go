@@ -27,12 +27,12 @@ func TestAComputeLimitRefusalIsQueuedWithItsFigures(t *testing.T) {
 }
 
 // A job that alone reserves more than its project may hold of the platform's compute runs on no
-// shared cluster, so it never fits where no cluster of its org's own may hold it.
+// platform cluster, so it never fits where no cluster of its org's own may hold it.
 func TestAJobAboveItsProjectsLimitNeverFitsWithoutAClusterOfItsOrg(t *testing.T) {
 	big := holdJob("big", domain.CapacityGuaranteed, h100, 4, "1")
 	big.OrgID = "org-a"
 	room := domain.CapacityFootprint(64, map[string]int64{h100: 8}, 1<<40, 1<<42)
-	platform := domain.Cluster{Name: "platform", OrgID: "operator", Shared: true}
+	platform := domain.Cluster{Name: "platform", OrgID: domain.PlatformOrgID}
 	own := domain.Cluster{Name: "own", OrgID: "org-a"}
 	limits := func(project float64) map[string]domain.ComputeLimit {
 		return map[string]domain.ComputeLimit{"org-a": {Org: 8, Project: project}}
@@ -60,7 +60,7 @@ func TestAJobAboveItsProjectsLimitNeverFitsWithoutAClusterOfItsOrg(t *testing.T)
 
 // Submit refuses such a job with 422 exceeds_project_compute_limit.
 func TestAJobAboveItsProjectsLimitIsRefusedAtSubmit(t *testing.T) {
-	registered := map[string]domain.Cluster{"platform": {Name: "platform", OrgID: "operator", Shared: true}}
+	registered := map[string]domain.Cluster{"platform": {Name: "platform", OrgID: domain.PlatformOrgID}}
 	capacity := installedCapacity{installed: map[string]domain.Footprint{"platform": domain.CapacityFootprint(64, map[string]int64{h100: 8}, 1<<40, 1<<42)}}
 	submit := func(project float64) (*AdmissionError, error) {
 		store := clustersStore{registered: registered, limits: map[string]domain.ComputeLimit{"org-a": {Org: 8, Project: project}}}

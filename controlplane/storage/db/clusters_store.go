@@ -26,19 +26,31 @@ var (
 // cluster from jobs, so the two never interleave.
 const clusterAdmissionLock = `SELECT pg_advisory_xact_lock(hashtextextended('cluster-admission/' || $1, 0))`
 
+// platformClusterSQL is the condition that the clusters row named cluster is one of the
+// platform's org.
+func platformClusterSQL(cluster string) string {
+	return cluster + `.org_id = '` + domain.PlatformOrgID + `'`
+}
+
+// clusterOpenToSQL is domain.Cluster.OpenTo as a condition on the clusters row named cluster and
+// the org org.
+func clusterOpenToSQL(cluster, org string) string {
+	return `(` + platformClusterSQL(cluster) + ` OR ` + cluster + `.org_id = ` + org + `)`
+}
+
 // clusterHostsJob is the placement rule (domain.Cluster.Hosts) as a condition on a job row e and
-// a cluster named $2: the cluster is registered, is shared or belongs to the job's org, and that
-// org has not turned it off.
+// a cluster named $2: the cluster is registered, serves the job's org, and that org has not
+// turned it off.
 var clusterHostsJob = `EXISTS (
 	SELECT 1 FROM clusters c, (SELECT ` + orgOfSQL("e.platform_experiment_id") + ` AS org_id) o
-	WHERE c.name = $2 AND (c.shared OR c.org_id = o.org_id)
+	WHERE c.name = $2 AND ` + clusterOpenToSQL("c", "o.org_id") + `
 	  AND NOT EXISTS (SELECT 1 FROM org_disabled_clusters d WHERE d.cluster_name = c.name AND d.org_id = o.org_id))`
 
-// requeueWithdrawn returns to the queue every job placed on a cluster that no longer takes it:
-// all of them, or with keepOrg set every one of another org. It is the requeue an infrastructure
-// fault gets (RequeueInfrastructureFault): the attempt advances so the next placement is a new
-// desired state, and it is counted as not the job's own, so no retry is spent. The allowance for
-// such requeues is not checked. It bounds a broken environment, and this is one decision.
+// requeueWithdrawn returns to the queue every job placed on a cluster that no longer takes it. It
+// is the requeue an infrastructure fault gets (RequeueInfrastructureFault): the attempt advances
+// so the next placement is a new desired state, and it is counted as not the job's own, so no
+// retry is spent. The allowance for such requeues is not checked. It bounds a broken
+// environment, and this is one decision.
 var requeueWithdrawn = `
 UPDATE experiments e SET
 	status = 'QUEUED',
@@ -53,17 +65,16 @@ UPDATE experiments e SET
 	not_admitted_reason = '` + domain.QueueReasonAwaitingAdmission + `',
 	quota_settled_at = NULL,
 	updated_at = NOW()
-WHERE e.cluster_name = $1 AND e.status IN ` + placedSQL + `
-  AND ($2 = '' OR $2 <> ` + orgOfSQL("e.platform_experiment_id") + `)` + jobReturning
+WHERE e.cluster_name = $1 AND e.status IN ` + placedSQL + jobReturning
 
-const clusterColumns = `name, org_id, shared, priority, COALESCE(reported_id, ''), created_at,
+const clusterColumns = `name, org_id, priority, COALESCE(reported_id, ''), created_at,
 	scale_up_timeout_seconds, max_speculative_accelerators, stuck_pending_timeout_seconds, status_silence_ceiling_seconds,
 	last_error, last_error_at,
 	ARRAY(SELECT d.org_id FROM org_disabled_clusters d WHERE d.cluster_name = clusters.name ORDER BY d.org_id)`
 
 func scanCluster(row rowScanner) (*domain.Cluster, error) {
 	c := &domain.Cluster{}
-	if err := row.Scan(&c.Name, &c.OrgID, &c.Shared, &c.Priority, &c.ReportedID, &c.CreatedAt,
+	if err := row.Scan(&c.Name, &c.OrgID, &c.Priority, &c.ReportedID, &c.CreatedAt,
 		&c.ScaleUpTimeoutSeconds, &c.MaxSpeculativeAccelerators, &c.StuckPendingTimeoutSeconds, &c.StatusSilenceCeilingSeconds,
 		&c.LastError, &c.LastErrorAt, &c.DisabledOrgs); err != nil {
 		return nil, err
@@ -160,11 +171,12 @@ func (s *Store) RegisteredClusters(ctx context.Context) (map[string]domain.Clust
 	return out, rows.Err()
 }
 
-// ClustersHosting returns the clusters orgID can use, its own and the shared ones, by name. The
-// ones it turned off are among them and say so. They come in the order placement tries them:
-// highest priority first, then by name.
+// ClustersHosting returns the clusters that serve orgID, its own and the platform's. The ones it
+// turned off are among them and say so. They come in the order placement tries them
+// (domain.Cluster.Rank), then by name.
 func (s *Store) ClustersHosting(ctx context.Context, orgID string) ([]*domain.Cluster, error) {
-	rows, err := s.pool.pool.Query(ctx, `SELECT `+clusterColumns+` FROM clusters WHERE org_id = $1 OR shared ORDER BY priority DESC, name`, orgID)
+	rows, err := s.pool.pool.Query(ctx, `SELECT `+clusterColumns+` FROM clusters WHERE `+clusterOpenToSQL("clusters", "$1")+`
+ORDER BY CASE WHEN org_id = $1 THEN priority ELSE 0 END DESC, name`, orgID)
 	if err != nil {
 		return nil, fmt.Errorf("clusters_store.ClustersHosting: %w", err)
 	}
@@ -180,49 +192,27 @@ func (s *Store) ClustersHosting(ctx context.Context, orgID string) ([]*domain.Cl
 	return out, rows.Err()
 }
 
-// UpdateCluster changes a cluster in one transaction, so all of a change is written or none of
-// it. shared, when stated, records whether the platform shares the cluster with every org.
-// Ending the sharing is a decision about the jobs of other orgs placed there too, so it is
-// written with them: they return to the queue, which is what makes the cluster's runtime stop
-// them and admission place them elsewhere. requeued names those jobs. Of the settings, a value
-// sets the field, 0 puts it back on the scheduler's default and nil leaves it as it is.
-func (s *Store) UpdateCluster(ctx context.Context, name string, shared *bool, change domain.ClusterSettings) (cluster *domain.Cluster, requeued []string, err error) {
+// UpdateCluster changes a cluster's settings: a value sets the field, 0 puts it back on the
+// scheduler's default and nil leaves it as it is.
+func (s *Store) UpdateCluster(ctx context.Context, name string, change domain.ClusterSettings) (*domain.Cluster, error) {
 	if err := domain.ValidateClusterSettings(change); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	if err := s.write(ctx, func(tx *Write) error {
-		if shared != nil {
-			if _, err := tx.Exec(ctx, clusterAdmissionLock, name); err != nil {
-				return fmt.Errorf("clusters_store.UpdateCluster: lock: %w", err)
-			}
-		}
-		// A shared cluster holds the platform's priority, and one that is its org's alone again starts
-		// from the priority a cluster is registered with.
-		cluster, err = scanCluster(tx.QueryRow(ctx, `
-UPDATE clusters SET shared = COALESCE($2::boolean, shared),
-	priority = CASE WHEN $2::boolean THEN $3 WHEN NOT $2::boolean AND shared THEN $4 ELSE priority END,
-	scale_up_timeout_seconds = CASE WHEN $5::int IS NULL THEN scale_up_timeout_seconds ELSE NULLIF($5::int, 0) END,
-	max_speculative_accelerators = CASE WHEN $6::int IS NULL THEN max_speculative_accelerators ELSE NULLIF($6::int, 0) END,
-	stuck_pending_timeout_seconds = CASE WHEN $7::int IS NULL THEN stuck_pending_timeout_seconds ELSE NULLIF($7::int, 0) END,
-	status_silence_ceiling_seconds = CASE WHEN $8::int IS NULL THEN status_silence_ceiling_seconds ELSE NULLIF($8::int, 0) END
-WHERE name = $1 RETURNING `+clusterColumns, name, shared, domain.SharedClusterPriority, domain.DefaultClusterPriority,
-			change.ScaleUpTimeoutSeconds, change.MaxSpeculativeAccelerators, change.StuckPendingTimeoutSeconds, change.StatusSilenceCeilingSeconds))
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrClusterNotFound
-		}
-		if err != nil {
-			return fmt.Errorf("clusters_store.UpdateCluster: %w", err)
-		}
-		if shared != nil && !*shared {
-			if requeued, err = withdraw(ctx, tx, name, cluster.OrgID); err != nil {
-				return fmt.Errorf("clusters_store.UpdateCluster: %w", err)
-			}
-		}
-		return nil
-	}); err != nil {
-		return nil, nil, err
+	cluster, err := scanCluster(s.pool.pool.QueryRow(ctx, `
+UPDATE clusters SET
+	scale_up_timeout_seconds = CASE WHEN $2::int IS NULL THEN scale_up_timeout_seconds ELSE NULLIF($2::int, 0) END,
+	max_speculative_accelerators = CASE WHEN $3::int IS NULL THEN max_speculative_accelerators ELSE NULLIF($3::int, 0) END,
+	stuck_pending_timeout_seconds = CASE WHEN $4::int IS NULL THEN stuck_pending_timeout_seconds ELSE NULLIF($4::int, 0) END,
+	status_silence_ceiling_seconds = CASE WHEN $5::int IS NULL THEN status_silence_ceiling_seconds ELSE NULLIF($5::int, 0) END
+WHERE name = $1 RETURNING `+clusterColumns, name,
+		change.ScaleUpTimeoutSeconds, change.MaxSpeculativeAccelerators, change.StuckPendingTimeoutSeconds, change.StatusSilenceCeilingSeconds))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrClusterNotFound
 	}
-	return cluster, requeued, nil
+	if err != nil {
+		return nil, fmt.Errorf("clusters_store.UpdateCluster: %w", err)
+	}
+	return cluster, nil
 }
 
 // SetClusterEnabled records whether orgID uses a cluster for its jobs, and by whom it was turned
@@ -237,7 +227,7 @@ func (s *Store) SetClusterEnabled(ctx context.Context, name, orgID string, by do
 		if _, err := tx.Exec(ctx, clusterAdmissionLock, name); err != nil {
 			return fmt.Errorf("clusters_store.SetClusterEnabled: lock: %w", err)
 		}
-		const open = `FROM clusters WHERE name = $1 AND (shared OR org_id = $2)`
+		open := `FROM clusters WHERE name = $1 AND ` + clusterOpenToSQL("clusters", "$2")
 		if enabled {
 			_, err = tx.Exec(ctx, `DELETE FROM org_disabled_clusters WHERE cluster_name = $1 AND org_id = $2`, name, orgID)
 		} else {
@@ -264,15 +254,15 @@ ON CONFLICT (cluster_name, org_id) DO NOTHING`, name, orgID, string(by.Kind), by
 }
 
 // ErrClusterOrder is an order that does not name every cluster its org ranks exactly once.
-var ErrClusterOrder = errors.New("the order must name every cluster the org registered and does not share, each once")
+var ErrClusterOrder = errors.New("the order must name every cluster the org registered, each once")
 
 // SetClusterOrder ranks the clusters orgID registered, first placed first, in one step: all of
-// them take their new priority or none does. names must be exactly the clusters the org ranks,
-// which leaves out one the platform shares. It orders placements from here on and moves no job.
+// them take their new priority or none does. names must be exactly the clusters the org
+// registered. It orders placements from here on and moves no job.
 // A cluster registered later starts at DefaultClusterPriority, behind an order of up to 900.
 func (s *Store) SetClusterOrder(ctx context.Context, orgID string, names []string) error {
 	if err := s.write(ctx, func(tx *Write) error {
-		rows, err := tx.Query(ctx, `SELECT name FROM clusters WHERE org_id = $1 AND NOT shared FOR UPDATE`, orgID)
+		rows, err := tx.Query(ctx, `SELECT name FROM clusters WHERE org_id = $1 FOR UPDATE`, orgID)
 		if err != nil {
 			return fmt.Errorf("clusters_store.SetClusterOrder: %w", err)
 		}
@@ -327,8 +317,8 @@ func (s *Store) StatusSilenceCeiling(ctx context.Context, name string) (*int, er
 	return seconds, nil
 }
 
-func withdraw(ctx context.Context, tx *Write, name, keepOrg string) ([]string, error) {
-	rows, err := tx.Query(ctx, requeueWithdrawn, name, keepOrg)
+func withdraw(ctx context.Context, tx *Write, name string) ([]string, error) {
+	rows, err := tx.Query(ctx, requeueWithdrawn, name)
 	if err != nil {
 		return nil, fmt.Errorf("requeue the jobs placed on %s: %w", name, err)
 	}
@@ -352,7 +342,7 @@ func (s *Store) RemoveCluster(ctx context.Context, name string) (requeued []stri
 		if _, err := tx.Exec(ctx, clusterAdmissionLock, name); err != nil {
 			return fmt.Errorf("clusters_store.RemoveCluster: lock: %w", err)
 		}
-		if requeued, err = withdraw(ctx, tx, name, ""); err != nil {
+		if requeued, err = withdraw(ctx, tx, name); err != nil {
 			return fmt.Errorf("clusters_store.RemoveCluster: %w", err)
 		}
 		tag, err := tx.Exec(ctx, `DELETE FROM clusters WHERE name = $1`, name)

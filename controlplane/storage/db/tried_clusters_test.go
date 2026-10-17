@@ -136,12 +136,10 @@ func TestAScaleUpTimeoutPastTheAllowanceEndsTheJob(t *testing.T) {
 func TestOnlyScaleUpFailuresHoldOtherJobsOffACluster(t *testing.T) {
 	w := newTwoOrgs(t)
 	ctx := context.Background()
-	scaled, stuck, old := w.bound(t, w.ofA), w.bound(t, w.ofB), "rid-old-"+w.suffix
-	if _, _, err := w.clusters.UpdateCluster(ctx, w.ofB, sharedAs(true), domain.ClusterSettings{}); err != nil {
-		t.Fatal(err)
-	}
+	platform := w.platformCluster(t)
+	scaled, stuck, old := w.bound(t, w.ofA), w.bound(t, platform), "rid-old-"+w.suffix
 	onScaled := w.placed(t, "others-scale", w.peA, w.ofA, domain.StatusSubmitted)
-	onStuck := w.placed(t, "others-stuck", w.peA, w.ofB, domain.StatusSubmitted)
+	onStuck := w.placed(t, "others-stuck", w.peA, platform, domain.StatusSubmitted)
 	if ok, err := w.exps.RequeueInfrastructureFault(ctx, onScaled, domain.StatusSubmitted, string(domain.EvictionScaleUpTimeout), 3); err != nil || !ok {
 		t.Fatalf("requeue = %v, %v", ok, err)
 	}

@@ -24,7 +24,7 @@ CREATE TABLE users (
 );
 
 -- shared_acch_per_hour and project_shared_acch_per_hour are domain.ComputeLimit: the accelerator
--- hours per hour of shared clusters the org's placed jobs, and each project's, may reserve.
+-- hours per hour of the platform's clusters the org's placed jobs, and each project's, may reserve.
 CREATE TABLE orgs (
     id                           TEXT             PRIMARY KEY,
     name                         TEXT             NOT NULL,
@@ -91,13 +91,12 @@ CREATE INDEX idx_api_keys_org ON api_keys(org_id);
 -- Clusters
 -- ---------------------------------------------------------------------------
 
--- A shared cluster is the platform's and holds priority 0, so every org's own compute is tried
--- first. The *_seconds and max_speculative_accelerators columns override the scheduler's defaults
--- (domain.ClusterSettings), NULL for the default.
+-- A cluster of the platform's org serves every org, any other serves its org alone
+-- (domain.Cluster.OpenTo). The *_seconds and max_speculative_accelerators columns override the
+-- scheduler's defaults (domain.ClusterSettings), NULL for the default.
 CREATE TABLE clusters (
     name                           TEXT        PRIMARY KEY,
     org_id                         TEXT        NOT NULL REFERENCES orgs(id),
-    shared                         BOOLEAN     NOT NULL DEFAULT false,
     priority                       INTEGER     NOT NULL DEFAULT 100,
     reported_id                    TEXT        UNIQUE,
     scale_up_timeout_seconds       INTEGER     CHECK (scale_up_timeout_seconds > 0 AND scale_up_timeout_seconds < 1800),
@@ -107,9 +106,7 @@ CREATE TABLE clusters (
     last_error                     TEXT        NOT NULL DEFAULT '',
     last_error_at                  TIMESTAMPTZ,
     created_at                     TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT clusters_priority CHECK (
-        (shared AND priority = 0) OR (NOT shared AND priority BETWEEN 1 AND 1000)
-    )
+    CONSTRAINT clusters_priority CHECK (priority BETWEEN 1 AND 1000)
 );
 CREATE INDEX idx_clusters_org ON clusters(org_id);
 

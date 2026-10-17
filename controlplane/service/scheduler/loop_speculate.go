@@ -116,12 +116,12 @@ func (l *Loop) speculativeCandidates(
 		}
 		candidates = append(candidates, candidate{cluster: cluster, clusterID: clusterID, provenFit: provenFit})
 	}
-	// The cluster's priority decides first, as it does for every placement (placement.Tiers).
-	// Within one priority, clusters with live proof of fit go first (higher confidence bet), then
+	// The cluster's rank decides first, as it does for every placement (placement.Tiers).
+	// Within one rank, clusters with live proof of fit go first (higher confidence bet), then
 	// fewest currently-pending speculative jobs (spreads bets instead of piling onto one cluster),
 	// then a stable clusterID tiebreak — all using data already computed this tick, no new state.
 	sort.Slice(candidates, func(i, j int) bool {
-		if pi, pj := registered[candidates[i].cluster].Priority, registered[candidates[j].cluster].Priority; pi != pj {
+		if pi, pj := registered[candidates[i].cluster].Rank(exp.OrgID), registered[candidates[j].cluster].Rank(exp.OrgID); pi != pj {
 			return pi > pj
 		}
 		if candidates[i].provenFit != candidates[j].provenFit {

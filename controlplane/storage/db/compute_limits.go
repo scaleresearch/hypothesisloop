@@ -10,17 +10,17 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// heldOnSharedSQL sums acch_per_hour over the placed jobs of org $1 on shared clusters, all of
-// them and those of project $2, leaving out job $3.
-var heldOnSharedSQL = `SELECT COALESCE(SUM(e.acch_per_hour), 0), COALESCE(SUM(e.acch_per_hour) FILTER (WHERE p.id = $2), 0)
+// heldOnPlatformSQL sums acch_per_hour over the placed jobs of org $1 on the platform's clusters,
+// all of them and those of project $2, leaving out job $3.
+var heldOnPlatformSQL = `SELECT COALESCE(SUM(e.acch_per_hour), 0), COALESCE(SUM(e.acch_per_hour) FILTER (WHERE p.id = $2), 0)
 FROM experiments e
-JOIN clusters c ON c.name = e.cluster_name AND c.shared
+JOIN clusters c ON c.name = e.cluster_name AND ` + platformClusterSQL("c") + `
 JOIN platform_experiments pe ON pe.id = e.platform_experiment_id
 JOIN projects p ON p.id = pe.project_id
 WHERE p.org_id = $1 AND e.status IN ` + placedSQL + ` AND e.id <> $3`
 
-// orgSharedLock is the advisory lock a claim on a shared cluster takes after the cluster's own,
-// so two claims of one org on different shared clusters read each other's reservations.
+// orgSharedLock is the advisory lock a claim on a platform cluster takes after the cluster's own,
+// so two claims of one org on different platform clusters read each other's reservations.
 func orgSharedLock(ctx context.Context, q queryer, orgID string) error {
 	_, err := q.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, "org-shared/"+orgID)
 	return err
@@ -79,8 +79,8 @@ func (s *Store) OrgComputeLimits(ctx context.Context) (map[string]domain.Compute
 	return limits, rows.Err()
 }
 
-// PlatformComputeHeld is orgID's platform compute limit and what its placed jobs on shared
-// clusters reserve, all of them and those of projectID, which may be empty. ErrOrgNotFound when
+// PlatformComputeHeld is orgID's platform compute limit and what its placed jobs on the
+// platform's clusters reserve, all of them and those of projectID, which may be empty. ErrOrgNotFound when
 // there is no such org.
 func (s *Store) PlatformComputeHeld(ctx context.Context, orgID, projectID string) (limit domain.ComputeLimit, orgHeld, projectHeld float64, err error) {
 	err = s.pool.pool.QueryRow(ctx, `SELECT shared_acch_per_hour, project_shared_acch_per_hour FROM orgs WHERE id = $1`, orgID).Scan(&limit.Org, &limit.Project)
@@ -90,7 +90,7 @@ func (s *Store) PlatformComputeHeld(ctx context.Context, orgID, projectID string
 	if err != nil {
 		return limit, 0, 0, fmt.Errorf("accounts_store.PlatformComputeHeld: %w", err)
 	}
-	if err := s.pool.pool.QueryRow(ctx, heldOnSharedSQL, orgID, projectID, "").Scan(&orgHeld, &projectHeld); err != nil {
+	if err := s.pool.pool.QueryRow(ctx, heldOnPlatformSQL, orgID, projectID, "").Scan(&orgHeld, &projectHeld); err != nil {
 		return limit, 0, 0, fmt.Errorf("accounts_store.PlatformComputeHeld: held: %w", err)
 	}
 	return limit, orgHeld, projectHeld, nil

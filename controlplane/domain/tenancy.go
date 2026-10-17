@@ -67,10 +67,9 @@ const (
 	ClusterActionEnable ClusterAction = "enable"
 	ClusterActionEdit   ClusterAction = "edit"
 	ClusterActionRemove ClusterAction = "remove"
-	ClusterActionShare  ClusterAction = "share"
 )
 
-var ClusterActions = []ClusterAction{ClusterActionEnable, ClusterActionEdit, ClusterActionRemove, ClusterActionShare}
+var ClusterActions = []ClusterAction{ClusterActionEnable, ClusterActionEdit, ClusterActionRemove}
 
 // Org owns projects, agents, API keys and clusters. Role is the asking user's own role and is
 // set only on a per-user listing.
@@ -184,16 +183,13 @@ type APIKey struct {
 	Orphaned bool `json:"orphaned,omitempty"`
 }
 
-// Cluster is a runtime's registered name and the org that added it. Shared is the platform's
-// decision that the cluster takes every org's jobs. ReportedID is the identity its runtime
-// states about itself, empty until its first report. DisabledOrgs are the orgs that turned the
-// cluster off for their own jobs. Priority orders the clusters a job may be placed on, higher
-// first: its org sets ClusterPriorityMin to ClusterPriorityMax, and a shared cluster holds
-// SharedClusterPriority, below every org's own.
+// Cluster is a runtime's registered name and the org that added it. ReportedID is the identity
+// its runtime states about itself, empty until its first report. DisabledOrgs are the orgs that
+// turned the cluster off for their own jobs. Priority orders the org's own clusters, higher
+// first, from ClusterPriorityMin to ClusterPriorityMax (Rank).
 type Cluster struct {
 	Name       string `json:"name"`
 	OrgID      string `json:"org_id"`
-	Shared     bool   `json:"shared"`
 	Priority   int    `json:"priority"`
 	ReportedID string `json:"cluster_id,omitempty"`
 	ClusterSettings
@@ -207,7 +203,6 @@ type Cluster struct {
 
 // The priorities a cluster holds. DefaultClusterPriority is the one a cluster is registered with.
 const (
-	SharedClusterPriority  = 0
 	ClusterPriorityMin     = 1
 	ClusterPriorityMax     = 1000
 	DefaultClusterPriority = 100
@@ -259,26 +254,32 @@ func (c Cluster) Hosts(orgID string) bool {
 	return c.OpenTo(orgID) && c.EnabledFor(orgID)
 }
 
-// OpenTo reports whether the cluster is one orgID can use: one of its own, or one the platform
-// shares.
+// OpenTo reports whether the cluster serves orgID: a cluster of the platform's org serves every
+// org, and any other org's cluster serves that org alone. A cluster's runtime token reads the
+// secret_env, data keys and pull logins of every job placed on it, and the org that holds the
+// cluster can register it again for that token.
 func (c Cluster) OpenTo(orgID string) bool {
-	return c.Shared || c.OrgID == orgID
+	return c.OfPlatform() || c.OrgID == orgID
+}
+
+// OfPlatform reports whether the cluster is one of the platform's org, which the org compute
+// limits (ComputeLimit) hold jobs to.
+func (c Cluster) OfPlatform() bool {
+	return c.OrgID == PlatformOrgID
+}
+
+// Rank is the cluster's place in the order a job of orgID tries the clusters open to it, higher
+// first: the org's own by their priority, then the platform's, below every one of them.
+func (c Cluster) Rank(orgID string) int {
+	if c.OrgID == orgID {
+		return c.Priority
+	}
+	return 0
 }
 
 // PlatformOrgID is the org the control plane seeds, which the platform's own clusters are
 // registered to.
 const PlatformOrgID = "default"
-
-// Shareable refuses sharing a cluster of any org but the platform's. A cluster's runtime token
-// reads the secret_env, data keys and pull logins of every job placed on it, and the org that
-// holds the cluster can register it again for that token, so an org's own cluster serves that
-// org alone.
-func (c Cluster) Shareable() error {
-	if c.OrgID != PlatformOrgID {
-		return fmt.Errorf("cluster %s is org %s's own and serves that org alone: only a cluster of the platform's org %s serves other orgs", c.Name, c.OrgID, PlatformOrgID)
-	}
-	return nil
-}
 
 // EnabledFor reports whether orgID left the cluster on for its jobs, which is the default.
 func (c Cluster) EnabledFor(orgID string) bool {

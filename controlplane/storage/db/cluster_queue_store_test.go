@@ -52,6 +52,7 @@ func TestAPreemptedJobStopsBeingRecentlyUndesiredWhileItWaitsInTheQueue(t *testi
 	if _, err := NewStore(pool, 3).RegisterCluster(ctx, cluster, "default"); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _, _ = NewStore(pool, 3).RemoveCluster(context.Background(), cluster) })
 	seedExperimentForCapTest(t, pool, preempted, agentID, peID, 1, domain.StatusQueued)
 	seedExperimentForCapTest(t, pool, fresh, agentID, peID, 1, domain.StatusQueued)
 	if refused, err := exps.ClaimSubmitted(ctx, preempted, cluster, &domain.JobSpec{AcceleratorCount: 1}, nil); err != nil || refused != nil {

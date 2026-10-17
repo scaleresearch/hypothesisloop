@@ -9,13 +9,13 @@ import (
 
 const l40 = "nvidia.com/gpu.product=NVIDIA-L40"
 
-// An org's two clusters and the platform's shared one. The names sort against the priorities, so
-// a search that still went by name would answer differently.
+// An org's two clusters and one of the platform's, ranked above them by the platform's org. The
+// names sort against the priorities, so a search that still went by name would answer differently.
 func rankedClusters() map[string]domain.Cluster {
 	return map[string]domain.Cluster{
-		"z-first":  {Name: "z-first", OrgID: "org-a", Priority: 500},
-		"m-second": {Name: "m-second", OrgID: "org-a", Priority: 100},
-		"a-shared": {Name: "a-shared", OrgID: "org-staff", Shared: true, Priority: domain.SharedClusterPriority},
+		"z-first":    {Name: "z-first", OrgID: "org-a", Priority: 500},
+		"m-second":   {Name: "m-second", OrgID: "org-a", Priority: 100},
+		"a-platform": {Name: "a-platform", OrgID: domain.PlatformOrgID, Priority: 900},
 	}
 }
 
@@ -33,7 +33,7 @@ func nodeTotal() map[string]int64 {
 
 func holdJob(id string, tier domain.CapacityTier, acceleratorType domain.AcceleratorType, count int, cpu string) *domain.Experiment {
 	return &domain.Experiment{
-		ID: id, AgentID: "agent-" + id, PlatformExperimentID: "pe-1", CapacityTier: tier,
+		ID: id, AgentID: "agent-" + id, PlatformExperimentID: "pe-1", OrgID: "org-a", CapacityTier: tier,
 		AcceleratorType: acceleratorType, AcceleratorCount: count,
 		Job: domain.JobSpec{CPU: cpu, Memory: "1Gi", Storage: "1Gi", AcceleratorType: acceleratorType, AcceleratorCount: count},
 	}
@@ -54,15 +54,15 @@ func free(byCluster map[string]map[string]int64) (avail map[string]domain.Footpr
 func TestPlacementTiersGoByPriorityThenName(t *testing.T) {
 	registered := rankedClusters()
 	registered["b-second"] = domain.Cluster{Name: "b-second", OrgID: "org-a", Priority: 100}
-	candidates := map[string]domain.Footprint{"a-shared": nil, "m-second": nil, "z-first": nil, "b-second": nil, "unregistered": nil}
+	candidates := map[string]domain.Footprint{"a-platform": nil, "m-second": nil, "z-first": nil, "b-second": nil, "unregistered": nil}
 
-	got := Tiers(candidates, registered)
+	got := Tiers(candidates, registered, "org-a")
 
-	want := [][]string{{"z-first"}, {"b-second", "m-second"}, {"a-shared", "unregistered"}}
+	want := [][]string{{"z-first"}, {"b-second", "m-second"}, {"a-platform", "unregistered"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("placementTiers = %v, want %v", got, want)
 	}
-	if got := Tiers(nil, registered); len(got) != 0 {
+	if got := Tiers(nil, registered, "org-a"); len(got) != 0 {
 		t.Fatalf("placementTiers of no candidates = %v, want none", got)
 	}
 }
@@ -120,7 +120,7 @@ func TestARequeuedJobIsPlacedAgainByPriority(t *testing.T) {
 	exp.Job.AcceleratorType = h100
 	exp.Job.AcceptableAcceleratorTypes = []domain.AcceleratorType{l40}
 	exp.RanOnAcceleratorType = l40
-	avail, nodes, resources := free(map[string]map[string]int64{"z-first": {h100: 1}, "m-second": {l40: 1}, "a-shared": {l40: 1}})
+	avail, nodes, resources := free(map[string]map[string]int64{"z-first": {h100: 1}, "m-second": {l40: 1}, "a-platform": {l40: 1}})
 
 	cluster, _ := ClusterAndFootprint(avail, rankedClusters(), nodes, resources, nil, exp)
 
@@ -133,11 +133,11 @@ func TestARequeuedJobIsPlacedAgainByPriority(t *testing.T) {
 // is placed by the same order.
 func TestPlaceAtAcceleratorTypeTakesTheHighestPriorityClusterThatFits(t *testing.T) {
 	exp := holdJob("a1", domain.CapacityBurst, h100, 1, "1")
-	avail, nodes, resources := free(map[string]map[string]int64{"z-first": {h100: 1}, "m-second": {h100: 1}, "a-shared": {h100: 1}})
+	avail, nodes, resources := free(map[string]map[string]int64{"z-first": {h100: 1}, "m-second": {h100: 1}, "a-platform": {h100: 1}})
 	if cluster, ok := AtAcceleratorType(avail, rankedClusters(), nodes, resources, nil, exp); !ok || cluster != "z-first" {
 		t.Fatalf("placeAtAcceleratorType = %q, %v, want z-first", cluster, ok)
 	}
-	avail, nodes, resources = free(map[string]map[string]int64{"z-first": {h100: 0}, "m-second": {h100: 1}, "a-shared": {h100: 1}})
+	avail, nodes, resources = free(map[string]map[string]int64{"z-first": {h100: 0}, "m-second": {h100: 1}, "a-platform": {h100: 1}})
 	if cluster, ok := AtAcceleratorType(avail, rankedClusters(), nodes, resources, nil, exp); !ok || cluster != "m-second" {
 		t.Fatalf("placeAtAcceleratorType with the first full = %q, %v, want m-second", cluster, ok)
 	}
@@ -157,12 +157,12 @@ func TestThePreemptionTargetIsTheHighestPriorityClusterWithTheHardware(t *testin
 		"the higher has no such hardware": {
 			map[string]domain.Footprint{"z-first": accelerators(map[string]int64{l40: 4}), "m-second": accelerators(map[string]int64{h100: 0})}, "m-second"},
 		"a lower one fits outright": {
-			map[string]domain.Footprint{"z-first": accelerators(map[string]int64{h100: 1}), "a-shared": accelerators(map[string]int64{h100: 2})}, "a-shared"},
+			map[string]domain.Footprint{"z-first": accelerators(map[string]int64{h100: 1}), "a-platform": accelerators(map[string]int64{h100: 2})}, "a-platform"},
 		"nobody has the hardware": {
 			map[string]domain.Footprint{"z-first": accelerators(map[string]int64{l40: 4}), "m-second": accelerators(map[string]int64{l40: 4})}, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if got := BestFit(tc.avail, registered, need); got != tc.want {
+			if got := BestFit(tc.avail, registered, "org-a", need); got != tc.want {
 				t.Fatalf("clusterWithBestFit = %q, want %q", got, tc.want)
 			}
 		})

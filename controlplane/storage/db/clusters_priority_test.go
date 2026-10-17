@@ -5,13 +5,11 @@ import (
 	"errors"
 	"slices"
 	"testing"
-
-	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // An org orders the clusters it registered in one step, a refused order changes nothing, and a
-// shared cluster holds the platform's priority, after every org's own.
-func TestAnOrgOrdersItsClustersAndASharedOneComesLast(t *testing.T) {
+// cluster of the platform's org comes after every one of the org's own.
+func TestAnOrgOrdersItsClustersAndAPlatformOneComesLast(t *testing.T) {
 	w := newTwoOrgs(t)
 	ctx := context.Background()
 	second, third := "a-second-"+w.suffix, "z-third-"+w.suffix
@@ -20,9 +18,7 @@ func TestAnOrgOrdersItsClustersAndASharedOneComesLast(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, _, err := w.clusters.UpdateCluster(ctx, w.ofB, sharedAs(true), domain.ClusterSettings{}); err != nil {
-		t.Fatal(err)
-	}
+	platform := w.platformCluster(t)
 	listed := func() []string {
 		t.Helper()
 		clusters, err := w.clusters.ClustersHosting(ctx, w.orgA)
@@ -31,21 +27,21 @@ func TestAnOrgOrdersItsClustersAndASharedOneComesLast(t *testing.T) {
 		}
 		var names []string
 		for _, c := range clusters {
-			if c.OrgID == w.orgA || c.Name == w.ofB {
+			if c.OrgID == w.orgA || c.Name == platform {
 				names = append(names, c.Name)
 			}
 		}
 		return names
 	}
-	if got, want := listed(), []string{second, w.ofA, third, w.ofB}; !slices.Equal(got, want) {
-		t.Fatalf("before any order: listed %v, want by name with the shared one last, %v", got, want)
+	if got, want := listed(), []string{second, w.ofA, third, platform}; !slices.Equal(got, want) {
+		t.Fatalf("before any order: listed %v, want by name with the platform one last, %v", got, want)
 	}
 	if err := w.clusters.SetClusterOrder(ctx, w.orgA, []string{third, w.ofA, second}); err != nil {
 		t.Fatal(err)
 	}
-	ordered := []string{third, w.ofA, second, w.ofB}
+	ordered := []string{third, w.ofA, second, platform}
 	for what, order := range map[string][]string{
-		"one left out": {third, w.ofA}, "one twice": {third, third, w.ofA}, "the shared cluster": {third, w.ofA, second, w.ofB}, "another org's order": nil,
+		"one left out": {third, w.ofA}, "one twice": {third, third, w.ofA}, "the platform cluster": {third, w.ofA, second, platform}, "another org's order": nil,
 	} {
 		org := w.orgA
 		if order == nil {
@@ -66,15 +62,11 @@ func TestAnOrgOrdersItsClustersAndASharedOneComesLast(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got, want := listed(), []string{third, w.ofA, second, late, w.ofB}; !slices.Equal(got, want) {
+	if got, want := listed(), []string{third, w.ofA, second, late, platform}; !slices.Equal(got, want) {
 		t.Fatalf("with a cluster registered later: listed %v, want %v", got, want)
 	}
 	registered, err := w.clusters.RegisteredClusters(ctx)
-	if err != nil || registered[third].Priority <= registered[second].Priority || registered[w.ofB].Priority != domain.SharedClusterPriority {
-		t.Fatalf("priorities as admission reads them: %d, %d and %d, %v", registered[third].Priority, registered[second].Priority, registered[w.ofB].Priority, err)
-	}
-	// Ending a sharing puts the cluster back among its org's own, at the default.
-	if unshared, _, err := w.clusters.UpdateCluster(ctx, w.ofB, sharedAs(false), domain.ClusterSettings{}); err != nil || unshared.Priority != domain.DefaultClusterPriority {
-		t.Fatalf("once the sharing ended: %+v, %v, want priority %d", unshared, err, domain.DefaultClusterPriority)
+	if err != nil || registered[third].Rank(w.orgA) <= registered[second].Rank(w.orgA) || registered[platform].Rank(w.orgA) >= registered[late].Rank(w.orgA) {
+		t.Fatalf("ranks as admission reads them: %d, %d, %d and %d, %v", registered[third].Rank(w.orgA), registered[second].Rank(w.orgA), registered[late].Rank(w.orgA), registered[platform].Rank(w.orgA), err)
 	}
 }

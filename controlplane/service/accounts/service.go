@@ -52,7 +52,7 @@ type Accounts interface {
 type Clusters interface {
 	RegisterCluster(ctx context.Context, name, orgID string) (*domain.Cluster, error)
 	ClustersHosting(ctx context.Context, orgID string) ([]*domain.Cluster, error)
-	UpdateCluster(ctx context.Context, name string, shared *bool, change domain.ClusterSettings) (cluster *domain.Cluster, requeued []string, err error)
+	UpdateCluster(ctx context.Context, name string, change domain.ClusterSettings) (*domain.Cluster, error)
 	SetClusterEnabled(ctx context.Context, name, orgID string, by domain.Actor, enabled bool) (*domain.Cluster, error)
 	SetClusterOrder(ctx context.Context, orgID string, names []string) error
 	RemoveCluster(ctx context.Context, name string) (requeued []string, err error)
@@ -159,7 +159,6 @@ type CreatedAPIKey struct {
 type ClusterView struct {
 	Name      string    `json:"name"`
 	OrgID     string    `json:"org_id,omitempty"`
-	Shared    bool      `json:"shared" doc:"The platform places every org's jobs on a shared cluster. Staff decide it."`
 	Enabled   bool      `json:"enabled" doc:"Whether the jobs of the org in the path are placed on the cluster. True until an owner of that org turns the cluster off, which no other org sees or is bound by."`
 	ClusterID string    `json:"cluster_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
@@ -168,7 +167,7 @@ type ClusterView struct {
 
 // viewOf shows a cluster as orgID has it.
 func viewOf(c *domain.Cluster, orgID string) ClusterView {
-	return ClusterView{Name: c.Name, OrgID: c.OrgID, Shared: c.Shared, Enabled: c.EnabledFor(orgID), ClusterID: c.ReportedID, CreatedAt: c.CreatedAt, ClusterSettings: c.ClusterSettings}
+	return ClusterView{Name: c.Name, OrgID: c.OrgID, Enabled: c.EnabledFor(orgID), ClusterID: c.ReportedID, CreatedAt: c.CreatedAt, ClusterSettings: c.ClusterSettings}
 }
 
 // viewFor shows a cluster as orgID has it to one caller. A cluster the caller does not know keeps
@@ -197,22 +196,21 @@ type RegisteredCluster struct {
 // its agent is connected right now, and when it was last heard from.
 type ListedCluster struct {
 	ClusterView
-	Owned             bool                   `json:"owned" doc:"The org registered the cluster and may change its settings. False for a cluster of another org that the platform shares: its org_id, cluster_id, settings, agent_version and last_error are left out."`
+	Owned             bool                   `json:"owned" doc:"The org registered the cluster and may change its settings. False for a cluster of the platform's org listed to another org: its org_id, cluster_id, settings, agent_version and last_error are left out."`
 	Connected         bool                   `json:"connected"`
-	Place             int                    `json:"place,omitempty" doc:"Where the cluster stands in the order a job of the org is tried on its clusters, 1 first. Clusters of one place are tried together, the one with the most room for the job first. The platform's shared clusters come after every cluster of the org's own. Absent while the org has the cluster turned off."`
+	Place             int                    `json:"place,omitempty" doc:"Where the cluster stands in the order a job of the org is tried on its clusters, 1 first. Clusters of one place are tried together, the one with the most room for the job first. The platform's clusters come after every cluster of the org's own. Absent while the org has the cluster turned off."`
 	AutoscalerEnabled bool                   `json:"autoscaler_enabled" doc:"The cluster's connected agent reports an autoscaler that adds nodes for waiting jobs, which is what scale_up_timeout_seconds and max_speculative_accelerators act on."`
 	LastContactAt     *time.Time             `json:"last_contact_at,omitempty" doc:"When the cluster's agent last reconciled with the platform, if within the last 30 days. Absent: not heard from in them, or never."`
 	AgentVersion      string                 `json:"agent_version,omitempty" doc:"The version, an image tag, the cluster's agent said it runs at its last contact."`
 	VersionSkew       bool                   `json:"version_skew,omitempty" doc:"The agent runs another version than the platform, whose own is the image_tag registering a cluster answers: run the attach command again to upgrade it."`
 	LastError         string                 `json:"last_error,omitempty" doc:"What the platform last refused the agent's reconcile with, until it accepts one again."`
 	LastErrorAt       *time.Time             `json:"last_error_at,omitempty"`
-	Actions           []domain.ClusterAction `json:"actions" doc:"What the caller may do to the cluster now, each a write the API accepts from them: enable (turn it on and off for the org's jobs, and order it), edit (PATCH its settings, and forget its identity), remove, and share (PATCH shared)."`
+	Actions           []domain.ClusterAction `json:"actions" doc:"What the caller may do to the cluster now, each a write the API accepts from them: enable (turn it on and off for the org's jobs, and order it), edit (PATCH its settings, and forget its identity), and remove."`
 }
 
 // clusterActions is what caller, holding role in orgID, may do to the cluster c its jobs may use,
 // by the rules auth.Access.ClusterUse and ClusterOf and UpdateCluster refuse by: an administrator
-// of the org turns any of them on and off for its jobs and changes and removes the org's own, and
-// staff share one.
+// of the org turns any of them on and off for its jobs and changes and removes the org's own.
 func clusterActions(c *domain.Cluster, orgID string, caller auth.Principal, role domain.OrgRole) []domain.ClusterAction {
 	actions := []domain.ClusterAction{}
 	if auth.Administers(caller, role) != nil {
@@ -222,11 +220,7 @@ func clusterActions(c *domain.Cluster, orgID string, caller auth.Principal, role
 	if c.OrgID != orgID {
 		return actions
 	}
-	actions = append(actions, domain.ClusterActionEdit, domain.ClusterActionRemove)
-	if caller.Kind == auth.KindStaff {
-		actions = append(actions, domain.ClusterActionShare)
-	}
-	return actions
+	return append(actions, domain.ClusterActionEdit, domain.ClusterActionRemove)
 }
 
 // listed shows a cluster to a caller, holding role in orgID, listing the clusters of orgID.
@@ -271,8 +265,8 @@ func (h *Service) listClusters(ctx context.Context, orgID string, caller auth.Pr
 		return nil, err
 	}
 	out := make([]ListedCluster, len(clusters))
-	// clusters come highest priority first, and placement tries one priority at a time
-	// (placement.Tiers), so each new priority among the clusters in use is the next place.
+	// clusters come highest rank first, and placement tries one rank at a time
+	// (placement.Tiers), so each new rank among the clusters in use is the next place.
 	place, placed := 0, -1
 	for i, c := range clusters {
 		var contact *metricsdb.ClusterContact
@@ -283,8 +277,8 @@ func (h *Service) listClusters(ctx context.Context, orgID string, caller auth.Pr
 		if !c.EnabledFor(orgID) {
 			continue
 		}
-		if c.Priority != placed {
-			place, placed = place+1, c.Priority
+		if rank := c.Rank(orgID); rank != placed {
+			place, placed = place+1, rank
 		}
 		out[i].Place = place
 	}
@@ -661,37 +655,23 @@ func (h *Service) SetClusterEnabled(ctx context.Context, orgID, name string, ena
 	return &view, nil
 }
 
-// ReasonClusterNotShareable refuses sharing a cluster of an org other than the platform's
-// (domain.Cluster.Shareable).
-const ReasonClusterNotShareable = "cluster_not_shareable"
-
-// UpdateCluster changes the cluster's settings, or whether every org shares it.
-func (h *Service) UpdateCluster(ctx context.Context, orgID, name string, shared *bool, settings domain.ClusterSettings) (*WithdrawnCluster, error) {
-	if shared != nil {
-		if err := h.access.Staff(ctx); err != nil {
-			return nil, err
-		}
-	}
-	cluster, err := h.access.ClusterOf(ctx, orgID, name)
-	if err != nil {
+// UpdateCluster changes the cluster's settings.
+func (h *Service) UpdateCluster(ctx context.Context, orgID, name string, settings domain.ClusterSettings) (*ClusterView, error) {
+	if _, err := h.access.ClusterOf(ctx, orgID, name); err != nil {
 		return nil, err
 	}
-	if shared != nil && *shared {
-		if err := cluster.Shareable(); err != nil {
-			return nil, refusal.Invalid(ReasonClusterNotShareable, err.Error()).On("shared")
-		}
-	}
-	if shared == nil && settings.Empty() {
-		return nil, refusal.Invalid(refusal.ReasonInvalidRequest, "name what changes: shared, scale_up_timeout_seconds, max_speculative_accelerators, stuck_pending_timeout_seconds or status_silence_ceiling_seconds")
+	if settings.Empty() {
+		return nil, refusal.Invalid(refusal.ReasonInvalidRequest, "name what changes: scale_up_timeout_seconds, max_speculative_accelerators, stuck_pending_timeout_seconds or status_silence_ceiling_seconds")
 	}
 	if err := domain.ValidateClusterSettings(settings); err != nil {
 		return nil, refusal.Invalid(refusal.ReasonInvalidRequest, err.Error())
 	}
-	cluster, requeued, err := h.clusters.UpdateCluster(ctx, name, shared, settings)
+	cluster, err := h.clusters.UpdateCluster(ctx, name, settings)
 	if err != nil {
 		return nil, err
 	}
-	return &WithdrawnCluster{ClusterView: viewOf(cluster, orgID), Requeued: orEmpty(requeued)}, nil
+	view := viewOf(cluster, orgID)
+	return &view, nil
 }
 
 // RemoveCluster ends the cluster name for the platform.

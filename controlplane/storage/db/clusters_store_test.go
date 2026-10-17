@@ -6,65 +6,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-
-	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
-
-func sharedAs(shared bool) *bool { return &shared }
-
-// Sharing and settings were two writes: a change of both whose second write failed had already
-// ended the sharing and requeued the other orgs' jobs.
-func TestAClusterUpdateThatFailsLeavesNothingChanged(t *testing.T) {
-	w := newTwoOrgs(t)
-	ctx := context.Background()
-	timeout, other, negative := 600, 900, -1
-	if _, _, err := w.clusters.UpdateCluster(ctx, w.ofA, sharedAs(true), domain.ClusterSettings{StuckPendingTimeoutSeconds: &timeout}); err != nil {
-		t.Fatal(err)
-	}
-	guest := w.placed(t, "b-running", w.peB, w.ofA, domain.StatusRunning)
-	unchanged := func(after string) {
-		t.Helper()
-		byName, err := w.clusters.RegisteredClusters(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		c := byName[w.ofA]
-		if !c.Shared || c.Priority != domain.SharedClusterPriority || c.StuckPendingTimeoutSeconds == nil || *c.StuckPendingTimeoutSeconds != timeout {
-			t.Errorf("after %s: cluster = %+v, want it shared at the platform's priority with a timeout of %d", after, c, timeout)
-		}
-		if job := w.get(t, guest); job.Status != domain.StatusRunning || job.ClusterName != w.ofA {
-			t.Errorf("after %s: the other org's job is %s on %q, want it running on %s", after, job.Status, job.ClusterName, w.ofA)
-		}
-	}
-
-	if _, _, err := w.clusters.UpdateCluster(ctx, w.ofA, sharedAs(false), domain.ClusterSettings{StuckPendingTimeoutSeconds: &negative}); err == nil {
-		t.Fatal("an invalid setting: got = nil, want an error")
-	}
-	unchanged("a refused setting")
-
-	// The database refuses the requeue of the other org's job, the last write of the transaction.
-	refuse := "refuse_requeue_" + w.suffix
-	t.Cleanup(func() {
-		_, _ = w.pool.pool.Exec(context.Background(), `DROP TRIGGER IF EXISTS `+refuse+` ON experiments`)
-		_, _ = w.pool.pool.Exec(context.Background(), `DROP FUNCTION IF EXISTS `+refuse+`()`)
-	})
-	for _, ddl := range []string{
-		`CREATE FUNCTION ` + refuse + `() RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN
-	IF NEW.id = '` + guest + `' AND NEW.status = 'QUEUED' THEN RAISE EXCEPTION 'requeue refused'; END IF;
-	RETURN NEW;
-END $$`,
-		`CREATE TRIGGER ` + refuse + ` BEFORE UPDATE ON experiments FOR EACH ROW EXECUTE FUNCTION ` + refuse + `()`,
-	} {
-		if _, err := w.pool.pool.Exec(ctx, ddl); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, _, err := w.clusters.UpdateCluster(ctx, w.ofA, sharedAs(false), domain.ClusterSettings{StuckPendingTimeoutSeconds: &other}); err == nil {
-		t.Fatal("a requeue the database refused: got = nil, want an error")
-	}
-	unchanged("a failed requeue")
-}
 
 func TestAClusterBelongsToTheOrgThatRegisteredIt(t *testing.T) {
 	pool := eventsTestDB(t)
@@ -96,8 +38,8 @@ func TestAClusterBelongsToTheOrgThatRegisteredIt(t *testing.T) {
 		t.Fatalf("cluster org: got = %q, %v, %v, want %s", org, found, err, orgA)
 	}
 	byName, err := clusters.RegisteredClusters(ctx)
-	if err != nil || byName[name].OrgID != orgA || byName[name].Shared {
-		t.Fatalf("registered clusters: got = %+v, %v, want %s owned by %s and not shared", byName[name], err, name, orgA)
+	if err != nil || byName[name].OrgID != orgA {
+		t.Fatalf("registered clusters: got = %+v, %v, want %s owned by %s", byName[name], err, name, orgA)
 	}
 	if _, err := clusters.RegisterCluster(ctx, "cluster-"+uuid.New().String()[:8], "org-missing"); !errors.Is(err, ErrOrgNotFound) {
 		t.Fatalf("register for an org that does not exist: got = %v, want = %v", err, ErrOrgNotFound)
@@ -107,51 +49,6 @@ func TestAClusterBelongsToTheOrgThatRegisteredIt(t *testing.T) {
 	}
 	if listed, err := clusters.ClustersHosting(ctx, orgB); err != nil || len(listed) != 0 {
 		t.Fatalf("clusters of another org: got = %+v, %v, want none", listed, err)
-	}
-	if _, _, err := clusters.UpdateCluster(ctx, name, sharedAs(true), domain.ClusterSettings{}); err != nil {
-		t.Fatal(err)
-	}
-	for _, orgID := range []string{orgA, orgB} {
-		if listed, err := clusters.ClustersHosting(ctx, orgID); err != nil || len(listed) != 1 || listed[0].Name != name || !listed[0].Shared {
-			t.Fatalf("clusters hosting %s once %s is shared: got = %+v, %v, want only it", orgID, name, listed, err)
-		}
-	}
-	if _, _, err := clusters.UpdateCluster(ctx, name, sharedAs(false), domain.ClusterSettings{}); err != nil {
-		t.Fatal(err)
-	}
-	if listed, err := clusters.ClustersHosting(ctx, orgB); err != nil || len(listed) != 0 {
-		t.Fatalf("clusters of another org once sharing ended: got = %+v, %v, want none", listed, err)
-	}
-}
-
-func TestSharingAClusterIsStoredAndSurvivesRegisteringAgain(t *testing.T) {
-	pool := eventsTestDB(t)
-	accounts := NewStore(pool, 3)
-	clusters := NewStore(pool, 3)
-	ctx := context.Background()
-	_, orgA := newTestUserHome(t, accounts)
-	name := "cluster-" + uuid.New().String()[:8]
-	if _, _, err := clusters.UpdateCluster(ctx, name, sharedAs(true), domain.ClusterSettings{}); !errors.Is(err, ErrClusterNotFound) {
-		t.Fatalf("share an unregistered cluster: got = %v, want = %v", err, ErrClusterNotFound)
-	}
-	if _, err := clusters.RegisterCluster(ctx, name, orgA); err != nil {
-		t.Fatalf("register: got = %v, want = nil", err)
-	}
-
-	shared, _, err := clusters.UpdateCluster(ctx, name, sharedAs(true), domain.ClusterSettings{})
-	if err != nil || !shared.Shared || shared.OrgID != orgA {
-		t.Fatalf("share: got = %+v, %v, want it shared and still owned by %s", shared, err, orgA)
-	}
-	if !shared.Hosts("org-other") || !shared.Hosts(orgA) {
-		t.Fatal("a shared cluster does not host every org")
-	}
-	again, err := clusters.RegisterCluster(ctx, name, orgA)
-	if err != nil || !again.Shared {
-		t.Fatalf("register again: got = %+v, %v, want it still shared", again, err)
-	}
-	unshared, _, err := clusters.UpdateCluster(ctx, name, sharedAs(false), domain.ClusterSettings{})
-	if err != nil || unshared.Shared || unshared.Hosts("org-other") || !unshared.Hosts(orgA) {
-		t.Fatalf("stop sharing: got = %+v, %v, want it to host %s alone", unshared, err, orgA)
 	}
 }
 

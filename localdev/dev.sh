@@ -288,14 +288,13 @@ case "${action}" in
     start_git_server
     start_control_plane
     # Both clusters take the jobs of org default, as placement chooses between them: the k3s
-    # cluster on this machine and the cloud cluster, which belongs to the org every schema starts
-    # with and is shared, so every org's jobs are placed on it. Registering again changes nothing,
-    # and each is turned on again for org default, which an e2e run stopped half way may have left
-    # off. control-service rents nothing for the cloud cluster until it is registered.
+    # cluster on this machine and the cloud cluster. Both belong to the org every schema starts
+    # with, the platform's, so every org's jobs are placed on them. Registering again changes
+    # nothing, and each is turned on again for org default, which an e2e run stopped half way may
+    # have left off. control-service rents nothing for the cloud cluster until it is registered.
     lib_register_local_cluster
     lib_default_org_cluster local enable
     lib_hl_admin cluster add "${cloud_cluster}" default >/dev/null
-    lib_hl_admin cluster share "${cloud_cluster}" on >/dev/null
     lib_default_org_cluster "${cloud_cluster}" enable
     must_stay_up control-service
     start_ui

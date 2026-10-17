@@ -290,8 +290,8 @@ func (s *memStore) ClustersHosting(_ context.Context, orgID string) ([]*domain.C
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
-		if out[i].Priority != out[j].Priority {
-			return out[i].Priority > out[j].Priority
+		if ri, rj := out[i].Rank(orgID), out[j].Rank(orgID); ri != rj {
+			return ri > rj
 		}
 		return out[i].Name < out[j].Name
 	})
@@ -300,35 +300,20 @@ func (s *memStore) ClustersHosting(_ context.Context, orgID string) ([]*domain.C
 
 // placed is what the store finds on a cluster: job id -> org. Withdrawing a cluster requeues
 // them as db.Store does, which the fake records in requeued.
-func (s *memStore) withdraw(name, keepOrg string) []string {
+func (s *memStore) withdraw(name string) []string {
 	ids := []string{}
-	for id, org := range s.placed[name] {
-		if org != keepOrg {
-			ids = append(ids, id)
-			delete(s.placed[name], id)
-		}
+	for id := range s.placed[name] {
+		ids = append(ids, id)
+		delete(s.placed[name], id)
 	}
 	sort.Strings(ids)
 	return ids
 }
 
-func (s *memStore) UpdateCluster(_ context.Context, name string, shared *bool, change domain.ClusterSettings) (*domain.Cluster, []string, error) {
+func (s *memStore) UpdateCluster(_ context.Context, name string, change domain.ClusterSettings) (*domain.Cluster, error) {
 	c, ok := s.clusters[name]
 	if !ok {
-		return nil, nil, db.ErrClusterNotFound
-	}
-	var requeued []string
-	if shared != nil {
-		switch {
-		case *shared:
-			c.Priority = domain.SharedClusterPriority
-		case c.Shared:
-			c.Priority = domain.DefaultClusterPriority
-		}
-		c.Shared = *shared
-		if !*shared {
-			requeued = s.withdraw(name, c.OrgID)
-		}
+		return nil, db.ErrClusterNotFound
 	}
 	for _, f := range []struct {
 		to   **int
@@ -347,13 +332,13 @@ func (s *memStore) UpdateCluster(_ context.Context, name string, shared *bool, c
 		}
 	}
 	out := *c
-	return &out, requeued, nil
+	return &out, nil
 }
 
 func (s *memStore) SetClusterOrder(_ context.Context, orgID string, names []string) error {
 	var ranked []string
 	for name, c := range s.clusters {
-		if c.OrgID == orgID && !c.Shared {
+		if c.OrgID == orgID {
 			ranked = append(ranked, name)
 		}
 	}
@@ -387,7 +372,7 @@ func (s *memStore) RemoveCluster(_ context.Context, name string) ([]string, erro
 	if _, ok := s.clusters[name]; !ok {
 		return nil, db.ErrClusterNotFound
 	}
-	requeued := s.withdraw(name, "")
+	requeued := s.withdraw(name)
 	delete(s.clusters, name)
 	return requeued, nil
 }

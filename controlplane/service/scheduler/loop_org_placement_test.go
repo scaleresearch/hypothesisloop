@@ -191,13 +191,13 @@ func orgJob(id, orgID string, tier domain.CapacityTier, count int) *domain.Exper
 	return exp
 }
 
-// The clusters of three orgs in one deployment: org-a's and org-b's own, and one that org-staff
-// registered and the platform shares.
+// The clusters of three orgs in one deployment: org-a's and org-b's own, and one of the
+// platform's.
 func threeOrgClusters() map[string]domain.Cluster {
 	return map[string]domain.Cluster{
 		"of-a":   {Name: "of-a", OrgID: "org-a"},
 		"of-b":   {Name: "of-b", OrgID: "org-b"},
-		"shared": {Name: "shared", OrgID: "org-staff", Shared: true},
+		"shared": {Name: "shared", OrgID: domain.PlatformOrgID},
 	}
 }
 
@@ -304,8 +304,8 @@ func TestTickTellsAJobWhoseOrgHasNoClusterSo(t *testing.T) {
 // reason it reads is the same whatever other orgs have connected, so it learns nothing of them.
 func TestTickDoesNotCallAnAwayClusterMissing(t *testing.T) {
 	for name, registered := range map[string]map[string]domain.Cluster{
-		"its own cluster is away":    {"of-a": {Name: "of-a", OrgID: "org-a"}, "of-c": {Name: "of-c", OrgID: "org-c"}},
-		"the shared cluster is away": threeOrgClusters(),
+		"its own cluster is away":      {"of-a": {Name: "of-a", OrgID: "org-a"}, "of-c": {Name: "of-c", OrgID: "org-c"}},
+		"the platform cluster is away": threeOrgClusters(),
 	} {
 		reasons := map[string]string{}
 		for others, clusters := range map[string]map[string]orgCluster{
@@ -353,7 +353,7 @@ func TestTickNeverPlacesOnAClusterNobodyRegistered(t *testing.T) {
 }
 
 // With no live room anywhere a guaranteed job bets on a cluster that scales up. The bet goes to
-// its own org's cluster or a shared one, never to another org's.
+// its own org's cluster or a platform one, never to another org's.
 func TestTickSpeculatesOnlyOnAClusterThatHostsTheJob(t *testing.T) {
 	registered := threeOrgClusters()
 	for name, tc := range map[string]struct {
@@ -362,7 +362,7 @@ func TestTickSpeculatesOnlyOnAClusterThatHostsTheJob(t *testing.T) {
 	}{
 		"another org's cluster scales up, the job's own does not": {
 			map[string]orgCluster{"of-a": {installed: 4}, "of-b": {installed: 4, autoscaler: true}}, ""},
-		"another org's and a shared cluster scale up": {
+		"another org's and a platform cluster scale up": {
 			map[string]orgCluster{"of-a": {installed: 4}, "of-b": {installed: 4, autoscaler: true}, "shared": {installed: 4, autoscaler: true}}, "shared"},
 		"the job's own cluster scales up": {
 			map[string]orgCluster{"of-a": {installed: 4, autoscaler: true}, "of-b": {installed: 4, autoscaler: true}}, "of-a"},
@@ -381,7 +381,7 @@ func TestTickSpeculatesOnlyOnAClusterThatHostsTheJob(t *testing.T) {
 }
 
 // A job returned to the queue after an infrastructure fault on its own cluster carries that
-// cluster in its tried list. Its next placement stays inside its org and the shared clusters.
+// cluster in its tried list. Its next placement stays inside its org and the platform clusters.
 func TestTickFailsOverOnlyToAClusterThatHostsTheJob(t *testing.T) {
 	failedOver := func() *domain.Experiment {
 		exp := orgJob("a1", "org-a", domain.CapacityGuaranteed, 1)
@@ -405,7 +405,7 @@ func TestTickFailsOverOnlyToAClusterThatHostsTheJob(t *testing.T) {
 			t.Fatalf("not_admitted_reason = %q, want %q: the one cluster that hosts the job was just tried", got, domain.NotAdmittedNoScalableCapacity)
 		}
 	})
-	t.Run("a shared cluster is left", func(t *testing.T) {
+	t.Run("a platform cluster is left", func(t *testing.T) {
 		store := &orgStore{registered: threeOrgClusters()}
 		l := orgLoop(store, map[string]orgCluster{
 			"of-a":   {installed: 4, autoscaler: true},
@@ -416,7 +416,7 @@ func TestTickFailsOverOnlyToAClusterThatHostsTheJob(t *testing.T) {
 		tickOnce(t, l)
 
 		if got := store.submitted["a1"]; got != "shared" {
-			t.Fatalf("failed over to %q, want the shared cluster (reason %q)", got, store.notAdmitted["a1"])
+			t.Fatalf("failed over to %q, want the platform cluster (reason %q)", got, store.notAdmitted["a1"])
 		}
 	})
 }
@@ -428,14 +428,14 @@ func runningBurst(id, orgID, cluster string) *domain.Experiment {
 	return exp
 }
 
-// Tiers are the platform's on a shared cluster: a guaranteed job of one org preempts a burst job
+// Tiers are the platform's on a platform cluster: a guaranteed job of one org preempts a burst job
 // of another there. On a cluster of another org it preempts nothing, because it cannot land there.
-func TestTickPreemptsAcrossOrgsOnASharedClusterOnly(t *testing.T) {
+func TestTickPreemptsAcrossOrgsOnAPlatformClusterOnly(t *testing.T) {
 	for name, tc := range map[string]struct {
 		cluster   string
 		preempted bool
 	}{
-		"a shared cluster":      {"shared", true},
+		"a platform cluster":    {"shared", true},
 		"another org's cluster": {"of-b", false},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -499,7 +499,7 @@ func TestAMultiNodeJobIsOfferedOnlyHostingClustersThatSpanNodes(t *testing.T) {
 	}
 	candidates, ineligible = eligibleClusters(avail, map[string]bool{"of-b": true, "shared": true}, threeOrgClusters(), exp)
 	if _, ok := candidates["shared"]; len(candidates) != 1 || !ok || ineligible != "" {
-		t.Fatalf("got %v, %q, want only the shared cluster", candidates, ineligible)
+		t.Fatalf("got %v, %q, want only the platform cluster", candidates, ineligible)
 	}
 }
 
@@ -518,12 +518,12 @@ func TestADeploymentWithOneOrgSeesEveryConnectedCluster(t *testing.T) {
 	}
 }
 
-// twoOrgsOnClusterA is cluster-a of the hold fixtures registered for two orgs' tests: shared by
-// the platform, or org-b's own. cluster-b is org-b's in both.
-func twoOrgsOnClusterA(shared bool) map[string]domain.Cluster {
+// twoOrgsOnClusterA is cluster-a of the hold fixtures registered for two orgs' tests: the
+// platform's, or org-b's own. cluster-b is org-b's in both.
+func twoOrgsOnClusterA(platform bool) map[string]domain.Cluster {
 	clusterA := domain.Cluster{Name: "cluster-a", OrgID: "org-b"}
-	if shared {
-		clusterA = domain.Cluster{Name: "cluster-a", OrgID: "org-staff", Shared: true}
+	if platform {
+		clusterA = domain.Cluster{Name: "cluster-a", OrgID: domain.PlatformOrgID}
 	}
 	return map[string]domain.Cluster{"cluster-a": clusterA, "cluster-b": {Name: "cluster-b", OrgID: "org-b"}}
 }
@@ -531,12 +531,12 @@ func twoOrgsOnClusterA(shared bool) map[string]domain.Cluster {
 // A job that strands idle accelerators is evicted for a job of another org only on a cluster
 // that takes both. On a cluster of its own org it is not evicted for a job that cannot land
 // there, however its requests look.
-func TestTickEvictsADisbalancedJobForAnotherOrgOnASharedClusterOnly(t *testing.T) {
+func TestTickEvictsADisbalancedJobForAnotherOrgOnAPlatformClusterOnly(t *testing.T) {
 	for name, tc := range map[string]struct {
 		shared  bool
 		evicted []string
 	}{
-		"a shared cluster":      {true, []string{"hog"}},
+		"a platform cluster":    {true, []string{"hog"}},
 		"another org's cluster": {false, nil},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -582,10 +582,10 @@ func (*twoOrgMaxStore) OrgComputeLimits(context.Context) (map[string]domain.Comp
 	return nil, nil
 }
 
-// A job runs with what it stated, whoever holds the cluster: two orgs' jobs on a shared cluster
+// A job runs with what it stated, whoever holds the cluster: two orgs' jobs on a platform cluster
 // resolve alike, as a job does on its org's own cluster, where the other org's job resolves to
 // nothing because it is not placed.
-func TestAJobResolvesAlikeForTwoOrgsOnASharedCluster(t *testing.T) {
+func TestAJobResolvesAlikeForTwoOrgsOnAPlatformCluster(t *testing.T) {
 	resolve := func(registered map[string]domain.Cluster) map[string]string {
 		ofA := holdJob("of-a", domain.CapacityBurst, h100, 1, "4")
 		ofB := holdJob("of-b", domain.CapacityBurst, h100, 1, "4")
@@ -600,19 +600,19 @@ func TestAJobResolvesAlikeForTwoOrgsOnASharedCluster(t *testing.T) {
 
 	shared := resolve(twoOrgsOnClusterA(true))
 	if shared["of-a"] == "" || shared["of-a"] != shared["of-b"] {
-		t.Fatalf("resolved cpu on a shared cluster = %q for org a and %q for org b, want the same share for both", shared["of-a"], shared["of-b"])
+		t.Fatalf("resolved cpu on a platform cluster = %q for org a and %q for org b, want the same share for both", shared["of-a"], shared["of-b"])
 	}
 
 	own := resolve(twoOrgsOnClusterA(false))
 	if own["of-b"] != shared["of-b"] {
-		t.Fatalf("resolved cpu on the org's own cluster = %q, want the %q it gets on a shared one", own["of-b"], shared["of-b"])
+		t.Fatalf("resolved cpu on the org's own cluster = %q, want the %q it gets on a platform one", own["of-b"], shared["of-b"])
 	}
 	if cpu, placed := own["of-a"]; placed {
 		t.Fatalf("org a's job resolved %q on a cluster of org b, where it is never placed", cpu)
 	}
 }
 
-// An org turns a cluster off for its own jobs, its own cluster or a shared one. Its jobs go to
+// An org turns a cluster off for its own jobs, its own cluster or a platform one. Its jobs go to
 // what it left on, whichever tier they are, and the other orgs' jobs are placed as before.
 func TestTickNeverPlacesAJobOnAClusterItsOrgTurnedOff(t *testing.T) {
 	for _, tier := range []domain.CapacityTier{domain.CapacityGuaranteed, domain.CapacityBurst} {
@@ -658,7 +658,7 @@ func TestTickNeverPlacesAJobOnAClusterItsOrgTurnedOff(t *testing.T) {
 func TestTickTellsAJobWhoseOrgTurnedEveryClusterOffSo(t *testing.T) {
 	registered := map[string]domain.Cluster{
 		"of-a":   {Name: "of-a", OrgID: "org-a", DisabledOrgs: []string{"org-a"}},
-		"shared": {Name: "shared", OrgID: "org-staff", Shared: true, DisabledOrgs: []string{"org-a", "org-c"}},
+		"shared": {Name: "shared", OrgID: domain.PlatformOrgID, DisabledOrgs: []string{"org-a", "org-c"}},
 	}
 	for name, clusters := range map[string]map[string]orgCluster{
 		"both connected with room": {"of-a": {free: 4, installed: 4}, "shared": {free: 4, installed: 4}},
@@ -682,7 +682,7 @@ func TestTickTellsAJobWhoseOrgTurnedEveryClusterOffSo(t *testing.T) {
 				}
 				if _, connected := clusters["shared"]; connected && !clusters["shared"].autoscaler {
 					if got := store.submitted["d1"]; got != "shared" {
-						t.Fatalf("d1 of an org that left the shared cluster on was placed on %q", got)
+						t.Fatalf("d1 of an org that left the platform cluster on was placed on %q", got)
 					}
 				}
 			})

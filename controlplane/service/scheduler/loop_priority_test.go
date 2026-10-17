@@ -10,13 +10,13 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// An org's two clusters and the platform's shared one. The names sort against the priorities, so
-// a search that still went by name would answer differently.
+// An org's two clusters and one of the platform's, ranked above them by the platform's org. The
+// names sort against the priorities, so a search that still went by name would answer differently.
 func rankedClusters() map[string]domain.Cluster {
 	return map[string]domain.Cluster{
-		"z-first":  {Name: "z-first", OrgID: "org-a", Priority: 500},
-		"m-second": {Name: "m-second", OrgID: "org-a", Priority: 100},
-		"a-shared": {Name: "a-shared", OrgID: "org-staff", Shared: true, Priority: domain.SharedClusterPriority},
+		"z-first":    {Name: "z-first", OrgID: "org-a", Priority: 500},
+		"m-second":   {Name: "m-second", OrgID: "org-a", Priority: 100},
+		"a-platform": {Name: "a-platform", OrgID: domain.PlatformOrgID, Priority: 900},
 	}
 }
 
@@ -32,13 +32,13 @@ func TestTickPlacesAJobOnTheHighestPriorityClusterWithRoom(t *testing.T) {
 		want     string
 	}{
 		"all have room": {map[string]orgCluster{
-			"z-first": {free: 2, installed: 4}, "m-second": {free: 2, installed: 4}, "a-shared": {free: 2, installed: 4}}, "z-first"},
+			"z-first": {free: 2, installed: 4}, "m-second": {free: 2, installed: 4}, "a-platform": {free: 2, installed: 4}}, "z-first"},
 		"the first is full": {map[string]orgCluster{
-			"z-first": {free: 0, installed: 4}, "m-second": {free: 2, installed: 4}, "a-shared": {free: 2, installed: 4}}, "m-second"},
+			"z-first": {free: 0, installed: 4}, "m-second": {free: 2, installed: 4}, "a-platform": {free: 2, installed: 4}}, "m-second"},
 		"both of the org's own are full": {map[string]orgCluster{
-			"z-first": {free: 0, installed: 4}, "m-second": {free: 0, installed: 4}, "a-shared": {free: 2, installed: 4}}, "a-shared"},
+			"z-first": {free: 0, installed: 4}, "m-second": {free: 0, installed: 4}, "a-platform": {free: 2, installed: 4}}, "a-platform"},
 		"the first is away": {map[string]orgCluster{
-			"m-second": {free: 2, installed: 4}, "a-shared": {free: 2, installed: 4}}, "m-second"},
+			"m-second": {free: 2, installed: 4}, "a-platform": {free: 2, installed: 4}}, "m-second"},
 	} {
 		for _, tier := range []domain.CapacityTier{domain.CapacityGuaranteed, domain.CapacityBurst} {
 			t.Run(name+"/"+string(tier), func(t *testing.T) {
@@ -61,7 +61,7 @@ func TestTickSpillsToTheNextPriorityOnceTheHigherIsFull(t *testing.T) {
 		t.Run(string(tier), func(t *testing.T) {
 			store := &orgStore{registered: rankedClusters()}
 			l := orgLoop(store, map[string]orgCluster{
-				"z-first": {free: 2, installed: 2}, "m-second": {free: 1, installed: 1}, "a-shared": {free: 8, installed: 8},
+				"z-first": {free: 2, installed: 2}, "m-second": {free: 1, installed: 1}, "a-platform": {free: 8, installed: 8},
 			}, orgJob("a1", "org-a", tier, 1), orgJob("a2", "org-a", tier, 1), orgJob("a3", "org-a", tier, 1), orgJob("a4", "org-a", tier, 1))
 
 			tickOnce(t, l)
@@ -70,29 +70,29 @@ func TestTickSpillsToTheNextPriorityOnceTheHigherIsFull(t *testing.T) {
 			for _, id := range []string{"a1", "a2", "a3", "a4"} {
 				cluster, admitted := store.submitted[id]
 				if !admitted {
-					t.Fatalf("%s was not placed with room on the shared cluster (reason %q)", id, store.notAdmitted[id])
+					t.Fatalf("%s was not placed with room on the platform cluster (reason %q)", id, store.notAdmitted[id])
 				}
 				on[cluster]++
 			}
-			if want := map[string]int{"z-first": 2, "m-second": 1, "a-shared": 1}; !reflect.DeepEqual(on, want) {
+			if want := map[string]int{"z-first": 2, "m-second": 1, "a-platform": 1}; !reflect.DeepEqual(on, want) {
 				t.Fatalf("jobs per cluster = %v, want %v", on, want)
 			}
 		})
 	}
 }
 
-// Another org has no say in the order: its jobs see the shared cluster alone, and an org's own
+// Another org has no say in the order: its jobs see the platform cluster alone, and an org's own
 // priority is its own.
 func TestPriorityOrdersOnlyTheClustersThatTakeTheJob(t *testing.T) {
 	store := &orgStore{registered: rankedClusters()}
 	l := orgLoop(store, map[string]orgCluster{
-		"z-first": {free: 2, installed: 4}, "m-second": {free: 2, installed: 4}, "a-shared": {free: 2, installed: 4},
+		"z-first": {free: 2, installed: 4}, "m-second": {free: 2, installed: 4}, "a-platform": {free: 2, installed: 4},
 	}, orgJob("b1", "org-b", domain.CapacityBurst, 1))
 
 	tickOnce(t, l)
 
-	if got := store.submitted["b1"]; got != "a-shared" {
-		t.Fatalf("org b's job was placed on %q, want the shared cluster", got)
+	if got := store.submitted["b1"]; got != "a-platform" {
+		t.Fatalf("org b's job was placed on %q, want the platform cluster", got)
 	}
 }
 
@@ -117,7 +117,7 @@ func TestTickPreemptsOnTheHighestPriorityCluster(t *testing.T) {
 // on a lower cluster. A burst job never bets, and takes the room.
 func TestAHigherPriorityScalingClusterGetsItsBetBeforeALowerClusterIsUsed(t *testing.T) {
 	clusters := map[string]orgCluster{
-		"z-first": {free: 0, installed: 4, autoscaler: true}, "m-second": {free: 2, installed: 4}, "a-shared": {free: 2, installed: 4},
+		"z-first": {free: 0, installed: 4, autoscaler: true}, "m-second": {free: 2, installed: 4}, "a-platform": {free: 2, installed: 4},
 	}
 	for tier, want := range map[domain.CapacityTier]string{domain.CapacityGuaranteed: "z-first", domain.CapacityBurst: "m-second"} {
 		t.Run(string(tier), func(t *testing.T) {
@@ -140,7 +140,7 @@ func TestAJobWhoseBetOnTheHigherClusterTimedOutTakesTheLowerCluster(t *testing.T
 	exp.TriedClusters = []domain.TriedCluster{{ClusterID: "id-z-first", At: time.Now()}}
 	store := &orgStore{registered: rankedClusters()}
 	l := orgLoop(store, map[string]orgCluster{
-		"z-first": {free: 0, installed: 4, autoscaler: true}, "m-second": {free: 2, installed: 4}, "a-shared": {free: 2, installed: 4},
+		"z-first": {free: 0, installed: 4, autoscaler: true}, "m-second": {free: 2, installed: 4}, "a-platform": {free: 2, installed: 4},
 	}, exp)
 
 	tickOnce(t, l)
@@ -182,7 +182,7 @@ func TestALiveFitIsTakenBeforeABetOfTheSameOrALowerPriority(t *testing.T) {
 func TestTheBetGoesToTheHighestPriorityScalingCluster(t *testing.T) {
 	store := &orgStore{registered: rankedClusters()}
 	l := orgLoop(store, map[string]orgCluster{
-		"z-first": {free: 0, installed: 4, autoscaler: true}, "m-second": {free: 0, installed: 4, autoscaler: true}, "a-shared": {free: 0, installed: 4, autoscaler: true},
+		"z-first": {free: 0, installed: 4, autoscaler: true}, "m-second": {free: 0, installed: 4, autoscaler: true}, "a-platform": {free: 0, installed: 4, autoscaler: true},
 	}, orgJob("a1", "org-a", domain.CapacityGuaranteed, 1))
 
 	tickOnce(t, l)
@@ -203,7 +203,7 @@ func failedOn(exp *domain.Experiment, ago time.Duration, clusterIDs ...string) *
 // one, both tiers alike. After the TTL the cluster is a candidate again.
 func TestAJobIsNotPlacedBackOnTheClusterThatJustFailedIt(t *testing.T) {
 	clusters := map[string]orgCluster{
-		"z-first": {free: 2, installed: 4}, "m-second": {free: 2, installed: 4}, "a-shared": {free: 2, installed: 4},
+		"z-first": {free: 2, installed: 4}, "m-second": {free: 2, installed: 4}, "a-platform": {free: 2, installed: 4},
 	}
 	for name, tc := range map[string]struct {
 		ago    time.Duration
@@ -211,7 +211,7 @@ func TestAJobIsNotPlacedBackOnTheClusterThatJustFailedIt(t *testing.T) {
 		want   string
 	}{
 		"failed on the first a moment ago": {time.Minute, []string{"id-z-first"}, "m-second"},
-		"failed on both of the org's own":  {time.Minute, []string{"id-z-first", "id-m-second"}, "a-shared"},
+		"failed on both of the org's own":  {time.Minute, []string{"id-z-first", "id-m-second"}, "a-platform"},
 		"failed on the first an hour ago":  {time.Hour, []string{"id-z-first"}, "z-first"},
 		"failed on a cluster that is gone": {time.Minute, []string{"id-removed"}, "z-first"},
 	} {

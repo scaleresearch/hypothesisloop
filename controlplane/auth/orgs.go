@@ -23,12 +23,11 @@ import (
 //   - A person leaves an org by themselves, whatever their role. An invite is accepted by a
 //     signed-in person, for themselves. The store keeps an org from losing its last owner.
 //   - A cluster is administered by the administrators of the org that registered it, whatever is
-//     done to it: its settings, its priority, its identity, removing it. Only
-//     staff share it.
-//   - A caller sees the clusters its jobs can be placed on: its orgs' own and the shared ones.
+//     done to it: its settings, its priority, its identity, removing it.
+//   - A caller sees the clusters its jobs can be placed on: its orgs' own and the platform's.
 //     Of a cluster another org owns it sees the name and whether it is connected.
 //   - Which of those clusters an org's jobs use is the org's own: its administrators turn any of
-//     them off and on for its jobs, a shared one of another org included. That decides nothing
+//     them off and on for its jobs, one of the platform's included. That decides nothing
 //     for any other org.
 
 // Account returns the principal when it is one that holds an account.
@@ -299,7 +298,7 @@ func (a *Access) ClusterOf(ctx context.Context, orgID, name string) (*domain.Clu
 }
 
 // ClusterUse admits the principal to decide whether the jobs of orgID use a cluster, and returns
-// both: an administrator of the org, for a cluster open to it, its own or a shared one. Any
+// both: an administrator of the org, for a cluster open to it, its own or one of the platform's. Any
 // other cluster is not found under this org.
 func (a *Access) ClusterUse(ctx context.Context, orgID, name string) (Principal, *domain.Cluster, error) {
 	p, err := a.OrgAdmin(ctx, orgID)

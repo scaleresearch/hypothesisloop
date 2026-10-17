@@ -34,7 +34,7 @@ type Experiment struct {
 	// ProjectID is the platform experiment's project, read with the job and stored there only.
 	ProjectID string `json:"project_id"`
 	// OrgID is the org of that project, read with the job and stored there only. Admission
-	// places a job on a cluster of this org or on a shared one.
+	// places a job on a cluster of this org or of the platform's.
 	OrgID string `json:"org_id"`
 	// ClusterName is the target execution cluster this experiment is (or will be) admitted onto
 	// (a k8s cluster today, but domain has no dependency on that). Empty means "not yet
@@ -163,7 +163,7 @@ type Experiment struct {
 	// appends here. Never cleared, only grown; stale entries simply age out of the TTL check.
 	//
 	// Kept out of every answer of the API: a cluster's id is the name its settings are kept
-	// under, and a job tried on a shared cluster would show its org the id of a cluster another
+	// under, and a job tried on a platform cluster would show its org the id of a cluster another
 	// org owns. No client reads the list.
 	TriedClusters []TriedCluster `json:"-"`
 	// RanOnAcceleratorType is the accelerator type the job ran on, written when it is marked

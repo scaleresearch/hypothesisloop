@@ -125,9 +125,9 @@ func (l *Loop) readTickState(ctx context.Context, start time.Time) (*tickState, 
 	if err != nil {
 		return nil, fmt.Errorf("multi-node capability: %w", err)
 	}
-	// Which clusters exist for the platform, whose each is, and which are shared. Placement by
-	// org is decided against this one read: a job goes to a cluster of its own org or to a
-	// shared one, and a name nobody registered is no cluster at all.
+	// Which clusters exist for the platform and whose each is. Placement by org is decided
+	// against this one read: a job goes to a cluster of its own org or of the platform's, and a
+	// name nobody registered is no cluster at all.
 	registeredClusters, err := l.store.RegisteredClusters(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("registered clusters: %w", err)

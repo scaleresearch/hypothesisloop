@@ -8,19 +8,16 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// limitedOrgs is twoOrgs with org B's cluster shared, so org A's jobs placed there are on the
-// platform's compute, and org A held to limit. Each job is one L40, 0.25 AccH/h.
-func limitedOrgs(t *testing.T, limit domain.ComputeLimit) *twoOrgs {
+// limitedOrgs is twoOrgs and a cluster of the platform's org, so org A's jobs placed there are on
+// the platform's compute, and org A held to limit. Each job is one L40, 0.25 AccH/h.
+func limitedOrgs(t *testing.T, limit domain.ComputeLimit) (*twoOrgs, string) {
 	t.Helper()
 	w := newTwoOrgs(t)
-	shared := true
-	if _, _, err := w.clusters.UpdateCluster(context.Background(), w.ofB, &shared, domain.ClusterSettings{}); err != nil {
-		t.Fatal(err)
-	}
+	platform := w.platformCluster(t)
 	if err := w.clusters.SetOrgComputeLimit(context.Background(), w.orgA, limit); err != nil {
 		t.Fatal(err)
 	}
-	return w
+	return w, platform
 }
 
 func (w *twoOrgs) claimed(t *testing.T, id, cluster string) *domain.ClaimRefusal {
@@ -32,15 +29,15 @@ func (w *twoOrgs) claimed(t *testing.T, id, cluster string) *domain.ClaimRefusal
 	return refused
 }
 
-func TestAClaimOnASharedClusterIsHeldToItsProjectsLimit(t *testing.T) {
-	w := limitedOrgs(t, domain.ComputeLimit{Org: 1, Project: 0.5})
+func TestAClaimOnAPlatformClusterIsHeldToItsProjectsLimit(t *testing.T) {
+	w, platform := limitedOrgs(t, domain.ComputeLimit{Org: 1, Project: 0.5})
 	for _, id := range []string{"first", "second"} {
-		if refused := w.claimed(t, w.queued(t, id, w.peA), w.ofB); refused != nil {
+		if refused := w.claimed(t, w.queued(t, id, w.peA), platform); refused != nil {
 			t.Fatalf("%s within the project's limit: got = %+v, want it placed", id, refused)
 		}
 	}
 	third := w.queued(t, "third", w.peA)
-	refused := w.claimed(t, third, w.ofB)
+	refused := w.claimed(t, third, platform)
 	want := domain.ClaimRefusal{Code: domain.NotAdmittedProjectComputeLimit, Holder: domain.DefaultProjectName, Held: 0.5, Limit: 0.5, Needs: 0.25}
 	if refused == nil || *refused != want {
 		t.Fatalf("the third on the platform's cluster: got = %+v, want %+v", refused, want)
@@ -54,8 +51,8 @@ func TestAClaimOnASharedClusterIsHeldToItsProjectsLimit(t *testing.T) {
 	}
 }
 
-func TestAClaimOnASharedClusterIsHeldToItsOrgsLimitAcrossProjects(t *testing.T) {
-	w := limitedOrgs(t, domain.ComputeLimit{Org: 0.75, Project: 0.5})
+func TestAClaimOnAPlatformClusterIsHeldToItsOrgsLimitAcrossProjects(t *testing.T) {
+	w, platform := limitedOrgs(t, domain.ComputeLimit{Org: 0.75, Project: 0.5})
 	ctx := context.Background()
 	other, err := w.clusters.CreateProject(ctx, w.orgA, "other-"+w.suffix, 0)
 	if err != nil {
@@ -64,18 +61,18 @@ func TestAClaimOnASharedClusterIsHeldToItsOrgsLimitAcrossProjects(t *testing.T) 
 	peOther := "pe-other-" + w.suffix
 	createTestPEIn(t, w.pool, peOther, other.ID)
 	for _, id := range []string{"a1", "a2"} {
-		if refused := w.claimed(t, w.queued(t, id, w.peA), w.ofB); refused != nil {
+		if refused := w.claimed(t, w.queued(t, id, w.peA), platform); refused != nil {
 			t.Fatalf("%s: got = %+v, want it placed", id, refused)
 		}
 	}
-	if refused := w.claimed(t, w.queued(t, "o1", peOther), w.ofB); refused != nil {
+	if refused := w.claimed(t, w.queued(t, "o1", peOther), platform); refused != nil {
 		t.Fatalf("the other project's first: got = %+v, want it placed", refused)
 	}
-	refused := w.claimed(t, w.queued(t, "o2", peOther), w.ofB)
+	refused := w.claimed(t, w.queued(t, "o2", peOther), platform)
 	if refused == nil || refused.Code != domain.NotAdmittedOrgComputeLimit || refused.Held != 0.75 || refused.Limit != 0.75 || refused.Needs != 0.25 {
 		t.Fatalf("past the org's limit within the project's: got = %+v, want org_compute_limit holding 0.75 of 0.75", refused)
 	}
-	if refused := w.claimed(t, w.queued(t, "b1", w.peB), w.ofB); refused != nil {
+	if refused := w.claimed(t, w.queued(t, "b1", w.peB), platform); refused != nil {
 		t.Fatalf("another org's job: got = %+v, want it placed", refused)
 	}
 
@@ -84,7 +81,7 @@ func TestAClaimOnASharedClusterIsHeldToItsOrgsLimitAcrossProjects(t *testing.T) 
 		t.Fatal(err)
 	}
 	var placed int
-	if err := w.pool.pool.QueryRow(ctx, `SELECT count(*) FROM experiments WHERE cluster_name = $1 AND status = 'SUBMITTED' AND acch_per_hour = 0.25`, w.ofB).Scan(&placed); err != nil || placed != 4 {
+	if err := w.pool.pool.QueryRow(ctx, `SELECT count(*) FROM experiments WHERE cluster_name = $1 AND status = 'SUBMITTED' AND acch_per_hour = 0.25`, platform).Scan(&placed); err != nil || placed != 4 {
 		t.Fatalf("placed after the limit was lowered: got = %d, %v, want 4", placed, err)
 	}
 	if err := w.clusters.SetOrgComputeLimit(ctx, w.orgA, domain.ComputeLimit{Org: 0.25, Project: 0.5}); err == nil {
@@ -95,20 +92,16 @@ func TestAClaimOnASharedClusterIsHeldToItsOrgsLimitAcrossProjects(t *testing.T) 
 	}
 }
 
-// Claims on different shared clusters take different cluster locks; the org's lock serializes
+// Claims on different platform clusters take different cluster locks; the org's lock serializes
 // them, so the project's limit holds however many race.
-func TestConcurrentClaimsOnSharedClustersKeepTheLimit(t *testing.T) {
-	w := limitedOrgs(t, domain.ComputeLimit{Org: 1, Project: 0.5})
+func TestConcurrentClaimsOnPlatformClustersKeepTheLimit(t *testing.T) {
+	w, platform := limitedOrgs(t, domain.ComputeLimit{Org: 1, Project: 0.5})
 	ctx := context.Background()
 	third := "of-c-" + w.suffix
-	if _, err := w.clusters.RegisterCluster(ctx, third, w.orgB); err != nil {
+	if _, err := w.clusters.RegisterCluster(ctx, third, domain.PlatformOrgID); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _, _ = w.pool.pool.Exec(context.Background(), `DELETE FROM clusters WHERE name = $1`, third) })
-	shared := true
-	if _, _, err := w.clusters.UpdateCluster(ctx, third, &shared, domain.ClusterSettings{}); err != nil {
-		t.Fatal(err)
-	}
 	var jobs []string
 	for i := range 8 {
 		jobs = append(jobs, w.queued(t, "race-"+string(rune('a'+i)), w.peA))
@@ -117,7 +110,7 @@ func TestConcurrentClaimsOnSharedClustersKeepTheLimit(t *testing.T) {
 	refusals := make([]*domain.ClaimRefusal, len(jobs))
 	errs := make([]error, len(jobs))
 	for i, id := range jobs {
-		cluster := w.ofB
+		cluster := platform
 		if i%2 == 1 {
 			cluster = third
 		}

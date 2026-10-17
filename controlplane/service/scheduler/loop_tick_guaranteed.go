@@ -78,7 +78,7 @@ func (l *Loop) admitGuaranteed(ctx context.Context, t *tickState, p *preemptionS
 			return
 		}
 		if liveFits {
-			if bets = above(bets, cluster, c.registered); len(bets) == 0 {
+			if bets = above(bets, cluster, c.registered, exp.OrgID); len(bets) == 0 {
 				exp.AcceleratorType = chosenAcceleratorType
 			}
 		}

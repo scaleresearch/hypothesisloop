@@ -1,5 +1,5 @@
 import { apiFetch, apiSend, withQuery } from '@/lib/api/request'
-import type { ListedCluster, ListedClusters, LiveCapacity, RegisteredCluster, UpdateClusterRequest } from '@/types/api'
+import type { ClusterSettings, ListedCluster, ListedClusters, LiveCapacity, RegisteredCluster } from '@/types/api'
 import type { AllClusters } from '@/types/cluster-agent-api'
 
 // Every org's clusters with their live occupancy. Staff only: anyone else is answered 403.
@@ -26,9 +26,9 @@ export function setClusterOrder(orgID: string, names: string[]): Promise<ListedC
   return apiSend<ListedClusters>('PUT', `/orgs/${orgID}/clusters/order`, { names }).then(r => r.clusters)
 }
 
-// Changes the fields named on a cluster the org registered: its settings, where 0 puts one back
-// on the scheduler's default, and shared, which staff alone decide.
-export async function updateCluster(orgID: string, name: string, change: UpdateClusterRequest): Promise<void> {
+// Changes the settings named on a cluster the org registered, where 0 puts one back on the
+// scheduler's default.
+export async function updateCluster(orgID: string, name: string, change: ClusterSettings): Promise<void> {
   await apiSend('PATCH', `/orgs/${orgID}/clusters/${encodeURIComponent(name)}`, change)
 }
 

@@ -149,8 +149,8 @@ Sets the order the org's jobs are placed on the clusters it registered: name eve
 once, first placed first. A job goes to the first cluster that can take it as the scheduler reads
 capacity at that moment, and to a later one when that is full or has just failed it. A guaranteed
 job first asks an earlier cluster that scales up to do so, and takes a later one when that times
-out. A cluster registered afterwards comes last until it is ordered, and the clusters the platform
-shares come after all of the org's own. Jobs that are placed do not move. Prints the clusters in
+out. A cluster registered afterwards comes last until it is ordered, and the platform's clusters
+come after all of the org's own. Jobs that are placed do not move. Prints the clusters in
 the new order, as hl cluster list does.`, stderr)
 	org := fs.String("org", "", orgFlagHelp)
 	names, err := command.ParseOperands(fs, args)
@@ -216,7 +216,7 @@ func ClusterDisable(c *apiclient.Client, args []string, stdout, stderr io.Writer
 	fs := command.NewFlags("cluster disable", `usage: hl cluster disable NAME [--org ORG]
 
 Turns a cluster off for the org's jobs: from now on none of them is placed on it. The cluster is
-any that hl cluster list shows, one the org registered or one the platform shares, and the
+any that hl cluster list shows, one the org registered or one of the platform's, and the
 decision is this org's alone. Its jobs already placed there are not touched and run to their
 end. A job that waits because the org turned off every cluster it could use reads
 not_admitted_reason clusters_disabled. Turn it on again with hl cluster enable.`, stderr)
@@ -258,8 +258,8 @@ func onCluster(c *apiclient.Client, fs *command.Flags, args []string, method, re
 func ClusterList(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := command.NewFlags("cluster list", `usage: hl cluster list [--org ORG]
 
-The clusters the org's jobs run on, by name: the ones it registered (owned) and the ones the
-platform shares with every org, in the order a job is placed on them (see hl cluster order),
+The clusters the org's jobs run on, by name: the ones it registered (owned) and the platform's,
+which serve every org, in the order a job is placed on them (see hl cluster order),
 with whether an agent is connected now and whether the org has the cluster on for its jobs
 (enabled; see hl cluster disable). last_contact_at is when its agent was last heard from, within
 30 days. Of a cluster the org registered: agent_version, the image tag its agent runs, with

@@ -129,13 +129,13 @@ func TestWhoReadsAndWhoAdministersAnOrgAndItsClusters(t *testing.T) {
 
 func TestACallerKnowsOnlyTheClustersOfItsOwnOrg(t *testing.T) {
 	own := domain.Cluster{Name: "own", OrgID: "org-a"}
-	shared := domain.Cluster{Name: "shared", OrgID: "org-b", Shared: true}
+	platform := domain.Cluster{Name: "platform", OrgID: "org-b"}
 	for caller, want := range map[string][2]bool{
 		"owner": {true, false}, "org key": {true, false}, "outsider": {false, true}, "staff": {true, true},
 	} {
 		p := accountCallers[caller]
-		if got := [2]bool{p.KnowsCluster(own), p.KnowsCluster(shared)}; got != want {
-			t.Errorf("%s knows (org a's cluster, org b's shared one) = %v, want %v", caller, got, want)
+		if got := [2]bool{p.KnowsCluster(own), p.KnowsCluster(platform)}; got != want {
+			t.Errorf("%s knows (org a's cluster, org b's) = %v, want %v", caller, got, want)
 		}
 	}
 }
