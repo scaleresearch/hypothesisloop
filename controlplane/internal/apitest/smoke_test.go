@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/clusteragentapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/registry"
@@ -32,7 +33,7 @@ func TestSmoke(t *testing.T) {
 	// together exactly as control-service wires them, so /openapi.json and /explore describe
 	// every operation a caller can reach at the single base URL.
 	r := authtest.Router(authtest.Staff)
-	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", apidocs.PlatformRules, auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", agenttypes.PlatformRules, auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	quota.RegisterHuma(doc, quota.NewHandler(nil, nil), quota.NewPlatformExperimentsHandler(nil, worldRepositories{}, worldPlanning, nil))
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(
 		scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{})))

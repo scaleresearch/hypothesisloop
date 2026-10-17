@@ -360,27 +360,10 @@ WHERE id = $1`, pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.Ma
 	return nil
 }
 
-// AgentStanding is what an agent's token stands on, read in one statement: where its platform
-// experiment is and when it closed, whether the agent is in it, and when its run ended for each
-// of the reasons that end one.
-type AgentStanding struct {
-	// Tenancy is nil when there is no such platform experiment, or it was removed.
-	Tenancy  *domain.Tenancy
-	ClosedAt *time.Time
-	SignedUp bool
-	CutAt    *time.Time
-	// PlannerAnsweredAt is the moment the run of a planner ended: it answered its draft, with a
-	// proposal or with why there is none, and the time its machine is kept after an answer has
-	// passed (planner_ends_at). nil for an agent that is no planner, for a planner that is
-	// planning, which a revision makes true again, and for one kept after its answer.
-	PlannerAnsweredAt *time.Time
-	FinishedAt        *time.Time
-}
-
 // AgentStanding reads the standing of agentID in platformExpID.
-func (s *PlatformExperimentsStore) AgentStanding(ctx context.Context, platformExpID, agentID string) (AgentStanding, error) {
+func (s *PlatformExperimentsStore) AgentStanding(ctx context.Context, platformExpID, agentID string) (domain.AgentStanding, error) {
 	t := &domain.Tenancy{PlatformExperimentID: platformExpID}
-	var out AgentStanding
+	var out domain.AgentStanding
 	err := s.pool.pool.QueryRow(ctx, `
 SELECT pe.project_id, p.org_id, pe.shared, ARRAY(`+priorRuns+`), pe.closed_at,
        s.agent_id IS NOT NULL,
@@ -392,10 +375,10 @@ LEFT JOIN experiment_signups s ON s.platform_experiment_id = pe.id AND s.agent_i
 WHERE pe.id = $1 AND pe.removed_at IS NULL`, platformExpID, agentID).Scan(&t.ProjectID, &t.OrgID, &t.Shared, &t.PriorRuns, &out.ClosedAt,
 		&out.SignedUp, &out.CutAt, &out.PlannerAnsweredAt, &out.FinishedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return AgentStanding{}, nil
+		return domain.AgentStanding{}, nil
 	}
 	if err != nil {
-		return AgentStanding{}, fmt.Errorf("platform_experiments_store.AgentStanding: %w", err)
+		return domain.AgentStanding{}, fmt.Errorf("platform_experiments_store.AgentStanding: %w", err)
 	}
 	out.Tenancy = t
 	return out, nil

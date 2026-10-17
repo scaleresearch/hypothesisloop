@@ -14,8 +14,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/agenttypes"
 )
 
 // testSettings is the platform settings a service of these tests applies and holds a create to.

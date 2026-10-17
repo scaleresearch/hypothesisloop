@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/agenttypes"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes"
 )
 
 // testTimeouts are the committed settings' database timeouts.

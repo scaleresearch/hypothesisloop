@@ -6,6 +6,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler"
@@ -57,7 +58,7 @@ func TestFieldsAddedToExistingRequestBodiesStayOptional(t *testing.T) {
 func openAPISpec(t *testing.T) map[string]any {
 	t.Helper()
 	r := authtest.Router(authtest.Staff)
-	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", apidocs.PlatformRules, auth.NewAccess(authtest.Placement{}), zap.NewNop())
+	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", agenttypes.PlatformRules, auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	platformExperiments := quota.NewPlatformExperimentsHandler(nil, worldRepositories{}, worldPlanning, nil).WithAgentLaunch(quota.AgentLaunch{Hosting: true, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: "contract-test-signing-secret", MaxHosted: 20})
 	quota.RegisterHuma(doc, quota.NewHandler(nil, nil), platformExperiments)
 	quota.RegisterAgentsHuma(doc, platformExperiments, struct{ quota.Hypotheses }{})

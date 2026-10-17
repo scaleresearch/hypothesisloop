@@ -45,7 +45,7 @@ type Directory interface {
 	PlatformExperimentTenancy(ctx context.Context, platformExperimentID string) (tenancy *domain.Tenancy, closedAt *time.Time, err error)
 	ExperimentTenancy(ctx context.Context, experimentID string) (*domain.Tenancy, bool, error)
 	AgentCutAt(ctx context.Context, platformExperimentID, agentID string) (*time.Time, error)
-	AgentStanding(ctx context.Context, platformExperimentID, agentID string) (db.AgentStanding, error)
+	AgentStanding(ctx context.Context, platformExperimentID, agentID string) (domain.AgentStanding, error)
 	ClusterOrg(ctx context.Context, name string) (orgID string, found bool, err error)
 	AssignedEnvironmentBuild(ctx context.Context, cluster, key string, attempt int) (*domain.Environment, error)
 }

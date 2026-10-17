@@ -25,7 +25,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
-	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
 // world is the rows every token and every access check of the authorization table is resolved
@@ -321,26 +320,26 @@ func newWorldSigner(t *testing.T) (func(claims map[string]any) string, config.JW
 		X: b64.EncodeToString(key.X.FillBytes(make([]byte, 32))), Y: b64.EncodeToString(key.Y.FillBytes(make([]byte, 32)))}
 }
 
-func (w *world) AgentStanding(ctx context.Context, pe, agent string) (db.AgentStanding, error) {
+func (w *world) AgentStanding(ctx context.Context, pe, agent string) (domain.AgentStanding, error) {
 	tenancy, closedAt, err := w.PlatformExperimentTenancy(ctx, pe)
 	if err != nil || tenancy == nil {
-		return db.AgentStanding{}, err
+		return domain.AgentStanding{}, err
 	}
 	signedUp, err := w.IsSignedUp(ctx, pe, agent)
 	if err != nil {
-		return db.AgentStanding{}, err
+		return domain.AgentStanding{}, err
 	}
 	cutAt, err := w.AgentCutAt(ctx, pe, agent)
 	if err != nil {
-		return db.AgentStanding{}, err
+		return domain.AgentStanding{}, err
 	}
 	answeredAt, err := w.PlannerAnsweredAt(ctx, pe, agent)
 	if err != nil {
-		return db.AgentStanding{}, err
+		return domain.AgentStanding{}, err
 	}
 	finishedAt, err := w.AgentFinishedAt(ctx, pe, agent)
 	if err != nil {
-		return db.AgentStanding{}, err
+		return domain.AgentStanding{}, err
 	}
-	return db.AgentStanding{Tenancy: tenancy, ClosedAt: closedAt, SignedUp: signedUp, CutAt: cutAt, PlannerAnsweredAt: answeredAt, FinishedAt: finishedAt}, nil
+	return domain.AgentStanding{Tenancy: tenancy, ClosedAt: closedAt, SignedUp: signedUp, CutAt: cutAt, PlannerAnsweredAt: answeredAt, FinishedAt: finishedAt}, nil
 }

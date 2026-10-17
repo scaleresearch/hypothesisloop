@@ -24,17 +24,6 @@ var files embed.FS
 // keeps the digest of each.
 const Release = 1
 
-// Builtin is one built-in agent type: its id, which is also the file its prompt is in, name, role
-// and settings.
-type Builtin struct {
-	ID          string
-	Name        string
-	Description string
-	Role        domain.AgentRole
-	Prompt      string
-	Settings    domain.AgentTypeSettings
-}
-
 var builtins = []struct {
 	id, name string
 	role     domain.AgentRole
@@ -50,7 +39,7 @@ var builtins = []struct {
 }
 
 // Builtins is every built-in agent type, each checked as an org's would be on save.
-func Builtins() ([]Builtin, error) {
+func Builtins() ([]domain.BuiltinAgentType, error) {
 	raw, err := files.ReadFile("builtin/descriptions.json")
 	if err != nil {
 		return nil, fmt.Errorf("agenttypes: %w", err)
@@ -62,7 +51,7 @@ func Builtins() ([]Builtin, error) {
 	if len(descriptions) != len(builtins) {
 		return nil, fmt.Errorf("agenttypes: descriptions.json holds %d descriptions for %d built-in types", len(descriptions), len(builtins))
 	}
-	out := make([]Builtin, 0, len(builtins))
+	out := make([]domain.BuiltinAgentType, 0, len(builtins))
 	for _, b := range builtins {
 		if err := domain.ValidateBuiltinAgentTypeID(b.id); err != nil {
 			return nil, fmt.Errorf("agenttypes: %w", err)
@@ -71,7 +60,7 @@ func Builtins() ([]Builtin, error) {
 		if err != nil {
 			return nil, fmt.Errorf("agenttypes: %w", err)
 		}
-		builtin := Builtin{
+		builtin := domain.BuiltinAgentType{
 			ID: b.id, Name: b.name, Description: descriptions[b.id], Role: b.role, Prompt: string(prompt),
 			Settings: domain.AgentTypeSettings{MaxSubagents: 4, Effort: b.effort, Hyperparameters: map[string]any{}},
 		}
@@ -107,7 +96,7 @@ func Catalog() domain.AgentTypeCatalog {
 
 // Digest is sha256 of everything a release seeds: each built-in's id, name, description, role,
 // prompt and settings, and rules.
-func Digest(all []Builtin, rules string) (string, error) {
+func Digest(all []domain.BuiltinAgentType, rules string) (string, error) {
 	sum := sha256.New()
 	for _, b := range all {
 		settings, err := json.Marshal(b.Settings)

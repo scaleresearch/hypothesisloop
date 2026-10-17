@@ -574,3 +574,14 @@ type Propagation struct {
 	Version int `json:"version"`
 	Told    int `json:"told" doc:"The agents and coordinators whose run goes on told with agent.instructions."`
 }
+
+// BuiltinAgentType is one built-in agent type: its id, which is also the file its prompt is in,
+// name, role and settings.
+type BuiltinAgentType struct {
+	ID          string
+	Name        string
+	Description string
+	Role        AgentRole
+	Prompt      string
+	Settings    AgentTypeSettings
+}

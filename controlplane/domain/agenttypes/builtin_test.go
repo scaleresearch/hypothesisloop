@@ -135,7 +135,7 @@ func TestTheBuiltinPromptsKeepWhatRunsTaught(t *testing.T) {
 	}
 }
 
-func mustBuiltins(t *testing.T) []Builtin {
+func mustBuiltins(t *testing.T) []domain.BuiltinAgentType {
 	t.Helper()
 	all, err := Builtins()
 	if err != nil {

@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/agenttypes"
 )
 
 const testPrompt = "{{rules}}\n{{hl_commands}}\nYou are {{agent_id}} in {{platform_experiment_id}}."
@@ -99,10 +98,10 @@ func TestSeedingWritesWhatDiffersFromTheCurrentVersionUnlessAnOlderReleaseHasIt(
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	store := NewAgentTypesStore(pool)
-	builtin := agenttypes.Builtin{ID: "test-" + uuid.New().String()[:8], Name: "Test", Role: domain.AgentRoleResearcher, Prompt: testPrompt, Settings: testTypeSettings()}
-	seed := func(release int, b agenttypes.Builtin) Seeded {
+	builtin := domain.BuiltinAgentType{ID: "test-" + uuid.New().String()[:8], Name: "Test", Role: domain.AgentRoleResearcher, Prompt: testPrompt, Settings: testTypeSettings()}
+	seed := func(release int, b domain.BuiltinAgentType) Seeded {
 		t.Helper()
-		seeded, err := SeedBuiltins(ctx, pool, release, []agenttypes.Builtin{b}, testRules)
+		seeded, err := SeedBuiltins(ctx, pool, release, []domain.BuiltinAgentType{b}, testRules)
 		if err != nil {
 			t.Fatalf("seed: got = %v, want = nil", err)
 		}
@@ -138,7 +137,7 @@ func TestSeedingWritesWhatDiffersFromTheCurrentVersionUnlessAnOlderReleaseHasIt(
 	}
 	other := changed
 	other.Role = domain.AgentRoleBaseline
-	if _, err := SeedBuiltins(ctx, pool, 7, []agenttypes.Builtin{other}, testRules); err == nil {
+	if _, err := SeedBuiltins(ctx, pool, 7, []domain.BuiltinAgentType{other}, testRules); err == nil {
 		t.Error("a built-in seeded with another role was accepted")
 	}
 	if got := actions(t, store, "", builtin.ID); !slices.Equal(got, []string{"edit@3", "rename@2", "edit@2", "rename@1", "create@1"}) {

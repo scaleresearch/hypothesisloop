@@ -9,7 +9,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/agenttypes"
 )
 
 var (
@@ -570,7 +569,7 @@ type SeededAgentType struct {
 // older than the current version's writes nothing, so an older replica of a rolling deploy never
 // puts its own back; a revert ships under a newer release and is written like any change
 // (agenttypes.Release).
-func SeedBuiltins(ctx context.Context, pool *Pool, release int, builtins []agenttypes.Builtin, rules string) (Seeded, error) {
+func SeedBuiltins(ctx context.Context, pool *Pool, release int, builtins []domain.BuiltinAgentType, rules string) (Seeded, error) {
 	tx, err := pool.pool.Begin(ctx)
 	if err != nil {
 		return Seeded{}, fmt.Errorf("db.SeedBuiltins: begin: %w", err)
@@ -607,7 +606,7 @@ func SeedBuiltins(ctx context.Context, pool *Pool, release int, builtins []agent
 
 // seedBuiltinTx writes one built-in type: the propagation of the version it inserted after the
 // first, nil when it inserted none, and whether release is older than the current version's.
-func seedBuiltinTx(ctx context.Context, tx pgx.Tx, release int, b agenttypes.Builtin) (*domain.Propagation, bool, error) {
+func seedBuiltinTx(ctx context.Context, tx pgx.Tx, release int, b domain.BuiltinAgentType) (*domain.Propagation, bool, error) {
 	platform := domain.Actor{Kind: domain.ActorStaff}
 	tag, err := tx.Exec(ctx, `
 INSERT INTO agent_types (id, org_id, name, description, role, current_version, created_by_kind) VALUES ($1, NULL, $2, $3, $4, 1, $5)

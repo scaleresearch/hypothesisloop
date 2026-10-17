@@ -49,7 +49,7 @@ class FillTest(unittest.TestCase):
 
 
 class NoPromptFilesTest(unittest.TestCase):
-    # The prompts live with the platform (controlplane/shared/agenttypes/builtin), which serves
+    # The prompts live with the platform (controlplane/domain/agenttypes/builtin), which serves
     # every agent the version it is pinned to: a copy in the image would be one that drifts.
     def test_the_harness_ships_no_prompt_and_reads_none(self):
         package = pathlib.Path(hypothesisloop_agent.__file__).parent

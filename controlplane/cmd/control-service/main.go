@@ -21,6 +21,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/registrycred"
 	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/clusteragentapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/environments"
@@ -30,7 +31,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/settlement"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/agenttypes"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
@@ -366,7 +366,7 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 
 	// One doc for the whole public API: every operation an agent or the UI can call is
 	// registered here, so /openapi.json and /explore describe all of it in one place.
-	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", apidocs.PlatformRules, gate.access, logger)
+	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", agenttypes.PlatformRules, gate.access, logger)
 	quota.RegisterHuma(doc, h.quota, h.platformExperiments)
 	quota.RegisterAgentsHuma(doc, h.platformExperiments, h.hypotheses)
 	quota.RegisterPlanningHuma(doc, h.platformExperiments)
@@ -528,7 +528,7 @@ func seedBuiltins(pool *db.Pool, logger *zap.Logger) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	seeded, err := db.SeedBuiltins(ctx, pool, agenttypes.Release, builtins, apidocs.PlatformRules)
+	seeded, err := db.SeedBuiltins(ctx, pool, agenttypes.Release, builtins, agenttypes.PlatformRules)
 	if err != nil {
 		logger.Fatal("control-service: seed built-in agent types and rules", zap.Error(err))
 	}

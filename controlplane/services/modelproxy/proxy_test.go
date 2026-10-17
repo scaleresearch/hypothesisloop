@@ -19,7 +19,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/api"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
-	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
@@ -501,26 +500,26 @@ func TestAProviderThatCannotBeReachedIsAnsweredInItsOwnErrorShape(t *testing.T) 
 	}
 }
 
-func (d directory) AgentStanding(ctx context.Context, pe, agent string) (db.AgentStanding, error) {
+func (d directory) AgentStanding(ctx context.Context, pe, agent string) (domain.AgentStanding, error) {
 	tenancy, closedAt, err := d.PlatformExperimentTenancy(ctx, pe)
 	if err != nil || tenancy == nil {
-		return db.AgentStanding{}, err
+		return domain.AgentStanding{}, err
 	}
 	signedUp, err := d.IsSignedUp(ctx, pe, agent)
 	if err != nil {
-		return db.AgentStanding{}, err
+		return domain.AgentStanding{}, err
 	}
 	cutAt, err := d.AgentCutAt(ctx, pe, agent)
 	if err != nil {
-		return db.AgentStanding{}, err
+		return domain.AgentStanding{}, err
 	}
 	answeredAt, err := d.PlannerAnsweredAt(ctx, pe, agent)
 	if err != nil {
-		return db.AgentStanding{}, err
+		return domain.AgentStanding{}, err
 	}
 	finishedAt, err := d.AgentFinishedAt(ctx, pe, agent)
 	if err != nil {
-		return db.AgentStanding{}, err
+		return domain.AgentStanding{}, err
 	}
-	return db.AgentStanding{Tenancy: tenancy, ClosedAt: closedAt, SignedUp: signedUp, CutAt: cutAt, PlannerAnsweredAt: answeredAt, FinishedAt: finishedAt}, nil
+	return domain.AgentStanding{Tenancy: tenancy, ClosedAt: closedAt, SignedUp: signedUp, CutAt: cutAt, PlannerAnsweredAt: answeredAt, FinishedAt: finishedAt}, nil
 }

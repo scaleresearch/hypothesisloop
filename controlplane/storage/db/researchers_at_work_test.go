@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/agenttypes"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes"
 )
 
 // Every agent says whether it is at work and why not, and the platform experiment counts those at
@@ -83,8 +83,8 @@ func TestADescriptionIsSeededForABuiltinAndWrittenOnAnOrgsType(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	store := NewAgentTypesStore(pool)
-	builtin := agenttypes.Builtin{ID: "test-" + uuid.New().String()[:8], Name: "Test", Description: "First.", Role: domain.AgentRoleResearcher, Prompt: testPrompt, Settings: testTypeSettings()}
-	if _, err := SeedBuiltins(ctx, pool, agenttypes.Release, []agenttypes.Builtin{builtin}, testRules); err != nil {
+	builtin := domain.BuiltinAgentType{ID: "test-" + uuid.New().String()[:8], Name: "Test", Description: "First.", Role: domain.AgentRoleResearcher, Prompt: testPrompt, Settings: testTypeSettings()}
+	if _, err := SeedBuiltins(ctx, pool, agenttypes.Release, []domain.BuiltinAgentType{builtin}, testRules); err != nil {
 		t.Fatal(err)
 	}
 	read := func() *domain.CurrentAgentType {
@@ -99,7 +99,7 @@ func TestADescriptionIsSeededForABuiltinAndWrittenOnAnOrgsType(t *testing.T) {
 		t.Fatalf("seeded: got description %q", got.Description)
 	}
 	builtin.Description = "Second."
-	seeded, err := SeedBuiltins(ctx, pool, agenttypes.Release, []agenttypes.Builtin{builtin}, testRules)
+	seeded, err := SeedBuiltins(ctx, pool, agenttypes.Release, []domain.BuiltinAgentType{builtin}, testRules)
 	if err != nil || len(seeded.Types) != 0 {
 		t.Fatalf("seed with a new description: %+v, %v, want no new version", seeded, err)
 	}

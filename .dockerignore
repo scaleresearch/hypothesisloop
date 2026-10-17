@@ -15,7 +15,7 @@
 
 # Docs / specs. The built-in agent prompts are compiled into control-service.
 *.md
-!controlplane/shared/agenttypes/builtin/*.md
+!controlplane/domain/agenttypes/builtin/*.md
 docs/
 
 # UI (not needed in Go images)

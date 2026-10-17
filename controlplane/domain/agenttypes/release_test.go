@@ -3,8 +3,7 @@ package agenttypes_test
 import (
 	"testing"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/agenttypes"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes"
 )
 
 // releases is the digest of what each release seeds (agenttypes.Digest). A change of a built-in or
@@ -18,7 +17,7 @@ func TestReleaseNamesWhatItSeeds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	digest, err := agenttypes.Digest(all, apidocs.PlatformRules)
+	digest, err := agenttypes.Digest(all, agenttypes.PlatformRules)
 	if err != nil {
 		t.Fatal(err)
 	}
