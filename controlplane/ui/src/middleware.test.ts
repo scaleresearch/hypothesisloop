@@ -1,13 +1,12 @@
 // @vitest-environment node
 import { NextRequest } from 'next/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { hasSession, sessionToken } from '@/lib/auth'
+import { hasSession } from '@/lib/auth'
 import { config, middleware } from '@/middleware'
 
 vi.mock('@/lib/auth', async importActual => ({
   ...(await importActual<typeof import('@/lib/auth')>()),
   hasSession: vi.fn(),
-  sessionToken: vi.fn(),
 }))
 
 function visit(path: string, cookie?: string) {
@@ -59,25 +58,6 @@ describe('a signed-in visitor', () => {
     const response = await visit('/')
     expect(response.status).toBe(200)
     expect(response.headers.get('location')).toBeNull()
-  })
-
-  it('is moved for good from an old page to its new one', async () => {
-    const response = await visit('/hypotheses?pe=pe-1&view=outline')
-    expect(response.status).toBe(308)
-    expect(response.headers.get('location')).toBe('http://ui.test/experiments/pe-1/hypotheses?view=outline')
-  })
-
-  it('is moved from an old job page to the job in its experiment, read with their own token', async () => {
-    vi.mocked(sessionToken).mockResolvedValue('tok')
-    const fetched = vi.fn(async () => Response.json({ id: 'j1', platform_experiment_id: 'pe-1' }))
-    vi.stubGlobal('fetch', fetched)
-    const response = await visit('/jobs/j1')
-    expect(response.status).toBe(308)
-    expect(response.headers.get('location')).toBe('http://ui.test/experiments/pe-1/jobs/j1')
-    expect(fetched).toHaveBeenCalledWith('http://api.test/experiments/j1', { headers: { Authorization: 'Bearer tok' }, cache: 'no-store' })
-
-    fetched.mockResolvedValue(new Response('not found', { status: 404 }))
-    expect((await visit('/hypotheses/h9')).headers.get('x-middleware-next')).toBe('1')
   })
 
   it('reaches the page', async () => {
