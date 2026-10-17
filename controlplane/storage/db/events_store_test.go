@@ -118,6 +118,7 @@ VALUES ($1, $2, $3, 'agent', $3, 'watch test comment')`, hypothesisID, peID, age
 			`DELETE FROM experiments WHERE platform_experiment_id = $1`,
 			`DELETE FROM platform_experiment_cuts WHERE platform_experiment_id = $1`,
 			`DELETE FROM experiment_signups WHERE platform_experiment_id = $1`,
+			`DELETE FROM changes WHERE platform_experiment_id = $1`,
 			`DELETE FROM platform_experiments WHERE id = $1`,
 		} {
 			if _, err := pool.pool.Exec(cleanupCtx, q, peID); err != nil {

@@ -13,10 +13,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-type sqlExecutor interface {
-	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
-}
-
 // experimentColumns is the canonical column list for SELECT queries: the stored columns, then
 // the job's project and org, which are read off its platform experiment where they are stored.
 const experimentColumns = experimentStoredColumns + `,
@@ -43,7 +39,7 @@ const pgUniqueViolation = "23505"
 var ErrDuplicateExperiment = errors.New("experiment already exists")
 
 // createExperiment inserts a new experiment row.
-func createExperiment(ctx context.Context, executor sqlExecutor, exp *domain.Experiment) error {
+func createExperiment(ctx context.Context, w *Write, exp *domain.Experiment) error {
 	if exp.CapacityTier == "" {
 		return fmt.Errorf("experiments_store.CreateExperiment: job %s names no capacity tier: admission decides it", exp.ID)
 	}
@@ -78,7 +74,7 @@ INSERT INTO experiments (
 	$21, NULLIF($22, ''),
 	$23, $24, $25,
 	$26, $27, $28, $29, $30, $31, NULLIF($32, ''), NULLIF($33, '')
-)`
+)` + jobReturning
 
 	// Accelerator type and total count are canonical columns used by quota/capacity SQL. Do not
 	// duplicate them inside job_spec; scanExperiment reconstructs the per-node API fields.
@@ -97,7 +93,7 @@ INSERT INTO experiments (
 		return fmt.Errorf("experiments_store.CreateExperiment: marshal job spec: %w", err)
 	}
 
-	_, err = executor.Exec(ctx, q,
+	j, err := scanJobWritten(w.QueryRow(ctx, q,
 		exp.ID, exp.ParentID, exp.AgentID, exp.PlatformExperimentID, exp.ClusterName,
 		exp.CodeRef, exp.ConfigHash, exp.DataRef, jobSpec,
 		exp.HypothesisID, exp.Hypothesis, exp.Theory,
@@ -107,7 +103,7 @@ INSERT INTO experiments (
 		exp.CreatedAt, exp.NotAdmittedReason,
 		exp.DataKey.AccessKeyID, exp.DataKey.SecretAccessKey, secretEnv,
 		exp.CreatedAt, exp.UpdatedAt, string(exp.Actor.Kind), exp.Actor.ID, exp.Branch, exp.SubmissionKey, exp.EnvironmentKey, exp.SameHypothesis,
-	)
+	))
 	if err != nil {
 		// A submission key is looked up under its agent's admission lock before this insert, so
 		// the unique violation that reaches here is the primary key's: this id already exists, a
@@ -119,6 +115,10 @@ INSERT INTO experiments (
 			return fmt.Errorf("%w: %s", ErrDuplicateExperiment, exp.ID)
 		}
 		return fmt.Errorf("experiments_store.CreateExperiment: %w", err)
+	}
+	w.jobStatus(j)
+	if j.sameHypothesis != "" {
+		w.Change(j.change(domain.EventJobDuplicate, j.hypothesisID, j.sameHypothesis))
 	}
 	return nil
 }

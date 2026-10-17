@@ -66,11 +66,11 @@ func creditIntoTier(ctx context.Context, tx *Write, platformExpID string, agentI
 		byTier[tier] = append(byTier[tier], agentID)
 	}
 	q := fmt.Sprintf(
-		`UPDATE agent_quotas SET %[1]s = %[1]s + $3, %[2]s = %[2]s + $4 WHERE platform_experiment_id=$1 AND agent_id = ANY($2)`,
+		`UPDATE agent_quotas SET %[1]s = %[1]s + $3, %[2]s = %[2]s + $4, updated_at = NOW() WHERE platform_experiment_id=$1 AND agent_id = ANY($2)`,
 		guaranteedCol, burstCol)
 	for tier, ids := range byTier {
 		g, b := domain.ApplyQuotaTier(tier, guaranteedAmount, burstAmount)
-		if _, err := tx.Exec(ctx, q, platformExpID, ids, g, b); err != nil {
+		if err := writeQuotas(ctx, tx, q, platformExpID, ids, g, b); err != nil {
 			return fmt.Errorf("creditIntoTier: credit %s tier: %w", tier, err)
 		}
 	}

@@ -28,7 +28,7 @@ func seedPricedExperiment(t *testing.T, pool *Pool, agentID, peID string, flavor
 		Job:     domain.JobSpec{Image: "registry.test/job:1", AcceleratorType: flavor, AcceleratorCount: count},
 		DataKey: domain.DataKey{AccessKeyID: "AK", SecretAccessKey: "SK"},
 	}
-	if err := createExperiment(context.Background(), pool.pool, exp); err != nil {
+	if err := insertExperiment(context.Background(), pool, exp); err != nil {
 		t.Fatalf("seed experiment %s: %v", id, err)
 	}
 	t.Cleanup(func() { _, _ = pool.pool.Exec(context.Background(), `DELETE FROM experiments WHERE id = $1`, id) })

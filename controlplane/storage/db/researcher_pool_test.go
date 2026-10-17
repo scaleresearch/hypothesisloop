@@ -36,9 +36,9 @@ func spawnResearcher(t *testing.T, pes *Store, pe, flavor string) string {
 		t.Fatalf("spawn: got = %v, want = nil", err)
 	}
 	qid, _ := domain.NewID(domain.AgentQuotaIDPrefix)
-	if _, err := pes.pool.pool.Exec(context.Background(), upsertAgentQuotaSQL, agentQuotaUpsertArgs(&domain.AgentQuota{
+	if err := pes.pool.write(context.Background(), func(w *Write) error { return upsertAgentQuota(context.Background(), w, &domain.AgentQuota{
 		ID: qid, AgentID: id, PlatformExperimentID: pe, GuaranteedAcceleratorHours: 2, CreatedAt: time.Now().UTC(),
-	})...); err != nil {
+	}) }); err != nil {
 		t.Fatal(err)
 	}
 	return id

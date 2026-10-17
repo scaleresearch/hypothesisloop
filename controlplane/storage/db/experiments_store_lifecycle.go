@@ -19,12 +19,32 @@ func (s *Store) TransitionStatus(ctx context.Context, id string, from, to domain
 	if to == domain.StatusQueued {
 		return false, fmt.Errorf("experiments_store.TransitionStatus: QUEUED is set by the requeue that says why")
 	}
-	const q = `UPDATE experiments SET status = $3, eviction_reason = NULLIF($4, ''), not_admitted_reason = NULL, updated_at = NOW() WHERE id = $1 AND status = $2`
-	tag, err := s.pool.pool.Exec(ctx, q, id, string(from), string(to), reason)
+	const q = `UPDATE experiments SET status = $3, eviction_reason = NULLIF($4, ''), not_admitted_reason = NULL, updated_at = NOW(), ended_at = NOW()
+WHERE id = $1 AND status = $2`
+	moved, err := s.writeJob(ctx, (*Write).jobStatus, q, id, string(from), string(to), reason)
 	if err != nil {
 		return false, fmt.Errorf("experiments_store.TransitionStatus: %w", err)
 	}
-	return tag.RowsAffected() > 0, nil
+	return moved, nil
+}
+
+// writeJob runs q, one write of at most one experiments row, and announces the row it wrote,
+// reporting whether there was one.
+func (s *Store) writeJob(ctx context.Context, announce func(*Write, jobWritten), q string, args ...any) (bool, error) {
+	written := false
+	err := s.write(ctx, func(w *Write) error {
+		j, err := scanJobWritten(w.QueryRow(ctx, q+jobReturning, args...))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		written = true
+		announce(w, j)
+		return nil
+	})
+	return written, err
 }
 
 // ListExperimentsWithStatus returns all experiments in the given status.
@@ -106,14 +126,16 @@ SET status = 'SUBMITTED', submitted_at = NOW(), cluster_name = $2, last_cluster 
 WHERE e.id = $1 AND e.status = 'QUEUED' AND ` + clusterHostsJob + `
   AND (e.environment_key IS NULL OR EXISTS (SELECT 1 FROM environments v WHERE v.key = e.environment_key
     AND (v.state = 'ready' OR (v.state = 'building' AND v.loaded_image <> '' AND v.loaded_cluster = $2 AND v.loaded_image = $3::jsonb ->> 'image'))))
-RETURNING e.resolved_job_spec ->> 'image'`
+RETURNING e.resolved_job_spec ->> 'image', ` + jobWrittenColumns
 		var image string
-		switch err := tx.QueryRow(ctx, q, id, clusterName, resolvedJobSpec).Scan(&image); {
+		var j jobWritten
+		switch err := tx.QueryRow(ctx, q, id, clusterName, resolvedJobSpec).Scan(append([]any{&image}, j.dest()...)...); {
 		case errors.Is(err, pgx.ErrNoRows):
 			return nil
 		case err != nil:
 			return fmt.Errorf("experiments_store.ClaimSubmitted: update: %w", err)
 		}
+		tx.jobStatus(j)
 		resolvedJob.Image = image
 		claimed = true
 		return nil
@@ -134,20 +156,23 @@ RETURNING e.resolved_job_spec ->> 'image'`
 func (s *Store) MarkStarted(ctx context.Context, id string) (bool, error) {
 	const q = `UPDATE experiments SET status = 'RUNNING', ran_on_accelerator_type = accelerator_type, updated_at = NOW()
 WHERE id = $1 AND status = 'SUBMITTED'`
-	tag, err := s.pool.pool.Exec(ctx, q, id)
+	moved, err := s.writeJob(ctx, (*Write).jobStatus, q, id)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("experiments_store.MarkStarted: %w", err)
 	}
-	return tag.RowsAffected() > 0, nil
+	return moved, nil
 }
 
 // MarkUnderperforming records the ranking metric the job trails its cohort on. Only the first
-// call for a job writes, and that write is what emits job.underperforming (see the migrations), so
-// the advisory is sent once per job and replays like every other row-backed event.
+// call for a job of one that has not ended writes, and announces job.underperforming, so the
+// advisory is sent once per job.
 func (s *Store) MarkUnderperforming(ctx context.Context, id, metricName string) error {
 	const q = `UPDATE experiments SET underperforming_metric = $2
-WHERE id = $1 AND underperforming_metric IS NULL`
-	if _, err := s.pool.pool.Exec(ctx, q, id, metricName); err != nil {
+WHERE id = $1 AND underperforming_metric IS NULL AND status NOT IN ('COMPLETED', 'FAILED', 'EVICTED', 'REJECTED')`
+	announce := func(w *Write, j jobWritten) {
+		w.Change(j.change(domain.EventJobUnderperforming, j.underperformingMetric, ""))
+	}
+	if _, err := s.writeJob(ctx, announce, q, id, metricName); err != nil {
 		return fmt.Errorf("experiments_store.MarkUnderperforming: %w", err)
 	}
 	return nil
@@ -162,30 +187,39 @@ func sentenced(reason string) error {
 	return nil
 }
 
-// MarkHeldJobs records on a QUEUED job the queue reason it is held for, and that write is what
-// emits job.held (see the migrations): once, when the job has waited since it was queued for longer
-// than its estimated duration and longer than minimum. A job the scheduler has not judged yet has
-// no reason to tell.
+// MarkHeldJobs records on a QUEUED job the queue reason it is held for and announces job.held:
+// once, when the job has waited since it was queued for longer than its estimated duration and
+// longer than minimum. A job the scheduler has not judged yet has no reason to tell.
 func (s *Store) MarkHeldJobs(ctx context.Context, minimum time.Duration) error {
 	const q = `UPDATE experiments SET held_reason = not_admitted_reason
 WHERE status = 'QUEUED' AND held_reason IS NULL AND split_part(not_admitted_reason, ': ', 1) <> 'awaiting_admission'
-  AND NOW() - queued_at > GREATEST($1 * INTERVAL '1 second', estimated_duration_hours * INTERVAL '1 hour')`
-	if _, err := s.pool.pool.Exec(ctx, q, minimum.Seconds()); err != nil {
-		return fmt.Errorf("experiments_store.MarkHeldJobs: %w", err)
-	}
-	return nil
+  AND NOW() - queued_at > GREATEST($1 * INTERVAL '1 second', estimated_duration_hours * INTERVAL '1 hour')` + jobReturning
+	return s.write(ctx, func(w *Write) error {
+		rows, err := w.Query(ctx, q, minimum.Seconds())
+		if err != nil {
+			return fmt.Errorf("experiments_store.MarkHeldJobs: %w", err)
+		}
+		held, err := collectJobsWritten(rows)
+		if err != nil {
+			return fmt.Errorf("experiments_store.MarkHeldJobs: %w", err)
+		}
+		for _, j := range held {
+			w.jobHeld(j)
+		}
+		return nil
+	})
 }
 
 // MarkBaselineLate records reason, domain.HeldBaselineLate and its sentence, on the job id while
-// it is queued or placed and not running, and that write emits job.held to its owner. A job is
-// told so once.
+// it is queued or placed and not running, and announces job.held to its owner. A job is told so
+// once.
 func (s *Store) MarkBaselineLate(ctx context.Context, id, reason string) error {
 	if err := sentenced(reason); err != nil {
 		return fmt.Errorf("experiments_store.MarkBaselineLate: %w", err)
 	}
 	const q = `UPDATE experiments SET held_reason = $2
 WHERE id = $1 AND status IN ('QUEUED', 'SUBMITTED') AND split_part(COALESCE(held_reason, ''), ': ', 1) <> $3`
-	if _, err := s.pool.pool.Exec(ctx, q, id, reason, domain.HeldBaselineLate); err != nil {
+	if _, err := s.writeJob(ctx, (*Write).jobHeld, q, id, reason, domain.HeldBaselineLate); err != nil {
 		return fmt.Errorf("experiments_store.MarkBaselineLate: %w", err)
 	}
 	return nil
@@ -200,8 +234,10 @@ func (s *Store) UpdateNotAdmittedReason(ctx context.Context, id, reason string) 
 	}
 	const q = `UPDATE experiments SET not_admitted_reason = $2
 	WHERE id = $1 AND status = 'QUEUED' AND not_admitted_reason IS DISTINCT FROM $2`
-	_, err := s.pool.pool.Exec(ctx, q, id, reason)
-	return err
+	if _, err := s.writeJob(ctx, (*Write).jobQueueReason, q, id, reason); err != nil {
+		return fmt.Errorf("experiments_store.UpdateNotAdmittedReason: %w", err)
+	}
+	return nil
 }
 
 // RequeuePreempted returns a job to QUEUED after preemption, preserving original queued_at
@@ -228,12 +264,12 @@ func (s *Store) RequeuePreempted(ctx context.Context, id string, remainingHours,
 		not_admitted_reason = '` + domain.QueueReasonAwaitingAdmission + `',
 		updated_at = NOW()
 	WHERE id = $1 AND status = 'RUNNING'`
-	tag, err := s.pool.pool.Exec(ctx, q, id, remainingHours, newCostAccH,
+	moved, err := s.writeJob(ctx, (*Write).jobStatus, q, id, remainingHours, newCostAccH,
 		string(domain.EvictionPreemptedForGuaranteed))
 	if err != nil {
 		return false, fmt.Errorf("experiments_store.RequeuePreempted: %w", err)
 	}
-	return tag.RowsAffected() > 0, nil
+	return moved, nil
 }
 
 // RequeueForRetry returns a gang whose attempt failed to QUEUED for a fresh whole-gang attempt,
@@ -265,11 +301,11 @@ func (s *Store) RequeueForRetry(ctx context.Context, id string, maxAttemptsBefor
 		not_admitted_reason = '` + domain.QueueReasonAwaitingAdmission + `',
 		updated_at = NOW()
 	WHERE id = $1 AND status IN ('SUBMITTED', 'RUNNING') AND attempt_count - infra_requeue_count < $2`
-	tag, err := s.pool.pool.Exec(ctx, q, id, maxAttemptsBefore)
+	moved, err := s.writeJob(ctx, (*Write).jobStatus, q, id, maxAttemptsBefore)
 	if err != nil {
 		return false, fmt.Errorf("experiments_store.RequeueForRetry: %w", err)
 	}
-	return tag.RowsAffected() > 0, nil
+	return moved, nil
 }
 
 // RequeueInfrastructureFault returns an experiment the environment failed to QUEUED for a fresh
@@ -318,17 +354,18 @@ func (s *Store) RequeueInfrastructureFault(ctx context.Context, id string, from 
 		queued_at = COALESCE(queued_at, NOW()),
 		not_admitted_reason = '` + domain.QueueReasonAwaitingAdmission + `',
 		quota_settled_at = NULL,
+		ended_at = NULL,
 		tried_clusters = tried_clusters || COALESCE((
 			SELECT jsonb_build_array(jsonb_build_object(
 				'cluster_id', c.reported_id, 'at', to_jsonb(NOW()), 'reason', split_part($3, ':', 1)))
 			FROM clusters c WHERE $5 AND c.name = e.cluster_name AND c.reported_id IS NOT NULL), '[]'::jsonb),
 		updated_at = NOW()
 	WHERE e.id = $1 AND e.status = $2 AND e.infra_requeue_count < $4`
-	tag, err := s.pool.pool.Exec(ctx, q, id, string(from), reason, maxInfraRequeues, domain.FailedByItsCluster(domain.EvictionReason(reason)))
+	moved, err := s.writeJob(ctx, (*Write).jobStatus, q, id, string(from), reason, maxInfraRequeues, domain.FailedByItsCluster(domain.EvictionReason(reason)))
 	if err != nil {
 		return false, fmt.Errorf("experiments_store.RequeueInfrastructureFault: %w", err)
 	}
-	return tag.RowsAffected() > 0, nil
+	return moved, nil
 }
 
 // MarkQuotaSettled records that exp's final usage was durably written to the metrics DB, so the

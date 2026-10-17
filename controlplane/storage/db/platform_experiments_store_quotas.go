@@ -23,14 +23,35 @@ INSERT INTO agent_quotas (
 VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (agent_id, platform_experiment_id) DO UPDATE SET
 	guaranteed_accelerator_hours         = EXCLUDED.guaranteed_accelerator_hours,
-	burst_accelerator_hours              = EXCLUDED.burst_accelerator_hours`
+	burst_accelerator_hours              = EXCLUDED.burst_accelerator_hours,
+	updated_at                           = NOW()`
 
-func agentQuotaUpsertArgs(q *domain.AgentQuota) []any {
-	return []any{
-		q.ID, q.AgentID, q.PlatformExperimentID,
-		q.GuaranteedAcceleratorHours, q.BurstAcceleratorHours,
-		q.CreatedAt,
+// upsertAgentQuota writes q and announces it.
+func upsertAgentQuota(ctx context.Context, w *Write, q *domain.AgentQuota) error {
+	return writeQuotas(ctx, w, upsertAgentQuotaSQL, q.ID, q.AgentID, q.PlatformExperimentID,
+		q.GuaranteedAcceleratorHours, q.BurstAcceleratorHours, q.CreatedAt)
+}
+
+// writeQuotas runs q, a write of agent_quotas rows, and announces quota.changed for each row it
+// wrote, with the agent's share as GET /quota answers it (domain.AgentQuota.Share).
+func writeQuotas(ctx context.Context, w *Write, q string, args ...any) error {
+	rows, err := w.Query(ctx, q+` RETURNING agent_id, platform_experiment_id, guaranteed_accelerator_hours, burst_accelerator_hours`, args...)
+	if err != nil {
+		return err
 	}
+	written, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (domain.AgentQuota, error) {
+		var aq domain.AgentQuota
+		err := row.Scan(&aq.AgentID, &aq.PlatformExperimentID, &aq.GuaranteedAcceleratorHours, &aq.BurstAcceleratorHours)
+		return aq, err
+	})
+	if err != nil {
+		return err
+	}
+	for _, aq := range written {
+		w.Change(domain.Change{Kind: domain.EventQuotaChanged, Subject: aq.AgentID, Value: fmt.Sprintf("%g", aq.Share()),
+			PlatformExperimentID: aq.PlatformExperimentID, AgentID: aq.AgentID})
+	}
+	return nil
 }
 
 // agentQuotaColumns is the canonical column list for agent_quotas SELECT queries, shared by

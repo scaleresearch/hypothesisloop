@@ -59,8 +59,7 @@ UPDATE experiments e SET
 WHERE e.cluster_name = $1 AND e.status IN ('SUBMITTED', 'RUNNING')
   AND ($2 = '' OR $2 <> (
 	SELECT p.org_id FROM platform_experiments pe JOIN projects p ON p.id = pe.project_id
-	WHERE pe.id = e.platform_experiment_id))
-RETURNING e.id`
+	WHERE pe.id = e.platform_experiment_id))` + jobReturning
 
 const clusterColumns = `name, org_id, shared, priority, COALESCE(reported_id, ''), job_image, created_at,
 	scale_up_timeout_seconds, max_speculative_accelerators, stuck_pending_timeout_seconds, status_silence_ceiling_seconds,
@@ -356,9 +355,14 @@ func withdraw(ctx context.Context, tx *Write, name, keepOrg string) ([]string, e
 	if err != nil {
 		return nil, fmt.Errorf("requeue the jobs placed on %s: %w", name, err)
 	}
-	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	requeued, err := collectJobsWritten(rows)
 	if err != nil {
 		return nil, fmt.Errorf("requeue the jobs placed on %s: %w", name, err)
+	}
+	ids := make([]string, len(requeued))
+	for i, j := range requeued {
+		tx.jobStatus(j)
+		ids[i] = j.id
 	}
 	return ids, nil
 }

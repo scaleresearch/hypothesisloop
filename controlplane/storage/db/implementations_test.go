@@ -35,7 +35,7 @@ func TestImplementationsAndTheLastCompletedCommitAreReadOffTheJobs(t *testing.T)
 		exp.ID, exp.AgentID, exp.Actor.ID = first.ID+"-"+job.commit, job.agent, job.agent
 		exp.HypothesisID, exp.Branch, exp.CodeRef, exp.Status = hypothesis, job.branch, ref(job.commit), job.status
 		exp.CreatedAt = base.Add(time.Duration(i) * time.Minute)
-		if err := createExperiment(ctx, store.pool.pool, &exp); err != nil {
+		if err := insertExperiment(ctx, store.pool, &exp); err != nil {
 			t.Fatalf("create job %s: %v", job.commit, err)
 		}
 	}

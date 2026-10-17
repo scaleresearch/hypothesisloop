@@ -139,11 +139,11 @@ func TestAJobAndItsFindingKeepWhoseTheyAreAndWhoMadeThem(t *testing.T) {
 		_, _ = pool.pool.Exec(context.Background(), `DELETE FROM hypothesis_findings WHERE platform_experiment_id = $1`, peID)
 		_, _ = pool.pool.Exec(context.Background(), `DELETE FROM experiments WHERE platform_experiment_id = $1`, peID)
 	})
-	if err := createExperiment(ctx, pool.pool, job("job-nobodys-"+peID, domain.Actor{})); err == nil {
+	if err := insertExperiment(ctx, pool, job("job-nobodys-"+peID, domain.Actor{})); err == nil {
 		t.Fatal("a job with no actor was stored")
 	}
 	for id, actor := range map[string]domain.Actor{byKey: key, old: person} {
-		if err := createExperiment(ctx, pool.pool, job(id, actor)); err != nil {
+		if err := insertExperiment(ctx, pool, job(id, actor)); err != nil {
 			t.Fatalf("create %s: %v", id, err)
 		}
 	}

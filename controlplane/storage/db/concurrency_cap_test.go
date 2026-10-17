@@ -25,7 +25,7 @@ func seedExperimentForCapTest(t *testing.T, pool *Pool, id, agentID, peID string
 		Job:     domain.JobSpec{Image: "registry.test/job:1", AcceleratorType: "nvidia.com/gpu.product=NVIDIA-L40", AcceleratorCount: acceleratorCount},
 		DataKey: domain.DataKey{AccessKeyID: "AK", SecretAccessKey: "SK"},
 	}
-	if err := createExperiment(context.Background(), pool.pool, exp); err != nil {
+	if err := insertExperiment(context.Background(), pool, exp); err != nil {
 		t.Fatalf("seed experiment %s: got = %v, want = nil", id, err)
 	}
 	t.Cleanup(func() {

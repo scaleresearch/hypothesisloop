@@ -35,13 +35,13 @@ func (s *Store) ResolveTermination(ctx context.Context, id string, from, to doma
 		// Ceiling reached (or another writer won the race): fall through and terminate, so a job
 		// that keeps landing on broken hardware stops and says so with the reason that ended it.
 	}
-	tag, err := s.pool.pool.Exec(ctx, `
-		UPDATE experiments SET status = $3, eviction_reason = $4, not_admitted_reason = NULL, updated_at = NOW()
+	moved, err := s.writeJob(ctx, (*Write).jobStatus, `
+		UPDATE experiments SET status = $3, eviction_reason = $4, not_admitted_reason = NULL, updated_at = NOW(), ended_at = NOW()
 		WHERE id = $1 AND status = $2`, id, string(from), string(to), reason)
 	if err != nil {
 		return domain.TerminationSkipped, fmt.Errorf("db.ResolveTermination: %w", err)
 	}
-	if tag.RowsAffected() == 0 {
+	if !moved {
 		return domain.TerminationSkipped, nil
 	}
 	return domain.TerminationWritten, nil
@@ -52,11 +52,11 @@ func (s *Store) ResolveTermination(ctx context.Context, id string, from, to doma
 // caller writes its final usage first (settlement.Settler.Settle). It says whether the row was
 // still queued.
 func (s *Store) EndQueuedSettled(ctx context.Context, id string, to domain.ExperimentStatus, reason string) (bool, error) {
-	tag, err := s.pool.pool.Exec(ctx, `
-		UPDATE experiments SET status = $2, eviction_reason = $3, not_admitted_reason = NULL, quota_settled_at = NOW(), updated_at = NOW()
+	moved, err := s.writeJob(ctx, (*Write).jobStatus, `
+		UPDATE experiments SET status = $2, eviction_reason = $3, not_admitted_reason = NULL, quota_settled_at = NOW(), updated_at = NOW(), ended_at = NOW()
 		WHERE id = $1 AND status = 'QUEUED'`, id, string(to), reason)
 	if err != nil {
 		return false, fmt.Errorf("db.EndQueuedSettled: %w", err)
 	}
-	return tag.RowsAffected() == 1, nil
+	return moved, nil
 }

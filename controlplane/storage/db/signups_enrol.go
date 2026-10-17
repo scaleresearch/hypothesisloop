@@ -155,10 +155,10 @@ func allocateBaselineQuota(ctx context.Context, tx *Write, platformExpID, agentI
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, upsertAgentQuotaSQL, agentQuotaUpsertArgs(&domain.AgentQuota{
+	if err := upsertAgentQuota(ctx, tx, &domain.AgentQuota{
 		ID: id, AgentID: agentID, PlatformExperimentID: platformExpID,
 		GuaranteedAcceleratorHours: guaranteed, BurstAcceleratorHours: burst, CreatedAt: time.Now().UTC(),
-	})...); err != nil {
+	}); err != nil {
 		return fmt.Errorf("allocate the quota of baseline agent %s: %w", agentID, err)
 	}
 	return nil
@@ -369,10 +369,11 @@ ORDER BY s.signed_up_at, s.agent_id`, platformExpID, string(domain.SignupRoleCom
 		return ErrNoShareLeft
 	}
 	for agentID, take := range taken {
-		if _, err := tx.Exec(ctx, `
+		if err := writeQuotas(ctx, tx, `
 UPDATE agent_quotas SET
     guaranteed_accelerator_hours = CASE WHEN guaranteed_accelerator_hours > 0 THEN GREATEST(0, guaranteed_accelerator_hours - $3) ELSE 0 END,
-    burst_accelerator_hours = CASE WHEN guaranteed_accelerator_hours > 0 THEN burst_accelerator_hours ELSE GREATEST(0, burst_accelerator_hours - $3) END
+    burst_accelerator_hours = CASE WHEN guaranteed_accelerator_hours > 0 THEN burst_accelerator_hours ELSE GREATEST(0, burst_accelerator_hours - $3) END,
+    updated_at = NOW()
 WHERE platform_experiment_id = $1 AND agent_id = $2`, platformExpID, agentID, take); err != nil {
 			return fmt.Errorf("platform_experiments_store.JoinRunning: take from %s: %w", agentID, err)
 		}
@@ -382,10 +383,10 @@ WHERE platform_experiment_id = $1 AND agent_id = $2`, platformExpID, agentID, ta
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, upsertAgentQuotaSQL, agentQuotaUpsertArgs(&domain.AgentQuota{
+	if err := upsertAgentQuota(ctx, tx, &domain.AgentQuota{
 		ID: id, AgentID: signup.AgentID, PlatformExperimentID: platformExpID,
 		GuaranteedAcceleratorHours: guaranteed, BurstAcceleratorHours: burst, CreatedAt: time.Now().UTC(),
-	})...); err != nil {
+	}); err != nil {
 		return fmt.Errorf("platform_experiments_store.JoinRunning: allocate the quota of %s: %w", signup.AgentID, err)
 	}
 	return nil

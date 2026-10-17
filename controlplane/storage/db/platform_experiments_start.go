@@ -157,7 +157,7 @@ ORDER BY s.agent_id`, id)
 			return fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: store stages: %w", err)
 		}
 		for _, q := range quotas {
-			if _, err := tx.Exec(ctx, upsertAgentQuotaSQL, agentQuotaUpsertArgs(q)...); err != nil {
+			if err := upsertAgentQuota(ctx, tx, q); err != nil {
 				return fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: upsert quota for %s: %w", q.AgentID, err)
 			}
 		}
@@ -263,8 +263,8 @@ func (s *Store) AdvanceStage(ctx context.Context, platformExpID string, stageInd
 			if err := rows.Err(); err != nil {
 				return fmt.Errorf("platform_experiments_store.AdvanceStage: lock cut allocations: %w", err)
 			}
-			zeroQ := fmt.Sprintf(`UPDATE agent_quotas SET %s=0, %s=0 WHERE platform_experiment_id=$1 AND agent_id = ANY($2)`, guaranteed, burst)
-			if _, err := tx.Exec(ctx, zeroQ, platformExpID, cutAgentIDs); err != nil {
+			zeroQ := fmt.Sprintf(`UPDATE agent_quotas SET %s=0, %s=0, updated_at=NOW() WHERE platform_experiment_id=$1 AND agent_id = ANY($2)`, guaranteed, burst)
+			if err := writeQuotas(ctx, tx, zeroQ, platformExpID, cutAgentIDs); err != nil {
 				return fmt.Errorf("platform_experiments_store.AdvanceStage: zero %s: %w", dim.ResourceType, err)
 			}
 			if len(survivorIDs) == 0 {
