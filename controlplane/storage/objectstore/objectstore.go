@@ -21,9 +21,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/scaleresearch/hypothesisloop/controlplane/config"
-	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore/minio"
 )
 
 const unreachableAfter = 5 * time.Second
@@ -53,11 +50,12 @@ type Client struct {
 
 // New returns a Client that reaches the store at address and hands endpoint out to jobs and
 // agents, which may reach the store by another address than this process does, and creates keys
-// the way provider's store does. Every field is required: a half-configured store has no usable
-// behaviour, so it fails at construction rather than at the first listing.
-func New(provider, address, endpoint, region, bucket, accessKeyID, secretAccessKey string) (*Client, error) {
-	if address == "" || endpoint == "" || region == "" || bucket == "" || accessKeyID == "" || secretAccessKey == "" {
-		return nil, fmt.Errorf("objectstore: address, endpoint, region, bucket, access_key_id and secret_access_key are all required")
+// with the KeyIssuer keys makes of it, the store's own. Every field is required: a
+// half-configured store has no usable behaviour, so it fails at construction rather than at the
+// first listing.
+func New(address, endpoint, region, bucket, accessKeyID, secretAccessKey string, keys func(*Client) KeyIssuer) (*Client, error) {
+	if address == "" || endpoint == "" || region == "" || bucket == "" || accessKeyID == "" || secretAccessKey == "" || keys == nil {
+		return nil, fmt.Errorf("objectstore: address, endpoint, region, bucket, access_key_id, secret_access_key and a key issuer are all required")
 	}
 	for _, stated := range []string{address, endpoint} {
 		if _, err := url.Parse(stated); err != nil {
@@ -74,12 +72,7 @@ func New(provider, address, endpoint, region, bucket, accessKeyID, secretAccessK
 		HTTP:    &http.Client{Timeout: 20 * time.Second, Transport: transport},
 		address: strings.TrimSuffix(address, "/"),
 	}
-	switch provider {
-	case config.DataStoreProviderMinIO:
-		c.keys = minio.New(c, secretAccessKey)
-	default:
-		return nil, fmt.Errorf("objectstore: provider %q is not one this build knows (%s)", provider, config.DataStoreProviderMinIO)
-	}
+	c.keys = keys(c)
 	return c, nil
 }
 

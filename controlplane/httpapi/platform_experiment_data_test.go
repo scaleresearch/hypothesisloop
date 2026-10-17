@@ -15,6 +15,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore/minio"
 )
 
 // signupKeys stands in for the signup rows: one key per agent, kept once created.
@@ -58,7 +59,7 @@ func dataKeyRouter(t *testing.T, keys *signupKeys, storeStatus int) (http.Handle
 		w.WriteHeader(storeStatus)
 	}))
 	t.Cleanup(store.Close)
-	client, err := objectstore.New("minio", store.URL, store.URL, "us-east-1", "hl-data", "root", "root-secret")
+	client, err := objectstore.New(store.URL, store.URL, "us-east-1", "hl-data", "root", "root-secret", func(c *objectstore.Client) objectstore.KeyIssuer { return minio.New(c, c.SecretAccessKey) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +175,7 @@ func TestACutAgentOrAClosedPlatformExperimentGetsNoDataKey(t *testing.T) {
 		"closed, agent also cut": {domain.PlatformExpClosed, "agent-cut", http.StatusConflict, "experiment_closed"},
 	} {
 		store := &windDownStore{status: tc.status, cut: "agent-cut"}
-		client, err := objectstore.New("minio", "http://127.0.0.1:1", "http://127.0.0.1:1", "us-east-1", "hl-data", "root", "root-secret")
+		client, err := objectstore.New("http://127.0.0.1:1", "http://127.0.0.1:1", "us-east-1", "hl-data", "root", "root-secret", func(c *objectstore.Client) objectstore.KeyIssuer { return minio.New(c, c.SecretAccessKey) })
 		if err != nil {
 			t.Fatal(err)
 		}

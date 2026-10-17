@@ -29,7 +29,7 @@ func TestEachListedObjectCarriesAReadURLOnTheHandedOutEndpoint(t *testing.T) {
 			`<LastModified>2026-10-09T10:00:00Z</LastModified></Contents></ListBucketResult>`))
 	}))
 	defer store.Close()
-	c, err := New("minio", store.URL, "https://data.example.com", "us-east-1", "hl-data", "AK", "SK")
+	c, err := New(store.URL, "https://data.example.com", "us-east-1", "hl-data", "AK", "SK", minioKeys)
 	if err != nil {
 		t.Fatal(err)
 	}

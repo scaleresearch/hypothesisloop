@@ -27,6 +27,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/graphdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore/minio"
 )
 
 type apiGate struct {
@@ -37,8 +38,8 @@ type apiGate struct {
 func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Repositories, gitHost githost.Provider, pool *db.Pool, store *db.Store, graph *graphdb.Store, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.ControlService, metrics *metricsdb.Store, port string, logger *zap.Logger) *http.Server {
 	// One client for the durable-data store, shared by everything that reads it: the listing
 	// endpoint, the usage report, admission's ceiling, and the addressing handed to runtimes.
-	dataStore, err := objectstore.New(pcfg.DataStore.Provider, pcfg.DataStore.ControlPlaneEndpoint, pcfg.DataStore.Endpoint, pcfg.DataStore.Region, pcfg.DataStore.Bucket,
-		pcfg.DataStore.AccessKeyID, pcfg.DataStoreSecret)
+	dataStore, err := objectstore.New(pcfg.DataStore.ControlPlaneEndpoint, pcfg.DataStore.Endpoint, pcfg.DataStore.Region, pcfg.DataStore.Bucket,
+		pcfg.DataStore.AccessKeyID, pcfg.DataStoreSecret, keyIssuer(pcfg.DataStore.Provider, logger))
 	if err != nil {
 		logger.Fatal("control-service: configure durable data store", zap.Error(err))
 	}
@@ -154,6 +155,16 @@ func openGraph(ctx context.Context, url string) (*graphdb.Store, error) {
 // modelDefaults is the platform's model for an agent and for a coordinator that names none.
 func modelDefaults(pcfg *hypothesisloopcfg.ControlService) domain.ModelDefaults {
 	return domain.ModelDefaults{Agent: pcfg.Agents.DefaultModel, Coordinator: pcfg.Agents.CoordinatorModel}
+}
+
+// keyIssuer is how the data store the settings name creates a job's key.
+func keyIssuer(provider string, logger *zap.Logger) func(*objectstore.Client) objectstore.KeyIssuer {
+	switch provider {
+	case hypothesisloopcfg.DataStoreProviderMinIO:
+		return func(c *objectstore.Client) objectstore.KeyIssuer { return minio.New(c, c.SecretAccessKey) }
+	}
+	logger.Fatal("control-service: the settings name no data store provider this build knows", zap.String("provider", provider))
+	return nil
 }
 
 // newGitHost is the git host the settings name, one of two. On a plain one there is no GitHub App

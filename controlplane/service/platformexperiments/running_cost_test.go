@@ -16,6 +16,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore/minio"
 )
 
 // aliveServer answers ObserveSpan with a job observed continuously from `ago` ago until now —
@@ -333,7 +334,7 @@ func TestAnAgentsQuotaSaysWhatDataItHoldsAgainstTheCeiling(t *testing.T) {
 		_, _ = w.Write([]byte(`<ListBucketResult><Contents><Key>k1</Key><Size>700</Size></Contents><Contents><Key>k2</Key><Size>300</Size></Contents></ListBucketResult>`))
 	}))
 	defer objects.Close()
-	client, err := objectstore.New("minio", objects.URL, objects.URL, "us-east-1", "hl-data", "root", "root-secret")
+	client, err := objectstore.New(objects.URL, objects.URL, "us-east-1", "hl-data", "root", "root-secret", func(c *objectstore.Client) objectstore.KeyIssuer { return minio.New(c, c.SecretAccessKey) })
 	if err != nil {
 		t.Fatal(err)
 	}

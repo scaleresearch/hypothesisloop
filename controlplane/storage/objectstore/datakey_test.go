@@ -8,7 +8,10 @@ import (
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore/minio"
 )
+
+func minioKeys(c *Client) KeyIssuer { return minio.New(c, c.SecretAccessKey) }
 
 func TestNewDataKeyFitsTheStoresLengthBoundsAndIsFreshEachTime(t *testing.T) {
 	a, err := NewDataKey()
@@ -51,11 +54,10 @@ func (f *issued) DeleteKey(_ context.Context, accessKeyID string) error {
 
 func clientIssuing(t *testing.T, keys KeyIssuer) *Client {
 	t.Helper()
-	client, err := New("minio", "http://127.0.0.1:1", "http://127.0.0.1:1", "us-east-1", testBucket, "root", "root-secret")
+	client, err := New("http://127.0.0.1:1", "http://127.0.0.1:1", "us-east-1", testBucket, "root", "root-secret", func(*Client) KeyIssuer { return keys })
 	if err != nil {
 		t.Fatal(err)
 	}
-	client.keys = keys
 	return client
 }
 
@@ -98,8 +100,8 @@ func TestCreateDataKeyReportsTheProvidersRefusal(t *testing.T) {
 	}
 }
 
-func TestAStoreOfAnUnknownProviderIsRefused(t *testing.T) {
-	if _, err := New("elsewhere", "http://127.0.0.1:1", "http://127.0.0.1:1", "us-east-1", testBucket, "root", "root-secret"); err == nil {
-		t.Fatal("New accepted a provider it has no key issuer for")
+func TestAStoreWithNoKeyIssuerIsRefused(t *testing.T) {
+	if _, err := New("http://127.0.0.1:1", "http://127.0.0.1:1", "us-east-1", testBucket, "root", "root-secret", nil); err == nil {
+		t.Fatal("New accepted a store with no key issuer")
 	}
 }

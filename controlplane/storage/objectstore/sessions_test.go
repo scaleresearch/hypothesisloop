@@ -37,7 +37,7 @@ func bucketServer(t *testing.T) (*Client, map[string][]byte) {
 		}
 	}))
 	t.Cleanup(srv.Close)
-	client, err := New("minio", srv.URL, handedOut, "garage", "bucket", "key-id", "secret")
+	client, err := New(srv.URL, handedOut, "garage", "bucket", "key-id", "secret", minioKeys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestASessionIsReadWhileTheAddressHandedToJobsIsDown(t *testing.T) {
 		t.Fatalf("hands out %s, want the address it was told to", client.Endpoint)
 	}
 	for name, args := range map[string][2]string{"no address of its own": {"", handedOut}, "no address to hand out": {"http://127.0.0.1:9000", ""}} {
-		if _, err := New("minio", args[0], args[1], "garage", "bucket", "key-id", "secret"); err == nil {
+		if _, err := New(args[0], args[1], "garage", "bucket", "key-id", "secret", minioKeys); err == nil {
 			t.Errorf("%s: a client was made, want it refused", name)
 		}
 	}

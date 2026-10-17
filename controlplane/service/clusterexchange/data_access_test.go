@@ -6,13 +6,14 @@ import (
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore/minio"
 )
 
 // The reconcile answer hands each job the key stored with it and asks the store nothing, so an
 // object-store outage can never blank a cluster's desired state.
 func TestTheDesiredJobCarriesItsOwnStoredKey(t *testing.T) {
 	// An unreachable endpoint: any store call would fail.
-	store, err := objectstore.New("minio", "http://127.0.0.1:1", "http://127.0.0.1:1", "us-east-1", "hl-data", "root", "root-secret")
+	store, err := objectstore.New("http://127.0.0.1:1", "http://127.0.0.1:1", "us-east-1", "hl-data", "root", "root-secret", func(c *objectstore.Client) objectstore.KeyIssuer { return minio.New(c, c.SecretAccessKey) })
 	if err != nil {
 		t.Fatal(err)
 	}

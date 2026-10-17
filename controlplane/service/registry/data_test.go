@@ -8,6 +8,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore/minio"
 )
 
 // emptyBucketStore answers every listing the way a real store answers a prefix nothing was ever
@@ -31,7 +32,7 @@ func TestListDataReturnsEmptyForAJobThatWroteNothing(t *testing.T) {
 		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?><ListBucketResult><IsTruncated>false</IsTruncated></ListBucketResult>`))
 	}))
 	defer srv.Close()
-	client, err := objectstore.New("minio", srv.URL, srv.URL, "us-east-1", "hl-data", "key", "secret")
+	client, err := objectstore.New(srv.URL, srv.URL, "us-east-1", "hl-data", "key", "secret", func(c *objectstore.Client) objectstore.KeyIssuer { return minio.New(c, c.SecretAccessKey) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +59,7 @@ func TestListDataGivesEachObjectItsS3URI(t *testing.T) {
 		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?><ListBucketResult><IsTruncated>false</IsTruncated><Contents><Key>pe-1/agent/job-1/ckpt.pt</Key><Size>7</Size></Contents></ListBucketResult>`))
 	}))
 	defer srv.Close()
-	client, err := objectstore.New("minio", srv.URL, srv.URL, "us-east-1", "hl-data", "key", "secret")
+	client, err := objectstore.New(srv.URL, srv.URL, "us-east-1", "hl-data", "key", "secret", func(c *objectstore.Client) objectstore.KeyIssuer { return minio.New(c, c.SecretAccessKey) })
 	if err != nil {
 		t.Fatal(err)
 	}

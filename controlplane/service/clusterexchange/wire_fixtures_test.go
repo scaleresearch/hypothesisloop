@@ -6,6 +6,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore/minio"
 )
 
 // wireCase is one representative desired state of a cluster, as the store holds it.
@@ -18,7 +19,7 @@ type wireCase struct {
 
 func wireHandler(t *testing.T) *Service {
 	t.Helper()
-	store, err := objectstore.New("minio", "http://127.0.0.1:1", "http://minio.test:9000", "us-east-1", "hl-data", "root", "root-secret")
+	store, err := objectstore.New("http://127.0.0.1:1", "http://minio.test:9000", "us-east-1", "hl-data", "root", "root-secret", func(c *objectstore.Client) objectstore.KeyIssuer { return minio.New(c, c.SecretAccessKey) })
 	if err != nil {
 		t.Fatal(err)
 	}
