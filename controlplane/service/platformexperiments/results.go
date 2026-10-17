@@ -168,7 +168,7 @@ func (s *PlatformExperimentsService) setAgainstBaseline(ctx context.Context, pe 
 		return nil
 	}
 	ranked.BaselineJobID = pe.BaselineJobID
-	values, err := metricsdb.LastPerJobOnMetric(ctx, s.metricsDBURL, pe, metric, map[string]bool{pe.BaselineJobID: true})
+	values, err := s.metrics.LastPerJobOnMetric(ctx, pe, metric, map[string]bool{pe.BaselineJobID: true})
 	if err != nil || len(values) == 0 {
 		return err
 	}
@@ -226,7 +226,7 @@ func (s *PlatformExperimentsService) references(ctx context.Context, pe *domain.
 	if err != nil {
 		return nil, err
 	}
-	met, err := metricsdb.ConstraintsMet(ctx, s.metricsDBURL, pe, completed)
+	met, err := s.metrics.ConstraintsMet(ctx, pe, completed)
 	if err != nil {
 		return nil, err
 	}
@@ -234,7 +234,7 @@ func (s *PlatformExperimentsService) references(ctx context.Context, pe *domain.
 		if metric.EffectiveRole() != domain.MetricRoleReference {
 			continue
 		}
-		values, err := metricsdb.LastPerJobOnMetric(ctx, s.metricsDBURL, pe, metric, completed)
+		values, err := s.metrics.LastPerJobOnMetric(ctx, pe, metric, completed)
 		if err != nil {
 			return nil, err
 		}
@@ -278,7 +278,7 @@ func (s *PlatformExperimentsService) mergeRanOn(ctx context.Context, out *Platfo
 	if len(jobs) == 0 {
 		return nil
 	}
-	where, err := metricsdb.LatestRanOn(ctx, s.metricsDBURL, slices.Collect(maps.Values(jobs)), time.Now().UTC())
+	where, err := s.metrics.LatestRanOn(ctx, slices.Collect(maps.Values(jobs)), time.Now().UTC())
 	if err != nil {
 		return err
 	}
@@ -338,7 +338,7 @@ func (s *PlatformExperimentsService) PriorRuns(ctx context.Context, ids []string
 			rankings = append(rankings, metricsdb.Ranking{PE: run.PE, Metric: primary, Completed: run.Completed})
 		}
 	}
-	best, err := metricsdb.BestPerAgentOnMetrics(ctx, s.metricsDBURL, rankings)
+	best, err := s.metrics.BestPerAgentOnMetrics(ctx, rankings)
 	if err != nil {
 		return nil, fmt.Errorf("prior runs: %w", err)
 	}
@@ -365,7 +365,7 @@ func (s *PlatformExperimentsService) bestPerAgent(ctx context.Context, pe *domai
 	if err != nil {
 		return nil, nil, err
 	}
-	return metricsdb.BestPerAgentOnMetric(ctx, s.metricsDBURL, pe, metric, completed)
+	return s.metrics.BestPerAgentOnMetric(ctx, pe, metric, completed)
 }
 
 // rank presents the competitors' bests on one metric as standings: attaches each one's job, sorts

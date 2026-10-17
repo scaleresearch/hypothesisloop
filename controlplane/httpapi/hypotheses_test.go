@@ -338,7 +338,7 @@ func (r *recordedEvents) Emit(_ context.Context, write func(stamp domain.Stamp) 
 }
 
 func poolService(store registry.Store) *registry.Service {
-	return registry.New(store, newFakeGraph(), &recordedEvents{}, zap.NewNop(), "", nil)
+	return registry.New(store, newFakeGraph(), &recordedEvents{}, zap.NewNop(), nil, nil)
 }
 
 var buildOnRoot = []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: "pe-1"}}

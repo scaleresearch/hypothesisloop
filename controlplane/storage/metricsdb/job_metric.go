@@ -15,7 +15,7 @@ import (
 // the value the standings rank with (BestPerAgentOnMetric). One query for each platform
 // experiment among exps, whatever the number of jobs. definitions returns the declared metrics
 // of one.
-func PopulateJobMetrics(ctx context.Context, dbURL string,
+func (s *Store) PopulateJobMetrics(ctx context.Context,
 	definitions func(ctx context.Context, platformExperimentID string) ([]domain.MetricDefinition, bool, error),
 	exps []*domain.Experiment) error {
 	byPlatformExperiment := map[string][]*domain.Experiment{}
@@ -48,7 +48,7 @@ func PopulateJobMetrics(ctx context.Context, dbURL string,
 		// Each (job, metric, basis) is one series, so the outer aggregation only drops labels.
 		promQL := fmt.Sprintf(`max by (job_id, metric_name, metric_basis) (last_over_time(%s{platform_experiment_id=%q, metric_name=~%q, job_id=~%q}[%s]))`,
 			ExperimentMetricValue, id, strings.Join(names, "|"), strings.Join(ids, "|"), ObservedLookback(oldest))
-		samples, err := QueryVector(ctx, dbURL, promQL)
+		samples, err := s.QueryVector(ctx, promQL)
 		if err != nil {
 			return fmt.Errorf("metricsdb.PopulateJobMetrics: %w", err)
 		}

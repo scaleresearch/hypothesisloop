@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // aliveServer answers ObserveSpan with a job observed continuously for (points-1) x step,
@@ -49,7 +50,7 @@ func TestSettleBillsOverrunAtTheEstimatedRateWithNoCeiling(t *testing.T) {
 	defer server.Close()
 
 	usage := &capturedUsage{}
-	settler := New(usage, server.URL, 3*step)
+	settler := New(usage, metricsdb.New(server.URL), 3*step)
 
 	exp := &domain.Experiment{
 		ID:                     "exp-overrun",
@@ -74,7 +75,7 @@ func TestSettleChargesNothingForAJobThatNeverRan(t *testing.T) {
 	defer server.Close()
 
 	usage := &capturedUsage{}
-	settler := New(usage, server.URL, 3*time.Minute)
+	settler := New(usage, metricsdb.New(server.URL), 3*time.Minute)
 
 	exp := &domain.Experiment{
 		ID:                     "exp-never-ran",
@@ -116,7 +117,7 @@ func TestAJobThatEndedEvictedOnAnInfrastructureFaultSettlesToAFullRefund(t *test
 	defer server.Close()
 
 	usage := &capturedUsage{}
-	settler := New(usage, server.URL, 3*step)
+	settler := New(usage, metricsdb.New(server.URL), 3*step)
 
 	exp := &domain.Experiment{
 		ID:                     "exp-bad-node",
@@ -144,7 +145,7 @@ func TestAWorkloadFaultIsBilledForEveryHourItRan(t *testing.T) {
 	defer server.Close()
 
 	usage := &capturedUsage{}
-	settler := New(usage, server.URL, 3*step)
+	settler := New(usage, metricsdb.New(server.URL), 3*step)
 
 	exp := &domain.Experiment{
 		ID:                     "exp-hung",
@@ -173,7 +174,7 @@ func TestAPolicyTerminationIsBilledLikeAnyOtherOutcome(t *testing.T) {
 	defer server.Close()
 
 	usage := &capturedUsage{}
-	settler := New(usage, server.URL, 3*step)
+	settler := New(usage, metricsdb.New(server.URL), 3*step)
 
 	exp := &domain.Experiment{
 		ID:                     "exp-cut",
@@ -202,7 +203,7 @@ func TestAnInfrastructureFaultCarryingDetailIsStillRefunded(t *testing.T) {
 	defer server.Close()
 
 	usage := &capturedUsage{}
-	settler := New(usage, server.URL, 3*step)
+	settler := New(usage, metricsdb.New(server.URL), 3*step)
 
 	exp := &domain.Experiment{
 		ID:                     "exp-detailed",
@@ -234,7 +235,7 @@ func TestACompletedJobCarryingAStaleInfrastructureReasonIsStillBilled(t *testing
 	defer server.Close()
 
 	usage := &capturedUsage{}
-	settler := New(usage, server.URL, 3*step)
+	settler := New(usage, metricsdb.New(server.URL), 3*step)
 
 	exp := &domain.Experiment{
 		ID:                     "exp-requeued-then-completed",
@@ -265,7 +266,7 @@ func TestAFailedJobCarryingAStaleInfrastructureReasonIsStillBilled(t *testing.T)
 	defer server.Close()
 
 	usage := &capturedUsage{}
-	settler := New(usage, server.URL, 3*step)
+	settler := New(usage, metricsdb.New(server.URL), 3*step)
 
 	exp := &domain.Experiment{
 		ID:                     "exp-requeued-then-failed",
@@ -296,7 +297,7 @@ func TestAnInfrastructureRequeuedJobBackInTheQueueIsBilledForWhatItHasBurned(t *
 	defer server.Close()
 
 	usage := &capturedUsage{}
-	settler := New(usage, server.URL, 3*step)
+	settler := New(usage, metricsdb.New(server.URL), 3*step)
 
 	exp := &domain.Experiment{
 		ID:                     "exp-requeued",

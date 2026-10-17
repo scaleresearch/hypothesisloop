@@ -77,7 +77,7 @@ func (s *listStore) NameActors(context.Context, []*domain.Actor) error { return 
 func listHypotheses(t *testing.T, graph *listGraph, query string) (*httptest.ResponseRecorder, []string) {
 	t.Helper()
 	r := authtest.Router(authtest.Staff)
-	svc := registry.New(&listStore{graph: graph}, graph, nil, zap.NewNop(), "", nil)
+	svc := registry.New(&listStore{graph: graph}, graph, nil, zap.NewNop(), nil, nil)
 	registerRegistry(NewDoc(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop()), svc, zap.NewNop())
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, authtest.Authorize(httptest.NewRequest(http.MethodGet, "/hypotheses?"+query, nil)))
@@ -179,7 +179,7 @@ func TestAProjectsHypothesesArePagedSearchedAndKeptToTheCallersOrg(t *testing.T)
 		"pe-b1": {PlatformExperimentID: "pe-b1", ProjectID: "prj-b", OrgID: "org-b"},
 	}}
 	r := authtest.Router(authtest.As{Kind: auth.KindUser, UserID: "u-a", OrgIDs: []string{"org-a"}})
-	svc := registry.New(&listStore{}, graph, nil, zap.NewNop(), "", nil)
+	svc := registry.New(&listStore{}, graph, nil, zap.NewNop(), nil, nil)
 	registerRegistry(NewDoc(r, "test", "1.0.0", "", auth.NewAccess(placement), zap.NewNop()), svc, zap.NewNop())
 	list := func(query string) ([]string, string) {
 		t.Helper()

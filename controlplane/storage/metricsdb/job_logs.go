@@ -31,7 +31,7 @@ const ensureJobLogsTableSQL = `CREATE TABLE IF NOT EXISTS job_logs (
 // RecordLogTail stores lines as the current log tail for experimentID, reported by a
 // cluster-agent for clusterName at time at. Replaces whatever was previously stored for this
 // experiment — not an accumulating archive.
-func RecordLogTail(ctx context.Context, dbURL, experimentID, clusterName string, lines []string, at time.Time) error {
+func (s *Store) RecordLogTail(ctx context.Context, experimentID, clusterName string, lines []string, at time.Time) error {
 	if experimentID == "" {
 		return fmt.Errorf("metricsdb.RecordLogTail: experiment_id is required")
 	}
@@ -46,7 +46,7 @@ func RecordLogTail(ctx context.Context, dbURL, experimentID, clusterName string,
 		`INSERT INTO job_logs (experiment_id, cluster_name, lines_json, ts) VALUES (%s, %s, %s, %d)`,
 		sqlQuote(experimentID), sqlQuote(clusterName), sqlQuote(string(linesJSON)), at.UnixMilli(),
 	)
-	if err := execSQL(ctx, dbURL, insertSQL); err != nil {
+	if err := s.execSQL(ctx, insertSQL); err != nil {
 		return fmt.Errorf("metricsdb.RecordLogTail: insert: %w", err)
 	}
 	return nil
@@ -55,7 +55,7 @@ func RecordLogTail(ctx context.Context, dbURL, experimentID, clusterName string,
 // GetLatestLogTail returns up to the last n lines of experimentID's most recently reported log
 // tail (n<=0 returns everything in that latest report). Empty, not an error, if nothing has
 // been reported yet.
-func GetLatestLogTail(ctx context.Context, dbURL, experimentID string, n int) ([]string, error) {
+func (s *Store) GetLatestLogTail(ctx context.Context, experimentID string, n int) ([]string, error) {
 	if experimentID == "" {
 		return nil, fmt.Errorf("metricsdb.GetLatestLogTail: experiment_id is required")
 	}
@@ -63,7 +63,7 @@ func GetLatestLogTail(ctx context.Context, dbURL, experimentID string, n int) ([
 		`SELECT lines_json FROM job_logs WHERE experiment_id = %s ORDER BY ts DESC LIMIT 1`,
 		sqlQuote(experimentID),
 	)
-	rows, err := querySQLRows(ctx, dbURL, querySQL)
+	rows, err := s.querySQLRows(ctx, querySQL)
 	if err != nil {
 		return nil, fmt.Errorf("metricsdb.GetLatestLogTail: %w", err)
 	}
@@ -102,15 +102,15 @@ type greptimeSQLResponse struct {
 }
 
 // execSQL runs a SQL statement against GreptimeDB with no result rows expected (DDL/DML).
-func execSQL(ctx context.Context, dbURL, sql string) error {
-	_, err := doSQL(ctx, dbURL, sql)
+func (s *Store) execSQL(ctx context.Context, sql string) error {
+	_, err := s.doSQL(ctx, sql)
 	return err
 }
 
 // querySQLRows runs a SQL query and returns its result rows. Every table it reads is created at
 // boot (EnsureObservationTables), so one that is missing is an error.
-func querySQLRows(ctx context.Context, dbURL, sql string) ([][]any, error) {
-	resp, err := doSQL(ctx, dbURL, sql)
+func (s *Store) querySQLRows(ctx context.Context, sql string) ([][]any, error) {
+	resp, err := s.doSQL(ctx, sql)
 	if err != nil {
 		return nil, err
 	}
@@ -120,9 +120,9 @@ func querySQLRows(ctx context.Context, dbURL, sql string) ([][]any, error) {
 	return resp.Output[0].Records.Rows, nil
 }
 
-func doSQL(ctx context.Context, dbURL, sql string) (*greptimeSQLResponse, error) {
+func (s *Store) doSQL(ctx context.Context, sql string) (*greptimeSQLResponse, error) {
 	form := url.Values{"sql": {sql}}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, dbURL+"/v1/sql", strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.url+"/v1/sql", strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}

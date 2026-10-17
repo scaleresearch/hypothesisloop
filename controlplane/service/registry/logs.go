@@ -3,8 +3,6 @@ package registry
 import (
 	"context"
 	"fmt"
-
-	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // GetLogTail returns the last n lines of an experiment's most recently reported log tail
@@ -19,7 +17,7 @@ func (s *Service) GetLogTail(ctx context.Context, experimentID string, n int) ([
 	if exp == nil {
 		return nil, fmt.Errorf("%w: %s", ErrExperimentNotFound, experimentID)
 	}
-	lines, err := metricsdb.GetLatestLogTail(ctx, s.metricsDBURL, experimentID, n)
+	lines, err := s.metrics.GetLatestLogTail(ctx, experimentID, n)
 	if err != nil {
 		return nil, fmt.Errorf("registry.GetLogTail: %w", err)
 	}

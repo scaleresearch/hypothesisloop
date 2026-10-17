@@ -11,7 +11,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
-	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // WithGitProxy is where the control plane's proxy serves repositories: a platform experiment's
@@ -43,13 +42,11 @@ type ClusterRegistry interface {
 	ProjectOrg(ctx context.Context, projectID string) (string, error)
 }
 
-// WithLiveCapacity attaches what GET /resource-catalog/capacity needs: the metrics DB URL
-// per-flavor capacity reports land in, the freshness window past which a cluster's last
+// WithLiveCapacity attaches what GET /resource-catalog/capacity needs: the freshness window past which a cluster's last
 // report is treated as stale, and the registry that says which clusters a caller may see. The
 // service checks a platform experiment against the same read.
-func (s *PlatformExperimentsService) WithLiveCapacity(metricsDBURL string, freshness time.Duration, clusters ClusterRegistry, podResources domain.PodResources) *PlatformExperimentsService {
+func (s *PlatformExperimentsService) WithLiveCapacity(freshness time.Duration, clusters ClusterRegistry, podResources domain.PodResources) *PlatformExperimentsService {
 	s.podResources = podResources
-	s.capacityURL = metricsDBURL
 	s.capacityFreshness = freshness
 	s.clusters = clusters
 	s.reachable = s.reachableTypes
@@ -136,27 +133,27 @@ var ErrLiveCapacityUnconfigured = errors.New("resource-catalog/capacity: metrics
 // on, or of every cluster that reports when every is set, which is staff's view. It fails fast
 // if this handler was never wired to a metrics DB.
 func (s *PlatformExperimentsService) liveCapacity(ctx context.Context, orgID string, every bool) ([]ClusterCapacity, error) {
-	if s.capacityURL == "" {
+	if s.clusters == nil {
 		return nil, ErrLiveCapacityUnconfigured
 	}
-	available, total, err := metricsdb.LiveClusterAcceleratorAvailableAndTotal(ctx, s.capacityURL, s.capacityFreshness)
+	available, total, err := s.metrics.LiveClusterAcceleratorAvailableAndTotal(ctx, s.capacityFreshness)
 	if err != nil {
 		return nil, err
 	}
 	clusters := buildClusterCapacity(available, total, s.podResources)
-	cpuAvailable, err := metricsdb.LiveClusterCPUCapacity(ctx, s.capacityURL, s.capacityFreshness)
+	cpuAvailable, err := s.metrics.LiveClusterCPUCapacity(ctx, s.capacityFreshness)
 	if err != nil {
 		return nil, err
 	}
-	cpuTotal, err := metricsdb.LiveClusterCPUTotalCapacity(ctx, s.capacityURL, s.capacityFreshness)
+	cpuTotal, err := s.metrics.LiveClusterCPUTotalCapacity(ctx, s.capacityFreshness)
 	if err != nil {
 		return nil, err
 	}
-	memoryAvailable, err := metricsdb.LiveClusterRAMCapacity(ctx, s.capacityURL, s.capacityFreshness)
+	memoryAvailable, err := s.metrics.LiveClusterRAMCapacity(ctx, s.capacityFreshness)
 	if err != nil {
 		return nil, err
 	}
-	memoryTotal, err := metricsdb.LiveClusterRAMTotalCapacity(ctx, s.capacityURL, s.capacityFreshness)
+	memoryTotal, err := s.metrics.LiveClusterRAMTotalCapacity(ctx, s.capacityFreshness)
 	if err != nil {
 		return nil, err
 	}
@@ -167,20 +164,20 @@ func (s *PlatformExperimentsService) liveCapacity(ctx context.Context, orgID str
 	}
 	withJobImages(registered, clusters)
 	withOfferedImages(s.jobImages, clusters)
-	nodeLabels, err := metricsdb.LiveClusterNodeLabels(ctx, s.capacityURL, s.capacityFreshness)
+	nodeLabels, err := s.metrics.LiveClusterNodeLabels(ctx, s.capacityFreshness)
 	if err != nil {
 		return nil, err
 	}
 	withOnDemand(clusters, nodeLabels)
-	nodeTotal, err := metricsdb.LiveClusterNodeTotalCapacity(ctx, s.capacityURL, s.capacityFreshness)
+	nodeTotal, err := s.metrics.LiveClusterNodeTotalCapacity(ctx, s.capacityFreshness)
 	if err != nil {
 		return nil, err
 	}
-	nodeFree, err := metricsdb.LiveClusterNodeResourceCapacity(ctx, s.capacityURL, s.capacityFreshness)
+	nodeFree, err := s.metrics.LiveClusterNodeResourceCapacity(ctx, s.capacityFreshness)
 	if err != nil {
 		return nil, err
 	}
-	nodeAcceleratorsFree, err := metricsdb.LiveClusterNodeAcceleratorCapacity(ctx, s.capacityURL, s.capacityFreshness)
+	nodeAcceleratorsFree, err := s.metrics.LiveClusterNodeAcceleratorCapacity(ctx, s.capacityFreshness)
 	if err != nil {
 		return nil, err
 	}

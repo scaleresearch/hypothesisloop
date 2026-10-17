@@ -61,7 +61,7 @@ func (s *PlatformExperimentsService) readBaseline(ctx context.Context, pe *domai
 	if out.Finding, err = s.store.JobHasFinding(ctx, jobID); err != nil {
 		return nil, err
 	}
-	samples, err := metricsdb.ExperimentMetricSamples(ctx, s.metricsDBURL, jobID, pe.CreatedAt, time.Now().UTC().Add(time.Minute))
+	samples, err := s.metrics.ExperimentMetricSamples(ctx, jobID, pe.CreatedAt, time.Now().UTC().Add(time.Minute))
 	if err != nil {
 		return nil, err
 	}

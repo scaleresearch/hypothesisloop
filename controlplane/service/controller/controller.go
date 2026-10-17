@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // Store is the persistence interface required by the controller.
@@ -146,11 +147,11 @@ func (c *Controller) WithClusterSilenceCeiling(d time.Duration) *Controller {
 	return c
 }
 
-// WithStagesStore enables the stage ladder. The metricsDBURL is used to rank agents at each
+// WithStagesStore enables the stage ladder. The metrics is used to rank agents at each
 // stage boundary. The ladder itself is per-platform-experiment config, not a controller knob.
-func (c *Controller) WithStagesStore(s StagesStore, metricsDBURL string) *Controller {
+func (c *Controller) WithStagesStore(s StagesStore, metrics *metricsdb.Store) *Controller {
 	c.stagesStore = s
-	c.observed = metricsDBObserver{url: metricsDBURL}
+	c.observed = metrics
 	return c
 }
 
@@ -172,7 +173,7 @@ func (c *Controller) Check() error {
 		return fmt.Errorf("controller: store, quota, settler, stages store, researcher keeper and logger are required")
 	}
 	if c.observed == nil {
-		return fmt.Errorf("controller: metrics DB URL is required")
+		return fmt.Errorf("controller: the metrics store is required")
 	}
 	if c.reconcileInterval <= 0 ||
 		c.defaultReportInterval <= 0 || c.minSilenceWindow <= 0 || c.startTimeout <= 0 ||

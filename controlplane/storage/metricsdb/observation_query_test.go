@@ -41,7 +41,7 @@ func TestAnyDeclaredMetricChangedCountsAMovingFractionAsProgress(t *testing.T) {
 		{"0", "0", false},
 	} {
 		server := spreadServer(t, tc.value, tc.fraction)
-		reported, changed, err := AnyDeclaredMetricChanged(context.Background(), server.URL, "job-1", []string{"loss"}, time.Hour)
+		reported, changed, err := New(server.URL).AnyDeclaredMetricChanged(context.Background(), "job-1", []string{"loss"}, time.Hour)
 		server.Close()
 		if err != nil {
 			t.Fatalf("value spread %s, fraction spread %s: %v", tc.value, tc.fraction, err)

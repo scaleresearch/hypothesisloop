@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // AddDesiredQuotaUsage (see db.Store) debits every non-terminal experiment's
@@ -54,7 +53,7 @@ func (s *PlatformExperimentsService) newRunningCostCalc() *runningCostCalc {
 }
 
 func (c *runningCostCalc) costOf(ctx context.Context, exp *domain.Experiment) (runningCost, error) {
-	hours, found, err := metricsdb.ObservedElapsed(ctx, c.svc.metricsDBURL, exp.ID, exp.CreatedAt, c.now, c.gapCap)
+	hours, found, err := c.svc.metrics.ObservedElapsed(ctx, exp.ID, exp.CreatedAt, c.now, c.gapCap)
 	if err != nil {
 		return runningCost{}, fmt.Errorf("observed elapsed for %s: %w", exp.ID, err)
 	}
@@ -80,7 +79,7 @@ func (s *PlatformExperimentsService) correctRunningCosts(ctx context.Context, pe
 		return nil
 	}
 	calc := s.newRunningCostCalc()
-	settled, err := metricsdb.SettledAccHByJob(ctx, s.metricsDBURL, pe.CreatedAt, pe.ID)
+	settled, err := s.metrics.SettledAccHByJob(ctx, pe.CreatedAt, pe.ID)
 	if err != nil {
 		return fmt.Errorf("quota.correctRunningCosts: %w", err)
 	}
@@ -122,7 +121,7 @@ func (s *PlatformExperimentsService) correctRunningCosts(ctx context.Context, pe
 // budget been spent?", which nothing unobserved can answer.
 func (s *PlatformExperimentsService) addRunningActualCosts(ctx context.Context, pe *domain.PlatformExperiment, q *domain.AgentQuota) error {
 	calc := s.newRunningCostCalc()
-	settled, err := metricsdb.SettledAccHByJob(ctx, s.metricsDBURL, pe.CreatedAt, pe.ID)
+	settled, err := s.metrics.SettledAccHByJob(ctx, pe.CreatedAt, pe.ID)
 	if err != nil {
 		return fmt.Errorf("quota.addRunningActualCosts: %w", err)
 	}

@@ -18,7 +18,7 @@ func TestGetLatestPhaseDetailFullDecodesSchedulingColumns(t *testing.T) {
 	}))
 	defer server.Close()
 
-	row, found, err := GetLatestPhaseDetailFull(context.Background(), server.URL, "exp-1", "cluster-a", 0)
+	row, found, err := New(server.URL).GetLatestPhaseDetailFull(context.Background(), "exp-1", "cluster-a", 0)
 	if err != nil {
 		t.Fatalf("GetLatestPhaseDetailFull: %v", err)
 	}
@@ -52,12 +52,12 @@ func TestPhaseReportedSinceIsTheFirstReportOfTheReasonInTheAttempt(t *testing.T)
 	}))
 	defer server.Close()
 
-	since, found, err := PhaseReportedSince(context.Background(), server.URL, "exp-1", "cluster-a", 2, "instance_starting")
+	since, found, err := New(server.URL).PhaseReportedSince(context.Background(), "exp-1", "cluster-a", 2, "instance_starting")
 	if err != nil || !found || !since.Equal(time.UnixMilli(1791288271695)) {
 		t.Fatalf("since = %v, found = %v, err = %v, want the first report's time", since, found, err)
 	}
 	answer = `[[null]]`
-	if _, found, err := PhaseReportedSince(context.Background(), server.URL, "exp-1", "cluster-a", 2, "instance_starting"); err != nil || found {
+	if _, found, err := New(server.URL).PhaseReportedSince(context.Background(), "exp-1", "cluster-a", 2, "instance_starting"); err != nil || found {
 		t.Fatalf("found = %v, err = %v, want not found for a reason never reported", found, err)
 	}
 }

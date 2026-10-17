@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 const settledL40 = "nvidia.com/gpu.product=NVIDIA-L40"
@@ -23,7 +24,7 @@ func settle(t *testing.T, flavor domain.AcceleratorType, count int, estimatedHou
 		AcceleratorType: flavor, AcceleratorCount: count, EstimatedDurationHours: estimatedHours,
 		EstimatedCostAccH: flavor.Cost() * float64(count) * estimatedHours,
 	}
-	if err := New(usage, server.URL, 3*time.Minute).Settle(context.Background(), exp); err != nil {
+	if err := New(usage, metricsdb.New(server.URL), 3*time.Minute).Settle(context.Background(), exp); err != nil {
 		t.Fatalf("Settle: %v", err)
 	}
 	return usage.amounts[domain.ResourceAcceleratorHours]

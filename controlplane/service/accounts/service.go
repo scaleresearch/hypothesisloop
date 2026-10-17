@@ -16,6 +16,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // Accounts is the persistence the handler needs for orgs, members, invites, projects and API keys.
@@ -56,17 +57,17 @@ type Clusters interface {
 	ClearReportedID(ctx context.Context, name string) (*domain.Cluster, error)
 }
 
-// Connectivity reports which clusters have an agent connected right now, by name.
-type Connectivity func(ctx context.Context) (map[string]bool, error)
-
-// Contact is a cluster's last reconcile exchange: when, and the version its agent said it runs.
-type Contact struct {
-	At           time.Time
-	AgentVersion string
+// Liveness reads which clusters an agent reported from lately, and when each was last heard
+// from. *metricsdb.Store is the one in use.
+type Liveness interface {
+	LiveClusterHeartbeats(ctx context.Context, window time.Duration) (map[string]bool, error)
+	LiveClusterAutoscalerCapability(ctx context.Context, window time.Duration) (map[string]bool, error)
+	ClusterLastContacts(ctx context.Context, lookback time.Duration) (map[string]metricsdb.ClusterContact, error)
 }
 
-// Contacts reports each cluster's last contact, by name, for the clusters heard from lately.
-type Contacts func(ctx context.Context) (map[string]Contact, error)
+// contactLookback is how far back a cluster's last contact is looked for: one silent for longer
+// is listed with none.
+const contactLookback = 30 * 24 * time.Hour
 
 // RuntimeAddresses is what a cluster's agents are installed with: where they reach the platform
 // from inside their cluster, and the registry and tag their images are pulled under.
@@ -84,9 +85,8 @@ type RuntimeAddresses struct {
 type Service struct {
 	accounts      Accounts
 	clusters      Clusters
-	connected     Connectivity
-	autoscalers   Connectivity
-	contacts      Contacts
+	liveness      Liveness
+	liveWithin    time.Duration
 	signingSecret string
 	runtimes      RuntimeAddresses
 	limits        Limits
@@ -102,17 +102,16 @@ type Limits struct {
 	MaxProjectsPerOrg int `json:"max_projects_per_org" doc:"How many projects one org may hold. The projects of this answer with that org_id are the ones that count."`
 }
 
-// NewService takes connected, the clusters with an agent connected now, autoscalers, those
-// whose connected agent reports an autoscaler, and contacts, each cluster's last contact, all by
-// name.
-func NewService(accounts Accounts, clusters Clusters, connected, autoscalers Connectivity, contacts Contacts, signingSecret string, runtimes RuntimeAddresses, limits Limits, access *auth.Access, logger *zap.Logger) *Service {
+// NewService takes liveness, which counts a cluster connected while it reported within
+// liveWithin.
+func NewService(accounts Accounts, clusters Clusters, liveness Liveness, liveWithin time.Duration, signingSecret string, runtimes RuntimeAddresses, limits Limits, access *auth.Access, logger *zap.Logger) *Service {
 	if logger == nil {
 		panic("accounts.NewService: a logger is required")
 	}
 	if limits.MaxOrgsPerUser <= 0 || limits.MaxProjectsPerOrg <= 0 {
 		panic("accounts.NewService: both account limits are required and positive")
 	}
-	return &Service{accounts: accounts, clusters: clusters, connected: connected, autoscalers: autoscalers, contacts: contacts, signingSecret: signingSecret, runtimes: runtimes, limits: limits, logger: logger, access: access, policy: policy{access: access}}
+	return &Service{accounts: accounts, clusters: clusters, liveness: liveness, liveWithin: liveWithin, signingSecret: signingSecret, runtimes: runtimes, limits: limits, logger: logger, access: access, policy: policy{access: access}}
 }
 
 // limit is bound for a caller held to the account limits, and none, zero, for staff.
@@ -199,7 +198,7 @@ type ListedCluster struct {
 
 // listed shows a cluster to a caller listing the clusters of orgID. platformVersion is the image
 // tag the platform runs, which an agent's version is compared with.
-func listed(c *domain.Cluster, orgID string, caller auth.Principal, connected, autoscaler bool, contact *Contact, platformVersion string) ListedCluster {
+func listed(c *domain.Cluster, orgID string, caller auth.Principal, connected, autoscaler bool, contact *metricsdb.ClusterContact, platformVersion string) ListedCluster {
 	out := ListedCluster{ClusterView: viewFor(c, orgID, caller), Owned: c.OrgID == orgID, Connected: connected, AutoscalerEnabled: autoscaler}
 	if contact != nil {
 		at := contact.At
@@ -222,15 +221,15 @@ func (h *Service) listClusters(ctx context.Context, orgID string, caller auth.Pr
 	if err != nil {
 		return nil, err
 	}
-	connected, err := h.connected(ctx)
+	connected, err := h.liveness.LiveClusterHeartbeats(ctx, h.liveWithin)
 	if err != nil {
 		return nil, err
 	}
-	autoscalers, err := h.autoscalers(ctx)
+	autoscalers, err := h.liveness.LiveClusterAutoscalerCapability(ctx, h.liveWithin)
 	if err != nil {
 		return nil, err
 	}
-	contacts, err := h.contacts(ctx)
+	contacts, err := h.liveness.ClusterLastContacts(ctx, contactLookback)
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +238,7 @@ func (h *Service) listClusters(ctx context.Context, orgID string, caller auth.Pr
 	// (placement.Tiers), so each new priority among the clusters in use is the next place.
 	place, placed := 0, -1
 	for i, c := range clusters {
-		var contact *Contact
+		var contact *metricsdb.ClusterContact
 		if seen, ok := contacts[c.Name]; ok {
 			contact = &seen
 		}

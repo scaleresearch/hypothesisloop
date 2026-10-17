@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // Situation is where a platform experiment stands now, in one read: its clock, its objective,
@@ -190,11 +189,11 @@ func (s *PlatformExperimentsService) placementOf(ctx context.Context, projectID 
 	if err != nil {
 		return nil, err
 	}
-	accelerators, err := metricsdb.LiveClusterNodeAcceleratorCapacity(ctx, s.metricsDBURL, s.capacityFreshness)
+	accelerators, err := s.metrics.LiveClusterNodeAcceleratorCapacity(ctx, s.capacityFreshness)
 	if err != nil {
 		return nil, err
 	}
-	resources, err := metricsdb.LiveClusterNodeResourceCapacity(ctx, s.metricsDBURL, s.capacityFreshness)
+	resources, err := s.metrics.LiveClusterNodeResourceCapacity(ctx, s.capacityFreshness)
 	if err != nil {
 		return nil, err
 	}
@@ -383,7 +382,7 @@ func (s *PlatformExperimentsService) objective(ctx context.Context, pe *domain.P
 			completedAt[job.ID] = job.UpdatedAt
 		}
 	}
-	rankable, err := metricsdb.RankableJobs(ctx, s.metricsDBURL, pe, ids)
+	rankable, err := s.metrics.RankableJobs(ctx, pe, ids)
 	if err != nil {
 		return nil, fmt.Errorf("objective: %w", err)
 	}
@@ -395,7 +394,7 @@ func (s *PlatformExperimentsService) objective(ctx context.Context, pe *domain.P
 		if metric.EffectiveRole() != domain.MetricRoleRanking {
 			continue
 		}
-		values, err := metricsdb.LastPerJobOnMetric(ctx, s.metricsDBURL, pe, metric, rankable)
+		values, err := s.metrics.LastPerJobOnMetric(ctx, pe, metric, rankable)
 		if err != nil {
 			return nil, fmt.Errorf("objective: %w", err)
 		}
@@ -410,7 +409,7 @@ func (s *PlatformExperimentsService) objective(ctx context.Context, pe *domain.P
 			m.BestCodeRef, m.BestBranch = best.CodeRef, best.Branch
 		}
 		if pe.BaselineJobID != "" {
-			baseline, err := metricsdb.LastPerJobOnMetric(ctx, s.metricsDBURL, pe, metric, map[string]bool{pe.BaselineJobID: true})
+			baseline, err := s.metrics.LastPerJobOnMetric(ctx, pe, metric, map[string]bool{pe.BaselineJobID: true})
 			if err != nil {
 				return nil, fmt.Errorf("objective: %w", err)
 			}
@@ -578,7 +577,7 @@ func (s *PlatformExperimentsService) situationCoordinator(ctx context.Context, p
 			out.JobsCompletedSinceSummary++
 		}
 	}
-	states, err := metricsdb.LatestHarnessState(ctx, s.metricsDBURL, pe.ID, pe.CreatedAt)
+	states, err := s.metrics.LatestHarnessState(ctx, pe.ID, pe.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -601,7 +600,7 @@ func liveReading(instance *domain.AgentInstance, state domain.HarnessState) bool
 // last reported and the model allowance it last read, of the machine it holds now, the messages
 // reader may still send it, and how long it has had no job in flight.
 func (s *PlatformExperimentsService) withWork(ctx context.Context, pe *domain.PlatformExperiment, rows []JoinedAgent, now time.Time, reader domain.Actor) error {
-	states, err := metricsdb.LatestHarnessState(ctx, s.metricsDBURL, pe.ID, pe.CreatedAt)
+	states, err := s.metrics.LatestHarnessState(ctx, pe.ID, pe.CreatedAt)
 	if err != nil {
 		return err
 	}

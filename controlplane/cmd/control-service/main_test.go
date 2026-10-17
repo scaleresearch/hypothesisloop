@@ -24,6 +24,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/modelproxy"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/watch"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // public is every route control-service answers without a token.
@@ -47,9 +48,9 @@ func testRouter(t *testing.T) chi.Router {
 	t.Helper()
 	unreachable := authtest.As{Kind: auth.KindStaff}
 	launch := platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model", CoordinatorModel: "model", SigningSecret: "secret", MaxHosted: 1}
-	platformExperiments := platformexperiments.NewPlatformExperimentsService(nil, domain.QuotaConfig{}, zap.NewNop(), "", time.Minute).WithRepositories(noRepositories{}).
+	platformExperiments := platformexperiments.NewPlatformExperimentsService(nil, domain.QuotaConfig{}, zap.NewNop(), nil, time.Minute).WithRepositories(noRepositories{}).
 		WithPlanning(platformexperiments.Planning{Limit: time.Minute, ProposedFor: time.Minute, PlannerKept: time.Minute}).WithAgentLaunch(launch)
-	modelProxy, err := modelproxy.New(noOneHosted{}, modelproxy.MetricsDB{}, "https://model.example.invalid", "credential", zap.NewNop())
+	modelProxy, err := modelproxy.New(noOneHosted{}, metricsdb.New(""), "https://model.example.invalid", "credential", zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}

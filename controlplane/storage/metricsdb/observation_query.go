@@ -20,9 +20,9 @@ func promSeconds(d time.Duration) string {
 // isAliveOn reports whether metric{labelKey=id} has a sample within `window` of now — a plain
 // last_over_time instant query, deliberately simple PromQL (no subqueries, no `or`) since not
 // every PromQL-compatible backend supports the fancier constructs.
-func isAliveOn(ctx context.Context, dbURL, metric, labelKey, id string, window time.Duration) (bool, error) {
+func (s *Store) isAliveOn(ctx context.Context, metric, labelKey, id string, window time.Duration) (bool, error) {
 	promQL := fmt.Sprintf(`last_over_time(%s{%s=%q}[%s])`, metric, labelKey, id, promSeconds(window))
-	samples, err := QueryVector(ctx, dbURL, promQL)
+	samples, err := s.QueryVector(ctx, promQL)
 	if err != nil {
 		return false, err
 	}
@@ -33,15 +33,15 @@ func isAliveOn(ctx context.Context, dbURL, metric, labelKey, id string, window t
 // training metric — within `window` of now. Used by silence detection in place of an in-memory
 // last-seen map: stateless, so it gives the same answer regardless of which process asks, and
 // survives a restart with no warm-up gap.
-func IsAlive(ctx context.Context, dbURL, experimentID string, window time.Duration) (bool, error) {
-	heartbeat, err := isAliveOn(ctx, dbURL, aliveHeartbeatMetric, "experiment_id", experimentID, window)
+func (s *Store) IsAlive(ctx context.Context, experimentID string, window time.Duration) (bool, error) {
+	heartbeat, err := s.isAliveOn(ctx, aliveHeartbeatMetric, "experiment_id", experimentID, window)
 	if err != nil {
 		return false, fmt.Errorf("metricsdb.IsAlive: heartbeat: %w", err)
 	}
 	if heartbeat {
 		return true, nil
 	}
-	metric, err := isAliveOn(ctx, dbURL, ExperimentMetricValue, "job_id", experimentID, window)
+	metric, err := s.isAliveOn(ctx, ExperimentMetricValue, "job_id", experimentID, window)
 	if err != nil {
 		return false, fmt.Errorf("metricsdb.IsAlive: experiment_metric_value: %w", err)
 	}
@@ -54,7 +54,7 @@ func IsAlive(ctx context.Context, dbURL, experimentID string, window time.Durati
 // single sample is not "quiet since it hung" — its metrics path is broken (wrong URL, a stale
 // helper baked into the image, a swallowed exception), which needs a different fix than a hung
 // process and so is worth telling apart at eviction time.
-func HasEverReportedMetric(ctx context.Context, dbURL, experimentID string, createdAt, now time.Time) (bool, error) {
+func (s *Store) HasEverReportedMetric(ctx context.Context, experimentID string, createdAt, now time.Time) (bool, error) {
 	since := ObservationWindowStart(createdAt)
 	if !now.After(since) {
 		return false, fmt.Errorf("metricsdb.HasEverReportedMetric: %s was created after now", experimentID)
@@ -64,7 +64,7 @@ func HasEverReportedMetric(ctx context.Context, dbURL, experimentID string, crea
 	query := fmt.Sprintf(
 		`SELECT COUNT(*) FROM %s WHERE job_id = '%s' AND greptime_timestamp >= %d::TimestampMillisecond AND greptime_timestamp < %d::TimestampMillisecond`,
 		ExperimentMetricValue, strings.ReplaceAll(experimentID, "'", "''"), since.UnixMilli(), now.UnixMilli())
-	row, found, err := querySingleRow(ctx, dbURL, "metricsdb.HasEverReportedMetric", query, 1)
+	row, found, err := s.querySingleRow(ctx, "metricsdb.HasEverReportedMetric", query, 1)
 	if err != nil {
 		return false, err
 	}
@@ -81,8 +81,8 @@ func HasEverReportedMetric(ctx context.Context, dbURL, experimentID string, crea
 // The fraction_complete written beside each value counts as movement too: a metric that
 // plateaus while training goes on is progress, and a hung loop re-emitting a cached point
 // repeats its fraction as well as its value.
-func declaredMetricSpread(ctx context.Context, dbURL, experimentID, metricKey string, window time.Duration) (reported, changed bool, err error) {
-	count, err := metricSampleCount(ctx, dbURL, experimentID, metricKey, window)
+func (s *Store) declaredMetricSpread(ctx context.Context, experimentID, metricKey string, window time.Duration) (reported, changed bool, err error) {
+	count, err := s.metricSampleCount(ctx, experimentID, metricKey, window)
 	if err != nil {
 		return false, false, err
 	}
@@ -93,7 +93,7 @@ func declaredMetricSpread(ctx context.Context, dbURL, experimentID, metricKey st
 	}
 	for _, series := range []string{ExperimentMetricValue, ExperimentMetricFraction} {
 		sel := fmt.Sprintf(`%s{job_id=%q, metric_name=%q}[%s]`, series, experimentID, metricKey, promSeconds(window))
-		samples, err := QueryVector(ctx, dbURL, fmt.Sprintf(`max_over_time(%s) - min_over_time(%s)`, sel, sel))
+		samples, err := s.QueryVector(ctx, fmt.Sprintf(`max_over_time(%s) - min_over_time(%s)`, sel, sel))
 		if err != nil {
 			return false, false, err
 		}
@@ -112,9 +112,9 @@ func declaredMetricSpread(ctx context.Context, dbURL, experimentID, metricKey st
 // single sample into reported=false, because one point cannot prove or disprove progress. For
 // "has this job ever reported at all", one point is a complete answer — and conflating the two
 // would condemn a job that reported once as never having reported.
-func AnyDeclaredMetricReported(ctx context.Context, dbURL, experimentID string, metricKeys []string, window time.Duration) (bool, error) {
+func (s *Store) AnyDeclaredMetricReported(ctx context.Context, experimentID string, metricKeys []string, window time.Duration) (bool, error) {
 	for _, key := range metricKeys {
-		count, err := metricSampleCount(ctx, dbURL, experimentID, key, window)
+		count, err := s.metricSampleCount(ctx, experimentID, key, window)
 		if err != nil {
 			return false, fmt.Errorf("metricsdb.AnyDeclaredMetricReported: %q: %w", key, err)
 		}
@@ -128,10 +128,10 @@ func AnyDeclaredMetricReported(ctx context.Context, dbURL, experimentID string, 
 // metricSampleCount is how many samples of one declared metric experimentID posted within window.
 // Shared because "did this job report at all" and "did the value move" both start from the same
 // count query, and had drifted into two separately-built copies of it.
-func metricSampleCount(ctx context.Context, dbURL, experimentID, metricKey string, window time.Duration) (float64, error) {
+func (s *Store) metricSampleCount(ctx context.Context, experimentID, metricKey string, window time.Duration) (float64, error) {
 	promQL := fmt.Sprintf(`count_over_time(%s{job_id=%q, metric_name=%q}[%s])`,
 		ExperimentMetricValue, experimentID, metricKey, promSeconds(window))
-	samples, err := QueryVector(ctx, dbURL, promQL)
+	samples, err := s.QueryVector(ctx, promQL)
 	if err != nil {
 		return 0, err
 	}
@@ -152,9 +152,9 @@ func metricSampleCount(ctx context.Context, dbURL, experimentID, metricKey strin
 // fraction_complete the whole window: a job whose training loop hung but keeps re-emitting the same point (e.g. a
 // cached last-value) would otherwise look perpetually alive to naive "did any sample arrive"
 // silence detection. changed=true as soon as any one declared metric moved.
-func AnyDeclaredMetricChanged(ctx context.Context, dbURL, experimentID string, metricKeys []string, window time.Duration) (reported, changed bool, err error) {
+func (s *Store) AnyDeclaredMetricChanged(ctx context.Context, experimentID string, metricKeys []string, window time.Duration) (reported, changed bool, err error) {
 	for _, key := range metricKeys {
-		keyReported, keyChanged, err := declaredMetricSpread(ctx, dbURL, experimentID, key, window)
+		keyReported, keyChanged, err := s.declaredMetricSpread(ctx, experimentID, key, window)
 		if err != nil {
 			return false, false, fmt.Errorf("metricsdb.AnyDeclaredMetricChanged: %q: %w", key, err)
 		}
@@ -173,8 +173,8 @@ func AnyDeclaredMetricChanged(ctx context.Context, dbURL, experimentID string, m
 // start", with no Postgres-stored StartedAt column involved. createdAt only bounds how far back
 // the query scans; it is a search window, not a clock the accounting trusts. Returns ok=false if
 // no sample exists (job never started, or aged out of retention).
-func FirstObserved(ctx context.Context, dbURL, experimentID string, createdAt, now time.Time, gapCap time.Duration) (t time.Time, ok bool, err error) {
-	span, err := ObserveSpan(ctx, dbURL, experimentID, ObservationWindowStart(createdAt), now, gapCap)
+func (s *Store) FirstObserved(ctx context.Context, experimentID string, createdAt, now time.Time, gapCap time.Duration) (t time.Time, ok bool, err error) {
+	span, err := s.ObserveSpan(ctx, experimentID, ObservationWindowStart(createdAt), now, gapCap)
 	if err != nil {
 		return time.Time{}, false, fmt.Errorf("metricsdb.FirstObserved: %w", err)
 	}
@@ -186,8 +186,8 @@ func FirstObserved(ctx context.Context, dbURL, experimentID string, createdAt, n
 // GreptimeDB (see ObserveSpan), so two processes, or the same process before and after a restart,
 // always get the same answer, and no wall-clock start time is needed as input. A job with no
 // observations at all reports zero, not an error.
-func ObservedElapsedHours(ctx context.Context, dbURL, experimentID string, createdAt, now time.Time, gapCap time.Duration) (float64, error) {
-	hours, _, err := ObservedElapsed(ctx, dbURL, experimentID, createdAt, now, gapCap)
+func (s *Store) ObservedElapsedHours(ctx context.Context, experimentID string, createdAt, now time.Time, gapCap time.Duration) (float64, error) {
+	hours, _, err := s.ObservedElapsed(ctx, experimentID, createdAt, now, gapCap)
 	return hours, err
 }
 
@@ -196,8 +196,8 @@ func ObservedElapsedHours(ctx context.Context, dbURL, experimentID string, creat
 // ambiguous on its own: a job seen once and a job never seen both report 0, and callers bill them
 // differently (a never-seen job keeps its admission estimate). Asking FirstObserved separately to
 // tell them apart re-ran a query this already performs.
-func ObservedElapsed(ctx context.Context, dbURL, experimentID string, createdAt, now time.Time, gapCap time.Duration) (float64, bool, error) {
-	span, err := ObserveSpan(ctx, dbURL, experimentID, ObservationWindowStart(createdAt), now, gapCap)
+func (s *Store) ObservedElapsed(ctx context.Context, experimentID string, createdAt, now time.Time, gapCap time.Duration) (float64, bool, error) {
+	span, err := s.ObserveSpan(ctx, experimentID, ObservationWindowStart(createdAt), now, gapCap)
 	if err != nil {
 		return 0, false, fmt.Errorf("metricsdb.ObservedElapsed: %w", err)
 	}
@@ -216,8 +216,8 @@ func ObservedElapsed(ctx context.Context, dbURL, experimentID string, createdAt,
 //
 // A job that has never been down reports its full observed elapsed time, which is the same
 // number by definition.
-func ObservedStintElapsedHours(ctx context.Context, dbURL, experimentID string, createdAt, now time.Time, gapCap time.Duration) (float64, error) {
-	span, err := ObserveSpan(ctx, dbURL, experimentID, ObservationWindowStart(createdAt), now, gapCap)
+func (s *Store) ObservedStintElapsedHours(ctx context.Context, experimentID string, createdAt, now time.Time, gapCap time.Duration) (float64, error) {
+	span, err := s.ObserveSpan(ctx, experimentID, ObservationWindowStart(createdAt), now, gapCap)
 	if err != nil {
 		return 0, fmt.Errorf("metricsdb.ObservedStintElapsedHours: %w", err)
 	}

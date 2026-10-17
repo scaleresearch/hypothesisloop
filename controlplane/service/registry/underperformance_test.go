@@ -138,9 +138,9 @@ func TestUnderperformanceFiresOnceOnAJobThatTrailsFromItsFirstSample(t *testing.
 
 	notifier := &marks{}
 	svc := &Service{
-		store:        underperformStore{exp: theJob(), metrics: rankingMetric("acc", "maximize"), marks: notifier},
-		metricsDBURL: server.URL,
-		logger:       zap.NewNop(),
+		store:   underperformStore{exp: theJob(), metrics: rankingMetric("acc", "maximize"), marks: notifier},
+		metrics: metricsdb.New(server.URL),
+		logger:  zap.NewNop(),
 	}
 
 	// A run of 3 minutes: 36 s in at 20%, 54 s at 30%, 72 s at 40%, where under 2 minutes are left.
@@ -189,9 +189,9 @@ func TestUnderperformanceLeavesOutCompletedSiblingsThatBrokeAConstraint(t *testi
 	} {
 		notifier := &marks{}
 		svc := &Service{
-			store:        underperformStore{exp: theJob(), metrics: gated, marks: notifier, completed: c.completed},
-			metricsDBURL: server.URL,
-			logger:       zap.NewNop(),
+			store:   underperformStore{exp: theJob(), metrics: gated, marks: notifier, completed: c.completed},
+			metrics: metricsdb.New(server.URL),
+			logger:  zap.NewNop(),
 		}
 		svc.checkUnderperformance(context.Background(), theJob(), "acc", 0.5, 0.5, time.Now().UTC())
 		if len(notifier.events) != c.events {
@@ -208,9 +208,9 @@ func TestUnderperformanceNeedsAMinimumCohort(t *testing.T) {
 
 	notifier := &marks{}
 	svc := &Service{
-		store:        underperformStore{exp: theJob(), metrics: rankingMetric("acc", "maximize"), marks: notifier},
-		metricsDBURL: server.URL,
-		logger:       zap.NewNop(),
+		store:   underperformStore{exp: theJob(), metrics: rankingMetric("acc", "maximize"), marks: notifier},
+		metrics: metricsdb.New(server.URL),
+		logger:  zap.NewNop(),
 	}
 
 	svc.checkUnderperformance(context.Background(), theJob(), "acc", 0.5, 0.5, time.Now().UTC())
@@ -228,9 +228,9 @@ func TestUnderperformanceIgnoresStaleSiblings(t *testing.T) {
 
 	notifier := &marks{}
 	svc := &Service{
-		store:        underperformStore{exp: theJob(), metrics: rankingMetric("acc", "maximize"), marks: notifier},
-		metricsDBURL: server.URL,
-		logger:       zap.NewNop(),
+		store:   underperformStore{exp: theJob(), metrics: rankingMetric("acc", "maximize"), marks: notifier},
+		metrics: metricsdb.New(server.URL),
+		logger:  zap.NewNop(),
 	}
 
 	svc.checkUnderperformance(context.Background(), theJob(), "acc", 0.5, 0.5, time.Now().UTC())
@@ -248,9 +248,9 @@ func TestUnderperformanceSkipsEarlyProgress(t *testing.T) {
 
 	notifier := &marks{}
 	svc := &Service{
-		store:        underperformStore{exp: theJob(), metrics: rankingMetric("acc", "maximize"), marks: notifier},
-		metricsDBURL: server.URL,
-		logger:       zap.NewNop(),
+		store:   underperformStore{exp: theJob(), metrics: rankingMetric("acc", "maximize"), marks: notifier},
+		metrics: metricsdb.New(server.URL),
+		logger:  zap.NewNop(),
 	}
 
 	svc.checkUnderperformance(context.Background(), theJob(), "acc", 0.05, 0.01, time.Now().UTC())
@@ -270,9 +270,9 @@ func TestUnderperformanceDoesNotFlagATinyGapAgainstATiedCohort(t *testing.T) {
 
 	notifier := &marks{}
 	svc := &Service{
-		store:        underperformStore{exp: theJob(), metrics: rankingMetric("acc", "maximize"), marks: notifier},
-		metricsDBURL: server.URL,
-		logger:       zap.NewNop(),
+		store:   underperformStore{exp: theJob(), metrics: rankingMetric("acc", "maximize"), marks: notifier},
+		metrics: metricsdb.New(server.URL),
+		logger:  zap.NewNop(),
 	}
 
 	svc.checkUnderperformance(context.Background(), theJob(), "acc", 0.5, 0.88, time.Now().UTC())
@@ -298,9 +298,9 @@ func TestUnderperformanceStaysSilentWhenTheJobIsAboutToEnd(t *testing.T) {
 		notifier := &marks{}
 		job := theJob()
 		svc := &Service{
-			store:        underperformStore{exp: job, metrics: rankingMetric("acc", "maximize"), marks: notifier},
-			metricsDBURL: server.URL,
-			logger:       zap.NewNop(),
+			store:   underperformStore{exp: job, metrics: rankingMetric("acc", "maximize"), marks: notifier},
+			metrics: metricsdb.New(server.URL),
+			logger:  zap.NewNop(),
 		}
 		server.reporting = tc.reporting
 		svc.checkUnderperformance(context.Background(), job, "acc", tc.fraction, 0.5, time.Now().UTC())
@@ -324,9 +324,9 @@ func TestUnderperformanceComparesSiblingsAtTheJobsOwnProgress(t *testing.T) {
 	}{{0.3, 0}, {0.1, 1}} {
 		notifier := &marks{}
 		svc := &Service{
-			store:        underperformStore{exp: theJob(), metrics: rankingMetric("acc", "maximize"), marks: notifier},
-			metricsDBURL: server.URL,
-			logger:       zap.NewNop(),
+			store:   underperformStore{exp: theJob(), metrics: rankingMetric("acc", "maximize"), marks: notifier},
+			metrics: metricsdb.New(server.URL),
+			logger:  zap.NewNop(),
 		}
 		svc.checkUnderperformance(context.Background(), theJob(), "acc", 0.3, tc.value, time.Now().UTC())
 		if len(notifier.events) != tc.want {
@@ -357,9 +357,9 @@ func TestUnderperformanceLeavesOutSiblingsBehindTheJob(t *testing.T) {
 
 	notifier := &marks{}
 	svc := &Service{
-		store:        underperformStore{exp: theJob(), metrics: rankingMetric("acc", "maximize"), marks: notifier},
-		metricsDBURL: server.URL,
-		logger:       zap.NewNop(),
+		store:   underperformStore{exp: theJob(), metrics: rankingMetric("acc", "maximize"), marks: notifier},
+		metrics: metricsdb.New(server.URL),
+		logger:  zap.NewNop(),
 	}
 	svc.checkUnderperformance(context.Background(), theJob(), "acc", 0.6, 0.1, time.Now().UTC())
 	if len(notifier.events) != 0 {

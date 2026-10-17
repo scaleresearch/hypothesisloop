@@ -14,6 +14,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/hosting"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // defaultWarmPool is the warm pool on a sandbox provider that can warm instances when the
@@ -23,10 +24,10 @@ const defaultWarmPool = 2
 // newRented builds what rents machines elsewhere, each a loop the leader runs: the launcher of
 // hosted agents on the sandbox provider, and one runtime per cloud compute account. A provider
 // that cannot be built from its settings stops the process here.
-func newRented(pcfg *hypothesisloopcfg.Config, store *db.Store, clusters *clusterexchange.Service, metricsDBURL string, logger *zap.Logger) ([]func(context.Context), error) {
+func newRented(pcfg *hypothesisloopcfg.Config, store *db.Store, clusters *clusterexchange.Service, metrics *metricsdb.Store, logger *zap.Logger) ([]func(context.Context), error) {
 	var loops []func(context.Context)
 	if s := pcfg.Sandbox; s != nil {
-		launcher, err := newLauncher(pcfg, s, store, metricsDBURL, logger)
+		launcher, err := newLauncher(pcfg, s, store, metrics, logger)
 		if err != nil {
 			return nil, err
 		}
@@ -46,7 +47,7 @@ func newRented(pcfg *hypothesisloopcfg.Config, store *db.Store, clusters *cluste
 	return loops, nil
 }
 
-func newLauncher(pcfg *hypothesisloopcfg.Config, s *hypothesisloopcfg.SandboxConfig, store *db.Store, metricsDBURL string, logger *zap.Logger) (*hosting.Launcher, error) {
+func newLauncher(pcfg *hypothesisloopcfg.Config, s *hypothesisloopcfg.SandboxConfig, store *db.Store, metrics *metricsdb.Store, logger *zap.Logger) (*hosting.Launcher, error) {
 	log := logger.Named("hosting")
 	// An agent instance has no accelerator, so the provider is asked for no accelerator type.
 	rented, err := providers.New(s.Provider.Name, s.Provider.Settings, nil, log.Named(s.Provider.Name).Sugar().Infof)
@@ -60,7 +61,7 @@ func newLauncher(pcfg *hypothesisloopcfg.Config, s *hypothesisloopcfg.SandboxCon
 	if s.WarmPoolSize != nil {
 		warmPool = *s.WarmPoolSize
 	}
-	decider := hosting.NewDecider(store, hosting.MetricsDB{URL: metricsDBURL}, hosting.Settings{
+	decider := hosting.NewDecider(store, metrics, hosting.Settings{
 		Image: pcfg.Agents.Image, APIURL: pcfg.Services.PublicAPIURL, SigningSecret: pcfg.Auth.SigningSecret,
 		BootLimit:       time.Duration(pcfg.Agents.BootLimitSeconds) * time.Second,
 		ProgressLimit:   time.Duration(pcfg.Agents.ProgressLimitSeconds) * time.Second,

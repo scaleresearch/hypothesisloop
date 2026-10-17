@@ -84,7 +84,7 @@ func (s *Service) PushStatus(ctx context.Context, clusterName string, push clust
 		// recorded: the phase that ends a job is what its workload is deleted on, and the
 		// reason it ended would be gone with it. The runtime pushes the snapshot again.
 		if rep.LogTail != nil {
-			if err := metricsdb.RecordLogTail(ctx, s.metricsDBURL, rep.ExperimentID, clusterName, splitLongLines(rep.LogTail, s.maxLogLineChars), now); err != nil {
+			if err := s.metrics.RecordLogTail(ctx, rep.ExperimentID, clusterName, splitLongLines(rep.LogTail, s.maxLogLineChars), now); err != nil {
 				return auth.Internal(s.logger, "cluster push status", err, zap.String("experiment_id", rep.ExperimentID), zap.String("cluster", clusterName))
 			}
 		}
@@ -93,7 +93,7 @@ func (s *Service) PushStatus(ctx context.Context, clusterName string, push clust
 		// started or has been restarting, so a healthy tick doesn't overwrite a still-valid
 		// prior explanation with silence.
 		if rep.Reason != "" || rep.Message != "" || rep.RestartCount != 0 || rep.ScheduledNodes != 0 || rep.SchedulingReason != "" {
-			if err := metricsdb.RecordPhaseDetail(ctx, s.metricsDBURL, rep.ExperimentID, clusterName, rep.Reason, rep.Message, rep.RestartCount, rep.ScheduledNodes, rep.SchedulingReason, placementByID[rep.ExperimentID].AttemptCount, now); err != nil {
+			if err := s.metrics.RecordPhaseDetail(ctx, rep.ExperimentID, clusterName, rep.Reason, rep.Message, rep.RestartCount, rep.ScheduledNodes, rep.SchedulingReason, placementByID[rep.ExperimentID].AttemptCount, now); err != nil {
 				return auth.Internal(s.logger, "cluster push status", err, zap.String("experiment_id", rep.ExperimentID), zap.String("cluster", clusterName))
 			}
 		}
@@ -101,11 +101,11 @@ func (s *Service) PushStatus(ctx context.Context, clusterName string, push clust
 	// Observations first: the job watcher settles a job as soon as it reads the phase that
 	// ended it, from whatever was observed of it by then.
 	if len(observations) > 0 {
-		if err := metricsdb.RecordObservations(ctx, s.metricsDBURL, observations); err != nil {
+		if err := s.metrics.RecordObservations(ctx, observations); err != nil {
 			return auth.Internal(s.logger, "cluster push status", err, zap.String("cluster", clusterName))
 		}
 	}
-	if err := metricsdb.RecordJobStatuses(ctx, s.metricsDBURL, clusterName, now, statusSamples); err != nil {
+	if err := s.metrics.RecordJobStatuses(ctx, clusterName, now, statusSamples); err != nil {
 		return auth.Internal(s.logger, "cluster push status", err, zap.String("cluster", clusterName))
 	}
 	return nil

@@ -16,6 +16,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 const typeA = domain.AcceleratorType("example.com/gpu=a")
@@ -175,7 +176,7 @@ func TestTheRecordOfACloseStatesTheAgentsAsTheyStoodAtTheClose(t *testing.T) {
 		Instance: &domain.AgentInstance{AskedAt: &asked, Name: "m-2", Reported: domain.InstanceRunning, EndReason: "gone", ExitedAt: &exited},
 		Activity: &domain.AgentActivity{Text: "running hl job submit", At: now.Add(-time.Minute)}}}},
 		unsettled: map[string]bool{"pe-ended": true}}
-	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), platformexperimentstest.NoUsage(t), time.Minute)
+	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), time.Minute)
 	if err := svc.SweepExpired(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +277,7 @@ func situationRun(t *testing.T) (*PlatformExperimentsService, *situationStore) {
 		allowance: map[string]domain.MessageAllowance{"ag-1": {LeftThisHour: 6}, "ag-2": {LeftThisHour: 4}},
 		inFlight:  []domain.HypothesisInFlight{{HypothesisID: "hyp-1", Queued: 1, Running: 1, AgentIDs: []string{"ag-1", "ag-gone"}}},
 	}
-	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), platformexperimentstest.NoUsage(t), time.Minute).WithPersonIdeas(personIdeas{"pe-1": 2})
+	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), time.Minute).WithPersonIdeas(personIdeas{"pe-1": 2})
 	svc.placement = func(context.Context, string) (*Placement, error) {
 		return &Placement{
 			Clusters: []ClusterCapacity{{ClusterName: "c1", Accelerators: []AcceleratorCapacity{
@@ -546,7 +547,7 @@ func TestTheSituationNamesTheCommitOfTheBest(t *testing.T) {
 		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
 	}))
 	t.Cleanup(metrics.Close)
-	svc.metricsDBURL, store.researchers = metrics.URL, []string{"ag-1", "ag-2"}
+	svc.metrics, store.researchers = metricsdb.New(metrics.URL), []string{"ag-1", "ag-2"}
 	done := time.Now().Add(-time.Minute)
 	store.completed = []*domain.Experiment{
 		{ID: "job-7", AgentID: "ag-1", FinishedAt: &done, CodeRef: "https://example.com/repo.git@f9a3", Branch: "hl/pe-1/r1-stack"},

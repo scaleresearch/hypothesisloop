@@ -14,6 +14,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // A field added to an existing request body must not become required, and huma makes it required
@@ -61,13 +62,13 @@ func openAPISpec(t *testing.T) map[string]any {
 	r := authtest.Router(authtest.Staff)
 	doc := httpapi.NewDoc(r, "hypothesisloop API", "1.0.0", agenttypes.PlatformRules, auth.NewAccess(authtest.Placement{}), zap.NewNop())
 	launch := platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: "contract-test-signing-secret", MaxHosted: 20}
-	platformExperiments := platformexperiments.NewPlatformExperimentsService(nil, domain.QuotaConfig{}, zap.NewNop(), "", time.Minute).WithRepositories(worldRepositories{}).WithPlanning(worldPlanning).WithAgentLaunch(launch)
+	platformExperiments := platformexperiments.NewPlatformExperimentsService(nil, domain.QuotaConfig{}, zap.NewNop(), nil, time.Minute).WithRepositories(worldRepositories{}).WithPlanning(worldPlanning).WithAgentLaunch(launch)
 	httpapi.Register(doc, httpapi.Handlers{
 		Logger:              zap.NewNop(),
 		PlatformExperiments: platformExperiments,
 		Hypotheses:          struct{ platformexperiments.Hypotheses }{},
 		Launch:              launch,
-		Scheduler:           scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{}),
+		Scheduler:           scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, metricsdb.New("http://metrics.invalid"), zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{}),
 	})
 	doc.MountExplore(r)
 

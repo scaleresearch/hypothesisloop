@@ -27,7 +27,7 @@ func TestJobScopedQueriesScanFromCreationHoweverOldTheJobIs(t *testing.T) {
 	}))
 	defer server.Close()
 
-	if _, err := ObservedElapsedHours(context.Background(), server.URL, "exp-1", createdAt, now, time.Minute); err != nil {
+	if _, err := New(server.URL).ObservedElapsedHours(context.Background(), "exp-1", createdAt, now, time.Minute); err != nil {
 		t.Fatalf("ObservedElapsedHours: %v", err)
 	}
 

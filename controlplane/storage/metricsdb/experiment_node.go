@@ -56,7 +56,7 @@ func nodeLabels(status JobStatusSample) map[string]string {
 // created: the newest node sample, with the machine behind the node when the runtime reported
 // one. A job no node was ever recorded for has no entry. It is one query however many jobs are
 // asked about.
-func LatestRanOn(ctx context.Context, dbURL string, jobs []*domain.Experiment, now time.Time) (map[string]*domain.RanOn, error) {
+func (s *Store) LatestRanOn(ctx context.Context, jobs []*domain.Experiment, now time.Time) (map[string]*domain.RanOn, error) {
 	ranOn := make(map[string]*domain.RanOn, len(jobs))
 	if len(jobs) == 0 {
 		return ranOn, nil
@@ -83,7 +83,7 @@ func LatestRanOn(ctx context.Context, dbURL string, jobs []*domain.Experiment, n
 			`GROUP BY experiment_id) newest ON observed.experiment_id = newest.id AND observed.greptime_timestamp = newest.latest `+
 			`ORDER BY observed.node`,
 		experimentNodeMetric, strings.Join(ids, ", "), since.UnixMilli(), now.UnixMilli())
-	samples, err := runClusterSnapshotQuery(ctx, dbURL, query)
+	samples, err := s.runClusterSnapshotQuery(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("metricsdb.LatestRanOn: %w", err)
 	}
@@ -114,7 +114,7 @@ func LatestRanOn(ctx context.Context, dbURL string, jobs []*domain.Experiment, n
 // LatestExperimentNode returns the most recently recorded node for experimentID since its row was
 // created, or ("", false, nil) if nothing was ever recorded — e.g. a job that never got far enough
 // to schedule a pod, or one whose samples have aged out of retention.
-func LatestExperimentNode(ctx context.Context, dbURL, experimentID string, createdAt, now time.Time) (node string, found bool, err error) {
+func (s *Store) LatestExperimentNode(ctx context.Context, experimentID string, createdAt, now time.Time) (node string, found bool, err error) {
 	since := ObservationWindowStart(createdAt)
 	if !now.After(since) {
 		return "", false, fmt.Errorf("metricsdb.LatestExperimentNode: %s was created after now", experimentID)
@@ -134,7 +134,7 @@ func LatestExperimentNode(ctx context.Context, dbURL, experimentID string, creat
 			`WHERE experiment_id = %s AND greptime_timestamp >= %d::TimestampMillisecond AND greptime_timestamp < %d::TimestampMillisecond `+
 			`GROUP BY node ORDER BY 2 DESC LIMIT 1`,
 		experimentNodeMetric, quote(experimentID), since.UnixMilli(), now.UnixMilli())
-	samples, err := runClusterSnapshotQuery(ctx, dbURL, query)
+	samples, err := s.runClusterSnapshotQuery(ctx, query)
 	if err != nil {
 		return "", false, fmt.Errorf("metricsdb.LatestExperimentNode: %w", err)
 	}

@@ -21,7 +21,7 @@ func TestObserveSpanFailsOnAMissingTable(t *testing.T) {
 	defer server.Close()
 
 	now := time.Now().UTC()
-	if _, err := ObserveSpan(context.Background(), server.URL, "exp-1", now.Add(-time.Hour), now, 3*time.Minute); err == nil {
+	if _, err := New(server.URL).ObserveSpan(context.Background(), "exp-1", now.Add(-time.Hour), now, 3*time.Minute); err == nil {
 		t.Fatal("ObserveSpan: got = nil, want an error for a missing observation table")
 	}
 }
@@ -34,7 +34,7 @@ func TestEnsureObservationTablesCreatesBothSeries(t *testing.T) {
 	}))
 	defer server.Close()
 
-	if err := EnsureObservationTables(context.Background(), server.URL); err != nil {
+	if err := New(server.URL).EnsureObservationTables(context.Background()); err != nil {
 		t.Fatalf("EnsureObservationTables: got = %v, want = nil", err)
 	}
 	all := strings.Join(statements, "\n")

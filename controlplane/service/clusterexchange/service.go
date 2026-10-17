@@ -14,6 +14,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
 )
 
@@ -80,8 +81,8 @@ type Service struct {
 	logger *zap.Logger
 	// connectedWithin is how recent a heartbeat must be to count as "connected".
 	connectedWithin time.Duration
-	// metricsDBURL is where live per-cluster accelerator capacity is written.
-	metricsDBURL string
+	// metrics is where live per-cluster accelerator capacity is written.
+	metrics *metricsdb.Store
 	// observationCadence is the longest gap between two observations that still counts as one
 	// run (config.SchedulerConfig.ObservationCadence).
 	observationCadence time.Duration
@@ -127,12 +128,12 @@ func (s *Service) wakeAdmission() {
 
 // NewService constructs a Service. connectedWithin is how recent a cluster's heartbeat must be
 // to count as reachable/connected.
-func NewService(store Store, connectedWithin time.Duration, metricsDBURL string, observationCadence time.Duration, dataStore *objectstore.Client, maxCheckpointGrace time.Duration, pricedAcceleratorTypes []string, maxLogLineChars int, signingSecret, proxyURL string, environments *EnvironmentRegistry, logger *zap.Logger) *Service {
+func NewService(store Store, connectedWithin time.Duration, metrics *metricsdb.Store, observationCadence time.Duration, dataStore *objectstore.Client, maxCheckpointGrace time.Duration, pricedAcceleratorTypes []string, maxLogLineChars int, signingSecret, proxyURL string, environments *EnvironmentRegistry, logger *zap.Logger) *Service {
 	priced := make(map[string]bool, len(pricedAcceleratorTypes))
 	for _, name := range pricedAcceleratorTypes {
 		priced[strings.ToLower(name)] = true
 	}
-	return &Service{store: store, connectedWithin: connectedWithin, metricsDBURL: metricsDBURL, observationCadence: observationCadence,
+	return &Service{store: store, connectedWithin: connectedWithin, metrics: metrics, observationCadence: observationCadence,
 		dataStore: dataStore, maxCheckpointGrace: maxCheckpointGrace,
 		pricedAcceleratorTypes: priced, maxLogLineChars: maxLogLineChars, signingSecret: signingSecret, proxyURL: proxyURL, environments: environments, logger: logger}
 }

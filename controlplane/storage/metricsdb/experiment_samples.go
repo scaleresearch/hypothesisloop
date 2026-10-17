@@ -28,29 +28,29 @@ type ExperimentSampleSet struct {
 // back as a single value repeated for the length of the run. The samples were never lost, only
 // resampled away on the way out, which is why the dashboard and the scenarios that read it saw
 // one rank where three had reported.
-func ExperimentMetricSamples(ctx context.Context, dbURL, experimentID string, since, until time.Time) (ExperimentSampleSet, error) {
+func (s *Store) ExperimentMetricSamples(ctx context.Context, experimentID string, since, until time.Time) (ExperimentSampleSet, error) {
 	if !until.After(since) {
 		return ExperimentSampleSet{}, fmt.Errorf("metricsdb.ExperimentMetricSamples: %s: until does not follow since", experimentID)
 	}
-	values, err := experimentSamplesFrom(ctx, dbURL, ExperimentMetricValue, experimentID, since, until)
+	values, err := s.experimentSamplesFrom(ctx, ExperimentMetricValue, experimentID, since, until)
 	if err != nil {
 		return ExperimentSampleSet{}, err
 	}
-	fractions, err := experimentSamplesFrom(ctx, dbURL, ExperimentMetricFraction, experimentID, since, until)
+	fractions, err := s.experimentSamplesFrom(ctx, ExperimentMetricFraction, experimentID, since, until)
 	if err != nil {
 		return ExperimentSampleSet{}, err
 	}
 	return ExperimentSampleSet{Values: values, Fractions: fractions}, nil
 }
 
-func experimentSamplesFrom(ctx context.Context, dbURL, table, experimentID string, since, until time.Time) ([]VectorSample, error) {
+func (s *Store) experimentSamplesFrom(ctx context.Context, table, experimentID string, since, until time.Time) ([]VectorSample, error) {
 	// Absolute bounds rather than a relative window, for the same reason every other read in
 	// this package uses them: the window must be the caller's, not the database's idea of now.
 	query := fmt.Sprintf(
 		`SELECT * FROM %s WHERE job_id = '%s' `+
 			`AND greptime_timestamp >= %d::TimestampMillisecond AND greptime_timestamp < %d::TimestampMillisecond`,
 		table, strings.ReplaceAll(experimentID, "'", "''"), since.UnixMilli(), until.UnixMilli())
-	samples, err := runClusterSnapshotQuery(ctx, dbURL, query)
+	samples, err := s.runClusterSnapshotQuery(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("metricsdb.ExperimentMetricSamples: %s: %w", table, err)
 	}

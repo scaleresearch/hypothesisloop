@@ -99,9 +99,9 @@ func metricTableSQL(metric string, labels ...string) string {
 }
 
 // EnsureObservationTables creates every table a SQL read names. Idempotent; run once at startup.
-func EnsureObservationTables(ctx context.Context, dbURL string) error {
+func (s *Store) EnsureObservationTables(ctx context.Context) error {
 	for _, ddl := range ensureObservationTablesSQL {
-		if err := execSQL(ctx, dbURL, ddl); err != nil {
+		if err := s.execSQL(ctx, ddl); err != nil {
 			return fmt.Errorf("metricsdb.EnsureObservationTables: %w", err)
 		}
 	}
@@ -119,18 +119,18 @@ type Observation struct {
 // RecordObservations writes every observation in one Prometheus remote-write request, for a caller (the node-agent push handler) that already has several
 // pods' readings in hand from a single payload and would otherwise issue one HTTP round trip per
 // pod for what is, from GreptimeDB's point of view, one write.
-func RecordObservations(ctx context.Context, dbURL string, observations []Observation) error {
+func (s *Store) RecordObservations(ctx context.Context, observations []Observation) error {
 	samples := make([]GaugeSample, 0, len(observations))
 	for _, o := range observations {
 		samples = append(samples, observationSample(o.ExperimentID, o.At, o.ExtraLabels))
 	}
-	return WriteGaugesAt(ctx, dbURL, samples)
+	return s.WriteGaugesAt(ctx, samples)
 }
 
 // RecordAdmission records that experimentID is being given capacity at `at`. Written before the
 // admission is claimed: observations on either side of it are never counted as one run.
-func RecordAdmission(ctx context.Context, dbURL, experimentID string, at time.Time) error {
-	return WriteGaugesAt(ctx, dbURL, []GaugeSample{{
+func (s *Store) RecordAdmission(ctx context.Context, experimentID string, at time.Time) error {
+	return s.WriteGaugesAt(ctx, []GaugeSample{{
 		MetricName: admissionMetric, Labels: map[string]string{"experiment_id": experimentID}, Value: 1, At: at,
 	}})
 }

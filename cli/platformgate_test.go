@@ -23,6 +23,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // principalOf is the caller a test token stands for: the agent or the coordinator a derived
@@ -45,18 +46,18 @@ func platformRoutes(caller auth.Principal) http.Handler {
 	r.Use(auth.Gate(authtest.As(caller), logger, map[string]string{"/watch": watch.Subprotocol}))
 	doc := httpapi.NewDoc(r, "hypothesisloop API", "1.0.0", "", auth.NewAccess(authtest.Placement{}), logger)
 	launch := platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model", SigningSecret: "secret", MaxHosted: 1}
-	experiments := platformexperiments.NewPlatformExperimentsService(nil, domain.QuotaConfig{}, logger, "", time.Minute).WithRepositories(struct{ githost.Provider }{}).
+	experiments := platformexperiments.NewPlatformExperimentsService(nil, domain.QuotaConfig{}, logger, nil, time.Minute).WithRepositories(struct{ githost.Provider }{}).
 		WithPlanning(platformexperiments.Planning{Limit: time.Minute, ProposedFor: time.Minute, PlannerKept: time.Minute}).WithAgentLaunch(launch)
 	httpapi.Register(doc, httpapi.Handlers{
 		Logger:              logger,
 		PlatformExperiments: experiments,
 		Hypotheses:          struct{ platformexperiments.Hypotheses }{},
 		Launch:              launch,
-		Accounts:            accounts.NewService(nil, nil, nil, nil, nil, "secret", accounts.RuntimeAddresses{}, accounts.Limits{MaxOrgsPerUser: 1, MaxProjectsPerOrg: 1}, doc.Access, logger),
+		Accounts:            accounts.NewService(nil, nil, nil, 0, "secret", accounts.RuntimeAddresses{}, accounts.Limits{MaxOrgsPerUser: 1, MaxProjectsPerOrg: 1}, doc.Access, logger),
 		Scheduler: scheduler.NewService(nil, nil, nil,
-			struct{ scheduler.CodeHost }{}, struct{ scheduler.InstalledCapacity }{}, struct{ scheduler.QuotaSettler }{}, "http://metrics.invalid", logger).
+			struct{ scheduler.CodeHost }{}, struct{ scheduler.InstalledCapacity }{}, struct{ scheduler.QuotaSettler }{}, metricsdb.New("http://metrics.invalid"), logger).
 			WithLoop(struct{ scheduler.Triggerable }{}),
-		Registry: registry.New(nil, nil, nil, logger, "http://metrics.invalid", nil),
+		Registry: registry.New(nil, nil, nil, logger, metricsdb.New("http://metrics.invalid"), nil),
 	})
 	access := auth.NewAccess(authtest.Placement{})
 	r.Get("/watch", watch.NewHandler(nil, nil, access, logger).ServeHTTP)

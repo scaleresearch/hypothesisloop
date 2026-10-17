@@ -17,6 +17,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // startStore fakes the calls a start makes and hands the allocation callback a fixed signup
@@ -402,7 +403,7 @@ func TestStartReleasesTheWholeShareUnlessABoundaryCanCut(t *testing.T) {
 			Stages: []domain.Stage{{LengthPct: 50, EvictPct: 50}, {LengthPct: 50, EvictPct: 0}},
 		}}
 		svc := newSignupTestService(t, store)
-		svc.metricsDBURL = metrics.URL
+		svc.metrics = metricsdb.New(metrics.URL)
 		quotas, err := svc.start(context.Background(), store.pe, time.Now().UTC())
 		metrics.Close()
 		if want == 0 {
@@ -424,7 +425,7 @@ func TestAPlatformExperimentAnswersWhatItSpent(t *testing.T) {
 		_, _ = fmt.Fprint(w, `{"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[1,"0.75"]}]}}`)
 	}))
 	defer metrics.Close()
-	svc := NewPlatformExperimentsService(&startStore{}, platformexperimentstest.Settings, zap.NewNop(), metrics.URL, time.Minute)
+	svc := NewPlatformExperimentsService(&startStore{}, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(metrics.URL), time.Minute)
 	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpOpen, domain.PlatformExpRunning, domain.PlatformExpClosed} {
 		pe := &domain.PlatformExperiment{ID: "pe-1", Status: status, BudgetAcceleratorHours: 2, CreatedAt: time.Now().Add(-time.Hour)}
 		if err := svc.Spend(context.Background(), pe); err != nil || pe.ConsumedAcceleratorHours == nil || *pe.ConsumedAcceleratorHours != 0.75 {

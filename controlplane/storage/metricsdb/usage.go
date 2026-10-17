@@ -18,27 +18,6 @@ const usedHoursMetric = "agent_quota_used_hours"
 // derived from non-terminal experiment rows in PostgreSQL; they are never copied into metrics.
 const kindObserved = "observed"
 
-// UsageTracker is the read/write path for observed terminal quota consumption (used_guaranteed_*/
-// used_burst_* in the old Postgres schema).
-//
-// Every sample is tagged with experiment_id, so each job owns its own series — an "agent's used
-// hours" bucket is never itself stored, only computed by summing per-job series at read time.
-// This makes completion/eviction accounting idempotent: writing a job's final cost (SetObserved)
-// is an absolute set against that job's own series, so replaying the same completion event twice
-// writes the same value instead of double-refunding or double-debiting.
-type UsageTracker struct {
-	dbURL string
-}
-
-// NewUsageTracker constructs a tracker backed by the GreptimeDB instance at dbURL.
-func NewUsageTracker(dbURL string) *UsageTracker {
-	return &UsageTracker{dbURL: dbURL}
-}
-
-// URL returns the GreptimeDB base URL this tracker is backed by, for callers (e.g. db.Store)
-// that need to make their own PopulateUsage/PopulateUsageOne calls against the same instance.
-func (t *UsageTracker) URL() string { return t.dbURL }
-
 func labelsFor(agentID, platformExpID, experimentID string, resourceType domain.ResourceType, tier domain.CapacityTier) map[string]string {
 	return map[string]string{
 		"agent_id":               agentID,
@@ -52,7 +31,7 @@ func labelsFor(agentID, platformExpID, experimentID string, resourceType domain.
 
 // SetObservedBatch writes every observed resource dimension for one terminal job in one remote
 // write. This prevents admission from ever seeing a partially-settled resource vector.
-func (t *UsageTracker) SetObservedBatch(ctx context.Context, agentID, platformExpID, experimentID string, tier domain.CapacityTier, amounts map[domain.ResourceType]float64) error {
+func (s *Store) SetObservedBatch(ctx context.Context, agentID, platformExpID, experimentID string, tier domain.CapacityTier, amounts map[domain.ResourceType]float64) error {
 	now := time.Now().UTC()
 	samples := make([]GaugeSample, 0, len(amounts))
 	for resourceType, amount := range amounts {
@@ -62,7 +41,7 @@ func (t *UsageTracker) SetObservedBatch(ctx context.Context, agentID, platformEx
 		samples = append(samples, GaugeSample{MetricName: usedHoursMetric,
 			Labels: labelsFor(agentID, platformExpID, experimentID, resourceType, tier), Value: amount, At: now})
 	}
-	return WriteGaugesAt(ctx, t.dbURL, samples)
+	return s.WriteGaugesAt(ctx, samples)
 }
 
 // minObservedLookback floors the last_over_time window so a platform experiment queried the
@@ -108,13 +87,13 @@ func ObservedLookback(start time.Time) string {
 // platform experiment's own creation time (see ObservedLookback) — callers that already hold the
 // domain.PlatformExperiment pass its CreatedAt; others fetch it once via their store, the same
 // pattern registry.GetTimeseries uses to size its own query window off the real experiment.
-func PopulateUsage(ctx context.Context, dbURL string, platformExpStart time.Time, platformExpID string, quotas []*domain.AgentQuota) error {
+func (s *Store) PopulateUsage(ctx context.Context, platformExpStart time.Time, platformExpID string, quotas []*domain.AgentQuota) error {
 	if len(quotas) == 0 {
 		return nil
 	}
 	promQL := fmt.Sprintf(`sum by (agent_id, resource_type, tier) (last_over_time(%s{platform_experiment_id=%q, kind=%q}[%s]))`,
 		usedHoursMetric, platformExpID, kindObserved, ObservedLookback(platformExpStart))
-	samples, err := QueryVector(ctx, dbURL, promQL)
+	samples, err := s.QueryVector(ctx, promQL)
 	if err != nil {
 		return fmt.Errorf("metricsdb.PopulateUsage: %w", err)
 	}
@@ -136,13 +115,13 @@ func PopulateUsage(ctx context.Context, dbURL string, platformExpStart time.Time
 
 // PopulateUsageOne fills a single quota's Used* fields from the metrics DB, summed across every
 // job the agent has run in this platform experiment. See PopulateUsage for platformExpStart.
-func PopulateUsageOne(ctx context.Context, dbURL string, platformExpStart time.Time, q *domain.AgentQuota) error {
+func (s *Store) PopulateUsageOne(ctx context.Context, platformExpStart time.Time, q *domain.AgentQuota) error {
 	if q == nil {
 		return nil
 	}
 	promQL := fmt.Sprintf(`sum by (resource_type, tier) (last_over_time(%s{agent_id=%q, platform_experiment_id=%q, kind=%q}[%s]))`,
 		usedHoursMetric, q.AgentID, q.PlatformExperimentID, kindObserved, ObservedLookback(platformExpStart))
-	samples, err := QueryVector(ctx, dbURL, promQL)
+	samples, err := s.QueryVector(ctx, promQL)
 	if err != nil {
 		return fmt.Errorf("metricsdb.PopulateUsageOne: %w", err)
 	}
@@ -156,10 +135,10 @@ func PopulateUsageOne(ctx context.Context, dbURL string, platformExpStart time.T
 // nothing has been settled for it yet (it is still running, or its terminal write has not landed).
 // This is the number the platform actually billed — read from the same absolute-set series
 // settlement writes, never recomputed from an estimate.
-func SettledCostForJob(ctx context.Context, dbURL string, platformExpStart time.Time, experimentID string) (map[domain.ResourceType]float64, bool, error) {
+func (s *Store) SettledCostForJob(ctx context.Context, platformExpStart time.Time, experimentID string) (map[domain.ResourceType]float64, bool, error) {
 	promQL := fmt.Sprintf(`last_over_time(%s{experiment_id=%q, kind=%q}[%s])`,
 		usedHoursMetric, experimentID, kindObserved, ObservedLookback(platformExpStart))
-	samples, err := QueryVector(ctx, dbURL, promQL)
+	samples, err := s.QueryVector(ctx, promQL)
 	if err != nil {
 		return nil, false, fmt.Errorf("metricsdb.SettledCostForJob: %w", err)
 	}
@@ -186,12 +165,12 @@ func applyUsedSample(q *domain.AgentQuota, tier domain.CapacityTier, value float
 // reservation. This is the "committed" half of stage-boundary progress; the caller adds live
 // usage of running attempts on top (see controller.stageProgress). Reading reservations
 // here would let a large queued job prematurely trip a stage boundary and cancel work.
-func TotalObservedAccH(ctx context.Context, dbURL string, platformExpStart time.Time, platformExpID string) (float64, error) {
+func (s *Store) TotalObservedAccH(ctx context.Context, platformExpStart time.Time, platformExpID string) (float64, error) {
 	// See PopulateUsage for why the lookback is sized off the platform experiment's own start
 	// time rather than a fixed constant.
 	promQL := fmt.Sprintf(`sum(last_over_time(%s{platform_experiment_id=%q, resource_type=%q, kind=%q}[%s]))`,
 		usedHoursMetric, platformExpID, string(domain.ResourceAcceleratorHours), kindObserved, ObservedLookback(platformExpStart))
-	samples, err := QueryVector(ctx, dbURL, promQL)
+	samples, err := s.QueryVector(ctx, promQL)
 	if err != nil {
 		return 0, fmt.Errorf("metricsdb.TotalObservedAccH: %w", err)
 	}
@@ -205,10 +184,10 @@ func TotalObservedAccH(ctx context.Context, dbURL string, platformExpStart time.
 // experiment id. A requeue settles the interrupted stint while the job stays alive, so a reader
 // adding a running job's cumulative observed cost on top of settled usage must subtract that
 // job's entry here or the earlier stints count twice.
-func SettledAccHByJob(ctx context.Context, dbURL string, platformExpStart time.Time, platformExpID string) (map[string]float64, error) {
+func (s *Store) SettledAccHByJob(ctx context.Context, platformExpStart time.Time, platformExpID string) (map[string]float64, error) {
 	promQL := fmt.Sprintf(`sum by (experiment_id) (last_over_time(%s{platform_experiment_id=%q, resource_type=%q, kind=%q}[%s]))`,
 		usedHoursMetric, platformExpID, string(domain.ResourceAcceleratorHours), kindObserved, ObservedLookback(platformExpStart))
-	samples, err := QueryVector(ctx, dbURL, promQL)
+	samples, err := s.QueryVector(ctx, promQL)
 	if err != nil {
 		return nil, fmt.Errorf("metricsdb.SettledAccHByJob: %w", err)
 	}

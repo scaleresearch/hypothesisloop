@@ -37,7 +37,7 @@ func TestLatestRunHealthReadsEachAgentsLatestValues(t *testing.T) {
 		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[` + answers[metric] + `]}}`))
 	}))
 	defer server.Close()
-	got, err := LatestRunHealth(context.Background(), server.URL, "pe-1", time.Now().Add(-time.Hour))
+	got, err := New(server.URL).LatestRunHealth(context.Background(), "pe-1", time.Now().Add(-time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestLatestRunHealthReadsWhetherAnAgentIsRateLimited(t *testing.T) {
 		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[` + answers[metric] + `]}}`))
 	}))
 	defer server.Close()
-	got, err := LatestRunHealth(context.Background(), server.URL, "pe-1", time.Now().Add(-time.Hour))
+	got, err := New(server.URL).LatestRunHealth(context.Background(), "pe-1", time.Now().Add(-time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestLatestHarnessStateReadsWhatEachHarnessLastSaid(t *testing.T) {
 		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[` + answers[metric] + `]}}`))
 	}))
 	defer server.Close()
-	got, err := LatestHarnessState(context.Background(), server.URL, "pe-1", time.Now().Add(-time.Hour))
+	got, err := New(server.URL).LatestHarnessState(context.Background(), "pe-1", time.Now().Add(-time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestRecordHarnessStateWritesTheRateLimitOnlyOnceRead(t *testing.T) {
 	}))
 	defer server.Close()
 	utilization := 0.4
-	err := RecordHarnessState(context.Background(), server.URL, time.Now(), []domain.HarnessState{
+	err := New(server.URL).RecordHarnessState(context.Background(), time.Now(), []domain.HarnessState{
 		{PlatformExperimentID: "pe-1", AgentID: "ag-1", Role: "competitor", Subagents: 2, TurnSince: time.Now(), Model: domain.RateLimit{Utilization: &utilization}},
 		{PlatformExperimentID: "pe-1", Role: "coordinator", TurnWaiting: true, TurnSince: time.Now(), InstructionsDigest: "0123456789ab", AgentType: "coordinator", AgentTypeVersion: 3},
 	})

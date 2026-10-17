@@ -30,15 +30,15 @@ type Store interface {
 // Settler computes and durably writes a terminal experiment's final observed usage across every
 // resource dimension it was estimated for.
 type Settler struct {
-	usage        UsageWriter
-	metricsDBURL string
-	gapCap       time.Duration
+	usage   UsageWriter
+	metrics *metricsdb.Store
+	gapCap  time.Duration
 }
 
 // New constructs a Settler. gapCap must match every other observed-usage query in this
 // deployment, so every termination path agrees on what "how long did this run" means.
-func New(usage UsageWriter, metricsDBURL string, gapCap time.Duration) *Settler {
-	return &Settler{usage: usage, metricsDBURL: metricsDBURL, gapCap: gapCap}
+func New(usage UsageWriter, metrics *metricsdb.Store, gapCap time.Duration) *Settler {
+	return &Settler{usage: usage, metrics: metrics, gapCap: gapCap}
 }
 
 // endedInInfrastructureFault reports whether exp's FINAL outcome was the environment's fault:
@@ -94,7 +94,7 @@ func (s *Settler) Settle(ctx context.Context, exp *domain.Experiment) error {
 	// it off the exact state ResolveTermination writes when the requeue allowance runs out.
 	if exp.EstimatedDurationHours > 0 && !endedInInfrastructureFault(exp) {
 		var err error
-		hours, err = metricsdb.ObservedElapsedHours(ctx, s.metricsDBURL, exp.ID, exp.CreatedAt, now, s.gapCap)
+		hours, err = s.metrics.ObservedElapsedHours(ctx, exp.ID, exp.CreatedAt, now, s.gapCap)
 		if err != nil {
 			return fmt.Errorf("settlement: observed elapsed hours: %w", err)
 		}

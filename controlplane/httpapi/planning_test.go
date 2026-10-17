@@ -25,6 +25,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 func measuredBaseline() *platformexperiments.Baseline {
@@ -39,7 +40,7 @@ func measuredBaseline() *platformexperiments.Baseline {
 // planningRouter is the planning routes and the ones a draft passes through, over store.
 func planningRouter(t *testing.T, store platformexperiments.PlatformExperimentsStore, caller auth.Principal) (*platformexperiments.PlatformExperimentsService, func(method, path string, body any) (int, map[string]any)) {
 	t.Helper()
-	svc := platformexperiments.NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), platformexperimentstest.NoUsage(t), time.Minute)
+	svc := platformexperiments.NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), time.Minute)
 	placement := authtest.Placement{
 		Projects: map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}, "prj-b": {ID: "prj-b", OrgID: "org-b"}},
 		PlatformExperiments: map[string]domain.Tenancy{

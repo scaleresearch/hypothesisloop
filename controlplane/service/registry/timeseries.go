@@ -38,7 +38,7 @@ func (s *Service) platformExperimentSeries(ctx context.Context, gauge, platformE
 	}
 
 	query := fmt.Sprintf(`%s{platform_experiment_id=%q, metric_name=%q}`, gauge, platformExpID, metricName)
-	result, err := metricsdb.QueryRange(ctx, s.metricsDBURL, query, start, end, step)
+	result, err := s.metrics.QueryRange(ctx, query, start, end, step)
 	if err != nil {
 		return nil, fmt.Errorf("registry.GetPlatformExperimentTimeseries: %w", err)
 	}
@@ -87,7 +87,7 @@ func (s *Service) GetTimeseries(ctx context.Context, experimentID string) ([]*do
 	// reports under one label set, so its ranks' samples land microseconds apart in one series;
 	// a range query keeps only the last one in each step and repeats it, which turned three
 	// ranks reporting three different values into one value reported all run long.
-	recorded, err := metricsdb.ExperimentMetricSamples(ctx, s.metricsDBURL, experimentID, start, end)
+	recorded, err := s.metrics.ExperimentMetricSamples(ctx, experimentID, start, end)
 	if err != nil {
 		return nil, fmt.Errorf("registry.GetTimeseries: %w", err)
 	}

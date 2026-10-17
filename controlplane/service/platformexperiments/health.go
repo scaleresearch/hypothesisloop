@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // RunHealth is where each agent of a platform experiment, and its hosted coordinator, last stood,
@@ -24,7 +23,7 @@ func (s *PlatformExperimentsService) Health(ctx context.Context, id string) (*Ru
 	if pe == nil {
 		return nil, ErrPlatformExperimentNotFound
 	}
-	agents, err := metricsdb.LatestRunHealth(ctx, s.metricsDBURL, pe.ID, pe.CreatedAt)
+	agents, err := s.metrics.LatestRunHealth(ctx, pe.ID, pe.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.Health: %w", err)
 	}

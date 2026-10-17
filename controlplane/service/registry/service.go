@@ -8,6 +8,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/graphdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
 )
 
@@ -75,10 +76,10 @@ type Graph interface {
 
 // Service manages experiments and their metric timeseries.
 type Service struct {
-	store        Store
-	graph        Graph
-	logger       *zap.Logger
-	metricsDBURL string
+	store   Store
+	graph   Graph
+	logger  *zap.Logger
+	metrics *metricsdb.Store
 	// dataStore is the only way this service learns what a job wrote — listed live, never
 	// mirrored into PostgreSQL.
 	dataStore *objectstore.Client
@@ -96,13 +97,13 @@ type EventNotifier interface {
 
 // New returns a new registry Service, which announces metric arrivals and hypothesis changes on
 // events.
-func New(store Store, graph Graph, events EventNotifier, logger *zap.Logger, metricsDBURL string, dataStore *objectstore.Client) *Service {
+func New(store Store, graph Graph, events EventNotifier, logger *zap.Logger, metrics *metricsdb.Store, dataStore *objectstore.Client) *Service {
 	return &Service{
-		store:        store,
-		graph:        graph,
-		events:       events,
-		logger:       logger,
-		metricsDBURL: metricsDBURL,
-		dataStore:    dataStore,
+		store:     store,
+		graph:     graph,
+		events:    events,
+		logger:    logger,
+		metrics:   metrics,
+		dataStore: dataStore,
 	}
 }

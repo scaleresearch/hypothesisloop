@@ -18,7 +18,7 @@ func TestLiveClusterAutoscalerCapabilityIsFailClosedForAnUnreportedCluster(t *te
 	}))
 	defer server.Close()
 
-	got, err := LiveClusterAutoscalerCapability(context.Background(), server.URL, time.Minute)
+	got, err := New(server.URL).LiveClusterAutoscalerCapability(context.Background(), time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestLiveClusterIDsOmitsClustersWithNoReportedIdentity(t *testing.T) {
 	}))
 	defer server.Close()
 
-	got, err := LiveClusterIDs(context.Background(), server.URL, time.Minute)
+	got, err := New(server.URL).LiveClusterIDs(context.Background(), time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}

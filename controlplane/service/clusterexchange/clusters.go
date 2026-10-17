@@ -11,7 +11,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
-	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 type occupancy struct{ busy, total int64 }
@@ -57,19 +56,19 @@ type ClusterInfo struct {
 
 // Clusters is every cluster that has ever polled, and whether its agent is connected now.
 func (s *Service) Clusters(ctx context.Context) ([]ClusterInfo, error) {
-	heartbeats, err := metricsdb.LiveClusterHeartbeats(ctx, s.metricsDBURL, s.connectedWithin)
+	heartbeats, err := s.metrics.LiveClusterHeartbeats(ctx, s.connectedWithin)
 	if err != nil {
 		return nil, auth.Internal(s.logger, "list clusters", err)
 	}
-	available, total, err := metricsdb.LiveClusterAcceleratorAvailableAndTotal(ctx, s.metricsDBURL, s.connectedWithin)
+	available, total, err := s.metrics.LiveClusterAcceleratorAvailableAndTotal(ctx, s.connectedWithin)
 	if err != nil {
 		return nil, auth.Internal(s.logger, "list clusters", err)
 	}
-	clusterIDs, err := metricsdb.LiveClusterIDs(ctx, s.metricsDBURL, s.connectedWithin)
+	clusterIDs, err := s.metrics.LiveClusterIDs(ctx, s.connectedWithin)
 	if err != nil {
 		return nil, auth.Internal(s.logger, "list clusters", err)
 	}
-	autoscalerEnabled, err := metricsdb.LiveClusterAutoscalerCapability(ctx, s.metricsDBURL, s.connectedWithin)
+	autoscalerEnabled, err := s.metrics.LiveClusterAutoscalerCapability(ctx, s.connectedWithin)
 	if err != nil {
 		return nil, auth.Internal(s.logger, "list clusters", err)
 	}

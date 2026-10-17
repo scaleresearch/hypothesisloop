@@ -48,7 +48,7 @@ type JobStatusSample struct {
 	At              time.Time
 }
 
-func RecordJobStatuses(ctx context.Context, dbURL, clusterName string, at time.Time, statuses []JobStatusSample) error {
+func (s *Store) RecordJobStatuses(ctx context.Context, clusterName string, at time.Time, statuses []JobStatusSample) error {
 	if clusterName == "" || at.IsZero() {
 		return fmt.Errorf("metricsdb.RecordJobStatuses: cluster and snapshot time are required")
 	}
@@ -87,7 +87,7 @@ func RecordJobStatuses(ctx context.Context, dbURL, clusterName string, at time.T
 			}, Value: 1, At: status.At})
 		}
 	}
-	return WriteGaugesAt(ctx, dbURL, samples)
+	return s.WriteGaugesAt(ctx, samples)
 }
 
 // SnapshotPresence answers, in one round trip, the two independent questions the eviction path
@@ -123,7 +123,7 @@ const GoneConfirmingSnapshots = 2
 // most recent complete snapshots have omitted one experiment. Both facts come from the snapshot
 // series' own recorded observation times, never from wall-clock arithmetic over sample
 // timestamps, so a cluster outage freezes the absence count instead of growing it.
-func ClusterSnapshotPresence(ctx context.Context, dbURL, experimentID, clusterName string, createdAt, now time.Time) (SnapshotPresence, error) {
+func (s *Store) ClusterSnapshotPresence(ctx context.Context, experimentID, clusterName string, createdAt, now time.Time) (SnapshotPresence, error) {
 	since := ObservationWindowStart(createdAt)
 	if !now.After(since) {
 		return SnapshotPresence{}, fmt.Errorf("metricsdb.ClusterSnapshotPresence: %s was created after now", experimentID)
@@ -143,7 +143,7 @@ func ClusterSnapshotPresence(ctx context.Context, dbURL, experimentID, clusterNa
 		clusterJobSnapshotMetric, quote(clusterName), bounds,
 		clusterJobObservedAtMetric, quote(experimentID), quote(clusterName), bounds,
 	)
-	row, found, err := querySingleRow(ctx, dbURL, "metricsdb.ClusterSnapshotPresence", query, 3)
+	row, found, err := s.querySingleRow(ctx, "metricsdb.ClusterSnapshotPresence", query, 3)
 	if err != nil {
 		return SnapshotPresence{}, err
 	}
@@ -164,7 +164,7 @@ func ClusterSnapshotPresence(ctx context.Context, dbURL, experimentID, clusterNa
 
 // LatestJobPhase returns the most recent phase observed within window. found=false means no
 // complete cluster snapshot exists; callers decide whether absence is expected for their state.
-func LatestJobPhase(ctx context.Context, dbURL, experimentID, clusterName string, window time.Duration) (domain.JobPhase, bool, error) {
+func (s *Store) LatestJobPhase(ctx context.Context, experimentID, clusterName string, window time.Duration) (domain.JobPhase, bool, error) {
 	if window <= 0 {
 		return domain.JobPhasePending, false, fmt.Errorf("metricsdb.LatestJobPhase: freshness window must be positive")
 	}
@@ -179,7 +179,7 @@ func LatestJobPhase(ctx context.Context, dbURL, experimentID, clusterName string
 		clusterJobPhaseMetric, quote(experimentID), quote(clusterName),
 		clusterJobObservedAtMetric, quote(experimentID), quote(clusterName),
 	)
-	snapshotValue, phaseValue, observedAtValue, found, err := queryJobStatusSnapshot(ctx, dbURL, query)
+	snapshotValue, phaseValue, observedAtValue, found, err := s.queryJobStatusSnapshot(ctx, query)
 	if err != nil {
 		return domain.JobPhasePending, false, err
 	}
@@ -211,8 +211,8 @@ func LatestJobPhase(ctx context.Context, dbURL, experimentID, clusterName string
 	}
 }
 
-func queryJobStatusSnapshot(ctx context.Context, dbURL, query string) (float64, *float64, *float64, bool, error) {
-	row, found, err := querySingleRow(ctx, dbURL, "metricsdb.LatestJobPhase", query, 3)
+func (s *Store) queryJobStatusSnapshot(ctx context.Context, query string) (float64, *float64, *float64, bool, error) {
+	row, found, err := s.querySingleRow(ctx, "metricsdb.LatestJobPhase", query, 3)
 	if err != nil || !found {
 		return 0, nil, nil, false, err
 	}
@@ -225,8 +225,8 @@ func queryJobStatusSnapshot(ctx context.Context, dbURL, query string) (float64, 
 // querySingleRow runs a SQL query expected to yield exactly one row of cols numeric columns and
 // returns that row. found=false means the query returned no rows at all. Individual columns may
 // still be nil (SQL NULL) — that is the caller's to interpret. op names the caller in errors.
-func querySingleRow(ctx context.Context, dbURL, op, query string, cols int) ([]*float64, bool, error) {
-	u, err := url.Parse(dbURL + "/v1/sql")
+func (s *Store) querySingleRow(ctx context.Context, op, query string, cols int) ([]*float64, bool, error) {
+	u, err := url.Parse(s.url + "/v1/sql")
 	if err != nil {
 		return nil, false, fmt.Errorf("%s: query URL: %w", op, err)
 	}
@@ -283,8 +283,8 @@ func querySingleRow(ctx context.Context, dbURL, op, query string, cols int) ([]*
 }
 
 // LatestAcceleratorType resolves the latest accelerator marker from the metrics store.
-func LatestAcceleratorType(ctx context.Context, dbURL, experimentID string, now time.Time, window time.Duration) (domain.AcceleratorType, bool, error) {
-	changes, err := acceleratorTypeChanges(ctx, dbURL, experimentID, now.Add(-window), now, time.Second)
+func (s *Store) LatestAcceleratorType(ctx context.Context, experimentID string, now time.Time, window time.Duration) (domain.AcceleratorType, bool, error) {
+	changes, err := s.acceleratorTypeChanges(ctx, experimentID, now.Add(-window), now, time.Second)
 	if err != nil {
 		return "", false, err
 	}

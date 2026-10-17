@@ -121,68 +121,68 @@ func TestPackageQueriesAreValidPromQL(t *testing.T) {
 		run  func(dbURL string) error
 	}{
 		{"isAliveOn", func(dbURL string) error {
-			_, err := isAliveOn(ctx, dbURL, "m", "experiment_id", "exp-1", time.Hour)
+			_, err := New(dbURL).isAliveOn(ctx, "m", "experiment_id", "exp-1", time.Hour)
 			return err
 		}},
 		{"metricSampleCount", func(dbURL string) error {
-			_, err := metricSampleCount(ctx, dbURL, "exp-1", "loss", time.Hour)
+			_, err := New(dbURL).metricSampleCount(ctx, "exp-1", "loss", time.Hour)
 			return err
 		}},
 		{"BestPerAgentOnMetric (normal start)", func(dbURL string) error {
 			pe := &domain.PlatformExperiment{ID: "pe-1", CreatedAt: recent}
-			_, _, err := BestPerAgentOnMetric(ctx, dbURL, pe, domain.MetricDefinition{Key: "val_accuracy", Direction: "maximize"}, nil)
+			_, _, err := New(dbURL).BestPerAgentOnMetric(ctx, pe, domain.MetricDefinition{Key: "val_accuracy", Direction: "maximize"}, nil)
 			return err
 		}},
 		{"BestPerAgentOnMetric (zero start)", func(dbURL string) error {
 			pe := &domain.PlatformExperiment{ID: "pe-1", CreatedAt: zero}
-			_, _, err := BestPerAgentOnMetric(ctx, dbURL, pe, domain.MetricDefinition{Key: "val_accuracy", Direction: "minimize"}, nil)
+			_, _, err := New(dbURL).BestPerAgentOnMetric(ctx, pe, domain.MetricDefinition{Key: "val_accuracy", Direction: "minimize"}, nil)
 			return err
 		}},
 		{"BestPerAgentOnMetric (constraint, read by its last value)", func(dbURL string) error {
 			bound := 0.0
 			pe := &domain.PlatformExperiment{ID: "pe-1", CreatedAt: recent}
-			_, _, err := BestPerAgentOnMetric(ctx, dbURL, pe, domain.MetricDefinition{Key: "digest_mismatches", Direction: "minimize", Role: domain.MetricRoleConstraint, Bound: &bound}, nil)
+			_, _, err := New(dbURL).BestPerAgentOnMetric(ctx, pe, domain.MetricDefinition{Key: "digest_mismatches", Direction: "minimize", Role: domain.MetricRoleConstraint, Bound: &bound}, nil)
 			return err
 		}},
 		{"BestPerAgentOnMetric (attribute, read by its last value)", func(dbURL string) error {
 			pe := &domain.PlatformExperiment{ID: "pe-1", CreatedAt: recent}
-			_, _, err := BestPerAgentOnMetric(ctx, dbURL, pe, domain.MetricDefinition{Key: "invalid_outputs", Direction: "minimize", Role: domain.MetricRoleAttribute}, nil)
+			_, _, err := New(dbURL).BestPerAgentOnMetric(ctx, pe, domain.MetricDefinition{Key: "invalid_outputs", Direction: "minimize", Role: domain.MetricRoleAttribute}, nil)
 			return err
 		}},
 		{"RankableJobs (zero start)", func(dbURL string) error {
 			bound := 1.0
 			pe := &domain.PlatformExperiment{ID: "pe-1", CreatedAt: zero, Metrics: []domain.MetricDefinition{
 				{Key: "exact_match", Direction: "maximize", Role: domain.MetricRoleConstraint, Bound: &bound}}}
-			_, err := RankableJobs(ctx, dbURL, pe, nil)
+			_, err := New(dbURL).RankableJobs(ctx, pe, nil)
 			return err
 		}},
 		{"acceleratorTypeChanges", func(dbURL string) error {
-			_, err := acceleratorTypeChanges(ctx, dbURL, "exp-1", now.Add(-time.Hour), now, 30*time.Second)
+			_, err := New(dbURL).acceleratorTypeChanges(ctx, "exp-1", now.Add(-time.Hour), now, 30*time.Second)
 			return err
 		}},
 		{"lastValuePerCluster", func(dbURL string) error {
-			_, err := lastValuePerCluster(ctx, dbURL, "some_metric", 5*time.Minute)
+			_, err := New(dbURL).lastValuePerCluster(ctx, "some_metric", 5*time.Minute)
 			return err
 		}},
 		{"PopulateUsage (normal start)", func(dbURL string) error {
-			return PopulateUsage(ctx, dbURL, recent, "pe-1", []*domain.AgentQuota{{AgentID: "a-1", PlatformExperimentID: "pe-1"}})
+			return New(dbURL).PopulateUsage(ctx, recent, "pe-1", []*domain.AgentQuota{{AgentID: "a-1", PlatformExperimentID: "pe-1"}})
 		}},
 		{"PopulateUsage (zero start)", func(dbURL string) error {
-			return PopulateUsage(ctx, dbURL, zero, "pe-1", []*domain.AgentQuota{{AgentID: "a-1", PlatformExperimentID: "pe-1"}})
+			return New(dbURL).PopulateUsage(ctx, zero, "pe-1", []*domain.AgentQuota{{AgentID: "a-1", PlatformExperimentID: "pe-1"}})
 		}},
 		{"PopulateUsageOne (zero start)", func(dbURL string) error {
-			return PopulateUsageOne(ctx, dbURL, zero, &domain.AgentQuota{AgentID: "a-1", PlatformExperimentID: "pe-1"})
+			return New(dbURL).PopulateUsageOne(ctx, zero, &domain.AgentQuota{AgentID: "a-1", PlatformExperimentID: "pe-1"})
 		}},
 		{"SettledCostForJob (zero start)", func(dbURL string) error {
-			_, _, err := SettledCostForJob(ctx, dbURL, zero, "exp-1")
+			_, _, err := New(dbURL).SettledCostForJob(ctx, zero, "exp-1")
 			return err
 		}},
 		{"TotalObservedAccH (zero start)", func(dbURL string) error {
-			_, err := TotalObservedAccH(ctx, dbURL, zero, "pe-1")
+			_, err := New(dbURL).TotalObservedAccH(ctx, zero, "pe-1")
 			return err
 		}},
 		{"SettledAccHByJob (zero start)", func(dbURL string) error {
-			_, err := SettledAccHByJob(ctx, dbURL, zero, "pe-1")
+			_, err := New(dbURL).SettledAccHByJob(ctx, zero, "pe-1")
 			return err
 		}},
 	}

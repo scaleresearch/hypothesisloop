@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // JobCost is what one job actually cost, as opposed to what it reserved. Every field is derived
@@ -54,7 +53,7 @@ func (s *PlatformExperimentsService) JobCost(ctx context.Context, experimentID s
 		AcceleratorCount:  exp.AcceleratorCount,
 	}
 
-	settled, ok, err := metricsdb.SettledCostForJob(ctx, s.metricsDBURL, pe.CreatedAt, exp.ID)
+	settled, ok, err := s.metrics.SettledCostForJob(ctx, pe.CreatedAt, exp.ID)
 	if err != nil {
 		return nil, fmt.Errorf("quota.JobCost: %w", err)
 	}

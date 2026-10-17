@@ -51,7 +51,7 @@ func TestWhereAJobRanIsTheNodeAndTheMachineItsRuntimeReported(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(answer))
 		}))
-		ranOn, err := LatestRanOn(context.Background(), server.URL, job, time.Now().UTC())
+		ranOn, err := New(server.URL).LatestRanOn(context.Background(), job, time.Now().UTC())
 		server.Close()
 		if err != nil || !reflect.DeepEqual(ranOn["exp-1"], wants[name]) {
 			t.Errorf("%s: ran on = %+v, %v, want %+v", name, ranOn, err, wants[name])
@@ -77,7 +77,7 @@ func TestWhereAPageOfJobsRanIsOneQuery(t *testing.T) {
 	page := []*domain.Experiment{
 		{ID: "exp-rented", CreatedAt: now.Add(-time.Hour)}, {ID: "exp-own", CreatedAt: oldest}, {ID: "exp-queued", CreatedAt: now.Add(-time.Minute)},
 	}
-	ranOn, err := LatestRanOn(context.Background(), server.URL, page, now)
+	ranOn, err := New(server.URL).LatestRanOn(context.Background(), page, now)
 	want := map[string]*domain.RanOn{
 		"exp-rented": {Node: "rtx4090-0", Machine: &domain.JobMachine{HostID: "16358"}},
 		"exp-own":    {Node: "box-b"},
@@ -94,7 +94,7 @@ func TestWhereAPageOfJobsRanIsOneQuery(t *testing.T) {
 		}
 	}
 
-	if none, err := LatestRanOn(context.Background(), server.URL, nil, now); err != nil || len(none) != 0 || len(asked) != 1 {
+	if none, err := New(server.URL).LatestRanOn(context.Background(), nil, now); err != nil || len(none) != 0 || len(asked) != 1 {
 		t.Errorf("no jobs = %+v, %v after %d queries, want nothing and no query", none, err, len(asked))
 	}
 }

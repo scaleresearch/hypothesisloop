@@ -19,6 +19,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 type noExperimentStore struct{ fakeStore }
@@ -178,7 +179,7 @@ func TestResultsTheMetricsStoreRefusesAreAnInternalErrorAndNotNotFound(t *testin
 	defer metricsDB.Close()
 	r := authtest.Router(authtest.Staff)
 	doc := NewDoc(r, "test", "1.0.0", "", auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	svc := reaching(platformexperiments.NewPlatformExperimentsService(constraintResultsStore{}, platformexperimentstest.Settings, zap.NewNop(), metricsDB.URL, 3*time.Minute), domain.CPUType)
+	svc := reaching(platformexperiments.NewPlatformExperimentsService(constraintResultsStore{}, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(metricsDB.URL), 3*time.Minute), domain.CPUType)
 	registerPlatformExperimentsAndBudget(doc, svc.WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning))
 
 	rec := httptest.NewRecorder()

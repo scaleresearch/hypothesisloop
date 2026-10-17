@@ -72,7 +72,7 @@ type GaugeSample struct {
 // which reports every pod on the node in one payload) should batch them here rather than issuing
 // one HTTP round trip per sample. Each sample carries the moment it
 // was observed, so a delayed delivery is not counted as elapsed time.
-func WriteGaugesAt(ctx context.Context, dbURL string, samples []GaugeSample) error {
+func (s *Store) WriteGaugesAt(ctx context.Context, samples []GaugeSample) error {
 	if len(samples) == 0 {
 		return nil
 	}
@@ -95,7 +95,7 @@ func WriteGaugesAt(ctx context.Context, dbURL string, samples []GaugeSample) err
 	compressed := snappy.Encode(nil, raw)
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		dbURL+"/v1/prometheus/write", bytes.NewReader(compressed))
+		s.url+"/v1/prometheus/write", bytes.NewReader(compressed))
 	if err != nil {
 		return fmt.Errorf("metricsdb.WriteGaugesAt: build request: %w", err)
 	}
@@ -123,8 +123,8 @@ type VectorSample struct {
 
 // QueryVector executes a PromQL instant query against GreptimeDB's Prometheus-compatible query
 // API and returns every series in the result vector.
-func QueryVector(ctx context.Context, dbURL, promQL string) ([]VectorSample, error) {
-	u, err := url.Parse(dbURL + "/v1/prometheus/api/v1/query")
+func (s *Store) QueryVector(ctx context.Context, promQL string) ([]VectorSample, error) {
+	u, err := url.Parse(s.url + "/v1/prometheus/api/v1/query")
 	if err != nil {
 		return nil, fmt.Errorf("metricsdb.QueryVector: %w", err)
 	}
@@ -217,14 +217,14 @@ type RangeSeries struct {
 // evaluating promQL at every `step`-spaced point from start to end and returning every series in
 // the result matrix. Every reader that needs to know when something actually happened (not just
 // its current value) goes through this — see metricsdb.ObservedElapsedHours.
-func QueryRange(ctx context.Context, dbURL, promQL string, start, end time.Time, step time.Duration) ([]RangeSeries, error) {
+func (s *Store) QueryRange(ctx context.Context, promQL string, start, end time.Time, step time.Duration) ([]RangeSeries, error) {
 	if step <= 0 {
 		return nil, fmt.Errorf("metricsdb.QueryRange: step must be positive")
 	}
 	if end.Before(start) {
 		return nil, fmt.Errorf("metricsdb.QueryRange: end precedes start")
 	}
-	u, err := url.Parse(dbURL + "/v1/prometheus/api/v1/query_range")
+	u, err := url.Parse(s.url + "/v1/prometheus/api/v1/query_range")
 	if err != nil {
 		return nil, fmt.Errorf("metricsdb.QueryRange: %w", err)
 	}

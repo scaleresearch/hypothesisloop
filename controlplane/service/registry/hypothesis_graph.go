@@ -7,7 +7,6 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/graphdb"
-	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // GraphNode is a hypothesis in its platform experiment's graph with what was found for it.
@@ -194,7 +193,7 @@ func (s *Service) evidence(ctx context.Context, metrics []domain.MetricDefinitio
 	if err != nil {
 		return nil, err
 	}
-	if err := metricsdb.PopulateJobMetrics(ctx, s.metricsDBURL, s.store.GetPlatformExperimentMetrics, jobs); err != nil {
+	if err := s.metrics.PopulateJobMetrics(ctx, s.store.GetPlatformExperimentMetrics, jobs); err != nil {
 		return nil, err
 	}
 	primary, _ := domain.PrimaryRankingMetric(metrics)

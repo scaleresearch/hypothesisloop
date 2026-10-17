@@ -42,7 +42,7 @@ type registryAs struct {
 func newRegistryAs(t *testing.T, caller auth.Principal) *registryAs {
 	t.Helper()
 	store, graph, events := newPoolStore(), newFakeGraph(), &recordedEvents{}
-	svc := registry.New(store, graph, events, zap.NewNop(), "", nil)
+	svc := registry.New(store, graph, events, zap.NewNop(), nil, nil)
 	ctx := context.Background()
 	seed := func(agent, pe, text string) *domain.Hypothesis {
 		hyp, _, _, _, err := svc.RegisterHypothesis(ctx, agent, agentActor(agent), pe, text, []domain.LinkSpec{{Type: domain.LinkBuildsOn, To: pe}}, nil)

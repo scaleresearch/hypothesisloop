@@ -14,6 +14,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 type placedOn map[string]string
@@ -87,7 +88,7 @@ func TestALivenessSampleCountsOnlyForAJobPlacedOnTheCallersCluster(t *testing.T)
 		"no principal":                      {nil, []string{"job-mine"}, 401, nil, []string{"job-mine"}},
 	} {
 		db, writes := metricsDB(t)
-		code := pushAs(t, NewPushHandler(db.URL, placements), tc.caller, tc.jobs...)
+		code := pushAs(t, NewPushHandler(metricsdb.New(db.URL), placements), tc.caller, tc.jobs...)
 		if code != tc.status {
 			t.Errorf("%s: status = %d, want %d", name, code, tc.status)
 		}

@@ -91,28 +91,6 @@ type ObservedState interface {
 	RecordAdmission(ctx context.Context, experimentID string, at time.Time) error
 }
 
-// metricsDBObserver is the only production ObservedState: metricsdb answers in real time.
-type metricsDBObserver struct {
-	url    string
-	gapCap time.Duration
-}
-
-func (o metricsDBObserver) ObservedElapsedHours(ctx context.Context, experimentID string, createdAt, now time.Time) (float64, error) {
-	return metricsdb.ObservedElapsedHours(ctx, o.url, experimentID, createdAt, now, o.gapCap)
-}
-
-func (o metricsDBObserver) ObservedStintElapsedHours(ctx context.Context, experimentID string, createdAt, now time.Time) (float64, error) {
-	return metricsdb.ObservedStintElapsedHours(ctx, o.url, experimentID, createdAt, now, o.gapCap)
-}
-
-func (o metricsDBObserver) RecordAdmission(ctx context.Context, experimentID string, at time.Time) error {
-	return metricsdb.RecordAdmission(ctx, o.url, experimentID, at)
-}
-
-func (o metricsDBObserver) LatestExperimentNode(ctx context.Context, experimentID string, createdAt, now time.Time) (string, bool, error) {
-	return metricsdb.LatestExperimentNode(ctx, o.url, experimentID, createdAt, now)
-}
-
 // ClusterCapacity is what the loop reads of the clusters' capacity: live reports net of desired
 // footprint. Placing a job is its ClaimSubmitted row alone, which the cluster reconciles against.
 type ClusterCapacity interface {
@@ -280,8 +258,31 @@ func (l *Loop) WithHeartbeat(d time.Duration) *Loop {
 // WithObservedTimeConfig wires the GreptimeDB URL and gap-cap/step preempt() uses to rank
 // victims by real observed runtime. Pass the same values every other observed-time consumer in
 // this deployment uses.
-func (l *Loop) WithObservedTimeConfig(metricsDBURL string, gapCap time.Duration) *Loop {
-	l.observed = metricsDBObserver{url: metricsDBURL, gapCap: gapCap}
+// observedMetrics is the only production ObservedState: the metrics store, read with the loop's
+// observation cadence.
+type observedMetrics struct {
+	metrics *metricsdb.Store
+	gapCap  time.Duration
+}
+
+func (o observedMetrics) ObservedElapsedHours(ctx context.Context, experimentID string, createdAt, now time.Time) (float64, error) {
+	return o.metrics.ObservedElapsedHours(ctx, experimentID, createdAt, now, o.gapCap)
+}
+
+func (o observedMetrics) ObservedStintElapsedHours(ctx context.Context, experimentID string, createdAt, now time.Time) (float64, error) {
+	return o.metrics.ObservedStintElapsedHours(ctx, experimentID, createdAt, now, o.gapCap)
+}
+
+func (o observedMetrics) RecordAdmission(ctx context.Context, experimentID string, at time.Time) error {
+	return o.metrics.RecordAdmission(ctx, experimentID, at)
+}
+
+func (o observedMetrics) LatestExperimentNode(ctx context.Context, experimentID string, createdAt, now time.Time) (string, bool, error) {
+	return o.metrics.LatestExperimentNode(ctx, experimentID, createdAt, now)
+}
+
+func (l *Loop) WithObservedTimeConfig(metrics *metricsdb.Store, gapCap time.Duration) *Loop {
+	l.observed = observedMetrics{metrics: metrics, gapCap: gapCap}
 	return l
 }
 

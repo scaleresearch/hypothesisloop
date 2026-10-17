@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // List returns the experiments matching the filter, each with its metrics: a
@@ -15,7 +14,7 @@ func (s *Service) List(ctx context.Context, filter domain.ExperimentFilter) ([]*
 	if err != nil {
 		return nil, fmt.Errorf("registry.List: %w", err)
 	}
-	if err := metricsdb.PopulateJobMetrics(ctx, s.metricsDBURL, s.store.GetPlatformExperimentMetrics, exps); err != nil {
+	if err := s.metrics.PopulateJobMetrics(ctx, s.store.GetPlatformExperimentMetrics, exps); err != nil {
 		return nil, fmt.Errorf("registry.List: %w", err)
 	}
 	if err := s.store.NameActors(ctx, jobActors(exps)); err != nil {

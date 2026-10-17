@@ -11,7 +11,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
-	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // Spend sets on pe what it has spent of its budget (ConsumedAcceleratorHours). A draft runs no
@@ -20,7 +19,7 @@ func (s *PlatformExperimentsService) Spend(ctx context.Context, pe *domain.Platf
 	if pe.Status == domain.PlatformExpDraft {
 		return nil
 	}
-	consumed, err := metricsdb.TotalObservedAccH(ctx, s.usage.URL(), pe.CreatedAt, pe.ID)
+	consumed, err := s.metrics.TotalObservedAccH(ctx, pe.CreatedAt, pe.ID)
 	if err != nil {
 		return fmt.Errorf("platform_experiments.Spend: %w", err)
 	}

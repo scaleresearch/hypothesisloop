@@ -32,10 +32,10 @@ type acceleratorTypeChange struct {
 // write as a sparse, precisely-timed event; acceleratorTypeAtGrid then resolves "which type was
 // active at grid point G" by picking the most recent event at or before G, statelessly, per
 // request.
-func acceleratorTypeChanges(ctx context.Context, dbURL, experimentID string, since, now time.Time, step time.Duration) ([]acceleratorTypeChange, error) {
+func (s *Store) acceleratorTypeChanges(ctx context.Context, experimentID string, since, now time.Time, step time.Duration) ([]acceleratorTypeChange, error) {
 	promQL := fmt.Sprintf(`max by (accelerator_type) (last_over_time(%s{experiment_id=%q}[%s]))`,
 		acceleratorTypeMetric, experimentID, promSeconds(step))
-	series, err := QueryRange(ctx, dbURL, promQL, since, now, step)
+	series, err := s.QueryRange(ctx, promQL, since, now, step)
 	if err != nil {
 		return nil, err
 	}

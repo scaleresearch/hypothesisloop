@@ -16,11 +16,12 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // testExperiments is the platform experiments service over store, with nothing else wired.
 func testExperiments(store platformexperiments.PlatformExperimentsStore) *platformexperiments.PlatformExperimentsService {
-	return platformexperiments.NewPlatformExperimentsService(store, domain.QuotaConfig{}, zap.NewNop(), "", 3*time.Minute)
+	return platformexperiments.NewPlatformExperimentsService(store, domain.QuotaConfig{}, zap.NewNop(), nil, 3*time.Minute)
 }
 
 var agentsTestPlacement = authtest.Placement{
@@ -101,5 +102,5 @@ func reaching(svc *platformexperiments.PlatformExperimentsService, types ...doma
 
 func newSignupTestService(t *testing.T, store platformexperiments.PlatformExperimentsStore) *platformexperiments.PlatformExperimentsService {
 	t.Helper()
-	return reaching(platformexperiments.NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), platformexperimentstest.NoUsage(t), 3*time.Minute), domain.CPUType)
+	return reaching(platformexperiments.NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), 3*time.Minute), domain.CPUType)
 }

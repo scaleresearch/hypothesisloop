@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // GetExperiment returns one experiment with its filed summary, the runtime's latest phase
@@ -28,7 +27,7 @@ func (s *Service) GetExperiment(ctx context.Context, id string) (*domain.Experim
 	if exp.Summary, err = s.store.FindingSummary(ctx, id); err != nil {
 		return nil, fmt.Errorf("scheduler.GetExperiment: %w", err)
 	}
-	reason, message, restartCount, found, err := metricsdb.GetLatestPhaseDetail(ctx, s.metricsDBURL, id, exp.ClusterName, exp.AttemptCount)
+	reason, message, restartCount, found, err := s.metrics.GetLatestPhaseDetail(ctx, id, exp.ClusterName, exp.AttemptCount)
 	if err != nil {
 		return nil, fmt.Errorf("scheduler.GetExperiment: phase detail: %w", err)
 	}
@@ -63,7 +62,7 @@ func (s *Service) judgeRankable(ctx context.Context, exp *domain.Experiment) err
 	if pe == nil || !slices.ContainsFunc(pe.Metrics, func(m domain.MetricDefinition) bool { return m.EffectiveRole() == domain.MetricRoleConstraint }) {
 		return nil
 	}
-	unrankable, err := metricsdb.UnrankableJobs(ctx, s.metricsDBURL, pe, map[string]bool{exp.ID: true})
+	unrankable, err := s.metrics.UnrankableJobs(ctx, pe, map[string]bool{exp.ID: true})
 	if err != nil {
 		return err
 	}
@@ -76,7 +75,7 @@ func (s *Service) judgeRankable(ctx context.Context, exp *domain.Experiment) err
 // mergeMetrics attaches what each experiment reported on its platform experiment's declared
 // metrics, read live from the metrics store.
 func (s *Service) mergeMetrics(ctx context.Context, exps []*domain.Experiment) error {
-	return metricsdb.PopulateJobMetrics(ctx, s.metricsDBURL, func(ctx context.Context, id string) ([]domain.MetricDefinition, bool, error) {
+	return s.metrics.PopulateJobMetrics(ctx, func(ctx context.Context, id string) ([]domain.MetricDefinition, bool, error) {
 		pe, err := s.store.GetPlatformExperiment(ctx, id)
 		if err != nil || pe == nil {
 			return nil, false, err
@@ -96,7 +95,7 @@ func (s *Service) mergePhaseDetails(ctx context.Context, exps []*domain.Experime
 	for i, exp := range exps {
 		ids[i] = exp.ID
 	}
-	details, err := metricsdb.GetLatestPhaseDetailBatch(ctx, s.metricsDBURL, ids)
+	details, err := s.metrics.GetLatestPhaseDetailBatch(ctx, ids)
 	if err != nil {
 		return fmt.Errorf("scheduler.mergePhaseDetails: %w", err)
 	}
@@ -137,7 +136,7 @@ func (s *Service) mergeBuildProgress(ctx context.Context, exps []*domain.Experim
 // mergeRanOn attaches where each experiment's workload ran, in one metrics-store query for all
 // of them: the read of one job and the read of a page say it the same way.
 func (s *Service) mergeRanOn(ctx context.Context, exps []*domain.Experiment) error {
-	ranOn, err := metricsdb.LatestRanOn(ctx, s.metricsDBURL, exps, time.Now().UTC())
+	ranOn, err := s.metrics.LatestRanOn(ctx, exps, time.Now().UTC())
 	if err != nil {
 		return fmt.Errorf("scheduler.mergeRanOn: %w", err)
 	}

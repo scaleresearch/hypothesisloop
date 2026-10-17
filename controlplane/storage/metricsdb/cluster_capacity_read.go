@@ -17,8 +17,8 @@ import (
 // a native autoscaler. A cluster absent from the map has not reported recently and must be treated
 // as not-autoscaled by the caller — never assumed capable, since the cost of the assumption is a
 // speculative submit that Pends forever.
-func LiveClusterAutoscalerCapability(ctx context.Context, dbURL string, window time.Duration) (map[string]bool, error) {
-	values, err := lastValuePerCluster(ctx, dbURL, clusterAutoscalerEnabledMetric, window)
+func (s *Store) LiveClusterAutoscalerCapability(ctx context.Context, window time.Duration) (map[string]bool, error) {
+	values, err := s.lastValuePerCluster(ctx, clusterAutoscalerEnabledMetric, window)
 	if err != nil {
 		return nil, fmt.Errorf("metricsdb.LiveClusterAutoscalerCapability: %w", err)
 	}
@@ -40,8 +40,8 @@ func boolGauge(value bool) float64 {
 // execute a multi-node job. A cluster absent from the map has not reported recently and must be
 // treated as incapable by the caller — never assumed capable, since the cost of the assumption is
 // a distributed job admitted onto a runtime that will refuse it at creation time.
-func LiveClusterMultiNodeCapability(ctx context.Context, dbURL string, window time.Duration) (map[string]bool, error) {
-	values, err := lastValuePerCluster(ctx, dbURL, clusterMultiNodeCapableMetric, window)
+func (s *Store) LiveClusterMultiNodeCapability(ctx context.Context, window time.Duration) (map[string]bool, error) {
+	values, err := s.lastValuePerCluster(ctx, clusterMultiNodeCapableMetric, window)
 	if err != nil {
 		return nil, fmt.Errorf("metricsdb.LiveClusterMultiNodeCapability: %w", err)
 	}
@@ -56,7 +56,7 @@ func LiveClusterMultiNodeCapability(ctx context.Context, dbURL string, window ti
 // UID / machine-id), as reported alongside its most recent heartbeat within window. A cluster
 // absent from the map has either not reported recently or is running a runtime build that does not
 // yet send cluster_id — callers must treat absence as "identity unknown", not as an error.
-func LiveClusterIDs(ctx context.Context, dbURL string, window time.Duration) (map[string]string, error) {
+func (s *Store) LiveClusterIDs(ctx context.Context, window time.Duration) (map[string]string, error) {
 	if window <= 0 {
 		return nil, fmt.Errorf("metricsdb.LiveClusterIDs: freshness window must be positive")
 	}
@@ -69,7 +69,7 @@ func LiveClusterIDs(ctx context.Context, dbURL string, window time.Duration) (ma
 			`ON metric.cluster_name = heartbeat.cluster_name AND metric.greptime_timestamp = heartbeat.snapshot_at`,
 		clusterHeartbeatMetric, seconds, clusterHeartbeatMetric,
 	)
-	samples, err := runClusterSnapshotQuery(ctx, dbURL, query)
+	samples, err := s.runClusterSnapshotQuery(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("metricsdb.LiveClusterIDs: %w", err)
 	}
@@ -95,7 +95,7 @@ type ClusterContact struct {
 // ClusterLastContacts returns each cluster's last contact within lookback, which is much longer
 // than the freshness window that decides connected: a cluster silent for days is shown with when
 // it was last heard from. A cluster absent from the map was not heard from within lookback.
-func ClusterLastContacts(ctx context.Context, dbURL string, lookback time.Duration) (map[string]ClusterContact, error) {
+func (s *Store) ClusterLastContacts(ctx context.Context, lookback time.Duration) (map[string]ClusterContact, error) {
 	if lookback <= 0 {
 		return nil, fmt.Errorf("metricsdb.ClusterLastContacts: lookback must be positive")
 	}
@@ -108,7 +108,7 @@ func ClusterLastContacts(ctx context.Context, dbURL string, lookback time.Durati
 			`ON metric.cluster_name = heartbeat.cluster_name AND metric.greptime_timestamp = heartbeat.snapshot_at`,
 		clusterHeartbeatMetric, seconds, clusterHeartbeatMetric,
 	)
-	samples, err := runClusterSnapshotQuery(ctx, dbURL, query)
+	samples, err := s.runClusterSnapshotQuery(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("metricsdb.ClusterLastContacts: %w", err)
 	}
@@ -128,9 +128,9 @@ func ClusterLastContacts(ctx context.Context, dbURL string, lookback time.Durati
 // window, as it does when its machines are rebuilt, has two series. That is one live cluster:
 // treating it as an ambiguity failed the read for every cluster and stopped admission for all
 // orgs until the older series aged out.
-func LiveClusterHeartbeats(ctx context.Context, dbURL string, window time.Duration) (map[string]bool, error) {
+func (s *Store) LiveClusterHeartbeats(ctx context.Context, window time.Duration) (map[string]bool, error) {
 	promQL := fmt.Sprintf(`last_over_time(%s[%s])`, clusterHeartbeatMetric, promSeconds(window))
-	samples, err := QueryVector(ctx, dbURL, promQL)
+	samples, err := s.QueryVector(ctx, promQL)
 	if err != nil {
 		return nil, fmt.Errorf("metricsdb.LiveClusterHeartbeats: query %s: %w", clusterHeartbeatMetric, err)
 	}
@@ -151,9 +151,9 @@ func LiveClusterHeartbeats(ctx context.Context, dbURL string, window time.Durati
 // last_over_time query and then re-implemented the same missing-label and duplicate-cluster
 // checks. One cluster reporting a metric twice is a real ambiguity, not something to resolve by
 // whichever sample the backend happened to return last, so it stays an error here for all of them.
-func lastValuePerCluster(ctx context.Context, dbURL, metricName string, window time.Duration) (map[string]float64, error) {
+func (s *Store) lastValuePerCluster(ctx context.Context, metricName string, window time.Duration) (map[string]float64, error) {
 	promQL := fmt.Sprintf(`last_over_time(%s[%s])`, metricName, promSeconds(window))
-	samples, err := QueryVector(ctx, dbURL, promQL)
+	samples, err := s.QueryVector(ctx, promQL)
 	if err != nil {
 		return nil, fmt.Errorf("metricsdb: query %s: %w", metricName, err)
 	}
@@ -171,8 +171,8 @@ func lastValuePerCluster(ctx context.Context, dbURL, metricName string, window t
 	return out, nil
 }
 
-func liveClusterFloatCapacity(ctx context.Context, dbURL, metricName string, window time.Duration) (map[string]float64, error) {
-	out, err := lastValuePerCluster(ctx, dbURL, metricName, window)
+func (s *Store) liveClusterFloatCapacity(ctx context.Context, metricName string, window time.Duration) (map[string]float64, error) {
+	out, err := s.lastValuePerCluster(ctx, metricName, window)
 	if err != nil {
 		return nil, err
 	}
@@ -184,16 +184,16 @@ func liveClusterFloatCapacity(ctx context.Context, dbURL, metricName string, win
 	return out, nil
 }
 
-func LiveClusterCPUCapacity(ctx context.Context, dbURL string, window time.Duration) (map[string]float64, error) {
-	return liveClusterFloatCapacity(ctx, dbURL, clusterCPUAvailableMetric, window)
+func (s *Store) LiveClusterCPUCapacity(ctx context.Context, window time.Duration) (map[string]float64, error) {
+	return s.liveClusterFloatCapacity(ctx, clusterCPUAvailableMetric, window)
 }
 
-func LiveClusterCPUTotalCapacity(ctx context.Context, dbURL string, window time.Duration) (map[string]float64, error) {
-	return liveClusterFloatCapacity(ctx, dbURL, clusterCPUTotalMetric, window)
+func (s *Store) LiveClusterCPUTotalCapacity(ctx context.Context, window time.Duration) (map[string]float64, error) {
+	return s.liveClusterFloatCapacity(ctx, clusterCPUTotalMetric, window)
 }
 
-func LiveClusterNodeLabels(ctx context.Context, dbURL string, window time.Duration) (map[string]map[string]map[string]string, error) {
-	samples, err := queryCompleteClusterSnapshot(ctx, dbURL, clusterNodeLabelMetric, window)
+func (s *Store) LiveClusterNodeLabels(ctx context.Context, window time.Duration) (map[string]map[string]map[string]string, error) {
+	samples, err := s.queryCompleteClusterSnapshot(ctx, clusterNodeLabelMetric, window)
 	if err != nil {
 		return nil, fmt.Errorf("metricsdb.LiveClusterNodeLabels: %w", err)
 	}
@@ -221,8 +221,8 @@ func LiveClusterNodeLabels(ctx context.Context, dbURL string, window time.Durati
 // LiveClusterNodeTotalCapacity returns each node's fresh capacity available to platform-scheduled
 // jobs as cluster -> node -> resource -> total amount. Mirrors LiveClusterNodeResourceCapacity's
 // shape, for the total/platform-usable series rather than the free/available one.
-func LiveClusterNodeTotalCapacity(ctx context.Context, dbURL string, window time.Duration) (map[string]map[string]map[string]int64, error) {
-	samples, err := queryCompleteClusterSnapshot(ctx, dbURL, clusterNodeResourceTotalMetric, window)
+func (s *Store) LiveClusterNodeTotalCapacity(ctx context.Context, window time.Duration) (map[string]map[string]map[string]int64, error) {
+	samples, err := s.queryCompleteClusterSnapshot(ctx, clusterNodeResourceTotalMetric, window)
 	if err != nil {
 		return nil, fmt.Errorf("metricsdb.LiveClusterNodeTotalCapacity: %w", err)
 	}
@@ -252,8 +252,8 @@ func LiveClusterNodeTotalCapacity(ctx context.Context, dbURL string, window time
 
 // LiveClusterNodeAcceleratorCapacity returns fresh actual capacity as
 // cluster -> node -> flavor -> free count.
-func LiveClusterNodeAcceleratorCapacity(ctx context.Context, dbURL string, window time.Duration) (map[string]map[string]map[string]int64, error) {
-	samples, err := queryCompleteClusterSnapshot(ctx, dbURL, clusterNodeAcceleratorAvailableMetric, window)
+func (s *Store) LiveClusterNodeAcceleratorCapacity(ctx context.Context, window time.Duration) (map[string]map[string]map[string]int64, error) {
+	samples, err := s.queryCompleteClusterSnapshot(ctx, clusterNodeAcceleratorAvailableMetric, window)
 	if err != nil {
 		return nil, fmt.Errorf("metricsdb.LiveClusterNodeAcceleratorCapacity: %w", err)
 	}
@@ -284,8 +284,8 @@ func LiveClusterNodeAcceleratorCapacity(ctx context.Context, dbURL string, windo
 // LiveClusterNodeResourceCapacity returns fresh actual capacity as
 // cluster -> node -> resource -> free amount, for the fungible dimensions (see
 // domain.NodeResource* for the keys).
-func LiveClusterNodeResourceCapacity(ctx context.Context, dbURL string, window time.Duration) (map[string]map[string]map[string]int64, error) {
-	samples, err := queryCompleteClusterSnapshot(ctx, dbURL, clusterNodeResourceAvailableMetric, window)
+func (s *Store) LiveClusterNodeResourceCapacity(ctx context.Context, window time.Duration) (map[string]map[string]map[string]int64, error) {
+	samples, err := s.queryCompleteClusterSnapshot(ctx, clusterNodeResourceAvailableMetric, window)
 	if err != nil {
 		return nil, fmt.Errorf("metricsdb.LiveClusterNodeResourceCapacity: %w", err)
 	}
@@ -316,14 +316,14 @@ func LiveClusterNodeResourceCapacity(ctx context.Context, dbURL string, window t
 // LiveClusterAcceleratorTotalCapacity returns the most recently reported total (allocatable)
 // accelerator capacity per cluster per flavor within window. A caller that also needs available
 // capacity must use LiveClusterAcceleratorAvailableAndTotal so both come from one snapshot.
-func LiveClusterAcceleratorTotalCapacity(ctx context.Context, dbURL string, window time.Duration) (map[string]map[string]int64, error) {
-	return liveClusterAcceleratorMetric(ctx, dbURL, clusterAcceleratorTotalMetric, window)
+func (s *Store) LiveClusterAcceleratorTotalCapacity(ctx context.Context, window time.Duration) (map[string]map[string]int64, error) {
+	return s.liveClusterAcceleratorMetric(ctx, clusterAcceleratorTotalMetric, window)
 }
 
 // LiveClusterAcceleratorAvailableAndTotal returns available and total accelerator capacity per
 // cluster per flavor, both read at the cluster's latest heartbeat so they come from one snapshot.
-func LiveClusterAcceleratorAvailableAndTotal(ctx context.Context, dbURL string, window time.Duration) (available, total map[string]map[string]int64, err error) {
-	samples, err := queryCompleteClusterAcceleratorSnapshot(ctx, dbURL, window)
+func (s *Store) LiveClusterAcceleratorAvailableAndTotal(ctx context.Context, window time.Duration) (available, total map[string]map[string]int64, err error) {
+	samples, err := s.queryCompleteClusterAcceleratorSnapshot(ctx, window)
 	if err != nil {
 		return nil, nil, fmt.Errorf("metricsdb.LiveClusterAcceleratorAvailableAndTotal: %w", err)
 	}
@@ -365,11 +365,11 @@ func LiveClusterAcceleratorAvailableAndTotal(ctx context.Context, dbURL string, 
 // statement: a query is not atomic across metric tables, so joining it to a capacity table can
 // pair a heartbeat with a scan taken before its samples landed. A heartbeat already read has
 // every sample it vouches for stored.
-func latestSnapshotFilter(ctx context.Context, dbURL string, window time.Duration) (string, error) {
+func (s *Store) latestSnapshotFilter(ctx context.Context, window time.Duration) (string, error) {
 	if window <= 0 {
 		return "", fmt.Errorf("freshness window must be positive")
 	}
-	heartbeats, err := runClusterSnapshotQuery(ctx, dbURL, fmt.Sprintf(
+	heartbeats, err := s.runClusterSnapshotQuery(ctx, fmt.Sprintf(
 		`SELECT cluster_name, MAX(greptime_timestamp) AS greptime_timestamp, 1.0 AS greptime_value FROM %s `+
 			`WHERE greptime_timestamp >= NOW() - INTERVAL '%d seconds' GROUP BY cluster_name`,
 		clusterHeartbeatMetric, int64(math.Ceil(window.Seconds())),
@@ -388,8 +388,8 @@ func latestSnapshotFilter(ctx context.Context, dbURL string, window time.Duratio
 // queryCompleteClusterAcceleratorSnapshot pulls the available and total accelerator metrics of
 // each cluster's latest snapshot, so both numbers reflect the same reported instant. Samples are
 // tagged with a synthetic "kind" label of "available" or "total".
-func queryCompleteClusterAcceleratorSnapshot(ctx context.Context, dbURL string, window time.Duration) ([]VectorSample, error) {
-	filter, err := latestSnapshotFilter(ctx, dbURL, window)
+func (s *Store) queryCompleteClusterAcceleratorSnapshot(ctx context.Context, window time.Duration) ([]VectorSample, error) {
+	filter, err := s.latestSnapshotFilter(ctx, window)
 	if err != nil || filter == "" {
 		return nil, err
 	}
@@ -399,11 +399,11 @@ func queryCompleteClusterAcceleratorSnapshot(ctx context.Context, dbURL string, 
 			`SELECT 'total' AS kind, cluster_name, accelerator_type, greptime_timestamp, greptime_value FROM %s WHERE %s`,
 		clusterAcceleratorAvailableMetric, filter, clusterAcceleratorTotalMetric, filter,
 	)
-	return runClusterSnapshotQuery(ctx, dbURL, query)
+	return s.runClusterSnapshotQuery(ctx, query)
 }
 
-func liveClusterAcceleratorMetric(ctx context.Context, dbURL, metricName string, window time.Duration) (map[string]map[string]int64, error) {
-	samples, err := queryCompleteClusterSnapshot(ctx, dbURL, metricName, window)
+func (s *Store) liveClusterAcceleratorMetric(ctx context.Context, metricName string, window time.Duration) (map[string]map[string]int64, error) {
+	samples, err := s.queryCompleteClusterSnapshot(ctx, metricName, window)
 	if err != nil {
 		return nil, fmt.Errorf("metricsdb.liveClusterAcceleratorMetric(%s): %w", metricName, err)
 	}
@@ -429,23 +429,23 @@ func liveClusterAcceleratorMetric(ctx context.Context, dbURL, metricName string,
 	return out, nil
 }
 
-func queryCompleteClusterSnapshot(ctx context.Context, dbURL, metricName string, window time.Duration) ([]VectorSample, error) {
+func (s *Store) queryCompleteClusterSnapshot(ctx context.Context, metricName string, window time.Duration) ([]VectorSample, error) {
 	switch metricName {
 	case clusterAcceleratorAvailableMetric, clusterAcceleratorTotalMetric, clusterNodeAcceleratorAvailableMetric, clusterNodeResourceAvailableMetric, clusterNodeResourceTotalMetric, clusterNodeLabelMetric:
 	default:
 		return nil, fmt.Errorf("unsupported snapshot metric %q", metricName)
 	}
-	filter, err := latestSnapshotFilter(ctx, dbURL, window)
+	filter, err := s.latestSnapshotFilter(ctx, window)
 	if err != nil || filter == "" {
 		return nil, err
 	}
-	return runClusterSnapshotQuery(ctx, dbURL, fmt.Sprintf(`SELECT * FROM %s WHERE %s`, metricName, filter))
+	return s.runClusterSnapshotQuery(ctx, fmt.Sprintf(`SELECT * FROM %s WHERE %s`, metricName, filter))
 }
 
 // runClusterSnapshotQuery executes query against GreptimeDB's SQL HTTP endpoint and decodes the
 // result into VectorSamples, treating every non-timestamp/value column as a label.
-func runClusterSnapshotQuery(ctx context.Context, dbURL, query string) ([]VectorSample, error) {
-	u, err := url.Parse(dbURL + "/v1/sql")
+func (s *Store) runClusterSnapshotQuery(ctx context.Context, query string) ([]VectorSample, error) {
+	u, err := url.Parse(s.url + "/v1/sql")
 	if err != nil {
 		return nil, fmt.Errorf("query URL: %w", err)
 	}
@@ -542,8 +542,8 @@ func runClusterSnapshotQuery(ctx context.Context, dbURL, query string) ([]Vector
 
 // liveClusterScalarCapacity returns the most recently reported value of availMetric per cluster,
 // restricted to samples within window of now.
-func liveClusterScalarCapacity(ctx context.Context, dbURL, availMetric string, window time.Duration) (map[string]int64, error) {
-	raw, err := lastValuePerCluster(ctx, dbURL, availMetric, window)
+func (s *Store) liveClusterScalarCapacity(ctx context.Context, availMetric string, window time.Duration) (map[string]int64, error) {
+	raw, err := s.lastValuePerCluster(ctx, availMetric, window)
 	if err != nil {
 		return nil, err
 	}
@@ -565,22 +565,22 @@ func capacityInt64(value float64) (int64, error) {
 	return int64(value), nil
 }
 
-func LiveClusterRAMCapacity(ctx context.Context, dbURL string, window time.Duration) (map[string]int64, error) {
-	return liveClusterScalarCapacity(ctx, dbURL, clusterRAMAvailableMetric, window)
+func (s *Store) LiveClusterRAMCapacity(ctx context.Context, window time.Duration) (map[string]int64, error) {
+	return s.liveClusterScalarCapacity(ctx, clusterRAMAvailableMetric, window)
 }
 
 // LiveClusterRAMTotalCapacity is LiveClusterRAMCapacity's total-capacity counterpart
 // (allocatable, not allocatable-minus-requested).
-func LiveClusterRAMTotalCapacity(ctx context.Context, dbURL string, window time.Duration) (map[string]int64, error) {
-	return liveClusterScalarCapacity(ctx, dbURL, clusterRAMTotalMetric, window)
+func (s *Store) LiveClusterRAMTotalCapacity(ctx context.Context, window time.Duration) (map[string]int64, error) {
+	return s.liveClusterScalarCapacity(ctx, clusterRAMTotalMetric, window)
 }
 
-func LiveClusterStorageCapacity(ctx context.Context, dbURL string, window time.Duration) (map[string]int64, error) {
-	return liveClusterScalarCapacity(ctx, dbURL, clusterStorageAvailableMetric, window)
+func (s *Store) LiveClusterStorageCapacity(ctx context.Context, window time.Duration) (map[string]int64, error) {
+	return s.liveClusterScalarCapacity(ctx, clusterStorageAvailableMetric, window)
 }
 
 // LiveClusterStorageTotalCapacity is LiveClusterStorageCapacity's total-capacity counterpart
 // (allocatable, not allocatable-minus-requested).
-func LiveClusterStorageTotalCapacity(ctx context.Context, dbURL string, window time.Duration) (map[string]int64, error) {
-	return liveClusterScalarCapacity(ctx, dbURL, clusterStorageTotalMetric, window)
+func (s *Store) LiveClusterStorageTotalCapacity(ctx context.Context, window time.Duration) (map[string]int64, error) {
+	return s.liveClusterScalarCapacity(ctx, clusterStorageTotalMetric, window)
 }

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // oneExperimentStore answers GetExperiment with a single fixed row — the only thing GetTimeseries
@@ -72,8 +73,8 @@ func TestGetTimeseriesReportsEveryNodesSampleWhenTheyLandInsideOneStep(t *testin
 	defer server.Close()
 
 	svc := &Service{
-		store:        oneExperimentStore{exp: &domain.Experiment{ID: "exp-1", AgentID: "agent-1", CreatedAt: at.Add(-time.Hour)}},
-		metricsDBURL: server.URL,
+		store:   oneExperimentStore{exp: &domain.Experiment{ID: "exp-1", AgentID: "agent-1", CreatedAt: at.Add(-time.Hour)}},
+		metrics: metricsdb.New(server.URL),
 	}
 	points, err := svc.GetTimeseries(context.Background(), "exp-1")
 	if err != nil {
@@ -99,8 +100,8 @@ func TestGetTimeseriesKeepsEachSamplesOwnFractionWhenNodesReportInsideOneSecond(
 	defer server.Close()
 
 	svc := &Service{
-		store:        oneExperimentStore{exp: &domain.Experiment{ID: "exp-1", AgentID: "agent-1", CreatedAt: at.Add(-time.Hour)}},
-		metricsDBURL: server.URL,
+		store:   oneExperimentStore{exp: &domain.Experiment{ID: "exp-1", AgentID: "agent-1", CreatedAt: at.Add(-time.Hour)}},
+		metrics: metricsdb.New(server.URL),
 	}
 	points, err := svc.GetTimeseries(context.Background(), "exp-1")
 	if err != nil {
@@ -124,7 +125,7 @@ func TestPlatformExperimentTimeseriesEndsItsWindowWhereAskedAndNeverAhead(t *tes
 		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"matrix","result":[]}}`))
 	}))
 	defer srv.Close()
-	svc := New(nil, nil, nil, nil, srv.URL, nil)
+	svc := New(nil, nil, nil, nil, metricsdb.New(srv.URL), nil)
 	unix := func(s string) time.Time {
 		f, err := strconv.ParseFloat(s, 64)
 		if err != nil {

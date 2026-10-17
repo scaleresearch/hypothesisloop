@@ -12,6 +12,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // inTxStore runs observe the way the real transactions do and fails any pool read made while one
@@ -50,7 +51,7 @@ func TestAdmissionObservesUsageWithoutASecondPoolConnection(t *testing.T) {
 		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
 	}))
 	defer metrics.Close()
-	svc := NewPlatformExperimentsService(&inTxStore{}, domain.QuotaConfig{}, zap.NewNop(), metrics.URL, 3*time.Minute)
+	svc := NewPlatformExperimentsService(&inTxStore{}, domain.QuotaConfig{}, zap.NewNop(), metricsdb.New(metrics.URL), 3*time.Minute)
 	ctx := context.Background()
 
 	exp := &domain.Experiment{ID: "exp-1", AgentID: "agent-1", PlatformExperimentID: testPE.ID}

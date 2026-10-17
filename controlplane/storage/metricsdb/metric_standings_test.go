@@ -50,7 +50,7 @@ func TestBestPerAgentOnMetricPicksTheBestAcrossMultipleJobsOfOneAgent(t *testing
 	pe := &domain.PlatformExperiment{ID: "pe-1", CreatedAt: time.Now().Add(-time.Hour)}
 	metric := domain.MetricDefinition{Key: "auroc", Direction: "maximize"}
 
-	best, nonRaw, err := BestPerAgentOnMetric(context.Background(), server.URL, pe, metric, allCompleted)
+	best, nonRaw, err := New(server.URL).BestPerAgentOnMetric(context.Background(), pe, metric, allCompleted)
 	if err != nil {
 		t.Fatalf("BestPerAgentOnMetric: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestBestPerAgentOnMetricPicksTheLowerJobIDOnAnExactTie(t *testing.T) {
 	pe := &domain.PlatformExperiment{ID: "pe-1", CreatedAt: time.Now().Add(-time.Hour)}
 	metric := domain.MetricDefinition{Key: "auroc", Direction: "maximize"}
 
-	best, _, err := BestPerAgentOnMetric(context.Background(), server.URL, pe, metric, allCompleted)
+	best, _, err := New(server.URL).BestPerAgentOnMetric(context.Background(), pe, metric, allCompleted)
 	if err != nil {
 		t.Fatalf("BestPerAgentOnMetric: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestBestPerAgentOnMetricExcludesNonRawBasisFromRanking(t *testing.T) {
 	pe := &domain.PlatformExperiment{ID: "pe-1", CreatedAt: time.Now().Add(-time.Hour)}
 	metric := domain.MetricDefinition{Key: "auroc", Direction: "maximize"}
 
-	best, nonRaw, err := BestPerAgentOnMetric(context.Background(), server.URL, pe, metric, allCompleted)
+	best, nonRaw, err := New(server.URL).BestPerAgentOnMetric(context.Background(), pe, metric, allCompleted)
 	if err != nil {
 		t.Fatalf("BestPerAgentOnMetric: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestAJobThatBreaksAConstraintOrReportsNoneRanksNowhere(t *testing.T) {
 		{Key: "fp32_agreement", Direction: "maximize", Role: domain.MetricRoleConstraint, Bound: &bound},
 	}}
 	completed := map[string]bool{"job-fp16": true, "job-bf16": true, "job-ok": true, "job-silent": true, "job-rescaled": true, "job-broken": true}
-	best, _, err := BestPerAgentOnMetric(context.Background(), server.URL, pe, pe.Metrics[0], completed)
+	best, _, err := New(server.URL).BestPerAgentOnMetric(context.Background(), pe, pe.Metrics[0], completed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestAJobThatBreaksAConstraintOrReportsNoneRanksNowhere(t *testing.T) {
 	if len(completed) != 6 {
 		t.Errorf("the completed jobs were narrowed in place to %v", completed)
 	}
-	why, err := UnrankableJobs(context.Background(), server.URL, pe, completed)
+	why, err := New(server.URL).UnrankableJobs(context.Background(), pe, completed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestAJobThatBreaksAConstraintOrReportsNoneRanksNowhere(t *testing.T) {
 	}; !maps.Equal(why, want) {
 		t.Errorf("unrankable = %v, want %v", why, want)
 	}
-	met, err := ConstraintsMet(context.Background(), server.URL, pe, completed)
+	met, err := New(server.URL).ConstraintsMet(context.Background(), pe, completed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +208,7 @@ func TestAJobThatBreaksAConstraintOrReportsNoneRanksNowhere(t *testing.T) {
 	}
 	// Every completed job's value stands, whatever it held: a reference is listed even where it
 	// broke a constraint, so nobody reads it as never measured.
-	values, err := LastPerJobOnMetric(context.Background(), server.URL, pe, pe.Metrics[0], map[string]bool{"job-bf16": true, "job-silent": true, "job-broken": true})
+	values, err := New(server.URL).LastPerJobOnMetric(context.Background(), pe, pe.Metrics[0], map[string]bool{"job-bf16": true, "job-silent": true, "job-broken": true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestBestPerAgentOnAnyMetricReadsEachJobsLastValue(t *testing.T) {
 		var captured []string
 		server := promqlMockServer(t, &captured)
 		pe := &domain.PlatformExperiment{ID: "pe-1", CreatedAt: time.Now().Add(-time.Hour)}
-		if _, _, err := BestPerAgentOnMetric(context.Background(), server.URL, pe, metric, nil); err != nil {
+		if _, _, err := New(server.URL).BestPerAgentOnMetric(context.Background(), pe, metric, nil); err != nil {
 			t.Fatalf("%s: %v (sent %v)", metric.Key, err, captured)
 		}
 		server.Close()
@@ -247,7 +247,7 @@ func TestBestPerAgentOnAnyMetricReadsEachJobsLastValue(t *testing.T) {
 	server, _ := vectorServer(t, body)
 	defer server.Close()
 	pe := &domain.PlatformExperiment{ID: "pe-1", CreatedAt: time.Now().Add(-time.Hour)}
-	best, _, err := BestPerAgentOnMetric(context.Background(), server.URL, pe,
+	best, _, err := New(server.URL).BestPerAgentOnMetric(context.Background(), pe,
 		domain.MetricDefinition{Key: "invalid_outputs", Direction: "minimize", Role: domain.MetricRoleAttribute}, allCompleted)
 	if err != nil {
 		t.Fatal(err)
@@ -290,7 +290,7 @@ func TestTheBestsOfManyRunsAreReadInTwoQueries(t *testing.T) {
 		{Key: "agreement", Direction: "maximize", Role: domain.MetricRoleConstraint, Bound: &bound},
 	}}
 	b := &domain.PlatformExperiment{ID: "pe-b", CreatedAt: time.Now().Add(-time.Hour), Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}}}
-	best, err := BestPerAgentOnMetrics(context.Background(), server.URL, []Ranking{
+	best, err := New(server.URL).BestPerAgentOnMetrics(context.Background(), []Ranking{
 		{PE: a, Metric: a.Metrics[0], Completed: map[string]bool{"a-broken": true, "a-ok": true}},
 		{PE: b, Metric: b.Metrics[0], Completed: map[string]bool{"b-1": true, "b-2": true}},
 	})

@@ -19,6 +19,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/graphdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // poolStore is the Postgres side of the registry reduced to what hypothesis writes consult: every
@@ -854,7 +855,7 @@ func TestFindingsPairEachHypothesisWithItsNewestFindingAndBestJob(t *testing.T) 
 			{"metric":{"job_id":"job-rescaled","metric_name":"loss","metric_basis":"per_token"},"value":[1,"0.01"]}]}}`))
 	}))
 	defer metrics.Close()
-	svc := New(findingsStore{newPoolStore()}, findingsGraph{}, &recordedEvents{}, zap.NewNop(), metrics.URL, nil)
+	svc := New(findingsStore{newPoolStore()}, findingsGraph{}, &recordedEvents{}, zap.NewNop(), metricsdb.New(metrics.URL), nil)
 
 	got, err := svc.Findings(context.Background(), "pe-1")
 	if err != nil || len(got) != 3 {

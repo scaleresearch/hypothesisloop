@@ -20,7 +20,7 @@ func TestRecordModelCallInsertsOneRowWithItsLabelsQuoted(t *testing.T) {
 	defer server.Close()
 
 	at := time.UnixMilli(1_700_000_000_123)
-	err := RecordModelCall(context.Background(), server.URL, ModelCall{
+	err := New(server.URL).RecordModelCall(context.Background(), ModelCall{
 		OrgID: "org-1", PlatformExperimentID: "pe-1", AgentID: "it's-a", Provider: "anthropic", Model: "claude-haiku-5-5",
 		InputTokens: 10, OutputTokens: 20, CacheCreationInputTokens: 30, CacheReadInputTokens: 40, At: at,
 	})
@@ -34,7 +34,7 @@ func TestRecordModelCallInsertsOneRowWithItsLabelsQuoted(t *testing.T) {
 }
 
 func TestRecordModelCallRefusesACallNamingNoOwner(t *testing.T) {
-	if err := RecordModelCall(context.Background(), "http://unused.invalid", ModelCall{PlatformExperimentID: "pe-1", AgentID: "a", Provider: "anthropic"}); err == nil {
+	if err := New("http://unused.invalid").RecordModelCall(context.Background(), ModelCall{PlatformExperimentID: "pe-1", AgentID: "a", Provider: "anthropic"}); err == nil {
 		t.Fatal("a call with no org was recorded")
 	}
 }
@@ -48,7 +48,7 @@ func TestModelUsageOfSumsPerAgentAndModel(t *testing.T) {
 	}))
 	defer server.Close()
 
-	got, err := ModelUsageOf(context.Background(), server.URL, "pe-1")
+	got, err := New(server.URL).ModelUsageOf(context.Background(), "pe-1")
 	if err != nil {
 		t.Fatal(err)
 	}

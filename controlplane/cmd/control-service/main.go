@@ -42,7 +42,7 @@ func main() {
 	}
 	apiPort := strconv.Itoa(pcfg.Services.APIPort)
 
-	metricsDBURL := pcfg.Services.MetricsDBURL
+	metrics := metricsdb.New(pcfg.Services.MetricsDBURL)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	pool, err := db.NewPool(ctx, db.ConfigOf(pcfg.Database, db.ServiceMaxConns))
@@ -57,7 +57,7 @@ func main() {
 	seedBuiltins(store, logger)
 
 	metricsCtx, metricsCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	err = metricsdb.EnsureObservationTables(metricsCtx, metricsDBURL)
+	err = metrics.EnsureObservationTables(metricsCtx)
 	metricsCancel()
 	if err != nil {
 		logger.Fatal("control-service: metrics store tables", zap.Error(err))
@@ -106,7 +106,7 @@ func main() {
 	githubApp, gitHost := newGitHost(pcfg, store, logger)
 	repos := accounts.NewRepositories(store, githubApp, gate.access, logger)
 
-	apiServer := newAPIServer(runCtx, gate, repos, gitHost, pool, store, graph, quotaCfg, pcfg, metricsDBURL, apiPort, logger)
+	apiServer := newAPIServer(runCtx, gate, repos, gitHost, pool, store, graph, quotaCfg, pcfg, metrics, apiPort, logger)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)

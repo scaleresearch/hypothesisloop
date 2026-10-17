@@ -21,7 +21,7 @@ func TestQueryVectorRejectsMalformedSampleInsteadOfReturningPartialState(t *test
 	server := queryServer(t, `{"status":"success","data":{"resultType":"vector","result":[{"metric":{"cluster_name":"a"},"value":[1,"2"]},{"metric":{"cluster_name":"b"},"value":[1,"broken"]}]}}`)
 	defer server.Close()
 
-	_, err := QueryVector(context.Background(), server.URL, "up")
+	_, err := New(server.URL).QueryVector(context.Background(), "up")
 	if err == nil || !strings.Contains(err.Error(), "result 1") {
 		t.Fatalf("QueryVector error = %v, want malformed second sample error", err)
 	}
@@ -31,7 +31,7 @@ func TestQueryVectorRejectsPrometheusErrorEnvelope(t *testing.T) {
 	server := queryServer(t, `{"status":"error","errorType":"execution","error":"bad query"}`)
 	defer server.Close()
 
-	_, err := QueryVector(context.Background(), server.URL, "up")
+	_, err := New(server.URL).QueryVector(context.Background(), "up")
 	if err == nil || !strings.Contains(err.Error(), "bad query") {
 		t.Fatalf("QueryVector error = %v, want Prometheus error", err)
 	}
@@ -41,7 +41,7 @@ func TestQueryRangeRejectsMalformedPointInsteadOfShorteningActualHistory(t *test
 	server := queryServer(t, `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"experiment_id":"e"},"values":[[1,"1"],[2,"NaN"]]}]}}`)
 	defer server.Close()
 
-	_, err := QueryRange(context.Background(), server.URL, "up", time.Unix(0, 0), time.Unix(3, 0), time.Second)
+	_, err := New(server.URL).QueryRange(context.Background(), "up", time.Unix(0, 0), time.Unix(3, 0), time.Second)
 	if err == nil || !strings.Contains(err.Error(), "point 1") {
 		t.Fatalf("QueryRange error = %v, want malformed second point error", err)
 	}
@@ -57,7 +57,7 @@ func TestAHungMetricsStoreFailsTheQueryInsteadOfBlockingForever(t *testing.T) {
 	httpClient.Timeout = 50 * time.Millisecond
 	defer func() { httpClient.Timeout = previous }()
 
-	if _, err := QueryVector(context.Background(), server.URL, "up"); err == nil {
+	if _, err := New(server.URL).QueryVector(context.Background(), "up"); err == nil {
 		t.Fatal("QueryVector against a hung store: got nil error, want a timeout")
 	}
 }

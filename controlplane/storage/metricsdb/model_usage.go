@@ -39,14 +39,14 @@ type ModelCall struct {
 }
 
 // RecordModelCall stores one model call.
-func RecordModelCall(ctx context.Context, dbURL string, c ModelCall) error {
+func (s *Store) RecordModelCall(ctx context.Context, c ModelCall) error {
 	if c.OrgID == "" || c.PlatformExperimentID == "" || c.AgentID == "" || c.Provider == "" {
 		return fmt.Errorf("metricsdb.RecordModelCall: org, platform experiment, agent and provider are required")
 	}
 	insert := fmt.Sprintf(`INSERT INTO model_usage (org_id, platform_experiment_id, agent_id, provider, model, input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens, ts) VALUES (%s, %s, %s, %s, %s, %d, %d, %d, %d, %d)`,
 		sqlQuote(c.OrgID), sqlQuote(c.PlatformExperimentID), sqlQuote(c.AgentID), sqlQuote(c.Provider), sqlQuote(c.Model),
 		c.InputTokens, c.OutputTokens, c.CacheCreationInputTokens, c.CacheReadInputTokens, c.At.UnixMilli())
-	if err := execSQL(ctx, dbURL, insert); err != nil {
+	if err := s.execSQL(ctx, insert); err != nil {
 		return fmt.Errorf("metricsdb.RecordModelCall: %w", err)
 	}
 	return nil
@@ -65,8 +65,8 @@ type AgentModelUsage struct {
 }
 
 // ModelUsageOf sums the model calls made for one platform experiment, per agent and model.
-func ModelUsageOf(ctx context.Context, dbURL, platformExperimentID string) ([]AgentModelUsage, error) {
-	rows, err := querySQLRows(ctx, dbURL, fmt.Sprintf(`SELECT agent_id, provider, model, COUNT(*), SUM(input_tokens), SUM(output_tokens), SUM(cache_creation_input_tokens), SUM(cache_read_input_tokens)
+func (s *Store) ModelUsageOf(ctx context.Context, platformExperimentID string) ([]AgentModelUsage, error) {
+	rows, err := s.querySQLRows(ctx, fmt.Sprintf(`SELECT agent_id, provider, model, COUNT(*), SUM(input_tokens), SUM(output_tokens), SUM(cache_creation_input_tokens), SUM(cache_read_input_tokens)
 FROM model_usage WHERE platform_experiment_id = %s GROUP BY agent_id, provider, model ORDER BY agent_id, provider, model`, sqlQuote(platformExperimentID)))
 	if err != nil {
 		return nil, fmt.Errorf("metricsdb.ModelUsageOf: %w", err)

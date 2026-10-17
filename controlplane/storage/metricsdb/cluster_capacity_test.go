@@ -37,7 +37,7 @@ func TestLiveClusterNodeCapacityDropsNodeAbsentFromLatestSnapshot(t *testing.T) 
 	server := snapshotServer(t, "")
 	defer server.Close()
 
-	got, err := LiveClusterNodeAcceleratorCapacity(context.Background(), server.URL, time.Minute)
+	got, err := New(server.URL).LiveClusterNodeAcceleratorCapacity(context.Background(), time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestLiveClusterNodeCapacityReadsSamplesAtLatestHeartbeat(t *testing.T) {
 	server := snapshotServer(t, `["cluster-a","node-a","test-type",20,2.0]`)
 	defer server.Close()
 
-	got, err := LiveClusterNodeAcceleratorCapacity(context.Background(), server.URL, time.Minute)
+	got, err := New(server.URL).LiveClusterNodeAcceleratorCapacity(context.Background(), time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestRecordClusterCapacitySnapshotWritesHeartbeatLast(t *testing.T) {
 	}))
 	defer server.Close()
 
-	err := RecordClusterCapacitySnapshot(context.Background(), server.URL, ClusterCapacitySnapshot{
+	err := New(server.URL).RecordClusterCapacitySnapshot(context.Background(), ClusterCapacitySnapshot{
 		ClusterName: "c", At: time.Now(),
 		AcceleratorAvailable: map[string]int64{"gpu": 1}, AcceleratorTotal: map[string]int64{"gpu": 2},
 	})
@@ -114,7 +114,7 @@ func TestAClusterWhoseIdentityChangedIsStillOneLiveClusterBesideTheOthers(t *tes
 	}))
 	defer server.Close()
 
-	live, err := LiveClusterHeartbeats(context.Background(), server.URL, time.Minute)
+	live, err := New(server.URL).LiveClusterHeartbeats(context.Background(), time.Minute)
 	if err != nil {
 		t.Fatalf("live clusters with one identity changed: %v", err)
 	}

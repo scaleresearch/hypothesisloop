@@ -61,7 +61,7 @@ type Placements interface {
 //
 // Stateless: every reader (silence detection, quota accounting, Cancel) recomputes from
 // GreptimeDB, so there is no cache here to fall out of sync with it.
-func NewPushHandler(dbURL string, placements Placements) http.Handler {
+func NewPushHandler(metrics *metricsdb.Store, placements Placements) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -120,7 +120,7 @@ func NewPushHandler(dbURL string, placements Placements) http.Handler {
 			})
 		}
 		if len(observations) > 0 {
-			if err := metricsdb.RecordObservations(r.Context(), dbURL, observations); err != nil {
+			if err := metrics.RecordObservations(r.Context(), observations); err != nil {
 				log.Printf("metrics: record observations for node %s: %v", req.Node, err)
 				// Non-2xx tells node-agent's retry queue to keep this payload and retry later —
 				// acking a write GreptimeDB never received would let silence-eviction mistake a

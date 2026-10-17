@@ -41,7 +41,7 @@ func TestTheHeartbeatCarriesTheAgentVersionReadBackWithTheLastContact(t *testing
 		}
 	}))
 	defer writer.Close()
-	if err := RecordClusterCapacitySnapshot(context.Background(), writer.URL, ClusterCapacitySnapshot{ClusterName: "c", ClusterID: "uid-c", AgentVersion: "abc1234", At: time.Now()}); err != nil {
+	if err := New(writer.URL).RecordClusterCapacitySnapshot(context.Background(), ClusterCapacitySnapshot{ClusterName: "c", ClusterID: "uid-c", AgentVersion: "abc1234", At: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	if heartbeat["agent_version"] != "abc1234" || heartbeat["cluster_id"] != "uid-c" {
@@ -55,7 +55,7 @@ func TestTheHeartbeatCarriesTheAgentVersionReadBackWithTheLastContact(t *testing
 			`"rows":[["tt-box","uid-tt","old1234",1760000000000,1.0],["from-before","uid-old",null,1760000000000,1.0]]}}]}`)
 	}))
 	defer reader.Close()
-	contacts, err := ClusterLastContacts(context.Background(), reader.URL, 30*24*time.Hour)
+	contacts, err := New(reader.URL).ClusterLastContacts(context.Background(), 30*24*time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

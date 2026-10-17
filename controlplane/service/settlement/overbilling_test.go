@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // These cover over-billing: a settlement that charges for MORE than the job observably consumed.
@@ -28,7 +29,7 @@ func TestSettlementIsObservedHoursTimesTheJobsOwnRate(t *testing.T) {
 	defer server.Close()
 
 	usage := &capturedUsage{}
-	settler := New(usage, server.URL, 3*step)
+	settler := New(usage, metricsdb.New(server.URL), 3*step)
 
 	exp := &domain.Experiment{
 		ID:                     "exp-identity",
@@ -66,7 +67,7 @@ func TestSettlingRepeatedlyDoesNotAccumulate(t *testing.T) {
 	defer server.Close()
 
 	usage := &capturedUsage{}
-	settler := New(usage, server.URL, 3*step)
+	settler := New(usage, metricsdb.New(server.URL), 3*step)
 
 	exp := &domain.Experiment{
 		ID:                     "exp-idempotent",
@@ -104,7 +105,7 @@ func TestAPreemptionRescaleDoesNotChangeWhatAnHourCosts(t *testing.T) {
 
 	settle := func(exp *domain.Experiment) float64 {
 		usage := &capturedUsage{}
-		settler := New(usage, server.URL, 3*step)
+		settler := New(usage, metricsdb.New(server.URL), 3*step)
 		if err := settler.Settle(context.Background(), exp); err != nil {
 			t.Fatalf("Settle %s: %v", exp.ID, err)
 		}

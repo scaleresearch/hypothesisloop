@@ -40,57 +40,6 @@ type ObservedState interface {
 	RecordRunHealth(ctx context.Context, at time.Time, agents []domain.AgentHealth) error
 }
 
-// metricsDBObserver is the only production ObservedState: metricsdb answers in real time.
-type metricsDBObserver struct{ url string }
-
-func (o metricsDBObserver) IsAlive(ctx context.Context, experimentID string, window time.Duration) (bool, error) {
-	return metricsdb.IsAlive(ctx, o.url, experimentID, window)
-}
-
-func (o metricsDBObserver) ObservedElapsedHours(ctx context.Context, experimentID string, createdAt, now time.Time, gapCap time.Duration) (float64, error) {
-	return metricsdb.ObservedElapsedHours(ctx, o.url, experimentID, createdAt, now, gapCap)
-}
-
-func (o metricsDBObserver) FirstObserved(ctx context.Context, experimentID string, createdAt, now time.Time, gapCap time.Duration) (time.Time, bool, error) {
-	return metricsdb.FirstObserved(ctx, o.url, experimentID, createdAt, now, gapCap)
-}
-
-func (o metricsDBObserver) LatestJobPhase(ctx context.Context, experimentID, clusterName string, window time.Duration) (domain.JobPhase, bool, error) {
-	return metricsdb.LatestJobPhase(ctx, o.url, experimentID, clusterName, window)
-}
-
-func (o metricsDBObserver) ClusterSnapshotPresence(ctx context.Context, experimentID, clusterName string, createdAt, now time.Time) (metricsdb.SnapshotPresence, error) {
-	return metricsdb.ClusterSnapshotPresence(ctx, o.url, experimentID, clusterName, createdAt, now)
-}
-
-func (o metricsDBObserver) AnyDeclaredMetricChanged(ctx context.Context, experimentID string, metricKeys []string, window time.Duration) (bool, bool, error) {
-	return metricsdb.AnyDeclaredMetricChanged(ctx, o.url, experimentID, metricKeys, window)
-}
-
-func (o metricsDBObserver) AnyDeclaredMetricReported(ctx context.Context, experimentID string, metricKeys []string, window time.Duration) (bool, error) {
-	return metricsdb.AnyDeclaredMetricReported(ctx, o.url, experimentID, metricKeys, window)
-}
-
-func (o metricsDBObserver) HasEverReportedMetric(ctx context.Context, experimentID string, createdAt, now time.Time) (bool, error) {
-	return metricsdb.HasEverReportedMetric(ctx, o.url, experimentID, createdAt, now)
-}
-
-func (o metricsDBObserver) SettledAccHByJob(ctx context.Context, platformExpStart time.Time, platformExpID string) (map[string]float64, error) {
-	return metricsdb.SettledAccHByJob(ctx, o.url, platformExpStart, platformExpID)
-}
-
-func (o metricsDBObserver) PopulateUsage(ctx context.Context, platformExpStart time.Time, platformExpID string, quotas []*domain.AgentQuota) error {
-	return metricsdb.PopulateUsage(ctx, o.url, platformExpStart, platformExpID, quotas)
-}
-
-func (o metricsDBObserver) BestPerAgentOnMetric(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition, completed map[string]bool) (map[string]metricsdb.AgentBest, []string, error) {
-	return metricsdb.BestPerAgentOnMetric(ctx, o.url, pe, metric, completed)
-}
-
-func (o metricsDBObserver) RecordRunHealth(ctx context.Context, at time.Time, agents []domain.AgentHealth) error {
-	return metricsdb.RecordRunHealth(ctx, o.url, at, agents)
-}
-
 // observedGapCap is the longest gap between two real observations that still counts as
 // continuous presence, so silence detection and observed-cost accounting agree.
 func (c *Controller) observedGapCap() time.Duration {

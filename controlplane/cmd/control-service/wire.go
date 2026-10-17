@@ -34,7 +34,7 @@ type apiGate struct {
 	access *auth.Access
 }
 
-func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Repositories, gitHost githost.Provider, pool *db.Pool, store *db.Store, graph *graphdb.Store, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) *http.Server {
+func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Repositories, gitHost githost.Provider, pool *db.Pool, store *db.Store, graph *graphdb.Store, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metrics *metricsdb.Store, port string, logger *zap.Logger) *http.Server {
 	// One client for the durable-data store, shared by everything that reads it: the listing
 	// endpoint, the usage report, admission's ceiling, and the addressing handed to runtimes.
 	dataStore, err := objectstore.New(pcfg.DataStore.Provider, pcfg.DataStore.ControlPlaneEndpoint, pcfg.DataStore.Endpoint, pcfg.DataStore.Region, pcfg.DataStore.Bucket,
@@ -53,7 +53,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	// registry at most once a minute per tag.
 	environmentsSvc := environments.NewService(store, gitHost).WithJobImages(pcfg.OfferedJobImages(), imagedigest.New(pcfg.PlainHTTPRegistries()...))
 
-	peSvc := platformexperiments.NewPlatformExperimentsService(store, quotaCfg, logger, metricsDBURL, observedGapCap).WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent).WithRepositories(gitHost).
+	peSvc := platformexperiments.NewPlatformExperimentsService(store, quotaCfg, logger, metrics, observedGapCap).WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent).WithRepositories(gitHost).
 		WithEnvironments(environmentsSvc).WithModelDefaults(modelDefaults(pcfg)).WithIdleNotice(store, time.Duration(pcfg.Agents.IdleNoticeMinutes)*time.Minute).WithPersonIdeas(graph)
 	launch := platformexperiments.AgentLaunch{
 		Hosting: pcfg.Sandbox != nil, DefaultModel: pcfg.Agents.DefaultModel, CoordinatorModel: pcfg.Agents.CoordinatorModel,
@@ -67,36 +67,19 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	}).
 		WithJobImages(pcfg.OfferedJobImages()).
 		WithGitProxy(pcfg.GitHost.ProxyURL).
-		WithLiveCapacity(metricsDBURL, connectedWithin, store, domain.NewPodResources(pcfg.PodResourcesByName)).
+		WithLiveCapacity(connectedWithin, store, domain.NewPodResources(pcfg.PodResourcesByName)).
 		WithAgentLaunch(launch)
 
-	jobs, clusterExchange := newSchedulerParts(runCtx, gitHost, environmentsSvc, pool, store, graph, peSvc, quotaCfg, pcfg, metricsDBURL, dataStore, logger)
+	jobs, clusterExchange := newSchedulerParts(runCtx, gitHost, environmentsSvc, pool, store, graph, peSvc, quotaCfg, pcfg, metrics, dataStore, logger)
 	// The change stream: one LISTEN connection for this process, fanned out to whatever /watch
 	// connections are open. Nothing is persisted for it and nothing is held between connections
 	// — see httpapi/watch/watch.go.
 	events := db.NewEventsStore(pool, graph)
-	registrySvc := registry.New(store, graph, events, logger, metricsDBURL, dataStore)
+	registrySvc := registry.New(store, graph, events, logger, metrics, dataStore)
 	watchHandler := watch.NewHandler(events, store, gate.access, logger)
 	watchHandler.Start(runCtx)
-	connectedClusters := func(ctx context.Context) (map[string]bool, error) {
-		return metricsdb.LiveClusterHeartbeats(ctx, metricsDBURL, connectedWithin)
-	}
-	autoscaledClusters := func(ctx context.Context) (map[string]bool, error) {
-		return metricsdb.LiveClusterAutoscalerCapability(ctx, metricsDBURL, connectedWithin)
-	}
-	clusterContacts := func(ctx context.Context) (map[string]accounts.Contact, error) {
-		seen, err := metricsdb.ClusterLastContacts(ctx, metricsDBURL, clusterContactLookback)
-		if err != nil {
-			return nil, err
-		}
-		out := make(map[string]accounts.Contact, len(seen))
-		for name, contact := range seen {
-			out[name] = accounts.Contact{At: contact.At, AgentVersion: contact.AgentVersion}
-		}
-		return out, nil
-	}
 
-	modelProxy, err := modelproxy.New(store, modelproxy.MetricsDB{URL: metricsDBURL},
+	modelProxy, err := modelproxy.New(store, metrics,
 		modelproxy.AnthropicUpstream, pcfg.Models.Anthropic.OAuthToken, logger)
 	if err != nil {
 		logger.Fatal("control-service: configure the model proxy", zap.Error(err))
@@ -115,7 +98,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		Sessions:            platformexperiments.NewSessions(dataStore),
 		Instructions:        platformexperiments.NewInstructionsService(store, modelDefaults(pcfg), logger),
 		Drafts:              platformexperiments.NewDrafts(store, logger),
-		Accounts: accounts.NewService(store, store, connectedClusters, autoscaledClusters, clusterContacts, pcfg.Auth.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Services.PublicAPIURL, MetricsURL: pcfg.Runtimes.MetricsURL, Registry: pcfg.Runtimes.Registry, ImageTag: pcfg.Runtimes.ImageTag, RegistryPlainHTTP: pcfg.Runtimes.RegistryPlainHTTP},
+		Accounts: accounts.NewService(store, store, metrics, connectedWithin, pcfg.Auth.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Services.PublicAPIURL, MetricsURL: pcfg.Runtimes.MetricsURL, Registry: pcfg.Runtimes.Registry, ImageTag: pcfg.Runtimes.ImageTag, RegistryPlainHTTP: pcfg.Runtimes.RegistryPlainHTTP},
 			accounts.Limits{MaxOrgsPerUser: pcfg.Accounts.MaxOrgsPerUser, MaxProjectsPerOrg: pcfg.Accounts.MaxProjectsPerOrg}, gate.access, logger),
 		AgentTypes:      accounts.NewAgentTypes(store, gate.access, logger),
 		Repositories:    repos,
@@ -135,10 +118,6 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		IdleTimeout:  60 * time.Second,
 	}
 }
-
-// clusterContactLookback is how far back a cluster's last contact is looked for: one silent for
-// longer is listed with none.
-const clusterContactLookback = 30 * 24 * time.Hour
 
 // newEnvironmentRegistry is where assigned environment builds push to and the logins to it, and
 // the git host their files' repositories are read from, nil on a deployment whose settings have no

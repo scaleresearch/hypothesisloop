@@ -10,7 +10,6 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
-	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // resolvedPool is pool as it is stored: each entry's agent type and model filled as a joining
@@ -141,7 +140,7 @@ func (s *PlatformExperimentsService) KeepResearchers(ctx context.Context, pe *do
 // harness of an agent of pe at work on one last read it: a researcher added on one would only wait.
 // An agent on its type's model is on the model catalog resolves.
 func (s *PlatformExperimentsService) refusedModels(ctx context.Context, pe *domain.PlatformExperiment, catalog domain.AgentTypeCatalog, now time.Time) (map[string]bool, error) {
-	states, err := metricsdb.LatestHarnessState(ctx, s.metricsDBURL, pe.ID, pe.CreatedAt)
+	states, err := s.metrics.LatestHarnessState(ctx, pe.ID, pe.CreatedAt)
 	if err != nil {
 		return nil, err
 	}

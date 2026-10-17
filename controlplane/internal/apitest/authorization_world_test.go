@@ -26,6 +26,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // world is the rows every token and every access check of the authorization table is resolved
@@ -246,21 +247,21 @@ func newWorldAPI(t *testing.T) *worldAPI {
 
 	clusters := chi.NewRouter()
 	api.docs["/internal/clusters"] = httpapi.NewDoc(clusters, "cluster-agent", "1.0.0", "", access, logger)
-	httpapi.RegisterClusterAgent(api.docs["/internal/clusters"], clusterexchange.NewService(nil, 0, "", 0, nil, 0, nil, 0, worldSecret, "https://api.test/git", &clusterexchange.EnvironmentRegistry{Repository: "registry.test/environments/environment"}, logger))
+	httpapi.RegisterClusterAgent(api.docs["/internal/clusters"], clusterexchange.NewService(nil, 0, nil, 0, nil, 0, nil, 0, worldSecret, "https://api.test/git", &clusterexchange.EnvironmentRegistry{Repository: "registry.test/environments/environment"}, logger))
 	api.router.Mount("/internal/clusters", clusters)
 
 	doc := httpapi.NewDoc(api.router, "hypothesisloop API", "1.0.0", "", access, logger)
 	api.docs[""] = doc
 	launch := platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: worldSecret, MaxHosted: 20}
-	peHandler := platformexperiments.NewPlatformExperimentsService(nil, domain.QuotaConfig{}, logger, "", time.Minute).WithRepositories(worldRepositories{}).WithPlanning(worldPlanning).WithAgentLaunch(launch)
+	peHandler := platformexperiments.NewPlatformExperimentsService(nil, domain.QuotaConfig{}, logger, nil, time.Minute).WithRepositories(worldRepositories{}).WithPlanning(worldPlanning).WithAgentLaunch(launch)
 	httpapi.Register(doc, httpapi.Handlers{
 		Logger:              logger,
 		PlatformExperiments: peHandler,
 		Hypotheses:          worldGraph{world: w},
 		Launch:              launch,
-		Accounts:            accounts.NewService(nil, nil, nil, nil, nil, worldSecret, accounts.RuntimeAddresses{}, accounts.Limits{MaxOrgsPerUser: 3, MaxProjectsPerOrg: 10}, doc.Access, logger),
-		Scheduler:           scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", logger).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{}),
-		Registry:            registry.New(nil, worldGraph{world: w}, nil, logger, "http://metrics.invalid", nil),
+		Accounts:            accounts.NewService(nil, nil, nil, 0, worldSecret, accounts.RuntimeAddresses{}, accounts.Limits{MaxOrgsPerUser: 3, MaxProjectsPerOrg: 10}, doc.Access, logger),
+		Scheduler:           scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, metricsdb.New("http://metrics.invalid"), logger).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{}),
+		Registry:            registry.New(nil, worldGraph{world: w}, nil, logger, metricsdb.New("http://metrics.invalid"), nil),
 	})
 
 	mint := func(scope string) string {

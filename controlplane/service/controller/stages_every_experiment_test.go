@@ -12,6 +12,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // everyPEStagesStore holds a roster of running platform experiments and records which of them a
@@ -105,7 +106,7 @@ func TestReconcileAdvancesTheLadderOfEveryRunningPlatformExperimentNotOnlyTheFir
 		})
 	}
 
-	c := New(&noRunningJobsStore{}, wholeBudget{}, zap.NewNop()).WithStagesStore(store, srv.URL).WithResearcherKeeper(keptNothing{})
+	c := New(&noRunningJobsStore{}, wholeBudget{}, zap.NewNop()).WithStagesStore(store, metricsdb.New(srv.URL)).WithResearcherKeeper(keptNothing{})
 	if err := c.Reconcile(context.Background()); err != nil {
 		t.Fatalf("Reconcile err = %v, want nil", err)
 	}
@@ -140,7 +141,7 @@ func TestASingleStageRunCrossesNoBoundary(t *testing.T) {
 		CreatedAt:    now.Add(-2 * time.Hour), StartedAt: now.Add(-2 * time.Hour), EndsAt: now.Add(-time.Hour),
 	}}}
 
-	c := New(&noRunningJobsStore{}, wholeBudget{}, zap.NewNop()).WithStagesStore(store, srv.URL).WithResearcherKeeper(keptNothing{})
+	c := New(&noRunningJobsStore{}, wholeBudget{}, zap.NewNop()).WithStagesStore(store, metricsdb.New(srv.URL)).WithResearcherKeeper(keptNothing{})
 	if err := c.Reconcile(context.Background()); err != nil {
 		t.Fatalf("Reconcile err = %v, want nil", err)
 	}

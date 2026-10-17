@@ -11,6 +11,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // keepStore is what KeepResearchers reads and writes: the state of one running platform
@@ -97,7 +98,7 @@ func TestKeepResearchersReplacesWhoEndedAndNobodyElse(t *testing.T) {
 		},
 	} {
 		store := &keepStore{state: c.state, joinErr: c.joinErr}
-		svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), platformexperimentstest.NoUsage(t), time.Minute)
+		svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), time.Minute)
 		pe := &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpRunning, CoordinatorHosted: c.hosted, EndsAt: now.Add(c.endsIn), JobEstimatedDurationHours: 0.5,
 			Actor: &domain.Actor{Kind: domain.ActorUser, ID: "user-1"}}
 		if err := svc.WithAgentLaunch(AgentLaunch{Hosting: true, DefaultModel: "model-1"}).KeepResearchers(context.Background(), pe, now); err != nil {
@@ -121,7 +122,7 @@ func TestKeepResearchersReplacesWhoEndedAndNobodyElse(t *testing.T) {
 func TestKeepResearchersFillsAPlaceThePoolGained(t *testing.T) {
 	key := domain.PoolKey{AgentType: "generalist", Model: "model-1"}
 	store := &keepStore{state: db.PoolState{Pool: domain.ResearcherPool{{AgentType: "generalist", Model: "model-1", Hyperparameters: map[string]any{"from": "entry"}, Count: 3}}, MaxAgents: 5, AtWork: map[domain.PoolKey]int{key: 1}}}
-	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), platformexperimentstest.NoUsage(t), time.Minute)
+	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), time.Minute)
 	now := time.Now().UTC()
 	pe := &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpRunning, CoordinatorHosted: true, EndsAt: now.Add(time.Hour)}
 	if err := svc.WithAgentLaunch(AgentLaunch{Hosting: true, DefaultModel: "model-1"}).KeepResearchers(context.Background(), pe, now); err != nil {
@@ -147,7 +148,7 @@ func TestKeepResearchersHoldsThePlacesOfEarlyEndsAndAboveTheLimitAndSaysWhy(t *t
 		Ended:  map[domain.PoolKey][]db.EndedResearcher{key: {ended("ag-early", true), ended("ag-1", false), ended("ag-2", false), ended("ag-3", false)}},
 		Recent: map[domain.PoolKey]int{key: domain.MaxReplacementsAnHour - 1},
 	}}
-	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), platformexperimentstest.NoUsage(t), time.Minute)
+	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), time.Minute)
 	now := time.Now().UTC()
 	pe := &domain.PlatformExperiment{ID: "pe-1", Status: domain.PlatformExpRunning, CoordinatorHosted: true, EndsAt: now.Add(10 * time.Hour)}
 	keep := func() {

@@ -15,6 +15,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // An accepted draft waited for a baseline nobody could measure, with its coordinator's machine
@@ -33,7 +34,7 @@ func TestAnOpenExperimentNotRunningByItsBaselineDeadlineIsClosed(t *testing.T) {
 		open("pe-in-time", now.Add(time.Minute), ""),
 		open("pe-declared-in-time", now.Add(time.Minute), "job-1"),
 	}}}
-	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), platformexperimentstest.NoUsage(t), time.Minute)
+	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), time.Minute)
 	if err := svc.SweepExpired(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +60,7 @@ func TestSweepEndedClosesARunPastItsEndAndNothingElse(t *testing.T) {
 	late := &domain.PlatformExperiment{ID: "pe-late", ProjectID: "prj-a", Status: domain.PlatformExpOpen, CreatedAt: now.Add(-time.Hour),
 		DurationHours: 1, BudgetAcceleratorHours: 6, BaselineDueAt: now.Add(-time.Minute), Stages: []domain.Stage{{LengthPct: 100}}}
 	store := &statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{ended, going, late}}}
-	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), platformexperimentstest.NoUsage(t), time.Minute)
+	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), time.Minute)
 	if err := svc.SweepEnded(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +76,7 @@ func TestASummaryWrittenWithTheRecordInItKeepsTheRecordOnce(t *testing.T) {
 	pe := &domain.PlatformExperiment{ID: "pe-ended", ProjectID: "prj-a", Status: domain.PlatformExpRunning, CreatedAt: now.Add(-2 * time.Hour),
 		StartedAt: now.Add(-time.Hour), EndsAt: now.Add(-time.Second), DurationHours: 1, BudgetAcceleratorHours: 6, Stages: []domain.Stage{{LengthPct: 100}}}
 	store := &summarizedStore{statusStore: statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{pe}}}}
-	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), platformexperimentstest.NoUsage(t), time.Minute)
+	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), time.Minute)
 	if err := svc.SweepExpired(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +100,7 @@ func TestAnExperimentThatClosesWithNoSummaryIsGivenTheRecordOfItsClose(t *testin
 	store := &statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{pe}, researchers: []string{"ag-researcher"},
 		baselines: []domain.AgentSignup{{AgentID: "ag-baseline", Name: "baseline", Role: domain.SignupRoleBaseline,
 			Instance: &domain.AgentInstance{AskedAt: &asked, Name: "m-1", Reported: domain.InstanceRunning}, Activity: &domain.AgentActivity{Text: "writing harness/run_trial.py", At: asked}}}}}
-	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), platformexperimentstest.NoUsage(t), time.Minute)
+	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), time.Minute)
 	if err := svc.SweepExpired(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +124,7 @@ func TestTheRecordOfACloseFollowsASummaryWrittenBefore(t *testing.T) {
 			Actor: domain.Actor{Kind: domain.ActorCoordinator, ID: "pe-ended"}, At: time.Date(2026, 10, 8, 19, 0, 0, 0, time.UTC)}}}
 	store := &statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{pe}, messages: []domain.AgentMessage{{AgentID: "ag-1", From: "coordinator",
 		Text: "leave the lr line,\ntry warmup", At: time.Date(2026, 10, 8, 19, 30, 0, 0, time.UTC)}}}}
-	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), platformexperimentstest.NoUsage(t), time.Minute)
+	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), time.Minute)
 	if err := svc.SweepExpired(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +148,7 @@ func TestAnOwnersReasonToCloseIsRecorded(t *testing.T) {
 	pe := &domain.PlatformExperiment{ID: "pe-early", ProjectID: "prj-a", Status: domain.PlatformExpRunning, CreatedAt: now.Add(-2 * time.Hour),
 		StartedAt: now.Add(-time.Hour), EndsAt: now.Add(time.Hour), DurationHours: 2, BudgetAcceleratorHours: 6, Stages: []domain.Stage{{LengthPct: 100}}}
 	store := &statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{pe}}}
-	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), platformexperimentstest.NoUsage(t), time.Minute)
+	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), time.Minute)
 	owner := domain.Actor{Kind: domain.ActorUser, ID: "user-1"}
 	closed, err := svc.Close(context.Background(), pe.ID, &owner, "the baseline is wrong:\nit measured the old split", nil)
 	if err != nil {
@@ -181,7 +182,7 @@ func TestTheRecordOfACloseWaitsForItsJobsToBeBilled(t *testing.T) {
 		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[0,"0.0645"]}]}}`))
 	}))
 	t.Cleanup(metrics.Close)
-	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), metrics.URL, time.Minute)
+	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(metrics.URL), time.Minute)
 	if err := svc.SweepExpired(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +213,7 @@ func TestTheRecordOfABaselineDeadlineCloseSaysWhatTheBaselineLeft(t *testing.T) 
 		InfraRequeueCount: 2, InfraRequeueReason: "stuck_pending: admitted and not running within 5m0s, its runtime reporting create_failed: secrets is forbidden",
 		CodeRef: "https://github.com/acme/codec.git@4c6e96", Branch: branch, EnvironmentKey: "env-1"}
 	store := &statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{pe}, objective: []*domain.Experiment{job}}}
-	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), platformexperimentstest.NoUsage(t), time.Minute).
+	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), time.Minute).
 		WithEnvironments(builtEnvironments{"env-1": {Key: "env-1", State: domain.EnvironmentReady, Image: "registry.test/environment@sha256:ce7a"}})
 	if err := svc.SweepExpired(context.Background()); err != nil {
 		t.Fatal(err)
@@ -344,7 +345,7 @@ func TestOnlyAJobHoldingTheConstraintsMakesADeclarationWeak(t *testing.T) {
 		for _, b := range completed {
 			store.completed = append(store.completed, b.Job)
 		}
-		svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), "", time.Minute)
+		svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), nil, time.Minute)
 		svc.baseline = func(_ context.Context, _ *domain.PlatformExperiment, jobID string) (*Baseline, error) {
 			return jobs[jobID], nil
 		}

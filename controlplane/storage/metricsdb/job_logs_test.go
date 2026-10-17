@@ -15,7 +15,7 @@ func TestQuerySQLRowsStillFailsOnAnyOtherError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	if _, err := querySQLRows(context.Background(), server.URL, "SELECT 1"); err == nil {
+	if _, err := New(server.URL).querySQLRows(context.Background(), "SELECT 1"); err == nil {
 		t.Fatal("querySQLRows swallowed a storage failure — that bills a real run as zero hours")
 	}
 }

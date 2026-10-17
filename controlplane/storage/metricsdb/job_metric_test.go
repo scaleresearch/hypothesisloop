@@ -60,7 +60,7 @@ func TestPopulateJobMetricsSetsTheLastValueOnEveryDeclaredMetric(t *testing.T) {
 			{Key: "kind", Direction: "maximize", Role: domain.MetricRoleAttribute},
 		}, true, nil
 	}
-	if err := PopulateJobMetrics(context.Background(), server.URL, definitions, jobs); err != nil {
+	if err := New(server.URL).PopulateJobMetrics(context.Background(), definitions, jobs); err != nil {
 		t.Fatalf("PopulateJobMetrics: %v", err)
 	}
 	auroc := domain.JobMetric{Name: "auroc", Value: 0.90, Basis: "raw"}
@@ -92,7 +92,7 @@ func TestPopulateJobMetricsAsksNothingWithoutDeclaredMetrics(t *testing.T) {
 	defer server.Close()
 	jobs := []*domain.Experiment{{ID: "job-a", PlatformExperimentID: "pe-gone"}}
 	none := func(context.Context, string) ([]domain.MetricDefinition, bool, error) { return nil, false, nil }
-	if err := PopulateJobMetrics(context.Background(), server.URL, none, jobs); err != nil {
+	if err := New(server.URL).PopulateJobMetrics(context.Background(), none, jobs); err != nil {
 		t.Fatalf("PopulateJobMetrics: %v", err)
 	}
 	if *gotQuery != "" || jobs[0].Metric != nil {

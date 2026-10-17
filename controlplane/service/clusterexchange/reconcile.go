@@ -142,7 +142,7 @@ func (s *Service) Reconcile(ctx context.Context, clusterName, agentVersion strin
 		return clusterapi.ReconcileAnswer{}, auth.Internal(s.logger, "cluster reconcile", err, zap.String("cluster", clusterName))
 	}
 
-	if err := metricsdb.RecordClusterCapacitySnapshot(ctx, s.metricsDBURL, metricsdb.ClusterCapacitySnapshot{
+	if err := s.metrics.RecordClusterCapacitySnapshot(ctx, metricsdb.ClusterCapacitySnapshot{
 		ClusterName: clusterName, At: time.Now().UTC(),
 		CPUAvailable: report.CPUAvailableCores, CPUTotal: report.CPUTotalCores,
 		AcceleratorAvailable: report.AcceleratorAvailableByFlavor, AcceleratorTotal: report.AcceleratorTotalByFlavor,

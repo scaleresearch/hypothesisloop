@@ -71,12 +71,6 @@ type Standings interface {
 	BestPerAgentOnMetric(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition, completed map[string]bool) (map[string]metricsdb.AgentBest, []string, error)
 }
 
-type metricsDBStandings struct{ url string }
-
-func (m metricsDBStandings) BestPerAgentOnMetric(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition, completed map[string]bool) (map[string]metricsdb.AgentBest, []string, error) {
-	return metricsdb.BestPerAgentOnMetric(ctx, m.url, pe, metric, completed)
-}
-
 // QuotaService handles experiment-scoped quota checks and debits, across every resource
 // dimension (Accelerator-hours, CPU-core-hours, RAM-GB-hours, storage-GB-hours).
 type QuotaService interface {
@@ -136,16 +130,16 @@ type Service struct {
 	environments Environments
 	clusters     InstalledCapacity
 	// jobImages is the images the deployment offers a job to run in, which a job names by name.
-	jobImages    []domain.JobImage
-	weights      domain.SchedulingWeights
-	credits      domain.QuotaConfig
-	loop         Triggerable
-	builds       BuildAssigner
-	pulls        RegistryPulls
-	settler      QuotaSettler
-	metricsDBURL string
-	standings    Standings
-	logger       *zap.Logger
+	jobImages []domain.JobImage
+	weights   domain.SchedulingWeights
+	credits   domain.QuotaConfig
+	loop      Triggerable
+	builds    BuildAssigner
+	pulls     RegistryPulls
+	settler   QuotaSettler
+	metrics   *metricsdb.Store
+	standings Standings
+	logger    *zap.Logger
 	// dataStore creates each submitted job's key. With maxDataBytesPerAgent it is also the
 	// durable-data ceiling: how much one agent already holds in this platform experiment is asked
 	// of the store at admission and nowhere else. Not enforced mid-write — that needs a gateway in
@@ -162,26 +156,26 @@ func NewService(
 	codeHost CodeHost,
 	clusters InstalledCapacity,
 	settler QuotaSettler,
-	metricsDBURL string,
+	metrics *metricsdb.Store,
 	logger *zap.Logger,
 ) *Service {
 	if settler == nil {
 		panic("scheduler: NewService requires a quota settler — it is the only path terminal usage is written by")
 	}
-	if codeHost == nil || clusters == nil || metricsDBURL == "" || logger == nil {
+	if codeHost == nil || clusters == nil || metrics == nil || logger == nil {
 		panic("scheduler: NewService requires the git host, the clusters' installed capacity, the metrics store URL and a logger")
 	}
 	return &Service{
-		store:        store,
-		quota:        quota,
-		hypotheses:   hypotheses,
-		codeHost:     codeHost,
-		clusters:     clusters,
-		settler:      settler,
-		metricsDBURL: metricsDBURL,
-		standings:    metricsDBStandings{url: metricsDBURL},
-		logger:       logger,
-		weights:      domain.DefaultSchedulingWeights(),
+		store:      store,
+		quota:      quota,
+		hypotheses: hypotheses,
+		codeHost:   codeHost,
+		clusters:   clusters,
+		settler:    settler,
+		metrics:    metrics,
+		standings:  metrics,
+		logger:     logger,
+		weights:    domain.DefaultSchedulingWeights(),
 	}
 }
 

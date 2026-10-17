@@ -11,7 +11,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
-	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
 	"go.uber.org/zap"
 )
@@ -33,7 +32,7 @@ func (s *PlatformExperimentsService) GetAgentQuota(ctx context.Context, agentID,
 	if pe == nil {
 		return nil, fmt.Errorf("platform_experiments.GetAgentQuota: platform experiment %s not found", platformExpID)
 	}
-	if err := metricsdb.PopulateUsageOne(ctx, s.usage.URL(), pe.CreatedAt, aq); err != nil {
+	if err := s.metrics.PopulateUsageOne(ctx, pe.CreatedAt, aq); err != nil {
 		return nil, fmt.Errorf("platform_experiments.GetAgentQuota: populate usage: %w", err)
 	}
 	if err := s.store.AddDesiredQuotaUsageOne(ctx, aq); err != nil {
@@ -76,7 +75,7 @@ func (s *PlatformExperimentsService) baselineSpend(ctx context.Context, pe *doma
 	spent := 0.0
 	for _, agentID := range agents {
 		quota := &domain.AgentQuota{AgentID: agentID, PlatformExperimentID: pe.ID}
-		if err := metricsdb.PopulateUsageOne(ctx, s.metricsDBURL, pe.CreatedAt, quota); err != nil {
+		if err := s.metrics.PopulateUsageOne(ctx, pe.CreatedAt, quota); err != nil {
 			return 0, fmt.Errorf("platform_experiments.baselineSpend: %w", err)
 		}
 		spent += quota.Used()
@@ -99,7 +98,7 @@ func (s *PlatformExperimentsService) GetObservedAgentQuota(ctx context.Context, 
 	if pe == nil {
 		return nil, fmt.Errorf("platform_experiments.GetObservedAgentQuota: platform experiment %s not found", platformExpID)
 	}
-	if err := metricsdb.PopulateUsageOne(ctx, s.usage.URL(), pe.CreatedAt, aq); err != nil {
+	if err := s.metrics.PopulateUsageOne(ctx, pe.CreatedAt, aq); err != nil {
 		return nil, fmt.Errorf("platform_experiments.GetObservedAgentQuota: populate usage: %w", err)
 	}
 	if err := s.addRunningActualCosts(ctx, pe, aq); err != nil {
@@ -144,7 +143,7 @@ func (s *PlatformExperimentsService) QuotaView(ctx context.Context, agentID, pla
 	if pe == nil {
 		return nil, fmt.Errorf("platform_experiments.QuotaView: platform experiment %s not found", platformExpID)
 	}
-	if err := metricsdb.PopulateUsageOne(ctx, s.usage.URL(), pe.CreatedAt, aq); err != nil {
+	if err := s.metrics.PopulateUsageOne(ctx, pe.CreatedAt, aq); err != nil {
 		return nil, fmt.Errorf("platform_experiments.QuotaView: populate usage: %w", err)
 	}
 	views, err := s.quotaViews(ctx, pe, []*domain.AgentQuota{aq})
@@ -175,7 +174,7 @@ func (s *PlatformExperimentsService) ListQuotas(ctx context.Context, platformExp
 	if pe == nil {
 		return nil, ErrPlatformExperimentNotFound
 	}
-	if err := metricsdb.PopulateUsage(ctx, s.usage.URL(), pe.CreatedAt, platformExpID, quotas); err != nil {
+	if err := s.metrics.PopulateUsage(ctx, pe.CreatedAt, platformExpID, quotas); err != nil {
 		return nil, fmt.Errorf("platform_experiments.ListQuotas: populate usage: %w", err)
 	}
 	views, err := s.quotaViews(ctx, pe, quotas)
@@ -259,7 +258,7 @@ func (s *PlatformExperimentsService) AdmitExperiment(ctx context.Context, exp *d
 	}
 	return s.store.AdmitExperimentTx(ctx, exp, func(ctx context.Context) (*domain.AgentQuota, error) {
 		aq := &domain.AgentQuota{AgentID: exp.AgentID, PlatformExperimentID: exp.PlatformExperimentID}
-		if err := metricsdb.PopulateUsageOne(ctx, s.usage.URL(), pe.CreatedAt, aq); err != nil {
+		if err := s.metrics.PopulateUsageOne(ctx, pe.CreatedAt, aq); err != nil {
 			return nil, err
 		}
 		return aq, nil
@@ -273,7 +272,7 @@ func (s *PlatformExperimentsService) ReserveAdmittedFlavor(ctx context.Context, 
 	reason, err := s.store.ReserveAdmittedFlavorTx(ctx, experimentID, acceleratorType, estimatedCost, acceleratorCount, s.cfg.DefaultMaxConcurrentAccelerators,
 		func(ctx context.Context, agentID, platformExpID string, platformExpStart time.Time) (*domain.AgentQuota, error) {
 			aq := &domain.AgentQuota{AgentID: agentID, PlatformExperimentID: platformExpID}
-			if err := metricsdb.PopulateUsageOne(ctx, s.usage.URL(), platformExpStart, aq); err != nil {
+			if err := s.metrics.PopulateUsageOne(ctx, platformExpStart, aq); err != nil {
 				return nil, err
 			}
 			return aq, nil
@@ -291,7 +290,7 @@ func (s *PlatformExperimentsService) ReserveAdmittedFlavor(ctx context.Context, 
 }
 
 func (s *PlatformExperimentsService) SetObservedUsage(ctx context.Context, exp *domain.Experiment, amounts map[domain.ResourceType]float64) error {
-	return s.usage.SetObservedBatch(ctx, exp.AgentID, exp.PlatformExperimentID, exp.ID, exp.CapacityTier, amounts)
+	return s.metrics.SetObservedBatch(ctx, exp.AgentID, exp.PlatformExperimentID, exp.ID, exp.CapacityTier, amounts)
 }
 
 // ErrNoQuota is an agent with no quota in an open platform experiment, of none or of no

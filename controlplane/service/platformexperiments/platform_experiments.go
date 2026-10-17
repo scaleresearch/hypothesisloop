@@ -192,11 +192,10 @@ type PlatformExperimentsStore interface {
 
 // PlatformExperimentsService manages the Platform Experiment lifecycle.
 type PlatformExperimentsService struct {
-	store        PlatformExperimentsStore
-	usage        *metricsdb.UsageTracker
-	metricsDBURL string
-	cfg          domain.QuotaConfig
-	logger       *zap.Logger
+	store   PlatformExperimentsStore
+	metrics *metricsdb.Store
+	cfg     domain.QuotaConfig
+	logger  *zap.Logger
 	// observedGapCap is the deployment-wide observation cadence, identical to the
 	// controller's and the settler's. Every observed-usage query in a deployment must agree on
 	// what "how long did this run" means, or the same job's cost changes depending on which code
@@ -231,9 +230,8 @@ type PlatformExperimentsService struct {
 	placement func(ctx context.Context, projectID string) (*Placement, error)
 	// jobImages is the images the deployment offers a job to run in (WithJobImages).
 	jobImages []domain.JobImage
-	// capacityURL, capacityFreshness, clusters and podResources are what the live capacity is
+	// capacityFreshness, clusters and podResources are what the live capacity is
 	// read from (WithLiveCapacity).
-	capacityURL       string
 	capacityFreshness time.Duration
 	clusters          ClusterRegistry
 	podResources      domain.PodResources
@@ -315,17 +313,16 @@ func (s *PlatformExperimentsService) WithDataStore(client *objectstore.Client, m
 	return s
 }
 
-// NewPlatformExperimentsService constructs the service. metricsDBURL is the GreptimeDB instance
+// NewPlatformExperimentsService constructs the service. metrics is the GreptimeDB instance
 // backing observed agent quota consumption. PostgreSQL holds allocations and current desired
 // experiment estimates.
-func NewPlatformExperimentsService(store PlatformExperimentsStore, cfg domain.QuotaConfig, logger *zap.Logger, metricsDBURL string, observedGapCap time.Duration) *PlatformExperimentsService {
+func NewPlatformExperimentsService(store PlatformExperimentsStore, cfg domain.QuotaConfig, logger *zap.Logger, metrics *metricsdb.Store, observedGapCap time.Duration) *PlatformExperimentsService {
 	if observedGapCap <= 0 {
 		panic("quota: NewPlatformExperimentsService requires a positive observation cadence — it must match the controller's and the settler's")
 	}
 	s := &PlatformExperimentsService{
 		store:          store,
-		usage:          metricsdb.NewUsageTracker(metricsDBURL),
-		metricsDBURL:   metricsDBURL,
+		metrics:        metrics,
 		cfg:            cfg,
 		logger:         logger,
 		observedGapCap: observedGapCap,
@@ -474,7 +471,7 @@ type AgentResult struct {
 // the in-flight cost of running jobs that the controller's authoritative value includes, so it
 // can trail the boundary the controller acts on.
 func (s *PlatformExperimentsService) stageProgress(ctx context.Context, pe *domain.PlatformExperiment) (float64, error) {
-	consumed, err := metricsdb.TotalObservedAccH(ctx, s.usage.URL(), pe.CreatedAt, pe.ID)
+	consumed, err := s.metrics.TotalObservedAccH(ctx, pe.CreatedAt, pe.ID)
 	if err != nil {
 		return 0, fmt.Errorf("stages: observed usage for %s: %w", pe.ID, err)
 	}

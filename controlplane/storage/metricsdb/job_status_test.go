@@ -3,12 +3,13 @@ package metricsdb
 import (
 	"context"
 	"fmt"
-	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 func TestRecordJobStatusesRejectsInvalidPhaseWithoutWriting(t *testing.T) {
@@ -19,7 +20,7 @@ func TestRecordJobStatusesRejectsInvalidPhaseWithoutWriting(t *testing.T) {
 	}))
 	defer server.Close()
 	now := time.Now()
-	err := RecordJobStatuses(context.Background(), server.URL, "cluster-a", now, []JobStatusSample{{
+	err := New(server.URL).RecordJobStatuses(context.Background(), "cluster-a", now, []JobStatusSample{{
 		ExperimentID: "exp-1", ClusterName: "cluster-a", Phase: "invented", At: now,
 	}})
 	if err == nil {
@@ -37,7 +38,7 @@ func TestRecordJobStatusesWritesEmptyCompleteSnapshot(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer server.Close()
-	if err := RecordJobStatuses(context.Background(), server.URL, "cluster-a", time.Now(), nil); err != nil {
+	if err := New(server.URL).RecordJobStatuses(context.Background(), "cluster-a", time.Now(), nil); err != nil {
 		t.Fatal(err)
 	}
 	if requests.Load() != 1 {
@@ -51,7 +52,7 @@ func TestLatestJobPhaseUsesNewerCompleteSnapshotToProveGone(t *testing.T) {
 	}))
 	defer server.Close()
 
-	phase, found, err := LatestJobPhase(context.Background(), server.URL, "exp-1", "cluster-a", time.Minute)
+	phase, found, err := New(server.URL).LatestJobPhase(context.Background(), "exp-1", "cluster-a", time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +67,7 @@ func TestLatestJobPhaseKeepsJobReportedInCurrentSnapshot(t *testing.T) {
 	}))
 	defer server.Close()
 
-	phase, found, err := LatestJobPhase(context.Background(), server.URL, "exp-1", "cluster-a", time.Minute)
+	phase, found, err := New(server.URL).LatestJobPhase(context.Background(), "exp-1", "cluster-a", time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}

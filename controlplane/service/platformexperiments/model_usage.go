@@ -15,7 +15,7 @@ type ModelUsage struct {
 
 // ModelUsage sums the model calls made for the platform experiment id.
 func (s *PlatformExperimentsService) ModelUsage(ctx context.Context, id string) (*ModelUsage, error) {
-	calls, err := metricsdb.ModelUsageOf(ctx, s.metricsDBURL, id)
+	calls, err := s.metrics.ModelUsageOf(ctx, id)
 	if err != nil {
 		return nil, err
 	}

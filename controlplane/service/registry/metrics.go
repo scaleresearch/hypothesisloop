@@ -87,7 +87,7 @@ func (s *Service) RecordMetric(ctx context.Context, experimentID, metricName, ba
 		{MetricName: metricsdb.ExperimentMetricValue, Labels: labels, Value: value, At: at},
 		{MetricName: metricsdb.ExperimentMetricFraction, Labels: labels, Value: fractionComplete, At: at},
 	}
-	if err := metricsdb.WriteGaugesAt(ctx, s.metricsDBURL, samples); err != nil {
+	if err := s.metrics.WriteGaugesAt(ctx, samples); err != nil {
 		return fmt.Errorf("registry.RecordMetric: %w", err)
 	}
 	s.notifyMetricArrived(ctx, experimentID, exp.PlatformExperimentID, exp.AgentID, metricName, fractionComplete)
@@ -193,7 +193,7 @@ func (s *Service) checkUnderperformance(ctx context.Context, exp *domain.Experim
 		s.logger.Warn("registry: underperformance check", zap.String("experiment_id", exp.ID), zap.Error(err))
 		return
 	}
-	rankable, err := metricsdb.RankableJobs(ctx, s.metricsDBURL, &domain.PlatformExperiment{ID: exp.PlatformExperimentID, Metrics: metrics, CreatedAt: at.Add(-lookback)}, completed)
+	rankable, err := s.metrics.RankableJobs(ctx, &domain.PlatformExperiment{ID: exp.PlatformExperimentID, Metrics: metrics, CreatedAt: at.Add(-lookback)}, completed)
 	if err != nil {
 		s.logger.Warn("registry: underperformance check", zap.String("experiment_id", exp.ID), zap.Error(err))
 		return

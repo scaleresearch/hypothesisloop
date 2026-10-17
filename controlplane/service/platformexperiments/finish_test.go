@@ -13,6 +13,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // In a live run both researchers finished with 11 to 16 minutes of an hour and most of their quota
@@ -29,7 +30,7 @@ func TestAResearcherFinishingEarlyNamesItsBlockerAndTheTimeAndQuotaItLeavesAreTo
 		return store
 	}
 	finish := func(store *rosterStore, blocker string) (*domain.AgentSignup, error) {
-		svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), platformexperimentstest.NoUsage(t), 3*time.Minute)
+		svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), 3*time.Minute)
 		return svc.FinishAgent(context.Background(), "pe-1", "dana", "nothing beat the control", blocker, "")
 	}
 
@@ -76,7 +77,7 @@ func TestAResearcherFinishesWithoutABlockerWhenNoJobOfItFitsInTheTimeLeft(t *tes
 		store.signups = []domain.AgentSignup{{PlatformExperimentID: "pe-1", AgentID: "dana", Role: domain.SignupRoleCompetitor}}
 		store.quota = &domain.AgentQuota{AgentID: "dana", PlatformExperimentID: "pe-1", GuaranteedAcceleratorHours: 3, UsedGuaranteedAccH: 0.2}
 		store.completed = completed
-		svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), platformexperimentstest.NoUsage(t), 3*time.Minute)
+		svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), 3*time.Minute)
 		_, err := svc.FinishAgent(context.Background(), "pe-1", "dana", "nothing beat the control", "", "")
 		return err
 	}

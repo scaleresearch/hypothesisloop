@@ -15,7 +15,6 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
-	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 type Store interface {
@@ -32,13 +31,6 @@ type Store interface {
 // Metrics is where the harness states the launcher reads are kept: the run's health series.
 type Metrics interface {
 	RecordHarnessState(ctx context.Context, at time.Time, states []domain.HarnessState) error
-}
-
-// MetricsDB is Metrics in the metrics store at URL.
-type MetricsDB struct{ URL string }
-
-func (m MetricsDB) RecordHarnessState(ctx context.Context, at time.Time, states []domain.HarnessState) error {
-	return metricsdb.RecordHarnessState(ctx, m.URL, at, states)
 }
 
 // Settings is what the platform's config decides about hosted machines.

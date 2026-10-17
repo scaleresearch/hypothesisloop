@@ -47,7 +47,7 @@ func healthLabels(platformExperimentID, agentID, role string) map[string]string 
 
 // RecordRunHealth writes where each agent stands at at, in one request. A first-job series
 // starts once there is a first job.
-func RecordRunHealth(ctx context.Context, dbURL string, at time.Time, agents []domain.AgentHealth) error {
+func (s *Store) RecordRunHealth(ctx context.Context, at time.Time, agents []domain.AgentHealth) error {
 	var samples []GaugeSample
 	for _, a := range agents {
 		labels := healthLabels(a.PlatformExperimentID, a.AgentID, a.Role)
@@ -64,7 +64,7 @@ func RecordRunHealth(ctx context.Context, dbURL string, at time.Time, agents []d
 		gauge(agentRestartsMetric, float64(a.Restarts))
 		gauge(agentCoordinatorMessagesMetric, float64(a.CoordinatorMessages))
 	}
-	if err := WriteGaugesAt(ctx, dbURL, samples); err != nil {
+	if err := s.WriteGaugesAt(ctx, samples); err != nil {
 		return fmt.Errorf("metricsdb.RecordRunHealth: %w", err)
 	}
 	return nil
@@ -72,7 +72,7 @@ func RecordRunHealth(ctx context.Context, dbURL string, at time.Time, agents []d
 
 // RecordHarnessState writes what each hosted harness last said of itself, read at at, in one
 // request: its subagents, its turn, and the rate limit when it has read one.
-func RecordHarnessState(ctx context.Context, dbURL string, at time.Time, states []domain.HarnessState) error {
+func (s *Store) RecordHarnessState(ctx context.Context, at time.Time, states []domain.HarnessState) error {
 	var samples []GaugeSample
 	for _, s := range states {
 		labels := healthLabels(s.PlatformExperimentID, s.AgentID, s.Role)
@@ -106,7 +106,7 @@ func RecordHarnessState(ctx context.Context, dbURL string, at time.Time, states 
 			gauge(agentRateLimitResetsAtMetric, float64(s.Model.ResetsAt.Unix()))
 		}
 	}
-	if err := WriteGaugesAt(ctx, dbURL, samples); err != nil {
+	if err := s.WriteGaugesAt(ctx, samples); err != nil {
 		return fmt.Errorf("metricsdb.RecordHarnessState: %w", err)
 	}
 	return nil
@@ -116,11 +116,11 @@ type healthSeries struct{ role, agentID string }
 
 // latestHealth is the latest value of each of metrics, per series of platformExperimentID, since
 // the run's row came into being at createdAt.
-func latestHealth(ctx context.Context, dbURL, platformExperimentID string, createdAt time.Time, metrics []string) (map[healthSeries]map[string]float64, error) {
+func (s *Store) latestHealth(ctx context.Context, platformExperimentID string, createdAt time.Time, metrics []string) (map[healthSeries]map[string]float64, error) {
 	window := promSeconds(time.Since(ObservationWindowStart(createdAt)))
 	out := map[healthSeries]map[string]float64{}
 	for _, metric := range metrics {
-		samples, err := QueryVector(ctx, dbURL, fmt.Sprintf(`last_over_time(%s{platform_experiment_id=%q}[%s])`, metric, platformExperimentID, window))
+		samples, err := s.QueryVector(ctx, fmt.Sprintf(`last_over_time(%s{platform_experiment_id=%q}[%s])`, metric, platformExperimentID, window))
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", metric, err)
 		}
@@ -152,8 +152,8 @@ func refusedUntil(values map[string]float64) (time.Time, bool) {
 // LatestRunHealth reads where each agent of platformExperimentID, and its hosted coordinator,
 // last stood: the latest value of each of its health series since the run's row came into being
 // at createdAt. A first-job value is nil until there is a first job. Sorted by role, then agent.
-func LatestRunHealth(ctx context.Context, dbURL, platformExperimentID string, createdAt time.Time) ([]domain.AgentHealth, error) {
-	series, err := latestHealth(ctx, dbURL, platformExperimentID, createdAt, append([]string{agentFirstJobSecondsMetric, agentFirstCompletedJobSecondsMetric,
+func (s *Store) LatestRunHealth(ctx context.Context, platformExperimentID string, createdAt time.Time) ([]domain.AgentHealth, error) {
+	series, err := s.latestHealth(ctx, platformExperimentID, createdAt, append([]string{agentFirstJobSecondsMetric, agentFirstCompletedJobSecondsMetric,
 		agentJobsInFlightMetric, agentRestartsMetric, agentCoordinatorMessagesMetric}, rateLimitMetrics...))
 	if err != nil {
 		return nil, fmt.Errorf("metricsdb.LatestRunHealth: %w", err)
@@ -186,8 +186,8 @@ func LatestRunHealth(ctx context.Context, dbURL, platformExperimentID string, cr
 // its hosted coordinator, last said of itself since the run's row came into being at createdAt.
 // One whose harness said nothing in that time is left out. Model is the rate limit last read,
 // Rejected only while its reset is ahead. Sorted by role, then agent.
-func LatestHarnessState(ctx context.Context, dbURL, platformExperimentID string, createdAt time.Time) ([]domain.HarnessState, error) {
-	series, err := latestHealth(ctx, dbURL, platformExperimentID, createdAt, append([]string{agentStateReportedAtMetric,
+func (s *Store) LatestHarnessState(ctx context.Context, platformExperimentID string, createdAt time.Time) ([]domain.HarnessState, error) {
+	series, err := s.latestHealth(ctx, platformExperimentID, createdAt, append([]string{agentStateReportedAtMetric,
 		agentSubagentsMetric, agentTurnWaitingMetric, agentTurnSinceMetric, agentInstructionsDigestMetric}, rateLimitMetrics...))
 	if err != nil {
 		return nil, fmt.Errorf("metricsdb.LatestHarnessState: %w", err)

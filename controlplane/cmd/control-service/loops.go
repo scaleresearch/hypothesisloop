@@ -16,16 +16,17 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/settlement"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/graphdb"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
 )
 
 // newSchedulerParts builds the scheduler's handler and starts its background loops, returning
 // the handlers httpapi.NewRouter serves: the scheduler's on the shared API doc, the cluster-agents' under
 // its own prefix.
-func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environmentsSvc *environments.Service, pool *db.Pool, store *db.Store, graph *graphdb.Store, expQuotaSvc *platformexperiments.PlatformExperimentsService, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL string, dataStore *objectstore.Client, logger *zap.Logger) (*scheduler.Service, *clusterexchange.Service) {
+func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environmentsSvc *environments.Service, pool *db.Pool, store *db.Store, graph *graphdb.Store, expQuotaSvc *platformexperiments.PlatformExperimentsService, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metrics *metricsdb.Store, dataStore *objectstore.Client, logger *zap.Logger) (*scheduler.Service, *clusterexchange.Service) {
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
 
-	clusterReports, err := scheduler.NewClusterReports(store, metricsDBURL,
+	clusterReports, err := scheduler.NewClusterReports(store, metrics,
 		time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds)*time.Second)
 	if err != nil {
 		logger.Fatal("control-service: configure cluster reports", zap.Error(err))
@@ -34,7 +35,7 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environ
 	// settler is the sole path that durably writes a terminal experiment's final observed usage
 	// (see service/settlement) — used inline by JobWatcher and by the reconciler below to
 	// retry anything a crash or metrics-DB outage left unsettled.
-	settler := settlement.New(expQuotaSvc, metricsDBURL, observedGapCap)
+	settler := settlement.New(expQuotaSvc, metrics, observedGapCap)
 	settlementReconciler := settlement.NewReconciler(store, settler, 30*time.Second, logger)
 
 	watcher := scheduler.NewJobWatcher(store, clusterReports, settler, logger).
@@ -48,7 +49,7 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environ
 		MaxShutdownSeconds:     int64(pcfg.Scheduler.MaxTerminationGracePeriodSeconds),
 		MaxCheckpointSeconds:   int64(pcfg.Scheduler.MaxCheckpointGraceSeconds),
 	}
-	schedulerSvc := scheduler.NewService(store, expQuotaSvc, graph, gitHost, clusterReports, settler, metricsDBURL, logger).
+	schedulerSvc := scheduler.NewService(store, expQuotaSvc, graph, gitHost, clusterReports, settler, metrics, logger).
 		WithQuotaConfig(quotaCfg).
 		WithJobImages(pcfg.OfferedJobImages()).
 		WithEnvironments(environmentsSvc).
@@ -60,7 +61,7 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environ
 		WithHeartbeat(time.Duration(pcfg.Scheduler.LoopHeartbeatSeconds)*time.Second).
 		WithGuaranteedFairnessWindow(time.Duration(pcfg.Scheduler.GuaranteedFairnessWindowSeconds)*time.Second).
 		WithHeldJobNotice(time.Duration(pcfg.Scheduler.HeldJobNoticeSeconds)*time.Second).
-		WithObservedTimeConfig(metricsDBURL, observedGapCap).
+		WithObservedTimeConfig(metrics, observedGapCap).
 		WithDisbalanceEvictor(schedulerSvc, pcfg.Scheduler.ResourceDisbalanceTolerance).
 		WithQuotaSettler(settler).
 		WithSpeculation(time.Duration(pcfg.Scheduler.TriedClusterTTLSeconds) * time.Second)
@@ -82,13 +83,13 @@ func newSchedulerParts(runCtx context.Context, gitHost githost.Provider, environ
 	// Cluster-agent-facing surface (Go cluster-agent binaries, not the research agent) gets its
 	// own Huma registration with its own openapi/explore docs, mounted under its own prefix.
 	clusterExchange := clusterexchange.NewService(store,
-		time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds)*time.Second, metricsDBURL, pcfg.Scheduler.ObservationCadence(), dataStore,
+		time.Duration(pcfg.Scheduler.ClusterUnreachableAfterSeconds)*time.Second, metrics, pcfg.Scheduler.ObservationCadence(), dataStore,
 		time.Duration(pcfg.Scheduler.MaxCheckpointGraceSeconds)*time.Second,
 		pcfg.AcceleratorTypeNames(), pcfg.Scheduler.MaxLogTailLineChars, pcfg.Auth.SigningSecret, pcfg.GitHost.ProxyURL, environmentRegistry, logger).
 		WithBuildReported(schedulerLoop.Trigger)
 
 	// The sandbox launcher and the cloud compute clusters rent machines, so one replica runs them.
-	rented, err := newRented(pcfg, store, clusterExchange, metricsDBURL, logger)
+	rented, err := newRented(pcfg, store, clusterExchange, metrics, logger)
 	if err != nil {
 		logger.Fatal("control-service: rented machines", zap.Error(err))
 	}

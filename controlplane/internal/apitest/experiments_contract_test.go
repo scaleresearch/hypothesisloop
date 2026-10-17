@@ -20,6 +20,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // filterSpyStore records the filter list-experiments builds, so the test asserts on what the
@@ -93,7 +94,7 @@ func schedulerRouter(t *testing.T, store scheduler.Store) chi.Router {
 		Logger:     zap.NewNop(),
 		Hypotheses: struct{ platformexperiments.Hypotheses }{},
 		Launch:     platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: "contract-test-signing-secret", MaxHosted: 20},
-		Scheduler:  scheduler.NewService(store, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, metrics.URL, zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{}),
+		Scheduler:  scheduler.NewService(store, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, metricsdb.New(metrics.URL), zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{}),
 	})
 	return r
 }

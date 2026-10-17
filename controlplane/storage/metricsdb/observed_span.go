@@ -54,7 +54,7 @@ type ObservedSpan struct {
 // A run its runtime measured from beside the command is in the store whole, as observations no
 // further apart than gapCap (clusterexchange's status push), so it is summed here like any other
 // and the gap rule falls on sampled liveness alone.
-func ObserveSpan(ctx context.Context, dbURL, experimentID string, since, now time.Time, gapCap time.Duration) (ObservedSpan, error) {
+func (s *Store) ObserveSpan(ctx context.Context, experimentID string, since, now time.Time, gapCap time.Duration) (ObservedSpan, error) {
 	// An inverted window means a corrupt created_at or a caller passing the two the wrong way
 	// round. Returning an empty span would bill that as "never observed" — silently, and as a
 	// full refund. It is not a measurement this package can make.
@@ -87,7 +87,7 @@ func ObserveSpan(ctx context.Context, dbURL, experimentID string, since, now tim
 		admissionMetric, id, since.UnixMilli(), now.UnixMilli(),
 		capMillis, capMillis, capMillis,
 	)
-	row, found, err := querySingleRow(ctx, dbURL, "metricsdb.ObserveSpan", query, 4)
+	row, found, err := s.querySingleRow(ctx, "metricsdb.ObserveSpan", query, 4)
 	if err != nil {
 		return ObservedSpan{}, err
 	}

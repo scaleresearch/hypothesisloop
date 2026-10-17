@@ -23,6 +23,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/settlement"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 // metrics-service hosts the metric-controller: the node-agent metric push endpoint and the
@@ -47,7 +48,7 @@ func main() {
 	}
 	controllerPort := strconv.Itoa(pcfg.Services.MetricControllerPort)
 
-	metricsDBURL := pcfg.Services.MetricsDBURL
+	metrics := metricsdb.New(pcfg.Services.MetricsDBURL)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	pool, err := db.NewPool(ctx, db.ConfigOf(pcfg.Database, db.ServiceMaxConns))
@@ -72,7 +73,7 @@ func main() {
 		logger.Fatal("metrics-service: configure auth", zap.Error(err))
 	}
 
-	controllerServer, runCancel := newControllerServer(authenticator, pool, store, quotaCfg, pcfg, metricsDBURL, controllerPort, logger)
+	controllerServer, runCancel := newControllerServer(authenticator, pool, store, quotaCfg, pcfg, metrics, controllerPort, logger)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
@@ -96,9 +97,9 @@ func main() {
 	logger.Info("metrics-service: stopped")
 }
 
-func newControllerServer(authenticator *auth.Authenticator, pool *db.Pool, store *db.Store, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metricsDBURL, port string, logger *zap.Logger) (*http.Server, context.CancelFunc) {
+func newControllerServer(authenticator *auth.Authenticator, pool *db.Pool, store *db.Store, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.Config, metrics *metricsdb.Store, port string, logger *zap.Logger) (*http.Server, context.CancelFunc) {
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
-	peSvc := platformexperiments.NewPlatformExperimentsService(store, quotaCfg, logger, metricsDBURL, observedGapCap)
+	peSvc := platformexperiments.NewPlatformExperimentsService(store, quotaCfg, logger, metrics, observedGapCap)
 
 	// metric-controller never connects to a cluster directly, and needs no cluster/workload
 	// wiring at all: eviction is purely a status update (service/controller) — the
@@ -112,7 +113,7 @@ func newControllerServer(authenticator *auth.Authenticator, pool *db.Pool, store
 		WithReconcileInterval(time.Duration(pcfg.Scheduler.ReconcileIntervalSeconds) * time.Second)
 	// Wire the stage-ladder store and GreptimeDB (Prometheus-compatible) URL. The ladder itself
 	// is per-platform-experiment config, not a controller-wide setting.
-	ctrl = ctrl.WithStagesStore(store, metricsDBURL)
+	ctrl = ctrl.WithStagesStore(store, metrics)
 	// Each pass keeps the researchers of every running platform experiment at work as its pool
 	// says, launched as the control service launches the researchers it creates.
 	ctrl = ctrl.WithResearcherKeeper(peSvc.WithAgentLaunch(platformexperiments.AgentLaunch{
@@ -124,7 +125,7 @@ func newControllerServer(authenticator *auth.Authenticator, pool *db.Pool, store
 	// reconciler below to retry any experiment a crash or metrics-DB outage left unsettled.
 	// gapCap mirrors Controller.observedGapCap exactly, so every observed-usage query in this
 	// deployment agrees on what "how long did this run" means.
-	settler := settlement.New(peSvc, metricsDBURL, observedGapCap)
+	settler := settlement.New(peSvc, metrics, observedGapCap)
 	ctrl = ctrl.WithSettler(settler)
 	settlementReconciler := settlement.NewReconciler(store, settler, 30*time.Second, logger)
 
@@ -142,7 +143,7 @@ func newControllerServer(authenticator *auth.Authenticator, pool *db.Pool, store
 
 	srv := &http.Server{
 		Addr:         ":" + port,
-		Handler:      newRouter(authenticator, metricsingest.NewPushHandler(metricsDBURL, store), logger),
+		Handler:      newRouter(authenticator, metricsingest.NewPushHandler(metrics, store), logger),
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  30 * time.Second,

@@ -20,6 +20,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 const testSigningSecret = "accounts-test-signing-secret"
@@ -48,7 +49,7 @@ type world struct {
 	memberKey            string
 	inviteA, inviteToken string
 	// contacts is each cluster's last contact as the metrics store answers it.
-	contacts map[string]accounts.Contact
+	contacts map[string]metricsdb.ClusterContact
 }
 
 // tokens resolves a token to the principal of that name, and refuses a revoked API key as the
@@ -156,10 +157,7 @@ func newAccountsWorld(t *testing.T) *world {
 	}
 	router := authtest.Router(tokens{w})
 	doc := NewDoc(router, "test", "1.0.0", "", auth.NewAccess(placement{memStore: w.store}), zap.NewNop())
-	connected := func(context.Context) (map[string]bool, error) { return map[string]bool{w.clusterA: true}, nil }
-	autoscalers := func(context.Context) (map[string]bool, error) { return map[string]bool{}, nil }
-	contacts := func(context.Context) (map[string]accounts.Contact, error) { return w.contacts, nil }
-	registerAccounts(doc, accounts.NewService(w.store, w.store, connected, autoscalers, contacts, testSigningSecret, testRuntimeAddresses, testLimits, doc.Access, zap.NewNop()))
+	registerAccounts(doc, accounts.NewService(w.store, w.store, liveness{connected: map[string]bool{w.clusterA: true}, contacts: func() map[string]metricsdb.ClusterContact { return w.contacts }}, time.Minute, testSigningSecret, testRuntimeAddresses, testLimits, doc.Access, zap.NewNop()))
 	w.agentTypes = newMemAgentTypes()
 	ownType, _ := w.agentTypes.Create(ctx, w.orgA, "Own", "", domain.AgentRoleResearcher, ownPrompt, domain.AgentTypeSettings{MaxSubagents: 2, Effort: "high"}, domain.Actor{Kind: domain.ActorUser, ID: "u-owner"})
 	w.ownType = ownType.ID
@@ -801,7 +799,7 @@ func TestClustersAreListedForTheirOrgWithConnectivity(t *testing.T) {
 func TestAClusterIsListedWithItsLastContactLastErrorAndAgentVersion(t *testing.T) {
 	w := newAccountsWorld(t)
 	seen := time.Date(2026, 10, 12, 8, 0, 0, 0, time.UTC)
-	w.contacts = map[string]accounts.Contact{w.clusterA: {At: seen, AgentVersion: "old1234"}, w.clusterB: {At: seen, AgentVersion: testRuntimeAddresses.ImageTag}}
+	w.contacts = map[string]metricsdb.ClusterContact{w.clusterA: {At: seen, AgentVersion: "old1234"}, w.clusterB: {At: seen, AgentVersion: testRuntimeAddresses.ImageTag}}
 	refused := seen.Add(time.Hour)
 	w.store.clusters[w.clusterA].LastError, w.store.clusters[w.clusterA].LastErrorAt = "cluster_id x is the identity of another registered cluster", &refused
 	list := func(caller, orgID string) accounts.ListedCluster {
@@ -1035,11 +1033,7 @@ func TestAFailureOfThePlatformIsAnsweredWithoutItsText(t *testing.T) {
 	w := newAccountsWorld(t)
 	router := authtest.Router(tokens{w})
 	doc := NewDoc(router, "test", "1.0.0", "", auth.NewAccess(placement{memStore: w.store}), zap.NewNop())
-	connected := func(context.Context) (map[string]bool, error) {
-		return nil, errors.New("metrics store at 10.0.0.7 refused the connection")
-	}
-	contacts := func(context.Context) (map[string]accounts.Contact, error) { return nil, nil }
-	registerAccounts(doc, accounts.NewService(failingStore{w.store}, w.store, connected, connected, contacts, testSigningSecret, testRuntimeAddresses, testLimits, doc.Access, zap.NewNop()))
+	registerAccounts(doc, accounts.NewService(failingStore{w.store}, w.store, liveness{err: errors.New("metrics store at 10.0.0.7 refused the connection")}, time.Minute, testSigningSecret, testRuntimeAddresses, testLimits, doc.Access, zap.NewNop()))
 	w.router = router
 	for _, path := range []string{"/me", "/orgs/" + w.orgA + "/projects", "/orgs/" + w.orgA + "/clusters"} {
 		rec := w.call("owner", "GET", path, nil)
@@ -1275,4 +1269,26 @@ func TestAnOrgOrdersTheClustersItRegistered(t *testing.T) {
 	if strings.Contains(w.call("member", "GET", "/orgs/"+w.orgA+"/clusters", nil).Body.String(), `"priority"`) {
 		t.Fatal("the list answers the number the order is kept as")
 	}
+}
+
+// liveness answers the clusters connected and their last contacts as a test sets them, or err.
+type liveness struct {
+	connected map[string]bool
+	contacts  func() map[string]metricsdb.ClusterContact
+	err       error
+}
+
+func (l liveness) LiveClusterHeartbeats(context.Context, time.Duration) (map[string]bool, error) {
+	return l.connected, l.err
+}
+
+func (l liveness) LiveClusterAutoscalerCapability(context.Context, time.Duration) (map[string]bool, error) {
+	return map[string]bool{}, l.err
+}
+
+func (l liveness) ClusterLastContacts(context.Context, time.Duration) (map[string]metricsdb.ClusterContact, error) {
+	if l.contacts == nil {
+		return nil, l.err
+	}
+	return l.contacts(), l.err
 }

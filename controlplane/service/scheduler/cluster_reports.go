@@ -22,9 +22,9 @@ type DesiredFootprints interface {
 // connects to a cluster; a job's status row is the desired state its cluster reconciles against.
 type ClusterReports struct {
 	store DesiredFootprints
-	// metricsDBURL is where cluster-agents' live capacity and job reports live: metric data,
+	// metrics is where cluster-agents' live capacity and job reports live: metric data,
 	// read live, never duplicated into Postgres.
-	metricsDBURL string
+	metrics *metricsdb.Store
 	// connectedWithin mirrors clusterexchange.Service's staleness window
 	// (scheduler.cluster_unreachable_after_seconds): a cluster whose heartbeat is older than
 	// this contributes zero capacity instead of a possibly-stale number. This also freezes new
@@ -33,18 +33,18 @@ type ClusterReports struct {
 }
 
 // NewClusterReports reads desired footprint from store and reports from the metrics store at
-// metricsDBURL, counting a cluster live while it reported within connectedWithin.
-func NewClusterReports(store DesiredFootprints, metricsDBURL string, connectedWithin time.Duration) (*ClusterReports, error) {
+// metrics, counting a cluster live while it reported within connectedWithin.
+func NewClusterReports(store DesiredFootprints, metrics *metricsdb.Store, connectedWithin time.Duration) (*ClusterReports, error) {
 	if store == nil {
 		return nil, fmt.Errorf("scheduler: desired footprint store is required")
 	}
-	if metricsDBURL == "" {
-		return nil, fmt.Errorf("scheduler: metrics DB URL is required")
+	if metrics == nil {
+		return nil, fmt.Errorf("scheduler: the metrics store is required")
 	}
 	if connectedWithin <= 0 {
 		return nil, fmt.Errorf("scheduler: cluster liveness window must be positive")
 	}
-	return &ClusterReports{store: store, metricsDBURL: metricsDBURL, connectedWithin: connectedWithin}, nil
+	return &ClusterReports{store: store, metrics: metrics, connectedWithin: connectedWithin}, nil
 }
 
 var (
@@ -68,14 +68,14 @@ func (b *ClusterReports) LatestJobPhase(ctx context.Context, exp *domain.Experim
 	if window <= 0 {
 		return domain.JobPhasePending, false, nil
 	}
-	return metricsdb.LatestJobPhase(ctx, b.metricsDBURL, exp.ID, exp.ClusterName, window)
+	return b.metrics.LatestJobPhase(ctx, exp.ID, exp.ClusterName, window)
 }
 
 // LatestPhaseDetail reads the runtime's latest reported explanation for why exp's container
 // hasn't started (or has been restarting). found=false means nothing has been reported yet —
 // distinct from an empty reason, which just means the runtime has nothing notable to say.
 func (b *ClusterReports) LatestPhaseDetail(ctx context.Context, exp *domain.Experiment) (reason, message string, restartCount int32, scheduledNodes int32, schedulingReason string, found bool, err error) {
-	row, found, err := metricsdb.GetLatestPhaseDetailFull(ctx, b.metricsDBURL, exp.ID, exp.ClusterName, exp.AttemptCount)
+	row, found, err := b.metrics.GetLatestPhaseDetailFull(ctx, exp.ID, exp.ClusterName, exp.AttemptCount)
 	if err != nil || !found {
 		return "", "", 0, 0, "", found, err
 	}
@@ -84,12 +84,12 @@ func (b *ClusterReports) LatestPhaseDetail(ctx context.Context, exp *domain.Expe
 
 // PhaseReportedSince is when exp's current attempt on its cluster first reported reason.
 func (b *ClusterReports) PhaseReportedSince(ctx context.Context, exp *domain.Experiment, reason string) (time.Time, bool, error) {
-	return metricsdb.PhaseReportedSince(ctx, b.metricsDBURL, exp.ID, exp.ClusterName, exp.AttemptCount, reason)
+	return b.metrics.PhaseReportedSince(ctx, exp.ID, exp.ClusterName, exp.AttemptCount, reason)
 }
 
 // LogTail reads up to the last n lines of exp's most recently reported output.
 func (b *ClusterReports) LogTail(ctx context.Context, exp *domain.Experiment, n int) ([]string, error) {
-	return metricsdb.GetLatestLogTail(ctx, b.metricsDBURL, exp.ID, n)
+	return b.metrics.GetLatestLogTail(ctx, exp.ID, n)
 }
 
 // GetAdmittedAcceleratorType reads the latest observed type metric for exp's current admission.
@@ -113,7 +113,7 @@ func (b *ClusterReports) GetAdmittedAcceleratorType(ctx context.Context, exp *do
 	if window <= 0 {
 		return "", false, nil
 	}
-	return metricsdb.LatestAcceleratorType(ctx, b.metricsDBURL, exp.ID, now, window)
+	return b.metrics.LatestAcceleratorType(ctx, exp.ID, now, window)
 }
 
 // GetFlavorCapacity returns two views of each connected cluster's free capacity:
@@ -132,27 +132,27 @@ func (b *ClusterReports) GetAdmittedAcceleratorType(ctx context.Context, exp *do
 // desiredFree above available there is always a platform job still terminating. Accelerator
 // totals are raw allocatable: the runtime does not report them net of non-platform pods.
 func (b *ClusterReports) GetFlavorCapacity(ctx context.Context) (available, desiredFree map[string]domain.Footprint, err error) {
-	heartbeats, err := metricsdb.LiveClusterHeartbeats(ctx, b.metricsDBURL, b.connectedWithin)
+	heartbeats, err := b.metrics.LiveClusterHeartbeats(ctx, b.connectedWithin)
 	if err != nil {
 		return nil, nil, fmt.Errorf("scheduler: live clusters: %w", err)
 	}
-	nodeTotals, err := metricsdb.LiveClusterNodeTotalCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+	nodeTotals, err := b.metrics.LiveClusterNodeTotalCapacity(ctx, b.connectedWithin)
 	if err != nil {
 		return nil, nil, fmt.Errorf("scheduler: total node capacity: %w", err)
 	}
-	cpuAvailable, err := metricsdb.LiveClusterCPUCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+	cpuAvailable, err := b.metrics.LiveClusterCPUCapacity(ctx, b.connectedWithin)
 	if err != nil {
 		return nil, nil, fmt.Errorf("scheduler: available CPU capacity: %w", err)
 	}
-	acceleratorAvailable, acceleratorTotal, err := metricsdb.LiveClusterAcceleratorAvailableAndTotal(ctx, b.metricsDBURL, b.connectedWithin)
+	acceleratorAvailable, acceleratorTotal, err := b.metrics.LiveClusterAcceleratorAvailableAndTotal(ctx, b.connectedWithin)
 	if err != nil {
 		return nil, nil, fmt.Errorf("scheduler: accelerator capacity: %w", err)
 	}
-	ramAvailable, err := metricsdb.LiveClusterRAMCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+	ramAvailable, err := b.metrics.LiveClusterRAMCapacity(ctx, b.connectedWithin)
 	if err != nil {
 		return nil, nil, fmt.Errorf("scheduler: available RAM capacity: %w", err)
 	}
-	storageAvailable, err := metricsdb.LiveClusterStorageCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+	storageAvailable, err := b.metrics.LiveClusterStorageCapacity(ctx, b.connectedWithin)
 	if err != nil {
 		return nil, nil, fmt.Errorf("scheduler: available storage capacity: %w", err)
 	}
@@ -273,7 +273,7 @@ func validateClusterSnapshot(
 // driver cases it, and an accelerator type is one type however it is cased
 // (domain.AcceleratorType.Is), so every reader looks it up exactly.
 func (b *ClusterReports) GetAcceleratorCapacityByNode(ctx context.Context) (map[string]map[string]map[string]int64, error) {
-	reported, err := metricsdb.LiveClusterNodeAcceleratorCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+	reported, err := b.metrics.LiveClusterNodeAcceleratorCapacity(ctx, b.connectedWithin)
 	if err != nil {
 		return nil, err
 	}
@@ -298,7 +298,7 @@ func lowerAcceleratorTypes(reported map[string]map[string]map[string]int64) map[
 // GetNodeResourceCapacity reports fresh free CPU/memory/storage per node as
 // cluster -> node -> domain.NodeResource* -> amount.
 func (b *ClusterReports) GetNodeResourceCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error) {
-	return metricsdb.LiveClusterNodeResourceCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+	return b.metrics.LiveClusterNodeResourceCapacity(ctx, b.connectedWithin)
 }
 
 // GetNodeTotalCapacity reports each node's capacity available to PLATFORM-scheduled jobs —
@@ -306,30 +306,30 @@ func (b *ClusterReports) GetNodeResourceCapacity(ctx context.Context) (map[strin
 // permanently resident; platform job pods themselves are not subtracted), as
 // cluster -> node -> domain.NodeResource* -> amount.
 func (b *ClusterReports) GetNodeTotalCapacity(ctx context.Context) (map[string]map[string]map[string]int64, error) {
-	return metricsdb.LiveClusterNodeTotalCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+	return b.metrics.LiveClusterNodeTotalCapacity(ctx, b.connectedWithin)
 }
 
 // GetTotalCapacity returns each connected cluster's installed capacity, for consumers that need
 // the cluster's shape rather than its free space. Only clusters with a complete fresh snapshot are
 // returned; a cluster whose totals are missing or stale is omitted entirely, never zero-filled.
 func (b *ClusterReports) GetTotalCapacity(ctx context.Context) (map[string]domain.Footprint, error) {
-	heartbeats, err := metricsdb.LiveClusterHeartbeats(ctx, b.metricsDBURL, b.connectedWithin)
+	heartbeats, err := b.metrics.LiveClusterHeartbeats(ctx, b.connectedWithin)
 	if err != nil {
 		return nil, fmt.Errorf("scheduler: live clusters: %w", err)
 	}
-	cpuTotal, err := metricsdb.LiveClusterCPUTotalCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+	cpuTotal, err := b.metrics.LiveClusterCPUTotalCapacity(ctx, b.connectedWithin)
 	if err != nil {
 		return nil, fmt.Errorf("scheduler: total CPU capacity: %w", err)
 	}
-	acceleratorTotal, err := metricsdb.LiveClusterAcceleratorTotalCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+	acceleratorTotal, err := b.metrics.LiveClusterAcceleratorTotalCapacity(ctx, b.connectedWithin)
 	if err != nil {
 		return nil, fmt.Errorf("scheduler: total accelerator capacity: %w", err)
 	}
-	ramTotal, err := metricsdb.LiveClusterRAMTotalCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+	ramTotal, err := b.metrics.LiveClusterRAMTotalCapacity(ctx, b.connectedWithin)
 	if err != nil {
 		return nil, fmt.Errorf("scheduler: total RAM capacity: %w", err)
 	}
-	storageTotal, err := metricsdb.LiveClusterStorageTotalCapacity(ctx, b.metricsDBURL, b.connectedWithin)
+	storageTotal, err := b.metrics.LiveClusterStorageTotalCapacity(ctx, b.connectedWithin)
 	if err != nil {
 		return nil, fmt.Errorf("scheduler: total storage capacity: %w", err)
 	}
@@ -353,7 +353,7 @@ func (b *ClusterReports) GetTotalCapacity(ctx context.Context) (map[string]domai
 // than one node. A cluster with no fresh report is absent, and admission reads absence as "cannot"
 // — the same fail-closed rule every other capacity read here follows.
 func (b *ClusterReports) GetMultiNodeCapability(ctx context.Context) (map[string]bool, error) {
-	return metricsdb.LiveClusterMultiNodeCapability(ctx, b.metricsDBURL, b.connectedWithin)
+	return b.metrics.LiveClusterMultiNodeCapability(ctx, b.connectedWithin)
 }
 
 // GetAutoscalerCapability reports which clusters say they sit behind a native autoscaler
@@ -361,11 +361,11 @@ func (b *ClusterReports) GetMultiNodeCapability(ctx context.Context) (map[string
 // absent, and speculative admission reads absence as "no autoscaler" — the same fail-closed rule
 // GetMultiNodeCapability follows.
 func (b *ClusterReports) GetAutoscalerCapability(ctx context.Context) (map[string]bool, error) {
-	return metricsdb.LiveClusterAutoscalerCapability(ctx, b.metricsDBURL, b.connectedWithin)
+	return b.metrics.LiveClusterAutoscalerCapability(ctx, b.connectedWithin)
 }
 
 func (b *ClusterReports) GetNodeLabels(ctx context.Context) (map[string]map[string]map[string]string, error) {
-	return metricsdb.LiveClusterNodeLabels(ctx, b.metricsDBURL, b.connectedWithin)
+	return b.metrics.LiveClusterNodeLabels(ctx, b.connectedWithin)
 }
 
 // GetClusterIDs reports each connected cluster's runtime-derived stable identity (kube-system
@@ -373,15 +373,15 @@ func (b *ClusterReports) GetNodeLabels(ctx context.Context) (map[string]map[stri
 // Speculative admission's tried-cluster bookkeeping keys on cluster_id (a rename must not split
 // or merge it); a cluster whose agent has not yet started sending cluster_id is simply absent.
 func (b *ClusterReports) GetClusterIDs(ctx context.Context) (map[string]string, error) {
-	return metricsdb.LiveClusterIDs(ctx, b.metricsDBURL, b.connectedWithin)
+	return b.metrics.LiveClusterIDs(ctx, b.connectedWithin)
 }
 
 func (b *ClusterReports) GetLiveClusters(ctx context.Context) (map[string]bool, error) {
-	live, err := metricsdb.LiveClusterHeartbeats(ctx, b.metricsDBURL, b.connectedWithin)
+	live, err := b.metrics.LiveClusterHeartbeats(ctx, b.connectedWithin)
 	if err != nil || domain.EnvironmentBuildHold <= b.connectedWithin {
 		return live, err
 	}
-	heard, err := metricsdb.LiveClusterHeartbeats(ctx, b.metricsDBURL, domain.EnvironmentBuildHold)
+	heard, err := b.metrics.LiveClusterHeartbeats(ctx, domain.EnvironmentBuildHold)
 	if err != nil {
 		return nil, err
 	}

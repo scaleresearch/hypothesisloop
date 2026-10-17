@@ -30,13 +30,6 @@ type Usage interface {
 	RecordModelCall(ctx context.Context, call metricsdb.ModelCall) error
 }
 
-// MetricsDB is the Usage over the metrics store.
-type MetricsDB struct{ URL string }
-
-func (m MetricsDB) RecordModelCall(ctx context.Context, call metricsdb.ModelCall) error {
-	return metricsdb.RecordModelCall(ctx, m.URL, call)
-}
-
 const (
 	// AnthropicProvider is the one provider served, at Prefix + AnthropicProvider.
 	AnthropicProvider = "anthropic"

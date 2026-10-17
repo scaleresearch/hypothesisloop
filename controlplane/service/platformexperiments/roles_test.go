@@ -59,7 +59,7 @@ func (f *signupStore) IsSignedUp(ctx context.Context, platformExpID, agentID str
 
 func newSignupTestService(t *testing.T, store PlatformExperimentsStore) *PlatformExperimentsService {
 	t.Helper()
-	return reaching(NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), platformexperimentstest.NoUsage(t), 3*time.Minute), domain.CPUType)
+	return reaching(NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), 3*time.Minute), domain.CPUType)
 }
 
 // max_agents sizes the field being ranked. If a baseline or a reviewer counted against it, adding
@@ -148,7 +148,7 @@ func TestStandingsOmitABaselineAgentHoldingTheBestValue(t *testing.T) {
 	defer srv.Close()
 	store := &standingsStore{competitors: []string{"c1", "c2"}}
 	svc := newSignupTestService(t, store)
-	svc.metricsDBURL = srv.URL
+	svc.metrics = metricsdb.New(srv.URL)
 
 	pe := &domain.PlatformExperiment{ID: "pe-1", CreatedAt: time.Now().UTC().Add(-time.Hour)}
 	metric := domain.MetricDefinition{Key: "score", Direction: "maximize", Role: domain.MetricRoleRanking}
@@ -191,7 +191,7 @@ func TestResultsListEveryAgentsBestOnEveryDeclaredMetric(t *testing.T) {
 		{Key: "loss", Direction: "minimize", Role: domain.MetricRoleAttribute},
 	}}
 	svc := newSignupTestService(t, store)
-	svc.metricsDBURL = srv.URL
+	svc.metrics = metricsdb.New(srv.URL)
 
 	results, err := svc.Results(context.Background(), "pe-1")
 	if err != nil {
@@ -221,7 +221,7 @@ func TestResultsSetEachStandingAgainstTheDeclaredBaseline(t *testing.T) {
 		{Key: "score", Direction: "maximize", Role: domain.MetricRoleRanking},
 	}}
 	svc := newSignupTestService(t, store)
-	svc.metricsDBURL = srv.URL
+	svc.metrics = metricsdb.New(srv.URL)
 	beats := func() string {
 		results, err := svc.Results(context.Background(), "pe-1")
 		if err != nil {
@@ -278,7 +278,7 @@ func TestResultsShowEachReferenceWithWhereItRanAndRankNoneOfIt(t *testing.T) {
 		{Key: "gate", Direction: "maximize", Role: domain.MetricRoleConstraint, Bound: &bound},
 	}}
 	svc := newSignupTestService(t, store)
-	svc.metricsDBURL = srv.URL
+	svc.metrics = metricsdb.New(srv.URL)
 
 	results, err := svc.Results(context.Background(), "pe-1")
 	if err != nil {
@@ -379,7 +379,7 @@ func TestCloseDerivesTheTopResultsFromConstraintEligibleAgentsOnly(t *testing.T)
 		{Key: "memory", Direction: "minimize", Role: domain.MetricRoleConstraint, Bound: &bound},
 	}}
 	svc := newSignupTestService(t, store)
-	svc.metricsDBURL = srv.URL
+	svc.metrics = metricsdb.New(srv.URL)
 
 	top, err := svc.derivedTopResults(context.Background(), "pe-1")
 	if err != nil {
@@ -445,7 +445,7 @@ func TestPriorRunsAreRankedAsResultsRanksThemAndReadTogether(t *testing.T) {
 		{PE: &domain.PlatformExperiment{ID: "pe-c", Status: domain.PlatformExpClosed, CreatedAt: created}},
 	}}
 	svc := newSignupTestService(t, store)
-	svc.metricsDBURL = srv.URL
+	svc.metrics = metricsdb.New(srv.URL)
 
 	got, err := svc.PriorRuns(context.Background(), []string{"pe-a", "pe-b", "pe-c"})
 	if err != nil || len(got) != 3 {

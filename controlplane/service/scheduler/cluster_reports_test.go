@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 type constructorStore struct{}
@@ -20,18 +21,18 @@ func (constructorStore) SumDesiredFootprintByCluster(context.Context) (map[strin
 
 func TestNewClusterReportsRejectsMissingAuthoritativeInputs(t *testing.T) {
 	tests := []struct {
-		name       string
-		store      DesiredFootprints
-		metricsURL string
-		window     time.Duration
+		name    string
+		store   DesiredFootprints
+		metrics *metricsdb.Store
+		window  time.Duration
 	}{
-		{name: "store", metricsURL: "http://metrics", window: time.Second},
-		{name: "metrics URL", store: constructorStore{}, window: time.Second},
-		{name: "liveness window", store: constructorStore{}, metricsURL: "http://metrics"},
+		{name: "store", metrics: metricsdb.New("http://metrics"), window: time.Second},
+		{name: "metrics store", store: constructorStore{}, window: time.Second},
+		{name: "liveness window", store: constructorStore{}, metrics: metricsdb.New("http://metrics")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := NewClusterReports(tt.store, tt.metricsURL, tt.window); err == nil {
+			if _, err := NewClusterReports(tt.store, tt.metrics, tt.window); err == nil {
 				t.Fatalf("NewClusterReports accepted missing %s", tt.name)
 			}
 		})
@@ -140,7 +141,7 @@ func TestAJobsPhaseIsReadOnlyFromSnapshotsSinceItWasClaimed(t *testing.T) {
 		_, _ = w.Write([]byte(`{"output":[{"records":{"rows":[[20,3,20]]}}]}`))
 	}))
 	defer server.Close()
-	b := &ClusterReports{metricsDBURL: server.URL, connectedWithin: time.Minute}
+	b := &ClusterReports{metrics: metricsdb.New(server.URL), connectedWithin: time.Minute}
 	claimed := func(ago time.Duration) *domain.Experiment {
 		at := time.Now().Add(-ago)
 		return &domain.Experiment{ID: "exp-1", ClusterName: "cluster-a", SubmittedAt: &at}

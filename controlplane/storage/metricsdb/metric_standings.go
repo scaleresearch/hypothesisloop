@@ -19,8 +19,8 @@ type AgentBest struct {
 
 // RankableJobs narrows completed to the jobs whose values rank: those that hold every constraint
 // metric of pe (UnrankableJobs).
-func RankableJobs(ctx context.Context, dbURL string, pe *domain.PlatformExperiment, completed map[string]bool) (map[string]bool, error) {
-	unrankable, err := UnrankableJobs(ctx, dbURL, pe, completed)
+func (s *Store) RankableJobs(ctx context.Context, pe *domain.PlatformExperiment, completed map[string]bool) (map[string]bool, error) {
+	unrankable, err := s.UnrankableJobs(ctx, pe, completed)
 	if err != nil {
 		return nil, err
 	}
@@ -41,8 +41,8 @@ func RankableJobs(ctx context.Context, dbURL string, pe *domain.PlatformExperime
 // the best number of the run ranked first as long as another job of its agent held the gate. So
 // a harness had to fail such a job to keep it out, and a trial that found the gate broken was
 // no completed trial.
-func UnrankableJobs(ctx context.Context, dbURL string, pe *domain.PlatformExperiment, completed map[string]bool) (map[string]string, error) {
-	unrankable, _, err := judgeConstraints(ctx, dbURL, pe, completed)
+func (s *Store) UnrankableJobs(ctx context.Context, pe *domain.PlatformExperiment, completed map[string]bool) (map[string]string, error) {
+	unrankable, _, err := s.judgeConstraints(ctx, pe, completed)
 	return unrankable, err
 }
 
@@ -56,8 +56,8 @@ const (
 // ConstraintsMet says of each job of completed whether it held every constraint metric of pe:
 // ConstraintsBroken when one is violated, ConstraintsUnknown when none is and one was not
 // reported, ConstraintsHeld otherwise.
-func ConstraintsMet(ctx context.Context, dbURL string, pe *domain.PlatformExperiment, completed map[string]bool) (map[string]string, error) {
-	unrankable, broken, err := judgeConstraints(ctx, dbURL, pe, completed)
+func (s *Store) ConstraintsMet(ctx context.Context, pe *domain.PlatformExperiment, completed map[string]bool) (map[string]string, error) {
+	unrankable, broken, err := s.judgeConstraints(ctx, pe, completed)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +77,7 @@ func ConstraintsMet(ctx context.Context, dbURL string, pe *domain.PlatformExperi
 
 // judgeConstraints gives UnrankableJobs' reasons, and the jobs of completed that violate a
 // constraint whatever their first reason is.
-func judgeConstraints(ctx context.Context, dbURL string, pe *domain.PlatformExperiment, completed map[string]bool) (map[string]string, map[string]bool, error) {
+func (s *Store) judgeConstraints(ctx context.Context, pe *domain.PlatformExperiment, completed map[string]bool) (map[string]string, map[string]bool, error) {
 	unrankable, broken := map[string]string{}, map[string]bool{}
 	for _, metric := range pe.Metrics {
 		if metric.EffectiveRole() != domain.MetricRoleConstraint {
@@ -85,7 +85,7 @@ func judgeConstraints(ctx context.Context, dbURL string, pe *domain.PlatformExpe
 		}
 		promQL := fmt.Sprintf(`max by (job_id, metric_basis) (last_over_time(%s{platform_experiment_id=%q, metric_name=%q}[%s]))`,
 			ExperimentMetricValue, pe.ID, metric.Key, ObservedLookback(pe.CreatedAt))
-		samples, err := QueryVector(ctx, dbURL, promQL)
+		samples, err := s.QueryVector(ctx, promQL)
 		if err != nil {
 			return nil, nil, fmt.Errorf("metricsdb.UnrankableJobs: %s: %w", metric.Key, err)
 		}
@@ -137,10 +137,10 @@ type JobValue struct {
 
 // LastPerJobOnMetric is the last "raw"-basis value on metric of every job of completed that
 // reported it, whatever constraints the job held, ordered by agent and job.
-func LastPerJobOnMetric(ctx context.Context, dbURL string, pe *domain.PlatformExperiment, metric domain.MetricDefinition, completed map[string]bool) ([]JobValue, error) {
+func (s *Store) LastPerJobOnMetric(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition, completed map[string]bool) ([]JobValue, error) {
 	promQL := fmt.Sprintf(`max by (agent_id, metric_basis, job_id) (last_over_time(%s{platform_experiment_id=%q, metric_name=%q}[%s]))`,
 		ExperimentMetricValue, pe.ID, metric.Key, ObservedLookback(pe.CreatedAt))
-	samples, err := QueryVector(ctx, dbURL, promQL)
+	samples, err := s.QueryVector(ctx, promQL)
 	if err != nil {
 		return nil, fmt.Errorf("metricsdb.LastPerJobOnMetric: %s: %w", metric.Key, err)
 	}
@@ -192,8 +192,8 @@ func LastPerJobOnMetric(ctx context.Context, dbURL string, pe *domain.PlatformEx
 // job_id is in the grouping so the winning value carries the job that produced it (and with it the
 // code ref). Each job is read by the last value it reported (domain.JobMetric), and the agent's
 // best is the best of those in the metric's direction.
-func BestPerAgentOnMetric(ctx context.Context, dbURL string, pe *domain.PlatformExperiment, metric domain.MetricDefinition, completed map[string]bool) (map[string]AgentBest, []string, error) {
-	rankable, err := RankableJobs(ctx, dbURL, pe, completed)
+func (s *Store) BestPerAgentOnMetric(ctx context.Context, pe *domain.PlatformExperiment, metric domain.MetricDefinition, completed map[string]bool) (map[string]AgentBest, []string, error) {
+	rankable, err := s.RankableJobs(ctx, pe, completed)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -201,7 +201,7 @@ func BestPerAgentOnMetric(ctx context.Context, dbURL string, pe *domain.Platform
 	// series, so the outer aggregation only drops labels.
 	promQL := fmt.Sprintf(`max by (agent_id, metric_basis, job_id) (last_over_time(%s{platform_experiment_id=%q, metric_name=%q}[%s]))`,
 		ExperimentMetricValue, pe.ID, metric.Key, ObservedLookback(pe.CreatedAt))
-	samples, err := QueryVector(ctx, dbURL, promQL)
+	samples, err := s.QueryVector(ctx, promQL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("metricsdb.BestPerAgentOnMetric: %s: %w", metric.Key, err)
 	}
@@ -249,7 +249,7 @@ type Ranking struct {
 // two queries whatever their number: one for every constraint metric of them all and one for
 // every metric they rank by, each grouped by platform experiment and metric besides and judged
 // and ranked per run as BestPerAgentOnMetric does.
-func BestPerAgentOnMetrics(ctx context.Context, dbURL string, runs []Ranking) (map[string]map[string]AgentBest, error) {
+func (s *Store) BestPerAgentOnMetrics(ctx context.Context, runs []Ranking) (map[string]map[string]AgentBest, error) {
 	out := make(map[string]map[string]AgentBest, len(runs))
 	if len(runs) == 0 {
 		return out, nil
@@ -273,7 +273,7 @@ func BestPerAgentOnMetrics(ctx context.Context, dbURL string, runs []Ranking) (m
 		}
 		promQL := fmt.Sprintf(`max by (platform_experiment_id, metric_name, %s) (last_over_time(%s{platform_experiment_id=~%q, metric_name=~%q}[%s]))`,
 			by, ExperimentMetricValue, anyOf(ids), anyOf(names), ObservedLookback(oldest))
-		samples, err := QueryVector(ctx, dbURL, promQL)
+		samples, err := s.QueryVector(ctx, promQL)
 		if err != nil {
 			return nil, err
 		}

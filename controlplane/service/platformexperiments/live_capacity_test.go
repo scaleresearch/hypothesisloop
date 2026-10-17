@@ -16,13 +16,13 @@ import (
 )
 
 // GET /resource-catalog/capacity used to answer 200 with an empty cluster list when the handler
-// was never wired to a metrics DB (metricsDBURL == ""), which reads exactly like "no cluster
+// was never wired to a metrics DB (WithLiveCapacity never called), which reads exactly like "no cluster
 // currently has this type free" — a job submitted against a real type then queues forever with no
 // error (see the endpoint's own doc). That silently converts an operator misconfiguration into
 // starvation nobody can diagnose from the API. Fail fast instead (important.md: "no fallbacks -
 // one path or error, fail fast").
 func TestLiveCapacityFailsFastWhenUnconfigured(t *testing.T) {
-	h := NewPlatformExperimentsService(nil, platformexperimentstest.Settings, zap.NewNop(), "", time.Minute).WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning)
+	h := NewPlatformExperimentsService(nil, platformexperimentstest.Settings, zap.NewNop(), nil, time.Minute).WithRepositories(&fakeRepositories{}).WithPlanning(testPlanning)
 	// Deliberately never call WithLiveCapacity.
 
 	clusters, err := h.liveCapacity(context.Background(), "org-a", false)
