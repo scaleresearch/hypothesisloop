@@ -147,7 +147,8 @@ func (l *Launcher) Run(ctx context.Context) error {
 // Pass is one convergence. The provider is listed and the platform told what was found before
 // anything is touched, so a provider that cannot be listed, or a platform that cannot answer,
 // changes nothing. A machine the
-// platform holds that the list leaves out is read by its id first (confirmUnlisted). After that every
+// platform holds that the list leaves out, an agent's or the warm pool's, is read by its id first
+// (confirmUnlisted), and the pool found is reported for the platform to hold. After that every
 // instance is handled by itself: one that cannot be created, stopped or destroyed is reported in
 // the returned error and the rest of the pass still runs.
 //
@@ -181,7 +182,11 @@ func (l *Launcher) Pass(ctx context.Context) error {
 		}
 		byName[i.Name] = append(byName[i.Name], i)
 	}
-	answer, err := l.cfg.Platform.Reconcile(ctx, hostingapi.Observed{LaunchDigest: l.launchDigest, Instances: l.observe(ctx, byName)})
+	observed := hostingapi.Observed{LaunchDigest: l.launchDigest, Instances: l.observe(ctx, byName), Pool: []hostingapi.PoolMachine{}}
+	for _, i := range sortedByID(pool) {
+		observed.Pool = append(observed.Pool, hostingapi.PoolMachine{Name: i.Name[len(l.prefix):], Machine: i.ID})
+	}
+	answer, err := l.cfg.Platform.Reconcile(ctx, observed)
 	if err != nil {
 		return fmt.Errorf("decide desired state: %w", err)
 	}
@@ -247,6 +252,7 @@ func (l *Launcher) confirmUnlisted(ctx context.Context, rented []provider.Instan
 				kept = append(kept, i)
 			}
 		}
+		renamed := len(kept) < len(rented)
 		rented = kept
 		if !exists {
 			continue
@@ -254,7 +260,10 @@ func (l *Launcher) confirmUnlisted(ctx context.Context, rented []provider.Instan
 		if !strings.HasPrefix(found.Name, l.prefix) {
 			return nil, fmt.Errorf("instance %s of %s is not listed, and read by its id it is named %q, outside this launcher's names", h.Machine, name, found.Name)
 		}
-		l.cfg.Log("instance %s of %s is %s and the provider's list left it out", h.Machine, name, found.State)
+		// A warm instance started for an agent is listed under the agent's name, which is no gap.
+		if !renamed {
+			l.cfg.Log("instance %s of %s is %s and the provider's list left it out", h.Machine, name, found.State)
+		}
 		rented = append(rented, found)
 	}
 	return rented, nil

@@ -9,6 +9,17 @@ type Observed struct {
 	// LaunchDigest is a digest of everything the launcher itself starts an instance with.
 	LaunchDigest string
 	Instances    []ObservedInstance
+	// Pool is every machine of the launcher's warm pool it found. The platform holds them (Held)
+	// until they are reported no more, so a pool machine its provider's list leaves out is read
+	// by its id, by this launcher or the next one, and never warmed again.
+	Pool []PoolMachine
+}
+
+// PoolMachine is one machine of the launcher's warm pool: its name without the launcher's
+// prefix, and the provider's id.
+type PoolMachine struct {
+	Name    string
+	Machine string
 }
 
 // ObservedInstance is one name of the launcher's namespace as its provider lists it, without the
@@ -50,8 +61,9 @@ type Instance struct {
 	Env   map[string]string
 }
 
-// HeldMachine is a machine the platform holds: the name it is asked for under, without the
-// launcher's prefix, and the provider's id the launcher last reported the name by.
+// HeldMachine is a machine the platform holds: the name it is asked for under, or a pool
+// machine's name, without the launcher's prefix, and the provider's id the launcher last reported
+// the name by.
 type HeldMachine struct {
 	Name    string
 	Machine string

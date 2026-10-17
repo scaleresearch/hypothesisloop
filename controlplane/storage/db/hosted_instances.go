@@ -312,7 +312,8 @@ type LauncherMachine struct {
 }
 
 // ListLauncherMachines returns every hosted machine, an agent's or a coordinator's, whose name is
-// still held and was reported with a machine id, by name. It writes nothing.
+// still held and was reported with a machine id, and every machine of the launcher's warm pool as
+// it last reported them (HoldPool), by name. It writes nothing.
 func (s *Store) ListLauncherMachines(ctx context.Context) ([]LauncherMachine, error) {
 	rows, err := s.pool.pool.Query(ctx, `
 SELECT i.name, i.machine FROM hosted_instances i
@@ -320,7 +321,9 @@ LEFT JOIN experiment_signups s ON s.platform_experiment_id = i.platform_experime
 LEFT JOIN platform_experiments pe ON pe.id = i.platform_experiment_id AND i.agent_id = ''
 WHERE i.name <> '' AND i.machine <> ''
   AND (s.hosted OR pe.coordinator_hosted)
-ORDER BY 1`)
+UNION ALL
+SELECT name, machine FROM hosted_pool
+ORDER BY 1, 2`)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments_store.ListLauncherMachines: %w", err)
 	}
@@ -333,4 +336,26 @@ ORDER BY 1`)
 		return nil, fmt.Errorf("platform_experiments_store.ListLauncherMachines: %w", err)
 	}
 	return machines, nil
+}
+
+// HoldPool makes the launcher's warm pool held exactly the machines it reported. One reported
+// with no name or no machine id refuses the whole report. A report that changes nothing writes
+// nothing.
+func (s *Store) HoldPool(ctx context.Context, machines []LauncherMachine) error {
+	names, ids := make([]string, 0, len(machines)), make([]string, 0, len(machines))
+	for _, m := range machines {
+		if m.Name == "" || m.Machine == "" {
+			return fmt.Errorf("platform_experiments_store.HoldPool: pool machine %q is reported with no name or no machine id", m.Machine)
+		}
+		names, ids = append(names, m.Name), append(ids, m.Machine)
+	}
+	_, err := s.pool.pool.Exec(ctx, `
+WITH reported AS (SELECT * FROM unnest($1::text[], $2::text[]) AS r(name, machine)),
+gone AS (DELETE FROM hosted_pool WHERE machine NOT IN (SELECT machine FROM reported))
+INSERT INTO hosted_pool (machine, name) SELECT machine, name FROM reported
+ON CONFLICT (machine) DO UPDATE SET name = EXCLUDED.name WHERE hosted_pool.name <> EXCLUDED.name`, names, ids)
+	if err != nil {
+		return fmt.Errorf("platform_experiments_store.HoldPool: %w", err)
+	}
+	return nil
 }

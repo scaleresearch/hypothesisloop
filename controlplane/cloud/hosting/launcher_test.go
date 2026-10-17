@@ -25,9 +25,12 @@ type controlPlane struct {
 	err     error
 	// asked holds every question, as the launcher asked it.
 	asked []hostingapi.Observed
-	// held is what Held answers, heldErr a failure in its place.
+	// held is what Held answers besides the pool, heldErr a failure in its place.
 	held    []hostingapi.HeldMachine
 	heldErr error
+	// pool is the warm pool the launcher last reported, which Held answers too, as the decider
+	// does.
+	pool []hostingapi.PoolMachine
 }
 
 func (cp *controlPlane) Held(context.Context) ([]hostingapi.HeldMachine, error) {
@@ -36,7 +39,11 @@ func (cp *controlPlane) Held(context.Context) ([]hostingapi.HeldMachine, error) 
 	if cp.heldErr != nil {
 		return nil, cp.heldErr
 	}
-	return append([]hostingapi.HeldMachine{}, cp.held...), nil
+	held := append([]hostingapi.HeldMachine{}, cp.held...)
+	for _, m := range cp.pool {
+		held = append(held, hostingapi.HeldMachine{Name: m.Name, Machine: m.Machine})
+	}
+	return held, nil
 }
 
 func (cp *controlPlane) Reconcile(_ context.Context, observed hostingapi.Observed) (*hostingapi.Desired, error) {
@@ -46,6 +53,7 @@ func (cp *controlPlane) Reconcile(_ context.Context, observed hostingapi.Observe
 	if cp.err != nil {
 		return nil, cp.err
 	}
+	cp.pool = observed.Pool
 	answer := hostingapi.Desired{Instances: []hostingapi.Instance{}, Ending: append([]string{}, cp.desired.Ending...), Image: cp.desired.Image}
 	for _, i := range cp.desired.Instances {
 		i.Env = maps.Clone(i.Env)

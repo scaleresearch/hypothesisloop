@@ -27,6 +27,7 @@ type Store interface {
 	ObserveInstance(ctx context.Context, platformExpID, agentID, name, state string, progress *string, progressLimit time.Duration, activity, machine string) error
 	EndInstance(ctx context.Context, platformExpID, agentID, name string, how db.InstanceEnd, exitLog string, limit time.Duration, maxRestarts int) (after domain.AgentInstance, recorded bool, err error)
 	ListLauncherMachines(ctx context.Context) ([]db.LauncherMachine, error)
+	HoldPool(ctx context.Context, machines []db.LauncherMachine) error
 }
 
 // Metrics is where the harness states the launcher reads are kept: the run's health series.
@@ -108,7 +109,8 @@ func (h *Decider) imageOf(agentImage string) string {
 	return h.cfg.Image
 }
 
-// Held is every machine the platform holds, an agent's or a coordinator's. It changes nothing.
+// Held is every machine the platform holds, an agent's, a coordinator's or one of the warm pool's.
+// It changes nothing.
 func (h *Decider) Held(ctx context.Context) ([]hostingapi.HeldMachine, error) {
 	machines, err := h.store.ListLauncherMachines(ctx)
 	if err != nil {
@@ -129,6 +131,13 @@ func (h *Decider) Reconcile(ctx context.Context, observed hostingapi.Observed) (
 	// A machine this answer no longer names is taken down by the launcher: that is written
 	// down first, as the platform's own doing, so no later answer reads it as lost.
 	if err := h.store.ReleaseInstances(ctx, domain.AgentWindDown, domain.CoordinatorWindDown); err != nil {
+		return nil, err
+	}
+	pool := make([]db.LauncherMachine, 0, len(observed.Pool))
+	for _, m := range observed.Pool {
+		pool = append(pool, db.LauncherMachine{Name: m.Name, Machine: m.Machine})
+	}
+	if err := h.store.HoldPool(ctx, pool); err != nil {
 		return nil, err
 	}
 	agents, err := h.store.ListLauncherAgents(ctx, domain.AgentWindDown)

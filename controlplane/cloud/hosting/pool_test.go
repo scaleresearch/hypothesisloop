@@ -391,3 +391,80 @@ func TestOutputIsReadOnEveryPass(t *testing.T) {
 		t.Fatalf("exit log = %q", got)
 	}
 }
+
+// warmCalls counts the warms and destroys among calls.
+func warmCalls(calls []string) (warms, destroys int) {
+	for _, call := range calls {
+		switch {
+		case strings.HasPrefix(call, "Warm "):
+			warms++
+		case strings.HasPrefix(call, "Destroy "):
+			destroys++
+		}
+	}
+	return warms, destroys
+}
+
+func TestAPoolTheListLeavesOutIsReadByItsIdsAndNeitherWarmedAgainNorDestroyedWhenItShows(t *testing.T) {
+	h := newPoolHarness(t, 4)
+	h.cp.want([]entry{agent("a")}, nil)
+	pool := h.warmPool(image1)
+	h.mustPass()
+	warmed := h.rented.IDs(pool)
+	if len(warmed) != 4 {
+		t.Fatalf("pool = %v, want 4", warmed)
+	}
+
+	order := h.calls()
+	h.rented.Hide(pool)
+	h.mustPass()
+	h.rented.Show(pool)
+	h.mustPass()
+	if warms, destroys := warmCalls(order()); warms != 0 || destroys != 0 {
+		t.Fatalf("calls = %v, want no warm and no destroy", order())
+	}
+	if got := h.rented.IDs(pool); !reflect.DeepEqual(got, warmed) {
+		t.Fatalf("pool = %v, want %v", got, warmed)
+	}
+}
+
+func TestANewLauncherAdoptsThePoolThePlatformHoldsWhenTheListLeavesItOut(t *testing.T) {
+	h := newPoolHarness(t, 4)
+	h.cp.want([]entry{agent("a")}, nil)
+	pool := h.warmPool(image1)
+	h.mustPass()
+	warmed := h.rented.IDs(pool)
+
+	h.launcher = h.launcherWith(func(cfg *Config) { cfg.WarmPool = 4 })
+	order := h.calls()
+	h.rented.Hide(pool)
+	h.mustPass()
+	h.rented.Show(pool)
+	h.mustPass()
+	if warms, destroys := warmCalls(order()); warms != 0 || destroys != 0 {
+		t.Fatalf("calls = %v, want the old pool adopted with no warm and no destroy", order())
+	}
+	if got := h.rented.IDs(pool); !reflect.DeepEqual(got, warmed) {
+		t.Fatalf("pool = %v, want %v", got, warmed)
+	}
+}
+
+func TestThePoolIsReportedForThePlatformToHoldAndADestroyedMachineIsDroppedFromIt(t *testing.T) {
+	h := newPoolHarness(t, 2)
+	h.cp.want([]entry{agent("a")}, nil)
+	pool := h.warmPool(image1)
+	h.mustPass()
+	ids := h.rented.IDs(pool)
+	short := pool[len("hl-agent-main-"):]
+	want := []hostingapi.PoolMachine{{Name: short, Machine: ids[0]}, {Name: short, Machine: ids[1]}}
+	if got := h.cp.lastQuestion().Pool; !reflect.DeepEqual(got, want) {
+		t.Fatalf("pool reported = %+v, want %+v", got, want)
+	}
+
+	h.launcher = h.launcherWith(func(cfg *Config) { cfg.WarmPool = 1 })
+	h.mustPass()
+	h.mustPass()
+	if got := h.cp.lastQuestion().Pool; !reflect.DeepEqual(got, want[:1]) {
+		t.Fatalf("pool reported = %+v, want %+v", got, want[:1])
+	}
+}

@@ -47,6 +47,8 @@ type launcherStore struct {
 	// machine is the provider id each held name was last reported by, by platform experiment
 	// and agent id joined with a slash.
 	machine map[string]string
+	// pool is the warm pool's machines as the launcher last reported them.
+	pool []db.LauncherMachine
 }
 
 var epoch = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -268,8 +270,16 @@ func (s *launcherStore) ListLauncherMachines(_ context.Context) ([]db.LauncherMa
 	for i := range s.Coordinators {
 		add(s.Coordinators[i].PlatformExperimentID+"/", &s.Coordinators[i].Instance)
 	}
+	held = append(held, s.pool...)
 	sort.Slice(held, func(a, b int) bool { return held[a].Name < held[b].Name })
 	return held, nil
+}
+
+func (s *launcherStore) HoldPool(_ context.Context, machines []db.LauncherMachine) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pool = append([]db.LauncherMachine(nil), machines...)
+	return nil
 }
 
 // harnessMetrics is the decider's health series in memory: the harness states written, in order.

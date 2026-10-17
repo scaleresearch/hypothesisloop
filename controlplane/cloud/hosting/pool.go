@@ -20,8 +20,11 @@ import (
 // A pool instance is named poolPrefix and a digest of the image and this launcher's launch
 // inputs, so it lives under the launcher's own prefix, which one List already covers, and is
 // told apart from an agent's by a segment no control-plane name starts with (read refuses one
-// that does). Like everything else it is kept nowhere but in the provider's list: each pass
-// destroys what does not belong, and a restarted process takes over the pool it finds.
+// that does). Each pass reports the pool it found and the platform holds those machines (Held)
+// until they are found no more, so one the provider's list leaves out for a while is read by its
+// id and counted, and not warmed again only to be destroyed as one too many when the list shows
+// it again. A restarted process takes over the pool the platform holds the same way. Each pass
+// destroys what does not belong.
 //
 // Which image the pool holds follows the answers: the image of an agent asked for that the pool
 // already holds, or else the one most agents are asked for under. An answer that asks for no

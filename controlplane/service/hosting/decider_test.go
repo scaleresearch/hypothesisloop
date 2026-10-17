@@ -867,6 +867,22 @@ func TestALauncherIsToldTheMachineEachNameItHoldsWasReportedByUntilItIsGivenUpOn
 	}
 }
 
+func TestTheWarmPoolIsHeldAsTheLauncherLastReportedIt(t *testing.T) {
+	store := oneAgentAndACoordinator()
+	body := observed()
+	body.Pool = []hostingapi.PoolMachine{{Name: "pool-a", Machine: "m-1"}, {Name: "pool-a", Machine: "m-2"}}
+	mustReconcile(t, store, body)
+	want := []hostingapi.HeldMachine{{Name: "pool-a", Machine: "m-1"}, {Name: "pool-a", Machine: "m-2"}}
+	if code, got := held(t, store); code != http.StatusOK || !reflect.DeepEqual(got.Machines, want) {
+		t.Fatalf("held = %d %+v, want %+v", code, got.Machines, want)
+	}
+	body.Pool = body.Pool[1:]
+	mustReconcile(t, store, body)
+	if code, got := held(t, store); code != http.StatusOK || !reflect.DeepEqual(got.Machines, want[1:]) {
+		t.Fatalf("after m-1 was reported no more: %d %+v, want %+v", code, got.Machines, want[1:])
+	}
+}
+
 func TestAMachineThatWasListedAndIsGoneIsAnExitAtOnce(t *testing.T) {
 	store := oneAgentAndACoordinator()
 	first := mustReconcile(t, store, observed())

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -916,5 +917,47 @@ func TestWhatAHostedAgentIsDoingIsKeptOnItsRowAndAnsweredWhereItIsRead(t *testin
 	}
 	if got, err := pes.GetPlatformExperiment(ctx, draft); err != nil || got.Activity != nil || said(draft, planner) != nil {
 		t.Fatalf("a released planner: activity %+v, %v, want none", got.Activity, err)
+	}
+}
+
+// The warm pool is held exactly as the launcher last reported it, and a report with a machine
+// missing its id is refused whole.
+func TestTheWarmPoolIsHeldAsLastReported(t *testing.T) {
+	pool := eventsTestDB(t)
+	ctx := context.Background()
+	pes := NewStore(pool, 3)
+	name := "pool-" + uuid.New().String()[:8]
+	m1, m2 := "m1-"+name, "m2-"+name
+	poolOf := func() []LauncherMachine {
+		t.Helper()
+		held, err := pes.ListLauncherMachines(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var mine []LauncherMachine
+		for _, m := range held {
+			if m.Name == name {
+				mine = append(mine, m)
+			}
+		}
+		return mine
+	}
+	if err := pes.HoldPool(ctx, []LauncherMachine{{Name: name, Machine: m1}, {Name: name, Machine: m2}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := poolOf(), []LauncherMachine{{Name: name, Machine: m1}, {Name: name, Machine: m2}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("held = %+v, want %+v", got, want)
+	}
+	if err := pes.HoldPool(ctx, []LauncherMachine{{Name: name, Machine: m2}, {Name: name}}); err == nil {
+		t.Fatal("a pool machine with no id was taken")
+	}
+	if err := pes.HoldPool(ctx, []LauncherMachine{{Name: name, Machine: m2}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := poolOf(), []LauncherMachine{{Name: name, Machine: m2}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("after m1 was reported no more: held = %+v, want %+v", got, want)
+	}
+	if err := pes.HoldPool(ctx, nil); err != nil || len(poolOf()) != 0 {
+		t.Fatalf("an empty pool: %v, held %+v", err, poolOf())
 	}
 }
