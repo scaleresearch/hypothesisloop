@@ -1,4 +1,4 @@
-// Human-readable labels for domain.EvictionReason (shared/domain/constants.go). Keep in sync with
+// Human-readable labels for domain.EvictionReason (domain/constants.go). Keep in sync with
 // the EvictionReason constants defined there — an unmapped reason falls back to its raw code.
 //
 // Not exported: a caller holding the raw map reaches past the "code: detail" parsing below and
@@ -24,7 +24,7 @@ const EVICTION_REASON_LABELS: Record<string, string> = {
   flavor_mismatch: 'Landed on a different accelerator type than reserved',
 }
 
-// Human-readable labels for domain.NotAdmittedReason (shared/domain/constants.go): why a QUEUED
+// Human-readable labels for domain.NotAdmittedReason (domain/constants.go): why a QUEUED
 // job hasn't started yet. An unmapped code is shown as it is. Use notAdmittedLabel to render.
 const NOT_ADMITTED_REASON_LABELS: Record<string, string> = {
   awaiting_admission: 'Waiting for the scheduler’s first look',
@@ -84,7 +84,7 @@ export function evictionCodeLabel(code: string): string {
   return EVICTION_REASON_LABELS[code] ?? code
 }
 
-// Fault classes (shared/domain/fault_class.go). The class is the verdict an agent actually needs:
+// Fault classes (domain/fault_class.go). The class is the verdict an agent actually needs:
 // an agent seeing its failures are 'infrastructure' stops debugging code that was correct, and a
 // stage-cut job stops reading as a failed one. Derived server-side from the same by-reason tally,
 // never stored twice.

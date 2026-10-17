@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { OWNER_ACTIONS } from '@/lib/phase'
 
 // The platform's one table of who each status reason waits for.
-const STATUS_REASONS = join(__dirname, '../../../shared/domain/status_reason.go')
+const STATUS_REASONS = join(__dirname, '../../../domain/status_reason.go')
 
 function waiters(): Map<string, string> {
   const table = readFileSync(STATUS_REASONS, 'utf8').match(/var statusWaiters = map\[string\]Waiter\{([\s\S]*?)\n\}/)

@@ -32,7 +32,7 @@ type OwnerAction = { opens: 'edit' | 'agents'; label: string }
 
 /**
  * For every status reason that can wait for the owner, what the page offers them. The reasons are
- * those of statusWaiters in controlplane/shared/domain/status_reason.go that wait for the owner,
+ * those of statusWaiters in controlplane/domain/status_reason.go that wait for the owner,
  * or for the coordinator, whose move is the owner's where a person coordinates. phase.test.ts
  * reads that file and fails when the two differ. null is a move with no control in the strip:
  * the proposal and the revise box are below it, a baseline is added or declared with the hl

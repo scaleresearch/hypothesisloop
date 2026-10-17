@@ -1,7 +1,7 @@
 import type { Actor } from '@/types/actors'
 import type { StatusReason } from '@/types/platform-experiments'
 
-// Mirrors domain.Agent (shared/domain/agent.go).
+// Mirrors domain.Agent (domain/agent.go).
 export interface Agent {
   id: string
   name: string

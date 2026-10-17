@@ -1,6 +1,6 @@
 import type { Actor } from '@/types/actors'
 
-// Exactly domain.ValidExperimentStatus's set (shared/domain/constants.go).
+// Exactly domain.ValidExperimentStatus's set (domain/constants.go).
 export enum ExperimentStatus {
   SUBMITTED = 'SUBMITTED',
   QUEUED = 'QUEUED',
@@ -19,7 +19,7 @@ type AcceleratorType = string
 
 type CapacityTier = 'guaranteed' | 'burst'
 
-// Mirrors domain.MetricDataPoint (shared/domain/metrics.go). Every field is always sent, so
+// Mirrors domain.MetricDataPoint (domain/metrics.go). Every field is always sent, so
 // none of them are optional — marking them optional invited `?? somethingElse` fallbacks to
 // fields that never existed.
 export interface MetricDataPoint {
@@ -57,7 +57,7 @@ interface JobSpec {
   extra_resources?: Record<string, string>
 }
 
-// Mirrors domain.PhaseDetail (shared/domain/constants.go) — the runtime's explanation for a
+// Mirrors domain.PhaseDetail (domain/constants.go) — the runtime's explanation for a
 // container that hasn't started or keeps restarting.
 interface PhaseDetail {
   reason?: string
@@ -65,7 +65,7 @@ interface PhaseDetail {
   restart_count?: number
 }
 
-// Mirrors domain.JobMetric (shared/domain/metrics.go). value is the one figure the job is read
+// Mirrors domain.JobMetric (domain/metrics.go). value is the one figure the job is read
 // and ranked by: the last value it reported for the metric.
 export interface JobMetric {
   name: string
@@ -73,7 +73,7 @@ export interface JobMetric {
   basis: string
 }
 
-// Mirrors domain.Experiment (shared/domain/experiment.go). Fields the Go struct does not have
+// Mirrors domain.Experiment (domain/experiment.go). Fields the Go struct does not have
 // do not belong here: an optional phantom field type-checks fine and renders as an em dash
 // forever, which reads as "not reported yet" rather than "this was never real".
 //
@@ -152,7 +152,7 @@ export interface ExperimentStats {
   evictions_by_reason: Record<string, number>
   // evictions_by_class folds evictions_by_reason into whose fault each was — the agent's own
   // ('workload'), the environment's ('infrastructure'), or the platform's own decision
-  // ('policy'). Derived server-side from the same tally; see shared/domain/fault_class.go.
+  // ('policy'). Derived server-side from the same tally; see domain/fault_class.go.
   evictions_by_class: Record<string, number>
   // accelerator_count summed over SUBMITTED and RUNNING jobs: those on an accelerator type, and
   // those on CPU, whose count is cores.
