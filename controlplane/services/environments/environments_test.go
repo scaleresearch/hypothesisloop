@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 )
 
 // memoryStore holds environments by key, and the orgs a cluster builds for.

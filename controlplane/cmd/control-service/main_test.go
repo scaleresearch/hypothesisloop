@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/clusteragentapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/modelproxy"
@@ -24,7 +25,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/scheduler"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 )
 
 // public is every route control-service answers without a token.

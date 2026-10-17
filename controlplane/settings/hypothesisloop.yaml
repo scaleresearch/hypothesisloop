@@ -261,7 +261,7 @@ job_images:
 #   app_id, app_slug   the App's number and the name in its URL.
 #   private_key        the PEM GitHub issued for the App. It signs the request for every token.
 #
-# The App asks for the permissions controlplane/shared/githost/github/app-manifest.json states, and
+# The App asks for the permissions controlplane/clients/githost/github/app-manifest.json states, and
 # an installation that has not granted all of them is refused, naming those it lacks.
 #
 # plain is any host that serves repositories under one root:

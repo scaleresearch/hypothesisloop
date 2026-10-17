@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/clients/registrycred/gcp"
 	"github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/registrycred/gcp"
 )
 
 // Source hands out the logins of one registry repository.

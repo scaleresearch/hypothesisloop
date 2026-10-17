@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 )
 
 // worldRepositories is a git host that has every repository asked of it under one root.

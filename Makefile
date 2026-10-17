@@ -512,7 +512,7 @@ agent-test:
 	cd agents/experimentator && PATH="$(AGENT_TEST_BIN):$$PATH" uv run pytest tests
 
 # The GitHub client's checks against github.com itself, as the App .env names
-# (controlplane/shared/githost/github/live_test.go). The token checks and the push check use the
+# (controlplane/clients/githost/github/live_test.go). The token checks and the push check use the
 # sandbox repository of TEST_GIT_HOST_GITHUB_REPOSITORY; the push check and the first-commit check
 # each make a branch there and delete it. The App's key reaches the test in a file that exists
 # only for the run. The creation check runs with TEST_GIT_HOST_GITHUB_CREATE=1 and creates on the
@@ -529,7 +529,7 @@ test-github-live:
 	  TEST_GIT_HOST_GITHUB_INSTALLATION="$$(lib_env_value TEST_GIT_HOST_GITHUB_INSTALLATION)" \
 	  TEST_GIT_HOST_GITHUB_REPOSITORY="$$(lib_env_value TEST_GIT_HOST_GITHUB_REPOSITORY)" \
 	  TEST_GIT_HOST_GITHUB_CREATE_INSTALLATION="$$(lib_env_value TEST_GIT_HOST_GITHUB_CREATE_INSTALLATION)" \
-	  go test ./controlplane/shared/githost/github -run Live -count=1 -v -timeout 180s'
+	  go test ./controlplane/clients/githost/github -run Live -count=1 -v -timeout 180s'
 
 lint:
 	golangci-lint run ./...

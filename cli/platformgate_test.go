@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/quota"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/registry"
@@ -20,7 +21,6 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth/authtest"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 )
 
 // principalOf is the caller a test token stands for: the agent or the coordinator a derived

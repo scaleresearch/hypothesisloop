@@ -363,7 +363,7 @@ type RuntimesConfig struct {
 
 // EnvironmentsConfig is where the images a repository's .hypothesisloop/Dockerfile declares are
 // pushed by the cluster each build is assigned to, and the registry provider that hands out the
-// logins to it (shared/registrycred). Left out, the deployment builds no environments: no cluster
+// logins to it (clients/registrycred). Left out, the deployment builds no environments: no cluster
 // counts as building, so a job whose commit declares one is refused.
 type EnvironmentsConfig struct {
 	// Repository is the whole address environment images are pushed to by digest,

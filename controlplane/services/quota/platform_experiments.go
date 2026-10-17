@@ -7,8 +7,8 @@ import (
 	"slices"
 	"time"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"

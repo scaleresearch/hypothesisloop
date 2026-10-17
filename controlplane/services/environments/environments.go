@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 )
 
 // Store keeps the environments (db.EnvironmentsStore).

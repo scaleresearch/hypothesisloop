@@ -9,9 +9,9 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 )
 
 // AppClient is what Host asks of the platform's GitHub App. *Client satisfies it.

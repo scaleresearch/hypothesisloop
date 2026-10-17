@@ -19,9 +19,9 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/auth"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/githost"
 )
 
 // Store is what the proxy reads to decide. *db.PlatformExperimentsStore with *db.EnvironmentsStore
