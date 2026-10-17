@@ -12,7 +12,7 @@ import { HypothesisGraphCanvas } from '@/components/hypotheses/graph-canvas'
 import { HypothesisOutline } from '@/components/hypotheses/outline'
 import { Expandable } from '@/components/ui/expandable'
 import { layoutGraph } from '@/lib/hypothesis-graph'
-import type { GraphNode, HypothesisGraph, RegisteredHypothesis, SimilarHypothesis } from '@/types/api'
+import type { GraphNode, HypothesisAction, HypothesisGraph, RegisteredHypothesis, SimilarHypothesis } from '@/types/api'
 
 // Its dot pattern reads a size jsdom never lays out.
 vi.mock('@xyflow/react', async original => ({ ...await original(), Background: () => null }))
@@ -24,10 +24,12 @@ vi.mock('@/components/agent-label', () => ({ AgentLabel: ({ id }: { id: string }
 const at = '2026-01-01T00:00:00Z'
 const ada = { kind: 'user' as const, id: 'u1', name: 'Ada' }
 
+// As the API answers it to Ada: her own idea is hers to change, and an agent's takes her comments alone.
 function idea(id: string, text: string, buildsOn: string[], agentID = ''): GraphNode {
   return {
     id, text, platform_experiment_id: 'pe-x', status: 'open', agent_id: agentID, actor: ada, status_changed_at: null,
     created_at: at, builds_on: buildsOn, finding_count: 0, comment_count: 0, child_count: 0,
+    actions: agentID ? ['comment'] : ['edit', 'remove', 'link', 'comment'],
   }
 }
 
@@ -51,7 +53,7 @@ function registered(id: string, text: string, links: Array<{ type: 'builds_on' |
 // What reading the graph again answers, when a test changed it behind the view.
 let served: HypothesisGraph | null = null
 
-function Harness({ view, role = 'member', graph: start = initial }: { view: 'graph' | 'outline'; role?: 'owner' | 'member'; graph?: HypothesisGraph }) {
+function Harness({ view, graph: start = initial }: { view: 'graph' | 'outline'; graph?: HypothesisGraph }) {
   const [graph, setGraph] = useState(start)
   const [selected, setSelected] = useState(initial.root)
   const mutate = (async (change?: unknown) => {
@@ -64,7 +66,7 @@ function Harness({ view, role = 'member', graph: start = initial }: { view: 'gra
   const common = { graph, rootLabel: 'Vision benchmark', selected, hits: new Set<string>(), filters: { status: '', owner: '' }, onSelect: setSelected }
   const resolved = resolveTenant({
     kind: 'user', user_id: 'u1',
-    orgs: [{ id: 'org_a', name: 'Ada', role, created_at: at }],
+    orgs: [{ id: 'org_a', name: 'Ada', role: 'member', created_at: at }],
     projects: [{ id: 'prj_1', org_id: 'org_a', name: 'default', created_at: at }],
   }, '')
   if (resolved.state !== 'selected') throw new Error('no tenant')
@@ -327,11 +329,12 @@ describe('in the outline', () => {
 
 describe('a person\'s own idea', () => {
   const bob = { kind: 'user' as const, id: 'u2', name: 'Bob' }
-  const withBob: HypothesisGraph = {
+  // Bob's idea as the API answers it to a member, and to an owner of the org, who removes it.
+  const withBob = (actions: HypothesisAction[]): HypothesisGraph => ({
     ...initial,
-    nodes: [...initial.nodes, { ...idea('hyp-4', 'mixup helps', ['pe-x']), actor: bob }],
+    nodes: [...initial.nodes, { ...idea('hyp-4', 'mixup helps', ['pe-x']), actor: bob, actions }],
     edges: [...initial.edges, { from: 'hyp-4', to: 'pe-x', type: 'builds_on', agent_id: '', actor: bob, created_at: at }],
-  }
+  })
   const panel = () => screen.getByRole('region', { name: 'Side panel' })
 
   it('is edited inline by its author, and the graph read again', async () => {
@@ -366,7 +369,7 @@ describe('a person\'s own idea', () => {
   })
 
   it('is changed by nobody else: an owner of its org only removes it, and an agent\'s idea takes neither', () => {
-    const { unmount } = render(<Harness view="outline" graph={withBob} />)
+    const { unmount } = render(<Harness view="outline" graph={withBob(['link', 'comment'])} />)
     fireEvent.click(screen.getByRole('button', { name: /mixup helps/ }))
     expect(within(panel()).queryByRole('button', { name: 'Edit' })).toBeNull()
     expect(within(panel()).queryByRole('button', { name: 'Remove' })).toBeNull()
@@ -374,7 +377,7 @@ describe('a person\'s own idea', () => {
     expect(within(panel()).queryByRole('button', { name: 'Remove' })).toBeNull()
     unmount()
 
-    render(<Harness view="outline" graph={withBob} role="owner" />)
+    render(<Harness view="outline" graph={withBob(['remove', 'link', 'comment'])} />)
     fireEvent.click(screen.getByRole('button', { name: /mixup helps/ }))
     expect(within(panel()).queryByRole('button', { name: 'Edit' })).toBeNull()
     expect(within(panel()).getByRole('button', { name: 'Remove' })).toBeTruthy()
@@ -383,7 +386,11 @@ describe('a person\'s own idea', () => {
   })
 
   it('is left as it is once another idea links to it', () => {
-    render(<Harness view="outline" graph={{ ...initial, edges: [...initial.edges, { from: 'hyp-2', to: 'hyp-1', type: 'related', agent_id: 'ag-1', actor: ada, created_at: at }] }} />)
+    render(<Harness view="outline" graph={{
+      ...initial,
+      nodes: initial.nodes.map(n => (n.id === 'hyp-1' ? { ...n, actions: ['link', 'comment'] } : n)),
+      edges: [...initial.edges, { from: 'hyp-2', to: 'hyp-1', type: 'related', agent_id: 'ag-1', actor: ada, created_at: at }],
+    }} />)
     fireEvent.click(screen.getByRole('button', { name: /^open warmup helps/ }))
     expect(within(panel()).queryByRole('button', { name: 'Edit' })).toBeNull()
   })

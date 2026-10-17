@@ -240,6 +240,20 @@ func holdOpenPlatformExperiment(ctx context.Context, tx *Write, platformExperime
 	return nil
 }
 
+// PlatformExperimentClosed says whether the platform experiment id is closed, after which its
+// hypothesis graph takes no write (holdOpenPlatformExperiment).
+func (s *Store) PlatformExperimentClosed(ctx context.Context, id string) (bool, error) {
+	var status domain.PlatformExperimentStatus
+	err := s.pool.pool.QueryRow(ctx, `SELECT status FROM platform_experiments WHERE id = $1`, id).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, fmt.Errorf("%w: %s", ErrPlatformExperimentNotFound, id)
+	}
+	if err != nil {
+		return false, fmt.Errorf("hypotheses_store.PlatformExperimentClosed: %w", err)
+	}
+	return status == domain.PlatformExpClosed, nil
+}
+
 // ListCommentsByHypothesis returns one page of the comments filed against a hypothesis, oldest
 // first — bounded like ListFindingsByHypothesis, for the same reason.
 func (s *Store) ListCommentsByHypothesis(ctx context.Context, hypothesisID string, limit, offset int) ([]*domain.HypothesisComment, error) {

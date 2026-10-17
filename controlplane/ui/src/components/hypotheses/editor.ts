@@ -6,10 +6,8 @@ import type { HypothesisGraph, LinkSpec, LinkType, RegisteredHypothesis, Similar
 
 interface GraphEditor {
   graph: HypothesisGraph
-  /** The ids some link of the graph points to. */
-  linked: Set<string>
   rootLabel: string
-  /** A person of the experiment's org, while it is not closed. */
+  /** The API lets the caller add ideas to the experiment (add_idea). */
   canWrite: boolean
   /** The experiment is closed: the platform refuses new ideas, and the views say so where they would be added. */
   closed: boolean
@@ -62,7 +60,6 @@ export function useGraphEditor({ graph, rootLabel, canWrite, closed = false, mut
   const [linkBusy, setLinkBusy] = useState(false)
   const [linkError, setLinkError] = useState('')
   const plan = useMemo(() => linkPlanner(graph), [graph])
-  const linked = useMemo(() => new Set(graph.edges.map(e => e.to)), [graph])
 
   const cancel = useCallback(() => {
     setComposing(false)
@@ -151,6 +148,8 @@ export function useGraphEditor({ graph, rootLabel, canWrite, closed = false, mut
       ...h,
       builds_on: links.filter(l => l.type === 'builds_on').map(l => l.hypothesis_id),
       child_count: 0, finding_count: 0, comment_count: 0,
+      // What the caller may do to it comes with the graph read again.
+      actions: [],
     }
     const edges = links.map(l => ({ from: h.id, to: l.hypothesis_id, type: l.type, agent_id: l.agent_id, actor: l.actor, created_at: l.created_at }))
     const drawn = mutate(g => g && withHypothesis(g, node, edges), { revalidate: true })
@@ -162,7 +161,6 @@ export function useGraphEditor({ graph, rootLabel, canWrite, closed = false, mut
 
   return useMemo<GraphEditor>(() => ({
     graph,
-    linked,
     rootLabel,
     canWrite,
     closed,
@@ -200,7 +198,7 @@ export function useGraphEditor({ graph, rootLabel, canWrite, closed = false, mut
     refresh: () => mutate(),
     cancel,
     // eslint-disable-next-line react-hooks/exhaustive-deps -- its functions read only these
-  }), [graph, linked, rootLabel, canWrite, closed, composing, links, findingTarget, linking, linkBusy, linkError, addedSimilar, plan, mutate, onSelect, cancel, startAdding])
+  }), [graph, rootLabel, canWrite, closed, composing, links, findingTarget, linking, linkBusy, linkError, addedSimilar, plan, mutate, onSelect, cancel, startAdding])
 }
 
 const EditorContext = createContext<GraphEditor | null>(null)

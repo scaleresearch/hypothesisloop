@@ -28,12 +28,12 @@ const hypothesis = {
   id: 'hyp-1', platform_experiment_id: 'pe-x', text: 'warmup helps', status: 'open', agent_id: 'ag-1',
   actor: { kind: 'agent', id: 'ag-1', name: 'Researcher 1' }, status_changed_at: null, created_at: at,
   links: { out: [], in: [] }, jobs: [], job_count: 0, findings: [], finding_count: 0, comments: [], comment_count: 0,
-  implementations: [],
+  implementations: [], actions: ['comment'],
 } as unknown as HypothesisWithJobs
 
 function show(answer: Partial<HypothesisWithJobs>, experimentId = 'pe-x') {
   vi.mocked(fetchHypothesis).mockResolvedValue({ ...hypothesis, ...answer })
-  vi.mocked(fetchPlatformExperiment).mockResolvedValue({ id: 'pe-x', project_id: 'prj_1', name: 'Vision benchmark' } as PlatformExperiment)
+  vi.mocked(fetchPlatformExperiment).mockResolvedValue({ id: 'pe-x', project_id: 'prj_1', name: 'Vision benchmark', editable: [], actions: ['remove', 'close', 'add_agent', 'add_idea'] } as unknown as PlatformExperiment)
   vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([{ agent_id: 'ag-1', name: 'Researcher 1' }, { agent_id: 'ag-2', name: 'Researcher 2' }] as never)
   const resolved = resolveTenant(me, '')
   if (resolved.state !== 'selected') throw new Error('no tenant')

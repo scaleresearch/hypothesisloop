@@ -49,13 +49,15 @@ const pe = {
 const owned: PlatformExperiment = { ...pe, project_id: 'prj_1', editable: ['name', 'description'], actions: ['remove', 'close', 'add_agent', 'add_idea'] }
 const node = {
   id: 'hyp-1', platform_experiment_id: 'pe-x', text: 'warmup helps', status: 'open', actor: { kind: 'user', id: 'u1', name: 'Ada' }, agent_id: '',
-  created_at: at, builds_on: ['pe-x'], finding_count: 0, comment_count: 0, child_count: 0,
+  created_at: at, builds_on: ['pe-x'], finding_count: 0, comment_count: 0, child_count: 0, actions: [],
 } as unknown as GraphNode
-const graph: HypothesisGraph = { root: 'pe-x', objective: {}, nodes: [node], edges: [] } as unknown as HypothesisGraph
+// The same idea as the API answers it to the person who wrote it.
+const ownNode: GraphNode = { ...node, actions: ['edit', 'remove', 'link', 'comment'] }
 
 // As the hypotheses page wires them: an account that only reads writes nothing.
-function GraphPanels() {
+function GraphPanels({ node }: { node: GraphNode }) {
   const actions = useExperimentActions()
+  const graph = { root: 'pe-x', objective: {}, nodes: [node], edges: [] } as unknown as HypothesisGraph
   const editor = useGraphEditor({ graph, rootLabel: pe.name, canWrite: actions.includes('add_idea'), mutate: vi.fn(), onSelect: () => {} })
   return (
     <GraphEditorProvider value={editor}>
@@ -107,11 +109,11 @@ describe('a shared platform experiment of another org shows no control that writ
   })
 
   it('to its hypothesis graph: no idea under the objective or under a hypothesis', () => {
-    const own = show(<GraphPanels />, owned)
+    const own = show(<GraphPanels node={ownNode} />, owned)
     expect(names('button')).toEqual(expect.arrayContaining(['Add idea', 'Link to…']))
     own.unmount()
 
-    show(<GraphPanels />, pe)
+    show(<GraphPanels node={node} />, pe)
     expect(names('button').filter(n => n?.includes('Add idea') || n?.includes('Link to'))).toEqual([])
     // Reading on stays possible, from the reader's own project.
     expect(screen.getByRole('link', { name: 'Open detail →' }).getAttribute('href')).toBe('/experiments/pe-x/hypotheses/hyp-1')
@@ -119,19 +121,19 @@ describe('a shared platform experiment of another org shows no control that writ
   })
 
   it('to a hypothesis: no link or comment form', () => {
-    const hypothesis = { ...node, links: { out: [], in: [] } } as unknown as HypothesisWithJobs
-    const forms = (
+    const forms = (hypothesis: HypothesisWithJobs) => (
       <>
         <AddLinkForm hypothesis={hypothesis} onAdded={() => {}} />
-        <AddCommentForm hypothesisID="hyp-1" onAdded={() => {}} />
+        <AddCommentForm hypothesis={hypothesis} onAdded={() => {}} />
       </>
     )
-    const own = show(forms, owned)
+    const of = (n: GraphNode) => ({ ...n, links: { out: [], in: [] } }) as unknown as HypothesisWithJobs
+    const own = show(forms(of(ownNode)), owned)
     expect(names('button')).toEqual(expect.arrayContaining(['Add comment']))
     expect(screen.getByText('Add link')).toBeTruthy()
     own.unmount()
 
-    const shared = show(forms, pe)
+    const shared = show(forms(of(node)), pe)
     expect(shared.container.textContent).toBe('')
   })
 

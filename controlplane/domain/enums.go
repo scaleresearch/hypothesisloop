@@ -36,6 +36,9 @@ func (PlatformExperimentAction) Schema(r huma.Registry) *huma.Schema {
 func (HypothesisStatus) Schema(r huma.Registry) *huma.Schema {
 	return enumSchema(r, HypothesisStatuses)
 }
+func (HypothesisAction) Schema(r huma.Registry) *huma.Schema {
+	return enumSchema(r, HypothesisActions)
+}
 func (LinkType) Schema(r huma.Registry) *huma.Schema        { return enumSchema(r, LinkTypes) }
 func (CloseReason) Schema(r huma.Registry) *huma.Schema     { return enumSchema(r, AnsweredCloseReasons) }
 func (Waiter) Schema(r huma.Registry) *huma.Schema          { return enumSchema(r, Waiters) }

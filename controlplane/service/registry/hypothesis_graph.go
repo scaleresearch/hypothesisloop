@@ -13,6 +13,7 @@ import (
 type GraphNode struct {
 	*domain.HypothesisListItem
 	Evidence
+	Actions []domain.HypothesisAction `json:"actions" doc:"What the reader may do to the hypothesis now, as on GET /hypotheses/{id}."`
 }
 
 // HypothesisGraph is one platform experiment's whole hypothesis graph, rooted at its objective.

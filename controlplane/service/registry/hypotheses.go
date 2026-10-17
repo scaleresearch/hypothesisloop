@@ -465,22 +465,28 @@ func named(what string, ids []string) string {
 // untouched refuses with an *InRecordError while a job tests h or another hypothesis links to
 // it. The graph checks the links again in the write that changes h.
 func (s *Service) untouched(ctx context.Context, h *domain.Hypothesis, verb string) error {
-	jobs, err := s.store.ListExperimentsTesting(ctx, []string{h.ID})
-	if err != nil {
+	jobs, linked, err := s.record(ctx, h)
+	if err != nil || len(jobs) == 0 && len(linked) == 0 {
 		return err
+	}
+	return &InRecordError{Verb: verb, Jobs: jobs, Linked: linked}
+}
+
+// record is what made h part of the record: the jobs testing it and the links of other
+// hypotheses to it.
+func (s *Service) record(ctx context.Context, h *domain.Hypothesis) (jobs []string, linked []domain.Link, err error) {
+	testing, err := s.store.ListExperimentsTesting(ctx, []string{h.ID})
+	if err != nil {
+		return nil, nil, err
 	}
 	links, err := s.graph.Links(ctx, h.ID)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	if len(jobs) == 0 && len(links.In) == 0 {
-		return nil
+	for _, job := range testing {
+		jobs = append(jobs, job.ID)
 	}
-	ids := make([]string, len(jobs))
-	for i, job := range jobs {
-		ids[i] = job.ID
-	}
-	return &InRecordError{Verb: verb, Jobs: ids, Linked: links.In}
+	return jobs, links.In, nil
 }
 
 // inRecord turns the graph's refusal of a linked hypothesis into an *InRecordError.

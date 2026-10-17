@@ -36,7 +36,7 @@ const graph = {
   nodes: [{
     id: 'hyp-1', platform_experiment_id: 'pe-x', text: 'warmup helps', status: 'open', agent_id: 'ag-1',
     actor: { kind: 'user', id: 'u7', name: 'Grace Hopper' },
-    created_at: at, builds_on: ['pe-x'], finding_count: 0, comment_count: 0, child_count: 0,
+    created_at: at, builds_on: ['pe-x'], finding_count: 0, comment_count: 0, child_count: 0, actions: [],
   }],
   edges: [],
 } as unknown as HypothesisGraph

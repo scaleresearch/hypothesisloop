@@ -9,21 +9,18 @@ import { Inline, Stack } from '@/components/ui/stack'
 import { Eyebrow, Text } from '@/components/ui/text'
 import { HypothesisPicker } from '@/components/hypotheses/search'
 import { AgentLabel } from '@/components/agent-label'
-import { useExperimentActions } from '@/lib/experiment-actions'
 import { LINK_KINDS, LINK_KIND_HINTS, LINK_KIND_LABELS } from '@/lib/hypothesis-graph'
 import { errorMessage } from '@/lib/errors'
 import type { HypothesisWithJobs, LinkType } from '@/types/api'
 
-// From an agent's hypothesis only that agent links; one no agent owns is anyone's.
+// A link from it as the API allows the caller, and why there is none from an agent's hypothesis.
 export function AddLinkForm({ hypothesis, onAdded }: { hypothesis: HypothesisWithJobs; onAdded: () => void }) {
   const [type, setType] = useState<LinkType>('related')
   const [target, setTarget] = useState<HypothesisSearchHit | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const actions = useExperimentActions()
-
-  if (!actions.includes('add_idea')) return null
-  if (hypothesis.agent_id) {
+  if (!hypothesis.actions.includes('link')) {
+    if (!hypothesis.agent_id || !hypothesis.actions.includes('comment')) return null
     return (
       <Text variant="hint" className="mt-3">
         Only <AgentLabel id={hypothesis.agent_id} /> can add links from this hypothesis.
@@ -71,17 +68,16 @@ export function AddLinkForm({ hypothesis, onAdded }: { hypothesis: HypothesisWit
 }
 
 /** A note against one hypothesis, under the name the writer signed in with. */
-export function AddCommentForm({ hypothesisID, onAdded }: { hypothesisID: string; onAdded: () => void }) {
+export function AddCommentForm({ hypothesis, onAdded }: { hypothesis: HypothesisWithJobs; onAdded: () => void }) {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const actions = useExperimentActions()
 
   async function submit() {
     setBusy(true)
     setError('')
     try {
-      await addHumanHypothesisComment(hypothesisID, text.trim())
+      await addHumanHypothesisComment(hypothesis.id, text.trim())
       setText('')
       onAdded()
     } catch (e) {
@@ -91,7 +87,7 @@ export function AddCommentForm({ hypothesisID, onAdded }: { hypothesisID: string
     }
   }
 
-  if (!actions.includes('add_idea')) return null
+  if (!hypothesis.actions.includes('comment')) return null
   return (
     <Stack gap="sm" className="mt-3 max-w-3xl">
       <Textarea

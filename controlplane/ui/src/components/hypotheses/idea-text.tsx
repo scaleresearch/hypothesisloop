@@ -7,18 +7,15 @@ import { Textarea } from '@/components/ui/input'
 import { Inline, Stack } from '@/components/ui/stack'
 import { InlineError } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
-import { useTenant } from '@/lib/tenant'
 import { useEditor } from '@/components/hypotheses/editor'
 import type { GraphNode } from '@/types/api'
 
 /**
- * The text of an idea, and while the signed-in person may still change it, their way to edit it
- * inline (its author) or remove it (its author or an owner of its org). Ideas an agent has acted on,
- * through a job or a link to it, are part of the record and are left as they are.
+ * The text of an idea, and the ways to edit it inline or remove it that the API lists for the
+ * caller: a person's own idea, or for an owner of its org any person's, while no agent acted on it.
  */
 export function IdeaText({ node }: { node: GraphNode }) {
   const editor = useEditor()
-  const { me, org } = useTenant()
   const [mode, setMode] = useState<'read' | 'edit' | 'remove'>('read')
   const [text, setText] = useState(node.text)
   const [busy, setBusy] = useState(false)
@@ -28,11 +25,8 @@ export function IdeaText({ node }: { node: GraphNode }) {
     setError('')
   }, [node.id])
 
-  const persons = !node.agent_id && node.actor.kind === 'user'
-  const untouched = !node.best_job && node.finding_count === 0 && !editor?.linked.has(node.id)
-  const open = !!editor?.canWrite && persons && untouched
-  const author = open && !!me.user_id && node.actor.id === me.user_id
-  const remover = author || (open && org.role === 'owner')
+  const edits = node.actions.includes('edit')
+  const removes = node.actions.includes('remove')
 
   async function run(change: () => Promise<unknown>) {
     setBusy(true)
@@ -82,10 +76,10 @@ export function IdeaText({ node }: { node: GraphNode }) {
           <Button variant="link" size="sm" onClick={() => setMode('read')}>Keep it</Button>
         </Inline>
       )}
-      {mode === 'read' && (author || remover) && (
+      {mode === 'read' && (edits || removes) && (
         <Inline gap="xs">
-          {author && <Button size="sm" onClick={() => { setText(node.text); setError(''); setMode('edit') }}>Edit</Button>}
-          {remover && <Button size="sm" variant="danger" onClick={() => { setError(''); setMode('remove') }}>Remove</Button>}
+          {edits && <Button size="sm" onClick={() => { setText(node.text); setError(''); setMode('edit') }}>Edit</Button>}
+          {removes && <Button size="sm" variant="danger" onClick={() => { setError(''); setMode('remove') }}>Remove</Button>}
         </Inline>
       )}
       {error && <InlineError>{error}</InlineError>}

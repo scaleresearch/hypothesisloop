@@ -2989,6 +2989,8 @@ export interface components {
             type: components["schemas"]["LinkType"];
         };
         GraphNode: {
+            /** @description What the reader may do to the hypothesis now, as on GET /hypotheses/{id}. */
+            actions: components["schemas"]["HypothesisAction"][];
             actor: components["schemas"]["Actor"];
             agent_id: string;
             best_job?: components["schemas"]["BestJob"];
@@ -3044,6 +3046,8 @@ export interface components {
             status_changed_at: string | null;
             text: string;
         };
+        /** @enum {string} */
+        HypothesisAction: "edit" | "remove" | "link" | "comment";
         HypothesisComment: {
             actor: components["schemas"]["Actor"];
             agent_id: string;
@@ -3100,6 +3104,8 @@ export interface components {
         /** @enum {string} */
         HypothesisStatus: "open" | "confirmed" | "refuted" | "inconclusive";
         HypothesisWithJobs: {
+            /** @description What the reader may do to it now, each a write the API accepts from them: edit (PATCH /hypotheses/{id}) and remove (DELETE /hypotheses/{id}) of an idea a person wrote that no agent acted on, link (POST /hypotheses/{id}/links, from an agent's hypothesis only by that agent) and comment (POST /hypotheses/{id}/comments). Empty for a reader who writes nothing of its platform experiment, and once it closed. */
+            actions: components["schemas"]["HypothesisAction"][];
             actor: components["schemas"]["Actor"];
             agent_id: string;
             /** @description The commit a new implementation starts from, repository_url@sha: the one the newest completed job of its first builds_on parent ran, whichever agent's. A parent with no completed job passes the question to its own first parent, and the objective answers with the declared baseline job's commit. Absent while that chain ends at the objective and no baseline is declared. */
@@ -4682,6 +4688,7 @@ export type GraphQueryRequest = components['schemas']['GraphQueryRequest'];
 export type HostedCoordinator = components['schemas']['HostedCoordinator'];
 export type Hosting = components['schemas']['Hosting'];
 export type Hypothesis = components['schemas']['Hypothesis'];
+export type HypothesisAction = components['schemas']['HypothesisAction'];
 export type HypothesisComment = components['schemas']['HypothesisComment'];
 export type HypothesisEvidence = components['schemas']['HypothesisEvidence'];
 export type HypothesisFinding = components['schemas']['HypothesisFinding'];
@@ -8863,6 +8870,7 @@ export const capacityTierValues: ReadonlyArray<FlattenedDeepRequired<components>
 export const closeReasonValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["CloseReason"]> = ["end_time_reached", "closed_by_request", "planning_limit_reached", "proposal_expired", "baseline_limit_reached", "agents_not_started", "planner_stopped", "repository_not_created"];
 export const experimentActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ExperimentAction"]> = ["cancel"];
 export const experimentStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["ExperimentStatus"]> = ["SUBMITTED", "QUEUED", "RUNNING", "COMPLETED", "FAILED", "EVICTED", "REJECTED", "CANCELLED"];
+export const hypothesisActionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["HypothesisAction"]> = ["edit", "remove", "link", "comment"];
 export const hypothesisStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["HypothesisStatus"]> = ["open", "confirmed", "refuted", "inconclusive"];
 export const joinedAgentEnded_reasonValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["JoinedAgent"]["ended_reason"]> = ["finished", "cut", "replaced", "stopped"];
 export const linkTypeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["LinkType"]> = ["builds_on", "contradicts", "related"];

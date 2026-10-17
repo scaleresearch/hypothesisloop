@@ -27,6 +27,9 @@ type Store interface {
 	GetAgent(ctx context.Context, id string) (*domain.Agent, error)
 	// PlatformExperimentExists says whether a hypothesis has a platform experiment to be in.
 	PlatformExperimentExists(ctx context.Context, platformExperimentID string) (bool, error)
+	// PlatformExperimentClosed says whether the platform experiment is closed, after which its
+	// graph takes no write.
+	PlatformExperimentClosed(ctx context.Context, platformExperimentID string) (bool, error)
 	// GetPlatformExperimentMetrics is a narrow read of a platform experiment's declared
 	// MetricDefinitions, used by the underperformance check to find the ranking metric's
 	// direction without pulling the full row through this interface.

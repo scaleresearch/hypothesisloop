@@ -9,6 +9,8 @@ function idea(id: string, buildsOn: string[], agentID = '', created = at): Graph
   return {
     id, text: id, platform_experiment_id: 'pe', status: 'open', agent_id: agentID, actor, status_changed_at: null,
     created_at: created, builds_on: buildsOn, finding_count: 0, comment_count: 0, child_count: 0,
+    // As the API answers it to a person: an agent's idea takes no link from them.
+    actions: agentID ? ['comment'] : ['edit', 'remove', 'link', 'comment'],
   }
 }
 

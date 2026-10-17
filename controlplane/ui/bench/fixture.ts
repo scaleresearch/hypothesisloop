@@ -38,6 +38,7 @@ export function fixtureGraph(n: number, seed = 1): HypothesisGraph {
       child_count: 0,
       finding_count: Math.floor(rand() * 4),
       comment_count: Math.floor(rand() * 3),
+      actions: [],
       best_job: rand() < 0.4 ? { id: `job-${i}`, metric: { name: 'val_loss', value: 2 + rand(), basis: 'min' } } : undefined,
     })
   }

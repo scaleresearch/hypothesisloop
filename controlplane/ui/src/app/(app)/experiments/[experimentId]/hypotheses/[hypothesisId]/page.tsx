@@ -221,7 +221,7 @@ export default function HypothesisDetailPage({ params }: { params: { experimentI
               ))}
             </Stack>
           )}
-          <AddCommentForm hypothesisID={data.id} onAdded={() => mutate()} />
+          <AddCommentForm hypothesis={data} onAdded={() => mutate()} />
       </Section>
 
       <Section title="Jobs testing this hypothesis" note={data.job_count > 0 && `${data.job_count}${data.job_count > jobs.length ? `, showing ${jobs.length}` : ''}`} scrollX>

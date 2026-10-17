@@ -170,6 +170,18 @@ type HypothesisStats struct {
 	ByStatus map[HypothesisStatus]int `json:"by_status"`
 }
 
+// HypothesisAction is something the reader of a hypothesis may do to it now.
+type HypothesisAction string
+
+const (
+	HypothesisActionEdit    HypothesisAction = "edit"
+	HypothesisActionRemove  HypothesisAction = "remove"
+	HypothesisActionLink    HypothesisAction = "link"
+	HypothesisActionComment HypothesisAction = "comment"
+)
+
+var HypothesisActions = []HypothesisAction{HypothesisActionEdit, HypothesisActionRemove, HypothesisActionLink, HypothesisActionComment}
+
 // GraphEdge is one edge of a platform experiment's hypothesis graph, with who created it and when.
 type GraphEdge struct {
 	From      string    `json:"from"`

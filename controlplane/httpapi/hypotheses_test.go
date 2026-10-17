@@ -69,6 +69,10 @@ func (s *poolStore) GetExperiment(_ context.Context, id string) (*domain.Experim
 
 func newPoolStore() *poolStore { return &poolStore{} }
 
+func (s *poolStore) PlatformExperimentClosed(_ context.Context, id string) (bool, error) {
+	return s.closed[id], nil
+}
+
 // PlatformExperimentExists knows every platform experiment id but pe-none.
 func (s *poolStore) PlatformExperimentExists(_ context.Context, id string) (bool, error) {
 	return strings.HasPrefix(id, "pe-") && id != "pe-none", nil

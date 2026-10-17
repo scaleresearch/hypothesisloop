@@ -169,8 +169,8 @@ export function allowedLinkKinds(graph: HypothesisGraph, to: string): LinkType[]
 type LinkPlan = { from: string; to: string } | { refused: string }
 
 // What the API takes from a person linking `from` to `to`: a link is stored on the idea it leaves,
-// and only an idea no agent owns takes one from a person. A related or contradicts link reads the
-// same both ways, so from an agent's idea it is stored on the other end when that one is free.
+// which lists link for the caller. A related or contradicts link reads the same both ways, so from
+// an idea that does not it is stored on the other end when that one does.
 export function linkPlanner(graph: HypothesisGraph): (from: string, to: string, kind: LinkType) => LinkPlan {
   const byID = new Map(graph.nodes.map(n => [n.id, n]))
   const edges = new Set(graph.edges.map(e => `${e.type}:${e.from}:${e.to}`))
@@ -202,8 +202,8 @@ export function linkPlanner(graph: HypothesisGraph): (from: string, to: string, 
       return { refused: 'These two ideas are already linked this way.' }
     }
     if (kind === 'builds_on' && descendants(from).has(to)) return { refused: 'That idea already refines this one.' }
-    if (!source.agent_id) return { from, to }
-    if (kind !== 'builds_on' && to !== graph.root && !byID.get(to)!.agent_id) return { from: to, to: from }
+    if (source.actions.includes('link')) return { from, to }
+    if (kind !== 'builds_on' && to !== graph.root && byID.get(to)!.actions.includes('link')) return { from: to, to: from }
     return { refused: 'Only the agent that owns this idea links from it.' }
   }
 }

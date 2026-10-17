@@ -36,6 +36,7 @@ type hypothesisWithJobs struct {
 	FindingCount    int                         `json:"finding_count"`
 	Comments        []*domain.HypothesisComment `json:"comments"`
 	CommentCount    int                         `json:"comment_count"`
+	Actions         []domain.HypothesisAction   `json:"actions" doc:"What the reader may do to it now, each a write the API accepts from them: edit (PATCH /hypotheses/{id}) and remove (DELETE /hypotheses/{id}) of an idea a person wrote that no agent acted on, link (POST /hypotheses/{id}/links, from an agent's hypothesis only by that agent) and comment (POST /hypotheses/{id}/comments). Empty for a reader who writes nothing of its platform experiment, and once it closed."`
 }
 
 // Each of the three sub-lists GET /hypotheses/{id} returns is bounded like every other list read
@@ -360,6 +361,45 @@ func (a hypothesesAPI) changer(ctx context.Context, hyp *domain.Hypothesis, remo
 	return c, nil
 }
 
+// reader is who the caller is to the hypotheses of the platform experiment
+// platformExperimentID.
+func (a hypothesesAPI) reader(ctx context.Context, platformExperimentID string) (registry.Reader, error) {
+	r := registry.Reader{}
+	var err error
+	if r.Caller, err = caller(ctx, a.logger); err != nil {
+		return r, err
+	}
+	if r.Writes, err = a.access.Writes(ctx, platformExperimentID); err != nil {
+		return r, auth.Internal(a.logger, "read what the caller writes", err)
+	}
+	if r.OrgOwner, err = a.access.OwnsOrgOf(ctx, platformExperimentID); err != nil {
+		return r, auth.Internal(a.logger, "read the caller's org role", err)
+	}
+	if r.Closed, err = a.registry.PlatformExperimentClosed(ctx, platformExperimentID); err != nil {
+		return r, auth.Internal(a.logger, "read whether the platform experiment closed", err)
+	}
+	return r, nil
+}
+
+// permit sets on each node what the caller may do to it.
+func (a hypothesesAPI) permit(ctx context.Context, nodes []*registry.GraphNode) error {
+	readers := map[string]registry.Reader{}
+	for _, node := range nodes {
+		r, read := readers[node.PlatformExperimentID]
+		var err error
+		if !read {
+			if r, err = a.reader(ctx, node.PlatformExperimentID); err != nil {
+				return err
+			}
+			readers[node.PlatformExperimentID] = r
+		}
+		if node.Actions, err = a.registry.HypothesisActions(ctx, node.Hypothesis, r); err != nil {
+			return auth.Internal(a.logger, "read what the caller may do to a hypothesis", err, zap.String("id", node.ID))
+		}
+	}
+	return nil
+}
+
 const changeRule = "Only for an idea a person wrote for no agent, and only while no agent has acted on it: no job tests it " +
 	"and no other hypothesis links to it. Once one has, it is part of the record and the answer is 409 hypothesis_in_record " +
 	"naming the jobs and the links; add a comment instead. 403 person_only for a request no signed-in person makes, " +
@@ -527,6 +567,9 @@ func (a hypothesesAPI) graph(ctx context.Context, in *struct {
 	if err != nil {
 		return nil, auth.Internal(a.logger, "get hypothesis graph", err)
 	}
+	if err := a.permit(ctx, graph.Nodes); err != nil {
+		return nil, err
+	}
 	return &struct{ Body *registry.HypothesisGraph }{Body: graph}, nil
 }
 
@@ -565,6 +608,9 @@ func (a hypothesesAPI) list(ctx context.Context, in *struct {
 	hs, err := a.registry.ListHypotheses(ctx, filter)
 	if err != nil {
 		return nil, auth.Internal(a.logger, "list hypotheses", err)
+	}
+	if err := a.permit(ctx, hs); err != nil {
+		return nil, err
 	}
 	stats, err := a.registry.HypothesisStats(ctx, filter)
 	if err != nil {
@@ -662,6 +708,14 @@ func (a hypothesesAPI) get(ctx context.Context, in *struct {
 	if err := permitJobs(ctx, a.access, a.logger, jobs); err != nil {
 		return nil, err
 	}
+	reader, err := a.reader(ctx, hyp.PlatformExperimentID)
+	if err != nil {
+		return nil, err
+	}
+	actions, err := a.registry.HypothesisActions(ctx, hyp, reader)
+	if err != nil {
+		return nil, auth.Internal(a.logger, "get hypothesis", err, zap.String("id", in.ID))
+	}
 	findings, findingCount, err := a.registry.ListHypothesisFindings(ctx, in.ID, in.Limit, in.Offset)
 	if err != nil {
 		return nil, auth.Internal(a.logger, "get hypothesis", err, zap.String("id", in.ID))
@@ -676,6 +730,7 @@ func (a hypothesesAPI) get(ctx context.Context, in *struct {
 		Jobs: jobs, JobCount: jobCount,
 		Findings: findings, FindingCount: findingCount,
 		Comments: comments, CommentCount: commentCount,
+		Actions: actions,
 	}}, nil
 }
 
