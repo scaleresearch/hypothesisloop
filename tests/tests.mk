@@ -45,7 +45,7 @@ test:
 # The tests that shell out to hl find the one built from this tree.
 AGENT_TEST_BIN := $(CURDIR)/bin/agent-test
 agent-test:
-	go build -o $(AGENT_TEST_BIN)/hl ./cli
+	go build -o $(AGENT_TEST_BIN)/hl ./cli/cmd/hl
 	cd agents/harness && PATH="$(AGENT_TEST_BIN):$$PATH" uv run pytest tests
 
 # The GitHub client's checks against github.com itself, as the App .env names

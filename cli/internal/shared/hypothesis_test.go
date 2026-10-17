@@ -1,0 +1,660 @@
+package shared
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"reflect"
+	"regexp"
+	"strings"
+	"testing"
+
+	"github.com/scaleresearch/hypothesisloop/cli/internal/clitest"
+)
+
+func links(pairs ...string) []any {
+	out := []any{}
+	for i := 0; i < len(pairs); i += 2 {
+		out = append(out, map[string]any{"type": pairs[i], "to": pairs[i+1]})
+	}
+	return out
+}
+
+func TestHypothesisSubmitFlagsBuildLinks(t *testing.T) {
+	got := clitest.RecordingServer(t, func(int, clitest.Recorded) any {
+		return map[string]any{"id": "hyp-9", "already_existed": false}
+	})
+	var stdout, stderr bytes.Buffer
+	code := clitest.Run(HypothesisSubmit, []string{"--agent", "jane", "--platform-experiment", "pe-1", "--text", "warmup helps", "--builds-on", "root", "--builds-on", "hyp-1", "--contradicts", "hyp-2", "--related", "hyp-3"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	if len(*got) != 1 || (*got)[0].Method != "POST" || (*got)[0].Path != "/hypotheses" {
+		t.Fatalf("requests: %+v", *got)
+	}
+	want := map[string]any{
+		"agent_id": "jane", "platform_experiment_id": "pe-1", "text": "warmup helps",
+		"links": links("builds_on", "pe-1", "builds_on", "hyp-1", "contradicts", "hyp-2", "related", "hyp-3"),
+	}
+	if !reflect.DeepEqual((*got)[0].Body, want) {
+		t.Fatalf("body = %v\nwant  %v", (*got)[0].Body, want)
+	}
+	if stdout.String() != `{"already_existed":false,"id":"hyp-9"}`+"\n" {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
+// A dedup hit applies none of the caller's links, which the agent must hear about to place its idea.
+func TestHypothesisSubmitDedupHitSaysTheLinksWereNotApplied(t *testing.T) {
+	clitest.RecordingServer(t, func(int, clitest.Recorded) any {
+		return map[string]any{"id": "hyp-1", "agent_id": "bob", "already_existed": true, "links": links("builds_on", "pe-1")}
+	})
+	var stdout, stderr bytes.Buffer
+	code := clitest.Run(HypothesisSubmit, []string{"--agent", "jane", "--platform-experiment", "pe-1", "--text", "warmup helps", "--builds-on", "hyp-7"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	for _, want := range []string{"hyp-1", "bob", "links were not applied", "--builds-on hyp-1"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("stderr does not say %q: %s", want, stderr.String())
+		}
+	}
+}
+
+func TestHypothesisSubmitWithoutBuildsOnIsUsageError(t *testing.T) {
+	got := clitest.RecordingServer(t, func(int, clitest.Recorded) any { return map[string]any{} })
+	var stdout, stderr bytes.Buffer
+	code := clitest.Run(HypothesisSubmit, []string{"--agent", "jane", "--platform-experiment", "pe-1", "--text", "t", "--related", "hyp-3"}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("exit %d, want 2", code)
+	}
+	if len(*got) != 0 {
+		t.Fatalf("sent %d requests for an unplaced hypothesis", len(*got))
+	}
+	for _, want := range []string{"--builds-on root", "--builds-on ID", "hl hypothesis query"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr does not tell the agent %q: %s", want, stderr.String())
+		}
+	}
+}
+
+func TestHypothesisSubmitRootOnlyForBuildsOn(t *testing.T) {
+	got := clitest.RecordingServer(t, func(int, clitest.Recorded) any { return map[string]any{} })
+	var stdout, stderr bytes.Buffer
+	code := clitest.Run(HypothesisSubmit, []string{"--agent", "jane", "--platform-experiment", "pe-1", "--text", "t", "--builds-on", "root", "--contradicts", "root"}, &stdout, &stderr)
+	if code != 2 || len(*got) != 0 || !strings.Contains(stderr.String(), "only builds_on may target root") {
+		t.Fatalf("exit %d, requests %d, stderr %s", code, len(*got), stderr.String())
+	}
+}
+
+func TestHypothesisSubmitBatchResolvesLocalKeys(t *testing.T) {
+	got := clitest.RecordingServer(t, func(n int, r clitest.Recorded) any {
+		return map[string]any{"id": fmt.Sprintf("hyp-%d", n), "text": r.Body["text"]}
+	})
+	file := clitest.WriteFile(t, `agent_id: jane
+platform_experiment_id: pe-1
+links: [{type: builds_on, to: root}]
+hypotheses:
+  - key: lr
+    text: higher lr
+  - key: warm
+    text: warmup
+  - text: higher lr with warmup
+    agent_id: bob
+    links:
+      - {type: builds_on, to: lr}
+      - {type: builds_on, to: warm}
+      - {type: contradicts, to: hyp-external}
+`)
+	var stdout, stderr bytes.Buffer
+	if code := clitest.Run(HypothesisSubmit, []string{"--file", file}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	if len(*got) != 3 {
+		t.Fatalf("want 3 POSTs, got %+v", *got)
+	}
+	for i, want := range []map[string]any{
+		{"agent_id": "jane", "platform_experiment_id": "pe-1", "text": "higher lr", "links": links("builds_on", "pe-1")},
+		{"agent_id": "jane", "platform_experiment_id": "pe-1", "text": "warmup", "links": links("builds_on", "pe-1")},
+		{"agent_id": "bob", "platform_experiment_id": "pe-1", "text": "higher lr with warmup",
+			"links": links("builds_on", "hyp-0", "builds_on", "hyp-1", "contradicts", "hyp-external")},
+	} {
+		if !reflect.DeepEqual((*got)[i].Body, want) {
+			t.Fatalf("item %d body = %v\nwant %v", i, (*got)[i].Body, want)
+		}
+	}
+	out := clitest.Lines(stdout.String())
+	if len(out) != 3 || !strings.Contains(out[2], `"id":"hyp-2"`) {
+		t.Fatalf("want one JSON object per item, got %q", stdout.String())
+	}
+}
+
+func TestHypothesisSubmitBatchFailsBeforeSendingAnything(t *testing.T) {
+	cases := map[string]struct{ yaml, want string }{
+		"forward key": {`hypotheses:
+  - text: child
+    links: [{type: builds_on, to: parent}]
+  - key: parent
+    text: parent
+    links: [{type: builds_on, to: root}]
+`, "item 0: link to key \"parent\", which item 1 defines"},
+		"duplicate key": {`links: [{type: builds_on, to: root}]
+hypotheses:
+  - {key: a, text: one}
+  - {key: a, text: two}
+`, "item 1: key \"a\" already used by item 0"},
+		"missing text": {`links: [{type: builds_on, to: root}]
+hypotheses:
+  - text: idea one
+  - agent_id: bob
+`, "item 1: platform_experiment_id and text are required"},
+		"an author stated": {`links: [{type: builds_on, to: root}]
+hypotheses:
+  - text: idea one
+  - {text: idea two, author: Ada}
+`, "item 1: author is not a field: who registers a hypothesis is whoever HL_TOKEN is"},
+		"an author stated for every item": {`author: Ada
+links: [{type: builds_on, to: root}]
+hypotheses:
+  - text: idea one
+`, "author is not a field"},
+		"unplaced item": {`hypotheses:
+  - text: placed
+    links: [{type: builds_on, to: root}]
+  - text: unplaced
+`, "item 1: at least one --builds-on"},
+		"bad link type": {`hypotheses:
+  - text: t
+    links: [{type: extends, to: root}]
+`, `link type "extends" must be one of builds_on, contradicts, related`},
+		"unknown link field": {`hypotheses:
+  - text: t
+    links: [{type: builds_on, target: root}]
+`, `links[0]: unknown field "target"`},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := clitest.RecordingServer(t, func(int, clitest.Recorded) any { return map[string]any{"id": "x"} })
+			file := clitest.WriteFile(t, "agent_id: jane\nplatform_experiment_id: pe-1\n"+tc.yaml)
+			var stdout, stderr bytes.Buffer
+			code := clitest.Run(HypothesisSubmit, []string{"--file", file}, &stdout, &stderr)
+			if code != 2 {
+				t.Fatalf("exit %d, want 2; stderr %s", code, stderr.String())
+			}
+			if len(*got) != 0 {
+				t.Fatalf("sent %d requests before rejecting the file", len(*got))
+			}
+			if !strings.Contains(stderr.String(), tc.want) {
+				t.Fatalf("stderr = %s, want it to contain %q", stderr.String(), tc.want)
+			}
+		})
+	}
+}
+
+func TestHypothesisSubmitFlagLinksOverrideFileLinks(t *testing.T) {
+	got := clitest.RecordingServer(t, func(int, clitest.Recorded) any { return map[string]any{"id": "x"} })
+	file := clitest.WriteFile(t, `- agent_id: jane
+  platform_experiment_id: pe-1
+  text: one
+  links: [{type: builds_on, to: hyp-old}]
+- agent_id: jane
+  platform_experiment_id: pe-2
+  text: two
+`)
+	var stdout, stderr bytes.Buffer
+	if code := clitest.Run(HypothesisSubmit, []string{"--file", file, "--builds-on", "root"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	if len(*got) != 2 {
+		t.Fatalf("want 2 POSTs, got %d", len(*got))
+	}
+	for i, pe := range []string{"pe-1", "pe-2"} {
+		if !reflect.DeepEqual((*got)[i].Body["links"], links("builds_on", pe)) {
+			t.Fatalf("item %d links = %v", i, (*got)[i].Body["links"])
+		}
+	}
+}
+
+func TestHypothesisSubmitBatchStopsAtFirstAPIError(t *testing.T) {
+	url := clitest.WithServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"detail":"unknown link target hyp-gone"}`))
+	})
+	clitest.SetAPIURL(t, url)
+	file := clitest.WriteFile(t, `agent_id: jane
+platform_experiment_id: pe-1
+links: [{type: builds_on, to: hyp-gone}]
+hypotheses: [{text: one}, {text: two}]
+`)
+	var stdout, stderr bytes.Buffer
+	code := clitest.Run(HypothesisSubmit, []string{"--file", file}, &stdout, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "item 0") || !strings.Contains(stderr.String(), "hyp-gone") {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+}
+
+func TestHypothesisSubmitHeldListsTheCloseOnesAndBothWaysOn(t *testing.T) {
+	url := clitest.WithServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"reason":"similar_hypotheses","message":"Nothing was registered","similar":[` +
+			`{"id":"hyp-1","agent_id":"bob","status":"open","text":"one","reason":"close_text"},` +
+			`{"id":"hyp-2","actor":{"kind":"user","id":"user-ann","name":"ann"},"status":"refuted","text":"two","reason":"refuted_parent"}]}`))
+	})
+	clitest.SetAPIURL(t, url)
+	var stdout, stderr bytes.Buffer
+	code := clitest.Run(HypothesisSubmit, []string{"--agent", "jane", "--platform-experiment", "pe-1", "--text", "t", "--builds-on", "hyp-2"}, &stdout, &stderr)
+	got := clitest.Lines(stderr.String())
+	if code != 1 || stdout.Len() != 0 || len(got) != 4 {
+		t.Fatalf("exit %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
+	}
+	if got[1] != `{"id":"hyp-1","agent_id":"bob","status":"open","text":"one","reason":"close_text"}` {
+		t.Fatalf("held hypothesis line: %s", got[1])
+	}
+	for _, want := range []string{"hl job submit FILE --hypothesis ID", "--distinct-from hyp-1,hyp-2", "--contradicts ID"} {
+		if !strings.Contains(got[3], want) {
+			t.Fatalf("the ways on do not name %q: %s", want, got[3])
+		}
+	}
+	if strings.Contains(stderr.String(), "Nothing was registered") {
+		t.Fatalf("the reply body is printed as well: %s", stderr.String())
+	}
+}
+
+func TestHypothesisList(t *testing.T) {
+	got := clitest.RecordingServer(t, func(int, clitest.Recorded) any {
+		return []map[string]any{{"id": "hyp-1", "child_count": 2}, {"id": "hyp-2", "child_count": 0}}
+	})
+	var stdout, stderr bytes.Buffer
+	code := clitest.Run(HypothesisList, []string{"--platform-experiment", "pe-1", "--agent", "jane", "--status", "open", "--by", "people", "--limit", "5", "--offset", "10"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	if (*got)[0].Path != "/hypotheses" || (*got)[0].Query != "agent_id=jane&by=people&limit=5&offset=10&platform_experiment_id=pe-1&status=open" {
+		t.Fatalf("request = %+v", (*got)[0])
+	}
+	if want := "{\"child_count\":2,\"id\":\"hyp-1\"}\n{\"child_count\":0,\"id\":\"hyp-2\"}\n"; stdout.String() != want {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	if code := clitest.Run(HypothesisList, []string{"--platform-experiment", "pe-1", "--by", "agents"}, &stdout, &stderr); code != 2 {
+		t.Fatalf("--by agents: exit %d, want 2", code)
+	}
+}
+
+func TestHypothesisGet(t *testing.T) {
+	got := clitest.RecordingServer(t, func(int, clitest.Recorded) any {
+		return map[string]any{"id": "hyp-1", "links": map[string]any{"out": []any{}, "in": []any{}}}
+	})
+	var stdout, stderr bytes.Buffer
+	if code := clitest.Run(HypothesisGet, []string{"hyp-1"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	if (*got)[0].Method != "GET" || (*got)[0].Path != "/hypotheses/hyp-1" {
+		t.Fatalf("request = %+v", (*got)[0])
+	}
+	if stdout.String() != `{"id":"hyp-1","links":{"out":[],"in":[]},"jobs":[]}`+"\n" {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	if code := clitest.Run(HypothesisGet, []string{}, &stdout, &stderr); code != 2 {
+		t.Fatalf("get without ID: exit %d, want 2", code)
+	}
+}
+
+func TestHypothesisLink(t *testing.T) {
+	got := clitest.RecordingServer(t, func(int, clitest.Recorded) any {
+		return []map[string]any{{"type": "builds_on", "hypothesis_id": "hyp-2"}}
+	})
+	var stdout, stderr bytes.Buffer
+	code := clitest.Run(HypothesisLink, []string{"--agent", "jane", "--from", "hyp-1", "--type", "builds_on", "--to", "hyp-2"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	want := map[string]any{"agent_id": "jane", "type": "builds_on", "to": "hyp-2"}
+	if (*got)[0].Method != "POST" || (*got)[0].Path != "/hypotheses/hyp-1/links" || !reflect.DeepEqual((*got)[0].Body, want) {
+		t.Fatalf("request = %+v", (*got)[0])
+	}
+	if stdout.String() != `[{"hypothesis_id":"hyp-2","type":"builds_on"}]`+"\n" {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
+func TestHypothesisLinkUsageErrors(t *testing.T) {
+	got := clitest.RecordingServer(t, func(int, clitest.Recorded) any { return nil })
+	for _, args := range [][]string{
+		{"--agent", "jane", "--from", "hyp-1", "--type", "extends", "--to", "hyp-2"},
+		{"--agent", "jane", "--from", "hyp-1", "--type", "related"},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := clitest.Run(HypothesisLink, append([]string{}, args...), &stdout, &stderr); code != 2 {
+			t.Fatalf("%v: exit %d, want 2", args, code)
+		}
+	}
+	if len(*got) != 0 {
+		t.Fatalf("usage errors sent %d requests", len(*got))
+	}
+}
+
+func TestHypothesisQuery(t *testing.T) {
+	got := clitest.RecordingServer(t, func(int, clitest.Recorded) any {
+		return map[string]any{
+			"columns":   []string{"id", "text", "n"},
+			"rows":      [][]any{{"hyp-1", "warmup", 3}, {"hyp-2", nil, map[string]any{"_labels": []string{"Hypothesis"}}}},
+			"truncated": false,
+		}
+	})
+	cypher := "MATCH (c:Hypothesis)-[:BUILDS_ON]->(:Hypothesis {id: $id}) RETURN c.id AS id, c.text AS text, 3 AS n"
+	var stdout, stderr bytes.Buffer
+	code := clitest.Run(HypothesisQuery, []string{cypher, "--param", "id=hyp-0", "--param", "q=a=b", "--platform-experiment", "pe-1"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	want := map[string]any{"platform_experiment_id": "pe-1", "cypher": cypher, "params": map[string]any{"id": "hyp-0", "q": "a=b"}}
+	if (*got)[0].Method != "POST" || (*got)[0].Path != "/hypotheses/query" || !reflect.DeepEqual((*got)[0].Body, want) {
+		t.Fatalf("request = %+v", (*got)[0])
+	}
+	wantOut := `{"id":"hyp-1","text":"warmup","n":3}` + "\n" + `{"id":"hyp-2","text":null,"n":{"_labels":["Hypothesis"]}}` + "\n"
+	if stdout.String() != wantOut {
+		t.Fatalf("stdout = %q\nwant     %q", stdout.String(), wantOut)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("unexpected stderr: %s", stderr.String())
+	}
+}
+
+func TestHypothesisQueryTruncatedWarnsOnStderr(t *testing.T) {
+	clitest.RecordingServer(t, func(int, clitest.Recorded) any {
+		return map[string]any{"columns": []string{"id"}, "rows": [][]any{{"a"}, {"b"}}, "truncated": true}
+	})
+	var stdout, stderr bytes.Buffer
+	if code := clitest.Run(HypothesisQuery, []string{"MATCH (h:Hypothesis) RETURN h.id AS id", "--platform-experiment", "pe-1"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	if len(clitest.Lines(stdout.String())) != 2 || !strings.Contains(stderr.String(), "truncated at 2 rows") {
+		t.Fatalf("stdout %q, stderr %q", stdout.String(), stderr.String())
+	}
+}
+
+func TestHypothesisQueryFromStdin(t *testing.T) {
+	got := clitest.RecordingServer(t, func(int, clitest.Recorded) any {
+		return map[string]any{"columns": []string{}, "rows": [][]any{}, "truncated": false}
+	})
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = old })
+	_, _ = w.WriteString("MATCH (n) RETURN count(n)\n")
+	w.Close()
+
+	t.Setenv("HL_TOKEN", clitest.DerivedToken("agent:pe-env/ag-1"))
+	var stdout, stderr bytes.Buffer
+	if code := clitest.Run(HypothesisQuery, []string{"--param", "x=1", "-"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	if (*got)[0].Body["cypher"] != "MATCH (n) RETURN count(n)\n" || (*got)[0].Body["platform_experiment_id"] != "pe-env" {
+		t.Fatalf("body = %v", (*got)[0].Body)
+	}
+}
+
+func TestHypothesisQueryUsageErrors(t *testing.T) {
+	got := clitest.RecordingServer(t, func(int, clitest.Recorded) any { return nil })
+	for _, args := range [][]string{
+		{},
+		{"MATCH (n) RETURN n"},
+		{"MATCH (n) RETURN n", "--platform-experiment", "pe-1", "extra"},
+		{"MATCH (n) RETURN n", "--platform-experiment", "pe-1", "--param", "novalue"},
+		{"   ", "--platform-experiment", "pe-1"},
+		{`{"cypher":"MATCH (n) RETURN n"}`, "--platform-experiment", "pe-1"},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := clitest.Run(HypothesisQuery, append([]string{}, args...), &stdout, &stderr); code != 2 {
+			t.Fatalf("%q: exit %d, want 2", args, code)
+		}
+	}
+	if len(*got) != 0 {
+		t.Fatalf("usage errors sent %d requests", len(*got))
+	}
+}
+
+func TestHypothesisExampleFileSubmits(t *testing.T) {
+	got := clitest.RecordingServer(t, func(n int, r clitest.Recorded) any { return map[string]any{"id": fmt.Sprintf("hyp-%d", n)} })
+	var stdout, stderr bytes.Buffer
+	if code := clitest.Run(HypothesisSubmit, []string{"--file", filepath.Join(clitest.RepoRoot(t), "cli", "reference", "hypothesis.yaml")}, &stdout, &stderr); code != 0 {
+		t.Fatalf("the DSL reference no longer submits: exit %d, stderr %s", code, stderr.String())
+	}
+	if len(*got) != 3 || !reflect.DeepEqual((*got)[2].Body["links"], links("builds_on", "hyp-0", "builds_on", "hyp-1")) {
+		t.Fatalf("requests = %+v", *got)
+	}
+	// The reference names ids in the form the platform issues them, which is what a reader copies.
+	issued := regexp.MustCompile(`^(ag|pe)-[0-9a-f]{32}$`)
+	if body := (*got)[0].Body; !issued.MatchString(fmt.Sprint(body["agent_id"])) || !issued.MatchString(fmt.Sprint(body["platform_experiment_id"])) {
+		t.Errorf("the reference names agent %v and platform experiment %v, want ids as the platform issues them", body["agent_id"], body["platform_experiment_id"])
+	}
+}
+
+func TestHypothesisComment(t *testing.T) {
+	got := clitest.RecordingServer(t, func(int, clitest.Recorded) any { return map[string]any{"id": "c-1"} })
+	var stdout, stderr bytes.Buffer
+	code := clitest.Run(HypothesisComment, []string{"hyp-1", "--agent", "jane", "--text", "dead end"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	want := map[string]any{"agent_id": "jane", "text": "dead end"}
+	if (*got)[0].Method != "POST" || (*got)[0].Path != "/hypotheses/hyp-1/comments" || !reflect.DeepEqual((*got)[0].Body, want) {
+		t.Fatalf("request = %+v", (*got)[0])
+	}
+}
+
+func TestHypothesisSubmitSendsDistinctFrom(t *testing.T) {
+	got := clitest.RecordingServer(t, func(n int, r clitest.Recorded) any { return map[string]any{"id": fmt.Sprintf("hyp-%d", n)} })
+	var stdout, stderr bytes.Buffer
+	code := clitest.Run(HypothesisSubmit, []string{"--agent", "jane", "--platform-experiment", "pe-1", "--text", "lr 0.2 wins", "--builds-on", "hyp-1", "--distinct-from", "hyp-1,hyp-3"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	if want := []any{"hyp-1", "hyp-3"}; !reflect.DeepEqual((*got)[0].Body["distinct_from"], want) {
+		t.Fatalf("distinct_from = %v, want %v", (*got)[0].Body["distinct_from"], want)
+	}
+
+	file := clitest.WriteFile(t, `agent_id: jane
+platform_experiment_id: pe-1
+hypotheses:
+  - key: lr
+    text: higher lr
+    links: [{type: builds_on, to: root}]
+  - text: higher lr with warmup
+    links: [{type: builds_on, to: lr}]
+    distinct_from: [lr, hyp-external]
+`)
+	if code := clitest.Run(HypothesisSubmit, []string{"--file", file}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	if _, set := (*got)[1].Body["distinct_from"]; set {
+		t.Fatalf("item without distinct_from sent one: %v", (*got)[1].Body)
+	}
+	if want := []any{"hyp-1", "hyp-external"}; !reflect.DeepEqual((*got)[2].Body["distinct_from"], want) {
+		t.Fatalf("file distinct_from = %v, want %v (local key resolved)", (*got)[2].Body["distinct_from"], want)
+	}
+}
+
+func TestHypothesisSubmitTakesCommaSeparatedIDs(t *testing.T) {
+	got := clitest.RecordingServer(t, func(int, clitest.Recorded) any { return map[string]any{"id": "hyp-9"} })
+	var stdout, stderr bytes.Buffer
+	code := clitest.Run(HypothesisSubmit, []string{"--agent", "jane", "--platform-experiment", "pe-1", "--text", "combo", "--builds-on", "hyp-1,hyp-2", "--related", "hyp-3"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	want := links("builds_on", "hyp-1", "builds_on", "hyp-2", "related", "hyp-3")
+	if !reflect.DeepEqual((*got)[0].Body["links"], want) {
+		t.Fatalf("links = %v, want %v", (*got)[0].Body["links"], want)
+	}
+}
+
+// Every job of hl hypothesis get read "env":{} in a run where each hypothesis had one job: env is
+// what differs between the listed jobs, and one job differs from nothing.
+func TestTheOnlyJobOfAHypothesisShowsItsWholeEnvAndSeveralShowWhatDiffers(t *testing.T) {
+	job := func(id, lr string) map[string]any {
+		return map[string]any{"id": id, "status": "COMPLETED", "job": map[string]any{"env": map[string]any{"LR": lr, "HIDDEN": "16"}}}
+	}
+	var jobs []any
+	clitest.RecordingServer(t, func(int, clitest.Recorded) any {
+		return map[string]any{"id": "h-1", "text": "t", "job_count": len(jobs), "jobs": jobs}
+	})
+	get := func() string {
+		var stdout, stderr bytes.Buffer
+		if code := clitest.Run(HypothesisGet, []string{"h-1"}, &stdout, &stderr); code != 0 {
+			t.Fatalf("exit %d: %s", code, stderr.String())
+		}
+		return stdout.String()
+	}
+	jobs = []any{job("job-1", "0.3")}
+	if out := get(); !strings.Contains(out, `"env":{"HIDDEN":"16","LR":"0.3"}`) {
+		t.Errorf("one job: %s, want its whole env", out)
+	}
+	jobs = []any{job("job-1", "0.3"), job("job-2", "0.1")}
+	if out := get(); !strings.Contains(out, `"env":{"LR":"0.3"}`) || !strings.Contains(out, `"env":{"LR":"0.1"}`) || strings.Contains(out, "HIDDEN") {
+		t.Errorf("two jobs: %s, want only what differs", out)
+	}
+}
+
+// hl hypothesis get printed 32 KB for a hypothesis with a few jobs and overflowed the reader of
+// the agent that asked: by default it prints what a decision needs, and --full the record.
+func TestHypothesisGetIsShortUnlessToldFull(t *testing.T) {
+	long := strings.Repeat("ö", commentCut+40)
+	actor := map[string]any{"kind": "agent", "id": "a", "name": "Researcher 1"}
+	clitest.RecordingServer(t, func(int, clitest.Recorded) any {
+		return map[string]any{"id": "hyp-1", "agent_id": "a", "actor": actor, "platform_experiment_id": "pe-1", "text": "bf16 is faster", "status": "open",
+			"links":           map[string]any{"out": []any{map[string]any{"type": "builds_on", "hypothesis_id": "hyp-0", "text": "a long parent text", "status": "confirmed", "actor": actor}}, "in": []any{}},
+			"implementations": []any{map[string]any{"agent_id": "a", "branch": "hl/pe-1/r1/bf16", "code_ref": "u@sha"}}, "base_ref": "u@base",
+			"jobs": []any{map[string]any{"id": "job-1", "agent_id": "a", "status": "COMPLETED", "theory": "a long theory", "created_at": "2026-10-06T00:00:00Z",
+				"metrics": []any{map[string]any{"name": "ips", "value": 1203.68, "basis": "raw"}}, "job": map[string]any{"image": "i", "env": map[string]any{"P": "bf16"}}}},
+			"job_count": 1,
+			"findings":  []any{map[string]any{"id": "f-1", "hypothesis_id": "hyp-1", "platform_experiment_id": "pe-1", "experiment_id": "job-1", "agent_id": "a", "actor": actor, "summary": "bf16 won", "created_at": "2026-10-06T00:01:00Z"}}, "finding_count": 1,
+			"comments": []any{map[string]any{"id": "c-1", "hypothesis_id": "hyp-1", "platform_experiment_id": "pe-1", "agent_id": "b", "actor": actor, "text": long, "created_at": "2026-10-06T00:02:00Z"},
+				map[string]any{"id": "c-2", "agent_id": "b", "text": "short", "created_at": "2026-10-06T00:03:00Z"}}, "comment_count": 2}
+	})
+	var stdout, stderr bytes.Buffer
+	if code := clitest.Run(HypothesisGet, []string{"hyp-1"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	want := `{"agent_id":"a","base_ref":"u@base","comment_count":2,"finding_count":1,"id":"hyp-1",` +
+		`"implementations":[{"agent_id":"a","branch":"hl/pe-1/r1/bf16","code_ref":"u@sha"}],"job_count":1,"status":"open","text":"bf16 is faster",` +
+		`"links":{"out":[{"type":"builds_on","hypothesis_id":"hyp-0","status":"confirmed"}],"in":[]},` +
+		`"findings":[{"experiment_id":"job-1","agent_id":"a","summary":"bf16 won","created_at":"2026-10-06T00:01:00Z"}],` +
+		`"comments":[{"agent_id":"b","text":"` + strings.Repeat("ö", commentCut) + `…","cut":true,"created_at":"2026-10-06T00:02:00Z"},{"agent_id":"b","text":"short","created_at":"2026-10-06T00:03:00Z"}],` +
+		`"jobs":[{"id":"job-1","agent_id":"a","status":"COMPLETED","metrics":{"ips":{"value":1203.68}},"job":{"env":{"P":"bf16"}}}]}` + "\n"
+	if stdout.String() != want {
+		t.Errorf("stdout = %s\nwant     %s", stdout.String(), want)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("stderr = %q, want nothing: what qualifies the record is in it", stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := clitest.Run(HypothesisGet, []string{"hyp-1", "--full"}, &stdout, &stderr); code != 0 || stderr.Len() != 0 {
+		t.Fatalf("--full: exit %d, stderr %s", code, stderr.String())
+	}
+	for _, whole := range []string{long, "a long parent text", "a long theory", `"name":"Researcher 1"`, `"job":{"env":{"P":"bf16"}}`} {
+		if !strings.Contains(stdout.String(), whole) {
+			t.Errorf("--full lacks %q: %s", whole, stdout.String())
+		}
+	}
+}
+
+// Researchers posted the literature as a comment on the objective with hl hypothesis comment root
+// and got 404 five times: root names the objective of the token's platform experiment, and the
+// comments on it are read back with hl hypothesis get root and pointed at by hl hypothesis list.
+func TestCommentsOnTheObjective(t *testing.T) {
+	var got []clitest.Recorded
+	url := clitest.WithServer(t, func(w http.ResponseWriter, r *http.Request) {
+		rec := clitest.Recorded{Method: r.Method, Path: r.URL.Path, Query: r.URL.RawQuery}
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &rec.Body)
+		got = append(got, rec)
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/hypotheses/pe-env/comments":
+			w.Header().Set("X-Total-Count", "2")
+			_, _ = io.WriteString(w, `[{"id":"c-1","hypothesis_id":"pe-env","platform_experiment_id":"pe-env","agent_id":"ag-2","actor":{"kind":"agent"},"text":"`+strings.Repeat("x", commentCut+5)+`","created_at":"t1"}]`)
+		case r.URL.Path == "/hypotheses":
+			_, _ = io.WriteString(w, `[]`)
+		default:
+			_, _ = io.WriteString(w, `{"id":"c-2"}`)
+		}
+	})
+	clitest.SetAPIURL(t, url)
+	t.Setenv("HL_TOKEN", clitest.DerivedToken("agent:pe-env/ag-1"))
+
+	for _, target := range []string{"root", "pe-env"} {
+		var stdout, stderr bytes.Buffer
+		if code := clitest.Run(HypothesisComment, []string{target, "--text", "published: 4.3x"}, &stdout, &stderr); code != 0 {
+			t.Fatalf("comment %s: exit %d, stderr %s", target, code, stderr.String())
+		}
+		if last := got[len(got)-1]; last.Method != "POST" || last.Path != "/hypotheses/pe-env/comments" || last.Body["text"] != "published: 4.3x" {
+			t.Errorf("comment %s sent %+v, want POST /hypotheses/pe-env/comments", target, last)
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := clitest.Run(HypothesisGet, []string{"root"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("get root: exit %d, stderr %s", code, stderr.String())
+	}
+	want := `{"id":"pe-env","objective":true,"comment_count":2,"comments_omitted":1,"comments":[{"agent_id":"ag-2","created_at":"t1","cut":true,"text":"` + strings.Repeat("x", commentCut) + `…"}]}` + "\n"
+	if stdout.String() != want {
+		t.Errorf("get root = %s, want %s", stdout.String(), want)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("get root stderr = %q, want nothing: the cut and the comment not shown are in the record", stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := clitest.Run(HypothesisList, []string{}, &stdout, &stderr); code != 0 {
+		t.Fatalf("list: exit %d, stderr %s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "2 comments on the objective (root): hl hypothesis get root prints them") {
+		t.Errorf("list stderr = %q, want the comments on the objective pointed at", stderr.String())
+	}
+}
+
+func TestTheStartOfAHypothesisIDNamesTheOneItStarts(t *testing.T) {
+	full := "019a3f2c-1b2d-7e00-8000-000000000001"
+	got := clitest.RecordingServer(t, func(_ int, r clitest.Recorded) any {
+		if r.Path == "/hypotheses/query" {
+			return map[string]any{"columns": []string{"h.id"}, "rows": [][]string{{full}}}
+		}
+		return map[string]any{"id": full}
+	})
+	t.Setenv("HL_TOKEN", clitest.DerivedToken("agent:pe-env/ag-1"))
+	var stdout, stderr bytes.Buffer
+	if code := clitest.Run(HypothesisStatus, []string{"019a3f2c", "inconclusive"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	query := (*got)[0]
+	if query.Body["platform_experiment_id"] != "pe-env" || !reflect.DeepEqual(query.Body["params"], map[string]any{"prefix": "019a3f2c"}) {
+		t.Fatalf("query = %+v", query)
+	}
+	if (*got)[1].Path != "/hypotheses/"+full+"/status" {
+		t.Fatalf("status went to %s", (*got)[1].Path)
+	}
+}
+
+func TestTheStartOfSeveralHypothesisIDsListsThem(t *testing.T) {
+	ids := []string{"019a3f2c-1b2d-7e00-8000-000000000001", "019a3f2c-1b2d-7e00-8000-000000000002"}
+	got := clitest.RecordingServer(t, func(int, clitest.Recorded) any {
+		return map[string]any{"columns": []string{"h.id"}, "rows": [][]string{{ids[0]}, {ids[1]}}}
+	})
+	t.Setenv("HL_TOKEN", clitest.DerivedToken("agent:pe-env/ag-1"))
+	var stdout, stderr bytes.Buffer
+	if code := clitest.Run(HypothesisGet, []string{"019a3f2c"}, &stdout, &stderr); code != 1 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	if len(*got) != 1 || !strings.Contains(stderr.String(), ids[0]+", "+ids[1]) || !strings.Contains(stderr.String(), "Give more of the id") {
+		t.Fatalf("requests %+v, stderr %s", *got, stderr.String())
+	}
+}

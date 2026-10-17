@@ -588,7 +588,7 @@ func runHLWatchEnv(t *testing.T, env []string, serverURL string, args ...string)
 			return
 		}
 		hlBinary = filepath.Join(dir, "hl")
-		out, err := exec.Command("go", "build", "-o", hlBinary, "github.com/scaleresearch/hypothesisloop/cli").CombinedOutput()
+		out, err := exec.Command("go", "build", "-o", hlBinary, "github.com/scaleresearch/hypothesisloop/cli/cmd/hl").CombinedOutput()
 		if err != nil {
 			hlBinaryErr = fmt.Errorf("%v: %s", err, out)
 		}

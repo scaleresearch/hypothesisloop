@@ -64,7 +64,7 @@ def run_id() -> str:
 
 def _build_hl_binary() -> Path:
     HL_BIN.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["go", "build", "-o", str(HL_BIN), "./cli"], cwd=REPO_ROOT, check=True)
+    subprocess.run(["go", "build", "-o", str(HL_BIN), "./cli/cmd/hl"], cwd=REPO_ROOT, check=True)
     return HL_BIN
 
 

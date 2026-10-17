@@ -17,7 +17,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 COPY cli/ cli/
 COPY contract/ contract/
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/hl ./cli
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/hl ./cli/cmd/hl
 
 # A stage of its own: a pull that fails here says why, and one that fails inside COPY --from
 # reads as "no stage or image found with that name".
