@@ -78,6 +78,11 @@ func buildAt(ctx context.Context, dsn string) error {
 		return err
 	}
 	defer pool.Close()
+	return build(ctx, pool)
+}
+
+// build creates the schema on pool's empty database and seeds the release's built-ins and testRules.
+func build(ctx context.Context, pool *Pool) error {
 	if _, err := EnsureSchema(ctx, pool); err != nil {
 		return err
 	}

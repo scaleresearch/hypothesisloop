@@ -80,7 +80,7 @@ func TestResearchersAtWorkAreCountedByTheOneRuleForEachAgentAndTheWholePool(t *t
 }
 
 func TestADescriptionIsSeededForABuiltinAndWrittenOnAnOrgsType(t *testing.T) {
-	pool := eventsTestDB(t)
+	pool := builtDatabase(t)
 	ctx := context.Background()
 	store := NewStore(pool, 3)
 	builtin := domain.BuiltinAgentType{ID: "test-" + uuid.New().String()[:8], Name: "Test", Description: "First.", Role: domain.AgentRoleResearcher, Prompt: testPrompt, Settings: testTypeSettings()}

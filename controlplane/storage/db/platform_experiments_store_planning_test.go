@@ -112,6 +112,7 @@ func TestNoMachineIsWantedBeforeTheRepositoryIsRecorded(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewStore(pool, 3)
+	var drafts []string
 	draft := func() (*domain.PlatformExperiment, string) {
 		now := time.Now().UTC()
 		pe := &domain.PlatformExperiment{Actor: testActor, DefaultQuotaTier: domain.QuotaTierGuaranteed, ID: "pe-" + uuid.New().String()[:8], ProjectID: "default", Name: "a goal", Goal: "a goal",
@@ -122,15 +123,12 @@ func TestNoMachineIsWantedBeforeTheRepositoryIsRecorded(t *testing.T) {
 			InAgentSandbox: true, AgentType: domain.PlannerAgentType, Model: "model-1"}); err != nil {
 			t.Fatal(err)
 		}
+		drafts = append(drafts, pe.ID)
 		return pe, planner.ID
 	}
 	wanted := func() []string {
-		agents, err := pes.ListLauncherAgents(ctx, time.Minute)
-		if err != nil {
-			t.Fatal(err)
-		}
 		var ids []string
-		for _, agent := range agents {
+		for _, agent := range launcherAgentsOf(t, pes, time.Minute, drafts...) {
 			ids = append(ids, agent.AgentID)
 		}
 		return ids
@@ -167,11 +165,7 @@ func TestNoMachineIsWantedBeforeTheRepositoryIsRecorded(t *testing.T) {
 		t.Fatal(err)
 	}
 	coordinators := func() int {
-		listed, err := pes.ListLauncherCoordinators(ctx, time.Minute)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return len(listed)
+		return len(launcherCoordinatorsOf(t, pes, time.Minute, whole.ID))
 	}
 	if !awaiting(whole.ID) || coordinators() != 0 {
 		t.Fatalf("a whole experiment without its repository: awaiting %v, %d coordinators wanted, want it awaiting and none", awaiting(whole.ID), coordinators())
@@ -424,7 +418,7 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	if err != nil || declined.DeclinedReason != "nothing here can be measured" || declined.DeclinedAt == nil || declined.ProposedAt != nil || declined.ProposalExpiresAt.IsZero() || len(declined.Proposal) != 0 {
 		t.Fatalf("declined: got = %+v, %v", declined, err)
 	}
-	if wanted, _ := pes.ListLauncherAgents(ctx, 0); len(wanted) != 0 {
+	if wanted := launcherAgentsOf(t, pes, 0, id); len(wanted) != 0 {
 		t.Fatalf("a planner that declined is still asked for: %+v", wanted)
 	}
 	pe, agents, signups = accepted(2)
@@ -493,9 +487,9 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	if baseline.Name != "Baseline 1" {
 		t.Fatalf("the baseline agent is named %q, want Baseline 1", baseline.Name)
 	}
-	wanted, err := pes.ListLauncherAgents(ctx, time.Minute)
-	if err != nil || len(wanted) != 1 || wanted[0].AgentID != baseline.ID || wanted[0].Ended != "" {
-		t.Fatalf("the launcher is asked for %+v, %v, want the baseline agent alone", wanted, err)
+	wanted := launcherAgentsOf(t, pes, time.Minute, id)
+	if len(wanted) != 1 || wanted[0].AgentID != baseline.ID || wanted[0].Ended != "" {
+		t.Fatalf("the launcher is asked for %+v, want the baseline agent alone", wanted)
 	}
 	if quota, err := pes.GetAgentQuota(ctx, baseline.ID, id); err != nil || quota == nil || quota.GuaranteedAcceleratorHours != 3 || quota.BurstAcceleratorHours != 0 {
 		t.Fatalf("the baseline agent's quota = %+v, %v, want 3 guaranteed accelerator-hours", quota, err)
@@ -538,8 +532,8 @@ func TestAcceptingADraftOpensItWithItsRosterOrChangesNothing(t *testing.T) {
 	if quota, err := pes.GetAgentQuota(ctx, baseline.ID, id); err != nil || quota == nil || quota.GuaranteedAcceleratorHours != 3 {
 		t.Fatalf("the baseline agent's quota after the start = %+v, %v, want the 3 it joined with", quota, err)
 	}
-	if wanted, err = pes.ListLauncherAgents(ctx, time.Minute); err != nil || len(wanted) != 4 {
-		t.Fatalf("the launcher of a running experiment is asked for %d agents, %v, want the 3 researchers and the baseline agent", len(wanted), err)
+	if wanted = launcherAgentsOf(t, pes, time.Minute, id); len(wanted) != 4 {
+		t.Fatalf("the launcher of a running experiment is asked for %d agents, want the 3 researchers and the baseline agent", len(wanted))
 	}
 }
 

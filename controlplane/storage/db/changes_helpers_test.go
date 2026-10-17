@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -207,4 +208,37 @@ func exec(t *testing.T, pool *Pool, query string, args ...any) {
 	if _, err := pool.pool.Exec(ctx, query, args...); err != nil {
 		t.Fatalf("exec %q: got = %v, want = nil", query, err)
 	}
+}
+
+// launcherAgentsOf is ListLauncherAgents narrowed to the platform experiments peIDs: the launcher
+// serves every platform experiment, and the tests share one database.
+func launcherAgentsOf(t *testing.T, s *Store, windDown time.Duration, peIDs ...string) []LauncherAgent {
+	t.Helper()
+	all, err := s.ListLauncherAgents(context.Background(), windDown)
+	if err != nil {
+		t.Fatalf("list launcher agents: %v", err)
+	}
+	var out []LauncherAgent
+	for _, a := range all {
+		if slices.Contains(peIDs, a.PlatformExperimentID) {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// launcherCoordinatorsOf is ListLauncherCoordinators narrowed to the platform experiments peIDs.
+func launcherCoordinatorsOf(t *testing.T, s *Store, windDown time.Duration, peIDs ...string) []LauncherCoordinator {
+	t.Helper()
+	all, err := s.ListLauncherCoordinators(context.Background(), windDown)
+	if err != nil {
+		t.Fatalf("list launcher coordinators: %v", err)
+	}
+	var out []LauncherCoordinator
+	for _, c := range all {
+		if slices.Contains(peIDs, c.PlatformExperimentID) {
+			out = append(out, c)
+		}
+	}
+	return out
 }

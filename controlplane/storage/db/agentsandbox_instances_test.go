@@ -800,8 +800,8 @@ func TestADraftWhosePlannerIsGivenUpOnIsClosedSayingSo(t *testing.T) {
 	if got, err := pes.GetPlatformExperiment(ctx, draft); err != nil || got.Status != domain.PlatformExpDraft {
 		t.Fatalf("a draft whose planner is being restarted: got = %+v, %v, want it a draft still", got, err)
 	}
-	if wanted, err := pes.ListLauncherAgents(ctx, time.Minute); err != nil || len(wanted) != 1 || wanted[0].AgentID != planner {
-		t.Fatalf("the launcher is asked for %+v, %v, want the planner again", wanted, err)
+	if wanted := launcherAgentsOf(t, pes, time.Minute, draft); len(wanted) != 1 || wanted[0].AgentID != planner {
+		t.Fatalf("the launcher is asked for %+v, want the planner again", wanted)
 	}
 	if after := die(draft, planner, 1); !after.Stopped {
 		t.Fatalf("one machine more: got = %+v, want the planner stopped", after)

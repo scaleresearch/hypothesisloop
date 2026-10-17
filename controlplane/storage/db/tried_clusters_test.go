@@ -150,7 +150,7 @@ func TestOnlyScaleUpFailuresHoldOtherJobsOffACluster(t *testing.T) {
 	}
 	// An entry from before reasons were kept: every one of those was a scale-up failover.
 	legacy := w.queued(t, "others-legacy", w.peA)
-	if _, err := w.pool.pool.Exec(ctx, `UPDATE experiments SET tried_clusters = jsonb_build_array(jsonb_build_object('cluster_id', $2::text, 'at', to_jsonb(NOW()))) WHERE id = $1`, legacy, old); err != nil {
+	if _, err := w.pool.pool.Exec(ctx, `UPDATE experiments SET tried_clusters = jsonb_build_array(jsonb_build_object('cluster_id', $2::text, 'at', to_jsonb(NOW()))), updated_at = NOW() WHERE id = $1`, legacy, old); err != nil {
 		t.Fatal(err)
 	}
 

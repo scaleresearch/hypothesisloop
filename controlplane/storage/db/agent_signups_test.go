@@ -211,9 +211,11 @@ func TestALaunchersListFollowsEachAgentThroughItsLife(t *testing.T) {
 	const windDown = 120 * time.Second
 	sandboxed := domain.AgentSignup{Actor: testActor, InAgentSandbox: true, AgentType: "generalist"}
 
+	var created []string
 	newPE := func() string {
 		pe := "pe-" + uuid.New().String()[:8]
 		createTestPE(t, pool, pe, 10)
+		created = append(created, pe)
 		return pe
 	}
 	want := map[string]bool{}
@@ -335,10 +337,7 @@ func TestALaunchersListFollowsEachAgentThroughItsLife(t *testing.T) {
 	setPEStatus(t, pool, foreign, domain.PlatformExpRunning, time.Hour)
 	expect(foreignAgent, false)
 
-	listed, err := pes.ListLauncherAgents(ctx, windDown)
-	if err != nil {
-		t.Fatalf("list launcher agents: got = %v, want = nil", err)
-	}
+	listed := launcherAgentsOf(t, pes, windDown, append(created, foreign)...)
 	got := map[string]bool{}
 	var order []string
 	for _, a := range listed {
@@ -361,15 +360,14 @@ func TestALaunchersListFollowsEachAgentThroughItsLife(t *testing.T) {
 // last minutes from.
 func TestTheWindDownIsCountedFromTheClose(t *testing.T) {
 	pool := eventsTestDB(t)
-	ctx := context.Background()
 	pes := NewStore(pool, 3)
 	const windDown = 120 * time.Second
 	pe := "pe-" + uuid.New().String()[:8]
 	createTestPE(t, pool, pe, 10)
 	spawnTestAgents(t, pes, pe, domain.AgentSignup{Actor: testActor, InAgentSandbox: true})
 	setPEStatus(t, pool, pe, domain.PlatformExpClosed, time.Hour)
-	if listed, err := pes.ListLauncherAgents(ctx, windDown); err != nil || len(listed) != 0 {
-		t.Errorf("closed an hour ago: listed = %+v, %v, want none", listed, err)
+	if listed := launcherAgentsOf(t, pes, windDown, pe); len(listed) != 0 {
+		t.Errorf("closed an hour ago: listed = %+v, want none", listed)
 	}
 }
 

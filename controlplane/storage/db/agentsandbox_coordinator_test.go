@@ -87,11 +87,7 @@ func TestASandboxedCoordinatorIsStoredReadAndListedOnlyWhereItIsOne(t *testing.T
 	const windDown = 2 * time.Minute
 	listed := func() []LauncherCoordinator {
 		t.Helper()
-		out, err := pes.ListLauncherCoordinators(ctx, windDown)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return out
+		return launcherCoordinatorsOf(t, pes, windDown, pe)
 	}
 	if out := listed(); len(out) != 1 || out[0].PlatformExperimentID != pe || out[0].Model != "model-1" || out[0].Ending {
 		t.Fatalf("open, its baseline measured under the coordinator: listed = %+v", out)
@@ -150,9 +146,8 @@ func TestAPlatformExperimentIsCreatedWithItsAgentsOrNotAtAll(t *testing.T) {
 	if agents[0].Name != "Baseline 1" {
 		t.Errorf("the baseline agent is named %q, want Baseline 1", agents[0].Name)
 	}
-	wanted, err := pes.ListLauncherAgents(ctx, time.Minute)
-	if err != nil || len(wanted) != 1 || wanted[0].AgentID != agents[0].ID {
-		t.Fatalf("the launcher is asked for %+v, %v, want the baseline agent's machine from the create on", wanted, err)
+	if wanted := launcherAgentsOf(t, pes, time.Minute, pe.ID); len(wanted) != 1 || wanted[0].AgentID != agents[0].ID {
+		t.Fatalf("the launcher is asked for %+v, want the baseline agent's machine from the create on", wanted)
 	}
 	if quota, err := pes.GetAgentQuota(ctx, agents[0].ID, pe.ID); err != nil || quota == nil || quota.GuaranteedAcceleratorHours != 3 {
 		t.Fatalf("the baseline agent's quota = %+v, %v, want half the budget, 3", quota, err)

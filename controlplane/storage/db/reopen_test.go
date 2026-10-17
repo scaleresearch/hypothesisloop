@@ -82,8 +82,8 @@ func TestAReopenedRunReadsRunningAndWantsTheAgentsTheCloseEnded(t *testing.T) {
 	pes := NewStore(pool, 3)
 	run := closedRunWithAgents(t, pool)
 
-	if agents, err := pes.ListLauncherAgents(ctx, domain.AgentWindDown); err != nil || len(agents) != 0 {
-		t.Fatalf("closed an hour ago: launcher agents = %+v, %v, want none", agents, err)
+	if agents := launcherAgentsOf(t, pes, domain.AgentWindDown, run.ID); len(agents) != 0 {
+		t.Fatalf("closed an hour ago: launcher agents = %+v, want none", agents)
 	}
 	since := cursorNow(t, pool)
 
@@ -117,17 +117,11 @@ func TestAReopenedRunReadsRunningAndWantsTheAgentsTheCloseEnded(t *testing.T) {
 		t.Fatalf("closed_at the token check reads = %v, %v, want none", closedAt, err)
 	}
 
-	agents, err := pes.ListLauncherAgents(ctx, domain.AgentWindDown)
-	if err != nil {
-		t.Fatal(err)
-	}
+	agents := launcherAgentsOf(t, pes, domain.AgentWindDown, run.ID)
 	if len(agents) != 1 || agents[0].AgentID != run.Live || agents[0].Ended != "" || agents[0].Instance.Released || agents[0].Instance.Stopped || agents[0].Instance.Name != "" {
 		t.Fatalf("launcher agents = %+v, want the researcher the close ended, at work and with no machine", agents)
 	}
-	coordinators, err := pes.ListLauncherCoordinators(ctx, domain.CoordinatorWindDown)
-	if err != nil {
-		t.Fatal(err)
-	}
+	coordinators := launcherCoordinatorsOf(t, pes, domain.CoordinatorWindDown, run.ID)
 	if len(coordinators) != 1 || coordinators[0].Ending || coordinators[0].Instance.Released || coordinators[0].Instance.Name != "" || coordinators[0].Model != "coordinator-2" {
 		t.Fatalf("launcher coordinators = %+v, want the coordinator at work with no machine", coordinators)
 	}

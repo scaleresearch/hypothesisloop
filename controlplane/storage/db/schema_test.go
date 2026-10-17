@@ -42,6 +42,17 @@ func scratchDatabase(t *testing.T) *Pool {
 	return pool
 }
 
+// builtDatabase is a scratch database built as TestMain builds the shared one, for tests whose
+// seeding would retire the shared one's built-ins or replace its rules.
+func builtDatabase(t *testing.T) *Pool {
+	t.Helper()
+	pool := scratchDatabase(t)
+	if err := build(context.Background(), pool); err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	return pool
+}
+
 func requireNoCheckNamespace(t *testing.T, pool *Pool) {
 	t.Helper()
 	var leftover bool

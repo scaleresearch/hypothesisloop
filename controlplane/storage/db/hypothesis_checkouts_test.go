@@ -99,6 +99,7 @@ func TestAnAgentThatEndedWorksOnNothing(t *testing.T) {
 		exec(t, pool, `DELETE FROM experiments WHERE platform_experiment_id = $1`, peID)
 		exec(t, pool, `DELETE FROM hypothesis_checkouts WHERE platform_experiment_id = $1`, peID)
 		exec(t, pool, `DELETE FROM platform_experiment_cuts WHERE platform_experiment_id = $1`, peID)
+		exec(t, pool, `DELETE FROM experiment_signups WHERE platform_experiment_id = $1`, peID)
 	})
 	for _, agent := range []string{worker, cut} {
 		if _, err := store.CheckOutHypothesis(ctx, peID, hypothesisID, agent, "hl/pe/"+agent+"/idea"); err != nil {
@@ -109,6 +110,7 @@ func TestAnAgentThatEndedWorksOnNothing(t *testing.T) {
 (actor_kind, id, agent_id, platform_experiment_id, code_ref, config_hash, data_ref,
  hypothesis_id, hypothesis, accelerator_type, status, estimated_duration_hours, queued_at, data_access_key_id, data_secret_access_key)
 VALUES ('agent', 'ended-job', $1, $2, 'r@0', 'h', 'd', $3, 'claim', 'test-accelerator', 'RUNNING', 1, now(), 'AK', 'SK')`, cut, peID, hypothesisID)
+	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist')`, peID, cut)
 	exec(t, pool, `INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index) VALUES ($1, $2, 1)`, peID, cut)
 
 	want := []domain.HypothesisWorker{{AgentID: worker, Name: worker}}

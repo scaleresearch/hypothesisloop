@@ -89,7 +89,7 @@ func TestAnEditKeepsEveryVersionAsItWas(t *testing.T) {
 // that version's or newer: a revert shipped under a newer release becomes current, and an older
 // release, as an older replica of a rolling deploy has, writes nothing.
 func TestSeedingWritesWhatDiffersFromTheCurrentVersionUnlessAnOlderReleaseHasIt(t *testing.T) {
-	pool := eventsTestDB(t)
+	pool := builtDatabase(t)
 	ctx := context.Background()
 	store := NewStore(pool, 3)
 	builtin := domain.BuiltinAgentType{ID: "test-" + uuid.New().String()[:8], Name: "Test", Role: domain.AgentRoleResearcher, Prompt: testPrompt, Settings: testTypeSettings()}
@@ -142,7 +142,7 @@ func TestSeedingWritesWhatDiffersFromTheCurrentVersionUnlessAnOlderReleaseHasIt(
 // The platform's rules are versioned as a built-in is, and a new version tells every live agent
 // and coordinator, whose instructions hold it and its version from then on.
 func TestNewRulesAreAVersionEveryLiveAgentIsToldOf(t *testing.T) {
-	pool := eventsTestDB(t)
+	pool := builtDatabase(t)
 	ctx := context.Background()
 	pes := NewStore(pool, 3)
 	_, peID, custom := orgWithExperiment(t, pool)
