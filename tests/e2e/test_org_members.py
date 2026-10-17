@@ -157,15 +157,14 @@ def test_a_member_reads_the_org_and_changes_none_of_what_an_owner_holds(api: API
     ]:
         r = _call(member, method, path, body)
         assert r.status_code == 403, f"a member's {method} {path}: {r.status_code} {r.text}, want 403"
-    with pytest.raises(HLError, match="403"):
+    with pytest.raises(HLError, match="the platform refuses this token"):
         member.hl("org", "invites", "create")
     assert _members(owner.home, org) == {owner.subject: "owner", guest.subject: "member"}
 
     # What a member is in the org for: platform experiments and what goes on in them.
-    # The org owns no cluster, so the default org's are shared with every org for the create,
-    # which is why the test is exclusive.
-    with member.clusters_shared():
-        pe_id = member.create_platform_experiment(f"members-{uuid.uuid4().hex[:8]}-{run_id}", 1.0, 1)
+    # The org owns no cluster, so the create runs on the default org's, which serve every org,
+    # and the test is exclusive.
+    pe_id = member.create_platform_experiment(f"members-{uuid.uuid4().hex[:8]}-{run_id}", 1.0, 1)
     try:
         assert member.get_json(f"/platform-experiments/{pe_id}")["project_id"] == project
         assert owner.home.get_json(f"/platform-experiments/{pe_id}")["id"] == pe_id

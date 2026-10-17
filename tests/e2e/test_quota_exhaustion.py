@@ -1,5 +1,5 @@
 """Quota exhaustion -- the path that evicts RUNNING jobs and cancels queued ones when an agent's
-budget is genuinely spent. Ported 1:1 from tests/scenarios/quota-exhaustion.sh. Two halves, and
+budget is genuinely spent. Two halves, and
 the order matters:
 
   1. Reservations alone must NEVER evict anything. Queuing work worth the whole remaining quota is
@@ -14,7 +14,7 @@ the order matters:
 Overrun is produced honestly rather than by waiting out a large budget: the job is submitted with a
 small estimated_duration_hours (what admission reserves against) while its workload is told to run
 far longer (HYPOTHESISLOOP_DURATION_SECONDS), so observed cost climbs past the estimate on a
-timescale a test can watch. API-only, parallel-safe (own PE/agent, one accelerator).
+timescale a test can watch.
 """
 from __future__ import annotations
 
@@ -22,18 +22,17 @@ import math
 
 import pytest
 
-from conftest import TEST_ACCH_RATE, make_agent
+from conftest import TEST_CPU_ACCH_RATE, make_agent
 from support.api import ENDED
 from support.wait import assert_stable, eventually
 
 pytestmark = pytest.mark.parallel
 
-# The estimate is a fixed wall-clock duration, deliberately NOT scaled by the accelerator rate: it
-# decides how long this test runs, and a pricier accelerator must not stretch it past the suite's
-# per-test ceiling. The rate belongs in the budget instead, which is where cost lives.
+# The estimate is a fixed wall-clock duration: it decides how long this test runs. The rate
+# belongs in the budget, which is where cost lives.
 JOB_HOURS = 0.01
 ESTIMATE_SECONDS = round(JOB_HOURS * 3600)
-JOB_COST = round(JOB_HOURS * TEST_ACCH_RATE, 6)
+JOB_COST = round(JOB_HOURS * TEST_CPU_ACCH_RATE, 6)
 # Budget covers exactly TWO of these jobs. That is the whole design of half 1: both jobs fit at
 # admission, so reservations alone reach 100% of the quota -- which is precisely what used to trip
 # the exhaustion check and kill the running job. Anything less and the second job is refused at
@@ -60,17 +59,13 @@ def test_reservation_alone_never_evicts_then_overrun_evicts(api, experiment, run
     # What measuring the baseline cost came out of the budget before the start, so each job is
     # half of what the agent holds, rounded down: the two reservations fill the quota and fit it.
     held = api.quota_field(pe_id, agent, "guaranteed_accelerator_hours")
-    job_hours = math.floor(held * 1e6 / 2) / 1e6 / TEST_ACCH_RATE
+    job_hours = math.floor(held * 1e6 / 2) / 1e6 / TEST_CPU_ACCH_RATE
 
-    # Both jobs are pinned to the requested accelerator type: every assertion below is arithmetic on a
-    # budget sized as exactly two of them, which only holds if both are actually priced at that
-    # rate (an alternate acceptable type prices differently -- see the bash suite's pinning comment).
-    pin = {"acceptable_accelerator_types": None}
     job = api.submit_job(
         pe_id,
         agent,
         hours=job_hours,
-        job_overrides={**pin, "env": {"HYPOTHESISLOOP_DURATION_SECONDS": str(OVERRUN_SECONDS)}},
+        job_overrides={"env": {"HYPOTHESISLOOP_DURATION_SECONDS": str(OVERRUN_SECONDS)}},
     )
 
     running = eventually(
@@ -86,7 +81,7 @@ def test_reservation_alone_never_evicts_then_overrun_evicts(api, experiment, run
     # The budget covers two jobs, so this one is admitted as a reservation rather than refused.
     # Its estimate plus the running job's now account for 100% of the quota while the running job
     # has barely consumed anything -- the exact state that used to evict the RUNNING job.
-    code, queued_job = api.submit_job_expect(pe_id, agent, hours=job_hours, job_overrides=pin)
+    code, queued_job = api.submit_job_expect(pe_id, agent, hours=job_hours)
     assert code < 400, f"second job was refused at submission (HTTP {code}) -- no reservation exists, the budget is mis-sized"
 
     # Two full reconcile intervals (5s each). Observed consumption after this long is still far
@@ -155,7 +150,7 @@ def test_reservation_alone_never_evicts_then_overrun_evicts(api, experiment, run
     # stays a real ceiling.
     guaranteed = api.quota_field(pe_id, agent, "guaranteed_accelerator_hours")
     used_final = api.quota_field(pe_id, agent, "used_guaranteed_acch")
-    allowance = round(guaranteed + (30.0 / 3600.0) * TEST_ACCH_RATE, 6)
+    allowance = round(guaranteed + (30.0 / 3600.0) * TEST_CPU_ACCH_RATE, 6)
     assert used_final <= allowance, (
         f"settled consumption {used_final} ran past the {allowance} AccH bound (budget + a few reconcile ticks)"
     )

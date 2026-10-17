@@ -10,14 +10,15 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
+import shutil
 import subprocess
 import tempfile
 import uuid
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import requests
 import yaml
@@ -32,18 +33,22 @@ WATCH_SUBPROTOCOL = "hypothesisloop.watch"
 # The branch of the sandbox repository a create names when the test names none: the default branch
 # of the experiment template the platform creates a repository from.
 SANDBOX_BRANCH = "main"
+GIT_ENV = {
+    "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null",
+    "GIT_AUTHOR_NAME": "hl e2e", "GIT_AUTHOR_EMAIL": "e2e@hypothesisloop.local",
+    "GIT_COMMITTER_NAME": "hl e2e", "GIT_COMMITTER_EMAIL": "e2e@hypothesisloop.local",
+}
 # The statuses a job ends in (platformapi.EndedStatuses).
 ENDED = frozenset({"COMPLETED", "FAILED", "EVICTED", "REJECTED", "CANCELLED"})
 JOB_SPEC_PATH = REPO_ROOT / "tests" / "workloads" / "generic" / "job.yaml"
 
 
-def workload_image() -> str:
-    """The generic workload as cluster nodes pull it: from the local registry at the host address
-    `make render-settings` wrote (nodes cannot reach the host's localhost), under the tag
-    `make local-images` last pushed. Never latest: nodes pull IfNotPresent and keep a stale latest."""
-    host = (REPO_ROOT / "localdev" / ".host-address").read_text().strip()
-    tag = (REPO_ROOT / "localdev" / ".image-tag").read_text().strip()
-    return f"{host}:5000/hypothesisloop-workload:{tag}"
+# The image every platform experiment of the suite records: public, on every architecture a node
+# may have, and with the sh, git and python its jobs need. The workload itself is the commit
+# workload_commit pushes, which every job fetches.
+WORKLOAD_IMAGE = "python:3.13-bookworm"
+WORKLOAD_DIR = REPO_ROOT / "tests" / "workloads" / "generic"
+WORKLOAD_FILES = ("train.py", "train_distributed.py", "data_stage.py")
 
 
 def link(type_: str, to: str) -> dict:
@@ -61,7 +66,7 @@ def token_scope(token: str) -> tuple[str, str, str]:
     return kind, pe, agent
 
 
-# 18 seconds of the default accelerator: under the per-job cap and the baseline agent's quota of
+# 18 seconds of the default job's one core: under the per-job cap and the baseline agent's quota of
 # every platform experiment the suite creates.
 BASELINE_HOURS = 0.005
 
@@ -90,11 +95,7 @@ def baseline_reporter(metrics: list[dict]) -> dict[str, Any]:
     """The job overrides of a baseline job that reports every one of metrics. A metric with a
     bound starts on it, which holds it."""
     reported = {m["key"]: (m.get("bound", 0.5), -0.001 if m["direction"] == "minimize" else 0.001) for m in metrics}
-    return {
-        "command": BASELINE_COMMAND,
-        "env": {"BASELINE_METRICS": json.dumps(reported)},
-        "acceptable_accelerator_types": None,
-    }
+    return {"command": BASELINE_COMMAND, "env": {"BASELINE_METRICS": json.dumps(reported)}}
 
 
 @dataclass
@@ -142,18 +143,11 @@ class JobRequest:
 
     def to_yaml(self) -> str:
         job = yaml.safe_load(JOB_SPEC_PATH.read_text())["job"]
-        job["image"] = workload_image()
         for k, v in self.job_overrides.items():
             if v is None:
                 job.pop(k, None)
             else:
                 job[k] = v
-        # Mirrors tests/lib/mk_body.py: an explicit accelerator_type override also drops
-        # acceptable_accelerator_types, so a scenario asking for a specific (possibly
-        # unsatisfiable) type is never silently satisfied by a cheaper alternate -- unless the
-        # caller already named acceptable_accelerator_types itself, which wins either way.
-        if "accelerator_type" in self.job_overrides and "acceptable_accelerator_types" not in self.job_overrides:
-            job.pop("acceptable_accelerator_types", None)
         tested = {"hypothesis_id": self.hypothesis_id, "theory": "e2e pytest coverage"} if self.hypothesis_id else {}
         metadata = {
             "agent_id": self.agent_id,
@@ -256,18 +250,13 @@ class API:
         }
 
     def git(self, platform_experiment: dict, cwd, *args: str) -> subprocess.CompletedProcess:
-        """git as an agent's image and harness configure it: the repository's own address is sent
-        to the platform's git proxy, git_url, and hl is the one credential helper, answering the
-        proxy with this caller's token. Nothing else of the machine's git config is read."""
+        """git as an agent's harness configures it: the repository's own address is sent to the
+        platform's git proxy, git_url, with this caller's token as a Bearer header. Nothing else
+        of the machine's git config is read."""
         git_url = platform_experiment["git_url"]
-        env = self.hl_env() | {
-            "HL_GIT_URL": git_url, "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null",
-            "GIT_AUTHOR_NAME": "hl e2e", "GIT_AUTHOR_EMAIL": "e2e@hypothesisloop.local",
-            "GIT_COMMITTER_NAME": "hl e2e", "GIT_COMMITTER_EMAIL": "e2e@hypothesisloop.local",
-        }
-        cmd = ["git", "-c", "credential.helper=", "-c", f"credential.helper=!{self.hl_bin} git-credential",
-               "-c", "credential.useHttpPath=true", "-c", f"url.{git_url}.insteadOf={platform_experiment['repository_url']}", *args]
-        return subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=120)
+        cmd = ["git", "-c", f"http.{git_url}.extraHeader=Authorization: Bearer {self.token}",
+               "-c", f"url.{git_url}.insteadOf={platform_experiment['repository_url']}", *args]
+        return subprocess.run(cmd, cwd=cwd, env=self.hl_env() | GIT_ENV, capture_output=True, text=True, timeout=120)
 
     def as_caller(self, token: str, org_id: str = "", project_id: str = "") -> "API":
         """The same API seen by another caller. What it creates is listed with what this one
@@ -276,24 +265,6 @@ class API:
         caller.created_platform_experiments = self.created_platform_experiments
         caller.staff = self.staff
         return caller
-
-    @contextmanager
-    def clusters_shared(self) -> Iterator[None]:
-        """Has the platform share the default org's connected clusters with every org while the
-        block runs. An org the suite makes owns no cluster that runs anything, and a platform
-        experiment is created, and its baseline measured, only where a cluster takes the org's
-        jobs. Every org reads those clusters meanwhile, so a test that uses it is exclusive."""
-        staff = self.staff
-        names = [c["name"] for c in staff.get_json(f"/orgs/{staff.org_id}/clusters")["clusters"]
-                 if c["owned"] and c["connected"] and not c["shared"]]
-        assert names, "the default org has no connected cluster to share"
-        for name in names:
-            admin.share_cluster(name, True)
-        try:
-            yield
-        finally:
-            for name in names:
-                admin.share_cluster(name, False)
 
     def hl_expect(self, *args: str, input: str | None = None, timeout: float = 60) -> subprocess.CompletedProcess:
         """Raw `hl` invocation returning the CompletedProcess as-is, unlike hl() which raises on a
@@ -340,11 +311,56 @@ class API:
 
     # ---- platform experiments -------------------------------------------------------------------
 
-    def code_ref(self, pe_id: str) -> str:
-        """What a job of the platform experiment names as its code: the experiment's repository
-        at a commit. Admission checks the address. The suite's workload is in its image and
-        clones nothing, so the commit is one no repository holds."""
-        return self.get_json(f"/platform-experiments/{pe_id}")["repository_url"] + "@" + "a" * 40
+    # The workload's commit in each repository, by repository_url. Shared by every caller.
+    workload_commits: dict[str, str] = {}
+
+    def code_ref(self, pe_id: str, agent_id: str = "") -> str:
+        """What a job of the platform experiment names as its code: the workload's commit in the
+        experiment's repository. WORKLOAD_IMAGE is recorded first unless it records one, as a job
+        needs one."""
+        pe = self.get_json(f"/platform-experiments/{pe_id}")
+        if not pe.get("image"):
+            self.record_image(pe_id)
+        return pe["repository_url"] + "@" + self.workload_commit(pe, agent_id)
+
+    def record_image(self, pe_id: str, image: str = WORKLOAD_IMAGE) -> None:
+        r = self.put(f"/platform-experiments/{pe_id}/image", {"image": image})
+        if r.status_code == 422 and r.json()["reason"] == "image_architecture":
+            r = self.put(f"/platform-experiments/{pe_id}/image", {"image": image, "architecture": self.architecture()})
+        assert r.status_code == 200, f"recording {image} for {pe_id}: {r.status_code} {r.text}"
+
+    def architecture(self) -> str:
+        """The architecture of the cluster with the most free cores the caller's org reaches, which
+        an image that runs on several is recorded for."""
+        clusters = self.capacity(self.org_id or "default")["clusters"]
+        free = lambda c: sum(a.get("available", 0) for a in c["accelerators"] if a["kind"] == "cpu")
+        best = max((c for c in clusters if c.get("architectures")), key=free)
+        return best["architectures"][0]
+
+    def workload_commit(self, pe: dict, agent_id: str) -> str:
+        """The commit holding the workload in pe's repository, which agent_id pushes on a branch
+        of its own the first time the repository is named. Every platform experiment of the
+        repository fetches it from there."""
+        known = API.workload_commits.get(pe["repository_url"])
+        if known:
+            return known
+        assert agent_id, f"no workload commit in {pe['repository_url']} yet, and no agent to push one"
+        signup = self.get_json(f"/platform-experiments/{pe['id']}/signups/{agent_id}")
+        if signup["role"] == "baseline":
+            branch = f"hl/{pe['id']}/baseline-workload"
+        else:
+            branch = f"hl/{pe['id']}/{re.sub(r'[^a-z0-9]+', '-', signup['name'].lower()).strip('-')}/workload"
+        token = admin.token(f"agent:{pe['id']}/{agent_id}")
+        with tempfile.TemporaryDirectory() as work:
+            for name in WORKLOAD_FILES:
+                shutil.copy(WORKLOAD_DIR / name, Path(work) / name)
+            for cmd in (["init", "-q"], ["add", "."], ["commit", "-q", "-m", "the e2e workload"],
+                        ["-c", f"http.{pe['git_url']}.extraHeader=Authorization: Bearer {token}", "push", "-q", "--force", pe["git_url"], f"HEAD:refs/heads/{branch}"]):
+                done = subprocess.run(["git", *cmd], cwd=work, env={"PATH": "/usr/bin:/bin:/usr/local/bin", **GIT_ENV}, capture_output=True, text=True, timeout=120)
+                assert done.returncode == 0, f"git {cmd[0] if cmd[0] != '-c' else 'push'} of the workload: {done.stderr}"
+            commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=work, capture_output=True, text=True, check=True).stdout.strip()
+        API.workload_commits[pe["repository_url"]] = commit
+        return commit
 
     def create_platform_experiment(
         self,
@@ -378,28 +394,6 @@ class API:
         pe_id = self.post_json("/platform-experiments", body)["id"]
         self.created_platform_experiments.append(pe_id)
         return pe_id
-
-    # ---- clusters (autoscaler.md) -----------------------------------------------------------
-
-    def list_internal_clusters(self) -> list[dict]:
-        """`GET /internal/clusters` -- id/name/autoscaler_enabled for every cluster the control
-        plane has heard from, per autoscaler.md's cluster-identity design."""
-        return self.get_json("/internal/clusters")["clusters"]
-
-    def cluster_id_for_name(self, cluster_name: str) -> str | None:
-        for c in self.list_internal_clusters():
-            if c["cluster_name"] == cluster_name:
-                return c["cluster_id"] or None
-        return None
-
-    def set_cluster_settings(self, cluster_name: str, *, org_id: str = "default", **settings: int | None) -> None:
-        """Changes the settings named on a cluster of org_id; None puts one back on the scheduler's
-        default, and naming none puts them all back."""
-        names = settings or dict.fromkeys(
-            ("scale_up_timeout_seconds", "max_speculative_accelerators", "stuck_pending_timeout_seconds",
-             "status_silence_ceiling_seconds"))
-        body = {name: settings.get(name) or 0 for name in names}
-        self.patch(f"/orgs/{org_id}/clusters/{cluster_name}", body).raise_for_status()
 
     def signup(self, pe_id: str, agent_id: str, role: str | None = None, quota_tier: str | None = "guaranteed") -> requests.Response:
         # Default "guaranteed", not the server's own kind-based default: an e2e-registered agent
@@ -439,22 +433,6 @@ class API:
     def remove_agent(self, pe_id: str, agent_id: str) -> requests.Response:
         return self.session.delete(self._url(f"/platform-experiments/{pe_id}/agents/{agent_id}"), timeout=30)
 
-    # What a launcher says of its own launch inputs. Tests that ask as one launcher all say the
-    # same, since a change of it renames every instance of that launcher.
-    LAUNCH_DIGEST = "e2e0e2e0e2e0e2e0e2e0e2e0e2e0e2e0"
-
-    def launcher_desired(self, launcher: str, observed: list[dict] | None = None) -> dict:
-        """One reconcile call as the agent-launcher of that name makes it: `observed` is what its
-        provider lists ({name, state, log}), and the answer is what should exist right now."""
-        return self.post_json(f"/internal/launchers/{launcher}/reconcile", self.launcher_question(observed))
-
-    def launcher_question(self, observed: list[dict] | None = None) -> dict:
-        """What a launcher sends: what it observed, its launch digest and how it paces its passes.
-        An instance observed with no machine id gets one of its own name."""
-        instances = [{"machine": f"m-{o['name']}", **o} for o in observed or []]
-        return {"launch_digest": self.LAUNCH_DIGEST, "instances": instances,
-                "reconcile_interval_seconds": 2, "create_pause_milliseconds": 0}
-
     def signup_role(self, pe_id: str, agent_id: str) -> tuple[int, str | None]:
         r = self.get(f"/platform-experiments/{pe_id}/signups/{agent_id}")
         if r.status_code == 404:
@@ -492,8 +470,8 @@ class API:
         and the description that names the job is sent with the declaration.
 
         The job reports every metric the experiment declares, on the default accelerator alone.
-        job_overrides are laid over it: where it runs, or with command None the image's own
-        workload, which then has to report them. job_wait_seconds is how long the job may take
+        job_overrides are laid over it: where it runs, or another command, which then has to
+        report them. job_wait_seconds is how long the job may take
         to complete: BASELINE_JOB_WAIT_SECONDS where the test has the default timeout."""
         pe = self.get_json(f"/platform-experiments/{pe_id}")
         agent = self.add_agents(pe_id, role="baseline", quota_tier="guaranteed")[0]["agent_id"]
@@ -606,8 +584,16 @@ class API:
         """A comment of agent_id's, or with none the caller's own. Who wrote it is the caller either way."""
         return self.post(f"/hypotheses/{hyp_id}/comments", {"text": text} | ({"agent_id": agent_id} if agent_id else {}))
 
-    # What a test says for a confirmed or refuted verdict it gives without the jobs that carry one.
-    NO_EVIDENCE = "the test settles this hypothesis without running jobs for it"
+    # What a test says for a confirmed or refuted verdict it gives without a control.
+    NO_EVIDENCE = "the test settles this hypothesis without a control"
+
+    def end_a_job(self, pe_id: str, agent_id: str, hyp_id: str) -> str:
+        """Runs a job of the hypothesis that completes at once, which every verdict needs."""
+        job = self.submit_job(pe_id, agent_id, hours=0.003, hyp_id=hyp_id, job_overrides={"command": ["true"], "max_retries": 0})
+        eventually(f"{job} of hypothesis {hyp_id} to complete", lambda: self.experiment(job),
+                   accept=lambda e: e["status"] == "COMPLETED", reject=lambda e: e["status"] in ENDED,
+                   deadline=Deadline.in_seconds(120), interval=1)
+        return job
 
     def set_hypothesis_status(self, hyp_id: str, agent_id: str, status: str, **evidence: str) -> requests.Response:
         """Sets a verdict. confirmed and refuted need `against` (the control job) or `despite`
@@ -645,7 +631,7 @@ class API:
             agent_id=agent_id,
             platform_experiment_id=pe_id,
             hypothesis_id=hyp_id,
-            code_ref=self.code_ref(pe_id),
+            code_ref=self.code_ref(pe_id, agent_id),
             hours=hours,
             tier=tier,
             job_overrides=job_overrides or {},
@@ -674,7 +660,7 @@ class API:
             agent_id=agent_id,
             platform_experiment_id=pe_id,
             hypothesis_id=hyp_id,
-            code_ref=self.code_ref(pe_id),
+            code_ref=self.code_ref(pe_id, agent_id),
             hours=hours,
             tier=tier,
             job_overrides=job_overrides or {},
@@ -688,7 +674,7 @@ class API:
         """A job body for a new hypothesis the agent registers, or for hypothesis_id when given:
         no hypothesis is registered on a closed platform experiment."""
         hyp_id = hypothesis_id or self.register_hypothesis(pe_id, agent_id, "")["id"]
-        req = JobRequest(id=job_id, agent_id=agent_id, platform_experiment_id=pe_id, hypothesis_id=hyp_id, code_ref=self.code_ref(pe_id), hours=hours, tier=tier)
+        req = JobRequest(id=job_id, agent_id=agent_id, platform_experiment_id=pe_id, hypothesis_id=hyp_id, code_ref=self.code_ref(pe_id, agent_id), hours=hours, tier=tier)
         return yaml.safe_load(req.to_yaml())
 
     def post_experiment_body(self, body: dict) -> requests.Response:
@@ -771,57 +757,8 @@ class API:
         is bound to. Staff naming none read every cluster."""
         return self.get_json("/resource-catalog/capacity" + (f"?org_id={org_id}" if org_id else ""))
 
-    def accelerators_free(self, accelerator_type: str) -> int:
-        """How many of `accelerator_type` the platform currently reports unused -- the same
-        figure admission reads. Ported from tests/lib/api.sh::accelerators_free."""
-        want = accelerator_type.lower()
-        total = 0
-        for cluster in self.capacity().get("clusters") or []:
-            for a in cluster.get("accelerators") or []:
-                if a["accelerator_type"].lower() == want:
-                    total += a["available"]
-        return total
-
-    def accelerators_free_settled(self, accelerator_type: str, *, stable_reads: int = 3, budget: float = 60.0) -> int:
-        """A free count read only once it has come back the same value `stable_reads` times in a
-        row -- COMPLETED is the control plane's verdict on a job, not proof its accelerator is
-        back in the schedulable pool; a job can finish and still be draining. Ported from
-        tests/lib/api.sh::accelerators_free_settled."""
-        import time as _time
-
-        seen: int | None = None
-        streak = 0
-        v = self.accelerators_free(accelerator_type)
-        deadline_at = _time.monotonic() + budget
-        while _time.monotonic() < deadline_at:
-            v = self.accelerators_free(accelerator_type)
-            if v == seen:
-                streak += 1
-                if streak >= stable_reads:
-                    return v
-            else:
-                seen = v
-                streak = 1
-            _time.sleep(2)
-        return v
-
-    def experiment_data_keys(self, job_id: str) -> list[str]:
-        """The keys a job left behind under its own address, live from the store -- ported from
-        tests/lib/api.sh's inline listing used by preemption-requeue.sh's checkpoint check."""
-        resp = self.experiment_data(job_id)
-        resp.raise_for_status()
-        return [o["key"] for o in resp.json()]
-
     # ---- internal cluster-agent-facing endpoints, read for assertions only ---------------------
 
     def internal_clusters(self) -> list[dict]:
-        """GET /internal/clusters/: every cluster that has ever polled and whether it is
-        connected right now. Used by fault tests to observe cluster-agent connectivity/liveness
-        from the control plane's own point of view."""
+        """GET /internal/clusters/: every cluster that reports and whether it is connected now."""
         return self.get_json("/internal/clusters/")["clusters"]
-
-    def cluster_absent_from_live_metrics(self, cluster_name: str) -> bool:
-        """Ported from tests/scenarios/connectivity-loss.sh::cluster_absent_from_live_metrics:
-        true once `cluster_name` no longer appears in /internal/clusters/ at all -- not merely
-        marked disconnected, but aged out of the live-heartbeat window entirely."""
-        return all(c["cluster_name"] != cluster_name for c in self.internal_clusters())

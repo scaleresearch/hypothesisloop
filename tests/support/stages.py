@@ -17,9 +17,9 @@ STAGES = [
 ]
 ROSTER_SIZE = 6
 REPORT_INTERVAL_SECONDS = 5
-# Each of the six agents holds 0.12 x 20% / 6 = 0.004 AccH in the first stage: 57s of the default
-# accelerator at its rate of 0.25.
-BUDGET = 0.12
+# Each of the six agents holds 0.48 x 20% / 6 = 0.016 AccH in the first stage: 57s of the default
+# job's one core at its rate of 1.0.
+BUDGET = 0.48
 # The workload reports four times at the least, so 15s of run at this report interval. With its
 # start-up that is well inside the 25s reserved and far from the agent's 57s.
 RANKED_JOB_HOURS = 0.007
@@ -34,8 +34,7 @@ def _job(seconds: int, baseline: str | None) -> dict:
     env = {"HYPOTHESISLOOP_DURATION_SECONDS": str(seconds)}
     if baseline is not None:
         env["HYPOTHESISLOOP_BASELINE"] = baseline
-    # One accelerator type only: every figure above is priced at the default accelerator's rate.
-    return {"env": env, "acceptable_accelerator_types": None}
+    return {"env": env}
 
 
 def cross_first_boundary_ranked(

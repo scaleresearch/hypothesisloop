@@ -16,6 +16,7 @@ test for real the moment nvidia-smi (and a working GPU passthrough) exist -- no 
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 
@@ -28,6 +29,12 @@ from support.wait import eventually
 
 pytestmark = [pytest.mark.hardware, pytest.mark.exclusive("nvidia")]
 
+
+def _gfd_product(name: str) -> str:
+    """The type GPU Feature Discovery labels a GPU of this name with: characters outside
+    [A-Za-z0-9-_. ] dropped and each run of whitespace joined with -."""
+    kept = re.sub(r"[^A-Za-z0-9\-_. ]", "", name.strip())
+    return "nvidia.com/gpu.product=" + re.sub(r"\s+", "-", kept)
 
 
 def _skip_reason() -> str | None:
@@ -51,7 +58,7 @@ def _skip_reason() -> str | None:
     ).stdout.splitlines()
     if not gpu_name_raw:
         return "nvidia-smi reported no GPU name"
-    acc_type = "nvidia.com/gpu.product=" + gpu_name_raw[0].strip().upper().replace(" ", "-")
+    acc_type = _gfd_product(gpu_name_raw[0])
     settings = (REPO_ROOT / "controlplane" / "settings" / "hypothesisloop.yaml").read_text()
     if acc_type not in settings:
         return f"{acc_type} has no acch_rate in controlplane/settings/hypothesisloop.yaml -- add one to admit jobs of this type"
@@ -72,7 +79,7 @@ def _detected_accelerator_type() -> str:
         ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
         capture_output=True, text=True, timeout=15,
     ).stdout.splitlines()[0].strip()
-    return "nvidia.com/gpu.product=" + raw.upper().replace(" ", "-")
+    return _gfd_product(raw)
 
 
 def _engine() -> str:

@@ -13,7 +13,7 @@ from conftest import make_agent
 from support.api import ENDED
 from support.wait import eventually
 
-pytestmark = [pytest.mark.parallel, pytest.mark.accelerator]
+pytestmark = pytest.mark.parallel
 
 # One stage, no cuts -- this scenario is about the length cap alone, so nothing else can stop a
 # job. 30s cap; the budget is far larger than anything below can burn, so quota exhaustion never

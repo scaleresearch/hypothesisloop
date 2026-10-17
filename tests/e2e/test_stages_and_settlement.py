@@ -22,10 +22,10 @@ from support.wait import eventually
 pytestmark = pytest.mark.parallel
 
 # Five agents is minSurvivorsForCut, so the default ladder's 75% first cut would apply to a field
-# that could be ranked. Each holds 0.02 x 40% / 5 = 0.0016 AccH in the first stage, 23s of the
-# default accelerator at its rate of 0.25. A job reserves 10s of it and runs far past the 23s.
+# that could be ranked. Each holds 0.08 x 40% / 5 = 0.0064 AccH in the first stage, 23s of the
+# default job's one core at its rate of 1.0. A job reserves 10s of it and runs far past the 23s.
 AGENTS = 5
-BUDGET = 0.02
+BUDGET = 0.08
 JOB_HOURS = 0.0028
 RUN_SECONDS = 120
 
@@ -36,7 +36,7 @@ def test_stage_boundary_advances_and_terminal_jobs_settle(api, experiment, run_i
         "stages-settlement", [(a, None, "guaranteed") for a in agents], budget=BUDGET
     )
 
-    job_overrides = {"env": {"HYPOTHESISLOOP_DURATION_SECONDS": str(RUN_SECONDS)}, "acceptable_accelerator_types": None}
+    job_overrides = {"env": {"HYPOTHESISLOOP_DURATION_SECONDS": str(RUN_SECONDS)}}
     jobs = [api.submit_job(pe_id, a, hours=JOB_HOURS, job_overrides=job_overrides) for a in agents]
 
     ended = eventually(

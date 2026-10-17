@@ -74,7 +74,8 @@ def test_registration_requires_placement(api, graph_pe, run_id):
     for case, links in refused.items():
         r = api.post_hypothesis(pe_id, f"unplaced {case} {run_id}", agent_id=agent_a, links=links)
         assert r.status_code == 422, f"{case}: got {r.status_code} {r.text}"
-        assert r.json()["problems"][0]["field"] == "links", f"{case}: the refusal does not name links: {r.text}"
+        # A rule of the platform names the field, a schema check its location in the body.
+        assert r.json()["problems"][0]["field"].removeprefix("body.").startswith("links"), f"{case}: the refusal does not name links: {r.text}"
 
     proc = api.hl_expect("hypothesis", "submit", "--agent", agent_a, "--platform-experiment", pe_id, "--text", f"cli unplaced {run_id}")
     assert proc.returncode == 2, f"hl hypothesis submit without --builds-on exited {proc.returncode}"
@@ -227,6 +228,7 @@ hypotheses:
     assert _out(api.hypothesis(sibling["id"])) == {("builds_on", pe_id), ("related", base["id"]), ("contradicts", child["id"])}
 
     api.hl("hypothesis", "comment", base["id"], "--agent", agent_a, "--text", f"dead end {run_id}")
+    api.end_a_job(pe_id, agent_a, base["id"])
     api.hl("hypothesis", "status", "--agent", agent_a, "--status", "refuted", "--despite", api.NO_EVIDENCE, base["id"])
     got = json.loads(api.hl("hypothesis", "get", base["id"]))
     # The verdict's basis is kept beside the agent's own note.
@@ -274,6 +276,7 @@ def test_query_text_search_and_status(api, graph_pe, run_id):
     kept = api.register_hypothesis(pe_id, agent_a, f"gradient clipping {word} stabilizes training")
     refuted = api.register_hypothesis(pe_id, agent_a, f"label smoothing {word} hurts calibration")
     api.register_hypothesis(pe_id, agent_a, f"an unrelated idea about data order {run_id}")
+    api.end_a_job(pe_id, agent_a, refuted["id"])
     assert api.set_hypothesis_status(refuted["id"], agent_a, "refuted").status_code == 200
 
     def search(q: str, status: str = "") -> list[dict]:
@@ -401,7 +404,6 @@ def test_query_is_read_only_and_bounded(api, graph_pe, run_id):
     assert (small["rows"], small["truncated"]) == ([[1], [2], [3]], False)
 
 
-@pytest.mark.accelerator
 def test_job_against_a_graph_hypothesis_is_accepted(api, graph_pe, run_id):
     pe_id, agent_a, _ = graph_pe
     parent = api.register_hypothesis(pe_id, agent_a, f"residual connections help depth {run_id}")
@@ -432,11 +434,11 @@ def _stop(proc: subprocess.Popen) -> None:
         proc.wait(timeout=5)
 
 
-def test_watch_delivers_and_replays_hypothesis_link(api, graph_pe, run_id, tmp_path: Path):
+def test_watch_delivers_a_hypothesis_link_once_and_reads_on_after_it(api, graph_pe, run_id, tmp_path: Path):
     pe_id, agent_a, agent_b = graph_pe
     deadline = Deadline.in_seconds(60)
     proc, out_path, err_path = _start_watch(
-        api, tmp_path, "live", "--platform-experiment", pe_id, "--kinds", "hypothesis.new,hypothesis.link", "--follow", "--timeout", "60"
+        api, tmp_path, "live", "--all", "--platform-experiment", pe_id, "--kinds", "hypothesis.new,hypothesis.link", "--follow", "--timeout", "60"
     )
     try:
         eventually("hl watch to connect", err_path.read_text, accept=lambda t: "hl watch: connected" in t, deadline=deadline)
@@ -459,28 +461,22 @@ def test_watch_delivers_and_replays_hypothesis_link(api, graph_pe, run_id, tmp_p
     assert [(e["subject"], e["value"], e["detail"]) for e in live] == [(b["id"], "contradicts", a["id"])], (
         f"expected exactly the explicit link; links created with a hypothesis must not emit hypothesis.link: {live}"
     )
-    cursor, position = live[0]["cursor"], live[0]["position"]
+    link_id = live[0]["id"]
 
-    replay_started = time.monotonic()
-    replay = api.hl_expect(
-        "watch", "--platform-experiment", pe_id, "--kinds", "hypothesis.link", "--since", "1", "--timeout", "5", timeout=20
-    )
+    # Read again from the first change on, the link comes back once under its own id; read on
+    # after that id, nothing does.
+    replayed_started = time.monotonic()
+    replay = api.hl_expect("watch", "--all", "--platform-experiment", pe_id, "--kinds", "hypothesis.link", "--after", "0", "--no-wait", timeout=20)
     assert replay.returncode == 0, f"replay watch exited {replay.returncode}: {replay.stderr}"
     replayed = [json.loads(line) for line in replay.stdout.splitlines() if line.startswith("{")]
-    assert [(e["kind"], e["subject"], e["value"], e["detail"], e["position"]) for e in replayed] == [
-        ("hypothesis.link", b["id"], "contradicts", a["id"], position)
-    ], f"replay from the start did not return exactly the explicit link: {replayed}"
-    assert time.monotonic() - replay_started < 15
+    assert [(e["kind"], e["subject"], e["value"], e["detail"], e["id"]) for e in replayed] == [
+        ("hypothesis.link", b["id"], "contradicts", a["id"], link_id)
+    ], f"reading from the start did not return exactly the explicit link: {replayed}"
+    assert time.monotonic() - replayed_started < 15
 
-    after = api.hl_expect(
-        "watch", "--platform-experiment", pe_id, "--kinds", "hypothesis.link", "--since", str(cursor), "--timeout", "3", timeout=15
-    )
+    after = api.hl_expect("watch", "--all", "--platform-experiment", pe_id, "--kinds", "hypothesis.link", "--after", str(link_id), "--no-wait", timeout=20)
     assert after.returncode == 0, after.stderr
-    # A resume repeats the transaction at its cursor and nothing older, so the link comes back once.
-    resent = [json.loads(line) for line in after.stdout.splitlines() if line.startswith("{")]
-    assert [e["position"] for e in resent] == [position], (
-        f"replay from the link's own cursor returned something other than the link once: {after.stdout}"
-    )
+    assert not [line for line in after.stdout.splitlines() if line.startswith("{")], f"reading on after the link returned: {after.stdout}"
 
 
 def _watch_as(api, agent: str, pe_id: str, state_dir: Path) -> subprocess.CompletedProcess:

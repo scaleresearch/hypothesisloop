@@ -1,8 +1,6 @@
-"""Admission correctness on the CPU dimension, ported 1:1 from tests/scenarios/mixed-admission.sh:
-mixed CPU+accelerator jobs are jointly fit-checked, fractional (millicore) CPU survives verbatim to
-the pod spec, a CPU-only job (no accelerator dimension at all) is admitted and billed on CPU alone,
-and a submission missing a required resource field is rejected rather than silently defaulted.
-API-only, parallel-safe.
+"""Admission on the CPU dimension: a job on an accelerator states its cpu beside it and both are
+fit together, fractional cpu reaches the runtime as stated, a job on cores alone is billed core
+hours, and a submission missing a required resource field is refused rather than defaulted.
 """
 from __future__ import annotations
 
@@ -10,7 +8,6 @@ import pytest
 
 from conftest import TEST_CPU_ACCH_RATE, TEST_CPU_TYPE, cpu_job, make_agent
 from support.api import ENDED
-from support.cluster import pod_resource
 from support.wait import eventually
 
 pytestmark = pytest.mark.parallel
@@ -38,11 +35,11 @@ def _finish_if_completed(api, job_id, deadline):
     return final
 
 
-def test_impossible_cpu_request_is_not_admitted(api, mixed_pe, deadline):
+def test_impossible_cpu_request_is_not_admitted(api, mixed_pe, deadline, accelerator):
     pe_id, agent = mixed_pe
     code, job_id = api.submit_job_expect(
         pe_id, agent, hours=PROBE_JOB_HOURS,
-        job_overrides={"cpu": "999999", "accelerator_count": 1, "accelerator_type": "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"},
+        job_overrides={"cpu": "999999", "accelerator_count": 1, "accelerator_type": accelerator.type},
     )
     if code >= 400:
         return  # rejected outright at submission -- also a correct fail-closed outcome
@@ -57,11 +54,11 @@ def test_impossible_cpu_request_is_not_admitted(api, mixed_pe, deadline):
     )
 
 
-def test_small_fittable_mixed_job_admits_and_runs(api, mixed_pe, deadline):
+def test_small_fittable_mixed_job_admits_and_runs(api, mixed_pe, deadline, accelerator):
     pe_id, agent = mixed_pe
     code, job_id = api.submit_job_expect(
         pe_id, agent, hours=PROBE_JOB_HOURS,
-        job_overrides={"cpu": "250m", "accelerator_count": 1, "accelerator_type": "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"},
+        job_overrides={"cpu": "250m", "accelerator_count": 1, "accelerator_type": accelerator.type},
     )
     assert code < 400, f"submission of a small, fittable mixed CPU+accelerator job was rejected outright (HTTP {code})"
     admitted = eventually(
@@ -75,11 +72,11 @@ def test_small_fittable_mixed_job_admits_and_runs(api, mixed_pe, deadline):
     _finish_if_completed(api, job_id, deadline)
 
 
-def test_fractional_cpu_retains_millicore_precision_in_pod_spec(api, mixed_pe, deadline):
+def test_fractional_cpu_reaches_the_runtime_as_stated(api, mixed_pe, deadline, accelerator):
     pe_id, agent = mixed_pe
     code, job_id = api.submit_job_expect(
         pe_id, agent, hours=PROBE_JOB_HOURS,
-        job_overrides={"cpu": "333m", "accelerator_count": 1, "accelerator_type": "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"},
+        job_overrides={"cpu": "333m", "accelerator_count": 1, "accelerator_type": accelerator.type},
     )
     assert code < 400, f"submission of a valid fractional-CPU (333m) job was rejected outright (HTTP {code})"
     admitted = eventually(
@@ -89,11 +86,7 @@ def test_fractional_cpu_retains_millicore_precision_in_pod_spec(api, mixed_pe, d
         reject=lambda e: e["status"] in ("FAILED", "EVICTED"),
         deadline=deadline,
     )
-    assert admitted["status"] in ("RUNNING", "COMPLETED")
-    req, lim = pod_resource(job_id, "cpu")
-    assert req == "333m" and lim == "333m", (
-        f"fractional CPU precision lost: got request={req} limit={lim}, expected 333m/333m"
-    )
+    assert admitted["resolved_job"]["cpu"] == "333m", f"the spec the runtime was given holds other cpu: {admitted['resolved_job']}"
     _finish_if_completed(api, job_id, deadline)
 
 
@@ -116,16 +109,13 @@ def test_a_job_that_states_only_its_cores_runs_on_them_and_is_billed_core_hours(
     want_cost = 2 * TEST_CPU_ACCH_RATE * PROBE_JOB_HOURS
     est_cost = admitted.get("estimated_cost_acch") or 0
     assert abs(est_cost - want_cost) < 1e-9, f"estimated_cost_acch={est_cost}, want {want_cost}: two cores are two core-hours an hour"
-    req, lim = pod_resource(job_id, "cpu")
-    assert req == "2" and lim == "2", f"pod cpu: request={req} limit={lim}, want 2/2"
-    assert pod_resource(job_id, "nvidia.com/gpu") == (None, None), "a job on cores was given an accelerator"
     _finish_if_completed(api, job_id, deadline)
 
 
 def test_a_job_on_cores_states_whole_cores_and_one_count_and_no_accelerator(api, mixed_pe):
     pe_id, agent = mixed_pe
     for overrides in ({**cpu_job(2), "accelerator_count": 4}, {**cpu_job(2), "cpu": "500m"}, {**cpu_job(2), "cpu": "1.5"},
-                      {**cpu_job(2), "acceptable_accelerator_types": ["nvidia.com/gpu.product=NVIDIA-L40"]}):
+                      {**cpu_job(2), "acceptable_accelerator_types": ["nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"]}):
         code, _ = api.submit_job_expect(pe_id, agent, hours=PROBE_JOB_HOURS, job_overrides=overrides)
         assert code == 422, f"{overrides}: answered {code}, want 422"
 
@@ -134,9 +124,9 @@ def test_a_job_on_cores_states_whole_cores_and_one_count_and_no_accelerator(api,
 def test_unset_required_resource_is_rejected_not_defaulted(api, mixed_pe):
     pe_id, agent = mixed_pe
     body = api.submission_body_for_id(api._job_id(), pe_id, agent, hours=PROBE_JOB_HOURS)
-    for field in ("cpu", "memory", "storage", "image"):
+    for field in ("cpu", "memory", "storage"):
         job = {key: value for key, value in body["job"].items() if key != field}
         r = api.post_experiment_body({**body, "job": job})
-        assert r.status_code == 422 and r.json()["reason"] == f"{field}_required", f"a job that states no {field}: {r.status_code} {r.text}"
-        assert f"job.{field} is required" in r.json()["message"], r.text
+        assert r.status_code == 422 and r.json()["reason"] == "required", f"a job that states no {field}: {r.status_code} {r.text}"
+        assert f"job.{field} is required" in r.json()["message"] and [p["field"] for p in r.json()["problems"]] == [f"job.{field}"], r.text
     assert api.get(f"/experiments/{body['id']}").status_code == 404, "a refused job was stored"

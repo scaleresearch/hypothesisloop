@@ -1,5 +1,4 @@
-"""A chain of jobs: one stage writes durable data, the next one reads it back. Ported 1:1 from
-tests/scenarios/multi-stage-chain.sh.
+"""A chain of jobs: one stage writes durable data, the next one reads it back.
 
 No other scenario submits a chain -- test_job_lifecycle.py follows a single job end to end, and
 nothing else covers parent_id plus data handed from one stage to the next. What is asserted here:
@@ -24,12 +23,6 @@ construction -- stage B cannot be submitted until stage A has completed and left
 behind, so splitting it would mean paying for two admit-run-settle cycles twice, not once each.
 "A completed job that wrote nothing lists as an empty array, not an error" is independently
 diagnosable with a single job and no chain at all, so it gets its own (much cheaper) test.
-
-tests/run.sh's SLOW_TESTS carries the comment for why: "A chain is serial by definition... That is
-longer than the shared ceiling by construction, not by accident." multi-stage-chain is NOT in
-CLUSTER_EXCLUSIVE (confirmed against tests/run.sh), so this stays `parallel` -- it owns only its
-own UUID-namespaced PE/agents and at most 1-2 A100s at a time, tolerant of queueing -- with `slow`
-added to the chain test for the same reason run.sh keeps it out of the default fast loop.
 """
 from __future__ import annotations
 
@@ -39,13 +32,6 @@ from conftest import make_agent
 from support.api import ENDED
 from support.wait import eventually
 
-
-# A100. The suite runs its slow group concurrently and this scenario is in it (see run.sh): of the
-# slow group, distributed-jobs holds H100 and everything else runs on the TEST_ACCELERATOR_TYPE
-# default (L40), so A100 is the one accelerator type nothing else in the group competes for. The two
-# scenarios that do use A100 -- preemption-requeue and burst-fair-round-robin -- are
-# CLUSTER_EXCLUSIVE and run in their own phase, after this one has finished.
-ACCELERATOR_TYPE = "nvidia.com/gpu.product=NVIDIA-A100-80GB-PCIe"
 
 # The estimate the cost/quota arithmetic is priced against; each stage's REAL runtime is set
 # separately and kept short, because a chain is serial -- every second stage A runs is a second
@@ -91,7 +77,7 @@ def test_completed_job_that_wrote_nothing_lists_as_empty_data(api, experiment, r
 
     job_id = api.submit_job(
         pe_id, agent, hours=JOB_HOURS,
-        job_overrides={"env": {"HYPOTHESISLOOP_DURATION_SECONDS": str(RUN_SECONDS)}, "accelerator_type": ACCELERATOR_TYPE},
+        job_overrides={"env": {"HYPOTHESISLOOP_DURATION_SECONDS": str(RUN_SECONDS)}},
     )
 
     _wait_completed(api, deadline, job_id, "the no-data job to complete")
@@ -118,19 +104,18 @@ def test_grouped_stage_writes_checkpoint_read_by_child_with_scoped_credentials(a
     # (None pops the key, mirroring mk_body.py) -- domain.JobSpec.ValidateGroups rejects a spec
     # that states a thing twice. spread_across_hosts is off because this is a 3-node job and
     # nothing here is about placement; leaving the default on would make the chain's first stage
-    # depend on how many hosts advertise A100, which is exactly the coupling this scenario exists
+    # depend on how many hosts the cluster has, which is exactly the coupling this scenario exists
     # to say does not matter.
     job_a = api.submit_job(
         pe_id, agent_a, hours=JOB_HOURS,
         job_overrides={
-            "command": ["python", "data_stage.py"],
+            "command": ["python", "-u", "data_stage.py"],
             "max_retries": 0,
-            "cpu": None, "memory": None, "storage": None, "accelerator_count": None,
-            "accelerator_type": ACCELERATOR_TYPE,
+            "cpu": None, "memory": None, "storage": None,
             "topology": {"spread_across_hosts": False},
             "groups": [
-                {"name": "writer", "replicas": 1, "cpu": "250m", "memory": "128Mi", "storage": "512Mi", "accelerator_count": 1},
-                {"name": "helper", "replicas": 2, "cpu": "100m", "memory": "64Mi", "storage": "256Mi", "accelerator_count": 0},
+                {"name": "writer", "replicas": 1, "cpu": "1", "memory": "128Mi", "storage": "512Mi"},
+                {"name": "helper", "replicas": 2, "cpu": "1", "memory": "64Mi", "storage": "256Mi"},
             ],
             "env": {
                 "HYPOTHESISLOOP_DURATION_SECONDS": str(RUN_SECONDS),
@@ -188,10 +173,8 @@ def test_grouped_stage_writes_checkpoint_read_by_child_with_scoped_credentials(a
     job_b = api.submit_job(
         pe_id, agent_b, hours=JOB_HOURS,
         job_overrides={
-            "command": ["python", "data_stage.py"],
+            "command": ["python", "-u", "data_stage.py"],
             "max_retries": 0,
-            "accelerator_type": ACCELERATOR_TYPE,
-            "accelerator_count": 1,
             "env": {
                 "HYPOTHESISLOOP_DURATION_SECONDS": str(RUN_SECONDS),
                 "STAGE_MODE": "read",

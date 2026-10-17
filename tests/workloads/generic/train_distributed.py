@@ -21,7 +21,7 @@ Environment (injected by the runtime, see runtime/k8s/internal/k8sexec/job_build
   HYPOTHESISLOOP_GROUP                    which group this pod belongs to   (GROUPED jobs only)
   WORLD_SIZE / HYPOTHESISLOOP_WORLD_SIZE  the node count, job-global in both shapes
   MASTER_ADDR / MASTER_PORT               rank 0's stable DNS name and port
-  HYPOTHESISLOOP_ACCELERATOR_COUNT        accelerators on THIS node (never the job total)
+  HYPOTHESISLOOP_ACCELERATOR_COUNT        accelerators on THIS node (never the job total), 0 on cores
   HYPOTHESISLOOP_ATTEMPT                  which attempt this is, 0 on the first
 """
 
@@ -62,7 +62,7 @@ WORLD_SIZE = int(os.environ.get("WORLD_SIZE", os.environ.get("HYPOTHESISLOOP_WOR
 MASTER_ADDR = os.environ.get("MASTER_ADDR", os.environ.get("HYPOTHESISLOOP_MASTER_ADDR", "127.0.0.1"))
 MASTER_PORT = int(os.environ.get("MASTER_PORT", os.environ.get("HYPOTHESISLOOP_MASTER_PORT", "29500")))
 
-ACCELERATOR_COUNT = int(os.environ.get("HYPOTHESISLOOP_ACCELERATOR_COUNT", "1"))
+ACCELERATOR_COUNT = int(os.environ["HYPOTHESISLOOP_ACCELERATOR_COUNT"])
 ATTEMPT = int(os.environ.get("HYPOTHESISLOOP_ATTEMPT", "0"))
 DURATION = int(os.environ.get("HYPOTHESISLOOP_DURATION_SECONDS", "30"))
 # Rank to kill after the barrier, for the gang-failure guarantee. Unset means nobody fails.
@@ -167,12 +167,6 @@ def main() -> None:
         f"starting — master={MASTER_ADDR}:{MASTER_PORT} accelerators_on_this_node={ACCELERATOR_COUNT} "
         f"attempt={ATTEMPT} group={GROUP or '<ungrouped>'}"
     )
-    # Asserted here as well as in the scenario: a pod told it holds more accelerators than it does
-    # is the exact failure that made the per-node count wrong, and the workload is the only place
-    # that can see what it was actually handed.
-    if ACCELERATOR_COUNT < 1:
-        raise SystemExit(f"HYPOTHESISLOOP_ACCELERATOR_COUNT={ACCELERATOR_COUNT}, want at least 1")
-
     deadline = time.time() + RENDEZVOUS_TIMEOUT
     started = time.time()
     total = all_reduce_rank0(deadline) if RANK == 0 else all_reduce_worker(deadline)

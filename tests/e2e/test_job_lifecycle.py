@@ -1,5 +1,5 @@
-"""Job/platform-experiment termination semantics, ported 1:1 from tests/scenarios/job-lifecycle.sh:
-  1. A valid job that no connected cluster can ever hold (known accelerator type, none installed) is
+"""Job/platform-experiment termination semantics:
+  1. A valid job that no connected cluster can ever hold (more cores than any node has) is
      refused at submit with 422 exceeds_cluster_capacity, is not stored and debits nothing. A job
      that waits in the queue reserves its estimate, and cancelling it while still QUEUED ends it
      as CANCELLED with its reservation returned.
@@ -15,13 +15,14 @@ from __future__ import annotations
 
 import pytest
 
-from conftest import TEST_ACCELERATOR_TYPE, TEST_ACCH_RATE, make_agent
+from conftest import TEST_CPU_ACCH_RATE, cpu_job, make_agent
 from support.api import ENDED
 from support.wait import assert_stable, eventually
 
 pytestmark = pytest.mark.parallel
 
-UNAVAILABLE_ACCELERATOR = "nvidia.com/gpu.product=NVIDIA-H200"
+# The most cores one job may ask for, more than a node of any cluster the suite runs on has.
+UNAVAILABLE_CORES = 64
 
 
 def test_a_job_no_cluster_can_hold_is_refused_at_submit_and_debits_nothing(api, experiment, run_id):
@@ -29,11 +30,9 @@ def test_a_job_no_cluster_can_hold_is_refused_at_submit_and_debits_nothing(api, 
     pe_id = experiment("job-lifecycle-never", [agent], budget=10.0)
 
     quota_before = api.quota_field(pe_id, agent, "used_guaranteed_acch")
-    # No cluster has an H200 installed and none scales up, so no wait admits this job. The type
-    # is stated alone, with no alternate a cluster could hold it on.
+    # No node has that many cores, so no wait admits this job.
     body = api.submission_body_for_id(api._job_id(), pe_id, agent)
-    body["job"].pop("acceptable_accelerator_types", None)
-    body["job"] |= {"accelerator_type": UNAVAILABLE_ACCELERATOR, "accelerator_count": 3}
+    body["job"] |= cpu_job(UNAVAILABLE_CORES)
     refused = api.post_experiment_body(body)
     assert refused.status_code == 422, f"a job no cluster can hold: {refused.status_code} {refused.text}"
     assert refused.json()["reason"] == "exceeds_cluster_capacity" and "hl capacity" in refused.json()["message"], refused.text
@@ -44,7 +43,7 @@ def test_a_job_no_cluster_can_hold_is_refused_at_submit_and_debits_nothing(api, 
 
 def test_cancel_while_queued_is_cancelled_and_refunded(api, experiment, run_id, deadline):
     agent = make_agent(api, run_id, "lifecycle")
-    # The experiment runs one accelerator at a time, so a job that asks for two fits the cluster,
+    # The experiment runs one unit at a time, so a job that asks for two cores fits the cluster,
     # is accepted, and is never admitted.
     pe_id = experiment("job-lifecycle", [agent], budget=10.0, max_concurrent_accelerators=1)
 
@@ -53,10 +52,7 @@ def test_cancel_while_queued_is_cancelled_and_refunded(api, experiment, run_id, 
         pe_id,
         agent,
         hours=0.02,
-        # api.py auto-drops acceptable_accelerator_types when accelerator_type is overridden
-        # (mirrors tests/lib/mk_body.py) -- an explicit type request must not silently fall back
-        # to an alternate priced otherwise, or this scenario's AccH arithmetic goes stale.
-        job_overrides={"accelerator_type": TEST_ACCELERATOR_TYPE, "accelerator_count": 2},
+        job_overrides=cpu_job(2),
     )
 
     # QUEUED and SUBMITTED are both "not yet admitted" -- the scheduler may claim a QUEUED job as
@@ -81,8 +77,8 @@ def test_cancel_while_queued_is_cancelled_and_refunded(api, experiment, run_id, 
     )
 
     # The still-QUEUED row IS the desired quota reservation; there is no reservation metric or
-    # secondary table: 0.02h * 2 accelerators * TEST_ACCH_RATE.
-    want = 0.02 * 2 * TEST_ACCH_RATE
+    # secondary table: 0.02h * 2 cores * TEST_CPU_ACCH_RATE.
+    want = 0.02 * 2 * TEST_CPU_ACCH_RATE
     debit = api.quota_field(pe_id, agent, "used_guaranteed_acch") - quota_before
     assert round(debit, 6) == pytest.approx(want, abs=1e-6), (
         f"expected {want} AccH desired reservation for the QUEUED job, got {debit}"

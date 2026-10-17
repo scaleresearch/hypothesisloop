@@ -51,11 +51,10 @@ def orgs(api: API, run_id: str):
 @pytest.fixture(scope="module")
 def run(orgs, run_id: str):
     """A platform experiment of org a with one self-run agent, and that agent's own caller. The
-    org owns no cluster, so it is created while the default org's are shared with every org, and
-    a test that uses it is exclusive."""
+    org owns no cluster, so it runs on the default org's, which serve every org, and a test that
+    uses it is exclusive."""
     a, _ = orgs
-    with a.api.clusters_shared():
-        pe_id = a.api.create_platform_experiment(f"repo-{run_id}", 1, 2)
+    pe_id = a.api.create_platform_experiment(f"repo-{run_id}", 1, 2)
     agent = a.api.add_agents(pe_id)[0]
     yield pe_id, a.api.as_caller(agent["token"], a.org_id, a.project_id)
     a.api.close_platform_experiment(pe_id)
@@ -155,7 +154,10 @@ def test_no_credential_of_the_git_host_is_handed_out_and_the_git_proxy_serves_on
         refused = _call(caller, "GET", refs)
         assert refused.status_code == 403 and "password" not in refused.text, refused.text
     unauthenticated = requests.get(a.api._url(refs), timeout=30)
-    assert unauthenticated.status_code == 401 and unauthenticated.headers["WWW-Authenticate"].startswith("Basic "), unauthenticated.text
+    assert unauthenticated.status_code == 401 and "Basic" not in unauthenticated.headers.get("WWW-Authenticate", ""), unauthenticated.headers
+    # The proxy takes the token as a Bearer header alone, never as a password.
+    as_password = requests.get(a.api._url(refs), auth=("x-access-token", agent.token), timeout=30)
+    assert as_password.status_code == 401, as_password.text
     assert _call(agent, "GET", "/git/pe_does-not-exist.git/info/refs?service=git-upload-pack").status_code == 404
 
 
@@ -200,7 +202,7 @@ def test_a_repository_is_checked_after_the_project_and_must_be_one_the_org_reach
     whole = {**RUN, "name": f"repo-named-{run_id}", "description": "names a repository", "report_interval_seconds": 10,
              "metrics": [{"key": "val_accuracy", "direction": "maximize"}], "branch": "main"}
     foreign = _call(a.api, "POST", "/platform-experiments", {**whole, "project_id": b.project_id, "repository": "acme/model"})
-    assert foreign.status_code == 404 and foreign.json() == {"message": "project not found"}, foreign.text
+    assert foreign.status_code == 404 and foreign.json() == {"reason": "not_found", "message": "project not found"}, foreign.text
 
     # On a plain host every name under its root is one the platform creates, so only GitHub's
     # installations bound what an org reaches.
@@ -237,13 +239,12 @@ def test_on_a_plain_git_host_a_repository_is_named_and_an_agent_pushes_its_branc
     whole = {**RUN, "project_id": a.project_id, "name": f"repo-plain-{run_id}", "description": "names a repository",
              "metrics": [{"key": "val_accuracy", "direction": "maximize"}]}
     # A repository is made for a platform experiment that could run, so the org is given a cluster.
-    with a.api.clusters_shared():
-        for body, reason in (
-            (whole, "repository_required"),
-            ({**whole, "repository": address, "branch": "main"}, "invalid_repository"),
-        ):
-            refused = _call(a.api, "POST", "/platform-experiments", body)
-            assert refused.status_code == 422 and refused.json()["reason"] == reason, (reason, refused.text)
+    for body, reason in (
+        (whole, "repository_required"),
+        ({**whole, "repository": address, "branch": "main"}, "invalid_repository"),
+    ):
+        refused = _call(a.api, "POST", "/platform-experiments", body)
+        assert refused.status_code == 422 and refused.json()["reason"] == reason, (reason, refused.text)
     missing = f"created-{run_id}.git"
     try:
         for _ in range(2):
@@ -301,8 +302,7 @@ def test_an_agent_clones_and_pushes_its_branch_and_loses_access_when_github_is_d
         assert _call(other.api, "GET", f"/orgs/{org.org_id}/github-installations").status_code == 404
         assert _installations(other) == []
 
-        with org.api.clusters_shared():
-            pe_id = org.api.create_platform_experiment(f"repo-live-{run_id}", 1, 2, repository=repo)
+        pe_id = org.api.create_platform_experiment(f"repo-live-{run_id}", 1, 2, repository=repo)
         clone_url = f"https://github.com/{repo}.git"
         read = org.api.get_json(f"/platform-experiments/{pe_id}")
         assert (read["repository"], read["repository_url"]) == (repo, clone_url), read

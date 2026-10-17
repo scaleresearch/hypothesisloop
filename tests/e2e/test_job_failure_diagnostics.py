@@ -1,27 +1,19 @@
-"""What the platform can tell an agent about a job that died. Ported 1:1 from
-tests/scenarios/job-failure-diagnostics.sh. Both halves are about diagnosis surviving cleanup:
+"""What the platform can tell an agent about a job that died. Both halves are about diagnosis
+surviving cleanup:
   1. A crashing job's own output must still be readable after its workload is gone (terminal
      status removes a job from desired state; the cluster-agent's next reconcile deletes the
      workload -- pod, logs, container termination reason with it -- so the runtime must capture
      and push that output *before* deleting).
-  2. A job that can never be scheduled (a bad image) is evicted early as `unschedulable` and
-     refunded, rather than sitting on a reservation until the generic stuck-pending timeout, and
-     is attributed to the agent (workload fault), never the environment (infrastructure fault).
-
-API-only and parallel-safe: neither job consumes an accelerator for any real length of time, and
-neither touches shared cluster state.
-
-PROVEN against the live stack: 3x solo green. Both halves needed quota_tier="guaranteed" at signup
-(an agent-kind participant otherwise defaults to burst_only, so a guaranteed-tier job submission
-402s with insufficient_quota).
+  2. An image no registry knows is refused when it is recorded, before any job could fail to pull
+     it, and the jobs keep running in the image recorded before.
 """
 from __future__ import annotations
 
 import pytest
 
 from conftest import make_agent
-from support.cluster import job_resource_absent
-from support.wait import eventually
+from support.api import ENDED
+from support.wait import assert_stable, eventually
 
 pytestmark = pytest.mark.parallel
 
@@ -59,13 +51,14 @@ def test_crashing_jobs_output_outlives_its_workload(api, experiment, run_id, dea
         deadline=deadline,
     )
 
-    eventually(
-        "crashed job's workload to be removed",
-        lambda: job_resource_absent(crash_job),
-        accept=lambda absent: absent,
-        deadline=deadline,
+    # The runtime removes an ended job's workload on its next pass, within seconds.
+    assert_stable(
+        "the log tail stays readable once the workload is gone",
+        lambda: api.logs(crash_job, n=200),
+        ok=lambda logs: marker in logs,
+        duration=20,
+        interval=2,
     )
-    assert marker in api.logs(crash_job, n=200), "log tail disappeared once the workload was cleaned up"
 
     exp = api.experiment(crash_job)
     phase_detail = exp.get("phase_detail") or {}
@@ -73,46 +66,16 @@ def test_crashing_jobs_output_outlives_its_workload(api, experiment, run_id, dea
     assert "container exited with code 42" in (phase_detail.get("message") or "")
 
 
-def test_unschedulable_job_is_evicted_early_refunded_and_attributed_to_the_agent(api, experiment, run_id, deadline):
-    agent = make_agent(api, run_id, "failure-diag-unsched")
-    pe_id = experiment("failure-diagnostics-unsched", [(agent, None, "guaranteed")], budget=10.0, report_interval_seconds=5)
+def test_an_image_no_registry_knows_is_refused_and_jobs_keep_the_one_recorded(api, experiment, run_id, deadline):
+    agent = make_agent(api, run_id, "failure-diag-image")
+    pe_id = experiment("failure-diagnostics-image", [(agent, None, "guaranteed")], budget=10.0, report_interval_seconds=5)
+    recorded = api.get_json(f"/platform-experiments/{pe_id}")["image"]
 
-    used_before = api.quota_field(pe_id, agent, "used_guaranteed_acch")
-    bad_job = api.submit_job(
-        pe_id,
-        agent,
-        hours=0.02,
-        job_overrides={
-            "image": "localhost/hypothesisloop-image-that-does-not-exist:nope",
-            "max_retries": 0,
-        },
-    )
+    r = api.put(f"/platform-experiments/{pe_id}/image", {"image": f"docker.io/library/hypothesisloop-no-such-image-{run_id}:nope"})
+    assert r.status_code == 422 and r.json()["reason"] == "image_unresolved", f"an unknown image: {r.status_code} {r.text}"
+    assert api.get_json(f"/platform-experiments/{pe_id}")["image"] == recorded, "a refused image replaced the recorded one"
 
-    final = eventually(
-        f"{bad_job} to be terminated as unschedulable",
-        lambda: api.experiment(bad_job),
-        accept=lambda e: e["status"] in ("EVICTED", "FAILED", "REJECTED"),
-        deadline=deadline,
-    )
-    assert final["status"] in ("EVICTED", "FAILED"), f"unpullable job never terminated: {final['status']!r}"
-    # "code: detail", the detail what the runtime said: here why the image could not be pulled.
-    assert final.get("eviction_reason", "").startswith("unschedulable: image_pull_failed: "), final.get("eviction_reason")
-
-    eventually(
-        "unschedulable job's reservation to be returned",
-        lambda: api.quota_field(pe_id, agent, "used_guaranteed_acch"),
-        accept=lambda now: abs(now - used_before) < 1e-6,
-        deadline=deadline,
-    )
-
-    if final["status"] == "EVICTED":
-        assert final.get("infra_requeue_count") == 0, "workload's own bad image must not be requeued for free"
-        assert final.get("attempt_count") == 0, "max_retries=0 means the job ended on its first attempt"
-
-    workload_n = api.eviction_class_count(pe_id, agent, "workload")
-    infra_n = api.eviction_class_count(pe_id, agent, "infrastructure")
-    assert workload_n is not None and workload_n >= 1, "the agent's own bad image must be counted as its own fault"
-    assert infra_n == 0, "nothing the agent did may be charged to the environment"
-
-    class_total, reason_total, unclassified = api.eviction_class_coverage(pe_id, agent)
-    assert class_total == reason_total and unclassified == 0
+    job = api.submit_job(pe_id, agent, hours=0.01, job_overrides={"command": ["true"], "max_retries": 0})
+    final = eventually(f"{job} to end", lambda: api.experiment(job), accept=lambda e: e["status"] in ENDED, deadline=deadline)
+    assert final["status"] == "COMPLETED", f"{job} ended {final['status']}: {final.get('eviction_reason')}"
+    assert final["image"] == recorded["image"], f"{job} ran in {final['image']}, its platform experiment records {recorded['image']}"

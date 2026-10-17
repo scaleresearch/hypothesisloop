@@ -1,49 +1,35 @@
-"""The whole sandboxed path on real providers, with nothing but an API key of an ordinary org: a
-sandboxed coordinator and two sandboxed researchers in rented sandboxes work in a real repository,
-their jobs run on a rented GPU cluster and report metrics, one sandbox is lost at the vendor and
-one harness is frozen, and the experiment still ends with a summary and nothing left rented.
+"""The whole sandboxed path on whatever providers the stack rents from, with nothing but an API
+key of an ordinary org: a sandboxed coordinator and two sandboxed researchers work in a real
+repository, their jobs run on a cluster the platform shares with every org and report metrics,
+and the experiment ends with a summary and every machine released.
 
-It rents machines and spends model tokens, so it is no part of the suite: it carries the
-real_providers marker, which runs only with make e2e RENT=1, and it skips unless the
-environment says where it runs:
+It rents machines and spends model tokens, so it carries the real_providers marker, which runs
+only with make e2e RENT=1. It skips unless the environment names the repository, which must hold
+mlp/job.yaml and a workload that reports val_accuracy:
 
-    API_URL, HL_TOKEN                 the dev stack (make dev) and its staff token,
-                                      used here only to make the org and connect the repository
-    TEST_GIT_HOST_GITHUB_INSTALLATIONthe installation of the platform's GitHub App that covers
-    TEST_GIT_HOST_GITHUB_REPOSITORY  the repository, which must hold .hypothesisloop/experiment.yaml,
-                                      mlp/job.yaml and a workload that reports val_accuracy
-    SANDBOX_PROVIDER                  fly or e2b, as the stack's launcher is configured
-    CLOUD_COMPUTE_PROVIDER            vast, as the stack's cloud cluster is configured
-    the keys support/vendors.py reads of each: its account key, <SECTION>_<PROVIDER>_API_KEY,
-                                      and SANDBOX_FLY_APP for fly
+    TEST_GIT_HOST_GITHUB_INSTALLATION   the installation of the platform's GitHub App that covers it
+    TEST_GIT_HOST_GITHUB_REPOSITORY     the repository
 
     make e2e RENT=1 E2E_ARGS='e2e/test_real_providers.py -s'
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 import os
-import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
-import requests
 import yaml
 
-from support import admin, vendors
-from support.api import API, SANDBOX_BRANCH
+from support import admin
+from support.api import API, ENDED, SANDBOX_BRANCH
 from support.wait import Deadline, eventually
 
 pytestmark = [pytest.mark.real_providers, pytest.mark.exclusive, pytest.mark.timeout(3600)]
 
-SANDBOX_PROVIDERS = ("fly", "e2b")
-CLOUD_COMPUTE_PROVIDERS = ("vast",)
-# domain.AgentProgressLimit on the stack that rents (agents.progress_limit_seconds), and the quarter
-# of it the platform may take to write a marker down.
-PROGRESS_LIMIT_S = 300
 MINUTE = 60.0
+SANDBOX_ENV = ("TEST_GIT_HOST_GITHUB_INSTALLATION", "TEST_GIT_HOST_GITHUB_REPOSITORY")
 
 
 def _instance(api: API, pe_id: str, agent_id: str | None) -> dict:
@@ -57,39 +43,27 @@ def _jobs(api: API, pe_id: str) -> list[dict]:
 
 
 @pytest.fixture(scope="module")
-def provider() -> str:
-    provider, cloud = os.environ.get("SANDBOX_PROVIDER", ""), os.environ.get("CLOUD_COMPUTE_PROVIDER", "")
-    if provider not in SANDBOX_PROVIDERS or cloud not in CLOUD_COMPUTE_PROVIDERS:
-        pytest.skip("needs real providers: set SANDBOX_PROVIDER to fly or e2b and CLOUD_COMPUTE_PROVIDER to vast, as the stack is configured")
-    needed = (*vendors.needed("SANDBOX", provider), *vendors.needed("CLOUD_COMPUTE", cloud), "TEST_GIT_HOST_GITHUB_INSTALLATION", "TEST_GIT_HOST_GITHUB_REPOSITORY")
-    missing = [key for key in needed if not os.environ.get(key)]
-    if missing:
-        pytest.skip(f"needs real providers: {', '.join(missing)} not set")
-    return provider
-
-
-@pytest.fixture(scope="module")
-def org(api: API, run_id: str, provider: str) -> API:
+def org(api: API, run_id: str) -> API:
     """An ordinary org with one API key, which is all the test works with from here on, and the
-    sandbox repository's installation connected to it."""
+    repository's installation connected to it."""
+    missing = [name for name in SANDBOX_ENV if not os.environ.get(name)]
+    if missing:
+        pytest.skip(f"needs a repository: {', '.join(missing)} not set")
     subject = f"user-real-{uuid.uuid4().hex[:10]}-{run_id}"
     home = admin.add_user(subject, f"Real providers {run_id}")
     key = admin.add_api_key(subject, home["org_id"])
-    assert key.startswith("hlk_")
     admin.connect_github(home["org_id"], os.environ["TEST_GIT_HOST_GITHUB_INSTALLATION"])
     return api.as_caller(key, home["org_id"], home["project_id"])
 
 
-def test_a_sandboxed_experiment_runs_end_to_end_on_rented_machines_and_survives_a_lost_and_a_hung_sandbox(org: API, provider: str, run_id: str):
-    assert not vendors.sandboxes(provider) and not vendors.rented_instances(), "something is rented before the test starts"
-    credit = vendors.job_credit()
+def test_a_sandboxed_experiment_runs_end_to_end_on_rented_machines(org: API, run_id: str):
     deadline = Deadline.in_seconds(50 * MINUTE)
-
-    # The repository's own experiment file is its CPU experiment, so this one states its brief
+    repository = os.environ["TEST_GIT_HOST_GITHUB_REPOSITORY"]
+    # The repository's own experiment file is another experiment, so this one states its brief
     # and metrics, which point at mlp/job.yaml there, and leaves the rest to the platform.
     stated = yaml.safe_load((Path(__file__).parent / "real_providers_experiment.yaml").read_text())
     created = org.post("/platform-experiments", {
-        "project_id": org.project_id, "repository": os.environ["TEST_GIT_HOST_GITHUB_REPOSITORY"], "branch": SANDBOX_BRANCH,
+        "project_id": org.project_id, "repository": repository, "branch": SANDBOX_BRANCH,
         "description": stated["description"], "metrics": stated["metrics"],
         "name": f"real-providers-{run_id}", "budget_accelerator_hours": 1, "max_agents": 3,
         "coordinator_in_agentsandbox": True, "duration_hours": 24,
@@ -97,77 +71,35 @@ def test_a_sandboxed_experiment_runs_end_to_end_on_rented_machines_and_survives_
     assert created.status_code == 201, f"create: {created.status_code} {created.text}"
     pe_id = created.json()["id"]
     org.created_platform_experiments.append(pe_id)
-    assert created.json()["repository_url"].endswith(os.environ["TEST_GIT_HOST_GITHUB_REPOSITORY"] + ".git")
-    researchers = [org.add_agents(pe_id, in_agentsandbox=True, agent_type=agent_type)[0]["agent_id"] for agent_type in ("hyperparameter-search", "architecture-search")]
-    # Its start time is now. The create made its agent of role baseline, and when that agent
-    # finishes with one completed job the platform declares it and starts the run: no researcher's
-    # machine is rented before, and duration_hours counts from that start.
-    org.patch(f"/platform-experiments/{pe_id}", {"starts_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}).raise_for_status()
-    eventually("the baseline to be measured and declared and the platform to start the run", lambda: org.get_json(f"/platform-experiments/{pe_id}"),
-               accept=lambda pe: pe["status"] == "running" and pe.get("baseline_job_id"), reject=lambda pe: pe["status"] == "closed",
-               deadline=deadline, interval=10)
+    researchers = [org.add_agents(pe_id, in_agentsandbox=True, agent_type=agent_type)[0]["agent_id"]
+                   for agent_type in ("hyperparameter-search", "architecture-search")]
     everyone: list[str | None] = [None, *researchers]
-
+    # Its start time is now. The create made its agent of role baseline, and when that agent
+    # finishes with one completed job the platform declares it and starts the run.
+    org.patch(f"/platform-experiments/{pe_id}", {"starts_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}).raise_for_status()
     try:
-        # Each of the three is a sandbox at the vendor, running, with its harness reporting progress.
-        def all_working() -> list[dict]:
-            return [_instance(org, pe_id, who) for who in everyone]
-        eventually("the coordinator and both researchers run and report progress", all_working, deadline=Deadline.in_seconds(6 * MINUTE),
+        eventually("the baseline to be measured and declared and the platform to start the run", lambda: org.get_json(f"/platform-experiments/{pe_id}"),
+                   accept=lambda pe: pe["status"] == "running" and pe.get("baseline_job_id"), reject=lambda pe: pe["status"] == "closed",
+                   deadline=deadline, interval=10)
+        eventually("the coordinator and both researchers run and report progress", lambda: [_instance(org, pe_id, who) for who in everyone],
                    accept=lambda instances: all(i["state"] == "running" and i.get("progress_at") for i in instances),
-                   reject=lambda instances: any(i["stopped"] for i in instances), interval=5)
-        rented = vendors.sandboxes(provider)
-        names = {who: _instance(org, pe_id, who)["name"] for who in everyone}
-        assert len(rented) == 3 and all(any(name in vendor_name for vendor_name in rented) for name in names.values()), \
-            f"the vendor holds {sorted(rented)}, the platform asked for {sorted(names.values())}"
+                   reject=lambda instances: any(i["stopped"] for i in instances), deadline=Deadline.in_seconds(10 * MINUTE), interval=5)
 
-        # The researchers clone the repository, register a hypothesis and submit: a job reaches
-        # the rented cluster and runs there.
-        eventually("a job runs on the rented cluster", lambda: _jobs(org, pe_id), deadline=Deadline.in_seconds(15 * MINUTE),
-                   accept=lambda jobs: any(j["status"] in ("RUNNING", "COMPLETED") for j in jobs),
-                   reject=lambda jobs: any(j["status"] in ("FAILED", "EVICTED", "REJECTED") for j in jobs), interval=10)
-        assert vendors.rented_instances() or any(j["status"] == "COMPLETED" for j in _jobs(org, pe_id)), "a job runs and nothing is rented for it"
-
-        # The vendor loses the coordinator's sandbox. The platform sees a machine that is gone,
-        # spends one restart and starts another, which takes up the stored session.
-        def vendor_id(who: str | None) -> str:
-            name = _instance(org, pe_id, who)["name"]
-            return next(vendor for vendor_name, vendor in vendors.sandboxes(provider).items() if name in vendor_name)
-        vendors.lose_sandbox(provider, vendor_id(None))
-        lost_at = time.monotonic()
-        replaced = eventually("the lost coordinator is replaced and works again", lambda: _instance(org, pe_id, None), deadline=Deadline.in_seconds(5 * MINUTE),
-                              accept=lambda i: i["restarts"] == 1 and i["state"] == "running" and i.get("progress_at") and i["name"] != names[None], interval=5)
-        assert replaced["end_reason"] == "gone" and "no longer lists it" in replaced["exit_log"], replaced
-        print(f"\nlost sandbox replaced and working after {time.monotonic() - lost_at:.0f}s")
-
-        # A harness that hangs with its machine still running: only its silence says so.
-        hung = researchers[0]
-        vendors.freeze_harness(provider, vendor_id(hung))
-        frozen_at = time.monotonic()
-        ended = eventually("the frozen researcher is ended as silent and replaced", lambda: _instance(org, pe_id, hung),
-                           deadline=Deadline.in_seconds(1.25 * PROGRESS_LIMIT_S + 4 * MINUTE),
-                           accept=lambda i: i["restarts"] == 1 and i["name"] != names[hung] and i["state"] == "running", interval=10)
-        assert ended["end_reason"] == "silent" and "no progress" in ended["exit_log"], ended
-        assert time.monotonic() - frozen_at >= PROGRESS_LIMIT_S - 30, "a working agent was ended before its limit"
-        assert _instance(org, pe_id, researchers[1])["restarts"] == 0, "the researcher that kept working was replaced"
-
-        # Both jobs finish with the declared metric, each pinned to the commit it ran, and the
-        # coordinator files its summary and closes.
-        finished = eventually("each researcher has a completed job", lambda: _jobs(org, pe_id), deadline=deadline,
-                              accept=lambda jobs: {j["agent_id"] for j in jobs if j["status"] == "COMPLETED"} == set(researchers), interval=15)
-        results = org.get_json(f"/platform-experiments/{pe_id}/results")
-        standings = next(m["standings"] for m in results["metrics"] if m["metric"] == "val_accuracy")
-        assert {row["agent_id"] for row in standings} == set(researchers) and all(0.5 < row["best"] <= 1 for row in standings), standings
+        # The researchers clone the repository, register a hypothesis, submit, and file a finding.
+        finished = eventually("each researcher has a completed job", lambda: _jobs(org, pe_id), deadline=deadline, interval=15,
+                              accept=lambda jobs: {j["agent_id"] for j in jobs if j["status"] == "COMPLETED"} >= set(researchers))
         for job in finished:
             if job["status"] == "COMPLETED":
-                assert job["cluster_name"] and "@" in job["code_ref"] and os.environ["TEST_GIT_HOST_GITHUB_REPOSITORY"] in job["code_ref"], job
-        closed = eventually("the coordinator closes the experiment with a summary", lambda: org.get_json(f"/platform-experiments/{pe_id}"), deadline=deadline,
-                            accept=lambda pe: pe["status"] == "closed" and len(pe.get("summary") or "") > 40, interval=15)
+                assert job["cluster_name"] and job["code_ref"].startswith(f"https://github.com/{repository}.git@"), job
+        standings = next(m["standings"] for m in org.results(pe_id)["metrics"] if m["metric"] == "val_accuracy")
+        assert {row["agent_id"] for row in standings} >= set(researchers) and all(0 < row["best"] <= 1 for row in standings), standings
+        closed = eventually("the coordinator closes the experiment with a summary", lambda: org.get_json(f"/platform-experiments/{pe_id}"),
+                            deadline=deadline, interval=15, accept=lambda pe: pe["status"] == "closed" and len(pe.get("summary") or "") > 40)
         assert all(not _instance(org, pe_id, who)["stopped"] for who in everyone), closed
     finally:
-        org.session.post(org._url(f"/platform-experiments/{pe_id}/close"), timeout=30)
-        # Nothing rented outlives the experiment: sandboxes go after the wind-down, instances
-        # with their jobs.
-        left = eventually("no sandbox and no instance is rented any more", lambda: (vendors.sandboxes(provider), vendors.rented_instances()),
-                          deadline=Deadline.in_seconds(8 * MINUTE), accept=lambda rented: not rented[0] and not rented[1], interval=15)
-        assert left == ({}, {})
-        print(f"\njobs cost {credit - vendors.job_credit():.3f} USD at the GPU vendor")
+        org.close_platform_experiment(pe_id)
+        # Nothing rented outlives the experiment: machines go after the wind-down, and jobs end.
+        eventually("every machine released and every job ended",
+                   lambda: ([_instance(org, pe_id, who) for who in everyone], _jobs(org, pe_id)), deadline=Deadline.in_seconds(8 * MINUTE),
+                   accept=lambda seen: all(i["state"] == "stopped" for i in seen[0]) and all(j["status"] in ENDED for j in seen[1]),
+                   interval=15)

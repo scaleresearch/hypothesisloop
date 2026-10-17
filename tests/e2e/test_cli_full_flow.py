@@ -19,8 +19,8 @@ import uuid
 import pytest
 import yaml
 
-from conftest import TEST_ACCELERATOR_TYPE, make_agent
-from support.api import branch, ENDED, workload_image
+from conftest import make_agent
+from support.api import branch, ENDED
 from support.wait import eventually
 
 pytestmark = pytest.mark.parallel
@@ -120,21 +120,18 @@ def test_cli_full_flow_happy_path(api, run_id, tmp_path):
             "hypothesis_id": hyp_id,
             "theory": "e2e scenario coverage",
             "estimated_duration_hours": JOB_HOURS,
-            "code_ref": api.code_ref(pe_id),
+            "code_ref": api.code_ref(pe_id, agent),
             "branch": branch(pe_id, agent, hyp_id),
             "config_hash": "",
             "data_ref": "",
             "capacity_tier": "guaranteed",
         },
         "job": {
-            "image": workload_image(),
-            "cpu": "250m",
+            "command": ["python", "-u", "train.py"],
+            "cpu": "1",
             "memory": "128Mi",
             "storage": "512Mi",
             "max_retries": 3,
-            "accelerator_count": 1,
-            "accelerator_type": TEST_ACCELERATOR_TYPE,
-            "accelerator_tolerations": ["nvidia.com/gpu"],
         },
     }
     job_submit_out = api.hl("job", "submit", "--agent", agent, "-", input=yaml.safe_dump(job_body, sort_keys=False))
@@ -177,7 +174,8 @@ def test_cli_full_flow_happy_path(api, run_id, tmp_path):
     assert "agent_id" not in note and note["actor"] == staff, note
     links = json.loads(api.hl("hypothesis", "link", own["id"], "--type", "related", "--to", hyp_id))
     assert {(l["type"], l["actor"]["kind"]) for l in links} == {("builds_on", "staff"), ("related", "staff")}, links
-    settled = json.loads(api.hl("hypothesis", "status", own["id"], "inconclusive"))
+    # A verdict needs a job of the hypothesis that ended: the agent's has one, and staff give it.
+    settled = json.loads(api.hl("hypothesis", "status", hyp_id, "inconclusive", "--agent", agent))
     assert settled["status"] == "inconclusive" and settled["status_actor"] == staff, settled
     for_agent = json.loads(api.hl("hypothesis", "comment", hyp_id, "--agent", agent, "--text", "a note for the agent"))
     assert (for_agent["agent_id"], for_agent["actor"]) == (agent, staff), for_agent

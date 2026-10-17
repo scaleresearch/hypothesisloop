@@ -23,11 +23,9 @@ import requests
 from support import admin
 from support.api import API, WATCH_SUBPROTOCOL
 from support.settings import setting
-from support.wait import eventually
 
 # Exclusive: an org made here owns no cluster that runs anything, so its platform experiment is
-# created and started while the default org's clusters are shared with every org
-# (API.clusters_shared).
+# created and started on the default org's clusters, which serve every org.
 pytestmark = pytest.mark.exclusive
 
 # Priced in controlplane/settings/hypothesisloop.yaml and on none of the dev nodes. A job asking
@@ -101,13 +99,12 @@ def _running_experiment(org: Org, caller: API, run_id: str, agents: int) -> tupl
     names = [f"agent-{org.marker}-{uuid.uuid4().hex[:6]}-{run_id}" for _ in range(agents)]
     for name in names:
         caller.register_agent(name)
-    with caller.clusters_shared():
-        pe_id = caller.create_platform_experiment(f"{org.marker}-{uuid.uuid4().hex[:6]}-{run_id}", 5.0, agents)
-        caller.signup_and_start(pe_id, names)
+    pe_id = caller.create_platform_experiment(f"{org.marker}-{uuid.uuid4().hex[:6]}-{run_id}", 5.0, agents)
+    caller.signup_and_start(pe_id, names)
     members = []
     for name in names:
         hypothesis_id = caller.register_hypothesis(pe_id, name, _claim(name))["id"]
-        job_id = caller.submit_job(pe_id, name, hyp_id=hypothesis_id, job_overrides={"accelerator_type": UNAVAILABLE_ACCELERATOR})
+        job_id = caller.submit_job(pe_id, name, hyp_id=hypothesis_id, job_overrides={"accelerator_type": UNAVAILABLE_ACCELERATOR, "accelerator_count": 1})
         members.append(Member(name, caller.as_caller(admin.token(f"agent:{pe_id}/{name}")), hypothesis_id, job_id))
     return pe_id, members
 
@@ -300,9 +297,8 @@ def test_a_person_signs_in_with_a_jwt_and_writes_under_the_providers_name(api: A
     person = api.as_caller(token, me["orgs"][0]["id"], me["projects"][0]["id"])
     agent = f"agent-of-{subject}"
     person.register_agent(agent)
-    with person.clusters_shared():
-        pe_id = person.create_platform_experiment(f"jwt-{subject}", 1.0, 1)
-        person.signup_and_start(pe_id, [agent])
+    pe_id = person.create_platform_experiment(f"jwt-{subject}", 1.0, 1)
+    person.signup_and_start(pe_id, [agent])
     try:
         ada = {"kind": "user", "id": subject, "name": "Ada Lovelace"}
         as_another = person.post("/hypotheses", _hypothesis_body(pe_id, _claim("under another name"), author="Mallory"))
@@ -521,7 +517,7 @@ def test_liveness_is_taken_only_from_the_cluster_a_job_is_placed_on(api: API, or
     assert _push(url, mine.token.token, mine.job_id, now) == 403
     assert _push(url, org.key.token, mine.job_id, now) == 403
     assert _push(url, admin.token(f"job:{mine.job_id}"), mine.job_id, now) == 403
-    assert _push(url, admin.token(f"runtime:never-registered-{uuid.uuid4().hex[:8]}"), mine.job_id, now) == 401
+    assert _push(url, admin.token(f"runtime:never-registered-{uuid.uuid4().hex[:8]}/1"), mine.job_id, now) == 401
 
     def observed() -> dict:
         return org.key.get_json(f"/experiments/{mine.job_id}/cost")

@@ -7,8 +7,8 @@ the same physical device is independently reachable via the bare-node agent (no 
 For the bare-node leg the host's node (TT_NODE) is tainted no-workload so the scheduler cannot place the job
 there; the taint is lifted in a `finally`, so the box takes jobs again on pass, fail, or timeout.
 
-The k3s leg's job runs TT_WORKLOAD_IMAGE, the image `make tt-e2e` pushed to the registry the box
-pulls from. The bare-node leg builds the same image on this host and runs that.
+Both legs' jobs run TT_WORKLOAD_IMAGE, the image `make tt-e2e` pushed to the registry the box
+pulls from, which the platform experiment records.
 """
 from __future__ import annotations
 
@@ -23,8 +23,9 @@ import pytest
 from conftest import API_URL, DEFAULT_ORG, REPO_ROOT, make_agent
 from support import admin
 from support.api import ENDED
-from support.cluster import JOB_NS
 from support.wait import eventually
+
+JOB_NS = "hypothesisloop-jobs"
 
 pytestmark = [pytest.mark.hardware, pytest.mark.exclusive("tenstorrent")]
 
@@ -48,12 +49,10 @@ TT_NODE = os.environ.get("TT_NODE") or _server_node()
 TT_CLUSTER = os.environ.get("TT_CLUSTER") or TT_NODE
 ACCEL_TYPE = "tenstorrent.com/chipArch=blackhole"
 
-# Overrides tests/workloads/tenstorrent/job.yaml's own fields on top of the generic base spec
-# api.submit_job() loads by default (workloads/generic/job.yaml): a real tt-metal workload needs
-# its own image/cpu/memory, and must drop the generic spec's nvidia
-# accelerator_tolerations/acceptable_accelerator_types -- see that job.yaml's own comments for why
-# (256Mi OOMKilled every run; 4Gi clears it).
-BARE_IMAGE = "localhost/hypothesisloop-tenstorrent-workload:latest"
+# Overrides of the generic base spec api.submit_job() loads (workloads/generic/job.yaml): a real
+# tt-metal workload needs its own command, cpu and memory (256Mi OOMKilled every run; 4Gi clears
+# it). It runs in TT_WORKLOAD_IMAGE, which each platform experiment records, from /app where the
+# image holds it.
 
 
 def _k3s_image() -> str:
@@ -61,7 +60,7 @@ def _k3s_image() -> str:
 
 
 TT_JOB_OVERRIDES = {
-    "image": BARE_IMAGE,
+    "command": ["python3", "/app/train.py"],
     "cpu": "2",
     "memory": "4Gi",
     "storage": "1Gi",
@@ -69,7 +68,6 @@ TT_JOB_OVERRIDES = {
     "accelerator_count": 1,
     "accelerator_type": ACCEL_TYPE,
     "acceptable_accelerator_types": None,
-    "accelerator_tolerations": None,
 }
 
 
@@ -179,7 +177,8 @@ def test_tenstorrent_real_dra_allocation_and_bare_node(api, run_id: str, deadlin
     # draws from (see test_node_and_daemonset_faults.py for the same override).
     api.signup_ok(pe_id, agent, quota_tier="guaranteed")
     # The baseline is this experiment's own workload, on the hardware the run is about.
-    api.declare_baseline_and_wait_running(pe_id, baseline_job={**TT_JOB_OVERRIDES, "image": _k3s_image(), "command": None})
+    api.record_image(pe_id, _k3s_image())
+    api.declare_baseline_and_wait_running(pe_id, baseline_job=TT_JOB_OVERRIDES)
 
     try:
         _run(api, pe_id, agent, run_id, deadline, tmp_path)
@@ -190,7 +189,7 @@ def test_tenstorrent_real_dra_allocation_and_bare_node(api, run_id: str, deadlin
 def _run(api, pe_id: str, agent: str, run_id: str, deadline, tmp_path: Path) -> None:
     job = api.submit_job(
         pe_id, agent, hours=0.02,
-        job_overrides={**TT_JOB_OVERRIDES, "image": _k3s_image()},
+        job_overrides=TT_JOB_OVERRIDES,
     )
 
     exp = eventually(
@@ -274,20 +273,6 @@ def _run(api, pe_id: str, agent: str, run_id: str, deadline, tmp_path: Path) -> 
             lambda: bare_cluster in [c.get("cluster_name") for c in api.internal_clusters()],
             accept=lambda ok: ok,
             deadline=deadline,
-        )
-
-        log_text = log_path.read_text()
-        engine = None
-        for token in ("engine=podman", "engine=docker"):
-            if token in log_text:
-                engine = token.split("=", 1)[1]
-                break
-        assert engine is not None, f"could not determine which container engine the bare-agent resolved to (see {log_path})"
-
-        subprocess.run(
-            [engine, "build", "-f", str(REPO_ROOT / "tests" / "workloads" / "tenstorrent" / "Dockerfile.train"),
-             "-t", "localhost/hypothesisloop-tenstorrent-workload", str(REPO_ROOT / "tests" / "workloads" / "tenstorrent")],
-            check=True, capture_output=True, text=True,
         )
 
         bare_job = api.submit_job(

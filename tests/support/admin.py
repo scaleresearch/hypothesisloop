@@ -33,13 +33,9 @@ def token(scope: str) -> str:
     return _run("token", scope)
 
 
-def add_launcher(name: str) -> str:
-    """Registers an agent-launcher and returns its token. Registering one again changes nothing."""
-    return _run("launcher", "add", name)
-
-
-def remove_launcher(name: str) -> None:
-    _run("launcher", "remove", name)
+def cluster_token(name: str) -> str:
+    """The runtime token of the cluster's registration as it stands."""
+    return _run("cluster", "token", name)
 
 
 def add_user(subject: str, name: str) -> dict:
@@ -66,11 +62,6 @@ def add_cluster(name: str, org_id: str) -> str:
 
 def set_staff(subject: str, staff: bool) -> None:
     _run("user", "staff", subject, "on" if staff else "off")
-
-
-def share_cluster(name: str, shared: bool) -> None:
-    """Places every org's jobs on the cluster, or only its own org's."""
-    _run("cluster", "share", name, "on" if shared else "off")
 
 
 def share_platform_experiment(pe_id: str, shared: bool) -> None:

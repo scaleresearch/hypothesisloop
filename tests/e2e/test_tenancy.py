@@ -12,14 +12,12 @@ from dataclasses import dataclass
 import pytest
 import requests
 
-from conftest import cpu_job
 from support import admin
 from support.api import API, WATCH_SUBPROTOCOL
 from support.wait import eventually
 
 # Exclusive: an org made here owns no cluster that runs anything, so its platform experiment is
-# created and started while the default org's clusters are shared with every org
-# (API.clusters_shared).
+# created and started on the default org's clusters, which serve every org.
 pytestmark = pytest.mark.exclusive
 
 # Priced in controlplane/settings/hypothesisloop.yaml and on none of the dev nodes.
@@ -52,15 +50,14 @@ def _tenant(api: API, run_id: str, label: str) -> Tenant:
     caller = api.as_caller(admin.add_api_key(subject, home["org_id"]), home["org_id"], home["project_id"])
     agent = f"agent-{marker}-{run_id}"
     caller.register_agent(agent)
-    with caller.clusters_shared():
-        pe_id = caller.create_platform_experiment(f"{marker}-{run_id}", 5.0, 2)
-        caller.signup_and_start(pe_id, [agent])
+    pe_id = caller.create_platform_experiment(f"{marker}-{run_id}", 5.0, 2)
+    caller.signup_and_start(pe_id, [agent])
     hypothesis_id = caller.register_hypothesis(pe_id, agent, f"{marker} hypothesis")["id"]
     # An accelerator type no local cluster has, submitted while the org has no cluster a submit
     # could be judged against (one that asks for more than every cluster of its org has is
     # refused with exceeds_cluster_capacity). The job stays QUEUED: non-terminal for the job
     # token, and holding nothing.
-    job_id = caller.submit_job(pe_id, agent, hyp_id=hypothesis_id, job_overrides={"accelerator_type": UNAVAILABLE_ACCELERATOR})
+    job_id = caller.submit_job(pe_id, agent, hyp_id=hypothesis_id, job_overrides={"accelerator_type": UNAVAILABLE_ACCELERATOR, "accelerator_count": 1})
     cluster = f"cluster-{marker}-{run_id}"
     admin.add_cluster(cluster, home["org_id"])
     return Tenant(caller, home["org_id"], home["project_id"], agent, pe_id, hypothesis_id, job_id, cluster, marker)
@@ -335,7 +332,7 @@ def test_a_project_key_reaches_only_its_project(tenants, run_id):
 
 def test_a_runtime_token_serves_its_own_registered_cluster_only(tenants, api):
     a, b = tenants
-    runtime = a.api.as_caller(admin.token(f"runtime:{a.cluster}"))
+    runtime = a.api.as_caller(admin.cluster_token(a.cluster))
     report = {"cluster_id": f"id-{a.cluster}", "capacity": {}, "workloads": []}
 
     assert runtime.post(f"/internal/clusters/{b.cluster}/reconcile", report).status_code == 403
@@ -343,7 +340,7 @@ def test_a_runtime_token_serves_its_own_registered_cluster_only(tenants, api):
     assert runtime.get("/internal/clusters/").status_code == 403
     assert runtime.get(f"/platform-experiments/{a.pe_id}").status_code == 403
 
-    unregistered = a.api.as_caller(admin.token(f"runtime:never-registered-{uuid.uuid4().hex[:8]}"))
+    unregistered = a.api.as_caller(admin.token(f"runtime:never-registered-{uuid.uuid4().hex[:8]}/1"))
     assert unregistered.post(f"/internal/clusters/{a.cluster}/reconcile", report).status_code == 401
     for caller in (a.api, b.api):
         assert caller.post(f"/internal/clusters/{a.cluster}/reconcile", report).status_code == 403
@@ -354,7 +351,7 @@ def _default_orgs_clusters(api: API) -> list[dict]:
     """The connected clusters registered for the default org. A name another test registered and
     removed still heartbeats in the listing of everything that reports, and is no cluster."""
     registered = {c["name"] for c in api.get_json("/orgs/default/clusters")["clusters"] if c["owned"]}
-    return [c for c in api.list_internal_clusters() if c["connected"] and c["cluster_name"] in registered]
+    return [c for c in api.internal_clusters() if c["connected"] and c["cluster_name"] in registered]
 
 
 def test_cluster_settings_belong_to_the_clusters_org(tenants, api):
@@ -424,7 +421,7 @@ def test_another_orgs_accounts_are_out_of_reach(tenants):
         "keys": b.api.get_json(f"/orgs/{b.org_id}/api-keys"),
         "clusters": [c["name"] for c in b.api.get_json(f"/orgs/{b.org_id}/clusters")["clusters"]],
     }
-    assert admin.add_cluster(b.cluster, b.org_id) == admin.token(f"runtime:{b.cluster}"), "org B's runtime token changed"
+    assert admin.add_cluster(b.cluster, b.org_id) == admin.cluster_token(b.cluster), "org B's runtime token changed"
 
 
 def test_capacity_stays_inside_the_org(tenants, api):
@@ -452,10 +449,6 @@ def test_capacity_stays_inside_the_org(tenants, api):
     assert api.get(f"{path}?org_id=org-never-made-{uuid.uuid4().hex[:8]}").status_code == 404
 
 
-# One CPU core, which every cluster offers.
-HOSTLESS_JOB = cpu_job()
-
-
 def test_a_job_waits_for_a_cluster_of_its_org_beside_another_orgs_free_one(tenants, api, run_id, deadline):
     """A job any local cluster could run, from orgs that own none of them and with none shared.
     An org with no cluster registered is told so. An org whose registered cluster is away is
@@ -466,12 +459,11 @@ def test_a_job_waits_for_a_cluster_of_its_org_beside_another_orgs_free_one(tenan
     lone = api.as_caller(admin.add_api_key(f"user-{marker}-{run_id}", home["org_id"]), home["org_id"], home["project_id"])
     lone_agent = f"agent-{marker}-{run_id}"
     lone.register_agent(lone_agent)
-    with lone.clusters_shared():
-        lone_pe = lone.create_platform_experiment(f"{marker}-{run_id}", 5.0, 2)
-        lone.signup_and_start(lone_pe, [lone_agent])
+    lone_pe = lone.create_platform_experiment(f"{marker}-{run_id}", 5.0, 2)
+    lone.signup_and_start(lone_pe, [lone_agent])
 
-    away_job = a.api.submit_job(a.pe_id, a.agent, job_overrides=HOSTLESS_JOB)
-    lone_job = lone.submit_job(lone_pe, lone_agent, job_overrides=HOSTLESS_JOB)
+    away_job = a.api.submit_job(a.pe_id, a.agent)
+    lone_job = lone.submit_job(lone_pe, lone_agent)
     try:
         waiting = eventually("the job says its org has no cluster", lambda: lone.experiment(lone_job), deadline=deadline, interval=2,
                              accept=lambda exp: exp.get("not_admitted_reason") == "no_cluster_for_org")

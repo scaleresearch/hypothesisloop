@@ -1,12 +1,10 @@
-"""Two platform experiments sharing one agent must never leak usage into each other's quota
-ledger, and a job on CPU cores (no accelerator) must be accepted into the fairness pool. Ported 1:1 from tests/scenarios/fairness-isolation.sh.
-API-only, parallel-safe (two fresh PEs of its own).
-"""
+"""Two platform experiments sharing one agent never leak usage into each other's quota ledger,
+and a job that holds no priced unit is refused."""
 from __future__ import annotations
 
 import pytest
 
-from conftest import cpu_job, make_agent
+from conftest import make_agent
 from support.wait import eventually
 
 pytestmark = pytest.mark.parallel
@@ -30,23 +28,11 @@ def two_pes_with_pe1_usage(api, experiment, run_id, deadline):
     return pe1, pe2, agent, job1
 
 
-def test_a_job_on_cpu_cores_is_accepted_into_the_fairness_pool(api, two_pes_with_pe1_usage, deadline):
-    pe1, pe2, agent, job1 = two_pes_with_pe1_usage
-    code, cpu_id = api.submit_job_expect(pe2, agent, hours=0.02, job_overrides=cpu_job())
-    assert code < 400, f"a job for one CPU core was rejected outright (HTTP {code})"
-    eventually(
-        f"{cpu_id} to reach a terminal/queued status",
-        lambda: api.experiment(cpu_id)["status"],
-        accept=lambda s: s in ("RUNNING", "COMPLETED", "FAILED", "EVICTED", "QUEUED", "REJECTED"),
-        deadline=deadline,
-    )
-
-
 def test_a_job_that_holds_no_priced_unit_is_refused(api, two_pes_with_pe1_usage):
     _, pe2, agent, _ = two_pes_with_pe1_usage
-    for overrides in ({"accelerator_count": 0}, {"accelerator_count": 0, "accelerator_type": None, "acceptable_accelerator_types": None}):
+    for overrides in ({"cpu": "500m"}, {"cpu": "500m", "accelerator_count": 0, "accelerator_type": "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3"}):
         code, _ = api.submit_job_expect(pe2, agent, hours=0.02, job_overrides=overrides)
-        assert code == 422, f"a job with no accelerator and no whole core was answered {code}, want 422"
+        assert code == 422, f"a job of {overrides} holds no accelerator and no whole core and was answered {code}, want 422"
 
 
 def test_pe2_quota_unaffected_by_pe1_usage(api, two_pes_with_pe1_usage, deadline):

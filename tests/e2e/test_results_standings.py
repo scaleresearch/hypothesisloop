@@ -116,7 +116,9 @@ def test_standings_are_ranked_traceable_and_exact(api, experiment, run_id, deadl
         # A job is read by the last value it reported, whatever the best point of its curve was.
         assert s["best"] == api.metric_last(job["id"], "val_accuracy"), (s, api.metric_values(job["id"], "val_accuracy"))
 
+    # The bests list every agent that measured, the baseline's too, which ranks nowhere.
     (bests,) = results["bests"]
     assert bests["metric"] == "val_accuracy"
-    assert sorted(bests["agents"], key=lambda a: a["agent_id"]) == sorted(
+    control = api.baseline_of[pe_id].agent
+    assert sorted((a for a in bests["agents"] if a["agent_id"] != control), key=lambda a: a["agent_id"]) == sorted(
         ({k: s[k] for k in ("agent_id", "best", "experiment_id")} for s in standings), key=lambda a: a["agent_id"])

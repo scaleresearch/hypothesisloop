@@ -3,7 +3,7 @@
 A person exists once they sign in, and their first key comes from the UI; hl-admin stands in for
 both. Everything after that is done with `hlk_` keys through `hl` and the API: projects, more
 keys, platform experiments, clusters. A second org sees none of it, and its jobs land on none of
-the first org's clusters until staff share one.
+the first org's clusters. A cluster of the platform's org runs every org's jobs.
 """
 from __future__ import annotations
 
@@ -16,18 +16,18 @@ from dataclasses import dataclass
 import pytest
 import requests
 
+from conftest import DEFAULT_ORG
 from support import admin
 from support.api import API, HLError
-from support.settings import setting
 from support.wait import Deadline, eventually
 
 
 # Priced in controlplane/settings/hypothesisloop.yaml, installed on none of the dev nodes and asked
 # for by no other test, so nothing but this module's jobs can fit the clusters it fakes.
-OWN_ACCELERATOR = "nvidia.com/gpu.product=NVIDIA-GEFORCE-GTX-1070-TI"
+OWN_ACCELERATOR = "nvidia.com/gpu.product=NVIDIA-GeForce-GTX-1070-Ti"
 # One job's share of the faked node, small enough that no other test's job fits beside it.
 JOB_SHAPE = {
-    "accelerator_type": OWN_ACCELERATOR, "accelerator_count": 1, "accelerator_tolerations": None,
+    "accelerator_type": OWN_ACCELERATOR, "accelerator_count": 1,
     "cpu": "10m", "memory": "16Mi", "storage": "16Mi",
 }
 MI = 1 << 20
@@ -70,7 +70,7 @@ def _key(api: API, org_id: str, name: str, project_id: str = "") -> dict:
 
 @pytest.mark.exclusive
 def test_an_api_key_runs_its_org_through_hl(orgs):
-    """Exclusive: its platform experiment is created while the default org's clusters are shared."""
+    """Exclusive: its platform experiment's baseline runs on the default org's clusters."""
     a, b = orgs
 
     me = a.api.get_json("/me")
@@ -80,7 +80,7 @@ def test_an_api_key_runs_its_org_through_hl(orgs):
 
     renamed = json.loads(a.api.hl("org", "rename", f"renamed {a.marker}"))
     assert renamed == {**renamed, "id": a.org_id, "name": f"renamed {a.marker}"}
-    with pytest.raises(HLError, match="403"):
+    with pytest.raises(HLError, match="the platform refuses this token"):
         a.api.hl("org", "create", f"second {a.marker}")
 
     project = json.loads(a.api.hl("project", "create", f"vision-{a.marker}"))
@@ -99,8 +99,7 @@ def test_an_api_key_runs_its_org_through_hl(orgs):
     assert created["minted_by"] == me["key_id"], "a key made with a key names the key that made it"
     bound = a.api.as_caller(created["token"], a.org_id, project["id"])
 
-    with bound.clusters_shared():
-        pe_id = bound.create_platform_experiment(f"{a.marker}-pe", 1.0, 1)
+    pe_id = bound.create_platform_experiment(f"{a.marker}-pe", 1.0, 1)
     assert bound.get_json(f"/platform-experiments/{pe_id}")["project_id"] == project["id"]
     assert pe_id in bound.hl("platform-experiments", "list")
     assert pe_id not in a.api.hl("platform-experiments", "list", "--project", a.project_id)
@@ -237,9 +236,8 @@ def _running_org(org: Org, run_id: str) -> tuple[str, str]:
     """An agent in a started platform experiment of the org's default project."""
     agent = f"agent-{uuid.uuid4().hex[:10]}-{run_id}"
     org.api.register_agent(agent)
-    with org.api.clusters_shared():
-        pe_id = org.api.create_platform_experiment(f"{org.marker}-{run_id}", 5.0, 2)
-        org.api.signup_and_start(pe_id, [agent])
+    pe_id = org.api.create_platform_experiment(f"{org.marker}-{run_id}", 5.0, 2)
+    org.api.signup_and_start(pe_id, [agent])
     return agent, pe_id
 
 
@@ -249,10 +247,11 @@ def _capacity_names(api: API) -> set[str]:
 
 @pytest.mark.timeout(240)
 @pytest.mark.exclusive
-def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, run_id: str, deadline: Deadline):
-    """Exclusive: while the cluster is shared, every org's capacity and cluster listing show it."""
+def test_an_orgs_cluster_runs_only_its_jobs_and_a_platform_cluster_runs_any_orgs(orgs, api: API, run_id: str, deadline: Deadline):
+    """Exclusive: the cluster of the platform's org it registers is in every org's capacity and
+    cluster listing while it lasts."""
     a, b = orgs
-    name, name_b = f"own-{a.marker}"[:40], f"own-{b.marker}"[:40]
+    name, name_b, name_p = f"own-{a.marker}"[:40], f"own-{b.marker}"[:40], f"platform-{a.marker}"[:40]
 
     printed = a.api.hl("cluster", "add", name)
     match = re.fullmatch(
@@ -262,8 +261,8 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
         r"  --namespace hypothesisloop --create-namespace --take-ownership \\\n"
         r"  --set-file runtimeToken=/dev/stdin \\\n"
         rf"  --set-string 'clusterName={name}' \\\n"
-        rf"  --set-string 'apiURL=(http://\S+:{setting('api_port')})' \\\n"
-        rf"  --set-string 'metricsURL=(http://\S+:{setting('metric_controller_port')})' \\\n"
+        r"  --set-string 'apiURL=(https?://[^' ]+)' \\\n"
+        r"  --set-string 'metricsURL=(https?://[^' ]+)' \\\n"
         r"  --set-string 'images\.registry=([^' ]+)' \\\n"
         r"  --set-string 'images\.tag=([^' ]+)'\n"
         rf"\nIt asks for the runtime token of {name}:\n(hls_\S+)\n", printed)
@@ -273,7 +272,7 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
     chart_registry, chart_tag, api_url, metrics_url, registry, image_tag, shown_token = match.groups()
     assert (chart_registry, chart_tag) == (registry, image_tag), "the chart named is the one pushed beside the images it runs"
     token = a.api.hl("cluster", "token", name).strip()
-    assert token == admin.token(f"runtime:{name}"), "the token printed is the one derived for the cluster's name"
+    assert token == admin.cluster_token(name), "the token printed is the one derived for the cluster's name"
     assert shown_token == token, "the token shown below the command is the cluster's"
     unregistered = a.api.hl_expect("cluster", "token", f"never-{a.marker}"[:40])
     assert unregistered.returncode != 0 and "hls_" not in unregistered.stdout, "hl cluster token registered a name to print its token"
@@ -304,14 +303,15 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
     assert malformed.status_code == 422, f"a cluster id that is a path: {malformed.status_code} {malformed.text}"
 
     listed = {c["name"]: c for c in _lines(a.api.hl("cluster", "list"))}
-    assert listed[name] == {**listed[name], "org_id": a.org_id, "shared": False, "owned": True, "connected": True, "cluster_id": runtime.cluster_id}
+    assert listed[name] == {**listed[name], "org_id": a.org_id, "owned": True, "connected": True, "cluster_id": runtime.cluster_id}
     assert name not in b.api.get(f"/orgs/{b.org_id}/clusters").text
     assert api.get(f"/orgs/org-never-made-{uuid.uuid4().hex[:8]}/clusters").status_code == 404, "staff list the clusters of an org that does not exist"
 
     assert name in _capacity_names(a.api) and name in _capacity_names(api)
     assert name not in _capacity_names(b.api), "org B reads the capacity of org A's cluster"
-    assert _capacity_names(a.api) & {c["cluster_name"] for c in api.list_internal_clusters()} == {name}, (
-        "org A reads the capacity of a cluster that is neither its own nor shared"
+    platform_clusters = {c["name"] for c in api.get_json(f"/orgs/{DEFAULT_ORG}/clusters")["clusters"] if c["owned"]}
+    assert (_capacity_names(a.api) & {c["cluster_name"] for c in api.internal_clusters()}) - platform_clusters == {name}, (
+        "org A reads the capacity of a cluster that is neither its own nor the platform's"
     )
 
     # A cluster's settings are fields of the named cluster: a change names the ones that change.
@@ -332,6 +332,10 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
 
     agent_a, pe_a = _running_org(a, run_id)
     agent_b, pe_b = _running_org(b, run_id)
+    # Org B turns off the platform's clusters it can use, so that its own, which is away, is all
+    # its job may wait for beside org A's free one.
+    for platform_cluster in platform_clusters:
+        b.api.hl("cluster", "disable", platform_cluster)
     job_a = a.api.submit_job(pe_a, agent_a, job_overrides=JOB_SHAPE)
     job_b = b.api.submit_job(pe_b, agent_b, job_overrides=JOB_SHAPE)
     try:
@@ -356,55 +360,34 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
         kept = {k for k in ("hypothesis", "theory", "org_id", "platform_experiment_id", "hypothesis_id") if handed.get(k)}
         assert not kept, f"the runtime is handed {kept} of the job, which no workload is built from"
 
-        share = f"/orgs/{a.org_id}/clusters/{name}"
-        for caller in (a.api, b.api):
-            assert _status(caller, "PATCH", share, {"shared": True}).status_code == 403
-        assert _status(api, "PATCH", f"/orgs/{b.org_id}/clusters/{name}", {"shared": True}).status_code == 404
-        admin.share_cluster(name, True)
-        assert {c["name"]: c["shared"] for c in a.api.get_json(f"/orgs/{a.org_id}/clusters")["clusters"]}[name] is True
-        try:
-            def placed_on_the_shared_cluster() -> dict:
-                runtime.reconcile()
-                return b.api.experiment(job_b)
+        # A cluster of the platform's org runs another org's job, and shows that org neither its
+        # owner nor its settings key.
+        runtime_p = FakeRuntime(api, name_p, admin.add_cluster(name_p, DEFAULT_ORG))
 
-            eventually("org B's job is placed on the shared cluster", placed_on_the_shared_cluster, deadline=deadline, interval=2,
-                       accept=lambda exp: exp.get("cluster_name") == name)
-            assert job_b in runtime.handed, "the shared cluster's runtime was not handed the job placed on it"
-            assert name in _capacity_names(b.api), "org B does not read the capacity of a cluster shared with it"
-            seen = b.api.get(f"/orgs/{b.org_id}/clusters")
-            shared = {c["name"]: c for c in seen.json()["clusters"]}[name]
-            assert shared == {**shared, "shared": True, "owned": False, "connected": True}, f"org B lists the shared cluster as {shared}"
-            assert "org_id" not in shared and "cluster_id" not in shared and a.org_id not in seen.text and runtime.cluster_id not in seen.text, (
-                f"org B is shown the owner or the settings key of the shared cluster: {seen.text}"
-            )
-            before = b.api.experiment(job_b)
-        finally:
-            unshared = _status(api, "PATCH", share, {"shared": False})
-        assert unshared.status_code == 200 and unshared.json()["shared"] is False
-        assert unshared.json()["requeued"] == [job_b], f"ending the sharing requeued {unshared.json()['requeued']}, want org B's job alone"
-        requeued = b.api.experiment(job_b)
-        assert requeued["status"] == "QUEUED" and not requeued.get("cluster_name"), f"org B's job after the sharing ended: {requeued}"
-        assert requeued["eviction_reason"] == "cluster_withdrawn"
-        assert requeued["attempt_count"] == before["attempt_count"] + 1, "the requeue is not a new attempt, so the runtime would keep the old workload"
-        assert requeued["attempt_count"] - requeued["infra_requeue_count"] == before["attempt_count"] - before["infra_requeue_count"], (
-            "ending the sharing spent one of the job's retries"
+        def placed_on_the_platform_cluster() -> dict:
+            runtime_p.reconcile()
+            return b.api.experiment(job_b)
+
+        eventually("org B's job is placed on the platform's cluster", placed_on_the_platform_cluster, deadline=deadline, interval=2,
+                   accept=lambda exp: exp.get("cluster_name") == name_p)
+        assert job_b in runtime_p.handed, "the platform cluster's runtime was not handed the job placed on it"
+        assert job_b not in runtime.handed, "org A's runtime was handed org B's job"
+        assert name_p in _capacity_names(b.api) and name_p in _capacity_names(a.api), "an org does not read the capacity of the platform's cluster"
+        seen = b.api.get(f"/orgs/{b.org_id}/clusters")
+        platform = {c["name"]: c for c in seen.json()["clusters"]}[name_p]
+        assert platform == {**platform, "owned": False, "connected": True}, f"org B lists the platform's cluster as {platform}"
+        assert "org_id" not in platform and "cluster_id" not in platform and runtime_p.cluster_id not in seen.text, (
+            f"org B is shown the owner or the settings key of the platform's cluster: {seen.text}"
         )
-        answer = runtime.api.post(f"/internal/clusters/{name}/reconcile", _report(runtime.cluster_id)).json()
-        assert job_b not in {e["id"] for e in answer["experiments"] or []}, "the cluster is still told to run another org's job"
-        assert job_b in (answer["checkpoint_window"] or []), "the withdrawn job is stopped without its checkpoint window"
-        assert a.api.experiment(job_a)["cluster_name"] == name, "the owner's own job was withdrawn with the others"
-        assert name not in _capacity_names(b.api)
-        assert name not in b.api.get(f"/orgs/{b.org_id}/clusters").text, "a cluster no longer shared is still listed to another org"
-        assert b.api.patch(own_path, {"stuck_pending_timeout_seconds": 1}).status_code == 404, "sharing a cluster gave another org its settings"
+        assert a.api.experiment(job_a)["cluster_name"] == name, "an org's own job moved"
+        assert _status(api, "DELETE", f"/orgs/{DEFAULT_ORG}/clusters/{name_p}").status_code == 200
 
-        # Org B removes its own cluster, which nothing ran on, and is then an org with none.
+        # Org B removes its own cluster, which nothing ran on.
         assert a.api.hl_expect("cluster", "remove", name_b).returncode != 0, "org A removed org B's cluster"
         assert json.loads(b.api.hl("cluster", "remove", name_b))["requeued"] == []
         assert runtime_b.api.post(f"/internal/clusters/{name_b}/reconcile", _report(runtime_b.cluster_id)).status_code == 401, (
             "the runtime token of a removed cluster still works"
         )
-        eventually("org B's job says its org has no cluster", waiting_for_a_cluster, deadline=deadline, interval=2,
-                   accept=lambda exp: exp.get("not_admitted_reason") == "no_cluster_for_org")
 
         # Forgetting the identity lets the cluster bind again and keeps its settings, which are the name's.
         assert b.api.hl_expect("cluster", "forget-identity", name).returncode != 0, "org B cleared the identity of org A's cluster"
@@ -419,9 +402,10 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
         assert runtime.api.post(f"/internal/clusters/{name}/reconcile", _report(runtime.cluster_id)).status_code == 401
         assert name not in a.api.get(f"/orgs/{a.org_id}/clusters").text
     finally:
-        # Removing the clusters, already gone on the passing path, also ends any sharing left on.
+        # Removing the clusters, already gone on the passing path but the platform's.
         _status(api, "DELETE", f"/orgs/{a.org_id}/clusters/{name}")
         _status(api, "DELETE", f"/orgs/{b.org_id}/clusters/{name_b}")
+        _status(api, "DELETE", f"/orgs/{DEFAULT_ORG}/clusters/{name_p}")
         for org, job_id, pe_id in ((a, job_a, pe_a), (b, job_b, pe_b)):
             org.api.post(f"/experiments/{job_id}/cancel")
             org.api.close_platform_experiment(pe_id)
@@ -430,13 +414,12 @@ def test_a_cluster_runs_only_its_orgs_jobs_until_staff_share_it(orgs, api: API, 
 @pytest.mark.timeout(240)
 @pytest.mark.exclusive
 def test_an_org_turns_a_cluster_off_and_on_for_its_own_jobs(orgs, api: API, run_id: str, deadline: Deadline):
-    """Exclusive: while the cluster is shared, every org's capacity and cluster listing show it."""
+    """Exclusive: the platform's cluster it registers is in every org's capacity and cluster listing
+    while it lasts."""
     a, b = orgs
     name = f"use-{a.marker}"[:40]
-    token = a.api.post_json(f"/orgs/{a.org_id}/clusters", {"name": name})["runtime_token"]
-    runtime = FakeRuntime(a.api, name, token)
+    runtime = FakeRuntime(api, name, admin.add_cluster(name, DEFAULT_ORG))
     assert runtime.reconcile() == []
-    admin.share_cluster(name, True)
 
     def clusters_of(org: Org) -> dict[str, dict]:
         return {c["name"]: c for c in org.api.get_json(f"/orgs/{org.org_id}/clusters")["clusters"]}
@@ -450,8 +433,8 @@ def test_an_org_turns_a_cluster_off_and_on_for_its_own_jobs(orgs, api: API, run_
     agent_a, pe_a = _running_org(a, run_id)
     agent_b, pe_b = _running_org(b, run_id)
     jobs: list[tuple[Org, str]] = []
-    # Every other cluster org B can use, which are the ones the platform shares in this stack. It
-    # turns them off too, so that the one under test is all that decides where its jobs go.
+    # Every other cluster org B can use, which are the platform's others in this stack. It turns
+    # them off too, so that the one under test is all that decides where its jobs go.
     others = [c for c in clusters_of(b) if c != name]
     try:
         assert clusters_of(a)[name]["enabled"] is True and clusters_of(b)[name]["enabled"] is True, "a cluster does not start enabled"
@@ -460,6 +443,7 @@ def test_an_org_turns_a_cluster_off_and_on_for_its_own_jobs(orgs, api: API, run_
         for verb in ("disable", "enable"):
             assert _status(project_key, "POST", f"/orgs/{b.org_id}/clusters/{name}/{verb}").status_code == 403, "a key of one project decided for its org"
             assert _status(b.api, "POST", f"/orgs/{a.org_id}/clusters/{name}/{verb}").status_code == 404, "org B decided for org A"
+            assert _status(b.api, "POST", f"/orgs/{DEFAULT_ORG}/clusters/{name}/{verb}").status_code in (403, 404), "org B decided for the platform"
             assert _status(a.api, "POST", f"/orgs/{a.org_id}/clusters/never-{a.marker}/{verb}").status_code == 404, "a name nobody registered was found"
         assert clusters_of(a)[name]["enabled"] is True and clusters_of(b)[name]["enabled"] is True, "a refused request turned the cluster off"
 
@@ -467,18 +451,18 @@ def test_an_org_turns_a_cluster_off_and_on_for_its_own_jobs(orgs, api: API, run_
             b.api.hl("cluster", "disable", other)
         running = b.api.submit_job(pe_b, agent_b, job_overrides=JOB_SHAPE)
         jobs.append((b, running))
-        eventually("org B's job is placed on the shared cluster", after_a_tick(b, running), deadline=deadline, interval=2,
+        eventually("org B's job is placed on the platform's cluster", after_a_tick(b, running), deadline=deadline, interval=2,
                    accept=lambda exp: exp.get("cluster_name") == name)
 
         off = json.loads(b.api.hl("cluster", "disable", name))
-        assert off == {**off, "name": name, "shared": True, "enabled": False}, f"hl cluster disable answered {off}"
+        assert off == {**off, "name": name, "enabled": False}, f"hl cluster disable answered {off}"
         assert "org_id" not in off and "cluster_id" not in off, f"org B is shown the owner or the settings key of the cluster it turned off: {off}"
         assert json.loads(b.api.hl("cluster", "disable", name)) == off, "turning it off again answered something else"
         listed = {c["name"]: c for c in _lines(b.api.hl("cluster", "list"))}
         assert listed[name]["enabled"] is False, f"hl cluster list shows the cluster org B turned off as {listed[name]}"
-        assert clusters_of(a)[name]["enabled"] is True, "org B turning the shared cluster off turned it off for org A"
+        assert clusters_of(a)[name]["enabled"] is True, "org B turning the platform's cluster off turned it off for org A"
         assert name not in _capacity_names(b.api), "org B reads the capacity of a cluster it turned off"
-        assert name in _capacity_names(a.api), "org A lost the capacity of its own cluster when org B turned it off"
+        assert name in _capacity_names(a.api), "org A lost the capacity of the platform's cluster when org B turned it off"
 
         # What was placed before stays: the runtime is still told to run it, and it is not requeued.
         waiting = b.api.submit_job(pe_b, agent_b, job_overrides=JOB_SHAPE)
@@ -497,7 +481,7 @@ def test_an_org_turns_a_cluster_off_and_on_for_its_own_jobs(orgs, api: API, run_
         # The other org is placed there as before.
         of_a = a.api.submit_job(pe_a, agent_a, job_overrides=JOB_SHAPE)
         jobs.append((a, of_a))
-        eventually("org A's job is placed on its own cluster", after_a_tick(a, of_a), deadline=deadline, interval=2,
+        eventually("org A's job is placed on the platform's cluster", after_a_tick(a, of_a), deadline=deadline, interval=2,
                    accept=lambda exp: exp.get("cluster_name") == name)
 
         # The node holds two jobs: the one placed before makes room, and the cluster is turned on.
@@ -510,8 +494,8 @@ def test_an_org_turns_a_cluster_off_and_on_for_its_own_jobs(orgs, api: API, run_
     finally:
         for other in others:
             _status(b.api, "POST", f"/orgs/{b.org_id}/clusters/{other}/enable")
-        # Removing the cluster also ends its sharing and forgets who turned it off.
-        _status(api, "DELETE", f"/orgs/{a.org_id}/clusters/{name}")
+        # Removing the cluster also forgets who turned it off.
+        _status(api, "DELETE", f"/orgs/{DEFAULT_ORG}/clusters/{name}")
         for org, job_id in jobs:
             org.api.post(f"/experiments/{job_id}/cancel")
         for org, pe_id in ((a, pe_a), (b, pe_b)):
@@ -522,10 +506,10 @@ def test_an_org_turns_a_cluster_off_and_on_for_its_own_jobs(orgs, api: API, run_
 @pytest.mark.exclusive
 def test_an_org_ranks_its_clusters_and_its_jobs_follow_the_order(orgs, api: API, run_id: str, deadline: Deadline):
     """Exclusive: its jobs fit any cluster of org A that reports the accelerator, and for a moment
-    one of its clusters is shared."""
+    the platform has a cluster of its own here."""
     a, b = orgs
     # The names sort against the priorities they are given, so placement by name fails the test.
-    low, high = f"a-low-{a.marker}"[:40], f"z-high-{a.marker}"[:40]
+    low, high, platform = f"a-low-{a.marker}"[:40], f"z-high-{a.marker}"[:40], f"platform-rank-{a.marker}"[:40]
     runtimes = {
         name: FakeRuntime(a.api, name, a.api.post_json(f"/orgs/{a.org_id}/clusters", {"name": name})["runtime_token"])
         for name in (low, high)
@@ -541,7 +525,7 @@ def test_an_org_ranks_its_clusters_and_its_jobs_follow_the_order(orgs, api: API,
 
     def others() -> list[str]:
         """The clusters org A ranks besides the two of this test, in their order."""
-        return [c["name"] for c in a.api.get_json(f"/orgs/{a.org_id}/clusters")["clusters"] if c["owned"] and not c["shared"] and c["name"] not in runtimes]
+        return [c["name"] for c in a.api.get_json(f"/orgs/{a.org_id}/clusters")["clusters"] if c["owned"] and c["name"] not in runtimes]
 
     def placed(job_id: str) -> str:
         def read() -> dict:
@@ -569,7 +553,6 @@ def test_an_org_ranks_its_clusters_and_its_jobs_follow_the_order(orgs, api: API,
             assert refused.status_code == 422, f"PUT order {names}: {refused.status_code} {refused.text}"
         assert _status(a.api, "PATCH", path(high), {"priority": 5}).status_code == 422, "a priority is still taken on a cluster"
         assert _status(b.api, "PUT", order_path, {"names": [high, low]}).status_code == 404, "org B ordered org A's clusters"
-        assert _status(a.api, "PATCH", path(high), {"shared": True}).status_code == 403, "an org shared its own cluster"
         assert a.api.hl_expect("cluster", "order", high).returncode != 0
         assert ranked() == [low, high], "a refused request changed the order"
 
@@ -591,20 +574,14 @@ def test_an_org_ranks_its_clusters_and_its_jobs_follow_the_order(orgs, api: API,
         assert placed(fourth) == low, "a job went to the cluster that is now ranked second, with room on the first"
         assert a.api.experiment(second)["cluster_name"] == high, "a job that was placed moved when the order changed"
 
-        # A shared cluster comes after every org's own and is in no org's order.
-        a.api.hl("cluster", "order", high, low, *others())
-        admin.share_cluster(high, True)
-        try:
-            assert ranked() == [low, high], f"a shared cluster is ranked {ranked()}"
-            refused = _status(a.api, "PUT", order_path, {"names": [high, low, *others()]})
-            assert refused.status_code == 422, f"an order naming a shared cluster: {refused.status_code} {refused.text}"
-            seen_by_b = b.api.get_json(f"/orgs/{b.org_id}/clusters")["clusters"]
-            shared_at = [c["name"] for c in seen_by_b].index(high)
-            assert all(i < shared_at for i, c in enumerate(seen_by_b) if c["owned"] and not c["shared"]), "an org's own cluster is listed after the platform's"
-        finally:
-            admin.share_cluster(high, False)
-        assert ranked() == [low, high], "a cluster no longer shared did not come last among its org's own"
+        # A cluster of the platform's org comes after every org's own and is in no other org's order.
+        FakeRuntime(api, platform, admin.add_cluster(platform, DEFAULT_ORG)).reconcile()
+        seen = [c["name"] for c in a.api.get_json(f"/orgs/{a.org_id}/clusters")["clusters"]]
+        assert seen.index(platform) > max(seen.index(low), seen.index(high)), f"the platform's cluster is listed before an org's own: {seen}"
+        refused = _status(a.api, "PUT", order_path, {"names": [platform, low, high, *others()]})
+        assert refused.status_code == 422, f"an order naming the platform's cluster: {refused.status_code} {refused.text}"
     finally:
+        _status(api, "DELETE", f"/orgs/{DEFAULT_ORG}/clusters/{platform}")
         for name in runtimes:
             _status(api, "DELETE", path(name))
         for job_id in jobs:
@@ -629,7 +606,7 @@ def test_only_staff_see_every_org(orgs, api: API):
 
 @pytest.mark.exclusive
 def test_tokens_the_platform_derives_reach_no_account(orgs, api: API, run_id: str):
-    """Exclusive: its platform experiment is started while the default org's clusters are shared."""
+    """Exclusive: its platform experiment's baseline runs on the default org's clusters."""
     a, _ = orgs
     agent, pe_id = _running_org(a, run_id)
     try:

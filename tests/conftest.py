@@ -1,8 +1,7 @@
-"""Configuration, run identity, cleanup, markers, preflight (tests/improve.md target layout).
-
-Fresh tenant per test: every fixture that creates a named resource suffixes it with a UUID (not
-timestamp/PID -- collision-free either way, but a UUID needs no shared clock assumption), so
-xdist-parallel tests never collide on agent ids, job ids or platform-experiment names.
+"""The suite works through the platform's API and hl alone: it creates experiments, submits jobs
+and reads what comes out. It assumes nothing of the compute that runs the jobs, so it passes on
+any cluster the stack gives the default org: the default job holds one core, which every cluster
+offers. Every resource a test creates is named with a UUID, so tests never collide.
 """
 from __future__ import annotations
 
@@ -11,6 +10,7 @@ import shutil
 import subprocess
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -19,7 +19,6 @@ import requests
 from support import admin
 from support.api import API
 from support.settings import setting
-from support.cluster import wait_scope_idle
 from support.wait import Deadline
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -40,22 +39,35 @@ HL_BIN = REPO_ROOT / "bin" / "hl"
 # session makes its own project in it, so what a run creates never lands in the default project.
 DEFAULT_ORG = "default"
 
-# Which accelerator the generic scenarios schedule onto.
-TEST_ACCELERATOR_TYPE = "nvidia.com/gpu.product=NVIDIA-L40"
-# Must match TEST_ACCELERATOR_TYPE's acch_rate in controlplane/settings/hypothesisloop.yaml.
-TEST_ACCH_RATE = 0.25
-# The type every cluster offers its cores as. A job that states cpu and no accelerator holds that
-# many units of it. A job that holds no priced unit is refused.
+# The type every cluster offers its cores as. A job that states cpu and no accelerator, as the
+# default job does with one, holds that many units of it.
 TEST_CPU_TYPE = "hypothesisloop.dev/cpu=core"
 # The rate the control plane builds TEST_CPU_TYPE in at: a budget spent on cores reads as CPU
 # core-hours.
 TEST_CPU_ACCH_RATE = 1.0
 
 
-def cpu_job(cores: int = 1) -> dict:
-    """Job overrides for `cores` cores and no accelerator, asked for the plain way: cpu alone.
-    Memory and storage stay those of the default job."""
-    return {"accelerator_type": None, "accelerator_count": None, "acceptable_accelerator_types": None, "cpu": str(cores)}
+def cpu_job(cores: int) -> dict:
+    """Job overrides for `cores` cores and no accelerator."""
+    return {"cpu": str(cores)}
+
+
+@dataclass(frozen=True)
+class Accelerator:
+    type: str
+    rate: float
+    per_node: int
+
+
+@pytest.fixture(scope="session")
+def accelerator(api) -> Accelerator:
+    """The accelerator the default org's clusters offer most of on one node, for the tests about
+    jobs that hold one. Those skip on a stack that offers none."""
+    lines = [a for c in api.capacity(DEFAULT_ORG)["clusters"] for a in c.get("accelerators") or [] if a["kind"] == "accelerator"]
+    if not lines:
+        pytest.skip("the default org's clusters offer no accelerator")
+    best = max(lines, key=lambda a: a["per_node_available"])
+    return Accelerator(best["accelerator_type"], best["acch_per_hour"], best["per_node_available"])
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
@@ -208,17 +220,3 @@ def experiment(api: API, run_id: str):
 
     for pe_id in created:
         api.close_platform_experiment(pe_id)
-
-
-@pytest.fixture(autouse=True)
-def idle_cluster(request: pytest.FixtureRequest, api: API):
-    """Autouse on `exclusive` tests only: a scenario only owns its scope if that scope is actually
-    idle when it starts (tests/improve.md #2.2). A failure to reach idle is a test/setup failure,
-    not a warning followed by execution -- never "continue anyway" (that turns one contamination
-    problem into unrelated failures downstream, see lib/scope.sh's header comment).
-    """
-    if "exclusive" not in {m.name for m in request.node.iter_markers()}:
-        yield
-        return
-    wait_scope_idle(api, list(request.node.get_closest_marker("exclusive").args))
-    yield

@@ -12,7 +12,6 @@ from conftest import make_agent
 from support.api import JobRequest
 from support.wait import eventually
 
-ACCELERATOR_TYPE = "nvidia.com/gpu.product=NVIDIA-A100-80GB-PCIe"
 METRICS = [
     {"key": "val_accuracy", "direction": "maximize"},
     {"key": "stage_rank", "direction": "maximize"},
@@ -32,10 +31,8 @@ def test_secret_env_reaches_the_workload_and_no_read_of_the_job(api, experiment,
     job_id = api.submit_job(
         pe_id, agent, hours=0.02,
         job_overrides={
-            "command": ["python", "data_stage.py"],
+            "command": ["python", "-u", "data_stage.py"],
             "max_retries": 0,
-            "accelerator_type": ACCELERATOR_TYPE,
-            "accelerator_count": 1,
             "env": {"HYPOTHESISLOOP_DURATION_SECONDS": "10", "STAGE_MODE": "write"},
         },
         secret_env={"CHECKPOINT_VALUE": secret},
@@ -74,7 +71,7 @@ def test_a_name_in_both_env_and_secret_env_is_refused(api, experiment, run_id):
     hyp_id = api.register_hypothesis(pe_id, agent, "")["id"]
     job_id = f"secret-clash-{uuid.uuid4().hex[:8]}"
     req = JobRequest(
-        id=job_id, agent_id=agent, platform_experiment_id=pe_id, hypothesis_id=hyp_id, code_ref=api.code_ref(pe_id), hours=0.02, tier="guaranteed",
+        id=job_id, agent_id=agent, platform_experiment_id=pe_id, hypothesis_id=hyp_id, code_ref=api.code_ref(pe_id, agent), hours=0.02, tier="guaranteed",
         job_overrides={"env": {"HF_TOKEN": "open"}, "secret_env": {"HF_TOKEN": "the-secret-value"}},
     )
     r = api.post("/experiments", yaml.safe_load(req.to_yaml()))
