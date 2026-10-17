@@ -63,7 +63,10 @@ for i in $(seq 1 "${NODE_COUNT}"); do
   }; then
     lib_destroy_node "${CONTEXT_NAME}" "${name}"
   fi
+  # A node whose container is gone leaves its Node and node password behind, which refuse the
+  # agent of a new container by that name.
   if ! podman inspect "${name}" &>/dev/null; then
+    lib_destroy_node "${CONTEXT_NAME}" "${name}"
     lib_create_node "${CONTEXT_NAME}" "${name}" "${IMAGE}" "${SERVER_URL}" "${TOKEN}" "${NODE_CPUS}" "${NODE_MEMORY}"
   fi
   lib_wait_node_ready "${CONTEXT_NAME}" "${name}"
