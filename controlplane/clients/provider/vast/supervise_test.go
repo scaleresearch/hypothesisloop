@@ -54,13 +54,7 @@ func startScript(t *testing.T, shell []string, dir string, args []string) *super
 		"CONTAINER_API_KEY=instance-key",
 		"CONTAINER_ID=9001",
 	}
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start supervisor: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-	})
+	supervisetest.Start(t, cmd)
 	return &supervisedRun{dir: dir, cmd: cmd}
 }
 

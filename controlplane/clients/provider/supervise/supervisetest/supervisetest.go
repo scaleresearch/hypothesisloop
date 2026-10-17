@@ -5,7 +5,9 @@ package supervisetest
 
 import (
 	"os/exec"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // shells are tried by name: the host's own sh, then the two the images carry.
@@ -34,4 +36,21 @@ func EachShell(t *testing.T, test func(t *testing.T, shell []string)) {
 func Command(shell []string, args ...string) *exec.Cmd {
 	argv := append(append([]string{}, shell...), args...)
 	return exec.Command(argv[0], argv[1:]...)
+}
+
+// Start starts cmd as the leader of its own process group, and at the end of the test kills the
+// whole group and reaps cmd, so nothing the script left behind outlives the test, whether it
+// passed, failed or timed out.
+func Start(t *testing.T, cmd *exec.Cmd) {
+	t.Helper()
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start supervisor: %v", err)
+	}
+	t.Cleanup(func() {
+		for syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) == nil {
+			time.Sleep(10 * time.Millisecond)
+		}
+		_ = cmd.Wait()
+	})
 }

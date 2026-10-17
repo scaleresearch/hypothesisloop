@@ -27,10 +27,7 @@ func startFor(t *testing.T, shell []string, dir string, lifetime time.Duration, 
 	t.Helper()
 	cmd := supervisetest.Command(shell, append([]string{"-c", supervise.Script(parts, lifetime), "hl-supervisor"}, command...)...)
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "DIR=" + dir}
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start supervisor: %v", err)
-	}
-	t.Cleanup(func() { _ = cmd.Process.Kill() })
+	supervisetest.Start(t, cmd)
 	return supervised{cmd}
 }
 

@@ -21,10 +21,7 @@ func startSupervised(t *testing.T, shell []string, dir string, env []string, com
 	cmd := supervisetest.Command(shell, supervised(command)[1:]...)
 	cmd.Env = append([]string{"PATH=" + os.Getenv("PATH"), "TMPDIR=" + dir, "DIR=" + dir}, env...)
 	cmd.Stdout = &bytes.Buffer{}
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start supervisor: %v", err)
-	}
-	t.Cleanup(func() { _ = cmd.Process.Kill() })
+	supervisetest.Start(t, cmd)
 	return cmd
 }
 
