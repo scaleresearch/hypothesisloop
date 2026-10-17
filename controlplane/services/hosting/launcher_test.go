@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/provider"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/provider/fake"
+	"github.com/scaleresearch/hypothesisloop/controlplane/cloud/provider"
+	"github.com/scaleresearch/hypothesisloop/controlplane/cloud/provider/fake"
 )
 
 const agentToken = "hls_agent-token"

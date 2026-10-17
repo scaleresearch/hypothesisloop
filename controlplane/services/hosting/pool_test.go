@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/provider"
+	"github.com/scaleresearch/hypothesisloop/controlplane/cloud/provider"
 )
 
 const image1, image2 = "registry.example.invalid/agent:1", "registry.example.invalid/agent:2"

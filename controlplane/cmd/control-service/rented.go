@@ -7,12 +7,12 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/cloud/compute"
+	"github.com/scaleresearch/hypothesisloop/controlplane/cloud/provider"
+	"github.com/scaleresearch/hypothesisloop/controlplane/cloud/provider/providers"
 	hypothesisloopcfg "github.com/scaleresearch/hypothesisloop/controlplane/config"
-	"github.com/scaleresearch/hypothesisloop/controlplane/services/cloudcompute"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/clusteragentapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/services/hosting"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/provider"
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/provider/providers"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
@@ -82,11 +82,11 @@ func newLauncher(pcfg *hypothesisloopcfg.Config, s *hypothesisloopcfg.SandboxCon
 	return launcher, nil
 }
 
-func newCloudCluster(pcfg *hypothesisloopcfg.Config, cc hypothesisloopcfg.CloudComputeConfig, environments string, store *db.Store, clusters *clusteragentapi.Handler, logger *zap.Logger) (*cloudcompute.Cluster, error) {
-	shapes := make([]cloudcompute.Shape, 0, len(cc.Shapes))
+func newCloudCluster(pcfg *hypothesisloopcfg.Config, cc hypothesisloopcfg.CloudComputeConfig, environments string, store *db.Store, clusters *clusteragentapi.Handler, logger *zap.Logger) (*compute.Cluster, error) {
+	shapes := make([]compute.Shape, 0, len(cc.Shapes))
 	var acceleratorTypes []string
 	for _, s := range cc.Shapes {
-		shapes = append(shapes, cloudcompute.Shape{
+		shapes = append(shapes, compute.Shape{
 			Name: s.Name, AcceleratorType: s.AcceleratorType, Accelerators: s.Accelerators,
 			CPUMillis: s.CPUMillis, MemoryBytes: s.MemoryBytes, StorageBytes: s.StorageBytes, MaxInstances: s.MaxInstances,
 		})
@@ -99,9 +99,9 @@ func newCloudCluster(pcfg *hypothesisloopcfg.Config, cc hypothesisloopcfg.CloudC
 	if err != nil {
 		return nil, fmt.Errorf("cloud_compute %s: %w", cc.ClusterName, err)
 	}
-	cluster, err := cloudcompute.NewCluster(cloudcompute.ClusterConfig{
+	cluster, err := compute.NewCluster(compute.ClusterConfig{
 		Name: cc.ClusterName,
-		Executor: cloudcompute.Config{
+		Executor: compute.Config{
 			ClusterID: cc.Provider.Name + "-" + cc.Provider.AccountID, Namespace: cc.Namespace,
 			APIURL: pcfg.Services.PublicAPIURL, JobImage: cc.JobImage, EnvironmentsRepository: environments,
 			Shapes: shapes, Provider: rented,

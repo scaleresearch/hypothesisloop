@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/provider"
+	"github.com/scaleresearch/hypothesisloop/controlplane/cloud/provider"
 )
 
 // The warm pool is instances rented ahead of the agents that will run in them: placed, their

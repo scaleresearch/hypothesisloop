@@ -9,7 +9,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/provider/e2b"
+	"github.com/scaleresearch/hypothesisloop/controlplane/cloud/provider/e2b"
 )
 
 const usage = `usage: e2b-template <image> <cores> <memory-mib>

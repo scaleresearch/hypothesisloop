@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/provider"
+	"github.com/scaleresearch/hypothesisloop/controlplane/cloud/provider"
 )
 
 // Size is what every agent instance is rented at.

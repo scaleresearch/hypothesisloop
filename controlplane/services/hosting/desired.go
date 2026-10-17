@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/scaleresearch/hypothesisloop/controlplane/shared/provider"
+	"github.com/scaleresearch/hypothesisloop/controlplane/cloud/provider"
 )
 
 // instance is one entry of the platform's list under the name the provider will hold it by.
