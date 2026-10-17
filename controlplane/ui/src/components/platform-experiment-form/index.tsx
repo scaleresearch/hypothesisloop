@@ -45,7 +45,7 @@ interface FormHandle {
 
 // Every field of the form the repository's experiment file fills, by the words the form names it with.
 const FILE_FIELDS = [
-  ['branch', 'the branch'], ['name', 'the name'], ['description', 'the brief'], ['metrics', 'the metrics'], ['budget_accelerator_hours', 'the budget'],
+  ['branch', 'the branch'], ['name', 'the name'], ['description', 'the experiment goal'], ['metrics', 'the metrics'], ['budget_accelerator_hours', 'the budget'],
   ['max_agents', 'the max researchers'], ['duration_hours', 'the duration'], ['starting_agents', 'the starting agents'],
   ['report_interval_seconds', 'the report interval'], ['stages', 'the stage ladder'], ['max_concurrent_accelerators', 'the max concurrent accelerators'],
   ['agent_image', 'the agent image'], ['coordinator_model', 'the coordinator model'], ['default_quota_tier', 'the default quota tier'],
@@ -174,7 +174,7 @@ export const PlatformExperimentForm = forwardRef<FormHandle, FormProps>(function
 
   // A repository may bring its own experiment spec, the one hl platform-experiments start reads.
   // Choosing it fills in every field it states, for the person to read and change before the
-  // whole body is sent. A name or a brief already typed stays. It is read at the branch named,
+  // whole body is sent. A name or an experiment goal already typed stays. It is read at the branch named,
   // and again whenever the repository or the branch changes.
   async function readFile(repository: string, branch: string) {
     setForm(f => ({ ...f, repository, branch }))

@@ -7,10 +7,10 @@ const POINTS = [
   { what: 'Limits on time or spend', example: 'a few hours, at most 10 GPU-hours' },
 ]
 
-/** The few things a brief should say, folded until asked for. */
-export function BriefGuide({ className }: { className?: string }) {
+/** The few things an experiment goal should say, folded until asked for. */
+export function GoalGuide({ className }: { className?: string }) {
   return (
-    <Disclosure label="What makes a good brief?" className={className}>
+    <Disclosure label="What makes a good experiment goal?" className={className}>
       <ul className="grid gap-1.5 text-sm">
         {POINTS.map(point => (
           <li key={point.what}>

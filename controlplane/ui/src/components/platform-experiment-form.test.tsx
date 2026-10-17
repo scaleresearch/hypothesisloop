@@ -67,7 +67,7 @@ async function chooseRepository(repository: string) {
 // The name and the brief, then on through the steps to the last.
 async function essentials({ repository }: { repository?: string } = {}) {
   await userEvent.type(name(), 'Run')
-  await userEvent.type(screen.getByLabelText('Brief'), 'The brief')
+  await userEvent.type(screen.getByLabelText('Experiment goal'), 'The brief')
   if (repository) await chooseRepository(repository)
   await next()
   await next()
@@ -110,7 +110,7 @@ describe('a new platform experiment', () => {
   it('sends what the person states over the defaults', async () => {
     show()
     await userEvent.type(name(), 'Run')
-    await userEvent.type(screen.getByLabelText('Brief'), 'The brief')
+    await userEvent.type(screen.getByLabelText('Experiment goal'), 'The brief')
     await next()
     await userEvent.clear(screen.getByLabelText('Duration (hours)'))
     await userEvent.type(screen.getByLabelText('Duration (hours)'), '6')
@@ -126,7 +126,7 @@ describe('a new platform experiment', () => {
   it('starts with the agents the person lists, within max researchers', async () => {
     show()
     await userEvent.type(name(), 'Run')
-    await userEvent.type(screen.getByLabelText('Brief'), 'The brief')
+    await userEvent.type(screen.getByLabelText('Experiment goal'), 'The brief')
     await next()
     await next()
     await userEvent.clear(screen.getByLabelText('Max researchers'))
@@ -144,7 +144,7 @@ describe('a new platform experiment', () => {
   it('offers the org\'s researcher types from the API, each with what it does, and links to manage them', async () => {
     show()
     await userEvent.type(name(), 'Run')
-    await userEvent.type(screen.getByLabelText('Brief'), 'The brief')
+    await userEvent.type(screen.getByLabelText('Experiment goal'), 'The brief')
     await next()
     await next()
     await userEvent.click(within(screen.getByRole('group', { name: 'Starting agents choice' })).getByRole('button', { name: 'Custom' }))
@@ -164,7 +164,7 @@ describe('a new platform experiment', () => {
   it('adds a common metric or a typed key from one control, a typed key maximizing', async () => {
     show()
     await userEvent.type(name(), 'Run')
-    await userEvent.type(screen.getByLabelText('Brief'), 'The brief')
+    await userEvent.type(screen.getByLabelText('Experiment goal'), 'The brief')
     await next()
     const metric = screen.getByLabelText('Add a metric')
     await userEvent.type(metric, 'val_loss')
@@ -179,7 +179,7 @@ describe('a new platform experiment', () => {
   it('states a gate with its bound, a tracked metric and the target of the ranked one, signed in its direction', async () => {
     show()
     await userEvent.type(name(), 'Run')
-    await userEvent.type(screen.getByLabelText('Brief'), 'The brief')
+    await userEvent.type(screen.getByLabelText('Experiment goal'), 'The brief')
     await next()
     const metric = screen.getByLabelText('Add a metric')
     await userEvent.type(metric, 'val_loss')
@@ -218,7 +218,7 @@ describe('a new platform experiment', () => {
     expect(vi.mocked(createExperimentDraft).mock.calls[0]).toEqual(['prj_1', {
       form: expect.objectContaining({ name: 'Run', description: 'The brief', repository: 'acme/widgets' }), step: '1', failure: 'the installation does not cover acme/widgets',
     }])
-    expect(screen.getByLabelText('Brief')).toBeTruthy()
+    expect(screen.getByLabelText('Experiment goal')).toBeTruthy()
     expect(screen.getByText('Not created. Change what the refusal names and try again.')).toBeTruthy()
 
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }))

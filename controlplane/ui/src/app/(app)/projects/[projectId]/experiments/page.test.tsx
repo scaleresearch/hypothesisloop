@@ -179,7 +179,7 @@ describe('the experiments page', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Configure it myself' }))
     const dialog = within(screen.getByRole('dialog'))
     await userEvent.type(dialog.getByPlaceholderText('e.g. Q3 Vision Benchmark'), 'First run')
-    await userEvent.type(dialog.getByLabelText('Brief'), 'The brief')
+    await userEvent.type(dialog.getByLabelText('Experiment goal'), 'The brief')
     await userEvent.click(dialog.getByRole('button', { name: 'Next' }))
     await userEvent.click(dialog.getByRole('button', { name: 'Next' }))
     await userEvent.click(dialog.getByRole('button', { name: 'Create experiment' }))
@@ -214,8 +214,8 @@ describe('the experiments page', () => {
     const dialog = within(await screen.findByRole('dialog'))
     expect(fetchExperimentDraft).toHaveBeenCalledWith('prj_1', 'draft-1')
     expect(navigation.replace).toHaveBeenCalledWith('/projects/prj_1/experiments')
-    expect(dialog.getByLabelText('Brief')).toBeTruthy()
-    expect((dialog.getByLabelText('Brief') as HTMLTextAreaElement).value).toBe('The kept brief')
+    expect(dialog.getByLabelText('Experiment goal')).toBeTruthy()
+    expect((dialog.getByLabelText('Experiment goal') as HTMLTextAreaElement).value).toBe('The kept brief')
   })
 
   it('lists the experiments under the goal box, or says it could not read them and keeps the box', async () => {

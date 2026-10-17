@@ -5,7 +5,7 @@ import { Inline, Stack } from '@/components/ui/stack'
 import { Pill } from '@/components/ui/text'
 import type { PlatformExperiment } from '@/types/api'
 
-/** The experiment's brief and the metrics it optimizes. */
+/** The experiment's description and the metrics it optimizes. */
 export function About({ pe }: { pe: PlatformExperiment }) {
   const metrics = pe.metrics ?? []
   if (!pe.description && metrics.length === 0) return null

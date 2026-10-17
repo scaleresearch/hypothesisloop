@@ -251,7 +251,7 @@ func (a *Access) Agent(ctx context.Context, agentID string) error {
 
 // ActAs is Agent for a request that spends as the agent it names: a job, quota asked for or
 // given away, the key to its data. A coordinator's token is refused all of them. It is handed to
-// a machine the platform rents and is there to keep a run's brief, so it holds no agent's hand.
+// a machine the platform rents and is there to keep a run's description, so it holds no agent's hand.
 func (a *Access) ActAs(ctx context.Context, agentID string) error {
 	p, err := principal(ctx)
 	if err != nil {

@@ -234,7 +234,7 @@ func (spec *Spec) Validate() error {
 		}
 	}
 	if s.Name == "" || s.Description == "" {
-		refuse("name", "name and description are required: the description is the brief every agent works from")
+		refuse("name", "name and description are required: the description is the text every agent works from")
 	}
 	if why := ProseTooLong("description", s.Description); why != "" {
 		refuse("description", "%s", why)

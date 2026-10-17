@@ -1,4 +1,4 @@
-import { BriefGuide } from '@/components/brief-guide'
+import { GoalGuide } from '@/components/goal-guide'
 import { namesRepository, RepositorySelect } from '@/components/repository-select'
 import { Button } from '@/components/ui/button'
 import { FieldGroup, FormField } from '@/components/ui/form-field'
@@ -21,9 +21,9 @@ const FILE = '.hypothesisloop/experiment.yaml'
 
 const listed = (words: string[]) => words.length === 1 ? words[0] : `${words.slice(0, -1).join(', ')} and ${words.at(-1)}`
 
-const BRIEF_PLACEHOLDER = 'What to find out, the number that decides it and how it is measured, what to compare against, and what must stay the same.'
+const GOAL_PLACEHOLDER = 'What to find out, the number that decides it and how it is measured, what to compare against, and what must stay the same.'
 
-/** Step 1: the code, the name and the brief. */
+/** Step 1: the code, the name and the experiment goal. */
 export function StepWhat({ form, set, isEdit, locked, fileNote, onRead }: StepProps & {
   fileNote: FileNote | null
   /** Takes the repository and branch named and reads the experiment file there. */
@@ -74,7 +74,7 @@ export function StepWhat({ form, set, isEdit, locked, fileNote, onRead }: StepPr
         <Input value={form.name} disabled={locked('name')} onChange={e => set('name', e.target.value)} placeholder="e.g. Q3 Vision Benchmark" />
       </FormField>
       <FormField
-        label="Brief"
+        label="Experiment goal"
         hint="The only text every agent reads about the task."
       >
         <Textarea
@@ -83,10 +83,10 @@ export function StepWhat({ form, set, isEdit, locked, fileNote, onRead }: StepPr
           value={form.description}
           disabled={locked('description')}
           onChange={e => set('description', e.target.value)}
-          placeholder={BRIEF_PLACEHOLDER}
+          placeholder={GOAL_PLACEHOLDER}
         />
       </FormField>
-      <BriefGuide />
+      <GoalGuide />
     </>
   )
 }

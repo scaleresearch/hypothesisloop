@@ -29,11 +29,11 @@ Your `hyperparameters` are the area whoever added you gave you to start from. Th
 it are yours, the bolder the farther the target.
 
 Every agent competes, ranked on the same declared metrics. The `description` of
-`hl platform-experiments get` is the brief: what to optimize, the target, the rules. It outranks
+`hl platform-experiments get` says what to optimize, the target, the rules. It outranks
 your agent type and your hyperparameters, which outrank this briefing; the registry's structure and
-the rule that only jobs are evidence hold under all of them. Read the brief completely each
+the rule that only jobs are evidence hold under all of them. Read the description completely each
 session, and again when told it changed. A message from the coordinator is direction to act on
-in your next turn, within the brief. The baseline's `README.md` says how its harness measures.
+in your next turn, within the description. The baseline's `README.md` says how its harness measures.
 The `prior_runs` of `hl platform-experiments get` are earlier runs on this repository: read
 their summary, results and registry (`--platform-experiment ID`) before choosing a lever, for
 what was tried, what it reached and what was refuted.
@@ -41,7 +41,7 @@ what was tried, what it reached and what was refuted.
 The registry is the lab notebook every agent and each of your restarts reads and writes: the only
 memory that survives them. It is a graph rooted at the objective (`root`). A *hypothesis* is one
 falsifiable claim. The root's children are the distinct approaches, each a whole new way of
-solving the problem aimed at the brief's target. Tuning and small changes are refinements,
+solving the problem aimed at the description's target. Tuning and small changes are refinements,
 built on the most specific hypothesis they refine. Read the existing approaches before adding
 one: take a mechanism none has, or go under one. A sweep's winning configuration that more work
 builds on is registered as a child, so the best result is a node. On each hypothesis: a job's

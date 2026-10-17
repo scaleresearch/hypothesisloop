@@ -215,7 +215,7 @@ type PlatformExperiment struct {
 	// Goal is what its owner asked, the sentence a draft was created from, and GoalVersion counts
 	// the goals it has had. Empty for a platform experiment that was created whole, which has no
 	// goal to change.
-	Goal        string `json:"goal,omitempty" doc:"What its owner asked, which a draft is planned from. Its owner changes it with PATCH /platform-experiments/{id} until it closes: a draft is planned again from it, and the coordinator of an open or running one brings the brief in line with it. Absent on one created whole."`
+	Goal        string `json:"goal,omitempty" doc:"What its owner asked, which a draft is planned from. Its owner changes it with PATCH /platform-experiments/{id} until it closes: a draft is planned again from it, and the coordinator of an open or running one brings the description in line with it. Absent on one created whole."`
 	GoalVersion int    `json:"goal_version,omitempty" doc:"How many goals it has had: 1 for the one it was created from, and one more for each change. A draft's planner names the version it planned from in its proposal or decline. Absent on a list."`
 	// Continues is the closed run it carries on, fixed at creation, empty for one that starts
 	// fresh. Its baseline starts from that run's; like every prior run, it is read as its own.
@@ -240,7 +240,7 @@ type PlatformExperiment struct {
 	// proposal's questions. Carried by a read of one platform experiment and left out of a list.
 	AcceptedAt      *time.Time `json:"accepted_at,omitempty" doc:"When the draft's proposal was accepted, by a person or by the platform at accepts_at. Absent on a draft, on one created whole and on one accepted before this was kept."`
 	AcceptedBy      *Actor     `json:"accepted_by,omitempty" doc:"Whose credential accepted the proposal. Absent beside accepted_at when the platform accepted it by itself."`
-	AcceptedAnswers []string   `json:"accepted_answers,omitempty" doc:"The answers given to proposal.questions on accepting it, one for each, in their order, as they were added to the brief."`
+	AcceptedAnswers []string   `json:"accepted_answers,omitempty" doc:"The answers given to proposal.questions on accepting it, one for each, in their order, as they were added to the description."`
 	// ClosedAt is when it closed and CloseReason why; ClosedBy is whose credential closed it,
 	// absent when the platform did at ClosesAt. A list carries the first two and no ClosedBy.
 	ClosedAt    *time.Time  `json:"closed_at,omitempty"`

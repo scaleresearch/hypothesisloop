@@ -619,7 +619,7 @@ func (s *Store) UpdatePlatformExperiment(ctx context.Context, pe *domain.Platfor
 }
 
 // writePlatformExperiment writes the patchable fields of pe while it is still in expectedStatus
-// and, when baseline is not empty, still has that baseline, and announces a changed brief. It
+// and, when baseline is not empty, still has that baseline, and announces a changed description. It
 // answers which fields of the plan the write changed, for platform_experiment.plan (planChange).
 func writePlatformExperiment(ctx context.Context, tx *Write, pe *domain.PlatformExperiment, metrics []byte, expectedStatus domain.PlatformExperimentStatus, baseline string) ([]string, error) {
 	const q = `UPDATE platform_experiments pe
@@ -638,21 +638,21 @@ RETURNING pe.description IS DISTINCT FROM old.description OR pe.duration_hours I
     CASE WHEN pe.max_concurrent_accelerators IS DISTINCT FROM old.max_concurrent_accelerators THEN 'max_concurrent_accelerators' END,
     CASE WHEN pe.report_interval_seconds IS DISTINCT FROM old.report_interval_seconds THEN 'report_interval_seconds' END,
     CASE WHEN pe.starts_at IS DISTINCT FROM old.starts_at THEN 'starts_at' END], NULL)`
-	var briefMoved bool
+	var descriptionMoved bool
 	var planned []string
 	err := tx.QueryRow(ctx, q,
 		pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents,
 		metrics, pe.ReportIntervalSeconds, optionalTime(pe.StartsAt), pe.ClosesAt(),
 		expectedStatus,
 		pe.MaxConcurrentAccelerators, pe.BaselineJobID, pe.JobEstimatedDurationHours, pe.DurationHours, baseline,
-	).Scan(&briefMoved, &planned)
+	).Scan(&descriptionMoved, &planned)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("status or baseline changed concurrently, retry")
 	}
 	if err != nil {
 		return nil, err
 	}
-	if briefMoved {
+	if descriptionMoved {
 		tx.runChange(pe.ID, platformapi.EventPlatformExperimentDescription, "", "")
 	}
 	return planned, nil

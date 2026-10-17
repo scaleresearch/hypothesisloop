@@ -39,7 +39,7 @@ _DRAIN_S = 5
 # jobs, whatever the best stands at against the target (capacity.idle=new, again as
 # capacity.idle=continues every notice period it lasts), that a job is held by what waiting will
 # not clear or has waited past its own estimate (job.held, sent once, to the job's agent too),
-# that a stage advanced, that someone wrote a comment, that the brief or the baseline changed (a raised
+# that a stage advanced, that someone wrote a comment, that the description or the baseline changed (a raised
 # baseline is the bar every researcher is set against from then on), that the run closed or that its
 # status_reason began to wait for the coordinator (platform_experiment.status, sent again with
 # the reason as its detail, as when the last researcher's machine stops for good). An agent has
@@ -49,7 +49,7 @@ _DRAIN_S = 5
 # jobs run before the upload ends, or ended (environment.status) the same way: told to end its
 # turn while it built, nothing else would wake it. The owner changing the goal
 # (platform_experiment.goal) wakes whoever acts on it: a draft's planner, which plans again, or the
-# coordinator, which brings the brief in line; one addressed to a planner is its own and reaches no
+# coordinator, which brings the description in line; one addressed to a planner is its own and reaches no
 # researcher. A coordinator is woken too by the owner changing fields of the plan
 # (platform_experiment.plan). A coordinator learns at once of an idea a person
 # posted (hypothesis.new of a user, a key or staff): every one is to be assigned or answered. A
@@ -92,7 +92,7 @@ GOAL = platform.EVENT_PLATFORM_EXPERIMENT_GOAL
 # which says nothing to the agent: the detail names the commit and image it asked with.
 ENVIRONMENT = platform.EVENT_ENVIRONMENT_STATUS
 # What wakes a coordinator besides, while its platform experiment is open: a job that failed then
-# is a baseline agent's, and one that failed for what the brief says is the coordinator's to
+# is a baseline agent's, and one that failed for what the description says is the coordinator's to
 # repair. Three failed in a row before a coordinator heard of any, from the agent giving up. One
 # that completed is acted on when its agent finishes, which wakes by itself.
 OPEN_WAKES = (f"{platform.EVENT_EXPERIMENT_STATUS}={platform.STATUS_FAILED}",)

@@ -28,7 +28,7 @@ a leading quote.
     name: |
       short title
     description: |
-      the brief, the only thing the baseline and researchers read: the objective first, then
+      the description, the only thing the baseline and researchers read: the objective first, then
       the metric, gate, control, references and levers. How they are measured is the baseline's
       to choose. The platform adds the baseline job, its code_ref and values once declared.
     report_interval_seconds: 30        # how often a job is to report
@@ -53,11 +53,11 @@ a leading quote.
                                        # Left out for work that needs no accelerator: the run is
                                        # on CPU cores (hypothesisloop.dev/cpu=core) and its
                                        # budget is core-hours. A refusal lists the valid types
-  image: ...                           # the job image the brief names, from the same line of 'hl capacity':
+  image: ...                           # the job image the description names, from the same line of 'hl capacity':
                                        # one of its job_images, or its only_job_image where it shows one
   cpu: 8                               # required, like memory and storage: what one node of a job
   memory: 32Gi                         # asks for, as job.cpu, job.memory and job.storage state it.
-  storage: 100Gi                       # the baseline writes them into job.yaml, so no brief repeats them
+  storage: 100Gi                       # the baseline writes them into job.yaml, so no description repeats them
   budget_accelerator_hours: 6          # proposed, positive; the person states the real ones at accept
   duration_hours: 4                    # the run, from its start: a time the goal states is this
   baseline_minutes: 60                 # what measuring the baseline needs from the accept, from
@@ -86,7 +86,7 @@ a leading quote.
   questions:                           # each decision the goal left open, with the answer you
     - question: |                      # planned on. A proposal with questions waits for the
         how big a win counts           # person to confirm or change each answer, which then goes
-      answer: |                        # into the brief; one without is accepted as proposed
+      answer: |                        # into the description; one without is accepted as proposed
         1.5x the control's throughput, since the goal states no margin
   repo_map: |                          # optional, at most 4000 bytes: what you read of the repository,
     a line per file or directory that matters, its entry points, how it builds and runs, and

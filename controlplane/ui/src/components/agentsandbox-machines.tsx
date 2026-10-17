@@ -23,7 +23,7 @@ function machinesStatus(instances: AgentInstance[], jobs: number): string | null
   const now = `The platform runs ${plural(instances.length, 'machine')} for this experiment: ${parts.join(', ')}.`
   if (count('stopped') === instances.length) return `${now} None is asked for again. Agents, below, says why each ended.`
   if (count('running') === 0) return `${now} A machine boots and clones the repository in about a minute.`
-  if (jobs === 0) return `${now} The agents are reading the brief and the code. Their first hypotheses and jobs follow within a few minutes.`
+  if (jobs === 0) return `${now} The agents are reading the description and the code. Their first hypotheses and jobs follow within a few minutes.`
   return now
 }
 

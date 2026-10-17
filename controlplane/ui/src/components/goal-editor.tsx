@@ -16,7 +16,7 @@ import { canEdit } from '@/lib/editable'
 
 /**
  * What the owner asked, which they change while the API lists goal in editable: a draft is
- * planned again from it, and the coordinator of an open or running one brings the brief in line.
+ * planned again from it, and the coordinator of an open or running one brings the description in line.
  */
 export function GoalEditor({ pe, onSaved }: { pe: PlatformExperiment; onSaved: () => void }) {
   const [goal, setGoal] = useState<string | null>(null)
@@ -48,7 +48,7 @@ export function GoalEditor({ pe, onSaved }: { pe: PlatformExperiment; onSaved: (
         <Stack gap="sm">
           <FormField
             label="Goal"
-            hint={draft ? 'Saving starts planning again from this text.' : 'The coordinator is told and updates the brief.'}
+            hint={draft ? 'Saving starts planning again from this text.' : 'The coordinator is told and updates the description.'}
           >
             <Textarea rows={4} maxLength={MAX_GOAL_LENGTH} value={goal} onChange={e => setGoal(e.target.value)} />
           </FormField>

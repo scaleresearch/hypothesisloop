@@ -114,7 +114,7 @@ const (
 	// stream carries it.
 	EventAgentActivity = "agent.activity"
 	// EventPlatformExperimentStatus and EventPlatformExperimentDescription describe the run
-	// itself: whether it is still open, and whether the brief still says what it said. The
+	// itself: whether it is still open, and whether the description still says what it said. The
 	// description event deliberately carries no text.
 	EventPlatformExperimentStatus      = "platform_experiment.status"
 	EventPlatformExperimentDescription = "platform_experiment.description"

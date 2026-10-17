@@ -107,7 +107,7 @@ func TestTheBuiltinPromptsKeepWhatRunsTaught(t *testing.T) {
 			"`hl platform-experiments propose --check FILE`",
 			"stores nothing and lists every problem at once, and `propose` only the final one",
 			"a goal that says it needs no accelerator is never proposed on one",
-			"Every field of the proposal says what the brief says.",
+			"Every field of the proposal says what the description says.",
 			// Refused for "", cpu and the CPU type in turn.
 			"`accelerator_type` is an `accelerator_type` string `hl capacity` prints, copied verbatim",
 			"Work that needs no accelerator leaves `accelerator_type` out",
@@ -116,7 +116,7 @@ func TestTheBuiltinPromptsKeepWhatRunsTaught(t *testing.T) {
 			"only when the goal leaves the control or the size of the effect to expect unknown",
 			"a goal that states its Metric and Control needs no search, or one at most",
 			// The UI ticks a point of the goal by its label at the start of a line.
-			"keeps that label at the start of its own line in the brief",
+			"keeps that label at the start of its own line in the description",
 			"`Metric:`", "`Control:`", "`Win:`", "`Held equal:`", "`Fixed:`", "`For:`",
 		},
 	} {

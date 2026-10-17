@@ -35,7 +35,7 @@ func registerPlanning(doc *Doc, experiments *platformexperiments.Service, logger
 		Description: "Makes a proposed draft an open platform experiment in one write: its name, description, metrics, report interval, stages and policies are the proposal's; " +
 			"its budget, its length, the minutes its baseline has and its researchers are the ones this body states, whatever the proposal proposed, because an agent wrote the proposal. " +
 			"name, when the body states one, replaces the proposal's name and nothing else of it (422 invalid_experiment for one that is no name). " +
-			"answers holds one answer for each of the proposal's questions, in their order, as the person confirmed or changed it: each question and its answer are added to the end of the brief, a line each, so every agent reads the decisions as made. 422 invalid_answers when it does not hold one non-empty answer for each question. " +
+			"answers holds one answer for each of the proposal's questions, in their order, as the person confirmed or changed it: each question and its answer are added to the end of the description, a line each, so every agent reads the decisions as made. 422 invalid_answers when it does not hold one non-empty answer for each question. " +
 			"proposal stays on the platform experiment as it was proposed, for anyone who reads it, beside accepted_at, accepted_by (absent when the platform accepted it by itself) and accepted_answers. " +
 			"The budget caps everything the platform experiment spends, the baseline included: what measuring it cost is taken from the budget, the rest is shared among the researchers, and an agent's burst hours run on idle capacity and come out of its share, never on top of it. " +
 			"The platform hosts its coordinator, each researcher and one agent of role baseline, named by its role, which the proposal signed up so that its machine starts while the proposal is read, and which is created here for a proposal that signed none up. " + platformexperiments.CoordinatorWanted + " " +
@@ -58,7 +58,7 @@ func registerPlanning(doc *Doc, experiments *platformexperiments.Service, logger
 		Summary: "Propose the platform experiment a draft becomes", Tags: []string{"platform-experiments"},
 		Description: "Written by a draft's planner and by nobody else, while the platform experiment is a draft (409 not_a_draft after). " +
 			"experiment is the experiment as its file would state it; budget_accelerator_hours, duration_hours, baseline_minutes and agents are proposed, and the person who accepts states them. " +
-			"A proposal defines the experiment and runs nothing: its brief states the objective and the measure and nothing measured yet, its numbers are estimates, " +
+			"A proposal defines the experiment and runs nothing: its description states the objective and the measure and nothing measured yet, its numbers are estimates, " +
 			"and the baseline is measured once it is accepted, before any researcher starts, by the baseline agent the proposal signs up, whose machine starts with it. " +
 			"The proposal is checked before it is stored, its experiment and its cost by the rules of POST /platform-experiments, and refused with 422 and a reason the planner can act on: invalid_experiment, invalid_metrics, invalid_stages, " +
 			"invalid_cost, invalid_agents, invalid_length, run_too_long (duration_hours over the platform's quota.max_platform_experiment_days), invalid_baseline_minutes (under planning.min_baseline_minutes, or over planning.baseline_limit_minutes), missing_explanation, too_long, " +
@@ -76,7 +76,7 @@ func registerPlanning(doc *Doc, experiments *platformexperiments.Service, logger
 		Description: "Creates a platform experiment in status draft from goal, one sentence saying what the caller wants to find out. " +
 			"A draft has no budget, no metrics, and one agent, its planner, which the platform runs (role planner, in the roster like any agent) " +
 			"and nobody else joins: the planner works out how to measure the goal and proposes the metrics, " +
-			"the brief, the hardware, the budget and the agents, and it opens only when that proposal is accepted: by a person, or by the platform as proposed at accepts_at. Until then its max_agents is the most researchers a proposal may name: max_agentsandboxes less the coordinator and the baseline agent an accepted draft is given. A draft takes no job, so nothing is measured " +
+			"the description, the hardware, the budget and the agents, and it opens only when that proposal is accepted: by a person, or by the platform as proposed at accepts_at. Until then its max_agents is the most researchers a proposal may name: max_agentsandboxes less the coordinator and the baseline agent an accepted draft is given. A draft takes no job, so nothing is measured " +
 			"and no compute is spent until then. Its name is the goal cut short until the proposal names it. POST /platform-experiments creates one whole instead, " +
 			"and states what a run costs itself. Closing a draft (POST /platform-experiments/{id}/close) abandons it. " +
 			"Its planner and later its agents keep their code in repository: the one the request names, checked as on POST /platform-experiments, or a private one the platform creates on the GitHub account the org connected. " +

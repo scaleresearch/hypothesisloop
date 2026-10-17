@@ -149,7 +149,7 @@ func registerPlatformExperiments(doc *Doc, experiments *platformexperiments.Serv
 			"editable on GET /platform-experiments/{id} lists the fields the caller may change now, and a body that carries another answers 409 not_editable and names it. " +
 			"`goal`, what the owner asked, changes until the experiment closes, on one made from a sentence, and alone: a body that carries another field beside it is 422 goal_alone, one empty or over 2000 bytes 422 invalid_goal, and the goal it has 422 nothing_to_change. " +
 			"A draft is then planned again from it: the proposal or decline stays readable, proposed_at, declined_at and accepts_at are cleared so nothing is accepted by itself, status_reason reads revising, planning_ends_at is the planning limit from now, and the planner is told with platform_experiment.goal, started again where its machine was released. " +
-			"An open or running one tells its coordinator with platform_experiment.goal, which brings the brief in line. Only a person's credential changes the goal. " +
+			"An open or running one tells its coordinator with platform_experiment.goal, which brings the description in line. Only a person's credential changes the goal. " +
 			"While the experiment is open every other field of the body can change, `metrics` among them, so a mis-specified ranking metric is fixed in place. " +
 			"Once it runs only `name`, `description`, `duration_hours`, `max_agents`, `researchers` and the baseline (`baseline_job_id` with `baseline_reason`) do, because admission and the stage ladder have acted on the rest. " +
 			"A max_agents of a running one changes the places nobody took: a researcher added in one is given an even part, with the researchers at work, of what all researchers left unspent, and a max_agents raised so far that the hours its researchers left unspent, split over max_agents, would not hold one trial of the baseline each (the job again at job_estimated_duration_hours) is 422 budget_below_baseline. " +
@@ -207,7 +207,7 @@ func registerPlatformExperiments(doc *Doc, experiments *platformexperiments.Serv
 	register(doc, auth.AudienceStaff, huma.Operation{
 		OperationID: "reopen-platform-experiment", Method: "POST", Path: "/platform-experiments/{id}/reopen",
 		Summary: "Set a closed platform experiment running again", Tags: []string{"platform-experiments"},
-		Description: "Staff only. A run closed early, for one to redeploy the platform, continues as the same run until ends_at: its hypotheses, jobs, branches, brief, baseline and agents stay as the close left them. " +
+		Description: "Staff only. A run closed early, for one to redeploy the platform, continues as the same run until ends_at: its hypotheses, jobs, branches, description, baseline and agents stay as the close left them. " +
 			"closed_at, close_reason, closed_by, close_message, the record of the close and its placements go, and the answer reads running with the new ends_at and duration_hours counted from its start. " +
 			"Every agent whose run ended only with the close is at work again, its machine asked for and its token accepted, and so is a sandboxed coordinator. One that finished or was cut before the close stays as it ended. " +
 			"Jobs the close evicted stay evicted. Agents are told with platform_experiment.status running and platform_experiment.description, as the run's length changed. " +

@@ -54,10 +54,10 @@ func init() {
 	commands = []command.Command{
 		{Name: "platform-experiments", Run: platformExperiments, Subs: []command.Command{
 			{Name: "list", About: "the platform experiments this token reaches, one line each", Run: shared.PlatformExperimentsList},
-			{Name: "get", About: "the platform experiment: its status, what it waits for, its brief and its stages", Run: shared.PlatformExperimentsGet},
+			{Name: "get", About: "the platform experiment: its status, what it waits for, its description and its stages", Run: shared.PlatformExperimentsGet},
 			{Name: "health", About: "where each agent and the coordinator last stood: first job, jobs in flight, restarts, messages", Run: shared.PlatformExperimentsHealth},
 			{Name: "start", About: "push a directory to a repository and create the platform experiment its spec states", Run: people.PlatformExperimentsStart},
-			{Name: "update", About: "change the brief or other fields, or declare or raise the baseline", Run: shared.PlatformExperimentsUpdate},
+			{Name: "update", About: "change the description or other fields, or declare or raise the baseline", Run: shared.PlatformExperimentsUpdate},
 			{Name: "propose", About: "a draft's planner: propose the experiment the draft becomes", Run: agent.PlatformExperimentsPropose},
 			{Name: "decline", About: "a draft's planner: say why no experiment is proposed", Run: agent.PlatformExperimentsDecline},
 			{Name: "close", About: "end the platform experiment for good", Run: shared.PlatformExperimentsClose},

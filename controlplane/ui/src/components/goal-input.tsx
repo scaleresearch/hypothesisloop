@@ -10,7 +10,7 @@ import { ApiError } from '@/lib/api/request'
 import { formDraftFromGoal, agentSandboxRefusal, MAX_GOAL_LENGTH } from '@/lib/planning'
 import { useGitHubApp } from '@/lib/github-connect'
 import { GOAL_EXAMPLES } from '@/lib/goal-examples'
-import { BriefGuide } from '@/components/brief-guide'
+import { GoalGuide } from '@/components/goal-guide'
 import { InstallGitHub, useGitHub } from '@/components/connect-github-step'
 import { codeFields, DEFAULT_BRANCH, namesRepository, RepositorySelect } from '@/components/repository-select'
 import { Button } from '@/components/ui/button'
@@ -156,7 +156,7 @@ export function GoalInput({ projectID, onCreated, onConfigure }: {
           void plan()
         }}
       />
-      <BriefGuide className="px-6 pb-3" />
+      <GoalGuide className="px-6 pb-3" />
       {unavailable && (
         <div className="px-4 pb-3">
           <Callout tone="warning" className="flex flex-wrap items-center justify-between gap-2">

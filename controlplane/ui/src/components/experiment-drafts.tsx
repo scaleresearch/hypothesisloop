@@ -14,12 +14,12 @@ import { Text } from '@/components/ui/text'
 import { keys } from '@/lib/keys'
 import type { ExperimentDraft } from '@/types/api'
 
-// The name typed, else the start of the brief, so that a draft kept from a goal reads as that goal.
+// The name typed, else the start of the description, so that a draft kept from a goal reads as that goal.
 function nameOf(draft: ExperimentDraft): string {
   const form = draft.form as Record<string, unknown>
   const name = typeof form.name === 'string' ? form.name.trim() : ''
-  const brief = typeof form.description === 'string' ? form.description.trim() : ''
-  return name || (brief && headline(brief, 80)) || 'Unnamed experiment'
+  const description = typeof form.description === 'string' ? form.description.trim() : ''
+  return name || (description && headline(description, 80)) || 'Unnamed experiment'
 }
 
 /**

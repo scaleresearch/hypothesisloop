@@ -104,7 +104,7 @@ models:
   provider: anthropic
 
 # What bounds a draft: a platform experiment a person started from one sentence, which an agent
-# the platform runs plans (it works out the metric, the brief and the size and proposes the
+# the platform runs plans (it works out the metric, the description and the size and proposes the
 # experiment) before the person accepts and states what the run itself costs. A draft takes no
 # job, so the platform pays for the planner's machine and nothing else, and all of it is bounded
 # here.

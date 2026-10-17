@@ -80,7 +80,7 @@ function Researcher({ n, agent }: { n: number; agent: ProposedAgent }) {
         <span className="text-muted">specialization <Code className="text-foreground">{agent.agent_type ?? 'generalist'}</Code></span>
         <span className="text-muted">model <Code className="text-foreground">{agent.model ?? 'the platform\'s default'}</Code></span>
       </Inline>
-      <Text pre>{direction ?? 'No direction of its own: it works from the brief.'}</Text>
+      <Text pre>{direction ?? 'No direction of its own: it works from the description.'}</Text>
     </InsetCard>
   )
 }
@@ -210,7 +210,7 @@ export function ProposalForm({ draft, proposal, editable, accepting, accepted = 
           <Captioned caption="Before you start, answer the planner's questions">
             <Stack gap="sm">
               <Text tone="muted">
-                The goal left these open. Each answer is the one the planner planned on: keep it or change it. Your answers are added to the brief every agent reads, so this proposal waits for you.
+                The goal left these open. Each answer is the one the planner planned on: keep it or change it. Your answers are added to the description every agent reads, so this proposal waits for you.
               </Text>
               {questions.map((q, i) => (
                 <FormField key={i} label={q.question}>
@@ -298,7 +298,7 @@ export function ProposalForm({ draft, proposal, editable, accepting, accepted = 
         )}
         <Sentences title="What could mislead" items={proposal.risks} />
         <Sentences title="Left out on purpose" items={proposal.out_of_scope} />
-        <Captioned caption={!accepted ? 'The brief every researcher works from' : questions.length > 0 ? 'The brief as proposed, before the answers were added' : 'The brief as proposed'}>
+        <Captioned caption={!accepted ? 'The description every researcher works from' : questions.length > 0 ? 'The description as proposed, before the answers were added' : 'The description as proposed'}>
           <CollapsibleDescription text={proposal.experiment.description} />
         </Captioned>
         {editable && (

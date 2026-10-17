@@ -242,7 +242,7 @@ func checkRaiseRequest(pe *domain.PlatformExperiment, patch PlatformExperimentPa
 // unchanged, measured as a baseline is (checkMeasurement) and strictly better than the baseline it
 // replaces on the first ranking metric. Only its arguments or environment differ, so a researcher's
 // new method never becomes the bar; reason says which configuration it measured. It answers the
-// raise to record and the block the brief is given. The estimate of a job that states none stays
+// raise to record and the block the description is given. The estimate of a job that states none stays
 // the declared baseline's.
 func (s *Service) raisedBaseline(ctx context.Context, pe, patched *domain.PlatformExperiment, reason string, by *domain.Actor) (domain.BaselineRaise, string, error) {
 	current, err := s.baseline(ctx, pe, pe.BaselineJobID)
@@ -283,7 +283,7 @@ func (s *Service) raisedBaseline(ctx context.Context, pe, patched *domain.Platfo
 	if measured {
 		detail += fmt.Sprintf(" (from %g, job %s)", from, pe.BaselineJobID)
 	}
-	detail += fmt.Sprintf(", by %s: %s. Re-read the brief: standings are set against the new baseline", who, reason)
+	detail += fmt.Sprintf(", by %s: %s. Re-read the description: standings are set against the new baseline", who, reason)
 	raise := domain.BaselineRaise{From: pe.BaselineJobID, To: candidate.Job.ID, Reason: reason, Detail: detail, Actor: actor}
 	return raise, baselineBlock(candidate, patched.Metrics), nil
 }
@@ -295,7 +295,7 @@ func inEnvironment(env *domain.Environment, image string) bool {
 }
 
 // MeasuredBaselineHeader opens the block of the description the platform writes: what the
-// declared baseline job is, from the platform's own records. The brief is all a researcher reads,
+// declared baseline job is, from the platform's own records. The description is all a researcher reads,
 // and a coordinator that copied these lines into it by hand got one of them wrong and waited.
 const MeasuredBaselineHeader = "MEASURED BASELINE (written by the platform from the declared job)"
 

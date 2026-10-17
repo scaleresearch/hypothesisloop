@@ -63,7 +63,7 @@ class StartupTest(PlatformCase):
 
 
 class BriefingTest(unittest.TestCase):
-    def test_the_commands_listed_for_a_coordinator_are_the_ones_that_change_roster_and_brief(self):
+    def test_the_commands_listed_for_a_coordinator_are_the_ones_that_change_roster_and_description(self):
         asked = []
 
         def fake_run(command, **how):

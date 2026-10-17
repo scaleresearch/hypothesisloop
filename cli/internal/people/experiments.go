@@ -176,7 +176,7 @@ func PlatformExperimentsReopen(c *apiclient.Client, args []string, stdout, stder
 	fs := command.NewFlags("platform-experiments reopen", `usage: hl platform-experiments reopen [--platform-experiment PE] --ends-at TIME [--coordinator-model M]
 
 Staff only. Sets a closed platform experiment, whose run started, running again until TIME
-(RFC 3339) as the same run: its hypotheses, jobs, branches, brief, baseline and agents stay. Every
+(RFC 3339) as the same run: its hypotheses, jobs, branches, description, baseline and agents stay. Every
 agent whose run ended only with the close is at work again, and so is a sandboxed coordinator, on
 --coordinator-model when it is given. An agent that finished or was cut before the close stays as
 it ended.`, stderr)

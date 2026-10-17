@@ -57,7 +57,7 @@ func TestARunningExperimentsBaselineIsRaisedToAStrongerJobOfTheControl(t *testin
 		}
 		r := stored.BaselineRaises[0]
 		if r.From != "job-1" || r.To != "job-2" || r.Reason != raiseReason || r.Actor.Kind != c.kind ||
-			!strings.Contains(r.Detail, "raised to val_loss = 1.6 by job job-2 (from 1.8, job job-1), by "+c.who+": "+raiseReason) || !strings.Contains(r.Detail, "Re-read the brief") {
+			!strings.Contains(r.Detail, "raised to val_loss = 1.6 by job job-2 (from 1.8, job job-1), by "+c.who+": "+raiseReason) || !strings.Contains(r.Detail, "Re-read the description") {
 			t.Errorf("%s: raise = %+v, want from job-1 to job-2 by %s with the values and the reason", name, r, c.kind)
 		}
 		if raises, _ := out["baseline_raises"].([]any); out["baseline_job_id"] != "job-2" || len(raises) != 1 {

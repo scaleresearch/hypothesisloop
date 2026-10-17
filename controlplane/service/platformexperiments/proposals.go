@@ -33,7 +33,7 @@ type Proposal struct {
 	GoalVersion int `json:"goal_version" doc:"The goal_version of the draft the proposal was planned from. 409 goal_changed once the draft has another goal: read it and propose for it."`
 
 	// Experiment is shaped exactly like .hypothesisloop/experiment.yaml: name, description (the
-	// brief every agent works from), metrics, report_interval_seconds, stages and the policies.
+	// text every agent works from), metrics, report_interval_seconds, stages and the policies.
 	// It is checked by validate, as the body of a create is.
 	Experiment json.RawMessage `json:"experiment" doc:"The experiment as .hypothesisloop/experiment.yaml would state it: name, description, metrics, and optionally report_interval_seconds, stages and default_quota_tier, which left out are the platform's settings, and max_concurrent_accelerators."`
 
@@ -55,7 +55,7 @@ type Proposal struct {
 	SizingReason string             `json:"sizing_reason" doc:"Why this budget, this long and this many researchers are the least that can reach the goal, in plain words, as an estimate: the trial length assumed, what an hour on the type costs, and the trials counted."`
 	OutOfScope   []string           `json:"out_of_scope,omitempty"`
 	Risks        []string           `json:"risks,omitempty"`
-	Questions    []ProposalQuestion `json:"questions,omitempty" doc:"Each decision the goal left open that changes what counts, with the answer the proposal is planned on: among them any bound of a gate that depends on a number nobody has measured yet. A proposal with questions is never accepted by itself: a person confirms or changes each answer on accepting it, and the answers go into the brief."`
+	Questions    []ProposalQuestion `json:"questions,omitempty" doc:"Each decision the goal left open that changes what counts, with the answer the proposal is planned on: among them any bound of a gate that depends on a number nobody has measured yet. A proposal with questions is never accepted by itself: a person confirms or changes each answer on accepting it, and the answers go into the description."`
 	// RepoMap is what the planner read of the repository, handed to the baseline agent so that it
 	// does not read it all again.
 	RepoMap string `json:"repo_map,omitempty" doc:"What the planner learned of the repository, for the baseline agent, which is given it when it starts: the files and directories that matter to the goal, the entry points and how the code builds and runs, the toolchain and dependency pins, a line each. Optional, at most 4000 bytes."`
@@ -398,13 +398,13 @@ type AcceptRequest struct {
 	DurationHours          float64         `json:"duration_hours" doc:"How long the run lasts from the moment it starts, once its baseline is declared."`
 	BaselineMinutes        int             `json:"baseline_minutes" doc:"The minutes measuring the baseline has from this accept, at least planning.min_baseline_minutes and at most planning.baseline_limit_minutes: baseline_due_at is that much later, and moves out by the time the platform spends building and starting the baseline's jobs."`
 	Agents                 []ProposedAgent `json:"agents" doc:"The researchers the platform runs, one entry each."`
-	Name                   string          `json:"name,omitempty" doc:"The name of the platform experiment, when the person changed the one proposed. One line, held to the rule of name on POST /platform-experiments. Left out, the proposal's name stands. Nothing else of the proposal's experiment is changed here but by answers: its metrics and the rest of its brief change by a change of the goal (PATCH /platform-experiments/{id} with goal), which the planner plans again."`
-	Answers                []string        `json:"answers,omitempty" doc:"One answer for each of the proposal's questions, in their order: the answer the planner planned on, or the person's own. Each question and its answer are added to the end of the brief. Left out for a proposal without questions."`
+	Name                   string          `json:"name,omitempty" doc:"The name of the platform experiment, when the person changed the one proposed. One line, held to the rule of name on POST /platform-experiments. Left out, the proposal's name stands. Nothing else of the proposal's experiment is changed here but by answers: its metrics and the rest of its description change by a change of the goal (PATCH /platform-experiments/{id} with goal), which the planner plans again."`
+	Answers                []string        `json:"answers,omitempty" doc:"One answer for each of the proposal's questions, in their order: the answer the planner planned on, or the person's own. Each question and its answer are added to the end of the description. Left out for a proposal without questions."`
 }
 
 // answered is the proposal's experiment with each question and its answer added to the end of
-// its brief, a line each, so that every agent reads the decisions the person made, and the
-// answers as the brief states them.
+// its description, a line each, so that every agent reads the decisions the person made, and the
+// answers as the description states them.
 func answered(experiment json.RawMessage, questions []ProposalQuestion, answers []string) (json.RawMessage, []string, error) {
 	if len(answers) != len(questions) {
 		return nil, nil, refusedProposal("invalid_answers", "answers: the proposal has %d questions and the accept answers %d: answer each, in their order", len(questions), len(answers))
@@ -416,11 +416,11 @@ func answered(experiment json.RawMessage, questions []ProposalQuestion, answers 
 	if err := json.Unmarshal(experiment, &fields); err != nil {
 		return nil, nil, err
 	}
-	var brief string
-	if err := json.Unmarshal(fields["description"], &brief); err != nil {
+	var description string
+	if err := json.Unmarshal(fields["description"], &description); err != nil {
 		return nil, nil, err
 	}
-	lines := []string{strings.TrimRight(brief, "\n"), "", "Decisions the owner made before the run:"}
+	lines := []string{strings.TrimRight(description, "\n"), "", "Decisions the owner made before the run:"}
 	given := make([]string, len(questions))
 	for i, q := range questions {
 		answer := strings.Join(strings.Fields(answers[i]), " ")

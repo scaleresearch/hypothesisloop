@@ -258,10 +258,10 @@ async function choose(page, field, option) {
 }
 
 // Walks a new experiment's form from What to its last step, Budget and rules: the name and the
-// brief, then on Measure one metric from Add a metric. `form` is where the form is shown.
+// experiment goal, then on Measure one metric from Add a metric. `form` is where the form is shown.
 async function fillNewExperiment(page, form, name) {
   await form.getByPlaceholder('e.g. Q3 Vision Benchmark').fill(name)
-  await form.getByLabel('Brief', { exact: true }).fill(`The brief of ${name}.`)
+  await form.getByLabel('Experiment goal', { exact: true }).fill(`The goal of ${name}.`)
   await form.getByRole('button', { name: 'Next', exact: true }).click()
   const metric = form.getByLabel('Add a metric')
   await metric.click()

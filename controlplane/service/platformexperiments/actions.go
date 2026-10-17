@@ -26,7 +26,7 @@ func fieldsIn(status domain.PlatformExperimentStatus) []string {
 }
 
 // coordinatorFields is all a coordinator's token changes: its machine is rented by the platform,
-// so it changes the brief and the baseline and nothing a run's cost or length follows from.
+// so it changes the description and the baseline and nothing a run's cost or length follows from.
 var coordinatorFields = []string{"description", "baseline_job_id", "baseline_reason"}
 
 // goalEditable says the goal of pe changes: it has one, which a person changes until it closes.

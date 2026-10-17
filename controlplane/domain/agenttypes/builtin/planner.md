@@ -31,7 +31,7 @@ the effect to expect unknown; a goal that states its Metric and Control needs no
 at most. The `prior_runs` of
 `hl platform-experiments get` are earlier runs on this repository, yours to read before choosing
 a lever (`--platform-experiment ID`: its summary, `hl results`, `hl hypothesis query` for
-findings and refuted hypotheses); put in the brief what they established, refuted and reached. A
+findings and refuted hypotheses); put in the description what they established, refuted and reached. A
 draft that `continues` one keeps its metric keys and directions so the numbers compare (others
 are refused). When the goal changes, plan from the new one, keep what it does not change, and
 name in `questions` what you could not meet, with what you planned instead as its answer. Put
@@ -43,7 +43,7 @@ The proposal, in the shape `hl platform-experiments propose` shows:
     repository holds for the goal that measures as below is the experiment: keep it and its
     metric keys as they are. Success stated as a change against the control goes on that
     metric as `target_vs_baseline`, signed in its direction; a target stated otherwise, or none,
-    is left out of it and stays in the brief. A metric the same code and data give exactly on
+    is left out of it and stays in the description. A metric the same code and data give exactly on
     any machine (an exact count, size or check, never a timing or a sampled estimate) is
     declared `deterministic: true`.
   - The control: the existing system the goal asks to beat, as it ships (its recommended
@@ -59,11 +59,11 @@ The proposal, in the shape `hl platform-experiments propose` shows:
     CPU cores and its budget is core-hours; a goal that says it needs no accelerator is never
     proposed on one. `image`, `cpu`, `memory` and `storage` come from the same line of
     `hl capacity`. A refusal lists the valid values: take one from it, never a guess. Every
-    field of the proposal says what the brief says.
-  - The brief, `experiment.description`, all the baseline and the researchers read: what and
+    field of the proposal says what the description says.
+  - The description, `experiment.description`, all the baseline and the researchers read: what and
     why, never how, readable in a minute. Each point the goal spells out on a labelled line
     (`Metric:`, `Control:`, `Win:`, `Held equal:`, `Fixed:`, `For:`) keeps that label at the start
-    of its own line in the brief, with the goal's wording kept, so the person sees each point
+    of its own line in the description, with the goal's wording kept, so the person sees each point
     still stated; write the points the goal left out under the same labels:
       - the objective in the person's terms, and success: the gain the person states, else a
         target far enough past the control that tuning cannot reach it and only a new approach
@@ -106,7 +106,7 @@ What the goal leaves open that changes what counts (how big a win, what is held 
 result is for) is planned on your best reading and named in `questions`, one decision each: the
 `question`, and as its `answer` the reading the proposal is planned on, stated as a value or a
 rule an agent can check. The person confirms or changes each answer, and the answers are added to
-the brief as written, so the brief need not repeat them. Ask nothing the goal already settles.
+the description as written, so the description need not repeat them. Ask nothing the goal already settles.
 
 Decline with `hl platform-experiments decline` only when the goal cannot be made into an
 experiment this platform can run now. A doubtful gate is a risk, no ground to decline.

@@ -114,7 +114,7 @@ func (s *Service) close(ctx context.Context, pe *domain.PlatformExperiment, topR
 }
 
 // Reopen sets the closed platform experiment id, whose run started, running again until endsAt as
-// the same run: its registry, jobs, branches, brief, baseline and agents stay, and what the close
+// the same run: its registry, jobs, branches, description, baseline and agents stay, and what the close
 // wrote goes. Its agents and coordinator are live again by the rows alone: those whose run ended
 // only with the close have no end of their own, while one that finished or was cut before keeps
 // it. endsAt is held to the length a create is held to, counted from the run's start.

@@ -1,7 +1,7 @@
 /**
- * The briefs the empty goal box types as its placeholder, one after another, in this order. Each
+ * The goals the empty goal box types as its placeholder, one after another, in this order. Each
  * states the number to move and which way, what to beat and what counts as a win, so that they
- * teach a brief agents can check. They come from different fields so that none reads as the only kind.
+ * teach a goal agents can check. They come from different fields so that none reads as the only kind.
  */
 export const GOAL_EXAMPLES: string[] = [
   'Does Muon reach val loss 3.28 in fewer tokens than AdamW for a 125M GPT on FineWeb? Same batch, schedule and a 16-trial LR sweep each; a win must beat the spread of 3 seeds.',

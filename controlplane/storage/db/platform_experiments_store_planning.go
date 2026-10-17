@@ -389,7 +389,7 @@ var ErrNotEditable = errors.New("the platform experiment has no goal that change
 // whoever acts on it. A draft is given back to its planner: what it answered stays to be read,
 // proposed_at, accepts_at and planner_ends_at are cleared, so nothing is accepted by itself and the
 // launcher wants the planner again, and the draft ends at planUntil unless the planner answers. An
-// open or running one tells its coordinator, which brings the brief in line. ErrNotEditable.
+// open or running one tells its coordinator, which brings the description in line. ErrNotEditable.
 func (s *Store) SetGoal(ctx context.Context, id, goal string, planUntil time.Time) error {
 	return s.write(ctx, func(tx *Write) error {
 		var status string

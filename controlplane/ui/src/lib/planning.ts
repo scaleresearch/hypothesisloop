@@ -15,7 +15,7 @@ export function agentSandboxRefusal(error: unknown): StatusReason | null {
 
 const AGENTSANDBOX_NOT_CONFIGURED = 'agentsandbox_not_configured'
 
-/** Keeps a goal as a saved draft of the full form, its brief, for a person who sets the experiment up themselves. */
+/** Keeps a goal as a saved draft of the full form, its description, for a person who sets the experiment up themselves. */
 export function formDraftFromGoal(projectID: string, goal: string, repository: string, branch: string): Promise<ExperimentDraft> {
   return createExperimentDraft(projectID, { form: { description: goal, repository, branch }, step: '1', failure: '' })
 }

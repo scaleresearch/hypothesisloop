@@ -22,7 +22,7 @@ import (
 // must have done what a baseline does (checkBaseline) and the budget must hold a trial of it for
 // each researcher (budgetCoversTrials), and with ownJobs no other job of its agent beat it
 // (strongerOwnJob). It sets on pe the estimate of a job that states none and answers the block
-// the brief is given. It is the one check of a declaration, whoever declares.
+// the description is given. It is the one check of a declaration, whoever declares.
 func (s *Service) heldToBaseline(ctx context.Context, pe *domain.PlatformExperiment, ownJobs bool) (string, error) {
 	baseline, err := s.baseline(ctx, pe, pe.BaselineJobID)
 	if err != nil {
@@ -98,7 +98,7 @@ func (s *Service) measuredJob(ctx context.Context, pe *domain.PlatformExperiment
 		return "", refusal.Refuse(http.StatusConflict, "baseline_required", fmt.Sprintf("platform experiment %s has no baseline declared and no agent of role baseline to measure one: its coordinator adds one with %s, and the platform declares the job it leaves and starts the run",
 			pe.ID, addBaselineAgent(pe.ID)))
 	}
-	return "", refusal.Refuse(http.StatusConflict, "baseline_required", fmt.Sprintf("platform experiment %s has no baseline declared, and no baseline agent left a COMPLETED job that reports %s: %s. Its coordinator repairs what the brief can and adds another baseline agent with %s, and what only its owner can repair it writes into the summary",
+	return "", refusal.Refuse(http.StatusConflict, "baseline_required", fmt.Sprintf("platform experiment %s has no baseline declared, and no baseline agent left a COMPLETED job that reports %s: %s. Its coordinator repairs what the description can and adds another baseline agent with %s, and what only its owner can repair it writes into the summary",
 		pe.ID, ranked.Key, strings.Join(gaveUp, "; "), addBaselineAgent(pe.ID)))
 }
 

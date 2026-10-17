@@ -39,7 +39,7 @@ func registerWatchKinds(doc *Doc) {
 			"Changes are held for 7 days. An after this platform never issued, " +
 			"or one older than what is held, is refused with 410: re-read state and watch from head.\n\n" +
 			"`agent_id` scopes the stream to that agent's own resources, as `agent_scope` below says per kind: the terminal " +
-			"status of its jobs and a queue reason that waiting will not clear, its quota and cut, ladder advances, the run's status and brief, and " +
+			"status of its jobs and a queue reason that waiting will not clear, its quota and cut, ladder advances, the run's status and description, and " +
 			"other people's comments, findings and links on hypotheses it registered. Its own actions are not echoed back. " +
 			"An agent's token is scoped to its own agent. Without `agent_id` you get the whole platform experiment or project.\n\n" +
 			"Omit `kinds` and you get every kind below. An unknown kind is refused. Nothing may be sent up the socket.\n\n" +

@@ -146,7 +146,7 @@ type declaredExperiment struct {
 // notOf is how file differs from experiment in what names an experiment, its name and its
 // metrics, "" when both are experiment's. It is the one test of a file left by another
 // experiment of the repository: hl repo check fails on it. The
-// description is the brief, which changes as the run learns. A run that continues another starts
+// description is left out, since it changes as the run learns. A run that continues another starts
 // from that one's files under a name of its own, so only the metrics tell it apart.
 func notOf(file experimentspec.Spec, experiment declaredExperiment) string {
 	if name, declared := strings.TrimSpace(file.Name), strings.TrimSpace(experiment.Name); name != declared && experiment.Continues == "" {
