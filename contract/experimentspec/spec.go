@@ -79,7 +79,7 @@ var placement = map[string]string{
 func Parse(data []byte) (Spec, error) {
 	var doc any
 	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return Spec{}, fmt.Errorf("not YAML: %w", err)
+		return Spec{}, fmt.Errorf("not YAML: %s", yamlProblem(data, err))
 	}
 	fields, ok := doc.(map[string]any)
 	if !ok || len(fields) == 0 {
@@ -101,6 +101,21 @@ func Parse(data []byte) (Spec, error) {
 		return Spec{}, fmt.Errorf("not an experiment spec: %s", strings.TrimPrefix(err.Error(), "json: "))
 	}
 	return spec, nil
+}
+
+// yamlProblem is why data is not YAML, with where the parser stopped when it says: the line, the
+// column and what that line reads.
+func yamlProblem(data []byte, err error) string {
+	var problem *yaml.LoadError
+	if !errors.As(err, &problem) || problem.Mark.Line == 0 {
+		return err.Error()
+	}
+	said := problem.Mark.String() + ": " + problem.Message
+	lines := strings.Split(string(data), "\n")
+	if problem.Mark.Line > len(lines) || strings.TrimSpace(lines[problem.Mark.Line-1]) == "" {
+		return said
+	}
+	return said + ", where the line reads: " + strings.TrimSpace(lines[problem.Mark.Line-1])
 }
 
 // Load reads the spec of the repository at dir.

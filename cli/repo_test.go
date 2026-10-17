@@ -10,6 +10,7 @@ import (
 
 	"go.yaml.in/yaml/v4"
 
+	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
 	"github.com/scaleresearch/hypothesisloop/contract/repotemplate"
 )
 
@@ -38,7 +39,8 @@ func emptyClone(t *testing.T) string {
 	return cloneOf(t, emptyExperiment)
 }
 
-const emptyExperiment = `{"id":"pe-1","name":"sweep","description":"the brief\n","metrics":[{"key":"val_accuracy","direction":"maximize"}]}`
+const emptyExperiment = `{"id":"pe-1","name":"sweep","description":"the brief\n","metrics":[{"key":"val_accuracy","direction":"maximize"}],` +
+	`"budget_accelerator_hours":2,"max_agents":3,"duration_hours":4}`
 
 // cloneOf is a repository with nothing in it, of platform experiment pe-1 as the platform
 // answers it with experiment, worked in by its baseline agent.
@@ -71,7 +73,7 @@ func cloneAs(t *testing.T, experiment, role string) string {
 
 // proposed is platform experiment pe-1 as accepted from a planner's proposal: a name with a
 // colon in it, a brief of several lines, a gate, and the image and the type its jobs run on.
-const proposed = `{"id":"pe-1","name":"ResNet-18: throughput\n","description":"GOAL: images per second.\n\nBASELINE\n  config: fp32\n  measured: not yet established\n",
+const proposed = `{"id":"pe-1","budget_accelerator_hours":2,"max_agents":3,"duration_hours":4,"name":"ResNet-18: throughput\n","description":"GOAL: images per second.\n\nBASELINE\n  config: fp32\n  measured: not yet established\n",
 "metrics":[{"key":"images_per_s","direction":"maximize","role":"ranking"},{"key":"top1_agreement","direction":"maximize","role":"constraint","bound":0.99}],
 "proposal":{"accelerator_type":"nvidia.com/gpu.product=RTX-4090","image":"torch","cpu":"8","memory":"32Gi","metric_reason":"Throughput is what the goal asks for.\n","measurement":"Images per second over 200 batches.\n"}}`
 
@@ -120,9 +122,9 @@ func TestRepoInitWritesWhatThePlatformHoldsOfTheExperiment(t *testing.T) {
 	if code, out := repo(t, "init"); code != 0 || strings.Count(out, "added    ") != 6 {
 		t.Fatalf("hl repo init = %d\n%s", code, out)
 	}
-	var stated statedExperiment
-	if err := yaml.Unmarshal([]byte(read(t, clone, repotemplate.ExperimentFile)), &stated); err != nil {
-		t.Fatalf("the experiment file is not YAML: %v\n%s", err, read(t, clone, repotemplate.ExperimentFile))
+	stated, err := experimentspec.Parse([]byte(read(t, clone, repotemplate.ExperimentFile)))
+	if err != nil {
+		t.Fatalf("the experiment file is no spec: %v\n%s", err, read(t, clone, repotemplate.ExperimentFile))
 	}
 	if stated.Name != "ResNet-18: throughput\n" || !strings.HasSuffix(stated.Description, "measured: not yet established\n") || len(stated.Metrics) != 2 ||
 		stated.Metrics[1].Role != "constraint" || *stated.Metrics[1].Bound != 0.99 {
@@ -271,7 +273,7 @@ func write(t *testing.T, clone, path, content string) {
 }
 
 const (
-	filledExperiment = "name: sweep\ndescription: |\n  the brief\nmetrics:\n  - key: val_accuracy\n    direction: maximize\n"
+	filledExperiment = "name: sweep\ndescription: |\n  the brief\nmetrics:\n  - key: val_accuracy\n    direction: maximize\nbudget_accelerator_hours: 2\nmax_agents: 3\nduration_hours: 4\n"
 	filledJobSpec    = "job:\n  image: registry/job:1\n  command: [\"python\", \"train.py\"]\n  cpu: 2\n  memory: 8Gi\n  storage: 4Gi\n"
 )
 
@@ -358,8 +360,9 @@ func TestRepoCheckNamesWhatAClonesFilesLack(t *testing.T) {
 		// A job.yaml stated estimated_duration_hours: 0.05 and all twelve jobs of a run were
 		// given that in place of the estimate the platform measured.
 		"an estimate in the committed spec": {repotemplate.JobSpec, "metadata:\n  estimated_duration_hours: 0.05\n" + filledJobSpec, "states metadata.estimated_duration_hours 0.05: every job submitted from this file would hold that"},
-		"free text with a colon in it":      {repotemplate.ExperimentFile, "name: sweep: wide\ndescription: d\nmetrics: []\n", "experiment: " + repotemplate.ExperimentFile + " is not the YAML of an experiment: line 1, column 12: mapping values are not allowed in this context, where the line reads: name: sweep: wide"},
-		"no ranking metric":                 {repotemplate.ExperimentFile, "name: sweep\ndescription: d\nmetrics:\n  - key: gate\n    role: constraint\n", "has no ranking metric"},
+		"free text with a colon in it":      {repotemplate.ExperimentFile, "name: sweep: wide\ndescription: d\nmetrics: []\n", "experiment: " + repotemplate.ExperimentFile + " is no valid experiment spec: not YAML: line 1, column 12: mapping values are not allowed in this context, where the line reads: name: sweep: wide"},
+		"no ranking metric":                 {repotemplate.ExperimentFile, strings.Replace(filledExperiment, "direction: maximize", "direction: maximize\n    role: constraint\n    bound: 0.5", 1), `at least one metric must have role "ranking"`},
+		"no budget":                         {repotemplate.ExperimentFile, strings.Replace(filledExperiment, "budget_accelerator_hours: 2\n", "", 1), "budget_accelerator_hours is required"},
 		"a job spec that is not YAML":       {repotemplate.JobSpec, "job:\n  image: a\n command: b\n", "job-spec: " + repotemplate.JobSpec + " is not the YAML of a job spec: line 3, column 2: did not find expected key, where the line reads: command: b"},
 		"a job spec with no job":            {repotemplate.JobSpec, "metadata:\n  theory: t\n", "states no job"},
 		// A spec with no image passed three checks, was submitted and sat in the queue.

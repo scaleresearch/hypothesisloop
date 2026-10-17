@@ -97,7 +97,7 @@ of hl platform-experiments get); experiment_closed.
                                   # max_retries left out is 0
 
 Every other field: $WORKLOAD_SAMPLES/experiment-submission.yaml. $WORKLOAD_SAMPLES also holds
-whole jobs to read first: each sample's seed/ reports its metrics and its
+whole experiments to read first, one repository tree each: its code reports its metrics and its
 .hypothesisloop/job.yaml runs it.`, stderr)
 	agent := fs.String("agent", "", "whose job it is, for a person or an API key; an agent's token says it")
 	overrides := map[string]*string{

@@ -670,7 +670,8 @@ var platformExperimentCommands = []subcommand{
 	{"list", "the platform experiments this token reaches, one line each", cmdPlatformExperimentsList},
 	{"get", "the platform experiment: its status, what it waits for, its brief and its stages", cmdPlatformExperimentsGet},
 	{"health", "where each agent and the coordinator last stood: first job, jobs in flight, restarts, messages", cmdPlatformExperimentsHealth},
-	{"create", "create a platform experiment from a YAML file", cmdPlatformExperimentsCreate},
+	{"create", "create a platform experiment from an experiment spec", cmdPlatformExperimentsCreate},
+	{"start", "push a directory to a repository and create the platform experiment its spec states", cmdPlatformExperimentsStart},
 	{"update", "change the brief or other fields, or declare or raise the baseline", cmdPlatformExperimentsUpdate},
 	{"propose", "a draft's planner: propose the experiment the draft becomes", cmdPlatformExperimentsPropose},
 	{"decline", "a draft's planner: say why no experiment is proposed", cmdPlatformExperimentsDecline},
@@ -730,83 +731,72 @@ hl platform-experiments with no command is this list.`, stderr)
 	return 0
 }
 
-// cmdPlatformExperimentsCreate handles `hl platform-experiments create [FILE|-]`. FILE is a YAML
-// file shaped like the POST /platform-experiments body — see
-// controlplane/settings/examples/experiment.yaml for the full DSL reference.
+// cmdPlatformExperimentsCreate handles `hl platform-experiments create FILE|-`: the experiment
+// spec of FILE, checked before anything is sent, placed by the flags.
 func cmdPlatformExperimentsCreate(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments create", `usage: hl platform-experiments create [--project PROJECT] [FILE|-]
+	fs := newFlags("platform-experiments create", `usage: hl platform-experiments create [--project PROJECT] [--repository R | --repository-account A] [--continues PE] [--starts-at TIME] [--dry-run] FILE|-
 
-FILE is a YAML file shaped exactly like the POST /platform-experiments body. Every platform
-experiment belongs to a project: project_id in the file, else --project, else $HL_PROJECT.
-Minimal shape:
+FILE is an experiment spec, the YAML a repository keeps at .hypothesisloop/experiment.yaml:
+contract/repotemplate/files/.hypothesisloop/experiment.yaml documents every key, and each
+directory of examples/ holds one. It is checked before anything is sent, and a file the platform
+would refuse for its own content exits 2 naming every problem. The flags say where the
+experiment is placed, which a spec never states:
 
-  name: my-platform-experiment
-  description: what this research program is testing
-  budget_accelerator_hours: 10
-  max_agents: 2               # researchers at work at once: baseline agents and the
-                              # coordinator never count
-  researchers:                # optional: who the platform starts and keeps at work
-    - agent_type: generalist
-      count: 2
-  duration_hours: 24          # the run, from its start once the baseline is declared
-  coordinator_hosted: true    # optional: the platform runs the coordinator
-  metrics:
-    - key: val_accuracy
-      direction: maximize
-      target_vs_baseline: 0.5 # optional: the goal, +50% over the baseline's value
-                              # (negative for a metric to minimize)
-      deterministic: true     # optional: the same code and data give the same value on
-                              # any machine, so results compare across machines unrepeated
+  --project              the project it belongs to (default $HL_PROJECT)
+  --repository           the repository it works on: owner/name on GitHub, which a GitHub
+                         account connected to the org covers, or on any other git host a name
+                         created there beforehand. hl platform-experiments start pushes a
+                         directory to one and creates the experiment on it
+  --repository-account   left without --repository, the platform creates a private repository
+                         on GitHub, on this connected account when the org connected several
+  --continues            a closed platform experiment of the project that keeps its code in the
+                         same repository and declared a baseline: its baseline starts from the
+                         commit of that run's baseline job, so the numbers of both compare
+  --starts-at            when its baseline begins to be measured, RFC 3339, for a later start
+  --dry-run              check the file and print the body, and send nothing
 
-Every field shown is required but coordinator_hosted, target_vs_baseline and deterministic. report_interval_seconds may be left out:
-the platform's default applies.
-
-It is created open and no run has started. Add the researchers while it is open
-(hl platform-experiments agents add). It starts on a declared baseline: with coordinator_hosted
-the platform creates a hosted baseline agent with the experiment, as accepting a draft does, and
-declares the job it leaves when it finishes. Without it you do both: add an
-agent with --role baseline, and once its job is COMPLETED with a summary, run
-hl platform-experiments update --baseline-job JOB. That request starts the run when a
-researcher has joined and starts_at, when the file states one, has passed; otherwise the
-request that adds the researcher starts it, or starts_at does. While it is open
-hl platform-experiments get answers in status_reason what the start waits for and your next step, and in
-baseline_due_at when the platform closes it, with close_reason baseline_limit_reached, if it is
-not running by then.
-
-The experiment keeps its code in a repository on the deployment's git host. On GitHub,
-repository: owner/name names one a GitHub account connected to the org covers. Left out, the
-platform creates a private one there and the answer names it; repository_account says on
-which account when the org connected several. With no account connected the answer is 422
-github_not_connected: an owner connects GitHub in Settings first. On any other git host,
-repository names one created there beforehand, and leaving it out is 422 repository_required.
-
-continues: ID carries on a closed platform experiment of the project that keeps its code in the
-same repository and declared a baseline: its baseline starts from the commit of that run's
-baseline job, so the numbers of both compare. Its agents read that run, as every closed run of
-the project and repository that ran, as their own.
-
-One file is one platform experiment: for several, run the command once for each.
-
-See controlplane/settings/examples/experiment.yaml for the full DSL reference.`, stderr)
-	project := fs.String("project", "", "project the platform experiments belong to (default $HL_PROJECT)")
-	path, err := parseOne(fs, args, "FILE", "-")
+It is created open and no run has started. With coordinator_hosted the platform runs the
+coordinator, creates a hosted baseline agent and the researchers the spec names, and declares
+the baseline job when it finishes. Without it you do both: add an agent with --role baseline
+(hl platform-experiments agents add), and once its job is COMPLETED with a summary, run
+hl platform-experiments update --baseline-job JOB. hl platform-experiments get answers in
+status_reason what the start waits for and your next step, and in baseline_due_at when the
+platform closes it, with close_reason baseline_limit_reached, if it is not running by then.`, stderr)
+	project := fs.String("project", "", "the project it belongs to (default $HL_PROJECT)")
+	repository := fs.String("repository", "", "the repository it works on")
+	account := fs.String("repository-account", "", "the connected account a new repository is created on")
+	continues := fs.String("continues", "", "a closed platform experiment this one carries on")
+	startsAt := fs.String("starts-at", "", "when its baseline begins to be measured, RFC 3339")
+	dryRun := fs.Bool("dry-run", false, "check the file, print the body and send nothing")
+	path, err := parseOne(fs, args, "FILE", "")
 	if err != nil {
 		return parseExit(err)
 	}
-	*project = orEnv(*project, projectEnv)
-	body, err := readYAMLBody(path)
+	if path == "-" {
+		if err := fs.claimStdin("FILE -"); err != nil {
+			return parseExit(err)
+		}
+	}
+	spec, err := readSpec(path)
 	if err != nil {
 		fmt.Fprintf(stderr, "hl: %s\n", err)
 		return 2
 	}
-	if _, several := body["experiments"]; several {
-		return parseExit(misuse(fs, "%s holds an experiments: list, and one file is one platform experiment: write each as a file of its own and create it with a command of its own", path))
+	body := createBody{Spec: spec, Repository: *repository, RepositoryAccount: *account, Continues: *continues}
+	if body.ProjectID, err = projectOf(fs, *project); err != nil {
+		return parseExit(err)
 	}
-	if _, ok := body["project_id"]; !ok {
-		if *project == "" {
-			return parseExit(misuse(fs, "a project is required: project_id in the file, --project, or $HL_PROJECT"))
+	if *startsAt != "" {
+		at, err := time.Parse(time.RFC3339, *startsAt)
+		if err != nil {
+			return parseExit(misuse(fs, "--starts-at %q is no RFC 3339 time, as in 2030-01-02T15:04:05Z", *startsAt))
 		}
-		body["project_id"] = *project
+		body.StartsAt = &at
+	}
+	if *dryRun {
+		printJSON(stdout, body)
+		fmt.Fprintln(stderr, "hl: platform-experiments create: --dry-run, nothing sent")
+		return 0
 	}
 	var out any
 	if err := c.Do("POST", "/platform-experiments", body, &out); err != nil {
@@ -816,10 +806,10 @@ See controlplane/settings/examples/experiment.yaml for the full DSL reference.`,
 	return 0
 }
 
-// cmdPlatformExperimentsUpdate handles `hl platform-experiments update [FIELDS.yaml]`. FILE is a
-// YAML file shaped exactly like the create body (see controlplane/settings/examples/
-// experiment.yaml) — while the platform experiment is still open, every field including metrics
-// is editable; once running, only name, description, duration_hours and the baseline are.
+// cmdPlatformExperimentsUpdate handles `hl platform-experiments update [FIELDS.yaml]`. FIELDS.yaml
+// holds keys of the experiment spec: while the platform experiment is still open, every field
+// including metrics is editable; once running, only name, description, duration_hours and the
+// baseline are.
 func cmdPlatformExperimentsUpdate(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("platform-experiments update", `usage: hl platform-experiments update [--platform-experiment PE] [--description TEXT | --description-file FILE|-] [--baseline-job JOB [--reason TEXT | --reason-file FILE|-]] [--name NAME] [FIELDS.yaml]
 

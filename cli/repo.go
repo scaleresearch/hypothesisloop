@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"go.yaml.in/yaml/v4"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
+	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
 	"github.com/scaleresearch/hypothesisloop/contract/repotemplate"
 )
 
@@ -23,8 +25,9 @@ var repoCommands = []subcommand{
 	{"check", "check that this clone holds the experiment files, each valid and fitting the platform experiment", repoCheck},
 }
 
-const repoFiles = `  .hypothesisloop/experiment.yaml   the experiment: name, description (the brief researchers read) and
-                                    metrics, written whole from the platform experiment
+const repoFiles = `  .hypothesisloop/experiment.yaml   the experiment spec, written whole from the platform experiment:
+                                    the brief researchers read, its metrics, budget, length and
+                                    researchers, as many of each as the platform keeps at work now
   .hypothesisloop/job.yaml          the base job spec, submitted unedited for every trial, with the image,
                                     the accelerator_type and the cpu, memory and storage its proposal states
   .hypothesisloop/Dockerfile        system packages and toolchains
@@ -235,11 +238,11 @@ func anotherExperiment(root string, experiment declaredExperiment) (string, erro
 	if err != nil {
 		return "", err
 	}
-	var file statedExperiment
-	if yaml.Unmarshal(data, &file) != nil || (strings.TrimSpace(file.Name) == "" && len(file.Metrics) == 0) {
+	file, err := experimentspec.Parse(data)
+	if err != nil || (strings.TrimSpace(file.Name) == "" && len(file.Metrics) == 0) {
 		return "", nil
 	}
-	return file.notOf(experiment), nil
+	return notOf(file, experiment), nil
 }
 
 // cpuType is the one accelerator_type of work on CPU cores, which a job spec leaves out.
@@ -272,12 +275,12 @@ func experimentFiles(template map[string]string, experiment declaredExperiment) 
 	for path, content := range template {
 		files[path] = content
 	}
-	stated, err := yaml.Marshal(statedExperiment{Name: experiment.Name, Description: experiment.Description, Metrics: experiment.Metrics})
+	stated, err := specYAML(experiment.spec())
 	if err != nil {
 		return nil, err
 	}
-	files[repotemplate.ExperimentFile] = "# Platform experiment " + experiment.ID + " as the platform holds it, written by hl repo init. A create with\n" +
-		"# from_repo reads this file at the head of the default branch.\n" + string(stated)
+	files[repotemplate.ExperimentFile] = "# Platform experiment " + experiment.ID + " as the platform holds it, written by hl repo init, with\n" +
+		"# the researchers it keeps at work now. hl platform-experiments start creates one from it.\n" + string(stated)
 	fill := func(path, mark, value string) error {
 		if value == "" {
 			return nil
@@ -333,10 +336,10 @@ With none it exits 0 and prints one line saying what it checked and what it did 
 helper line is printed either way and fails nothing.
 
   readme      README.md is there with no REPLACE-WITH left
-  experiment  .hypothesisloop/experiment.yaml states name, description and metrics, one of
-              them ranked, and the name and the metrics are the platform experiment's: a
-              file left by another experiment of the repository fails here, and hl repo
-              init replaces it
+  experiment  .hypothesisloop/experiment.yaml is a valid experiment spec, as
+              hl platform-experiments create checks one, and its name and metrics are the
+              platform experiment's: a file left by another experiment of the repository
+              fails here, and hl repo init replaces it
   job-spec    .hypothesisloop/job.yaml states a job, its image, and its cpu, memory and
               storage as quantities, in each group of a grouped job, with no REPLACE-WITH
               left, no secret_env and no metadata.estimated_duration_hours: every job
@@ -410,16 +413,17 @@ commit (hl hypothesis checkout ID).`, stderr)
 }
 
 // declaredExperiment is what a clone's files are held to and written from: the platform
-// experiment's name, brief and metrics, and of the proposal it was accepted from, when it has
-// one, what a job spec and a README repeat.
+// experiment's spec, and of the proposal it was accepted from, when it has one, what a job spec
+// and a README repeat.
 type declaredExperiment struct {
-	ID          string           `json:"id"`
-	Name        string           `json:"name"`
-	Description string           `json:"description"`
-	Metrics     []declaredMetric `json:"metrics"`
+	experimentspec.Spec
+	ID string `json:"id"`
 	// Continues is the run this one carries on, whose files a clone of its baseline holds.
-	Continues string `json:"continues"`
-	Proposal  struct {
+	Continues   string `json:"continues"`
+	Coordinator *struct {
+		Model string `json:"model"`
+	} `json:"coordinator"`
+	Proposal struct {
 		AcceleratorType string `json:"accelerator_type"`
 		Image           string `json:"image"`
 		CPU             string `json:"cpu"`
@@ -430,28 +434,44 @@ type declaredExperiment struct {
 	} `json:"proposal"`
 }
 
-type declaredMetric struct {
-	Key              string   `json:"key" yaml:"key"`
-	Direction        string   `json:"direction" yaml:"direction"`
-	Role             string   `json:"role" yaml:"role,omitempty"`
-	Bound            *float64 `json:"bound" yaml:"bound,omitempty"`
-	TargetVsBaseline *float64 `json:"target_vs_baseline" yaml:"target_vs_baseline,omitempty"`
-	Deterministic    bool     `json:"deterministic" yaml:"deterministic,omitempty"`
+// spec is the experiment's spec as a file states it: its hosted coordinator's model is
+// coordinator_model.
+func (e declaredExperiment) spec() experimentspec.Spec {
+	spec := e.Spec
+	if e.Coordinator != nil {
+		spec.CoordinatorModel = e.Coordinator.Model
+	}
+	return spec
 }
 
-// statedExperiment is what the experiment file of a clone states.
-type statedExperiment struct {
-	Name        string           `yaml:"name"`
-	Description string           `yaml:"description"`
-	Metrics     []declaredMetric `yaml:"metrics"`
+// specYAML is spec as YAML, its keys in the order of the spec and a description of several lines
+// a block.
+func specYAML(spec experimentspec.Spec) ([]byte, error) {
+	encoded, err := json.Marshal(spec)
+	if err != nil {
+		return nil, err
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(encoded, &doc); err != nil {
+		return nil, err
+	}
+	var block func(*yaml.Node)
+	block = func(n *yaml.Node) {
+		n.Style = 0
+		for _, child := range n.Content {
+			block(child)
+		}
+	}
+	block(&doc)
+	return yaml.Marshal(&doc)
 }
 
-// notOf is how the file differs from experiment in what names an experiment, its name and its
+// notOf is how file differs from experiment in what names an experiment, its name and its
 // metrics, "" when both are experiment's. It is the one test of a file left by another
 // experiment of the repository: hl repo check fails on it and hl repo init replaces by it. The
 // description is the brief, which changes as the run learns. A run that continues another starts
 // from that one's files under a name of its own, so only the metrics tell it apart.
-func (file statedExperiment) notOf(experiment declaredExperiment) string {
+func notOf(file experimentspec.Spec, experiment declaredExperiment) string {
 	if name, declared := strings.TrimSpace(file.Name), strings.TrimSpace(experiment.Name); name != declared && experiment.Continues == "" {
 		return fmt.Sprintf("states name %q, and platform experiment %s is %q", name, experiment.ID, declared)
 	}
@@ -461,13 +481,9 @@ func (file statedExperiment) notOf(experiment declaredExperiment) string {
 	return ""
 }
 
-// String is the metric as a failure names it, with the role a metric that states none has.
-func (m declaredMetric) String() string {
-	role := m.Role
-	if role == "" {
-		role = "ranking"
-	}
-	stated := m.Key + " " + m.Direction + " " + role
+// metricLine is the metric as a failure names it, with the role a metric that states none has.
+func metricLine(m experimentspec.MetricDefinition) string {
+	stated := m.Key + " " + m.Direction + " " + string(m.EffectiveRole())
 	if m.Bound != nil {
 		stated += fmt.Sprintf(" bound %g", *m.Bound)
 	}
@@ -481,10 +497,10 @@ func (m declaredMetric) String() string {
 }
 
 // stated is metrics as one sorted line, which two declarations of the same metrics share.
-func stated(metrics []declaredMetric) string {
+func stated(metrics []experimentspec.MetricDefinition) string {
 	names := make([]string, len(metrics))
 	for i, metric := range metrics {
-		names[i] = metric.String()
+		names[i] = metricLine(metric)
 	}
 	slices.Sort(names)
 	return strings.Join(names, ", ")
@@ -570,38 +586,18 @@ func notReady(clone iofs.FS, experiment declaredExperiment, missing string) ([]s
 	return failures, nil
 }
 
-// experimentGap is what the experiment file lacks, and for a whole one how it differs from the
-// platform experiment: a file an earlier experiment of the repository left states another name
-// or other metrics.
+// experimentGap is what keeps the experiment file from being a valid spec, and for a valid one how
+// it differs from the platform experiment: a file an earlier experiment of the repository left
+// states another name or other metrics.
 func experimentGap(data []byte, experiment declaredExperiment) string {
-	var file statedExperiment
-	if err := yaml.Unmarshal(data, &file); err != nil {
-		return "is not the YAML of an experiment: " + yamlProblem(data, err)
+	file, err := experimentspec.Parse(data)
+	if err == nil {
+		err = file.Validate()
 	}
-	var missing []string
-	if strings.TrimSpace(file.Name) == "" {
-		missing = append(missing, "name")
+	if err != nil {
+		return "is no valid experiment spec: " + strings.ReplaceAll(err.Error(), "\n", "; ") + ". hl repo init writes it from the platform experiment"
 	}
-	if strings.TrimSpace(file.Description) == "" {
-		missing = append(missing, "description")
-	}
-	ranked := false
-	for _, metric := range file.Metrics {
-		if metric.Key == "" {
-			return "has a metric with no key"
-		}
-		ranked = ranked || metric.Role == "" || metric.Role == "ranking"
-	}
-	if len(file.Metrics) == 0 {
-		missing = append(missing, "metrics")
-	}
-	switch {
-	case len(missing) > 0:
-		return "states no " + strings.Join(missing, ", ") + ": hl repo init writes it from the platform experiment"
-	case !ranked:
-		return "has no ranking metric: one metric is the goal, with role ranking and a direction"
-	}
-	if another := file.notOf(experiment); another != "" {
+	if another := notOf(file, experiment); another != "" {
 		return another + ": the file is another experiment's, and hl repo init writes this one's"
 	}
 	return ""
