@@ -1,11 +1,6 @@
-# Shared base for every experiment's own experimentator image (see
-# agents/coordinator/experiments/<name>/Dockerfile.experimentator, which FROMs this image and
-# layers on that experiment's own runtime source/pins -- tt-metal today, but nothing here assumes
-# that; a non-tt-metal experiment's overlay just skips that layer). Everything below is identical
-# across experiments: the agent harness itself, git/Claude Code plumbing, and the read-only
-# WORKLOAD_SAMPLES reference. Keep experiment-specific source/deps out of this file -- they belong
-# in the per-experiment overlay so one experiment's pin bump can't silently change what every other
-# experiment's agent reads.
+# The image every hosted agent runs: the agent harness, git/Claude Code plumbing, and the
+# read-only WORKLOAD_SAMPLES reference, nothing of any one experiment. An agent image of its own
+# (agent_image) is built FROM this one.
 #
 # Thin, deliberately unopinionated: uv-managed deps (claude-agent-sdk bundles its own Claude
 # Code CLI binary, no separate install needed) + curl (the agent will likely reach for it via
@@ -23,25 +18,6 @@ COPY go.mod go.sum ./
 COPY cli/ cli/
 COPY contract/ contract/
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/hl ./cli
-
-# Only hl-clone and the experiments EXPERIMENT_SAMPLES names (separated by spaces or commas, or
-# all for every one this checkout holds) reach the agent, and of each only its seed/ and its job
-# spec: experiment.md carries coordinator notes agents must not read. An experiment that holds
-# neither leaves no directory.
-FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS samples
-ARG EXPERIMENT_SAMPLES=""
-COPY agents/coordinator/experiments /samples
-RUN keep=" $(printf '%s' "$EXPERIMENT_SAMPLES" | tr ',' ' ') " \
-	&& for name in $keep; do \
-		[ "$name" = all ] || [ -d "/samples/$name" ] || { echo "EXPERIMENT_SAMPLES names $name, which agents/coordinator/experiments does not hold" >&2; exit 1; }; \
-	done \
-	&& for dir in $(find /samples -mindepth 1 -maxdepth 1 -type d); do \
-		case "$keep" in *" all "*|*" ${dir#/samples/} "*) ;; *) rm -rf "$dir" ;; esac; \
-	done \
-	&& find /samples -mindepth 2 -maxdepth 2 ! -name seed ! -name .hypothesisloop -exec rm -rf {} + \
-	&& find /samples -mindepth 3 -maxdepth 3 -path '*/.hypothesisloop/*' ! -name job.yaml -delete \
-	&& find /samples -mindepth 1 -maxdepth 1 -type f ! -name hl-clone -delete \
-	&& find /samples -type d -empty -delete
 
 # A stage of its own: a pull that fails here says why, and one that fails inside COPY --from
 # reads as "no stage or image found with that name".
@@ -92,17 +68,16 @@ RUN useradd --home-dir /agent --shell /bin/bash agent \
  && echo 'agent ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/agent \
  && chmod 0440 /etc/sudoers.d/agent
 
-# WORKLOAD_SAMPLES is the agent's starting point for what a job workload looks like: the seed/ of
-# each experiment EXPERIMENT_SAMPLES names (not tests/workloads/, which is test-only fixture code)
-# with the .hypothesisloop/job.yaml that runs it, plus hl-clone. Read, copy, adapt into its own repo.
-# Deliberately not experiment-specific.
+# WORKLOAD_SAMPLES is the agent's starting point for what a job workload looks like: every example
+# experiment's repository tree (examples/, not tests/workloads/, which is test-only fixture code)
+# with the .hypothesisloop/job.yaml that runs it. Read, copy, adapt into its own repo.
 ENV WORKLOAD_SAMPLES=/opt/workloads-samples
-COPY --from=samples /samples $WORKLOAD_SAMPLES
+COPY examples $WORKLOAD_SAMPLES
 # The job DSL reference the samples and hl job submit --help name.
 COPY controlplane/settings/examples/experiment-submission.yaml $WORKLOAD_SAMPLES/
 # An agent reads the code a job ran with `hl-clone <code_ref> <dir>`, so it is a command here as
 # it is in the job image.
-RUN ln -s $WORKLOAD_SAMPLES/hl-clone /usr/local/bin/hl-clone
+COPY images/job/hl-clone /usr/local/bin/hl-clone
 
 # The `hl` CLI, built in the hl-builder stage above: the one way the agent acts on the platform.
 COPY --from=hl-builder /out/hl /usr/local/bin/hl
@@ -152,6 +127,6 @@ ENV AGENT_STATE_DIR=/agent/.harness
 ENV CLAUDE_CONFIG_DIR=/agent/.claude
 
 ENTRYPOINT ["/opt/hypothesisloop-agent/.venv/bin/python3", "-m", "hypothesisloop_agent.claude.run"]
-# A per-experiment overlay that needs to install/clone as root (e.g. tt-metal source) must
-# `USER root` for that layer and switch back to `USER agent` itself afterwards -- ENTRYPOINT is
-# inherited as-is and does not need repeating.
+# An image built FROM this one that needs to install as root must `USER root` for that layer and
+# switch back to `USER agent` itself afterwards -- ENTRYPOINT is inherited as-is and does not need
+# repeating.

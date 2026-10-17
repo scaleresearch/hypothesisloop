@@ -43,7 +43,6 @@ read -r -a images <<<"${IMAGES:-experimentator-base job-base job cluster-agent n
 for entry in "$@"; do
   images+=("${entry%%=*}-base" "${entry%%=*}")
 done
-samples="$(lib_env_value EXPERIMENT_SAMPLES)"
 remote_dir="hl-build/$(id -un)"
 box="${remote_dir}/src/localdev/images-remote-box.sh"
 read -r -a ssh <<<"ssh -o BatchMode=yes ${SSH_OPTIONS:-}"
@@ -61,16 +60,6 @@ work="$(mktemp -d)"
 trap 'rm -rf "${work}"' EXIT
 # docs/ and the UI are in no image built here.
 git archive HEAD -- . ':!docs' ':!controlplane/ui' | tar -x -C "${work}"
-# The experiments the agent image bakes in as samples are local to this checkout (git-ignored);
-# the image keeps their seed/ and .hypothesisloop/job.yaml only.
-experiments=agents/coordinator/experiments
-for dir in "${experiments}"/*/; do
-  name="$(basename "${dir}")"
-  case " ${samples//,/ } " in *" all "* | *" ${name} "*) ;; *) continue ;; esac
-  mkdir -p "${work}/${experiments}/${name}/.hypothesisloop"
-  [[ ! -d "${dir}seed" ]] || rsync -a --exclude __pycache__ --exclude .venv "${dir}seed" "${work}/${experiments}/${name}/"
-  [[ ! -f "${dir}.hypothesisloop/job.yaml" ]] || cp "${dir}.hypothesisloop/job.yaml" "${work}/${experiments}/${name}/.hypothesisloop/"
-done
 echo "==> sending HEAD ($(git rev-parse --short HEAD)) to ${builder}:${remote_dir}/src"
 COPYFILE_DISABLE=1 tar -cz --no-xattrs -C "${work}" . | "${ssh[@]}" "${builder}" "rm -rf ${remote_dir}/src && mkdir -p ${remote_dir}/src && tar -xz -C ${remote_dir}/src"
 
@@ -82,7 +71,7 @@ results="${work}/results"
 : >"${results}"
 if [[ ${#missing[@]} -gt 0 ]]; then
   echo "==> building on ${builder}: ${missing[*]}"
-  ssh_box build "${HL_REGISTRY}" "${tag}" "'${samples// /,}'" "'$*'" "${missing[@]}" | tee -a "${results}"
+  ssh_box build "${HL_REGISTRY}" "${tag}" "'$*'" "${missing[@]}" | tee -a "${results}"
   echo "==> pushing from ${builder}: ${missing[*]}"
   for name in "${missing[@]}"; do
     ssh_box push "${HL_REGISTRY}" "${tag}" "${name}" | tee -a "${results}"

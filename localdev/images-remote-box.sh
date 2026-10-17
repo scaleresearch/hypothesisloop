@@ -5,7 +5,7 @@
 # config of this run's own, deleted when the run ends, so the builder's own logins are untouched.
 #
 #   missing REGISTRY TAG NAME...                   the names the registry holds nothing under TAG for
-#   build   REGISTRY TAG SAMPLES JOB_BASES NAME... builds each for linux/amd64 into docker's store
+#   build   REGISTRY TAG JOB_BASES NAME...         builds each for linux/amd64 into docker's store
 #   push    REGISTRY TAG NAME...                   pushes each
 #   import  REGISTRY TAG NAME...                   imports each into k3s's containerd (sudo)
 #
@@ -40,7 +40,7 @@ image() {
 spec() {
   args=() context=. dockerfile=""
   case "$1" in
-    experimentator-base) dockerfile=agents/experimentator/Dockerfile.base; args=(--build-arg "EXPERIMENT_SAMPLES=${samples}") ;;
+    experimentator-base) dockerfile=agents/experimentator/Dockerfile.base ;;
     job-base) dockerfile=images/job/Dockerfile.base ;;
     job) dockerfile=images/job/Dockerfile; args=(--build-arg "BASE=$(image job-base)") ;;
     control-service | metrics-service) dockerfile="controlplane/build/Dockerfile.$1" ;;
@@ -86,8 +86,8 @@ case "${command}" in
     done
     ;;
   build)
-    samples="$1" job_bases="$2"
-    shift 2
+    job_bases="$1"
+    shift
     # The Go images copy a vendor/ that is not tracked. Made with the toolchain go.mod names, in a
     # container, since the builder's own go may be older.
     if [[ " $* " =~ \ (cluster-agent|node-agent|bare-agent|control-service|metrics-service)\  ]]; then

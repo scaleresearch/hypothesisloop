@@ -17,4 +17,4 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/hl ./cli
 
 FROM ${BASE}
 COPY --from=hl-builder /out/hl /usr/local/bin/hl
-COPY agents/coordinator/experiments/hl-clone /usr/local/bin/hl-clone
+COPY images/job/hl-clone /usr/local/bin/hl-clone

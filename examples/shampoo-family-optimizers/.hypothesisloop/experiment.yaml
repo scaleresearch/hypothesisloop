@@ -1,0 +1,145 @@
+name: shampoo-family-optimizers
+description: |
+  OBJECTIVE
+  On a fixed, tiny MLP autoencoder, measure how much the Shampoo family of second-order optimizers
+  beats AdamW, what each successive paper in the family actually improves over the one before it,
+  and whether a new variant can beat the best of them. This is an optimizer-research experiment:
+  the network and dataset are fixed and out of scope to change; the only lever is the optimizer
+  (which one, and its hyperparameters).
+
+  MODEL AND TASK (fixed: do not change)
+    AutoencoderMLP in train.py: a 784-256-64-256-784 MLP autoencoder (GELU, no BatchNorm, which
+    masks preconditioning gains), reconstructing Fashion-MNIST images (MSE loss). About 470k
+    params, every weight a 2D matrix: exactly the shape Shampoo/SOAP/Muon are designed for, with no
+    conv or embedding special-casing. It is the simplest network where the classic
+    second-order-vs-Adam gap is large and reproducible: an ill-conditioned loss landscape, no
+    augmentation noise, deterministic given a seed.
+
+  OPTIMIZERS TO COMPARE (optimizers.py, one entry point `build_optimizer(name, model, lr, ...)`)
+    sgd, adamw, full_adagrad, shampoo_2018, scalable_shampoo, soap, muon, kl_shampoo,
+    online_kl_shampoo. optimizers.py's module docstring names the paper each implements and,
+    critically, its FIDELITY NOTES: shampoo_2018/scalable_shampoo/soap/muon are direct unabridged
+    implementations of their papers' update rules; kl_shampoo/online_kl_shampoo are BEST-EFFORT
+    reconstructions written without the official code. FIRST TASK for whoever works kl_shampoo or
+    online_kl_shampoo: clone github.com/tilde-research/online-kl-shampoo-release and the
+    KL-Shampoo paper's code if public, diff this implementation's update rule against it, and
+    replace it with the official rule if they diverge. Note the specific divergence in your
+    hypothesis either way.
+    full_adagrad is the "ideal reference" upper bound, never a contender: only run it at a tiny
+    latent config where its O(dim^3) state is tractable (see CONSTRAINTS).
+
+  RANKING METRIC AND WHY
+    optimizer_flops_to_target (MINIMIZE, RANKING METRIC): analytic FLOPs (forward + backward +
+    optimizer step, train.py's estimate_forward_backward_flops and estimate_optimizer_flops) spent
+    to reach a fixed target test MSE (TARGET_LOSS env var, default 0.012, AdamW's own tuned loss at
+    a full 3000-step budget: the reference point every other optimizer's speedup or slowdown is
+    reported against). Steps-to-target would hide the Shampoo family's much higher per-step cost
+    and flatter every second-order method; wall-clock-to-target is dominated by the hardware's host
+    sync and CPU eigendecomposition. FLOPs-to-target is the implementation-invariant number the
+    papers themselves argue about. It is steps taken times the analytic FLOPs of one step, and
+    train.py reports it once, at the report where test MSE first reaches the target (so to within
+    REPORT_EVERY_STEPS steps): the platform ranks a job on the lowest value it ever reported, and a
+    running total would rank every job on its first report. A run that ends above the target
+    reports none and ranks nowhere. test_loss, step and wall_clock_seconds are reported at a steady
+    cadence (REPORT_EVERY_STEPS) the whole run, plus `diverged`, the gate (1.0 if loss went
+    NaN/Inf, else 0.0). A diverged run is a completed trial that ranks nowhere: the job reports
+    diverged = 1.0 and exits 0.
+
+  USE train.py AND optimizers.py
+    train.py is the full harness: loads Fashion-MNIST (torchvision, downloaded to DATA_DIR),
+    builds AutoencoderMLP, trains with build_optimizer(...), reports metrics via metrics.py at
+    REPORT_EVERY_STEPS cadence, and stops at STEPS or when TARGET_LOSS is reached. Every knob is an
+    env var: OPT_NAME, OPT_LR, OPT_PRECOND_FREQ, BATCH_SIZE, STEPS, TARGET_LOSS, SEED,
+    REPORT_EVERY_STEPS. A job runs in the platform's `python` job image on CPU cores: it clones
+    the commit you submit from with hl-clone and runs train.py with uv, so a change to
+    optimizers.py you commit and push runs in the next job. A hyperparameter sweep is --env flags on
+    the base job spec, submitted unedited with
+    `hl job submit .hypothesisloop/job.yaml --hypothesis ID --theory "..." --env K=V`, never a
+    change to train.py's training loop. A new optimizer variant (for success criterion 3) is a new
+    class in optimizers.py plus a new `build_optimizer` branch; train.py itself should not need to
+    change for that.
+    Every job runs on CPU (TRAIN_DEVICE=cpu). The optimizer step always runs on host CPU in fp32
+    (optimizers.py enforces it). TRAIN_DEVICE=tt exits with an error: no ttnn forward/backward is
+    wired, so results are not validated against Tenstorrent numerics.
+
+  CONSTRAINTS
+    - full_adagrad only at latent configs where the flattened per-parameter dim stays under ~300
+      (O(dim^3) state): do not point it at the default 784-256-64 config, it will not finish.
+    - Preconditioner update frequency (OPT_PRECOND_FREQ, Shampoo-family methods only) is a real
+      axis: sweep k in {1, 10, 100} for every Shampoo-family optimizer and report the best-FLOP
+      point per method. Comparing method A at k=1 to method B at k=100 compares no papers: always
+      report which k a result used.
+    - Tuning budget parity: a claimed win must come from a fixed random search of N=32 trials per
+      optimizer over LR (log-uniform, 3 decades) plus that optimizer's own hyperparameters
+      (momentum, eps, betas, precondition_freq, grafting on/off), with the same seeds and the same
+      trial budget across optimizers. Report best-of-N AND median-of-top-5 (best-of-N alone
+      rewards high-variance methods): a win on best-of-N that does not hold on median-of-top-5 is
+      no win.
+    - At least 5 seeds on any config you claim a ranked result for; a gap smaller than the seed
+      std-dev is a tie.
+    - Numerics: optimizer-step math is fp32 always: never let a job silently run preconditioner
+      math in bf16/fp16.
+    - Weight decay: decoupled (AdamW-style) for every optimizer that uses it, including any new
+      variant: do not compare an optimizer with WD against one without.
+    - Do not weaken TARGET_LOSS, the metric definition, or train.py's measurement code to post a
+      better number. The metric computation is this experiment's correctness gate: changing
+      either FLOP estimate or how test_loss is computed voids the submission.
+    - A diverged run (NaN/Inf loss) reports diverged = 1.0 and exits 0. The platform keeps it out
+      of the ranking and it still counts as a trial with a finding to file.
+
+  METRICS TO REPORT
+    optimizer_flops_to_target  (minimize, RANKING METRIC): once, when the target is reached.
+    step                       (attribute)
+    wall_clock_seconds         (attribute)
+    diverged                   (constraint, at most 0): 1.0/0.0
+
+  RESEARCH QUESTIONS THIS EXPERIMENT MUST ANSWER (success criteria)
+    1. How much better is each Shampoo-family optimizer than AdamW, and under what conditions
+       (batch size, precondition_freq, seed count) does the advantage appear or vanish? Report a
+       verdict per optimizer: confirmed / partially confirmed / not confirmed against its own
+       paper's claimed improvement, backed by the optimizer_flops_to_target measured here.
+    2. What does each successive paper improve over the previous one, and by how much? Chain:
+       Shampoo 2018 -> Scalable Shampoo 2020 -> SOAP 2024 -> KL-Shampoo 2025 -> Online KL Shampoo
+       2026 (Muon is a separate lineage: compare it to the chain without forcing it into the
+       chain order). Each link needs its own verdict.
+    3. Can a new variant beat the best of them? Ends when EITHER a variant reaches
+       optimizer_flops_to_target >= 10% better than the best baseline (flag a second, larger
+       network as the next experiment's job once found), OR a documented negative result after
+       >= 5 distinct tried variants (each a new optimizers.py class with a fair sweep against it,
+       never a hyperparameter retune of an existing one).
+
+  BASELINE
+    config:    train.py defaults (AutoencoderMLP, OPT_NAME=adamw, OPT_LR=1e-3, BATCH_SIZE=1024,
+               STEPS=3000, TARGET_LOSS=0.012, SEED=0) on CPU. Confirm TARGET_LOSS=0.012 is
+               reachable within STEPS=3000 at the default LR, tuning LR first if not.
+    trial:     hl job submit .hypothesisloop/job.yaml
+
+metrics:
+  - key: optimizer_flops_to_target
+    direction: minimize
+    role: ranking
+  # The gate: a run whose loss went NaN/Inf reports 1 and ranks nowhere.
+  - key: diverged
+    direction: minimize
+    role: constraint
+    bound: 0
+  - key: step
+    direction: minimize
+    role: attribute
+  - key: wall_clock_seconds
+    direction: minimize
+    role: attribute
+
+# Core-hours: a trial holds 4 cores for up to a quarter of an hour.
+budget_accelerator_hours: 100
+max_agents: 4
+duration_hours: 24
+researchers:
+  - agent_type: generalist
+    count: 4
+coordinator_hosted: true
+report_interval_seconds: 10
+stages:
+  - length_pct: 100
+    evict_pct: 0
+default_quota_tier: guaranteed

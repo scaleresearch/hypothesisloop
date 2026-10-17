@@ -1,0 +1,107 @@
+name: sparse-sdpa
+description: |
+  OBJECTIVE
+  Minimize the device kernel duration of ttnn.transformer.sparse_sdpa (the DSA/MLA-style sparse
+  attention op) on Tenstorrent Blackhole, on the official "prod-sparse" production shape.
+  Optimize sparse_sdpa only: do not switch to or explore the sibling MSA op
+  (SparseSDPAMsaOperation), so every researcher works the same code and results compare directly.
+  The objective is better code that can be merged upstream.
+
+  SOURCE
+  The pinned tt-metal is TT_METAL_REF of .hypothesisloop/job.yaml, the commit of v0.77.0 and of the
+  ttnn in the job image. When you need its source, clone it at that commit:
+    git clone --filter=blob:none https://github.com/tenstorrent/tt-metal.git
+    git -C tt-metal checkout 9f9cd4fd590f4b606bd0981a4fe0b6403eb38ec9
+  TT-NN ships inside it as ttnn/. The op lives under ttnn/cpp/ttnn/operations/transformer/sdpa/.
+
+  USE harness.py
+  It wraps tt-metal's own sparse_sdpa_test_utils.py (the real upstream make_inputs, golden, to_dev
+  and pcc), which tt_metal_tests.sh fetches at the pinned commit when the job starts. A job runs
+  in the platform's `tenstorrent` job image: it clones the commit you submit from with hl-clone and
+  runs harness.py. Submit the base job spec unedited:
+  `hl job submit .hypothesisloop/job.yaml --hypothesis ID --theory "..." --env K=V`.
+    - Every knob is an env var: DSA_KV_DTYPE, DSA_Q_DTYPE, DSA_KC (k_chunk_size), DSA_FIDELITY,
+      DSA_H/S/T/TOPK/DSA_NV_PATTERN (shape), DSA_ITERS/WARMUP/TRACE_REPS. A hyperparameter sweep
+      is --env flags at submit, never a change to harness.py.
+    - Import it as a library (`from harness import run_dsa_prod`) for a custom sweep driver in
+      place of one job per config: it returns (best_kernel_duration_ns, pcc, cache_entries).
+
+  YOU MAY CHANGE ANYTHING, ANYWHERE IN THE STACK
+    - Config and hyperparameters: env vars of harness.py jobs, the fast, high-scale path with no
+      build.
+    - tt-metal and ttnn source (the op's C++, kernels, dispatch, sparse gather/DMA, anything under
+      ttnn/cpp/...): edit your clone, `git -C tt-metal diff > tt-metal.patch`, commit the patch at
+      the root of your branch, and submit with the job command's `python3 harness.py` replaced by
+      `bash build_and_run.sh harness.py`. It clones tt-metal at the pinned commit, applies your
+      patch, builds it, and runs the same harness against the freshly built ttnn. A build takes
+      many minutes: budget for it, and never rebuild for a trivial rerun.
+    - Nothing is off limits: kernel algorithm, dispatch/scheduling, gather-header tuning by source
+      edit, new fused ops. If it builds and passes the constraints below, it counts.
+
+  METRICS TO REPORT
+    kernel_duration_ns  (minimize, RANKING METRIC): DEVICE KERNEL DURATION [ns] of
+        ttnn.transformer.sparse_sdpa on the "prod-sparse" shape (see FACTS), reported as a running
+        minimum.
+    pcc_achieved        (constraint, at least 0.99): PCC vs the Torch sparse_mla() golden, full
+        precision.
+    program_cache_entries (attribute): program-cache entry count for the run.
+  Report all three at a steady cadence while the job runs, never once at the end.
+
+  CONSTRAINTS
+    - PCC >= 0.99 vs the sparse_mla() golden in
+      tests/ttnn/unit_tests/operations/sdpa/sparse_sdpa_test_utils.py.
+    - Falling below your own baseline PCC is a regression even if it clears 0.99.
+    - program_cache_entries must match the baseline's: this blocks speedups that come from
+      recompilation or shape over-specialization.
+    - The existing tests define correctness. Do not weaken, redefine, skip or bypass them: run the
+      real upstream PCC tests in test_sparse_sdpa.py against any op you changed, C++ or Python. A
+      submission that changes the gate is void.
+    - A lower-precision config (e.g. fp8 K/V) is legitimate but a lesser result than an algorithm
+      or kernel improvement at the same precision: report which category your best result falls
+      into.
+
+  FACTS ABOUT THE PROBLEM
+    - Kernel timing is noisy; the ranking metric varies run to run.
+    - Perf reference, which harness.py's defaults target: S=640, T=56320, TOPK=2048,
+      k_chunk_size=256, H=32, K_DIM=576, V_DIM=512, nv="sparse" (256 valid keys/query), upstream's
+      own test_sparse_sdpa_perf, id="prod-sparse". Official bf16 reference: 0.576ms.
+    - That official perf test needs IsProgramRealtimeProfilerActive() (host IOMMU), which a device
+      may lack, and run as is it would pytest.fail(). harness.py handles it: real-time profiler
+      first, then trace-capture replay, then synced wall-clock. On hardware it measured about 583us
+      bf16 against the official 576us, and about 436us with fp8 K/V.
+    - The cpu/memory/storage of .hypothesisloop/job.yaml are a generous starting point: raise them
+      on your branch when you need to, especially for a build from source.
+    - One Tenstorrent ASIC per job; only that device node is visible in the container.
+
+  BASELINE
+    config:    harness.py at its shipped defaults on the "prod-sparse" shape: S=640, T=56320,
+               TOPK=2048, k_chunk_size=256, H=32, K_DIM=576, V_DIM=512, nv="sparse", bf16 K/V,
+               against the job image's ttnn
+    trial:     hl job submit .hypothesisloop/job.yaml
+
+metrics:
+  - key: kernel_duration_ns
+    direction: minimize
+    role: ranking
+  # The gate: a job below it, or that reports none, ranks nowhere.
+  - key: pcc_achieved
+    direction: maximize
+    role: constraint
+    bound: 0.99
+  - key: program_cache_entries
+    direction: minimize
+    role: attribute
+
+budget_accelerator_hours: 24
+max_agents: 2
+duration_hours: 12
+researchers:
+  - agent_type: generalist
+    count: 2
+coordinator_hosted: true
+report_interval_seconds: 10
+stages:
+  - length_pct: 100
+    evict_pct: 0
+default_quota_tier: guaranteed
+max_concurrent_accelerators: 2

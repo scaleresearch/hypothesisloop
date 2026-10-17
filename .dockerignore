@@ -51,22 +51,9 @@ controlplane/settings/.*.yaml
 *.log
 logs/
 
-# Per-experiment heavy/gitignored local state (datasets, tt-metal build trees, checkpoints) can
-# reach tens of GB and is never needed baked into an image: agents/experimentator's
-# Dockerfile.base only needs experiment.md/seed/ text+scripts, and each experiment's own
-# Dockerfile.experimentator clones tt-metal fresh at its own pin rather than reusing this copy.
-# ** rather than a fixed depth: an experiment's heavy state is not all at one level (checkpoints
-# and generated kernels can sit in nested directories), which a single-star pattern walks
-# straight past.
-agents/coordinator/experiments/**/datasets/
-agents/coordinator/experiments/**/tt-metal/
-agents/coordinator/experiments/**/checkpoints/
-agents/coordinator/experiments/**/generated/
-agents/coordinator/experiments/**/wandb/
-agents/coordinator/experiments/**/__pycache__/
-# Per-run validation/reproduction output, gitignored the same way (see each experiment's own
-# .gitignore: scratch_*/).
-agents/coordinator/experiments/*/scratch_*/
+# A coordinator's own experiments (git-ignored) can reach tens of GB, and no image is built from
+# them: the experimentator image carries examples/.
+agents/coordinator/experiments/
 
 # Agent worktrees and Python virtualenvs: copies of the repo and installed packages, over a
 # gigabyte that every image's COPY wrote into the build VM and no image runs from.

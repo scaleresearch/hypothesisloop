@@ -1,0 +1,85 @@
+name: dummy-data-search-demo
+description: |
+  OBJECTIVE
+  Maximize held-out validation accuracy (val_accuracy) on a small synthetic two-class dataset. This
+  is a fast, self-contained shakedown of the platform's three researcher types
+  (hyperparameter-search, architecture-search, data-search), and no real research problem. Every
+  job completes in well under a minute.
+
+  STARTING POINT
+  The repository holds a working numpy MLP and synthetic-dataset generator (train.py) and the
+  base job spec (.hypothesisloop/job.yaml). A job runs in the platform's `python` job image on one
+  CPU core: it clones the commit you submit from with hl-clone, installs numpy with uv and runs
+  train.py. Clone the repository and work on your branch. Every knob you vary is a job env var.
+  Submit the spec unedited, with no build step:
+  `hl job submit .hypothesisloop/job.yaml --hypothesis ID --theory "..." --env K=V`.
+
+  THREE INDEPENDENT AXES: hold two fixed, vary the third, the one of your agent type
+    ARCHITECTURE   HIDDEN_LAYERS (comma-separated hidden-layer widths, e.g. "32,16"),
+                   ACTIVATION (relu|tanh)
+    HYPERPARAMS    LR, BATCH_SIZE, EPOCHS, L2
+    DATA           N_SAMPLES, NOISE, N_FEATURES, CLASS_SEP, CURRICULUM (0|1: easy-to-hard
+                   training-set ordering; only meaningful together with epochs > ~10)
+  Every env var of the job spec outside your axis stays at the value the graph's confirmed
+  hypotheses settled on (or the BASELINE's, before anything is confirmed): that is what "hold
+  fixed" means here.
+
+  DIRECTIONS
+  Capacity (architecture), optimization (hyperparameters) and data, with depth refining capacity
+  and curriculum refining data. Place each idea under the most specific hypothesis it refines,
+  under several when it combines axes (e.g. a wider model that only pays off with more samples),
+  and open a new direction under the objective only when none fits. Mark an idea that competes
+  with an existing one as contradicting it.
+
+  METRICS TO REPORT
+    val_accuracy (maximize, RANKING METRIC): held-out accuracy, reported as a running max.
+    train_loss   (attribute, not ranked): final-epoch mean training loss.
+
+  CONSTRAINTS
+    - Runs on CPU cores, with no accelerator: the workload is plain numpy.
+    - Report metrics at a steady cadence while the job runs, never once at the end.
+    - Never fabricate or inflate a metric; nothing checks this server-side.
+    - The dataset generator and training loop in train.py ARE the correctness gate: do not
+      change the loss function, the accuracy definition, or the train/val split (first 80%/last
+      20% of the generated, pre-shuffled samples) to make a number look better.
+
+  FACTS ABOUT THE PROBLEM
+    - The task is a noisy two-moons-style binary classification problem; N_FEATURES > 2 adds pure
+      noise columns (a real data axis: more noise columns without more capacity or more signal
+      should hurt).
+    - The run is short and cheap by design (EPOCHS default 40, N_SAMPLES default 800) so a fleet
+      can run dozens of jobs in minutes: prefer many small trials over few large ones.
+
+  BASELINE
+    config:    .hypothesisloop/job.yaml as shipped (HIDDEN_LAYERS=16, ACTIVATION=relu, LR=0.05,
+               BATCH_SIZE=32, EPOCHS=40, L2=0.0, N_SAMPLES=800, NOISE=0.25, N_FEATURES=2,
+               CLASS_SEP=1.0, CURRICULUM=0), one CPU core
+    trial:     hl job submit .hypothesisloop/job.yaml with no --env
+
+metrics:
+  - key: val_accuracy
+    direction: maximize
+    role: ranking
+  - key: train_loss
+    direction: minimize
+    role: attribute
+
+# Core-hours: a trial holds one core for about a minute.
+budget_accelerator_hours: 2
+max_agents: 3
+duration_hours: 1
+researchers:
+  - agent_type: hyperparameter-search
+    count: 1
+  - agent_type: architecture-search
+    count: 1
+  - agent_type: data-search
+    count: 1
+coordinator_hosted: true
+# Jobs end in about a minute, so every 5s still gives a short job several points.
+report_interval_seconds: 5
+stages:
+  - length_pct: 100
+    evict_pct: 0
+    max_job_hours: 0.25
+default_quota_tier: guaranteed

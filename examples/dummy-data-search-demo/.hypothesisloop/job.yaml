@@ -1,0 +1,27 @@
+# The base job spec. Every trial is this file, submitted unedited:
+#
+#   hl job submit .hypothesisloop/job.yaml --hypothesis ID --theory "..." --env KEY=VALUE
+job:
+  image: python
+  # hl-clone checks out the commit the job was submitted from and prints its directory. The image
+  # carries no framework, so uv runs train.py with numpy, its one dependency.
+  command: ["bash", "-c", "dir=$(hl-clone) && cd \"$dir\" && exec uv run --with numpy==2.3.3 train.py"]
+  # No accelerator: cpu is the whole cores the job holds and pays for.
+  cpu: 1
+  memory: 512Mi
+  storage: 256Mi
+  env:
+    # Architecture axis
+    HIDDEN_LAYERS: "16"
+    ACTIVATION: "relu"
+    # Hyperparameter axis
+    LR: "0.05"
+    BATCH_SIZE: "32"
+    EPOCHS: "40"
+    L2: "0.0"
+    # Data axis
+    N_SAMPLES: "800"
+    NOISE: "0.25"
+    N_FEATURES: "2"
+    CLASS_SEP: "1.0"
+    CURRICULUM: "0"

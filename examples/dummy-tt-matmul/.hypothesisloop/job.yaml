@@ -1,0 +1,18 @@
+# The base job spec. Every trial is this file, submitted unedited:
+#
+#   hl job submit .hypothesisloop/job.yaml --hypothesis ID --theory "..." --env KEY=VALUE
+job:
+  # ttnn, device firmware and torch, with python3 the venv that holds them.
+  image: tenstorrent
+  # hl-clone checks out the commit the job was submitted from and prints its directory.
+  command: ["bash", "-c", "dir=$(hl-clone) && cd \"$dir\" && exec python3 train.py"]
+  accelerator_type: tenstorrent.com/chipArch=blackhole
+  accelerator_count: 1
+  # Generous for the tt-metal runtime: firmware and kernel JIT loading and dispatch buffers.
+  cpu: 8
+  memory: 32Gi
+  storage: 1Gi
+  env:
+    # One ASIC of a two-chip board is visible to the job, and ttnn's default fabric setup expects
+    # the whole board. The single-chip mesh descriptor the image ships describes what the job holds.
+    TT_MESH_GRAPH_DESC_PATH: /opt/venv/lib/python3.10/site-packages/ttnn/tt_metal/fabric/mesh_graph_descriptors/p100_mesh_graph_descriptor.textproto

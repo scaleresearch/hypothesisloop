@@ -1,0 +1,62 @@
+name: dummy-tt-matmul
+description: |
+  OBJECTIVE
+  Maximize sustained bf16 matmul throughput (TFLOPS) on Tenstorrent Blackhole. This is an
+  end-to-end shakedown of the full agent journey on real hardware, with a simple, self-contained
+  workload, and no deep kernel-optimization task.
+
+  STARTING POINT
+  The repository holds a working Blackhole matmul benchmark (train.py) and the base job spec
+  (.hypothesisloop/job.yaml). The benchmark opens the device allocated to the job via ttnn, runs
+  bf16 matmuls across a range of sizes, times them, and reports the metrics below. A job runs in
+  the platform's `tenstorrent` job image: it clones the commit you submit from with hl-clone and
+  runs train.py, so a change you commit and push runs in the next job. Clone the repository and
+  work on your branch. Submit the spec unedited:
+  `hl job submit .hypothesisloop/job.yaml --hypothesis ID --theory "..."`.
+
+  WHAT TO VARY
+  Matmul sizes, warmup and timed iterations, dtype and tiling in train.py. How a matmul is timed
+  and how TFLOPS is computed from it stay as they are.
+
+  METRICS TO REPORT
+    tflops_measured (maximize, RANKING METRIC): best sustained bf16 matmul TFLOPS, reported as
+        a running max.
+    latency_ms (attribute): mean wall-clock per matmul at the current size.
+
+  CONSTRAINTS
+    - Runs on one Tenstorrent Blackhole ASIC per job (accelerator_type
+      tenstorrent.com/chipArch=blackhole, accelerator_count 1).
+    - Report metrics at a steady cadence while the job runs, never once at the end.
+    - Never fabricate or inflate a metric; nothing checks this server-side.
+
+  FACTS ABOUT THE PROBLEM
+    - A Blackhole ASIC measured about 180 TFLOPS bf16 with the defaults.
+    - Kernel and matmul timing is noisy; a gain inside run-to-run variance is no gain.
+
+  BASELINE
+    config:    .hypothesisloop/job.yaml as shipped (matmul sizes, warmup/timed iters, dtype,
+               tiling at the defaults of train.py), one Blackhole ASIC
+    trial:     hl job submit .hypothesisloop/job.yaml
+
+metrics:
+  - key: tflops_measured
+    direction: maximize
+    role: ranking
+  - key: latency_ms
+    direction: minimize
+    role: attribute
+
+budget_accelerator_hours: 4
+max_agents: 2
+duration_hours: 2
+researchers:
+  - agent_type: generalist
+    count: 2
+coordinator_hosted: true
+report_interval_seconds: 10
+stages:
+  - length_pct: 100
+    evict_pct: 0
+    max_job_hours: 0.5
+default_quota_tier: guaranteed
+max_concurrent_accelerators: 2

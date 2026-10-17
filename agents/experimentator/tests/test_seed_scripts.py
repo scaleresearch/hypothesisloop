@@ -19,7 +19,7 @@ EXPERIMENTS = REPO / "agents/coordinator/experiments"
 
 # Every script that carries its own copy of post_metric: the template's and the seeds' are
 # copied into an experiment's repository and workloads into an image, so none of them can import
-# a shared one. Of the experiments, those on disk whose seed defines post_metric.
+# a shared one. Of the examples, those whose code defines post_metric.
 METRIC_HELPERS = [path for path in [
     "contract/repotemplate/files/metrics.py",
     "tests/workloads/generic/train.py",
@@ -28,7 +28,7 @@ METRIC_HELPERS = [path for path in [
     "tests/workloads/nvidia/train.py",
     "tests/workloads/tenstorrent/train.py",
 ] if (REPO / path).exists()] + sorted(
-    str(path.relative_to(REPO)) for path in EXPERIMENTS.glob("*/seed/*.py")
+    str(path.relative_to(REPO)) for path in (REPO / "examples").glob("*/*.py")
     if "\ndef post_metric(" in "\n" + path.read_text()
 )
 
