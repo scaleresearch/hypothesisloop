@@ -15,13 +15,16 @@ import (
 )
 
 // fakeCurl stands in for the vendor. A write records its arguments, one per line, so a test reads
-// what the supervisor asked for. A read records its own and answers with the instance file, or
+// what the supervisor asked for. A record is appended in one write, so a reader never sees half of one. A read records its own and answers with the instance file, or
 // fails while there is none, as an unreachable API does.
 const fakeCurl = `#!/bin/sh
+record="$TMPDIR/record.$$"
+printf '%s\n' "$@" > "$record"
 case " $* " in
-*" PUT "*) printf '%s\n' "$@" >> "$CURL_CALLS" ;;
-*) printf '%s\n' "$@" >> "$CURL_READS"; cat "$CURL_INSTANCE" 2>/dev/null || exit 22 ;;
+*" PUT "*) cat "$record" >> "$CURL_CALLS" ;;
+*) cat "$record" >> "$CURL_READS"; rm "$record"; cat "$CURL_INSTANCE" 2>/dev/null || exit 22 ;;
 esac
+rm -f "$record"
 `
 
 type supervisedRun struct {
