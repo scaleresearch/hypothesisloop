@@ -975,8 +975,8 @@ a leading quote.
                                        # planning.min_baseline_minutes (45) to
                                        # planning.baseline_limit_minutes
   agents:                              # one entry per researcher
-    - flavor: hyperparameter-search    # optional: generalist (the default), architecture-search,
-      hyperparameters:                 #   data-search or hyperparameter-search. The direction you
+    - agent_type: data-search          # optional: generalist (the default), architecture-search,
+      hyperparameters:                 #   hyperparameter-search or data-search. The direction you
         direction: |                   #   give a researcher goes in hyperparameters, any keys.
           the approach this one explores: a mechanism, never a list of values to try, since
           its researcher makes each claim under it a hypothesis of its own

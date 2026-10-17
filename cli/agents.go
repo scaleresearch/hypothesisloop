@@ -50,7 +50,7 @@ func rolesOf(c *apiclient.Client, platformExperiment string) (map[string]string,
 }
 
 func agentsAdd(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments agents add", `usage: hl platform-experiments agents add [--platform-experiment PE] [--hosted] [--flavor F] [--hyperparameters JSON] [--model M] [--name NAME] [--role ROLE] [--quota-tier TIER]
+	fs := newFlags("platform-experiments agents add", `usage: hl platform-experiments agents add [--platform-experiment PE] [--hosted] [--agent-type TYPE] [--hyperparameters JSON] [--model M] [--name NAME] [--role ROLE] [--quota-tier TIER]
    or: hl platform-experiments agents add [--platform-experiment PE] --agent ID [--role ROLE] [--quota-tier TIER]
 
 The only way an agent joins a platform experiment, while it is open; once per agent. While it
@@ -66,7 +66,7 @@ carries the agent's token: run the agent with it as HL_TOKEN and the API's addre
 from an env file the container reads, never a command line.`, stderr)
 	agent := fs.String("agent", "", "join this registered agent instead of creating a new one")
 	hosted := fs.Bool("hosted", false, "the platform runs the agent")
-	flavor := fs.String("flavor", "", "the specialization the agent runs")
+	agentType := fs.String("agent-type", "", "the agent type the agent runs, by id; omitted, generalist")
 	hyperparameters := fs.String("hyperparameters", "", "the direction you give the agent, a JSON object of any keys: the approach it explores")
 	model := fs.String("model", "", "the model the agent runs on; omitted, its agent type's")
 	name := fs.String("name", "", "display name of a created agent, unique in the platform experiment; omitted, its role and a number")
@@ -85,7 +85,7 @@ from an env file the container reads, never a command line.`, stderr)
 	}
 	body := map[string]any{}
 	for key, value := range map[string]string{
-		"agent_id": *agent, "flavor": *flavor, "model": *model, "name": *name, "role": *role, "quota_tier": *quotaTier,
+		"agent_id": *agent, "agent_type": *agentType, "model": *model, "name": *name, "role": *role, "quota_tier": *quotaTier,
 	} {
 		if value != "" {
 			body[key] = value

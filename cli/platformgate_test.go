@@ -127,7 +127,7 @@ func TestNoCommandACoordinatorRunsCallsARouteACoordinatorMayNot(t *testing.T) {
 		{"platform-experiments", "health"},
 		{"platform-experiments", "agents", "list"},
 		{"platform-experiments", "agents", "session", "coordinator"},
-		{"platform-experiments", "agents", "add", "--hosted", "--flavor", "generalist"},
+		{"platform-experiments", "agents", "add", "--hosted", "--agent-type", "generalist"},
 		{"platform-experiments", "agents", "add", "--hosted", "--role", "baseline", "--name", "Baseline"},
 		{"platform-experiments", "agents", "remove", "ag-1"},
 		{"platform-experiments", "agents", "message", "ag-1", "--text", "try warmup"},

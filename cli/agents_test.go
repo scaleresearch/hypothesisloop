@@ -13,14 +13,14 @@ func TestAgentsAddCreatesOneAgentWithWhatItIsLaunchedWith(t *testing.T) {
 		return map[string]any{"agents": []map[string]any{{"agent_id": "ag-1", "hosted": true, "launcher": "main"}}}
 	})
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"platform-experiments", "agents", "add", "--platform-experiment", "pe-1", "--hosted", "--flavor", "data-search",
+	code := run([]string{"platform-experiments", "agents", "add", "--platform-experiment", "pe-1", "--hosted", "--agent-type", "data-search",
 		"--hyperparameters", `{"batch_size":64}`, "--model", "claude-sonnet-5", "--name", "sweep", "--role", "baseline", "--quota-tier", "burst_only"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit %d, stderr %s", code, stderr.String())
 	}
 	request := (*got)[0]
 	want := map[string]any{
-		"hosted": true, "flavor": "data-search", "model": "claude-sonnet-5", "name": "sweep",
+		"hosted": true, "agent_type": "data-search", "model": "claude-sonnet-5", "name": "sweep",
 		"role": "baseline", "quota_tier": "burst_only", "hyperparameters": map[string]any{"batch_size": float64(64)},
 	}
 	if request.Method != "POST" || request.Path != "/platform-experiments/pe-1/agents" || !reflect.DeepEqual(request.Body, want) {

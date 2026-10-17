@@ -270,13 +270,13 @@ func TestAPlannerProposesItsDraftFromAFile(t *testing.T) {
 	got := recordingServer(t, func(int, recorded) any { return map[string]any{"status": "draft"} })
 	t.Setenv("HL_TOKEN", derivedToken("agent:pe-env/ag-1"))
 	var stdout, stderr bytes.Buffer
-	file := writeFile(t, "experiment:\n  name: n\n  metrics:\n    - {key: val_loss, direction: minimize}\nbudget_accelerator_hours: 6\nagents:\n  - flavor: generalist\n  - {}\nmetric_reason: r\n")
+	file := writeFile(t, "experiment:\n  name: n\n  metrics:\n    - {key: val_loss, direction: minimize}\nbudget_accelerator_hours: 6\nagents:\n  - agent_type: generalist\n  - {}\nmetric_reason: r\n")
 	if code := run([]string{"platform-experiments", "propose", file}, &stdout, &stderr); code != 0 {
 		t.Fatalf("propose: exit %d, stderr %s", code, stderr.String())
 	}
 	want := []recorded{{Method: "PUT", Path: "/platform-experiments/pe-env/proposal", Body: map[string]any{
 		"experiment":               map[string]any{"name": "n", "metrics": []any{map[string]any{"key": "val_loss", "direction": "minimize"}}},
-		"budget_accelerator_hours": float64(6), "agents": []any{map[string]any{"flavor": "generalist"}, map[string]any{}}, "metric_reason": "r",
+		"budget_accelerator_hours": float64(6), "agents": []any{map[string]any{"agent_type": "generalist"}, map[string]any{}}, "metric_reason": "r",
 	}}}
 	if !reflect.DeepEqual(*got, want) {
 		t.Fatalf("requests = %+v\nwant %+v", *got, want)
