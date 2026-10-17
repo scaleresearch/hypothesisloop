@@ -194,7 +194,7 @@ const (
 	RunEndCut      RunEnd = "cut"
 	RunEndFinished RunEnd = "finished"
 	// RunEndPlanned is a planner whose answer to its draft is stored: a proposal, or why there
-	// is none. A revision takes it back.
+	// is none. A change of the goal takes it back.
 	RunEndPlanned RunEnd = "planned"
 )
 
@@ -210,7 +210,7 @@ func (e RunEnd) ReleasedBecause() string {
 	case RunEndFinished:
 		return released + "its agent finished"
 	case RunEndPlanned:
-		return released + "its planner answered the draft, and a revision of the draft starts a new machine"
+		return released + "its planner answered the draft, and a change of the draft's goal starts a new machine"
 	}
 	return released + "its run is over"
 }

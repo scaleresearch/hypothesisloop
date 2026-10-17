@@ -26,7 +26,7 @@ Your assignment:
   agent_id: ag-0193f2a4c5d67e8f9a0b1c2d3e4f5a6b
   platform_experiment_id: pe-0193f2a4c5d67e8f9a0b1c2d3e4f5a6c
 
-Your first prompt carries the draft (`goal`, `revisions`, your last `proposal`), `hl capacity`
+Your first prompt carries the draft (`goal`, `goal_version`, your last `proposal`), `hl capacity`
 and https://github.com/acme/vision.git cloned into {{workdir}}. Read further only what the goal turns on. Search
 the web (WebSearch) for published results only when the goal leaves the control or the size of
 the effect to expect unknown; a goal that states its Metric and Control needs no search, or one
@@ -35,8 +35,9 @@ at most. The `prior_runs` of
 a lever (`--platform-experiment ID`: its summary, `hl results`, `hl hypothesis query` for
 findings and refuted hypotheses); put in the brief what they established, refuted and reached. A
 draft that `continues` one keeps its metric keys and directions so the numbers compare (others
-are refused). On a revision, meet the last one, keep what it does not touch, and name in
-`questions` what you could not meet, with what you planned instead as its answer.
+are refused). When the goal changes, plan from the new one, keep what it does not change, and
+name in `questions` what you could not meet, with what you planned instead as its answer. Put
+the draft's `goal_version` in the proposal: one for an older goal is refused with goal_changed.
 
 The proposal, in the shape `hl platform-experiments propose` shows:
 

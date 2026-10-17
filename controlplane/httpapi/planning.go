@@ -3,8 +3,6 @@ package httpapi
 import (
 	"context"
 	"errors"
-	"fmt"
-	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 	"go.uber.org/zap"
@@ -28,17 +26,9 @@ func registerPlanning(doc *Doc, experiments *platformexperiments.Service, logger
 		Description: "Written by a draft's planner and by nobody else, while the platform experiment is a draft (409 not_a_draft after), when the goal cannot be made into an experiment: " +
 			"nothing measurable, or nothing this platform can run. reason is read by the person who wrote the goal, in plain words, with what would make it plannable. " +
 			"Stored, it answers the goal as a proposal does: the draft carries declined_reason and declined_at and no proposed_at, its status_reason reads declined, a proposal made before is cleared so there is nothing to accept, " +
-			"the planner's machine is kept until planner_ends_at for a revision asked for soon and released then, and the person revises the draft or closes it. It waits for that until proposal_expires_at, as a proposal does, and the platform closes it then with close_reason proposal_expired. The next proposal clears the reason.",
+			"the planner's machine is kept until planner_ends_at for a goal changed soon and released then, and the person changes the draft's goal or closes it. It waits for that until proposal_expires_at, as a proposal does, and the platform closes it then with close_reason proposal_expired. The next proposal clears the reason. " +
+			"goal_version is the draft's goal_version the decline answers: 409 goal_changed once the draft has another goal, which the planner reads and answers instead. Stored, it is told as platform_experiment.proposal declined.",
 	}, a.putDecline)
-	register(doc, auth.AudienceCoordinator, huma.Operation{
-		OperationID: "revise-draft", Method: "POST", Path: "/platform-experiments/{id}/revise",
-		Summary: "Ask a draft's planner to change its proposal, or to try again after it declined", Tags: []string{"platform-experiments"},
-		Description: "Takes one sentence or two saying what to change (\"it must fit a 4090\", \"measure latency too\"). The request is recorded with whose credential made it and shown in the draft's revisions; " +
-			"the proposal stays readable, proposed_at or declined_at is cleared with accepts_at, so nothing is accepted by itself, and the planner has the planning limit to propose anew. " +
-			"The planner's machine is kept after its answer until the draft's planner_ends_at: a revision asked for before it reaches the planner that is still there, as its next update (platform_experiment.revision), and is answered with nothing to boot. After it the platform starts the planner again with what it knew. " +
-			"A draft its planner declined is revised the same way: say what the planner lacked, and its reason stays readable until it answers again. " +
-			"409 invalid_transition for anything but a draft its planner has answered: while the planner still works there is nothing to revise yet.",
-	}, a.reviseDraft)
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "accept-draft", Method: "POST", Path: "/platform-experiments/{id}/accept",
 		Summary: "Accept a draft's proposal", Tags: []string{"platform-experiments"},
@@ -51,15 +41,15 @@ func registerPlanning(doc *Doc, experiments *platformexperiments.Service, logger
 			"The platform hosts its coordinator, each researcher and one agent of role baseline, named by its role, which the proposal signed up so that its machine starts while the proposal is read, and which is created here for a proposal that signed none up. " + platformexperiments.CoordinatorWanted + " " +
 			"starts_at is now and it is open until baseline_due_at, baseline_minutes from now, and one not running by then is closed with close_reason baseline_limit_reached. The run lasts duration_hours from the moment it starts, and measuring the baseline takes nothing from it. Nothing has run yet: the baseline agent measures the baseline, the platform declares the job it leaves when it finishes and starts the run, " +
 			"and no researcher's machine is started before. Where that agent leaves no job, or several, the coordinator adds another or declares one (PATCH /platform-experiments/{id}, baseline_job_id), and status_reason says so. " +
-			"The platform makes the same accept by itself at accepts_at, at the proposal's own budget, length, baseline_minutes and researchers, for the person who created the draft, unless a person accepted, held, revised or closed it first; one the check refuses then waits for a person. A proposal with questions has no accepts_at and waits for a person to answer them. " +
-			"409 invalid_transition for anything but a draft with a proposal; 422 with the proposal's reasons when the stated cost, baseline_minutes or agents do not pass its check, " +
+			"The platform makes the same accept by itself at accepts_at, at the proposal's own budget, length, baseline_minutes and researchers, for the person who created the draft, unless a person accepted, held or closed it or changed its goal first; one the check refuses then waits for a person. A proposal with questions has no accepts_at and waits for a person to answer them. " +
+			"409 invalid_transition for anything but a draft with a proposal, which a change of its goal takes back until its planner answers again; 422 with the proposal's reasons when the stated cost, baseline_minutes or agents do not pass its check, " +
 			"accelerator_unreachable among them when the proposal's accelerator_type is on no cluster the org's jobs can be placed on now, and no_cluster_for_image when none that has it runs the proposal's image any more; " +
 			"503 hosting_not_configured when nothing could run it. A draft's own planner cannot accept it.",
 	}, a.acceptDraft)
 	register(doc, auth.AudienceCoordinator, huma.Operation{
 		OperationID: "hold-draft", Method: "POST", Path: "/platform-experiments/{id}/hold",
 		Summary: "Keep the platform from accepting a draft's proposal by itself", Tags: []string{"platform-experiments"},
-		Description: "For a person who edits the proposal before accepting it: accepts_at is cleared, status_reason reads proposed, and the draft waits for the person to accept it (POST /platform-experiments/{id}/accept, with what they changed), revise it or close it. " +
+		Description: "For a person who edits the proposal before accepting it: accepts_at is cleared, status_reason reads proposed, and the draft waits for the person to accept it (POST /platform-experiments/{id}/accept, with what they changed), change its goal or close it. " +
 			"The baseline agent the proposal signed up is let go of its machine until then, and is given one again with the accept. Holding a draft that is held changes nothing. " +
 			"409 invalid_transition for anything but a draft with a proposal standing.",
 	}, a.holdDraft)
@@ -74,7 +64,8 @@ func registerPlanning(doc *Doc, experiments *platformexperiments.Service, logger
 			"invalid_cost, invalid_agents, invalid_length, run_too_long (duration_hours over the platform's quota.max_platform_experiment_days), invalid_baseline_minutes (under planning.min_baseline_minutes, or over planning.baseline_limit_minutes), missing_explanation, too_long, " +
 			"accelerator_unreachable for an accelerator_type no cluster this org's jobs can be placed on has now, naming every type that is, and for image the two refusals a job submit gives: " +
 			"unknown_job_image for one that is neither a job image the platform offers nor a whole registry address, and no_cluster_for_image for one no cluster that has the type runs. Stored, it replaces the one before, marks the draft proposed " +
-			"(proposed_at), and the planner's machine is released: GET /platform-experiments/{id} shows the proposal, and the platform accepts it as proposed at accepts_at (planning.auto_accept_seconds from now) unless a person accepts it sooner, holds it, revises it or closes it. A proposal with questions, or one made with no auto-accept configured, has no accepts_at and waits for a person to accept it, and its baseline agent's machine starts with the accept. " +
+			"(proposed_at), is told as platform_experiment.proposal proposed, and the planner's machine is released: GET /platform-experiments/{id} shows the proposal, and the platform accepts it as proposed at accepts_at (planning.auto_accept_seconds from now) unless a person accepts it sooner, holds it, changes its goal or closes it. A proposal with questions, or one made with no auto-accept configured, has no accepts_at and waits for a person to accept it, and its baseline agent's machine starts with the accept. " +
+			"goal_version is the draft's goal_version the proposal was planned from: 409 goal_changed once the draft has another goal, so a proposal for a goal the person changed is never stored nor accepted by itself. " +
 			"A refusal lists every problem the check found, each in problems with its reason and message, the first also as the refusal's own reason. " +
 			"With check=true the proposal is checked exactly so and nothing is stored: 422 with every problem, or 200 with the draft as it stands, so a planner tries variants with check and proposes only the one it means.",
 	}, a.putProposal)
@@ -100,7 +91,8 @@ func registerPlanning(doc *Doc, experiments *platformexperiments.Service, logger
 func (a planningAPI) putDecline(ctx context.Context, in *struct {
 	ID   string `path:"id"`
 	Body struct {
-		Reason string `json:"reason" doc:"Why no experiment is proposed, and what would make the goal plannable."`
+		Reason      string `json:"reason" doc:"Why no experiment is proposed, and what would make the goal plannable."`
+		GoalVersion int    `json:"goal_version" doc:"The goal_version of the draft the decline answers."`
 	}
 }) (*struct{ Body *domain.PlatformExperiment }, error) {
 	if err := a.access.PlatformExperiment(ctx, in.ID); err != nil {
@@ -110,33 +102,9 @@ func (a planningAPI) putDecline(ctx context.Context, in *struct {
 	if err != nil {
 		return nil, err
 	}
-	pe, err := a.experiments.Decline(ctx, in.ID, caller, in.Body.Reason)
+	pe, err := a.experiments.Decline(ctx, in.ID, caller, in.Body.GoalVersion, in.Body.Reason)
 	if err != nil {
 		return nil, planningRefusal(err)
-	}
-	return a.answer(ctx, pe)
-}
-
-func (a planningAPI) reviseDraft(ctx context.Context, in *struct {
-	ID   string `path:"id"`
-	Body struct {
-		Message string `json:"message" doc:"What to change, in plain words."`
-	}
-}) (*struct{ Body *domain.PlatformExperiment }, error) {
-	if err := a.access.PlatformExperiment(ctx, in.ID); err != nil {
-		return nil, err
-	}
-	message := strings.TrimSpace(in.Body.Message)
-	if message == "" || len(message) > platformexperiments.MaxRevisionBytes {
-		return nil, huma.Error422UnprocessableEntity(fmt.Sprintf("message is required and at most %d bytes: say what to change in a sentence or two", platformexperiments.MaxRevisionBytes))
-	}
-	caller, err := caller(ctx, a.logger)
-	if err != nil {
-		return nil, err
-	}
-	pe, err := a.experiments.Revise(ctx, in.ID, message, caller.Actor())
-	if err != nil {
-		return nil, err
 	}
 	return a.answer(ctx, pe)
 }

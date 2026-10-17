@@ -933,6 +933,8 @@ FILE is YAML of this shape, with every field shown required unless it says optio
 Every free-text value is a | block, a list item too (- |): unquoted text breaks on a colon or
 a leading quote.
 
+  goal_version: 1                      # the draft's goal_version you planned from: a proposal for
+                                       # an older goal is refused with goal_changed
   experiment:
     name: |
       short title
@@ -1006,8 +1008,8 @@ and what is wrong there, accelerator_unreachable with the types that are listed,
 what a job submit would refuse (unknown_job_image, no_cluster_for_image), and invalid_resources
 for a cpu, memory or storage that is no quantity. Without --check, one that passes is stored at
 once, replaces the one before and is what the person is asked to accept, so propose only the
-finished proposal. Your machine is kept some minutes after it, and a revision the person asks
-for in that time arrives as your next update.`, stderr)
+finished proposal. Your machine is kept some minutes after it, and a change of the goal the
+person makes in that time arrives as your next update.`, stderr)
 	pe := experimentFlag(fs)
 	check := fs.Bool("check", false, "check the proposal and store nothing")
 	operands, err := parseArgs(fs, args)
@@ -1070,16 +1072,21 @@ func textsAsLists(body map[string]any) {
 }
 
 func cmdPlatformExperimentsDecline(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("platform-experiments decline", `usage: hl platform-experiments decline [--platform-experiment PE] --reason TEXT | --reason-file FILE|-
+	fs := newFlags("platform-experiments decline", `usage: hl platform-experiments decline [--platform-experiment PE] --goal-version N --reason TEXT | --reason-file FILE|-
 
 For the planner of a draft, when the goal cannot be made into an experiment: nothing measurable,
 or nothing this platform can run. The reason is shown to the person who wrote the goal in place
 of a proposal, so say in plain words why, and what would make it plannable. A proposal you made
-before no longer stands. The person may answer with a revision, which starts you again.`, stderr)
+before no longer stands. --goal-version is the draft's goal_version you answer: a decline of an
+older goal is refused with goal_changed. The person may change the goal, which starts you again.`, stderr)
 	pe := experimentFlag(fs)
+	goalVersion := fs.Int("goal-version", 0, "the draft's goal_version the decline answers")
 	reasonFlag := newTextFlag(fs, "reason", "why no experiment is proposed")
 	if err := parseNone(fs, args); err != nil {
 		return parseExit(err)
+	}
+	if *goalVersion < 1 {
+		return parseExit(misuse(fs, "want --goal-version, the draft's goal_version"))
 	}
 	reason, err := reasonFlag.value(fs)
 	if err != nil {
@@ -1093,7 +1100,7 @@ before no longer stands. The person may answer with a revision, which starts you
 		return parseExit(err)
 	}
 	var out any
-	if err := c.Do("PUT", "/platform-experiments/"+url.PathEscape(id)+"/decline", map[string]string{"reason": reason}, &out); err != nil {
+	if err := c.Do("PUT", "/platform-experiments/"+url.PathEscape(id)+"/decline", map[string]any{"reason": reason, "goal_version": *goalVersion}, &out); err != nil {
 		return fail(stderr, err)
 	}
 	printJSON(stdout, out)

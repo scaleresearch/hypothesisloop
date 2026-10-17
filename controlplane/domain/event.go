@@ -66,9 +66,13 @@ const (
 	// description event deliberately carries no text — see EventKinds.
 	EventPlatformExperimentStatus      = "platform_experiment.status"
 	EventPlatformExperimentDescription = "platform_experiment.description"
-	// EventPlatformExperimentRevision says a person asked a draft's planner to change its answer.
-	// A pointer like the description event: what was asked is read from the draft.
-	EventPlatformExperimentRevision = "platform_experiment.revision"
+	// EventPlatformExperimentGoal says a person changed the goal, to the draft's planner or to the
+	// coordinator, whichever acts on it now. A pointer like the description event: the goal is
+	// read from the platform experiment.
+	EventPlatformExperimentGoal = "platform_experiment.goal"
+	// EventPlatformExperimentProposal says a draft's planner answered its goal, with a proposal
+	// or a decline. Nobody acts on it but a person.
+	EventPlatformExperimentProposal = "platform_experiment.proposal"
 	// EventPlatformExperimentBaseline says the baseline of a running platform experiment was
 	// raised to a stronger job, with the sentence every agent is told.
 	EventPlatformExperimentBaseline = "platform_experiment.baseline"
@@ -157,8 +161,10 @@ var EventKinds = []EventKindDoc{
 			"or, on a running one, the platform keeps places of its researchers empty: detail starts researchers not replaced, and names each researcher that ended before submitting a job or within 10 minutes of joining, which is never replaced, and each that waits because its pool entry had 3 replacements in the last hour (researchers_held on GET /platform-experiments/{id}). GET /platform-experiments/{id} has its message."},
 	{Kind: EventPlatformExperimentDescription, Subject: "platform experiment id", Value: "empty by design",
 		Description: "The brief or the run's length (duration_hours) changed. A description is unbounded and is never copied into an event: re-read both with GET /platform-experiments/{id}."},
-	{Kind: EventPlatformExperimentRevision, Subject: "platform experiment id", Value: "empty by design",
-		Description: "A person asked the planner of a draft to change its answer (POST /platform-experiments/{id}/revise). What was asked is the last of revisions on GET /platform-experiments/{id}, whose status_reason reads revising until the planner answers again. A planner whose machine is still there after its answer is told by this event, and one whose machine was released is started again."},
+	{Kind: EventPlatformExperimentGoal, Subject: "platform experiment id", Value: "the new goal_version",
+		Description: "A person changed the goal (PATCH /platform-experiments/{id} with goal): re-read it with GET /platform-experiments/{id}. On a draft it is its planner's, agent_id names it, and the draft is planned again from the new goal: its status_reason reads revising until the planner answers, and a planner whose machine was released is started again. Once the draft is accepted it is the coordinator's, whose subject and agent_id are coordinator, to bring the brief in line with it."},
+	{Kind: EventPlatformExperimentProposal, Subject: "platform experiment id", Value: "proposed or declined",
+		Description: "A draft's planner answered its goal: proposed (proposal on GET /platform-experiments/{id}) or declined (declined_reason). It waits for a person from then on."},
 	{Kind: EventPlatformExperimentBaseline, Subject: "platform experiment id", Value: "the job that is the baseline from now on",
 		Description: "The baseline of the running run was raised to a stronger job that measured the control (PATCH /platform-experiments/{id} with baseline_job_id and baseline_reason). detail says by whom, from which value to which on the ranking metric, and why. The brief's measured baseline changed with it, and standings are set against the new bar: re-read the brief with GET /platform-experiments/{id}."},
 	{Kind: EventPlatformExperimentRemoved, Subject: "platform experiment id", Value: "empty by design",
@@ -219,7 +225,7 @@ func isExperimentSubject(kind string) bool {
 func isAgentOwned(kind string) bool {
 	switch kind {
 	case EventExperimentStatus, EventExperimentBlocked, EventQuotaChanged, EventAgentCut, EventAgentFinished, EventAgentReplaced, EventAgentIdle, EventAgentInstructions, EventAgentMessage, EventJobUnderperforming, EventJobHeld,
-		EventJobDuplicate, EventEnvironmentStatus:
+		EventJobDuplicate, EventEnvironmentStatus, EventPlatformExperimentGoal:
 		return true
 	default:
 		return false

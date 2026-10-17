@@ -95,10 +95,11 @@ type Store interface {
 	// or the agent was already signed up. A researcher past max_agents is db.ErrMaxAgentsReached,
 	// decided inside the insert's own transaction.
 	Signup(ctx context.Context, platformExpID string, signup domain.AgentSignup) (bool, error)
-	// SetProposal stores a draft's proposal with what p says of it: until when it waits, when the
-	// platform accepts it by itself, how long its planner's machine is kept for a revision and
-	// the baseline agent it signs up; db.ErrNotDraft for anything but a draft.
-	SetProposal(ctx context.Context, id string, proposal []byte, p db.Proposed) error
+	// SetProposal stores a draft's proposal for goal goalVersion with what p says of it: until
+	// when it waits, when the platform accepts it by itself, how long its planner's machine is
+	// kept for a change of the goal and the baseline agent it signs up; db.ErrNotDraft for
+	// anything but a draft, db.ErrGoalChanged once it has another goal.
+	SetProposal(ctx context.Context, id string, goalVersion int, proposal []byte, p db.Proposed) error
 	// HoldAccept stops the platform accepting a proposed draft by itself: db.ErrNotDraft,
 	// db.ErrNotProposed.
 	HoldAccept(ctx context.Context, id string) error
@@ -107,16 +108,17 @@ type Store interface {
 	// AcceptDraft makes a proposed draft the open platform experiment pe describes, with its
 	// researchers signed up, or does neither: db.ErrNotDraft, db.ErrNothingProposed.
 	AcceptDraft(ctx context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error
-	// Revise records a request to change a proposed draft's proposal and gives the draft back
-	// to its planner until planUntil: db.ErrNotDraft, db.ErrNothingProposed.
-	Revise(ctx context.Context, id, message string, by domain.Actor, planUntil time.Time) error
+	// SetGoal changes the goal of a platform experiment and tells whoever acts on it, giving a
+	// draft back to its planner until planUntil: db.ErrNotEditable.
+	SetGoal(ctx context.Context, id, goal string, planUntil time.Time) error
 	// NameActors sets on each actor the name it carries now.
 	NameActors(ctx context.Context, actors []*domain.Actor) error
 	// JobHasFinding says a finding was filed for the job.
 	JobHasFinding(ctx context.Context, experimentID string) (bool, error)
-	// Decline stores why a draft's planner proposes nothing, until when the draft waits for a
-	// person and how long the planner's machine is kept; db.ErrNotDraft for anything but a draft.
-	Decline(ctx context.Context, id, reason string, waitUntil time.Time, keepPlanner time.Duration) error
+	// Decline stores why a draft's planner proposes nothing for goal goalVersion, until when the
+	// draft waits for a person and how long the planner's machine is kept; the errors of
+	// SetProposal.
+	Decline(ctx context.Context, id string, goalVersion int, reason string, waitUntil time.Time, keepPlanner time.Duration) error
 	// CreateDraft creates a draft with its planner signed up, or neither.
 	CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, planner *domain.Agent, signup domain.AgentSignup) error
 	// RepositoriesToCreate, GiveRepository and FailRepository are the repository pass's: the
@@ -372,6 +374,7 @@ type CreatePlatformExperimentRequest struct {
 // change, and no others. A field left out keeps its value. The project, the repository, the agent image, the stages and the default
 // quota tier are fixed at creation and are no fields of it.
 type PlatformExperimentPatch struct {
+	Goal                      *string                    `json:"goal,omitempty" doc:"What the owner asks, changed alone: a body that carries another field beside it is 422 goal_alone. A draft is planned again from it, and the coordinator of an open or running one is told to bring the brief in line. Not empty and at most 2000 bytes (422 invalid_goal), and not the goal it has (422 nothing_to_change)."`
 	Name                      *string                    `json:"name,omitempty" doc:"Not empty."`
 	Description               *string                    `json:"description,omitempty" doc:"The brief every agent works from, not empty and at most 32768 bytes."`
 	BudgetAcceleratorHours    *float64                   `json:"budget_accelerator_hours,omitempty"`
@@ -396,6 +399,7 @@ func (p PlatformExperimentPatch) carried(except ...string) []string {
 		name string
 		set  bool
 	}{
+		{"goal", p.Goal != nil},
 		{"name", p.Name != nil},
 		{"description", p.Description != nil},
 		{"budget_accelerator_hours", p.BudgetAcceleratorHours != nil},

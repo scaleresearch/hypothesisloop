@@ -14,7 +14,7 @@ type AgentStanding struct {
 	// PlannerAnsweredAt is the moment the run of a planner ended: it answered its draft, with a
 	// proposal or with why there is none, and the time its machine is kept after an answer has
 	// passed (planner_ends_at). nil for an agent that is no planner, for a planner that is
-	// planning, which a revision makes true again, and for one kept after its answer.
+	// planning, which a change of the goal makes true again, and for one kept after its answer.
 	PlannerAnsweredAt *time.Time
 	FinishedAt        *time.Time
 }

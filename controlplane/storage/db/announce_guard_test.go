@@ -15,7 +15,7 @@ import (
 // announcedInserts are the tables a row inserted into is a change GET /watch delivers.
 var announcedInserts = map[string]bool{
 	"experiments": true, "agent_quotas": true, "hypothesis_findings": true, "hypothesis_comments": true,
-	"platform_experiment_stage_advances": true, "platform_experiment_cuts": true, "planning_requests": true,
+	"platform_experiment_stage_advances": true, "platform_experiment_cuts": true,
 	"baseline_raises": true, "agent_messages": true, "platform_rules": true,
 }
 
@@ -23,7 +23,7 @@ var announcedInserts = map[string]bool{
 // empty set is every column.
 var announcedUpdates = map[string][]string{
 	"experiments":          {"status", "not_admitted_reason", "underperforming_metric", "held_reason", "same_hypothesis"},
-	"platform_experiments": {"status", "description", "duration_hours", "coordinator_reason", "researchers_held", "capacity_noticed_at"},
+	"platform_experiments": {"status", "description", "duration_hours", "coordinator_reason", "researchers_held", "capacity_noticed_at", "goal", "proposed_at"},
 	"agent_quotas":         {},
 	"experiment_signups":   {"finished_at", "idle_noticed_at"},
 	"environment_waiters":  {"loaded"},

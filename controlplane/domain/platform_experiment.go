@@ -132,16 +132,16 @@ type PlatformExperiment struct {
 	EndsAt            time.Time `json:"ends_at,omitzero" doc:"When the run ends and the platform closes it: starts_at, the start of the run, plus duration_hours. Absent until the run starts."`
 	AgentsDueAt       time.Time `json:"agents_due_at,omitzero" doc:"On a running platform experiment with no started_at: when the platform closes it, with close_reason agents_not_started, if no researcher's machine is running by then. Never later than ends_at."`
 	BaselineDueAt     time.Time `json:"baseline_due_at,omitzero" doc:"On an open platform experiment: when the platform closes it, with close_reason baseline_limit_reached, if it is not running by then. starts_at plus the minutes its baseline was given: the ones accepted for a draft, at most planning.baseline_limit_minutes, and that limit for one created whole. It moves out by the time a job of the baseline waits on the platform, for its environment to be built or for its cluster to start it, at most the 90 minutes the platform spends on one build, so that time is not the baseline agent's."`
-	PlanningEndsAt    time.Time `json:"planning_ends_at,omitzero" doc:"On a draft being planned or revised: when the platform closes it if its planner has answered nothing by then."`
-	ProposalExpiresAt time.Time `json:"proposal_expires_at,omitzero" doc:"On a draft whose planner proposed or declined: when the platform closes it if no person has accepted or revised it by then."`
+	PlanningEndsAt    time.Time `json:"planning_ends_at,omitzero" doc:"On a draft being planned, from its goal or from a changed one: when the platform closes it if its planner has answered nothing by then."`
+	ProposalExpiresAt time.Time `json:"proposal_expires_at,omitzero" doc:"On a draft whose planner proposed or declined: when the platform closes it if no person has accepted it or changed its goal by then."`
 	// Activity is what a draft's planner last said it is doing.
 	Activity *AgentActivity `json:"activity,omitempty" doc:"On a draft whose planner's machine is up: what the planner is doing now and since when, as on each agent of GET /platform-experiments/{id}/agents. Absent on anything but a draft, where each agent's is in the roster and the coordinator's on coordinator."`
 	// PlannerEndsAt is until when the machine of an answered draft's planner is kept.
-	PlannerEndsAt *time.Time               `json:"planner_ends_at,omitempty" doc:"On a draft whose planner proposed or declined: until when the planner's machine is kept, the answer plus the platform's planning.planner_kept_minutes and never past the planning limit. A revision (POST /platform-experiments/{id}/revise) asked for before it reaches the planner that is still there, as its next update, and is answered with nothing to boot. One asked for later starts the planner again with its session, as before. Absent while the planner works."`
+	PlannerEndsAt *time.Time               `json:"planner_ends_at,omitempty" doc:"On a draft whose planner proposed or declined: until when the planner's machine is kept, the answer plus the platform's planning.planner_kept_minutes and never past the planning limit. A goal changed before then reaches the planner that is still there, as its next update, and is answered with nothing to boot. One changed later starts the planner again with its session, as before. Absent while the planner works."`
 	Status        PlatformExperimentStatus `json:"status"`
 	// StatusReason is why the platform experiment is in its status, in every status. Worked out
 	// when one is read and stored nowhere.
-	StatusReason *StatusReason `json:"status_reason,omitempty" doc:"Why it is in its status, in every answer that is one platform experiment (a read of it and each write that answers it, never a list). Any that is not closed reads repository_creating while the platform creates its repository, before any machine of it starts. A draft's reason is then planning, revising, accepting (proposed, and accepted as proposed at accepts_at unless a person acts first), proposed (it waits for a person to accept) or declined (its planner proposed nothing, for declined_reason, and it waits for a person to revise or close it). An open one's is why it is not running yet: without a baseline baseline_measuring, baseline_required, baseline_undeclared, baseline_declaring or the reason the platform's declaration of the measured job is refused for (budget_below_baseline, baseline_breaks_constraint, baseline_missing_metric), and with one starts_at_ahead, no_researchers, budget_spent, or starting once nothing is missing.A running one's is agents_starting while no researcher's machine is running yet, when the platform closes it at agents_due_at, and running from then. A closed one's is its close_reason, or closed on one closed before reasons were kept. message says what the state waits for or how it came about and who acts, the command included, and to an agent that reads an open one it begins with the agent's own next step."`
+	StatusReason *StatusReason `json:"status_reason,omitempty" doc:"Why it is in its status, in every answer that is one platform experiment (a read of it and each write that answers it, never a list). Any that is not closed reads repository_creating while the platform creates its repository, before any machine of it starts. A draft's reason is then planning, revising, accepting (proposed, and accepted as proposed at accepts_at unless a person acts first), proposed (it waits for a person to accept) or declined (its planner proposed nothing, for declined_reason, and it waits for a person to change its goal or close it). revising is a draft whose goal changed, planned again until its planner answers. An open one's is why it is not running yet: without a baseline baseline_measuring, baseline_required, baseline_undeclared, baseline_declaring or the reason the platform's declaration of the measured job is refused for (budget_below_baseline, baseline_breaks_constraint, baseline_missing_metric), and with one starts_at_ahead, no_researchers, budget_spent, or starting once nothing is missing.A running one's is agents_starting while no researcher's machine is running yet, when the platform closes it at agents_due_at, and running from then. A closed one's is its close_reason, or closed on one closed before reasons were kept. message says what the state waits for or how it came about and who acts, the command included, and to an agent that reads an open one it begins with the agent's own next step."`
 	// Editable is what its reader may change of it now, set on an answer to one who writes it.
 	Editable []string `json:"editable,omitempty" doc:"The fields of PATCH /platform-experiments/{id} the reader may change now, for its status and its credential. Absent for a reader who changes nothing of it, and on a list. A field left out is refused with 409 not_editable."`
 	// Stages is the elimination ladder, fixed at creation.
@@ -196,9 +196,11 @@ type PlatformExperiment struct {
 	// Carried by a read of one platform experiment and left out of a list.
 	BaselineRaises []BaselineRaise `json:"baseline_raises,omitempty" doc:"Each raise of the baseline while the run went on, oldest first: the job declared before and the one after, who raised it and why."`
 
-	// Goal is the sentence a draft was created from, fixed from then on. Empty for a platform
-	// experiment that was created whole.
-	Goal string `json:"goal,omitempty"`
+	// Goal is what its owner asked, the sentence a draft was created from, and GoalVersion counts
+	// the goals it has had. Empty for a platform experiment that was created whole, which has no
+	// goal to change.
+	Goal        string `json:"goal,omitempty" doc:"What its owner asked, which a draft is planned from. Its owner changes it with PATCH /platform-experiments/{id} until it closes: a draft is planned again from it, and the coordinator of an open or running one brings the brief in line with it. Absent on one created whole."`
+	GoalVersion int    `json:"goal_version,omitempty" doc:"How many goals it has had: 1 for the one it was created from, and one more for each change. A draft's planner names the version it planned from in its proposal or decline. Absent on a list."`
 	// Continues is the closed run it carries on, fixed at creation, empty for one that starts
 	// fresh. Its baseline starts from that run's; like every prior run, it is read as its own.
 	Continues string `json:"continues,omitempty" doc:"The closed platform experiment of the same project and repository this one carries on, fixed at creation. Absent on one that starts fresh. Its baseline starts from the commit of that run's baseline job (that run's baseline_job_id), so the two are measured by the same harness. It is one of prior_runs, read as every prior run is."`
@@ -209,23 +211,20 @@ type PlatformExperiment struct {
 	// stands. Proposal is what it proposed, as the check on writing it took it, and ProposedAt
 	// when. DeclinedReason is why it proposed nothing, the goal being none an experiment can be
 	// made of, and DeclinedAt when: a decline clears the proposal made before. Both moments are
-	// absent while the draft is being planned or revised, when the last proposal or reason stays
-	// to be read until the planner answers again. See Answered.
+	// absent while the draft is being planned, from its goal or a changed one, when the last
+	// proposal or reason stays to be read until the planner answers again. See Answered.
 	// Carried by a read of one platform experiment and left out of a list.
 	Proposal       json.RawMessage `json:"proposal,omitempty" doc:"The proposal as PUT /platform-experiments/{id}/proposal took it. Kept as proposed once it is accepted."`
-	ProposedAt     *time.Time      `json:"proposed_at,omitempty" doc:"On a draft: when its planner proposed what proposal holds and the draft began to wait for a person. Absent while it is planned or revised, and on one its planner declined."`
-	DeclinedAt     *time.Time      `json:"declined_at,omitempty" doc:"On a draft: when its planner declined to propose, for declined_reason, and the draft began to wait for a person. Absent while it is planned or revised, and on one that has a proposal."`
-	DeclinedReason string          `json:"declined_reason,omitempty" doc:"Why the draft's planner proposed nothing. It stays while a revision is planned and goes with the next proposal."`
-	AcceptsAt      *time.Time      `json:"accepts_at,omitempty" doc:"On a proposed draft: when the platform accepts the proposal as proposed, unless a person accepts it sooner, holds it to edit it (POST /platform-experiments/{id}/hold), revises it or closes it. Its baseline agent's machine starts with the proposal and runs while this is set. Absent on a draft that waits for a person."`
+	ProposedAt     *time.Time      `json:"proposed_at,omitempty" doc:"On a draft: when its planner proposed what proposal holds and the draft began to wait for a person. Absent while it is planned, and on one its planner declined."`
+	DeclinedAt     *time.Time      `json:"declined_at,omitempty" doc:"On a draft: when its planner declined to propose, for declined_reason, and the draft began to wait for a person. Absent while it is planned, and on one that has a proposal."`
+	DeclinedReason string          `json:"declined_reason,omitempty" doc:"Why the draft's planner proposed nothing. It stays while a changed goal is planned and goes with the next proposal."`
+	AcceptsAt      *time.Time      `json:"accepts_at,omitempty" doc:"On a proposed draft: when the platform accepts the proposal as proposed, unless a person accepts it sooner, holds it to edit it (POST /platform-experiments/{id}/hold), changes its goal or closes it. Its baseline agent's machine starts with the proposal and runs while this is set. Absent on a draft that waits for a person."`
 	// AcceptedAt is when its proposal was accepted, AcceptedBy whose credential accepted it, nil
 	// when the platform did at AcceptsAt, and AcceptedAnswers the answers given to the
 	// proposal's questions. Carried by a read of one platform experiment and left out of a list.
 	AcceptedAt      *time.Time `json:"accepted_at,omitempty" doc:"When the draft's proposal was accepted, by a person or by the platform at accepts_at. Absent on a draft, on one created whole and on one accepted before this was kept."`
 	AcceptedBy      *Actor     `json:"accepted_by,omitempty" doc:"Whose credential accepted the proposal. Absent beside accepted_at when the platform accepted it by itself."`
 	AcceptedAnswers []string   `json:"accepted_answers,omitempty" doc:"The answers given to proposal.questions on accepting it, one for each, in their order, as they were added to the brief."`
-	// Revisions are what a person asked the planner to change, oldest first. One made after the
-	// planner's last answer, or while there is none, is not answered yet.
-	Revisions []PlanningRequest `json:"revisions,omitempty"`
 	// ClosedAt is when it closed and CloseReason why; ClosedBy is whose credential closed it,
 	// absent when the platform did at ClosesAt. A list carries the first two and no ClosedBy.
 	ClosedAt    *time.Time  `json:"closed_at,omitempty"`
@@ -375,13 +374,6 @@ const (
 	// experiment is answered to nobody, so no answer carries it.
 	CloseRemoved CloseReason = "removed"
 )
-
-// PlanningRequest is one request to a draft's planner to change its proposal.
-type PlanningRequest struct {
-	Message string    `json:"message"`
-	Actor   Actor     `json:"actor"`
-	At      time.Time `json:"at"`
-}
 
 // BaselineRaise is one re-declaration of a running platform experiment's baseline to a job that
 // measured the control in a stronger configuration.

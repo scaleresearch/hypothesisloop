@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
@@ -69,20 +69,15 @@ var ErrNotDraft = errors.New("platform experiment is not a draft")
 // ErrPlanningOver is returned for a planner's answer to a draft whose planning limit has passed.
 var ErrPlanningOver = errors.New("the draft's planning limit has passed")
 
-// answerDraft runs a planner's answer, which a draft takes until its ends_at. The sweep closes a
-// draft past it within a minute; an answer in that minute is refused here.
-func (s *Store) answerDraft(ctx context.Context, id, update string, args ...any) error {
-	return answerDraftTx(ctx, s.pool.pool, id, update, args...)
-}
+// ErrGoalChanged is returned for a planner's answer to a goal the draft no longer has.
+var ErrGoalChanged = errors.New("the draft's goal changed after the one its planner answered")
 
-// draftWriter is a pool or a transaction.
-type draftWriter interface {
-	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
-	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
-}
-
-func answerDraftTx(ctx context.Context, w draftWriter, id, update string, args ...any) error {
-	tag, err := w.Exec(ctx, update+` WHERE id = $1 AND status = 'draft' AND ends_at > now()`, append([]any{id}, args...)...)
+// answerDraftTx runs a planner's answer to goal goalVersion, which a draft takes until its ends_at
+// while that is its goal. The sweep closes a draft past it within a minute; an answer in that
+// minute is refused here. args are $2 on, and the goal version follows them.
+func answerDraftTx(ctx context.Context, tx *Write, id string, goalVersion int, update string, args ...any) error {
+	tag, err := tx.Exec(ctx, update+fmt.Sprintf(` WHERE id = $1 AND status = 'draft' AND ends_at > now() AND goal_version = $%d`, len(args)+2),
+		append(append([]any{id}, args...), goalVersion)...)
 	if err != nil {
 		return err
 	}
@@ -90,17 +85,21 @@ func answerDraftTx(ctx context.Context, w draftWriter, id, update string, args .
 		return nil
 	}
 	var draft bool
-	if err := w.QueryRow(ctx, `SELECT COALESCE((SELECT status = 'draft' FROM platform_experiments WHERE id = $1), false)`, id).Scan(&draft); err != nil {
+	var version int
+	err = tx.QueryRow(ctx, `SELECT status = 'draft', goal_version FROM platform_experiments WHERE id = $1`, id).Scan(&draft, &version)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows) || (err == nil && !draft):
+		return ErrNotDraft
+	case err != nil:
 		return err
+	case version != goalVersion:
+		return ErrGoalChanged
 	}
-	if draft {
-		return ErrPlanningOver
-	}
-	return ErrNotDraft
+	return ErrPlanningOver
 }
 
 // plannerKeptSQL is until when the planner of a draft that is answered now keeps its machine: $4
-// seconds from now, so a revision asked for soon reaches the planner that is still there, and no
+// seconds from now, so a goal changed soon reaches the planner that is still there, and no
 // later than the planning limit, which is the bound its machine was rented with. It reads ends_at
 // as it was before the answer moved it, so an answer that replaces one leaves the moment alone.
 const plannerKeptSQL = `CASE WHEN proposed_at IS NULL THEN LEAST(now() + make_interval(secs => $4), ends_at) ELSE planner_ends_at END`
@@ -121,25 +120,26 @@ type Proposed struct {
 	BaselineSignup domain.AgentSignup
 }
 
-// SetProposal stores what a draft's planner proposed, marks it proposed now, and moves the
-// draft's end to p.WaitUntil: from then on it waits for a person, or for p.AcceptsAt, and no
-// longer for the planner, whose machine is kept for p.KeepPlanner more (plannerKeptSQL). The
-// draft's baseline agent is signed up in the same write, once.
-func (s *Store) SetProposal(ctx context.Context, id string, proposal []byte, p Proposed) error {
+// SetProposal stores what a draft's planner proposed for goal goalVersion, marks it proposed now,
+// and moves the draft's end to p.WaitUntil: from then on it waits for a person, or for
+// p.AcceptsAt, and no longer for the planner, whose machine is kept for p.KeepPlanner more
+// (plannerKeptSQL). The draft's baseline agent is signed up in the same write, once.
+// ErrNotDraft, ErrPlanningOver, and ErrGoalChanged once the draft has another goal.
+func (s *Store) SetProposal(ctx context.Context, id string, goalVersion int, proposal []byte, p Proposed) error {
 	if p.Baseline != nil && (p.BaselineSignup.AgentID != p.Baseline.ID || p.BaselineSignup.Role != domain.SignupRoleBaseline || !p.BaselineSignup.Hosted) {
 		return fmt.Errorf("platform_experiments_store.SetProposal: a proposal signs up a hosted agent of role baseline, got %+v", p.BaselineSignup)
 	}
 	return s.write(ctx, func(tx *Write) error {
-		var err error
-		err = answerDraftTx(ctx, tx, id, `
+		err := answerDraftTx(ctx, tx, id, goalVersion, `
 UPDATE platform_experiments SET proposal = $2, proposed_at = now(), declined_reason = '', planner_ends_at = `+plannerKeptSQL+`, ends_at = $3, accepts_at = $5, updated_at = now()`,
 			proposal, p.WaitUntil, p.KeepPlanner.Seconds(), p.AcceptsAt)
-		if errors.Is(err, ErrNotDraft) || errors.Is(err, ErrPlanningOver) {
+		if errors.Is(err, ErrNotDraft) || errors.Is(err, ErrPlanningOver) || errors.Is(err, ErrGoalChanged) {
 			return err
 		}
 		if err != nil {
 			return fmt.Errorf("platform_experiments_store.SetProposal: %w", err)
 		}
+		tx.runChange(id, domain.EventPlatformExperimentProposal, "proposed", "")
 		if p.Baseline != nil {
 			if err := signUpDraftBaseline(ctx, tx, id, p.Baseline, p.BaselineSignup); err != nil {
 				return fmt.Errorf("platform_experiments_store.SetProposal: %w", err)
@@ -201,7 +201,7 @@ VALUES ($1, $2, NOW(), $3, COALESCE(NULLIF($4, ''), (SELECT default_quota_tier F
 var ErrNotProposed = errors.New("the draft has no proposal standing")
 
 // HoldAccept stops the platform from accepting the proposed draft id by itself: a person edits
-// the proposal and accepts it, revises it or closes it. Its baseline agent's machine is released
+// the proposal and accepts it, changes its goal or closes it. Its baseline agent's machine is released
 // with it, and is asked for again once the draft is accepted. Holding one held changes nothing.
 // ErrNotDraft, and ErrNotProposed for a draft that has no proposal standing.
 func (s *Store) HoldAccept(ctx context.Context, id string) error {
@@ -241,32 +241,37 @@ ORDER BY accepts_at`)
 	return ids, nil
 }
 
-// Decline stores why a draft's planner proposes nothing. It answers the goal as a proposal
-// does: the draft waits for a person until waitUntil, when the platform closes it as it closes
-// a proposal nobody took up, and the planner's machine is kept for keepPlanner more, as after a
-// proposal. A proposal made before no longer stands, so it is cleared and there is nothing to
-// accept. proposed_at is the column of the planner's answer, whichever it was: with no proposal
-// beside it the draft is declined.
-func (s *Store) Decline(ctx context.Context, id, reason string, waitUntil time.Time, keepPlanner time.Duration) error {
-	err := s.answerDraft(ctx, id, `
+// Decline stores why a draft's planner proposes nothing for goal goalVersion. It answers the goal
+// as a proposal does: the draft waits for a person until waitUntil, when the platform closes it as
+// it closes a proposal nobody took up, and the planner's machine is kept for keepPlanner more, as
+// after a proposal. A proposal made before no longer stands, so it is cleared and there is nothing
+// to accept. proposed_at is the column of the planner's answer, whichever it was: with no proposal
+// beside it the draft is declined. The errors of SetProposal.
+func (s *Store) Decline(ctx context.Context, id string, goalVersion int, reason string, waitUntil time.Time, keepPlanner time.Duration) error {
+	return s.write(ctx, func(tx *Write) error {
+		err := answerDraftTx(ctx, tx, id, goalVersion, `
 UPDATE platform_experiments SET declined_reason = $2, proposal = NULL, proposed_at = now(), planner_ends_at = `+plannerKeptSQL+`, ends_at = $3, accepts_at = NULL, updated_at = now()`,
-		reason, waitUntil, keepPlanner.Seconds())
-	if err != nil && !errors.Is(err, ErrNotDraft) && !errors.Is(err, ErrPlanningOver) {
-		return fmt.Errorf("platform_experiments_store.Decline: %w", err)
-	}
-	return err
+			reason, waitUntil, keepPlanner.Seconds())
+		if errors.Is(err, ErrNotDraft) || errors.Is(err, ErrPlanningOver) || errors.Is(err, ErrGoalChanged) {
+			return err
+		}
+		if err != nil {
+			return fmt.Errorf("platform_experiments_store.Decline: %w", err)
+		}
+		tx.runChange(id, domain.EventPlatformExperimentProposal, "declined", "")
+		return nil
+	})
 }
 
 // ErrNothingProposed is returned for accepting a draft whose planner has proposed nothing or
-// declined, or whose proposal is being revised, and for revising one the planner has not
-// answered.
+// declined, or whose goal changed since its proposal.
 var ErrNothingProposed = errors.New("nothing is proposed")
 
 // AcceptDraft makes a proposed draft the open platform experiment pe describes and signs its
 // researchers up, and its baseline agent where its proposal signed none up, or does neither. pe carries what the proposal stated and what the person who
 // accepts stated, and who accepted it, when and with which answers, beside the proposal kept as proposed; its baseline is measured from its StartsAt, and it is open until its
 // BaselineDueAt. Its planner has nothing left to answer, so the time its machine was kept for a
-// revision ends with the accept. The limits a signup holds are held here too
+// change of the goal ends with the accept. The limits a signup holds are held here too
 // (ErrMaxAgentsReached, ErrMaxHostedReached).
 func (s *Store) AcceptDraft(ctx context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error {
 	if pe.Coordinator == nil || !pe.CoordinatorHosted {
@@ -376,60 +381,51 @@ func (s *Store) JobHasFinding(ctx context.Context, experimentID string) (bool, e
 	return found, nil
 }
 
-// Revise records what a person asked a proposed draft's planner to change and gives the draft
-// back to the planner: the proposal stays to be read, proposed_at and planner_ends_at are
-// cleared, which is what the launcher keeps the planner's machine by, and the draft ends at
-// planUntil unless the planner proposes again. The request is the planner's next update
-// (platform_experiment.revision): one whose machine is still there answers it at once, and one
-// whose machine was released is started again. ErrNotDraft, and ErrNothingProposed while the
-// planner still works.
-func (s *Store) Revise(ctx context.Context, id, message string, by domain.Actor, planUntil time.Time) error {
+// ErrNotEditable is returned for a change of the goal of a platform experiment that is closed or
+// was created whole, with no goal.
+var ErrNotEditable = errors.New("the platform experiment has no goal that changes")
+
+// SetGoal stores goal as what the platform experiment id answers, one goal_version on, and tells
+// whoever acts on it. A draft is given back to its planner: what it answered stays to be read,
+// proposed_at, accepts_at and planner_ends_at are cleared, so nothing is accepted by itself and the
+// launcher wants the planner again, and the draft ends at planUntil unless the planner answers. An
+// open or running one tells its coordinator, which brings the brief in line. ErrNotEditable.
+func (s *Store) SetGoal(ctx context.Context, id, goal string, planUntil time.Time) error {
 	return s.write(ctx, func(tx *Write) error {
-		var err error
 		var status string
-		var proposed bool
-		err = tx.QueryRow(ctx, `SELECT status, proposed_at IS NOT NULL FROM platform_experiments WHERE id = $1 FOR UPDATE`, id).Scan(&status, &proposed)
-		if errors.Is(err, pgx.ErrNoRows) || (err == nil && status != string(domain.PlatformExpDraft)) {
-			return ErrNotDraft
+		var version int
+		var planner *string
+		err := tx.QueryRow(ctx, `
+UPDATE platform_experiments SET goal = $2, goal_version = goal_version + 1, updated_at = now(),
+  proposed_at = CASE WHEN status = 'draft' THEN NULL ELSE proposed_at END,
+  accepts_at = CASE WHEN status = 'draft' THEN NULL ELSE accepts_at END,
+  planner_ends_at = CASE WHEN status = 'draft' THEN NULL ELSE planner_ends_at END,
+  ends_at = CASE WHEN status = 'draft' THEN $3 ELSE ends_at END
+WHERE id = $1 AND status <> 'closed' AND goal <> '' AND removed_at IS NULL
+RETURNING status, goal_version, (SELECT agent_id FROM experiment_signups WHERE platform_experiment_id = $1 AND role = $4)`,
+			id, goal, planUntil, string(domain.SignupRolePlanner)).Scan(&status, &version, &planner)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotEditable
 		}
 		if err != nil {
-			return fmt.Errorf("platform_experiments_store.Revise: lock draft: %w", err)
+			return fmt.Errorf("platform_experiments_store.SetGoal: %w", err)
 		}
-		if !proposed {
-			return ErrNothingProposed
+		recipient := domain.CoordinatorRecipient
+		if status == string(domain.PlatformExpDraft) {
+			if planner == nil {
+				return fmt.Errorf("platform_experiments_store.SetGoal: draft %s has no planner", id)
+			}
+			recipient = *planner
+			// A planner whose machine ended because its work was done is asked for under a new
+			// launch, with its own restarts: a launch the launcher's reconcile does not know spends
+			// none of the old one's. One whose machine is still there keeps it and its launch.
+			if _, err := tx.Exec(ctx, `UPDATE hosted_instances SET launch = ''
+WHERE platform_experiment_id = $1 AND agent_id = $2 AND name = ''`, id, recipient); err != nil {
+				return fmt.Errorf("platform_experiments_store.SetGoal: renew the planner's launch: %w", err)
+			}
 		}
-		if _, err := tx.Exec(ctx, `UPDATE platform_experiments SET proposed_at = NULL, planner_ends_at = NULL, accepts_at = NULL, ends_at = $2, updated_at = now() WHERE id = $1`, id, planUntil); err != nil {
-			return fmt.Errorf("platform_experiments_store.Revise: %w", err)
-		}
-		// A planner whose machine ended because its work was done is asked for under a new launch,
-		// with its own restarts: a launch the launcher's reconcile does not know spends none of the
-		// old one's. One whose machine is still there keeps it and its launch.
-		if _, err := tx.Exec(ctx, `UPDATE hosted_instances i SET launch = '' FROM experiment_signups s
-WHERE s.platform_experiment_id = i.platform_experiment_id AND s.agent_id = i.agent_id AND i.platform_experiment_id = $1 AND s.role = $2 AND i.name = ''`, id, string(domain.SignupRolePlanner)); err != nil {
-			return fmt.Errorf("platform_experiments_store.Revise: renew the planner's launch: %w", err)
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO planning_requests (platform_experiment_id, message, actor_kind, actor_id) VALUES ($1, $2, $3, $4)`,
-			id, message, string(by.Kind), by.ID); err != nil {
-			return fmt.Errorf("platform_experiments_store.Revise: record request: %w", err)
-		}
-		tx.runChange(id, domain.EventPlatformExperimentRevision, "", "")
+		tx.Change(domain.Change{Kind: domain.EventPlatformExperimentGoal, Subject: id, Value: strconv.Itoa(version),
+			PlatformExperimentID: id, AgentID: recipient})
 		return nil
 	})
-}
-
-func (s *Store) planningRequests(ctx context.Context, id string) ([]domain.PlanningRequest, error) {
-	rows, err := s.pool.pool.Query(ctx, `SELECT message, actor_kind, actor_id, created_at FROM planning_requests WHERE platform_experiment_id = $1 ORDER BY id`, id)
-	if err != nil {
-		return nil, fmt.Errorf("platform_experiments_store.planningRequests: %w", err)
-	}
-	defer rows.Close()
-	var out []domain.PlanningRequest
-	for rows.Next() {
-		var request domain.PlanningRequest
-		if err := rows.Scan(&request.Message, &request.Actor.Kind, &request.Actor.ID, &request.At); err != nil {
-			return nil, fmt.Errorf("platform_experiments_store.planningRequests: %w", err)
-		}
-		out = append(out, request)
-	}
-	return out, rows.Err()
 }

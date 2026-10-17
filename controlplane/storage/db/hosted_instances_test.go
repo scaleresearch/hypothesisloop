@@ -667,8 +667,8 @@ func TestARunningMachineWhoseProgressIsUnreadableIsEndedByTheSilentClockAndSpend
 
 // A machine the launcher is no longer asked to keep is taken down by the launcher. That is the
 // platform's doing and is written down as such, with which end of the run it was, so that it is
-// never read as a machine the provider lost: a planner whose draft is revised is asked for a new
-// machine with no restart spent.
+// never read as a machine the provider lost: a planner whose draft's goal changed is asked for a
+// new machine with no restart spent.
 func TestAMachineThePlatformNoLongerAsksForIsRecordedAsReleasedAndNeverAsLost(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
@@ -753,9 +753,9 @@ func TestAMachineThePlatformNoLongerAsksForIsRecordedAsReleasedAndNeverAsLost(t 
 		t.Fatalf("coordinator inside its wind-down: got = %+v, %v", winding.Coordinator, err)
 	}
 
-	// The draft is revised: the planner is asked for again, and the machine that was released
+	// The draft's goal changes: the planner is asked for again, and the machine that was released
 	// is not one that was seen and is gone.
-	if err := pes.Revise(ctx, draft, "it must fit one accelerator", domain.Actor{Kind: domain.ActorUser, ID: "u-planning"}, time.Now().UTC().Add(30*time.Minute)); err != nil {
+	if err := pes.SetGoal(ctx, draft, "it must fit one accelerator", time.Now().UTC().Add(30*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	if _, recorded, err := pes.EndInstance(ctx, draft, planner, "planner-machine", InstanceGone, "lost", time.Minute, 3); err != nil || recorded {
@@ -763,7 +763,7 @@ func TestAMachineThePlatformNoLongerAsksForIsRecordedAsReleasedAndNeverAsLost(t 
 	}
 	release()
 	if got := instanceOfAgent(draft, planner); got.Restarts != 0 || got.EndReason != string(InstanceReleased) {
-		t.Fatalf("after the revision: got = %+v", got)
+		t.Fatalf("after the change of the goal: got = %+v", got)
 	}
 }
 
@@ -811,7 +811,7 @@ func TestADraftWhosePlannerIsGivenUpOnIsClosedSayingSo(t *testing.T) {
 	}
 
 	answered, answering := createTestDraft(t, pool)
-	if err := pes.SetProposal(ctx, answered, []byte(`{}`), Proposed{WaitUntil: time.Now().UTC().Add(time.Hour), KeepPlanner: 10 * time.Minute}); err != nil {
+	if err := pes.SetProposal(ctx, answered, 1, []byte(`{}`), Proposed{WaitUntil: time.Now().UTC().Add(time.Hour), KeepPlanner: 10 * time.Minute}); err != nil {
 		t.Fatal(err)
 	}
 	if after := die(answered, answering, maxRestarts+1); !after.Stopped {
@@ -908,7 +908,7 @@ func TestWhatAHostedAgentIsDoingIsKeptOnItsRowAndAnsweredWhereItIsRead(t *testin
 		t.Fatalf("a coordinator asked for on a new machine: got = %+v, want none", got)
 	}
 	// Released with its draft's answer, the planner's machine says nothing either.
-	if err := pes.SetProposal(ctx, draft, []byte(`{}`), Proposed{WaitUntil: time.Now().UTC().Add(time.Hour)}); err != nil {
+	if err := pes.SetProposal(ctx, draft, 1, []byte(`{}`), Proposed{WaitUntil: time.Now().UTC().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
 	if err := pes.ReleaseInstances(ctx, 0, 0); err != nil {

@@ -217,7 +217,7 @@ WHERE pe.id = $1 AND pe.status = 'draft' AND pe.proposed_at IS NULL
 // longer asked to keep, that the platform released it and why: the name is cleared, the end
 // is InstanceReleased and the exit log says which end of the run it was. The launcher takes such
 // a machine down on its next answer, so without the record a later question about the same agent,
-// a planner whose draft is revised, finds a machine that was seen and is gone and counts a
+// a planner whose draft's goal changed, finds a machine that was seen and is gone and counts a
 // machine the provider lost. No restart is spent. A pass with nothing to release writes nothing.
 // An agent's machine is kept windDown after its run ended, a coordinator's coordinatorWindDown.
 func (s *Store) ReleaseInstances(ctx context.Context, windDown, coordinatorWindDown time.Duration) error {

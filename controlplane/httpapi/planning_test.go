@@ -345,9 +345,12 @@ func (s *draftStore) GetAgentSignup(_ context.Context, platformExperimentID, age
 	return nil, nil
 }
 
-func (s *draftStore) SetProposal(_ context.Context, id string, proposal []byte, p db.Proposed) error {
+func (s *draftStore) SetProposal(_ context.Context, id string, goalVersion int, proposal []byte, p db.Proposed) error {
 	for _, pe := range s.created {
 		if pe.ID == id && pe.Status == domain.PlatformExpDraft {
+			if pe.GoalVersion != goalVersion {
+				return db.ErrGoalChanged
+			}
 			now := time.Now().UTC()
 			kept := now.Add(p.KeepPlanner)
 			pe.Proposal, pe.DeclinedReason, pe.PlannerEndsAt, pe.AcceptsAt = proposal, "", &kept, p.AcceptsAt
@@ -398,6 +401,7 @@ func aProposal(more map[string]any) map[string]any {
 			"name": "Cosine or constant", "description": "Train the small transformer in train.py and report val_loss. BASELINE config: constant lr 3e-4 measured: not yet established",
 			"metrics": []map[string]any{{"key": "val_loss", "direction": "minimize"}},
 		},
+		"goal_version":             1,
 		"budget_accelerator_hours": 6, "duration_hours": 4, "baseline_minutes": 30, "agents": []map[string]any{{"flavor": "hyperparameter-search"}, {}},
 		"accelerator_type": "rtx-4090",
 		"image":            "torch",
@@ -418,7 +422,7 @@ const draftMaxHosted = 5
 func draftWithPlanner() *draftStore {
 	return &draftStore{
 		statusStore: statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{{
-			ID: "pe-draft", ProjectID: "prj-a", Status: domain.PlatformExpDraft, Goal: "g", MaxHosted: draftMaxHosted, PlanningEndsAt: time.Now().Add(time.Minute),
+			ID: "pe-draft", ProjectID: "prj-a", Status: domain.PlatformExpDraft, Goal: "g", GoalVersion: 1, MaxHosted: draftMaxHosted, PlanningEndsAt: time.Now().Add(time.Minute),
 		}}}},
 		signups:   map[string]domain.AgentSignup{"pe-draft": {AgentID: "ag-planner", Role: domain.SignupRolePlanner, AgentType: domain.PlannerFlavor, Hosted: true}},
 		reachable: map[string][]domain.Cluster{"rtx-4090": {{Name: "rented"}}},
@@ -451,8 +455,8 @@ func TestAProposalIsStoredOnlyFromThePlannerAndOnlyWhenItHoldsTogether(t *testin
 	if wait := pe.ProposalExpiresAt.Sub(before); wait < testPlanning.ProposedFor-time.Minute {
 		t.Errorf("a proposed draft ends in %v, want %v", wait, testPlanning.ProposedFor)
 	}
-	// A revision right after the proposal waited for a machine to boot: the planner's is kept for
-	// the setting's time, and the draft says until when.
+	// A goal changed right after the proposal waited for a machine to boot: the planner's is kept
+	// for the setting's time, and the draft says until when.
 	if pe.PlannerEndsAt == nil || out["planner_ends_at"] == nil || pe.PlannerEndsAt.Sub(before) < testPlanning.PlannerKept-time.Minute || pe.PlannerEndsAt.Sub(before) > testPlanning.PlannerKept+time.Minute {
 		t.Errorf("the planner's machine is kept until %v (%v answered), want %v from the proposal", pe.PlannerEndsAt, out["planner_ends_at"], testPlanning.PlannerKept)
 	}
@@ -789,21 +793,20 @@ func TestACheckedProposalIsStoredNeverAndARefusalHoldsEveryProblem(t *testing.T)
 	}
 }
 
-func (s *draftStore) Revise(_ context.Context, id, message string, by domain.Actor, planUntil time.Time) error {
+func (s *draftStore) SetGoal(_ context.Context, id, goal string, planUntil time.Time) error {
 	for _, pe := range s.created {
-		if pe.ID != id || pe.Status != domain.PlatformExpDraft {
+		if pe.ID != id || pe.Status == domain.PlatformExpClosed || pe.Goal == "" {
 			continue
 		}
-		if !pe.Answered() {
-			return db.ErrNothingProposed
+		pe.Goal, pe.GoalVersion = goal, pe.GoalVersion+1
+		if pe.Status == domain.PlatformExpDraft {
+			pe.SetAnswered(nil, false)
+			pe.PlannerEndsAt, pe.AcceptsAt = nil, nil
+			pe.SetClosesAt(planUntil)
 		}
-		pe.SetAnswered(nil, false)
-		pe.PlannerEndsAt, pe.AcceptsAt = nil, nil
-		pe.SetClosesAt(planUntil)
-		pe.Revisions = append(pe.Revisions, domain.PlanningRequest{Message: message, Actor: by, At: time.Now().UTC()})
 		return nil
 	}
-	return db.ErrNotDraft
+	return db.ErrNotEditable
 }
 
 func (s *draftStore) NameActors(_ context.Context, actors []*domain.Actor) error {
@@ -815,61 +818,72 @@ func (s *draftStore) NameActors(_ context.Context, actors []*domain.Actor) error
 
 func (s *draftStore) ListSignups(context.Context, string) ([]string, error) { return nil, nil }
 
-// A person who reads a proposal and wants it otherwise says so in a sentence, and the draft
-// goes back to the planner with the proposal still there to read.
-func TestRevisingGivesAProposedDraftBackToItsPlannerWithWhatWasAsked(t *testing.T) {
+// A person who reads a proposal and wants it otherwise changes what they asked, and the draft
+// goes back to the planner with the proposal still there to read. A proposal for the goal before
+// is never stored.
+func TestChangingTheGoalGivesADraftBackToItsPlanner(t *testing.T) {
 	store := draftWithPlanner()
 	_, propose := planningRouter(t, store, thePlanner)
 	_, call := planningRouter(t, store, planner)
-	if code, out := call("POST", "/platform-experiments/pe-draft/revise", map[string]any{"message": "too early"}); code != http.StatusConflict || out["reason"] != "invalid_transition" {
-		t.Fatalf("revising before anything is proposed: got = %d %v, want 409 invalid_transition", code, out)
-	}
 	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusOK {
 		t.Fatalf("propose: %d %v", code, out)
 	}
-	for name, message := range map[string]string{"nothing": "  ", "an essay": strings.Repeat("x", platformexperiments.MaxRevisionBytes+1)} {
-		if code, _ := call("POST", "/platform-experiments/pe-draft/revise", map[string]any{"message": message}); code != http.StatusUnprocessableEntity || store.created[0].ProposedAt == nil {
-			t.Errorf("%s: got = %d, want 422 and the proposal left standing", name, code)
+	for name, c := range map[string]struct {
+		body   map[string]any
+		code   int
+		reason string
+	}{
+		"nothing":            {map[string]any{"goal": "  "}, 422, "invalid_goal"},
+		"an essay":           {map[string]any{"goal": strings.Repeat("x", domain.MaxGoalBytes+1)}, 422, "invalid_goal"},
+		"the goal it has":    {map[string]any{"goal": " g "}, 422, "nothing_to_change"},
+		"with another field": {map[string]any{"goal": "smaller", "name": "n"}, 422, "goal_alone"},
+	} {
+		if code, out := call("PATCH", "/platform-experiments/pe-draft", c.body); code != c.code || out["reason"] != c.reason || store.created[0].ProposedAt == nil {
+			t.Errorf("%s: got = %d %v, want %d %s and the proposal left standing", name, code, out, c.code, c.reason)
 		}
 	}
 	before := time.Now()
-	code, out := call("POST", "/platform-experiments/pe-draft/revise", map[string]any{"message": " It must fit one RTX 4090. "})
+	code, out := call("PATCH", "/platform-experiments/pe-draft", map[string]any{"goal": " It must fit one RTX 4090. "})
 	if code != http.StatusOK {
-		t.Fatalf("revise: got = %d %v, want 200", code, out)
+		t.Fatalf("change the goal: got = %d %v, want 200", code, out)
 	}
 	pe := store.created[0]
-	if pe.ProposedAt != nil || out["proposed_at"] != nil || out["planner_ends_at"] != nil || len(pe.Proposal) == 0 || out["proposal"] == nil || pe.Status != domain.PlatformExpDraft {
-		t.Errorf("revised draft %+v, want no proposed_at, no planner_ends_at and the proposal kept", pe)
-	}
-	if len(pe.Revisions) != 1 || pe.Revisions[0].Message != "It must fit one RTX 4090." || pe.Revisions[0].Actor.Kind != domain.ActorUser || pe.Revisions[0].Actor.ID != "u-1" {
-		t.Errorf("revisions = %+v, want the sentence by the person who asked", pe.Revisions)
+	if pe.ProposedAt != nil || out["proposed_at"] != nil || out["planner_ends_at"] != nil || len(pe.Proposal) == 0 || out["proposal"] == nil || pe.Status != domain.PlatformExpDraft ||
+		out["goal"] != "It must fit one RTX 4090." || out["goal_version"] != float64(2) || out["status_reason"].(map[string]any)["reason"] != "revising" {
+		t.Errorf("goal changed: got %v, want the new goal at version 2, revising, no proposed_at, no planner_ends_at and the proposal kept", out)
 	}
 	if left := pe.PlanningEndsAt.Sub(before); left < testPlanning.Limit-time.Minute || left > testPlanning.Limit+time.Minute {
 		t.Errorf("the planner has %v to propose again, want the planning limit", left)
 	}
-	// Read back, whoever asked is named.
-	code, out = call("GET", "/platform-experiments/pe-draft", nil)
-	revisions, _ := out["revisions"].([]any)
-	if code != http.StatusOK || len(revisions) != 1 || revisions[0].(map[string]any)["actor"].(map[string]any)["name"] != "named u-1" {
-		t.Errorf("read back: got = %d %v, want the revision with its author named", code, out["revisions"])
+	if editable, _ := out["editable"].([]any); len(editable) != 1 || editable[0] != "goal" {
+		t.Errorf("a draft's editable: got %v, want goal alone", out["editable"])
 	}
-	// The planner proposes again, and the draft waits for the person again.
-	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"budget_accelerator_hours": 4})); code != http.StatusOK || store.created[0].ProposedAt == nil {
-		t.Fatalf("proposing again: %d %v", code, out)
+	// A proposal for the goal before is refused, one for the new goal waits for the person again.
+	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusConflict || out["reason"] != "goal_changed" || store.created[0].ProposedAt != nil {
+		t.Fatalf("proposing for the goal before: got = %d %v, want 409 goal_changed and nothing stored", code, out)
 	}
-	// The planner cannot ask itself for a revision, and an accepted draft takes none.
-	if code, _ := propose("POST", "/platform-experiments/pe-draft/revise", map[string]any{"message": "m"}); code != http.StatusForbidden {
-		t.Errorf("the planner revising: got = %d, want 403", code)
+	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal?check=true", aProposal(nil)); code != http.StatusConflict || out["reason"] != "goal_changed" {
+		t.Fatalf("checking a proposal for the goal before: got = %d %v, want 409 goal_changed", code, out)
 	}
-	store.created[0].Status = domain.PlatformExpOpen
-	if code, out := call("POST", "/platform-experiments/pe-draft/revise", map[string]any{"message": "m"}); code != http.StatusConflict || out["reason"] != "invalid_transition" {
-		t.Errorf("revising what is no draft: got = %d %v, want 409 invalid_transition", code, out)
+	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"goal_version": 2, "budget_accelerator_hours": 4})); code != http.StatusOK || store.created[0].ProposedAt == nil {
+		t.Fatalf("proposing for the new goal: %d %v", code, out)
+	}
+	// The planner changes no goal, and a closed draft takes none.
+	if code, _ := propose("PATCH", "/platform-experiments/pe-draft", map[string]any{"goal": "m"}); code != http.StatusForbidden {
+		t.Errorf("the planner changing the goal: got = %d, want 403", code)
+	}
+	store.created[0].Status = domain.PlatformExpClosed
+	if code, out := call("PATCH", "/platform-experiments/pe-draft", map[string]any{"goal": "m"}); code != http.StatusConflict || out["reason"] != "not_editable" {
+		t.Errorf("changing the goal of a closed draft: got = %d %v, want 409 not_editable", code, out)
 	}
 }
 
-func (s *draftStore) Decline(_ context.Context, id, reason string, waitUntil time.Time, keepPlanner time.Duration) error {
+func (s *draftStore) Decline(_ context.Context, id string, goalVersion int, reason string, waitUntil time.Time, keepPlanner time.Duration) error {
 	for _, pe := range s.created {
 		if pe.ID == id && pe.Status == domain.PlatformExpDraft {
+			if pe.GoalVersion != goalVersion {
+				return db.ErrGoalChanged
+			}
 			now := time.Now().UTC()
 			kept := now.Add(keepPlanner)
 			pe.DeclinedReason, pe.Proposal, pe.PlannerEndsAt, pe.AcceptsAt = reason, nil, &kept, nil
@@ -891,7 +905,7 @@ func TestAPlannerDeclinesWithAReasonThePersonReadsAndCanAnswer(t *testing.T) {
 		t.Fatalf("propose: %d %v", code, out)
 	}
 	for name, reason := range map[string]string{"no reason": " ", "an essay": strings.Repeat("x", platformexperiments.MaxDeclineBytes+1)} {
-		if code, out := asPlanner("PUT", "/platform-experiments/pe-draft/decline", map[string]any{"reason": reason}); code != http.StatusUnprocessableEntity || store.created[0].DeclinedReason != "" {
+		if code, out := asPlanner("PUT", "/platform-experiments/pe-draft/decline", map[string]any{"reason": reason, "goal_version": 1}); code != http.StatusUnprocessableEntity || store.created[0].DeclinedReason != "" {
 			t.Errorf("%s: got = %d %v, want 422 and nothing stored", name, code, out)
 		}
 	}
@@ -900,14 +914,14 @@ func TestAPlannerDeclinesWithAReasonThePersonReadsAndCanAnswer(t *testing.T) {
 		"the person who asked": planner,
 	} {
 		_, as := planningRouter(t, store, caller)
-		if code, _ := as("PUT", "/platform-experiments/pe-draft/decline", map[string]any{"reason": "r"}); code != http.StatusForbidden || store.created[0].DeclinedReason != "" {
+		if code, _ := as("PUT", "/platform-experiments/pe-draft/decline", map[string]any{"reason": "r", "goal_version": 1}); code != http.StatusForbidden || store.created[0].DeclinedReason != "" {
 			t.Errorf("%s declining: got = %d, want 403", name, code)
 		}
 	}
 
 	before := time.Now()
 	const why = "\"Make the model better\" names nothing to measure: say which model, on what data, and what better means."
-	code, out := asPlanner("PUT", "/platform-experiments/pe-draft/decline", map[string]any{"reason": "  " + why + "\n"})
+	code, out := asPlanner("PUT", "/platform-experiments/pe-draft/decline", map[string]any{"reason": "  " + why + "\n", "goal_version": 1})
 	if code != http.StatusOK || out["declined_reason"] != why || out["declined_at"] == nil || out["proposed_at"] != nil || out["proposal"] != nil || out["status"] != "draft" || out["status_reason"].(map[string]any)["reason"] != "declined" {
 		t.Fatalf("decline: got = %d %v, want the reason, when it declined, and nothing proposed", code, out)
 	}
@@ -922,20 +936,23 @@ func TestAPlannerDeclinesWithAReasonThePersonReadsAndCanAnswer(t *testing.T) {
 	if code, out := call("POST", "/platform-experiments/pe-draft/accept", accept); code != http.StatusConflict || out["reason"] != "invalid_transition" || !strings.Contains(out["message"].(string), "declined") {
 		t.Errorf("accepting a declined draft: got = %d %v, want 409 invalid_transition that says it declined", code, out)
 	}
-	// The person says what was missing; the reason stays until the planner answers again.
-	code, out = call("POST", "/platform-experiments/pe-draft/revise", map[string]any{"message": "The small transformer in train.py, by validation loss."})
+	// The person says what was missing in the goal; the reason stays until the planner answers again.
+	code, out = call("PATCH", "/platform-experiments/pe-draft", map[string]any{"goal": "The small transformer in train.py, by validation loss."})
 	if code != http.StatusOK || out["proposed_at"] != nil || out["declined_at"] != nil || out["declined_reason"] != why {
-		t.Fatalf("revising a declined draft: got = %d %v, want it back with the planner and the reason kept", code, out)
+		t.Fatalf("changing the goal of a declined draft: got = %d %v, want it back with the planner and the reason kept", code, out)
 	}
 	if _, read := call("GET", "/platform-experiments/pe-draft", nil); read["status_reason"].(map[string]any)["reason"] != "revising" {
-		t.Errorf("a declined draft being revised: status_reason = %v, want revising", read["status_reason"])
+		t.Errorf("a declined draft planned again: status_reason = %v, want revising", read["status_reason"])
 	}
-	if code, out := asPlanner("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusOK || out["declined_reason"] != nil || out["proposal"] == nil {
+	if code, out := asPlanner("PUT", "/platform-experiments/pe-draft/decline", map[string]any{"reason": "r", "goal_version": 1}); code != http.StatusConflict || out["reason"] != "goal_changed" {
+		t.Errorf("declining the goal before: got = %d %v, want 409 goal_changed", code, out)
+	}
+	if code, out := asPlanner("PUT", "/platform-experiments/pe-draft/proposal", aProposal(map[string]any{"goal_version": 2})); code != http.StatusOK || out["declined_reason"] != nil || out["proposal"] == nil {
 		t.Fatalf("proposing after a decline: got = %d %v, want the proposal and no reason", code, out)
 	}
 
 	store.created[0].Status = domain.PlatformExpOpen
-	if code, out := asPlanner("PUT", "/platform-experiments/pe-draft/decline", map[string]any{"reason": "r"}); code != http.StatusConflict || out["reason"] != "not_a_draft" {
+	if code, out := asPlanner("PUT", "/platform-experiments/pe-draft/decline", map[string]any{"reason": "r", "goal_version": 2}); code != http.StatusConflict || out["reason"] != "not_a_draft" {
 		t.Errorf("declining what is no draft: got = %d %v, want 409 not_a_draft", code, out)
 	}
 }
@@ -1144,7 +1161,7 @@ func TestAStoredFinishIsAnsweredAsOneWhenItsDeclarationFails(t *testing.T) {
 	}
 }
 
-// A person who wanted another name for the experiment had to ask the planner for a revision and
+// A person who wanted another name for the experiment had to have the planner propose again and
 // wait for it. The accept takes the name they typed, held to the rule of every name, and nothing
 // else of the proposal's experiment.
 func TestAcceptingADraftTakesTheNameThePersonGaveIt(t *testing.T) {
@@ -1197,8 +1214,8 @@ func TestAcceptingADraftTakesTheNameThePersonGaveIt(t *testing.T) {
 // An owner accepted 10 s after the proposal and its set-up still took 30 minutes, and an
 // owner away from the page held the run up for as long as they were away. A proposal without
 // questions (TestAProposalWithQuestionsWaitsForAPersonWhoseAnswersGoIntoTheBrief) is accepted
-// as proposed by itself unless a person acts first: accepts it, holds it to edit it, revises it
-// or closes it.
+// as proposed by itself unless a person acts first: accepts it, holds it to edit it, changes its
+// goal or closes it.
 func TestAProposalIsAcceptedAsProposedUnlessAPersonActsFirst(t *testing.T) {
 	creator := domain.Actor{Kind: domain.ActorUser, ID: "u-creator"}
 	proposed := func(t *testing.T) (*draftStore, *platformexperiments.Service, func(method, path string, body any) (int, map[string]any)) {
@@ -1277,13 +1294,13 @@ func TestAProposalIsAcceptedAsProposedUnlessAPersonActsFirst(t *testing.T) {
 		t.Errorf("holding what is no draft: got = %d %v, want 409 invalid_transition", code, out)
 	}
 
-	// Revised, nothing is accepted until the planner proposes again.
+	// With its goal changed, nothing is accepted until the planner proposes again.
 	store, handler, call = proposed(t)
-	if code, out := call("POST", "/platform-experiments/pe-draft/revise", map[string]any{"message": "smaller"}); code != http.StatusOK || out["accepts_at"] != nil {
-		t.Fatalf("revise: got = %d %v, want no accepts_at", code, out)
+	if code, out := call("PATCH", "/platform-experiments/pe-draft", map[string]any{"goal": "smaller"}); code != http.StatusOK || out["accepts_at"] != nil {
+		t.Fatalf("change the goal: got = %d %v, want no accepts_at", code, out)
 	}
 	if code, out := call("POST", "/platform-experiments/pe-draft/hold", nil); code != http.StatusConflict || out["reason"] != "invalid_transition" {
-		t.Errorf("holding a draft being revised: got = %d %v, want 409 invalid_transition", code, out)
+		t.Errorf("holding a draft planned again: got = %d %v, want 409 invalid_transition", code, out)
 	}
 
 	// One the check refuses when its time comes waits for a person, who is told why on accepting.

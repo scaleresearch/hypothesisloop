@@ -29,6 +29,8 @@ import (
 // waits for a person to answer them. Nothing has run when it is written:
 // the baseline is measured once it is accepted, before any researcher starts.
 type Proposal struct {
+	GoalVersion int `json:"goal_version" doc:"The goal_version of the draft the proposal was planned from. 409 goal_changed once the draft has another goal: read it and propose for it."`
+
 	// Experiment is shaped exactly like .hypothesisloop/experiment.yaml: name, description (the
 	// brief every agent works from), metrics, report_interval_seconds, stages and the policies.
 	// It is checked by validate, as the body of a create is.
@@ -255,28 +257,6 @@ func (s *Service) requirePlanner(ctx context.Context, id string, caller auth.Pri
 	return nil
 }
 
-// Revise asks the planner of the draft id to change its proposal as message says, or to try
-// again after it declined, for by.
-func (s *Service) Revise(ctx context.Context, id, message string, by domain.Actor) (*domain.PlatformExperiment, error) {
-	switch err := s.store.Revise(ctx, id, message, by, time.Now().UTC().Add(s.planning.Limit)); {
-	case errors.Is(err, db.ErrNotDraft):
-		return nil, invalidTransition("platform experiment %s is not a draft: only a draft's proposal is revised", id)
-	case errors.Is(err, db.ErrNothingProposed):
-		return nil, invalidTransition("draft %s has nothing to revise yet: its planner is still working", id)
-	case err != nil:
-		return nil, s.refusal("revise", err)
-	}
-	s.logger.Info("draft revision asked", zap.String("id", id))
-	pe, err := s.store.GetPlatformExperiment(ctx, id)
-	if err != nil || pe == nil {
-		return nil, s.refusal("read draft", errors.Join(err, errors.New("the draft is gone")))
-	}
-	if err := s.nameActors(ctx, pe); err != nil {
-		return nil, s.refusal("name actors", err)
-	}
-	return pe, nil
-}
-
 // Accept makes the draft id the open platform experiment its proposal describes, at what req
 // states, for by, who accepted it.
 func (s *Service) Accept(ctx context.Context, id string, req AcceptRequest, by domain.Actor) (*domain.PlatformExperiment, error) {
@@ -316,6 +296,9 @@ func (s *Service) Propose(ctx context.Context, id string, caller auth.Principal,
 	if pe.Status != domain.PlatformExpDraft {
 		return nil, notADraft(pe)
 	}
+	if p.GoalVersion != pe.GoalVersion {
+		return nil, goalChanged(pe)
+	}
 	if _, err := s.checkProposal(ctx, p, pe); err != nil {
 		return nil, s.refusal("check proposal", err)
 	}
@@ -330,14 +313,7 @@ func (s *Service) Propose(ctx context.Context, id string, caller auth.Principal,
 	if err != nil {
 		return nil, s.refusal("store proposal", err)
 	}
-	err = s.store.SetProposal(ctx, id, stored, proposed)
-	if errors.Is(err, db.ErrNotDraft) {
-		return nil, notADraft(pe)
-	}
-	if errors.Is(err, db.ErrPlanningOver) {
-		return nil, planningOver(pe)
-	}
-	if err != nil {
+	if err := s.refusedAnswer(ctx, pe, s.store.SetProposal(ctx, id, p.GoalVersion, stored, proposed)); err != nil {
 		return nil, s.refusal("store proposal", err)
 	}
 	s.logger.Info("draft proposed", zap.String("id", id))
@@ -348,14 +324,12 @@ func (s *Service) Propose(ctx context.Context, id string, caller auth.Principal,
 	return pe, nil
 }
 
-// MaxRevisionBytes bounds one request to change a proposal.
-const MaxRevisionBytes = domain.MaxGoalBytes
-
 // MaxDeclineBytes bounds the reason a planner gives for proposing nothing.
 const MaxDeclineBytes = MaxProposalTextBytes
 
-// Decline records that the planner caller of the draft id proposes nothing, and why.
-func (s *Service) Decline(ctx context.Context, id string, caller auth.Principal, reason string) (*domain.PlatformExperiment, error) {
+// Decline records that the planner caller of the draft id proposes nothing for goal goalVersion,
+// and why.
+func (s *Service) Decline(ctx context.Context, id string, caller auth.Principal, goalVersion int, reason string) (*domain.PlatformExperiment, error) {
 	if err := s.requirePlanner(ctx, id, caller); err != nil {
 		return nil, err
 	}
@@ -373,14 +347,10 @@ func (s *Service) Decline(ctx context.Context, id string, caller auth.Principal,
 	if pe.Status != domain.PlatformExpDraft {
 		return nil, notADraft(pe)
 	}
-	err = s.store.Decline(ctx, id, reason, time.Now().UTC().Add(s.planning.ProposedFor), s.planning.PlannerKept)
-	if errors.Is(err, db.ErrNotDraft) {
-		return nil, notADraft(pe)
+	if goalVersion != pe.GoalVersion {
+		return nil, goalChanged(pe)
 	}
-	if errors.Is(err, db.ErrPlanningOver) {
-		return nil, planningOver(pe)
-	}
-	if err != nil {
+	if err := s.refusedAnswer(ctx, pe, s.store.Decline(ctx, id, goalVersion, reason, time.Now().UTC().Add(s.planning.ProposedFor), s.planning.PlannerKept)); err != nil {
 		return nil, s.refusal("store decline", err)
 	}
 	s.logger.Info("draft declined", zap.String("id", id))
@@ -429,7 +399,7 @@ type AcceptRequest struct {
 	DurationHours          float64         `json:"duration_hours" doc:"How long the run lasts from the moment it starts, once its baseline is declared."`
 	BaselineMinutes        int             `json:"baseline_minutes" doc:"The minutes measuring the baseline has from this accept, at least planning.min_baseline_minutes and at most planning.baseline_limit_minutes: baseline_due_at is that much later, and moves out by the time the platform spends building and starting the baseline's jobs."`
 	Agents                 []ProposedAgent `json:"agents" doc:"The researchers the platform runs, one entry each."`
-	Name                   string          `json:"name,omitempty" doc:"The name of the platform experiment, when the person changed the one proposed. One line, held to the rule of name on POST /platform-experiments. Left out, the proposal's name stands. Nothing else of the proposal's experiment is changed here but by answers: its metrics and the rest of its brief change by a revision."`
+	Name                   string          `json:"name,omitempty" doc:"The name of the platform experiment, when the person changed the one proposed. One line, held to the rule of name on POST /platform-experiments. Left out, the proposal's name stands. Nothing else of the proposal's experiment is changed here but by answers: its metrics and the rest of its brief change by a change of the goal (PATCH /platform-experiments/{id} with goal), which the planner plans again."`
 	Answers                []string        `json:"answers,omitempty" doc:"One answer for each of the proposal's questions, in their order: the answer the planner planned on, or the person's own. Each question and its answer are added to the end of the brief. Left out for a proposal without questions."`
 }
 
@@ -502,7 +472,7 @@ func (s *Service) accept(ctx context.Context, id string, req AcceptRequest, by d
 		return nil, invalidTransition("platform experiment %s is %s: only a draft is accepted", id, pe.Status)
 	}
 	if pe.DeclinedAt != nil {
-		return nil, invalidTransition("draft %s has no proposal to accept: its planner declined (declined_reason). Revise it with POST /platform-experiments/%s/revise, or close it", id, id)
+		return nil, invalidTransition("draft %s has no proposal to accept: its planner declined (declined_reason). Change its goal with PATCH /platform-experiments/%s, or close it", id, id)
 	}
 	if pe.ProposedAt == nil {
 		return nil, invalidTransition("draft %s has no proposal to accept yet: its planner is still working", id)
@@ -576,8 +546,8 @@ func (s *Service) accept(ctx context.Context, id string, req AcceptRequest, by d
 	return accepted, nil
 }
 
-// nameActors names whoever created pe, closed it, accepted its proposal, asked for its revisions
-// and raised its baseline, when it carries them.
+// nameActors names whoever created pe, closed it, accepted its proposal and raised its baseline,
+// when it carries them.
 func (s *Service) nameActors(ctx context.Context, pe *domain.PlatformExperiment) error {
 	var actors []*domain.Actor
 	if pe.Actor != nil {
@@ -588,9 +558,6 @@ func (s *Service) nameActors(ctx context.Context, pe *domain.PlatformExperiment)
 	}
 	if pe.AcceptedBy != nil {
 		actors = append(actors, pe.AcceptedBy)
-	}
-	for i := range pe.Revisions {
-		actors = append(actors, &pe.Revisions[i].Actor)
 	}
 	for i := range pe.BaselineRaises {
 		actors = append(actors, &pe.BaselineRaises[i].Actor)
@@ -606,7 +573,29 @@ func planningOver(pe *domain.PlatformExperiment) error {
 }
 
 func notADraft(pe *domain.PlatformExperiment) error {
-	return refusal.Refuse(http.StatusConflict, "not_a_draft", "platform experiment "+pe.ID+" is "+string(pe.Status)+": only a draft is proposed, revised or accepted")
+	return refusal.Refuse(http.StatusConflict, "not_a_draft", "platform experiment "+pe.ID+" is "+string(pe.Status)+": only a draft is proposed or accepted")
+}
+
+func goalChanged(pe *domain.PlatformExperiment) error {
+	return refusal.Refuse(http.StatusConflict, "goal_changed", fmt.Sprintf("the goal of draft %s changed to version %d after the one you planned from. Read it with `hl platform-experiments get` and answer it", pe.ID, pe.GoalVersion))
+}
+
+// refusedAnswer is the refusal of the planner's answer to the draft pe that the store refused
+// with err, naming the goal the draft has where it changed in the meantime.
+func (s *Service) refusedAnswer(ctx context.Context, pe *domain.PlatformExperiment, err error) error {
+	switch {
+	case errors.Is(err, db.ErrNotDraft):
+		return notADraft(pe)
+	case errors.Is(err, db.ErrPlanningOver):
+		return planningOver(pe)
+	case errors.Is(err, db.ErrGoalChanged):
+		now, err := s.stored(ctx, pe.ID)
+		if err != nil {
+			return err
+		}
+		return goalChanged(now)
+	}
+	return err
 }
 
 // AcceptDue accepts, as proposed, every draft whose accepts_at has passed, for the person who

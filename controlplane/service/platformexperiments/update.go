@@ -197,6 +197,35 @@ func (s *Service) Update(ctx context.Context, id string, patch PlatformExperimen
 	return s.stored(ctx, pe.ID)
 }
 
+// setGoal changes the goal of the platform experiment id. A draft is planned again from it, and
+// the coordinator of an open or running one is told.
+func (s *Service) setGoal(ctx context.Context, id, goal string) (*domain.PlatformExperiment, error) {
+	goal, err := checkGoal(goal)
+	if err != nil {
+		return nil, err
+	}
+	pe, err := s.stored(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if !goalEditable(pe) {
+		return nil, notEditable(pe, []string{"goal"})
+	}
+	if goal == pe.Goal {
+		return nil, refuseUpdate(422, "nothing_to_change", "goal is the goal it has: send the goal as it is to be")
+	}
+	if err := s.store.SetGoal(ctx, id, goal, time.Now().UTC().Add(s.planning.Limit)); errors.Is(err, db.ErrNotEditable) {
+		if pe, err = s.stored(ctx, id); err != nil {
+			return nil, err
+		}
+		return nil, notEditable(pe, []string{"goal"})
+	} else if err != nil {
+		return nil, fmt.Errorf("platform_experiments.setGoal: %w", err)
+	}
+	s.logger.Info("goal changed", zap.String("platform_experiment_id", id))
+	return s.stored(ctx, id)
+}
+
 // seatsHoldTrials refuses a max_agents raised on the running pe when what its researchers left
 // unspent, split evenly over max_agents researchers, would not hold one trial of the baseline
 // each: the share a researcher that joins is given (domain.LateShare) would not run one.
@@ -240,14 +269,23 @@ func (s *Service) SetSummary(ctx context.Context, id, summary string) (*domain.P
 	return s.stored(ctx, id)
 }
 
-// Patch changes the platform experiment id as patch says, for caller. A coordinator's token is
-// handed to a machine the platform rents, so it changes the brief and declares the baseline, and
-// nothing a run's cost or length follows from.
+// Patch changes the platform experiment id as patch says, for caller: the fields Editable gives
+// it. The goal changes alone, in a write of its own.
 func (s *Service) Patch(ctx context.Context, id string, patch PlatformExperimentPatch, caller auth.Principal) (*domain.PlatformExperiment, error) {
 	if caller.Kind == auth.KindCoordinator {
 		if others := patch.carried(coordinatorFields...); len(others) > 0 {
 			return nil, refusal.Refuse(http.StatusForbidden, "coordinator_changes_description_only", "a coordinator's token changes the description and the baseline (baseline_job_id, baseline_reason) and nothing else, and the body also carries: "+strings.Join(others, ", ")+". Leave them out")
 		}
+	}
+	if patch.Goal != nil {
+		if others := patch.carried("goal"); len(others) > 0 {
+			return nil, refuseUpdate(422, "goal_alone", "Change the goal alone. Send the other fields in another request: the body also carries %s", strings.Join(others, ", "))
+		}
+		pe, err := s.setGoal(ctx, id, *patch.Goal)
+		if err != nil {
+			return nil, s.refusal("change the goal", err)
+		}
+		return pe, nil
 	}
 	by := caller.Actor()
 	patch.by = &by

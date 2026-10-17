@@ -204,8 +204,8 @@ type LauncherAgent struct {
 // is up once the draft is accepted. A draft that waits for a person keeps no machine of it.
 //
 // A draft's planner is the other way round. It has something to do while the draft is a draft
-// and nothing is proposed, which a revision makes true again. After its answer it is kept until
-// the draft's planner_ends_at, for a revision asked for soon, and then let wind down for $1
+// and nothing is proposed, which a change of the goal makes true again. After its answer it is
+// kept until the draft's planner_ends_at, for a goal changed soon, and then let wind down for $1
 // seconds, as it is after the draft closed. Once the draft is accepted it has nothing left to
 // do, in an experiment that is then open or running.
 //

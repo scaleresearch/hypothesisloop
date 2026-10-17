@@ -796,7 +796,7 @@ func TestEveryFreeTextFlagReadsItFromAFileOrStdin(t *testing.T) {
 		{"coordinator:pe-1", []string{"platform-experiments", "close"}, "reason", field("reason")},
 		{"coordinator:pe-1", []string{"platform-experiments", "update"}, "description", field("description")},
 		{"coordinator:pe-1", []string{"platform-experiments", "update", "--baseline-job", "job-2"}, "reason", field("baseline_reason")},
-		{"agent:pe-1/ag-1", []string{"platform-experiments", "decline"}, "reason", field("reason")},
+		{"agent:pe-1/ag-1", []string{"platform-experiments", "decline", "--goal-version", "1"}, "reason", field("reason")},
 	} {
 		got := recordingServer(t, func(int, recorded) any { return map[string]any{"id": "hyp-1", "status": "QUEUED", "messages": []any{}} })
 		t.Setenv("HL_TOKEN", derivedToken(tc.token))

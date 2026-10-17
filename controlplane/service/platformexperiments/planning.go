@@ -16,16 +16,28 @@ import (
 
 // Planning bounds a draft, which the platform pays for: how long it is planned and waits.
 type Planning struct {
-	// Limit is how long a planner has to propose, from the goal or from a revision.
+	// Limit is how long a planner has to propose, from the goal or from a changed one.
 	Limit time.Duration
 	// ProposedFor is how long a proposal waits for the person before the draft is closed.
 	ProposedFor time.Duration
-	// PlannerKept is how long a planner's machine is kept after its answer, for a revision asked
-	// for in that time to reach the planner that is still there.
+	// PlannerKept is how long a planner's machine is kept after its answer, for a goal changed in
+	// that time to reach the planner that is still there.
 	PlannerKept time.Duration
 	// AutoAccept is how long a proposal waits before the platform accepts it as proposed, unless
-	// a person accepts it sooner, holds it, revises it or closes it. 0 leaves it to a person.
+	// a person accepts it sooner, holds it, changes its goal or closes it. 0 leaves it to a person.
 	AutoAccept time.Duration
+}
+
+// checkGoal is goal as it is stored, or why it is refused.
+func checkGoal(goal string) (string, error) {
+	goal = strings.TrimSpace(goal)
+	if goal == "" {
+		return "", refuseUpdate(422, "invalid_goal", "goal is required: one sentence saying what you want to find out")
+	}
+	if len(goal) > domain.MaxGoalBytes {
+		return "", refuseUpdate(422, "invalid_goal", "goal is %d bytes and at most %d: say it in a sentence or two, the planner works out the rest", len(goal), domain.MaxGoalBytes)
+	}
+	return goal, nil
 }
 
 // DraftNameLength bounds the name a draft takes from its goal until the proposal names it.
@@ -71,12 +83,9 @@ func (s *Service) CreateDraft(ctx context.Context, projectID, goal, continues, r
 
 func (s *Service) createDraft(ctx context.Context, projectID, goal, continues string, by domain.Actor, repository RepositoryChoice) (*domain.PlatformExperiment, error) {
 	planning, launch := s.planning, s.launch
-	goal = strings.TrimSpace(goal)
-	if goal == "" {
-		return nil, refuseUpdate(422, "invalid_goal", "goal is required: one sentence saying what you want to find out")
-	}
-	if len(goal) > domain.MaxGoalBytes {
-		return nil, refuseUpdate(422, "invalid_goal", "goal is %d bytes and at most %d: say it in a sentence or two, the planner works out the rest", len(goal), domain.MaxGoalBytes)
+	goal, err := checkGoal(goal)
+	if err != nil {
+		return nil, err
 	}
 	if launch.DefaultModel == "" {
 		return nil, errors.New("platform_experiments.CreateDraft: no agent launch settings, and a draft is planned by an agent the platform runs")
@@ -106,6 +115,7 @@ func (s *Service) createDraft(ctx context.Context, projectID, goal, continues st
 		ProjectID:             projectID,
 		Name:                  draftName(goal),
 		Goal:                  goal,
+		GoalVersion:           1,
 		Continues:             continues,
 		Actor:                 &by,
 		MaxAgents:             MaxProposedResearchers(launch.MaxHosted),

@@ -39,7 +39,7 @@ func summarize(why *domain.StatusReason, pe *domain.PlatformExperiment, signups 
 			return "The plan is ready and waits for your accept. It expires in " + in(pe.ProposalExpiresAt) + "."
 		},
 		"declined": func() string {
-			return "The planner couldn't propose an experiment and says what it needs. Revise the goal or close it; it closes by itself in " + in(pe.ProposalExpiresAt) + "."
+			return "The planner couldn't propose an experiment and says what it needs. Change the goal or close it; it closes by itself in " + in(pe.ProposalExpiresAt) + "."
 		},
 
 		"baseline_measuring": func() string { return measuringBaseline(signups) + " The run starts by itself when it finishes." },
@@ -109,7 +109,7 @@ func summarize(why *domain.StatusReason, pe *domain.PlatformExperiment, signups 
 			return "Closed by " + who + "."
 		},
 		string(domain.ClosePlanningLimitReached): func() string { return "Closed: the planner proposed nothing in time." },
-		string(domain.CloseProposalExpired):      func() string { return "Closed: nobody accepted or revised the plan in time." },
+		string(domain.CloseProposalExpired):      func() string { return "Closed: nobody accepted the plan or changed the goal in time." },
 		string(domain.CloseBaselineLimitReached): func() string {
 			if pe.BaselineJobID != "" {
 				return "Closed: the baseline was ready, but no researcher or budget started the run in time."
