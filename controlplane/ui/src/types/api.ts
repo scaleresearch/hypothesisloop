@@ -2097,7 +2097,7 @@ export interface components {
             };
             /** @description true: the platform runs the agent. false (default): its token is returned and you run it. */
             in_agentsandbox?: boolean;
-            /** @description The model the agent runs on, which it reads from its signup. Omitted, the platform's default applies and is what the answer shows. */
+            /** @description The model the agent runs on, which it reads from its signup. Omitted, it runs on its agent type's model and the answer shows none. */
             model?: string;
             /** @description Display name of a created agent, unique in the platform experiment: 409 name_taken for one another agent of it carries. Omitted, it is named by its role and a number no other agent of the experiment has: "Researcher 2", "Baseline 1". */
             name?: string;

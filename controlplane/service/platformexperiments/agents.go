@@ -26,7 +26,7 @@ type AddAgentRequest struct {
 	InAgentSandbox  bool           `json:"in_agentsandbox,omitempty" doc:"true: the platform runs the agent. false (default): its token is returned and you run it."`
 	AgentType       string         `json:"agent_type,omitempty" doc:"Which specialization the agent runs, which it reads from its signup: generalist (default), hyperparameter-search, architecture-search or data-search."`
 	Hyperparameters map[string]any `json:"hyperparameters,omitempty" doc:"A small JSON object the agent reads from its signup, at most 4096 bytes as JSON."`
-	Model           string         `json:"model,omitempty" doc:"The model the agent runs on, which it reads from its signup. Omitted, the platform's default applies and is what the answer shows."`
+	Model           string         `json:"model,omitempty" doc:"The model the agent runs on, which it reads from its signup. Omitted, it runs on its agent type's model and the answer shows none."`
 }
 
 // AgentLaunch is what joining needs beyond the store.
