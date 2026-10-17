@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -55,23 +54,6 @@ func firstDifference(got, want string) string {
 		}
 	}
 	return "one is a prefix of the other"
-}
-
-func TestEveryRoleHasABuiltinDefault(t *testing.T) {
-	var researchers []string
-	for _, t := range Catalog() {
-		if t.Role == domain.AgentRoleResearcher {
-			researchers = append(researchers, t.ID)
-		}
-	}
-	if !slices.Contains(researchers, domain.DefaultAgentType) {
-		t.Fatalf("the default type %q is no built-in researcher", domain.DefaultAgentType)
-	}
-	for _, role := range domain.AgentRoles {
-		if _, err := domain.LookupAgentType(Catalog(), domain.AgentTypeOfRole(role), role); err != nil {
-			t.Errorf("role %s has no built-in default: %v", role, err)
-		}
-	}
 }
 
 // What live runs taught the built-in prompts, each said where the agent reads it. These were the

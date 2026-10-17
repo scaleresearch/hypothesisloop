@@ -302,12 +302,3 @@ func TestAPassAppliesTheOverrideWithoutTheScaleUpOptIn(t *testing.T) {
 		})
 	}
 }
-
-type phaseByJobBackend struct {
-	idsBackend
-	phases map[string]domain.JobPhase
-}
-
-func (b *phaseByJobBackend) LatestJobPhase(_ context.Context, exp *domain.Experiment) (domain.JobPhase, bool, error) {
-	return b.phases[exp.ID], true, nil
-}

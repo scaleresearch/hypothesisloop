@@ -6,7 +6,7 @@ const (
 	Readme         = "README.md"
 	ExperimentFile = ".hypothesisloop/experiment.yaml"
 	JobSpec        = ".hypothesisloop/job.yaml"
-	Environment    = ".hypothesisloop/Dockerfile"
+	Dockerfile     = ".hypothesisloop/Dockerfile"
 	// MetricsHelper posts a job's metric. A repository may leave it out and post the metric
 	// itself, which hl repo check says how to do and fails nothing for.
 	MetricsHelper = "metrics.py"

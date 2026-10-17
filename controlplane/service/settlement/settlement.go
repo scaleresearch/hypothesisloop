@@ -102,19 +102,8 @@ func (s *Settler) Settle(ctx context.Context, exp *domain.Experiment) error {
 	// Every dimension, accelerator included, settles at its estimated per-hour rate (estimate /
 	// duration) times cumulative observed hours. This rate is invariant across a preemption
 	// requeue's proportional rescale (see experiments_store_lifecycle.RequeuePreempted), so it's
-	// correct whether or not the job was preempted. The old approach (observed/currentEstimate)
-	// overcharged post-preemption jobs, since currentEstimate only covers the shortened
-	// remaining work.
+	// correct whether or not the job was preempted.
 	//
-	// Accelerator used to be billed differently: metricsdb.ObservedAcceleratorCost queried a
-	// separate "which type is this job actually running on right now" live marker per grid
-	// point, to bill a mid-run reschedule onto a different type correctly segment-by-segment.
-	// That marker depended on catching a job's RUNNING phase within a poll window — for jobs
-	// that start and finish faster than one poll tick (routine for short benchmark jobs), it was
-	// never written, so accelerator cost silently settled at 0 regardless of real runtime. The
-	// flat per-job rate below can't bill a mid-run type change correctly, but a fixed
-	// AcceleratorType per job's whole run is already the common case, and this needs no live
-	// observation at all — it can't ever silently zero out.
 	// Deliberately uncapped. A job that outran its estimate really did consume the hours, and
 	// billing it for less would put a number in the metrics store that never happened — the one
 	// thing that store is for. The bound on overrun is enforced upstream, not here: the

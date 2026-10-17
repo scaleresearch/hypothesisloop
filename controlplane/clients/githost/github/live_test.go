@@ -228,7 +228,7 @@ func TestLiveARepositoryIsCreatedAndCoveredByItsInstallation(t *testing.T) {
 	if err != nil || token.Repository != created.FullName {
 		t.Fatalf("a write token for %s: got = %+v, %v, want one: the installation covers what it created", created.FullName, token != nil, err)
 	}
-	for _, path := range []string{experimentspec.Readme, experimentspec.ExperimentFile, experimentspec.JobSpec, experimentspec.Environment} {
+	for _, path := range []string{experimentspec.Readme, experimentspec.ExperimentFile, experimentspec.JobSpec, experimentspec.Dockerfile} {
 		if _, err := client.File(t.Context(), token, "", path); err != nil {
 			t.Errorf("File(%s) on %s = %v, want the template's", path, created.FullName, err)
 		}

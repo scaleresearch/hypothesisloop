@@ -1,6 +1,6 @@
 // Package watchclient blocks until the platform reports a change on GET /watch, instead of
 // polling for it. It speaks RFC 6455 itself (no third-party library) because it ships wherever
-// `hl` does, including job images built on anything.
+// `hl` does.
 package watchclient
 
 import (

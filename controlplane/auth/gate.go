@@ -38,7 +38,7 @@ func public(path string) bool {
 
 // Gate is the one check every request passes before any handler runs: it resolves the request's
 // token and hands the handler a context carrying the principal. What the principal may do is
-// declared per route and asked of that principal (RequireStaff, RequireRuntime, an
+// declared per route and asked of that principal (RequireRuntime, an
 // Audience). webSockets names the paths a WebSocket client opens with the subprotocol
 // each speaks: a browser cannot set a header on a WebSocket, so such a client offers its token
 // as the second of two subprotocols.
@@ -120,11 +120,6 @@ var errNotGated = errors.New("the request did not pass auth.Gate")
 // guards the plain HTTP endpoints runtimes push to outside the documented API.
 func RequireRuntime(logger *zap.Logger, next http.Handler) http.Handler {
 	return require(logger, "only a runtime token may push here", next, KindRuntime, KindStaff)
-}
-
-// RequireStaff serves next only to staff.
-func RequireStaff(logger *zap.Logger, next http.Handler) http.Handler {
-	return require(logger, "staff only", next, KindStaff)
 }
 
 func require(logger *zap.Logger, refusal string, next http.Handler, kinds ...Kind) http.Handler {

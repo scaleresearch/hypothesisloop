@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes/agenttypestest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
@@ -24,7 +24,7 @@ type memAgentTypes struct {
 
 func newMemAgentTypes() *memAgentTypes {
 	m := &memAgentTypes{types: map[string]*domain.CurrentAgentType{}, versions: map[string][]domain.AgentTypeVersion{}, events: map[string][]domain.AgentTypeEvent{}}
-	for _, t := range agenttypes.Catalog() {
+	for _, t := range agenttypestest.Catalog() {
 		m.types[t.ID] = &t
 		m.versions[t.ID] = []domain.AgentTypeVersion{t.Current}
 	}

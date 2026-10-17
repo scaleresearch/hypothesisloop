@@ -19,9 +19,4 @@ func TestEachBuiltinHasAValidDescription(t *testing.T) {
 			t.Errorf("%s: %v", b.ID, err)
 		}
 	}
-	for _, c := range Catalog() {
-		if c.Description == "" {
-			t.Errorf("catalog entry %s has no description", c.ID)
-		}
-	}
 }

@@ -13,7 +13,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes/agenttypestest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
@@ -59,11 +59,11 @@ type catalogStore struct {
 }
 
 func (catalogStore) AgentTypeCatalog(context.Context, string) (domain.AgentTypeCatalog, error) {
-	return agenttypes.Catalog(), nil
+	return agenttypestest.Catalog(), nil
 }
 
 func (catalogStore) ProjectAgentTypeCatalog(context.Context, string) (domain.AgentTypeCatalog, error) {
-	return agenttypes.Catalog(), nil
+	return agenttypestest.Catalog(), nil
 }
 
 func (catalogStore) OnCoresOnly(context.Context, []string) (map[string]bool, error) {
@@ -78,11 +78,11 @@ type fakeStore struct {
 }
 
 func (fakeStore) AgentTypeCatalog(context.Context, string) (domain.AgentTypeCatalog, error) {
-	return agenttypes.Catalog(), nil
+	return agenttypestest.Catalog(), nil
 }
 
 func (fakeStore) ProjectAgentTypeCatalog(context.Context, string) (domain.AgentTypeCatalog, error) {
-	return agenttypes.Catalog(), nil
+	return agenttypestest.Catalog(), nil
 }
 
 func (fakeStore) OnCoresOnly(context.Context, []string) (map[string]bool, error) {

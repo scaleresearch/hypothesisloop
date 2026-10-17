@@ -59,18 +59,12 @@ const (
 // (experimentspec.MetricDefinition).
 type MetricDefinition = experimentspec.MetricDefinition
 
-func ValidMetricRole(role MetricRole) bool { return experimentspec.ValidMetricRole(role) }
-
 func ValidateMetricDefinitions(defs []MetricDefinition) error {
 	return experimentspec.ValidateMetricDefinitions(defs)
 }
 
 func PrimaryRankingMetric(defs []MetricDefinition) (MetricDefinition, bool) {
 	return experimentspec.PrimaryRankingMetric(defs)
-}
-
-func RequireRankingMetric(defs []MetricDefinition) error {
-	return experimentspec.RequireRankingMetric(defs)
 }
 
 // AllRankingDeterministic reports whether defs declare a ranking metric and every one of them is
@@ -88,10 +82,6 @@ func AllRankingDeterministic(defs []MetricDefinition) bool {
 	}
 	return ranking
 }
-
-const MaxAgentImageLength = experimentspec.MaxAgentImageLength
-
-func ValidateAgentImage(image string) error { return experimentspec.ValidateAgentImage(image) }
 
 // ExperimentFile is where a platform experiment's repository keeps its spec.
 const ExperimentFile = experimentspec.ExperimentFile

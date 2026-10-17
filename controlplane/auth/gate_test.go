@@ -142,7 +142,7 @@ func TestRecheckResolvesTheAdmittedTokenAgain(t *testing.T) {
 }
 
 func TestARouteRequirementWithoutTheGateFailsClosed(t *testing.T) {
-	h := RequireStaff(zap.NewNop(), http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+	h := RequireRuntime(zap.NewNop(), http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Error("the handler ran with no principal")
 	}))
 	if got := serve(h, "/metrics", map[string]string{"Authorization": "Bearer staff"}).Code; got != http.StatusInternalServerError {

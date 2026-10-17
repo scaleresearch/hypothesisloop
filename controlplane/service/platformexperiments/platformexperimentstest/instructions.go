@@ -6,7 +6,7 @@ import (
 	"context"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes/agenttypestest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
@@ -20,7 +20,7 @@ const Rules = "## platform rules (read first)"
 var Defaults = domain.ModelDefaults{Agent: "model-default", Coordinator: "model-c"}
 
 func builtin(id string) domain.AgentTypeVersion {
-	for _, t := range agenttypes.Catalog() {
+	for _, t := range agenttypestest.Catalog() {
 		if t.ID == id {
 			return t.Current
 		}

@@ -3,9 +3,7 @@
 package agenttypes
 
 import (
-	"crypto/sha256"
 	"embed"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 
@@ -76,38 +74,4 @@ func Builtins() ([]domain.BuiltinAgentType, error) {
 		out = append(out, builtin)
 	}
 	return out, nil
-}
-
-// Catalog is the built-in types as a catalog at version 1, as a database seeded once holds them.
-func Catalog() domain.AgentTypeCatalog {
-	all, err := Builtins()
-	if err != nil {
-		panic(err)
-	}
-	catalog := make(domain.AgentTypeCatalog, len(all))
-	for i, b := range all {
-		catalog[i] = domain.CurrentAgentType{
-			AgentType: domain.AgentType{ID: b.ID, Name: b.Name, Description: b.Description, Role: b.Role, Builtin: true, CurrentVersion: 1},
-			Current:   domain.AgentTypeVersion{TypeID: b.ID, Version: 1, Prompt: b.Prompt, Settings: b.Settings},
-		}
-	}
-	return catalog
-}
-
-// Digest is sha256 of everything a release seeds: each built-in's id, name, description, role,
-// prompt and settings, and rules.
-func Digest(all []domain.BuiltinAgentType, rules string) (string, error) {
-	sum := sha256.New()
-	for _, b := range all {
-		settings, err := json.Marshal(b.Settings)
-		if err != nil {
-			return "", err
-		}
-		for _, part := range []string{b.ID, b.Name, b.Description, string(b.Role), b.Prompt, string(settings)} {
-			sum.Write([]byte(part))
-			sum.Write([]byte{0})
-		}
-	}
-	sum.Write([]byte(rules))
-	return hex.EncodeToString(sum.Sum(nil)), nil
 }

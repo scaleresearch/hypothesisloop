@@ -84,19 +84,7 @@ func (p PodResources) Over(t AcceleratorType, stated map[string]string) map[stri
 // TypeKinds is every kind of accelerator type.
 var TypeKinds = []TypeKind{TypeKindAccelerator, TypeKindCPU}
 
-// AcceleratorCost returns the registered accelerator-hour rate and panics for an unknown type.
-// Admission validates catalog membership before cost calculation; internal callers must never
-// substitute a different hardware rate.
-func AcceleratorCost(g AcceleratorType) float64 {
-	if r, ok := acceleratorRateRegistry[foldKey(string(g))]; ok {
-		return r
-	}
-	panic("unknown accelerator type: " + string(g))
-}
-
 // LookupAcceleratorCost returns this type's registered AccH rate and whether it was found.
-// Unlike AcceleratorCost, it never silently substitutes another rate — used by settlement paths (see
-// metricsdb.ObservedAcceleratorCost) where an unrecognized type must fail loudly.
 func LookupAcceleratorCost(g AcceleratorType) (float64, bool) {
 	r, ok := acceleratorRateRegistry[foldKey(string(g))]
 	return r, ok

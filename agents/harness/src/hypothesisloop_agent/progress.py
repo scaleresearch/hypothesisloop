@@ -21,7 +21,7 @@ MAX_ACTIVITY_LENGTH = platform.MAX_ACTIVITY_LENGTH
 # subagents are live, whether a turn is in flight (working) or the agent waits for an update, since
 # when (Unix seconds), and the model provider's rate limit as the CLI last said it, once there is a
 # reading, and the digest of the instructions it runs. The launcher hands the newest to the platform, which keeps it in the run's metrics
-# (launcherapi.parseHarnessState reads it).
+# (agentsandbox.parseHarnessState reads it).
 STATE_PREFIX = platform.STATE_PREFIX
 DIGEST_LENGTH = platform.INSTRUCTIONS_DIGEST_LENGTH
 

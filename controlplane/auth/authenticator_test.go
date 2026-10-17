@@ -451,30 +451,6 @@ func TestOnlyARuntimeOrStaffMayPush(t *testing.T) {
 	}
 }
 
-func TestOnlyStaffReachWhatRequireStaffGuards(t *testing.T) {
-	a, _ := newTestAuthenticator(t)
-	handler := Gate(a, zap.NewNop(), nil)(RequireStaff(zap.NewNop(), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })))
-	for name, tc := range map[string]struct {
-		header string
-		want   int
-	}{
-		"no token": {"", http.StatusUnauthorized},
-		"staff":    {"Bearer " + mustMint(t, testSecret, scope.Staff), http.StatusOK},
-		"runtime":  {"Bearer " + mustMint(t, testSecret, scope.Runtime("cluster-a", clusterRegisteredAt)), http.StatusForbidden},
-		"agent":    {"Bearer " + mustMint(t, testSecret, scope.Agent("pe-a", "agent-1")), http.StatusForbidden},
-	} {
-		request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
-		if tc.header != "" {
-			request.Header.Set("Authorization", tc.header)
-		}
-		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, request)
-		if recorder.Code != tc.want {
-			t.Errorf("%s: got = %d, want = %d", name, recorder.Code, tc.want)
-		}
-	}
-}
-
 func TestAFailureOfThePlatformsOwnIsAnsweredWithoutItsText(t *testing.T) {
 	a, directory := newTestAuthenticator(t)
 	directory.fail = errors.New("pq: password authentication failed for user hl at 10.0.0.7")

@@ -1,12 +1,16 @@
 package agenttypes_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"testing"
 
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes"
 )
 
-// releases is the digest of what each release seeds (agenttypes.Digest). A change of a built-in or
+// releases is the digest of what each release seeds (releaseDigest). A change of a built-in or
 // of the rules fails this until it is shipped under the next release, with its digest added here.
 var releases = map[int]string{
 	1: "e23db9a0d4928e952b5aa754c9626f5343202b8f82e2a53c45a0b7c4cdaa3177",
@@ -23,7 +27,7 @@ func TestReleaseNamesWhatItSeeds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	digest, err := agenttypes.Digest(all, agenttypes.PlatformRules)
+	digest, err := releaseDigest(all, agenttypes.PlatformRules)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,4 +40,22 @@ func TestReleaseNamesWhatItSeeds(t *testing.T) {
 			t.Errorf("releases records %d, after agenttypes.Release %d", release, agenttypes.Release)
 		}
 	}
+}
+
+// releaseDigest is sha256 of everything a release seeds: each built-in's id, name, description, role,
+// prompt and settings, and rules.
+func releaseDigest(all []domain.BuiltinAgentType, rules string) (string, error) {
+	sum := sha256.New()
+	for _, b := range all {
+		settings, err := json.Marshal(b.Settings)
+		if err != nil {
+			return "", err
+		}
+		for _, part := range []string{b.ID, b.Name, b.Description, string(b.Role), b.Prompt, string(settings)} {
+			sum.Write([]byte(part))
+			sum.Write([]byte{0})
+		}
+	}
+	sum.Write([]byte(rules))
+	return hex.EncodeToString(sum.Sum(nil)), nil
 }

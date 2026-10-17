@@ -96,7 +96,7 @@ class ProgressTest(unittest.TestCase):
 
     # Nothing outside the harness knew whether a lead had subagents at work or a turn in flight,
     # so a lead with neither looked like one at work. The launcher hands the newest state line to
-    # the platform with every beat; launcherapi.parseHarnessState reads this format.
+    # the platform with every beat; agentsandbox.parseHarnessState reads this format.
     def test_the_state_is_said_with_every_beat(self):
         self.progress.beat()
         self.assertEqual(self.states, ["hl-state subagents=0 turn=waiting since=1760000000"])
@@ -118,7 +118,7 @@ class ProgressTest(unittest.TestCase):
         for line in self.states:
             self.assertLessEqual(len(line.removeprefix("hl-state ")), 200)
 
-    # launcherapi.parseHarnessState reads instructions_digest and the launcher keeps 200 characters.
+    # agentsandbox.parseHarnessState reads instructions_digest and the launcher keeps 200 characters.
     def test_the_state_carries_the_digest_of_the_instructions_it_runs_within_the_launchers_limit(self):
         self.progress.instructions("0123456789abcdef" * 4, 12)
         self.progress.awaiting()

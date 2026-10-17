@@ -15,6 +15,10 @@ const settledL40 = "nvidia.com/gpu.product=NVIDIA-L40"
 // settlement after observedHours of observation, and returns what was written.
 func settle(t *testing.T, acceleratorType domain.AcceleratorType, count int, estimatedHours float64, observedHours int) float64 {
 	t.Helper()
+	rate, ok := domain.LookupAcceleratorCost(acceleratorType)
+	if !ok {
+		t.Fatalf("no rate for %s", acceleratorType)
+	}
 	now := time.Now().UTC()
 	server := aliveServer(t, observedHours*60+1, time.Minute, now)
 	defer server.Close()
@@ -22,7 +26,7 @@ func settle(t *testing.T, acceleratorType domain.AcceleratorType, count int, est
 	exp := &domain.Experiment{
 		ID: "exp-1", PlatformExperimentID: "pe-1", CreatedAt: now.Add(-24 * time.Hour),
 		AcceleratorType: acceleratorType, AcceleratorCount: count, EstimatedDurationHours: estimatedHours,
-		EstimatedCostAccH: domain.AcceleratorCost(acceleratorType) * float64(count) * estimatedHours,
+		EstimatedCostAccH: rate * float64(count) * estimatedHours,
 	}
 	if err := New(usage, metricsdb.New(server.URL), 3*time.Minute).Settle(context.Background(), exp); err != nil {
 		t.Fatalf("Settle: %v", err)

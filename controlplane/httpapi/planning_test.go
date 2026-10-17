@@ -1674,13 +1674,6 @@ func (s *createdStore) ListAgentMessages(context.Context, string, string) ([]dom
 	return s.messages, nil
 }
 
-// plannerListed is a draftStore whose roster is the draft's planner.
-type plannerListed struct{ *draftStore }
-
-func (s plannerListed) ListAgentSignups(_ context.Context, id string) ([]domain.AgentSignup, error) {
-	return []domain.AgentSignup{s.signups[id]}, nil
-}
-
 // A declaration the platform makes is refused as a coordinator's is. The finish still stands, the
 // experiment says what the declaration was refused for, and the owner's change that clears it is
 // the request that declares the job and starts the run.
