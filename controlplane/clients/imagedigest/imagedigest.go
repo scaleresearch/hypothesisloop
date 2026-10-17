@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
 	"slices"
+	"syscall"
 	"time"
 
 	"github.com/containerd/containerd/v2/core/images"
@@ -41,7 +44,40 @@ func New(plainHTTP ...string) *Resolver {
 	for _, host := range plainHTTP {
 		hosts[host] = true
 	}
-	return &Resolver{client: &http.Client{Timeout: 30 * time.Second}, plainHTTP: hosts}
+	transport := &http.Transport{DialContext: dial(hosts), TLSHandshakeTimeout: 10 * time.Second}
+	return &Resolver{client: &http.Client{Timeout: 30 * time.Second, Transport: transport}, plainHTTP: hosts}
+}
+
+// dial reaches the plainHTTP hosts wherever they are and every other address only on the public
+// internet: a ref, its registry's redirects and the token realm it names are the customer's, and
+// would otherwise have the control plane send requests into its own network.
+func dial(plainHTTP map[string]bool) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	open := &net.Dialer{Timeout: 10 * time.Second}
+	public := &net.Dialer{Timeout: 10 * time.Second, Control: publicOnly}
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, _, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		if plainHTTP[addr] || plainHTTP[host] {
+			return open.DialContext(ctx, network, addr)
+		}
+		return public.DialContext(ctx, network, addr)
+	}
+}
+
+var sharedAddressSpace = netip.MustParsePrefix("100.64.0.0/10")
+
+func publicOnly(_, address string, _ syscall.RawConn) error {
+	addrPort, err := netip.ParseAddrPort(address)
+	if err != nil {
+		return err
+	}
+	ip := addrPort.Addr().Unmap()
+	if !ip.IsGlobalUnicast() || ip.IsPrivate() || sharedAddressSpace.Contains(ip) {
+		return fmt.Errorf("imagedigest: %s is not a public address", ip)
+	}
+	return nil
 }
 
 // Resolve reads ref, a tag or a digest, with login for its registry host, or anonymously when

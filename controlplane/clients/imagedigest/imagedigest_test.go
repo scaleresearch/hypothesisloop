@@ -200,3 +200,24 @@ func TestConfigReadsTheVariantOfTheArchitecture(t *testing.T) {
 		t.Errorf("an arm64 index: %v", err)
 	}
 }
+
+// A registry's token realm, like its redirects, is the customer's to name, and one inside the
+// platform's network is never asked.
+func TestARegistryCannotSendTheResolverIntoAPrivateNetwork(t *testing.T) {
+	asked := false
+	internal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { asked = true }))
+	t.Cleanup(internal.Close)
+	registry := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="`+internal.URL+`/v1/sql?sql=DROP",service="x"`)
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	t.Cleanup(registry.Close)
+	host := strings.TrimPrefix(registry.URL, "http://")
+
+	if _, err := New(host).Resolve(context.Background(), host+"/team/model:v1", nil); err == nil || asked || !strings.Contains(err.Error(), "not a public address") {
+		t.Fatalf("err = %v, internal asked = %v: want the realm on a private address refused", err, asked)
+	}
+	if _, err := New().Resolve(context.Background(), strings.TrimPrefix(internal.URL, "http://")+"/team/model:v1", nil); err == nil || !strings.Contains(err.Error(), "not a public address") {
+		t.Fatalf("err = %v: want a registry on a private address refused", err)
+	}
+}
