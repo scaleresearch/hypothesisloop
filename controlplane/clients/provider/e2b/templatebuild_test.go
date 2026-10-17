@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"io"
 	"net/http"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
@@ -55,14 +57,15 @@ func TestTheImagesConfigBecomesBuildSteps(t *testing.T) {
 }
 
 const (
-	templatesPath = "/templates"
-	buildStart    = "/v2/templates/tpl1/builds/bld1"
-	buildStatus   = "/templates/tpl1/builds/bld1/status"
+	templatesPath  = "/v2/templates"
+	buildStart     = "/v2/templates/tpl1/builds/bld1"
+	templateBuilds = "/templates/tpl1"
+	buildStatus    = "/templates/tpl1/builds/bld2/status"
 )
 
 func templatesJSON(status string) string {
-	return `[{"templateID":"other","buildID":"x","buildStatus":"ready","aliases":["notebook"]},` +
-		`{"templateID":"tpl1","buildID":"bld1","buildStatus":"` + status + `","aliases":["` + agentTemplate + `"]}]`
+	return "[" + templateJSON("other", "notebook", "ready", "2026-10-01T10:00:00Z", "") + "," +
+		templateJSON("tpl1", agentTemplate, status, "2026-10-05T14:07:23Z", "") + "]"
 }
 
 // The first Create of an image and size starts the build of its template and fails while it runs;
@@ -124,6 +127,7 @@ func TestATaggedImageIsBuiltFromItsDigest(t *testing.T) {
 	api := newFakeAPI(t)
 	p := newTestProvider(t, api)
 	api.on(http.MethodGet, templatesPath, answer(200, `[]`))
+	api.on(http.MethodGet, sandboxesPath, answer(200, `[]`))
 	api.on(http.MethodPost, "/v3/templates", answer(202, `{"templateID":"tpl1","buildID":"bld1"}`))
 	api.on(http.MethodPost, buildStart, answer(202, ``))
 	images := p.images.(*fakeImages)
@@ -152,6 +156,7 @@ func TestAFailedBuildIsReportedWithItsReasonAndNotRepeated(t *testing.T) {
 	api := newFakeAPI(t)
 	p := newTestProvider(t, api)
 	api.on(http.MethodGet, templatesPath, answer(200, templatesJSON("error")))
+	api.on(http.MethodGet, templateBuilds, answer(200, `{"templateID":"tpl1","builds":[{"buildID":"bld2","status":"error"}]}`))
 	api.on(http.MethodGet, buildStatus, answer(200, `{"status":"error","logEntries":[],"reason":{"message":"base64: not found"}}`))
 
 	for range 2 {
@@ -160,8 +165,8 @@ func TestAFailedBuildIsReportedWithItsReasonAndNotRepeated(t *testing.T) {
 			t.Fatalf("err = %v, want the failure with its reason and the template", err)
 		}
 	}
-	if api.total() != 4 {
-		t.Errorf("requests = %v, want the list and the reason twice and nothing built", api.order())
+	if api.total() != 6 {
+		t.Errorf("requests = %v, want the list, the latest build and its reason twice and nothing built", api.order())
 	}
 }
 
@@ -181,5 +186,84 @@ func TestABuildThatCannotStartIsAnError(t *testing.T) {
 	}
 	if len(api.sent(http.MethodPost, "/v3/templates")) != 1 {
 		t.Error("a template was created for an image whose config could not be read")
+	}
+}
+
+// A template on a later page of the list is found, and no build is started for it.
+func TestTheTemplateIsFoundOnALaterPage(t *testing.T) {
+	api := newFakeAPI(t)
+	p := newTestProvider(t, api)
+	creatable(api, "hl-agent-pe1-a2")
+	api.on(http.MethodGet, templatesPath, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("nextToken") == "" {
+			w.Header().Set("X-Next-Token", "page2")
+			_, _ = io.WriteString(w, "["+templateJSON("other", "notebook", "ready", "2026-10-01T10:00:00Z", "")+"]")
+			return
+		}
+		_, _ = io.WriteString(w, templatesJSON("ready"))
+	})
+	if id, err := p.Create(context.Background(), agentSpec()); err != nil || id != "sb1" {
+		t.Fatalf("Create: %q, %v", id, err)
+	}
+	if listed := api.sent(http.MethodGet, templatesPath); len(listed) != 2 || listed[0].Query != "limit=100" || listed[1].Query != "limit=100&nextToken=page2" {
+		t.Errorf("template list requests = %+v, want both pages", listed)
+	}
+}
+
+// Starting a build deletes the platform's templates that no sandbox uses and that have been
+// unused for templateIdle, and only those; one that cannot be deleted does not stop the pass.
+func TestABuildDeletesThePlatformsIdleTemplates(t *testing.T) {
+	api := newFakeAPI(t)
+	p := newTestProvider(t, api)
+	old := time.Now().Add(-templateIdle - time.Hour).UTC().Format(time.RFC3339)
+	recent := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
+	idle := func(id string) string {
+		return templateJSON(id, "hl-00000000000000000000-1c-1024m", "ready", old, old)
+	}
+	api.on(http.MethodGet, templatesPath, answer(200, "["+strings.Join([]string{
+		idle("idle1"),
+		idle("idle2"),
+		templateJSON("failed", "hl-11111111111111111111-1c-1024m", "error", old, ""),
+		idle("running"),
+		idle("paused"),
+		templateJSON("spawned", "hl-22222222222222222222-1c-1024m", "ready", old, recent),
+		templateJSON("new", "hl-33333333333333333333-1c-1024m", "building", recent, ""),
+		templateJSON("theirs", "notebook", "ready", old, old),
+		templateJSON("theirs2", "hl-notebook", "ready", old, old),
+	}, ",")+"]"))
+	api.on(http.MethodGet, sandboxesPath, answer(200, `[{"sandboxID":"a","templateID":"running","alias":"x","state":"running"},`+
+		`{"sandboxID":"b","templateID":"paused","state":"paused"}]`))
+	api.on(http.MethodPost, "/v3/templates", answer(202, `{"templateID":"tpl1","buildID":"bld1"}`))
+	api.on(http.MethodPost, buildStart, answer(202, ``))
+	api.on(http.MethodDelete, "/templates/idle1", answer(500, `{"code":500,"message":"try later"}`))
+	api.on(http.MethodDelete, "/templates/idle2", answer(204, ``))
+	api.on(http.MethodDelete, "/templates/failed", answer(204, ``))
+
+	if _, err := p.Create(context.Background(), agentSpec()); !errors.Is(err, errBuilding) {
+		t.Fatalf("err = %v, want the build started", err)
+	}
+	var deleted []string
+	for _, r := range api.requests {
+		if r.Method == http.MethodDelete {
+			deleted = append(deleted, r.Path)
+		}
+	}
+	if want := []string{"/templates/idle1", "/templates/idle2", "/templates/failed"}; !reflect.DeepEqual(deleted, want) {
+		t.Errorf("deleted = %v, want %v", deleted, want)
+	}
+}
+
+// A template is kept when the sandboxes cannot be listed, and the build is not failed for it.
+func TestTemplatesAreKeptWhenTheSandboxesCannotBeListed(t *testing.T) {
+	api := newFakeAPI(t)
+	p := newTestProvider(t, api)
+	old := time.Now().Add(-templateIdle - time.Hour).UTC().Format(time.RFC3339)
+	api.on(http.MethodGet, templatesPath, answer(200, "["+templateJSON("idle", "hl-00000000000000000000-1c-1024m", "ready", old, old)+"]"))
+	api.on(http.MethodGet, sandboxesPath, answer(500, `{"code":500,"message":"down"}`))
+	api.on(http.MethodPost, "/v3/templates", answer(202, `{"templateID":"tpl1","buildID":"bld1"}`))
+	api.on(http.MethodPost, buildStart, answer(202, ``))
+
+	if _, err := p.Create(context.Background(), agentSpec()); !errors.Is(err, errBuilding) {
+		t.Fatalf("err = %v, want the build started", err)
 	}
 }

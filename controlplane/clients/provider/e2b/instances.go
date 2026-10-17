@@ -33,6 +33,8 @@ const (
 
 type sandbox struct {
 	SandboxID  string            `json:"sandboxID"`
+	TemplateID string            `json:"templateID"`
+	Alias      string            `json:"alias"`
 	State      string            `json:"state"`
 	StartedAt  time.Time         `json:"startedAt"`
 	Metadata   map[string]string `json:"metadata"`
@@ -87,7 +89,22 @@ func (p *Provider) Get(ctx context.Context, id string) (provider.Instance, bool,
 // sandboxes returns the team's sandboxes whose name starts with namePrefix. The API filters on a
 // whole metadata value and has no prefix match, so every page is read.
 func (p *Provider) sandboxes(ctx context.Context, namePrefix string) ([]sandbox, error) {
+	all, err := p.allSandboxes(ctx)
+	if err != nil {
+		return nil, err
+	}
 	var matching []sandbox
+	for _, found := range all {
+		if name, named := found.Metadata[nameKey]; named && strings.HasPrefix(name, namePrefix) {
+			matching = append(matching, found)
+		}
+	}
+	return matching, nil
+}
+
+// allSandboxes are the team's running and paused sandboxes, whoever made them.
+func (p *Provider) allSandboxes(ctx context.Context) ([]sandbox, error) {
+	var all []sandbox
 	token := ""
 	for {
 		query := url.Values{"state": {"running,paused"}, "limit": {strconv.Itoa(listPageSize)}}
@@ -99,14 +116,10 @@ func (p *Provider) sandboxes(ctx context.Context, namePrefix string) ([]sandbox,
 		if err != nil {
 			return nil, err
 		}
-		for _, found := range page {
-			if name, named := found.Metadata[nameKey]; named && strings.HasPrefix(name, namePrefix) {
-				matching = append(matching, found)
-			}
-		}
+		all = append(all, page...)
 		token = header.Get("X-Next-Token")
 		if token == "" {
-			return matching, nil
+			return all, nil
 		}
 	}
 }

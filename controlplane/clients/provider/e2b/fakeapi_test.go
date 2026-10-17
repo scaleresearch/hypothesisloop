@@ -162,6 +162,22 @@ func sandboxJSON(id, name, state string) string {
 	return string(encoded)
 }
 
+// templateJSON is a template as GET /v2/templates answered for one of the team's, in the
+// account's namespace. lastSpawnedAt "" is a template no sandbox was started from.
+func templateJSON(id, alias, status, createdAt, lastSpawnedAt string) string {
+	var spawned any
+	if lastSpawnedAt != "" {
+		spawned = lastSpawnedAt
+	}
+	encoded, _ := json.Marshal(map[string]any{
+		"aliases": []string{alias}, "buildCount": 1, "buildID": "00000000-0000-0000-0000-000000000000", "buildStatus": status,
+		"cpuCount": 2, "createdAt": createdAt, "createdBy": nil, "diskSizeMB": 11484, "envdVersion": "0.9.0",
+		"lastSpawnedAt": spawned, "memoryMB": 4096, "names": []string{"team/" + alias}, "public": false,
+		"spawnCount": 0, "templateID": id, "updatedAt": createdAt,
+	})
+	return string(encoded)
+}
+
 const (
 	detailJSON = `{"sandboxID":"sb1","state":"running","envdAccessToken":"` + testToken + `"}`
 	goneJSON   = `{"code":404,"message":"Sandbox \"sb1\" doesn't exist or you don't have access to it"}`
@@ -217,7 +233,7 @@ func newTestProvider(t *testing.T, api *fakeAPI) *Provider {
 	p.poll = 5 * time.Millisecond
 	p.window = 300 * time.Millisecond
 	p.images = &fakeImages{}
-	api.on(http.MethodGet, "/templates", answer(200, `[{"templateID":"tpl1","buildID":"bld1","buildStatus":"ready","aliases":["`+agentTemplate+`"]}]`))
+	api.on(http.MethodGet, templatesPath, answer(200, "["+templateJSON("tpl1", agentTemplate, "ready", "2026-10-05T14:07:23.186984Z", "")+"]"))
 	return p
 }
 

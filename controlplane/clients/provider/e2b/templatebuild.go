@@ -9,7 +9,9 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/distribution/reference"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -29,12 +31,46 @@ type images interface {
 // build runs at the vendor, and a later Create starts the sandbox once it is ready.
 var errBuilding = errors.New("its template is being built")
 
-// vendorTemplate is a template as the vendor lists it.
+// vendorTemplate is a template as the vendor lists it. Its status is the one of its latest
+// build, which is "waiting" or "building" until the build is "ready" or ends in "error".
 type vendorTemplate struct {
-	TemplateID  string   `json:"templateID"`
-	BuildID     string   `json:"buildID"`
-	BuildStatus string   `json:"buildStatus"`
-	Aliases     []string `json:"aliases"`
+	TemplateID    string     `json:"templateID"`
+	BuildStatus   string     `json:"buildStatus"`
+	Names         []string   `json:"names"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	LastSpawnedAt *time.Time `json:"lastSpawnedAt"`
+}
+
+// aliases are the template's names without the team's namespace, which the vendor puts before
+// every name it lists as "namespace/name".
+func (t vendorTemplate) aliases() []string {
+	aliases := make([]string, len(t.Names))
+	for i, name := range t.Names {
+		aliases[i] = name[strings.LastIndex(name, "/")+1:]
+	}
+	return aliases
+}
+
+// templates are all of the team's templates, read page by page.
+func (p *Provider) templates(ctx context.Context) ([]vendorTemplate, error) {
+	var all []vendorTemplate
+	token := ""
+	for {
+		query := url.Values{"limit": {strconv.Itoa(listPageSize)}}
+		if token != "" {
+			query.Set("nextToken", token)
+		}
+		var page []vendorTemplate
+		header, err := p.call(ctx, http.MethodGet, "/v2/templates?"+query.Encode(), nil, &page)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, page...)
+		token = header.Get("X-Next-Token")
+		if token == "" {
+			return all, nil
+		}
+	}
 }
 
 // readyTemplate is the name of the built template a sandbox of spec boots from. A template that
@@ -48,12 +84,12 @@ func (p *Provider) readyTemplate(ctx context.Context, spec provider.Spec) (strin
 	}
 	asked := sizeOf(spec)
 	name := templateName(digest, asked)
-	var templates []vendorTemplate
-	if _, err := p.call(ctx, http.MethodGet, "/templates", nil, &templates); err != nil {
+	templates, err := p.templates(ctx)
+	if err != nil {
 		return "", err
 	}
 	for _, t := range templates {
-		if !slices.Contains(t.Aliases, name) {
+		if !slices.Contains(t.aliases(), name) {
 			continue
 		}
 		switch t.BuildStatus {
@@ -68,6 +104,7 @@ func (p *Provider) readyTemplate(ctx context.Context, spec provider.Spec) (strin
 	if err := p.build(ctx, pinned, name, asked); err != nil {
 		return "", fmt.Errorf("e2b: building template %s of image %s: %w", name, pinned, err)
 	}
+	p.prune(ctx, templates)
 	return "", fmt.Errorf("e2b: template %s of image %s with %d cores and %d MiB of memory was missing and its build has started: %w", name, pinned, asked.CPUs, asked.MemoryMB, errBuilding)
 }
 
@@ -131,14 +168,27 @@ func buildPath(templateID, buildID string) string {
 	return "/templates/" + url.PathEscape(templateID) + "/builds/" + url.PathEscape(buildID)
 }
 
-// buildFailure is why the vendor says the template's build failed.
+// buildFailure is why the vendor says the template's latest build failed. The list names only
+// the template's latest ready build, so the failed one is read from the template's builds,
+// which come newest first.
 func (p *Provider) buildFailure(ctx context.Context, t vendorTemplate) string {
+	var builds struct {
+		Builds []struct {
+			BuildID string `json:"buildID"`
+		} `json:"builds"`
+	}
+	if _, err := p.call(ctx, http.MethodGet, "/templates/"+url.PathEscape(t.TemplateID)+"?limit=1", nil, &builds); err != nil {
+		return fmt.Sprintf("the reason could not be read: %v", err)
+	}
+	if len(builds.Builds) == 0 {
+		return "the template has no build"
+	}
 	var status struct {
 		Reason struct {
 			Message string `json:"message"`
 		} `json:"reason"`
 	}
-	if _, err := p.call(ctx, http.MethodGet, buildPath(t.TemplateID, t.BuildID)+"/status?limit=1", nil, &status); err != nil {
+	if _, err := p.call(ctx, http.MethodGet, buildPath(t.TemplateID, builds.Builds[0].BuildID)+"/status?limit=1", nil, &status); err != nil {
 		return fmt.Sprintf("the reason could not be read: %v", err)
 	}
 	if status.Reason.Message == "" {

@@ -147,7 +147,7 @@ func TestCreateSeesTheSandboxListedBeforeAnythingOfTheSpecEntersIt(t *testing.T)
 		t.Fatalf("Create: %v", err)
 	}
 	want := []string{
-		"GET /templates", "POST " + sandboxesPath, "GET " + sandboxesPath,
+		"GET /v2/templates", "POST " + sandboxesPath, "GET " + sandboxesPath,
 		"POST " + envdStart, "POST " + envdFiles, "POST " + envdStart, "GET " + envdFiles,
 	}
 	if got := api.order(); !slices.Equal(got, want) {
@@ -259,7 +259,7 @@ func TestCreateStartsNothingInASandboxSmallerThanTheSpec(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "it was destroyed") {
 				t.Fatalf("err = %v, want one about %q that says the sandbox was destroyed", err, tc.want)
 			}
-			want := []string{"GET /templates", "POST " + sandboxesPath, "GET " + sandboxesPath, "DELETE " + sandboxPath}
+			want := []string{"GET /v2/templates", "POST " + sandboxesPath, "GET " + sandboxesPath, "DELETE " + sandboxPath}
 			if got := api.order(); !slices.Equal(got, want) {
 				t.Errorf("requests = %q, want %q: nothing may be written or started in the sandbox", got, want)
 			}
