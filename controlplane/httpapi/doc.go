@@ -63,7 +63,24 @@ func init() {
 		}
 		return refused
 	}
+	// A failure answered here is one no handler logged (auth.Internal logs its own and is answered
+	// as it is), such as a raw error a handler returned: it is logged once, with its request.
+	huma.NewErrorWithContext = func(ctx huma.Context, status int, msg string, errs ...error) huma.StatusError {
+		refused := huma.NewError(status, msg, errs...)
+		if logger, ok := ctx.Context().Value(loggerKey{}).(*zap.Logger); ok && refused.GetStatus() >= http.StatusInternalServerError {
+			route := ""
+			if op := ctx.Operation(); op != nil {
+				route = op.Path
+			}
+			logger.Error("request failed", zap.String("method", ctx.Method()), zap.String("route", route), zap.String("message", msg), zap.Errors("errors", errs))
+		}
+		return refused
+	}
 }
+
+// loggerKey holds the logger of the Doc an operation is registered on, which logs a failure huma
+// answers.
+type loggerKey struct{}
 
 func validAudience(a auth.Audience) bool {
 	switch a {
@@ -126,7 +143,11 @@ func NewDoc(r chi.Router, title, version, preamble string, access *auth.Access, 
 	// data for it is indistinguishable from a correct answer — a caller filtering by a mistyped or
 	// imagined param silently reads the whole table and believes it. 400 instead, naming the param.
 	cfg.RejectUnknownQueryParameters = true
-	return &Doc{API: humachi.New(r, cfg), title: title, preamble: preamble, logger: logger, Access: access}
+	api := humachi.New(r, cfg)
+	api.UseMiddleware(func(ctx huma.Context, next func(huma.Context)) {
+		next(huma.WithValue(ctx, loggerKey{}, logger))
+	})
+	return &Doc{API: api, title: title, preamble: preamble, logger: logger, Access: access}
 }
 
 // afterCloseKey marks an operation a coordinator token may still call once its platform
