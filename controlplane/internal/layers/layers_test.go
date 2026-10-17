@@ -137,9 +137,6 @@ func TestEveryPackageImportsOnlyWhatItsLayerAdmits(t *testing.T) {
 	for _, line := range goListLines(t, "-f", `{{.ImportPath}} {{join .Imports " "}}`, module+"controlplane/...") {
 		fields := strings.Fields(line)
 		pkg := strings.TrimPrefix(fields[0], module)
-		if strings.HasPrefix(pkg, "controlplane/ui/") {
-			continue
-		}
 		l, ok := layerOf(pkg)
 		if !ok {
 			t.Errorf("%s is in no layer", pkg)
@@ -164,7 +161,7 @@ func TestEveryPackageImportsOnlyWhatItsLayerAdmits(t *testing.T) {
 }
 
 // A program reads the keys of the environment only through controlplane/config, so each reads its
-// own and refuses to start without one. infra/ is no part of this repository.
+// own and refuses to start without one.
 func TestOnlyConfigReadsTheKeysOfTheEnvironment(t *testing.T) {
 	keys := map[string]bool{}
 	for _, key := range config.Keys {
@@ -173,7 +170,7 @@ func TestOnlyConfigReadsTheKeysOfTheEnvironment(t *testing.T) {
 	for _, line := range goListLines(t, "-f", `{{.ImportPath}}|{{.Dir}}|{{join .GoFiles " "}}`, module+"...") {
 		pkg, rest, _ := strings.Cut(strings.TrimPrefix(line, module), "|")
 		dir, files, _ := strings.Cut(rest, "|")
-		if pkg == "controlplane/config" || within(pkg, "infra") {
+		if pkg == "controlplane/config" {
 			continue
 		}
 		for _, file := range strings.Fields(files) {

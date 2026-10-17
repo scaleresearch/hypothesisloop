@@ -2,6 +2,11 @@ module github.com/scaleresearch/hypothesisloop
 
 go 1.25.8
 
+ignore (
+	./controlplane/ui/node_modules
+	./infra
+)
+
 require (
 	github.com/NVIDIA/go-nvml v0.13.3-1
 	github.com/containerd/containerd/v2 v2.2.1
