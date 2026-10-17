@@ -1,6 +1,6 @@
 'use client'
 
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import useSWR, { SWRConfig, type SWRConfiguration } from 'swr'
 import { useParams } from 'next/navigation'
 import { fetchMe } from '@/lib/api/accounts'
@@ -12,6 +12,7 @@ import { HOME_PATH } from '@/lib/auth'
 import { resolveExperimentTenant, resolveOrgTenant, resolveTenant, TenantContext, type TenantResolution } from '@/lib/tenant'
 import { Nav } from '@/components/nav'
 import { CommandPalette } from '@/components/command-palette'
+import { LiveChanges } from '@/components/live-changes'
 import { SignOutButton } from '@/components/sign-out-button'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { Centered } from '@/components/ui/centered'
@@ -71,10 +72,18 @@ function resolve(me: Me, place: Place, pe: PlatformExperiment | undefined): Tena
  * Pages below never render without a project.
  */
 export function AppShell({ children }: { children: ReactNode }) {
-  return <SWRConfig value={SWR_CONFIG}><Shell>{children}</Shell></SWRConfig>
+  // The stream stays open while the shell reads an experiment it is sent to, which is shown in
+  // the project the tab was in until it says otherwise.
+  const [projectID, setProjectID] = useState<string>()
+  return (
+    <SWRConfig value={SWR_CONFIG}>
+      {projectID && <LiveChanges projectID={projectID} />}
+      <Shell onProject={setProjectID}>{children}</Shell>
+    </SWRConfig>
+  )
 }
 
-function Shell({ children }: { children: ReactNode }) {
+function Shell({ children, onProject }: { children: ReactNode; onProject: (projectID: string) => void }) {
   // Reread on a timer: that is how a rename made in another tab, or a membership that ended,
   // reaches a page that is already open.
   const { data: me, error, mutate } = useSWR(keys.me(), fetchMe, { refreshInterval: POLL.slow })
@@ -83,6 +92,9 @@ function Shell({ children }: { children: ReactNode }) {
     place.experimentId ? keys.experiment(place.experimentId) : null,
     () => fetchPlatformExperiment(place.experimentId as string),
   )
+  const resolution = me && (!place.experimentId || pe) ? resolve(me, place, pe) : undefined
+  const projectID = resolution?.state === 'selected' ? resolution.tenant.project.id : undefined
+  useEffect(() => { if (projectID) onProject(projectID) }, [projectID, onProject])
 
   if (error && !me) return <Failed onRetry={() => void mutate()}>{failedRead(error, 'your account')}</Failed>
   if (!me) return <Standalone><Loading text="Loading your account…" /></Standalone>
@@ -102,7 +114,7 @@ function Shell({ children }: { children: ReactNode }) {
     return <Standalone><Loading text="Loading the experiment…" /></Standalone>
   }
 
-  const resolution = resolve(me, place, pe)
+  if (!resolution) throw new Error('the shell resolves a tenant once the account and the experiment are read')
   if (resolution.state === 'none') {
     return (
       <Standalone>

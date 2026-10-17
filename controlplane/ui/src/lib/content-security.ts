@@ -6,9 +6,13 @@ export const NONCE_HEADER = 'x-nonce'
 
 // Next.js writes the page's data as inline scripts that differ on every page, so no hash can name
 // them: each response gets a fresh nonce, which Next.js reads off the request's policy and puts on
-// its scripts. The browser talks to the API and the sign-in service and nothing else.
+// its scripts. The browser talks to the API, over HTTP and its change stream, and the sign-in
+// service, and nothing else.
 export function contentSecurityPolicy(nonce: string, development: boolean): string {
-  const connect = ["'self'", new URL(apiURL()).origin, new URL(identityServiceURL()).origin]
+  const api = new URL(apiURL())
+  // The change stream is a socket on the API, and not every browser lets an https: source cover wss:.
+  const stream = `${api.protocol === 'https:' ? 'wss:' : 'ws:'}//${api.host}`
+  const connect = ["'self'", api.origin, stream, new URL(identityServiceURL()).origin]
   // next dev reloads over a websocket and evaluates the modules it sends.
   if (development) connect.push('ws:')
   return [

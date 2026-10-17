@@ -18,6 +18,7 @@ vi.mock('next/navigation', () => ({ useParams: () => navigation.params }))
 vi.mock('@/lib/api/accounts', () => ({ fetchMe: vi.fn() }))
 vi.mock('@/lib/api/platform-experiments', () => ({ fetchPlatformExperiment: vi.fn() }))
 vi.mock('@/components/nav', () => ({ Nav: () => <nav>nav</nav> }))
+vi.mock('@/components/live-changes', () => ({ LiveChanges: () => null }))
 vi.mock('@/components/command-palette', async () => {
   const { useState } = await import('react')
   return {
