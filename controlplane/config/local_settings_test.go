@@ -83,10 +83,30 @@ func render(t *testing.T, repo, dir, rendered, environments string) {
 	// exported checkout and changes under a tree others are writing to.
 	script := `. localdev/lib/auth.sh && lib_env_value() { case "$1" in UI_ORIGIN) echo ` + testUIOrigin + ` ;; esac; } && HL_DEV_JWT_KEY="$1/key.pem" && HL_GIT_HOST_PROVIDER=plain && HL_IDENTITY_PROVIDER="" && LIB_NODE_REPO="$1" && ` + environments + ` && TAG=abc1234 lib_render_settings host.example.internal "$2"`
 	cmd := exec.Command("bash", "-c", script, "render", dir, rendered)
-	cmd.Dir = repo
+	cmd.Dir = withoutEnv(t, repo, dir)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("render: %v\n%s", err, out)
 	}
+}
+
+// withoutEnv is a tree in dir that links the scripts and settings rendering reads from repo and
+// holds no .env: sourcing auth.sh checks the .env beside the scripts, which is the developer's.
+func withoutEnv(t *testing.T, repo, dir string) string {
+	t.Helper()
+	tree := filepath.Join(dir, "tree")
+	for _, path := range []string{"localdev/lib", "controlplane/settings"} {
+		link := filepath.Join(tree, path)
+		if _, err := os.Lstat(link); err == nil {
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join(repo, path), link); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return tree
 }
 
 // A cluster on another machine is attached to the local stack with one .env key: every address
