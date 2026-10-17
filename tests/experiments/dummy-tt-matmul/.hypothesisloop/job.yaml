@@ -2,10 +2,9 @@
 #
 #   hl job submit .hypothesisloop/job.yaml --hypothesis ID --theory "..." --env KEY=VALUE
 job:
+  # Runs in the commit the job was submitted from, in the image .hypothesisloop/Dockerfile builds:
   # ttnn, device firmware and torch, with python3 the venv that holds them.
-  image: tenstorrent
-  # hl-clone checks out the commit the job was submitted from and prints its directory.
-  command: ["bash", "-c", "dir=$(hl-clone) && cd \"$dir\" && exec python3 train.py"]
+  command: ["python3", "train.py"]
   accelerator_type: tenstorrent.com/chipArch=blackhole
   accelerator_count: 1
   # Generous for the tt-metal runtime: firmware and kernel JIT loading and dispatch buffers.

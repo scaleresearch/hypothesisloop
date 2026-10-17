@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The job command for a change to tt-metal source: clones tt-metal at TT_METAL_REF, applies
 # tt-metal.patch from the repository root when there is one, builds it, and runs the harness against
-# the freshly built ttnn in place of the job image's prebuilt one. A full build takes many minutes:
+# the freshly built ttnn in place of the image's prebuilt one. A full build takes many minutes:
 # a change to the harness's env vars alone runs `python3 harness.py` instead.
 #
 #   bash build_and_run.sh harness.py

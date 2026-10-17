@@ -64,7 +64,7 @@ def post_metric(fraction: float, value: float, metric_name: str) -> None:
 
 
 def _run_op_compat(ttnn, tt_q, tt_kv, tt_idx, *, v_dim, scale, k_chunk_size, kv_dtype, compute_kernel_config=None):
-    """Same call upstream's run_op makes, with one addition: the job image's prebuilt wheel can
+    """Same call upstream's run_op makes, with one addition: the image's prebuilt wheel can
     be older than $TT_METAL_SRC (confirmed on this cluster: no ttnn.transformer.SparseKVFormat in
     the deployed release wheel) -- fall back to calling without kv_format when it's absent rather
     than hard-failing. Only kicks in on the fast/prebuilt-wheel path; a build_and_run.sh build

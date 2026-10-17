@@ -50,8 +50,8 @@ description: |
     builds AutoencoderMLP, trains with build_optimizer(...), reports metrics via metrics.py at
     REPORT_EVERY_STEPS cadence, and stops at STEPS or when TARGET_LOSS is reached. Every knob is an
     env var: OPT_NAME, OPT_LR, OPT_PRECOND_FREQ, BATCH_SIZE, STEPS, TARGET_LOSS, SEED,
-    REPORT_EVERY_STEPS. A job runs in the platform's `python` job image on CPU cores: it clones
-    the commit you submit from with hl-clone and runs train.py with uv, so a change to
+    REPORT_EVERY_STEPS. A job runs on CPU cores in the image .hypothesisloop/Dockerfile builds:
+    the platform fetches the commit you submit from and runs train.py in it, so a change to
     optimizers.py you commit and push runs in the next job. A hyperparameter sweep is --env flags on
     the base job spec, submitted unedited with
     `hl job submit .hypothesisloop/job.yaml --hypothesis ID --theory "..." --env K=V`, never a

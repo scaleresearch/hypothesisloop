@@ -2,10 +2,8 @@
 #
 #   hl job submit .hypothesisloop/job.yaml --hypothesis ID --theory "..." --env KEY=VALUE
 job:
-  image: python
-  # hl-clone checks out the commit the job was submitted from and prints its directory. The image
-  # carries no framework, so uv runs train.py with numpy, its one dependency.
-  command: ["bash", "-c", "dir=$(hl-clone) && cd \"$dir\" && exec uv run --with numpy==2.3.3 train.py"]
+  # Runs in the commit the job was submitted from, in the image .hypothesisloop/Dockerfile builds.
+  command: ["python", "-u", "train.py"]
   # No accelerator: cpu is the whole cores the job holds and pays for.
   cpu: 1
   memory: 512Mi

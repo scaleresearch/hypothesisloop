@@ -9,7 +9,7 @@ description: |
 
   SOURCE
   The pinned tt-metal is TT_METAL_REF of .hypothesisloop/job.yaml, the commit of v0.77.0 and of the
-  ttnn in the job image. When you need its source, clone it at that commit:
+  ttnn in the image .hypothesisloop/Dockerfile builds. When you need its source, clone it at that commit:
     git clone --filter=blob:none https://github.com/tenstorrent/tt-metal.git
     git -C tt-metal checkout 9f9cd4fd590f4b606bd0981a4fe0b6403eb38ec9
   TT-NN ships inside it as ttnn/. The op lives under ttnn/cpp/ttnn/operations/transformer/sdpa/.
@@ -17,8 +17,8 @@ description: |
   USE harness.py
   It wraps tt-metal's own sparse_sdpa_test_utils.py (the real upstream make_inputs, golden, to_dev
   and pcc), which tt_metal_tests.sh fetches at the pinned commit when the job starts. A job runs
-  in the platform's `tenstorrent` job image: it clones the commit you submit from with hl-clone and
-  runs harness.py. Submit the base job spec unedited:
+  in the image .hypothesisloop/Dockerfile builds: the platform fetches the commit you submit from
+  and runs harness.py in it. Submit the base job spec unedited:
   `hl job submit .hypothesisloop/job.yaml --hypothesis ID --theory "..." --env K=V`.
     - Every knob is an env var: DSA_KV_DTYPE, DSA_Q_DTYPE, DSA_KC (k_chunk_size), DSA_FIDELITY,
       DSA_H/S/T/TOPK/DSA_NV_PATTERN (shape), DSA_ITERS/WARMUP/TRACE_REPS. A hyperparameter sweep
@@ -76,7 +76,7 @@ description: |
   BASELINE
     config:    harness.py at its shipped defaults on the "prod-sparse" shape: S=640, T=56320,
                TOPK=2048, k_chunk_size=256, H=32, K_DIM=576, V_DIM=512, nv="sparse", bf16 K/V,
-               against the job image's ttnn
+               against the image's ttnn
     trial:     hl job submit .hypothesisloop/job.yaml
 
 metrics:

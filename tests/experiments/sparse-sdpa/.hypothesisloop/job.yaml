@@ -2,12 +2,11 @@
 #
 #   hl job submit .hypothesisloop/job.yaml --hypothesis ID --theory "..." --env KEY=VALUE
 job:
+  # Runs in the commit the job was submitted from, in the image .hypothesisloop/Dockerfile builds:
   # ttnn v0.77.0, device firmware and torch, with python3 the venv that holds them.
-  image: tenstorrent
-  # hl-clone checks out the commit the job was submitted from and prints its directory.
   # tt_metal_tests.sh fetches the upstream test utilities harness.py imports. A change to tt-metal
   # source runs `bash build_and_run.sh harness.py` in place of `python3 harness.py`.
-  command: ["bash", "-c", "dir=$(hl-clone) && cd \"$dir\" && bash tt_metal_tests.sh && exec python3 harness.py"]
+  command: ["bash", "-c", "bash tt_metal_tests.sh && exec python3 harness.py"]
   accelerator_type: tenstorrent.com/chipArch=blackhole
   accelerator_count: 1
   # The host-side torch golden of the prod-sparse shape needs well over 4Gi, and a build from
@@ -16,7 +15,7 @@ job:
   memory: 32Gi
   storage: 16Gi
   env:
-    # The commit of tt-metal v0.77.0, the ttnn of the job image: the test utilities are fetched
+    # The commit of tt-metal v0.77.0, the ttnn of the image: the test utilities are fetched
     # and a source build is made at it.
     TT_METAL_REF: "9f9cd4fd590f4b606bd0981a4fe0b6403eb38ec9"
     TT_METAL_TEST_UTILS_PATH: /workspace/tt-metal-tests

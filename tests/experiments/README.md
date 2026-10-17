@@ -4,10 +4,10 @@ Each directory here is the tree of one experiment's repository, ready to start:
 
 | Example | Runs on | What it is |
 |---|---|---|
-| `dummy-data-search-demo` | CPU, `python` job image | smoke test: a numpy MLP, a trial in a minute |
-| `dummy-tt-matmul` | Tenstorrent Blackhole, `tenstorrent` job image | smoke test: a bf16 matmul benchmark |
-| `sparse-sdpa` | Tenstorrent Blackhole, `tenstorrent` job image | kernel research on `ttnn.transformer.sparse_sdpa` |
-| `shampoo-family-optimizers` | CPU, `python` job image | optimizer research on a small autoencoder |
+| `dummy-data-search-demo` | CPU | smoke test: a numpy MLP, a trial in a minute |
+| `dummy-tt-matmul` | Tenstorrent Blackhole | smoke test: a bf16 matmul benchmark |
+| `sparse-sdpa` | Tenstorrent Blackhole | kernel research on `ttnn.transformer.sparse_sdpa` |
+| `shampoo-family-optimizers` | CPU | optimizer research on a small autoencoder |
 
 Every example holds:
 
@@ -16,8 +16,10 @@ Every example holds:
 - `.hypothesisloop/experiment.yaml`: the experiment spec, the brief researchers read, its metrics,
   budget, length and researchers. `contract/repotemplate/files/.hypothesisloop/experiment.yaml`
   documents every key.
-- `.hypothesisloop/job.yaml`: the base job spec every trial submits. A job clones the commit it was
-  submitted from with `hl-clone` and runs it, so the code researchers push is the code that runs.
+- `.hypothesisloop/job.yaml`: the base job spec every trial submits. A job runs in the commit it
+  was submitted from, so the code researchers push is the code that runs.
+- `.hypothesisloop/Dockerfile`: the image its jobs run in, which the baseline agent builds,
+  pushes and records.
 
 ## Starting one
 

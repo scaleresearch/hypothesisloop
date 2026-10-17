@@ -9,8 +9,8 @@ description: |
   The repository holds a working Blackhole matmul benchmark (train.py) and the base job spec
   (.hypothesisloop/job.yaml). The benchmark opens the device allocated to the job via ttnn, runs
   bf16 matmuls across a range of sizes, times them, and reports the metrics below. A job runs in
-  the platform's `tenstorrent` job image: it clones the commit you submit from with hl-clone and
-  runs train.py, so a change you commit and push runs in the next job. Clone the repository and
+  the image .hypothesisloop/Dockerfile builds: the platform fetches the commit you submit from and
+  runs train.py in it, so a change you commit and push runs in the next job. Clone the repository and
   work on your branch. Submit the spec unedited:
   `hl job submit .hypothesisloop/job.yaml --hypothesis ID --theory "..."`.
 

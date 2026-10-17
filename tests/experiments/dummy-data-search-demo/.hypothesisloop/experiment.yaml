@@ -8,9 +8,9 @@ description: |
 
   STARTING POINT
   The repository holds a working numpy MLP and synthetic-dataset generator (train.py) and the
-  base job spec (.hypothesisloop/job.yaml). A job runs in the platform's `python` job image on one
-  CPU core: it clones the commit you submit from with hl-clone, installs numpy with uv and runs
-  train.py. Clone the repository and work on your branch. Every knob you vary is a job env var.
+  base job spec (.hypothesisloop/job.yaml). A job runs on one CPU core in the image
+  .hypothesisloop/Dockerfile builds, Python with numpy: the platform fetches the commit you submit
+  from and runs train.py in it. Clone the repository and work on your branch. Every knob you vary is a job env var.
   Submit the spec unedited, with no build step:
   `hl job submit .hypothesisloop/job.yaml --hypothesis ID --theory "..." --env K=V`.
 
