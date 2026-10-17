@@ -3,10 +3,10 @@
 import { useState } from 'react'
 import { useSWRConfig } from 'swr'
 import { removePlatformExperiment } from '@/lib/api/platform-experiments'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/dialog'
 import { experimentTallies } from '@/lib/keys'
+import type { PlatformExperiment } from '@/types/api'
 
 /** The owner's control to remove an experiment, behind a confirmation that says what removing does. */
 export function RemoveExperiment({ pe, label = 'Remove experiment', onRemoved }: { pe: PlatformExperiment; label?: string; onRemoved?: () => void }) {

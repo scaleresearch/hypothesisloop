@@ -4,11 +4,8 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 import { useSWRConfig } from 'swr'
 import { createExperimentDraft, deleteExperimentDraft, updateExperimentDraft } from '@/lib/api/drafts'
 import { createPlatformExperiment, fetchExperimentFile, NO_EXPERIMENT_FILE, updatePlatformExperiment } from '@/lib/api/platform-experiments'
-import type { CreatePlatformExperimentRequest, PlatformExperimentPatch } from '@/lib/api/platform-experiments'
+import type { CreatePlatformExperimentRequest, PlatformExperimentPatch } from '@/types/api'
 import { ApiError } from '@/lib/api/request'
-import type { ExperimentDraft } from '@/types/drafts'
-import { canEdit } from '@/types/platform-experiments'
-import type { EditableField, PlatformExperiment } from '@/types/platform-experiments'
 import { isZeroDate } from '@/lib/format'
 import { useTenant } from '@/lib/tenant'
 import { repositoryFields } from '@/components/repository-select'
@@ -27,6 +24,8 @@ import { StepMeasure } from '@/components/platform-experiment-form/step-measure'
 import { StepBudget } from '@/components/platform-experiment-form/step-budget'
 import { errorMessage } from '@/lib/errors'
 import { keys } from '@/lib/keys'
+import type { ExperimentDraft, PlatformExperiment } from '@/types/api'
+import { canEdit, type EditableField } from '@/lib/editable'
 
 interface FormProps {
   /** The experiment to edit. Without one the form creates one in the selected project. */

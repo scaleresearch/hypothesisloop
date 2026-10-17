@@ -7,11 +7,9 @@ import { fetchHypothesisStats } from '@/lib/api/hypotheses'
 import { fetchExperimentStats } from '@/lib/api/jobs'
 import { fetchPlatformExperimentsPage } from '@/lib/api/platform-experiments'
 import { fetchPlatformExperimentQuotas } from '@/lib/api/quotas'
-import type { Me } from '@/types/accounts'
-import { PlatformExperimentStatus } from '@/types/platform-experiments'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import PlatformExperimentsPage from '@/app/(app)/projects/[projectId]/experiments/page'
+import type { Me, PlatformExperiment } from '@/types/api'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -41,8 +39,9 @@ const me: Me = {
 
 function experiment(id: string, name: string, projectID: string, shared: boolean): PlatformExperiment {
   return {
-    id, name, project_id: projectID, status: PlatformExperimentStatus.RUNNING, shared,
+    id, name, project_id: projectID, status: 'running', shared,
     budget_accelerator_hours: 100, max_agents: 4, signup_count: 3, stages: [], current_stage: 1, created_at: at,
+    description: '', metrics: [], researchers: [], coordinator_hosted: false, max_hosted: 0, report_interval_seconds: 60, starts_at: at, updated_at: at,
   }
 }
 

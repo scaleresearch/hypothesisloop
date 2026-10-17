@@ -1,4 +1,4 @@
-import type { Change } from '@/lib/api/changes'
+import type { Change } from '@/types/api'
 import { experimentTallies } from '@/lib/keys'
 
 /** Which SWR keys a change makes the page read again. */

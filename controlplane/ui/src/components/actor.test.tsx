@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
-import type { Actor as ActorRecord } from '@/types/actors'
 import { Actor, actorLabel, verdictBy } from '@/components/actor'
+import type { Actor as ActorRecord } from '@/types/api'
 
 afterEach(cleanup)
 
@@ -29,7 +29,7 @@ describe('who made a record, in words', () => {
   })
 
   it('for a verdict, with nothing while none was given', () => {
-    expect(verdictBy({ agent_id: '', status_actor: null, status_changed_at: null })).toBe('')
+    expect(verdictBy({ agent_id: '', status_changed_at: null })).toBe('')
     expect(verdictBy({ agent_id: '', status_actor: ada, status_changed_at: new Date().toISOString() })).toMatch(/^by Ada Lovelace · /)
     expect(verdictBy({ agent_id: 'ag-1', status_actor: key, status_changed_at: new Date().toISOString() })).toMatch(/^by ag-1 \(by key ci\) · /)
   })

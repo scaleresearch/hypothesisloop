@@ -1,13 +1,13 @@
 import { apiFetch, apiSend } from '@/lib/api/request'
-import type { AgentRole, AgentType, AgentTypeSettings, AgentTypeVersion, EditedAgentType } from '@/types/agent-types'
+import type { AgentTypeVersion, CreateAgentTypeRequest, CurrentAgentType, EditAgentTypeRequest, EditedAgentType } from '@/types/api'
 
 // The built-in types and the org's own, archived ones included.
-export function fetchAgentTypes(orgID: string): Promise<AgentType[]> {
-  return apiFetch<AgentType[]>(`/orgs/${orgID}/agent-types`)
+export function fetchAgentTypes(orgID: string): Promise<CurrentAgentType[]> {
+  return apiFetch<CurrentAgentType[]>(`/orgs/${orgID}/agent-types`)
 }
 
-export function fetchAgentType(orgID: string, typeID: string): Promise<AgentType> {
-  return apiFetch<AgentType>(`/orgs/${orgID}/agent-types/${encodeURIComponent(typeID)}`)
+export function fetchAgentType(orgID: string, typeID: string): Promise<CurrentAgentType> {
+  return apiFetch<CurrentAgentType>(`/orgs/${orgID}/agent-types/${encodeURIComponent(typeID)}`)
 }
 
 // Newest first.
@@ -15,23 +15,9 @@ export function fetchAgentTypeVersions(orgID: string, typeID: string): Promise<A
   return apiFetch<AgentTypeVersion[]>(`/orgs/${orgID}/agent-types/${encodeURIComponent(typeID)}/versions`)
 }
 
-export type CreateAgentTypeRequest =
-  | { from: string; name?: string }
-  | { name: string; description?: string; role: AgentRole; prompt: string; settings: AgentTypeSettings }
-
 // For an owner. A copy (from) takes its role, prompt and settings from the type it copies.
-export function createAgentType(orgID: string, req: CreateAgentTypeRequest): Promise<AgentType> {
-  return apiSend<AgentType>('POST', `/orgs/${orgID}/agent-types`, req)
-}
-
-interface EditAgentTypeRequest {
-  /** The version the edit was made from: 409 version_conflict when it is no longer current. */
-  if_version: number
-  name: string
-  /** Left out, the description stays as it was. */
-  description?: string
-  prompt: string
-  settings: AgentTypeSettings
+export function createAgentType(orgID: string, req: CreateAgentTypeRequest): Promise<CurrentAgentType> {
+  return apiSend<CurrentAgentType>('POST', `/orgs/${orgID}/agent-types`, req)
 }
 
 // Makes the next version current: running agents of the type apply it at their next turn.
@@ -45,6 +31,6 @@ export function restoreAgentType(orgID: string, typeID: string, version: number)
 }
 
 // Refused 409 agent_type_in_use while an experiment that is not closed names it.
-export function archiveAgentType(orgID: string, typeID: string): Promise<AgentType> {
-  return apiSend<AgentType>('POST', `/orgs/${orgID}/agent-types/${encodeURIComponent(typeID)}/archive`)
+export function archiveAgentType(orgID: string, typeID: string): Promise<CurrentAgentType> {
+  return apiSend<CurrentAgentType>('POST', `/orgs/${orgID}/agent-types/${encodeURIComponent(typeID)}/archive`)
 }

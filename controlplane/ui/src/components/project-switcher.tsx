@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 import { createOrg, createProject } from '@/lib/api/accounts'
-import type { Project } from '@/types/accounts'
 import { usePathname, useRouter } from 'next/navigation'
 import { sectionOf, sectionPath } from '@/lib/routes'
 import { orgLabels, useRefreshMe, useTenant } from '@/lib/tenant'
@@ -12,6 +11,7 @@ import { InlineError } from '@/components/ui/status-message'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Eyebrow } from '@/components/ui/text'
 import { SearchableSelect } from '@/components/ui/searchable-select'
+import type { Project } from '@/types/api'
 
 /**
  * A "New ..." link that opens a name field in place. `create` makes the thing and switches to

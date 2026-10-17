@@ -1,5 +1,5 @@
 import { apiCall, apiFetch, apiSend } from '@/lib/api/request'
-import type { Hypothesis, HypothesisComment, HypothesisEvidence, HypothesisGraph, HypothesisLink, HypothesisLinkInput, HypothesisLinkType, HypothesisSearchHit, HypothesisStats, HypothesisStatus, HypothesisWithJobs, RegisteredHypothesis } from '@/types/hypotheses'
+import type { Hypothesis, HypothesisComment, HypothesisEvidence, HypothesisGraph, HypothesisStats, HypothesisStatus, HypothesisWithJobs, Link, LinkSpec, LinkType, QueryResult, RegisteredHypothesis } from '@/types/api'
 
 export function fetchHypothesisStats(platformExperimentID: string): Promise<HypothesisStats> {
   return apiFetch<HypothesisStats>(
@@ -22,16 +22,10 @@ export function fetchHypothesisGraph(platformExperimentID: string): Promise<Hypo
   )
 }
 
-interface HypothesisQueryResult {
-  columns: string[]
-  rows: unknown[][]
-  truncated: boolean
-}
-
 // Read-only Cypher against one platform experiment's hypothesis graph, which the backend binds as
 // $pe. A Cypher error comes back as a 400 whose body is the database's own message.
-function queryHypothesisGraph(platformExperimentID: string, cypher: string, params: Record<string, unknown>): Promise<HypothesisQueryResult> {
-  return apiSend<HypothesisQueryResult>('POST', '/hypotheses/query', { platform_experiment_id: platformExperimentID, cypher, params })
+function queryHypothesisGraph(platformExperimentID: string, cypher: string, params: Record<string, unknown>): Promise<QueryResult> {
+  return apiSend<QueryResult>('POST', '/hypotheses/query', { platform_experiment_id: platformExperimentID, cypher, params })
 }
 
 // The text index name and call syntax are defined by the backend in the POST /hypotheses/query
@@ -48,6 +42,9 @@ LIMIT 20`
 // needs an es6 target, which this tsconfig is not.
 const NON_WORD = new RegExp('[^\\p{L}\\p{N}]+', 'gu')
 
+/** A hypothesis a search found. */
+export type HypothesisSearchHit = Pick<Hypothesis, 'id' | 'text' | 'status'>
+
 export async function searchHypotheses(platformExperimentID: string, q: string): Promise<HypothesisSearchHit[]> {
   const words = q.toLowerCase().replace(NON_WORD, ' ').trim()
   if (!words) return []
@@ -63,7 +60,7 @@ export async function searchHypotheses(platformExperimentID: string, q: string):
 // that row with already_existed set, and the supplied links are not applied. Text close to other
 // hypotheses is registered all the same, and those come back in similar.
 export function registerHumanHypothesis(
-  platformExperimentID: string, text: string, links: HypothesisLinkInput[],
+  platformExperimentID: string, text: string, links: LinkSpec[],
 ): Promise<RegisteredHypothesis> {
   return apiSend<RegisteredHypothesis>('POST', '/hypotheses', { platform_experiment_id: platformExperimentID, text, links })
 }
@@ -71,9 +68,9 @@ export function registerHumanHypothesis(
 // Links are append-only. Only a hypothesis no agent owns accepts links from a person as themselves.
 // Answers the hypothesis's outgoing links.
 export function addHumanHypothesisLink(
-  hypothesisID: string, type: HypothesisLinkType, to: string,
-): Promise<HypothesisLink[]> {
-  return apiSend<HypothesisLink[]>('POST', `/hypotheses/${hypothesisID}/links`, { type, to })
+  hypothesisID: string, type: LinkType, to: string,
+): Promise<Link[]> {
+  return apiSend<Link[]>('POST', `/hypotheses/${hypothesisID}/links`, { type, to })
 }
 
 // The author edits their own idea, and the author or an org owner removes it, while no agent has

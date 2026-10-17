@@ -1,6 +1,6 @@
 import { apiCall, apiFetch, apiFetchPage, apiSend, withQuery } from '@/lib/api/request'
 import type { Page } from '@/lib/api/request'
-import type { AgentMetricSeries, ExperimentFile, ExperimentSpec, MetricDefinition, PlatformExperiment, PlatformExperimentResults, RepositoryCheck, ResearcherPoolEntry, Stage, StagesStatus } from '@/types/platform-experiments'
+import type { CreatePlatformExperimentRequest, ExperimentFile, MetricHistory, PlatformExperiment, PlatformExperimentPatch, PlatformExperimentResults, RepositoryCheck, StagesStatus } from '@/types/api'
 
 // Metric history of every job in a platform experiment over its own run, one series per job. The
 // window reaches from the run's start to its end, or to now while it runs: each series comes back as
@@ -9,7 +9,7 @@ import type { AgentMetricSeries, ExperimentFile, ExperimentSpec, MetricDefinitio
 export function fetchPlatformExperimentTimeseries(
   pe: PlatformExperiment,
   metricName: string,
-): Promise<{ series: AgentMetricSeries[] }> {
+): Promise<MetricHistory> {
   const query = new URLSearchParams({ metric_name: metricName })
   if (pe.started_at) {
     const end = Math.min(Date.now(), new Date(pe.ends_at as string).getTime())
@@ -17,18 +17,7 @@ export function fetchPlatformExperimentTimeseries(
     query.set('lookback_hours', String(Math.max(1, quarters) / 4))
     query.set('end', new Date(pe.ends_at as string).toISOString())
   }
-  return apiFetch<{ series: AgentMetricSeries[] }>(`/platform-experiments/${pe.id}/metrics-timeseries?${query}`)
-}
-
-export interface CreatePlatformExperimentRequest extends ExperimentSpec {
-  /** owner/name of the repository it works on. */
-  repository?: string
-  /** The connected account a new repository is created on, without repository. */
-  repository_account?: string
-  /** A closed platform experiment of the project this one carries on. */
-  continues?: string
-  /** When its baseline begins to be measured. Omitted, the create. */
-  starts_at?: string
+  return apiFetch<MetricHistory>(`/platform-experiments/${pe.id}/metrics-timeseries?${query}`)
 }
 
 /** The reason the API gives for a repository that brings no experiment file. */
@@ -72,11 +61,6 @@ export function fetchPlatformExperiment(id: string): Promise<PlatformExperiment>
 export function fetchPlatformExperimentResults(id: string): Promise<PlatformExperimentResults> {
   return apiFetch<PlatformExperimentResults>(`/platform-experiments/${id}/results`)
 }
-
-/** The fields of a platform experiment that can change after it is created. The goal changes alone. */
-export type PlatformExperimentPatch = Partial<Pick<CreatePlatformExperimentRequest,
-  'name' | 'description' | 'budget_accelerator_hours' | 'max_agents' | 'researchers' | 'max_concurrent_accelerators' | 'metrics' |
-  'report_interval_seconds' | 'starts_at' | 'duration_hours'> & { goal: string }>
 
 /** Changes the fields the patch names and no others. */
 export function updatePlatformExperiment(id: string, patch: PlatformExperimentPatch): Promise<PlatformExperiment> {

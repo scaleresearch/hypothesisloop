@@ -1,4 +1,3 @@
-import type { MetricReference } from '@/types/platform-experiments'
 import { jobPath } from '@/lib/routes'
 import { AgentLabel } from '@/components/agent-label'
 import { Badge } from '@/components/ui/badge'
@@ -7,6 +6,7 @@ import { Section } from '@/components/ui/section'
 import { Stack } from '@/components/ui/stack'
 import { Table, num } from '@/components/ui/table'
 import { Text } from '@/components/ui/text'
+import type { MetricReference } from '@/types/api'
 
 const counts = {
   true: { tone: 'success', label: 'counts', title: 'The job met every constraint of the goal, so this value counts toward the reference.' },

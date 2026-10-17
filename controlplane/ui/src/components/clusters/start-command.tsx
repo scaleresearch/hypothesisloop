@@ -1,12 +1,15 @@
 'use client'
 
 import { useState, type ReactNode } from 'react'
-import type { ClusterKind as Kind, RegisteredCluster } from '@/types/clusters'
 import { CopyButton } from '@/components/ui/copy-button'
 import { Secret } from '@/components/ui/secret'
 import { Segmented } from '@/components/ui/segmented'
 import { Stack } from '@/components/ui/stack'
 import { Code, Heading } from '@/components/ui/text'
+import type { Registered } from '@/lib/api/clusters'
+import type { AttachCommands } from '@/types/api'
+
+type Kind = keyof AttachCommands
 
 // What runs the jobs. The API records no kind: a cluster is a name, and its kind is whichever agent
 // connects under it. Registering answers the command for each, and the choice here shows one.
@@ -27,7 +30,7 @@ function GuidePart({ title, children }: { title: string; children: ReactNode }) 
 const guideList = 'list-disc space-y-1 pl-5 text-xs text-muted'
 
 /** What running the command needs, what it puts where, and how to check, upgrade and remove it. */
-function InstallGuide({ kind, registered }: { kind: Kind; registered: RegisteredCluster }) {
+function InstallGuide({ kind, registered }: { kind: Kind; registered: Registered }) {
   if (kind === 'kubernetes') {
     return (
       <div className="grid w-full gap-4 md:grid-cols-2">
@@ -96,7 +99,7 @@ function InstallGuide({ kind, registered }: { kind: Kind; registered: Registered
 }
 
 /** The command that attaches a registered cluster, for the kind chosen in it, and the token it asks for. */
-export function StartCommand({ registered, onHide }: { registered: RegisteredCluster; onHide: () => void }) {
+export function StartCommand({ registered, onHide }: { registered: Registered; onHide: () => void }) {
   const [kind, setKind] = useState<Kind>('kubernetes')
   return (
     <Stack gap="sm" start>

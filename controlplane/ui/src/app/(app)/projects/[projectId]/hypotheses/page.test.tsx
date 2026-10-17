@@ -3,10 +3,9 @@ import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchHypothesisStats } from '@/lib/api/hypotheses'
 import { fetchPlatformExperiment, fetchPlatformExperimentsPage } from '@/lib/api/platform-experiments'
-import type { Me } from '@/types/accounts'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import ProjectHypothesesPage from '@/app/(app)/projects/[projectId]/hypotheses/page'
+import type { HypothesisStats, Me, PlatformExperiment } from '@/types/api'
 
 const navigation = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn(), search: '' }))
 
@@ -60,7 +59,7 @@ beforeEach(() => {
   navigation.search = ''
   vi.mocked(fetchPlatformExperimentsPage).mockReset().mockResolvedValue({ items: Object.values(experiments), total: 2 })
   vi.mocked(fetchPlatformExperiment).mockReset().mockImplementation(async id => experiments[id])
-  vi.mocked(fetchHypothesisStats).mockReset().mockImplementation(async pe => pe === 'pe-1'
+  vi.mocked(fetchHypothesisStats).mockReset().mockImplementation(async (pe): Promise<HypothesisStats> => pe === 'pe-1'
     ? { total: 5, by_status: { open: 3, confirmed: 1, refuted: 1 } }
     : { total: 0, by_status: {} })
 })

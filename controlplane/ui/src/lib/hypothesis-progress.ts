@@ -1,12 +1,11 @@
-import { ExperimentStatus } from '@/types/jobs'
-import type { Experiment, ExperimentStats } from '@/types/jobs'
+import type { Experiment, ExperimentStats } from '@/types/api'
 
 const TERMINAL: string[] = [
-  ExperimentStatus.COMPLETED,
-  ExperimentStatus.FAILED,
-  ExperimentStatus.EVICTED,
-  ExperimentStatus.REJECTED,
-  ExperimentStatus.CANCELLED,
+  'COMPLETED',
+  'FAILED',
+  'EVICTED',
+  'REJECTED',
+  'CANCELLED',
 ]
 
 // Job activity is separate from the verdict: a hypothesis whose jobs all ended is still open until

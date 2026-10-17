@@ -7,10 +7,6 @@ import { clsx } from 'clsx'
 import { ArrowUpRight } from 'lucide-react'
 import { fetchHypothesisStats } from '@/lib/api/hypotheses'
 import { fetchPlatformExperimentResults, fetchPlatformExperimentsPage } from '@/lib/api/platform-experiments'
-import { HYPOTHESIS_STATUSES } from '@/types/hypotheses'
-import type { HypothesisStats } from '@/types/hypotheses'
-import { PlatformExperimentStatus } from '@/types/platform-experiments'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { statusColor } from '@/lib/colors'
 import { useQueryParam } from '@/lib/query-state'
 import { experimentPath, projectPath } from '@/lib/routes'
@@ -28,6 +24,8 @@ import { Heading, Text } from '@/components/ui/text'
 import { ErrorMessage, Loading } from '@/components/ui/status-message'
 import { keys } from '@/lib/keys'
 import { POLL } from '@/lib/poll'
+import { hypothesisStatusValues } from '@/types/api'
+import type { HypothesisStats, PlatformExperiment } from '@/types/api'
 
 // The experiments a project holds are few; past this many the newest are listed and the rest named.
 const EXPERIMENTS_LISTED = 50
@@ -38,7 +36,7 @@ const VIEWS = [{ value: 'outline', label: 'Outline' }, { value: 'graph', label: 
  * as the list comes, else the one that closed last.
  */
 function mostRecentlyActive(experiments: PlatformExperiment[]): PlatformExperiment {
-  const live = experiments.find(pe => pe.status === PlatformExperimentStatus.OPEN || pe.status === PlatformExperimentStatus.RUNNING)
+  const live = experiments.find(pe => pe.status === 'open' || pe.status === 'running')
   if (live) return live
   return experiments.reduce((last, pe) => (pe.closed_at ?? '') > (last.closed_at ?? '') ? pe : last)
 }
@@ -52,7 +50,7 @@ interface Standing {
 
 /** The experiment's primary metric with its best result and the baseline's, from its standings. */
 function useStanding(pe: PlatformExperiment | undefined): Standing | undefined {
-  const asked = pe && pe.status !== PlatformExperimentStatus.DRAFT
+  const asked = pe && pe.status !== 'draft'
   const { data } = useSWR(asked ? keys.results(pe.id) : null, () => fetchPlatformExperimentResults(pe!.id), { refreshInterval: POLL.standing })
   const primary = data?.metrics[0]
   if (!primary) return undefined
@@ -81,7 +79,7 @@ function StatusBar({ stats }: { stats?: HypothesisStats }) {
   const total = stats?.total ?? 0
   return (
     <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-surface-inset" aria-hidden="true">
-      {total > 0 && HYPOTHESIS_STATUSES.map(s => {
+      {total > 0 && hypothesisStatusValues.map(s => {
         const n = stats?.by_status[s] ?? 0
         return n > 0 ? <span key={s} style={{ width: `${(n / total) * 100}%`, background: statusColor(s) }} /> : null
       })}
@@ -92,7 +90,7 @@ function StatusBar({ stats }: { stats?: HypothesisStats }) {
 function StatusCounts({ stats }: { stats?: HypothesisStats }) {
   return (
     <Inline gap="md" className="text-xs text-muted">
-      {HYPOTHESIS_STATUSES.map(s => (
+      {hypothesisStatusValues.map(s => (
         <span key={s} className="inline-flex items-center gap-1.5 tabular-nums">
           <span className="inline-block size-2 rounded-full" style={{ background: statusColor(s) }} />
           {stats?.by_status[s] ?? 0} {s}
@@ -142,7 +140,7 @@ function ProjectHypotheses() {
     () => fetchPlatformExperimentsPage({ project_id: project.id, sort: '-starts_at', limit: EXPERIMENTS_LISTED }),
     { keepPreviousData: true },
   )
-  const experiments = (data?.items ?? []).filter(pe => pe.status !== PlatformExperimentStatus.DRAFT)
+  const experiments = (data?.items ?? []).filter(pe => pe.status !== 'draft')
   const selected = experiments.length === 0 ? undefined : chosen ? experiments.find(pe => pe.id === chosen) : mostRecentlyActive(experiments)
 
   return (

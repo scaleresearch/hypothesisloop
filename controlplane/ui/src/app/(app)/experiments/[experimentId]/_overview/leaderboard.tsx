@@ -2,9 +2,6 @@
 
 import { Fragment, useState } from 'react'
 import { clsx } from 'clsx'
-import type { ExperimentStats } from '@/types/jobs'
-import type { AgentStanding, PlatformExperiment, PlatformExperimentResults, StagesStatus } from '@/types/platform-experiments'
-import type { AgentQuota } from '@/types/quotas'
 import { AgentLabel } from '@/components/agent-label'
 import { Badge } from '@/components/ui/badge'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -18,6 +15,7 @@ import { settings, variedKeys } from '@/lib/hypothesis-progress'
 import { hypothesisPath, jobPath } from '@/lib/routes'
 import { AgentJobsPanel } from './job-metrics'
 import { bestOf } from './standings'
+import type { AgentQuotaView, AgentStanding, ExperimentStats, PlatformExperiment, PlatformExperimentResults, StagesStatus } from '@/types/api'
 
 /**
  * The agents ranked as the server ranks them on the primary ranking metric; an agent without a
@@ -28,7 +26,7 @@ export function Leaderboard({ pe, agentIds, results, quotas, stages, jobsByAgent
   pe: PlatformExperiment
   agentIds: string[]
   results: PlatformExperimentResults | undefined
-  quotas: AgentQuota[] | undefined
+  quotas: AgentQuotaView[] | undefined
   stages: StagesStatus | undefined
   jobsByAgent: Record<string, ExperimentStats>
   hypothesisText: Map<string, string>
@@ -117,7 +115,7 @@ function LeaderboardRow({ pe, agentId, standing, standingKeys, results, quota, s
   standing: AgentStanding | undefined
   standingKeys: string[]
   results: PlatformExperimentResults | undefined
-  quota: AgentQuota | undefined
+  quota: AgentQuotaView | undefined
   stages: StagesStatus | undefined
   jobs: ExperimentStats | undefined
   hypothesisText: Map<string, string>

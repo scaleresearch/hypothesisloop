@@ -6,10 +6,6 @@ import { fetchPlatformExperimentAgents } from '@/lib/api/agents'
 import { fetchHypothesisStats } from '@/lib/api/hypotheses'
 import { fetchExperimentStats } from '@/lib/api/jobs'
 import { fetchPlatformExperimentQuotas } from '@/lib/api/quotas'
-import type { Me } from '@/types/accounts'
-import type { HypothesisGraph, HypothesisListItem, HypothesisWithJobs } from '@/types/hypotheses'
-import { PlatformExperimentStatus } from '@/types/platform-experiments'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { ReadOnlyProvider, useReadOnly } from '@/lib/read-only'
 import { GraphEditorProvider, useGraphEditor } from '@/components/hypotheses/editor'
 import { AddIdeaButton } from '@/components/hypotheses/editor-controls'
@@ -18,6 +14,7 @@ import { ExperimentAgents } from '@/components/experiment-agents'
 import { AddCommentForm, AddLinkForm } from '@/components/hypotheses/human-idea'
 import { HypothesisPanel, ObjectiveBar } from '@/components/hypotheses/panel'
 import { PlatformExperimentCard } from '@/components/platform-experiment-card'
+import type { GraphNode, HypothesisGraph, HypothesisWithJobs, Me, PlatformExperiment } from '@/types/api'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -41,13 +38,14 @@ const me: Me = {
   projects: [{ id: 'prj_1', org_id: 'org_a', name: 'default', created_at: at }],
 }
 const pe = {
-  id: 'pe-x', project_id: 'prj_platform', name: 'Vision benchmark', status: PlatformExperimentStatus.OPEN, shared: true,
+  id: 'pe-x', project_id: 'prj_platform', name: 'Vision benchmark', status: 'open' as const, shared: true,
   budget_accelerator_hours: 100, max_agents: 4, signup_count: 2, stages: [], current_stage: 1, created_at: at,
+  description: '', metrics: [], researchers: [], coordinator_hosted: false, max_hosted: 0, report_interval_seconds: 60, starts_at: at, updated_at: at,
 } as PlatformExperiment
 const node = {
-  id: 'hyp-1', platform_experiment_id: 'pe-x', text: 'warmup helps', status: 'open', actor: { kind: 'user', id: 'u1', name: 'Ada' }, status_actor: null, agent_id: '',
+  id: 'hyp-1', platform_experiment_id: 'pe-x', text: 'warmup helps', status: 'open', actor: { kind: 'user', id: 'u1', name: 'Ada' }, agent_id: '',
   created_at: at, builds_on: ['pe-x'], finding_count: 0, comment_count: 0, child_count: 0,
-} as unknown as HypothesisListItem
+} as unknown as GraphNode
 const graph: HypothesisGraph = { root: 'pe-x', objective: {}, nodes: [node], edges: [] } as unknown as HypothesisGraph
 
 // As the hypotheses page wires them: an account that only reads writes nothing.
@@ -83,7 +81,7 @@ function names(role: 'button' | 'textbox') {
 
 beforeEach(() => {
   vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([
-    { platform_experiment_id: 'pe-x', agent_id: 'ag-self', name: 'ag-self', role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, hosted: false, at_work: true, signed_up_at: at },
+    { platform_experiment_id: 'pe-x', agent_id: 'ag-self', name: 'ag-self', role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, hosted: false, agent_type: 'generalist', model: '', hyperparameters: null, at_work: true, signed_up_at: at },
   ])
   vi.mocked(fetchPlatformExperimentQuotas).mockResolvedValue([])
   vi.mocked(fetchHypothesisStats).mockResolvedValue({ total: 0, by_status: {} })

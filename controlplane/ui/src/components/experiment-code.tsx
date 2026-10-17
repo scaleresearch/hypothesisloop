@@ -1,7 +1,7 @@
 import { clsx } from 'clsx'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { textLinkClass } from '@/components/ui/link'
 import { Text } from '@/components/ui/text'
+import type { PlatformExperiment } from '@/types/api'
 
 /**
  * The repository a platform experiment works on, as owner/name, and the image its hosted agents

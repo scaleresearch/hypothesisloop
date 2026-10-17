@@ -8,9 +8,7 @@ import { fetchPlatformExperiment, fetchPlatformExperimentResults, fetchPlatformE
 import { fetchPlatformExperimentQuotas } from '@/lib/api/quotas'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import PlatformExperimentDetailPage from '@/app/(app)/experiments/[experimentId]/page'
-import type { Me } from '@/types/accounts'
-import { PlatformExperimentStatus } from '@/types/platform-experiments'
-import type { PlatformExperiment } from '@/types/platform-experiments'
+import type { Me, PlatformExperiment } from '@/types/api'
 
 const navigation = vi.hoisted(() => ({ search: '', push: vi.fn(), replace: vi.fn() }))
 
@@ -40,12 +38,13 @@ const me: Me = {
 
 function show(search: string, more: Partial<PlatformExperiment>) {
   navigation.search = search
-  const status = more.status ?? PlatformExperimentStatus.OPEN
+  const status = more.status ?? 'open'
   const reason = { draft: 'planning', open: 'baseline_measuring', running: 'running', closed: more.close_reason ?? 'closed' }[status]
   vi.mocked(fetchPlatformExperiment).mockResolvedValue({
     id: 'pe-x', name: 'Vision benchmark', project_id: 'prj_platform', status, shared: true,
-    status_reason: { reason, message: `the API's sentence for ${reason}`, summary: `The summary for ${reason}.`, ...(status === PlatformExperimentStatus.CLOSED ? {} : { waits_for: 'platform' as const }) },
-    budget_accelerator_hours: 100, max_agents: 4, signup_count: 1, stages: [], current_stage: 1, created_at: at, ...more,
+    status_reason: { reason, message: `the API's sentence for ${reason}`, summary: `The summary for ${reason}.`, ...(status === 'closed' ? {} : { waits_for: 'platform' as const }) },
+    budget_accelerator_hours: 100, max_agents: 4, signup_count: 1, stages: [], current_stage: 1, created_at: at,
+    description: '', metrics: [], researchers: [], coordinator_hosted: false, max_hosted: 0, report_interval_seconds: 60, starts_at: at, updated_at: at, ...more,
   })
   const resolved = resolveTenant(me, '')
   if (resolved.state !== 'selected') throw new Error('no tenant')
@@ -58,14 +57,14 @@ function show(search: string, more: Partial<PlatformExperiment>) {
 
 beforeEach(() => {
   vi.mocked(fetchPlatformExperimentQuotas).mockResolvedValue([])
-  vi.mocked(fetchPlatformExperimentResults).mockResolvedValue({ metrics: [], bests: [] })
+  vi.mocked(fetchPlatformExperimentResults).mockResolvedValue({ platform_experiment_id: 'pe-x', name: 'Vision benchmark', status: 'running', metrics: [], bests: [], references: [] })
   vi.mocked(fetchExperimentsPage).mockResolvedValue({ items: [], total: 0 })
   vi.mocked(fetchExperimentStats).mockResolvedValue({ total: 0, by_status: {} } as never)
   vi.mocked(fetchStages).mockResolvedValue({ stages: [], current_stage: 1, progress: 0, next_boundary_progress: 1, advances: [], active_agents: [], cut_agents: [] })
   vi.mocked(fetchHypothesisStats).mockResolvedValue({ total: 0, by_status: {} })
   vi.mocked(fetchFindings).mockResolvedValue([])
   vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([
-    { platform_experiment_id: 'pe-x', agent_id: 'ag-self', name: 'ag-self', role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, hosted: false, at_work: true, signed_up_at: at },
+    { platform_experiment_id: 'pe-x', agent_id: 'ag-self', name: 'ag-self', role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, hosted: false, agent_type: 'generalist', model: '', hyperparameters: null, at_work: true, signed_up_at: at },
   ])
 })
 
@@ -110,7 +109,7 @@ describe('the baseline of a platform experiment', () => {
     vi.mocked(fetchPlatformExperimentTimeseries).mockResolvedValue({ series: [] })
     vi.mocked(fetchExperimentMetrics).mockResolvedValue([point('val_loss', 2.1), point('val_loss', 1.8), point('exact_match', 1), point('val_loss', 0.2, 'scaled')] as never)
     show('', {
-      status: PlatformExperimentStatus.RUNNING, baseline_job_id: 'job-base',
+      status: 'running', baseline_job_id: 'job-base',
       metrics: [{ key: 'val_loss', direction: 'minimize' }, { key: 'exact_match', direction: 'maximize', role: 'constraint', bound: 1 }],
     })
     const link = await screen.findByRole('link', { name: 'job job-base' })
@@ -123,7 +122,7 @@ describe('the baseline of a platform experiment', () => {
     vi.mocked(fetchPlatformExperimentTimeseries).mockResolvedValue({ series: [] })
     vi.mocked(fetchExperimentMetrics).mockResolvedValue([{ experiment_id: 'job-2', fraction_complete: 1, metric_name: 'val_loss', metric_value: 1.6, metric_basis: 'raw' }] as never)
     show('', {
-      status: PlatformExperimentStatus.RUNNING, baseline_job_id: 'job-2', metrics: [{ key: 'val_loss', direction: 'minimize' }],
+      status: 'running', baseline_job_id: 'job-2', metrics: [{ key: 'val_loss', direction: 'minimize' }],
       baseline_raises: [{ from: 'job-1', to: 'job-2', reason: "the control's other coder", detail: '', actor: { kind: 'coordinator', id: 'pe-x', name: 'Coordinator' }, at: '2026-10-08T19:00:00Z' }],
     })
     const link = await screen.findByRole('link', { name: 'job job-2' })
@@ -134,7 +133,7 @@ describe('the baseline of a platform experiment', () => {
 describe('the references of a platform experiment', () => {
   it('lists every measured value with whether its job met the constraints, and the leader against the best that counts', async () => {
     vi.mocked(fetchPlatformExperimentResults).mockResolvedValue({
-      metrics: [], bests: [],
+      platform_experiment_id: 'pe-x', name: 'Vision benchmark', status: 'running', metrics: [], bests: [],
       references: [
         {
           metric: 'other_val_accuracy', direction: 'maximize', best: 0.81, leader_metric: 'val_accuracy', leader: 0.84, beaten: true,
@@ -146,7 +145,7 @@ describe('the references of a platform experiment', () => {
         { metric: 'unmeasured', direction: 'maximize', values: [] },
       ],
     })
-    show('', { status: PlatformExperimentStatus.RUNNING })
+    show('', { status: 'running' })
     expect(await screen.findByRole('heading', { name: /^References/ })).toBeTruthy()
     expect(screen.getByText(/best that counts 0\.8100/)).toBeTruthy()
     expect(screen.getByText(/beaten by the leader's val_accuracy 0\.8400/)).toBeTruthy()

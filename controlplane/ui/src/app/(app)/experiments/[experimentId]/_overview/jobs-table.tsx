@@ -1,5 +1,4 @@
 import { clsx } from 'clsx'
-import type { Experiment } from '@/types/jobs'
 import { AgentLabel } from '@/components/agent-label'
 import { JobHypothesis } from '@/components/job-hypothesis'
 import { Badge } from '@/components/ui/badge'
@@ -11,6 +10,7 @@ import { formatAccH, relTime, shortId } from '@/lib/format'
 import { variedEnvByHypothesis, variedEnvSettings } from '@/lib/hypothesis-progress'
 import { experimentPath, jobPath } from '@/lib/routes'
 import { budgetUnit, kindOf } from '@/lib/units'
+import type { Experiment } from '@/types/api'
 
 /** The jobs shown, what is running first, and a link to all of them when there are more. */
 export function JobsTable({ experimentId, jobs, total, rankingMetric }: {

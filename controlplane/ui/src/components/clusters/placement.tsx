@@ -1,12 +1,12 @@
 import { Fragment } from 'react'
 import { ChevronDown, ChevronUp, GripVertical } from 'lucide-react'
-import type { OrgCluster } from '@/types/clusters'
 import { Button } from '@/components/ui/button'
 import { Stack } from '@/components/ui/stack'
 import { Code, Text } from '@/components/ui/text'
+import type { ListedCluster } from '@/types/api'
 
 /** The buttons that move one of the org's own clusters up or down its order, beside the grip a row is dragged by. */
-export function MoveButtons({ cluster, index, of, onMove, disabled }: { cluster: OrgCluster; index: number; of: number; onMove: (to: number) => void; disabled: boolean }) {
+export function MoveButtons({ cluster, index, of, onMove, disabled }: { cluster: ListedCluster; index: number; of: number; onMove: (to: number) => void; disabled: boolean }) {
   return (
     <span className="flex items-center gap-1">
       <GripVertical aria-hidden="true" size={14} className="cursor-grab text-subtle" />
@@ -38,7 +38,7 @@ export function Place({ place, shared }: { place?: number; shared: boolean }) {
  * Where a job of the org goes right now: the first place with a connected cluster. A job that does
  * not fit there moves down the order.
  */
-export function NextPlacement({ clusters }: { clusters: OrgCluster[] }) {
+export function NextPlacement({ clusters }: { clusters: ListedCluster[] }) {
   const placed = clusters.filter(c => c.place)
   if (placed.length === 0) return <Text variant="note">Every cluster is turned off, so jobs wait in the queue.</Text>
   const first = Math.min(...placed.filter(c => c.connected).map(c => c.place!))

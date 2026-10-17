@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSWRConfig } from 'swr'
 import { createAgentType } from '@/lib/api/agent-types'
-import type { CreateAgentTypeRequest } from '@/lib/api/agent-types'
+import type { CreateAgentTypeRequest } from '@/types/api'
 import { agentTypesPath } from '@/lib/routes'
 import { keys } from '@/lib/keys'
 

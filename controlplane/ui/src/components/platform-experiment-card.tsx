@@ -4,10 +4,6 @@ import useSWR from 'swr'
 import { clsx } from 'clsx'
 import { fetchHypothesisStats } from '@/lib/api/hypotheses'
 import { fetchPlatformExperimentQuotas } from '@/lib/api/quotas'
-import type { Draft } from '@/types/planning'
-import { PlatformExperimentStatus } from '@/types/platform-experiments'
-import type { PlatformExperiment } from '@/types/platform-experiments'
-import type { AgentQuota } from '@/types/quotas'
 import { useRouter } from 'next/navigation'
 import { experimentPath } from '@/lib/routes'
 import { isReadOnly } from '@/lib/read-only'
@@ -22,11 +18,13 @@ import { Inline } from '@/components/ui/stack'
 import { RemoveExperiment } from '@/components/remove-experiment'
 import { keys } from '@/lib/keys'
 import { POLL } from '@/lib/poll'
+import { proposalOf } from '@/lib/planning'
+import type { AgentQuotaView, PlatformExperiment } from '@/types/api'
 
 const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' })
 
 // The API takes an edit of an open or a running experiment only.
-const EDITABLE: string[] = [PlatformExperimentStatus.OPEN, PlatformExperimentStatus.RUNNING]
+const EDITABLE: string[] = ['open', 'running']
 
 /**
  * One platform experiment in a list, on one line, opening its page. It shows the figures its
@@ -44,9 +42,9 @@ export function PlatformExperimentCard({
   const { me } = useTenant()
   const readOnly = isReadOnly(me, pe)
   const href = experimentPath(pe.id)
-  const started = pe.status !== PlatformExperimentStatus.DRAFT
+  const started = pe.status !== 'draft'
 
-  const { data: quotas, error: quotasError } = useSWR<AgentQuota[]>(
+  const { data: quotas, error: quotasError } = useSWR<AgentQuotaView[]>(
     started ? keys.quotas(pe.id) : null,
     () => fetchPlatformExperimentQuotas(pe.id),
     { refreshInterval: POLL.reports },
@@ -56,8 +54,8 @@ export function PlatformExperimentCard({
     () => fetchHypothesisStats(pe.id),
   )
 
-  const unit = budgetUnit(budgetKind((pe as Draft).proposal?.accelerator_type, []))
-  const live = pe.status === PlatformExperimentStatus.OPEN || pe.status === PlatformExperimentStatus.RUNNING
+  const unit = budgetUnit(budgetKind(proposalOf(pe)?.accelerator_type, []))
+  const live = pe.status === 'open' || pe.status === 'running'
   const daysLeft = live && !isZeroDate(pe.ends_at)
     ? Math.ceil((new Date(pe.ends_at!).getTime() - Date.now()) / 86_400_000)
     : null
@@ -85,7 +83,7 @@ export function PlatformExperimentCard({
     }
   }
 
-  const when = pe.status === PlatformExperimentStatus.CLOSED && !isZeroDate(pe.closed_at)
+  const when = pe.status === 'closed' && !isZeroDate(pe.closed_at)
     ? day(pe.closed_at!)
     : !live && !isZeroDate(pe.created_at) ? day(pe.created_at) : null
 

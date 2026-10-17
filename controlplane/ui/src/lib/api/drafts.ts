@@ -1,7 +1,5 @@
 import { apiCall, apiFetch, apiSend } from '@/lib/api/request'
-import type { ExperimentDraft } from '@/types/drafts'
-
-type ExperimentDraftBody = Pick<ExperimentDraft, 'form' | 'step' | 'failure'>
+import type { ExperimentDraft, ExperimentDraftRequest } from '@/types/api'
 
 export function fetchExperimentDrafts(projectID: string): Promise<ExperimentDraft[]> {
   return apiFetch<ExperimentDraft[]>(`/projects/${projectID}/experiment-drafts`)
@@ -11,11 +9,11 @@ export function fetchExperimentDraft(projectID: string, draftID: string): Promis
   return apiFetch<ExperimentDraft>(`/projects/${projectID}/experiment-drafts/${draftID}`)
 }
 
-export function createExperimentDraft(projectID: string, body: ExperimentDraftBody): Promise<ExperimentDraft> {
+export function createExperimentDraft(projectID: string, body: ExperimentDraftRequest): Promise<ExperimentDraft> {
   return apiSend<ExperimentDraft>('POST', `/projects/${projectID}/experiment-drafts`, body)
 }
 
-export function updateExperimentDraft(projectID: string, draftID: string, body: ExperimentDraftBody): Promise<ExperimentDraft> {
+export function updateExperimentDraft(projectID: string, draftID: string, body: ExperimentDraftRequest): Promise<ExperimentDraft> {
   return apiSend<ExperimentDraft>('PUT', `/projects/${projectID}/experiment-drafts/${draftID}`, body)
 }
 

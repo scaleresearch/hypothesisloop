@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import { editHumanHypothesis, removeHumanHypothesis } from '@/lib/api/hypotheses'
-import type { HypothesisGraphNode } from '@/types/hypotheses'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/input'
 import { Inline, Stack } from '@/components/ui/stack'
@@ -10,13 +9,14 @@ import { InlineError } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
 import { useTenant } from '@/lib/tenant'
 import { useEditor } from '@/components/hypotheses/editor'
+import type { GraphNode } from '@/types/api'
 
 /**
  * The text of an idea, and while the signed-in person may still change it, their way to edit it
  * inline (its author) or remove it (its author or an owner of its org). Ideas an agent has acted on,
  * through a job or a link to it, are part of the record and are left as they are.
  */
-export function IdeaText({ node }: { node: HypothesisGraphNode }) {
+export function IdeaText({ node }: { node: GraphNode }) {
   const editor = useEditor()
   const { me, org } = useTenant()
   const [mode, setMode] = useState<'read' | 'edit' | 'remove'>('read')

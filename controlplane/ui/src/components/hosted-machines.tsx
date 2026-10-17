@@ -1,10 +1,8 @@
 'use client'
 
 import { useRoster } from '@/lib/roster'
-import type { AgentInstance } from '@/types/agents'
-import { PlatformExperimentStatus } from '@/types/platform-experiments'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { Text } from '@/components/ui/text'
+import type { AgentInstance, PlatformExperiment } from '@/types/api'
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`
 
@@ -32,7 +30,7 @@ function machinesStatus(instances: AgentInstance[], jobs: number): string | null
 /** The status of the machines of a running experiment, under its title. Nothing for an experiment with none. */
 export function HostedMachines({ pe, jobs }: { pe: PlatformExperiment; jobs: number }) {
   const { data: agents } = useRoster(pe)
-  if (pe.status !== PlatformExperimentStatus.RUNNING || !agents) return null
+  if (pe.status !== 'running' || !agents) return null
   const instances = [pe.coordinator?.instance, ...agents.map(a => a.instance)].filter((i): i is AgentInstance => !!i)
   const status = machinesStatus(instances, jobs)
   if (!status) return null

@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ReactFlow, ReactFlowProvider, Background, ConnectionMode, Controls, MiniMap, Panel, useReactFlow, useStore } from '@xyflow/react'
 import type { Edge, Node } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import type { HypothesisGraph, HypothesisLinkType } from '@/types/hypotheses'
 import { Button } from '@/components/ui/button'
 import { Dot } from '@/components/ui/dot'
 import { ExpandButton, useExpanded } from '@/components/ui/expandable'
@@ -16,11 +15,12 @@ import { opacity as scale } from '@/lib/scale'
 import { useEditor } from '@/components/hypotheses/editor'
 import { Highlight, NODE_HANDLES, dataOf, isFar, nodeTypes } from '@/components/hypotheses/graph-nodes'
 import type { HypothesisNodeData } from '@/components/hypotheses/graph-nodes'
+import type { HypothesisGraph, LinkType } from '@/types/api'
 
 // Kinds read apart by line as well as colour: a related link is thin, the others thick. No line is
 // dashed: a dash pattern on a long path is rasterized dash by dash, which at hundreds of links
 // stalls every frame of a pan or zoom.
-const LINK_WIDTH: Record<HypothesisLinkType, number> = { builds_on: 1.5, related: 1, contradicts: 2.5 }
+const LINK_WIDTH: Record<LinkType, number> = { builds_on: 1.5, related: 1, contradicts: 2.5 }
 
 // A small graph is seen whole on the canvas; the map only takes room from it.
 const MINIMAP_FROM = 15

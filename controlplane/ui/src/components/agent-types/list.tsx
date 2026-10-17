@@ -4,7 +4,6 @@ import { useState } from 'react'
 import { ORG_ROLES, ROLES, describeType, roleOf, useAgentTypes } from '@/lib/agent-types'
 import { agentTypesPath } from '@/lib/routes'
 import { useTenant } from '@/lib/tenant'
-import type { AgentRole, AgentType } from '@/types/agent-types'
 import { useCreateAgentType } from '@/components/agent-types/duplicate'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -19,13 +18,14 @@ import { Inline, Stack } from '@/components/ui/stack'
 import { ErrorMessage, Loading } from '@/components/ui/status-message'
 import { Table, num } from '@/components/ui/table'
 import { Text } from '@/components/ui/text'
+import type { AgentRole, CurrentAgentType } from '@/types/api'
 
-function settingsLine(t: AgentType): string {
+function settingsLine(t: CurrentAgentType): string {
   const s = t.current.settings
   return `${s.model || 'platform default'} · ${s.effort} effort · ${s.max_subagents} subagents`
 }
 
-function NewTypeDialog({ catalog, onClose }: { catalog: AgentType[]; onClose: () => void }) {
+function NewTypeDialog({ catalog, onClose }: { catalog: CurrentAgentType[]; onClose: () => void }) {
   const { org } = useTenant()
   const { create, busy, error } = useCreateAgentType(org.id)
   const [role, setRole] = useState<AgentRole>('researcher')
@@ -66,9 +66,9 @@ function NewTypeDialog({ catalog, onClose }: { catalog: AgentType[]; onClose: ()
 
 function RoleGroup({ role, types, administers, duplicate, busy }: {
   role: AgentRole
-  types: AgentType[]
+  types: CurrentAgentType[]
   administers: boolean
-  duplicate: (t: AgentType) => void
+  duplicate: (t: CurrentAgentType) => void
   busy: string | null
 }) {
   const { org } = useTenant()

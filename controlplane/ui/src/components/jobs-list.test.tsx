@@ -3,10 +3,9 @@ import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchOrgClusters } from '@/lib/api/clusters'
 import { fetchExperimentsPage, fetchExperimentStats } from '@/lib/api/jobs'
-import type { Me } from '@/types/accounts'
-import type { Experiment } from '@/types/jobs'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { JobsList } from '@/components/jobs-list'
+import type { Experiment, Me } from '@/types/api'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -33,7 +32,7 @@ function job(id: string, cluster: string): Experiment {
     status: 'RUNNING', capacity_tier: 'guaranteed', cluster_name: cluster, created_at: at, updated_at: at,
     accelerator_type: 'nvidia.com/gpu.product=NVIDIA-L40', accelerator_count: 1, hypothesis: 'a claim', env: {}, priority_score: 0,
     code_ref: 'https://github.com/acme/widgets@0123456789abcdef', branch: 'hl/pe-1/warmup-ag-1',
-  } as Experiment
+  } as unknown as Experiment
 }
 
 beforeEach(() => {

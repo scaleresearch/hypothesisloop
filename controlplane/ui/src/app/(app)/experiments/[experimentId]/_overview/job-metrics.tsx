@@ -4,7 +4,6 @@ import { useMemo, useState } from 'react'
 import useSWR from 'swr'
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { fetchExperimentMetrics, fetchExperimentsPage } from '@/lib/api/jobs'
-import type { Experiment, MetricDataPoint } from '@/types/jobs'
 import { AgentLabel, useAgentName } from '@/components/agent-label'
 import { Badge } from '@/components/ui/badge'
 import { Captioned } from '@/components/ui/captioned'
@@ -22,6 +21,7 @@ import { keys } from '@/lib/keys'
 import { POLL } from '@/lib/poll'
 import { jobPath } from '@/lib/routes'
 import { ChartBox, ExpandableChart } from './chart-frame'
+import type { Experiment, MetricDataPoint } from '@/types/api'
 
 // Bounded-score metrics (roughly 0-1) get their own axis so they aren't flattened to a
 // hairline by unbounded metrics like seconds_per_subject/cv_seconds sitting in the tens+.

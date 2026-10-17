@@ -1,7 +1,6 @@
 import { createExperimentDraft } from '@/lib/api/drafts'
 import { ApiError } from '@/lib/api/request'
-import type { ExperimentDraft } from '@/types/drafts'
-import type { StatusReason } from '@/types/platform-experiments'
+import type { CreatePlatformExperimentRequest, ExperimentDraft, PlatformExperiment, Proposal, StatusReason } from '@/types/api'
 
 export const MAX_GOAL_LENGTH = 2000
 
@@ -17,4 +16,16 @@ export function hostingRefusal(error: unknown): StatusReason | null {
 /** Keeps a goal as a saved draft of the full form, its brief, for a person who sets the experiment up themselves. */
 export function formDraftFromGoal(projectID: string, goal: string, repository: string): Promise<ExperimentDraft> {
   return createExperimentDraft(projectID, { form: { description: goal, repository }, step: '1', failure: '' })
+}
+
+/** The experiment a proposal states, keyed as the create states it. */
+export type ProposedExperiment = Required<Pick<CreatePlatformExperimentRequest, 'name' | 'description' | 'metrics'>> &
+  Pick<CreatePlatformExperimentRequest, 'report_interval_seconds' | 'stages'>
+
+/** What a draft's planner proposed, stored with the type its jobs are sized for, CPU_TYPE where it named none. */
+export type StoredProposal = Omit<Proposal, 'experiment' | 'accelerator_type'> & { experiment: ProposedExperiment; accelerator_type: string }
+
+/** The proposal of pe, which the API answers as the planner's PUT stored it. */
+export function proposalOf(pe: Pick<PlatformExperiment, 'proposal'>): StoredProposal | undefined {
+  return pe.proposal as StoredProposal | undefined
 }

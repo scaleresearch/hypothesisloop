@@ -1,11 +1,11 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { finishGitHubInstall } from '@/lib/api/github'
-import type { Me } from '@/types/accounts'
 import { takeReturn } from '@/lib/github-connect'
 import type { ReturnView } from '@/lib/github-connect'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import GitHubReturnPage from '@/app/(app)/settings/repository/page'
+import type { Me } from '@/types/api'
 
 const navigation = vi.hoisted(() => ({ search: '' }))
 

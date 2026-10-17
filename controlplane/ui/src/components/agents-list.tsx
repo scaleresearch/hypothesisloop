@@ -10,8 +10,6 @@ import { fetchExperimentStats } from '@/lib/api/jobs'
 import { fetchPlatformExperiment, fetchPlatformExperimentResults, fetchPlatformExperimentsPage } from '@/lib/api/platform-experiments'
 import { fetchAgentQuota, fetchPlatformExperimentQuotas } from '@/lib/api/quotas'
 import { ApiError, MAX_LIST_PAGE_SIZE } from '@/lib/api/request'
-import type { Draft } from '@/types/planning'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { Page } from '@/components/ui/page'
 import { Section } from '@/components/ui/section'
 import { Inline, Stack } from '@/components/ui/stack'
@@ -32,11 +30,13 @@ import { experimentPath, jobPath, projectPath } from '@/lib/routes'
 import { useTenant } from '@/lib/tenant'
 import { keys } from '@/lib/keys'
 import { POLL } from '@/lib/poll'
+import { proposalOf } from '@/lib/planning'
+import type { PlatformExperiment } from '@/types/api'
 
 const PAGE_SIZE = 25
 
 function unitOf(pe: PlatformExperiment): string {
-  return budgetUnit(budgetKind((pe as Draft).proposal?.accelerator_type, []))
+  return budgetUnit(budgetKind(proposalOf(pe)?.accelerator_type, []))
 }
 
 // One agent's compute in one experiment. An agent that is not in the experiment has none, which

@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react'
-import type { StatusReason } from '@/types/platform-experiments'
 import { Inline } from '@/components/ui/stack'
 import { Callout } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
+import type { StatusReason } from '@/types/api'
 
 /**
  * Why planning cannot go on right now, in the platform's plain sentence, what that means for the

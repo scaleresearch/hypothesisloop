@@ -3,7 +3,6 @@ import { useMemo, useState } from 'react'
 import type { KeyedMutator } from 'swr'
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { addHumanHypothesisLink, editHumanHypothesis, registerHumanHypothesis, removeHumanHypothesis } from '@/lib/api/hypotheses'
-import type { HypothesisGraph, HypothesisGraphNode, RegisteredHypothesis, SimilarHypothesis } from '@/types/hypotheses'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { GraphEditorProvider, useGraphEditor } from '@/components/hypotheses/editor'
 import { AddIdeaButton, AddedNote, LinkBar } from '@/components/hypotheses/editor-controls'
@@ -13,6 +12,7 @@ import { HypothesisGraphCanvas } from '@/components/hypotheses/graph-canvas'
 import { HypothesisOutline } from '@/components/hypotheses/outline'
 import { Expandable } from '@/components/ui/expandable'
 import { layoutGraph } from '@/lib/hypothesis-graph'
+import type { GraphNode, HypothesisGraph, RegisteredHypothesis, SimilarHypothesis } from '@/types/api'
 
 // Its dot pattern reads a size jsdom never lays out.
 vi.mock('@xyflow/react', async original => ({ ...await original(), Background: () => null }))
@@ -24,16 +24,16 @@ vi.mock('@/components/agent-label', () => ({ AgentLabel: ({ id }: { id: string }
 const at = '2026-01-01T00:00:00Z'
 const ada = { kind: 'user' as const, id: 'u1', name: 'Ada' }
 
-function idea(id: string, text: string, buildsOn: string[], agentID = ''): HypothesisGraphNode {
+function idea(id: string, text: string, buildsOn: string[], agentID = ''): GraphNode {
   return {
-    id, text, platform_experiment_id: 'pe-x', status: 'open', agent_id: agentID, actor: ada, status_actor: null, status_changed_at: null,
+    id, text, platform_experiment_id: 'pe-x', status: 'open', agent_id: agentID, actor: ada, status_changed_at: null,
     created_at: at, builds_on: buildsOn, finding_count: 0, comment_count: 0, child_count: 0,
   }
 }
 
 const initial: HypothesisGraph = {
   root: 'pe-x',
-  objective: {},
+  objective: { comment_count: 0, comments: [] },
   nodes: [idea('hyp-1', 'warmup helps', ['pe-x']), idea('hyp-2', 'a cosine schedule helps', ['pe-x'], 'ag-1')],
   edges: [
     { from: 'hyp-1', to: 'pe-x', type: 'builds_on', agent_id: '', actor: ada, created_at: at },

@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import type { KeyedMutator } from 'swr'
 import { addHumanHypothesisLink } from '@/lib/api/hypotheses'
-import type { HypothesisGraph, HypothesisLinkInput, HypothesisLinkType, RegisteredHypothesis, SimilarHypothesis } from '@/types/hypotheses'
 import { allowedLinkKinds, linkPlanner, withEdge, withHypothesis } from '@/lib/hypothesis-graph'
+import type { HypothesisGraph, LinkSpec, LinkType, RegisteredHypothesis, SimilarHypothesis } from '@/types/api'
 
 interface GraphEditor {
   graph: HypothesisGraph
@@ -18,15 +18,15 @@ interface GraphEditor {
   /** Opens the composer with its first link refining `target`, or a new approach when it is the objective. */
   startAdding: (target: string) => void
   /** The links of the idea being written, starting with builds_on to the node it was opened for. */
-  links: HypothesisLinkInput[]
-  setLinkType: (to: string, type: HypothesisLinkType) => void
+  links: LinkSpec[]
+  setLinkType: (to: string, type: LinkType) => void
   removeLink: (to: string) => void
   /** A target for another link of the idea being written is being picked. */
   findingTarget: boolean
   setFindingTarget: (finding: boolean) => void
-  linking: { from: string; kind: HypothesisLinkType } | null
+  linking: { from: string; kind: LinkType } | null
   startLinking: (from: string) => void
-  setLinkKind: (kind: HypothesisLinkType) => void
+  setLinkKind: (kind: LinkType) => void
   linkBusy: boolean
   linkError: string
   /** Waiting for a click on, or a choice of, a target node. */
@@ -56,9 +56,9 @@ export function useGraphEditor({ graph, rootLabel, canWrite, closed = false, mut
 }): GraphEditor {
   const [composing, setComposing] = useState(false)
   const [addedSimilar, setAddedSimilar] = useState<SimilarHypothesis[]>([])
-  const [links, setLinks] = useState<HypothesisLinkInput[]>([])
+  const [links, setLinks] = useState<LinkSpec[]>([])
   const [findingTarget, setFindingTarget] = useState(false)
-  const [linking, setLinking] = useState<{ from: string; kind: HypothesisLinkType } | null>(null)
+  const [linking, setLinking] = useState<{ from: string; kind: LinkType } | null>(null)
   const [linkBusy, setLinkBusy] = useState(false)
   const [linkError, setLinkError] = useState('')
   const plan = useMemo(() => linkPlanner(graph), [graph])
@@ -141,7 +141,7 @@ export function useGraphEditor({ graph, rootLabel, canWrite, closed = false, mut
     setFindingTarget(false)
     setAddedSimilar([])
     setComposing(true)
-    const first: HypothesisLinkInput = { type: 'builds_on', to: target }
+    const first: LinkSpec = { type: 'builds_on', to: target }
     setLinks(ls => (composing ? [first, ...ls.slice(1).filter(l => l.to !== target)] : [first]))
   }, [composing])
 

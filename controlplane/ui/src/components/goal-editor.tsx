@@ -4,8 +4,6 @@ import { useState } from 'react'
 import { updatePlatformExperiment } from '@/lib/api/platform-experiments'
 import { errorMessage } from '@/lib/errors'
 import { MAX_GOAL_LENGTH } from '@/lib/planning'
-import { canEdit, PlatformExperimentStatus } from '@/types/platform-experiments'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { Button } from '@/components/ui/button'
 import { FormField } from '@/components/ui/form-field'
 import { Textarea } from '@/components/ui/input'
@@ -13,6 +11,8 @@ import { Section } from '@/components/ui/section'
 import { Inline, Stack } from '@/components/ui/stack'
 import { InlineError } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
+import type { PlatformExperiment } from '@/types/api'
+import { canEdit } from '@/lib/editable'
 
 /**
  * What the owner asked, which they change while the API lists goal in editable: a draft is
@@ -22,7 +22,7 @@ export function GoalEditor({ pe, onSaved }: { pe: PlatformExperiment; onSaved: (
   const [goal, setGoal] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const draft = pe.status === PlatformExperimentStatus.DRAFT
+  const draft = pe.status === 'draft'
 
   async function save() {
     setSaving(true)

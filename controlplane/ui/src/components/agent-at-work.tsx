@@ -3,10 +3,10 @@
 import { clsx } from 'clsx'
 import { relTime } from '@/lib/format'
 import { useTick } from '@/lib/tick'
-import type { AgentActivity, AgentInstance, JoinedAgent } from '@/types/agents'
 import { Stack } from '@/components/ui/stack'
 import { Steps } from '@/components/ui/steps'
 import { Text } from '@/components/ui/text'
+import type { AgentActivity, AgentInstance, JoinedAgent } from '@/types/api'
 
 const MACHINE_STEPS = [
   { key: 'requested', label: 'Machine asked for' },

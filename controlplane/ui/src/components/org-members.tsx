@@ -4,7 +4,6 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
 import { createOrgInvite, fetchOrgInvites, fetchOrgMembers, removeOrgMember, revokeOrgInvite, setOrgMemberRole } from '@/lib/api/accounts'
-import type { CreatedOrgInvite, OrgInvite, OrgMember, OrgRole } from '@/types/accounts'
 import { errorMessage } from '@/lib/errors'
 import { inviteLink } from '@/lib/invite'
 import { HOME_PATH } from '@/lib/auth'
@@ -20,6 +19,7 @@ import { Inline, Stack } from '@/components/ui/stack'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { keys } from '@/lib/keys'
+import type { CreatedInvite, OrgInvite, OrgMember, OrgRole } from '@/types/api'
 
 const ROLES: OrgRole[] = ['owner', 'member']
 
@@ -44,7 +44,7 @@ function Invites({ onError }: { onError: (message: string) => void }) {
   const [role, setRole] = useState<OrgRole>('member')
   const [busy, setBusy] = useState(false)
   // The token exists here and nowhere else: no read of the API returns it again.
-  const [created, setCreated] = useState<CreatedOrgInvite | null>(null)
+  const [created, setCreated] = useState<CreatedInvite | null>(null)
   const [revoking, setRevoking] = useState<OrgInvite | null>(null)
 
   async function create(e: React.FormEvent) {

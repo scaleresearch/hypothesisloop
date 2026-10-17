@@ -4,13 +4,11 @@ import { SWRConfig } from 'swr'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchPlatformExperimentAgents } from '@/lib/api/agents'
 import { apiSend } from '@/lib/api/request'
-import type { Me } from '@/types/accounts'
-import type { AgentSignup } from '@/types/agents'
-import type { Draft, Proposal } from '@/types/planning'
-import { PlatformExperimentStatus } from '@/types/platform-experiments'
 import { DraftView } from '@/components/draft'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { formatDate } from '@/lib/format'
+import type { StoredProposal } from '@/lib/planning'
+import type { JoinedAgent, Me, PlatformExperiment } from '@/types/api'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -24,7 +22,7 @@ vi.mock('@/lib/api/request', async importActual => ({
 }))
 
 const sweeper = { agent_type: 'hyperparameter-search', model: 'claude-opus-4-5', hyperparameters: { direction: 'Find the schedule: warmup length first, then the decay.' } }
-const proposal: Proposal = {
+const proposal: StoredProposal = {
   experiment: {
     name: 'Cosine or constant',
     description: 'Train the small transformer in train.py and report val_loss.',
@@ -37,6 +35,7 @@ const proposal: Proposal = {
   budget_accelerator_hours: 6,
   duration_hours: 4,
   baseline_minutes: 30,
+  goal_version: 1,
   agents: [sweeper, {}],
   accelerator_type: 'rtx-4090',
   image: 'pytorch',
@@ -56,22 +55,22 @@ const resolved = resolveTenant(me, 'prj_1')
 if (resolved.state !== 'selected') throw new Error('no tenant')
 const tenant = resolved.tenant
 
-function draft(reason: 'planning' | 'revising' | 'accepting' | 'proposed' | 'declined', more: Partial<Draft> = {}): Draft {
+function draft(reason: 'planning' | 'revising' | 'accepting' | 'proposed' | 'declined', more: Partial<PlatformExperiment> = {}): PlatformExperiment {
   return {
-    id: 'pe-1', project_id: 'prj_1', name: 'Does a cosine schedule beat…', status: PlatformExperimentStatus.DRAFT,
+    id: 'pe-1', project_id: 'prj_1', name: 'Does a cosine schedule beat…', status: 'draft',
     status_reason: { reason, message: '', waits_for: reason === 'proposed' || reason === 'declined' ? 'owner' : 'platform' },
     goal: 'Does a cosine schedule beat a constant one?', goal_version: 1, editable: ['goal'], planning_ends_at: '2026-10-05T12:30:00Z', ...more,
-  } as Draft
+  } as PlatformExperiment
 }
 
-function show(d: Draft) {
+function show(d: PlatformExperiment) {
   return render(<SWRConfig value={{ provider: () => new Map() }}><TenantContext.Provider value={tenant}><DraftView draft={d} /></TenantContext.Provider></SWRConfig>)
 }
 
 beforeEach(() => {
   vi.mocked(apiSend).mockReset().mockResolvedValue({})
   vi.mocked(fetchPlatformExperimentAgents).mockResolvedValue([
-    { platform_experiment_id: 'pe-1', agent_id: 'ag-p', name: 'Planner', role: 'planner', hosted: true, agent_type: 'planner', signed_up_at: '', instance: { state: 'starting', restarts: 0, stopped: false } } as AgentSignup,
+    { platform_experiment_id: 'pe-1', agent_id: 'ag-p', name: 'Planner', role: 'planner', hosted: true, agent_type: 'planner', signed_up_at: '', instance: { state: 'starting', restarts: 0, stopped: false } } as JoinedAgent,
   ])
 })
 

@@ -1,6 +1,5 @@
-import type { JoinedAgent } from '@/types/agents'
-import type { ResearcherPoolEntry } from '@/types/platform-experiments'
 import { DEFAULT_AGENT_TYPE } from '@/lib/agent-types'
+import type { JoinedAgent, ResearcherPoolEntry } from '@/types/api'
 
 /** The researchers at work, oldest first: the agents the platform says are (`at_work`). */
 export function researchersAtWork(roster: JoinedAgent[]): JoinedAgent[] {

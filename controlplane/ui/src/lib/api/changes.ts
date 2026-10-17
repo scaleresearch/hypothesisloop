@@ -1,17 +1,5 @@
 import { apiFetch, apiURL, withQuery } from '@/lib/api/request'
 
-/** One change of GET /watch and GET /changes, a pointer to what to read again. Mirrors domain.Event. */
-export interface Change {
-  id: number
-  kind: string
-  subject: string
-  value: string
-  detail: string
-  platform_experiment_id: string
-  agent_id: string
-  occurred_at: string
-}
-
 /** Where a read of the changes starts: after the id of the last change read, or at the newest. */
 export type After = number | 'head'
 

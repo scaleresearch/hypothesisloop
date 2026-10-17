@@ -3,9 +3,9 @@ import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createProject, fetchMe, renameOrg, renameProject } from '@/lib/api/accounts'
-import type { Me } from '@/types/accounts'
 import { resolveOrgTenant, resolveTenant, TenantContext } from '@/lib/tenant'
 import SettingsPage from '@/app/(app)/orgs/[orgId]/settings/page'
+import type { Me } from '@/types/api'
 
 vi.mock('@/lib/api/accounts', () => ({ createProject: vi.fn(), fetchMe: vi.fn(), renameOrg: vi.fn(), renameProject: vi.fn() }))
 vi.mock('@/components/api-keys', () => ({ APIKeys: () => <p>api keys</p> }))

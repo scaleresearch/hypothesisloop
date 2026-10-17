@@ -1,13 +1,11 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { ObjectiveBar } from '@/components/hypotheses/panel'
-import type { HypothesisGraph } from '@/types/hypotheses'
-import { PlatformExperimentStatus } from '@/types/platform-experiments'
-import type { PlatformExperiment } from '@/types/platform-experiments'
+import type { HypothesisGraph, PlatformExperiment } from '@/types/api'
 
 const at = '2026-01-01T00:00:00Z'
 const pe = {
-  id: 'pe-x', project_id: 'prj_1', name: 'Vision benchmark', status: PlatformExperimentStatus.RUNNING,
+  id: 'pe-x', project_id: 'prj_1', name: 'Vision benchmark', status: 'running',
   budget_accelerator_hours: 100, max_agents: 4, signup_count: 2, stages: [], current_stage: 1, created_at: at,
 } as unknown as PlatformExperiment
 

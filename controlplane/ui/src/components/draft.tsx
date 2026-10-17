@@ -4,8 +4,7 @@ import { useState } from 'react'
 import { useSWRConfig } from 'swr'
 import { formatDate } from '@/lib/format'
 import { abandonDraft } from '@/lib/api/planning'
-import { PLANNING_MOVES } from '@/lib/planning'
-import type { Draft } from '@/types/planning'
+import { PLANNING_MOVES, proposalOf } from '@/lib/planning'
 import { reasonOf } from '@/lib/phase'
 import { useRouter } from 'next/navigation'
 import { projectPath } from '@/lib/routes'
@@ -20,6 +19,7 @@ import { Section } from '@/components/ui/section'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Text } from '@/components/ui/text'
 import { keys } from '@/lib/keys'
+import type { PlatformExperiment } from '@/types/api'
 
 /**
  * The page of an experiment that is still a draft: the goal it is planned from, what its planner
@@ -27,12 +27,13 @@ import { keys } from '@/lib/keys'
  * proposed, accept it now, edit it and accept it at a cost they state, change the goal, or reject
  * it. A reader of a shared draft is shown none of these.
  */
-export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?: boolean }) {
+export function DraftView({ draft, readOnly = false }: { draft: PlatformExperiment; readOnly?: boolean }) {
   const router = useRouter()
   const { project } = useTenant()
   const { mutate } = useSWRConfig()
   const [confirming, setConfirming] = useState(false)
   const state = reasonOf(draft).reason
+  const proposal = proposalOf(draft)
   const reread = () => void mutate(keys.experiment(draft.id))
 
   async function abandon() {
@@ -60,8 +61,8 @@ export function DraftView({ draft, readOnly = false }: { draft: Draft; readOnly?
           </Stack>
         </Section>
       )}
-      {draft.proposal && (
-        <ProposalForm key={draft.proposed_at} draft={draft} proposal={draft.proposal} editable={!readOnly && state === 'proposed'} accepting={!readOnly && state === 'accepting'} onDone={reread} />
+      {proposal && (
+        <ProposalForm key={draft.proposed_at} draft={draft} proposal={proposal} editable={!readOnly && state === 'proposed'} accepting={!readOnly && state === 'accepting'} onDone={reread} />
       )}
       {!readOnly && (
         <Inline gap="md">

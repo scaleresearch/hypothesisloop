@@ -1,6 +1,6 @@
 import { apiCall, apiFetch, apiFetchPage, apiSend, MAX_LIST_PAGE_SIZE } from '@/lib/api/request'
 import type { Page } from '@/lib/api/request'
-import type { APIKey, CreatedAPIKey, CreatedOrgInvite, Me, Org, OrgInvite, OrgMember, OrgRole, Project } from '@/types/accounts'
+import type { APIKey, CreatedAPIKey, CreatedInvite, Me, Org, OrgInvite, OrgMember, OrgRole, Project } from '@/types/api'
 
 export function fetchMe(): Promise<Me> {
   return apiFetch<Me>(`/me`)
@@ -45,8 +45,8 @@ export function fetchOrgInvites(orgID: string): Promise<Page<OrgInvite>> {
 }
 
 // The answer is the only place the invite's token ever appears.
-export function createOrgInvite(orgID: string, role: OrgRole): Promise<CreatedOrgInvite> {
-  return apiSend<CreatedOrgInvite>('POST', `/orgs/${orgID}/invites`, { role })
+export function createOrgInvite(orgID: string, role: OrgRole): Promise<CreatedInvite> {
+  return apiSend<CreatedInvite>('POST', `/orgs/${orgID}/invites`, { role })
 }
 
 export async function revokeOrgInvite(inviteID: string): Promise<void> {

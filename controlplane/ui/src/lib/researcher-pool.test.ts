@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { cutByMax, poolProblem, researchersAtWork, toPool, toRows } from '@/lib/researcher-pool'
-import type { JoinedAgent } from '@/types/agents'
+import type { JoinedAgent } from '@/types/api'
 
 function researcher(id: string, joined: string, more: Partial<JoinedAgent> = {}): JoinedAgent {
   return {
     platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' },
-    hosted: true, agent_type: 'generalist', model: 'm', at_work: true, signed_up_at: `2026-01-01T0${joined}:00:00Z`, ...more,
+    hosted: true, agent_type: 'generalist', model: 'm', hyperparameters: null, at_work: true, signed_up_at: `2026-01-01T0${joined}:00:00Z`, ...more,
   }
 }
 

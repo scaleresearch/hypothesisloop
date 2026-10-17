@@ -6,10 +6,6 @@ import { clsx } from 'clsx'
 import { ChevronRight, MessageSquare } from 'lucide-react'
 import { addPlatformExperimentAgents, fetchPlatformExperimentAgentToken, fetchPlatformExperimentMessages, removePlatformExperimentAgent, sendPlatformExperimentMessage } from '@/lib/api/agents'
 import { apiURL } from '@/lib/api/request'
-import type { AgentType } from '@/types/agent-types'
-import type { AgentMessage, AgentSignup, JoinedAgent } from '@/types/agents'
-import { PlatformExperimentStatus } from '@/types/platform-experiments'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { useRoster } from '@/lib/roster'
 import { StatusLabel } from '@/components/ui/badge'
 import { Button, Chip } from '@/components/ui/button'
@@ -35,6 +31,7 @@ import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { useReadOnly } from '@/lib/read-only'
 import type { Tone } from '@/lib/colors'
 import { keys } from '@/lib/keys'
+import type { AgentMessage, CurrentAgentType, JoinedAgent, PlatformExperiment } from '@/types/api'
 
 
 // What the operator's own `podman run --env-file` takes for one agent, and all an agent is
@@ -130,7 +127,7 @@ function statusOf(agent: JoinedAgent, closed: boolean): { label: string; tone: T
 
 /** Writes a message to one agent, which wakes it at once. */
 function MessageAgent({ pe, agent, onSent, onClose }: {
-  pe: PlatformExperiment; agent: AgentSignup; onSent: () => Promise<unknown>; onClose: () => void
+  pe: PlatformExperiment; agent: JoinedAgent; onSent: () => Promise<unknown>; onClose: () => void
 }) {
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
@@ -182,12 +179,12 @@ function Messages({ messages }: { messages: AgentMessage[] }) {
 
 /** Everything about one agent that its row has no room for. */
 /** The agent type an agent runs, by name. */
-function AgentTypeLabel({ agent, catalog }: { agent: AgentSignup; catalog: AgentType[] | undefined }) {
+function AgentTypeLabel({ agent, catalog }: { agent: JoinedAgent; catalog: CurrentAgentType[] | undefined }) {
   if (!agent.agent_type) return <span className="text-muted">default</span>
   return <span title={agent.agent_type}>{typeName(agent.agent_type, catalog)}</span>
 }
 
-function AgentDetails({ agent, messages, catalog }: { agent: JoinedAgent; messages: AgentMessage[]; catalog: AgentType[] | undefined }) {
+function AgentDetails({ agent, messages, catalog }: { agent: JoinedAgent; messages: AgentMessage[]; catalog: CurrentAgentType[] | undefined }) {
   return (
     <Stack gap="sm">
       <Facts facts={[
@@ -224,22 +221,22 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
   const [rowError, setRowError] = useState('')
   // Self-run agents whose token is on screen: the ones just added, and any asked for again.
   const [shown, setShown] = useState<JoinedAgent[]>([])
-  const [removing, setRemoving] = useState<AgentSignup | null>(null)
-  const [messaging, setMessaging] = useState<AgentSignup | null>(null)
+  const [removing, setRemoving] = useState<JoinedAgent | null>(null)
+  const [messaging, setMessaging] = useState<JoinedAgent | null>(null)
   const [open, setOpen] = useState<string | null>(null)
   const readOnly = useReadOnly()
   const { org } = useTenant()
   const { data: catalog } = useAgentTypes(org.id)
   // Quota is divided at the start over the agents present, so the roster is fixed from then on.
-  const started = pe.status === PlatformExperimentStatus.RUNNING || pe.status === PlatformExperimentStatus.CLOSED
+  const started = pe.status === 'running' || pe.status === 'closed'
   const { data: messages, mutate: mutateMessages } = useSWR(
-    pe.status === PlatformExperimentStatus.DRAFT ? null : keys.messages(pe.id),
+    pe.status === 'draft' ? null : keys.messages(pe.id),
     () => fetchPlatformExperimentMessages(pe.id),
   )
-  const at = pe.status === PlatformExperimentStatus.OPEN || pe.status === PlatformExperimentStatus.RUNNING
-  const messagesTo = (agent: AgentSignup) => messages?.filter(m => m.agent_id === agent.agent_id) ?? []
+  const at = pe.status === 'open' || pe.status === 'running'
+  const messagesTo = (agent: JoinedAgent) => messages?.filter(m => m.agent_id === agent.agent_id) ?? []
 
-  async function remove(agent: AgentSignup) {
+  async function remove(agent: JoinedAgent) {
     await removePlatformExperimentAgent(pe.id, agent.agent_id)
     hide(agent.agent_id)
     await mutate()
@@ -254,7 +251,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
     setShown(current => [...current.filter(a => !tokens.some(t => t.agent_id === a.agent_id)), ...tokens])
   }
 
-  async function showToken(agent: AgentSignup) {
+  async function showToken(agent: JoinedAgent) {
     setRowError('')
     try {
       show([await fetchPlatformExperimentAgentToken(pe.id, agent.agent_id)])
@@ -306,7 +303,7 @@ export function ExperimentAgents({ pe }: { pe: PlatformExperiment }) {
               </thead>
               <tbody>
                 {agents.map(agent => {
-                  const status = statusOf(agent, pe.status === PlatformExperimentStatus.CLOSED)
+                  const status = statusOf(agent, pe.status === 'closed')
                   const expanded = open === agent.agent_id
                   const sent = messagesTo(agent)
                   return (

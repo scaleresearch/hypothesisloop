@@ -1,12 +1,12 @@
 'use client'
 
 import { EFFORTS, MAX_SUBAGENTS, modelProblem, parseHyperparameters } from '@/lib/agent-types'
-import type { AgentRole, AgentTypeSettings } from '@/types/agent-types'
 import { Facts } from '@/components/ui/facts'
 import { FieldGroup, FormField } from '@/components/ui/form-field'
 import { Input, Textarea } from '@/components/ui/input'
 import { Segmented } from '@/components/ui/segmented'
 import { Select } from '@/components/ui/select'
+import type { AgentRole, AgentTypeSettings } from '@/types/api'
 
 /** Settings as typed: numbers as the select holds them, hyperparameters as JSON text. */
 export interface SettingsDraft {

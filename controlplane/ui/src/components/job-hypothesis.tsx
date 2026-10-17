@@ -1,7 +1,7 @@
-import type { Experiment } from '@/types/jobs'
 import { TextLink } from '@/components/ui/link'
 import { graphHref } from '@/lib/hypothesis-graph'
 import { hypothesisPath } from '@/lib/routes'
+import type { Experiment } from '@/types/api'
 
 type Tested = Pick<Experiment, 'hypothesis_id' | 'objective' | 'hypothesis' | 'platform_experiment_id'>
 

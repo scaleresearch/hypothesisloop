@@ -1,8 +1,6 @@
 'use client'
 
 import { TextLink } from '@/components/ui/link'
-import type { HypothesisGraph, HypothesisGraphNode, HypothesisLinkType } from '@/types/hypotheses'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button, RowButton } from '@/components/ui/button'
@@ -20,10 +18,11 @@ import { semantic, statusColor } from '@/lib/colors'
 import { filedAfterVerdict } from '@/lib/hypothesis-progress'
 import { relTime } from '@/lib/format'
 import { experimentPath, hypothesisPath, jobPath } from '@/lib/routes'
+import type { GraphNode, HypothesisGraph, LinkType, PlatformExperiment } from '@/types/api'
 
 interface HypothesisPanelProps {
   graph: HypothesisGraph
-  nodeByID: Map<string, HypothesisGraphNode>
+  nodeByID: Map<string, GraphNode>
   selected: string
   onSelect: (id: string) => void
 }
@@ -143,9 +142,9 @@ export function HypothesisPanel({ graph, nodeByID, selected, onSelect }: Hypothe
 
 function PanelLink({ id, type, graph, nodeByID, onSelect }: {
   id: string
-  type: HypothesisLinkType
+  type: LinkType
   graph: HypothesisGraph
-  nodeByID: Map<string, HypothesisGraphNode>
+  nodeByID: Map<string, GraphNode>
   onSelect: (id: string) => void
 }) {
   const target = nodeByID.get(id)

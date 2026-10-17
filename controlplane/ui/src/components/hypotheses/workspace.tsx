@@ -6,11 +6,8 @@ import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
 import type { KeyedMutator } from 'swr'
 import { clsx } from 'clsx'
-import { fetchHypothesisGraph } from '@/lib/api/hypotheses'
+import { fetchHypothesisGraph, type HypothesisSearchHit } from '@/lib/api/hypotheses'
 import { fetchPlatformExperiment } from '@/lib/api/platform-experiments'
-import type { HypothesisGraph, HypothesisSearchHit } from '@/types/hypotheses'
-import { PlatformExperimentStatus } from '@/types/platform-experiments'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { Page } from '@/components/ui/page'
 import { Card } from '@/components/ui/card'
 import { Expandable } from '@/components/ui/expandable'
@@ -37,6 +34,7 @@ import { isReadOnly, ReadOnlyProvider } from '@/lib/read-only'
 import { HUMAN_OWNER, extendLayout, graphHref, layoutGraph, matchesFilters, shareUnchanged } from '@/lib/hypothesis-graph'
 import type { GraphFilters, Position } from '@/lib/hypothesis-graph'
 import { keys } from '@/lib/keys'
+import type { HypothesisGraph, PlatformExperiment } from '@/types/api'
 
 /** The view a hypotheses page opens in, which the URL leaves out. */
 export const HYPOTHESES_VIEW = 'outline'
@@ -113,7 +111,7 @@ export function ExperimentHypotheses({ peID, embedded = false }: { peID: string;
   }
 
   // Nothing is added to a graph whose experiment has not been read yet, nor to a closed one.
-  const closed = pe?.status === PlatformExperimentStatus.CLOSED
+  const closed = pe?.status === 'closed'
   const readOnly = pe ? isReadOnly(me, pe) || closed : true
 
   // The toolbar heads the workspace once the graph is read, with the action that adds an idea to it.

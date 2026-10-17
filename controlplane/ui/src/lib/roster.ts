@@ -1,7 +1,7 @@
 import useSWR from 'swr'
 import { fetchPlatformExperimentAgents } from '@/lib/api/agents'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { keys } from '@/lib/keys'
+import type { PlatformExperiment } from '@/types/api'
 
 /**
  * The agents of a platform experiment with what each is doing, the one read of the roster on

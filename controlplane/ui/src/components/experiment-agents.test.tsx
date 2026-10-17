@@ -5,14 +5,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchAgentTypes } from '@/lib/api/agent-types'
 import { addPlatformExperimentAgents, fetchPlatformExperimentAgents, fetchPlatformExperimentAgentToken, fetchPlatformExperimentMessages, removePlatformExperimentAgent, sendPlatformExperimentMessage } from '@/lib/api/agents'
 import { createPlatformExperiment } from '@/lib/api/platform-experiments'
-import type { Me } from '@/types/accounts'
-import type { AgentMessage, AgentSignup, JoinedAgent } from '@/types/agents'
-import { PlatformExperimentStatus } from '@/types/platform-experiments'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { choose } from '@/test-select'
 import { CATALOG } from '@/test-agent-types'
 import { ExperimentAgents } from '@/components/experiment-agents'
+import type { AgentMessage, JoinedAgent, Me, PlatformExperiment } from '@/types/api'
 
 class ApiError extends Error {
   constructor(readonly status: number, message: string, readonly reason?: string) { super(message) }
@@ -33,11 +30,11 @@ const me: Me = {
   projects: [{ id: 'prj_1', org_id: 'org_a', name: 'default', created_at: at }],
 }
 
-function signup(id: string, hosted: boolean, agentType?: string): AgentSignup {
-  return { platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, hosted, agent_type: agentType, at_work: true, signed_up_at: at }
+function signup(id: string, hosted: boolean, agentType = ''): JoinedAgent {
+  return { platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, hosted, agent_type: agentType, model: '', hyperparameters: null, at_work: true, signed_up_at: at }
 }
 
-function show(status = PlatformExperimentStatus.OPEN, more: Partial<PlatformExperiment> = {}) {
+function show(status = 'open', more: Partial<PlatformExperiment> = {}) {
   const pe = { id: 'pe-1', project_id: 'prj_1', status, ...more } as PlatformExperiment
   const resolved = resolveTenant(me, '')
   if (resolved.state !== 'selected') throw new Error('no tenant')
@@ -52,7 +49,7 @@ beforeEach(() => {
   roster = [signup('ag-old', true)]
   vi.mocked(fetchPlatformExperimentAgents).mockImplementation(async () => [...roster])
   vi.mocked(addPlatformExperimentAgents).mockImplementation(async (_pe, req) => {
-    const added = signup(`ag-new${roster.length}`, req.hosted, req.agent_type)
+    const added = signup(`ag-new${roster.length}`, !!req.hosted, req.agent_type)
     roster = [...roster, added]
     return [req.hosted ? added : { ...added, token: `hls_token-of-${added.agent_id}` }]
   })
@@ -75,7 +72,7 @@ describe('messaging an agent', () => {
       sent.push(one)
       return [one]
     })
-    show(PlatformExperimentStatus.RUNNING)
+    show('running')
     await userEvent.click(await screen.findByRole('button', { name: 'Message' }))
     await userEvent.type(screen.getByRole('textbox', { name: 'Message' }), 'try warmup')
     await userEvent.click(screen.getByRole('button', { name: 'Send' }))
@@ -87,10 +84,10 @@ describe('messaging an agent', () => {
 
   it('offers no message to an agent that finished or in a closed experiment', async () => {
     roster = [{ ...signup('ag-old', true), finished_at: at, finished_reason: 'quota spent' }, signup('ag-2', true)]
-    const { unmount } = show(PlatformExperimentStatus.RUNNING)
+    const { unmount } = show('running')
     expect(await screen.findAllByRole('button', { name: 'Message' })).toHaveLength(1)
     unmount()
-    show(PlatformExperimentStatus.CLOSED)
+    show('closed')
     await screen.findByRole('cell', { name: 'ag-2' })
     expect(screen.queryByRole('button', { name: 'Message' })).toBeNull()
   })
@@ -200,7 +197,7 @@ describe('removing an agent', () => {
 })
 
 describe('once the experiment has started', () => {
-  it.each([PlatformExperimentStatus.RUNNING, PlatformExperimentStatus.CLOSED])('shows the roster and nothing to change it with: %s', async status => {
+  it.each(['running', 'closed'])('shows the roster and nothing to change it with: %s', async status => {
     show(status)
     expect(await screen.findByRole('cell', { name: 'ag-old' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /^Add/ })).toBeNull()
@@ -209,7 +206,7 @@ describe('once the experiment has started', () => {
 
   it('still shows a self-run agent\'s token, which its operator may need to restart it', async () => {
     roster = [signup('ag-self', false)]
-    show(PlatformExperimentStatus.RUNNING)
+    show('running')
     await userEvent.click(await screen.findByRole('button', { name: 'Show token' }))
     expect((await screen.findByTestId('secret')).textContent).toContain('HL_TOKEN=hls_token-of-ag-self')
   })
@@ -219,7 +216,7 @@ describe('an experiment waiting to start', () => {
   const waits = { reason: 'baseline_required', waits_for: 'coordinator' as const, summary: 'No usable baseline is measured yet.', message: 'Add a baseline agent with `hl platform-experiments agents add --hosted --role baseline --platform-experiment pe-1`: none has joined. platform experiment pe-1 has no baseline declared' }
 
   it('offers nothing to start it with', async () => {
-    show(PlatformExperimentStatus.OPEN, { status_reason: waits })
+    show('open', { status_reason: waits })
     await screen.findByRole('cell', { name: 'ag-old' })
     expect(screen.queryByRole('button', { name: /^Start/ })).toBeNull()
   })
@@ -232,7 +229,7 @@ describe('agent types in the roster', () => {
 
   it('names each agent\'s type, an unknown type by its id', async () => {
     roster = [signup('ag-1', true, 'at-lr'), signup('ag-2', true, 'data-search'), signup('ag-3', true, 'at-gone')]
-    show(PlatformExperimentStatus.RUNNING)
+    show('running')
     await screen.findByText('LR sweeper')
     expect((await row('ag-1')).getByText('LR sweeper')).toBeTruthy()
     expect((await row('ag-2')).getByText('Data search')).toBeTruthy()
@@ -241,7 +238,7 @@ describe('agent types in the roster', () => {
 
   it('says a researcher was cut when max researchers was lowered', async () => {
     roster = [{ ...signup('ag-1', true, 'generalist'), cut_reason: 'max_agents_lowered' }]
-    show(PlatformExperimentStatus.RUNNING)
+    show('running')
     expect(await screen.findByText('Cut, max researchers lowered')).toBeTruthy()
   })
 })

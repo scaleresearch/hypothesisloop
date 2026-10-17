@@ -1,9 +1,9 @@
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { Captioned } from '@/components/ui/captioned'
 import { CollapsibleDescription } from '@/components/ui/collapsible-description'
 import { Section } from '@/components/ui/section'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Pill } from '@/components/ui/text'
+import type { PlatformExperiment } from '@/types/api'
 
 /** The experiment's brief and the metrics it optimizes. */
 export function About({ pe }: { pe: PlatformExperiment }) {

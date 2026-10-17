@@ -5,8 +5,6 @@ import { useRouter } from 'next/navigation'
 import { formatDate, formatDuration } from '@/lib/format'
 import { reasonOf } from '@/lib/phase'
 import { formDraftFromGoal, PLANNING_MOVES } from '@/lib/planning'
-import type { JoinedAgent } from '@/types/agents'
-import type { Draft } from '@/types/planning'
 import { projectPath } from '@/lib/routes'
 import { useTenant } from '@/lib/tenant'
 import { useTick } from '@/lib/tick'
@@ -17,6 +15,7 @@ import { InlineError } from '@/components/ui/status-message'
 import { Steps } from '@/components/ui/steps'
 import { Text } from '@/components/ui/text'
 import { errorMessage } from '@/lib/errors'
+import type { JoinedAgent, PlatformExperiment } from '@/types/api'
 
 
 const STEPS = [
@@ -26,7 +25,7 @@ const STEPS = [
 ]
 
 /** What is happening right now, in a few words, from the draft's reason, its planner's machine and what the planner last said. */
-function nowDoing(pe: Draft, planner: JoinedAgent | undefined): { step: 'starting' | 'planning'; text: string } {
+function nowDoing(pe: PlatformExperiment, planner: JoinedAgent | undefined): { step: 'starting' | 'planning'; text: string } {
   if (reasonOf(pe).reason === 'repository_creating') return { step: 'starting', text: 'Creating your repository…' }
   const instance = planner?.instance
   if (instance?.state !== 'running') return { step: 'starting', text: instance && instance.restarts > 0 ? 'Restarting the planner…' : 'Starting the planner…' }
@@ -34,7 +33,7 @@ function nowDoing(pe: Draft, planner: JoinedAgent | undefined): { step: 'startin
 }
 
 /** Keeps the draft's goal as a draft of the full form and opens it there. */
-function SetUpMyself({ pe }: { pe: Draft }) {
+function SetUpMyself({ pe }: { pe: PlatformExperiment }) {
   const router = useRouter()
   const { project } = useTenant()
   const [moving, setMoving] = useState(false)
@@ -63,7 +62,7 @@ function SetUpMyself({ pe }: { pe: Draft }) {
  * holds planning up, what that is in the platform's words, what it means for the person and what
  * they can do.
  */
-export function PlanningProgress({ pe, planner, readOnly }: { pe: Draft; planner: JoinedAgent | undefined; readOnly: boolean }) {
+export function PlanningProgress({ pe, planner, readOnly }: { pe: PlatformExperiment; planner: JoinedAgent | undefined; readOnly: boolean }) {
   useTick(1_000)
   const reason = reasonOf(pe)
   const revising = reason.reason === 'revising'

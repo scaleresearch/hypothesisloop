@@ -3,7 +3,6 @@
 import { useState } from 'react'
 import useSWR from 'swr'
 import { createAPIKey, fetchAPIKeys, revokeAPIKey } from '@/lib/api/accounts'
-import type { APIKey, CreatedAPIKey } from '@/types/accounts'
 import { errorMessage } from '@/lib/errors'
 import { useTenant } from '@/lib/tenant'
 import { StatusLabel } from '@/components/ui/badge'
@@ -18,6 +17,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Code, Text } from '@/components/ui/text'
 import { keys } from '@/lib/keys'
+import type { APIKey, CreatedAPIKey } from '@/types/api'
 
 const WHOLE_ORG = ''
 

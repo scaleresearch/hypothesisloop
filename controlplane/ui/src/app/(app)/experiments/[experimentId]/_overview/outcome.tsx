@@ -1,4 +1,3 @@
-import type { PlatformExperiment, PlatformExperimentResults } from '@/types/platform-experiments'
 import { AgentLabel } from '@/components/agent-label'
 import { Captioned } from '@/components/ui/captioned'
 import { TextLink } from '@/components/ui/link'
@@ -8,6 +7,7 @@ import { Text } from '@/components/ui/text'
 import { headline } from '@/lib/format'
 import { hypothesisPath } from '@/lib/routes'
 import { bestOf } from './standings'
+import type { PlatformExperiment, PlatformExperimentResults } from '@/types/api'
 
 /** How a closed experiment ended: its leader on the primary metric and the coordinator's summary. */
 export function Outcome({ pe, results, hypothesisText }: {

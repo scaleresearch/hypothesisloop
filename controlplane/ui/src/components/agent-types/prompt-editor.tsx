@@ -4,11 +4,11 @@ import { useRef } from 'react'
 import { clsx } from 'clsx'
 import { Check } from 'lucide-react'
 import { MAX_PROMPT_BYTES, REQUIRED_PLACEHOLDERS, placeholdersIn, placeholdersOf, promptProblems } from '@/lib/agent-types'
-import type { AgentRole } from '@/types/agent-types'
 import { Textarea } from '@/components/ui/input'
 import { Stack } from '@/components/ui/stack'
 import { InlineError } from '@/components/ui/status-message'
 import { Eyebrow, Text } from '@/components/ui/text'
+import type { AgentRole } from '@/types/api'
 
 function kb(n: number): string {
   return `${(n / 1024).toFixed(1)} KB`

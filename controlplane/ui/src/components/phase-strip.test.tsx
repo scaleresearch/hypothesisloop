@@ -3,12 +3,10 @@ import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchPlatformExperimentAgents } from '@/lib/api/agents'
-import type { JoinedAgent } from '@/types/agents'
-import type { Draft, Proposal } from '@/types/planning'
-import { PlatformExperimentStatus } from '@/types/platform-experiments'
-import type { StatusReason } from '@/types/platform-experiments'
 import { PhaseStrip } from '@/components/phase-strip'
 import { formatDate } from '@/lib/format'
+import type { StoredProposal } from '@/lib/planning'
+import type { JoinedAgent, PlatformExperiment, PlatformExperimentStatus, StatusReason } from '@/types/api'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
@@ -17,26 +15,26 @@ vi.mock('next/navigation', () => ({
 }))
 vi.mock('@/lib/api/agents', () => ({ fetchPlatformExperimentAgents: vi.fn() }))
 vi.mock('@/components/platform-experiment-form', () => ({
-  PlatformExperimentDialog: ({ initial }: { initial: Draft }) => <div role="dialog">Edit experiment {initial.name}, budget {initial.budget_accelerator_hours}</div>,
+  PlatformExperimentDialog: ({ initial }: { initial: PlatformExperiment }) => <div role="dialog">Edit experiment {initial.name}, budget {initial.budget_accelerator_hours}</div>,
 }))
 
 const at = '2026-10-05T12:30:00Z'
 
-function experiment(status: `${PlatformExperimentStatus}`, reason: string, more: Partial<Draft> = {}, said: Partial<StatusReason> = {}): Draft {
+function experiment(status: `${PlatformExperimentStatus}`, reason: string, more: Partial<PlatformExperiment> = {}, said: Partial<StatusReason> = {}): PlatformExperiment {
   return {
     id: 'pe-1', project_id: 'prj_1', name: 'Cosine or constant', status,
     status_reason: { reason, message: `the API's sentence for ${reason}`, ...(status === 'closed' ? {} : { waits_for: 'platform' as const }), ...said }, ...more,
-  } as Draft
+  } as PlatformExperiment
 }
 
 function agent(role: JoinedAgent['role'], more: Partial<JoinedAgent> = {}): JoinedAgent {
   return {
-    platform_experiment_id: 'pe-1', agent_id: `ag-${role}`, name: role === 'baseline' ? 'Baseline 1' : 'Planner 1', role, hosted: true, agent_type: role === 'planner' ? 'planner' : 'generalist',
+    platform_experiment_id: 'pe-1', agent_id: `ag-${role}`, name: role === 'baseline' ? 'Baseline 1' : 'Planner 1', role, hosted: true, agent_type: role === 'planner' ? 'planner' : 'generalist', model: '', hyperparameters: null,
     actor: { kind: 'coordinator', id: 'pe-1', name: 'coordinator' }, at_work: false, signed_up_at: at, instance: { state: 'running', restarts: 0, stopped: false }, ...more,
   }
 }
 
-function show(pe: Draft) {
+function show(pe: PlatformExperiment) {
   return render(<SWRConfig value={{ provider: () => new Map() }}><PhaseStrip pe={pe} jobs={[]} /></SWRConfig>)
 }
 
@@ -93,7 +91,7 @@ describe('the phase strip', () => {
 })
 
 describe('whose move it is', () => {
-  const waits = (reason: string, who: StatusReason['waits_for'], more: Partial<Draft> = {}) =>
+  const waits = (reason: string, who: StatusReason['waits_for'], more: Partial<PlatformExperiment> = {}) =>
     experiment('open', reason, { baseline_job_id: 'job-base', ...more }, { waits_for: who, message: `It waits: ${reason}.` })
   const strip = () => within(screen.getByRole('region', { name: 'Where this experiment stands' }))
 
@@ -158,7 +156,7 @@ describe('the baseline agent in the phase strip', () => {
 // Once a proposal was accepted the page had no way back to it: what was proposed, the planner's
 // questions and the answers given, and who accepted it were gone from sight.
 describe('the proposal of an accepted experiment', () => {
-  const proposal: Proposal = {
+  const proposal: StoredProposal = {
     experiment: {
       name: 'Schedules on tiny transformers',
       description: 'Train the small transformer in train.py and report val_loss.',
@@ -167,10 +165,13 @@ describe('the proposal of an accepted experiment', () => {
     budget_accelerator_hours: 6,
     duration_hours: 4,
     baseline_minutes: 30,
+    goal_version: 1,
     agents: [{}, {}],
     accelerator_type: 'rtx-4090',
+    image: 'pytorch',
     metric_reason: 'Validation loss on held-out text is the goal itself.',
     measurement: 'bench.py scores a split the training never reads.',
+    sizing_reason: 'An estimate, nothing has run.',
     questions: [
       { question: 'How big a win counts?', answer: '20% lower loss.' },
       { question: 'Which batch sizes are held equal?', answer: '32 only.' },

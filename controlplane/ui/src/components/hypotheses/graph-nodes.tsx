@@ -5,7 +5,6 @@ import { Handle, Position as Side, useStore } from '@xyflow/react'
 import type { Node, NodeHandle, NodeProps, NodeTypes, ReactFlowState } from '@xyflow/react'
 import { clsx } from 'clsx'
 import { Plus } from 'lucide-react'
-import type { HypothesisGraphNode, ObjectiveEvidence } from '@/types/hypotheses'
 import { verdictBy } from '@/components/actor'
 import { StatusLabel } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -14,13 +13,14 @@ import { semantic, statusColor, statusTone, tint } from '@/lib/colors'
 import { NODE_HEIGHT, NODE_WIDTH } from '@/lib/hypothesis-graph'
 import { addHereLabel } from '@/components/hypotheses/editor-controls'
 import { NodeMeta, ObjectiveMeta } from '@/components/hypotheses/node-meta'
+import type { GraphNode, ObjectiveEvidence } from '@/types/api'
 
-export type HypothesisNodeData = { item: HypothesisGraphNode }
+export type HypothesisNodeData = { item: GraphNode }
 type ObjectiveNodeData = { label: string; objective: ObjectiveEvidence }
 
 // One data object per idea object, so a memoized node whose idea a poll left unchanged is skipped.
-const nodeData = new WeakMap<HypothesisGraphNode, HypothesisNodeData>()
-export function dataOf(item: HypothesisGraphNode): HypothesisNodeData {
+const nodeData = new WeakMap<GraphNode, HypothesisNodeData>()
+export function dataOf(item: GraphNode): HypothesisNodeData {
   let data = nodeData.get(item)
   if (!data) nodeData.set(item, (data = { item }))
   return data

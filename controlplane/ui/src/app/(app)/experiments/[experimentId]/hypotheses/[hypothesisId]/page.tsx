@@ -8,8 +8,6 @@ import { useRouter } from 'next/navigation'
 import { ReadOnlyProvider, useExperimentAccess } from '@/lib/read-only'
 import { experimentPath, hypothesisPath, jobPath } from '@/lib/routes'
 import { fetchHypothesis } from '@/lib/api/hypotheses'
-import type { HypothesisLink } from '@/types/hypotheses'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { InsetCard, RowLink } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { CopyButton } from '@/components/ui/copy-button'
@@ -30,9 +28,10 @@ import { Branch, Commit } from '@/components/code-ref'
 import { graphHref, linkGroups } from '@/lib/hypothesis-graph'
 import { envSettings, filedAfterVerdict, variedEnvKeys } from '@/lib/hypothesis-progress'
 import { keys } from '@/lib/keys'
+import type { Link, PlatformExperiment } from '@/types/api'
 
 function LinkRow({ link, platformExperimentID, pe }: {
-  link: HypothesisLink
+  link: Link
   platformExperimentID: string
   pe: PlatformExperiment | undefined
 }) {

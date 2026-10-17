@@ -4,7 +4,6 @@ import { useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Plus, X } from 'lucide-react'
 import { clsx } from 'clsx'
-import type { HypothesisLinkType } from '@/types/hypotheses'
 import { Badge } from '@/components/ui/badge'
 import { Button, Chip, RowButton } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -13,6 +12,7 @@ import { Callout, InlineError } from '@/components/ui/status-message'
 import { Eyebrow, Text } from '@/components/ui/text'
 import { LINK_KINDS, LINK_KIND_HINTS, LINK_KIND_LABELS, findIdeas } from '@/lib/hypothesis-graph'
 import { nodeLabel, useEditor } from '@/components/hypotheses/editor'
+import type { LinkType } from '@/types/api'
 
 /** Stands where an idea would be added to a closed experiment. */
 function ClosedNote() {
@@ -93,9 +93,9 @@ export function IdeaSearch({ placeholder = 'Find an idea by its text' }: { place
 }
 
 function KindChips({ value, onChange, kinds = LINK_KINDS }: {
-  value: HypothesisLinkType | null
-  onChange: (kind: HypothesisLinkType) => void
-  kinds?: HypothesisLinkType[]
+  value: LinkType | null
+  onChange: (kind: LinkType) => void
+  kinds?: LinkType[]
 }) {
   return (
     <Inline gap="xs" role="group" aria-label="Kind of link">

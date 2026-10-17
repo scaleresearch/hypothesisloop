@@ -9,7 +9,6 @@ import { TextLink } from '@/components/ui/link'
 import { fetchOrgClusters } from '@/lib/api/clusters'
 import { cancelExperiment, fetchExperimentsPage, fetchExperimentStats } from '@/lib/api/jobs'
 import { fetchPlatformExperiment } from '@/lib/api/platform-experiments'
-import type { Experiment } from '@/types/jobs'
 import { Page } from '@/components/ui/page'
 import { AgentSelect } from '@/components/agent-select'
 import { PlatformExperimentName } from '@/components/platform-experiment-name'
@@ -39,6 +38,7 @@ import { variedEnvByHypothesis, variedEnvSettings } from '@/lib/hypothesis-progr
 import { BASELINE_JOB, JobHypothesis, measuresBaseline } from '@/components/job-hypothesis'
 import { keys } from '@/lib/keys'
 import { POLL } from '@/lib/poll'
+import type { Experiment } from '@/types/api'
 
 const CANCELABLE = new Set(['SUBMITTED', 'QUEUED', 'RUNNING'])
 const PAGE_SIZE = 25

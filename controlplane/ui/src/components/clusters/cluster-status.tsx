@@ -1,14 +1,14 @@
-import type { OrgCluster } from '@/types/clusters'
 import { Badge, StatusLabel } from '@/components/ui/badge'
 import { Stack } from '@/components/ui/stack'
 import { Code, Text } from '@/components/ui/text'
 import { formatDate, relTime } from '@/lib/format'
+import type { ListedCluster } from '@/types/api'
 
 /**
  * Whether the cluster's agent is connected, when it was last heard from, the version it runs and
  * whether that is the platform's own, and what the platform last refused it with.
  */
-export function ClusterStatus({ cluster: c }: { cluster: OrgCluster }) {
+export function ClusterStatus({ cluster: c }: { cluster: ListedCluster }) {
   return (
     <Stack gap="xs" start>
       <StatusLabel tone={c.connected ? 'success' : 'danger'}>{c.connected ? 'Connected' : 'Disconnected'}</StatusLabel>

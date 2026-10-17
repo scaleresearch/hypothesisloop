@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation'
 import useSWR, { useSWRConfig } from 'swr'
 import { archiveAgentType, editAgentType, fetchAgentType } from '@/lib/api/agent-types'
 import { ApiError } from '@/lib/api/request'
-import type { AgentType, EditedAgentType } from '@/types/agent-types'
 import { APPLIES_LIVE, describeType, descriptionProblem, nameProblem, promptProblems, roleOf, said } from '@/lib/agent-types'
 import { relTime } from '@/lib/format'
 import { agentTypesPath } from '@/lib/routes'
@@ -26,9 +25,10 @@ import { Inline, Stack } from '@/components/ui/stack'
 import { Callout, ErrorMessage, Loading } from '@/components/ui/status-message'
 import { Code, Text } from '@/components/ui/text'
 import { keys } from '@/lib/keys'
+import type { CurrentAgentType, EditedAgentType } from '@/types/api'
 
 // Why the person cannot edit the type, or null when they can.
-function readOnlyReason(t: AgentType, administers: boolean, orgName: string): string | null {
+function readOnlyReason(t: CurrentAgentType, administers: boolean, orgName: string): string | null {
   if (t.builtin) return 'Built-in types are read-only for everyone. Duplicate it to get a copy you can edit.'
   if (t.archived_at) return `Archived ${relTime(t.archived_at)}. It takes no new agents and can no longer be edited. Duplicate it to start a new type from it.`
   if (!administers) return `Only an owner of ${orgName} can edit agent types.`
@@ -60,7 +60,7 @@ function Saved({ edited, onDismiss }: { edited: EditedAgentType | 'renamed'; onD
   )
 }
 
-function ArchiveDialog({ type, onClose, onArchived }: { type: AgentType; onClose: () => void; onArchived: () => Promise<unknown> }) {
+function ArchiveDialog({ type, onClose, onArchived }: { type: CurrentAgentType; onClose: () => void; onArchived: () => Promise<unknown> }) {
   const { org } = useTenant()
   const [busy, setBusy] = useState(false)
   const [refusal, setRefusal] = useState<{ inUse: boolean; message: string } | null>(null)
@@ -100,7 +100,7 @@ function ArchiveDialog({ type, onClose, onArchived }: { type: AgentType; onClose
 }
 
 function Editor({ type, editable, onSaved, onReload }: {
-  type: AgentType
+  type: CurrentAgentType
   editable: boolean
   onSaved: (edited: EditedAgentType) => Promise<unknown>
   onReload: () => Promise<unknown>
@@ -225,7 +225,7 @@ export function AgentTypeDetail({ typeID }: { typeID: string }) {
   const [archiving, setArchiving] = useState(false)
   const [saved, setSaved] = useState<{ edited: EditedAgentType; renamed: boolean } | null>(null)
 
-  async function refresh(next?: AgentType) {
+  async function refresh(next?: CurrentAgentType) {
     await mutateType(next)
     await mutate(keys.agentTypes(org.id))
   }

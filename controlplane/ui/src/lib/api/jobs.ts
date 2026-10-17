@@ -1,6 +1,6 @@
 import { apiFetch, apiFetchPage, apiSend, withQuery } from '@/lib/api/request'
 import type { Page } from '@/lib/api/request'
-import type { Experiment, ExperimentStats, MetricDataPoint } from '@/types/jobs'
+import type { Experiment, ExperimentStats, MetricDataPoint } from '@/types/api'
 
 // Field names are sent verbatim as query params, so they must match the API's own names.
 interface ExperimentsParams {

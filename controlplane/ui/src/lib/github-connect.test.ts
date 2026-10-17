@@ -3,7 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { beginGitHubInstall } from '@/lib/api/github'
-import type { GitHubInstallation } from '@/types/github'
+import type { OrgGitHubInstallation } from '@/types/api'
 
 vi.mock('@/lib/auth', () => ({ accessToken: vi.fn(), endSession: vi.fn() }))
 vi.mock('@/lib/api/github', async importActual => ({
@@ -17,7 +17,7 @@ let ApiError: typeof import('@/lib/api/request').ApiError
 
 const INSTALL = 'https://github.test/apps/hl/installations/new'
 const RETURN = '/projects/prj_1/experiments?new=1'
-const installation: GitHubInstallation = { org_id: 'org_a', installation_id: 7, account_login: 'acme', account_type: 'Organization', connected_actor: { kind: 'user', id: 'u1', name: 'Ada' }, connected_at: '2026-01-01T00:00:00Z', default: true }
+const installation: OrgGitHubInstallation = { org_id: 'org_a', installation_id: 7, account_login: 'acme', account_type: 'Organization', connected_actor: { kind: 'user', id: 'u1', name: 'Ada' }, connected_at: '2026-01-01T00:00:00Z', default: true }
 
 let lib: Module
 let finish: ReturnType<typeof vi.fn>

@@ -1,8 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { addHumanHypothesisComment, addHumanHypothesisLink } from '@/lib/api/hypotheses'
-import type { HypothesisLinkType, HypothesisSearchHit, HypothesisWithJobs } from '@/types/hypotheses'
+import { addHumanHypothesisComment, addHumanHypothesisLink, type HypothesisSearchHit } from '@/lib/api/hypotheses'
 import { Button, Chip } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/input'
 import { InlineError } from '@/components/ui/status-message'
@@ -13,10 +12,11 @@ import { AgentLabel } from '@/components/agent-label'
 import { useReadOnly } from '@/lib/read-only'
 import { LINK_KINDS, LINK_KIND_HINTS, LINK_KIND_LABELS } from '@/lib/hypothesis-graph'
 import { errorMessage } from '@/lib/errors'
+import type { HypothesisWithJobs, LinkType } from '@/types/api'
 
 // From an agent's hypothesis only that agent links; one no agent owns is anyone's.
 export function AddLinkForm({ hypothesis, onAdded }: { hypothesis: HypothesisWithJobs; onAdded: () => void }) {
-  const [type, setType] = useState<HypothesisLinkType>('related')
+  const [type, setType] = useState<LinkType>('related')
   const [target, setTarget] = useState<HypothesisSearchHit | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')

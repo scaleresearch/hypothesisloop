@@ -2,7 +2,6 @@
 
 import useSWR from 'swr'
 import { fetchAllClusters, fetchResourceCapacity } from '@/lib/api/clusters'
-import type { ClusterInfo, ClustersResponse } from '@/types/clusters'
 import { useTenant } from '@/lib/tenant'
 import { budgetUnit, unitCount, unitRate } from '@/lib/units'
 import { OrgClusters } from '@/components/clusters/org-clusters'
@@ -17,6 +16,7 @@ import { Heading, Text } from '@/components/ui/text'
 import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { keys } from '@/lib/keys'
 import { POLL } from '@/lib/poll'
+import type { AllClusters, ClusterInfo } from '@/types/cluster-agent-api'
 
 function AllClustersCounts({ clusters }: { clusters: ClusterInfo[] }) {
   const connected = clusters.filter(c => c.connected).length
@@ -39,7 +39,7 @@ function AllClustersCounts({ clusters }: { clusters: ClusterInfo[] }) {
 
 // Every org's clusters with their live occupancy, which the API answers for staff alone.
 function AllClusters() {
-  const { data, error, isLoading } = useSWR<ClustersResponse>(
+  const { data, error, isLoading } = useSWR<AllClusters>(
     keys.allClusters(),
     fetchAllClusters,
     { refreshInterval: POLL.live },
@@ -142,7 +142,7 @@ function LiveCapacity() {
                           <span className="text-muted"> / {unitCount(a.kind, a.total)}</span>
                         </td>
                       )}
-                      <td className={num}>{unitRate(a.kind, a.acch_per_hour)}</td>
+                      <td className={num}>{unitRate(a.kind, a.acch_per_hour ?? 0)}</td>
                     </tr>
                   ))}
                 </tbody>

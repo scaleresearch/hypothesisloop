@@ -1,11 +1,11 @@
 'use client'
 
 import { clsx } from 'clsx'
-import type { Actor as ActorRecord } from '@/types/actors'
 import { relTime } from '@/lib/format'
 import { Badge } from '@/components/ui/badge'
 import { Text } from '@/components/ui/text'
 import { useAgentName } from '@/components/agent-label'
+import type { Actor as ActorRecord, Hypothesis } from '@/types/api'
 
 const UNVERIFIED = 'Written before the platform kept who wrote a record. The name is the one stated then, and no account stands behind it.'
 
@@ -30,12 +30,12 @@ export function actorLabel(actor: ActorRecord, agentID = '', agentName = agentID
 }
 
 /** Who gave a verdict and when, empty while none was given. */
-export function verdictBy(h: { agent_id: string; status_actor: ActorRecord | null; status_changed_at: string | null }): string {
+export function verdictBy(h: Pick<Hypothesis, 'agent_id' | 'status_actor' | 'status_changed_at'>): string {
   if (h.status_changed_at == null) return ''
   return `${h.status_actor ? `by ${actorLabel(h.status_actor, h.agent_id)} · ` : ''}${relTime(h.status_changed_at)}`
 }
 
-type Judged = { status: string; agent_id: string; status_actor: ActorRecord | null; status_changed_at: string | null }
+type Judged = Pick<Hypothesis, 'status' | 'agent_id' | 'status_actor' | 'status_changed_at'>
 
 /** A hypothesis's verdict with who gave it and when. Nothing while none was given. */
 export function Verdict({ hypothesis: h }: { hypothesis: Judged }) {

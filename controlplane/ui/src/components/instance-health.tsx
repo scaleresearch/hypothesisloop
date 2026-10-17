@@ -1,6 +1,5 @@
 'use client'
 
-import type { AgentInstance } from '@/types/agents'
 import type { Tone } from '@/lib/colors'
 import { relTime } from '@/lib/format'
 import { useTick } from '@/lib/tick'
@@ -9,6 +8,7 @@ import { CodeBlock } from '@/components/ui/code-block'
 import { Disclosure } from '@/components/ui/disclosure'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Text } from '@/components/ui/text'
+import type { AgentInstance } from '@/types/api'
 
 const STATE_TONE: Record<AgentInstance['state'], Tone> = {
   waiting: 'neutral',

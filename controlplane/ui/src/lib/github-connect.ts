@@ -2,10 +2,10 @@ import { useEffect, useState } from 'react'
 import useSWR, { useSWRConfig } from 'swr'
 import { beginGitHubInstall, fetchGitHubApp } from '@/lib/api/github'
 import { ApiError } from '@/lib/api/request'
-import type { GitHubInstallation, GitHubInstallFinished, GitHubInstallStart } from '@/types/github'
 import { orgPath } from '@/lib/routes'
 import { errorMessage } from '@/lib/errors'
 import { keys, githubReads } from '@/lib/keys'
+import type { InstallFinished, InstallStart, OrgGitHubInstallation } from '@/types/api'
 
 /**
  * The platform's GitHub App, read under one key by every component that needs it. An error whose
@@ -24,7 +24,7 @@ export function githubCardPath(orgID: string): string {
 }
 
 /** Where on GitHub the owner of an account reviews the App's installation: permissions, suspension. */
-export function installationSettingsURL(installation: Pick<GitHubInstallation, 'installation_id' | 'account_login' | 'account_type'>): string {
+export function installationSettingsURL(installation: Pick<OrgGitHubInstallation, 'installation_id' | 'account_login' | 'account_type'>): string {
   const id = installation.installation_id
   return installation.account_type === 'User'
     ? `https://github.com/settings/installations/${id}`
@@ -41,7 +41,7 @@ function inApp(path: unknown): path is string {
 // is told apart by its state; a change made on GitHub without one asks every tab to read again.
 const CHANNEL = 'hl-github-install'
 
-type InstallOutcome = { ok: true; installation: GitHubInstallation } | { ok: false; message: string; reason?: string }
+type InstallOutcome = { ok: true; installation: OrgGitHubInstallation } | { ok: false; message: string; reason?: string }
 
 type Message = { state: string; outcome: InstallOutcome } | { changed: true }
 
@@ -72,7 +72,7 @@ const BLOCKED = 'Your browser blocked the GitHub tab. Allow pop-ups for this sit
  */
 export async function openInstall(orgID: string, returnTo: string, deps: {
   open: () => InstallTab | null
-  begin: (orgID: string, returnTo: string) => Promise<GitHubInstallStart>
+  begin: (orgID: string, returnTo: string) => Promise<InstallStart>
 }): Promise<string> {
   const tab = deps.open()
   if (!tab) throw new Error(BLOCKED)
@@ -90,7 +90,7 @@ export async function openInstall(orgID: string, returnTo: string, deps: {
 export type Install =
   | { phase: 'idle' }
   | { phase: 'waiting'; state: string }
-  | { phase: 'connected'; installation: GitHubInstallation }
+  | { phase: 'connected'; installation: OrgGitHubInstallation }
   | { phase: 'failed'; message: string; reason?: string }
 
 const IDLE: Install = { phase: 'idle' }
@@ -141,7 +141,7 @@ const NO_INSTALLATION = 'GitHub returned without an installation, so nothing was
  * told to the tab the install started in. A return with no state, from a change made on GitHub,
  * has every tab read again and connects nothing.
  */
-export function takeReturn(query: string, finish: (state: string, installationID: number) => Promise<GitHubInstallFinished>): Promise<ReturnView> {
+export function takeReturn(query: string, finish: (state: string, installationID: number) => Promise<InstallFinished>): Promise<ReturnView> {
   // React runs an effect twice in development, and a state works once: the second run is
   // answered what the first was.
   if (taken?.query !== query) taken = { query, view: take(new URLSearchParams(query), finish) }
@@ -150,7 +150,7 @@ export function takeReturn(query: string, finish: (state: string, installationID
 
 let taken: { query: string; view: Promise<ReturnView> } | null = null
 
-async function take(params: URLSearchParams, finish: (state: string, installationID: number) => Promise<GitHubInstallFinished>): Promise<ReturnView> {
+async function take(params: URLSearchParams, finish: (state: string, installationID: number) => Promise<InstallFinished>): Promise<ReturnView> {
   const state = params.get('state')
   const installed = Number(params.get('installation_id'))
   const hasInstallation = Number.isSafeInteger(installed) && installed > 0

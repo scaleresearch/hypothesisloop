@@ -1,5 +1,4 @@
-import { PlatformExperimentStatus } from '@/types/platform-experiments'
-import type { PlatformExperiment, StatusReason } from '@/types/platform-experiments'
+import type { PlatformExperiment, StatusReason } from '@/types/api'
 
 export type Phase = 'planning' | 'proposal' | 'baseline' | 'running' | 'closed'
 
@@ -67,10 +66,10 @@ export const OWNER_ACTIONS: Record<string, OwnerAction | null> = {
  */
 export function phaseOf(pe: Stated & { proposed_at?: string }): Phase {
   switch (pe.status) {
-    case PlatformExperimentStatus.DRAFT:
+    case 'draft':
       return pe.proposed_at || reasonOf(pe).reason === 'declined' ? 'proposal' : 'planning'
-    case PlatformExperimentStatus.OPEN: return 'baseline'
-    case PlatformExperimentStatus.RUNNING: return 'running'
-    case PlatformExperimentStatus.CLOSED: return 'closed'
+    case 'open': return 'baseline'
+    case 'running': return 'running'
+    case 'closed': return 'closed'
   }
 }

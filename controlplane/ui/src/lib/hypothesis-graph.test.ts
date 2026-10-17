@@ -1,21 +1,21 @@
 import { describe, expect, it } from 'vitest'
 import { COLUMN, ROW, extendLayout, layoutGraph, linkPlanner, objectiveFinding } from '@/lib/hypothesis-graph'
-import type { HypothesisGraph, HypothesisGraphNode } from '@/types/hypotheses'
+import type { GraphNode, HypothesisGraph } from '@/types/api'
 
 const at = '2026-01-01T00:00:00Z'
 const actor = { kind: 'user' as const, id: 'u1', name: 'Ada' }
 
-function idea(id: string, buildsOn: string[], agentID = '', created = at): HypothesisGraphNode {
+function idea(id: string, buildsOn: string[], agentID = '', created = at): GraphNode {
   return {
-    id, text: id, platform_experiment_id: 'pe', status: 'open', agent_id: agentID, actor, status_actor: null, status_changed_at: null,
+    id, text: id, platform_experiment_id: 'pe', status: 'open', agent_id: agentID, actor, status_changed_at: null,
     created_at: created, builds_on: buildsOn, finding_count: 0, comment_count: 0, child_count: 0,
   }
 }
 
-function graphOf(nodes: HypothesisGraphNode[], cross: Array<[string, 'related' | 'contradicts', string]> = []): HypothesisGraph {
+function graphOf(nodes: GraphNode[], cross: Array<[string, 'related' | 'contradicts', string]> = []): HypothesisGraph {
   return {
     root: 'pe',
-    objective: {},
+    objective: { comment_count: 0, comments: [] },
     nodes,
     edges: [
       ...nodes.flatMap(n => n.builds_on.map(to => ({ from: n.id, to, type: 'builds_on' as const, agent_id: n.agent_id, actor, created_at: at }))),
@@ -67,7 +67,7 @@ describe('a node that joins the graph', () => {
 
 describe('objectiveFinding', () => {
   const metric = { name: 'ratio', value: 1.5, basis: 'raw' }
-  const reference = { id: 'f2', hypothesis_id: 'pe', experiment_id: 'job-ref', agent_id: 'b', actor, summary: 'Reference', created_at: at }
+  const reference = { id: 'f2', hypothesis_id: 'pe', platform_experiment_id: 'pe', experiment_id: 'job-ref', agent_id: 'b', actor, summary: 'Reference', created_at: at }
 
   it('shows the baseline job write-up over a newer one on the objective', () => {
     expect(objectiveFinding({ finding: reference, best_job: { id: 'job-control', metric, summary: 'Control' } }))

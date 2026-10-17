@@ -5,15 +5,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchAgentTypes } from '@/lib/api/agent-types'
 import { fetchPlatformExperimentAgents } from '@/lib/api/agents'
 import { updatePlatformExperiment } from '@/lib/api/platform-experiments'
-import type { Me } from '@/types/accounts'
-import type { JoinedAgent } from '@/types/agents'
-import { PlatformExperimentStatus } from '@/types/platform-experiments'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { ReadOnlyProvider } from '@/lib/read-only'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { ResearcherPool } from '@/components/researcher-pool'
 import { CATALOG } from '@/test-agent-types'
 import { choose } from '@/test-select'
+import type { JoinedAgent, Me, PlatformExperiment } from '@/types/api'
 
 vi.mock('@/lib/api/agent-types', () => ({ fetchAgentTypes: vi.fn() }))
 vi.mock('@/lib/api/agents', () => ({ fetchPlatformExperimentAgents: vi.fn() }))
@@ -29,12 +26,12 @@ const me: Me = {
 function researcher(id: string, hour: number, agentType = 'generalist'): JoinedAgent {
   return {
     platform_experiment_id: 'pe-1', agent_id: id, name: id, role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' },
-    hosted: true, agent_type: agentType, model: 'm', at_work: true, signed_up_at: `2026-01-01T0${hour}:00:00Z`,
+    hosted: true, agent_type: agentType, model: 'm', hyperparameters: null, at_work: true, signed_up_at: `2026-01-01T0${hour}:00:00Z`,
   }
 }
 
 const pe = {
-  id: 'pe-1', project_id: 'prj_1', status: PlatformExperimentStatus.RUNNING, max_agents: 4, editable: ['name', 'description', 'duration_hours', 'max_agents', 'researchers'],
+  id: 'pe-1', project_id: 'prj_1', status: 'running', max_agents: 4, editable: ['name', 'description', 'duration_hours', 'max_agents', 'researchers'],
   researchers: [{ agent_type: 'generalist', model: 'm', count: 2 }, { agent_type: 'at-lr', model: 'm', count: 1 }],
   researchers_at_work: { total: 3, pool: [{ agent_type: 'generalist', model: 'm', at_work: 2 }, { agent_type: 'at-lr', model: 'm', at_work: 1 }], outside_pool: 0 },
 } as PlatformExperiment
@@ -122,7 +119,7 @@ describe('the researchers of an experiment', () => {
     await screen.findByText('3 at work of 4 max')
     expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
     unmount()
-    show(false, { ...pe, status: PlatformExperimentStatus.CLOSED, editable: undefined })
+    show(false, { ...pe, status: 'closed', editable: undefined })
     await screen.findByText('3 at work of 4 max')
     expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
   })

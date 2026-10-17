@@ -1,4 +1,3 @@
-import type { HypothesisEvidence } from '@/types/hypotheses'
 import { verdictBy } from '@/components/actor'
 import { Badge } from '@/components/ui/badge'
 import { TextLink } from '@/components/ui/link'
@@ -8,6 +7,7 @@ import { Text } from '@/components/ui/text'
 import { shortId } from '@/lib/format'
 import { filedAfterVerdict } from '@/lib/hypothesis-progress'
 import { hypothesisPath, jobPath } from '@/lib/routes'
+import type { HypothesisEvidence } from '@/types/api'
 
 /** The hypotheses with a verdict or a result, best result first. */
 export function Findings({ experimentId, findings, direction }: {

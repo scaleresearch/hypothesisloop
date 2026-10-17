@@ -4,11 +4,10 @@ import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { beginGitHubInstall, checkGitHubInstallation, disconnectGitHubInstallation, fetchGitHubApp, fetchGitHubInstallations } from '@/lib/api/github'
 import { ApiError } from '@/lib/api/request'
-import type { Me } from '@/types/accounts'
-import type { GitHubInstallation } from '@/types/github'
 import { takeReturn } from '@/lib/github-connect'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { OrgGitHub } from '@/components/org-github'
+import type { Me, OrgGitHubInstallation } from '@/types/api'
 
 vi.mock('@/lib/api/github', async importActual => ({
   ...(await importActual<typeof import('@/lib/api/github')>()),
@@ -23,10 +22,10 @@ const owner: Me = {
 }
 const member: Me = { ...owner, user_id: 'u2', orgs: [{ ...owner.orgs[0], role: 'member' }] }
 const app = { slug: 'hl', install_url: 'https://github.test/apps/hl/installations/new', new_repository_url: 'https://github.test/new' }
-const acme: GitHubInstallation = { org_id: 'org_a', installation_id: 7, account_login: 'acme', connected_actor: { kind: 'user', id: 'u1', name: 'Ada Lovelace' }, connected_at: at, default: false }
-const lab: GitHubInstallation = { org_id: 'org_a', installation_id: 9, account_login: 'lab', connected_actor: { kind: 'key', id: 'key_3', name: 'ci' }, connected_at: at, default: false }
+const acme: OrgGitHubInstallation = { org_id: 'org_a', installation_id: 7, account_login: 'acme', connected_actor: { kind: 'user', id: 'u1', name: 'Ada Lovelace' }, connected_at: at, default: false }
+const lab: OrgGitHubInstallation = { org_id: 'org_a', installation_id: 9, account_login: 'lab', connected_actor: { kind: 'key', id: 'key_3', name: 'ci' }, connected_at: at, default: false }
 
-let installations: GitHubInstallation[]
+let installations: OrgGitHubInstallation[]
 
 function show(as: Me = owner) {
   const resolved = resolveTenant(as, '')

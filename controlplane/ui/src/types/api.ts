@@ -2019,7 +2019,7 @@ export interface components {
             /** Format: int64 */
             available: number;
             job_images?: string[];
-            kind: string;
+            kind: components["schemas"]["TypeKind"];
             /** Format: int64 */
             per_node_available: number;
             /** @description What the platform adds to every node of a job on this type, by Kubernetes resource name, such as the hugepages a Tenstorrent Blackhole chip's driver maps. A job states none of it: it is added over the job's own accelerator_pod_resources. */
@@ -2233,7 +2233,7 @@ export interface components {
             from: "coordinator" | "owner";
             text: string;
         };
-        AgentMessagesBody: {
+        AgentMessages: {
             /** @description The messages sent, one for each agent sent to. */
             messages: components["schemas"]["AgentMessage"][];
             /** @description With all, each researcher not sent to because the sender sent it the most an hour allows. Absent when none was refused. */
@@ -2554,7 +2554,7 @@ export interface components {
             name: string;
             project_id?: string;
         };
-        CreateAgentTypeBody: {
+        CreateAgentTypeRequest: {
             /** @description One line on what agents of the type do, at most 200 characters. With from, the copy has the source's. */
             description?: string;
             /** @description Copy this agent type, a built-in one or the org's own: its role, prompt and settings, at its current version. With it, only name may be given. */
@@ -2713,7 +2713,7 @@ export interface components {
             /** @description Why no experiment is proposed, and what would make the goal plannable. */
             reason: string;
         };
-        EditAgentTypeBody: {
+        EditAgentTypeRequest: {
             /** @description Its description, one line of at most 200 characters, which no version holds either. Left out, it stays as it was. */
             description?: string;
             /**
@@ -2880,7 +2880,7 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
-        ExperimentDraftBody: {
+        ExperimentDraftRequest: {
             /** @description Why the last create from this draft was refused. Left out, none was. */
             failure?: string;
             /** @description The form as the client holds it: a JSON object, stored and returned unread. */
@@ -2970,7 +2970,7 @@ export interface components {
             /** @description The state of POST /orgs/{id}/github-install-states, as GitHub handed it back. */
             state: string;
         };
-        FinishedAgentBody: {
+        FinishedAgent: {
             agents: components["schemas"]["JoinedAgent"][];
             /** @description The hypotheses still open that are the agent's verdict to give, newest first, at most 200: its own, then the ideas of people no agent owns that a completed job of its tested. Each stays open for good unless the agent gives its verdict (POST /hypotheses/{id}/status) while its token still works. Empty when it left none. Nothing is refused for them. */
             open_hypotheses: components["schemas"]["OpenHypothesis"][];
@@ -3368,7 +3368,7 @@ export interface components {
             /** @description Whether its harness last reported its model in a turn or waiting for platform updates, and since when, of the machine it holds now. */
             turn?: components["schemas"]["AgentTurn"];
         };
-        JoinedAgentsBody: {
+        JoinedAgents: {
             agents: components["schemas"]["JoinedAgent"][];
         };
         Limits: {
@@ -3463,8 +3463,8 @@ export interface components {
         };
         Me: {
             key_id?: string;
-            /** @description user, key or staff */
-            kind: string;
+            /** @enum {string} */
+            kind: "user" | "key" | "staff";
             /** @description What this caller may create, absent for staff, who are held to no limit. How much of each is used is read from orgs and projects beside it. */
             limits?: components["schemas"]["Limits"];
             name?: string;
@@ -3582,7 +3582,7 @@ export interface components {
             platform_experiment_id: string;
             usage: components["schemas"]["AgentModelUsage"][];
         };
-        NameBody: {
+        NameRequest: {
             name: string;
         };
         NodeCapacity: {
@@ -3882,7 +3882,7 @@ export interface components {
             platform_experiment_id: string;
             /** @description Each reference metric with the value of every completed job that reported it, whether that job met the constraints, and the machine it ran on, never ranked. */
             references: components["schemas"]["MetricReference"][];
-            status: string;
+            status: components["schemas"]["PlatformExperimentStatus"];
             summary?: string;
         };
         /** @enum {string} */
@@ -4174,14 +4174,14 @@ export interface components {
             /** Format: int64 */
             memory_bytes_total: number;
         };
-        RestoreAgentTypeBody: {
+        RestoreAgentTypeRequest: {
             /**
              * Format: int64
              * @description The version whose prompt and settings the new version holds.
              */
             version: number;
         };
-        RoleBody: {
+        RoleRequest: {
             /** @description owner or member. Any other is refused with reason invalid_role. */
             role: string;
         };
@@ -4303,7 +4303,7 @@ export interface components {
             cluster: string;
             /** Format: int64 */
             free: number;
-            kind: string;
+            kind: components["schemas"]["TypeKind"];
             /** Format: int64 */
             total: number;
         };
@@ -4511,6 +4511,8 @@ export interface components {
             same_zone?: boolean;
             spread_across_hosts?: boolean;
         };
+        /** @enum {string} */
+        TypeKind: "accelerator" | "cpu";
         UpdateClusterRequest: {
             /**
              * Format: int64
@@ -4604,7 +4606,7 @@ export type AgentDataCost = components['schemas']['AgentDataCost'];
 export type AgentHealth = components['schemas']['AgentHealth'];
 export type AgentInstance = components['schemas']['AgentInstance'];
 export type AgentMessage = components['schemas']['AgentMessage'];
-export type AgentMessagesBody = components['schemas']['AgentMessagesBody'];
+export type AgentMessages = components['schemas']['AgentMessages'];
 export type AgentMetricSeries = components['schemas']['AgentMetricSeries'];
 export type AgentModelUsage = components['schemas']['AgentModelUsage'];
 export type AgentQuotaView = components['schemas']['AgentQuotaView'];
@@ -4632,7 +4634,7 @@ export type CloseRequest = components['schemas']['CloseRequest'];
 export type ClusterCapacity = components['schemas']['ClusterCapacity'];
 export type ClusterView = components['schemas']['ClusterView'];
 export type CreateAPIKeyRequest = components['schemas']['CreateAPIKeyRequest'];
-export type CreateAgentTypeBody = components['schemas']['CreateAgentTypeBody'];
+export type CreateAgentTypeRequest = components['schemas']['CreateAgentTypeRequest'];
 export type CreateDraftRequest = components['schemas']['CreateDraftRequest'];
 export type CreateOrgRequest = components['schemas']['CreateOrgRequest'];
 export type CreatePlatformExperimentRequest = components['schemas']['CreatePlatformExperimentRequest'];
@@ -4643,7 +4645,7 @@ export type DataAccess = components['schemas']['DataAccess'];
 export type DataKeyRequest = components['schemas']['DataKeyRequest'];
 export type DataUsage = components['schemas']['DataUsage'];
 export type DeclineRequest = components['schemas']['DeclineRequest'];
-export type EditAgentTypeBody = components['schemas']['EditAgentTypeBody'];
+export type EditAgentTypeRequest = components['schemas']['EditAgentTypeRequest'];
 export type EditHypothesisRequest = components['schemas']['EditHypothesisRequest'];
 export type EditedAgentType = components['schemas']['EditedAgentType'];
 export type EnvironmentAnswer = components['schemas']['EnvironmentAnswer'];
@@ -4652,13 +4654,13 @@ export type ErrorModel = components['schemas']['ErrorModel'];
 export type EventKindDoc = components['schemas']['EventKindDoc'];
 export type Experiment = components['schemas']['Experiment'];
 export type ExperimentDraft = components['schemas']['ExperimentDraft'];
-export type ExperimentDraftBody = components['schemas']['ExperimentDraftBody'];
+export type ExperimentDraftRequest = components['schemas']['ExperimentDraftRequest'];
 export type ExperimentFile = components['schemas']['ExperimentFile'];
 export type ExperimentStats = components['schemas']['ExperimentStats'];
 export type ExperimentStatus = components['schemas']['ExperimentStatus'];
 export type FinishAgentRequest = components['schemas']['FinishAgentRequest'];
 export type FinishInstallRequest = components['schemas']['FinishInstallRequest'];
-export type FinishedAgentBody = components['schemas']['FinishedAgentBody'];
+export type FinishedAgent = components['schemas']['FinishedAgent'];
 export type GraphEdge = components['schemas']['GraphEdge'];
 export type GraphNode = components['schemas']['GraphNode'];
 export type GraphQueryRequest = components['schemas']['GraphQueryRequest'];
@@ -4689,7 +4691,7 @@ export type JobMetric = components['schemas']['JobMetric'];
 export type JobSpec = components['schemas']['JobSpec'];
 export type JobSummaryRequest = components['schemas']['JobSummaryRequest'];
 export type JoinedAgent = components['schemas']['JoinedAgent'];
-export type JoinedAgentsBody = components['schemas']['JoinedAgentsBody'];
+export type JoinedAgents = components['schemas']['JoinedAgents'];
 export type Limits = components['schemas']['Limits'];
 export type Link = components['schemas']['Link'];
 export type LinkSpec = components['schemas']['LinkSpec'];
@@ -4708,7 +4710,7 @@ export type MetricSeriesPoint = components['schemas']['MetricSeriesPoint'];
 export type MetricStandings = components['schemas']['MetricStandings'];
 export type ModelAllowance = components['schemas']['ModelAllowance'];
 export type ModelUsage = components['schemas']['ModelUsage'];
-export type NameBody = components['schemas']['NameBody'];
+export type NameRequest = components['schemas']['NameRequest'];
 export type NodeCapacity = components['schemas']['NodeCapacity'];
 export type Object = components['schemas']['Object'];
 export type ObjectiveEvidence = components['schemas']['ObjectiveEvidence'];
@@ -4748,8 +4750,8 @@ export type RepositoryCheck = components['schemas']['RepositoryCheck'];
 export type ResearcherPoolEntry = components['schemas']['ResearcherPoolEntry'];
 export type ResearchersAtWork = components['schemas']['ResearchersAtWork'];
 export type ResourceCapacity = components['schemas']['ResourceCapacity'];
-export type RestoreAgentTypeBody = components['schemas']['RestoreAgentTypeBody'];
-export type RoleBody = components['schemas']['RoleBody'];
+export type RestoreAgentTypeRequest = components['schemas']['RestoreAgentTypeRequest'];
+export type RoleRequest = components['schemas']['RoleRequest'];
 export type RunBest = components['schemas']['RunBest'];
 export type RunHealth = components['schemas']['RunHealth'];
 export type RunSummaryRequest = components['schemas']['RunSummaryRequest'];
@@ -4777,6 +4779,7 @@ export type SubmitMeta = components['schemas']['SubmitMeta'];
 export type SubmitRequest = components['schemas']['SubmitRequest'];
 export type SummaryReply = components['schemas']['SummaryReply'];
 export type TopologySpec = components['schemas']['TopologySpec'];
+export type TypeKind = components['schemas']['TypeKind'];
 export type UpdateClusterRequest = components['schemas']['UpdateClusterRequest'];
 export type VerdictRequest = components['schemas']['VerdictRequest'];
 export type Waiter = components['schemas']['Waiter'];
@@ -6097,7 +6100,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["NameBody"];
+                "application/json": components["schemas"]["NameRequest"];
             };
         };
         responses: {
@@ -6163,7 +6166,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateAgentTypeBody"];
+                "application/json": components["schemas"]["CreateAgentTypeRequest"];
             };
         };
         responses: {
@@ -6231,7 +6234,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["EditAgentTypeBody"];
+                "application/json": components["schemas"]["EditAgentTypeRequest"];
             };
         };
         responses: {
@@ -6331,7 +6334,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["RestoreAgentTypeBody"];
+                "application/json": components["schemas"]["RestoreAgentTypeRequest"];
             };
         };
         responses: {
@@ -6528,7 +6531,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["NameBody"];
+                "application/json": components["schemas"]["NameRequest"];
             };
         };
         responses: {
@@ -7000,7 +7003,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["RoleBody"];
+                "application/json": components["schemas"]["RoleRequest"];
             };
         };
         responses: {
@@ -7103,7 +7106,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["RoleBody"];
+                "application/json": components["schemas"]["RoleRequest"];
             };
         };
         responses: {
@@ -7169,7 +7172,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["NameBody"];
+                "application/json": components["schemas"]["NameRequest"];
             };
         };
         responses: {
@@ -7451,7 +7454,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["JoinedAgentsBody"];
+                    "application/json": components["schemas"]["JoinedAgents"];
                 };
             };
             /** @description Error */
@@ -7486,7 +7489,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["JoinedAgentsBody"];
+                    "application/json": components["schemas"]["JoinedAgents"];
                 };
             };
             /** @description Error */
@@ -7552,7 +7555,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FinishedAgentBody"];
+                    "application/json": components["schemas"]["FinishedAgent"];
                 };
             };
             /** @description Error */
@@ -8014,7 +8017,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AgentMessagesBody"];
+                    "application/json": components["schemas"]["AgentMessages"];
                 };
             };
             /** @description Error */
@@ -8049,7 +8052,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AgentMessagesBody"];
+                    "application/json": components["schemas"]["AgentMessages"];
                 };
             };
             /** @description Error */
@@ -8501,7 +8504,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["NameBody"];
+                "application/json": components["schemas"]["NameRequest"];
             };
         };
         responses: {
@@ -8567,7 +8570,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ExperimentDraftBody"];
+                "application/json": components["schemas"]["ExperimentDraftRequest"];
             };
         };
         responses: {
@@ -8635,7 +8638,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ExperimentDraftBody"];
+                "application/json": components["schemas"]["ExperimentDraftRequest"];
             };
         };
         responses: {
@@ -8845,6 +8848,7 @@ export const experimentStatusValues: ReadonlyArray<FlattenedDeepRequired<compone
 export const hypothesisStatusValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["HypothesisStatus"]> = ["open", "confirmed", "refuted", "inconclusive"];
 export const joinedAgentEnded_reasonValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["JoinedAgent"]["ended_reason"]> = ["finished", "cut", "replaced", "stopped"];
 export const linkTypeValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["LinkType"]> = ["builds_on", "contradicts", "related"];
+export const meKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Me"]["kind"]> = ["user", "key", "staff"];
 export const metricDefinitionDirectionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["MetricDefinition"]["direction"]> = ["maximize", "minimize"];
 export const metricDefinitionRoleValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["MetricDefinition"]["role"]> = ["ranking", "constraint", "attribute", "reference"];
 export const metricReferenceDirectionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["MetricReference"]["direction"]> = ["maximize", "minimize"];
@@ -8857,4 +8861,5 @@ export const signupReplyEndedValues: ReadonlyArray<FlattenedDeepRequired<compone
 export const signupRoleValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SignupRole"]> = ["competitor", "baseline", "reviewer", "planner"];
 export const similarHypothesisReasonValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SimilarHypothesis"]["reason"]> = ["close_text", "refuted_parent"];
 export const situationMetricDirectionValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["SituationMetric"]["direction"]> = ["maximize", "minimize"];
+export const typeKindValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["TypeKind"]> = ["accelerator", "cpu"];
 export const waiterValues: ReadonlyArray<FlattenedDeepRequired<components>["schemas"]["Waiter"]> = ["owner", "coordinator", "platform"];

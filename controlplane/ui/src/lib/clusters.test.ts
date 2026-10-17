@@ -1,8 +1,8 @@
 import { expect, it } from 'vitest'
 import { clustersInUse } from '@/lib/clusters'
-import type { OrgCluster } from '@/types/clusters'
+import type { ListedCluster } from '@/types/api'
 
-const cluster = (over: Partial<OrgCluster>): OrgCluster => ({ name: 'c', shared: false, enabled: true, created_at: '', owned: false, connected: true, autoscaler_enabled: false, ...over })
+const cluster = (over: Partial<ListedCluster>): ListedCluster => ({ name: 'c', shared: false, enabled: true, created_at: '', owned: false, connected: true, autoscaler_enabled: false, ...over })
 
 // The home page told a new person "0/0 own clusters online, no clusters of your own" while two
 // shared clusters were ready to run their jobs.

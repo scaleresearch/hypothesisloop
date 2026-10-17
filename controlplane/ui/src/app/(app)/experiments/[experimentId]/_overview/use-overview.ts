@@ -3,10 +3,9 @@ import { fetchFindings, fetchHypothesisStats } from '@/lib/api/hypotheses'
 import { fetchExperimentsPage, fetchExperimentStats } from '@/lib/api/jobs'
 import { fetchPlatformExperiment, fetchPlatformExperimentResults, fetchPlatformExperimentTimeseries, fetchStages } from '@/lib/api/platform-experiments'
 import { fetchPlatformExperimentQuotas } from '@/lib/api/quotas'
-import type { AgentMetricSeries, PlatformExperiment, StagesStatus } from '@/types/platform-experiments'
-import type { AgentQuota } from '@/types/quotas'
 import { keys } from '@/lib/keys'
 import { POLL } from '@/lib/poll'
+import type { AgentMetricSeries, AgentQuotaView, PlatformExperiment, StagesStatus } from '@/types/api'
 
 // How many of the newest jobs the page reads, for the jobs table and the metrics picker.
 const RECENT_JOBS = 20
@@ -19,7 +18,7 @@ export function useOverview(id: string) {
   )
   const pe = experiment.data
 
-  const { data: quotas, error: quotasError } = useSWR<AgentQuota[]>(
+  const { data: quotas, error: quotasError } = useSWR<AgentQuotaView[]>(
     keys.quotas(id),
     () => fetchPlatformExperimentQuotas(id),
     { refreshInterval: POLL.standing },

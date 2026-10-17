@@ -8,9 +8,6 @@ import { fetchHosting } from '@/lib/api/hosting'
 import { createDraft } from '@/lib/api/planning'
 import { ApiError } from '@/lib/api/request'
 import { formDraftFromGoal, hostingRefusal, MAX_GOAL_LENGTH } from '@/lib/planning'
-import type { ExperimentDraft } from '@/types/drafts'
-import type { Draft } from '@/types/planning'
-import type { StatusReason } from '@/types/platform-experiments'
 import { useGitHubApp } from '@/lib/github-connect'
 import { GOAL_EXAMPLES } from '@/lib/goal-examples'
 import { BriefGuide } from '@/components/brief-guide'
@@ -24,6 +21,7 @@ import { Text } from '@/components/ui/text'
 import { errorMessage } from '@/lib/errors'
 import { keys } from '@/lib/keys'
 import { POLL } from '@/lib/poll'
+import type { ExperimentDraft, PlatformExperiment, StatusReason } from '@/types/api'
 
 const ASK = 'What do you want to find out?'
 const CONNECT_FIRST = 'Install the GitHub App to start'
@@ -81,7 +79,7 @@ function useTypedExamples(stopped: boolean): string {
  */
 export function GoalInput({ projectID, onCreated, onConfigure }: {
   projectID: string
-  onCreated: (draft: Draft) => void
+  onCreated: (draft: PlatformExperiment) => void
   onConfigure: (draft: ExperimentDraft) => void
 }) {
   const [goal, setGoal] = useState('')

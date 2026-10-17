@@ -1,6 +1,6 @@
-import type { StagesStatus } from '@/types/platform-experiments'
 import { Stack } from '@/components/ui/stack'
 import { Text } from '@/components/ui/text'
+import type { StagesStatus } from '@/types/api'
 
 const percent = (share: number) => Math.round(share * 100)
 

@@ -3,10 +3,9 @@ import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchOrgClusters, registerCluster, removeCluster, setClusterEnabled, setClusterOrder, updateCluster } from '@/lib/api/clusters'
-import type { Me } from '@/types/accounts'
-import type { OrgCluster } from '@/types/clusters'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { OrgClusters } from '@/components/clusters/org-clusters'
+import type { ListedCluster, Me } from '@/types/api'
 
 vi.mock('@/lib/api/clusters', () => ({
   fetchOrgClusters: vi.fn(), registerCluster: vi.fn(), removeCluster: vi.fn(), setClusterEnabled: vi.fn(), setClusterOrder: vi.fn(), updateCluster: vi.fn(),
@@ -23,12 +22,12 @@ const me: Me = {
 const member: Me = { ...me, orgs: [{ ...me.orgs[0], role: 'member' }] }
 const staff: Me = { ...me, kind: 'staff' }
 
-const owned = (name: string, over: Partial<OrgCluster> = {}): OrgCluster =>
+const owned = (name: string, over: Partial<ListedCluster> = {}): ListedCluster =>
   ({ name, org_id: 'org_a', shared: false, enabled: true, created_at: at, owned: true, connected: false, autoscaler_enabled: false, ...over })
-const platform: OrgCluster = { name: 'platform-gpu', shared: true, enabled: true, created_at: at, owned: false, connected: true, autoscaler_enabled: false, place: 4 }
+const platform: ListedCluster = { name: 'platform-gpu', shared: true, enabled: true, created_at: at, owned: false, connected: true, autoscaler_enabled: false, place: 4 }
 
 // In the order the API lists them: the org's own as it ordered them, then the platform's.
-let clusters: OrgCluster[]
+let clusters: ListedCluster[]
 
 function show(as: Me = me) {
   const resolved = resolveTenant(as, '')
@@ -52,7 +51,7 @@ beforeEach(() => {
     return clusters
   })
   vi.mocked(updateCluster).mockImplementation(async (_orgID, name, change) => {
-    clusters = clusters.map(c => (c.name === name ? Object.fromEntries(Object.entries({ ...c, ...change }).filter(([, v]) => v !== 0)) as unknown as OrgCluster : c))
+    clusters = clusters.map(c => (c.name === name ? Object.fromEntries(Object.entries({ ...c, ...change }).filter(([, v]) => v !== 0)) as unknown as ListedCluster : c))
   })
   vi.mocked(removeCluster).mockImplementation(async (_orgID, name) => { clusters = clusters.filter(c => c.name !== name) })
   vi.mocked(setClusterEnabled).mockImplementation(async (_orgID, name, enabled) => {

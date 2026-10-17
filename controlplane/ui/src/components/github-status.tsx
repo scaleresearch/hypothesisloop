@@ -3,13 +3,13 @@
 import type { ReactNode } from 'react'
 import type { Tone } from '@/lib/colors'
 import { installationSettingsURL, type Install } from '@/lib/github-connect'
-import type { GitHubInstallation } from '@/types/github'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { inlineLinkClass } from '@/components/ui/link'
 import { Inline } from '@/components/ui/stack'
 import { InlineError, Spinner } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
+import type { OrgGitHubInstallation } from '@/types/api'
 
 /** A state in a short chip, with its explanation on hover and focus and to a screen reader. */
 export function StatusChip({ tone, label, explain }: { tone: Tone; label: string; explain: string }) {
@@ -77,7 +77,7 @@ export function GitHubProblem({ reason, message, account, installation, onInstal
   reason?: string
   message: string
   account: string
-  installation?: Pick<GitHubInstallation, 'installation_id' | 'account_login' | 'account_type'>
+  installation?: Pick<OrgGitHubInstallation, 'installation_id' | 'account_login' | 'account_type'>
   onInstall?: () => void
   onRetry: () => void
   retrying?: boolean

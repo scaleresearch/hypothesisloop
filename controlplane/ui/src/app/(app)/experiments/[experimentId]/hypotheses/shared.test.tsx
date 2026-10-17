@@ -4,12 +4,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchPlatformExperimentAgents } from '@/lib/api/agents'
 import { fetchHypothesisGraph } from '@/lib/api/hypotheses'
 import { fetchPlatformExperiment } from '@/lib/api/platform-experiments'
-import type { Me } from '@/types/accounts'
-import type { HypothesisGraph } from '@/types/hypotheses'
-import { PlatformExperimentStatus } from '@/types/platform-experiments'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import HypothesesPage from '@/app/(app)/experiments/[experimentId]/hypotheses/page'
+import type { HypothesisGraph, Me, PlatformExperiment } from '@/types/api'
 
 const navigation = vi.hoisted(() => ({ search: '', push: vi.fn(), replace: vi.fn() }))
 
@@ -38,7 +35,7 @@ const graph = {
   objective: {},
   nodes: [{
     id: 'hyp-1', platform_experiment_id: 'pe-x', text: 'warmup helps', status: 'open', agent_id: 'ag-1',
-    actor: { kind: 'user', id: 'u7', name: 'Grace Hopper' }, status_actor: null,
+    actor: { kind: 'user', id: 'u7', name: 'Grace Hopper' },
     created_at: at, builds_on: ['pe-x'], finding_count: 0, comment_count: 0, child_count: 0,
   }],
   edges: [],
@@ -79,11 +76,11 @@ describe('the hypothesis graph', () => {
   })
 
   it.each([
-    ['a reader of a shared experiment of another org', { project_id: 'prj_platform', shared: true, status: PlatformExperimentStatus.RUNNING }],
-    ['a closed experiment of the caller\'s own', { project_id: 'prj_1', shared: false, status: PlatformExperimentStatus.CLOSED }],
+    ['a reader of a shared experiment of another org', { project_id: 'prj_platform', shared: true, status: 'running' as const }],
+    ['a closed experiment of the caller\'s own', { project_id: 'prj_1', shared: false, status: 'closed' as const }],
   ])('shows %s no control that adds or links', async (_, pe) => {
     Element.prototype.scrollIntoView = vi.fn()
-    const own = show('view=outline&focus=hyp-1', { project_id: 'prj_1', shared: false, status: PlatformExperimentStatus.RUNNING })
+    const own = show('view=outline&focus=hyp-1', { project_id: 'prj_1', shared: false, status: 'running' })
     await screen.findByRole('button', { name: 'Link to…' })
     expect(screen.getAllByRole('button', { name: /Add idea/ }).length).toBeGreaterThan(0)
     own.unmount()

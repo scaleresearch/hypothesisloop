@@ -2,12 +2,11 @@
 
 import useSWR from 'swr'
 import { fetchExperimentMetrics } from '@/lib/api/jobs'
-import type { MetricDataPoint } from '@/types/jobs'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { TextLink } from '@/components/ui/link'
 import { Callout } from '@/components/ui/status-message'
 import { jobPath } from '@/lib/routes'
 import { keys } from '@/lib/keys'
+import type { MetricDataPoint, PlatformExperiment } from '@/types/api'
 
 /** The last raw value a job reported for each metric key. */
 function lastReported(points: MetricDataPoint[]): Map<string, number> {

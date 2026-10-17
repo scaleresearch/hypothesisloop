@@ -1,15 +1,15 @@
 import { clsx } from 'clsx'
 import { FileText, MessageSquare } from 'lucide-react'
-import type { HypothesisGraphNode, ObjectiveEvidence } from '@/types/hypotheses'
 import { Actor } from '@/components/actor'
 import { Text } from '@/components/ui/text'
 import { objectiveFinding } from '@/lib/hypothesis-graph'
 import { filedAfterVerdict } from '@/lib/hypothesis-progress'
+import type { GraphNode, ObjectiveEvidence } from '@/types/api'
 
 const COUNT = 'inline-flex items-center gap-0.5'
 
 /** Who registered it, evidence counts and best result, shared by graph nodes and outline rows. */
-export function NodeMeta({ item }: { item: HypothesisGraphNode }) {
+export function NodeMeta({ item }: { item: GraphNode }) {
   const newer = item.finding !== undefined && filedAfterVerdict(item, item.finding.created_at)
   return (
     <Text as="span" variant="meta" className="inline-flex min-w-0 items-center gap-2 whitespace-nowrap tabular-nums">

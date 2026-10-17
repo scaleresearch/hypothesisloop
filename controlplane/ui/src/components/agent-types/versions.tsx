@@ -4,7 +4,6 @@ import { useState } from 'react'
 import { clsx } from 'clsx'
 import useSWR from 'swr'
 import { fetchAgentTypeVersions, restoreAgentType } from '@/lib/api/agent-types'
-import type { AgentType, AgentTypeSettings, AgentTypeVersion, EditedAgentType } from '@/types/agent-types'
 import { APPLIES_LIVE, said } from '@/lib/agent-types'
 import { diffLines, foldUnchanged } from '@/lib/diff'
 import type { DiffLine } from '@/lib/diff'
@@ -18,6 +17,7 @@ import { Inline, Stack } from '@/components/ui/stack'
 import { ErrorMessage, Loading } from '@/components/ui/status-message'
 import { Eyebrow, Text } from '@/components/ui/text'
 import { keys } from '@/lib/keys'
+import type { AgentTypeSettings, AgentTypeVersion, CurrentAgentType, EditedAgentType } from '@/types/api'
 
 const lineClass: Record<DiffLine['kind'], string> = {
   same: 'text-muted',
@@ -120,7 +120,7 @@ function VersionDiff({ before, after }: { before: AgentTypeVersion; after: Agent
 
 function RestoreDialog({ orgID, type, version, onClose, onRestored }: {
   orgID: string
-  type: AgentType
+  type: CurrentAgentType
   version: number
   onClose: () => void
   onRestored: (t: EditedAgentType) => Promise<unknown>
@@ -159,7 +159,7 @@ function RestoreDialog({ orgID, type, version, onClose, onRestored }: {
  * restore of an earlier one for an owner. */
 export function VersionHistory({ orgID, type, editable, onRestored }: {
   orgID: string
-  type: AgentType
+  type: CurrentAgentType
   editable: boolean
   onRestored: (t: EditedAgentType) => Promise<unknown>
 }) {

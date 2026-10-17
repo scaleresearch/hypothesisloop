@@ -3,10 +3,9 @@ import type { ReactNode } from 'react'
 import { SWRConfig } from 'swr'
 import { describe, expect, it, vi } from 'vitest'
 import { fetchPlatformExperiment } from '@/lib/api/platform-experiments'
-import type { Me } from '@/types/accounts'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { isReadOnly, listProject, ReadOnlyProvider, useExperimentAccess, useReadOnly } from '@/lib/read-only'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
+import type { Me, PlatformExperiment } from '@/types/api'
 
 vi.mock('@/lib/api/platform-experiments', () => ({ fetchPlatformExperiment: vi.fn() }))
 

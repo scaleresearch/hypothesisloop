@@ -4,11 +4,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { fetchPlatformExperimentAgents } from '@/lib/api/agents'
 import { fetchHypothesis } from '@/lib/api/hypotheses'
 import { fetchPlatformExperiment } from '@/lib/api/platform-experiments'
-import type { Me } from '@/types/accounts'
-import type { HypothesisWithJobs } from '@/types/hypotheses'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import HypothesisDetailPage from '@/app/(app)/experiments/[experimentId]/hypotheses/[hypothesisId]/page'
+import type { HypothesisWithJobs, Me, PlatformExperiment } from '@/types/api'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
@@ -28,7 +26,7 @@ const me: Me = {
 }
 const hypothesis = {
   id: 'hyp-1', platform_experiment_id: 'pe-x', text: 'warmup helps', status: 'open', agent_id: 'ag-1',
-  actor: { kind: 'agent', id: 'ag-1', name: 'Researcher 1' }, status_actor: null, status_changed_at: null, created_at: at,
+  actor: { kind: 'agent', id: 'ag-1', name: 'Researcher 1' }, status_changed_at: null, created_at: at,
   links: { out: [], in: [] }, jobs: [], job_count: 0, findings: [], finding_count: 0, comments: [], comment_count: 0,
   implementations: [],
 } as unknown as HypothesisWithJobs

@@ -3,10 +3,10 @@ import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAgentType, fetchAgentTypes } from '@/lib/api/agent-types'
-import type { Me } from '@/types/accounts'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { AgentTypesList } from '@/components/agent-types/list'
 import { CATALOG, agentType } from '@/test-agent-types'
+import type { Me } from '@/types/api'
 
 const navigation = vi.hoisted(() => ({ push: vi.fn() }))
 vi.mock('next/navigation', () => ({ useRouter: () => navigation }))

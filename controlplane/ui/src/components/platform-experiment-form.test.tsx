@@ -8,13 +8,11 @@ import { createExperimentDraft, deleteExperimentDraft, updateExperimentDraft } f
 import { beginGitHubInstall, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories } from '@/lib/api/github'
 import { createPlatformExperiment, fetchExperimentFile, updatePlatformExperiment } from '@/lib/api/platform-experiments'
 import { ApiError } from '@/lib/api/request'
-import type { Me } from '@/types/accounts'
-import type { ExperimentDraft } from '@/types/drafts'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { PlatformExperimentForm } from '@/components/platform-experiment-form'
 import { CATALOG } from '@/test-agent-types'
 import { choose } from '@/test-select'
+import type { ExperimentDraft, Me, PlatformExperiment } from '@/types/api'
 
 vi.mock('@/lib/api/agent-types', async importActual => ({
   ...(await importActual<typeof import('@/lib/api/agent-types')>()),

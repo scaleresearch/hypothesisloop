@@ -2,9 +2,9 @@
 
 import { useState } from 'react'
 import { closePlatformExperiment } from '@/lib/api/platform-experiments'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/dialog'
+import type { PlatformExperiment } from '@/types/api'
 
 /** The owner's control to close an open or running experiment, behind a confirmation that says what closing does. */
 export function CloseExperiment({ pe, onClosed }: { pe: PlatformExperiment; onClosed: () => void }) {

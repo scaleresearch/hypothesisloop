@@ -5,7 +5,6 @@ import useSWR from 'swr'
 import { checkGitHubInstallation, fetchGitHubInstallations, fetchGitHubRepositories, GITHUB_NOT_CONFIGURED } from '@/lib/api/github'
 import { checkRepository } from '@/lib/api/platform-experiments'
 import { ApiError } from '@/lib/api/request'
-import type { GitHubInstallation } from '@/types/github'
 import { useGitHubApp, useGitHubInstall } from '@/lib/github-connect'
 import { useTenant } from '@/lib/tenant'
 import { GitHubProblem, InstallProgress } from '@/components/github-status'
@@ -16,6 +15,7 @@ import { SearchableSelect } from '@/components/ui/searchable-select'
 import { InlineError } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
 import { keys } from '@/lib/keys'
+import type { OrgGitHubInstallation } from '@/types/api'
 
 const LISTED = 50
 
@@ -29,7 +29,7 @@ export function repositoryFields(value: string): { repository?: string; reposito
 }
 
 // GitHub's form for a new repository, private and on the connected account when there is one.
-function newRepositoryURL(form: string, accounts: GitHubInstallation[]): string {
+function newRepositoryURL(form: string, accounts: OrgGitHubInstallation[]): string {
   const url = new URL(form)
   if (accounts.length === 1) url.searchParams.set('owner', accounts[0].account_login)
   url.searchParams.set('visibility', 'private')
@@ -41,7 +41,7 @@ function newRepositoryURL(form: string, accounts: GitHubInstallation[]): string 
 const UNUSABLE = new Set(['installation_gone', 'installation_suspended', 'github_permission_missing'])
 
 // The installations GitHub says are unusable, asked by the check Settings runs on each.
-async function unusable(orgID: string, accounts: GitHubInstallation[]): Promise<number[]> {
+async function unusable(orgID: string, accounts: OrgGitHubInstallation[]): Promise<number[]> {
   const found = await Promise.all(accounts.map(a => checkGitHubInstallation(orgID, a.installation_id).then(
     () => null,
     (e: unknown) => e instanceof ApiError && e.reason && UNUSABLE.has(e.reason) ? a.installation_id : null,
@@ -51,7 +51,7 @@ async function unusable(orgID: string, accounts: GitHubInstallation[]): Promise<
 
 // The connected account a value concerns: the owner of the repository named, the account named for
 // a new one, or the account a new one goes to unasked.
-function accountOf(value: string, accounts: GitHubInstallation[], unasked?: GitHubInstallation): GitHubInstallation | undefined {
+function accountOf(value: string, accounts: OrgGitHubInstallation[], unasked?: OrgGitHubInstallation): OrgGitHubInstallation | undefined {
   const owner = value.startsWith(ON_ACCOUNT) ? value.slice(ON_ACCOUNT.length) : value.split('/')[0]
   return owner ? accounts.find(a => a.account_login.toLowerCase() === owner.toLowerCase()) : unasked
 }
@@ -61,7 +61,7 @@ function accountOf(value: string, accounts: GitHubInstallation[], unasked?: GitH
  * or a repository it cannot push to shows here, as one chip and the one action that fixes it,
  * before anything is created.
  */
-function RepositoryCheckNote({ value, account, onInstall }: { value: string; account?: GitHubInstallation; onInstall?: () => void }) {
+function RepositoryCheckNote({ value, account, onInstall }: { value: string; account?: OrgGitHubInstallation; onInstall?: () => void }) {
   const { project } = useTenant()
   const { error, isValidating, mutate } = useSWR(keys.repositoryCheck(project.id, value), () => checkRepository(project.id, repositoryFields(value)))
   if (!error) return null

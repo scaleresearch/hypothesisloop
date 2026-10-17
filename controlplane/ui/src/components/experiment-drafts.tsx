@@ -3,7 +3,6 @@
 import { useState } from 'react'
 import useSWR from 'swr'
 import { deleteExperimentDraft, fetchExperimentDrafts } from '@/lib/api/drafts'
-import type { ExperimentDraft } from '@/types/drafts'
 import { headline, relTime } from '@/lib/format'
 import { useTenant } from '@/lib/tenant'
 import { Button } from '@/components/ui/button'
@@ -13,11 +12,13 @@ import { Inline, Stack } from '@/components/ui/stack'
 import { ErrorMessage, InlineError } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
 import { keys } from '@/lib/keys'
+import type { ExperimentDraft } from '@/types/api'
 
 // The name typed, else the start of the brief, so that a draft kept from a goal reads as that goal.
 function nameOf(draft: ExperimentDraft): string {
-  const name = typeof draft.form.name === 'string' ? draft.form.name.trim() : ''
-  const brief = typeof draft.form.description === 'string' ? draft.form.description.trim() : ''
+  const form = draft.form as Record<string, unknown>
+  const name = typeof form.name === 'string' ? form.name.trim() : ''
+  const brief = typeof form.description === 'string' ? form.description.trim() : ''
   return name || (brief && headline(brief, 80)) || 'Unnamed experiment'
 }
 

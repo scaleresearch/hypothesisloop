@@ -3,9 +3,9 @@ import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createOrg, createProject, fetchMe } from '@/lib/api/accounts'
-import type { Me } from '@/types/accounts'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { ProjectSwitcher } from '@/components/project-switcher'
+import type { Me } from '@/types/api'
 
 const navigation = vi.hoisted(() => ({ push: vi.fn(), pathname: '/projects/prj_a1/jobs' }))
 

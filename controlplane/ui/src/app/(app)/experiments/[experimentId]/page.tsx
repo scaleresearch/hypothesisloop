@@ -5,9 +5,6 @@ import { useRouter } from 'next/navigation'
 import { isReadOnly, ReadOnlyProvider } from '@/lib/read-only'
 import { projectPath } from '@/lib/routes'
 import { useTenant } from '@/lib/tenant'
-import type { Draft } from '@/types/planning'
-import { PlatformExperimentStatus } from '@/types/platform-experiments'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { AgentNames } from '@/components/agent-label'
 import { Baseline } from '@/components/baseline'
 import { CloseExperiment } from '@/components/close-experiment'
@@ -35,6 +32,7 @@ import { runClock } from '@/lib/format'
 import { phaseOf } from '@/lib/phase'
 import { useRoster } from '@/lib/roster'
 import { budgetKind, budgetUnit } from '@/lib/units'
+import { proposalOf } from '@/lib/planning'
 import { About } from './_overview/about'
 import { overviewFigures } from './_overview/figures'
 import { Findings } from './_overview/findings'
@@ -44,6 +42,7 @@ import { Leaderboard } from './_overview/leaderboard'
 import { Outcome } from './_overview/outcome'
 import { ResearchersOverTime } from './_overview/researchers-over-time'
 import { useOverview } from './_overview/use-overview'
+import type { PlatformExperiment } from '@/types/api'
 
 // The reasons a draft closes for, before anything was accepted.
 const PLANNED_ONLY: NonNullable<PlatformExperiment['close_reason']>[] = ['planning_limit_reached', 'proposal_expired', 'planner_stopped', 'repository_not_created']
@@ -63,7 +62,7 @@ function PlatformExperimentDetail({ id }: { id: string }) {
 
   if (peLoading) return <Loading />
   if (peError) return <ErrorMessage>Could not load this platform experiment: {peError.message}</ErrorMessage>
-  if (pe?.status === PlatformExperimentStatus.DRAFT) return <DraftView draft={pe} readOnly={isReadOnly(me, pe)} />
+  if (pe?.status === 'draft') return <DraftView draft={pe} readOnly={isReadOnly(me, pe)} />
   if (reads.failed.length > 0) return <ErrorMessage>Could not load {reads.failed.join(', ')} for this platform experiment.</ErrorMessage>
   if (!pe) return <ErrorMessage>Experiment not found.</ErrorMessage>
 
@@ -76,7 +75,7 @@ function PlatformExperimentDetail({ id }: { id: string }) {
   ])).sort()
   const primary = results?.metrics[0]
   const hypothesisText = new Map((findings ?? []).map(h => [h.id, h.text]))
-  const unit = budgetUnit(budgetKind((pe as Draft).proposal?.accelerator_type, (experiments ?? []).map(exp => exp.accelerator_type)))
+  const unit = budgetUnit(budgetKind(proposalOf(pe)?.accelerator_type, (experiments ?? []).map(exp => exp.accelerator_type)))
   const clock = runClock(pe)
   // One list: what is running first, then the newest of the rest.
   const running = reads.running ?? []
@@ -104,7 +103,7 @@ function PlatformExperimentDetail({ id }: { id: string }) {
       actions={!readOnly && (
         <Inline gap="sm">
           {pe.editable?.some(field => field !== 'goal') && <Button size="sm" onClick={() => setEditing(true)}>Edit</Button>}
-          {pe.status !== PlatformExperimentStatus.CLOSED && <CloseExperiment pe={pe} onClosed={() => void mutatePE()} />}
+          {pe.status !== 'closed' && <CloseExperiment pe={pe} onClosed={() => void mutatePE()} />}
           <RemoveExperiment pe={pe} onRemoved={() => router.push(projectPath(project.id, 'experiments'))} />
         </Inline>
       )}

@@ -6,11 +6,9 @@ import { fetchAgentsPage } from '@/lib/api/agents'
 import { fetchOrgClusters } from '@/lib/api/clusters'
 import { fetchExperimentsPage, fetchExperimentStats } from '@/lib/api/jobs'
 import { fetchPlatformExperiment } from '@/lib/api/platform-experiments'
-import type { Me } from '@/types/accounts'
-import type { Experiment } from '@/types/jobs'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { JobsList } from '@/components/jobs-list'
+import type { Experiment, Me, PlatformExperiment } from '@/types/api'
 
 const navigation = vi.hoisted(() => ({ search: '', push: vi.fn() }))
 
@@ -38,7 +36,7 @@ const running = {
   status: 'RUNNING', capacity_tier: 'guaranteed', cluster_name: 'platform-gpu', created_at: at, updated_at: at,
   accelerator_type: 'nvidia.com/gpu.product=NVIDIA-L40', accelerator_count: 1, hypothesis: 'a claim', env: {}, priority_score: 0,
   code_ref: 'https://github.com/acme/widgets@0123456789abcdef', branch: 'hl/pe-x/warmup-ag-1',
-} as Experiment
+} as unknown as Experiment
 
 function show(search: string, pe: Partial<PlatformExperiment>, experimentID?: string) {
   navigation.search = search

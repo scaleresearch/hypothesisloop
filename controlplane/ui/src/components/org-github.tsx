@@ -4,7 +4,6 @@ import { useState } from 'react'
 import useSWR from 'swr'
 import { checkGitHubInstallation, disconnectGitHubInstallation, fetchGitHubInstallations, GITHUB_NOT_CONFIGURED, makeGitHubInstallationDefault } from '@/lib/api/github'
 import { ApiError } from '@/lib/api/request'
-import type { GitHubInstallation } from '@/types/github'
 import { githubCardPath, useGitHubApp, useGitHubInstall } from '@/lib/github-connect'
 import { errorMessage } from '@/lib/errors'
 import { useTenant } from '@/lib/tenant'
@@ -19,6 +18,7 @@ import { Inline, Stack } from '@/components/ui/stack'
 import { Callout, ErrorMessage, Loading } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
 import { keys } from '@/lib/keys'
+import type { OrgGitHubInstallation } from '@/types/api'
 
 const KIND = { User: 'Personal', Organization: 'Organization' } as const
 
@@ -26,7 +26,7 @@ const KIND = { User: 'Personal', Organization: 'Organization' } as const
  * Whether GitHub still lets the App create and push on a connected account, asked of GitHub by
  * the check a create runs there, as one chip and the one action that fixes it.
  */
-function InstallationState({ installation, onInstall }: { installation: GitHubInstallation; onInstall?: () => void }) {
+function InstallationState({ installation, onInstall }: { installation: OrgGitHubInstallation; onInstall?: () => void }) {
   const { org } = useTenant()
   const { data, error, isValidating, mutate } = useSWR(
     keys.githubInstallationCheck(org.id, installation.installation_id),
@@ -60,11 +60,11 @@ export function OrgGitHub() {
   const { data, error, mutate } = useSWR(keys.githubInstallations(org.id), () => fetchGitHubInstallations(org.id))
   const app = useGitHubApp(administers)
   const { install, start, reset } = useGitHubInstall(org.id, githubCardPath(org.id))
-  const [disconnecting, setDisconnecting] = useState<GitHubInstallation | null>(null)
+  const [disconnecting, setDisconnecting] = useState<OrgGitHubInstallation | null>(null)
   const [defaulting, setDefaulting] = useState<number | null>(null)
   const [actionError, setActionError] = useState('')
 
-  async function makeDefault(installation: GitHubInstallation) {
+  async function makeDefault(installation: OrgGitHubInstallation) {
     setDefaulting(installation.installation_id)
     setActionError('')
     try {
@@ -77,7 +77,7 @@ export function OrgGitHub() {
     }
   }
 
-  async function disconnect(installation: GitHubInstallation) {
+  async function disconnect(installation: OrgGitHubInstallation) {
     await disconnectGitHubInstallation(org.id, installation.installation_id)
     if (install.phase === 'connected' && install.installation.installation_id === installation.installation_id) reset()
     await mutate()

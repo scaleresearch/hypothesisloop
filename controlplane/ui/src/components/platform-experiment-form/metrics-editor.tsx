@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { COMMON_ML_METRICS } from '@/components/platform-experiment-form/common-metrics'
-import type { MetricDefinition } from '@/types/platform-experiments'
 import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
 import type { ComboboxChoice } from '@/components/ui/combobox'
@@ -8,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Code, Text } from '@/components/ui/text'
+import type { MetricDefinition } from '@/types/api'
 
 const arrow = (direction: MetricDefinition['direction']) => direction === 'maximize' ? '↑ max' : '↓ min'
 

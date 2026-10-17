@@ -1,5 +1,5 @@
-import type { Evidence, Hypothesis, HypothesisGraph, HypothesisLinkType, HypothesisListItem } from '@/types/hypotheses'
 import { experimentPath, withQuery } from '@/lib/routes'
+import type { GraphNode, Hypothesis, HypothesisGraph, LinkType, ObjectiveEvidence } from '@/types/api'
 
 export const NODE_WIDTH = 280
 export const NODE_HEIGHT = 112
@@ -16,7 +16,7 @@ export interface GraphFilters {
   owner: string
 }
 
-export function matchesFilters(h: HypothesisListItem, f: GraphFilters): boolean {
+export function matchesFilters(h: GraphNode, f: GraphFilters): boolean {
   return (!f.status || h.status === f.status) && (!f.owner || ownerKey(h) === f.owner)
 }
 
@@ -145,24 +145,24 @@ export function extendLayout(graph: HypothesisGraph, previous: Map<string, Posit
   return positions
 }
 
-export const LINK_KINDS: HypothesisLinkType[] = ['builds_on', 'related', 'contradicts']
+export const LINK_KINDS: LinkType[] = ['builds_on', 'related', 'contradicts']
 
 /** Each kind of link in plain words, read as "this idea <label> that one", the same in every view. */
-export const LINK_KIND_LABELS: Record<HypothesisLinkType, string> = {
+export const LINK_KIND_LABELS: Record<LinkType, string> = {
   builds_on: 'refines',
   related: 'related',
   contradicts: 'contradicts',
 }
 
 /** What each kind of link says about the idea it leaves. */
-export const LINK_KIND_HINTS: Record<HypothesisLinkType, string> = {
+export const LINK_KIND_HINTS: Record<LinkType, string> = {
   builds_on: 'extends or narrows that idea',
   related: 'touches the same thing',
   contradicts: 'expects the opposite outcome',
 }
 
 /** The kinds of link a hypothesis may take to `to`: the objective is only built on. */
-export function allowedLinkKinds(graph: HypothesisGraph, to: string): HypothesisLinkType[] {
+export function allowedLinkKinds(graph: HypothesisGraph, to: string): LinkType[] {
   return to === graph.root ? ['builds_on'] : LINK_KINDS
 }
 
@@ -171,7 +171,7 @@ type LinkPlan = { from: string; to: string } | { refused: string }
 // What the API takes from a person linking `from` to `to`: a link is stored on the idea it leaves,
 // and only an idea no agent owns takes one from a person. A related or contradicts link reads the
 // same both ways, so from an agent's idea it is stored on the other end when that one is free.
-export function linkPlanner(graph: HypothesisGraph): (from: string, to: string, kind: HypothesisLinkType) => LinkPlan {
+export function linkPlanner(graph: HypothesisGraph): (from: string, to: string, kind: LinkType) => LinkPlan {
   const byID = new Map(graph.nodes.map(n => [n.id, n]))
   const edges = new Set(graph.edges.map(e => `${e.type}:${e.from}:${e.to}`))
   const children = new Map<string, string[]>()
@@ -233,7 +233,7 @@ export function withEdge(graph: HypothesisGraph, edge: GraphEdge): HypothesisGra
 }
 
 /** The ideas whose text holds every word of the query, for picking one without a round trip. */
-export function findIdeas(graph: HypothesisGraph, query: string): HypothesisListItem[] {
+export function findIdeas(graph: HypothesisGraph, query: string): GraphNode[] {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean)
   return graph.nodes.filter(n => {
     const text = n.text.toLowerCase()
@@ -242,7 +242,7 @@ export function findIdeas(graph: HypothesisGraph, query: string): HypothesisList
 }
 
 interface OutlineRow {
-  node: HypothesisListItem
+  node: GraphNode
   depth: number
   /** builds_on targets beyond the one this row is nested under. */
   alsoBuildsOn: string[]
@@ -251,7 +251,7 @@ interface OutlineRow {
 // A DAG flattened to a tree: each hypothesis sits once, under its first builds_on target, so the
 // outline stays linear in size however many ideas combine.
 export function outlineRows(graph: HypothesisGraph): OutlineRow[] {
-  const children = new Map<string, HypothesisListItem[]>()
+  const children = new Map<string, GraphNode[]>()
   for (const n of graph.nodes) {
     const parent = n.builds_on[0]
     if (!children.has(parent)) children.set(parent, [])
@@ -275,7 +275,7 @@ interface LinkGroup<T> {
 }
 
 // Contradiction and relatedness are symmetric claims, so their two directions share a group.
-export function linkGroups<T extends { type: HypothesisLinkType }>(out: T[], incoming: T[]): LinkGroup<T>[] {
+export function linkGroups<T extends { type: LinkType }>(out: T[], incoming: T[]): LinkGroup<T>[] {
   return [
     { label: 'Refines', items: out.filter(l => l.type === 'builds_on') },
     { label: 'Refined by', items: incoming.filter(l => l.type === 'builds_on') },
@@ -292,7 +292,7 @@ export function graphHref(platformExperimentID: string, focus?: string): string 
  * The write-up to show for the objective: that of the baseline job, else the newest filed on the
  * objective, which may be a reference job's.
  */
-export function objectiveFinding(objective: Evidence): { job: string; summary: string; baseline: boolean } | null {
+export function objectiveFinding(objective: Pick<ObjectiveEvidence, 'finding' | 'best_job'>): { job: string; summary: string; baseline: boolean } | null {
   const { best_job: best, finding } = objective
   if (best?.summary) return { job: best.id, summary: best.summary, baseline: true }
   if (finding) return { job: finding.experiment_id, summary: finding.summary, baseline: finding.experiment_id === best?.id }

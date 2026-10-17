@@ -4,9 +4,9 @@ import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { acceptOrgInvite, fetchMe } from '@/lib/api/accounts'
 import { ApiError } from '@/lib/api/request'
-import type { Me } from '@/types/accounts'
 import { accessToken } from '@/lib/auth'
 import { AcceptInvite } from '@/components/accept-invite'
+import type { Me } from '@/types/api'
 
 const router = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }))
 

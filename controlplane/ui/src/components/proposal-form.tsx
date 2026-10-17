@@ -3,8 +3,6 @@
 import { useState } from 'react'
 import { abandonDraft, acceptDraft, holdDraft } from '@/lib/api/planning'
 import { ApiError } from '@/lib/api/request'
-import type { Draft, Proposal, ProposedAgent } from '@/types/planning'
-import type { MetricDefinition } from '@/types/platform-experiments'
 import { useSecondsUntil } from '@/lib/auto-accept'
 import { acceleratorLabel, formatAccH, formatDate } from '@/lib/format'
 import { budgetUnit, kindOf } from '@/lib/units'
@@ -21,6 +19,8 @@ import { Inline, Stack } from '@/components/ui/stack'
 import { Callout, InlineError } from '@/components/ui/status-message'
 import { Code, Pill, Text } from '@/components/ui/text'
 import { errorMessage } from '@/lib/errors'
+import type { MetricDefinition, PlatformExperiment, ProposedAgent } from '@/types/api'
+import type { StoredProposal } from '@/lib/planning'
 
 type Stated = 'name' | 'budget' | 'baseline' | 'hours' | 'researchers'
 
@@ -60,7 +60,7 @@ function Sentences({ title, items }: { title: string; items?: string[] }) {
 }
 
 /** What one node of the run's jobs asks for, of what the planner stated. */
-function runsOn(proposal: Proposal): [string, string][] {
+function runsOn(proposal: StoredProposal): [string, string][] {
   const stated: [string, string | undefined][] = [
     [kindOf(proposal.accelerator_type) === 'cpu' ? 'Runs on' : 'Accelerator', acceleratorLabel(proposal.accelerator_type)],
     ['Image', proposal.image],
@@ -72,7 +72,7 @@ function runsOn(proposal: Proposal): [string, string][] {
 }
 
 function Researcher({ n, agent }: { n: number; agent: ProposedAgent }) {
-  const direction = agent.hyperparameters?.direction
+  const direction = agent.hyperparameters?.direction as string | undefined
   return (
     <InsetCard as="li" gap="xs">
       <Inline gap="md" align="baseline" className="text-xs">
@@ -86,7 +86,7 @@ function Researcher({ n, agent }: { n: number; agent: ProposedAgent }) {
 }
 
 /** The countdown to the platform accepting the proposal by itself, with the three ways to act first. */
-function Countdown({ draft, accept, sending, onDone }: { draft: Draft; accept: () => void; sending: boolean; onDone: () => void }) {
+function Countdown({ draft, accept, sending, onDone }: { draft: PlatformExperiment; accept: () => void; sending: boolean; onDone: () => void }) {
   const secondsLeft = useSecondsUntil(draft.accepts_at)
   const [acting, setActing] = useState<'edit' | 'reject' | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -131,8 +131,8 @@ function Countdown({ draft, accept, sending, onDone }: { draft: Draft; accept: (
  * it: the same layout with the values as text and no control.
  */
 export function ProposalForm({ draft, proposal, editable, accepting, accepted = false, onDone }: {
-  draft: Draft
-  proposal: Proposal
+  draft: PlatformExperiment
+  proposal: StoredProposal
   editable: boolean
   accepting: boolean
   accepted?: boolean
@@ -234,7 +234,6 @@ export function ProposalForm({ draft, proposal, editable, accepting, accepted = 
                 <Pill tone={metric.role === 'constraint' ? 'warning' : 'success'} active={metric.role !== 'constraint' && metric.role !== 'attribute'}>
                   {metricLine(metric)}
                 </Pill>
-                {metric.description && <Text as="span" variant="note">{metric.description}</Text>}
               </Inline>
             ))}
           </Stack>

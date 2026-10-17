@@ -1,10 +1,10 @@
-import type { OrgCluster } from '@/types/clusters'
+import type { ListedCluster } from '@/types/api'
 
 /**
  * What an org's jobs can run on: the clusters it uses, its own and the platform's, and how many
  * of them are connected. A cluster the org switched off is not one of them.
  */
-export function clustersInUse(clusters: OrgCluster[]) {
+export function clustersInUse(clusters: ListedCluster[]) {
   const used = clusters.filter(c => c.enabled)
   const online = used.filter(c => c.connected)
   const own = used.filter(c => c.owned).length

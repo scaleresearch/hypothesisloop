@@ -1,4 +1,4 @@
-import type { PlatformExperimentResults } from '@/types/platform-experiments'
+import type { PlatformExperimentResults } from '@/types/api'
 
 /** An agent's best raw value on a metric and the job that set it, absent before it reported one. */
 export function bestOf(results: PlatformExperimentResults | undefined, metricKey: string, agentId: string) {

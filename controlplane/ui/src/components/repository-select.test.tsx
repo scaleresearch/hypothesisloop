@@ -6,11 +6,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { beginGitHubInstall, checkGitHubInstallation, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories } from '@/lib/api/github'
 import { checkRepository } from '@/lib/api/platform-experiments'
 import { ApiError } from '@/lib/api/request'
-import type { Me } from '@/types/accounts'
-import type { GitHubInstallation, GitHubRepository } from '@/types/github'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { takeReturn } from '@/lib/github-connect'
 import { RepositorySelect, repositoryFields } from '@/components/repository-select'
+import type { Me, OrgGitHubInstallation, Repository } from '@/types/api'
 
 vi.mock('@/lib/api/github', async importActual => ({
   ...(await importActual<typeof import('@/lib/api/github')>()),
@@ -28,12 +27,12 @@ const me: Me = {
   projects: [{ id: 'prj_1', org_id: 'org_a', name: 'default', created_at: at }],
 }
 const owner: Me = { ...me, orgs: [{ ...me.orgs[0], role: 'owner' }] }
-const repositories: GitHubRepository[] = [
+const repositories: Repository[] = [
   { repository: 'acme/widgets', installation_id: 7, private: true },
   { repository: 'acme/open', installation_id: 7, private: false },
 ]
 
-const organisation: GitHubInstallation = { org_id: 'org_a', installation_id: 7, account_login: 'acme', account_type: 'Organization', connected_actor: { kind: 'user', id: 'u9', name: 'Una' }, connected_at: at, default: false }
+const organisation: OrgGitHubInstallation = { org_id: 'org_a', installation_id: 7, account_login: 'acme', account_type: 'Organization', connected_actor: { kind: 'user', id: 'u9', name: 'Una' }, connected_at: at, default: false }
 
 function Picker({ initial = '' }: { initial?: string }) {
   const [value, setValue] = useState(initial)

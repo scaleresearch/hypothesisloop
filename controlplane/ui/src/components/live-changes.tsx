@@ -2,7 +2,8 @@
 
 import { useEffect } from 'react'
 import { useSWRConfig } from 'swr'
-import { fetchChanges, watchURL, WATCH_SUBPROTOCOL, type After, type Change } from '@/lib/api/changes'
+import { fetchChanges, watchURL, WATCH_SUBPROTOCOL, type After } from '@/lib/api/changes'
+import type { Change } from '@/types/api'
 import { ApiError } from '@/lib/api/request'
 import { accessToken, endSession } from '@/lib/auth'
 import { LIVE_KINDS, readsOf, type Reads } from '@/lib/live'

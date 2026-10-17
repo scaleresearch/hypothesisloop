@@ -2,13 +2,13 @@
 
 import { Fragment, useMemo } from 'react'
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import type { AgentMetricSeries, StagesStatus } from '@/types/platform-experiments'
 import { AgentLabel, useAgentName } from '@/components/agent-label'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Loading } from '@/components/ui/status-message'
 import { Pill } from '@/components/ui/text'
 import { chart, semantic } from '@/lib/colors'
 import { ChartBox, ExpandableChart } from './chart-frame'
+import type { AgentMetricSeries, StagesStatus } from '@/types/api'
 
 export function CompetingAgentsChart({
   series: allSeries, metricName, direction, selectedAgents, colorFor, boundaries,

@@ -9,11 +9,9 @@ import { fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories } fro
 import { fetchExperimentStats } from '@/lib/api/jobs'
 import { createPlatformExperiment, fetchPlatformExperimentsPage } from '@/lib/api/platform-experiments'
 import { ApiError, apiSend } from '@/lib/api/request'
-import type { Me } from '@/types/accounts'
-import type { ExperimentDraft } from '@/types/drafts'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import PlatformExperimentsPage from '@/app/(app)/projects/[projectId]/experiments/page'
+import type { ExperimentDraft, Me, PlatformExperiment } from '@/types/api'
 
 const navigation = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn(), search: '' }))
 

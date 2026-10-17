@@ -13,8 +13,6 @@ import { fetchOrgClusters } from '@/lib/api/clusters'
 import { fetchExperimentDraft } from '@/lib/api/drafts'
 import { fetchExperimentStats } from '@/lib/api/jobs'
 import { fetchPlatformExperimentsPage } from '@/lib/api/platform-experiments'
-import type { ExperimentDraft } from '@/types/drafts'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { ExperimentDrafts } from '@/components/experiment-drafts'
 import { GoalInput } from '@/components/goal-input'
 import { Page } from '@/components/ui/page'
@@ -34,6 +32,7 @@ import { Segmented } from '@/components/ui/segmented'
 import { errorMessage } from '@/lib/errors'
 import { keys } from '@/lib/keys'
 import { POLL } from '@/lib/poll'
+import type { ExperimentDraft, PlatformExperiment } from '@/types/api'
 
 const PAGE_SIZE = 10
 

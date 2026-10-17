@@ -3,10 +3,7 @@
 import { Fragment, useState } from 'react'
 import { useSWRConfig } from 'swr'
 import { updatePlatformExperiment } from '@/lib/api/platform-experiments'
-import type { PlatformExperimentPatch } from '@/lib/api/platform-experiments'
-import type { JoinedAgent } from '@/types/agents'
-import { canEdit, PlatformExperimentStatus } from '@/types/platform-experiments'
-import type { PlatformExperiment } from '@/types/platform-experiments'
+import type { PlatformExperimentPatch } from '@/types/api'
 import { DEFAULT_AGENT_TYPE, describeType, researcherTypes, typeName, useAgentTypes } from '@/lib/agent-types'
 import { relTime } from '@/lib/format'
 import {
@@ -29,6 +26,8 @@ import { Table, num } from '@/components/ui/table'
 import { Code, Eyebrow, Text } from '@/components/ui/text'
 import { errorMessage } from '@/lib/errors'
 import { keys } from '@/lib/keys'
+import type { JoinedAgent, PlatformExperiment } from '@/types/api'
+import { canEdit } from '@/lib/editable'
 
 const NEW_ROW: PoolRow = { agent_type: DEFAULT_AGENT_TYPE, model: '', count: '1' }
 
@@ -82,7 +81,7 @@ function PoolEditor({ pe, atWork, onDone }: { pe: PlatformExperiment; atWork: Jo
   const poolChanged = JSON.stringify(rows) !== opened
   const maxN = Number(max)
   const maxChanged = maxN !== pe.max_agents
-  const running = pe.status === PlatformExperimentStatus.RUNNING
+  const running = pe.status === 'running'
   const cut = running && Number.isInteger(maxN) ? cutByMax(atWork, maxN) : []
   const remaining = atWork.slice(0, atWork.length - cut.length)
   const problem = poolProblem(maxN, poolChanged ? rows : null, remaining, id => typeName(id, catalog))

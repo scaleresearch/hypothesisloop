@@ -5,9 +5,9 @@ import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createOrgInvite, fetchMe, fetchOrgInvites, fetchOrgMembers, removeOrgMember, revokeOrgInvite, setOrgMemberRole } from '@/lib/api/accounts'
 import { ApiError } from '@/lib/api/request'
-import type { Me, OrgInvite, OrgMember } from '@/types/accounts'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { OrgMembers } from '@/components/org-members'
+import type { Me, OrgInvite, OrgMember } from '@/types/api'
 
 const router = vi.hoisted(() => ({ replace: vi.fn() }))
 

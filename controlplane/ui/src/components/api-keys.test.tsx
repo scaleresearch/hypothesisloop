@@ -4,9 +4,9 @@ import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAPIKey, fetchAPIKeys, revokeAPIKey } from '@/lib/api/accounts'
-import type { APIKey, Me } from '@/types/accounts'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { APIKeys } from '@/components/api-keys'
+import type { APIKey, Me } from '@/types/api'
 
 vi.mock('@/lib/api/accounts', () => ({ createAPIKey: vi.fn(), fetchAPIKeys: vi.fn(), revokeAPIKey: vi.fn() }))
 

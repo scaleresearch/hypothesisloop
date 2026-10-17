@@ -3,9 +3,8 @@
 import { createContext, useContext } from 'react'
 import { useSWRConfig } from 'swr'
 import { fetchMe } from '@/lib/api/accounts'
-import type { Me, Org, Project } from '@/types/accounts'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { keys } from '@/lib/keys'
+import type { Me, Org, PlatformExperiment, Project } from '@/types/api'
 
 /** The signed-in caller and the org and project every page is showing. */
 export interface Tenant {

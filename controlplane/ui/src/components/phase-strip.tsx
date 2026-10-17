@@ -3,11 +3,6 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { useSWRConfig } from 'swr'
-import type { JoinedAgent } from '@/types/agents'
-import { ExperimentStatus } from '@/types/jobs'
-import type { Experiment } from '@/types/jobs'
-import type { Draft } from '@/types/planning'
-import type { StagesStatus, StatusReason } from '@/types/platform-experiments'
 import { formatDate } from '@/lib/format'
 import { OWNER_ACTIONS, PHASES, phaseOf, reasonOf, waitsFor } from '@/lib/phase'
 import { useRoster } from '@/lib/roster'
@@ -15,6 +10,7 @@ import { AgentAtWork } from '@/components/agent-at-work'
 import { AGENTS_CARD } from '@/components/experiment-agents'
 import { JobReason } from '@/components/job-reason'
 import { PlanningProgress } from '@/components/planning-progress'
+import { proposalOf } from '@/lib/planning'
 import { PlatformExperimentDialog } from '@/components/platform-experiment-form'
 import { ProposalForm } from '@/components/proposal-form'
 import { RunProgress } from '@/components/run-progress'
@@ -26,9 +22,10 @@ import { Steps } from '@/components/ui/steps'
 import { Eyebrow, Text } from '@/components/ui/text'
 import { jobPath } from '@/lib/routes'
 import { keys } from '@/lib/keys'
+import type { Experiment, JoinedAgent, PlatformExperiment, StagesStatus, StatusReason } from '@/types/api'
 
 /** The control for what an experiment waits on its owner for, where this page has one. */
-function OwnerMove({ pe }: { pe: Draft }) {
+function OwnerMove({ pe }: { pe: PlatformExperiment }) {
   const { mutate } = useSWRConfig()
   const [editing, setEditing] = useState(false)
   const { reason } = reasonOf(pe)
@@ -55,14 +52,14 @@ function BaselineJob({ job }: { job: Experiment | undefined }) {
   const link = <TextLink inline href={jobPath(job.platform_experiment_id, job.id)}>Its job</TextLink>
   const value = job.metric ? `: ${job.metric.name} ${job.metric.value}` : ''
   switch (job.status) {
-    case ExperimentStatus.SUBMITTED:
-    case ExperimentStatus.QUEUED: {
+    case 'SUBMITTED':
+    case 'QUEUED': {
       const why = job.not_admitted_message ?? job.not_admitted_reason
       return <Text variant="note" tone="default">{link} is queued{why ? `: ${why}` : '.'}</Text>
     }
-    case ExperimentStatus.RUNNING:
+    case 'RUNNING':
       return <Text variant="note" tone="default">{link} is running{value}.</Text>
-    case ExperimentStatus.COMPLETED:
+    case 'COMPLETED':
       return <Text variant="note" tone="default">{link} is done{value}. The platform declares it the baseline and starts the run once the agent finishes.</Text>
     default:
       return (
@@ -90,7 +87,7 @@ function baselineAgent(agents: JoinedAgent[] | undefined): JoinedAgent | undefin
  * accepted, to read.
  */
 export function PhaseStrip({ pe, jobs = [], stages, readOnly = false, children }: {
-  pe: Draft
+  pe: PlatformExperiment
   jobs?: Experiment[]
   stages?: StagesStatus
   readOnly?: boolean
@@ -112,7 +109,8 @@ export function PhaseStrip({ pe, jobs = [], stages, readOnly = false, children }
   const planner = agents?.find(agent => agent.agent_type === 'planner')
   const baseline = baselineAgent(agents)
   const [showProposal, setShowProposal] = useState(false)
-  const pastProposal = phase !== 'planning' && phase !== 'proposal' && !!pe.proposal
+  const proposal = proposalOf(pe)
+  const pastProposal = phase !== 'planning' && phase !== 'proposal' && !!proposal
   return (
     <>
     <Card role="region" aria-label="Where this experiment stands">
@@ -145,8 +143,8 @@ export function PhaseStrip({ pe, jobs = [], stages, readOnly = false, children }
         )}
       </CardContent>
     </Card>
-    {pastProposal && showProposal && (
-      <ProposalForm key={pe.proposed_at} draft={pe} proposal={pe.proposal!} editable={false} accepting={false} accepted onDone={() => {}} />
+    {pastProposal && showProposal && proposal && (
+      <ProposalForm key={pe.proposed_at} draft={pe} proposal={proposal} editable={false} accepting={false} accepted onDone={() => {}} />
     )}
     </>
   )

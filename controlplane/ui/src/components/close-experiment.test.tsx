@@ -2,13 +2,12 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { closePlatformExperiment } from '@/lib/api/platform-experiments'
-import { PlatformExperimentStatus } from '@/types/platform-experiments'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { CloseExperiment } from '@/components/close-experiment'
+import type { PlatformExperiment } from '@/types/api'
 
 vi.mock('@/lib/api/platform-experiments', () => ({ closePlatformExperiment: vi.fn() }))
 
-const pe = { id: 'pe-1', name: 'Cosine', status: PlatformExperimentStatus.RUNNING } as PlatformExperiment
+const pe = { id: 'pe-1', name: 'Cosine', status: 'running' } as PlatformExperiment
 
 beforeEach(() => { vi.mocked(closePlatformExperiment).mockReset().mockResolvedValue(pe) })
 

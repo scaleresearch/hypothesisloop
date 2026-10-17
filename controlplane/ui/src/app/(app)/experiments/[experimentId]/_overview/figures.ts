@@ -1,8 +1,3 @@
-import type { HypothesisStats } from '@/types/hypotheses'
-import { HYPOTHESIS_STATUSES } from '@/types/hypotheses'
-import type { ExperimentStats } from '@/types/jobs'
-import type { PlatformExperiment } from '@/types/platform-experiments'
-import type { AgentQuota } from '@/types/quotas'
 import type { Figure } from '@/components/ui/figures'
 import { evictionLabel, faultBreakdown } from '@/lib/eviction'
 import { formatAccH } from '@/lib/format'
@@ -11,6 +6,8 @@ import { hypothesisActivity } from '@/lib/hypothesis-progress'
 import type { Phase } from '@/lib/phase'
 import { experimentPath, withQuery } from '@/lib/routes'
 import { inFlight } from '@/lib/units'
+import { hypothesisStatusValues } from '@/types/api'
+import type { AgentQuotaView, ExperimentStats, HypothesisStats, PlatformExperiment } from '@/types/api'
 
 /** The experiment in figures: what it spent and holds, its jobs, hypotheses and researchers. */
 export function overviewFigures({ pe, phase, plannedOnly, unit, quotas, stats, hypothesisStats, verdicts, researchers }: {
@@ -18,7 +15,7 @@ export function overviewFigures({ pe, phase, plannedOnly, unit, quotas, stats, h
   phase: Phase
   plannedOnly: boolean
   unit: string
-  quotas: AgentQuota[] | undefined
+  quotas: AgentQuotaView[] | undefined
   stats: ExperimentStats | undefined
   hypothesisStats: ExperimentStats | undefined
   verdicts: HypothesisStats | undefined
@@ -32,7 +29,7 @@ export function overviewFigures({ pe, phase, plannedOnly, unit, quotas, stats, h
   const running = jobsByStatus.RUNNING ?? 0
   const hypothesisCount = verdicts?.total ?? 0
   const hypothesisSub = [
-    HYPOTHESIS_STATUSES.map(v => `${verdicts?.by_status[v] ?? 0} ${v}`).join(' · '),
+    hypothesisStatusValues.map(v => `${verdicts?.by_status[v] ?? 0} ${v}`).join(' · '),
     hypothesisActivity(hypothesisCount, hypothesisStats?.groups ?? {}, pe.id),
   ].filter(Boolean).join(' · ')
 

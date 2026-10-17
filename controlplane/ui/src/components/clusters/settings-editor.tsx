@@ -2,15 +2,16 @@
 
 import { useState } from 'react'
 import { updateCluster } from '@/lib/api/clusters'
-import type { ClusterSettings, OrgCluster } from '@/types/clusters'
 import { Button } from '@/components/ui/button'
 import { FormField } from '@/components/ui/form-field'
 import { Input } from '@/components/ui/input'
 import { Inline, Stack } from '@/components/ui/stack'
 import { InlineError } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
+import type { ListedCluster, UpdateClusterRequest } from '@/types/api'
 
-type Field = keyof ClusterSettings
+type Settings = Omit<UpdateClusterRequest, 'shared'>
+type Field = keyof Settings
 
 const FIELDS: { key: Field; label: string; placeholder: string; unit: string; autoscaler: boolean }[] = [
   { key: 'stuck_pending_timeout_seconds', label: 'stuck-pending timeout', placeholder: 'seconds', unit: 's', autoscaler: false },
@@ -24,7 +25,7 @@ const FIELDS: { key: Field; label: string; placeholder: string; unit: string; au
  * Saving sends the fields that changed; an emptied field goes back to the default, which the API
  * takes as 0.
  */
-export function ClusterSettingsEditor({ orgID, cluster, onSaved }: { orgID: string; cluster: OrgCluster; onSaved: () => Promise<unknown> }) {
+export function ClusterSettingsEditor({ orgID, cluster, onSaved }: { orgID: string; cluster: ListedCluster; onSaved: () => Promise<unknown> }) {
   const fields = FIELDS.filter(f => !f.autoscaler || cluster.autoscaler_enabled || cluster[f.key] != null)
   const saved = (key: Field) => (cluster[key] != null ? String(cluster[key]) : '')
   const [draft, setDraft] = useState<Partial<Record<Field, string>>>({})
@@ -36,7 +37,7 @@ export function ClusterSettingsEditor({ orgID, cluster, onSaved }: { orgID: stri
   async function save(e: React.FormEvent) {
     e.preventDefault()
     setError('')
-    const change: ClusterSettings = {}
+    const change: Settings = {}
     for (const { key, label } of fields) {
       const text = value(key).trim()
       if (text === saved(key)) continue

@@ -6,11 +6,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchMe } from '@/lib/api/accounts'
 import { fetchPlatformExperiment } from '@/lib/api/platform-experiments'
 import { ApiError } from '@/lib/api/request'
-import type { Me } from '@/types/accounts'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { useTenant } from '@/lib/tenant'
 import { AppShell } from '@/components/app-shell'
 import { keys } from '@/lib/keys'
+import type { Me, PlatformExperiment } from '@/types/api'
 
 const navigation = vi.hoisted(() => ({ params: {} as Record<string, string> }))
 

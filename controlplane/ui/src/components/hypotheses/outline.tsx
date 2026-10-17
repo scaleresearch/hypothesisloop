@@ -3,7 +3,6 @@
 import { memo, useEffect, useMemo, useRef } from 'react'
 import type { ReactNode, RefObject } from 'react'
 import { clsx } from 'clsx'
-import type { HypothesisGraph, HypothesisGraphNode } from '@/types/hypotheses'
 import { Badge } from '@/components/ui/badge'
 import { RowButton } from '@/components/ui/button'
 import { Inline } from '@/components/ui/stack'
@@ -14,6 +13,7 @@ import { AddHereButton } from '@/components/hypotheses/editor-controls'
 import { matchesFilters, outlineRows } from '@/lib/hypothesis-graph'
 import { verdictBy } from '@/components/actor'
 import type { GraphFilters } from '@/lib/hypothesis-graph'
+import type { GraphNode, HypothesisGraph } from '@/types/api'
 
 interface HypothesisOutlineProps {
   graph: HypothesisGraph
@@ -62,7 +62,7 @@ function Row({ id, depth, selected, selectedRef, hit, className, onSelect, child
 // One row per idea, memoized on its own props: selecting, filtering or a poll that changes one idea
 // re-renders the rows that changed and not the thousand around them.
 const IdeaRow = memo(function IdeaRow({ node, depth, alsoBuildsOn, selected, hit, dimmed, selectedRef, onSelect }: {
-  node: HypothesisGraphNode
+  node: GraphNode
   depth: number
   alsoBuildsOn: number
   selected: boolean

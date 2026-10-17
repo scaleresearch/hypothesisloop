@@ -7,7 +7,6 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
 import { fetchExperiment, fetchExperimentLogs, fetchExperimentMetrics } from '@/lib/api/jobs'
-import type { MetricDataPoint } from '@/types/jobs'
 import { PlatformExperimentName } from '@/components/platform-experiment-name'
 import { Section } from '@/components/ui/section'
 import { CodeBlock } from '@/components/ui/code-block'
@@ -30,6 +29,7 @@ import { JobReason } from '@/components/job-reason'
 import { graphHref } from '@/lib/hypothesis-graph'
 import { keys } from '@/lib/keys'
 import { POLL } from '@/lib/poll'
+import type { MetricDataPoint } from '@/types/api'
 
 // What eviction_reason says of a job in each status that carries one: a QUEUED job's is the
 // reason its last attempt was requeued for.

@@ -2,8 +2,7 @@
 
 import { Fragment, useState } from 'react'
 import useSWR from 'swr'
-import { fetchOrgClusters, registerCluster, removeCluster, setClusterEnabled, setClusterOrder, updateCluster } from '@/lib/api/clusters'
-import type { OrgCluster, RegisteredCluster } from '@/types/clusters'
+import { fetchOrgClusters, registerCluster, removeCluster, setClusterEnabled, setClusterOrder, updateCluster, type Registered } from '@/lib/api/clusters'
 import { useTenant } from '@/lib/tenant'
 import { ClusterSettingsEditor } from '@/components/clusters/settings-editor'
 import { ClusterStatus } from '@/components/clusters/cluster-status'
@@ -21,6 +20,7 @@ import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
 import { keys } from '@/lib/keys'
 import { POLL } from '@/lib/poll'
+import type { ListedCluster } from '@/types/api'
 
 /**
  * The clusters the org's jobs can run on: its own, in the order a job is placed on them, then any
@@ -35,7 +35,7 @@ export function OrgClusters() {
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState('')
-  const [registered, setRegistered] = useState<RegisteredCluster | null>(null)
+  const [registered, setRegistered] = useState<Registered | null>(null)
   const [switching, setSwitching] = useState('')
   const [moving, setMoving] = useState<string[] | null>(null)
   const [dragged, setDragged] = useState('')
@@ -47,10 +47,10 @@ export function OrgClusters() {
   // While a move is written the list shows the order asked for, each in a place of its own as the
   // write gives it; a refusal puts it back.
   const shownOwn = moving
-    ? moving.map(n => own.find(c => c.name === n)).filter((c): c is OrgCluster => !!c).map((c, i) => ({ ...c, place: c.enabled ? i + 1 : undefined }))
+    ? moving.map(n => own.find(c => c.name === n)).filter((c): c is ListedCluster => !!c).map((c, i) => ({ ...c, place: c.enabled ? i + 1 : undefined }))
     : own
   const shown = [...shownOwn, ...others]
-  const tied = (c: OrgCluster) => !!c.place && shown.filter(o => o.place === c.place).length > 1
+  const tied = (c: ListedCluster) => !!c.place && shown.filter(o => o.place === c.place).length > 1
   const columns = administers ? 6 : 5
 
   async function change(cluster: string, act: () => Promise<unknown>) {
@@ -97,7 +97,7 @@ export function OrgClusters() {
     if (await register(name.trim())) setName('')
   }
 
-  function row(c: OrgCluster, index?: number) {
+  function row(c: ListedCluster, index?: number) {
     const orders = administers && index !== undefined
     return (
       <Fragment key={c.name}>

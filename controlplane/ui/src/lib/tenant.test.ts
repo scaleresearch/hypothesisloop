@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { resolveExperimentTenant, resolveOrgTenant, resolveTenant } from '@/lib/tenant'
-import type { Me } from '@/types/accounts'
+import type { Me } from '@/types/api'
 
 const at = '2026-01-01T00:00:00Z'
 

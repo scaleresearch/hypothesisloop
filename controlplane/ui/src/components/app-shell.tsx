@@ -6,8 +6,6 @@ import { useParams } from 'next/navigation'
 import { fetchMe } from '@/lib/api/accounts'
 import { fetchPlatformExperiment } from '@/lib/api/platform-experiments'
 import { ApiError } from '@/lib/api/request'
-import type { Me } from '@/types/accounts'
-import type { PlatformExperiment } from '@/types/platform-experiments'
 import { HOME_PATH } from '@/lib/auth'
 import { resolveExperimentTenant, resolveOrgTenant, resolveTenant, TenantContext, type TenantResolution } from '@/lib/tenant'
 import { Nav } from '@/components/nav'
@@ -21,6 +19,7 @@ import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { Text } from '@/components/ui/text'
 import { keys } from '@/lib/keys'
 import { POLL } from '@/lib/poll'
+import type { Me, PlatformExperiment } from '@/types/api'
 
 // A failed read stays failed until the person comes back to the tab, the network returns or they
 // try again: no read is retried on a timer, and refreshInterval stops on an error until then.

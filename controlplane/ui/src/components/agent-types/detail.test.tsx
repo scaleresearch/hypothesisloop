@@ -4,12 +4,11 @@ import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { archiveAgentType, createAgentType, editAgentType, fetchAgentType, fetchAgentTypeVersions, restoreAgentType } from '@/lib/api/agent-types'
 import { ApiError } from '@/lib/api/request'
-import type { Me } from '@/types/accounts'
-import type { AgentType, AgentTypeVersion, EditedAgentType } from '@/types/agent-types'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { AgentTypeDetail } from '@/components/agent-types/detail'
 import { CATALOG, RESEARCHER_PROMPT, agentType } from '@/test-agent-types'
 import { choose } from '@/test-select'
+import type { AgentTypeVersion, CurrentAgentType, EditedAgentType, Me } from '@/types/api'
 
 const navigation = vi.hoisted(() => ({ push: vi.fn() }))
 vi.mock('next/navigation', () => ({ useRouter: () => navigation }))
@@ -24,9 +23,9 @@ const me = (role: 'owner' | 'member'): Me => ({
   projects: [{ id: 'prj_1', org_id: 'org_a', name: 'default', created_at: at }],
 })
 
-let type: AgentType
+let type: CurrentAgentType
 
-function version(n: number, prompt: string, effort: AgentType['current']['settings']['effort'] = 'high'): AgentTypeVersion {
+function version(n: number, prompt: string, effort: CurrentAgentType['current']['settings']['effort'] = 'high'): AgentTypeVersion {
   return { agent_type: type.id, version: n, prompt, digest: `d${n}0000000000000`, created_at: at, created_by: { kind: 'user', id: 'u1', name: 'Ada' }, settings: { model: '', max_subagents: 4, effort, hyperparameters: {} } }
 }
 
@@ -46,7 +45,7 @@ function setPrompt(text: string) {
   fireEvent.change(prompt(), { target: { value: text } })
 }
 
-function edited(t: AgentType, told: number): EditedAgentType {
+function edited(t: CurrentAgentType, told: number): EditedAgentType {
   return { ...t, propagation: { version: t.current_version, told } }
 }
 

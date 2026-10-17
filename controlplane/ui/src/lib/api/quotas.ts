@@ -1,11 +1,11 @@
 import { apiFetch } from '@/lib/api/request'
-import type { AgentQuota } from '@/types/quotas'
+import type { AgentQuotaView } from '@/types/api'
 
-export function fetchPlatformExperimentQuotas(platformExpID: string): Promise<AgentQuota[]> {
-  return apiFetch<AgentQuota[]>(`/platform-experiments/${platformExpID}/quotas`)
+export function fetchPlatformExperimentQuotas(platformExpID: string): Promise<AgentQuotaView[]> {
+  return apiFetch<AgentQuotaView[]>(`/platform-experiments/${platformExpID}/quotas`)
 }
 
 // Answered 404 for an agent with no quota there: quota is granted at the start, to the agents signed up.
-export function fetchAgentQuota(platformExpID: string, agentID: string): Promise<AgentQuota> {
-  return apiFetch<AgentQuota>(`/platform-experiments/${platformExpID}/quotas/${agentID}`)
+export function fetchAgentQuota(platformExpID: string, agentID: string): Promise<AgentQuotaView> {
+  return apiFetch<AgentQuotaView>(`/platform-experiments/${platformExpID}/quotas/${agentID}`)
 }

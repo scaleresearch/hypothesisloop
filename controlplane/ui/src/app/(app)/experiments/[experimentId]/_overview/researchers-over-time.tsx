@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from 'react'
 import { clsx } from 'clsx'
-import type { AgentMetricSeries, MetricDefinition, StagesStatus } from '@/types/platform-experiments'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Section } from '@/components/ui/section'
 import { Stack } from '@/components/ui/stack'
@@ -10,6 +9,7 @@ import { Text } from '@/components/ui/text'
 import { semantic, seriesPalette } from '@/lib/colors'
 import { AgentSelector, MetricSelector } from './chart-selectors'
 import { CompetingAgentsChart } from './competing-chart'
+import type { AgentMetricSeries, MetricDefinition, StagesStatus } from '@/types/api'
 
 // Colors are assigned once per full (unfiltered) agent roster, keyed by a sorted id list, so a
 // given agent keeps the same color even as the user toggles which agents/metrics are visible.
