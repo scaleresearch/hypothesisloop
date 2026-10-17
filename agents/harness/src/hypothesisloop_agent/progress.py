@@ -23,9 +23,7 @@ MAX_ACTIVITY_LENGTH = platform.MAX_ACTIVITY_LENGTH
 # reading, and the digest of the instructions it runs. The launcher hands the newest to the platform, which keeps it in the run's metrics
 # (launcherapi.parseHarnessState reads it).
 STATE_PREFIX = platform.STATE_PREFIX
-# Characters of the instructions digest the state line carries: the launcher keeps 200 characters
-# of it, and 12 hex characters are 48 bits, which the platform's metrics hold exactly.
-DIGEST_LENGTH = 12
+DIGEST_LENGTH = platform.INSTRUCTIONS_DIGEST_LENGTH
 
 THINKING = "thinking"
 WAITING = "waiting for platform updates"
@@ -35,9 +33,10 @@ def state_line(subagents: int, working: bool, since: float, digest: str, version
     """The state line: subagents, turn and since, the instructions_digest and the version of the
     agent type they are once the harness runs instructions, then the model_ fields of model that
     are known."""
-    fields = {"subagents": subagents, "turn": "working" if working else "waiting", "since": int(since),
-              **({"instructions_digest": digest[:DIGEST_LENGTH], "version": version} if digest else {}),
-              **{f"model_{k}": v for k, v in model.items() if v is not None}}
+    fields = {platform.STATE_SUBAGENTS: subagents, platform.STATE_TURN: platform.TURN_WORKING if working else platform.TURN_WAITING,
+              platform.STATE_SINCE: int(since),
+              **({platform.STATE_INSTRUCTIONS_DIGEST: digest[:DIGEST_LENGTH], platform.STATE_VERSION: version} if digest else {}),
+              **{k: v for k, v in model.items() if v is not None}}
     return " ".join([STATE_PREFIX] + [f"{k}={v}" for k, v in fields.items()])
 
 
@@ -122,7 +121,8 @@ class Progress:
 
     def model(self, status: str, kind: str | None, utilization: float | None, resets_at: int | None) -> None:
         """The model provider's rate limit as the CLI said it last."""
-        self._model = {"status": status, "type": kind, "utilization": utilization, "resets_at": resets_at}
+        self._model = {platform.STATE_MODEL_STATUS: status, platform.STATE_MODEL_TYPE: kind,
+                       platform.STATE_MODEL_UTILIZATION: utilization, platform.STATE_MODEL_RESETS_AT: resets_at}
 
     def _sentence(self) -> str:
         return sentence(f"{self._trouble}. {self._activity}") if self._trouble else self._activity

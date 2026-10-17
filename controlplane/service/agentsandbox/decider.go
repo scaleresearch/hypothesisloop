@@ -379,34 +379,34 @@ func parseHarnessState(line string) (state domain.HarnessState, unknown []string
 	modelRead := false
 	for key, value := range fields {
 		switch key {
-		case "subagents":
+		case sandboxapi.StateSubagents:
 			state.Subagents, err = strconv.Atoi(value)
 			if err != nil || state.Subagents < 0 {
 				return state, unknown, fmt.Errorf("subagents %q is no count", value)
 			}
-		case "turn":
+		case sandboxapi.StateTurn:
 			switch value {
-			case "working":
-			case "waiting":
+			case sandboxapi.TurnWorking:
+			case sandboxapi.TurnWaiting:
 				state.TurnWaiting = true
 			default:
 				return state, unknown, fmt.Errorf("turn %q is neither working nor waiting", value)
 			}
-		case "since":
+		case sandboxapi.StateSince:
 			if state.TurnSince, err = unixTime(key); err != nil {
 				return state, unknown, err
 			}
-		case "instructions_digest":
+		case sandboxapi.StateInstructionsDigest:
 			if !instructionsDigestPattern.MatchString(value) {
 				return state, unknown, fmt.Errorf("instructions_digest %q is no %d lowercase hex characters", value, domain.InstructionsDigestLength)
 			}
 			state.InstructionsDigest = value
-		case "version":
+		case sandboxapi.StateVersion:
 			state.AgentTypeVersion, err = strconv.Atoi(value)
 			if err != nil || state.AgentTypeVersion < 1 {
 				return state, unknown, fmt.Errorf("version %q is no version", value)
 			}
-		case "model_status":
+		case sandboxapi.StateModelStatus:
 			switch value {
 			case "allowed", "allowed_warning":
 			case "rejected":
@@ -414,14 +414,14 @@ func parseHarnessState(line string) (state domain.HarnessState, unknown []string
 			default:
 				return state, unknown, fmt.Errorf("model_status %q is none of allowed, allowed_warning and rejected", value)
 			}
-		case "model_type":
-		case "model_utilization":
+		case sandboxapi.StateModelType:
+		case sandboxapi.StateModelUtilization:
 			u, err := strconv.ParseFloat(value, 64)
 			if err != nil || u < 0 || u > 1 {
 				return state, unknown, fmt.Errorf("model_utilization %q is no number from 0 to 1", value)
 			}
 			state.Model.Utilization = &u
-		case "model_resets_at":
+		case sandboxapi.StateModelResetsAt:
 			at, err := unixTime(key)
 			if err != nil {
 				return state, unknown, err
@@ -431,14 +431,14 @@ func parseHarnessState(line string) (state domain.HarnessState, unknown []string
 			unknown = append(unknown, key)
 			continue
 		}
-		modelRead = modelRead || strings.HasPrefix(key, "model_")
+		modelRead = modelRead || strings.HasPrefix(key, sandboxapi.StateModelPrefix)
 	}
-	for _, key := range []string{"subagents", "turn", "since"} {
+	for _, key := range []string{sandboxapi.StateSubagents, sandboxapi.StateTurn, sandboxapi.StateSince} {
 		if _, given := fields[key]; !given {
 			return state, unknown, fmt.Errorf("%s is required", key)
 		}
 	}
-	if _, given := fields["model_status"]; modelRead && !given {
+	if _, given := fields[sandboxapi.StateModelStatus]; modelRead && !given {
 		return state, unknown, fmt.Errorf("model_status is required with the other model_ fields")
 	}
 	slices.Sort(unknown)

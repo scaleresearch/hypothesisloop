@@ -8,12 +8,11 @@ import logging
 import tarfile
 from pathlib import Path
 
-from hypothesisloop_agent import api_client, config
+from hypothesisloop_agent import api_client, config, platform
 
 log = logging.getLogger("llm_agent")
 
-# domain.MaxAgentSessionBytes on the platform's side.
-MAX_BYTES = 32 << 20
+MAX_BYTES = platform.MAX_SESSION_BYTES
 
 # The two roots a snapshot's members live under, by the name each has inside the archive. The
 # harness's state is named workdir there: sessions stored while it was kept in the working

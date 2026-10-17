@@ -103,7 +103,7 @@ def complete(answer: dict, cfg: config.Config, commands: str, workdir: str) -> I
         cfg.run_as(answer["role"])
         instructions = Instructions(
             agent_type=answer["agent_type"], version=int(answer["agent_type_version"]), role=answer["role"],
-            prompt=prompt.fill(answer["prompt"], answer["placeholders"], {prompt.HL_COMMANDS: commands, prompt.WORKDIR: workdir}),
+            prompt=prompt.fill(answer["prompt"], answer["placeholders"], {platform.PLACEHOLDER_HL_COMMANDS: commands, platform.PLACEHOLDER_WORKDIR: workdir}),
             model=settings["model"], max_subagents=int(settings["max_subagents"]),
             effort=settings["effort"],
             hyperparameters=settings["hyperparameters"] or {}, digest=answer["digest"])

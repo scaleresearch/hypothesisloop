@@ -763,7 +763,7 @@ class RateLimitTest(unittest.IsolatedAsyncioTestCase):
             await run._read_usage(SimpleNamespace())
         self.assertEqual(asked, [{"subtype": "get_usage"}])
         self.assertEqual(run._allowance.pacing().window, "five_hour")
-        self.assertEqual(run._progress._model, {"status": "allowed", "type": "five_hour", "utilization": 0.85, "resets_at": int(resets)})
+        self.assertEqual(run._progress._model, {"model_status": "allowed", "model_type": "five_hour", "model_utilization": 0.85, "model_resets_at": int(resets)})
 
     async def test_a_reset_that_has_passed_refuses_nothing(self):
         run._rate_limit = _refusal(time.time() - 1).rate_limit_info

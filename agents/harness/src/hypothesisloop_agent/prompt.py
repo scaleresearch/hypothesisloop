@@ -9,11 +9,6 @@ import subprocess
 
 from hypothesisloop_agent import config
 
-# domain.HarnessPlaceholders on the platform's side.
-HL_COMMANDS = "hl_commands"
-WORKDIR = "workdir"
-PLACEHOLDERS = (HL_COMMANDS, WORKDIR)
-
 # Each role reads hl's listing, which holds the rules every command shares, and the help of the
 # commands it acts with; it reads the help of any other when it runs one. A planner runs nothing,
 # so the listing is not for it: it is shown its two commands.

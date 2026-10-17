@@ -66,12 +66,13 @@ _DRAIN_S = 5
 # Everything else is read when next acting. A kind wakes only for what its reader can act on.
 WAKES = {
     config.COORDINATOR: (
-        platform.EVENT_AGENT_FINISHED, f"{platform.EVENT_AGENT_IDLE}=new", f"{platform.EVENT_CAPACITY_IDLE}=new",
+        platform.EVENT_AGENT_FINISHED, f"{platform.EVENT_AGENT_IDLE}={platform.IDLE_NEW}", f"{platform.EVENT_CAPACITY_IDLE}={platform.IDLE_NEW}",
         platform.EVENT_EXPERIMENT_BLOCKED, platform.EVENT_JOB_HELD, platform.EVENT_STAGE_BOUNDARY, platform.EVENT_COMMENT_NEW,
         platform.EVENT_PLATFORM_EXPERIMENT_STATUS, platform.EVENT_PLATFORM_EXPERIMENT_DESCRIPTION,
         platform.EVENT_PLATFORM_EXPERIMENT_BASELINE, platform.EVENT_PLATFORM_EXPERIMENT_GOAL, platform.EVENT_PLATFORM_EXPERIMENT_PLAN,
-        f"{platform.EVENT_HYPOTHESIS_NEW}=user", f"{platform.EVENT_HYPOTHESIS_NEW}=key", f"{platform.EVENT_HYPOTHESIS_NEW}=staff",
-        f"{platform.EVENT_AGENT_MESSAGE}=owner", platform.EVENT_JOB_DUPLICATE, platform.EVENT_AGENT_REPLACED,
+        f"{platform.EVENT_HYPOTHESIS_NEW}={platform.ACTOR_USER}",
+        f"{platform.EVENT_HYPOTHESIS_NEW}={platform.ACTOR_KEY}", f"{platform.EVENT_HYPOTHESIS_NEW}={platform.ACTOR_STAFF}",
+        f"{platform.EVENT_AGENT_MESSAGE}={platform.MESSAGE_FROM_OWNER}", platform.EVENT_JOB_DUPLICATE, platform.EVENT_AGENT_REPLACED,
         f"{platform.EVENT_AGENT_INSTRUCTIONS}@{config.COORDINATOR}"),
     "agent": (
         platform.EVENT_EXPERIMENT_STATUS, platform.EVENT_EXPERIMENT_BLOCKED, platform.EVENT_JOB_HELD,

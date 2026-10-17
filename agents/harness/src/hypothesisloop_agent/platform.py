@@ -127,3 +127,32 @@ CUT_MAX_AGENTS_LOWERED = "max_agents_lowered"
 # The fields of an agent's instructions (platformexperiments.Instructions) and of their settings (domain.AgentTypeSettings).
 INSTRUCTIONS_FIELDS = frozenset({"agent_type", "agent_type_version", "digest", "placeholders", "prompt", "role", "rules_version", "settings"})
 AGENT_TYPE_SETTINGS_FIELDS = frozenset({"effort", "hyperparameters", "max_subagents", "model"})
+
+# The keys of the state line and the values of its turn (agentsandbox).
+STATE_SUBAGENTS = "subagents"
+STATE_TURN = "turn"
+STATE_SINCE = "since"
+STATE_INSTRUCTIONS_DIGEST = "instructions_digest"
+STATE_VERSION = "version"
+STATE_MODEL_STATUS = "model_status"
+STATE_MODEL_TYPE = "model_type"
+STATE_MODEL_UTILIZATION = "model_utilization"
+STATE_MODEL_RESETS_AT = "model_resets_at"
+TURN_WORKING = "working"
+TURN_WAITING = "waiting"
+
+# The placeholders the harness fills, the session it stores and the characters of the instructions digest its state line carries (domain).
+PLACEHOLDER_HL_COMMANDS = "hl_commands"
+PLACEHOLDER_WORKDIR = "workdir"
+MAX_SESSION_BYTES = 33554432
+INSTRUCTIONS_DIGEST_LENGTH = 12
+
+# The kinds of actor (domain.ActorKinds), who a message of a person or a key is from (domain.MessageFrom) and the value of the first notice of an idle stretch (domain.IdleNew).
+ACTOR_AGENT = "agent"
+ACTOR_COORDINATOR = "coordinator"
+ACTOR_KEY = "key"
+ACTOR_STAFF = "staff"
+ACTOR_UNVERIFIED = "unverified"
+ACTOR_USER = "user"
+MESSAGE_FROM_OWNER = "owner"
+IDLE_NEW = "new"

@@ -100,6 +100,24 @@ const (
 	ProgressIntervalSeconds = 15
 )
 
+// The keys of a state line, each key=value, and the values of its turn: working while a turn is in
+// flight, waiting while the agent waits for an update. The model_ keys are the model provider's
+// rate limit, once the harness has read one.
+const (
+	StateSubagents          = "subagents"
+	StateTurn               = "turn"
+	StateSince              = "since"
+	StateInstructionsDigest = "instructions_digest"
+	StateVersion            = "version"
+	StateModelPrefix        = "model_"
+	StateModelStatus        = StateModelPrefix + "status"
+	StateModelType          = StateModelPrefix + "type"
+	StateModelUtilization   = StateModelPrefix + "utilization"
+	StateModelResetsAt      = StateModelPrefix + "resets_at"
+	TurnWorking             = "working"
+	TurnWaiting             = "waiting"
+)
+
 // The environment a sandboxed agent's machine is started with, which hl reads: where the
 // platform is and the caller's token.
 const (

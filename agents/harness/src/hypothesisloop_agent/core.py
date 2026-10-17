@@ -231,13 +231,13 @@ async def repo_map(setup: RunSetup) -> str:
 
 def _closer(actor: dict | None) -> str:
     kind, name = (actor or {}).get("kind"), (actor or {}).get("name") or "unnamed"
-    if kind == "coordinator":
+    if kind == platform.ACTOR_COORDINATOR:
         return "its coordinator closed it"
-    if kind == "user":
+    if kind == platform.ACTOR_USER:
         return f"a person closed it ({name})"
-    if kind == "key":
+    if kind == platform.ACTOR_KEY:
         return f"it was closed with an API key ({name})"
-    if kind == "staff":
+    if kind == platform.ACTOR_STAFF:
         return "platform staff closed it"
     return "the platform does not say who closed it"
 
@@ -283,7 +283,7 @@ async def _closed_because(setup: RunSetup) -> str | None:
         return "You are being stopped because nobody took up your answer in time, and the platform closed the draft."
     if pe.get("close_reason") == platform.CLOSE_CLOSED_BY_REQUEST:
         closed_by = pe.get("closed_by")
-        if config.coordinates(cfg) and (closed_by or {}).get("kind") == "coordinator":
+        if config.coordinates(cfg) and (closed_by or {}).get("kind") == platform.ACTOR_COORDINATOR:
             return None
         said = f" Their reason: {pe['close_message']}" if pe.get("close_message") else " They gave no reason."
         return (f"You are being stopped because the platform experiment was closed before its end time: "
