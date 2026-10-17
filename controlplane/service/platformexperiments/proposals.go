@@ -296,13 +296,14 @@ func (s *Service) Propose(ctx context.Context, id string, caller auth.Principal,
 	if pe.Status != domain.PlatformExpDraft {
 		return nil, notADraft(pe)
 	}
-	if p.GoalVersion != pe.GoalVersion {
-		return nil, goalChanged(pe)
-	}
 	if _, err := s.checkProposal(ctx, p, pe); err != nil {
 		return nil, s.refusal("check proposal", err)
 	}
 	if check {
+		// A check writes nothing, so the store's refusal of a goal that changed is not reached.
+		if p.GoalVersion != pe.GoalVersion {
+			return nil, goalChanged(pe)
+		}
 		return pe, nil
 	}
 	stored, err := json.Marshal(p)
@@ -343,12 +344,6 @@ func (s *Service) Decline(ctx context.Context, id string, caller auth.Principal,
 	}
 	if pe == nil {
 		return nil, ErrPlatformExperimentNotFound
-	}
-	if pe.Status != domain.PlatformExpDraft {
-		return nil, notADraft(pe)
-	}
-	if goalVersion != pe.GoalVersion {
-		return nil, goalChanged(pe)
 	}
 	if err := s.refusedAnswer(ctx, pe, s.store.Decline(ctx, id, goalVersion, reason, time.Now().UTC().Add(s.planning.ProposedFor), s.planning.PlannerKept)); err != nil {
 		return nil, s.refusal("store decline", err)
