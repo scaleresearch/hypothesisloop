@@ -10,6 +10,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
 )
 
 // seatStore is createdStore with the quotas of its researchers, and the hours each used.
@@ -68,7 +69,7 @@ func TestARunningExperimentTakesAMaxAgentsItsUnspentHoursHold(t *testing.T) {
 		for _, id := range cut {
 			store.cut[id] = true
 		}
-		svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), noUsage(t), time.Minute)
+		svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), platformexperimentstest.NoUsage(t), time.Minute)
 		svc.baseline = func(context.Context, *domain.PlatformExperiment, string) (*Baseline, error) {
 			return measuredBaseline(), nil
 		}

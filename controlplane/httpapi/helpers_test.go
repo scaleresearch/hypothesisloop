@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 )
 
@@ -45,4 +47,19 @@ func call(t *testing.T, r http.Handler, method, path, body string) (int, map[str
 		}
 	}
 	return rec.Code, out
+}
+
+// catalogStore is what the stores of these tests are made from: the built-in agent types are the
+// catalog of every platform experiment and project, and every other method is left to whoever
+// embeds it.
+type catalogStore struct {
+	platformexperiments.PlatformExperimentsStore
+}
+
+func (catalogStore) AgentTypeCatalog(context.Context, string) (domain.AgentTypeCatalog, error) {
+	return agenttypes.Catalog(), nil
+}
+
+func (catalogStore) ProjectAgentTypeCatalog(context.Context, string) (domain.AgentTypeCatalog, error) {
+	return agenttypes.Catalog(), nil
 }

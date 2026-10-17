@@ -16,14 +16,10 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
 )
 
-// testSettings is the platform settings a service of these tests applies and holds a create to.
-var testSettings = domain.QuotaConfig{
-	DefaultStages: []domain.Stage{{LengthPct: 100}}, DefaultReportIntervalSeconds: 30,
-	DefaultQuotaTier: domain.QuotaTierGuaranteed, MaxRunLength: 30 * 24 * time.Hour, BaselineLimit: 90 * time.Minute, MinBaseline: 20 * time.Minute,
-}
-
+// platformexperimentstest.Settings is the platform settings a service of these tests applies and holds a create to.
 var testPlanning = Planning{Limit: 30 * time.Minute, ProposedFor: 7 * 24 * time.Hour, PlannerKept: 10 * time.Minute, AutoAccept: 30 * time.Second}
 
 // reaching has the org of every project reach the given accelerator types and no other.
@@ -45,7 +41,7 @@ func TestValidateRefusesWithAReasonAndAppliesTheSettings(t *testing.T) {
 			Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}},
 		}
 	}
-	svc := NewPlatformExperimentsService(&createStore{}, testSettings, zap.NewNop(), "", time.Minute)
+	svc := NewPlatformExperimentsService(&createStore{}, platformexperimentstest.Settings, zap.NewNop(), "", time.Minute)
 	spec, err := svc.validate(valid(), agenttypes.Catalog())
 	if err != nil {
 		t.Fatalf("validate: %v", err)
@@ -104,7 +100,7 @@ func TestValidateRefusesWithAReasonAndAppliesTheSettings(t *testing.T) {
 // cut from takes the default as one stage, and a ladder stated for it is refused.
 func TestAFieldNoBoundaryCanCutIsStoredWithTheLadderItRuns(t *testing.T) {
 	ladder := []domain.Stage{{LengthPct: 40, EvictPct: 75, MaxJobHours: 2}, {LengthPct: 60, MaxJobHours: 6}}
-	settings := testSettings
+	settings := platformexperimentstest.Settings
 	settings.DefaultStages = ladder
 	svc := NewPlatformExperimentsService(&createStore{}, settings, zap.NewNop(), "", time.Minute)
 	spec := func(researchers int, stages []domain.Stage) CreatePlatformExperimentRequest {
@@ -146,7 +142,7 @@ func TestAPlatformExperimentNoClusterCouldRunIsRefusedWhereItComesIntoBeing(t *t
 		"a type no cluster has":                  {[]domain.AcceleratorType{domain.CPUType, rtx}, &a100, true},
 		"a type stated while no cluster reports": {nil, &rtx, true},
 	} {
-		svc := reaching(NewPlatformExperimentsService(&createStore{}, testSettings, zap.NewNop(), "", time.Minute), c.reachable...)
+		svc := reaching(NewPlatformExperimentsService(&createStore{}, platformexperimentstest.Settings, zap.NewNop(), "", time.Minute), c.reachable...)
 		_, err := svc.requireReachable(context.Background(), "prj-a", c.sizedFor)
 		var refused *refusal.Refusal
 		if got := errors.As(err, &refused) && refused.GetStatus() == 422 && refused.Reason == "accelerator_unreachable"; got != c.refused || (!c.refused && err != nil) {
@@ -159,12 +155,12 @@ func TestAPlatformExperimentNoClusterCouldRunIsRefusedWhereItComesIntoBeing(t *t
 		Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}},
 	}
 	store := &createStore{}
-	_, err := reaching(NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute)).Create(context.Background(), body)
+	_, err := reaching(NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), "", time.Minute)).Create(context.Background(), body)
 	var refused *refusal.Refusal
 	if !errors.As(err, &refused) || refused.Reason != "accelerator_unreachable" || store.created != nil {
 		t.Errorf("a create no cluster could run: got %v, stored %v, want 422 accelerator_unreachable and nothing stored", err, store.created)
 	}
-	unread := NewPlatformExperimentsService(&createStore{}, testSettings, zap.NewNop(), "", time.Minute)
+	unread := NewPlatformExperimentsService(&createStore{}, platformexperimentstest.Settings, zap.NewNop(), "", time.Minute)
 	if _, err := unread.Create(context.Background(), body); !errors.Is(err, ErrLiveCapacityUnconfigured) {
 		t.Errorf("a create with no capacity to read: got %v, want ErrLiveCapacityUnconfigured", err)
 	}
@@ -179,7 +175,7 @@ func TestAPatchPassesWithNoCapacityReported(t *testing.T) {
 			StartsAt: time.Now().UTC(), DurationHours: 24,
 			Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}},
 		}}}
-		svc := reaching(NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute))
+		svc := reaching(NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), "", time.Minute))
 		renamed := "renamed"
 		pe, err := svc.Update(context.Background(), "pe-1", PlatformExperimentPatch{Name: &renamed})
 		if err != nil || pe.Name != renamed {
@@ -206,7 +202,7 @@ func TestTheExamplePlatformExperimentIsAccepted(t *testing.T) {
 	if err := json.Unmarshal(body, &req); err != nil {
 		t.Fatal(err)
 	}
-	svc := reaching(NewPlatformExperimentsService(&createStore{}, testSettings, zap.NewNop(), "", time.Minute), domain.CPUType)
+	svc := reaching(NewPlatformExperimentsService(&createStore{}, platformexperimentstest.Settings, zap.NewNop(), "", time.Minute), domain.CPUType)
 	if _, err := svc.Create(context.Background(), req); err != nil {
 		t.Fatalf("Create from the example: %v", err)
 	}
@@ -219,7 +215,7 @@ func TestARunThatContinuesAnotherKeepsItsMetric(t *testing.T) {
 	prior := &domain.PlatformExperiment{ID: "pe-prior", Metrics: []domain.MetricDefinition{
 		{Key: "val_loss", Direction: "minimize"}, {Key: "latency_ms", Direction: "minimize", Role: domain.MetricRoleConstraint, Bound: &bound},
 	}}
-	svc := NewPlatformExperimentsService(&createStore{created: prior}, testSettings, zap.NewNop(), "", time.Minute)
+	svc := NewPlatformExperimentsService(&createStore{created: prior}, platformexperimentstest.Settings, zap.NewNop(), "", time.Minute)
 	if err := svc.requireContinuedMetrics(context.Background(), "pe-prior", []domain.MetricDefinition{
 		{Key: "latency_ms", Direction: "minimize", Role: domain.MetricRoleConstraint, Bound: &looser}, {Key: "val_loss", Direction: "minimize"},
 	}); err != nil {

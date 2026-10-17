@@ -216,6 +216,10 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 
 	peSvc := platformexperiments.NewPlatformExperimentsService(peFullStore, quotaCfg, logger, metricsDBURL, observedGapCap).WithDataStore(dataStore, pcfg.DataStore.MaxBytesPerAgent).WithRepositories(gitHost).
 		WithEnvironments(environmentsSvc).WithModelDefaults(modelDefaults(pcfg)).WithIdleNotice(peFullStore, time.Duration(pcfg.Agents.IdleNoticeMinutes)*time.Minute).WithPersonIdeas(graph)
+	launch := platformexperiments.AgentLaunch{
+		Hosting: pcfg.Sandbox != nil, DefaultModel: pcfg.Agents.DefaultModel, CoordinatorModel: pcfg.Agents.CoordinatorModel,
+		SigningSecret: pcfg.Auth.SigningSecret, MaxHosted: pcfg.Agents.MaxHostedPerPlatformExperiment,
+	}
 	peHandler := platformexperiments.NewPlatformExperimentsHandler(peSvc, gitHost, platformexperiments.Planning{
 		Limit:       time.Duration(pcfg.Planning.LimitMinutes) * time.Minute,
 		ProposedFor: time.Duration(pcfg.Planning.ProposedForDays) * 24 * time.Hour,
@@ -225,10 +229,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		WithJobImages(pcfg.OfferedJobImages()).
 		WithGitProxy(pcfg.GitHost.ProxyURL).
 		WithLiveCapacity(metricsDBURL, connectedWithin, store, domain.NewPodResources(pcfg.PodResourcesByName)).
-		WithAgentLaunch(platformexperiments.AgentLaunch{
-			Hosting: pcfg.Sandbox != nil, DefaultModel: pcfg.Agents.DefaultModel, CoordinatorModel: pcfg.Agents.CoordinatorModel,
-			SigningSecret: pcfg.Auth.SigningSecret, MaxHosted: pcfg.Agents.MaxHostedPerPlatformExperiment,
-		})
+		WithAgentLaunch(launch)
 
 	schedulerHandler, clusterAgentHandler := newSchedulerParts(runCtx, gitHost, environmentsSvc, pool, store, graph, peSvc, peHandler, quotaCfg, pcfg, metricsDBURL, dataStore, logger)
 	// The change stream: one LISTEN connection for this process, fanned out to whatever /watch
@@ -284,6 +285,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		}{db.NewPlatformExperimentsStore(pool), store.EnvironmentsStore}, gitHost, logger),
 		modelProxy:  modelProxy,
 		experiments: peSvc,
+		launch:      launch,
 	}, logger)
 
 	return &http.Server{
@@ -314,6 +316,7 @@ type routes struct {
 	gitProxy            *gitproxy.Proxy
 	modelProxy          *modelproxy.Proxy
 	experiments         *platformexperiments.PlatformExperimentsService
+	launch              platformexperiments.AgentLaunch
 }
 
 // webSockets are the paths a WebSocket client opens, with the subprotocol that carries its token.
@@ -366,7 +369,7 @@ func newRouter(gate apiGate, uiOrigin string, h routes, logger *zap.Logger) chi.
 	httpapi.RegisterSituation(doc, h.experiments, logger)
 	platformexperiments.RegisterBudgetHuma(doc, h.platformExperiments)
 	httpapi.RegisterMessages(doc, h.experiments, logger)
-	platformexperiments.RegisterAgentsHuma(doc, h.platformExperiments, h.hypotheses)
+	httpapi.RegisterExperimentAgents(doc, h.experiments, h.hypotheses, h.launch, logger)
 	platformexperiments.RegisterPlanningHuma(doc, h.platformExperiments)
 	httpapi.RegisterSharing(doc, h.sharing, h.platformExperiments.Answer)
 	httpapi.RegisterExperimentData(doc, h.experiments, logger)

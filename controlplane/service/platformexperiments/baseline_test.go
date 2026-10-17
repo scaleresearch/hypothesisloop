@@ -16,6 +16,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
@@ -50,7 +51,7 @@ func declareAPI(t *testing.T, pe *domain.PlatformExperiment, baseline *Baseline,
 func jobsAPI(t *testing.T, pe *domain.PlatformExperiment, jobs []*Baseline, caller auth.Principal) (*createdStore, func(body map[string]any) (int, map[string]any)) {
 	t.Helper()
 	store := &createdStore{created: []*domain.PlatformExperiment{pe}}
-	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute)
+	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), "", time.Minute)
 	svc.baseline = func(_ context.Context, _ *domain.PlatformExperiment, jobID string) (*Baseline, error) {
 		for _, job := range jobs {
 			if job != nil && job.Job.ID == jobID {

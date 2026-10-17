@@ -15,6 +15,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
@@ -423,7 +424,7 @@ func TestAPlatformExperimentAnswersWhatItSpent(t *testing.T) {
 		_, _ = fmt.Fprint(w, `{"status":"success","data":{"resultType":"vector","result":[{"metric":{},"value":[1,"0.75"]}]}}`)
 	}))
 	defer metrics.Close()
-	svc := NewPlatformExperimentsService(&startStore{}, testSettings, zap.NewNop(), metrics.URL, time.Minute)
+	svc := NewPlatformExperimentsService(&startStore{}, platformexperimentstest.Settings, zap.NewNop(), metrics.URL, time.Minute)
 	for _, status := range []domain.PlatformExperimentStatus{domain.PlatformExpOpen, domain.PlatformExpRunning, domain.PlatformExpClosed} {
 		pe := &domain.PlatformExperiment{ID: "pe-1", Status: status, BudgetAcceleratorHours: 2, CreatedAt: time.Now().Add(-time.Hour)}
 		if err := svc.Spend(context.Background(), pe); err != nil || pe.ConsumedAcceleratorHours == nil || *pe.ConsumedAcceleratorHours != 0.75 {

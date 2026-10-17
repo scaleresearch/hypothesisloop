@@ -60,13 +60,14 @@ func openAPISpec(t *testing.T) map[string]any {
 	t.Helper()
 	r := authtest.Router(authtest.Staff)
 	doc := apidocs.New(r, "hypothesisloop API", "1.0.0", agenttypes.PlatformRules, auth.NewAccess(authtest.Placement{}), zap.NewNop())
-	platformExperiments := platformexperiments.NewPlatformExperimentsHandler(nil, worldRepositories{}, worldPlanning, nil).WithAgentLaunch(platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: "contract-test-signing-secret", MaxHosted: 20})
+	launch := platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model-1", CoordinatorModel: "model-2", SigningSecret: "contract-test-signing-secret", MaxHosted: 20}
+	platformExperiments := platformexperiments.NewPlatformExperimentsHandler(nil, worldRepositories{}, worldPlanning, nil).WithAgentLaunch(launch)
 	httpapi.RegisterAgents(doc, nil)
 	platformexperiments.RegisterHuma(doc, platformExperiments)
 	httpapi.RegisterSituation(doc, nil, zap.NewNop())
 	platformexperiments.RegisterBudgetHuma(doc, platformExperiments)
 	httpapi.RegisterMessages(doc, nil, zap.NewNop())
-	platformexperiments.RegisterAgentsHuma(doc, platformExperiments, struct{ platformexperiments.Hypotheses }{})
+	httpapi.RegisterExperimentAgents(doc, nil, struct{ platformexperiments.Hypotheses }{}, launch, zap.NewNop())
 	platformexperiments.RegisterPlanningHuma(doc, platformExperiments)
 	scheduler.RegisterHuma(doc, scheduler.NewHandler(
 		scheduler.NewService(nil, nil, nil, worldRepositories{}, contractCapacity{}, contractSettler{}, "http://metrics.invalid", zap.NewNop()).WithEnvironments(noEnvironments{}).WithLoop(noopLoop{})))

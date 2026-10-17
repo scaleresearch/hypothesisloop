@@ -19,6 +19,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
@@ -322,7 +323,7 @@ func (s *createdStore) update(pe *domain.PlatformExperiment, status domain.Platf
 func repoAPI(t *testing.T, caller authtest.As, repos *fakeRepositories) (*createdStore, func(method, path string, body any) *httptest.ResponseRecorder, *PlatformExperimentsService) {
 	t.Helper()
 	store := &createdStore{}
-	svc := reaching(NewPlatformExperimentsService(store, testSettings, zap.NewNop(), "", time.Minute), domain.CPUType).WithRepositories(repos)
+	svc := reaching(NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), "", time.Minute), domain.CPUType).WithRepositories(repos)
 	placement := authtest.Placement{
 		Projects:            map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}, "prj-b": {ID: "prj-b", OrgID: "org-b"}},
 		PlatformExperiments: map[string]domain.Tenancy{},
@@ -430,7 +431,7 @@ func TestCreateWithoutFromRepoRequiresWhatOnlyTheCallerCanSay(t *testing.T) {
 	// Its two hours count from the start of its run, so until then it has no end: its baseline has
 	// the platform's limit from the create.
 	if pe.ReportIntervalSeconds != 30 || pe.StartsAt.Before(before) || pe.StartsAt.After(time.Now()) || pe.DurationHours != 2 ||
-		!pe.EndsAt.IsZero() || !pe.BaselineDueAt.Equal(pe.StartsAt.Add(testSettings.BaselineLimit)) {
+		!pe.EndsAt.IsZero() || !pe.BaselineDueAt.Equal(pe.StartsAt.Add(platformexperimentstest.Settings.BaselineLimit)) {
 		t.Fatalf("created = %+v, want the platform's report interval, a start at the create, no end yet and the baseline due at the platform's limit", pe)
 	}
 	for _, field := range []string{"name", "description", "metrics", "budget_accelerator_hours", "max_agents", "duration_hours"} {

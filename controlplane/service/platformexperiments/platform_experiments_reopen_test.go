@@ -12,6 +12,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
@@ -126,7 +127,7 @@ func TestAReopenIsRefusedWithAPlainReason(t *testing.T) {
 		"one closed before its run started":  {"/platform-experiments/pe-never/reopen", fmt.Sprintf(`{"ends_at":%q}`, ahead), "invalid_transition", 409},
 		"one a later run continues":          {"/platform-experiments/pe-continued/reopen", fmt.Sprintf(`{"ends_at":%q}`, ahead), "invalid_transition", 409},
 		"an ends_at that has passed":         {"/platform-experiments/pe-1/reopen", fmt.Sprintf(`{"ends_at":%q}`, now.Add(-time.Minute).Format(time.RFC3339)), "invalid_length", 422},
-		"an ends_at past the longest run":    {"/platform-experiments/pe-1/reopen", fmt.Sprintf(`{"ends_at":%q}`, now.Add(testSettings.MaxRunLength).Format(time.RFC3339)), "run_too_long", 422},
+		"an ends_at past the longest run":    {"/platform-experiments/pe-1/reopen", fmt.Sprintf(`{"ends_at":%q}`, now.Add(platformexperimentstest.Settings.MaxRunLength).Format(time.RFC3339)), "run_too_long", 422},
 		"a model with no hosted coordinator": {"/platform-experiments/pe-1/reopen", fmt.Sprintf(`{"ends_at":%q,"coordinator_model":"coordinator-new"}`, ahead), "invalid_request", 400},
 		"one that does not exist":            {"/platform-experiments/pe-none/reopen", fmt.Sprintf(`{"ends_at":%q}`, ahead), "not_found", 404},
 	} {

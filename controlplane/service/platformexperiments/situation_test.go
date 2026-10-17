@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 )
 
@@ -174,7 +175,7 @@ func TestTheRecordOfACloseStatesTheAgentsAsTheyStoodAtTheClose(t *testing.T) {
 		Instance: &domain.AgentInstance{AskedAt: &asked, Name: "m-2", Reported: domain.InstanceRunning, EndReason: "gone", ExitedAt: &exited},
 		Activity: &domain.AgentActivity{Text: "running hl job submit", At: now.Add(-time.Minute)}}}},
 		unsettled: map[string]bool{"pe-ended": true}}
-	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), noUsage(t), time.Minute)
+	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), platformexperimentstest.NoUsage(t), time.Minute)
 	if err := svc.SweepExpired(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +276,7 @@ func situationRun(t *testing.T) (*PlatformExperimentsService, *situationStore) {
 		allowance: map[string]domain.MessageAllowance{"ag-1": {LeftThisHour: 6}, "ag-2": {LeftThisHour: 4}},
 		inFlight:  []domain.HypothesisInFlight{{HypothesisID: "hyp-1", Queued: 1, Running: 1, AgentIDs: []string{"ag-1", "ag-gone"}}},
 	}
-	svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), noUsage(t), time.Minute).WithPersonIdeas(personIdeas{"pe-1": 2})
+	svc := NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), platformexperimentstest.NoUsage(t), time.Minute).WithPersonIdeas(personIdeas{"pe-1": 2})
 	svc.placement = func(context.Context, string) (*Placement, error) {
 		return &Placement{
 			Clusters: []ClusterCapacity{{ClusterName: "c1", Accelerators: []AcceleratorCapacity{

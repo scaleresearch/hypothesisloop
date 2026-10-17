@@ -15,6 +15,7 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
@@ -58,7 +59,7 @@ func (f *signupStore) IsSignedUp(ctx context.Context, platformExpID, agentID str
 
 func newSignupTestService(t *testing.T, store PlatformExperimentsStore) *PlatformExperimentsService {
 	t.Helper()
-	return reaching(NewPlatformExperimentsService(store, testSettings, zap.NewNop(), noUsage(t), 3*time.Minute), domain.CPUType)
+	return reaching(NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), platformexperimentstest.NoUsage(t), 3*time.Minute), domain.CPUType)
 }
 
 // max_agents sizes the field being ranked. If a baseline or a reviewer counted against it, adding

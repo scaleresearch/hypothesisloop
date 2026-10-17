@@ -13,6 +13,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
+	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
@@ -436,4 +437,20 @@ func (h *PlatformExperimentsHandler) Answer(ctx context.Context, pe *domain.Plat
 		pe.GitURL = domain.GitProxyURL(h.proxyURL, pe.ID)
 	}
 	return &struct{ Body *domain.PlatformExperiment }{Body: pe}, nil
+}
+
+// WithAgentLaunch attaches what joining needs beyond the store.
+func (h *PlatformExperimentsHandler) WithAgentLaunch(launch AgentLaunch) *PlatformExperimentsHandler {
+	h.launch = launch
+	return h
+}
+
+// refusal answers a refusal as it is; anything else is the platform's own failure, logged and
+// answered without detail.
+func (h *PlatformExperimentsHandler) refusal(op string, err error) error {
+	var refused *refusal.Refusal
+	if errors.As(err, &refused) {
+		return refused
+	}
+	return auth.Internal(h.logger, op+" failed", err)
 }

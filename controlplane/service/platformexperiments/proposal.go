@@ -453,7 +453,7 @@ func (h *PlatformExperimentsHandler) proposed(ctx context.Context, pe *domain.Pl
 	if err != nil {
 		return proposed, err
 	}
-	agents, signups, err := h.hostedAgents(catalog, nil, by, now)
+	agents, signups, err := hostedAgents(catalog, nil, by, now)
 	if err != nil {
 		return proposed, err
 	}
@@ -586,7 +586,7 @@ func (h *PlatformExperimentsHandler) accept(ctx context.Context, id string, req 
 	if err != nil {
 		return nil, h.refusal("accept", err)
 	}
-	agents, signups, err := h.hostedAgents(catalog, req.Agents, by, now)
+	agents, signups, err := hostedAgents(catalog, req.Agents, by, now)
 	if err != nil {
 		return nil, h.refusal("accept", err)
 	}

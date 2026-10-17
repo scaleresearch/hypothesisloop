@@ -47,8 +47,9 @@ type (
 func testRouter(t *testing.T) chi.Router {
 	t.Helper()
 	unreachable := authtest.As{Kind: auth.KindStaff}
+	launch := platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model", CoordinatorModel: "model", SigningSecret: "secret", MaxHosted: 1}
 	platformExperiments := platformexperiments.NewPlatformExperimentsHandler(nil, noRepositories{}, platformexperiments.Planning{Limit: time.Minute, ProposedFor: time.Minute, PlannerKept: time.Minute}, zap.NewNop()).
-		WithAgentLaunch(platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model", CoordinatorModel: "model", SigningSecret: "secret", MaxHosted: 1})
+		WithAgentLaunch(launch)
 	modelProxy, err := modelproxy.New(noOneHosted{}, modelproxy.MetricsDB{}, "https://model.example.invalid", "credential", zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
@@ -56,6 +57,7 @@ func testRouter(t *testing.T) chi.Router {
 	return newRouter(apiGate{tokens: unreachable, access: auth.NewAccess(authtest.Placement{})}, "http://ui.test", routes{
 		platformExperiments: platformExperiments,
 		hypotheses:          noHypotheses{},
+		launch:              launch,
 		accounts:            &accounts.Handler{},
 		agentTypes:          &accounts.AgentTypesHandler{},
 		repositories:        &accounts.Repositories{},

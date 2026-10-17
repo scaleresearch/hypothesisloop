@@ -1,11 +1,9 @@
-package platformexperiments
+package httpapi
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"reflect"
 	"slices"
 	"strings"
@@ -18,7 +16,8 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/shared/apidocs"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/graphdb"
@@ -28,7 +27,7 @@ const agentsTestSecret = "a-signing-secret-only-this-test-knows"
 
 // rosterStore is a platform experiment's roster in memory, with the store's own refusals.
 type rosterStore struct {
-	fakeStore
+	catalogStore
 	pe      *domain.PlatformExperiment
 	agents  map[string]*domain.Agent
 	signups []domain.AgentSignup
@@ -306,44 +305,17 @@ func (f *rosterStore) RemoveAgent(_ context.Context, _, agentID string, _ func(c
 	return domain.ErrNotSignedUp
 }
 
-var agentsTestPlacement = authtest.Placement{
-	PlatformExperiments: map[string]domain.Tenancy{
-		"pe-1": {PlatformExperimentID: "pe-1", ProjectID: "project-a", OrgID: "org-a"},
-	},
-	Agents: map[string]string{"veteran": "org-a", "dana": "org-a", "outsider": "org-b"},
-}
-
 func agentsRouter(t *testing.T, store *rosterStore, caller auth.Principal) http.Handler {
 	t.Helper()
 	r := authtest.Router(authtest.As(caller))
 	doc := apidocs.New(r, "test", "1.0.0", "", auth.NewAccess(agentsTestPlacement), zap.NewNop())
-	handler := NewPlatformExperimentsHandler(newSignupTestService(t, store), store, testPlanning, zap.NewNop()).WithAgentLaunch(agentsTestLaunch())
-	RegisterAgentsHuma(doc, handler, store)
+	svc := platformexperiments.NewPlatformExperimentsService(store, platformexperimentstest.Settings, zap.NewNop(), platformexperimentstest.NoUsage(t), 3*time.Minute)
+	RegisterExperimentAgents(doc, svc, store, agentsTestLaunch(), zap.NewNop())
 	return r
 }
 
-func agentsTestLaunch() AgentLaunch {
-	return AgentLaunch{Hosting: true, DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxHosted: 20}
-}
-
-func call(t *testing.T, r http.Handler, method, path, body string) (int, map[string]any) {
-	t.Helper()
-	var req *http.Request
-	if body == "" {
-		req = httptest.NewRequest(method, path, nil)
-	} else {
-		req = httptest.NewRequest(method, path, strings.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-	}
-	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, authtest.Authorize(req))
-	out := map[string]any{}
-	if rec.Body.Len() > 0 {
-		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-			t.Fatalf("%s %s: body %q is not JSON: %v", method, path, rec.Body, err)
-		}
-	}
-	return rec.Code, out
+func agentsTestLaunch() platformexperiments.AgentLaunch {
+	return platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "platform-model-1", CoordinatorModel: "platform-coordinator-1", SigningSecret: agentsTestSecret, MaxHosted: 20}
 }
 
 // addEach makes the same request n times, as a client that wants n agents does, and returns the
@@ -378,7 +350,11 @@ func joined(t *testing.T, body map[string]any) []map[string]any {
 	return out
 }
 
-var staff = auth.Principal{Kind: auth.KindStaff}
+var (
+	staff              = auth.Principal{Kind: auth.KindStaff}
+	waitingPerson      = auth.Principal{Kind: auth.KindUser, UserID: "u-1", OrgIDs: []string{"org-a"}}
+	waitingCoordinator = auth.Principal{Kind: auth.KindCoordinator, PlatformExperimentID: "pe-1", OrgIDs: []string{"org-a"}}
+)
 
 func TestHostedAgentsAreCreatedForTheConfiguredLauncherAndHandedNoToken(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 5)
@@ -866,90 +842,6 @@ func (f *rosterStore) GetAgentRunningExperiments(context.Context, string, string
 	return nil, nil
 }
 
-// In a live run both researchers finished with 11 to 16 minutes of an hour and most of their quota
-// left, and the coordinator heard only their reasons. A researcher with more than a tenth of
-// both left names its blocker or is told what is left, and every researcher's finish records
-// the time and quota it left, which agent.finished carries. No other role is asked.
-func TestAResearcherFinishingEarlyNamesItsBlockerAndTheTimeAndQuotaItLeavesAreTold(t *testing.T) {
-	newStore := func(role domain.SignupRole, left time.Duration, spent float64) *rosterStore {
-		store := newRosterStore(domain.PlatformExpRunning, 5)
-		store.pe.DurationHours, store.pe.EndsAt = 1, time.Now().Add(left)
-		store.pe.StartsAt = store.pe.EndsAt.Add(-time.Hour)
-		store.signups = []domain.AgentSignup{{PlatformExperimentID: "pe-1", AgentID: "dana", Role: role}}
-		store.quota = &domain.AgentQuota{AgentID: "dana", PlatformExperimentID: "pe-1", GuaranteedAcceleratorHours: 3, UsedGuaranteedAccH: spent}
-		return store
-	}
-	finish := func(store *rosterStore, blocker string) (*domain.AgentSignup, error) {
-		svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), noUsage(t), 3*time.Minute)
-		return svc.FinishAgent(context.Background(), "pe-1", "dana", "nothing beat the control", blocker, "")
-	}
-
-	store := newStore(domain.SignupRoleCompetitor, 16*time.Minute+30*time.Second, 0.2)
-	_, err := finish(store, "")
-	var refused *refusal.Refusal
-	if !errors.As(err, &refused) || refused.Reason != "time_and_quota_left" || refused.GetStatus() != http.StatusConflict ||
-		!strings.Contains(refused.Message, "16 of the run's 60 minutes and 2.8 of the agent's 3 AccH were left") || !strings.Contains(refused.Message, "--blocker") ||
-		store.signups[0].FinishedAt != nil {
-		t.Fatalf("an early finish with no blocker: got %v, want 409 time_and_quota_left saying what is left, and no finish", err)
-	}
-	finished, err := finish(store, "every job needs a toolchain the environment cannot build")
-	if err != nil || !strings.HasPrefix(finished.FinishedReason, "nothing beat the control. Blocker: every job needs a toolchain the environment cannot build. When it finished, 16 of the run's 60 minutes") {
-		t.Errorf("an early finish naming its blocker: got %+v, %v, want finished with the reason, the blocker and what it left", finished, err)
-	}
-
-	for name, store := range map[string]*rosterStore{
-		"little time left":  newStore(domain.SignupRoleCompetitor, 5*time.Minute, 0.2),
-		"little quota left": newStore(domain.SignupRoleCompetitor, 30*time.Minute, 2.8),
-	} {
-		finished, err := finish(store, "")
-		if err != nil || !strings.HasPrefix(finished.FinishedReason, "nothing beat the control. When it finished, ") {
-			t.Errorf("%s: got %+v, %v, want finished with what it left and no blocker asked", name, finished, err)
-		}
-	}
-	store = newStore(domain.SignupRoleReviewer, 30*time.Minute, 0.2)
-	if finished, err := finish(store, ""); err != nil || finished.FinishedReason != "nothing beat the control" {
-		t.Errorf("a reviewer: got %+v, %v, want finished with its reason as it gave it", finished, err)
-	}
-}
-
-// A researcher was refused a finish with 4 minutes of 30 left, more than a tenth, when its
-// jobs took 2 to 7 minutes, and sat idle until the close. Less time left than the agent's jobs
-// typically take, or with none of its own the experiment's, is too little to ask a blocker for.
-func TestAResearcherFinishesWithoutABlockerWhenNoJobOfItFitsInTheTimeLeft(t *testing.T) {
-	took := func(agent string, minutes int) *domain.Experiment {
-		end := time.Now().Add(-time.Hour)
-		return &domain.Experiment{AgentID: agent, Status: domain.StatusCompleted, CreatedAt: end.Add(-time.Duration(minutes) * time.Minute), FinishedAt: &end}
-	}
-	finish := func(completed ...*domain.Experiment) error {
-		store := newRosterStore(domain.PlatformExpRunning, 5)
-		store.pe.DurationHours, store.pe.EndsAt = 0.5, time.Now().Add(4*time.Minute+30*time.Second)
-		store.pe.StartsAt = store.pe.EndsAt.Add(-30 * time.Minute)
-		store.signups = []domain.AgentSignup{{PlatformExperimentID: "pe-1", AgentID: "dana", Role: domain.SignupRoleCompetitor}}
-		store.quota = &domain.AgentQuota{AgentID: "dana", PlatformExperimentID: "pe-1", GuaranteedAcceleratorHours: 3, UsedGuaranteedAccH: 0.2}
-		store.completed = completed
-		svc := NewPlatformExperimentsService(store, testSettings, zap.NewNop(), noUsage(t), 3*time.Minute)
-		_, err := svc.FinishAgent(context.Background(), "pe-1", "dana", "nothing beat the control", "", "")
-		return err
-	}
-	for name, completed := range map[string][]*domain.Experiment{
-		"its own jobs take longer":          {took("dana", 2), took("dana", 6), took("dana", 7), took("ali", 1)},
-		"the experiment's jobs take longer": {took("ali", 5), took("ali", 6)},
-	} {
-		if err := finish(completed...); err != nil {
-			t.Errorf("%s: %v, want finished without a blocker", name, err)
-		}
-	}
-	for name, completed := range map[string][]*domain.Experiment{
-		"its own jobs are quick": {took("dana", 1), took("dana", 2), took("ali", 20)},
-		"no job completed":       nil,
-	} {
-		var refused *refusal.Refusal
-		if err := finish(completed...); !errors.As(err, &refused) || refused.Reason != "time_and_quota_left" {
-			t.Errorf("%s: %v, want 409 time_and_quota_left", name, err)
-		}
-	}
-}
-
 // A baseline agent that finished after its platform experiment closed was answered 409 not_running
 // and a paragraph about roles. Its token still works then, to file summaries, and anything else it
 // sends is answered experiment_closed. A finish that is taken answers the agent as finished.
@@ -1074,4 +966,40 @@ func TestTheRosterOfAnOpenPlatformExperimentSaysWhyAnAgentWaits(t *testing.T) {
 			t.Errorf("an agent of a running platform experiment carries status_reason: %v", agent)
 		}
 	}
+}
+
+// The roster said which machines ran and nothing of what their agents did. Each entry answers
+// what its agent is doing now and since when, and one whose machine says nothing answers none.
+func TestTheRosterAnswersWhatEachHostedAgentIsDoing(t *testing.T) {
+	store := newRosterStore(domain.PlatformExpRunning, 5)
+	since := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	running := &domain.AgentInstance{Name: "m-1", AskedAt: &since, SeenAt: &since, Reported: domain.InstanceRunning}
+	store.signups = []domain.AgentSignup{
+		{AgentID: "dana", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: running, Activity: &domain.AgentActivity{Text: "running hl job submit", At: since}},
+		{AgentID: "eli", Role: domain.SignupRoleCompetitor, Hosted: true, Instance: running},
+	}
+	code, out := call(t, agentsRouter(t, store, waitingPerson), "GET", "/platform-experiments/pe-1/agents", "")
+	if code != http.StatusOK {
+		t.Fatalf("list: got = %d %v", code, out)
+	}
+	roster := joined(t, out)
+	doing, _ := roster[0]["activity"].(map[string]any)
+	if doing["text"] != "running hl job submit" || doing["at"] != "2026-10-06T12:00:00Z" {
+		t.Errorf("an agent at work: activity %v, want its sentence and since when", roster[0]["activity"])
+	}
+	if _, says := roster[1]["activity"]; says {
+		t.Errorf("an agent whose machine said nothing: activity %v, want none", roster[1]["activity"])
+	}
+}
+
+// Nobody asks for a planner: it is no flavor a request can name.
+func TestNobodyAsksForAPlanner(t *testing.T) {
+	open := &rosterStore{pe: &domain.PlatformExperiment{ID: "pe-1", ProjectID: "prj-a", Status: domain.PlatformExpOpen, MaxAgents: 5, MaxHosted: rosterMaxHosted, Repository: "acme/model"}, agents: map[string]*domain.Agent{}}
+	if code, body := call(t, agentsRouter(t, open, staff), "POST", "/platform-experiments/pe-1/agents", `{"hosted":true,"flavor":"planner"}`); code != http.StatusBadRequest || len(open.signups) != 0 {
+		t.Errorf("an agent asked for as a planner: got = %d %v, want 400 and nobody joined", code, body)
+	}
+}
+
+func (s *rosterStore) GetAgentQuota(context.Context, string, string) (*domain.AgentQuota, error) {
+	return s.quota, nil
 }

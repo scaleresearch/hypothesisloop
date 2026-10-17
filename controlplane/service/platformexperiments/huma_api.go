@@ -158,7 +158,7 @@ func RegisterHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
 		if in.Body.Researchers, err = peh.resolvedPool(catalog, in.Body.Researchers); err != nil {
 			return nil, err
 		}
-		hosting, err := peh.withHosting(ctx, in.Body)
+		hosting, err := withHosting(in.Body, peh.launch)
 		if err != nil {
 			return nil, peh.refusal("create platform experiment", err)
 		}
@@ -169,7 +169,7 @@ func RegisterHuma(doc *apidocs.Doc, peh *PlatformExperimentsHandler) {
 		by := caller.Actor()
 		hosting.createdBy = &by
 		if hosting.CoordinatorHosted {
-			if hosting.agents, hosting.signups, err = peh.hostedAgents(catalog, poolAgents(hosting.Researchers), by, time.Now().UTC()); err != nil {
+			if hosting.agents, hosting.signups, err = hostedAgents(catalog, poolAgents(hosting.Researchers), by, time.Now().UTC()); err != nil {
 				return nil, peh.refusal("create platform experiment", err)
 			}
 		}
