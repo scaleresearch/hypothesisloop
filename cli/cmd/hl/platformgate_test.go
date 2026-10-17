@@ -58,7 +58,7 @@ func platformRoutes(caller auth.Principal) http.Handler {
 		PlatformExperiments: experiments,
 		Hypotheses:          struct{ platformexperiments.Hypotheses }{},
 		Launch:              launch,
-		Accounts:            accounts.NewService(nil, nil, nil, 0, "secret", accounts.RuntimeAddresses{}, accounts.Limits{MaxOrgsPerUser: 1, MaxProjectsPerOrg: 1}, doc.Access, logger),
+		Accounts:            accounts.NewService(nil, nil, nil, 0, "secret", accounts.RuntimeAddresses{}, nil, accounts.Limits{MaxOrgsPerUser: 1, MaxProjectsPerOrg: 1}, doc.Access, logger),
 		Scheduler: scheduler.NewService(nil, nil, nil,
 			struct{ scheduler.CodeHost }{}, struct{ scheduler.InstalledCapacity }{}, struct{ scheduler.QuotaSettler }{}, metricsdb.New("http://metrics.invalid"), logger).
 			WithLoop(struct{ scheduler.Triggerable }{}),

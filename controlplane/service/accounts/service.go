@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"go.uber.org/zap"
@@ -90,10 +91,14 @@ type Service struct {
 	liveWithin    time.Duration
 	signingSecret string
 	runtimes      RuntimeAddresses
-	limits        Limits
-	logger        *zap.Logger
-	access        *auth.Access
-	policy        policy
+	// platformClusters are the cluster names the control plane runs itself (cloud_compute), which
+	// only an operator registers: whoever registered one would have the platform rent machines
+	// for its jobs and hold the cluster's runtime token.
+	platformClusters []string
+	limits           Limits
+	logger           *zap.Logger
+	access           *auth.Access
+	policy           policy
 }
 
 // Limits is what one account may create: the orgs a person owns and the projects an org holds.
@@ -105,14 +110,14 @@ type Limits struct {
 
 // NewService takes liveness, which counts a cluster connected while it reported within
 // liveWithin.
-func NewService(accounts Accounts, clusters Clusters, liveness Liveness, liveWithin time.Duration, signingSecret string, runtimes RuntimeAddresses, limits Limits, access *auth.Access, logger *zap.Logger) *Service {
+func NewService(accounts Accounts, clusters Clusters, liveness Liveness, liveWithin time.Duration, signingSecret string, runtimes RuntimeAddresses, platformClusters []string, limits Limits, access *auth.Access, logger *zap.Logger) *Service {
 	if logger == nil {
 		panic("accounts.NewService: a logger is required")
 	}
 	if limits.MaxOrgsPerUser <= 0 || limits.MaxProjectsPerOrg <= 0 {
 		panic("accounts.NewService: both account limits are required and positive")
 	}
-	return &Service{accounts: accounts, clusters: clusters, liveness: liveness, liveWithin: liveWithin, signingSecret: signingSecret, runtimes: runtimes, limits: limits, logger: logger, access: access, policy: policy{access: access}}
+	return &Service{accounts: accounts, clusters: clusters, liveness: liveness, liveWithin: liveWithin, signingSecret: signingSecret, runtimes: runtimes, platformClusters: platformClusters, limits: limits, logger: logger, access: access, policy: policy{access: access}}
 }
 
 // limit is bound for a caller held to the account limits, and none, zero, for staff.
@@ -598,6 +603,9 @@ func (h *Service) RegisterCluster(ctx context.Context, orgID, name string) (*Reg
 	}
 	if err := domain.ValidateIdentifier("cluster name", name); err != nil {
 		return nil, refusal.Invalid(refusal.ReasonInvalidRequest, err.Error()).On("name")
+	}
+	if slices.Contains(h.platformClusters, name) {
+		return nil, refusal.Conflict("name_taken", "cluster name "+name+" is the platform's own")
 	}
 	cluster, err := h.clusters.RegisterCluster(ctx, name, orgID)
 	if err != nil {

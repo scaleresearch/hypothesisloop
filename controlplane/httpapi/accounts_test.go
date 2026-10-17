@@ -27,6 +27,8 @@ import (
 
 const testSigningSecret = "accounts-test-signing-secret"
 
+const testPlatformCluster = "hypothesisloop-vast"
+
 var testLimits = accounts.Limits{MaxOrgsPerUser: 3, MaxProjectsPerOrg: 10}
 
 var testRuntimeAddresses = accounts.RuntimeAddresses{APIURL: "https://api.test.invalid", MetricsURL: "https://metrics.test.invalid", Registry: "registry.test.invalid/images", ImageTag: "abc1234"}
@@ -159,7 +161,7 @@ func newAccountsWorld(t *testing.T) *world {
 	}
 	router := authtest.Router(tokens{w})
 	doc := NewDoc(router, "test", "1.0.0", "", auth.NewAccess(placement{memStore: w.store}), zap.NewNop())
-	registerAccounts(doc, accounts.NewService(w.store, w.store, liveness{connected: map[string]bool{w.clusterA: true}, contacts: func() map[string]metricsdb.ClusterContact { return w.contacts }}, time.Minute, testSigningSecret, testRuntimeAddresses, testLimits, doc.Access, zap.NewNop()))
+	registerAccounts(doc, accounts.NewService(w.store, w.store, liveness{connected: map[string]bool{w.clusterA: true}, contacts: func() map[string]metricsdb.ClusterContact { return w.contacts }}, time.Minute, testSigningSecret, testRuntimeAddresses, []string{testPlatformCluster}, testLimits, doc.Access, zap.NewNop()))
 	w.agentTypes = newMemAgentTypes()
 	ownType, _ := w.agentTypes.Create(ctx, w.orgA, "Own", "", domain.AgentRoleResearcher, ownPrompt, domain.AgentTypeSettings{MaxSubagents: 2, Effort: "high"}, domain.Actor{Kind: domain.ActorUser, ID: "u-owner"})
 	w.ownType = ownType.ID
@@ -760,6 +762,9 @@ func TestRegisteringAClusterReturnsItsRuntimeToken(t *testing.T) {
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("a name another org owns: got = %d %s, want = 409", rec.Code, rec.Body)
 	}
+	if rec := w.call("owner", "POST", "/orgs/"+w.orgA+"/clusters", name{"name": testPlatformCluster}); rec.Code != http.StatusConflict || w.store.clusters[testPlatformCluster] != nil {
+		t.Fatalf("the platform's cloud compute cluster name: got = %d %s, want = 409 and nothing registered", rec.Code, rec.Body)
+	}
 	if strings.Contains(rec.Body.String(), want) || strings.Contains(rec.Body.String(), "runtime_token") {
 		t.Fatalf("the refusal carries the cluster's token: %s", rec.Body)
 	}
@@ -1038,7 +1043,7 @@ func TestAFailureOfThePlatformIsAnsweredWithoutItsText(t *testing.T) {
 	w := newAccountsWorld(t)
 	router := authtest.Router(tokens{w})
 	doc := NewDoc(router, "test", "1.0.0", "", auth.NewAccess(placement{memStore: w.store}), zap.NewNop())
-	registerAccounts(doc, accounts.NewService(failingStore{w.store}, w.store, liveness{err: errors.New("metrics store at 10.0.0.7 refused the connection")}, time.Minute, testSigningSecret, testRuntimeAddresses, testLimits, doc.Access, zap.NewNop()))
+	registerAccounts(doc, accounts.NewService(failingStore{w.store}, w.store, liveness{err: errors.New("metrics store at 10.0.0.7 refused the connection")}, time.Minute, testSigningSecret, testRuntimeAddresses, []string{testPlatformCluster}, testLimits, doc.Access, zap.NewNop()))
 	w.router = router
 	for _, path := range []string{"/me", "/orgs/" + w.orgA + "/projects", "/orgs/" + w.orgA + "/clusters"} {
 		rec := w.call("owner", "GET", path, nil)

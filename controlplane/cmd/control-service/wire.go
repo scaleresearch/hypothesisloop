@@ -101,7 +101,7 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 		Instructions:        platformexperiments.NewComposer(store, modelDefaults(pcfg), logger),
 		Drafts:              platformexperiments.NewDrafts(store, logger),
 		Accounts: accounts.NewService(store, store, metrics, connectedWithin, pcfg.SigningSecret, accounts.RuntimeAddresses{APIURL: pcfg.Services.PublicAPIURL, MetricsURL: pcfg.Runtimes.MetricsURL, Registry: pcfg.Runtimes.Registry, ImageTag: pcfg.Runtimes.ImageTag, RegistryPlainHTTP: pcfg.Runtimes.RegistryPlainHTTP},
-			accounts.Limits{MaxOrgsPerUser: pcfg.Accounts.MaxOrgsPerUser, MaxProjectsPerOrg: pcfg.Accounts.MaxProjectsPerOrg}, gate.access, logger),
+			platformClusters(pcfg), accounts.Limits{MaxOrgsPerUser: pcfg.Accounts.MaxOrgsPerUser, MaxProjectsPerOrg: pcfg.Accounts.MaxProjectsPerOrg}, gate.access, logger),
 		AgentTypes:      accounts.NewAgentTypes(store, gate.access, logger),
 		Repositories:    repos,
 		Scheduler:       jobs,
@@ -149,6 +149,14 @@ func openGraph(ctx context.Context, url string) (*graphdb.Store, error) {
 }
 
 // modelDefaults is the platform's model for an agent and for a coordinator that names none.
+func platformClusters(pcfg *hypothesisloopcfg.ControlService) []string {
+	names := make([]string, 0, len(pcfg.CloudCompute))
+	for _, cc := range pcfg.CloudCompute {
+		names = append(names, cc.ClusterName)
+	}
+	return names
+}
+
 func modelDefaults(pcfg *hypothesisloopcfg.ControlService) domain.ModelDefaults {
 	return domain.ModelDefaults{Agent: pcfg.Agents.DefaultModel, Coordinator: pcfg.Agents.CoordinatorModel}
 }
