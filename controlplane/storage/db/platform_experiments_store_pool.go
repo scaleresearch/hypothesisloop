@@ -101,7 +101,7 @@ func holdsAtWork(maxAgents int, pool domain.ResearcherPool, atWork map[domain.Po
 // max_agents just written to it: a running one loses the newest of its researchers at work above
 // it (evictAboveMaxTx), and its researchers, unless pool states them, are capped to it. Then pool,
 // unless it is nil, is held to the researchers at work (holdsAtWork) and written.
-func setResearchersTx(ctx context.Context, tx pgx.Tx, platformExpID string, maxAgents int, pool domain.ResearcherPool) error {
+func setResearchersTx(ctx context.Context, tx *Write, platformExpID string, maxAgents int, pool domain.ResearcherPool) error {
 	if err := poolTypesTx(ctx, tx, platformExpID, pool); err != nil {
 		return err
 	}
@@ -142,7 +142,7 @@ const CutMaxAgentsLowered = "max_agents_lowered"
 // nobody takes its place. With lowerPool their entries of its researchers are lowered by them, as
 // a stage cut lowers them; a change that states the researchers states them itself. A platform
 // experiment that does not run evicts nobody.
-func evictAboveMaxTx(ctx context.Context, tx pgx.Tx, platformExpID string, maxAgents int, lowerPool bool) error {
+func evictAboveMaxTx(ctx context.Context, tx *Write, platformExpID string, maxAgents int, lowerPool bool) error {
 	var status string
 	var stage int
 	if err := tx.QueryRow(ctx, `SELECT status, current_stage FROM platform_experiments WHERE id = $1`, platformExpID).Scan(&status, &stage); err != nil {
@@ -175,7 +175,7 @@ SELECT $1, unnest($2::text[]), $3, $4`, platformExpID, evicted, stage, CutMaxAge
 }
 
 // lockedPoolTx locks platform experiment platformExpID and reads its researchers.
-func lockedPoolTx(ctx context.Context, tx pgx.Tx, platformExpID string) (domain.ResearcherPool, error) {
+func lockedPoolTx(ctx context.Context, tx *Write, platformExpID string) (domain.ResearcherPool, error) {
 	var pool domain.ResearcherPool
 	if err := tx.QueryRow(ctx, `SELECT researchers FROM platform_experiments WHERE id = $1 FOR UPDATE`, platformExpID).Scan(&pool); err != nil {
 		return nil, fmt.Errorf("read researchers: %w", err)
@@ -185,7 +185,7 @@ func lockedPoolTx(ctx context.Context, tx pgx.Tx, platformExpID string) (domain.
 
 // signupKeysTx is the agent type and model of each of agentIDs that is a researcher of platform
 // experiment platformExpID.
-func signupKeysTx(ctx context.Context, tx pgx.Tx, platformExpID string, agentIDs []string) ([]domain.PoolKey, error) {
+func signupKeysTx(ctx context.Context, tx *Write, platformExpID string, agentIDs []string) ([]domain.PoolKey, error) {
 	rows, err := tx.Query(ctx, `
 SELECT `+signupKeySQL+` FROM experiment_signups s
 WHERE s.platform_experiment_id = $1 AND s.agent_id = ANY($2) AND s.role = '`+string(domain.SignupRoleCompetitor)+`'
@@ -202,7 +202,7 @@ ORDER BY s.agent_id`, platformExpID, agentIDs)
 
 // lowerPoolTx writes the researchers of platform experiment platformExpID less the researchers
 // of agentIDs, who leave it for good (domain.ResearcherPool.Lowered): nobody takes their places.
-func lowerPoolTx(ctx context.Context, tx pgx.Tx, platformExpID string, agentIDs []string) error {
+func lowerPoolTx(ctx context.Context, tx *Write, platformExpID string, agentIDs []string) error {
 	pool, err := lockedPoolTx(ctx, tx, platformExpID)
 	if err != nil {
 		return err
@@ -223,7 +223,7 @@ func lowerPoolTx(ctx context.Context, tx pgx.Tx, platformExpID string, agentIDs 
 
 // shrinkPoolToAtWorkTx lowers the entry of key in the researchers of the locked platform
 // experiment platformExpID by one when it wants more of them at work than are.
-func shrinkPoolToAtWorkTx(ctx context.Context, tx pgx.Tx, platformExpID string, key domain.PoolKey) error {
+func shrinkPoolToAtWorkTx(ctx context.Context, tx *Write, platformExpID string, key domain.PoolKey) error {
 	pool, err := lockedPoolTx(ctx, tx, platformExpID)
 	if err != nil {
 		return err

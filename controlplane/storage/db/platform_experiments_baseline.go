@@ -41,23 +41,17 @@ func (s *Store) RaiseBaseline(ctx context.Context, pe *domain.PlatformExperiment
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.RaiseBaseline: marshal metrics: %w", err)
 	}
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.RaiseBaseline: begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	if err := writePlatformExperiment(ctx, tx, pe, metrics, domain.PlatformExpRunning, raise.From); err != nil {
-		return fmt.Errorf("platform_experiments_store.RaiseBaseline: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `INSERT INTO baseline_raises (platform_experiment_id, from_job_id, to_job_id, reason, detail, actor_kind, actor_id, created_xid)
+	return s.write(ctx, func(tx *Write) error {
+		if err := writePlatformExperiment(ctx, tx, pe, metrics, domain.PlatformExpRunning, raise.From); err != nil {
+			return fmt.Errorf("platform_experiments_store.RaiseBaseline: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO baseline_raises (platform_experiment_id, from_job_id, to_job_id, reason, detail, actor_kind, actor_id, created_xid)
 VALUES ($1, $2, $3, $4, $5, $6, $7, pg_current_xact_id()::text::bigint)`,
-		pe.ID, raise.From, raise.To, raise.Reason, raise.Detail, string(raise.Actor.Kind), raise.Actor.ID); err != nil {
-		return fmt.Errorf("platform_experiments_store.RaiseBaseline: record: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("platform_experiments_store.RaiseBaseline: commit: %w", err)
-	}
-	return nil
+			pe.ID, raise.From, raise.To, raise.Reason, raise.Detail, string(raise.Actor.Kind), raise.Actor.ID); err != nil {
+			return fmt.Errorf("platform_experiments_store.RaiseBaseline: record: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *Store) baselineRaises(ctx context.Context, id string) ([]domain.BaselineRaise, error) {
@@ -79,7 +73,7 @@ func (s *Store) baselineRaises(ctx context.Context, id string) ([]domain.Baselin
 
 // reallocateBaselineQuotas writes the quota of every agent of role baseline of pe again, from
 // pe's budget.
-func reallocateBaselineQuotas(ctx context.Context, tx pgx.Tx, pe *domain.PlatformExperiment) error {
+func reallocateBaselineQuotas(ctx context.Context, tx *Write, pe *domain.PlatformExperiment) error {
 	rows, err := tx.Query(ctx, `
 SELECT agent_id, quota_tier FROM experiment_signups
 WHERE platform_experiment_id = $1 AND role = $2`, pe.ID, string(domain.SignupRoleBaseline))

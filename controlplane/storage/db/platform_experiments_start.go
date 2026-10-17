@@ -90,13 +90,10 @@ WHERE pe.id = $1 AND pe.status = 'running' AND pe.started_at IS NULL
 //
 // Returns started=false when the experiment was not open.
 func (s *Store) StartPlatformExperimentTx(ctx context.Context, id string, agentsDue time.Duration, quotasFor func(participants []StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error)) (bool, []*domain.AgentQuota, error) {
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-
-	tag, err := tx.Exec(ctx, `
+	var quotas []*domain.AgentQuota
+	started := false
+	if err := s.write(ctx, func(tx *Write) error {
+		tag, err := tx.Exec(ctx, `
 WITH at_work AS (
     SELECT EXISTS (SELECT 1 FROM experiment_signups s
                    WHERE s.platform_experiment_id = $1 AND NOT s.hosted AND `+sharesBudgetSQL+`) AS already
@@ -107,66 +104,69 @@ SET status='running', updated_at=NOW(), starts_at = NOW(),
     ends_at = NOW() + make_interval(secs => CASE WHEN at_work.already THEN pe.duration_hours * 3600 ELSE LEAST($2, pe.duration_hours * 3600) END)
 FROM at_work
 WHERE pe.id=$1 AND pe.status='open'`, id, agentsDue.Seconds())
-	if err != nil {
-		return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: claim: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return false, nil, nil
-	}
+		if err != nil {
+			return fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: claim: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return nil
+		}
 
-	// An agent of role baseline takes no share of the run: it measured the baseline before the
-	// start, against the quota it joined with. A draft's planner took part in the draft only.
-	// Signups joined against the agents they name and their top-3 history, all on this
-	// transaction's own connection. The caller must not issue its own queries while this
-	// transaction is open: several concurrent starts would each hold a connection and wait for
-	// another from the same pool, which is a deadlock rather than a slow path.
-	rows, err := tx.Query(ctx, `
+		// An agent of role baseline takes no share of the run: it measured the baseline before the
+		// start, against the quota it joined with. A draft's planner took part in the draft only.
+		// Signups joined against the agents they name and their top-3 history, all on this
+		// transaction's own connection. The caller must not issue its own queries while this
+		// transaction is open: several concurrent starts would each hold a connection and wait for
+		// another from the same pool, which is a deadlock rather than a slow path.
+		rows, err := tx.Query(ctx, `
 SELECT s.agent_id, s.role, a.id IS NOT NULL, EXISTS (SELECT 1 FROM experiment_top3 t WHERE t.agent_id = s.agent_id),
        s.quota_tier
 FROM experiment_signups s
 LEFT JOIN agents a ON a.id = s.agent_id
 WHERE s.platform_experiment_id = $1 AND `+sharesBudgetSQL+`
 ORDER BY s.agent_id`, id)
-	if err != nil {
-		return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: list signups: %w", err)
-	}
-	var participants []StartParticipant
-	for rows.Next() {
-		var p StartParticipant
-		if err := rows.Scan(&p.AgentID, &p.Role, &p.AgentExists, &p.HasTop3, &p.QuotaTier); err != nil {
-			rows.Close()
-			return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: scan signup: %w", err)
+		if err != nil {
+			return fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: list signups: %w", err)
 		}
-		participants = append(participants, p)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: list signups: %w", err)
-	}
+		var participants []StartParticipant
+		for rows.Next() {
+			var p StartParticipant
+			if err := rows.Scan(&p.AgentID, &p.Role, &p.AgentExists, &p.HasTop3, &p.QuotaTier); err != nil {
+				rows.Close()
+				return fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: scan signup: %w", err)
+			}
+			participants = append(participants, p)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: list signups: %w", err)
+		}
 
-	quotas, stages, err := quotasFor(participants)
-	if err != nil {
+		var stages []domain.Stage
+		quotas, stages, err = quotasFor(participants)
+		if err != nil {
+			return err
+		}
+		if err := domain.ValidateStages(stages); err != nil {
+			return fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: %w", err)
+		}
+		stagesJSON, err := json.Marshal(stages)
+		if err != nil {
+			return fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: marshal stages: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `UPDATE platform_experiments SET stages=$2 WHERE id=$1`, id, stagesJSON); err != nil {
+			return fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: store stages: %w", err)
+		}
+		for _, q := range quotas {
+			if _, err := tx.Exec(ctx, upsertAgentQuotaSQL, agentQuotaUpsertArgs(q)...); err != nil {
+				return fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: upsert quota for %s: %w", q.AgentID, err)
+			}
+		}
+		started = true
+		return nil
+	}); err != nil {
 		return false, nil, err
 	}
-	if err := domain.ValidateStages(stages); err != nil {
-		return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: %w", err)
-	}
-	stagesJSON, err := json.Marshal(stages)
-	if err != nil {
-		return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: marshal stages: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `UPDATE platform_experiments SET stages=$2 WHERE id=$1`, id, stagesJSON); err != nil {
-		return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: store stages: %w", err)
-	}
-	for _, q := range quotas {
-		if _, err := tx.Exec(ctx, upsertAgentQuotaSQL, agentQuotaUpsertArgs(q)...); err != nil {
-			return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: upsert quota for %s: %w", q.AgentID, err)
-		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return false, nil, fmt.Errorf("platform_experiments_store.StartPlatformExperimentTx: commit: %w", err)
-	}
-	return true, quotas, nil
+	return started, quotas, nil
 }
 
 // AdvanceStage commits one stage boundary in a single Postgres transaction: it claims
@@ -183,116 +183,114 @@ ORDER BY s.agent_id`, id)
 // Returns (false, nil) if this boundary was already committed by an earlier call — the caller
 // must skip straight to retrying job-stopping instead of re-applying ops.
 func (s *Store) AdvanceStage(ctx context.Context, platformExpID string, stageIndex int, cutAgentIDs, survivorIDs []string, dims []StageRedistribution) (bool, error) {
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return false, fmt.Errorf("platform_experiments_store.AdvanceStage: begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-
-	// The primary key on (platform_experiment_id, stage_index) is the claim: exactly one caller
-	// inserts a row for this boundary, so concurrent control-service replicas reconciling the
-	// same platform experiment can never both apply the ops.
-	tag, err := tx.Exec(ctx,
-		`INSERT INTO platform_experiment_stage_advances (platform_experiment_id, stage_index)
+	advanced := false
+	if err := s.write(ctx, func(tx *Write) error {
+		// The primary key on (platform_experiment_id, stage_index) is the claim: exactly one caller
+		// inserts a row for this boundary, so concurrent control-service replicas reconciling the
+		// same platform experiment can never both apply the ops.
+		tag, err := tx.Exec(ctx,
+			`INSERT INTO platform_experiment_stage_advances (platform_experiment_id, stage_index)
 		 VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-		platformExpID, stageIndex,
-	)
-	if err != nil {
-		return false, fmt.Errorf("platform_experiments_store.AdvanceStage: claim: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return false, nil // boundary already committed
-	}
+			platformExpID, stageIndex,
+		)
+		if err != nil {
+			return fmt.Errorf("platform_experiments_store.AdvanceStage: claim: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return nil // boundary already committed
+		}
 
-	for _, agentID := range cutAgentIDs {
-		if _, err := tx.Exec(ctx,
-			`INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index)
+		for _, agentID := range cutAgentIDs {
+			if _, err := tx.Exec(ctx,
+				`INSERT INTO platform_experiment_cuts (platform_experiment_id, agent_id, stage_index)
 			 VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-			platformExpID, agentID, stageIndex,
+				platformExpID, agentID, stageIndex,
+			); err != nil {
+				return fmt.Errorf("platform_experiments_store.AdvanceStage: insert cut %s: %w", agentID, err)
+			}
+		}
+		// The stages after the boundary want as many fewer researchers as it cut, written with the
+		// cut: nobody is added in a cut researcher's place.
+		if len(cutAgentIDs) > 0 {
+			if err := lowerPoolTx(ctx, tx, platformExpID, cutAgentIDs); err != nil {
+				return fmt.Errorf("platform_experiments_store.AdvanceStage: %w", err)
+			}
+		}
+
+		for _, dim := range dims {
+			if dim.Budget <= 0 {
+				continue // platform experiment does not track this dimension
+			}
+			guaranteed, burst := resourceQuotaColumns(dim.ResourceType)
+
+			// Lock every cut agent's row and read its allocation here, not from a snapshot taken
+			// before the transaction: a stage move committing in between would make "unspent" wrong in
+			// either direction, minting or destroying hours against the platform budget.
+			tiers, err := participantTiers(ctx, tx, platformExpID, cutAgentIDs)
+			if err != nil {
+				return fmt.Errorf("platform_experiments_store.AdvanceStage: cut agent tiers: %w", err)
+			}
+			allocated := make(map[string]float64, len(cutAgentIDs))
+			used := make(map[string]float64, len(cutAgentIDs))
+			lockQ := fmt.Sprintf(
+				`SELECT agent_id, %s, %s FROM agent_quotas WHERE platform_experiment_id=$1 AND agent_id = ANY($2) ORDER BY agent_id FOR UPDATE`,
+				guaranteed, burst)
+			rows, err := tx.Query(ctx, lockQ, platformExpID, cutAgentIDs)
+			if err != nil {
+				return fmt.Errorf("platform_experiments_store.AdvanceStage: lock cut allocations: %w", err)
+			}
+			for rows.Next() {
+				var agentID string
+				var g, b float64
+				if err := rows.Scan(&agentID, &g, &b); err != nil {
+					rows.Close()
+					return fmt.Errorf("platform_experiments_store.AdvanceStage: scan cut allocation: %w", err)
+				}
+				tier, ok := tiers[agentID]
+				if !ok {
+					rows.Close()
+					return fmt.Errorf("platform_experiments_store.AdvanceStage: cut agent %s has no signup in %s", agentID, platformExpID)
+				}
+				// A burst-only agent holds its whole entitlement in the burst column (see
+				// domain.ApplyQuotaTier), so that is the column its unspent hours are measured in.
+				if tier == domain.QuotaTierGuaranteed {
+					allocated[agentID], used[agentID] = g, dim.UsedByAgent[agentID]
+				} else {
+					allocated[agentID], used[agentID] = b, dim.UsedBurstByAgent[agentID]
+				}
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return fmt.Errorf("platform_experiments_store.AdvanceStage: lock cut allocations: %w", err)
+			}
+			zeroQ := fmt.Sprintf(`UPDATE agent_quotas SET %s=0, %s=0 WHERE platform_experiment_id=$1 AND agent_id = ANY($2)`, guaranteed, burst)
+			if _, err := tx.Exec(ctx, zeroQ, platformExpID, cutAgentIDs); err != nil {
+				return fmt.Errorf("platform_experiments_store.AdvanceStage: zero %s: %w", dim.ResourceType, err)
+			}
+			if len(survivorIDs) == 0 {
+				continue
+			}
+			credit := domain.StageCredit(dim.Budget, dim.ReleaseFrac, allocated, used, len(survivorIDs))
+			if credit <= 0 {
+				continue
+			}
+			if err := creditIntoTier(ctx, tx, platformExpID, survivorIDs, guaranteed, burst, credit, 0); err != nil {
+				return fmt.Errorf("platform_experiments_store.AdvanceStage: add %s: %w", dim.ResourceType, err)
+			}
+		}
+
+		if _, err := tx.Exec(ctx,
+			`UPDATE platform_experiments SET current_stage=$2, updated_at=NOW() WHERE id=$1`,
+			platformExpID, stageIndex+1,
 		); err != nil {
-			return false, fmt.Errorf("platform_experiments_store.AdvanceStage: insert cut %s: %w", agentID, err)
+			return fmt.Errorf("platform_experiments_store.AdvanceStage: bump current_stage: %w", err)
 		}
+		advanced = true
+		return nil
+	}); err != nil {
+		return false, err
 	}
-	// The stages after the boundary want as many fewer researchers as it cut, written with the
-	// cut: nobody is added in a cut researcher's place.
-	if len(cutAgentIDs) > 0 {
-		if err := lowerPoolTx(ctx, tx, platformExpID, cutAgentIDs); err != nil {
-			return false, fmt.Errorf("platform_experiments_store.AdvanceStage: %w", err)
-		}
-	}
-
-	for _, dim := range dims {
-		if dim.Budget <= 0 {
-			continue // platform experiment does not track this dimension
-		}
-		guaranteed, burst := resourceQuotaColumns(dim.ResourceType)
-
-		// Lock every cut agent's row and read its allocation here, not from a snapshot taken
-		// before the transaction: a stage move committing in between would make "unspent" wrong in
-		// either direction, minting or destroying hours against the platform budget.
-		tiers, err := participantTiers(ctx, tx, platformExpID, cutAgentIDs)
-		if err != nil {
-			return false, fmt.Errorf("platform_experiments_store.AdvanceStage: cut agent tiers: %w", err)
-		}
-		allocated := make(map[string]float64, len(cutAgentIDs))
-		used := make(map[string]float64, len(cutAgentIDs))
-		lockQ := fmt.Sprintf(
-			`SELECT agent_id, %s, %s FROM agent_quotas WHERE platform_experiment_id=$1 AND agent_id = ANY($2) ORDER BY agent_id FOR UPDATE`,
-			guaranteed, burst)
-		rows, err := tx.Query(ctx, lockQ, platformExpID, cutAgentIDs)
-		if err != nil {
-			return false, fmt.Errorf("platform_experiments_store.AdvanceStage: lock cut allocations: %w", err)
-		}
-		for rows.Next() {
-			var agentID string
-			var g, b float64
-			if err := rows.Scan(&agentID, &g, &b); err != nil {
-				rows.Close()
-				return false, fmt.Errorf("platform_experiments_store.AdvanceStage: scan cut allocation: %w", err)
-			}
-			tier, ok := tiers[agentID]
-			if !ok {
-				rows.Close()
-				return false, fmt.Errorf("platform_experiments_store.AdvanceStage: cut agent %s has no signup in %s", agentID, platformExpID)
-			}
-			// A burst-only agent holds its whole entitlement in the burst column (see
-			// domain.ApplyQuotaTier), so that is the column its unspent hours are measured in.
-			if tier == domain.QuotaTierGuaranteed {
-				allocated[agentID], used[agentID] = g, dim.UsedByAgent[agentID]
-			} else {
-				allocated[agentID], used[agentID] = b, dim.UsedBurstByAgent[agentID]
-			}
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return false, fmt.Errorf("platform_experiments_store.AdvanceStage: lock cut allocations: %w", err)
-		}
-		zeroQ := fmt.Sprintf(`UPDATE agent_quotas SET %s=0, %s=0 WHERE platform_experiment_id=$1 AND agent_id = ANY($2)`, guaranteed, burst)
-		if _, err := tx.Exec(ctx, zeroQ, platformExpID, cutAgentIDs); err != nil {
-			return false, fmt.Errorf("platform_experiments_store.AdvanceStage: zero %s: %w", dim.ResourceType, err)
-		}
-		if len(survivorIDs) == 0 {
-			continue
-		}
-		credit := domain.StageCredit(dim.Budget, dim.ReleaseFrac, allocated, used, len(survivorIDs))
-		if credit <= 0 {
-			continue
-		}
-		if err := creditIntoTier(ctx, tx, platformExpID, survivorIDs, guaranteed, burst, credit, 0); err != nil {
-			return false, fmt.Errorf("platform_experiments_store.AdvanceStage: add %s: %w", dim.ResourceType, err)
-		}
-	}
-
-	if _, err := tx.Exec(ctx,
-		`UPDATE platform_experiments SET current_stage=$2, updated_at=NOW() WHERE id=$1`,
-		platformExpID, stageIndex+1,
-	); err != nil {
-		return false, fmt.Errorf("platform_experiments_store.AdvanceStage: bump current_stage: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return false, fmt.Errorf("platform_experiments_store.AdvanceStage: commit: %w", err)
-	}
-	return true, nil
+	return advanced, nil
 }
 
 // ListCutAgents returns agent IDs cut at any stage boundary of a platform experiment,

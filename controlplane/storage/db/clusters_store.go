@@ -214,19 +214,15 @@ func (s *Store) UpdateCluster(ctx context.Context, name string, shared *bool, ch
 	if err := domain.ValidateClusterSettings(change); err != nil {
 		return nil, nil, err
 	}
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return nil, nil, fmt.Errorf("clusters_store.UpdateCluster: begin: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	if shared != nil {
-		if _, err := tx.Exec(ctx, clusterAdmissionLock, name); err != nil {
-			return nil, nil, fmt.Errorf("clusters_store.UpdateCluster: lock: %w", err)
+	if err := s.write(ctx, func(tx *Write) error {
+		if shared != nil {
+			if _, err := tx.Exec(ctx, clusterAdmissionLock, name); err != nil {
+				return fmt.Errorf("clusters_store.UpdateCluster: lock: %w", err)
+			}
 		}
-	}
-	// A shared cluster holds the platform's priority, and one that is its org's alone again starts
-	// from the priority a cluster is registered with.
-	cluster, err = scanCluster(tx.QueryRow(ctx, `
+		// A shared cluster holds the platform's priority, and one that is its org's alone again starts
+		// from the priority a cluster is registered with.
+		cluster, err = scanCluster(tx.QueryRow(ctx, `
 UPDATE clusters SET shared = COALESCE($2::boolean, shared),
 	priority = CASE WHEN $2::boolean THEN $3 WHEN NOT $2::boolean AND shared THEN $4 ELSE priority END,
 	scale_up_timeout_seconds = CASE WHEN $5::int IS NULL THEN scale_up_timeout_seconds ELSE NULLIF($5::int, 0) END,
@@ -234,20 +230,21 @@ UPDATE clusters SET shared = COALESCE($2::boolean, shared),
 	stuck_pending_timeout_seconds = CASE WHEN $7::int IS NULL THEN stuck_pending_timeout_seconds ELSE NULLIF($7::int, 0) END,
 	status_silence_ceiling_seconds = CASE WHEN $8::int IS NULL THEN status_silence_ceiling_seconds ELSE NULLIF($8::int, 0) END
 WHERE name = $1 RETURNING `+clusterColumns, name, shared, domain.SharedClusterPriority, domain.DefaultClusterPriority,
-		change.ScaleUpTimeoutSeconds, change.MaxSpeculativeAccelerators, change.StuckPendingTimeoutSeconds, change.StatusSilenceCeilingSeconds))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil, ErrClusterNotFound
-	}
-	if err != nil {
-		return nil, nil, fmt.Errorf("clusters_store.UpdateCluster: %w", err)
-	}
-	if shared != nil && !*shared {
-		if requeued, err = withdraw(ctx, tx, name, cluster.OrgID); err != nil {
-			return nil, nil, fmt.Errorf("clusters_store.UpdateCluster: %w", err)
+			change.ScaleUpTimeoutSeconds, change.MaxSpeculativeAccelerators, change.StuckPendingTimeoutSeconds, change.StatusSilenceCeilingSeconds))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrClusterNotFound
 		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, nil, fmt.Errorf("clusters_store.UpdateCluster: commit: %w", err)
+		if err != nil {
+			return fmt.Errorf("clusters_store.UpdateCluster: %w", err)
+		}
+		if shared != nil && !*shared {
+			if requeued, err = withdraw(ctx, tx, name, cluster.OrgID); err != nil {
+				return fmt.Errorf("clusters_store.UpdateCluster: %w", err)
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, nil, err
 	}
 	return cluster, requeued, nil
 }
@@ -258,35 +255,34 @@ WHERE name = $1 RETURNING `+clusterColumns, name, shared, domain.SharedClusterPr
 // off or reads it as off. Repeating a decision changes nothing. A cluster that is not open to the
 // org is ErrClusterNotFound.
 func (s *Store) SetClusterEnabled(ctx context.Context, name, orgID string, by domain.Actor, enabled bool) (*domain.Cluster, error) {
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("clusters_store.SetClusterEnabled: begin: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	if _, err := tx.Exec(ctx, clusterAdmissionLock, name); err != nil {
-		return nil, fmt.Errorf("clusters_store.SetClusterEnabled: lock: %w", err)
-	}
-	const open = `FROM clusters WHERE name = $1 AND (shared OR org_id = $2)`
-	if enabled {
-		_, err = tx.Exec(ctx, `DELETE FROM org_disabled_clusters WHERE cluster_name = $1 AND org_id = $2`, name, orgID)
-	} else {
-		_, err = tx.Exec(ctx, `
+	var cluster *domain.Cluster
+	if err := s.write(ctx, func(tx *Write) error {
+		var err error
+		if _, err := tx.Exec(ctx, clusterAdmissionLock, name); err != nil {
+			return fmt.Errorf("clusters_store.SetClusterEnabled: lock: %w", err)
+		}
+		const open = `FROM clusters WHERE name = $1 AND (shared OR org_id = $2)`
+		if enabled {
+			_, err = tx.Exec(ctx, `DELETE FROM org_disabled_clusters WHERE cluster_name = $1 AND org_id = $2`, name, orgID)
+		} else {
+			_, err = tx.Exec(ctx, `
 INSERT INTO org_disabled_clusters (cluster_name, org_id, disabled_by_kind, disabled_by_id)
 SELECT name, $2, $3, $4 `+open+`
 ON CONFLICT (cluster_name, org_id) DO NOTHING`, name, orgID, string(by.Kind), by.ID)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("clusters_store.SetClusterEnabled: %w", err)
-	}
-	cluster, err := scanCluster(tx.QueryRow(ctx, `SELECT `+clusterColumns+` `+open, name, orgID))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrClusterNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("clusters_store.SetClusterEnabled: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("clusters_store.SetClusterEnabled: commit: %w", err)
+		}
+		if err != nil {
+			return fmt.Errorf("clusters_store.SetClusterEnabled: %w", err)
+		}
+		cluster, err = scanCluster(tx.QueryRow(ctx, `SELECT `+clusterColumns+` `+open, name, orgID))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrClusterNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("clusters_store.SetClusterEnabled: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	return cluster, nil
 }
@@ -299,29 +295,26 @@ var ErrClusterOrder = errors.New("the order must name every cluster the org regi
 // which leaves out one the platform shares. It orders placements from here on and moves no job.
 // A cluster registered later starts at DefaultClusterPriority, behind an order of up to 900.
 func (s *Store) SetClusterOrder(ctx context.Context, orgID string, names []string) error {
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("clusters_store.SetClusterOrder: begin: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	rows, err := tx.Query(ctx, `SELECT name FROM clusters WHERE org_id = $1 AND NOT shared FOR UPDATE`, orgID)
-	if err != nil {
-		return fmt.Errorf("clusters_store.SetClusterOrder: %w", err)
-	}
-	ranked, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil {
-		return fmt.Errorf("clusters_store.SetClusterOrder: %w", err)
-	}
-	if err := domain.ValidateClusterOrder(ranked, names); err != nil {
-		return fmt.Errorf("%w: %w", ErrClusterOrder, err)
-	}
-	if _, err := tx.Exec(ctx, `
+	if err := s.write(ctx, func(tx *Write) error {
+		rows, err := tx.Query(ctx, `SELECT name FROM clusters WHERE org_id = $1 AND NOT shared FOR UPDATE`, orgID)
+		if err != nil {
+			return fmt.Errorf("clusters_store.SetClusterOrder: %w", err)
+		}
+		ranked, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return fmt.Errorf("clusters_store.SetClusterOrder: %w", err)
+		}
+		if err := domain.ValidateClusterOrder(ranked, names); err != nil {
+			return fmt.Errorf("%w: %w", ErrClusterOrder, err)
+		}
+		if _, err := tx.Exec(ctx, `
 UPDATE clusters c SET priority = $2 + 1 - o.place
 FROM unnest($1::text[]) WITH ORDINALITY AS o(name, place) WHERE c.name = o.name`, names, domain.ClusterPriorityMax); err != nil {
-		return fmt.Errorf("clusters_store.SetClusterOrder: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("clusters_store.SetClusterOrder: commit: %w", err)
+			return fmt.Errorf("clusters_store.SetClusterOrder: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	return nil
 }
@@ -358,7 +351,7 @@ func (s *Store) StatusSilenceCeiling(ctx context.Context, name string) (*int, er
 	return seconds, nil
 }
 
-func withdraw(ctx context.Context, tx pgx.Tx, name, keepOrg string) ([]string, error) {
+func withdraw(ctx context.Context, tx *Write, name, keepOrg string) ([]string, error) {
 	rows, err := tx.Query(ctx, requeueWithdrawn, name, keepOrg)
 	if err != nil {
 		return nil, fmt.Errorf("requeue the jobs placed on %s: %w", name, err)
@@ -374,26 +367,23 @@ func withdraw(ctx context.Context, tx pgx.Tx, name, keepOrg string) ([]string, e
 // the identity bound to it go with its row, and the name is registered to nobody, so its runtime token is
 // refused from here on. requeued names the jobs.
 func (s *Store) RemoveCluster(ctx context.Context, name string) (requeued []string, err error) {
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("clusters_store.RemoveCluster: begin: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	if _, err := tx.Exec(ctx, clusterAdmissionLock, name); err != nil {
-		return nil, fmt.Errorf("clusters_store.RemoveCluster: lock: %w", err)
-	}
-	if requeued, err = withdraw(ctx, tx, name, ""); err != nil {
-		return nil, fmt.Errorf("clusters_store.RemoveCluster: %w", err)
-	}
-	tag, err := tx.Exec(ctx, `DELETE FROM clusters WHERE name = $1`, name)
-	if err != nil {
-		return nil, fmt.Errorf("clusters_store.RemoveCluster: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return nil, ErrClusterNotFound
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("clusters_store.RemoveCluster: commit: %w", err)
+	if err := s.write(ctx, func(tx *Write) error {
+		if _, err := tx.Exec(ctx, clusterAdmissionLock, name); err != nil {
+			return fmt.Errorf("clusters_store.RemoveCluster: lock: %w", err)
+		}
+		if requeued, err = withdraw(ctx, tx, name, ""); err != nil {
+			return fmt.Errorf("clusters_store.RemoveCluster: %w", err)
+		}
+		tag, err := tx.Exec(ctx, `DELETE FROM clusters WHERE name = $1`, name)
+		if err != nil {
+			return fmt.Errorf("clusters_store.RemoveCluster: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrClusterNotFound
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	return requeued, nil
 }

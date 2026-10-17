@@ -85,7 +85,7 @@ func migrateAt(ctx context.Context, dsn string) error {
 	if err != nil {
 		return err
 	}
-	_, err = SeedBuiltins(ctx, pool, agenttypes.Release, builtins, testRules)
+	_, err = NewStore(pool, 3).SeedBuiltins(ctx, agenttypes.Release, builtins, testRules)
 	return err
 }
 

@@ -12,14 +12,14 @@ import (
 
 // seedBuiltins writes the built-in agent types and the platform's rules this build holds, under
 // its release (agenttypes.Release), right after the schema and under its lock.
-func seedBuiltins(pool *db.Pool, logger *zap.Logger) {
+func seedBuiltins(store *db.Store, logger *zap.Logger) {
 	builtins, err := agenttypes.Builtins()
 	if err != nil {
 		logger.Fatal("control-service: built-in agent types", zap.Error(err))
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	seeded, err := db.SeedBuiltins(ctx, pool, agenttypes.Release, builtins, agenttypes.PlatformRules)
+	seeded, err := store.SeedBuiltins(ctx, agenttypes.Release, builtins, agenttypes.PlatformRules)
 	if err != nil {
 		logger.Fatal("control-service: seed built-in agent types and rules", zap.Error(err))
 	}

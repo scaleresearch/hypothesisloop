@@ -43,29 +43,25 @@ func (e *MessagesRateLimited) Error() string {
 // sender may not message yet are returned as refused and the rest are sent, and only when none is
 // is it *MessagesRateLimited, for the first of them. Each is told as agent.message.
 func (s *Store) SendAgentMessages(ctx context.Context, platformExpID string, to []string, text string, sender domain.Actor) (sent []domain.AgentMessage, refused []MessagesRateLimited, err error) {
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return nil, nil, fmt.Errorf("platform_experiments_store.SendAgentMessages: begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
+	var messages []domain.AgentMessage
+	if err := s.write(ctx, func(tx *Write) error {
+		var status string
+		err = tx.QueryRow(ctx, `SELECT status::text FROM platform_experiments WHERE id = $1 FOR SHARE`, platformExpID).Scan(&status)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			return domain.ErrNotSignedUp
+		case err != nil:
+			return fmt.Errorf("platform_experiments_store.SendAgentMessages: %w", err)
+		case status == string(domain.PlatformExpClosed):
+			return domain.ErrPlatformExperimentClosed
+		}
 
-	var status string
-	err = tx.QueryRow(ctx, `SELECT status::text FROM platform_experiments WHERE id = $1 FOR SHARE`, platformExpID).Scan(&status)
-	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-		return nil, nil, domain.ErrNotSignedUp
-	case err != nil:
-		return nil, nil, fmt.Errorf("platform_experiments_store.SendAgentMessages: %w", err)
-	case status == string(domain.PlatformExpClosed):
-		return nil, nil, domain.ErrPlatformExperimentClosed
-	}
-
-	if to == nil {
-		to = []string{}
-	}
-	from := domain.MessageFrom(sender)
-	// The signups are locked so that two sends to one agent count each other.
-	rows, err := tx.Query(ctx, `
+		if to == nil {
+			to = []string{}
+		}
+		from := domain.MessageFrom(sender)
+		// The signups are locked so that two sends to one agent count each other.
+		rows, err := tx.Query(ctx, `
 SELECT s.agent_id, s.finished_at IS NOT NULL OR EXISTS (
            SELECT 1 FROM platform_experiment_cuts c WHERE c.platform_experiment_id = s.platform_experiment_id AND c.agent_id = s.agent_id),
        (SELECT array_agg(m.created_at ORDER BY m.created_at) FROM agent_messages m
@@ -75,65 +71,66 @@ FROM experiment_signups s
 WHERE s.platform_experiment_id = $1 AND s.role <> $2 AND (cardinality($3::text[]) = 0 AND s.role = $4 OR s.agent_id = ANY($3))
 ORDER BY s.signed_up_at, s.agent_id
 FOR UPDATE OF s`, platformExpID, string(domain.SignupRolePlanner), to, string(domain.SignupRoleCompetitor), from)
-	if err != nil {
-		return nil, nil, fmt.Errorf("platform_experiments_store.SendAgentMessages: %w", err)
-	}
-	type recipient struct {
-		agentID string
-		ended   bool
-		recent  []time.Time
-	}
-	recipients, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (recipient, error) {
-		var r recipient
-		err := row.Scan(&r.agentID, &r.ended, &r.recent)
-		return r, err
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("platform_experiments_store.SendAgentMessages: %w", err)
-	}
-	found := map[string]bool{}
-	var kept []recipient
-	for _, r := range recipients {
-		found[r.agentID] = true
-		switch {
-		case r.ended && len(to) > 0:
-			return nil, nil, fmt.Errorf("agent %s: %w", r.agentID, ErrAgentEnded)
-		case r.ended:
-			continue
-		case len(r.recent) >= domain.MaxAgentMessagesPerHour:
-			limited := MessagesRateLimited{AgentID: r.agentID, From: from, Next: r.recent[len(r.recent)-domain.MaxAgentMessagesPerHour].Add(time.Hour).UTC()}
-			if len(to) > 0 {
-				return nil, nil, &limited
+		if err != nil {
+			return fmt.Errorf("platform_experiments_store.SendAgentMessages: %w", err)
+		}
+		type recipient struct {
+			agentID string
+			ended   bool
+			recent  []time.Time
+		}
+		recipients, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (recipient, error) {
+			var r recipient
+			err := row.Scan(&r.agentID, &r.ended, &r.recent)
+			return r, err
+		})
+		if err != nil {
+			return fmt.Errorf("platform_experiments_store.SendAgentMessages: %w", err)
+		}
+		found := map[string]bool{}
+		var kept []recipient
+		for _, r := range recipients {
+			found[r.agentID] = true
+			switch {
+			case r.ended && len(to) > 0:
+				return fmt.Errorf("agent %s: %w", r.agentID, ErrAgentEnded)
+			case r.ended:
+				continue
+			case len(r.recent) >= domain.MaxAgentMessagesPerHour:
+				limited := MessagesRateLimited{AgentID: r.agentID, From: from, Next: r.recent[len(r.recent)-domain.MaxAgentMessagesPerHour].Add(time.Hour).UTC()}
+				if len(to) > 0 {
+					return &limited
+				}
+				refused = append(refused, limited)
+				continue
 			}
-			refused = append(refused, limited)
-			continue
+			kept = append(kept, r)
 		}
-		kept = append(kept, r)
-	}
-	for _, agentID := range to {
-		if !found[agentID] {
-			return nil, nil, fmt.Errorf("agent %s: %w", agentID, domain.ErrNotSignedUp)
+		for _, agentID := range to {
+			if !found[agentID] {
+				return fmt.Errorf("agent %s: %w", agentID, domain.ErrNotSignedUp)
+			}
 		}
-	}
-	if len(kept) == 0 && len(refused) > 0 {
-		return nil, nil, &refused[0]
-	}
-	if len(kept) == 0 {
-		return nil, nil, ErrNoResearcherAtWork
-	}
+		if len(kept) == 0 && len(refused) > 0 {
+			return &refused[0]
+		}
+		if len(kept) == 0 {
+			return ErrNoResearcherAtWork
+		}
 
-	messages := make([]domain.AgentMessage, len(kept))
-	for i, r := range kept {
-		messages[i] = domain.AgentMessage{AgentID: r.agentID, From: from, Text: text, Actor: domain.Actor{Kind: sender.Kind, ID: sender.ID}}
-		if err := tx.QueryRow(ctx, `INSERT INTO agent_messages (platform_experiment_id, agent_id, sender, text, actor_kind, actor_id, created_xid)
+		messages = make([]domain.AgentMessage, len(kept))
+		for i, r := range kept {
+			messages[i] = domain.AgentMessage{AgentID: r.agentID, From: from, Text: text, Actor: domain.Actor{Kind: sender.Kind, ID: sender.ID}}
+			if err := tx.QueryRow(ctx, `INSERT INTO agent_messages (platform_experiment_id, agent_id, sender, text, actor_kind, actor_id, created_xid)
 VALUES ($1, $2, $3, $4, $5, $6, pg_current_xact_id()::text::bigint) RETURNING created_at`,
-			platformExpID, r.agentID, from, text, string(sender.Kind), sender.ID).Scan(&messages[i].At); err != nil {
-			return nil, nil, fmt.Errorf("platform_experiments_store.SendAgentMessages: insert: %w", err)
+				platformExpID, r.agentID, from, text, string(sender.Kind), sender.ID).Scan(&messages[i].At); err != nil {
+				return fmt.Errorf("platform_experiments_store.SendAgentMessages: insert: %w", err)
+			}
+			messages[i].At = messages[i].At.UTC()
 		}
-		messages[i].At = messages[i].At.UTC()
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, nil, fmt.Errorf("platform_experiments_store.SendAgentMessages: commit: %w", err)
+		return nil
+	}); err != nil {
+		return nil, nil, err
 	}
 	return messages, refused, nil
 }
@@ -144,44 +141,42 @@ VALUES ($1, $2, $3, $4, $5, $6, pg_current_xact_id()::text::bigint) RETURNING cr
 // ErrNoCoordinator where the platform hosts none, and *MessagesRateLimited past
 // domain.MaxAgentMessagesPerHour of the sender's in the last hour.
 func (s *Store) SendCoordinatorMessage(ctx context.Context, platformExpID, text string, sender domain.Actor) (*domain.AgentMessage, error) {
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("platform_experiments_store.SendCoordinatorMessage: begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-
-	from := domain.MessageFrom(sender)
-	// The row is locked so that two sends to the coordinator count each other.
-	var status string
-	var hosted bool
-	var recent []time.Time
-	err = tx.QueryRow(ctx, `
+	var message *domain.AgentMessage
+	if err := s.write(ctx, func(tx *Write) error {
+		var err error
+		from := domain.MessageFrom(sender)
+		// The row is locked so that two sends to the coordinator count each other.
+		var status string
+		var hosted bool
+		var recent []time.Time
+		err = tx.QueryRow(ctx, `
 SELECT p.status::text, p.coordinator_hosted,
        COALESCE((SELECT array_agg(m.created_at ORDER BY m.created_at) FROM agent_messages m
                  WHERE m.platform_experiment_id = p.id AND m.agent_id = $2 AND m.sender = $3
                    AND m.created_at > now() - interval '1 hour'), '{}')
 FROM platform_experiments p WHERE p.id = $1 FOR NO KEY UPDATE OF p`, platformExpID, domain.CoordinatorRecipient, from).Scan(&status, &hosted, &recent)
-	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-		return nil, ErrNoCoordinator
-	case err != nil:
-		return nil, fmt.Errorf("platform_experiments_store.SendCoordinatorMessage: %w", err)
-	case status == string(domain.PlatformExpClosed):
-		return nil, domain.ErrPlatformExperimentClosed
-	case !hosted:
-		return nil, ErrNoCoordinator
-	case len(recent) >= domain.MaxAgentMessagesPerHour:
-		return nil, &MessagesRateLimited{AgentID: domain.CoordinatorRecipient, From: from, Next: recent[len(recent)-domain.MaxAgentMessagesPerHour].Add(time.Hour).UTC()}
-	}
-	message := &domain.AgentMessage{AgentID: domain.CoordinatorRecipient, From: from, Text: text, Actor: domain.Actor{Kind: sender.Kind, ID: sender.ID}}
-	if err := tx.QueryRow(ctx, `INSERT INTO agent_messages (platform_experiment_id, agent_id, sender, text, actor_kind, actor_id, created_xid)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			return ErrNoCoordinator
+		case err != nil:
+			return fmt.Errorf("platform_experiments_store.SendCoordinatorMessage: %w", err)
+		case status == string(domain.PlatformExpClosed):
+			return domain.ErrPlatformExperimentClosed
+		case !hosted:
+			return ErrNoCoordinator
+		case len(recent) >= domain.MaxAgentMessagesPerHour:
+			return &MessagesRateLimited{AgentID: domain.CoordinatorRecipient, From: from, Next: recent[len(recent)-domain.MaxAgentMessagesPerHour].Add(time.Hour).UTC()}
+		}
+		message = &domain.AgentMessage{AgentID: domain.CoordinatorRecipient, From: from, Text: text, Actor: domain.Actor{Kind: sender.Kind, ID: sender.ID}}
+		if err := tx.QueryRow(ctx, `INSERT INTO agent_messages (platform_experiment_id, agent_id, sender, text, actor_kind, actor_id, created_xid)
 VALUES ($1, $2, $3, $4, $5, $6, pg_current_xact_id()::text::bigint) RETURNING created_at`,
-		platformExpID, domain.CoordinatorRecipient, from, text, string(sender.Kind), sender.ID).Scan(&message.At); err != nil {
-		return nil, fmt.Errorf("platform_experiments_store.SendCoordinatorMessage: insert: %w", err)
-	}
-	message.At = message.At.UTC()
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("platform_experiments_store.SendCoordinatorMessage: commit: %w", err)
+			platformExpID, domain.CoordinatorRecipient, from, text, string(sender.Kind), sender.ID).Scan(&message.At); err != nil {
+			return fmt.Errorf("platform_experiments_store.SendCoordinatorMessage: insert: %w", err)
+		}
+		message.At = message.At.UTC()
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	return message, nil
 }

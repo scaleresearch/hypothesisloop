@@ -84,12 +84,8 @@ var ErrNotReopenable = errors.New("platform experiment is not a closed run that 
 // by the row's trigger. ErrNotReopenable, and ErrPlatformExperimentNotFound for an id none has
 // and a removed one.
 func (s *Store) ReopenPlatformExperiment(ctx context.Context, id string, endsAt time.Time, durationHours float64, coordinatorModel string) error {
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.Reopen: begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	tag, err := tx.Exec(ctx, `
+	return s.write(ctx, func(tx *Write) error {
+		tag, err := tx.Exec(ctx, `
 UPDATE platform_experiments pe
 SET status = 'running', updated_at = now(), ends_at = $2, duration_hours = $3,
     coordinator_model = CASE WHEN $4 <> '' THEN $4 ELSE coordinator_model END,
@@ -97,26 +93,24 @@ SET status = 'running', updated_at = now(), ends_at = $2, duration_hours = $3,
     close_agents = '', close_record = ''
 WHERE pe.id = $1 AND pe.status = 'closed' AND pe.removed_at IS NULL AND pe.started_at IS NOT NULL AND ($4 = '' OR pe.coordinator_hosted)
   AND NOT EXISTS (SELECT 1 FROM platform_experiments later WHERE later.continues = pe.id)`, id, endsAt, durationHours, coordinatorModel)
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.Reopen: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		var exists bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM platform_experiments WHERE id = $1 AND removed_at IS NULL)`, id).Scan(&exists); err != nil {
+		if err != nil {
 			return fmt.Errorf("platform_experiments_store.Reopen: %w", err)
 		}
-		if !exists {
-			return ErrPlatformExperimentNotFound
+		if tag.RowsAffected() == 0 {
+			var exists bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM platform_experiments WHERE id = $1 AND removed_at IS NULL)`, id).Scan(&exists); err != nil {
+				return fmt.Errorf("platform_experiments_store.Reopen: %w", err)
+			}
+			if !exists {
+				return ErrPlatformExperimentNotFound
+			}
+			return ErrNotReopenable
 		}
-		return ErrNotReopenable
-	}
-	if _, err := tx.Exec(ctx, `DELETE FROM experiment_top3 WHERE platform_experiment_id = $1`, id); err != nil {
-		return fmt.Errorf("platform_experiments_store.Reopen: placements: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("platform_experiments_store.Reopen: commit: %w", err)
-	}
-	return nil
+		if _, err := tx.Exec(ctx, `DELETE FROM experiment_top3 WHERE platform_experiment_id = $1`, id); err != nil {
+			return fmt.Errorf("platform_experiments_store.Reopen: placements: %w", err)
+		}
+		return nil
+	})
 }
 
 // unsettledJobsSQL says a job of pe still runs, waits to, or ended and its cost is not yet

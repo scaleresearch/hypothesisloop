@@ -53,55 +53,52 @@ func (s *Store) ClaimSubmitted(ctx context.Context, id, clusterName string, reso
 	if resolvedJob == nil {
 		return false, fmt.Errorf("experiments_store.ClaimSubmitted: resolved job spec is required")
 	}
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return false, fmt.Errorf("experiments_store.ClaimSubmitted: begin: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, "cluster-admission/"+clusterName); err != nil {
-		return false, fmt.Errorf("experiments_store.ClaimSubmitted: lock: %w", err)
-	}
-	rows, err := tx.Query(ctx, `SELECT`+experimentColumns+`FROM experiments
+	claimed := false
+	if err := s.write(ctx, func(tx *Write) error {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, "cluster-admission/"+clusterName); err != nil {
+			return fmt.Errorf("experiments_store.ClaimSubmitted: lock: %w", err)
+		}
+		rows, err := tx.Query(ctx, `SELECT`+experimentColumns+`FROM experiments
 WHERE cluster_name = $1 AND status = 'SUBMITTED'
 ORDER BY submitted_at ASC, id ASC`, clusterName)
-	if err != nil {
-		return false, fmt.Errorf("experiments_store.ClaimSubmitted: desired placements: %w", err)
-	}
-	desired, err := collectExperiments(rows)
-	rows.Close()
-	if err != nil {
-		return false, fmt.Errorf("experiments_store.ClaimSubmitted: desired placements: %w", err)
-	}
-	// A nil callback is a speculative submit: there is no node yet for a live-fit predicate to
-	// check, and the capacity being claimed is the SUBMITTED row itself (already fenced against
-	// GetFlavorCapacity's desired-free by the caller's own footprint accounting). The lock and
-	// the status='QUEUED' predicate below still fully serialize the claim.
-	available := true
-	if capacityAvailable != nil {
-		var err error
-		available, err = capacityAvailable(ctx, desired)
 		if err != nil {
-			return false, fmt.Errorf("experiments_store.ClaimSubmitted: capacity: %w", err)
+			return fmt.Errorf("experiments_store.ClaimSubmitted: desired placements: %w", err)
 		}
-	}
-	if !available {
-		return false, nil
-	}
-	resolvedJobSpec, err := json.Marshal(resolvedJob)
-	if err != nil {
-		return false, fmt.Errorf("experiments_store.ClaimSubmitted: marshal resolved job spec: %w", err)
-	}
-	// This statement is the one write that places a job, so the placement rule is part of it
-	// (clusterHostsJob), and it starts an attempt, so the reason the last one ended goes with it.
-	// What admission filtered in memory only chose the candidate. Un-sharing,
-	// removing or turning off a cluster takes the admission lock held above, so it either finds
-	// this job already placed or is committed when this statement reads the cluster. The image
-	// is decided from the same read of the cluster as the rule that lets the job onto it. A job
-	// whose commit declares an environment is placed once it is ready, in its image, which is
-	// built on the image the cluster runs. Before, it is placed only in the image a cluster that
-	// built it holds on one node and has not pushed, which resolvedJob names and pins it to (see
-	// domain.Experiment.EnvironmentImage).
-	const q = `UPDATE experiments e
+		desired, err := collectExperiments(rows)
+		rows.Close()
+		if err != nil {
+			return fmt.Errorf("experiments_store.ClaimSubmitted: desired placements: %w", err)
+		}
+		// A nil callback is a speculative submit: there is no node yet for a live-fit predicate to
+		// check, and the capacity being claimed is the SUBMITTED row itself (already fenced against
+		// GetFlavorCapacity's desired-free by the caller's own footprint accounting). The lock and
+		// the status='QUEUED' predicate below still fully serialize the claim.
+		available := true
+		if capacityAvailable != nil {
+			var err error
+			available, err = capacityAvailable(ctx, desired)
+			if err != nil {
+				return fmt.Errorf("experiments_store.ClaimSubmitted: capacity: %w", err)
+			}
+		}
+		if !available {
+			return nil
+		}
+		resolvedJobSpec, err := json.Marshal(resolvedJob)
+		if err != nil {
+			return fmt.Errorf("experiments_store.ClaimSubmitted: marshal resolved job spec: %w", err)
+		}
+		// This statement is the one write that places a job, so the placement rule is part of it
+		// (clusterHostsJob), and it starts an attempt, so the reason the last one ended goes with it.
+		// What admission filtered in memory only chose the candidate. Un-sharing,
+		// removing or turning off a cluster takes the admission lock held above, so it either finds
+		// this job already placed or is committed when this statement reads the cluster. The image
+		// is decided from the same read of the cluster as the rule that lets the job onto it. A job
+		// whose commit declares an environment is placed once it is ready, in its image, which is
+		// built on the image the cluster runs. Before, it is placed only in the image a cluster that
+		// built it holds on one node and has not pushed, which resolvedJob names and pins it to (see
+		// domain.Experiment.EnvironmentImage).
+		const q = `UPDATE experiments e
 SET status = 'SUBMITTED', submitted_at = NOW(), cluster_name = $2, last_cluster = $2, eviction_reason = NULL, not_admitted_reason = NULL, updated_at = NOW(),
 	resolved_job_spec = $3::jsonb || jsonb_build_object('image', CASE
 		WHEN e.environment_key IS NULL THEN (SELECT CASE WHEN c.job_image = '' THEN e.job_spec ->> 'image' ELSE c.job_image END FROM clusters c WHERE c.name = $2)
@@ -110,18 +107,20 @@ WHERE e.id = $1 AND e.status = 'QUEUED' AND ` + clusterHostsJob + `
   AND (e.environment_key IS NULL OR EXISTS (SELECT 1 FROM environments v WHERE v.key = e.environment_key
     AND (v.state = 'ready' OR (v.state = 'building' AND v.loaded_image <> '' AND v.loaded_cluster = $2 AND v.loaded_image = $3::jsonb ->> 'image'))))
 RETURNING e.resolved_job_spec ->> 'image'`
-	var image string
-	switch err := tx.QueryRow(ctx, q, id, clusterName, resolvedJobSpec).Scan(&image); {
-	case errors.Is(err, pgx.ErrNoRows):
-		return false, nil
-	case err != nil:
-		return false, fmt.Errorf("experiments_store.ClaimSubmitted: update: %w", err)
+		var image string
+		switch err := tx.QueryRow(ctx, q, id, clusterName, resolvedJobSpec).Scan(&image); {
+		case errors.Is(err, pgx.ErrNoRows):
+			return nil
+		case err != nil:
+			return fmt.Errorf("experiments_store.ClaimSubmitted: update: %w", err)
+		}
+		resolvedJob.Image = image
+		claimed = true
+		return nil
+	}); err != nil {
+		return false, err
 	}
-	resolvedJob.Image = image
-	if err := tx.Commit(ctx); err != nil {
-		return false, fmt.Errorf("experiments_store.ClaimSubmitted: commit: %w", err)
-	}
-	return true, nil
+	return claimed, nil
 }
 
 // MarkStarted sets status=RUNNING, but only if still SUBMITTED. Guards against a
@@ -335,25 +334,22 @@ func (s *Store) RequeueInfrastructureFault(ctx context.Context, id string, from 
 // MarkQuotaSettled records that exp's final usage was durably written to the metrics DB, so the
 // settlement reconciler stops retrying it. Only called after that write succeeds.
 func (s *Store) MarkQuotaSettled(ctx context.Context, id string) error {
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("experiments_store.MarkQuotaSettled: begin: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	var agentID, platformExpID string
-	if err := tx.QueryRow(ctx, `SELECT agent_id, platform_experiment_id FROM experiments WHERE id=$1`, id).Scan(&agentID, &platformExpID); err != nil {
-		return fmt.Errorf("experiments_store.MarkQuotaSettled: identify owner: %w", err)
-	}
-	key := agentID + "/" + platformExpID
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, key); err != nil {
-		return fmt.Errorf("experiments_store.MarkQuotaSettled: acquire lock: %w", err)
-	}
-	if _, err = tx.Exec(ctx, `UPDATE experiments SET quota_settled_at = NOW() WHERE id = $1`, id); err != nil {
-		return fmt.Errorf("experiments_store.MarkQuotaSettled: update: %w", err)
-	}
-	err = tx.Commit(ctx)
-	if err != nil {
-		return fmt.Errorf("experiments_store.MarkQuotaSettled: commit: %w", err)
+	if err := s.write(ctx, func(tx *Write) error {
+		var err error
+		var agentID, platformExpID string
+		if err := tx.QueryRow(ctx, `SELECT agent_id, platform_experiment_id FROM experiments WHERE id=$1`, id).Scan(&agentID, &platformExpID); err != nil {
+			return fmt.Errorf("experiments_store.MarkQuotaSettled: identify owner: %w", err)
+		}
+		key := agentID + "/" + platformExpID
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, key); err != nil {
+			return fmt.Errorf("experiments_store.MarkQuotaSettled: acquire lock: %w", err)
+		}
+		if _, err = tx.Exec(ctx, `UPDATE experiments SET quota_settled_at = NOW() WHERE id = $1`, id); err != nil {
+			return fmt.Errorf("experiments_store.MarkQuotaSettled: update: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	return nil
 }

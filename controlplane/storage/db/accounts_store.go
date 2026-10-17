@@ -57,26 +57,22 @@ func (s *Store) EnsureUserHome(ctx context.Context, userID, name, orgName string
 		}
 		return user, orgIDs, nil
 	}
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return nil, nil, fmt.Errorf("accounts_store.EnsureUserHome: begin: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-
-	tag, err := tx.Exec(ctx, `INSERT INTO users (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`, userID, name)
-	if err != nil {
-		return nil, nil, fmt.Errorf("accounts_store.EnsureUserHome: insert user: %w", err)
-	}
-	if tag.RowsAffected() == 1 {
-		if _, err := createOrg(ctx, tx, orgName, userID); err != nil {
-			return nil, nil, fmt.Errorf("accounts_store.EnsureUserHome: %w", err)
+	if err := s.write(ctx, func(tx *Write) error {
+		tag, err := tx.Exec(ctx, `INSERT INTO users (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`, userID, name)
+		if err != nil {
+			return fmt.Errorf("accounts_store.EnsureUserHome: insert user: %w", err)
 		}
-	}
-	if user, orgIDs, err = readUserHome(ctx, tx, userID); err != nil {
+		if tag.RowsAffected() == 1 {
+			if _, err := createOrg(ctx, tx, orgName, userID); err != nil {
+				return fmt.Errorf("accounts_store.EnsureUserHome: %w", err)
+			}
+		}
+		if user, orgIDs, err = readUserHome(ctx, tx, userID); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return nil, nil, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, nil, fmt.Errorf("accounts_store.EnsureUserHome: commit: %w", err)
 	}
 	return user, orgIDs, nil
 }
@@ -115,7 +111,7 @@ WHERE u.id = $1 GROUP BY u.id`, userID).Scan(&user.Name, &user.Staff, &user.Crea
 }
 
 // createOrg inserts an org, its owner and its default project.
-func createOrg(ctx context.Context, tx pgx.Tx, name, ownerUserID string) (*domain.Org, error) {
+func createOrg(ctx context.Context, tx *Write, name, ownerUserID string) (*domain.Org, error) {
 	orgID, err := newAccountID("org")
 	if err != nil {
 		return nil, err
@@ -145,34 +141,33 @@ func createOrg(ctx context.Context, tx pgx.Tx, name, ownerUserID string) (*domai
 // is locked first and the orgs they own are counted after the insert, inside its transaction, so
 // two creates at once cannot both take the last place.
 func (s *Store) CreateOrg(ctx context.Context, name, ownerUserID string, maxOwned int) (*domain.Org, error) {
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("accounts_store.CreateOrg: begin: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	var locked bool
-	err = tx.QueryRow(ctx, `SELECT true FROM users WHERE id = $1 FOR NO KEY UPDATE`, ownerUserID).Scan(&locked)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrUserNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("accounts_store.CreateOrg: lock owner: %w", err)
-	}
-	org, err := createOrg(ctx, tx, name, ownerUserID)
-	if err != nil {
-		return nil, fmt.Errorf("accounts_store.CreateOrg: %w", err)
-	}
-	if maxOwned > 0 {
-		var owned int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM org_members WHERE user_id = $1 AND role = 'owner'`, ownerUserID).Scan(&owned); err != nil {
-			return nil, fmt.Errorf("accounts_store.CreateOrg: count owned: %w", err)
+	var org *domain.Org
+	if err := s.write(ctx, func(tx *Write) error {
+		var err error
+		var locked bool
+		err = tx.QueryRow(ctx, `SELECT true FROM users WHERE id = $1 FOR NO KEY UPDATE`, ownerUserID).Scan(&locked)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrUserNotFound
 		}
-		if owned > maxOwned {
-			return nil, ErrMaxOrgsReached
+		if err != nil {
+			return fmt.Errorf("accounts_store.CreateOrg: lock owner: %w", err)
 		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("accounts_store.CreateOrg: commit: %w", err)
+		org, err = createOrg(ctx, tx, name, ownerUserID)
+		if err != nil {
+			return fmt.Errorf("accounts_store.CreateOrg: %w", err)
+		}
+		if maxOwned > 0 {
+			var owned int
+			if err := tx.QueryRow(ctx, `SELECT count(*) FROM org_members WHERE user_id = $1 AND role = 'owner'`, ownerUserID).Scan(&owned); err != nil {
+				return fmt.Errorf("accounts_store.CreateOrg: count owned: %w", err)
+			}
+			if owned > maxOwned {
+				return ErrMaxOrgsReached
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	return org, nil
 }
@@ -283,36 +278,33 @@ func (s *Store) CreateProject(ctx context.Context, orgID, name string, maxProjec
 	if err != nil {
 		return nil, fmt.Errorf("accounts_store.CreateProject: %w", err)
 	}
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("accounts_store.CreateProject: begin: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	var locked bool
-	err = tx.QueryRow(ctx, `SELECT true FROM orgs WHERE id = $1 FOR NO KEY UPDATE`, orgID).Scan(&locked)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrOrgNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("accounts_store.CreateProject: lock org: %w", err)
-	}
 	p := &domain.Project{ID: id, OrgID: orgID, Name: name}
-	err = tx.QueryRow(ctx, `INSERT INTO projects (id, org_id, name) VALUES ($1, $2, $3) RETURNING created_at`,
-		id, orgID, name).Scan(&p.CreatedAt)
-	if err != nil {
-		return nil, projectWriteError("CreateProject", err)
-	}
-	if maxProjects > 0 {
-		var held int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM projects WHERE org_id = $1`, orgID).Scan(&held); err != nil {
-			return nil, fmt.Errorf("accounts_store.CreateProject: count projects: %w", err)
+	if err := s.write(ctx, func(tx *Write) error {
+		var locked bool
+		err = tx.QueryRow(ctx, `SELECT true FROM orgs WHERE id = $1 FOR NO KEY UPDATE`, orgID).Scan(&locked)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrOrgNotFound
 		}
-		if held > maxProjects {
-			return nil, ErrMaxProjectsReached
+		if err != nil {
+			return fmt.Errorf("accounts_store.CreateProject: lock org: %w", err)
 		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("accounts_store.CreateProject: commit: %w", err)
+		err = tx.QueryRow(ctx, `INSERT INTO projects (id, org_id, name) VALUES ($1, $2, $3) RETURNING created_at`,
+			id, orgID, name).Scan(&p.CreatedAt)
+		if err != nil {
+			return projectWriteError("CreateProject", err)
+		}
+		if maxProjects > 0 {
+			var held int
+			if err := tx.QueryRow(ctx, `SELECT count(*) FROM projects WHERE org_id = $1`, orgID).Scan(&held); err != nil {
+				return fmt.Errorf("accounts_store.CreateProject: count projects: %w", err)
+			}
+			if held > maxProjects {
+				return ErrMaxProjectsReached
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	return p, nil
 }

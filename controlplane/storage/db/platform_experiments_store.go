@@ -34,23 +34,17 @@ var coordinatorColumns = `pe.coordinator_hosted, COALESCE(pe.coordinator_model, 
 // create made first, or stores nothing. The limits a signup holds are held here too
 // (ErrMaxAgentsReached, ErrMaxHostedReached).
 func (s *Store) CreatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error {
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.Create: begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	if err := insertPlatformExperiment(ctx, tx, pe); err != nil {
-		return err
-	}
-	if len(signups) > 0 {
-		if _, err := enrolTx(ctx, tx, pe.ID, create, signups, nil); err != nil {
+	return s.write(ctx, func(tx *Write) error {
+		if err := insertPlatformExperiment(ctx, tx, pe); err != nil {
 			return err
 		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("platform_experiments_store.Create: commit: %w", err)
-	}
-	return nil
+		if len(signups) > 0 {
+			if _, err := enrolTx(ctx, tx, pe.ID, create, signups, nil); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // ProjectOrg is the org a project belongs to: ErrProjectNotFound for no such project.
@@ -81,7 +75,7 @@ type execer interface {
 
 // insertPlatformExperiment inserts pe, whose coordinator runs the built-in coordinator type, and
 // locks the agent type of each entry of its researchers (poolTypesTx).
-func insertPlatformExperiment(ctx context.Context, tx pgx.Tx, pe *domain.PlatformExperiment) error {
+func insertPlatformExperiment(ctx context.Context, tx *Write, pe *domain.PlatformExperiment) error {
 	const q = `
 INSERT INTO platform_experiments (id, project_id, name, description, budget_accelerator_hours, max_agents, metrics, report_interval_seconds, starts_at, ends_at, status, stages, current_stage, created_at, updated_at, max_concurrent_accelerators, default_quota_tier, coordinator_hosted, coordinator_model, max_hosted, repository, repository_url, agent_image, goal, created_by_kind, created_by_id, duration_hours, repository_account, continues, researchers,
                                   coordinator_agent_type)
@@ -589,31 +583,25 @@ func (s *Store) UpdatePlatformExperiment(ctx context.Context, pe *domain.Platfor
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.Update: marshal metrics: %w", err)
 	}
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.Update: begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	if err := writePlatformExperiment(ctx, tx, pe, metrics, expectedStatus, ""); err != nil {
-		return fmt.Errorf("platform_experiments_store.Update: %w", err)
-	}
-	if err := setResearchersTx(ctx, tx, pe.ID, pe.MaxAgents, researchers); err != nil {
-		return fmt.Errorf("platform_experiments_store.Update: %w", err)
-	}
-	if expectedStatus == domain.PlatformExpOpen {
-		if err := reallocateBaselineQuotas(ctx, tx, pe); err != nil {
+	return s.write(ctx, func(tx *Write) error {
+		if err := writePlatformExperiment(ctx, tx, pe, metrics, expectedStatus, ""); err != nil {
 			return fmt.Errorf("platform_experiments_store.Update: %w", err)
 		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("platform_experiments_store.Update: commit: %w", err)
-	}
-	return nil
+		if err := setResearchersTx(ctx, tx, pe.ID, pe.MaxAgents, researchers); err != nil {
+			return fmt.Errorf("platform_experiments_store.Update: %w", err)
+		}
+		if expectedStatus == domain.PlatformExpOpen {
+			if err := reallocateBaselineQuotas(ctx, tx, pe); err != nil {
+				return fmt.Errorf("platform_experiments_store.Update: %w", err)
+			}
+		}
+		return nil
+	})
 }
 
 // writePlatformExperiment writes the patchable fields of pe while it is still in expectedStatus
 // and, when baseline is not empty, still has that baseline.
-func writePlatformExperiment(ctx context.Context, tx pgx.Tx, pe *domain.PlatformExperiment, metrics []byte, expectedStatus domain.PlatformExperimentStatus, baseline string) error {
+func writePlatformExperiment(ctx context.Context, tx *Write, pe *domain.PlatformExperiment, metrics []byte, expectedStatus domain.PlatformExperimentStatus, baseline string) error {
 	const q = `UPDATE platform_experiments
 SET name=$2, description=$3, budget_accelerator_hours=$4, max_agents=$5, metrics=$6,
     report_interval_seconds=$7, starts_at=$8, ends_at=$9, updated_at=NOW(),

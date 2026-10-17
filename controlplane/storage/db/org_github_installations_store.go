@@ -48,64 +48,53 @@ func (s *Store) ConnectGitHubInstallation(ctx context.Context, in *domain.OrgGit
 	if in.AccountType == "" {
 		return errors.New("accounts_store.ConnectGitHubInstallation: an installation is connected with the type of its account")
 	}
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("accounts_store.ConnectGitHubInstallation: begin: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	var replacedDefault bool
-	err = tx.QueryRow(ctx, `
+	return s.write(ctx, func(tx *Write) error {
+		var err error
+		var replacedDefault bool
+		err = tx.QueryRow(ctx, `
 WITH replaced AS (
   DELETE FROM org_github_installations
   WHERE org_id = $1 AND installation_id <> $2 AND lower(account_login) = lower($3)
   RETURNING is_default
 )
 SELECT COALESCE(bool_or(is_default), false) FROM replaced`, in.OrgID, in.InstallationID, in.AccountLogin).Scan(&replacedDefault)
-	if err != nil {
-		return fmt.Errorf("accounts_store.ConnectGitHubInstallation: replace the installation removed on the account: %w", err)
-	}
-	err = scanInstallation(tx.QueryRow(ctx, `
+		if err != nil {
+			return fmt.Errorf("accounts_store.ConnectGitHubInstallation: replace the installation removed on the account: %w", err)
+		}
+		err = scanInstallation(tx.QueryRow(ctx, `
 INSERT INTO org_github_installations (org_id, installation_id, account_login, account_type, connected_by_kind, connected_by_id, is_default)
 VALUES ($1, $2, $3, $4, $5, $6, $7 OR NOT EXISTS (SELECT 1 FROM org_github_installations WHERE org_id = $1))
 ON CONFLICT (org_id, installation_id) DO UPDATE SET account_login = EXCLUDED.account_login, account_type = EXCLUDED.account_type
 RETURNING `+installationColumns, in.OrgID, in.InstallationID, in.AccountLogin, in.AccountType, string(in.ConnectedActor.Kind), in.ConnectedActor.ID, replacedDefault), in)
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == pgForeignKeyViolation {
-		return ErrOrgNotFound
-	}
-	if err != nil {
-		return fmt.Errorf("accounts_store.ConnectGitHubInstallation: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("accounts_store.ConnectGitHubInstallation: commit: %w", err)
-	}
-	return nil
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgForeignKeyViolation {
+			return ErrOrgNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("accounts_store.ConnectGitHubInstallation: %w", err)
+		}
+		return nil
+	})
 }
 
 // MakeGitHubInstallationDefault makes an installation the org connected the one a new repository
 // is created on when a request names no account, in place of any other.
 // ErrGitHubInstallationNotFound when the org has not connected it.
 func (s *Store) MakeGitHubInstallationDefault(ctx context.Context, orgID string, installationID int64) error {
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("accounts_store.MakeGitHubInstallationDefault: begin: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	// Cleared first: the index takes one default per org at every row.
-	if _, err := tx.Exec(ctx, `UPDATE org_github_installations SET is_default = false WHERE org_id = $1 AND is_default AND installation_id <> $2`, orgID, installationID); err != nil {
-		return fmt.Errorf("accounts_store.MakeGitHubInstallationDefault: %w", err)
-	}
-	tag, err := tx.Exec(ctx, `UPDATE org_github_installations SET is_default = true WHERE org_id = $1 AND installation_id = $2`, orgID, installationID)
-	if err != nil {
-		return fmt.Errorf("accounts_store.MakeGitHubInstallationDefault: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrGitHubInstallationNotFound
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("accounts_store.MakeGitHubInstallationDefault: commit: %w", err)
-	}
-	return nil
+	return s.write(ctx, func(tx *Write) error {
+		// Cleared first: the index takes one default per org at every row.
+		if _, err := tx.Exec(ctx, `UPDATE org_github_installations SET is_default = false WHERE org_id = $1 AND is_default AND installation_id <> $2`, orgID, installationID); err != nil {
+			return fmt.Errorf("accounts_store.MakeGitHubInstallationDefault: %w", err)
+		}
+		tag, err := tx.Exec(ctx, `UPDATE org_github_installations SET is_default = true WHERE org_id = $1 AND installation_id = $2`, orgID, installationID)
+		if err != nil {
+			return fmt.Errorf("accounts_store.MakeGitHubInstallationDefault: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrGitHubInstallationNotFound
+		}
+		return nil
+	})
 }
 
 // ListGitHubInstallations returns the installations an org connected, oldest first.

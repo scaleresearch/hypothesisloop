@@ -53,7 +53,8 @@ func main() {
 	defer pool.Close()
 
 	migrate(pool, logger)
-	seedBuiltins(pool, logger)
+	store := db.NewStore(pool, pcfg.Scheduler.MaxInfrastructureRequeues)
+	seedBuiltins(store, logger)
 
 	metricsCtx, metricsCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	err = metricsdb.EnsureObservationTables(metricsCtx, metricsDBURL)
@@ -69,8 +70,6 @@ func main() {
 		logger.Fatal("control-service: graph store", zap.Error(err))
 	}
 	defer graph.Close(context.Background()) //nolint:errcheck
-
-	store := db.NewStore(pool, pcfg.Scheduler.MaxInfrastructureRequeues)
 
 	domain.SetAcceleratorRates(pcfg.RateByName)
 

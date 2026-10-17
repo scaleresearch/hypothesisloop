@@ -21,77 +21,71 @@ import (
 // record of the agent's object-store key, so deleteDataKey takes that key out of the store before
 // the row goes, and a key that could not be deleted keeps the signup.
 func (s *Store) RemoveAgent(ctx context.Context, platformExpID, agentID string, deleteDataKey func(ctx context.Context, accessKeyID string) error) error {
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.RemoveAgent: begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-
-	// A submission of this agent in flight commits or rolls back first, as in FinishAgent, so the
-	// jobs read below include it, and one that starts later finds no quota to be admitted on.
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, admissionLockKey(agentID, platformExpID)); err != nil {
-		return fmt.Errorf("platform_experiments_store.RemoveAgent: lock: %w", err)
-	}
-	var status string
-	var platformRuns bool
-	if err := tx.QueryRow(ctx, `SELECT status, coordinator_hosted FROM platform_experiments WHERE id=$1 FOR UPDATE`, platformExpID).Scan(&status, &platformRuns); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+	return s.write(ctx, func(tx *Write) error {
+		var err error
+		// A submission of this agent in flight commits or rolls back first, as in FinishAgent, so the
+		// jobs read below include it, and one that starts later finds no quota to be admitted on.
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, admissionLockKey(agentID, platformExpID)); err != nil {
+			return fmt.Errorf("platform_experiments_store.RemoveAgent: lock: %w", err)
+		}
+		var status string
+		var platformRuns bool
+		if err := tx.QueryRow(ctx, `SELECT status, coordinator_hosted FROM platform_experiments WHERE id=$1 FOR UPDATE`, platformExpID).Scan(&status, &platformRuns); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrSignupClosed
+			}
+			return fmt.Errorf("platform_experiments_store.RemoveAgent: lock experiment: %w", err)
+		}
+		if status != string(domain.PlatformExpOpen) {
 			return ErrSignupClosed
 		}
-		return fmt.Errorf("platform_experiments_store.RemoveAgent: lock experiment: %w", err)
-	}
-	if status != string(domain.PlatformExpOpen) {
-		return ErrSignupClosed
-	}
-	var accessKeyID string
-	var inFlight bool
-	err = tx.QueryRow(ctx, `
+		var accessKeyID string
+		var inFlight bool
+		err = tx.QueryRow(ctx, `
 SELECT s.data_access_key_id,
        EXISTS (SELECT 1 FROM experiments
                WHERE platform_experiment_id = s.platform_experiment_id AND agent_id = s.agent_id AND status IN ('QUEUED', 'SUBMITTED', 'RUNNING'))
 FROM experiment_signups s
 WHERE s.platform_experiment_id=$1 AND s.agent_id=$2 FOR UPDATE OF s`, platformExpID, agentID).Scan(&accessKeyID, &inFlight)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return domain.ErrNotSignedUp
-	}
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.RemoveAgent: read signup: %w", err)
-	}
-	// The agent's quota goes with its place, and a job of it that still runs is charged to that
-	// quota by every pass of the controller: the job ends first.
-	if inFlight {
-		return ErrWorkUnfinished
-	}
-	if accessKeyID != "" {
-		if err := deleteDataKey(ctx, accessKeyID); err != nil {
-			return fmt.Errorf("platform_experiments_store.RemoveAgent: delete data key: %w", err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.ErrNotSignedUp
 		}
-	}
-	keys, err := signupKeysTx(ctx, tx, platformExpID, []string{agentID})
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.RemoveAgent: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `DELETE FROM hosted_instances WHERE platform_experiment_id=$1 AND agent_id=$2`, platformExpID, agentID); err != nil {
-		return fmt.Errorf("platform_experiments_store.RemoveAgent: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `DELETE FROM experiment_signups WHERE platform_experiment_id=$1 AND agent_id=$2`, platformExpID, agentID); err != nil {
-		return fmt.Errorf("platform_experiments_store.RemoveAgent: %w", err)
-	}
-	// Where the platform runs the researchers, the pool is what it runs: a researcher removed
-	// before the start lowers its entry, or the platform would add another in its place.
-	if platformRuns && len(keys) > 0 {
-		if err := shrinkPoolToAtWorkTx(ctx, tx, platformExpID, keys[0]); err != nil {
+		if err != nil {
+			return fmt.Errorf("platform_experiments_store.RemoveAgent: read signup: %w", err)
+		}
+		// The agent's quota goes with its place, and a job of it that still runs is charged to that
+		// quota by every pass of the controller: the job ends first.
+		if inFlight {
+			return ErrWorkUnfinished
+		}
+		if accessKeyID != "" {
+			if err := deleteDataKey(ctx, accessKeyID); err != nil {
+				return fmt.Errorf("platform_experiments_store.RemoveAgent: delete data key: %w", err)
+			}
+		}
+		keys, err := signupKeysTx(ctx, tx, platformExpID, []string{agentID})
+		if err != nil {
 			return fmt.Errorf("platform_experiments_store.RemoveAgent: %w", err)
 		}
-	}
-	// Only an agent of role baseline holds one before the start.
-	if _, err := tx.Exec(ctx, `DELETE FROM agent_quotas WHERE platform_experiment_id=$1 AND agent_id=$2`, platformExpID, agentID); err != nil {
-		return fmt.Errorf("platform_experiments_store.RemoveAgent: release quota: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("platform_experiments_store.RemoveAgent: commit: %w", err)
-	}
-	return nil
+		if _, err := tx.Exec(ctx, `DELETE FROM hosted_instances WHERE platform_experiment_id=$1 AND agent_id=$2`, platformExpID, agentID); err != nil {
+			return fmt.Errorf("platform_experiments_store.RemoveAgent: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM experiment_signups WHERE platform_experiment_id=$1 AND agent_id=$2`, platformExpID, agentID); err != nil {
+			return fmt.Errorf("platform_experiments_store.RemoveAgent: %w", err)
+		}
+		// Where the platform runs the researchers, the pool is what it runs: a researcher removed
+		// before the start lowers its entry, or the platform would add another in its place.
+		if platformRuns && len(keys) > 0 {
+			if err := shrinkPoolToAtWorkTx(ctx, tx, platformExpID, keys[0]); err != nil {
+				return fmt.Errorf("platform_experiments_store.RemoveAgent: %w", err)
+			}
+		}
+		// Only an agent of role baseline holds one before the start.
+		if _, err := tx.Exec(ctx, `DELETE FROM agent_quotas WHERE platform_experiment_id=$1 AND agent_id=$2`, platformExpID, agentID); err != nil {
+			return fmt.Errorf("platform_experiments_store.RemoveAgent: release quota: %w", err)
+		}
+		return nil
+	})
 }
 
 // ErrWorkUnfinished refuses finishing or removing an agent that still has a job queued or
@@ -103,20 +97,16 @@ var ErrWorkUnfinished = errors.New("the agent has a job in flight")
 // ErrSignupClosed anywhere else, domain.ErrNotSignedUp, and ErrWorkUnfinished. An agent that already
 // finished keeps the moment and the reason it has.
 func (s *Store) FinishAgent(ctx context.Context, platformExpID, agentID, reason string) error {
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.FinishAgent: begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-
-	// A submission of this agent in flight commits or rolls back first, so the jobs read below
-	// include it, and one that starts later reads the finish.
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, admissionLockKey(agentID, platformExpID)); err != nil {
-		return fmt.Errorf("platform_experiments_store.FinishAgent: lock: %w", err)
-	}
-	var running, unfinished bool
-	var finishedAt *time.Time
-	err = tx.QueryRow(ctx, `
+	return s.write(ctx, func(tx *Write) error {
+		var err error
+		// A submission of this agent in flight commits or rolls back first, so the jobs read below
+		// include it, and one that starts later reads the finish.
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, admissionLockKey(agentID, platformExpID)); err != nil {
+			return fmt.Errorf("platform_experiments_store.FinishAgent: lock: %w", err)
+		}
+		var running, unfinished bool
+		var finishedAt *time.Time
+		err = tx.QueryRow(ctx, `
 SELECT pe.status = 'running' OR pe.status = 'open' AND s.role = '`+string(domain.SignupRoleBaseline)+`', s.finished_at,
        EXISTS (SELECT 1 FROM experiments
                WHERE platform_experiment_id = s.platform_experiment_id AND agent_id = s.agent_id
@@ -124,27 +114,25 @@ SELECT pe.status = 'running' OR pe.status = 'open' AND s.role = '`+string(domain
 FROM experiment_signups s JOIN platform_experiments pe ON pe.id = s.platform_experiment_id
 WHERE s.platform_experiment_id = $1 AND s.agent_id = $2
 FOR UPDATE OF s`, platformExpID, agentID).Scan(&running, &finishedAt, &unfinished)
-	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-		return domain.ErrNotSignedUp
-	case err != nil:
-		return fmt.Errorf("platform_experiments_store.FinishAgent: %w", err)
-	case finishedAt != nil:
-		return nil
-	case !running:
-		return ErrSignupClosed
-	case unfinished:
-		return ErrWorkUnfinished
-	}
-	if _, err := tx.Exec(ctx, `
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			return domain.ErrNotSignedUp
+		case err != nil:
+			return fmt.Errorf("platform_experiments_store.FinishAgent: %w", err)
+		case finishedAt != nil:
+			return nil
+		case !running:
+			return ErrSignupClosed
+		case unfinished:
+			return ErrWorkUnfinished
+		}
+		if _, err := tx.Exec(ctx, `
 UPDATE experiment_signups SET finished_at = now(), finished_reason = $3, finished_xid = pg_current_xact_id()::text::bigint
 WHERE platform_experiment_id = $1 AND agent_id = $2`, platformExpID, agentID, reason); err != nil {
-		return fmt.Errorf("platform_experiments_store.FinishAgent: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("platform_experiments_store.FinishAgent: commit: %w", err)
-	}
-	return nil
+			return fmt.Errorf("platform_experiments_store.FinishAgent: %w", err)
+		}
+		return nil
+	})
 }
 
 // SetCloseAgents keeps lines as how each agent's run of the platform experiment id stands at its

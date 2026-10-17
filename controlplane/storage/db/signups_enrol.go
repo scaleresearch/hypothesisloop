@@ -87,7 +87,7 @@ var ErrPoolSatisfied = errors.New("the pool entry wants no researcher added now"
 // poolWantsTx refuses signup, a researcher the platform adds to keep the pool of the platform
 // experiment platformExpID whose row the transaction locked, with ErrPoolSatisfied: what the
 // keeper decided from is checked again where no other write can move it.
-func poolWantsTx(ctx context.Context, tx pgx.Tx, platformExpID string, signup domain.AgentSignup) error {
+func poolWantsTx(ctx context.Context, tx *Write, platformExpID string, signup domain.AgentSignup) error {
 	var pool domain.ResearcherPool
 	if err := tx.QueryRow(ctx, `SELECT researchers FROM platform_experiments WHERE id = $1`, platformExpID).Scan(&pool); err != nil {
 		return fmt.Errorf("read researchers: %w", err)
@@ -133,17 +133,14 @@ func (s *Store) JoinRunning(ctx context.Context, platformExpID string, agent *do
 // enrol is the one transaction a signup row is written in. create is inserted first, into the org
 // the platform experiment belongs to.
 func (s *Store) enrol(ctx context.Context, platformExpID string, create []*domain.Agent, signups []domain.AgentSignup, late *LateJoin) (int, error) {
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("platform_experiments_store.Signup: begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	inserted, err := enrolTx(ctx, tx, platformExpID, create, signups, late)
+	var inserted int
+	err := s.write(ctx, func(tx *Write) error {
+		var err error
+		inserted, err = enrolTx(ctx, tx, platformExpID, create, signups, late)
+		return err
+	})
 	if err != nil {
 		return 0, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return 0, fmt.Errorf("platform_experiments_store.Signup: commit: %w", err)
 	}
 	return inserted, nil
 }
@@ -152,7 +149,7 @@ func (s *Store) enrol(ctx context.Context, platformExpID string, create []*domai
 // is open: half the budget (domain.BaselineShare), in the column its tier names
 // (domain.ApplyQuotaTier). It is written when the agent joins and again whenever the budget of
 // the open experiment changes.
-func allocateBaselineQuota(ctx context.Context, tx pgx.Tx, platformExpID, agentID string, tier domain.QuotaTier, budget float64) error {
+func allocateBaselineQuota(ctx context.Context, tx *Write, platformExpID, agentID string, tier domain.QuotaTier, budget float64) error {
 	guaranteed, burst := domain.ApplyQuotaTier(tier, domain.BaselineShare(budget), 0)
 	id, err := domain.NewID(domain.AgentQuotaIDPrefix)
 	if err != nil {
@@ -173,7 +170,7 @@ func allocateBaselineQuota(ctx context.Context, tx pgx.Tx, platformExpID, agentI
 // An agent of role baseline is given its quota here, with its place: its job runs while the
 // platform experiment is open, before the start divides the budget (allocateBaselineQuota). So
 // is a researcher that joins a running one (allocateLateQuota).
-func enrolTx(ctx context.Context, tx pgx.Tx, platformExpID string, create []*domain.Agent, signups []domain.AgentSignup, late *LateJoin) (int, error) {
+func enrolTx(ctx context.Context, tx *Write, platformExpID string, create []*domain.Agent, signups []domain.AgentSignup, late *LateJoin) (int, error) {
 	var status, orgID string
 	var maxAgents, maxHosted int
 	var coordinatorHosted bool
@@ -341,7 +338,7 @@ WHERE s.platform_experiment_id = $1 AND `+researcherAtWorkSQL, platformExpID).Sc
 // of what the researchers left unspent (domain.LateShare), and takes that share from the quotas of
 // the others, never below it nor below what they used. The experiment row is locked, so two researchers joining at once do not
 // take the same hours.
-func allocateLateQuota(ctx context.Context, tx pgx.Tx, platformExpID string, signup domain.AgentSignup, late LateJoin) error {
+func allocateLateQuota(ctx context.Context, tx *Write, platformExpID string, signup domain.AgentSignup, late LateJoin) error {
 	rows, err := tx.Query(ctx, `
 SELECT q.agent_id, q.guaranteed_accelerator_hours, q.burst_accelerator_hours,
        s.finished_at IS NOT NULL OR `+stoppedSQL+`

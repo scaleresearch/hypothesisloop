@@ -72,103 +72,103 @@ type SubmissionRateLimit struct {
 // before commit: a store failure rolls the submission back, and no key is created for an id that
 // was rejected or already queued.
 func (s *Store) AdmitExperimentTx(ctx context.Context, exp *domain.Experiment, observe func(context.Context) (*domain.AgentQuota, error), rateLimit SubmissionRateLimit, createDataKey func(context.Context) error) (AdmitDecision, error) {
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return AdmitRejected, fmt.Errorf("admit experiment: begin: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, admissionLockKey(exp.AgentID, exp.PlatformExperimentID)); err != nil {
-		return AdmitRejected, fmt.Errorf("admit experiment: lock: %w", err)
-	}
-	// A submit that was stored and whose answer was lost is sent again with its key. Read under
-	// the agent's lock, so of two that race one inserts and the other finds its row here.
-	if exp.SubmissionKey != "" {
-		err := tx.QueryRow(ctx, `SELECT id FROM experiments WHERE platform_experiment_id = $1 AND agent_id = $2 AND submission_key = $3`,
-			exp.PlatformExperimentID, exp.AgentID, exp.SubmissionKey).Scan(&exp.ID)
-		if err == nil {
-			return AdmitRepeated, nil
+	decision := AdmitInserted
+	if err := s.write(ctx, func(tx *Write) error {
+		var err error
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, admissionLockKey(exp.AgentID, exp.PlatformExperimentID)); err != nil {
+			return fmt.Errorf("admit experiment: lock: %w", err)
 		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return AdmitRejected, fmt.Errorf("admit experiment: submission key: %w", err)
+		// A submit that was stored and whose answer was lost is sent again with its key. Read under
+		// the agent's lock, so of two that race one inserts and the other finds its row here.
+		if exp.SubmissionKey != "" {
+			err := tx.QueryRow(ctx, `SELECT id FROM experiments WHERE platform_experiment_id = $1 AND agent_id = $2 AND submission_key = $3`,
+				exp.PlatformExperimentID, exp.AgentID, exp.SubmissionKey).Scan(&exp.ID)
+			if err == nil {
+				decision = AdmitRepeated
+				return nil
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("admit experiment: submission key: %w", err)
+			}
 		}
-	}
-	// The one place that decides whether this id is new, a legal re-submission, or taken. It is
-	// read here rather than before the transaction because only here is it atomic with the insert
-	// below, under the same lock. The unique constraint on the primary key remains, but it is an
-	// invariant backstop -- reaching it means two different agents raced the same id, which is a
-	// collision, not a retry -- and no longer a second place that decides "duplicate".
-	var existingStatus, existingAgent, existingPE string
-	err = tx.QueryRow(ctx, `SELECT status, agent_id, platform_experiment_id FROM experiments WHERE id = $1`,
-		exp.ID).Scan(&existingStatus, &existingAgent, &existingPE)
-	switch {
-	case err == nil && (existingAgent != exp.AgentID || existingPE != exp.PlatformExperimentID):
-		// Someone else's job. Ownership is checked, not just status: this transaction holds the
-		// lock for *this* submitter's (agent, platform experiment), so it can say nothing about
-		// another owner's row -- and treating one as a re-submission would let any agent refresh
-		// the priority of a job it does not own by guessing an id.
-		return AdmitRejected, fmt.Errorf("%w: %s belongs to another agent", ErrDuplicateExperiment, exp.ID)
-	case err == nil && domain.ExperimentStatus(existingStatus) == domain.StatusQueued:
-		return AdmitAlreadyQueued, nil
-	case err == nil:
-		return AdmitRejected, fmt.Errorf("%w: %s already exists with status %s", ErrDuplicateExperiment, exp.ID, existingStatus)
-	case !errors.Is(err, pgx.ErrNoRows):
-		return AdmitRejected, fmt.Errorf("admit experiment: existing row: %w", err)
-	}
+		// The one place that decides whether this id is new, a legal re-submission, or taken. It is
+		// read here rather than before the transaction because only here is it atomic with the insert
+		// below, under the same lock. The unique constraint on the primary key remains, but it is an
+		// invariant backstop -- reaching it means two different agents raced the same id, which is a
+		// collision, not a retry -- and no longer a second place that decides "duplicate".
+		var existingStatus, existingAgent, existingPE string
+		err = tx.QueryRow(ctx, `SELECT status, agent_id, platform_experiment_id FROM experiments WHERE id = $1`,
+			exp.ID).Scan(&existingStatus, &existingAgent, &existingPE)
+		switch {
+		case err == nil && (existingAgent != exp.AgentID || existingPE != exp.PlatformExperimentID):
+			// Someone else's job. Ownership is checked, not just status: this transaction holds the
+			// lock for *this* submitter's (agent, platform experiment), so it can say nothing about
+			// another owner's row -- and treating one as a re-submission would let any agent refresh
+			// the priority of a job it does not own by guessing an id.
+			return fmt.Errorf("%w: %s belongs to another agent", ErrDuplicateExperiment, exp.ID)
+		case err == nil && domain.ExperimentStatus(existingStatus) == domain.StatusQueued:
+			decision = AdmitAlreadyQueued
+			return nil
+		case err == nil:
+			return fmt.Errorf("%w: %s already exists with status %s", ErrDuplicateExperiment, exp.ID, existingStatus)
+		case !errors.Is(err, pgx.ErrNoRows):
+			return fmt.Errorf("admit experiment: existing row: %w", err)
+		}
 
-	observedCtx, cancelObserved := context.WithTimeout(ctx, InTxObservationTimeout)
-	observed, err := observe(observedCtx)
-	cancelObserved()
-	if err != nil {
-		return AdmitRejected, fmt.Errorf("admit experiment: observed usage: %w", err)
-	}
+		observedCtx, cancelObserved := context.WithTimeout(ctx, InTxObservationTimeout)
+		observed, err := observe(observedCtx)
+		cancelObserved()
+		if err != nil {
+			return fmt.Errorf("admit experiment: observed usage: %w", err)
+		}
 
-	// Counted here rather than before the transaction: the advisory lock above is per
-	// (agent, platform experiment), which is exactly the scope this limit is expressed in, so
-	// inside it the count cannot go stale. Outside it, N concurrent submissions all read the
-	// same pre-limit count and all pass.
-	if rateLimit.MaxPerHour > 0 {
-		var recent int
-		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM experiments
+		// Counted here rather than before the transaction: the advisory lock above is per
+		// (agent, platform experiment), which is exactly the scope this limit is expressed in, so
+		// inside it the count cannot go stale. Outside it, N concurrent submissions all read the
+		// same pre-limit count and all pass.
+		if rateLimit.MaxPerHour > 0 {
+			var recent int
+			if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM experiments
 			WHERE agent_id = $1 AND platform_experiment_id = $2 AND created_at >= $3`,
-			exp.AgentID, exp.PlatformExperimentID, time.Now().UTC().Add(-rateLimit.Window)).Scan(&recent); err != nil {
-			return AdmitRejected, fmt.Errorf("admit experiment: recent submissions: %w", err)
+				exp.AgentID, exp.PlatformExperimentID, time.Now().UTC().Add(-rateLimit.Window)).Scan(&recent); err != nil {
+				return fmt.Errorf("admit experiment: recent submissions: %w", err)
+			}
+			if recent >= rateLimit.MaxPerHour {
+				return &AdmitRefusal{Reason: RefusedRateLimited, Message: fmt.Sprintf("the agent submitted %d jobs to this platform experiment in the last hour, and %d is the most it may: submit again as the earliest of them turns an hour old", recent, rateLimit.MaxPerHour)}
+			}
 		}
-		if recent >= rateLimit.MaxPerHour {
-			return AdmitRejected, &AdmitRefusal{Reason: RefusedRateLimited, Message: fmt.Sprintf("the agent submitted %d jobs to this platform experiment in the last hour, and %d is the most it may: submit again as the earliest of them turns an hour old", recent, rateLimit.MaxPerHour)}
-		}
-	}
 
-	var cut bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (
+		var cut bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (
 		SELECT 1 FROM platform_experiment_cuts WHERE platform_experiment_id=$1 AND agent_id=$2
 	)`, exp.PlatformExperimentID, exp.AgentID).Scan(&cut); err != nil {
-		return AdmitRejected, fmt.Errorf("admit experiment: stage cut: %w", err)
-	}
-	if cut {
-		return AdmitRejected, &AdmitRefusal{Reason: RefusedAgentCut, Message: "the agent was cut at a stage boundary and submits no further job in this platform experiment: GET /platform-experiments/{id}/stages says where it ranked"}
-	}
-	var finished bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (
+			return fmt.Errorf("admit experiment: stage cut: %w", err)
+		}
+		if cut {
+			return &AdmitRefusal{Reason: RefusedAgentCut, Message: "the agent was cut at a stage boundary and submits no further job in this platform experiment: GET /platform-experiments/{id}/stages says where it ranked"}
+		}
+		var finished bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (
 		SELECT 1 FROM experiment_signups WHERE platform_experiment_id=$1 AND agent_id=$2 AND finished_at IS NOT NULL
 	)`, exp.PlatformExperimentID, exp.AgentID).Scan(&finished); err != nil {
-		return AdmitRejected, fmt.Errorf("admit experiment: finished: %w", err)
-	}
-	if finished {
-		return AdmitRejected, &AdmitRefusal{Reason: RefusedAgentFinished, Message: "the agent finished in this platform experiment, which is final: it submits no further job"}
-	}
+			return fmt.Errorf("admit experiment: finished: %w", err)
+		}
+		if finished {
+			return &AdmitRefusal{Reason: RefusedAgentFinished, Message: "the agent finished in this platform experiment, which is final: it submits no further job"}
+		}
 
-	allocation, err := scanAgentQuota(tx.QueryRow(ctx, `SELECT`+agentQuotaColumns+`
+		allocation, err := scanAgentQuota(tx.QueryRow(ctx, `SELECT`+agentQuotaColumns+`
 		FROM agent_quotas WHERE agent_id=$1 AND platform_experiment_id=$2 FOR UPDATE`, exp.AgentID, exp.PlatformExperimentID))
-	if err == pgx.ErrNoRows {
-		return AdmitRejected, &AdmitRefusal{Reason: RefusedNoQuota, Message: "the agent holds no quota in this platform experiment, and a job spends its agent's quota: only an agent added to the platform experiment with a share of its budget submits jobs"}
-	}
-	if err != nil {
-		return AdmitRejected, fmt.Errorf("admit experiment: quota: %w", err)
-	}
+		if err == pgx.ErrNoRows {
+			return &AdmitRefusal{Reason: RefusedNoQuota, Message: "the agent holds no quota in this platform experiment, and a job spends its agent's quota: only an agent added to the platform experiment with a share of its budget submits jobs"}
+		}
+		if err != nil {
+			return fmt.Errorf("admit experiment: quota: %w", err)
+		}
 
-	var desiredGuaranteedAcc, desiredBurstAcc float64
-	var holding int
-	if err := tx.QueryRow(ctx, `
+		var desiredGuaranteedAcc, desiredBurstAcc float64
+		var holding int
+		if err := tx.QueryRow(ctx, `
 		SELECT
 			COALESCE(SUM(estimated_cost_acch) FILTER (WHERE capacity_tier='guaranteed'), 0),
 			COALESCE(SUM(estimated_cost_acch) FILTER (WHERE capacity_tier='burst'), 0),
@@ -177,31 +177,32 @@ func (s *Store) AdmitExperimentTx(ctx context.Context, exp *domain.Experiment, o
 		WHERE agent_id=$1 AND platform_experiment_id=$2
 		  AND (status IN ('QUEUED','SUBMITTED','RUNNING')
 		       OR (status IN ('COMPLETED','FAILED','EVICTED','REJECTED') AND quota_settled_at IS NULL))`,
-		exp.AgentID, exp.PlatformExperimentID).Scan(
-		&desiredGuaranteedAcc, &desiredBurstAcc, &holding); err != nil {
-		return AdmitRejected, fmt.Errorf("admit experiment: desired usage: %w", err)
-	}
-
-	allocation.UsedGuaranteedAccH = observed.UsedGuaranteedAccH + desiredGuaranteedAcc
-	allocation.UsedBurstAccH = observed.UsedBurstAccH + desiredBurstAcc
-	remaining := allocation.Remaining(exp.CapacityTier)
-	if exp.EstimatedDurationHours == 0 {
-		if err := takeLargestEstimate(exp, remaining, holding, desiredGuaranteedAcc+desiredBurstAcc); err != nil {
-			return AdmitRejected, err
+			exp.AgentID, exp.PlatformExperimentID).Scan(
+			&desiredGuaranteedAcc, &desiredBurstAcc, &holding); err != nil {
+			return fmt.Errorf("admit experiment: desired usage: %w", err)
 		}
-	} else if exp.EstimatedCostAccH > remaining {
-		return AdmitRejected, &AdmitRefusal{Reason: RefusedInsufficientQuota, Message: quotaRefusal(exp, remaining, holding, desiredGuaranteedAcc+desiredBurstAcc)}
-	}
-	if err := createExperiment(ctx, tx, exp); err != nil {
+
+		allocation.UsedGuaranteedAccH = observed.UsedGuaranteedAccH + desiredGuaranteedAcc
+		allocation.UsedBurstAccH = observed.UsedBurstAccH + desiredBurstAcc
+		remaining := allocation.Remaining(exp.CapacityTier)
+		if exp.EstimatedDurationHours == 0 {
+			if err := takeLargestEstimate(exp, remaining, holding, desiredGuaranteedAcc+desiredBurstAcc); err != nil {
+				return err
+			}
+		} else if exp.EstimatedCostAccH > remaining {
+			return &AdmitRefusal{Reason: RefusedInsufficientQuota, Message: quotaRefusal(exp, remaining, holding, desiredGuaranteedAcc+desiredBurstAcc)}
+		}
+		if err := createExperiment(ctx, tx, exp); err != nil {
+			return err
+		}
+		if err := createDataKey(ctx); err != nil {
+			return fmt.Errorf("admit experiment: durable-data key: %w", err)
+		}
+		return nil
+	}); err != nil {
 		return AdmitRejected, err
 	}
-	if err := createDataKey(ctx); err != nil {
-		return AdmitRejected, fmt.Errorf("admit experiment: durable-data key: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return AdmitRejected, fmt.Errorf("admit experiment: commit: %w", err)
-	}
-	return AdmitInserted, nil
+	return decision, nil
 }
 
 // quotaRefusal is the rejection of a job whose estimate is over what its agent has remaining. It
@@ -275,91 +276,92 @@ func heldByEstimates(jobs int, reserved float64) string {
 // admission. defaultMaxConcurrent is quota.default_max_concurrent_accelerators, used when the
 // platform experiment has no override.
 func (s *Store) ReserveAdmittedFlavorTx(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, acceleratorCount, defaultMaxConcurrent int, observe func(ctx context.Context, agentID, platformExpID string, platformExpStart time.Time) (*domain.AgentQuota, error)) (string, error) {
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return "", fmt.Errorf("reserve admitted flavor: begin: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	var agentID, platformExpID string
-	var tier domain.CapacityTier
-	var oldCost float64
-	// The platform experiment's start bounds the usage lookback. It is read here, on the
-	// transaction's connection, so observe needs no second one from the pool.
-	var platformExpStart time.Time
-	if err := tx.QueryRow(ctx, `SELECT e.agent_id, e.platform_experiment_id, e.capacity_tier, e.estimated_cost_acch, pe.created_at
+	reason := ""
+	if err := s.write(ctx, func(tx *Write) error {
+		var agentID, platformExpID string
+		var tier domain.CapacityTier
+		var oldCost float64
+		// The platform experiment's start bounds the usage lookback. It is read here, on the
+		// transaction's connection, so observe needs no second one from the pool.
+		var platformExpStart time.Time
+		if err := tx.QueryRow(ctx, `SELECT e.agent_id, e.platform_experiment_id, e.capacity_tier, e.estimated_cost_acch, pe.created_at
 		FROM experiments e JOIN platform_experiments pe ON pe.id = e.platform_experiment_id WHERE e.id=$1`, experimentID).
-		Scan(&agentID, &platformExpID, &tier, &oldCost, &platformExpStart); err != nil {
-		return "", fmt.Errorf("reserve admitted flavor: experiment: %w", err)
-	}
-	key := agentID + "/" + platformExpID
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, key); err != nil {
-		return "", fmt.Errorf("reserve admitted flavor: lock: %w", err)
-	}
-	observedCtx, cancelObserved := context.WithTimeout(ctx, InTxObservationTimeout)
-	observed, err := observe(observedCtx, agentID, platformExpID, platformExpStart)
-	cancelObserved()
-	if err != nil {
-		return "", fmt.Errorf("reserve admitted flavor: observed usage: %w", err)
-	}
-	allocation, err := scanAgentQuota(tx.QueryRow(ctx, `SELECT`+agentQuotaColumns+`
+			Scan(&agentID, &platformExpID, &tier, &oldCost, &platformExpStart); err != nil {
+			return fmt.Errorf("reserve admitted flavor: experiment: %w", err)
+		}
+		key := agentID + "/" + platformExpID
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, key); err != nil {
+			return fmt.Errorf("reserve admitted flavor: lock: %w", err)
+		}
+		observedCtx, cancelObserved := context.WithTimeout(ctx, InTxObservationTimeout)
+		observed, err := observe(observedCtx, agentID, platformExpID, platformExpStart)
+		cancelObserved()
+		if err != nil {
+			return fmt.Errorf("reserve admitted flavor: observed usage: %w", err)
+		}
+		allocation, err := scanAgentQuota(tx.QueryRow(ctx, `SELECT`+agentQuotaColumns+`
 		FROM agent_quotas WHERE agent_id=$1 AND platform_experiment_id=$2 FOR UPDATE`, agentID, platformExpID))
-	if err != nil {
-		return "", fmt.Errorf("reserve admitted flavor: quota: %w", err)
-	}
-	var desired, desiredAll float64
-	if err := tx.QueryRow(ctx, `SELECT COALESCE(SUM(estimated_cost_acch) FILTER (WHERE capacity_tier=$3),0), COALESCE(SUM(estimated_cost_acch),0) FROM experiments
+		if err != nil {
+			return fmt.Errorf("reserve admitted flavor: quota: %w", err)
+		}
+		var desired, desiredAll float64
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(SUM(estimated_cost_acch) FILTER (WHERE capacity_tier=$3),0), COALESCE(SUM(estimated_cost_acch),0) FROM experiments
 		WHERE agent_id=$1 AND platform_experiment_id=$2
 		AND (status IN ('QUEUED','SUBMITTED','RUNNING')
 		OR (status IN ('COMPLETED','FAILED','EVICTED','REJECTED') AND quota_settled_at IS NULL))`,
-		agentID, platformExpID, tier).Scan(&desired, &desiredAll); err != nil {
-		return "", fmt.Errorf("reserve admitted flavor: desired usage: %w", err)
-	}
-	used, limit := observed.UsedBurstAccH, allocation.BurstAcceleratorHours
-	if tier == domain.CapacityGuaranteed {
-		used, limit = observed.UsedGuaranteedAccH, allocation.GuaranteedAcceleratorHours
-	}
-	projected := used + desired - oldCost + estimatedCost
-	if projected > limit {
-		return fmt.Sprintf("insufficient_%s_quota for selected %s: need %.2f additional accelerator_hours, have %.2f remaining", tier, acceleratorType, estimatedCost-oldCost, limit-(used+desired-oldCost)), nil
-	}
-	if spent := observed.Used() + desiredAll - oldCost; spent+estimatedCost > allocation.Share() {
-		return fmt.Sprintf("insufficient_%s_quota for selected %s: need %.2f additional accelerator_hours, the agent's share of the experiment budget has %.2f remaining", tier, acceleratorType, estimatedCost-oldCost, allocation.Share()-spent), nil
-	}
-	if acceleratorCount > 0 {
-		var maxConcurrent *int
-		if err := tx.QueryRow(ctx, `SELECT max_concurrent_accelerators FROM platform_experiments WHERE id=$1`, platformExpID).Scan(&maxConcurrent); err != nil {
-			return "", fmt.Errorf("reserve admitted flavor: platform experiment cap: %w", err)
+			agentID, platformExpID, tier).Scan(&desired, &desiredAll); err != nil {
+			return fmt.Errorf("reserve admitted flavor: desired usage: %w", err)
 		}
-		cap := defaultMaxConcurrent
-		if maxConcurrent != nil {
-			cap = *maxConcurrent
+		used, limit := observed.UsedBurstAccH, allocation.BurstAcceleratorHours
+		if tier == domain.CapacityGuaranteed {
+			used, limit = observed.UsedGuaranteedAccH, allocation.GuaranteedAcceleratorHours
 		}
-		if cap > 0 {
-			// The cap is defined on the platform experiment across ALL of its agents' jobs
-			// (autoscaler.md, the migrations' max_concurrent_accelerators comment), not per agent —
-			// so both the lock and the SUM below are scoped to platformExpID alone. A second,
-			// distinctly-salted advisory lock is used here (rather than reusing the agent-scoped
-			// `key` lock above) so two different agents under the same platform experiment still
-			// serialize against each other instead of racing past this check independently.
-			if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 1))`, platformExpID); err != nil {
-				return "", fmt.Errorf("reserve admitted flavor: concurrency lock: %w", err)
+		projected := used + desired - oldCost + estimatedCost
+		if projected > limit {
+			reason = fmt.Sprintf("insufficient_%s_quota for selected %s: need %.2f additional accelerator_hours, have %.2f remaining", tier, acceleratorType, estimatedCost-oldCost, limit-(used+desired-oldCost))
+			return nil
+		}
+		if spent := observed.Used() + desiredAll - oldCost; spent+estimatedCost > allocation.Share() {
+			reason = fmt.Sprintf("insufficient_%s_quota for selected %s: need %.2f additional accelerator_hours, the agent's share of the experiment budget has %.2f remaining", tier, acceleratorType, estimatedCost-oldCost, allocation.Share()-spent)
+			return nil
+		}
+		if acceleratorCount > 0 {
+			var maxConcurrent *int
+			if err := tx.QueryRow(ctx, `SELECT max_concurrent_accelerators FROM platform_experiments WHERE id=$1`, platformExpID).Scan(&maxConcurrent); err != nil {
+				return fmt.Errorf("reserve admitted flavor: platform experiment cap: %w", err)
 			}
-			var inFlight int
-			if err := tx.QueryRow(ctx, `SELECT COALESCE(SUM(accelerator_count),0) FROM experiments
+			cap := defaultMaxConcurrent
+			if maxConcurrent != nil {
+				cap = *maxConcurrent
+			}
+			if cap > 0 {
+				// The cap is defined on the platform experiment across ALL of its agents' jobs
+				// (autoscaler.md, the migrations' max_concurrent_accelerators comment), not per agent —
+				// so both the lock and the SUM below are scoped to platformExpID alone. A second,
+				// distinctly-salted advisory lock is used here (rather than reusing the agent-scoped
+				// `key` lock above) so two different agents under the same platform experiment still
+				// serialize against each other instead of racing past this check independently.
+				if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 1))`, platformExpID); err != nil {
+					return fmt.Errorf("reserve admitted flavor: concurrency lock: %w", err)
+				}
+				var inFlight int
+				if err := tx.QueryRow(ctx, `SELECT COALESCE(SUM(accelerator_count),0) FROM experiments
 				WHERE platform_experiment_id=$1 AND id!=$2 AND status IN ('SUBMITTED','RUNNING')`,
-				platformExpID, experimentID).Scan(&inFlight); err != nil {
-				return "", fmt.Errorf("reserve admitted flavor: in-flight accelerators: %w", err)
-			}
-			if inFlight+acceleratorCount > cap {
-				return domain.NotAdmittedConcurrencyCap, nil
+					platformExpID, experimentID).Scan(&inFlight); err != nil {
+					return fmt.Errorf("reserve admitted flavor: in-flight accelerators: %w", err)
+				}
+				if inFlight+acceleratorCount > cap {
+					reason = domain.NotAdmittedConcurrencyCap
+					return nil
+				}
 			}
 		}
+		if _, err := tx.Exec(ctx, `UPDATE experiments SET accelerator_type=$2, estimated_cost_acch=$3 WHERE id=$1`, experimentID, string(acceleratorType), estimatedCost); err != nil {
+			return fmt.Errorf("reserve admitted flavor: update: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return "", err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE experiments SET accelerator_type=$2, estimated_cost_acch=$3 WHERE id=$1`, experimentID, string(acceleratorType), estimatedCost); err != nil {
-		return "", fmt.Errorf("reserve admitted flavor: update: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return "", fmt.Errorf("reserve admitted flavor: commit: %w", err)
-	}
-	return "", nil
+	return reason, nil
 }

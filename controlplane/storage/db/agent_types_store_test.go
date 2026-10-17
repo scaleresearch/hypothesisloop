@@ -101,7 +101,7 @@ func TestSeedingWritesWhatDiffersFromTheCurrentVersionUnlessAnOlderReleaseHasIt(
 	builtin := domain.BuiltinAgentType{ID: "test-" + uuid.New().String()[:8], Name: "Test", Role: domain.AgentRoleResearcher, Prompt: testPrompt, Settings: testTypeSettings()}
 	seed := func(release int, b domain.BuiltinAgentType) Seeded {
 		t.Helper()
-		seeded, err := SeedBuiltins(ctx, pool, release, []domain.BuiltinAgentType{b}, testRules)
+		seeded, err := NewStore(pool, 3).SeedBuiltins(ctx, release, []domain.BuiltinAgentType{b}, testRules)
 		if err != nil {
 			t.Fatalf("seed: got = %v, want = nil", err)
 		}
@@ -137,7 +137,7 @@ func TestSeedingWritesWhatDiffersFromTheCurrentVersionUnlessAnOlderReleaseHasIt(
 	}
 	other := changed
 	other.Role = domain.AgentRoleBaseline
-	if _, err := SeedBuiltins(ctx, pool, 7, []domain.BuiltinAgentType{other}, testRules); err == nil {
+	if _, err := NewStore(pool, 3).SeedBuiltins(ctx, 7, []domain.BuiltinAgentType{other}, testRules); err == nil {
 		t.Error("a built-in seeded with another role was accepted")
 	}
 	if got := actions(t, store, "", builtin.ID); !slices.Equal(got, []string{"edit@3", "rename@2", "edit@2", "rename@1", "create@1"}) {
@@ -161,7 +161,7 @@ func TestNewRulesAreAVersionEveryLiveAgentIsToldOf(t *testing.T) {
 	defer stop()
 
 	const release = 1000
-	seeded, err := SeedBuiltins(ctx, pool, release, nil, "## new rules")
+	seeded, err := NewStore(pool, 3).SeedBuiltins(ctx, release, nil, "## new rules")
 	if err != nil || seeded.RulesVersion != before.RulesVersion+1 || seeded.RulesTold < 2 {
 		t.Fatalf("new rules: got = %+v, %v, want the next version and the agent and coordinator told", seeded, err)
 	}
@@ -180,10 +180,10 @@ func TestNewRulesAreAVersionEveryLiveAgentIsToldOf(t *testing.T) {
 	if err != nil || after.Rules != "## new rules" || after.RulesVersion != seeded.RulesVersion {
 		t.Errorf("after: got = %+v, %v", after, err)
 	}
-	if seeded, err := SeedBuiltins(ctx, pool, release-1, nil, testRules); err != nil || seeded.RulesVersion != 0 || !slices.Contains(seeded.Skipped, "rules") {
+	if seeded, err := NewStore(pool, 3).SeedBuiltins(ctx, release-1, nil, testRules); err != nil || seeded.RulesVersion != 0 || !slices.Contains(seeded.Skipped, "rules") {
 		t.Errorf("an older release's rules: got = %+v, %v, want them left alone", seeded, err)
 	}
-	if seeded, err := SeedBuiltins(ctx, pool, release, nil, testRules); err != nil || seeded.RulesVersion != after.RulesVersion+1 {
+	if seeded, err := NewStore(pool, 3).SeedBuiltins(ctx, release, nil, testRules); err != nil || seeded.RulesVersion != after.RulesVersion+1 {
 		t.Errorf("the rules back under the same release: got = %+v, %v, want the next version", seeded, err)
 	}
 	if _, err := pool.pool.Exec(ctx, `UPDATE platform_rules SET rules = 'x'`); err == nil {

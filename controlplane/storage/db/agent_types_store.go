@@ -232,7 +232,7 @@ FROM agent_type_events e WHERE e.type_id = $1 ORDER BY e.id DESC`, id)
 	return events, nil
 }
 
-func recordEventTx(ctx context.Context, tx pgx.Tx, typeID string, action domain.AgentTypeAction, version int, detail string, by domain.Actor) error {
+func recordEventTx(ctx context.Context, tx *Write, typeID string, action domain.AgentTypeAction, version int, detail string, by domain.Actor) error {
 	_, err := tx.Exec(ctx, `
 INSERT INTO agent_type_events (type_id, action, version, detail, actor_kind, actor_id) VALUES ($1, $2, $3, $4, $5, $6)`,
 		typeID, string(action), version, detail, string(by.Kind), by.ID)
@@ -242,7 +242,7 @@ INSERT INTO agent_type_events (type_id, action, version, detail, actor_kind, act
 	return nil
 }
 
-func insertAgentTypeVersion(ctx context.Context, tx pgx.Tx, typeID string, version int, prompt string, settings domain.AgentTypeSettings, release *int, by domain.Actor) error {
+func insertAgentTypeVersion(ctx context.Context, tx *Write, typeID string, version int, prompt string, settings domain.AgentTypeSettings, release *int, by domain.Actor) error {
 	digest, err := domain.AgentTypeDigest(prompt, settings)
 	if err != nil {
 		return err
@@ -266,36 +266,35 @@ func (s *Store) Create(ctx context.Context, orgID, name, description string, rol
 	if err != nil {
 		return nil, fmt.Errorf("agent_types_store.Create: %w", err)
 	}
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("agent_types_store.Create: begin: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	var types int
-	if err := tx.QueryRow(ctx, `
+	var created *domain.CurrentAgentType
+	if err := s.write(ctx, func(tx *Write) error {
+		var types int
+		if err := tx.QueryRow(ctx, `
 SELECT (SELECT count(*) FROM agent_types WHERE org_id = o.id AND archived_at IS NULL)::int FROM orgs o WHERE o.id = $1 FOR UPDATE`, orgID).Scan(&types); err != nil {
-		return nil, fmt.Errorf("agent_types_store.Create: lock org %s: %w", orgID, err)
-	}
-	if types >= domain.MaxOrgAgentTypes {
-		return nil, &AgentTypeLimit{Types: true, Limit: domain.MaxOrgAgentTypes}
-	}
-	if _, err := tx.Exec(ctx, `
+			return fmt.Errorf("agent_types_store.Create: lock org %s: %w", orgID, err)
+		}
+		if types >= domain.MaxOrgAgentTypes {
+			return &AgentTypeLimit{Types: true, Limit: domain.MaxOrgAgentTypes}
+		}
+		if _, err := tx.Exec(ctx, `
 INSERT INTO agent_types (id, org_id, name, description, role, current_version, created_by_kind, created_by_id)
 VALUES ($1, $2, $3, $4, $5, 1, $6, $7)`, id, orgID, name, description, string(role), string(by.Kind), by.ID); err != nil {
-		return nil, fmt.Errorf("agent_types_store.Create: %w", err)
-	}
-	if err := insertAgentTypeVersion(ctx, tx, id, 1, prompt, settings, nil, by); err != nil {
-		return nil, fmt.Errorf("agent_types_store.Create: %w", err)
-	}
-	if err := recordEventTx(ctx, tx, id, domain.AgentTypeCreated, 1, "", by); err != nil {
-		return nil, fmt.Errorf("agent_types_store.Create: %w", err)
-	}
-	created, err := getAgentType(ctx, tx, orgID, id, false)
-	if err != nil {
-		return nil, fmt.Errorf("agent_types_store.Create: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("agent_types_store.Create: commit: %w", err)
+			return fmt.Errorf("agent_types_store.Create: %w", err)
+		}
+		if err := insertAgentTypeVersion(ctx, tx, id, 1, prompt, settings, nil, by); err != nil {
+			return fmt.Errorf("agent_types_store.Create: %w", err)
+		}
+		if err := recordEventTx(ctx, tx, id, domain.AgentTypeCreated, 1, "", by); err != nil {
+			return fmt.Errorf("agent_types_store.Create: %w", err)
+		}
+		var err error
+		created, err = getAgentType(ctx, tx, orgID, id, false)
+		if err != nil {
+			return fmt.Errorf("agent_types_store.Create: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	return created, nil
 }
@@ -315,7 +314,7 @@ type AgentTypeEdit struct {
 
 // lockOrgTypeTx locks agent type id of org orgID for a change: ErrAgentTypeNotFound for one that
 // is not the org's, ErrAgentTypeBuiltin for a built-in one and ErrAgentTypeArchived.
-func lockOrgTypeTx(ctx context.Context, tx pgx.Tx, orgID, id string) (*domain.CurrentAgentType, error) {
+func lockOrgTypeTx(ctx context.Context, tx *Write, orgID, id string) (*domain.CurrentAgentType, error) {
 	current, err := getAgentType(ctx, tx, orgID, id, true)
 	switch {
 	case err != nil:
@@ -334,40 +333,39 @@ func lockOrgTypeTx(ctx context.Context, tx pgx.Tx, orgID, id string) (*domain.Cu
 // type (tellTypeTx). The errors are lockOrgTypeTx's, an *AgentTypeVersionConflict when IfVersion
 // is not current, and an *AgentTypeLimit above domain.MaxAgentTypeEditsAnHour.
 func (s *Store) Edit(ctx context.Context, e AgentTypeEdit) (*domain.CurrentAgentType, *domain.Propagation, error) {
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return nil, nil, fmt.Errorf("agent_types_store.Edit: begin: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	current, err := lockOrgTypeTx(ctx, tx, e.OrgID, e.ID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("agent_types_store.Edit: %w", err)
-	}
-	if current.CurrentVersion != e.IfVersion {
-		return nil, nil, &AgentTypeVersionConflict{IfVersion: e.IfVersion, Current: current.CurrentVersion}
-	}
-	if err := describeTx(ctx, tx, current, e.Name, e.Description, e.By); err != nil {
-		return nil, nil, fmt.Errorf("agent_types_store.Edit: %w", err)
-	}
-	digest, err := domain.AgentTypeDigest(e.Prompt, e.Settings)
-	if err != nil {
-		return nil, nil, fmt.Errorf("agent_types_store.Edit: %w", err)
-	}
-	propagation := &domain.Propagation{Version: current.CurrentVersion}
-	if digest != current.Current.Digest {
-		if err := withinEditLimitTx(ctx, tx, e.ID); err != nil {
-			return nil, nil, err
+	var edited *domain.CurrentAgentType
+	var propagation *domain.Propagation
+	if err := s.write(ctx, func(tx *Write) error {
+		current, err := lockOrgTypeTx(ctx, tx, e.OrgID, e.ID)
+		if err != nil {
+			return fmt.Errorf("agent_types_store.Edit: %w", err)
 		}
-		if propagation, err = newVersionTx(ctx, tx, current, e.Prompt, e.Settings, nil, domain.AgentTypeEdited, "", e.By); err != nil {
-			return nil, nil, fmt.Errorf("agent_types_store.Edit: %w", err)
+		if current.CurrentVersion != e.IfVersion {
+			return &AgentTypeVersionConflict{IfVersion: e.IfVersion, Current: current.CurrentVersion}
 		}
-	}
-	edited, err := getAgentType(ctx, tx, e.OrgID, e.ID, false)
-	if err != nil {
-		return nil, nil, fmt.Errorf("agent_types_store.Edit: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, nil, fmt.Errorf("agent_types_store.Edit: commit: %w", err)
+		if err := describeTx(ctx, tx, current, e.Name, e.Description, e.By); err != nil {
+			return fmt.Errorf("agent_types_store.Edit: %w", err)
+		}
+		digest, err := domain.AgentTypeDigest(e.Prompt, e.Settings)
+		if err != nil {
+			return fmt.Errorf("agent_types_store.Edit: %w", err)
+		}
+		propagation = &domain.Propagation{Version: current.CurrentVersion}
+		if digest != current.Current.Digest {
+			if err := withinEditLimitTx(ctx, tx, e.ID); err != nil {
+				return err
+			}
+			if propagation, err = newVersionTx(ctx, tx, current, e.Prompt, e.Settings, nil, domain.AgentTypeEdited, "", e.By); err != nil {
+				return fmt.Errorf("agent_types_store.Edit: %w", err)
+			}
+		}
+		edited, err = getAgentType(ctx, tx, e.OrgID, e.ID, false)
+		if err != nil {
+			return fmt.Errorf("agent_types_store.Edit: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return nil, nil, err
 	}
 	return edited, propagation, nil
 }
@@ -376,41 +374,40 @@ func (s *Store) Edit(ctx context.Context, e AgentTypeEdit) (*domain.CurrentAgent
 // as an edit does. Restoring what the current version already holds makes none. The errors are
 // Edit's, and ErrAgentTypeNotFound for a version the type does not have.
 func (s *Store) Restore(ctx context.Context, orgID, id string, n int, by domain.Actor) (*domain.CurrentAgentType, *domain.Propagation, error) {
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return nil, nil, fmt.Errorf("agent_types_store.Restore: begin: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	current, err := lockOrgTypeTx(ctx, tx, orgID, id)
-	if err != nil {
-		return nil, nil, fmt.Errorf("agent_types_store.Restore: %w", err)
-	}
-	from, err := readVersion(ctx, tx, orgID, id, n)
-	if err != nil {
-		return nil, nil, fmt.Errorf("agent_types_store.Restore: version %d: %w", n, err)
-	}
-	propagation := &domain.Propagation{Version: current.CurrentVersion}
-	if from.Digest != current.Current.Digest {
-		if err := withinEditLimitTx(ctx, tx, id); err != nil {
-			return nil, nil, err
+	var restored *domain.CurrentAgentType
+	var propagation *domain.Propagation
+	if err := s.write(ctx, func(tx *Write) error {
+		current, err := lockOrgTypeTx(ctx, tx, orgID, id)
+		if err != nil {
+			return fmt.Errorf("agent_types_store.Restore: %w", err)
 		}
-		if propagation, err = newVersionTx(ctx, tx, current, from.Prompt, from.Settings, nil, domain.AgentTypeRestored, fmt.Sprintf("version %d", n), by); err != nil {
-			return nil, nil, fmt.Errorf("agent_types_store.Restore: %w", err)
+		from, err := readVersion(ctx, tx, orgID, id, n)
+		if err != nil {
+			return fmt.Errorf("agent_types_store.Restore: version %d: %w", n, err)
 		}
-	}
-	restored, err := getAgentType(ctx, tx, orgID, id, false)
-	if err != nil {
-		return nil, nil, fmt.Errorf("agent_types_store.Restore: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, nil, fmt.Errorf("agent_types_store.Restore: commit: %w", err)
+		propagation = &domain.Propagation{Version: current.CurrentVersion}
+		if from.Digest != current.Current.Digest {
+			if err := withinEditLimitTx(ctx, tx, id); err != nil {
+				return err
+			}
+			if propagation, err = newVersionTx(ctx, tx, current, from.Prompt, from.Settings, nil, domain.AgentTypeRestored, fmt.Sprintf("version %d", n), by); err != nil {
+				return fmt.Errorf("agent_types_store.Restore: %w", err)
+			}
+		}
+		restored, err = getAgentType(ctx, tx, orgID, id, false)
+		if err != nil {
+			return fmt.Errorf("agent_types_store.Restore: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return nil, nil, err
 	}
 	return restored, propagation, nil
 }
 
 // describeTx writes the name and description of current, whose row the transaction locked, each
 // one that changed kept as a rename or a description.
-func describeTx(ctx context.Context, tx pgx.Tx, current *domain.CurrentAgentType, name, description string, by domain.Actor) error {
+func describeTx(ctx context.Context, tx *Write, current *domain.CurrentAgentType, name, description string, by domain.Actor) error {
 	if name == current.Name && description == current.Description {
 		return nil
 	}
@@ -430,7 +427,7 @@ func describeTx(ctx context.Context, tx pgx.Tx, current *domain.CurrentAgentType
 
 // withinEditLimitTx refuses another version of agent type id, whose row the transaction locked,
 // once domain.MaxAgentTypeEditsAnHour were made in the last hour.
-func withinEditLimitTx(ctx context.Context, tx pgx.Tx, id string) error {
+func withinEditLimitTx(ctx context.Context, tx *Write, id string) error {
 	var made int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM agent_type_versions WHERE type_id = $1 AND created_at > now() - interval '1 hour'`, id).Scan(&made); err != nil {
 		return fmt.Errorf("count the versions of %s: %w", id, err)
@@ -443,7 +440,7 @@ func withinEditLimitTx(ctx context.Context, tx pgx.Tx, id string) error {
 
 // newVersionTx inserts the version after current's, whose type row the transaction locked, makes it
 // current, keeps the change as action and tells the type's live agents.
-func newVersionTx(ctx context.Context, tx pgx.Tx, current *domain.CurrentAgentType, prompt string, settings domain.AgentTypeSettings, release *int, action domain.AgentTypeAction, detail string, by domain.Actor) (*domain.Propagation, error) {
+func newVersionTx(ctx context.Context, tx *Write, current *domain.CurrentAgentType, prompt string, settings domain.AgentTypeSettings, release *int, action domain.AgentTypeAction, detail string, by domain.Actor) (*domain.Propagation, error) {
 	next := current.CurrentVersion + 1
 	if err := insertAgentTypeVersion(ctx, tx, current.ID, next, prompt, settings, release, by); err != nil {
 		return nil, fmt.Errorf("insert version %d: %w", next, err)
@@ -465,7 +462,7 @@ func newVersionTx(ctx context.Context, tx pgx.Tx, current *domain.CurrentAgentTy
 // platform experiment that is not closed that signupWhere and coordinatorWhere hold for: each is
 // told agent.instructions by the trigger on its row, and replay derives it from the xid. It
 // answers how many were told.
-func tellTx(ctx context.Context, tx pgx.Tx, signupWhere, coordinatorWhere string, args ...any) (int, error) {
+func tellTx(ctx context.Context, tx *Write, signupWhere, coordinatorWhere string, args ...any) (int, error) {
 	agents, err := tx.Exec(ctx, `
 UPDATE experiment_signups s SET instructions_xid = pg_current_xact_id()::text::bigint
 WHERE `+signupWhere+` AND `+liveSignupSQL, args...)
@@ -486,50 +483,49 @@ WHERE `+coordinatorWhere+` AND status <> 'closed'`, args...)
 // *AgentTypeInUse while a platform experiment that is not closed names it in its researchers, for
 // its coordinator or for one of its agents.
 func (s *Store) Archive(ctx context.Context, orgID, id string, by domain.Actor) (*domain.CurrentAgentType, error) {
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("agent_types_store.Archive: begin: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	current, err := getAgentType(ctx, tx, orgID, id, true)
-	if err != nil {
-		return nil, fmt.Errorf("agent_types_store.Archive: %w", err)
-	}
-	if current.Builtin {
-		return nil, ErrAgentTypeBuiltin
-	}
-	if current.ArchivedAt != nil {
-		return current, tx.Commit(ctx)
-	}
-	rows, err := tx.Query(ctx, `
+	var archived *domain.CurrentAgentType
+	if err := s.write(ctx, func(tx *Write) error {
+		current, err := getAgentType(ctx, tx, orgID, id, true)
+		if err != nil {
+			return fmt.Errorf("agent_types_store.Archive: %w", err)
+		}
+		if current.Builtin {
+			return ErrAgentTypeBuiltin
+		}
+		if current.ArchivedAt != nil {
+			archived = current
+			return nil
+		}
+		rows, err := tx.Query(ctx, `
 SELECT pe.id FROM platform_experiments pe
 WHERE pe.status <> 'closed' AND (
     pe.coordinator_agent_type = $1
     OR pe.researchers @> jsonb_build_array(jsonb_build_object('agent_type', $1::text))
     OR EXISTS (SELECT 1 FROM experiment_signups s WHERE s.platform_experiment_id = pe.id AND s.agent_type = $1))
 ORDER BY pe.id`, id)
-	if err != nil {
-		return nil, fmt.Errorf("agent_types_store.Archive: %w", err)
-	}
-	using, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil {
-		return nil, fmt.Errorf("agent_types_store.Archive: %w", err)
-	}
-	if len(using) > 0 {
-		return nil, &AgentTypeInUse{PlatformExperimentIDs: using}
-	}
-	if _, err := tx.Exec(ctx, `UPDATE agent_types SET archived_at = now() WHERE id = $1`, id); err != nil {
-		return nil, fmt.Errorf("agent_types_store.Archive: %w", err)
-	}
-	if err := recordEventTx(ctx, tx, id, domain.AgentTypeArchived, current.CurrentVersion, "", by); err != nil {
-		return nil, fmt.Errorf("agent_types_store.Archive: %w", err)
-	}
-	archived, err := getAgentType(ctx, tx, orgID, id, false)
-	if err != nil {
-		return nil, fmt.Errorf("agent_types_store.Archive: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("agent_types_store.Archive: commit: %w", err)
+		if err != nil {
+			return fmt.Errorf("agent_types_store.Archive: %w", err)
+		}
+		using, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return fmt.Errorf("agent_types_store.Archive: %w", err)
+		}
+		if len(using) > 0 {
+			return &AgentTypeInUse{PlatformExperimentIDs: using}
+		}
+		if _, err := tx.Exec(ctx, `UPDATE agent_types SET archived_at = now() WHERE id = $1`, id); err != nil {
+			return fmt.Errorf("agent_types_store.Archive: %w", err)
+		}
+		if err := recordEventTx(ctx, tx, id, domain.AgentTypeArchived, current.CurrentVersion, "", by); err != nil {
+			return fmt.Errorf("agent_types_store.Archive: %w", err)
+		}
+		archived, err = getAgentType(ctx, tx, orgID, id, false)
+		if err != nil {
+			return fmt.Errorf("agent_types_store.Archive: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	return archived, nil
 }
@@ -557,7 +553,7 @@ FOR SHARE OF t`,
 
 // poolTypesTx locks the agent type of each entry of pool, the researchers of platform experiment
 // platformExpID, as agentTypeTx does.
-func poolTypesTx(ctx context.Context, tx pgx.Tx, platformExpID string, pool domain.ResearcherPool) error {
+func poolTypesTx(ctx context.Context, tx *Write, platformExpID string, pool domain.ResearcherPool) error {
 	for _, e := range pool {
 		if _, err := agentTypeTx(ctx, tx, platformExpID, e.AgentType, domain.AgentRoleResearcher); err != nil {
 			return err

@@ -34,44 +34,41 @@ type SeededAgentType struct {
 // older than the current version's writes nothing, so an older replica of a rolling deploy never
 // puts its own back; a revert ships under a newer release and is written like any change
 // (agenttypes.Release).
-func SeedBuiltins(ctx context.Context, pool *Pool, release int, builtins []domain.BuiltinAgentType, rules string) (Seeded, error) {
-	tx, err := pool.pool.Begin(ctx)
-	if err != nil {
-		return Seeded{}, fmt.Errorf("db.SeedBuiltins: begin: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", schemaMigrationLockKey); err != nil {
-		return Seeded{}, fmt.Errorf("db.SeedBuiltins: lock: %w", err)
-	}
+func (s *Store) SeedBuiltins(ctx context.Context, release int, builtins []domain.BuiltinAgentType, rules string) (Seeded, error) {
 	var seeded Seeded
-	for _, b := range builtins {
-		propagation, skipped, err := seedBuiltinTx(ctx, tx, release, b)
+	if err := s.write(ctx, func(tx *Write) error {
+		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", schemaMigrationLockKey); err != nil {
+			return fmt.Errorf("db.SeedBuiltins: lock: %w", err)
+		}
+		for _, b := range builtins {
+			propagation, skipped, err := seedBuiltinTx(ctx, tx, release, b)
+			if err != nil {
+				return fmt.Errorf("db.SeedBuiltins: %s: %w", b.ID, err)
+			}
+			if skipped {
+				seeded.Skipped = append(seeded.Skipped, b.ID)
+			}
+			if propagation != nil {
+				seeded.Types = append(seeded.Types, SeededAgentType{ID: b.ID, Propagation: *propagation})
+			}
+		}
+		skipped, err := seedRulesTx(ctx, tx, release, rules, &seeded)
 		if err != nil {
-			return Seeded{}, fmt.Errorf("db.SeedBuiltins: %s: %w", b.ID, err)
+			return fmt.Errorf("db.SeedBuiltins: rules: %w", err)
 		}
 		if skipped {
-			seeded.Skipped = append(seeded.Skipped, b.ID)
+			seeded.Skipped = append(seeded.Skipped, "rules")
 		}
-		if propagation != nil {
-			seeded.Types = append(seeded.Types, SeededAgentType{ID: b.ID, Propagation: *propagation})
-		}
-	}
-	skipped, err := seedRulesTx(ctx, tx, release, rules, &seeded)
-	if err != nil {
-		return Seeded{}, fmt.Errorf("db.SeedBuiltins: rules: %w", err)
-	}
-	if skipped {
-		seeded.Skipped = append(seeded.Skipped, "rules")
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return Seeded{}, fmt.Errorf("db.SeedBuiltins: commit: %w", err)
+		return nil
+	}); err != nil {
+		return Seeded{}, err
 	}
 	return seeded, nil
 }
 
 // seedBuiltinTx writes one built-in type: the propagation of the version it inserted after the
 // first, nil when it inserted none, and whether release is older than the current version's.
-func seedBuiltinTx(ctx context.Context, tx pgx.Tx, release int, b domain.BuiltinAgentType) (*domain.Propagation, bool, error) {
+func seedBuiltinTx(ctx context.Context, tx *Write, release int, b domain.BuiltinAgentType) (*domain.Propagation, bool, error) {
 	platform := domain.Actor{Kind: domain.ActorStaff}
 	tag, err := tx.Exec(ctx, `
 INSERT INTO agent_types (id, org_id, name, description, role, current_version, created_by_kind) VALUES ($1, NULL, $2, $3, $4, 1, $5)
@@ -115,7 +112,7 @@ ON CONFLICT (id) DO NOTHING`, b.ID, b.Name, b.Description, string(b.Role), strin
 // seedRulesTx makes rules the next version of the platform's rules when they differ from the
 // current one and release is at least its, and tells every live agent and coordinator. It answers
 // whether release is older than the current version's.
-func seedRulesTx(ctx context.Context, tx pgx.Tx, release int, rules string, seeded *Seeded) (bool, error) {
+func seedRulesTx(ctx context.Context, tx *Write, release int, rules string, seeded *Seeded) (bool, error) {
 	digest, err := domain.AgentTypeDigest(rules, domain.AgentTypeSettings{})
 	if err != nil {
 		return false, err

@@ -133,34 +133,28 @@ func (s *EventsStore) NotifyEvent(ctx context.Context, e domain.Event) error {
 // resuming watcher from skipping a graph write. Position and cursor of the returned events are
 // set by Postgres.
 func (s *EventsStore) Emit(ctx context.Context, write func(stamp domain.Stamp) ([]domain.Event, error)) error {
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("events_store.Emit: begin: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	stamp := domain.Stamp{Aborted: func(position int64) (bool, error) {
-		var status *string
-		if err := tx.QueryRow(ctx, "SELECT pg_xact_status($1::bigint::text::xid8)", position).Scan(&status); err != nil {
-			return false, fmt.Errorf("events_store.Emit: status of %d: %w", position, err)
+	return s.pool.write(ctx, func(tx *Write) error {
+		stamp := domain.Stamp{Aborted: func(position int64) (bool, error) {
+			var status *string
+			if err := tx.QueryRow(ctx, "SELECT pg_xact_status($1::bigint::text::xid8)", position).Scan(&status); err != nil {
+				return false, fmt.Errorf("events_store.Emit: status of %d: %w", position, err)
+			}
+			return status != nil && *status == "aborted", nil
+		}, RequireOpen: func(platformExperimentID string) error {
+			return holdOpenPlatformExperiment(ctx, tx, platformExperimentID)
+		}}
+		if err := tx.QueryRow(ctx, "SELECT pg_current_xact_id()::text::bigint").Scan(&stamp.Position); err != nil {
+			return fmt.Errorf("events_store.Emit: position: %w", err)
 		}
-		return status != nil && *status == "aborted", nil
-	}, RequireOpen: func(platformExperimentID string) error {
-		return holdOpenPlatformExperiment(ctx, tx, platformExperimentID)
-	}}
-	if err := tx.QueryRow(ctx, "SELECT pg_current_xact_id()::text::bigint").Scan(&stamp.Position); err != nil {
-		return fmt.Errorf("events_store.Emit: position: %w", err)
-	}
-	events, err := write(stamp)
-	if err != nil {
-		return err
-	}
-	for _, e := range events {
-		if _, err := tx.Exec(ctx, notifySQL, e.Kind, e.Subject, e.Value, e.Detail, e.PlatformExperimentID, e.AgentID); err != nil {
-			return fmt.Errorf("events_store.Emit: notify: %w", err)
+		events, err := write(stamp)
+		if err != nil {
+			return err
 		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("events_store.Emit: commit: %w", err)
-	}
-	return nil
+		for _, e := range events {
+			if _, err := tx.Exec(ctx, notifySQL, e.Kind, e.Subject, e.Value, e.Detail, e.PlatformExperimentID, e.AgentID); err != nil {
+				return fmt.Errorf("events_store.Emit: notify: %w", err)
+			}
+		}
+		return nil
+	})
 }

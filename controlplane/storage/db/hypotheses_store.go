@@ -192,26 +192,23 @@ func (s *Store) CreateHypothesisComment(ctx context.Context, hypothesisID, platf
 		Text:                 text,
 		CreatedAt:            time.Now().UTC(),
 	}
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("hypotheses_store.CreateHypothesisComment: begin: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	if err := holdOpenPlatformExperiment(ctx, tx, platformExperimentID); err != nil {
-		return nil, fmt.Errorf("hypotheses_store.CreateHypothesisComment: %w", err)
-	}
-	const q = `
+	if err := s.write(ctx, func(tx *Write) error {
+		if err := holdOpenPlatformExperiment(ctx, tx, platformExperimentID); err != nil {
+			return fmt.Errorf("hypotheses_store.CreateHypothesisComment: %w", err)
+		}
+		const q = `
 INSERT INTO hypothesis_comments (id, hypothesis_id, platform_experiment_id, agent_id, actor_kind, actor_id, text, created_at)
 VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, $8)`
-	if _, err := tx.Exec(ctx, q, c.ID, c.HypothesisID, c.PlatformExperimentID, c.AgentID, string(actor.Kind), actor.ID, c.Text, c.CreatedAt); err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == pgForeignKeyViolation {
-			return nil, fmt.Errorf("hypotheses_store.CreateHypothesisComment: %w: %s", ErrUnknownAgent, agentID)
+		if _, err := tx.Exec(ctx, q, c.ID, c.HypothesisID, c.PlatformExperimentID, c.AgentID, string(actor.Kind), actor.ID, c.Text, c.CreatedAt); err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == pgForeignKeyViolation {
+				return fmt.Errorf("hypotheses_store.CreateHypothesisComment: %w: %s", ErrUnknownAgent, agentID)
+			}
+			return fmt.Errorf("hypotheses_store.CreateHypothesisComment: %w", err)
 		}
-		return nil, fmt.Errorf("hypotheses_store.CreateHypothesisComment: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("hypotheses_store.CreateHypothesisComment: commit: %w", err)
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	return c, nil
 }
@@ -219,7 +216,7 @@ VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, $8)`
 // holdOpenPlatformExperiment refuses a hypothesis write to a closed platform experiment with
 // domain.ErrPlatformExperimentClosed, whoever makes it. It holds the row until tx ends, so a close waits
 // for a write that passed and a write that waited for a close sees it.
-func holdOpenPlatformExperiment(ctx context.Context, tx pgx.Tx, platformExperimentID string) error {
+func holdOpenPlatformExperiment(ctx context.Context, tx *Write, platformExperimentID string) error {
 	var status domain.PlatformExperimentStatus
 	err := tx.QueryRow(ctx, `SELECT status FROM platform_experiments WHERE id = $1 FOR SHARE`, platformExperimentID).Scan(&status)
 	if errors.Is(err, pgx.ErrNoRows) {

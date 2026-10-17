@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -13,7 +11,7 @@ import (
 // connection. Reading it here rather than accepting
 // it from the caller is what keeps the tier a property of the signup: a caller passing its own
 // idea of who is burst-only would eventually pass a stale one.
-func participantTiers(ctx context.Context, tx pgx.Tx, platformExpID string, agentIDs []string) (map[string]domain.QuotaTier, error) {
+func participantTiers(ctx context.Context, tx *Write, platformExpID string, agentIDs []string) (map[string]domain.QuotaTier, error) {
 	rows, err := tx.Query(ctx, `
 SELECT s.agent_id, s.quota_tier
 FROM experiment_signups s
@@ -48,7 +46,7 @@ WHERE s.platform_experiment_id = $1 AND s.agent_id = ANY($2)`, platformExpID, ag
 //
 // An agent named here with no signup row is an error, not a skip: it would otherwise be credited
 // under whatever tier the zero value resolves to, which is the one thing this exists to prevent.
-func creditIntoTier(ctx context.Context, tx pgx.Tx, platformExpID string, agentIDs []string,
+func creditIntoTier(ctx context.Context, tx *Write, platformExpID string, agentIDs []string,
 	guaranteedCol, burstCol string, guaranteedAmount, burstAmount float64) error {
 	if len(agentIDs) == 0 || (guaranteedAmount == 0 && burstAmount == 0) {
 		return nil

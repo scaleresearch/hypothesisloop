@@ -26,47 +26,41 @@ func (s *Store) CreateDraft(ctx context.Context, pe *domain.PlatformExperiment, 
 	if (pe.Repository == "") == (pe.RepositoryAccount == "") {
 		return fmt.Errorf("platform_experiments_store.CreateDraft: a draft names its repository or the account one is created on, got repository %q and account %q", pe.Repository, pe.RepositoryAccount)
 	}
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.CreateDraft: begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	if err := tx.QueryRow(ctx, `SELECT org_id FROM projects WHERE id = $1`, pe.ProjectID).Scan(&planner.OrgID); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrProjectNotFound
+	return s.write(ctx, func(tx *Write) error {
+		if err := tx.QueryRow(ctx, `SELECT org_id FROM projects WHERE id = $1`, pe.ProjectID).Scan(&planner.OrgID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrProjectNotFound
+			}
+			return fmt.Errorf("platform_experiments_store.CreateDraft: read project: %w", err)
 		}
-		return fmt.Errorf("platform_experiments_store.CreateDraft: read project: %w", err)
-	}
-	if err := insertPlatformExperiment(ctx, tx, pe); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(ctx, `
+		if err := insertPlatformExperiment(ctx, tx, pe); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `
 INSERT INTO agents (id, name, org_id, created_at)
 VALUES ($1, $2, $3, $4)`, planner.ID, planner.Name, planner.OrgID, planner.CreatedAt); err != nil {
-		return fmt.Errorf("platform_experiments_store.CreateDraft: create planner: %w", err)
-	}
-	model, hyperparameters, err := ownSettings(signup)
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.CreateDraft: %w", err)
-	}
-	var addedBy domain.Actor
-	if signup.Actor != nil {
-		addedBy = *signup.Actor
-	}
-	agentType, err := agentTypeTx(ctx, tx, pe.ID, signup.AgentType, domain.RoleOfSignup(signup.Role))
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.CreateDraft: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `
+			return fmt.Errorf("platform_experiments_store.CreateDraft: create planner: %w", err)
+		}
+		model, hyperparameters, err := ownSettings(signup)
+		if err != nil {
+			return fmt.Errorf("platform_experiments_store.CreateDraft: %w", err)
+		}
+		var addedBy domain.Actor
+		if signup.Actor != nil {
+			addedBy = *signup.Actor
+		}
+		agentType, err := agentTypeTx(ctx, tx, pe.ID, signup.AgentType, domain.RoleOfSignup(signup.Role))
+		if err != nil {
+			return fmt.Errorf("platform_experiments_store.CreateDraft: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `
 INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, agent_type, hyperparameters, model, added_by_kind, added_by_id)
 VALUES ($1, $2, NOW(), $3, COALESCE(NULLIF($4, ''), (SELECT default_quota_tier FROM platform_experiments WHERE id = $1)), $5, $6, $7, $8, $9, $10)`, pe.ID, signup.AgentID, string(signup.Role), string(signup.QuotaTier),
-		signup.Hosted, agentType, hyperparameters, model, string(addedBy.Kind), addedBy.ID); err != nil {
-		return fmt.Errorf("platform_experiments_store.CreateDraft: sign the planner up: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("platform_experiments_store.CreateDraft: commit: %w", err)
-	}
-	return nil
+			signup.Hosted, agentType, hyperparameters, model, string(addedBy.Kind), addedBy.ID); err != nil {
+			return fmt.Errorf("platform_experiments_store.CreateDraft: sign the planner up: %w", err)
+		}
+		return nil
+	})
 }
 
 // ErrNotDraft is returned for a write that only a draft takes.
@@ -135,35 +129,30 @@ func (s *Store) SetProposal(ctx context.Context, id string, proposal []byte, p P
 	if p.Baseline != nil && (p.BaselineSignup.AgentID != p.Baseline.ID || p.BaselineSignup.Role != domain.SignupRoleBaseline || !p.BaselineSignup.Hosted) {
 		return fmt.Errorf("platform_experiments_store.SetProposal: a proposal signs up a hosted agent of role baseline, got %+v", p.BaselineSignup)
 	}
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.SetProposal: begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	err = answerDraftTx(ctx, tx, id, `
+	return s.write(ctx, func(tx *Write) error {
+		var err error
+		err = answerDraftTx(ctx, tx, id, `
 UPDATE platform_experiments SET proposal = $2, proposed_at = now(), declined_reason = '', planner_ends_at = `+plannerKeptSQL+`, ends_at = $3, accepts_at = $5, updated_at = now()`,
-		proposal, p.WaitUntil, p.KeepPlanner.Seconds(), p.AcceptsAt)
-	if errors.Is(err, ErrNotDraft) || errors.Is(err, ErrPlanningOver) {
-		return err
-	}
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.SetProposal: %w", err)
-	}
-	if p.Baseline != nil {
-		if err := signUpDraftBaseline(ctx, tx, id, p.Baseline, p.BaselineSignup); err != nil {
+			proposal, p.WaitUntil, p.KeepPlanner.Seconds(), p.AcceptsAt)
+		if errors.Is(err, ErrNotDraft) || errors.Is(err, ErrPlanningOver) {
+			return err
+		}
+		if err != nil {
 			return fmt.Errorf("platform_experiments_store.SetProposal: %w", err)
 		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("platform_experiments_store.SetProposal: commit: %w", err)
-	}
-	return nil
+		if p.Baseline != nil {
+			if err := signUpDraftBaseline(ctx, tx, id, p.Baseline, p.BaselineSignup); err != nil {
+				return fmt.Errorf("platform_experiments_store.SetProposal: %w", err)
+			}
+		}
+		return nil
+	})
 }
 
 // signUpDraftBaseline creates agent in the draft's org and signs it up as signup says, unless the
 // draft has an agent of role baseline already. Its quota is written when the draft is accepted,
 // from the budget the accept states (AcceptDraft).
-func signUpDraftBaseline(ctx context.Context, tx pgx.Tx, id string, agent *domain.Agent, signup domain.AgentSignup) error {
+func signUpDraftBaseline(ctx context.Context, tx *Write, id string, agent *domain.Agent, signup domain.AgentSignup) error {
 	var has bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM experiment_signups WHERE platform_experiment_id = $1 AND role = $2)`,
 		id, string(domain.SignupRoleBaseline)).Scan(&has); err != nil {
@@ -216,29 +205,24 @@ var ErrNotProposed = errors.New("the draft has no proposal standing")
 // with it, and is asked for again once the draft is accepted. Holding one held changes nothing.
 // ErrNotDraft, and ErrNotProposed for a draft that has no proposal standing.
 func (s *Store) HoldAccept(ctx context.Context, id string) error {
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.HoldAccept: begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	var status string
-	var proposed bool
-	err = tx.QueryRow(ctx, `SELECT status, proposed_at IS NOT NULL AND proposal IS NOT NULL FROM platform_experiments WHERE id = $1 FOR UPDATE`, id).Scan(&status, &proposed)
-	switch {
-	case errors.Is(err, pgx.ErrNoRows) || (err == nil && status != string(domain.PlatformExpDraft)):
-		return ErrNotDraft
-	case err != nil:
-		return fmt.Errorf("platform_experiments_store.HoldAccept: lock draft: %w", err)
-	case !proposed:
-		return ErrNotProposed
-	}
-	if _, err := tx.Exec(ctx, `UPDATE platform_experiments SET accepts_at = NULL, updated_at = now() WHERE id = $1 AND accepts_at IS NOT NULL`, id); err != nil {
-		return fmt.Errorf("platform_experiments_store.HoldAccept: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("platform_experiments_store.HoldAccept: commit: %w", err)
-	}
-	return nil
+	return s.write(ctx, func(tx *Write) error {
+		var err error
+		var status string
+		var proposed bool
+		err = tx.QueryRow(ctx, `SELECT status, proposed_at IS NOT NULL AND proposal IS NOT NULL FROM platform_experiments WHERE id = $1 FOR UPDATE`, id).Scan(&status, &proposed)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows) || (err == nil && status != string(domain.PlatformExpDraft)):
+			return ErrNotDraft
+		case err != nil:
+			return fmt.Errorf("platform_experiments_store.HoldAccept: lock draft: %w", err)
+		case !proposed:
+			return ErrNotProposed
+		}
+		if _, err := tx.Exec(ctx, `UPDATE platform_experiments SET accepts_at = NULL, updated_at = now() WHERE id = $1 AND accepts_at IS NOT NULL`, id); err != nil {
+			return fmt.Errorf("platform_experiments_store.HoldAccept: %w", err)
+		}
+		return nil
+	})
 }
 
 // DraftsToAccept is the proposed drafts whose accepts_at has passed, oldest first.
@@ -313,24 +297,20 @@ func (s *Store) AcceptDraft(ctx context.Context, pe *domain.PlatformExperiment, 
 	if pe.AcceptedBy != nil {
 		acceptedBy = *pe.AcceptedBy
 	}
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.AcceptDraft: begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	var status string
-	var proposed bool
-	err = tx.QueryRow(ctx, `SELECT status, proposed_at IS NOT NULL AND proposal IS NOT NULL FROM platform_experiments WHERE id = $1 FOR UPDATE`, pe.ID).Scan(&status, &proposed)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && status != string(domain.PlatformExpDraft)) {
-		return ErrNotDraft
-	}
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.AcceptDraft: lock draft: %w", err)
-	}
-	if !proposed {
-		return ErrNothingProposed
-	}
-	if _, err := tx.Exec(ctx, `
+	return s.write(ctx, func(tx *Write) error {
+		var status string
+		var proposed bool
+		err = tx.QueryRow(ctx, `SELECT status, proposed_at IS NOT NULL AND proposal IS NOT NULL FROM platform_experiments WHERE id = $1 FOR UPDATE`, pe.ID).Scan(&status, &proposed)
+		if errors.Is(err, pgx.ErrNoRows) || (err == nil && status != string(domain.PlatformExpDraft)) {
+			return ErrNotDraft
+		}
+		if err != nil {
+			return fmt.Errorf("platform_experiments_store.AcceptDraft: lock draft: %w", err)
+		}
+		if !proposed {
+			return ErrNothingProposed
+		}
+		if _, err := tx.Exec(ctx, `
 UPDATE platform_experiments
 SET status = 'open', name = $2, description = $3, budget_accelerator_hours = $4, max_agents = $5, metrics = $6,
     report_interval_seconds = $7, starts_at = $14, ends_at = $8, stages = $9, current_stage = 1,
@@ -339,25 +319,23 @@ SET status = 'open', name = $2, description = $3, budget_accelerator_hours = $4,
     planner_ends_at = LEAST(planner_ends_at, now()), accepts_at = NULL,
     accepted_at = $15, accepted_by_kind = $16, accepted_by_id = $17, accepted_answers = $18, researchers = $19
 WHERE id = $1`, pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents, metrics,
-		pe.ReportIntervalSeconds, pe.BaselineDueAt, stages,
-		string(pe.DefaultQuotaTier), pe.MaxConcurrentAccelerators, pe.Coordinator.Model, pe.DurationHours, optionalTime(pe.StartsAt),
-		pe.AcceptedAt, string(acceptedBy.Kind), acceptedBy.ID, answers, researchers); err != nil {
-		return fmt.Errorf("platform_experiments_store.AcceptDraft: %w", err)
-	}
-	if err := poolTypesTx(ctx, tx, pe.ID, pe.Researchers); err != nil {
-		return fmt.Errorf("platform_experiments_store.AcceptDraft: %w", err)
-	}
-	if _, err := enrolTx(ctx, tx, pe.ID, create, signups, nil); err != nil {
-		return err
-	}
-	// The baseline agent its proposal signed up gets its quota from the budget stated here.
-	if err := reallocateBaselineQuotas(ctx, tx, pe); err != nil {
-		return fmt.Errorf("platform_experiments_store.AcceptDraft: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("platform_experiments_store.AcceptDraft: commit: %w", err)
-	}
-	return nil
+			pe.ReportIntervalSeconds, pe.BaselineDueAt, stages,
+			string(pe.DefaultQuotaTier), pe.MaxConcurrentAccelerators, pe.Coordinator.Model, pe.DurationHours, optionalTime(pe.StartsAt),
+			pe.AcceptedAt, string(acceptedBy.Kind), acceptedBy.ID, answers, researchers); err != nil {
+			return fmt.Errorf("platform_experiments_store.AcceptDraft: %w", err)
+		}
+		if err := poolTypesTx(ctx, tx, pe.ID, pe.Researchers); err != nil {
+			return fmt.Errorf("platform_experiments_store.AcceptDraft: %w", err)
+		}
+		if _, err := enrolTx(ctx, tx, pe.ID, create, signups, nil); err != nil {
+			return err
+		}
+		// The baseline agent its proposal signed up gets its quota from the budget stated here.
+		if err := reallocateBaselineQuotas(ctx, tx, pe); err != nil {
+			return fmt.Errorf("platform_experiments_store.AcceptDraft: %w", err)
+		}
+		return nil
+	})
 }
 
 // AgentStanding reads the standing of agentID in platformExpID.
@@ -401,41 +379,36 @@ func (s *Store) JobHasFinding(ctx context.Context, experimentID string) (bool, e
 // whose machine was released is started again. ErrNotDraft, and ErrNothingProposed while the
 // planner still works.
 func (s *Store) Revise(ctx context.Context, id, message string, by domain.Actor, planUntil time.Time) error {
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.Revise: begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	var status string
-	var proposed bool
-	err = tx.QueryRow(ctx, `SELECT status, proposed_at IS NOT NULL FROM platform_experiments WHERE id = $1 FOR UPDATE`, id).Scan(&status, &proposed)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && status != string(domain.PlatformExpDraft)) {
-		return ErrNotDraft
-	}
-	if err != nil {
-		return fmt.Errorf("platform_experiments_store.Revise: lock draft: %w", err)
-	}
-	if !proposed {
-		return ErrNothingProposed
-	}
-	if _, err := tx.Exec(ctx, `UPDATE platform_experiments SET proposed_at = NULL, planner_ends_at = NULL, accepts_at = NULL, ends_at = $2, updated_at = now() WHERE id = $1`, id, planUntil); err != nil {
-		return fmt.Errorf("platform_experiments_store.Revise: %w", err)
-	}
-	// A planner whose machine ended because its work was done is asked for under a new launch,
-	// with its own restarts: a launch the launcher's reconcile does not know spends none of the
-	// old one's. One whose machine is still there keeps it and its launch.
-	if _, err := tx.Exec(ctx, `UPDATE hosted_instances i SET launch = '' FROM experiment_signups s
+	return s.write(ctx, func(tx *Write) error {
+		var err error
+		var status string
+		var proposed bool
+		err = tx.QueryRow(ctx, `SELECT status, proposed_at IS NOT NULL FROM platform_experiments WHERE id = $1 FOR UPDATE`, id).Scan(&status, &proposed)
+		if errors.Is(err, pgx.ErrNoRows) || (err == nil && status != string(domain.PlatformExpDraft)) {
+			return ErrNotDraft
+		}
+		if err != nil {
+			return fmt.Errorf("platform_experiments_store.Revise: lock draft: %w", err)
+		}
+		if !proposed {
+			return ErrNothingProposed
+		}
+		if _, err := tx.Exec(ctx, `UPDATE platform_experiments SET proposed_at = NULL, planner_ends_at = NULL, accepts_at = NULL, ends_at = $2, updated_at = now() WHERE id = $1`, id, planUntil); err != nil {
+			return fmt.Errorf("platform_experiments_store.Revise: %w", err)
+		}
+		// A planner whose machine ended because its work was done is asked for under a new launch,
+		// with its own restarts: a launch the launcher's reconcile does not know spends none of the
+		// old one's. One whose machine is still there keeps it and its launch.
+		if _, err := tx.Exec(ctx, `UPDATE hosted_instances i SET launch = '' FROM experiment_signups s
 WHERE s.platform_experiment_id = i.platform_experiment_id AND s.agent_id = i.agent_id AND i.platform_experiment_id = $1 AND s.role = $2 AND i.name = ''`, id, string(domain.SignupRolePlanner)); err != nil {
-		return fmt.Errorf("platform_experiments_store.Revise: renew the planner's launch: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `INSERT INTO planning_requests (platform_experiment_id, message, actor_kind, actor_id, created_xid) VALUES ($1, $2, $3, $4, pg_current_xact_id()::text::bigint)`,
-		id, message, string(by.Kind), by.ID); err != nil {
-		return fmt.Errorf("platform_experiments_store.Revise: record request: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("platform_experiments_store.Revise: commit: %w", err)
-	}
-	return nil
+			return fmt.Errorf("platform_experiments_store.Revise: renew the planner's launch: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO planning_requests (platform_experiment_id, message, actor_kind, actor_id, created_xid) VALUES ($1, $2, $3, $4, pg_current_xact_id()::text::bigint)`,
+			id, message, string(by.Kind), by.ID); err != nil {
+			return fmt.Errorf("platform_experiments_store.Revise: record request: %w", err)
+		}
+		return nil
+	})
 }
 
 func (s *Store) planningRequests(ctx context.Context, id string) ([]domain.PlanningRequest, error) {

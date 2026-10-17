@@ -55,7 +55,7 @@ func (s *Store) SetOrgMemberRole(ctx context.Context, orgID, userID string, role
 		return nil, fmt.Errorf("accounts_store.SetOrgMemberRole: unknown role %q", role)
 	}
 	member := &domain.OrgMember{OrgID: orgID, UserID: userID, Role: role}
-	err := s.changeMembership(ctx, orgID, userID, func(tx pgx.Tx) error {
+	err := s.changeMembership(ctx, orgID, userID, func(tx *Write) error {
 		return tx.QueryRow(ctx, `UPDATE org_members SET role = $3 WHERE org_id = $1 AND user_id = $2 RETURNING created_at`,
 			orgID, userID, string(role)).Scan(&member.JoinedAt)
 	}, role != domain.OrgRoleOwner)
@@ -68,7 +68,7 @@ func (s *Store) SetOrgMemberRole(ctx context.Context, orgID, userID string, role
 // RemoveOrgMember ends a membership, under the same refusals as SetOrgMemberRole. The API keys
 // the person created stop working with it: a key is read as orphaned from then on (apiKeySelect).
 func (s *Store) RemoveOrgMember(ctx context.Context, orgID, userID string) error {
-	err := s.changeMembership(ctx, orgID, userID, func(tx pgx.Tx) error {
+	err := s.changeMembership(ctx, orgID, userID, func(tx *Write) error {
 		var removed bool
 		return tx.QueryRow(ctx, `DELETE FROM org_members WHERE org_id = $1 AND user_id = $2 RETURNING true`, orgID, userID).Scan(&removed)
 	}, true)
@@ -79,44 +79,38 @@ func (s *Store) RemoveOrgMember(ctx context.Context, orgID, userID string) error
 // changes to one org's members run one after the other and the owner that remains is counted
 // after the change, inside its transaction: no two of them can each see the other as the owner
 // that stays. With losesOwnership the pending invites the member made are revoked in the same step.
-func (s *Store) changeMembership(ctx context.Context, orgID, userID string, change func(pgx.Tx) error, losesOwnership bool) error {
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-
-	var locked bool
-	err = tx.QueryRow(ctx, `SELECT true FROM orgs WHERE id = $1 FOR NO KEY UPDATE`, orgID).Scan(&locked)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrOrgMemberNotFound
-	}
-	if err != nil {
-		return fmt.Errorf("lock org: %w", err)
-	}
-	if err := change(tx); errors.Is(err, pgx.ErrNoRows) {
-		return ErrOrgMemberNotFound
-	} else if err != nil {
-		return err
-	}
-	if losesOwnership {
-		var owned bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM org_members WHERE org_id = $1 AND role = 'owner')`, orgID).Scan(&owned); err != nil {
-			return fmt.Errorf("count owners: %w", err)
+func (s *Store) changeMembership(ctx context.Context, orgID, userID string, change func(*Write) error, losesOwnership bool) error {
+	return s.write(ctx, func(tx *Write) error {
+		var err error
+		var locked bool
+		err = tx.QueryRow(ctx, `SELECT true FROM orgs WHERE id = $1 FOR NO KEY UPDATE`, orgID).Scan(&locked)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrOrgMemberNotFound
 		}
-		if !owned {
-			return ErrLastOwner
+		if err != nil {
+			return fmt.Errorf("lock org: %w", err)
 		}
-		if _, err := tx.Exec(ctx, `
+		if err := change(tx); errors.Is(err, pgx.ErrNoRows) {
+			return ErrOrgMemberNotFound
+		} else if err != nil {
+			return err
+		}
+		if losesOwnership {
+			var owned bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM org_members WHERE org_id = $1 AND role = 'owner')`, orgID).Scan(&owned); err != nil {
+				return fmt.Errorf("count owners: %w", err)
+			}
+			if !owned {
+				return ErrLastOwner
+			}
+			if _, err := tx.Exec(ctx, `
 UPDATE org_invites SET revoked_at = now()
 WHERE org_id = $1 AND created_by = $2 AND accepted_at IS NULL AND revoked_at IS NULL`, orgID, userID); err != nil {
-			return fmt.Errorf("revoke invites: %w", err)
+				return fmt.Errorf("revoke invites: %w", err)
+			}
 		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit: %w", err)
-	}
-	return nil
+		return nil
+	})
 }
 
 func wrapUnlessRefusal(op string, err error) error {
@@ -225,44 +219,41 @@ UPDATE org_invites SET revoked_at = COALESCE(revoked_at, $2) WHERE id = $1 AND a
 // row, so of two accepts at once the second waits and then finds it used. An invite accepted by
 // someone already in the org is refused and stays unused.
 func (s *Store) AcceptOrgInvite(ctx context.Context, tokenHash, userID string) (*domain.OrgMember, error) {
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("accounts_store.AcceptOrgInvite: begin: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-
 	member := &domain.OrgMember{UserID: userID}
-	err = tx.QueryRow(ctx, `
+	if err := s.write(ctx, func(tx *Write) error {
+		var err error
+		err = tx.QueryRow(ctx, `
 UPDATE org_invites SET accepted_by = $2, accepted_at = now()
 WHERE token_hash = $1 AND `+orgInvitePending+`
 RETURNING org_id, role`, tokenHash, userID).Scan(&member.OrgID, &member.Role)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, whyNotAccepted(ctx, tx, tokenHash)
-	}
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == pgForeignKeyViolation {
-		return nil, ErrUserNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("accounts_store.AcceptOrgInvite: %w", err)
-	}
-	err = tx.QueryRow(ctx, `
+		if errors.Is(err, pgx.ErrNoRows) {
+			return whyNotAccepted(ctx, tx, tokenHash)
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgForeignKeyViolation {
+			return ErrUserNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("accounts_store.AcceptOrgInvite: %w", err)
+		}
+		err = tx.QueryRow(ctx, `
 INSERT INTO org_members (org_id, user_id, role) VALUES ($1, $2, $3)
 ON CONFLICT (org_id, user_id) DO NOTHING RETURNING created_at`, member.OrgID, userID, string(member.Role)).Scan(&member.JoinedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrAlreadyOrgMember
-	}
-	if err != nil {
-		return nil, fmt.Errorf("accounts_store.AcceptOrgInvite: insert member: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("accounts_store.AcceptOrgInvite: commit: %w", err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrAlreadyOrgMember
+		}
+		if err != nil {
+			return fmt.Errorf("accounts_store.AcceptOrgInvite: insert member: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	return member, nil
 }
 
 // whyNotAccepted names what stopped an invite from being accepted.
-func whyNotAccepted(ctx context.Context, tx pgx.Tx, tokenHash string) error {
+func whyNotAccepted(ctx context.Context, tx *Write, tokenHash string) error {
 	var used, revoked bool
 	err := tx.QueryRow(ctx, `SELECT accepted_at IS NOT NULL, revoked_at IS NOT NULL FROM org_invites WHERE token_hash = $1`, tokenHash).Scan(&used, &revoked)
 	switch {

@@ -171,14 +171,10 @@ func (s *Store) EndInstance(ctx context.Context, platformExpID, agentID, name st
 	default:
 		return after, false, fmt.Errorf("platform_experiments_store.EndInstance: unknown end %q", how)
 	}
-	tx, err := s.pool.pool.Begin(ctx)
-	if err != nil {
-		return after, false, fmt.Errorf("platform_experiments_store.EndInstance: begin tx: %w", err)
-	}
-	defer tx.Rollback(ctx) //nolint:errcheck
-	const recent = `ARRAY(SELECT t FROM unnest(restarted_at) t WHERE t > now() - make_interval(secs => $9))`
-	const restart = `$8::boolean AND cardinality(` + recent + `) < $5`
-	err = tx.QueryRow(ctx, `
+	if err := s.write(ctx, func(tx *Write) error {
+		const recent = `ARRAY(SELECT t FROM unnest(restarted_at) t WHERE t > now() - make_interval(secs => $9))`
+		const restart = `$8::boolean AND cardinality(` + recent + `) < $5`
+		err = tx.QueryRow(ctx, `
 UPDATE hosted_instances
 SET name = '', machine = '', exited_at = now(), exit_log = $4, end_reason = $7, state = '',
     activity = '', activity_at = NULL,
@@ -188,31 +184,33 @@ SET name = '', machine = '', exited_at = now(), exit_log = $4, end_reason = $7, 
     renewals = renewals + CASE WHEN $8::boolean THEN 0 ELSE 1 END
 WHERE platform_experiment_id = $1 AND agent_id = $2 AND NOT stopped AND name = $3 AND name <> '' AND `+when+`
 RETURNING restarts, renewals, stopped, exited_at, exit_log, launch, end_reason`,
-		platformExpID, agentID, name, exitLog, maxRestarts, limit.Seconds(), string(how), how.SpendsRestart(), domain.AgentInstanceRestartWindow.Seconds()).
-		Scan(&after.Restarts, &after.Renewals, &after.Stopped, &after.ExitedAt, &after.ExitLog, &after.Launch, &after.EndReason)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return after, false, nil
-	}
-	if err != nil {
-		return after, false, fmt.Errorf("platform_experiments_store.EndInstance: %w", err)
-	}
-	// A draft whose planner is given up on before it answered has nobody left to answer it: it is
-	// closed with the stop, saying so, where it would have read planning until its limit.
-	if after.Stopped && agentID != "" {
-		if _, err := tx.Exec(ctx, `
+			platformExpID, agentID, name, exitLog, maxRestarts, limit.Seconds(), string(how), how.SpendsRestart(), domain.AgentInstanceRestartWindow.Seconds()).
+			Scan(&after.Restarts, &after.Renewals, &after.Stopped, &after.ExitedAt, &after.ExitLog, &after.Launch, &after.EndReason)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("platform_experiments_store.EndInstance: %w", err)
+		}
+		// A draft whose planner is given up on before it answered has nobody left to answer it: it is
+		// closed with the stop, saying so, where it would have read planning until its limit.
+		if after.Stopped && agentID != "" {
+			if _, err := tx.Exec(ctx, `
 UPDATE platform_experiments pe
 SET status = 'closed', updated_at = now(), closed_at = now(), close_reason = '`+string(domain.ClosePlannerStopped)+`'
 WHERE pe.id = $1 AND pe.status = 'draft' AND pe.proposed_at IS NULL
   AND EXISTS (SELECT 1 FROM experiment_signups s
               WHERE s.platform_experiment_id = pe.id AND s.agent_id = $2 AND s.role = '`+string(domain.SignupRolePlanner)+`')`,
-			platformExpID, agentID); err != nil {
-			return after, false, fmt.Errorf("platform_experiments_store.EndInstance: close the draft of a stopped planner: %w", err)
+				platformExpID, agentID); err != nil {
+				return fmt.Errorf("platform_experiments_store.EndInstance: close the draft of a stopped planner: %w", err)
+			}
 		}
+		recorded = true
+		return nil
+	}); err != nil {
+		return after, false, err
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return after, false, fmt.Errorf("platform_experiments_store.EndInstance: commit: %w", err)
-	}
-	return after, true, nil
+	return after, recorded, nil
 }
 
 // ReleaseInstances records, for every machine whose agent or coordinator the launcher is no
