@@ -96,7 +96,8 @@ INSERT INTO org_github_installations (org_id, installation_id, account_login, co
 	}
 
 	after := rowCounts(t, pool)
-	dropped := map[string]int{"environments": 1, "environment_waiters": 1, "baseline_raises": 1}
+	// event_times goes with the triggers that filled it (0009).
+	dropped := map[string]int{"environments": 1, "environment_waiters": 1, "baseline_raises": 1, "event_times": before["event_times"]}
 	for table, n := range before {
 		if after[table] != n-dropped[table] {
 			t.Errorf("%s: got %d rows, want %d of %d", table, after[table], n-dropped[table], n)
@@ -131,7 +132,7 @@ INSERT INTO org_github_installations (org_id, installation_id, account_login, co
 		"a2":                        `SELECT string_agg(agent_id, ',') FROM environment_waiters`,
 		"job2 job1":                 `SELECT from_job_id || ' ' || to_job_id FROM baseline_raises`,
 		"coordinator,a1":            `SELECT string_agg(agent_id, ',' ORDER BY id) FROM agent_messages`,
-		"0 smaller":                 `SELECT created_xid || ' ' || message FROM planning_requests`,
+		"smaller":                   `SELECT message FROM planning_requests`,
 		"Grace unverified old note": `SELECT author || ' ' || actor_kind || ' ' || text FROM hypothesis_comments WHERE id = 'cm1'`,
 		"key:k1,staff:,unverified:someone,user:u1": `SELECT string_agg(disabled_by_kind || ':' || disabled_by_id, ',' ORDER BY disabled_by_kind) FROM org_disabled_clusters`,
 		"Organization staff hl-admin":              `SELECT account_type || ' ' || connected_by_kind || ' ' || connected_by_id FROM org_github_installations WHERE org_id = 'default'`,

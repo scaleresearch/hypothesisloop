@@ -408,7 +408,7 @@ func (s *Store) Revise(ctx context.Context, id, message string, by domain.Actor,
 WHERE s.platform_experiment_id = i.platform_experiment_id AND s.agent_id = i.agent_id AND i.platform_experiment_id = $1 AND s.role = $2 AND i.name = ''`, id, string(domain.SignupRolePlanner)); err != nil {
 			return fmt.Errorf("platform_experiments_store.Revise: renew the planner's launch: %w", err)
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO planning_requests (platform_experiment_id, message, actor_kind, actor_id, created_xid) VALUES ($1, $2, $3, $4, pg_current_xact_id()::text::bigint)`,
+		if _, err := tx.Exec(ctx, `INSERT INTO planning_requests (platform_experiment_id, message, actor_kind, actor_id) VALUES ($1, $2, $3, $4)`,
 			id, message, string(by.Kind), by.ID); err != nil {
 			return fmt.Errorf("platform_experiments_store.Revise: record request: %w", err)
 		}

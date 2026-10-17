@@ -56,18 +56,14 @@ func actions(t *testing.T, store *Store, orgID, id string) []string {
 	return out
 }
 
-func TestAVersionIsNeverChangedOrDeleted(t *testing.T) {
+// An edit inserts the next version and leaves the one before as it was. No write of the store
+// updates or deletes a version or an event (TestTheAppendOnlyTablesAreOnlyAppended).
+func TestAnEditKeepsEveryVersionAsItWas(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	store := NewStore(pool, 3)
 	orgID, _, custom := orgWithExperiment(t, pool)
 
-	if _, err := pool.pool.Exec(ctx, `UPDATE agent_type_versions SET prompt = 'x' WHERE type_id = $1`, custom.ID); err == nil {
-		t.Error("a version was updated")
-	}
-	if _, err := pool.pool.Exec(ctx, `DELETE FROM agent_type_versions WHERE type_id = $1`, custom.ID); err == nil {
-		t.Error("a version was deleted")
-	}
 	edited, _, err := store.Edit(ctx, AgentTypeEdit{By: *testActor, OrgID: orgID, ID: custom.ID, IfVersion: 1, Name: "Tuner", Description: custom.Description, Prompt: testPrompt + " Tune.", Settings: testTypeSettings()})
 	if err != nil || edited.CurrentVersion != 2 || edited.Current.Prompt != testPrompt+" Tune." {
 		t.Fatalf("edit: got = %+v, %v, want version 2", edited, err)
@@ -85,9 +81,6 @@ func TestAVersionIsNeverChangedOrDeleted(t *testing.T) {
 	}
 	if got := actions(t, store, orgID, custom.ID); !slices.Equal(got, []string{"rename@2", "edit@2", "create@1"}) {
 		t.Errorf("events: got = %v, want create, edit, rename", got)
-	}
-	if _, err := pool.pool.Exec(ctx, `DELETE FROM agent_type_events WHERE type_id = $1`, custom.ID); err == nil {
-		t.Error("an event was deleted")
 	}
 }
 
@@ -185,9 +178,6 @@ func TestNewRulesAreAVersionEveryLiveAgentIsToldOf(t *testing.T) {
 	}
 	if seeded, err := NewStore(pool, 3).SeedBuiltins(ctx, release, nil, testRules); err != nil || seeded.RulesVersion != after.RulesVersion+1 {
 		t.Errorf("the rules back under the same release: got = %+v, %v, want the next version", seeded, err)
-	}
-	if _, err := pool.pool.Exec(ctx, `UPDATE platform_rules SET rules = 'x'`); err == nil {
-		t.Error("rules were updated")
 	}
 }
 

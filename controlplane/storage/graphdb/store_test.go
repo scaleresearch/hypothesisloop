@@ -526,7 +526,7 @@ CREATE (p)-[:BUILDS_ON {agent_id: '', author: 'Grace', created_at: $at}]->(o)`, 
 		t.Fatalf("write old rows: %v", err)
 	}
 	if _, err := s.write(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-		return collect(ctx, tx, `MATCH (a:Hypothesis {id: $pe + '-agent'}) SET a.status = 'refuted', a.status_changed_at = $at, a.status_changed_xid = 2`,
+		return collect(ctx, tx, `MATCH (a:Hypothesis {id: $pe + '-agent'}) SET a.status = 'refuted', a.status_changed_at = $at`,
 			map[string]any{"pe": pe, "at": now()})
 	}); err != nil {
 		t.Fatalf("write an old verdict: %v", err)

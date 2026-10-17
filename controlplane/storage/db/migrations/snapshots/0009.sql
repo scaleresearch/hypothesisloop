@@ -8,8 +8,8 @@
 --   - Who did something is an actor (domain.Actor): <verb>_by_kind and <verb>_by_id, or actor_kind
 --     and actor_id for whose credential wrote the row. An optional actor is '' while there is none.
 --     A column named <verb>_by alone references users(id).
---   - Every *_xid column is the transaction that last moved the field beside it: the position of
---     the event GET /watch replays from it.
+--   - No triggers and no functions: every column a write sets is set by the store, and every
+--     change GET /watch delivers is a row of changes the store appends with the write.
 
 -- ---------------------------------------------------------------------------
 -- Tenancy
@@ -178,7 +178,7 @@ CREATE TABLE agent_types (
 );
 CREATE INDEX idx_agent_types_org ON agent_types(org_id);
 
--- Immutable (agent_type_versions_immutable): every edit inserts the next version. release is that
+-- Immutable: every edit inserts the next version. release is that
 -- of the binary that seeded a built-in version (agenttypes.Release), NULL for an org's.
 CREATE TABLE agent_type_versions (
     type_id         TEXT        NOT NULL REFERENCES agent_types(id),
@@ -199,8 +199,7 @@ CREATE TABLE agent_type_versions (
 ALTER TABLE agent_types ADD CONSTRAINT agent_types_current_version
     FOREIGN KEY (id, current_version) REFERENCES agent_type_versions(type_id, version) DEFERRABLE INITIALLY DEFERRED;
 
--- Who changed an agent type, when and how, and the version it was at after. Append-only
--- (agent_type_events_append_only).
+-- Who changed an agent type, when and how, and the version it was at after. Append-only.
 CREATE TABLE agent_type_events (
     id         BIGSERIAL   PRIMARY KEY,
     type_id    TEXT        NOT NULL REFERENCES agent_types(id),
@@ -217,8 +216,7 @@ CREATE TABLE agent_type_events (
 CREATE INDEX agent_type_events_by_type ON agent_type_events (type_id, id);
 
 -- The rules every agent's prompt holds ({{rules}}), seeded at every start like the built-in agent
--- types (db.SeedBuiltins). The newest version is the one served. Append-only
--- (platform_rules_append_only).
+-- types (db.SeedBuiltins). The newest version is the one served. Append-only.
 CREATE TABLE platform_rules (
     version    INTEGER     PRIMARY KEY,
     rules      TEXT        NOT NULL,
@@ -243,8 +241,8 @@ CREATE INDEX idx_agents_org ON agents(org_id);
 -- starts_at is NULL until the run has a clock. ends_at is what closes it in every status: a
 -- draft's planning or proposal limit, an open one's baseline deadline, a running one's deadline
 -- for a researcher to be at work, then starts_at plus duration_hours once started_at is written.
--- proposed_at with no proposal is a declined draft. The *_changed_at, *_xid and summary_at columns
--- are maintained by platform_experiments_touch alone.
+-- proposed_at with no proposal is a declined draft. A write that moves the status clears
+-- coordinator_reason and researchers_held with it.
 -- A removed one (removed_at) is closed and answered to nobody, and every row it holds stays.
 CREATE TABLE platform_experiments (
     id                             TEXT             PRIMARY KEY,
@@ -300,15 +298,11 @@ CREATE TABLE platform_experiments (
     coordinator_hosted             BOOLEAN          NOT NULL DEFAULT false,
     coordinator_model              TEXT,
     coordinator_agent_type         TEXT             NOT NULL DEFAULT 'coordinator',
-    coordinator_instructions_xid   BIGINT,
     coordinator_reason             TEXT,
-    coordinator_reason_xid         BIGINT,
     researchers_held               TEXT,
-    researchers_held_xid           BIGINT,
 
     capacity_free_since            TIMESTAMPTZ,
     capacity_noticed_at            TIMESTAMPTZ,
-    capacity_xid                   BIGINT,
     capacity_detail                TEXT             NOT NULL DEFAULT '',
     capacity_repeat                INT              NOT NULL DEFAULT 0,
 
@@ -324,9 +318,6 @@ CREATE TABLE platform_experiments (
     removed_at                     TIMESTAMPTZ,
     removed_by_kind                TEXT             NOT NULL DEFAULT '',
     removed_by_id                  TEXT             NOT NULL DEFAULT '',
-
-    status_changed_xid             BIGINT,
-    description_changed_xid        BIGINT,
 
     CONSTRAINT platform_experiments_status CHECK (status IN ('draft', 'open', 'running', 'closed')),
     CONSTRAINT platform_experiments_current_stage CHECK (current_stage >= 1),
@@ -361,7 +352,6 @@ CREATE TABLE planning_requests (
     actor_kind             TEXT        NOT NULL,
     actor_id               TEXT        NOT NULL DEFAULT '',
     created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_xid            BIGINT      NOT NULL,
     CONSTRAINT planning_requests_actor_kind
         CHECK (actor_kind IN ('user', 'key', 'agent', 'coordinator', 'staff', 'unverified'))
 );
@@ -381,7 +371,6 @@ CREATE TABLE experiment_signups (
 
     hosted                 BOOLEAN     NOT NULL DEFAULT false,
     agent_type             TEXT        NOT NULL,
-    instructions_xid       BIGINT,
     model                  TEXT,
     hyperparameters        JSONB,
 
@@ -389,12 +378,9 @@ CREATE TABLE experiment_signups (
     data_secret_access_key TEXT        NOT NULL DEFAULT '',
 
     replaces               TEXT        NOT NULL DEFAULT '',
-    replaces_xid           BIGINT,
     finished_at            TIMESTAMPTZ,
     finished_reason        TEXT        NOT NULL DEFAULT '',
-    finished_xid           BIGINT,
     idle_noticed_at        TIMESTAMPTZ,
-    idle_xid               BIGINT,
     idle_detail            TEXT        NOT NULL DEFAULT '',
     idle_repeat            INT         NOT NULL DEFAULT 0,
 
@@ -449,7 +435,6 @@ CREATE TABLE agent_quotas (
     burst_accelerator_hours      DOUBLE PRECISION NOT NULL,
     created_at                   TIMESTAMPTZ      NOT NULL DEFAULT now(),
     updated_at                   TIMESTAMPTZ      NOT NULL DEFAULT now(),
-    updated_xid                  BIGINT           NOT NULL DEFAULT pg_current_xact_id()::text::bigint,
     CONSTRAINT agent_quotas_non_negative CHECK (
         guaranteed_accelerator_hours >= 0 AND burst_accelerator_hours >= 0
     ),
@@ -473,7 +458,6 @@ CREATE TABLE platform_experiment_cuts (
     stage_index            INTEGER     NOT NULL,
     reason                 TEXT        NOT NULL DEFAULT '',
     cut_at                 TIMESTAMPTZ NOT NULL DEFAULT now(),
-    cut_xid                BIGINT      NOT NULL DEFAULT pg_current_xact_id()::text::bigint,
     PRIMARY KEY (platform_experiment_id, agent_id)
 );
 
@@ -482,7 +466,6 @@ CREATE TABLE platform_experiment_stage_advances (
     platform_experiment_id TEXT        NOT NULL REFERENCES platform_experiments(id),
     stage_index            INTEGER     NOT NULL,
     advanced_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
-    advanced_xid           BIGINT      NOT NULL DEFAULT pg_current_xact_id()::text::bigint,
     PRIMARY KEY (platform_experiment_id, stage_index)
 );
 
@@ -496,7 +479,6 @@ CREATE TABLE agent_messages (
     actor_kind             TEXT        NOT NULL,
     actor_id               TEXT        NOT NULL DEFAULT '',
     created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_xid            BIGINT      NOT NULL,
     CONSTRAINT agent_messages_sender CHECK (sender IN ('coordinator', 'owner')),
     CONSTRAINT agent_messages_actor_kind
         CHECK (actor_kind IN ('user', 'key', 'agent', 'coordinator', 'staff', 'unverified'))
@@ -558,16 +540,9 @@ CREATE TABLE environment_waiters (
     agent_id               TEXT   NOT NULL REFERENCES agents (id),
     code_ref               TEXT   NOT NULL,
     image                  TEXT   NOT NULL,
-    state                  TEXT   NOT NULL DEFAULT '',
-    detail                 TEXT   NOT NULL DEFAULT '',
-    ended_xid              BIGINT,
-    loaded_xid             BIGINT,
-    loaded_detail          TEXT   NOT NULL DEFAULT '',
     loaded                 BOOLEAN NOT NULL DEFAULT false,
     PRIMARY KEY (environment_key, platform_experiment_id, agent_id)
 );
-CREATE INDEX environment_waiters_ended ON environment_waiters (platform_experiment_id, ended_xid) WHERE ended_xid IS NOT NULL;
-CREATE INDEX environment_waiters_loaded ON environment_waiters (platform_experiment_id, loaded_xid) WHERE loaded_xid IS NOT NULL;
 
 -- ---------------------------------------------------------------------------
 -- Jobs (experiments)
@@ -629,14 +604,6 @@ CREATE TABLE experiments (
     created_at               TIMESTAMPTZ      NOT NULL DEFAULT now(),
     updated_at               TIMESTAMPTZ      NOT NULL DEFAULT now(),
     ended_at                 TIMESTAMPTZ,
-    updated_xid              BIGINT           NOT NULL DEFAULT pg_current_xact_id()::text::bigint,
-    status_xid               BIGINT           NOT NULL DEFAULT pg_current_xact_id()::text::bigint,
-    not_admitted_xid         BIGINT           NOT NULL DEFAULT pg_current_xact_id()::text::bigint,
-    queued_xid               BIGINT,
-    submitted_xid            BIGINT,
-    underperforming_xid      BIGINT,
-    held_xid                 BIGINT,
-    same_hypothesis_xid      BIGINT,
 
     CONSTRAINT experiments_status
         CHECK (status IN ('SUBMITTED', 'QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'EVICTED', 'REJECTED')),
@@ -676,7 +643,6 @@ CREATE TABLE baseline_raises (
     actor_kind             TEXT        NOT NULL,
     actor_id               TEXT        NOT NULL DEFAULT '',
     created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_xid            BIGINT      NOT NULL,
     CONSTRAINT baseline_raises_actor_kind
         CHECK (actor_kind IN ('user', 'key', 'agent', 'coordinator', 'staff', 'unverified'))
 );
@@ -697,7 +663,6 @@ CREATE TABLE hypothesis_findings (
     actor_kind             TEXT        NOT NULL,
     actor_id               TEXT        NOT NULL DEFAULT '',
     created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_xid            BIGINT      NOT NULL DEFAULT pg_current_xact_id()::text::bigint,
     CONSTRAINT hypothesis_findings_actor_kind
         CHECK (actor_kind IN ('user', 'key', 'agent', 'coordinator', 'staff', 'unverified'))
 );
@@ -716,7 +681,6 @@ CREATE TABLE hypothesis_comments (
     actor_id               TEXT        NOT NULL DEFAULT '',
     author                 TEXT        NOT NULL DEFAULT '',
     created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
-    created_xid            BIGINT      NOT NULL DEFAULT pg_current_xact_id()::text::bigint,
     CONSTRAINT hypothesis_comments_actor_kind
         CHECK (actor_kind IN ('user', 'key', 'agent', 'coordinator', 'staff', 'unverified'))
 );
@@ -736,466 +700,12 @@ CREATE INDEX idx_hypothesis_checkouts_platform_experiment
     ON hypothesis_checkouts(platform_experiment_id, checked_out_at);
 
 -- ---------------------------------------------------------------------------
--- Change notification: the source of GET /watch's live event stream
+-- Changes: what GET /watch delivers
 -- ---------------------------------------------------------------------------
---
--- Every event about a Postgres row is emitted by an AFTER trigger on the row that changed, so the
--- NOTIFY is part of the very transaction that wrote it: a rolled-back write emits nothing, and no
--- event can ever describe a state the database did not commit. Hypotheses live in the graph store,
--- which has no NOTIFY, so their events are sent by the registry after the graph write commits,
--- through the same channel and payload.
---
--- The payload is a small typed record (kind, subject, new value, a qualifying detail, the two
--- scoping ids, and a cursor), never a copy of the row. A client wanting detail follows with a
--- normal GET, so no read path is duplicated here and nothing is persisted twice.
---
--- An event's position is the id of the transaction that wrote it, recorded in the *_xid column
--- beside each timestamp replay reads. Its cursor is the xmin of the writer's snapshot: every
--- transaction below it had finished, so its NOTIFY was delivered first, and a client resuming
--- from it misses nothing. Replay (see db.EventsStore) re-derives events from the *_xid columns,
--- so a live event and its replayed twin carry the same position. Timestamps are not commit
--- ordered and are not used for this.
---
--- The *_changed_at and *_xid columns record WHEN one field of their own row last moved: a row
--- timestamp, not a second copy of the field. They are NULL until the field first moves, and no Go
--- writer sets them: one clock per column, and no write path can forget it.
 
--- When the transaction at an event's position began. Replay re-derives events from rows, and a
--- row keeps a time beside few of its *_xid columns, so the time of a position is kept here once,
--- by the one function every event passes through. It holds no event: one row per transaction.
-CREATE TABLE event_times (
-    xid         BIGINT      PRIMARY KEY,
-    occurred_at TIMESTAMPTZ NOT NULL
-);
-
-CREATE FUNCTION hypothesisloop_notify_event(
-    kind TEXT, subject TEXT, new_value TEXT, detail TEXT,
-    pe_id TEXT, owner_agent_id TEXT
-) RETURNS void AS $$
-BEGIN
-    INSERT INTO event_times (xid, occurred_at) VALUES (pg_current_xact_id()::text::bigint, now())
-        ON CONFLICT (xid) DO NOTHING;
-    PERFORM pg_notify('hypothesisloop_events', json_build_object(
-        'kind', kind,
-        'subject', subject,
-        'value', new_value,
-        'detail', COALESCE(detail, ''),
-        'platform_experiment_id', pe_id,
-        'agent_id', COALESCE(owner_agent_id, ''),
-        'position', pg_current_xact_id()::text::bigint,
-        'occurred_at', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
-        'cursor', pg_snapshot_xmin(pg_current_snapshot())::text::bigint
-    )::text);
-END;
-$$ LANGUAGE plpgsql;
-
--- updated_xid moves on every write, as updated_at does. A waypoint's xid moves when its
--- timestamp does; a waypoint is only ever set from NULL, so the comparison is exact. status_xid
--- and not_admitted_xid move only with the column the live event announces, so a replayed event
--- carries the position its live twin did even after an unrelated later write to the row.
-CREATE FUNCTION hypothesisloop_experiments_touch() RETURNS trigger AS $$
-BEGIN
-    NEW.updated_xid := pg_current_xact_id()::text::bigint;
-    IF TG_OP = 'INSERT' OR NEW.status IS DISTINCT FROM OLD.status THEN
-        NEW.status_xid := NEW.updated_xid;
-    END IF;
-    IF TG_OP = 'INSERT' OR NEW.not_admitted_reason IS DISTINCT FROM OLD.not_admitted_reason THEN
-        NEW.not_admitted_xid := NEW.updated_xid;
-    END IF;
-    IF TG_OP = 'INSERT' OR NEW.queued_at IS DISTINCT FROM OLD.queued_at THEN
-        NEW.queued_xid := CASE WHEN NEW.queued_at IS NULL THEN NULL ELSE NEW.updated_xid END;
-    END IF;
-    IF TG_OP = 'INSERT' OR NEW.submitted_at IS DISTINCT FROM OLD.submitted_at THEN
-        NEW.submitted_xid := CASE WHEN NEW.submitted_at IS NULL THEN NULL ELSE NEW.updated_xid END;
-    END IF;
-    IF TG_OP = 'INSERT' OR NEW.underperforming_metric IS DISTINCT FROM OLD.underperforming_metric THEN
-        NEW.underperforming_xid := CASE WHEN NEW.underperforming_metric IS NULL THEN NULL ELSE NEW.updated_xid END;
-    END IF;
-    IF TG_OP = 'INSERT' OR NEW.held_reason IS DISTINCT FROM OLD.held_reason THEN
-        NEW.held_xid := CASE WHEN NEW.held_reason IS NULL THEN NULL ELSE NEW.updated_xid END;
-    END IF;
-    IF TG_OP = 'INSERT' OR NEW.same_hypothesis IS DISTINCT FROM OLD.same_hypothesis THEN
-        NEW.same_hypothesis_xid := CASE WHEN NEW.same_hypothesis IS NULL THEN NULL ELSE NEW.updated_xid END;
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER experiments_touch BEFORE INSERT OR UPDATE ON experiments
-    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_experiments_touch();
-
-CREATE FUNCTION hypothesisloop_experiments_notify() RETURNS trigger AS $$
-BEGIN
-    IF TG_OP = 'INSERT' OR NEW.status IS DISTINCT FROM OLD.status THEN
-        PERFORM hypothesisloop_notify_event('experiment.status', NEW.id, NEW.status::text,
-            COALESCE(NEW.eviction_reason, ''), NEW.platform_experiment_id, NEW.agent_id);
-    END IF;
-    -- The queue reason is what an agent polls hardest for: it changes while the status does not,
-    -- so it needs an event of its own or a waiting agent learns nothing until admission. A job
-    -- nobody has judged yet has no reason to tell (replayExperiments leaves it out too).
-    IF split_part(NEW.not_admitted_reason, ': ', 1) <> 'awaiting_admission'
-       AND (TG_OP = 'INSERT' OR NEW.not_admitted_reason IS DISTINCT FROM OLD.not_admitted_reason) THEN
-        PERFORM hypothesisloop_notify_event('experiment.blocked', NEW.id,
-            split_part(NEW.not_admitted_reason, ': ', 1),
-            CASE WHEN position(': ' in NEW.not_admitted_reason) > 0
-                 THEN substr(NEW.not_admitted_reason, position(': ' in NEW.not_admitted_reason) + 2) ELSE '' END,
-            NEW.platform_experiment_id, NEW.agent_id);
-    END IF;
-    IF NEW.held_reason IS NOT NULL
-       AND (TG_OP = 'INSERT' OR NEW.held_reason IS DISTINCT FROM OLD.held_reason) THEN
-        PERFORM hypothesisloop_notify_event('job.held', NEW.id,
-            split_part(NEW.held_reason, ': ', 1),
-            CASE WHEN position(': ' in NEW.held_reason) > 0
-                 THEN substr(NEW.held_reason, position(': ' in NEW.held_reason) + 2) ELSE '' END,
-            NEW.platform_experiment_id, NEW.agent_id);
-    END IF;
-    IF NEW.same_hypothesis IS NOT NULL
-       AND (TG_OP = 'INSERT' OR NEW.same_hypothesis IS DISTINCT FROM OLD.same_hypothesis) THEN
-        PERFORM hypothesisloop_notify_event('job.duplicate', NEW.id, NEW.hypothesis_id, NEW.same_hypothesis,
-            NEW.platform_experiment_id, NEW.agent_id);
-    END IF;
-    IF NEW.underperforming_metric IS NOT NULL
-       AND (TG_OP = 'INSERT' OR NEW.underperforming_metric IS DISTINCT FROM OLD.underperforming_metric) THEN
-        PERFORM hypothesisloop_notify_event('job.underperforming', NEW.id, NEW.underperforming_metric, '',
-            NEW.platform_experiment_id, NEW.agent_id);
-    END IF;
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER experiments_notify AFTER INSERT OR UPDATE ON experiments
-    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_experiments_notify();
-
-CREATE FUNCTION hypothesisloop_agent_quotas_touch() RETURNS trigger AS $$
-BEGIN
-    NEW.updated_at := now();
-    NEW.updated_xid := pg_current_xact_id()::text::bigint;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER agent_quotas_touch BEFORE UPDATE ON agent_quotas
-    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_agent_quotas_touch();
-
-CREATE FUNCTION hypothesisloop_agent_quotas_notify() RETURNS trigger AS $$
-BEGIN
-    -- The value is the agent's share, all it may spend at either priority, as GET /quota answers
-    -- it (domain.AgentQuota.Share): its guaranteed hours, or its burst hours when it has none
-    -- guaranteed. Burst hours come out of the share and are never added to it. replayQuotas
-    -- answers the same figure.
-    PERFORM hypothesisloop_notify_event('quota.changed', NEW.agent_id,
-        (CASE WHEN NEW.guaranteed_accelerator_hours > 0 THEN NEW.guaranteed_accelerator_hours
-              ELSE NEW.burst_accelerator_hours END)::text,
-        '', NEW.platform_experiment_id, NEW.agent_id);
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER agent_quotas_notify AFTER INSERT OR UPDATE ON agent_quotas
-    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_agent_quotas_notify();
-
-CREATE FUNCTION hypothesisloop_platform_experiments_touch() RETURNS trigger AS $$
-BEGIN
-    IF NEW.status IS DISTINCT FROM OLD.status THEN
-        NEW.status_changed_xid := pg_current_xact_id()::text::bigint;
-        NEW.coordinator_reason := NULL;
-        NEW.researchers_held := NULL;
-    END IF;
-    IF NEW.coordinator_reason IS DISTINCT FROM OLD.coordinator_reason THEN
-        NEW.coordinator_reason_xid := pg_current_xact_id()::text::bigint;
-    END IF;
-    IF NEW.researchers_held IS DISTINCT FROM OLD.researchers_held THEN
-        NEW.researchers_held_xid := pg_current_xact_id()::text::bigint;
-    END IF;
-    -- The run's length is part of what every agent plans its work by, as the brief is.
-    IF NEW.description IS DISTINCT FROM OLD.description OR NEW.duration_hours IS DISTINCT FROM OLD.duration_hours THEN
-        NEW.description_changed_xid := pg_current_xact_id()::text::bigint;
-    END IF;
-    IF NEW.summary IS DISTINCT FROM OLD.summary THEN
-        NEW.summary_at := now();
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER platform_experiments_touch BEFORE UPDATE ON platform_experiments
-    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_platform_experiments_touch();
-
-CREATE FUNCTION hypothesisloop_platform_experiments_notify() RETURNS trigger AS $$
-BEGIN
-    -- The run opening, closing or moving to running is a stop condition for every agent in it,
-    -- and nothing told them: a closed platform experiment looked exactly like a quiet one.
-    IF NEW.status IS DISTINCT FROM OLD.status THEN
-        PERFORM hypothesisloop_notify_event('platform_experiment.status', NEW.id, NEW.status::text,
-            CASE WHEN NEW.status = 'closed' THEN NEW.close_message ELSE '' END, NEW.id, '');
-    END IF;
-    -- The status stayed and what it waits for became its coordinator's move. The machine of the
-    -- last researcher stopped for good, and no event told the coordinator the run was its to close.
-    IF NEW.coordinator_reason IS NOT NULL AND NEW.coordinator_reason IS DISTINCT FROM OLD.coordinator_reason THEN
-        PERFORM hypothesisloop_notify_event('platform_experiment.status', NEW.id, NEW.status::text,
-            NEW.coordinator_reason, NEW.id, '');
-    END IF;
-    -- The platform keeps places of the researchers empty, or no longer does.
-    IF NEW.researchers_held IS NOT NULL AND NEW.researchers_held IS DISTINCT FROM OLD.researchers_held THEN
-        PERFORM hypothesisloop_notify_event('platform_experiment.status', NEW.id, NEW.status::text,
-            NEW.researchers_held, NEW.id, '');
-    END IF;
-    -- The brief is the question every agent is working on, and it is edited mid-run when the
-    -- coordinator resolves or redirects something. The new text is deliberately NOT carried: a
-    -- description is unbounded, and an event is a pointer — a subscriber re-reads it with the
-    -- ordinary GET, exactly as it would have anyway. A new duration_hours is told the same way.
-    IF NEW.description IS DISTINCT FROM OLD.description OR NEW.duration_hours IS DISTINCT FROM OLD.duration_hours THEN
-        PERFORM hypothesisloop_notify_event('platform_experiment.description', NEW.id, '', '',
-            NEW.id, '');
-    END IF;
-    -- Removed, it is answered to nobody and its tokens are refused: this is the last its agents hear.
-    IF NEW.removed_at IS NOT NULL AND OLD.removed_at IS NULL THEN
-        PERFORM hypothesisloop_notify_event('platform_experiment.removed', NEW.id, '', '', NEW.id, '');
-    END IF;
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER platform_experiments_notify AFTER UPDATE ON platform_experiments
-    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_platform_experiments_notify();
-
--- Findings and comments both name the hypothesis they hang off as their subject, not their own
--- id: the hypothesis is what a reader would GET, and it is what the pool is organised around.
-CREATE FUNCTION hypothesisloop_findings_notify() RETURNS trigger AS $$
-BEGIN
-    PERFORM hypothesisloop_notify_event('finding.new', NEW.hypothesis_id, NEW.experiment_id, '',
-        NEW.platform_experiment_id, NEW.agent_id);
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER hypothesis_findings_notify AFTER INSERT ON hypothesis_findings
-    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_findings_notify();
-
-CREATE FUNCTION hypothesisloop_comments_notify() RETURNS trigger AS $$
-BEGIN
-    PERFORM hypothesisloop_notify_event('comment.new', NEW.hypothesis_id, '', '',
-        NEW.platform_experiment_id, COALESCE(NEW.agent_id, ''));
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER hypothesis_comments_notify AFTER INSERT ON hypothesis_comments
-    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_comments_notify();
-
-CREATE FUNCTION hypothesisloop_stage_advance_notify() RETURNS trigger AS $$
-BEGIN
-    PERFORM hypothesisloop_notify_event('stage.boundary', NEW.platform_experiment_id,
-        NEW.stage_index::text, 'advanced', NEW.platform_experiment_id, '');
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER stage_advances_notify AFTER INSERT ON platform_experiment_stage_advances
-    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_stage_advance_notify();
-
--- A cut is committed in the same transaction as the advance that computed it, so a subscriber
--- sees the boundary and who it fell on together or not at all.
-CREATE FUNCTION hypothesisloop_cuts_notify() RETURNS trigger AS $$
-BEGIN
-    -- A cut for a lowered max_agents is no move of the ladder.
-    IF NEW.reason = '' THEN
-        PERFORM hypothesisloop_notify_event('stage.boundary', NEW.platform_experiment_id,
-            NEW.stage_index::text, 'cut', NEW.platform_experiment_id, NEW.agent_id);
-    END IF;
-    -- The same row, said the other way round. stage.boundary is about the ladder and reaches
-    -- everyone; agent.cut is about one agent and is the only event that tells it, without a GET,
-    -- that the run is over for IT. It is agent-owned, so an agent's own subscription receives its
-    -- own cut and is not woken by every rival's.
-    PERFORM hypothesisloop_notify_event('agent.cut', NEW.agent_id,
-        NEW.stage_index::text, NEW.reason, NEW.platform_experiment_id, NEW.agent_id);
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER pe_cuts_notify AFTER INSERT ON platform_experiment_cuts
-    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_cuts_notify();
-
-CREATE FUNCTION hypothesisloop_agent_finished_notify() RETURNS trigger AS $$
-BEGIN
-    PERFORM hypothesisloop_notify_event('agent.finished', NEW.agent_id,
-        '', NEW.finished_reason, NEW.platform_experiment_id, NEW.agent_id);
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER signup_finished_notify AFTER UPDATE OF finished_at ON experiment_signups
-    FOR EACH ROW WHEN (OLD.finished_at IS NULL AND NEW.finished_at IS NOT NULL)
-    EXECUTE FUNCTION hypothesisloop_agent_finished_notify();
-
-CREATE FUNCTION hypothesisloop_agent_replaced_notify() RETURNS trigger AS $$
-BEGIN
-    PERFORM hypothesisloop_notify_event('agent.replaced', NEW.agent_id,
-        NEW.replaces, (SELECT CASE WHEN gone.finished_at IS NOT NULL THEN 'it finished: ' || gone.finished_reason
-                                   ELSE 'its machine stopped with no restart left' END
-                       FROM experiment_signups gone
-                       WHERE gone.platform_experiment_id = NEW.platform_experiment_id AND gone.agent_id = NEW.replaces),
-        NEW.platform_experiment_id, NEW.agent_id);
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER signup_replaced_notify AFTER INSERT ON experiment_signups
-    FOR EACH ROW WHEN (NEW.replaces <> '')
-    EXECUTE FUNCTION hypothesisloop_agent_replaced_notify();
-
-CREATE FUNCTION hypothesisloop_agent_idle_notify() RETURNS trigger AS $$
-BEGIN
-    PERFORM hypothesisloop_notify_event('agent.idle', NEW.agent_id,
-        CASE WHEN NEW.idle_repeat = 0 THEN 'new' ELSE 'continues' END, NEW.idle_detail, NEW.platform_experiment_id, NEW.agent_id);
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER signup_idle_notify AFTER UPDATE OF idle_xid ON experiment_signups
-    FOR EACH ROW WHEN (NEW.idle_xid IS DISTINCT FROM OLD.idle_xid)
-    EXECUTE FUNCTION hypothesisloop_agent_idle_notify();
-
-CREATE FUNCTION hypothesisloop_capacity_idle_notify() RETURNS trigger AS $$
-BEGIN
-    PERFORM hypothesisloop_notify_event('capacity.idle', NEW.id,
-        CASE WHEN NEW.capacity_repeat = 0 THEN 'new' ELSE 'continues' END, NEW.capacity_detail, NEW.id, '');
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER platform_experiments_capacity_idle_notify AFTER UPDATE OF capacity_xid ON platform_experiments
-    FOR EACH ROW WHEN (NEW.capacity_xid IS DISTINCT FROM OLD.capacity_xid)
-    EXECUTE FUNCTION hypothesisloop_capacity_idle_notify();
-
--- A revision asked of a draft's planner. A pointer: what was asked is read from the draft.
-CREATE FUNCTION hypothesisloop_planning_request_notify() RETURNS trigger AS $$
-BEGIN
-    PERFORM hypothesisloop_notify_event('platform_experiment.revision', NEW.platform_experiment_id,
-        '', '', NEW.platform_experiment_id, '');
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER planning_requests_notify AFTER INSERT ON planning_requests
-    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_planning_request_notify();
-
-CREATE FUNCTION hypothesisloop_baseline_raise_notify() RETURNS trigger AS $$
-BEGIN
-    PERFORM hypothesisloop_notify_event('platform_experiment.baseline', NEW.platform_experiment_id,
-        NEW.to_job_id, NEW.detail, NEW.platform_experiment_id, '');
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER baseline_raises_notify AFTER INSERT ON baseline_raises
-    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_baseline_raise_notify();
-
-CREATE FUNCTION hypothesisloop_agent_message_notify() RETURNS trigger AS $$
-BEGIN
-    PERFORM hypothesisloop_notify_event('agent.message', NEW.agent_id,
-        NEW.sender, NEW.text, NEW.platform_experiment_id, NEW.agent_id);
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER agent_messages_notify AFTER INSERT ON agent_messages
-    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_agent_message_notify();
-
-CREATE FUNCTION hypothesisloop_environment_ended_notify() RETURNS trigger AS $$
-DECLARE
-    w environment_waiters;
-BEGIN
-    FOR w IN
-        UPDATE environment_waiters SET state = NEW.state, ended_xid = pg_current_xact_id()::text::bigint,
-            detail = 'the environment commit ' || left(right(code_ref, 40), 12) || ' declares in .hypothesisloop/Dockerfile '
-                || CASE WHEN NEW.state = 'ready' THEN 'is built on ' || image || ': a job of that commit on that image runs in it'
-                        WHEN NEW.fault = 'file' THEN 'did not build on ' || image || ': `hl env status` at that commit prints the end of its output. Fix the file, commit and build again'
-                        ELSE 'was not built on ' || image || ', no fault of the file''s: the platform could not build it, and `hl env build` builds it again' END
-        WHERE environment_key = NEW.key AND ended_xid IS NULL
-        RETURNING *
-    LOOP
-        IF NOT (w.state = 'ready' AND w.loaded_xid IS NOT NULL) THEN
-            PERFORM hypothesisloop_notify_event('environment.status', w.environment_key, w.state, w.detail,
-                w.platform_experiment_id, w.agent_id);
-        END IF;
-    END LOOP;
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER environments_ended_notify AFTER UPDATE OF state ON environments
-    FOR EACH ROW WHEN (OLD.state = 'building' AND NEW.state <> 'building')
-    EXECUTE FUNCTION hypothesisloop_environment_ended_notify();
-
-CREATE FUNCTION hypothesisloop_environment_loaded_notify() RETURNS trigger AS $$
-DECLARE
-    w environment_waiters;
-BEGIN
-    FOR w IN
-        UPDATE environment_waiters SET loaded_xid = pg_current_xact_id()::text::bigint,
-            loaded_detail = 'the environment commit ' || left(right(code_ref, 40), 12) || ' declares in .hypothesisloop/Dockerfile is built on ' || image
-                || ' and loaded on cluster ' || NEW.loaded_cluster || ' while it is pushed to the registry: submit its jobs now. One that fits on that cluster''s node starts there at once, '
-                || 'any other starts once the push ends, by itself. A failed push or build is told as an update'
-        WHERE environment_key = NEW.key AND ended_xid IS NULL AND loaded_xid IS NULL
-        RETURNING *
-    LOOP
-        PERFORM hypothesisloop_notify_event('environment.status', w.environment_key, 'loaded', w.loaded_detail,
-            w.platform_experiment_id, w.agent_id);
-    END LOOP;
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER environments_loaded_notify AFTER UPDATE OF loaded_image ON environments
-    FOR EACH ROW WHEN (NEW.state = 'building' AND NEW.loaded_image <> '' AND OLD.loaded_image IS DISTINCT FROM NEW.loaded_image)
-    EXECUTE FUNCTION hypothesisloop_environment_loaded_notify();
-
-CREATE FUNCTION hypothesisloop_agent_type_versions_immutable() RETURNS trigger AS $$
-BEGIN
-    RAISE EXCEPTION 'agent_type_versions are immutable: insert the next version instead';
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER agent_type_versions_immutable BEFORE UPDATE OR DELETE ON agent_type_versions
-    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_agent_type_versions_immutable();
-
-CREATE FUNCTION hypothesisloop_append_only() RETURNS trigger AS $$
-BEGIN
-    RAISE EXCEPTION '% is append-only', TG_TABLE_NAME;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER platform_rules_append_only BEFORE UPDATE OR DELETE ON platform_rules
-    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_append_only();
-
-CREATE TRIGGER agent_type_events_append_only BEFORE UPDATE OR DELETE ON agent_type_events
-    FOR EACH ROW EXECUTE FUNCTION hypothesisloop_append_only();
-
-CREATE FUNCTION hypothesisloop_agent_instructions_notify() RETURNS trigger AS $$
-BEGIN
-    PERFORM hypothesisloop_notify_event('agent.instructions', NEW.agent_id,
-        (SELECT t.current_version::text FROM agent_types t WHERE t.id = NEW.agent_type), NEW.agent_type, NEW.platform_experiment_id, NEW.agent_id);
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER signup_instructions_notify AFTER UPDATE OF instructions_xid ON experiment_signups
-    FOR EACH ROW WHEN (NEW.instructions_xid IS DISTINCT FROM OLD.instructions_xid)
-    EXECUTE FUNCTION hypothesisloop_agent_instructions_notify();
-
-CREATE FUNCTION hypothesisloop_coordinator_instructions_notify() RETURNS trigger AS $$
-BEGIN
-    PERFORM hypothesisloop_notify_event('agent.instructions', 'coordinator',
-        (SELECT t.current_version::text FROM agent_types t WHERE t.id = NEW.coordinator_agent_type), NEW.coordinator_agent_type, NEW.id, 'coordinator');
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER platform_experiments_coordinator_instructions_notify AFTER UPDATE OF coordinator_instructions_xid ON platform_experiments
-    FOR EACH ROW WHEN (NEW.coordinator_instructions_xid IS DISTINCT FROM OLD.coordinator_instructions_xid)
-    EXECUTE FUNCTION hypothesisloop_coordinator_instructions_notify();
-
+-- Every change a write announces, appended by the store in the write's own transaction under one
+-- advisory lock, so ids commit in order and a reader that read up to an id misses nothing below
+-- it. Held for a week (domain.ChangesRetention).
 CREATE TABLE changes (
     id                     BIGSERIAL   PRIMARY KEY,
     platform_experiment_id TEXT        NOT NULL REFERENCES platform_experiments(id),

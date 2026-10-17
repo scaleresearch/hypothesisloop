@@ -74,7 +74,7 @@ func (s *Store) NoticeIdle(ctx context.Context, r IdleResearcher, detail string)
 	return s.write(ctx, func(w *Write) error {
 		tag, err := w.Exec(ctx, `
 UPDATE experiment_signups
-SET idle_noticed_at = now(), idle_xid = pg_current_xact_id()::text::bigint, idle_repeat = $3, idle_detail = $4
+SET idle_noticed_at = now(), idle_repeat = $3, idle_detail = $4
 WHERE platform_experiment_id = $1 AND agent_id = $2 AND idle_noticed_at IS NOT DISTINCT FROM $5`,
 			r.PlatformExperimentID, r.AgentID, r.Repeat, detail, r.NoticedAt)
 		if err != nil {
@@ -139,7 +139,7 @@ func (s *Store) NoticeCapacityIdle(ctx context.Context, r IdleCapacity, detail s
 	return s.write(ctx, func(w *Write) error {
 		tag, err := w.Exec(ctx, `
 UPDATE platform_experiments
-SET capacity_noticed_at = now(), capacity_xid = pg_current_xact_id()::text::bigint, capacity_repeat = $2, capacity_detail = $3
+SET capacity_noticed_at = now(), capacity_repeat = $2, capacity_detail = $3
 WHERE id = $1 AND capacity_noticed_at IS NOT DISTINCT FROM $4`,
 			r.PlatformExperimentID, r.Repeat, detail, r.NoticedAt)
 		if err != nil {

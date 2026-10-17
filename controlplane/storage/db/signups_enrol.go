@@ -266,8 +266,8 @@ VALUES ($1, $2, $3, $4)`, agent.ID, agent.Name, agent.OrgID, agent.CreatedAt); e
 		var why string
 		err = tx.QueryRow(ctx, `
 INSERT INTO experiment_signups (platform_experiment_id, agent_id, signed_up_at, role, quota_tier, hosted, agent_type, hyperparameters, model, added_by_kind, added_by_id,
-                                replaces, replaces_xid)
-VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $8, $9, $10, $11::text, CASE WHEN $11::text <> '' THEN pg_current_xact_id()::text::bigint END)
+                                replaces)
+VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $8, $9, $10, $11::text)
 ON CONFLICT (platform_experiment_id, agent_id) DO NOTHING
 RETURNING COALESCE((SELECT CASE WHEN gone.finished_at IS NOT NULL THEN 'it finished: ' || gone.finished_reason
                                 ELSE 'its machine stopped with no restart left' END

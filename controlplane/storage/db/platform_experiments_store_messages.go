@@ -121,8 +121,8 @@ FOR UPDATE OF s`, platformExpID, string(domain.SignupRolePlanner), to, string(do
 		messages = make([]domain.AgentMessage, len(kept))
 		for i, r := range kept {
 			messages[i] = domain.AgentMessage{AgentID: r.agentID, From: from, Text: text, Actor: domain.Actor{Kind: sender.Kind, ID: sender.ID}}
-			if err := tx.QueryRow(ctx, `INSERT INTO agent_messages (platform_experiment_id, agent_id, sender, text, actor_kind, actor_id, created_xid)
-VALUES ($1, $2, $3, $4, $5, $6, pg_current_xact_id()::text::bigint) RETURNING created_at`,
+			if err := tx.QueryRow(ctx, `INSERT INTO agent_messages (platform_experiment_id, agent_id, sender, text, actor_kind, actor_id)
+VALUES ($1, $2, $3, $4, $5, $6) RETURNING created_at`,
 				platformExpID, r.agentID, from, text, string(sender.Kind), sender.ID).Scan(&messages[i].At); err != nil {
 				return fmt.Errorf("platform_experiments_store.SendAgentMessages: insert: %w", err)
 			}
@@ -169,8 +169,8 @@ FROM platform_experiments p WHERE p.id = $1 FOR NO KEY UPDATE OF p`, platformExp
 			return &MessagesRateLimited{AgentID: domain.CoordinatorRecipient, From: from, Next: recent[len(recent)-domain.MaxAgentMessagesPerHour].Add(time.Hour).UTC()}
 		}
 		message = &domain.AgentMessage{AgentID: domain.CoordinatorRecipient, From: from, Text: text, Actor: domain.Actor{Kind: sender.Kind, ID: sender.ID}}
-		if err := tx.QueryRow(ctx, `INSERT INTO agent_messages (platform_experiment_id, agent_id, sender, text, actor_kind, actor_id, created_xid)
-VALUES ($1, $2, $3, $4, $5, $6, pg_current_xact_id()::text::bigint) RETURNING created_at`,
+		if err := tx.QueryRow(ctx, `INSERT INTO agent_messages (platform_experiment_id, agent_id, sender, text, actor_kind, actor_id)
+VALUES ($1, $2, $3, $4, $5, $6) RETURNING created_at`,
 			platformExpID, domain.CoordinatorRecipient, from, text, string(sender.Kind), sender.ID).Scan(&message.At); err != nil {
 			return fmt.Errorf("platform_experiments_store.SendCoordinatorMessage: insert: %w", err)
 		}
