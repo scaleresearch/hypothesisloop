@@ -7,8 +7,9 @@
 # not for anything that needs a stable address. For that, switch to a named tunnel
 # (requires a domain added to a free Cloudflare account) and a cloudflared config.yml.
 #
-# Services to expose are read from tunnels.conf (name + local port, one per line), and the local
-# git server is one more on a stack that runs it.
+# Services to expose are the API and metrics-service at the ports the settings name, those read
+# from tunnels.conf (name + local port, one per line), and the local git server on a stack that
+# runs it.
 set -euo pipefail
 
 ACTION="${1:?usage: tunnels.sh up|down|status|addresses}"
@@ -31,6 +32,8 @@ require_cloudflared() {
 read_services() {
   local git_host
   git_host="$(lib_git_host_provider)" || exit 1
+  echo "api ${HL_API_PORT}"
+  echo "metric-controller ${HL_METRICS_PORT}"
   grep -Ev '^\s*(#|$)' "$CONF_FILE"
   if [[ "${git_host}" == "local" ]]; then
     echo "git ${HL_GIT_PORT}"

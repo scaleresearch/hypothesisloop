@@ -20,7 +20,7 @@ git_host="$(lib_git_host_provider)"
 
 lock=/tmp/hl-stack.lock
 context=k3s-local
-api="http://localhost:8081"
+api="http://localhost:${HL_API_PORT}"
 registry="$(. localdev/lib/node.sh && lib_registry_publish_ip):5000"
 
 bash localdev/dev.sh require-local
@@ -29,7 +29,7 @@ if ! curl -fsS -o /dev/null "${api}/health"; then
   exit 1
 fi
 
-export API_URL="${api}" METRICS_URL="http://localhost:8084"
+export API_URL="${api}" METRICS_URL="http://localhost:${HL_METRICS_PORT}"
 HL_TOKEN="$(lib_hl_admin token staff)"
 export HL_TOKEN
 

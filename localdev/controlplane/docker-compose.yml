@@ -123,7 +123,7 @@ services:
       # service cannot mint them.
       GOOGLE_APPLICATION_CREDENTIALS: /google/credentials.json
     ports:
-      - "${API_HOST_PORT:-8081}:8081"
+      - "${HL_API_PORT:?localdev/lib/env.sh names the port}:${HL_API_PORT}"
     volumes:
       # Rendered by `make render-settings` (host address substituted into data_store.endpoint) —
       # same file both services mount, same as the pod model this replaces.
@@ -147,7 +147,7 @@ services:
       DATABASE_URL: postgres://hypothesisloop:hypothesisloop@postgres:5432/hypothesisloop?sslmode=disable
       METRICS_DB_URL: http://greptimedb:4000
     ports:
-      - "8084:8084"
+      - "${HL_METRICS_PORT:?localdev/lib/env.sh names the port}:${HL_METRICS_PORT}"
     volumes:
       - ../../controlplane/settings/.hypothesisloop.rendered.yaml:/settings/hypothesisloop.yaml:ro
     depends_on:

@@ -4,6 +4,8 @@ secret: each service reads its own from the Secret, through its environment.
 */ -}}
 {{- $raw := include "hypothesisloop.stagedConfig" . }}
 {{- $set := list
+  (list "services" "api_port" (int .Values.controlService.port))
+  (list "services" "metric_controller_port" (int .Values.metricsService.port))
   (list "services" "public_api_url" (required "publicAPIURL is required: the address sandboxed agents and every cluster's runtime reach the API at" .Values.publicAPIURL))
   (list "auth" "identity_providers" .Values.auth.identityProviders)
   (list "auth" "ui_origin" (required "auth.uiOrigin is required: the one browser origin allowed to call the API, which is the address people open the UI at" .Values.auth.uiOrigin))

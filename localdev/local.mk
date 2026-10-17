@@ -34,8 +34,8 @@ prune-images:
 # Each compose service reads its keys from the environment file render-settings writes.
 controlplane-up: registry-up render-settings local-images
 	$(COMPOSE) up -d
-	$(call await,the control service,curl -fsS -o /dev/null http://localhost:$${API_HOST_PORT:-8081}/health)
-	$(call await,the metrics service,curl -fsS -o /dev/null http://localhost:8084/health)
+	$(call await,the control service,curl -fsS -o /dev/null http://localhost:$(HL_API_PORT)/health)
+	$(call await,the metrics service,curl -fsS -o /dev/null http://localhost:$(HL_METRICS_PORT)/health)
 	bash -c '. localdev/lib/auth.sh && lib_register_clusters && lib_register_local_cluster'
 
 # The control plane and the UI as host processes against the compose datastores: starts in
@@ -112,7 +112,7 @@ controlplane-destroy:
 # below), so this target alone produces a fully working local dev cluster. Set NODE_COUNT=0 to
 # stay control-plane only.
 LOCAL_CLUSTER_AGENT = RUNTIME_TOKEN="$$(bash -c '. localdev/lib/auth.sh && lib_runtime_token local')" && \
-  $(call cluster_agent_install,local,http://host.containers.internal:8081,http://host.containers.internal:8084,$(LOCAL_REGISTRY),false)
+  $(call cluster_agent_install,local,http://host.containers.internal:$(HL_API_PORT),http://host.containers.internal:$(HL_METRICS_PORT),$(LOCAL_REGISTRY),false)
 k3s-up reload: KUBE_CONTEXT := k3s-local
 k3s-up: render-settings local-images
 	bash localdev/k3s-macos/install.sh

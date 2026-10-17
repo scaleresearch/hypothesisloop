@@ -2,6 +2,21 @@
 LIB_ENV_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 LIB_ENV_DIR="${LIB_ENV_REPO}/localdev/.run/env"
 
+# lib_setting KEY: the one value of KEY in the committed settings, the source of the ports the
+# control plane listens on.
+lib_setting() {
+  local value
+  value="$(sed -n "s/^  $1: *\([^ #]*\).*$/\1/p" "${LIB_ENV_REPO}/controlplane/settings/hypothesisloop.yaml")"
+  if [[ -z "${value}" || "${value}" == *$'\n'* ]]; then
+    echo "env: controlplane/settings/hypothesisloop.yaml does not name one $1" >&2
+    return 1
+  fi
+  printf '%s' "${value}"
+}
+HL_API_PORT="$(lib_setting api_port)"
+HL_METRICS_PORT="$(lib_setting metric_controller_port)"
+export HL_API_PORT HL_METRICS_PORT
+
 # lib_env_files <settings>: writes localdev/.run/env/<program>.env for every program, holding the
 # keys it reads under these settings (localdev/envfiles). .env is read here and by nothing else.
 lib_env_files() {

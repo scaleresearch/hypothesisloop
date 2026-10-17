@@ -118,8 +118,8 @@ render_settings() {
   local rented=() values=("  control_plane_endpoint: http://localhost:9000") value host
   if [[ "${1:-}" == "rented" ]]; then
     host="$(lib_advertised_address "$(cat localdev/.host-address)")"
-    rented=(-e "s|http://${host}:8081|${public_api}|"
-            -e "s|http://${host}:8084|${public_metrics}|"
+    rented=(-e "s|http://${host}:${HL_API_PORT}|${public_api}|"
+            -e "s|http://${host}:${HL_METRICS_PORT}|${public_metrics}|"
             -e "s|http://${host}:9000|${public_store}|"
             -e "s|^  image: ${host}:5000/hypothesisloop-harness-base:.*$|  image: ${registry}/hypothesisloop-harness-base:${tag}|"
             -e "s|^  registry: ${host}:5000$|  registry: ${registry}|"
@@ -239,12 +239,12 @@ start_control_plane() {
   fi
   stop control-service
   stop metrics-service
-  require_port 8081
-  require_port 8084
+  require_port "${HL_API_PORT}"
+  require_port "${HL_METRICS_PORT}"
   start control-service lib_run control-service "${bin}/control-service"
   start metrics-service lib_run metrics-service "${bin}/metrics-service"
-  wait_for control-service http://localhost:8081/health
-  wait_for metrics-service http://localhost:8084/health
+  wait_for control-service "http://localhost:${HL_API_PORT}/health"
+  wait_for metrics-service "http://localhost:${HL_METRICS_PORT}/health"
   lib_register_clusters
 }
 
@@ -254,7 +254,7 @@ start_control_plane() {
 local_cluster() {
   local code
   code="$(printf 'Authorization: Bearer %s\n' "$(lib_hl_admin token staff)" |
-    curl -sS -o /dev/null -w '%{http_code}' -X POST -H @- "http://localhost:8081/orgs/default/clusters/local/$1")"
+    curl -sS -o /dev/null -w '%{http_code}' -X POST -H @- "http://localhost:${HL_API_PORT}/orgs/default/clusters/local/$1")"
   if [[ "${code}" == "200" || ( "$1" == "disable" && "${code}" == "404" ) ]]; then
     return
   fi
@@ -333,10 +333,10 @@ case "${action}" in
       lib_hl_admin cluster share "${cloud_cluster}" off >/dev/null
     fi
     start_ui
-    echo "dev: API http://localhost:8081, UI http://localhost:3000"
+    echo "dev: API http://localhost:${HL_API_PORT}, UI http://localhost:3000"
     reachable="$(lib_reachable_address)"
     if [[ -n "${reachable}" ]]; then
-      echo "dev: clusters on other machines are handed ${reachable} (LOCAL_REACHABLE_ADDRESS): API :8081, metrics :8084, registry :5000 (plain HTTP), object store :9000"
+      echo "dev: clusters on other machines are handed ${reachable} (LOCAL_REACHABLE_ADDRESS): API :${HL_API_PORT}, metrics :${HL_METRICS_PORT}, registry :5000 (plain HTTP), object store :9000"
     fi
     status
     ;;
@@ -355,7 +355,7 @@ case "${action}" in
     lib_hl_admin cluster share "${cloud_cluster}" on >/dev/null
     must_stay_up control-service
     start_ui
-    echo "dev: API http://localhost:8081 (from outside ${public_api}), UI http://localhost:3000"
+    echo "dev: API http://localhost:${HL_API_PORT} (from outside ${public_api}), UI http://localhost:3000"
     echo "dev: control-service rents jobs for cluster ${cloud_cluster} and runs hosted agents on ${sandbox_provider}"
     status
     ;;

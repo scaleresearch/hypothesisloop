@@ -19,6 +19,11 @@ REGISTRY_PUBLISH_IP := $(shell bash -c '. localdev/lib/node.sh && lib_registry_p
 # also publishes on REGISTRY_REACHABLE_IP, what it resolves to (docker-compose.reachable.yml).
 # Local nodes keep reaching everything through HOST_ADDRESS.
 REGISTRY_REACHABLE_IP := $(shell bash -c '. localdev/lib/node.sh && lib_registry_reachable_ip')
+# The ports the control service and metrics-service listen on, which the settings name
+# (localdev/lib/env.sh). Exported for the compose file and the scripts make runs.
+HL_API_PORT := $(shell bash -c '. localdev/lib/env.sh && echo "$$HL_API_PORT"')
+HL_METRICS_PORT := $(shell bash -c '. localdev/lib/env.sh && echo "$$HL_METRICS_PORT"')
+export HL_API_PORT HL_METRICS_PORT
 COMPOSE := podman compose -f $(COMPOSE_FILE) $(if $(REGISTRY_REACHABLE_IP),-f localdev/controlplane/docker-compose.reachable.yml)
 
 # In production REGISTRY names a real registry the operator provisioned and every cluster

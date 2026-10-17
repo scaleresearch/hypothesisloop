@@ -11,7 +11,7 @@ e2e:
 
 # What a suite run on another host's stack (tt-e2e, nvidia-e2e) is started with: the API's address, a staff
 # token, and what the suite's hl-admin calls read. Refused on a stack that rents, as make e2e is.
-E2E_API_URL = $${API_URL:-http://localhost:$${API_HOST_PORT:-8081}}
+E2E_API_URL = $${API_URL:-http://localhost:$(HL_API_PORT)}
 E2E_ENV = bash $(CURDIR)/localdev/dev.sh require-local && . $(CURDIR)/localdev/lib/auth.sh && export API_URL="$(E2E_API_URL)" && export HL_TOKEN="$${HL_TOKEN:-$$(lib_hl_admin token staff)}" &&
 
 # The workloads the tests' jobs run, built and pushed as the product's images are (push_image in

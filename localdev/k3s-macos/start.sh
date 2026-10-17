@@ -9,6 +9,7 @@ set -euo pipefail
 CONTEXT_NAME="k3s-local"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/node.sh"
+source "${SCRIPT_DIR}/../lib/env.sh"
 
 if [[ "$(uname)" == "Darwin" ]]; then
   if ! podman machine list --format '{{.Running}}' 2>/dev/null | grep -q "true"; then
@@ -45,9 +46,9 @@ kubectl config use-context "${CONTEXT_NAME}" >/dev/null
 echo "==> Starting control plane..."
 podman compose -f "${SCRIPT_DIR}/../../localdev/controlplane/docker-compose.yml" start
 wait_for 20 1 "control-service to accept connections" \
-  curl -sf -o /dev/null "http://localhost:${API_HOST_PORT:-8081}/health"
+  curl -sf -o /dev/null "http://localhost:${HL_API_PORT}/health"
 wait_for 20 1 "metrics-service to accept connections" \
-  curl -sf -o /dev/null "http://localhost:8084/health"
+  curl -sf -o /dev/null "http://localhost:${HL_METRICS_PORT}/health"
 
 bash "${SCRIPT_DIR}/dev-nodes-up.sh"
 
