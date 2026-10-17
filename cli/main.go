@@ -73,9 +73,7 @@ var commands = []struct {
 	{subcommand{"capacity", "live accelerators per cluster, available and total", cmdCapacity}, nil},
 	{subcommand{"situation", "the run now: time, objective, capacity, budget and each agent's work and allowances", cmdSituation}, nil},
 	{subcommand{"data-key", `your S3 key to the experiment's data: eval "$(hl data-key)"`, cmdDataKey}, nil},
-	{subcommand{"git-credential", "git's credential helper for your experiment's repository; git runs it", func(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-		return cmdGitCredential(c, os.Getenv("HL_GIT_URL"), args, os.Stdin, stdout, stderr)
-	}}, nil},
+	{subcommand{"git-credential", "git's credential helper for your experiment's repository; git runs it", gitCredential}, nil},
 	{subcommand{"hypothesis", "", cmdHypothesis}, hypothesisCommands},
 	{subcommand{"job", "", group("job", jobCommands)}, jobCommands},
 	{subcommand{"env", "", group("env", envCommands)}, envCommands},
@@ -632,11 +630,11 @@ and nothing is written beside the JSON, so the output parses whole.`, stderr)
 func cmdPlatformExperimentsHealth(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := command.NewFlags("platform-experiments health", `usage: hl platform-experiments health [--platform-experiment PE]
 
-Where each agent of the platform experiment, and its hosted coordinator, last stood, one line
+Where each agent of the platform experiment, and its sandboxed coordinator, last stood, one line
 each as compact JSON, as the metrics store recorded it while the run was open or running:
 first_job_seconds and first_completed_job_seconds from when it could first submit (absent
 before there is one), jobs_in_flight, restarts of its machine over the whole run,
-coordinator_messages sent to it, and for a hosted agent rate_limit_utilization, the share of
+coordinator_messages sent to it, and for a sandboxed agent rate_limit_utilization, the share of
 its model account's rate limit used, and while the model provider refuses its calls
 rate_limited_until, when the limit resets: it waits until then and resumes. The coordinator's
 line has role coordinator and no agent_id.`, stderr)
@@ -697,11 +695,11 @@ func cmdPlatformExperimentsReopen(c *apiclient.Client, args []string, stdout, st
 
 Staff only. Sets a closed platform experiment, whose run started, running again until TIME
 (RFC 3339) as the same run: its hypotheses, jobs, branches, brief, baseline and agents stay. Every
-agent whose run ended only with the close is at work again, and so is a hosted coordinator, on
+agent whose run ended only with the close is at work again, and so is a sandboxed coordinator, on
 --coordinator-model when it is given. An agent that finished or was cut before the close stays as
 it ended.`, stderr)
 	endsAt := fs.String("ends-at", "", "when the run closes again, RFC 3339")
-	model := fs.String("coordinator-model", "", "the model the hosted coordinator runs on from now (default the one it has)")
+	model := fs.String("coordinator-model", "", "the model the sandboxed coordinator runs on from now (default the one it has)")
 	pe := command.ExperimentFlag(fs)
 	if err := command.ParseNone(fs, args); err != nil {
 		return command.ParseExit(err)

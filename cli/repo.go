@@ -437,7 +437,7 @@ type declaredExperiment struct {
 	} `json:"proposal"`
 }
 
-// spec is the experiment's spec as a file states it: its hosted coordinator's model is
+// spec is the experiment's spec as a file states it: its sandboxed coordinator's model is
 // coordinator_model.
 func (e declaredExperiment) spec() experimentspec.Spec {
 	spec := e.Spec

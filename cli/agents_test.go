@@ -10,17 +10,17 @@ import (
 
 func TestAgentsAddCreatesOneAgentWithWhatItIsLaunchedWith(t *testing.T) {
 	got := recordingServer(t, func(int, recorded) any {
-		return map[string]any{"agents": []map[string]any{{"agent_id": "ag-1", "hosted": true, "launcher": "main"}}}
+		return map[string]any{"agents": []map[string]any{{"agent_id": "ag-1", "in_agentsandbox": true, "launcher": "main"}}}
 	})
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"platform-experiments", "agents", "add", "--platform-experiment", "pe-1", "--hosted", "--agent-type", "data-search",
+	code := run([]string{"platform-experiments", "agents", "add", "--platform-experiment", "pe-1", "--in-agentsandbox", "--agent-type", "data-search",
 		"--hyperparameters", `{"batch_size":64}`, "--model", "claude-sonnet-5", "--name", "sweep", "--role", "baseline", "--quota-tier", "burst_only"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit %d, stderr %s", code, stderr.String())
 	}
 	request := (*got)[0]
 	want := map[string]any{
-		"hosted": true, "agent_type": "data-search", "model": "claude-sonnet-5", "name": "sweep",
+		"in_agentsandbox": true, "agent_type": "data-search", "model": "claude-sonnet-5", "name": "sweep",
 		"role": "baseline", "quota_tier": "burst_only", "hyperparameters": map[string]any{"batch_size": float64(64)},
 	}
 	if request.Method != "POST" || request.Path != "/platform-experiments/pe-1/agents" || !reflect.DeepEqual(request.Body, want) {
@@ -183,7 +183,7 @@ func TestFinishingAfterTheCloseSaysNothingNeedsFinishing(t *testing.T) {
 	}
 }
 
-// A hosted coordinator's briefing is built from this listing. It crashed on a subcommand that
+// A sandboxed coordinator's briefing is built from this listing. It crashed on a subcommand that
 // read the token before parsing its flags, so every coordinator exited as it started.
 func TestTheAgentsGroupListsItsCommands(t *testing.T) {
 	code, stdout, stderr := hl(t, "platform-experiments", "agents", "--help")

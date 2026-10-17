@@ -18,7 +18,7 @@ func agentsSession(c *apiclient.Client, args []string, stdout, stderr io.Writer)
 	fs := command.NewFlags("platform-experiments agents session", `usage: hl platform-experiments agents session [--platform-experiment PE] AGENT|coordinator|planner > session.tar.gz
 
 Writes the model session last stored to standard output, byte for byte: what its owner said and
-saw, as its harness packed it. AGENT is an agent's id, coordinator the hosted coordinator and
+saw, as its harness packed it. AGENT is an agent's id, coordinator the sandboxed coordinator and
 planner the agent that planned the draft. The platform's own harness packs a gzipped tar, with
 the model's transcript as JSON lines under model-home/:
 

@@ -47,7 +47,7 @@ func platformRoutes(caller auth.Principal) http.Handler {
 	r := chi.NewRouter()
 	r.Use(auth.Gate(authtest.As(caller), logger, map[string]string{"/watch": watch.Subprotocol}))
 	doc := httpapi.NewDoc(r, "hypothesisloop API", "1.0.0", "", auth.NewAccess(authtest.Placement{}), logger)
-	launch := platformexperiments.AgentLaunch{Hosting: true, DefaultModel: "model", SigningSecret: "secret", MaxHosted: 1}
+	launch := platformexperiments.AgentLaunch{AgentSandbox: true, DefaultModel: "model", SigningSecret: "secret", MaxAgentSandboxes: 1}
 	experiments := platformexperiments.NewService(nil, domain.QuotaConfig{}, logger, nil, time.Minute).WithRepositories(struct{ githost.Provider }{}).
 		WithPlanning(platformexperiments.Planning{Limit: time.Minute, ProposedFor: time.Minute, PlannerKept: time.Minute}).WithAgentLaunch(launch)
 	httpapi.Register(doc, httpapi.Handlers{
@@ -129,8 +129,8 @@ func TestNoCommandACoordinatorRunsCallsARouteACoordinatorMayNot(t *testing.T) {
 		{"platform-experiments", "health"},
 		{"platform-experiments", "agents", "list"},
 		{"platform-experiments", "agents", "session", "coordinator"},
-		{"platform-experiments", "agents", "add", "--hosted", "--agent-type", "generalist"},
-		{"platform-experiments", "agents", "add", "--hosted", "--role", "baseline", "--name", "Baseline"},
+		{"platform-experiments", "agents", "add", "--in-agentsandbox", "--agent-type", "generalist"},
+		{"platform-experiments", "agents", "add", "--in-agentsandbox", "--role", "baseline", "--name", "Baseline"},
 		{"platform-experiments", "agents", "remove", "ag-1"},
 		{"platform-experiments", "agents", "message", "ag-1", "--text", "try warmup"},
 		{"platform-experiments", "agents", "message", "--all", "--text", "queue more trials"},
