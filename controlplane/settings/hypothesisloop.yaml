@@ -239,10 +239,15 @@ job_images:
 #
 #   git_host:
 #     provider: github
+#     experiment_template_repository: scaleresearch/hypothesisloop-experiment-template
 #     github:
 #       app_id: 123456
 #       app_slug: hypothesisloop
 #
+#   experiment_template_repository  the repository on the host every repository the platform
+#                      creates starts from, one commit of its files with no history. On GitHub the
+#                      platform's public template repository, which the App generates each new
+#                      repository from; on a plain host a name under base_url holding a copy of it.
 #   app_id, app_slug   the App's number and the name in its URL. The PEM GitHub issued for the App,
 #                      which signs the request for every token, is GIT_HOST_GITHUB_APP_PRIVATE_KEY.
 #
@@ -259,12 +264,14 @@ job_images:
 #
 #   git_host:
 #     provider: plain
+#     experiment_template_repository: hypothesisloop-experiment-template.git
 #     plain:
 #       base_url: https://git.example.com/experiments
 #       username: platform
 #
-#   base_url   the https root of any git host. A repository is a name under it, created on the host
-#              beforehand: the platform creates none there and reads no experiment file from one.
+#   base_url   the https root of any git host. A repository is a name under it. The platform creates
+#              one by pushing the template's files to it, which a host that creates a repository
+#              on its first push takes, and reads no experiment file from one. It runs git for that.
 #   allow_http true lets base_url be http, for a host on the deployment's own network, as local
 #              development's is. The credential then travels in the clear.
 #   username   the account the host takes, left out for a host that asks for nothing. Its password

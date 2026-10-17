@@ -24,10 +24,9 @@ def listed(cfg) -> list:
 
 
 class CommandsListedTest(unittest.TestCase):
-    # hl's own listing named `quota`, which answers a planner 404, and no `repo init`, whose
-    # files one guessed at.
+    # hl's own listing named `quota`, which answers a planner 404.
     def test_a_planner_and_a_baseline_agent_are_shown_the_commands_of_their_role(self):
-        self.assertEqual(listed(planner()), [["platform-experiments", "propose"], ["platform-experiments", "decline"], ["repo", "init"]])
+        self.assertEqual(listed(planner()), [["platform-experiments", "propose"], ["platform-experiments", "decline"]])
         self.assertEqual(listed(baseline_agent()), [[], ["job", "submit"], ["job", "summary"], ["platform-experiments", "agents", "finish"]])
 
 

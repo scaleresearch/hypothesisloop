@@ -29,11 +29,13 @@ The staged file names no git host: the chart adds the one gitHost.provider names
 {{- if not $gitHost.github.appId }}
 {{- fail "gitHost.github.appId is required with gitHost.provider github: the App's number" }}
 {{- end }}
-{{- $raw = printf "%s\ngit_host:\n  provider: github\n  github:\n    app_id: %s\n    app_slug: %s\n" (trimSuffix "\n" $raw)
+{{- $raw = printf "%s\ngit_host:\n  provider: github\n  experiment_template_repository: %s\n  github:\n    app_id: %s\n    app_slug: %s\n" (trimSuffix "\n" $raw)
+  (toJson (required "gitHost.experimentTemplateRepository is required: the repository every repository the platform creates starts from" $gitHost.experimentTemplateRepository))
   (toJson (int64 $gitHost.github.appId))
   (toJson (required "gitHost.github.appSlug is required with gitHost.provider github: the name in the App's URL" $gitHost.github.appSlug)) }}
 {{- else if eq $gitHost.provider "plain" }}
-{{- $raw = printf "%s\ngit_host:\n  provider: plain\n  plain:\n    base_url: %s\n    allow_http: %s\n" (trimSuffix "\n" $raw)
+{{- $raw = printf "%s\ngit_host:\n  provider: plain\n  experiment_template_repository: %s\n  plain:\n    base_url: %s\n    allow_http: %s\n" (trimSuffix "\n" $raw)
+  (toJson (required "gitHost.experimentTemplateRepository is required: the repository every repository the platform creates starts from" $gitHost.experimentTemplateRepository))
   (toJson (required "gitHost.plain.baseURL is required with gitHost.provider plain: the root the deployment's repositories are cloned from" $gitHost.plain.baseURL))
   (toJson $gitHost.plain.allowHTTP) }}
 {{- if $gitHost.plain.username }}

@@ -97,7 +97,7 @@ const MaxAgentImageLength = experimentspec.MaxAgentImageLength
 func ValidateAgentImage(image string) error { return experimentspec.ValidateAgentImage(image) }
 
 // ExperimentFile is where a platform experiment's repository keeps its spec.
-const ExperimentFile = experimentspec.File
+const ExperimentFile = experimentspec.ExperimentFile
 
 const MaxProseBytes = experimentspec.MaxProseBytes
 

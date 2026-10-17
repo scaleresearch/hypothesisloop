@@ -57,7 +57,7 @@ a leading quote.
                                        # one of its job_images, or its only_job_image where it shows one
   cpu: 8                               # optional, like memory and storage: what one node of a job
   memory: 32Gi                         # asks for, as job.cpu, job.memory and job.storage state it.
-  storage: 100Gi                       # hl repo init writes them into job.yaml, so no brief repeats them
+  storage: 100Gi                       # the baseline writes them into job.yaml, so no brief repeats them
   budget_accelerator_hours: 6          # proposed, positive; the person states the real ones at accept
   duration_hours: 4                    # the run, from its start: a time the goal states is this
   baseline_minutes: 60                 # what measuring the baseline needs from the accept, from

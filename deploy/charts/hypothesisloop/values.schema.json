@@ -433,6 +433,9 @@
           "type": "string",
           "enum": ["github", "plain"]
         },
+        "experimentTemplateRepository": {
+          "type": "string"
+        },
         "github": {
           "type": "object",
           "additionalProperties": false,

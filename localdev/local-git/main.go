@@ -1,9 +1,11 @@
 // git-server serves the bare repositories under one directory over git's smart HTTP, to
 // whoever presents the one credential: local development's git host (git_host provider plain, GIT_HOST_PROVIDER=local).
+// A push to a repository that does not exist creates it.
 package main
 
 import (
 	"crypto/subtle"
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/cgi"
@@ -38,7 +40,25 @@ func main() {
 			http.Error(w, "unauthenticated", http.StatusUnauthorized)
 			return
 		}
+		if repository, push := strings.CutSuffix(r.URL.Path, "/info/refs"); push && r.URL.Query().Get("service") == "git-receive-pack" {
+			if err := create(env["GIT_SERVER_ROOT"], repository); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+		}
 		backend.ServeHTTP(w, r)
 	})
 	log.Fatal(http.ListenAndServe(env["GIT_SERVER_ADDRESS"], mux))
+}
+
+// create makes the bare repository at path under root unless it exists.
+func create(root, path string) error {
+	dir := filepath.Join(root, filepath.Clean("/"+path))
+	if _, err := os.Stat(dir); err == nil {
+		return nil
+	}
+	if out, err := exec.Command("git", "init", "--quiet", "--bare", "--initial-branch=main", dir).CombinedOutput(); err != nil {
+		return fmt.Errorf("git-server: create %s: %v: %s", path, err, out)
+	}
+	return nil
 }

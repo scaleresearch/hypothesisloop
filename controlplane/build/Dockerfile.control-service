@@ -11,7 +11,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 GOOS=$TARGETOS
 RUN --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -mod=vendor -o /hl-admin ./controlplane/cmd/hl-admin
 
 FROM alpine:3.22
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates git
 COPY --from=builder /control-service /control-service
 # The operator's tool, run with `kubectl exec`: it reads the config and the secrets this container
 # was started with.

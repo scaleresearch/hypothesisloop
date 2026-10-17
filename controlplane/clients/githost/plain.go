@@ -2,9 +2,13 @@ package githost
 
 import (
 	"context"
+	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
 	"regexp"
 	"strings"
 	"time"
@@ -13,13 +17,14 @@ import (
 )
 
 // Plain is any git host that serves repositories under one root over smart HTTP. A repository is
-// a name under that root, made on the host by whoever runs it: the platform creates none and
-// reads no file from one. Its one credential is the deployment's, the same for every repository
-// and every caller.
+// a name under that root. The platform creates one by pushing the experiment template's files to
+// it, which a host that creates a repository on its first push takes, and reads no file from one.
+// Its one credential is the deployment's, the same for every repository and every caller.
 type Plain struct {
 	base     *url.URL
 	username string
 	password string
+	template string
 	client   *http.Client
 }
 
@@ -27,9 +32,9 @@ var _ Provider = (*Plain)(nil)
 
 var plainRepository = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$`)
 
-// NewPlain takes the root every repository is under and the credential the host takes, both
-// empty for a host that asks for none.
-func NewPlain(baseURL, username, password string) (*Plain, error) {
+// NewPlain takes the root every repository is under, the credential the host takes, both empty
+// for a host that asks for none, and the experiment template, a repository under the root.
+func NewPlain(baseURL, username, password, template string) (*Plain, error) {
 	base, err := url.Parse(strings.TrimRight(baseURL, "/"))
 	if err != nil || base.Scheme == "" || base.Host == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
 		return nil, fmt.Errorf("git base_url %q must be the root repositories are cloned from, as scheme://host[:port][/path] with no credential in it", baseURL)
@@ -37,19 +42,22 @@ func NewPlain(baseURL, username, password string) (*Plain, error) {
 	if (username == "") != (password == "") {
 		return nil, fmt.Errorf("the git host's username and password are given together or not at all")
 	}
-	return &Plain{base: base, username: username, password: password, client: &http.Client{Timeout: 15 * time.Second}}, nil
+	if !plainRepository.MatchString(template) {
+		return nil, fmt.Errorf("the experiment template %q must be the name of a repository under %s", template, baseURL)
+	}
+	return &Plain{base: base, username: username, password: password, template: template, client: &http.Client{Timeout: 15 * time.Second}}, nil
 }
 
 func (p *Plain) URL(repository string) string { return p.base.String() + "/" + repository }
 
 // Reachable asks the host for the repository's refs, the request git ls-remote makes.
 func (p *Plain) Reachable(ctx context.Context, _, repository string) (string, error) {
-	if !plainRepository.MatchString(repository) || len(repository) > 200 {
-		return "", refusal.Refuse(http.StatusUnprocessableEntity, "invalid_repository", "repository must be the name of a repository under "+p.base.String()+": path segments of letters, digits, '.', '_' and '-'")
+	if err := p.validName(repository); err != nil {
+		return "", err
 	}
 	address := p.URL(repository)
 	notReachable := func(why string) error {
-		return refusal.Refuse(http.StatusUnprocessableEntity, "repository_not_reachable", "no repository answers git at "+address+" ("+why+"): it is created on the git host before a platform experiment names it")
+		return refusal.Refuse(http.StatusUnprocessableEntity, "repository_not_reachable", "no repository answers git at "+address+" ("+why+")")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, address+"/info/refs?service=git-upload-pack", nil)
 	if err != nil {
@@ -72,19 +80,91 @@ func (p *Plain) Reachable(ctx context.Context, _, repository string) (string, er
 	return repository, nil
 }
 
+func (p *Plain) validName(repository string) error {
+	if !plainRepository.MatchString(repository) || len(repository) > 200 {
+		return refusal.Refuse(http.StatusUnprocessableEntity, "invalid_repository", "repository must be the name of a repository under "+p.base.String()+": path segments of letters, digits, '.', '_' and '-'")
+	}
+	return nil
+}
+
+// CreatesOn refuses: a plain host has no accounts, so a repository it creates is named.
 func (p *Plain) CreatesOn(context.Context, string, string) (string, error) {
-	return "", p.createsNone()
+	return "", refusal.Refuse(http.StatusUnprocessableEntity, "repository_required", "on this deployment's git host a platform experiment names its repository, a name under "+p.base.String()+", which the platform creates from the experiment template when it does not exist")
 }
 
-func (p *Plain) Create(context.Context, string, string, string, string, map[string]string) (string, error) {
-	return "", p.createsNone()
+// Create pushes one commit of the template's files, with no history, to the repository as the
+// branch the template's HEAD names.
+func (p *Plain) Create(ctx context.Context, _, repository, _ string) (string, error) {
+	if err := p.validName(repository); err != nil {
+		return "", err
+	}
+	if _, err := p.Reachable(ctx, "", repository); err == nil {
+		return "", refusal.Refuse(http.StatusConflict, "repository_exists", repository+" already exists under "+p.base.String())
+	}
+	dir, err := os.MkdirTemp("", "hl-create-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(dir) //nolint:errcheck
+	template := p.URL(p.template)
+	head, err := p.git(ctx, dir, "ls-remote", "--symref", template, "HEAD")
+	if err != nil {
+		return "", notCreated(repository, err)
+	}
+	ref, _, _ := strings.Cut(strings.TrimPrefix(strings.SplitN(head, "\n", 2)[0], "ref: "), "\t")
+	if !strings.HasPrefix(ref, "refs/heads/") {
+		return "", notCreated(repository, fmt.Errorf("the experiment template %s names no branch as its HEAD", template))
+	}
+	var commit string
+	for _, args := range [][]string{{"init", "--quiet", "--bare"}, {"fetch", "--quiet", "--depth=1", template, ref}} {
+		if _, err := p.git(ctx, dir, args...); err != nil {
+			return "", notCreated(repository, err)
+		}
+	}
+	if commit, err = p.git(ctx, dir, "commit-tree", "FETCH_HEAD^{tree}", "-m", "Start from the experiment template"); err != nil {
+		return "", notCreated(repository, err)
+	}
+	if _, err := p.git(ctx, dir, "push", "--quiet", p.URL(repository), commit+":"+ref); err != nil {
+		return "", notCreated(repository, err)
+	}
+	return repository, nil
 }
 
-func (p *Plain) createsNone() error {
-	return refusal.Refuse(http.StatusUnprocessableEntity, "repository_required", "the platform creates no repository on this deployment's git host: create one under "+p.base.String()+" and name it in repository")
+func notCreated(repository string, err error) error {
+	return refusal.Refuse(http.StatusBadGateway, "repository_not_created", "the git host did not take "+repository+" from the experiment template: "+err.Error())
 }
 
-func (p *Plain) File(_ context.Context, _, _, path string) ([]byte, error) {
+func (p *Plain) HasBranch(ctx context.Context, _, repository, branch string) (bool, error) {
+	if err := p.validName(repository); err != nil {
+		return false, err
+	}
+	heads, err := p.git(ctx, "", "ls-remote", "--heads", p.URL(repository), "refs/heads/"+branch)
+	if err != nil {
+		return false, refusal.Refuse(http.StatusBadGateway, "repository_not_reachable", "the branches of "+repository+" could not be read: "+err.Error())
+	}
+	return heads != "", nil
+}
+
+// git runs git in dir with the host's credential as a header, never in a URL or an argument.
+func (p *Plain) git(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0",
+		"GIT_AUTHOR_NAME=HypothesisLoop", "GIT_AUTHOR_EMAIL=platform@hypothesisloop.invalid",
+		"GIT_COMMITTER_NAME=HypothesisLoop", "GIT_COMMITTER_EMAIL=platform@hypothesisloop.invalid")
+	if p.username != "" {
+		basic := base64.StdEncoding.EncodeToString([]byte(p.username + ":" + p.password))
+		cmd.Env = append(cmd.Env, "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http.extraHeader", "GIT_CONFIG_VALUE_0=Authorization: Basic "+basic)
+	}
+	out, err := cmd.Output()
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		return "", fmt.Errorf("git %s: %s", args[0], strings.TrimSpace(string(exit.Stderr)))
+	}
+	return strings.TrimSpace(string(out)), err
+}
+
+func (p *Plain) File(_ context.Context, _, _, _, path string) ([]byte, error) {
 	return nil, refusal.Refuse(http.StatusUnprocessableEntity, "experiment_file_unsupported", "this deployment's git host hands the platform no file, so "+path+" cannot be read from the repository: state its fields in the request")
 }
 

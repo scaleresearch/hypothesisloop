@@ -18,19 +18,20 @@ type Provider interface {
 	// Reachable returns the repository as the host names it, when the project may keep a
 	// platform experiment's code in it.
 	Reachable(ctx context.Context, projectID, repository string) (string, error)
-	// CreatesOn returns the account Create makes the project's repository on, account or the
-	// project's only or default one, or what refuses a repository there: everything Create checks
-	// before it creates, asked of the host now, so a request is answered with it before anything
-	// is made.
+	// CreatesOn returns the account Create makes a repository the project names none of on,
+	// account or the project's only or default one, or what refuses a repository there: everything
+	// Create checks before it creates, asked of the host now, so a request is answered with it
+	// before anything is made. A host with no accounts refuses: there a repository is named.
 	CreatesOn(ctx context.Context, projectID, account string) (string, error)
-	// Create makes a repository of that name for a platform experiment that names none, on the
-	// account named where the host has several for the project, and returns it. files, by path,
-	// are its first commit. A host that creates none refuses. A repository the request names is
-	// never written to.
-	Create(ctx context.Context, projectID, account, name, description string, files map[string]string) (string, error)
-	// File reads a file at the head of the repository's default branch. A host that serves no
-	// file to the platform refuses.
-	File(ctx context.Context, projectID, repository, path string) ([]byte, error)
+	// Create makes the repository, as Reachable names it, from the deployment's experiment
+	// template: its default branch holds one commit of the template's files. It refuses a
+	// repository that exists.
+	Create(ctx context.Context, projectID, repository, description string) (string, error)
+	// HasBranch says whether the repository has a branch of that name.
+	HasBranch(ctx context.Context, projectID, repository, branch string) (bool, error)
+	// File reads a file of the repository at ref for a form to show: ErrFileNotFound when it
+	// holds none there. A host that serves no file to the platform refuses.
+	File(ctx context.Context, projectID, repository, ref, path string) ([]byte, error)
 	// FileAt reads a file of the repository at ref, a branch or a commit: ErrFileNotFound when
 	// it holds none there.
 	FileAt(ctx context.Context, projectID, repository, ref, path string) ([]byte, error)

@@ -10,7 +10,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
-	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 )
 
@@ -28,7 +27,6 @@ const (
 	ReasonRepositoryCreationNotPermitted = "repository_creation_not_permitted"
 	ReasonRepositoryNotAdded             = "repository_not_added"
 	ReasonRepositoryAccountRequired      = "repository_account_required"
-	ReasonNoExperimentFile               = "no_experiment_file"
 	ReasonUnreadableFile                 = "unreadable_file"
 	ReasonUnavailable                    = "unavailable"
 	ReasonGitHubFailed                   = "github_failed"
@@ -70,7 +68,6 @@ func (e *InstallationGoneError) Unwrap() error {
 // GitHub refused, whose answer is GitHub's own message.
 func Refusal(logger *zap.Logger, op string, err error, gone int) error {
 	var status interface{ GetStatus() int }
-	var uncommitted *FirstCommitError
 	var notCovered *NotCoveredError
 	var notPermitted *CreationNotPermittedError
 	var failed *CreationFailedError
@@ -81,12 +78,9 @@ func Refusal(logger *zap.Logger, op string, err error, gone int) error {
 	switch {
 	case errors.As(err, &status):
 		return err
-	case errors.As(err, &uncommitted):
-		logger.Error("github created a repository and did not take its first commit", zap.String("operation", op), zap.Error(err))
-		return refusal.Refuse(http.StatusBadGateway, ReasonRepositoryNotCreated, "GitHub created the repository "+uncommitted.Repository+" and did not take its first commit, so nothing else was created. The repository is left on the GitHub account without the experiment's files: name it in repository on the next try, where hl repo init adds them, or delete it on GitHub")
 	case errors.As(err, &notCovered):
 		logger.Error("github created a repository and did not add it to the installation", zap.String("operation", op), zap.Error(err))
-		return refusal.Refuse(http.StatusBadGateway, ReasonRepositoryNotAdded, "GitHub created the repository "+notCovered.Repository+" and did not let the platform add it to the GitHub App's installation, which covers selected repositories only, so nothing else was created. Add it to the installation on GitHub (the account's Settings, Applications, Configure), then name it in repository on the next try, where hl repo init adds the experiment's files")
+		return refusal.Refuse(http.StatusBadGateway, ReasonRepositoryNotAdded, "GitHub created the repository "+notCovered.Repository+" and did not let the platform add it to the GitHub App's installation, which covers selected repositories only, so nothing else was created. Add it to the installation on GitHub (the account's Settings, Applications, Configure), then name it in repository on the next try")
 	case errors.As(err, &notAsAsked):
 		logger.Error("github created a repository that is not the private one asked for", zap.String("operation", op), zap.Error(err))
 		return refusal.Refuse(http.StatusBadGateway, ReasonRepositoryNotCreated, "GitHub created the repository "+notAsAsked.Repository+", which is not the private repository asked for on the GitHub account the org connected, so nothing else was created. It is left on GitHub: its owner deletes it there, or makes it private and adds it to the installation, and the request names it in repository on the next try")
@@ -121,12 +115,6 @@ func Refusal(logger *zap.Logger, op string, err error, gone int) error {
 		return refusal.Refuse(gone, ReasonPermissionMissing, "github_permission_missing: "+strings.Join(missing.Missing, ", ")+". The GitHub App installation has not granted that, which the platform needs: its owner accepts the App's permissions on GitHub (the account's Settings, Applications, Configure)")
 	case errors.Is(err, ErrPermissionNotGranted):
 		return refusal.Refuse(gone, ReasonPermissionMissing, "the GitHub App installation has not granted the access the App asks for: its owner accepts the App's permissions on GitHub (the account's Settings, Applications, Configure)")
-	case errors.Is(err, ErrFileNotFound):
-		return refusal.Invalid(ReasonNoExperimentFile, "the repository has no "+domain.ExperimentFile+" on its default branch")
-	case errors.Is(err, ErrNotAFile):
-		return refusal.Invalid(ReasonNoExperimentFile, domain.ExperimentFile+" on the repository's default branch is not a file")
-	case errors.Is(err, ErrFileTooLarge):
-		return refusal.Invalid(ReasonNoExperimentFile, domain.ExperimentFile+" is larger than the platform reads from a repository")
 	case errors.Is(err, ErrRateLimited):
 		logger.Warn("github is rate limiting the platform", zap.String("operation", op))
 		return refusal.Refuse(http.StatusServiceUnavailable, ReasonUnavailable, "GitHub is rate limiting the platform: try again shortly")

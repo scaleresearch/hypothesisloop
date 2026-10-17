@@ -1,5 +1,5 @@
 // Package experimentspec is the one definition of a platform experiment that the CLI, the wizard
-// and the API share: the file a repository keeps at File, shaped like the body of
+// and the API share: the file a repository keeps at ExperimentFile, shaped like the body of
 // POST /platform-experiments without where the experiment is placed.
 package experimentspec
 
@@ -16,9 +16,6 @@ import (
 
 	"go.yaml.in/yaml/v4"
 )
-
-// File is where a repository keeps its experiment spec.
-const File = ".hypothesisloop/experiment.yaml"
 
 // MaxProseBytes caps the description and the summary: every read of the platform experiment
 // answers both whole, and every agent reads it often.
@@ -120,7 +117,7 @@ func yamlProblem(data []byte, err error) string {
 
 // Load reads the spec of the repository at dir.
 func Load(dir string) (Spec, error) {
-	path := filepath.Join(dir, filepath.FromSlash(File))
+	path := filepath.Join(dir, filepath.FromSlash(ExperimentFile))
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Spec{}, err

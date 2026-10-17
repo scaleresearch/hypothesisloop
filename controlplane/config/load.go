@@ -338,5 +338,8 @@ func (c *Settings) build() error {
 	default:
 		return fmt.Errorf("git_host provider %q is neither %s nor %s", g.Provider, GitHostProviderGitHub, GitHostProviderPlain)
 	}
+	if c.GitHost.ExperimentTemplateRepository == "" {
+		return fmt.Errorf("git_host experiment_template_repository is required: the repository on the git host every repository the platform creates starts from")
+	}
 	return nil
 }

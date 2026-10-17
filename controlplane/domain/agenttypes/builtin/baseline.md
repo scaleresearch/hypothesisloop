@@ -32,9 +32,11 @@ What it takes:
     (where it is empty, run `git clone {{repository_url}} .` there). Work on branch `hl/{{platform_experiment_id}}/baseline`; `hl job submit` pushes it. A run that
     `continues` another starts that branch from the other's `baseline_code_ref` and measures
     the control with its harness, changed only where it breaks the brief's definition of a
-    metric (say so in `README.md`), so the numbers of both compare. Run
-    `hl repo init` in the clone before you write anything: it writes the experiment's files
-    from what the platform holds. `hl repo check` says what is left.
+    metric (say so in `README.md`), so the numbers of both compare. A repository
+    the platform created holds the experiment template's files; one missing from the clone is
+    copied from the template, which `hl repo init DIR` puts in DIR. Write into them what the
+    platform holds: the spec of `hl platform-experiments get` and the image, accelerator_type,
+    cpu, memory and storage of its proposal. `hl repo check` says what is left.
   - The environment: one `.hypothesisloop/Dockerfile` for the whole experiment, holding what the
     control and every reference need at the versions the repository pins, with dependencies
     already fetched and built where the job's build finds them, so a job builds only the

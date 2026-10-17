@@ -270,6 +270,9 @@ start_git_server() {
   fi
   go build -o "${repo}/${bin}/git-server" ./localdev/local-git
   mkdir -p "${HL_GIT_ROOT}"
+  if [[ ! -d "${HL_GIT_ROOT}/${HL_GIT_EXPERIMENT_TEMPLATE}" ]]; then
+    git clone --quiet --bare "${HL_EXPERIMENT_TEMPLATE_URL}" "${HL_GIT_ROOT}/${HL_GIT_EXPERIMENT_TEMPLATE}"
+  fi
   stop git-server
   require_port "${HL_GIT_PORT}"
   GIT_SERVER_ADDRESS=":${HL_GIT_PORT}" GIT_SERVER_ROOT="${HL_GIT_ROOT}" GIT_SERVER_USERNAME="${HL_GIT_USERNAME}" \

@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
-	"github.com/scaleresearch/hypothesisloop/contract/repotemplate"
+	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/command"
 )
@@ -109,7 +109,7 @@ func environmentAsked(c *apiclient.Client, fs *command.Flags, args []string, ima
 	}
 	if len(operands) == 0 {
 		if root, err := git(".", "rev-parse", "--show-toplevel"); err == nil {
-			spec := filepath.Join(root, repotemplate.JobSpec)
+			spec := filepath.Join(root, experimentspec.JobSpec)
 			if _, err := os.Stat(spec); err == nil {
 				operands = []string{spec}
 			}

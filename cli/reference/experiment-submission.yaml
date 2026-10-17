@@ -15,7 +15,7 @@
 # accelerator_type and accelerator_count for a job on an accelerator.
 #
 # An experiment's repository commits the job section alone, as .hypothesisloop/job.yaml
-# (hl repo init writes it), and every trial submits that file unedited:
+# (the experiment template holds it), and every trial submits that file unedited:
 #
 #   hl job submit .hypothesisloop/job.yaml --hypothesis ID --theory "..." --env KEY=VALUE
 #

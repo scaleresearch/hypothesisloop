@@ -13,12 +13,13 @@ import (
 	"github.com/moby/buildkit/frontend/dockerfile/parser"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
 )
 
 // EnvironmentFile is the file of an experiment repository that declares the environment its jobs
 // run in: a Dockerfile built on the job's image, which the platform passes as BASE. Code is not in
 // it: a job clones its commit at start, as without one.
-const EnvironmentFile = ".hypothesisloop/Dockerfile"
+const EnvironmentFile = experimentspec.Environment
 
 // EnvironmentGitSecret is the id of the BuildKit secret a RUN of an environment file mounts to
 // read the repository that declared it, at /run/secrets/git-credentials by default: a git config

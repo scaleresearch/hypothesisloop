@@ -74,6 +74,9 @@ auth:
 # the section of that name is read.
 gitHost:
   provider: ""
+  # The repository on the git host every repository the platform creates starts from: on GitHub
+  # the platform's public template, on a plain host a name under baseURL holding a copy of it.
+  experimentTemplateRepository: scaleresearch/hypothesisloop-experiment-template
   # The GitHub App a project's repository is reached through. Its private key comes from the Secret.
   github:
     appId: 0

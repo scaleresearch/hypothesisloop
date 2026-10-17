@@ -43,13 +43,18 @@ fi
 # The git host local platform experiments keep their code on, as GIT_HOST_PROVIDER in .env names
 # it (.env.example): github, the GitHub App of the GIT_HOST_GITHUB_APP_* keys, or local, the git
 # server `make dev` runs on this machine (localdev/local-git). That one serves the bare
-# repositories under HL_GIT_ROOT (make git-repository) to its one credential, whose password is
-# made on this machine by the first use and never leaves it. The secret of either reaches the
-# processes that read it through their environment files (lib_env_files).
+# repositories under HL_GIT_ROOT to its one credential, whose password is made on this machine by
+# the first use and never leaves it, and holds a copy of the experiment template,
+# HL_GIT_EXPERIMENT_TEMPLATE, cloned from HL_EXPERIMENT_TEMPLATE_URL when it is missing, so the
+# platform creates repositories there with no network. The secret of either reaches the processes
+# that read it through their environment files (lib_env_files).
 HL_GIT_PORT=8085
 HL_GIT_ROOT="${LIB_AUTH_REPO}/localdev/.run/git"
 HL_GIT_USERNAME=hypothesisloop
 HL_GIT_PASSWORD_FILE="${LIB_AUTH_REPO}/localdev/.run/git-password"
+HL_EXPERIMENT_TEMPLATE_REPOSITORY=scaleresearch/hypothesisloop-experiment-template
+HL_EXPERIMENT_TEMPLATE_URL="https://github.com/${HL_EXPERIMENT_TEMPLATE_REPOSITORY}.git"
+HL_GIT_EXPERIMENT_TEMPLATE=hypothesisloop-experiment-template.git
 HL_GIT_HOST_PROVIDER=""
 if [[ -f "${LIB_AUTH_REPO}/.env" ]]; then
   HL_GIT_HOST_PROVIDER="$(lib_env_value GIT_HOST_PROVIDER)"
@@ -198,12 +203,12 @@ lib_render_settings() {
   case "$(lib_git_host_provider)" in
     github)
       # The values are JSON strings, which YAML reads as they are.
-      printf '\ngit_host:\n  provider: github\n  github:\n    app_id: %d\n    app_slug: "%s"\n' \
-        "${HL_GIT_HOST_GITHUB_APP_ID}" "${HL_GIT_HOST_GITHUB_APP_SLUG}" >> "${output}"
+      printf '\ngit_host:\n  provider: github\n  experiment_template_repository: %s\n  github:\n    app_id: %d\n    app_slug: "%s"\n' \
+        "${HL_EXPERIMENT_TEMPLATE_REPOSITORY}" "${HL_GIT_HOST_GITHUB_APP_ID}" "${HL_GIT_HOST_GITHUB_APP_SLUG}" >> "${output}"
       ;;
     local)
-      printf '\ngit_host:\n  provider: plain\n  plain:\n    base_url: http://%s:%s\n    allow_http: true\n    username: %s\n' \
-        "${host_address}" "${HL_GIT_PORT}" "${HL_GIT_USERNAME}" >> "${output}"
+      printf '\ngit_host:\n  provider: plain\n  experiment_template_repository: %s\n  plain:\n    base_url: http://%s:%s\n    allow_http: true\n    username: %s\n' \
+        "${HL_GIT_EXPERIMENT_TEMPLATE}" "${host_address}" "${HL_GIT_PORT}" "${HL_GIT_USERNAME}" >> "${output}"
       ;;
     *) return 1 ;;
   esac

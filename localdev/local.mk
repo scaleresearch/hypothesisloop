@@ -3,7 +3,7 @@
 	k3s-up k3s-down k3s-dev-nodes-up k3s-dev-nodes-down full-stop full-start reload stack-not-held \
 	tt-up tt-down tt-status tt-stop tt-start tt-dev-nodes-up tt-dev-nodes-down \
 	nvidia-up nvidia-down nvidia-status \
-	git-repository images-remote
+	images-remote
 
 # ---- The local stack: control plane, dev registry and local clusters ----------
 registry-up:
@@ -239,16 +239,6 @@ nvidia-status:
 	kubectl --context $(NVIDIA_CONTEXT) -n kube-system get pods -l app.kubernetes.io/name=gpu-feature-discovery
 	kubectl --context $(NVIDIA_CONTEXT) -n hypothesisloop get deploy,ds
 	nvidia-smi -L
-
-# ---- Local git host: a stack whose GIT_HOST_PROVIDER is local keeps its code on the git server make dev runs ----
-# One bare repository on it, which a platform experiment then names in `repository` as NAME.git:
-# the platform creates none on a plain git host. Usage: make git-repository NAME=my-experiment
-git-repository:
-	@test -n "$(NAME)" || { echo "make git-repository: NAME is required" >&2; exit 1; }
-	@bash -c '. localdev/lib/auth.sh && \
-	  git_host="$$(lib_git_host_provider)" && \
-	  { test "$$git_host" = local || { echo "make git-repository: this stack keeps its code on GitHub (GIT_HOST_PROVIDER=$$git_host in .env)" >&2; exit 1; }; } && \
-	  git init -q --bare "$$HL_GIT_ROOT/$(NAME).git" && echo "$(NAME).git"'
 
 # make publish run on BUILDER (an ssh host with docker buildx, linux/amd64), pushing to the
 # registry of .env, so no image is uploaded from this machine (localdev/images-remote.sh). Publishes

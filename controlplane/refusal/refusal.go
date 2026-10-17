@@ -78,3 +78,12 @@ func Invalid(reason, message string) *Refusal {
 func Conflict(reason, message string) *Refusal {
 	return Refuse(http.StatusConflict, reason, message)
 }
+
+// ReasonOf is the reason err refuses with, "" for an error that is no refusal.
+func ReasonOf(err error) string {
+	var refused *Refusal
+	if errors.As(err, &refused) {
+		return refused.Reason
+	}
+	return ""
+}

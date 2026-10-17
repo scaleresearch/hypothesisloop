@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -9,7 +8,6 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -18,137 +16,9 @@ import (
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
 	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
 	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
-	"github.com/scaleresearch/hypothesisloop/contract/repotemplate"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/command"
 )
-
-const repoFiles = `  .hypothesisloop/experiment.yaml   the experiment spec, written whole from the platform experiment:
-                                    the brief researchers read, its metrics, budget, length and
-                                    researchers, as many of each as the platform keeps at work now
-  .hypothesisloop/job.yaml          the base job spec, submitted unedited for every trial, with the image,
-                                    the accelerator_type and the cpu, memory and storage its proposal states
-  .hypothesisloop/Dockerfile        system packages and toolchains
-  README.md                         what is measured, how one trial runs, what to vary, what must not
-                                    change, with the experiment's name and what its proposal says is measured
-  metrics.py                        how a job reports a metric: post_metric(fraction_complete, value, "key")
-  .gitignore                        bytecode caches, virtual environments and editor files, kept out of a commit`
-
-func RepoInit(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := command.NewFlags("repo init", `usage: hl repo init [--platform-experiment PE]
-
-Run in a clone of the experiment's repository, on a branch under hl/PE/ and never the default
-branch (a baseline agent's is hl/PE/baseline). Writes the files every experiment repository
-holds, with what the platform holds of the experiment filled in, so none of it is typed:
-
-`+repoFiles+`
-
-The experiment file is always the platform's. Of the others a file that is there is kept, unless
-it is still the unfilled template or the clone's experiment file stated another experiment (a
-name or metrics that are not this one's, the test hl repo check applies): those belong to no
-work of yours and are replaced, and the old ones stay in git. A clone of the baseline of the run
-this one continues keeps its files: of that run only other metrics would be another experiment.
-What is left to write is marked REPLACE-WITH: the command of one trial and the README's account
-of the harness. On a repository with no branch yet it first pushes an empty commit as main, so
-that the default branch is main and no experiment's. Nothing else is committed: git add and
-commit on your branch, and hl job submit pushes it. hl repo check says what is left.
-Run again it changes nothing that is already written and says so, so it is safe to repeat. A
-failure says which step failed and what the platform or git answered, and writes nothing.
-Of the agents only the baseline runs it: every other one gets the files with the baseline's
-commit (hl hypothesis checkout ID).`, stderr)
-	pe := command.ExperimentFlag(fs)
-	if err := fs.Parse(args); err != nil {
-		return command.ParseExit(err)
-	}
-	if fs.NArg() != 0 {
-		return command.ParseExit(command.Misuse(fs, "hl repo init takes no argument"))
-	}
-	root, err := cloneRoot()
-	if err != nil {
-		return command.Fail(stderr, err)
-	}
-	id, err := command.NamedExperiment(fs, c, *pe)
-	if err != nil {
-		return command.ParseExit(err)
-	}
-	if err := baselineOnly(c, id); err != nil {
-		return command.Fail(stderr, fmt.Errorf("repo init: %w", err))
-	}
-	var experiment declaredExperiment
-	if err := c.Do("GET", "/platform-experiments/"+url.PathEscape(id), nil, &experiment); err != nil {
-		return command.Fail(stderr, fmt.Errorf("repo init: reading platform experiment %s: %w", id, err))
-	}
-	started, err := startDefaultBranch(root)
-	if err != nil {
-		return command.Fail(stderr, fmt.Errorf("repo init: %w. Nothing was written, and hl repo init can be run again", err))
-	}
-	if started {
-		fmt.Fprintf(stdout, "pushed %s: the repository had no branch, and its default branch is no experiment's\n", defaultBranch)
-	}
-	another, err := anotherExperiment(root, experiment)
-	if err != nil {
-		return command.Fail(stderr, fmt.Errorf("repo init: %w", err))
-	}
-	template := repotemplate.Files()
-	files, err := experimentFiles(template, experiment)
-	if err != nil {
-		return command.Fail(stderr, fmt.Errorf("repo init: %w", err))
-	}
-	written := started
-	for _, path := range sortedPaths(files) {
-		target := filepath.Join(root, filepath.FromSlash(path))
-		existing, err := os.ReadFile(target)
-		did := "replaced " + path + ": "
-		switch {
-		case errors.Is(err, os.ErrNotExist):
-			did = "added    " + path
-		case err != nil:
-			return command.Fail(stderr, err)
-		case string(existing) == files[path]:
-			did = ""
-		case path == repotemplate.ExperimentFile:
-			did += "it is written from platform experiment " + id
-		case another != "" && (path == repotemplate.JobSpec || path == repotemplate.Readme):
-			did += "the clone's experiment file " + another
-		case string(existing) == template[path]:
-			did += "it was the unfilled template"
-		default:
-			did = ""
-		}
-		if did == "" {
-			fmt.Fprintf(stdout, "kept     %s\n", path)
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return command.Fail(stderr, err)
-		}
-		if err := os.WriteFile(target, []byte(files[path]), 0o644); err != nil {
-			return command.Fail(stderr, err)
-		}
-		fmt.Fprintln(stdout, did)
-		written = true
-	}
-	if !written {
-		fmt.Fprintf(stdout, "already initialised for platform experiment %s: every file is there, as written before or as your work left it, and nothing was changed. hl repo check says what is left\n", id)
-		return 0
-	}
-	fmt.Fprintf(stdout, "initialised for platform experiment %s: git add and commit on your branch, and hl repo check says what is left\n", id)
-	return 0
-}
-
-// baselineOnly refuses an agent that is not the baseline of platform experiment pe: the baseline
-// writes the experiment's files once, and every other agent starts from its commit.
-func baselineOnly(c *apiclient.Client, pe string) error {
-	role, err := agentRole(c, pe)
-	if err != nil {
-		return err
-	}
-	if role != "" && role != platformapi.SignupRoleBaseline {
-		return fmt.Errorf("only the baseline agent writes the experiment's files, and your role is %s. Your files come with the baseline's commit: "+
-			"hl hypothesis checkout ID puts your clone on a branch made from it", role)
-	}
-	return nil
-}
 
 // agentRole is the role in pe of the agent the token is, empty for a caller that is no agent.
 func agentRole(c *apiclient.Client, pe string) (platformapi.SignupRole, error) {
@@ -165,163 +35,13 @@ func agentRole(c *apiclient.Client, pe string) (platformapi.SignupRole, error) {
 	return signup.Role, nil
 }
 
-// missingFileHint is how the caller gets a missing experiment file: hl repo init writes it for
-// the baseline and anyone who is no agent, and every other agent gets the baseline's.
+// missingFileHint is how the caller gets a missing experiment file: the baseline and anyone who
+// is no agent copy it from the experiment template, and every other agent gets the baseline's.
 func missingFileHint(role platformapi.SignupRole) string {
 	if role == "" || role == platformapi.SignupRoleBaseline {
-		return "hl repo init writes it"
+		return "the experiment template holds it, which hl repo init DIR puts in DIR to copy from"
 	}
 	return "it comes with the baseline's commit: hl hypothesis checkout ID puts your clone on a branch made from it"
-}
-
-// defaultBranch is the branch hl gives a repository that has none.
-const defaultBranch = "main"
-
-// startDefaultBranch gives an origin with no branch its default branch, an empty commit, and
-// starts the branch HEAD is on from it when that has no commit either. The first branch pushed
-// to an empty repository becomes its default one, which an experiment's branch must never be.
-func startDefaultBranch(root string) (bool, error) {
-	remotes, err := git(root, "remote")
-	if err != nil || !slices.Contains(strings.Fields(remotes), "origin") {
-		return false, err
-	}
-	heads, err := git(root, "ls-remote", "--heads", "origin")
-	if err != nil {
-		return false, originUnreached("reading the branches of origin", err)
-	}
-	if heads != "" {
-		return false, nil
-	}
-	tree, err := git(root, "mktree")
-	if err != nil {
-		return false, err
-	}
-	commit, err := git(root, "commit-tree", tree, "-m", "Start the repository")
-	if err != nil {
-		return false, err
-	}
-	if _, err := git(root, "push", "--quiet", "origin", commit+":refs/heads/"+defaultBranch); err != nil {
-		// Another init, or the platform, gave origin its first branch since it was read.
-		if heads, again := git(root, "ls-remote", "--heads", "origin"); again == nil && heads != "" {
-			return false, nil
-		}
-		return false, originUnreached("pushing an empty "+defaultBranch+" to origin", err)
-	}
-	if _, err := git(root, "rev-parse", "--verify", "--quiet", "HEAD"); err != nil {
-		if _, err := git(root, "update-ref", "HEAD", commit); err != nil {
-			return false, err
-		}
-	}
-	return true, nil
-}
-
-// originUnreached says which step of reaching origin failed, with what git answered. Where git
-// got no credential its last line blames a username prompt, and the reason is what hl
-// git-credential said above it.
-func originUnreached(step string, err error) error {
-	said := err.Error()
-	if strings.Contains(said, "git-credential") {
-		return fmt.Errorf("%s failed: git got no credential for origin, as hl git-credential says: %w", step, err)
-	}
-	return fmt.Errorf("%s failed: %w", step, err)
-}
-
-// anotherExperiment is how the experiment file of the clone at root states an experiment that
-// is not this one, "" when it states this one, nothing, or is not there.
-func anotherExperiment(root string, experiment declaredExperiment) (string, error) {
-	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(repotemplate.ExperimentFile)))
-	if errors.Is(err, os.ErrNotExist) {
-		return "", nil
-	}
-	if err != nil {
-		return "", err
-	}
-	file, err := experimentspec.Parse(data)
-	if err != nil || (strings.TrimSpace(file.Name) == "" && len(file.Metrics) == 0) {
-		return "", nil
-	}
-	return notOf(file, experiment), nil
-}
-
-// cpuType is the one accelerator_type of work on CPU cores, which a job spec leaves out.
-const cpuType = "hypothesisloop.dev/cpu=core"
-
-// The marks of the template that hl repo init fills from the platform experiment.
-const (
-	imageMark       = "REPLACE-WITH-A-JOB-IMAGE-NAME-HL-CAPACITY-LISTS"
-	acceleratorMark = "REPLACE-WITH-AN-ACCELERATOR-TYPE-HL-CAPACITY-LISTS"
-	nameMark        = "REPLACE-WITH-THE-NAME-OF-THE-EXPERIMENT"
-	measuredMark    = "REPLACE-WITH the ranked metric, why it is the goal, and the gate that makes a result wrong."
-	// What the template's job spec asks for one node, which a proposal that states them replaces.
-	cpuLine     = "  cpu: 2\n"
-	memoryLine  = "  memory: 8Gi\n"
-	storageLine = "  storage: 4Gi\n"
-	// acceleratorLines is what the job spec says of its accelerator, which work on cores has none of.
-	acceleratorLines = "  # Copied verbatim from `hl capacity`. Work that needs no accelerator deletes both lines, and\n" +
-		"  # its `cpu`, a whole number, is then the cores it holds and pays for.\n" +
-		"  accelerator_type: " + acceleratorMark + "\n" +
-		"  accelerator_count: 1\n"
-	onCores = "  # This experiment runs on CPU cores, so the job names no accelerator: its `cpu`, a whole\n" +
-		"  # number, is the cores it holds and pays for.\n"
-)
-
-// experimentFiles is the template with what the platform holds of experiment written in: the
-// experiment file whole, and in the job spec and the README what its proposal states. An
-// experiment created with no proposal leaves those two as the template has them.
-func experimentFiles(template map[string]string, experiment declaredExperiment) (map[string]string, error) {
-	files := map[string]string{}
-	for path, content := range template {
-		files[path] = content
-	}
-	stated, err := specYAML(experiment.spec())
-	if err != nil {
-		return nil, err
-	}
-	files[repotemplate.ExperimentFile] = "# Platform experiment " + experiment.ID + " as the platform holds it, written by hl repo init, with\n" +
-		"# the researchers it keeps at work now. hl platform-experiments start creates one from it.\n" + string(stated)
-	fill := func(path, mark, value string) error {
-		if value == "" {
-			return nil
-		}
-		if !strings.Contains(files[path], mark) {
-			return fmt.Errorf("the template's %s has no %q to fill in", path, mark)
-		}
-		files[path] = strings.Replace(files[path], mark, value, 1)
-		return nil
-	}
-	scalar := func(value string) string {
-		if value == "" {
-			return ""
-		}
-		quoted, _ := yaml.Marshal(value)
-		return strings.TrimSpace(string(quoted))
-	}
-	proposal := experiment.Proposal
-	quantity := func(name, stated string) string {
-		if stated == "" {
-			return ""
-		}
-		return "  " + name + ": " + stated + "\n"
-	}
-	fills := []struct{ path, mark, value string }{
-		{repotemplate.Readme, nameMark, strings.TrimSpace(experiment.Name)},
-		{repotemplate.JobSpec, imageMark, scalar(proposal.Image)},
-		{repotemplate.JobSpec, cpuLine, quantity("cpu", proposal.CPU)},
-		{repotemplate.JobSpec, memoryLine, quantity("memory", proposal.Memory)},
-		{repotemplate.JobSpec, storageLine, quantity("storage", proposal.Storage)},
-		{repotemplate.Readme, measuredMark, strings.TrimSpace(strings.TrimSpace(proposal.MetricReason) + "\n\n" + strings.TrimSpace(proposal.Measurement))},
-	}
-	if proposal.AcceleratorType == cpuType {
-		fills = append(fills, struct{ path, mark, value string }{repotemplate.JobSpec, acceleratorLines, onCores})
-	} else {
-		fills = append(fills, struct{ path, mark, value string }{repotemplate.JobSpec, acceleratorMark, scalar(proposal.AcceleratorType)})
-	}
-	for _, f := range fills {
-		if err := fill(f.path, f.mark, f.value); err != nil {
-			return nil, err
-		}
-	}
-	return files, nil
 }
 
 func RepoCheck(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
@@ -337,7 +57,7 @@ helper line is printed either way and fails nothing.
   experiment  .hypothesisloop/experiment.yaml is a valid experiment spec, as
               hl platform-experiments start checks one, and its name and metrics are the
               platform experiment's: a file left by another experiment of the repository
-              fails here, and hl repo init replaces it
+              fails here
   job-spec    .hypothesisloop/job.yaml states a job, its image, and its cpu, memory and
               storage as quantities, in each group of a grouped job, with no REPLACE-WITH
               left, no secret_env and no metadata.estimated_duration_hours: every job
@@ -346,14 +66,14 @@ helper line is printed either way and fails nothing.
               proposed with
   metrics     every metric the platform experiment declares is named, by its key, in a file
               of the clone besides those two: a job reports each under its key
-  helper      whether metrics.py, the Python helper hl repo init supplies, is there, and
+  helper      whether metrics.py, the Python helper of the experiment template, is there, and
               without it the request a job reports a metric with: a repository needs no
               helper to report
 
 Not checked: the README's text, the code the job spec runs or its baseline job, which the
 platform checks when the baseline is declared (hl platform-experiments update --baseline-job).
-hl repo init writes a missing file for the baseline; any other agent gets it with the baseline's
-commit (hl hypothesis checkout ID).`, stderr)
+The baseline copies a missing file from the experiment template, which hl repo init DIR puts in
+DIR; any other agent gets it with the baseline's commit (hl hypothesis checkout ID).`, stderr)
 	pe := command.ExperimentFlag(fs)
 	if err := fs.Parse(args); err != nil {
 		return command.ParseExit(err)
@@ -395,7 +115,7 @@ commit (hl hypothesis checkout ID).`, stderr)
 		}
 	}
 	helper := metricsHelperAbsent
-	if _, err := iofs.Stat(clone, repotemplate.MetricsHelper); err == nil {
+	if _, err := iofs.Stat(clone, experimentspec.MetricsHelper); err == nil {
 		helper = metricsHelperPresent
 	} else if !errors.Is(err, iofs.ErrNotExist) {
 		return command.Fail(stderr, err)
@@ -410,63 +130,21 @@ commit (hl hypothesis checkout ID).`, stderr)
 	return 0
 }
 
-// declaredExperiment is what a clone's files are held to and written from: the platform
-// experiment's spec, and of the proposal it was accepted from, when it has one, what a job spec
-// and a README repeat.
+// declaredExperiment is what a clone's files are held to: the platform experiment's spec, and
+// the image of the proposal it was accepted from, when it has one.
 type declaredExperiment struct {
 	experimentspec.Spec
 	ID string `json:"id"`
 	// Continues is the run this one carries on, whose files a clone of its baseline holds.
-	Continues   string `json:"continues"`
-	Coordinator *struct {
-		Model string `json:"model"`
-	} `json:"coordinator"`
-	Proposal struct {
-		AcceleratorType string `json:"accelerator_type"`
-		Image           string `json:"image"`
-		CPU             string `json:"cpu"`
-		Memory          string `json:"memory"`
-		Storage         string `json:"storage"`
-		MetricReason    string `json:"metric_reason"`
-		Measurement     string `json:"measurement"`
+	Continues string `json:"continues"`
+	Proposal  struct {
+		Image string `json:"image"`
 	} `json:"proposal"`
-}
-
-// spec is the experiment's spec as a file states it: its sandboxed coordinator's model is
-// coordinator_model.
-func (e declaredExperiment) spec() experimentspec.Spec {
-	spec := e.Spec
-	if e.Coordinator != nil {
-		spec.CoordinatorModel = e.Coordinator.Model
-	}
-	return spec
-}
-
-// specYAML is spec as YAML, its keys in the order of the spec and a description of several lines
-// a block.
-func specYAML(spec experimentspec.Spec) ([]byte, error) {
-	encoded, err := json.Marshal(spec)
-	if err != nil {
-		return nil, err
-	}
-	var doc yaml.Node
-	if err := yaml.Unmarshal(encoded, &doc); err != nil {
-		return nil, err
-	}
-	var block func(*yaml.Node)
-	block = func(n *yaml.Node) {
-		n.Style = 0
-		for _, child := range n.Content {
-			block(child)
-		}
-	}
-	block(&doc)
-	return yaml.Marshal(&doc)
 }
 
 // notOf is how file differs from experiment in what names an experiment, its name and its
 // metrics, "" when both are experiment's. It is the one test of a file left by another
-// experiment of the repository: hl repo check fails on it and hl repo init replaces by it. The
+// experiment of the repository: hl repo check fails on it. The
 // description is the brief, which changes as the run learns. A run that continues another starts
 // from that one's files under a name of its own, so only the metrics tell it apart.
 func notOf(file experimentspec.Spec, experiment declaredExperiment) string {
@@ -507,7 +185,7 @@ func stated(metrics []experimentspec.MetricDefinition) string {
 // namedInClone reports whether a file of the clone besides the README and the experiment file
 // contains text. It reads tracked and untracked files alike and none that .gitignore leaves out.
 func namedInClone(root, text string) (bool, error) {
-	cmd := exec.Command("git", "grep", "--untracked", "-q", "-F", "-e", text, "--", ".", ":(exclude)"+repotemplate.Readme, ":(exclude)"+repotemplate.ExperimentFile)
+	cmd := exec.Command("git", "grep", "--untracked", "-q", "-F", "-e", text, "--", ".", ":(exclude)"+experimentspec.Readme, ":(exclude)"+experimentspec.ExperimentFile)
 	cmd.Dir = root
 	err := cmd.Run()
 	var exit *exec.ExitError
@@ -521,17 +199,17 @@ func namedInClone(root, text string) (bool, error) {
 }
 
 const (
-	metricsHelperPresent = "helper: " + repotemplate.MetricsHelper + " is there: post_metric(fraction_complete, value, \"key\") reports a metric"
-	metricsHelperAbsent  = "helper: no " + repotemplate.MetricsHelper + ", which fails nothing: a job reports a metric with POST $HYPOTHESISLOOP_API_URL/experiments/$HYPOTHESISLOOP_EXPERIMENT_ID/metrics, Authorization: Bearer $HYPOTHESISLOOP_TOKEN, body {\"metric_name\", \"fraction_complete\", \"metric_value\"}"
+	metricsHelperPresent = "helper: " + experimentspec.MetricsHelper + " is there: post_metric(fraction_complete, value, \"key\") reports a metric"
+	metricsHelperAbsent  = "helper: no " + experimentspec.MetricsHelper + ", which fails nothing: a job reports a metric with POST $HYPOTHESISLOOP_API_URL/experiments/$HYPOTHESISLOOP_EXPERIMENT_ID/metrics, Authorization: Bearer $HYPOTHESISLOOP_TOKEN, body {\"metric_name\", \"fraction_complete\", \"metric_value\"}"
 )
 
 // metricNotSpelled says of a declared metric that no code of the clone spells its key out.
 func metricNotSpelled(key, id string) string {
-	return fmt.Sprintf("metrics: no file of the clone besides %s and %s spells out %s, a metric platform experiment %s declares, which fails nothing: code that builds its keys may still report it. A job reports each declared metric under its key, as in post_metric(fraction_complete, value, %q)", repotemplate.Readme, repotemplate.ExperimentFile, key, id, key)
+	return fmt.Sprintf("metrics: no file of the clone besides %s and %s spells out %s, a metric platform experiment %s declares, which fails nothing: code that builds its keys may still report it. A job reports each declared metric under its key, as in post_metric(fraction_complete, value, %q)", experimentspec.Readme, experimentspec.ExperimentFile, key, id, key)
 }
 
 func repoChecked(id string) string {
-	return "checked: the layout, each file's validity, and that " + repotemplate.ExperimentFile + " and " + repotemplate.JobSpec + " fit platform experiment " + id + ". Not checked: the README's text, the code the job spec runs and which metrics it reports."
+	return "checked: the layout, each file's validity, and that " + experimentspec.ExperimentFile + " and " + experimentspec.JobSpec + " fit platform experiment " + id + ". Not checked: the README's text, the code the job spec runs and which metrics it reports."
 }
 
 func cloneRoot() (string, error) {
@@ -542,15 +220,6 @@ func cloneRoot() (string, error) {
 	return root, nil
 }
 
-func sortedPaths(files map[string]string) []string {
-	paths := make([]string, 0, len(files))
-	for path := range files {
-		paths = append(paths, path)
-	}
-	slices.Sort(paths)
-	return paths
-}
-
 // notReady lists what the files of a clone lack in layout, validity and fit to experiment, each
 // under the name the checklist gives the item. missing says how the caller gets a missing file.
 func notReady(clone iofs.FS, experiment declaredExperiment, missing string) ([]string, error) {
@@ -559,9 +228,9 @@ func notReady(clone iofs.FS, experiment declaredExperiment, missing string) ([]s
 		name, path string
 		check      func([]byte) string
 	}{
-		{"readme", repotemplate.Readme, nil},
-		{"experiment", repotemplate.ExperimentFile, func(data []byte) string { return experimentGap(data, experiment) }},
-		{"job-spec", repotemplate.JobSpec, func(data []byte) string { return jobSpecGap(data, experiment) }},
+		{"readme", experimentspec.Readme, nil},
+		{"experiment", experimentspec.ExperimentFile, func(data []byte) string { return experimentGap(data, experiment) }},
+		{"job-spec", experimentspec.JobSpec, func(data []byte) string { return jobSpecGap(data, experiment) }},
 	} {
 		data, err := iofs.ReadFile(clone, item.path)
 		var gap string
@@ -572,8 +241,8 @@ func notReady(clone iofs.FS, experiment declaredExperiment, missing string) ([]s
 			return nil, err
 		case strings.TrimSpace(string(data)) == "":
 			gap = "is empty"
-		case strings.Contains(string(data), repotemplate.Placeholder):
-			gap = fmt.Sprintf("still has %d %s to fill in", strings.Count(string(data), repotemplate.Placeholder), repotemplate.Placeholder)
+		case strings.Contains(string(data), experimentspec.Placeholder):
+			gap = fmt.Sprintf("still has %d %s to fill in", strings.Count(string(data), experimentspec.Placeholder), experimentspec.Placeholder)
 		case item.check != nil:
 			gap = item.check(data)
 		}
@@ -593,10 +262,10 @@ func experimentGap(data []byte, experiment declaredExperiment) string {
 		err = file.Validate()
 	}
 	if err != nil {
-		return "is no valid experiment spec: " + strings.ReplaceAll(err.Error(), "\n", "; ") + ". hl repo init writes it from the platform experiment"
+		return "is no valid experiment spec: " + strings.ReplaceAll(err.Error(), "\n", "; ") + ": state the platform experiment's spec, which hl platform-experiments get answers"
 	}
 	if another := notOf(file, experiment); another != "" {
-		return another + ": the file is another experiment's, and hl repo init writes this one's"
+		return another + ": the file is another experiment's, state this one's"
 	}
 	return ""
 }

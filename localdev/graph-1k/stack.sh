@@ -128,7 +128,7 @@ render_settings() {
       -e "s|http://minio:9000|http://localhost:${STORE_PORT}|" \
       -e "s|^  identity_providers: \[\]$|  identity_providers: [{issuer: \"http://localhost/hypothesisloop-dev\", audience: hypothesisloop-dev, jwt_keys: [{kid: local-dev, kty: EC, alg: ES256, crv: P-256, x: \"${x}\", y: \"${y}\"}]}]|" \
       "${repo}/controlplane/settings/hypothesisloop.yaml" >"${STATE}/hypothesisloop.yaml"
-  printf '\ngit_host:\n  provider: plain\n  plain:\n    base_url: http://%s:%s\n    allow_http: true\n    username: hypothesisloop\n' \
+  printf '\ngit_host:\n  provider: plain\n  experiment_template_repository: experiment-template.git\n  plain:\n    base_url: http://%s:%s\n    allow_http: true\n    username: hypothesisloop\n' \
     "${HOST}" "${GIT_PORT}" >>"${STATE}/hypothesisloop.yaml"
   if grep -q 'REPLACE-WITH\|:8081\|:8084\|greptimedb:\|memgraph:\|minio:' "${STATE}/hypothesisloop.yaml"; then
     echo "stack: the settings file changed shape; these lines still name the dev stack or a placeholder:" >&2

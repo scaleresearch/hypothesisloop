@@ -16,10 +16,9 @@ PLACEHOLDERS = (HL_COMMANDS, WORKDIR)
 
 # Each role reads hl's listing, which holds the rules every command shares, and the help of the
 # commands it acts with; it reads the help of any other when it runs one. A planner runs nothing,
-# so the listing is not for it: it is shown its two commands and what hl repo init will write
-# from its proposal.
+# so the listing is not for it: it is shown its two commands.
 _HL_HELP = ([], ["hypothesis", "submit"])
-_HL_HELP_PLANNER = (["platform-experiments", "propose"], ["platform-experiments", "decline"], ["repo", "init"])
+_HL_HELP_PLANNER = (["platform-experiments", "propose"], ["platform-experiments", "decline"])
 _HL_HELP_BASELINE = ([], ["job", "submit"], ["job", "summary"], ["platform-experiments", "agents", "finish"])
 _HL_HELP_COORDINATOR = ([], ["platform-experiments", "update"], ["platform-experiments", "summary"],
                         ["platform-experiments", "close"], ["platform-experiments", "agents", "add"],

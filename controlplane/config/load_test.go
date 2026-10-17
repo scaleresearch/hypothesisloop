@@ -16,7 +16,7 @@ var committedConfig = filepath.Join("..", "settings", "hypothesisloop.yaml")
 // productionConfig is the committed settings file as a deployment renders it: with its git host.
 func productionConfig(t *testing.T) string {
 	t.Helper()
-	return withoutGitHost(t) + "\ngit_host:\n  provider: plain\n  plain:\n    base_url: https://git.example.invalid\n"
+	return withoutGitHost(t) + "\ngit_host:\n  provider: plain\n  experiment_template_repository: experiment-template.git\n  plain:\n    base_url: https://git.example.invalid\n"
 }
 
 // withoutGitHost is the rendered settings file before the deployment's git host is added.
@@ -315,19 +315,20 @@ func TestLoadRejectsAnIncompleteAccountsSection(t *testing.T) {
 const githubSection = `
 git_host:
   provider: github
+  experiment_template_repository: scaleresearch/hypothesisloop-experiment-template
   github:
     app_id: 4242
     app_slug: hypothesisloop
 `
 
 func TestLoadTakesOneGitHostAndRefusesAHalfStatedOne(t *testing.T) {
-	const plain = "\ngit_host:\n  provider: plain\n  plain:\n    base_url: https://git.example/experiments\n"
+	const plain = "\ngit_host:\n  provider: plain\n  experiment_template_repository: experiment-template.git\n  plain:\n    base_url: https://git.example/experiments\n"
 	const account = "    username: platform\n"
 	const app = "  github:\n    app_id: 4242\n    app_slug: hypothesisloop\n"
 	for name, section := range map[string]string{
 		"a plain host that asks for no credential": plain,
 		"a plain host with an account":             plain + account,
-		"a plain host over http that says so":      "\ngit_host:\n  provider: plain\n  plain:\n    base_url: http://git.example\n    allow_http: true\n",
+		"a plain host over http that says so":      "\ngit_host:\n  provider: plain\n  experiment_template_repository: experiment-template.git\n  plain:\n    base_url: http://git.example\n    allow_http: true\n",
 		"github with its App":                      githubSection,
 	} {
 		if err := loadText(t, withoutGitHost(t)+section); err != nil {
@@ -350,9 +351,9 @@ func TestLoadTakesOneGitHostAndRefusesAHalfStatedOne(t *testing.T) {
 		"github with a plain section": githubSection + "  plain:\n    base_url: https://git.example\n",
 		"plain beside a GitHub App":   plain + app,
 		"plain with no section":       "\ngit_host:\n  provider: plain\n",
-		"plain with no base_url":      "\ngit_host:\n  provider: plain\n  plain:\n    allow_http: false\n",
-		"plain over http":             "\ngit_host:\n  provider: plain\n  plain:\n    base_url: http://git.example\n",
-		"plain over another scheme":   "\ngit_host:\n  provider: plain\n  plain:\n    base_url: git://git.example\n    allow_http: true\n",
+		"plain with no base_url":      "\ngit_host:\n  provider: plain\n  experiment_template_repository: experiment-template.git\n  plain:\n    allow_http: false\n",
+		"plain over http":             "\ngit_host:\n  provider: plain\n  experiment_template_repository: experiment-template.git\n  plain:\n    base_url: http://git.example\n",
+		"plain over another scheme":   "\ngit_host:\n  provider: plain\n  experiment_template_repository: experiment-template.git\n  plain:\n    base_url: git://git.example\n    allow_http: true\n",
 		"plain with a password":       plain + account + "    password: secret\n",
 		"the old github section":      "\ngithub:\n  app_id: 4242\ngit:\n  provider: github\n",
 		"a proxy_url":                 strings.Replace(plain, "git_host:\n", "git_host:\n  proxy_url: https://api.example.invalid/git\n", 1),

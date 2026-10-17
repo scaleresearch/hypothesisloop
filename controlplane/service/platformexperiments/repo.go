@@ -2,6 +2,7 @@ package platformexperiments
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -10,7 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
-	"github.com/scaleresearch/hypothesisloop/contract/repotemplate"
+	"github.com/scaleresearch/hypothesisloop/controlplane/clients/githost"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 )
@@ -64,7 +65,7 @@ func (s *Service) chooseRepository(ctx context.Context, projectID, named, accoun
 }
 
 // ProvideRepositories creates the repository of every platform experiment and draft that awaits
-// one, from the template, and records it, from which its machines are started. One whose
+// one, from the experiment template, and records it, from which its machines are started. One whose
 // repository the git host does not create is closed repository_not_created with what the host
 // answered.
 func (s *Service) ProvideRepositories(ctx context.Context) error {
@@ -74,7 +75,13 @@ func (s *Service) ProvideRepositories(ctx context.Context) error {
 	}
 	for _, one := range pending {
 		pe := &domain.PlatformExperiment{ID: one.ID, Name: one.Name}
-		created, err := s.repos.Create(ctx, one.ProjectID, one.Account, RepositoryName(pe), "Platform experiment "+pe.ID+": "+pe.Name, repotemplate.Files())
+		repository := one.Account + "/" + RepositoryName(pe)
+		created, err := s.repos.Create(ctx, one.ProjectID, repository, "Platform experiment "+pe.ID+": "+pe.Name)
+		// The name carries the experiment's id, so one that exists is what an earlier pass created
+		// and a restart left unrecorded.
+		if refusal.ReasonOf(err) == "repository_exists" {
+			created, err = s.repos.Reachable(ctx, one.ProjectID, repository)
+		}
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -141,7 +148,7 @@ func (s *Service) repositoryOf(ctx context.Context, projectID, repository, accou
 	return s.repos.Reachable(ctx, projectID, repository)
 }
 
-// ExperimentFile is the spec a repository keeps at experimentspec.File, which a form shows before
+// ExperimentFile is the spec a repository keeps at experimentspec.ExperimentFile, which a form shows before
 // anything is created.
 type ExperimentFile struct {
 	experimentspec.Spec
@@ -155,13 +162,16 @@ func (s *Service) ReadExperimentFile(ctx context.Context, projectID, repository 
 	if err != nil {
 		return nil, err
 	}
-	data, err := s.repos.File(ctx, projectID, named, experimentspec.File)
+	data, err := s.repos.File(ctx, projectID, named, "", experimentspec.ExperimentFile)
+	if errors.Is(err, githost.ErrFileNotFound) {
+		return nil, refusal.Refuse(http.StatusUnprocessableEntity, "no_experiment_file", named+" has no "+experimentspec.ExperimentFile)
+	}
 	if err != nil {
 		return nil, err
 	}
 	spec, err := experimentspec.Parse(data)
 	if err != nil {
-		return nil, refusal.Refuse(http.StatusUnprocessableEntity, "invalid_experiment_file", experimentspec.File+" of "+named+" cannot be used: "+err.Error())
+		return nil, refusal.Refuse(http.StatusUnprocessableEntity, "invalid_experiment_file", experimentspec.ExperimentFile+" of "+named+" cannot be used: "+err.Error())
 	}
 	return &ExperimentFile{Repository: named, Spec: spec}, nil
 }

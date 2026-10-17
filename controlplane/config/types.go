@@ -430,11 +430,13 @@ const (
 )
 
 // GitHostConfig is the one git host platform experiments keep their code on: Provider names it,
-// and the section of that name, the only one set, configures it.
+// and the section of that name, the only one set, configures it. ExperimentTemplateRepository is
+// the repository on that host every repository the platform creates starts from.
 type GitHostConfig struct {
-	Provider string          `yaml:"provider"`
-	GitHub   *GitHubConfig   `yaml:"github"`
-	Plain    *PlainGitConfig `yaml:"plain"`
+	Provider                     string          `yaml:"provider"`
+	ExperimentTemplateRepository string          `yaml:"experiment_template_repository"`
+	GitHub                       *GitHubConfig   `yaml:"github"`
+	Plain                        *PlainGitConfig `yaml:"plain"`
 }
 
 // GitHubConfig is the GitHub App a project's repository is reached through, whose private key

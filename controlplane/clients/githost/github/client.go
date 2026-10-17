@@ -73,9 +73,6 @@ var (
 	ErrCannotCreateRepositories = errors.New("the installation does not let the GitHub App create repositories")
 	// ErrRepositoryExists reports that the account already holds a repository of that name.
 	ErrRepositoryExists = errors.New("the GitHub account already has a repository of that name")
-	// ErrNotFresh reports a repository that holds more than the one commit GitHub makes for a
-	// repository it creates.
-	ErrNotFresh = errors.New("the repository holds commits beyond the one GitHub made at its creation")
 )
 
 // NotCoveredError reports a repository that was created and that the installation, which covers
@@ -91,20 +88,6 @@ func (e *NotCoveredError) Error() string {
 }
 
 func (e *NotCoveredError) Unwrap() error { return e.Cause }
-
-// FirstCommitError reports a repository that was created and did not take its first commit. It
-// is left on the account holding what GitHub starts one with: the App creates repositories and
-// deletes none.
-type FirstCommitError struct {
-	Repository string
-	Cause      error
-}
-
-func (e *FirstCommitError) Error() string {
-	return "github: " + e.Repository + " was created and did not take its first commit: " + e.Cause.Error()
-}
-
-func (e *FirstCommitError) Unwrap() error { return e.Cause }
 
 // NotAsAskedError reports a repository GitHub created that is not the private one asked for on
 // the installation's account: it is public, or on another account, as when the person's token is
@@ -496,6 +479,8 @@ func (c *Client) request(ctx context.Context, method, path, authorization string
 		accepted: bounded(resp.Header.Get("X-Accepted-GitHub-Permissions")),
 		detail:   fmt.Sprintf("github: %s %s answered %d: %s", method, routeOf(path), resp.StatusCode, bounded(answer.Message)),
 	}
+	// GitHub says it in its message or in an error of the field.
+	refused.nameExists = strings.Contains(answer.Message, "already exists")
 	for _, one := range answer.Errors {
 		if one.Field == "name" && strings.Contains(one.Message, "already exists") {
 			refused.nameExists = true

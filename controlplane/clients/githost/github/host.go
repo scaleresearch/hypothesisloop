@@ -18,8 +18,8 @@ import (
 type AppClient interface {
 	Token(ctx context.Context, installationID int64, fullName string, access Access) (*Token, error)
 	File(ctx context.Context, token *Token, ref, path string) ([]byte, error)
-	CreateRepository(ctx context.Context, installationID int64, name, description string, files map[string]string) (*Repository, error)
-	StartFresh(ctx context.Context, token *Token, files map[string]string) error
+	CreateFromTemplate(ctx context.Context, installationID int64, template, name, description string) (*Repository, error)
+	HasBranch(ctx context.Context, token *Token, branch string) (bool, error)
 	Installation(ctx context.Context, installationID int64) (*Installation, error)
 }
 
@@ -32,20 +32,22 @@ type InstallationStore interface {
 }
 
 // Host is GitHub as the git host: a repository is owner/name, reached through the installation
-// of the platform's App that the org of the project connected on its owner.
+// of the platform's App that the org of the project connected on its owner. template is the
+// public template repository every repository it creates is generated from.
 type Host struct {
-	store  InstallationStore
-	app    AppClient
-	logger *zap.Logger
+	store    InstallationStore
+	app      AppClient
+	template string
+	logger   *zap.Logger
 }
 
 var _ githost.Provider = (*Host)(nil)
 
-func NewHost(store InstallationStore, app AppClient, logger *zap.Logger) *Host {
-	if store == nil || app == nil || logger == nil {
-		panic("github.NewHost: the store, the App's client and a logger are required")
+func NewHost(store InstallationStore, app AppClient, template string, logger *zap.Logger) *Host {
+	if store == nil || app == nil || template == "" || logger == nil {
+		panic("github.NewHost: the store, the App's client, the experiment template and a logger are required")
 	}
-	return &Host{store: store, app: app, logger: logger}
+	return &Host{store: store, app: app, template: template, logger: logger}
 }
 
 func (h *Host) URL(repository string) string { return CloneURL(repository) }
@@ -88,52 +90,24 @@ func (h *Host) Reachable(ctx context.Context, projectID, repository string) (str
 	return token.Repository, nil
 }
 
-// Create makes a private repository on the GitHub account named, one the org of the project
-// connected, or with none named on the org's only or default account. files are its first
-// commit.
-func (h *Host) Create(ctx context.Context, projectID, account, name, description string, files map[string]string) (string, error) {
+// Create generates the repository, owner/name, from the experiment template on owner, a GitHub
+// account the org of the project connected, and returns it as GitHub names it.
+func (h *Host) Create(ctx context.Context, projectID, repository, description string) (string, error) {
 	const op = "create-repository"
-	orgID, chosen, err := h.createsOn(ctx, projectID, account)
+	if err := ValidRepository(repository); err != nil {
+		return "", Refusal(h.logger, op, err, http.StatusUnprocessableEntity)
+	}
+	owner, name, _ := strings.Cut(repository, "/")
+	orgID, chosen, err := h.createsOn(ctx, projectID, owner)
 	if err != nil {
 		return "", err
 	}
-	created, err := h.app.CreateRepository(ctx, chosen.InstallationID, name, description, files)
-	if errors.Is(err, ErrRepositoryExists) {
-		if adopted, ours := h.madeHere(ctx, chosen, name, files); ours {
-			h.logger.Info("repository found as created before, adopted", zap.String("repository", adopted), zap.String("orgID", orgID))
-			return adopted, nil
-		}
-	}
+	created, err := h.app.CreateFromTemplate(ctx, chosen.InstallationID, h.template, name, description)
 	if err != nil {
 		return "", Refusal(h.logger, op, err, http.StatusUnprocessableEntity)
 	}
-	h.logger.Info("repository created for a platform experiment", zap.String("repository", created.FullName), zap.String("orgID", orgID))
+	h.logger.Info("repository created from the experiment template", zap.String("repository", created.FullName), zap.String("orgID", orgID))
 	return created.FullName, nil
-}
-
-// madeHere says the repository of that name on the chosen account is the one an earlier Create
-// with the same files made, which a restart left unrecorded, and returns it as GitHub names it.
-// The installation reaches it, and it holds the template's experiment file or nothing but the
-// commit GitHub made at its creation, the first commit not written yet: then files are written
-// into it now. The name carries the platform experiment's id, so such a repository is no one
-// else's.
-func (h *Host) madeHere(ctx context.Context, chosen *domain.OrgGitHubInstallation, name string, files map[string]string) (string, bool) {
-	token, err := h.app.Token(ctx, chosen.InstallationID, chosen.AccountLogin+"/"+name, Write)
-	if err != nil {
-		return "", false
-	}
-	data, err := h.app.File(ctx, token, "", domain.ExperimentFile)
-	switch {
-	case err == nil:
-		return token.Repository, string(data) == files[domain.ExperimentFile]
-	case errors.Is(err, ErrFileNotFound):
-		if err := h.app.StartFresh(ctx, token, files); err != nil {
-			h.logger.Warn("a repository of the experiment's name is not the one created for it", zap.String("repository", token.Repository), zap.Error(err))
-			return "", false
-		}
-		return token.Repository, true
-	}
-	return "", false
 }
 
 // CreatesOn is what Create checks before it creates: what passes here is created unless GitHub
@@ -216,17 +190,21 @@ func unusable(err error) bool {
 	return errors.Is(err, ErrInstallationGone) || errors.Is(err, ErrPermissionNotGranted)
 }
 
-func (h *Host) File(ctx context.Context, projectID, repository, path string) ([]byte, error) {
-	const op = "read-repository-file"
+func (h *Host) File(ctx context.Context, projectID, repository, ref, path string) ([]byte, error) {
+	return h.FileAt(ctx, projectID, repository, ref, path)
+}
+
+func (h *Host) HasBranch(ctx context.Context, projectID, repository, branch string) (bool, error) {
+	const op = "read-repository-branch"
 	token, err := h.token(ctx, projectID, repository, Read)
 	if err != nil {
-		return nil, Refusal(h.logger, op, err, http.StatusUnprocessableEntity)
+		return false, Refusal(h.logger, op, err, http.StatusUnprocessableEntity)
 	}
-	data, err := h.app.File(ctx, token, "", path)
+	exists, err := h.app.HasBranch(ctx, token, branch)
 	if err != nil {
-		return nil, Refusal(h.logger, op, err, http.StatusUnprocessableEntity)
+		return false, Refusal(h.logger, op, err, http.StatusUnprocessableEntity)
 	}
-	return data, nil
+	return exists, nil
 }
 
 func (h *Host) FileAt(ctx context.Context, projectID, repository, ref, path string) ([]byte, error) {

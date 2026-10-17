@@ -31,8 +31,8 @@ func inEnvironment(t *testing.T, text string) {
 }
 
 const (
-	githubHost   = "\ngit_host:\n  provider: github\n  github:\n    app_id: 4242\n    app_slug: hypothesisloop\n"
-	plainAccount = "\ngit_host:\n  provider: plain\n  plain:\n    base_url: https://git.example.invalid\n    username: platform\n"
+	githubHost   = "\ngit_host:\n  provider: github\n  experiment_template_repository: scaleresearch/hypothesisloop-experiment-template\n  github:\n    app_id: 4242\n    app_slug: hypothesisloop\n"
+	plainAccount = "\ngit_host:\n  provider: plain\n  experiment_template_repository: experiment-template.git\n  plain:\n    base_url: https://git.example.invalid\n    username: platform\n"
 	rents        = "\nsandbox:\n  name: main\n  reconcile_interval_seconds: 5\n  create_pause_milliseconds: 0\n  provider:\n    name: fly\n    settings: {}\n" +
 		"  instance:\n    command: [run]\n    cpu: \"1\"\n    memory: 1Gi\n    storage: 1Gi\n" +
 		"cloud_compute:\n" + cluster

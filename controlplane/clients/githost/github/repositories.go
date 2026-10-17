@@ -2,17 +2,15 @@ package github
 
 import (
 	"context"
-	_ "embed"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"net/http"
 	"net/url"
 	"regexp"
-	"slices"
 	"strings"
+	"time"
 )
 
 // Repository is a repository an installation covers, named owner/name in GitHub's own casing.
@@ -43,28 +41,22 @@ func CloneURL(fullName string) string {
 
 var newRepositoryName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,100}$`)
 
-// CreateRepository creates a private repository of that name on the account an installation is
-// on, whose default branch holds one commit: files, by path. The installation creates it with a
-// token that holds everything it granted: on an organisation through the organisation's
-// repositories, on a person's own account through "the authenticated user's", which GitHub
-// documents as taking an installation token with Administration (write). The token does not
-// leave here.
-func (c *Client) CreateRepository(ctx context.Context, installationID int64, name, description string, files map[string]string) (*Repository, error) {
+// CreateFromTemplate creates a private repository of that name on the account an installation is
+// on, generated from template, a public template repository named owner/name: its default branch
+// holds one commit of the template's files. It returns once that branch exists. The installation
+// creates it with a token that holds everything it granted, which does not leave here.
+func (c *Client) CreateFromTemplate(ctx context.Context, installationID int64, template, name, description string) (*Repository, error) {
 	if !newRepositoryName.MatchString(name) || name == "." || name == ".." {
 		return nil, ErrInvalidRepository
 	}
-	if len(files) == 0 {
-		return nil, fmt.Errorf("github: a repository is created with the files of its first commit")
+	if err := ValidRepository(template); err != nil {
+		return nil, fmt.Errorf("github: the experiment template %q is not owner/name", template)
 	}
 	installation, err := c.Installation(ctx, installationID)
 	if err != nil {
 		return nil, err
 	}
 	owner := installation.AccountLogin
-	path := "/orgs/" + url.PathEscape(owner) + "/repos"
-	if installation.AccountType == AccountUser {
-		path = "/user/repos"
-	}
 	// GitHub documents no name by which a token is narrowed to creating repositories, so the
 	// token is asked for whole.
 	token, err := c.mint(ctx, installationID, map[string]any{})
@@ -77,9 +69,8 @@ func (c *Client) CreateRepository(ctx context.Context, installationID int64, nam
 		Private       bool   `json:"private"`
 		DefaultBranch string `json:"default_branch"`
 	}
-	// GitHub writes no tree to a repository with no commit, so it makes the first one itself
-	// and firstCommit takes its place.
-	body := map[string]any{"name": name, "description": description, "private": true, "auto_init": true}
+	path := "/repos/" + template + "/generate"
+	body := map[string]any{"owner": owner, "name": name, "description": description, "private": true}
 	var refused *rejection
 	switch err := c.call(ctx, http.MethodPost, path, token.Token, body, &out); {
 	case errors.Is(err, ErrRateLimited):
@@ -93,75 +84,55 @@ func (c *Client) CreateRepository(ctx context.Context, installationID int64, nam
 	case err != nil:
 		return nil, failedFor(installationID, err)
 	}
-	if out.ID <= 0 || ValidRepository(out.FullName) != nil {
-		return nil, fmt.Errorf("github: POST %s answered without the repository it created", path)
+	if out.ID <= 0 || ValidRepository(out.FullName) != nil || out.DefaultBranch == "" {
+		return nil, fmt.Errorf("github: POST %s answered without the repository it created", routeOf(path))
 	}
 	if !out.Private || !strings.EqualFold(out.FullName, owner+"/"+name) {
 		return nil, &NotAsAskedError{Repository: out.FullName}
 	}
-	write, err := c.Token(ctx, installationID, out.FullName, Write)
+	read, err := c.Token(ctx, installationID, out.FullName, Read)
 	if errors.Is(err, ErrRepositoryNotInstalled) {
 		return nil, &NotCoveredError{Repository: out.FullName, Cause: err}
 	}
 	if err != nil {
-		return nil, &FirstCommitError{Repository: out.FullName, Cause: err}
+		return nil, err
 	}
-	if err := c.firstCommit(ctx, write, out.DefaultBranch, files); err != nil {
-		return nil, &FirstCommitError{Repository: out.FullName, Cause: err}
+	// GitHub copies the template's files after it answers, and the branch exists once it has.
+	for wait := time.Duration(0); ; wait = time.Second {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(wait):
+		}
+		exists, err := c.HasBranch(ctx, read, out.DefaultBranch)
+		if err != nil {
+			return nil, err
+		}
+		if exists {
+			return &Repository{FullName: out.FullName, Private: true}, nil
+		}
 	}
-	return &Repository{FullName: out.FullName, Private: true}, nil
 }
 
-// StartFresh makes files the only commit of the token's repository, a write token's, when it
-// holds nothing but the commit GitHub made when it was created: what a CreateRepository cut off
-// before its first commit leaves. ErrNotFresh for one that holds anything more.
-func (c *Client) StartFresh(ctx context.Context, token *Token, files map[string]string) error {
-	var repository struct {
-		DefaultBranch string `json:"default_branch"`
+// HasBranch says whether the token's repository has a branch of that name.
+func (c *Client) HasBranch(ctx context.Context, token *Token, branch string) (bool, error) {
+	err := c.call(ctx, http.MethodGet, "/repos/"+token.Repository+"/branches/"+escapedPath(branch), token.Value, nil, nil)
+	switch {
+	case errors.Is(err, errNotFound):
+		return false, nil
+	case err != nil:
+		return false, failedFor(token.installation, err)
 	}
-	if err := c.call(ctx, http.MethodGet, "/repos/"+token.Repository, token.Value, nil, &repository); err != nil {
-		return failedFor(token.installation, err)
-	}
-	var commits []struct {
-		Parents []struct {
-			SHA string `json:"sha"`
-		} `json:"parents"`
-	}
-	path := "/repos/" + token.Repository + "/commits?per_page=2&sha=" + url.QueryEscape(repository.DefaultBranch)
-	if err := c.call(ctx, http.MethodGet, path, token.Value, nil, &commits); err != nil {
-		return failedFor(token.installation, err)
-	}
-	if len(commits) != 1 || len(commits[0].Parents) != 0 {
-		return ErrNotFresh
-	}
-	return failedFor(token.installation, c.firstCommit(ctx, token, repository.DefaultBranch, files))
+	return true, nil
 }
 
-// firstCommit makes files the only commit of a branch the token's repository has: a tree, a
-// commit of it with no parent, and the branch moved there whatever it held.
-func (c *Client) firstCommit(ctx context.Context, token *Token, branch string, files map[string]string) error {
-	if branch == "" {
-		return fmt.Errorf("github: %s names no default branch", token.Repository)
+// escapedPath is a path of segments, each escaped for a URL.
+func escapedPath(path string) string {
+	segments := strings.Split(path, "/")
+	for i, segment := range segments {
+		segments[i] = url.PathEscape(segment)
 	}
-	entries := make([]map[string]string, 0, len(files))
-	for _, path := range slices.Sorted(maps.Keys(files)) {
-		entries = append(entries, map[string]string{"path": path, "mode": "100644", "type": "blob", "content": files[path]})
-	}
-	git := "/repos/" + token.Repository + "/git/"
-	var tree, commit struct {
-		SHA string `json:"sha"`
-	}
-	if err := c.call(ctx, http.MethodPost, git+"trees", token.Value, map[string]any{"tree": entries}, &tree); err != nil {
-		return err
-	}
-	made := map[string]any{"message": "Start from the HypothesisLoop experiment template", "tree": tree.SHA, "parents": []string{}}
-	if err := c.call(ctx, http.MethodPost, git+"commits", token.Value, made, &commit); err != nil {
-		return err
-	}
-	if tree.SHA == "" || commit.SHA == "" {
-		return fmt.Errorf("github: %s answered a tree or a commit without its sha", token.Repository)
-	}
-	return c.call(ctx, http.MethodPatch, git+"refs/heads/"+branch, token.Value, map[string]any{"sha": commit.SHA, "force": true}, nil)
+	return strings.Join(segments, "/")
 }
 
 // File reads one file of a repository with a token minted for it, at ref, a branch name or a

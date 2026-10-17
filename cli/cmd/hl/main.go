@@ -107,7 +107,7 @@ func init() {
 			{Name: "run", About: "-- COMMAND: run COMMAND here inside the staged image", Run: agent.EnvRun},
 		}},
 		{Name: "repo", About: "the files every experiment's repository holds", Subs: []command.Command{
-			{Name: "init", About: "write the experiment's files into this clone from what the platform holds", Run: agent.RepoInit},
+			{Name: "init", About: "put the experiment template in a new directory", Run: people.RepoInit},
 			{Name: "check", About: "check that this clone holds the experiment files, each valid and fitting the platform experiment", Run: agent.RepoCheck},
 		}},
 		{Name: "org", Subs: []command.Command{
