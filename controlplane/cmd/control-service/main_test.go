@@ -58,7 +58,9 @@ func testRouter(t *testing.T) chi.Router {
 	launch := platformexperiments.AgentLaunch{AgentSandbox: true, DefaultModel: "model", CoordinatorModel: "model", SigningSecret: "secret", MaxAgentSandboxes: 1}
 	platformExperiments := platformexperiments.NewService(nil, domain.QuotaConfig{}, zap.NewNop(), nil, time.Minute).WithRepositories(noRepositories{}).
 		WithPlanning(platformexperiments.Planning{Limit: time.Minute, ProposedFor: time.Minute, PlannerKept: time.Minute}).WithAgentLaunch(launch)
-	modelProxy, err := modelproxy.New(noneInAgentSandbox{}, metricsdb.New(""), "https://model.example.invalid", "credential", zap.NewNop())
+	modelProxy, err := modelproxy.New(noneInAgentSandbox{}, metricsdb.New(""), platformExperiments,
+		modelproxy.Policy{Models: domain.ModelCatalog{"model": {InputUSDPerMTok: 1, OutputUSDPerMTok: 1, CacheWriteUSDPerMTok: 1, CacheReadUSDPerMTok: 1}}, MaxInFlightPerOrg: 1},
+		"https://model.example.invalid", "credential", zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}

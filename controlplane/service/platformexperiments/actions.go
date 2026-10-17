@@ -18,9 +18,9 @@ func fieldsIn(status domain.PlatformExperimentStatus) []string {
 	switch status {
 	case domain.PlatformExpOpen:
 		return []string{"name", "description", "budget_accelerator_hours", "max_agents", "researchers", "max_concurrent_accelerators",
-			"metrics", "report_interval_seconds", "starts_at", "duration_hours", "baseline_job_id", "baseline_reason"}
+			"metrics", "report_interval_seconds", "starts_at", "duration_hours", "baseline_job_id", "baseline_reason", "model_budget_usd"}
 	case domain.PlatformExpRunning:
-		return []string{"name", "description", "duration_hours", "max_agents", "researchers", "baseline_job_id", "baseline_reason"}
+		return []string{"name", "description", "duration_hours", "max_agents", "researchers", "baseline_job_id", "baseline_reason", "model_budget_usd"}
 	}
 	return nil
 }

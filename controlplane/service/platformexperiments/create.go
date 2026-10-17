@@ -106,6 +106,9 @@ func (s *Service) validate(req CreatePlatformExperimentRequest, catalog domain.A
 	if err := problems.Add(s.checkLength(req.DurationHours)); err != nil {
 		return req, err
 	}
+	if b := req.ModelBudgetUSD; b != nil && (*b <= 0 || *b > s.cfg.MaxModelBudgetUSD) {
+		problems = append(problems, refusal.Refuse(422, domain.ReasonModelBudgetTooHigh, fmt.Sprintf("model_budget_usd %g is not above 0 and at most %g (quota.max_model_budget_usd): leave it out for the platform's default of %g", *b, s.cfg.MaxModelBudgetUSD, s.cfg.DefaultModelBudgetUSD)).On("model_budget_usd"))
+	}
 	return req, problems.Err()
 }
 
@@ -198,6 +201,7 @@ func (s *Service) Create(ctx context.Context, req CreatePlatformExperimentReques
 		CurrentStage:              1,
 		DefaultQuotaTier:          req.DefaultQuotaTier,
 		MaxConcurrentAccelerators: req.MaxConcurrentAccelerators,
+		ModelBudgetUSD:            req.ModelBudgetUSD,
 		CreatedAt:                 now,
 		UpdatedAt:                 now,
 		CoordinatorInAgentSandbox: req.CoordinatorInAgentSandbox,

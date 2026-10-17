@@ -89,6 +89,9 @@ func main() {
 		MaxRAMGBPerJob:                   pcfg.Quota.MaxRAMGBPerJob,
 		MaxStorageGBPerJob:               pcfg.Quota.MaxStorageGBPerJob,
 		DefaultMaxConcurrentAccelerators: pcfg.Quota.DefaultMaxConcurrentAccelerators,
+		DefaultModelBudgetUSD:            pcfg.Quota.DefaultModelBudgetUSD,
+		MaxModelBudgetUSD:                pcfg.Quota.MaxModelBudgetUSD,
+		ModelCatalog:                     pcfg.Models.Catalog,
 	}
 
 	// One root context for every background loop, cancelled before the HTTP server drains.

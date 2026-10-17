@@ -13,6 +13,8 @@ import (
 var Settings = domain.QuotaConfig{
 	DefaultStages: []domain.Stage{{LengthPct: 100}}, DefaultReportIntervalSeconds: 30,
 	DefaultQuotaTier: domain.QuotaTierGuaranteed, MaxRunLength: 30 * 24 * time.Hour, BaselineLimit: 90 * time.Minute, MinBaseline: 20 * time.Minute,
+	DefaultModelBudgetUSD: 50, MaxModelBudgetUSD: 500,
+	ModelCatalog: domain.ModelCatalog{"model-default": {InputUSDPerMTok: 2, OutputUSDPerMTok: 10, CacheWriteUSDPerMTok: 4, CacheReadUSDPerMTok: 0.2}},
 }
 
 // NoUsage is the address of a metrics store that answers every query with no usage.

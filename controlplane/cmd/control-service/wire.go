@@ -81,7 +81,8 @@ func newAPIServer(runCtx context.Context, gate apiGate, repos *accounts.Reposito
 	watchHandler := watch.NewHandler(store, graph, store, gate.access, logger)
 	watchHandler.Start(runCtx)
 
-	modelProxy, err := modelproxy.New(store, metrics,
+	modelProxy, err := modelproxy.New(store, metrics, peSvc,
+		modelproxy.Policy{Models: pcfg.Models.Catalog, MaxInFlightPerOrg: pcfg.Models.MaxCallsInFlightPerOrg},
 		modelproxy.AnthropicUpstream, pcfg.ModelToken, logger)
 	if err != nil {
 		logger.Fatal("control-service: configure the model proxy", zap.Error(err))

@@ -3909,6 +3909,11 @@ export interface components {
             /** Format: int64 */
             max_concurrent_accelerators?: number;
             metrics: components["schemas"]["MetricDefinition"][];
+            /**
+             * Format: double
+             * @description What its agents and coordinator may spend on model calls the platform makes for them, in US dollars at the platform's prices. Absent: the platform's default (quota.default_model_budget_usd). Once spent, every further model call is refused with 429 model_budget_spent until it is raised.
+             */
+            model_budget_usd?: number;
             name: string;
             /**
              * Format: date-time
@@ -4445,6 +4450,16 @@ export interface components {
             turn?: components["schemas"]["AgentTurn"];
         };
         SituationBudget: {
+            /**
+             * Format: double
+             * @description What its agents and coordinator may spend on model calls the platform makes for them, in US dollars: its model_budget_usd, or the platform's default when it states none.
+             */
+            model_budget_usd: number;
+            /**
+             * Format: double
+             * @description What their model calls cost so far, at the platform's prices. Once it reaches model_budget_usd every further model call is refused with 429 model_budget_spent until the budget is raised.
+             */
+            model_used_usd: number;
             /** Format: double */
             run_budget_acch: number;
             /** Format: double */

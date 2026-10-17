@@ -648,3 +648,23 @@ func TestTheObjectStoreHoldsTheSectionOfTheProviderItNames(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadRejectsAModelPolicyThatCannotBeApplied(t *testing.T) {
+	for name, edit := range map[string][2]string{
+		"no catalog":                          {"  catalog:\n", "  old_catalog:\n"},
+		"a default model outside the catalog": {"  default_model: claude-sonnet-5", "  default_model: claude-sonnet-4-6"},
+		"a coordinator model outside it":      {"  coordinator_model: claude-opus-5-5", "  coordinator_model: claude-fable-5-1"},
+		"a model priced at nothing":           {"cache_read_usd_per_mtok: 0.01}", "cache_read_usd_per_mtok: 0}"},
+		"no calls in flight":                  {"  max_calls_in_flight_per_org: 64\n", ""},
+		"no default model budget":             {"  default_model_budget_usd: 50\n", ""},
+		"a default above the most":            {"  default_model_budget_usd: 50", "  default_model_budget_usd: 501"},
+	} {
+		text := productionConfig(t)
+		if !strings.Contains(text, edit[0]) {
+			t.Fatalf("%s: the production config has no %q", name, edit[0])
+		}
+		if err := loadText(t, strings.Replace(text, edit[0], edit[1], 1)); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}

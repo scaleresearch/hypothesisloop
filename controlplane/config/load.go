@@ -246,6 +246,20 @@ func (c *Settings) build() error {
 	default:
 		return fmt.Errorf("models provider %q is not %s: the provider whose models sandboxed agents run on", m.Provider, ModelProviderAnthropic)
 	}
+	if err := c.Models.Catalog.Validate(); err != nil {
+		return fmt.Errorf("models catalog: %w", err)
+	}
+	for _, model := range []string{c.Agents.DefaultModel, c.Agents.CoordinatorModel} {
+		if _, ok := c.Models.Catalog[model]; !ok {
+			return fmt.Errorf("models catalog does not name %s, a default model of the agents section: an agent on it would be refused every model call", model)
+		}
+	}
+	if c.Models.MaxCallsInFlightPerOrg <= 0 {
+		return fmt.Errorf("models max_calls_in_flight_per_org is required and positive: how many model calls the platform makes for one org at once")
+	}
+	if c.Quota.DefaultModelBudgetUSD <= 0 || c.Quota.DefaultModelBudgetUSD > c.Quota.MaxModelBudgetUSD {
+		return fmt.Errorf("quota default_model_budget_usd and max_model_budget_usd are required, 0 < default <= max")
+	}
 	if c.Planning.LimitMinutes <= 0 {
 		return fmt.Errorf("planning limit_minutes is required and positive: how long a draft's planner has to propose")
 	}

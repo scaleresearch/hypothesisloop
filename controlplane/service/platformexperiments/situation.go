@@ -136,6 +136,7 @@ type JobCounts struct {
 type SituationBudget struct {
 	RunBudgetAccH float64 `json:"run_budget_acch"`
 	RunUsedAccH   float64 `json:"run_used_acch"`
+	domain.ModelBudget
 }
 
 // SituationAgent is what one agent has going.
@@ -469,6 +470,9 @@ func (s *Service) Situation(ctx context.Context, id, agentID string, reader doma
 	out.Budget = SituationBudget{RunBudgetAccH: pe.BudgetAcceleratorHours}
 	if pe.ConsumedAcceleratorHours != nil {
 		out.Budget.RunUsedAccH = domain.RoundHours(*pe.ConsumedAcceleratorHours)
+	}
+	if out.Budget.ModelBudget, err = s.modelBudgetOf(ctx, pe); err != nil {
+		return nil, fmt.Errorf("situation: %w", err)
 	}
 	signups, err := s.store.ListAgentSignups(ctx, id)
 	if err != nil {

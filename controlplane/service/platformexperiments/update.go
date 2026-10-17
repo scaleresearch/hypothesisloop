@@ -115,6 +115,9 @@ func (s *Service) Update(ctx context.Context, id string, patch PlatformExperimen
 	if patch.MaxConcurrentAccelerators != nil {
 		patched.MaxConcurrentAccelerators = patch.MaxConcurrentAccelerators
 	}
+	if patch.ModelBudgetUSD != nil {
+		patched.ModelBudgetUSD = patch.ModelBudgetUSD
+	}
 	if patch.BaselineJobID != nil {
 		patched.BaselineJobID = *patch.BaselineJobID
 	}
@@ -132,7 +135,7 @@ func (s *Service) Update(ctx context.Context, id string, patch PlatformExperimen
 		MaxConcurrentAccelerators: patched.MaxConcurrentAccelerators, Metrics: patched.Metrics,
 		ReportIntervalSeconds: patched.ReportIntervalSeconds, DurationHours: patched.DurationHours,
 		Stages: patched.Stages, DefaultQuotaTier: patched.DefaultQuotaTier,
-	}, StartsAt: patched.StartsAt}, catalog)
+	}, StartsAt: patched.StartsAt, ModelBudgetUSD: patch.ModelBudgetUSD}, catalog)
 	if err != nil {
 		return nil, err
 	}

@@ -67,6 +67,9 @@ func main() {
 		Top3BonusFraction:                pcfg.Quota.Top3BonusFraction,
 		BurstFraction:                    pcfg.Quota.BurstFraction,
 		DefaultMaxConcurrentAccelerators: pcfg.Quota.DefaultMaxConcurrentAccelerators,
+		DefaultModelBudgetUSD:            pcfg.Quota.DefaultModelBudgetUSD,
+		MaxModelBudgetUSD:                pcfg.Quota.MaxModelBudgetUSD,
+		ModelCatalog:                     pcfg.Models.Catalog,
 	}
 
 	authenticator, err := auth.NewAuthenticator(pcfg.Auth, pcfg.SigningSecret, db.OrgDefaults{Store: store, NewOrgLimit: pcfg.Quota.NewOrgComputeLimit()})

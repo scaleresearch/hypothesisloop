@@ -58,4 +58,10 @@ type QuotaConfig struct {
 	// platform experiment when it does not set its own MaxConcurrentAccelerators. See
 	// config.QuotaConfig for the operator-facing doc.
 	DefaultMaxConcurrentAccelerators int `json:"default_max_concurrent_accelerators,omitempty"`
+
+	// DefaultModelBudgetUSD is the model budget of a platform experiment that states none, and
+	// MaxModelBudgetUSD the most one may state. ModelCatalog prices what is spent of it.
+	DefaultModelBudgetUSD float64      `json:"default_model_budget_usd,omitempty"`
+	MaxModelBudgetUSD     float64      `json:"max_model_budget_usd,omitempty"`
+	ModelCatalog          ModelCatalog `json:"-"`
 }

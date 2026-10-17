@@ -71,6 +71,24 @@ func (h sandboxed) InAgentSandbox(_ context.Context, pe, agent string) (bool, er
 	return h[pe+"/"+agent], nil
 }
 
+// budgets is each platform experiment's model budget, pe-1 and pe-2 with room left unless set.
+type budgets map[string]domain.ModelBudget
+
+func (b budgets) ModelBudget(_ context.Context, pe string) (domain.ModelBudget, error) {
+	if budget, ok := b[pe]; ok {
+		return budget, nil
+	}
+	return domain.ModelBudget{BudgetUSD: 50, UsedUSD: 1}, nil
+}
+
+var policy = Policy{
+	Models: domain.ModelCatalog{
+		"claude-haiku-5-5": {InputUSDPerMTok: 0.1, OutputUSDPerMTok: 0.5, CacheWriteUSDPerMTok: 0.2, CacheReadUSDPerMTok: 0.01},
+		"claude-opus-5-5":  {InputUSDPerMTok: 4, OutputUSDPerMTok: 20, CacheWriteUSDPerMTok: 8, CacheReadUSDPerMTok: 0.2},
+	},
+	MaxInFlightPerOrg: 8,
+}
+
 type recorded struct {
 	mu    sync.Mutex
 	calls []metricsdb.ModelCall
@@ -133,11 +151,11 @@ func newFixture(t *testing.T, provider http.HandlerFunc) *fixture {
 		provider(w, r)
 	}))
 	t.Cleanup(upstream.Close)
-	f.api = newAPI(t, upstream.URL, f.usage)
+	f.api = newAPI(t, upstream.URL, f.usage, budgets{}, policy)
 	return f
 }
 
-func newAPI(t *testing.T, upstream string, usage Usage) *httptest.Server {
+func newAPI(t *testing.T, upstream string, usage Usage, spent budgets, policy Policy) *httptest.Server {
 	t.Helper()
 	authenticator, err := auth.NewAuthenticator(config.AuthConfig{}, signingSecret, directory{
 		signedUp: map[string]bool{"pe-1/agent-a": true, "pe-1/agent-self": true, "pe-1/agent-cut": true, "pe-1/agent-ending": true, "pe-2/agent-b": true},
@@ -147,7 +165,7 @@ func newAPI(t *testing.T, upstream string, usage Usage) *httptest.Server {
 		t.Fatal(err)
 	}
 	proxy, err := New(sandboxed{"pe-1/agent-a": true, "pe-1/": true, "pe-1/agent-cut": true, "pe-1/agent-ending": true, "pe-2/agent-b": true},
-		usage, upstream, credential, zap.NewNop())
+		usage, spent, policy, upstream, credential, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +190,12 @@ func token(t *testing.T, scope string) string {
 // call is a model call as Claude Code makes it with ANTHROPIC_AUTH_TOKEN set to the agent's token.
 func (f *fixture) call(t *testing.T, ctx context.Context, path, bearer string) *http.Response {
 	t.Helper()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, f.api.URL+path, strings.NewReader(`{"model":"claude-haiku-5-5","max_tokens":16,"stream":true,"messages":[]}`))
+	return callOn(t, ctx, f.api.URL, path, bearer, "claude-haiku-5-5")
+}
+
+func callOn(t *testing.T, ctx context.Context, api, path, bearer, model string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, api+path, strings.NewReader(`{"model":"`+model+`","max_tokens":16,"stream":true,"messages":[]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -467,13 +490,13 @@ func TestAnAnswerOutlastsTheServersOwnDeadlines(t *testing.T) {
 		}
 	}))
 	defer upstream.Close()
-	front := newAPI(t, upstream.URL, &recorded{done: make(chan struct{})})
+	front := newAPI(t, upstream.URL, &recorded{done: make(chan struct{})}, budgets{}, policy)
 	front.Close()
 	slow := httptest.NewUnstartedServer(front.Config.Handler)
 	slow.Config.ReadTimeout, slow.Config.WriteTimeout = 100*time.Millisecond, 100*time.Millisecond
 	slow.Start()
 	defer slow.Close()
-	req, _ := http.NewRequest(http.MethodPost, slow.URL+messagesCall, strings.NewReader(`{}`))
+	req, _ := http.NewRequest(http.MethodPost, slow.URL+messagesCall, strings.NewReader(`{"model":"claude-opus-5-5"}`))
 	req.Header.Set("Authorization", "Bearer "+token(t, scope.Agent("pe-1", "agent-a")))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -489,8 +512,8 @@ func TestAnAnswerOutlastsTheServersOwnDeadlines(t *testing.T) {
 func TestAProviderThatCannotBeReachedIsAnsweredInItsOwnErrorShape(t *testing.T) {
 	gone := httptest.NewServer(http.NotFoundHandler())
 	gone.Close()
-	server := newAPI(t, gone.URL, &recorded{done: make(chan struct{})})
-	req, _ := http.NewRequest(http.MethodPost, server.URL+messagesCall, strings.NewReader(`{}`))
+	server := newAPI(t, gone.URL, &recorded{done: make(chan struct{})}, budgets{}, policy)
+	req, _ := http.NewRequest(http.MethodPost, server.URL+messagesCall, strings.NewReader(`{"model":"claude-opus-5-5"}`))
 	req.Header.Set("Authorization", "Bearer "+token(t, scope.Agent("pe-1", "agent-a")))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -525,4 +548,122 @@ func (d directory) AgentStanding(ctx context.Context, pe, agent string) (domain.
 		return domain.AgentStanding{}, err
 	}
 	return domain.AgentStanding{Tenancy: tenancy, ClosedAt: closedAt, SignedUp: signedUp, CutAt: cutAt, PlannerAnsweredAt: answeredAt, FinishedAt: finishedAt}, nil
+}
+
+// refused reads a refusal: its status, reason and Retry-After.
+func refused(t *testing.T, resp *http.Response) (int, string, string) {
+	t.Helper()
+	defer resp.Body.Close()
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	return resp.StatusCode, body.Reason, resp.Header.Get("Retry-After")
+}
+
+// Claude Code's subagents and small tasks call the models of the catalog; any other model is
+// refused before the provider, counting tokens too.
+func TestAModelOutsideTheCatalogIsRefusedBeforeTheProvider(t *testing.T) {
+	f := newFixture(t, streamed(messageStart, messageStop))
+	agent := token(t, scope.Agent("pe-1", "agent-a"))
+	resp := callOn(t, context.Background(), f.api.URL, messagesCall, agent, "claude-opus-5-5")
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("a catalog model: status %d", resp.StatusCode)
+	}
+	for _, path := range []string{messagesCall, Prefix + AnthropicProvider + "/v1/messages/count_tokens"} {
+		for _, model := range []string{"claude-fable-5-1", ""} {
+			if status, reason, _ := refused(t, callOn(t, context.Background(), f.api.URL, path, agent, model)); status != http.StatusForbidden || reason != domain.ReasonModelNotServed {
+				t.Errorf("%s with model %q: %d %s, want 403 %s", path, model, status, reason, domain.ReasonModelNotServed)
+			}
+		}
+	}
+	if f.upstreamCalls() != 1 {
+		t.Fatalf("the provider was called %d times, want once", f.upstreamCalls())
+	}
+}
+
+// Once a platform experiment's model calls cost its budget, its agents and coordinator are
+// refused every call, and another platform experiment's go on.
+func TestAPlatformExperimentWhoseModelBudgetIsSpentIsRefused(t *testing.T) {
+	var calls int
+	var mu sync.Mutex
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		streamed(messageStart, messageStop)(w, r)
+	}))
+	t.Cleanup(upstream.Close)
+	api := newAPI(t, upstream.URL, &recorded{done: make(chan struct{})}, budgets{"pe-1": {BudgetUSD: 50, UsedUSD: 50.01}}, policy)
+	for _, bearer := range []string{token(t, scope.Agent("pe-1", "agent-a")), token(t, scope.Coordinator("pe-1"))} {
+		status, reason, retry := refused(t, callOn(t, context.Background(), api.URL, messagesCall, bearer, "claude-haiku-5-5"))
+		if status != http.StatusTooManyRequests || reason != domain.ReasonModelBudgetSpent || retry != "60" {
+			t.Errorf("got %d %s Retry-After %q, want 429 %s after 60", status, reason, retry, domain.ReasonModelBudgetSpent)
+		}
+	}
+	resp := callOn(t, context.Background(), api.URL, messagesCall, token(t, scope.Agent("pe-2", "agent-b")), "claude-haiku-5-5")
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	mu.Lock()
+	defer mu.Unlock()
+	if resp.StatusCode != http.StatusOK || calls != 1 {
+		t.Fatalf("another platform experiment: status %d after %d provider calls, want 200 after 1", resp.StatusCode, calls)
+	}
+}
+
+// An org has at most MaxInFlightPerOrg calls in flight; another org's calls are not held to its,
+// and a call that ends frees its place.
+func TestAnOrgHasAtMostItsCallsInFlight(t *testing.T) {
+	answer := make(chan struct{})
+	started := make(chan struct{}, 4)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started <- struct{}{}
+		<-answer
+		streamed(messageStart, messageStop)(w, r)
+	}))
+	t.Cleanup(upstream.Close)
+	api := newAPI(t, upstream.URL, &recorded{done: make(chan struct{})}, budgets{}, Policy{Models: policy.Models, MaxInFlightPerOrg: 2})
+	agent := token(t, scope.Agent("pe-1", "agent-a"))
+	results := make(chan int, 2)
+	for range 2 {
+		go func() {
+			resp := callOn(t, context.Background(), api.URL, messagesCall, agent, "claude-haiku-5-5")
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			results <- resp.StatusCode
+		}()
+		<-started
+	}
+	status, reason, retry := refused(t, callOn(t, context.Background(), api.URL, messagesCall, token(t, scope.Coordinator("pe-1")), "claude-haiku-5-5"))
+	if status != http.StatusTooManyRequests || reason != domain.ReasonModelCallsInFlight || retry != "60" {
+		t.Fatalf("a third call of org-1: %d %s Retry-After %q, want 429 %s", status, reason, retry, domain.ReasonModelCallsInFlight)
+	}
+	other := make(chan int, 1)
+	go func() {
+		resp := callOn(t, context.Background(), api.URL, messagesCall, token(t, scope.Agent("pe-2", "agent-b")), "claude-haiku-5-5")
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		other <- resp.StatusCode
+	}()
+	<-started
+	close(answer)
+	for range 2 {
+		if got := <-results; got != http.StatusOK {
+			t.Fatalf("a call in flight: status %d", got)
+		}
+	}
+	if got := <-other; got != http.StatusOK {
+		t.Fatalf("org-2's call: status %d", got)
+	}
+	resp := callOn(t, context.Background(), api.URL, messagesCall, agent, "claude-haiku-5-5")
+	<-started
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("a call after the others ended: status %d", resp.StatusCode)
+	}
 }

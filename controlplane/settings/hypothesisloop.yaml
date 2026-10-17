@@ -104,8 +104,30 @@ agents:
 #
 #   provider   anthropic: Claude, through Claude Code, with the subscription token
 #              MODEL_ANTHROPIC_OAUTH_TOKEN.
+#   catalog    every model a sandboxed agent or coordinator may call, by the name a call states,
+#              with the provider's price in US dollars per million tokens of each kind. A call
+#              naming another model is refused with 403 model_not_served. Claude Code calls the
+#              models its subagents and its own small tasks run on as well (its opus, sonnet and
+#              haiku), so those are named too, haiku under the name Claude Code states and the
+#              one the provider answers with. cache_write is the one-hour cache's price, twice
+#              the input's, the cache the agents write. The prices are what a platform
+#              experiment's model budget is spent at, so a model stays here while any run's
+#              recorded usage names it. agents.default_model and coordinator_model are in it.
+#   max_calls_in_flight_per_org  how many model calls the platform makes for one org at once,
+#              so that no org takes the provider's whole allowance of the platform's credential.
+#              One more is refused with 429 model_calls_in_flight, which Claude Code waits out
+#              and retries. An agent makes one call at a time, and each of its subagents one more.
 models:
   provider: anthropic
+  max_calls_in_flight_per_org: 64
+  catalog:
+    claude-opus-5-5:           {input_usd_per_mtok: 4,   output_usd_per_mtok: 20,  cache_write_usd_per_mtok: 8,   cache_read_usd_per_mtok: 0.2}
+    claude-opus-5:             {input_usd_per_mtok: 5,   output_usd_per_mtok: 25,  cache_write_usd_per_mtok: 10,  cache_read_usd_per_mtok: 0.5}
+    claude-sonnet-5-5:         {input_usd_per_mtok: 2,   output_usd_per_mtok: 10,  cache_write_usd_per_mtok: 4,   cache_read_usd_per_mtok: 0.2}
+    claude-sonnet-5:           {input_usd_per_mtok: 2,   output_usd_per_mtok: 10,  cache_write_usd_per_mtok: 4,   cache_read_usd_per_mtok: 0.2}
+    claude-haiku-5-5:          {input_usd_per_mtok: 0.1, output_usd_per_mtok: 0.5, cache_write_usd_per_mtok: 0.2, cache_read_usd_per_mtok: 0.01}
+    claude-haiku-4-5:          {input_usd_per_mtok: 1,   output_usd_per_mtok: 5,   cache_write_usd_per_mtok: 2,   cache_read_usd_per_mtok: 0.1}
+    claude-haiku-4-5-20251001: {input_usd_per_mtok: 1,   output_usd_per_mtok: 5,   cache_write_usd_per_mtok: 2,   cache_read_usd_per_mtok: 0.1}
 
 # What bounds a draft: a platform experiment a person started from one sentence, which an agent
 # the platform runs plans (it works out the metric, the description and the size and proposes the
@@ -396,6 +418,14 @@ quota:
   # does not set its own max_concurrent_accelerators. Speculative submission makes capacity
   # appear on demand, so this is the concurrency ceiling that live capacity used to provide.
   default_max_concurrent_accelerators: 64
+
+  # What the model calls the platform makes for one platform experiment's agents and coordinator
+  # may cost, in US dollars at the prices of models.catalog: the default of one that states no
+  # model_budget_usd, and the most one may state. Once its calls cost it, every further call is
+  # refused with 429 model_budget_spent until its owner raises it. The platform pays the provider,
+  # so the most bounds what one platform experiment spends of the platform's credential.
+  default_model_budget_usd: 50
+  max_model_budget_usd: 500
 
   # The tier of a signup that states no quota_tier, in a platform experiment that states no
   # default_quota_tier of its own: guaranteed (a reserved share and burst on top) or burst_only.

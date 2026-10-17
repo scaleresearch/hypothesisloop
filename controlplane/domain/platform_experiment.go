@@ -117,6 +117,7 @@ type PlatformExperiment struct {
 	// demand and removes the live-capacity ceiling that used to bound concurrency implicitly —
 	// this is the explicit replacement, enforced in ReserveAdmittedAcceleratorTypeTx on every submit.
 	MaxConcurrentAccelerators *int               `json:"max_concurrent_accelerators,omitempty"`
+	ModelBudgetUSD            *float64           `json:"model_budget_usd,omitempty" doc:"What its agents and coordinator may spend on model calls the platform makes for them, in US dollars at the platform's prices. Absent: the platform's default (quota.default_model_budget_usd). Once spent, every further model call is refused with 429 model_budget_spent until it is raised."`
 	Metrics                   []MetricDefinition `json:"metrics"`                 // metrics jobs must emit; used for ranking
 	ReportIntervalSeconds     int                `json:"report_interval_seconds"` // expected reporting cadence (for silent-eviction guard)
 	// StartsAt is when the clock that runs started. While it is open that is the moment it was

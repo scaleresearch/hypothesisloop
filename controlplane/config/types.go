@@ -47,6 +47,10 @@ type QuotaConfig struct {
 	// appear on demand, removing the live-capacity ceiling that otherwise bounded concurrency —
 	// "unlimited" is not offered, this default is what "I don't care" means.
 	DefaultMaxConcurrentAccelerators int `yaml:"default_max_concurrent_accelerators"`
+	// DefaultModelBudgetUSD is the model budget of a platform experiment that states none, and
+	// MaxModelBudgetUSD the most one may state. Required, 0 < default <= max.
+	DefaultModelBudgetUSD float64 `yaml:"default_model_budget_usd"`
+	MaxModelBudgetUSD     float64 `yaml:"max_model_budget_usd"`
 	// DefaultQuotaTier is the tier of a signup that states none, in a platform experiment that
 	// states no default_quota_tier: guaranteed or burst_only.
 	DefaultQuotaTier string `yaml:"default_quota_tier"`
@@ -319,6 +323,12 @@ type AgentsConfig struct {
 // (httpapi/modelproxy), so no agent's machine holds the credential.
 type ModelsConfig struct {
 	Provider string `yaml:"provider"`
+	// Catalog is every model a sandboxed agent or coordinator may call, with its price. A call
+	// naming another is refused, and the prices are what a platform experiment's model budget
+	// is spent at.
+	Catalog domain.ModelCatalog `yaml:"catalog"`
+	// MaxCallsInFlightPerOrg is how many model calls the platform makes for one org at once.
+	MaxCallsInFlightPerOrg int `yaml:"max_calls_in_flight_per_org"`
 }
 
 // ModelProviderAnthropic is Claude, which sandboxed agents run through Claude Code.

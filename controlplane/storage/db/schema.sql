@@ -343,6 +343,9 @@ CREATE TABLE platform_experiments (
     image_architecture             TEXT             NOT NULL DEFAULT '',
     image_set_at                   TIMESTAMPTZ,
 
+    -- NULL is the platform's default (quota.default_model_budget_usd).
+    model_budget_usd               DOUBLE PRECISION,
+
     CONSTRAINT platform_experiments_status CHECK (status IN ('draft', 'open', 'running', 'closed')),
     CONSTRAINT platform_experiments_current_stage CHECK (current_stage >= 1),
     CONSTRAINT platform_experiments_budget_non_negative CHECK (budget_accelerator_hours >= 0),
@@ -361,7 +364,8 @@ CREATE TABLE platform_experiments (
         CHECK (removed_by_kind IN ('', 'user', 'key', 'agent', 'coordinator', 'staff', 'unverified')),
     CONSTRAINT platform_experiments_removed_closed CHECK (removed_at IS NULL OR status = 'closed'),
     CONSTRAINT platform_experiments_image
-        CHECK ((image = '') = (image_set_at IS NULL) AND (image = '') = (image_architecture = ''))
+        CHECK ((image = '') = (image_set_at IS NULL) AND (image = '') = (image_architecture = '')),
+    CONSTRAINT platform_experiments_model_budget CHECK (model_budget_usd IS NULL OR model_budget_usd > 0)
 );
 CREATE INDEX idx_platform_experiments_project ON platform_experiments(project_id);
 CREATE INDEX idx_platform_experiments_accepts_at ON platform_experiments(accepts_at) WHERE accepts_at IS NOT NULL;

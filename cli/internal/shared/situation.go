@@ -32,9 +32,11 @@ The platform experiment as it stands now, one line per block, each field as key=
   capacity    fits_now, how many more jobs shaped like the baseline's job would be placed now, and
               jobs_in_flight_run, the run's jobs queued and running; then one line per cluster
               and resource the run's jobs use, free and total
-  budget      run_budget_acch and run_used_acch of the whole run; for an agent its share, used,
-              and room_guaranteed and room_burst, the largest estimate a job of that tier is
-              admitted with now
+  budget      run_budget_acch and run_used_acch of the whole run, model_budget_usd and
+              model_used_usd, what the model calls of its agents and coordinator may cost and cost
+              so far (once used reaches the budget every model call is refused until its owner
+              raises it); for an agent its share, used, and room_guaranteed and room_burst, the
+              largest estimate a job of that tier is admitted with now
   agents      one line per agent: jobs queued and running, subagents live, turn (working or
               waiting, and since when), activity, minutes_without_job_in_flight, messages
               (left_this_hour the caller may still send it, next_at when the next frees up) and model
