@@ -167,3 +167,36 @@ func TestAnImageIsReadWithTheLoginOfItsRegistry(t *testing.T) {
 		t.Fatalf("with its login: %+v, %v", got, err)
 	}
 }
+
+// Config reads the config of the variant of the asked architecture, from an index or a single
+// manifest, and refuses an image that has none of it.
+func TestConfigReadsTheVariantOfTheArchitecture(t *testing.T) {
+	r := newRegistry()
+	withConfig := func(arch string, config ocispec.ImageConfig) ocispec.Descriptor {
+		blob := r.put(ocispec.MediaTypeImageConfig, ocispec.Image{Platform: ocispec.Platform{OS: "linux", Architecture: arch}, Config: config})
+		desc := r.put(ocispec.MediaTypeImageManifest, ocispec.Manifest{MediaType: ocispec.MediaTypeImageManifest, Config: blob, Layers: []ocispec.Descriptor{}})
+		desc.Platform = &ocispec.Platform{OS: "linux", Architecture: arch}
+		return desc
+	}
+	amd := withConfig("amd64", ocispec.ImageConfig{Env: []string{"PATH=/amd"}, WorkingDir: "/w", User: "agent"})
+	r.tags["v1"] = r.put(ocispec.MediaTypeImageIndex, ocispec.Index{MediaType: ocispec.MediaTypeImageIndex, Manifests: []ocispec.Descriptor{
+		withConfig("arm64", ocispec.ImageConfig{Env: []string{"PATH=/arm"}}), amd,
+	}})
+	r.tags["single"] = amd
+	r.tags["arm"] = r.image("linux", "arm64")
+	host, resolver := serve(t, r)
+
+	for _, tag := range []string{"v1", "single"} {
+		got, err := resolver.Config(context.Background(), host+"/team/model:"+tag, "amd64", nil)
+		if err != nil || !slices.Equal(got.Env, []string{"PATH=/amd"}) || got.WorkingDir != "/w" || got.User != "agent" {
+			t.Errorf("%s: %+v, %v, want the amd64 config", tag, got, err)
+		}
+	}
+	if _, err := resolver.Config(context.Background(), host+"/team/model:arm", "amd64", nil); err == nil || !strings.Contains(err.Error(), "not linux/amd64") {
+		t.Errorf("an arm64 manifest: %v", err)
+	}
+	r.tags["armindex"] = r.put(ocispec.MediaTypeImageIndex, ocispec.Index{MediaType: ocispec.MediaTypeImageIndex, Manifests: []ocispec.Descriptor{withConfig("arm64", ocispec.ImageConfig{})}})
+	if _, err := resolver.Config(context.Background(), host+"/team/model:armindex", "amd64", nil); err == nil || !strings.Contains(err.Error(), "no linux/amd64 image") {
+		t.Errorf("an arm64 index: %v", err)
+	}
+}

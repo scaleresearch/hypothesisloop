@@ -47,9 +47,56 @@ func New(plainHTTP ...string) *Resolver {
 // Resolve reads ref, a tag or a digest, with login for its registry host, or anonymously when
 // login is nil.
 func (r *Resolver) Resolve(ctx context.Context, ref string, login *domain.RegistryLogin) (Image, error) {
+	named, desc, fetcher, err := r.remote(ctx, ref, login)
+	if err != nil {
+		return Image{}, err
+	}
+	architectures, err := architectures(ctx, fetcher, desc)
+	if err != nil {
+		return Image{}, fmt.Errorf("imagedigest: %s: %w", named, err)
+	}
+	return Image{Pinned: named.Name() + "@" + desc.Digest.String(), Architectures: architectures}, nil
+}
+
+// Config reads the config of the linux image of architecture that ref names, with login as
+// Resolve takes it.
+func (r *Resolver) Config(ctx context.Context, ref, architecture string, login *domain.RegistryLogin) (ocispec.ImageConfig, error) {
+	named, desc, fetcher, err := r.remote(ctx, ref, login)
+	if err != nil {
+		return ocispec.ImageConfig{}, err
+	}
+	if images.IsIndexType(desc.MediaType) {
+		var index ocispec.Index
+		if err := fetchJSON(ctx, fetcher, desc, &index); err != nil {
+			return ocispec.ImageConfig{}, fmt.Errorf("imagedigest: %s: %w", named, err)
+		}
+		i := slices.IndexFunc(index.Manifests, func(m ocispec.Descriptor) bool {
+			return m.Platform != nil && m.Platform.OS == "linux" && m.Platform.Architecture == architecture
+		})
+		if i < 0 {
+			return ocispec.ImageConfig{}, fmt.Errorf("imagedigest: %s has no linux/%s image", named, architecture)
+		}
+		desc = index.Manifests[i]
+	}
+	var manifest ocispec.Manifest
+	if err := fetchJSON(ctx, fetcher, desc, &manifest); err != nil {
+		return ocispec.ImageConfig{}, fmt.Errorf("imagedigest: %s: %w", named, err)
+	}
+	var config ocispec.Image
+	if err := fetchJSON(ctx, fetcher, manifest.Config, &config); err != nil {
+		return ocispec.ImageConfig{}, fmt.Errorf("imagedigest: %s: %w", named, err)
+	}
+	if config.OS != "linux" || config.Architecture != architecture {
+		return ocispec.ImageConfig{}, fmt.Errorf("imagedigest: %s runs on %s/%s, not linux/%s", named, config.OS, config.Architecture, architecture)
+	}
+	return config.Config, nil
+}
+
+// remote is what ref names in its registry and what reads from that registry.
+func (r *Resolver) remote(ctx context.Context, ref string, login *domain.RegistryLogin) (reference.Named, ocispec.Descriptor, remotes.Fetcher, error) {
 	named, err := reference.ParseNormalizedNamed(ref)
 	if err != nil {
-		return Image{}, fmt.Errorf("imagedigest: %q: %w", ref, err)
+		return nil, ocispec.Descriptor{}, nil, fmt.Errorf("imagedigest: %q: %w", ref, err)
 	}
 	named = reference.TagNameOnly(named)
 	credentials := func(host string) (string, string, error) {
@@ -65,17 +112,13 @@ func (r *Resolver) Resolve(ctx context.Context, ref string, login *domain.Regist
 	)})
 	name, desc, err := resolver.Resolve(ctx, named.String())
 	if err != nil {
-		return Image{}, fmt.Errorf("imagedigest: %s: %w", named, err)
+		return nil, ocispec.Descriptor{}, nil, fmt.Errorf("imagedigest: %s: %w", named, err)
 	}
 	fetcher, err := resolver.Fetcher(ctx, name)
 	if err != nil {
-		return Image{}, fmt.Errorf("imagedigest: %s: %w", named, err)
+		return nil, ocispec.Descriptor{}, nil, fmt.Errorf("imagedigest: %s: %w", named, err)
 	}
-	architectures, err := architectures(ctx, fetcher, desc)
-	if err != nil {
-		return Image{}, fmt.Errorf("imagedigest: %s: %w", named, err)
-	}
-	return Image{Pinned: named.Name() + "@" + desc.Digest.String(), Architectures: architectures}, nil
+	return named, desc, fetcher, nil
 }
 
 // architectures is the linux architectures the image desc names runs on: those of its index, or
