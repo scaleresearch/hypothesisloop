@@ -2,6 +2,7 @@ package vast
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"reflect"
 	"strings"
@@ -42,9 +43,14 @@ func TestRentableCountsTheOffersCreateWouldChooseAmong(t *testing.T) {
 		t.Errorf("Rentable asked for %v offers, want 200", limit)
 	}
 
-	// The search goes on listing the offer this process now holds: it is not there to rent.
+	// The search goes on listing the offer this process now holds: it is not there to rent,
+	// in the read that stands as in a new one, which asks for one more.
 	if supply, err := p.Rentable(ctx, gpuSpec(), 200); err != nil || supply.Count != 2 {
 		t.Fatalf("Rentable with one offer held = %+v, %v, want 2", supply, err)
+	}
+	p.marketFor = 0
+	if supply, err := p.Rentable(ctx, gpuSpec(), 200); err != nil || supply.Count != 2 {
+		t.Fatalf("Rentable with one offer held, read again = %+v, %v, want 2", supply, err)
 	}
 	last := api.sent(http.MethodPost, searchPath)
 	if limit := last[len(last)-1].Body["limit"]; limit != float64(201) {
@@ -53,7 +59,7 @@ func TestRentableCountsTheOffersCreateWouldChooseAmong(t *testing.T) {
 }
 
 // No offer passes the filters, and there are offers of the size: the answer names the filters
-// that leave them out, with no figures, and the detail counts what each one leaves out.
+// that leave them out, with no figures, and the log counts what each one leaves out.
 func TestRentableOfNothingNamesTheFiltersThatLeaveTheOffersOut(t *testing.T) {
 	api := newFakeAPI(t)
 	sized := `{"offers":[` +
@@ -62,6 +68,8 @@ func TestRentableOfNothingNamesTheFiltersThatLeaveTheOffersOut(t *testing.T) {
 		`{"id":3,"machine_id":13,"dph_total":0.90,"geolocation":"Estonia, EE","reliability2":0.90,"verification":"unverified"}]}`
 	api.on(http.MethodPost, searchPath, inSequence(answer(200, `{"offers":[]}`), answer(200, sized)))
 	p := newTestProvider(t, api, gpuSettings())
+	var logged strings.Builder
+	p.log = func(format string, args ...any) { fmt.Fprintf(&logged, format+"\n", args...) }
 
 	supply, err := p.Rentable(context.Background(), gpuSpec(), 200)
 	if err != nil {
@@ -71,8 +79,8 @@ func TestRentableOfNothingNamesTheFiltersThatLeaveTheOffersOut(t *testing.T) {
 		t.Fatalf("Rentable = %+v", supply)
 	}
 	for _, want := range []string{"3 offers of the size", "$0.440/h", "regions 2", "max_price_per_hour 2", "min_reliability 1", "verified_only 1"} {
-		if !strings.Contains(supply.Detail, want) {
-			t.Errorf("detail %q does not say %q", supply.Detail, want)
+		if !strings.Contains(logged.String(), want) {
+			t.Errorf("log %q does not say %q", logged.String(), want)
 		}
 	}
 	searches := api.sent(http.MethodPost, searchPath)
@@ -116,5 +124,37 @@ func TestRentableOfNothingSaysWhenThisAgentHoldsEveryOffer(t *testing.T) {
 	supply, err := p.Rentable(ctx, gpuSpec(), 200)
 	if err != nil || supply.Count != 0 || !strings.Contains(supply.Why, "own instances hold every vast offer") {
 		t.Fatalf("Rentable = %+v, %v", supply, err)
+	}
+}
+
+// A read stands for marketInterval: asked again within it, Rentable answers from it, unless more
+// are wanted than it asked for and it found as many. One that failed does not stand.
+func TestRentableAnswersFromAReadWithinItsInterval(t *testing.T) {
+	api := newFakeAPI(t)
+	ctx := context.Background()
+	api.on(http.MethodPost, searchPath, inSequence(answer(500, `{}`), offersOn(11, 12), offersOn(11, 12), offersOn(11, 12, 13)))
+	p := newTestProvider(t, api, gpuSettings())
+	searches := func() int { return len(api.sent(http.MethodPost, searchPath)) }
+
+	if _, err := p.Rentable(ctx, gpuSpec(), 2); err == nil {
+		t.Fatal("a failed search answered")
+	}
+	for range 3 {
+		if supply, err := p.Rentable(ctx, gpuSpec(), 2); err != nil || supply.Count != 2 {
+			t.Fatalf("Rentable = %+v, %v", supply, err)
+		}
+	}
+	if searches() != 2 {
+		t.Fatalf("%d searches, want the failed one and one that stands", searches())
+	}
+	if supply, err := p.Rentable(ctx, gpuSpec(), 5); err != nil || supply.Count != 2 || searches() != 3 {
+		t.Fatalf("asked for more than the read found as many of: %+v, %v, %d searches", supply, err, searches())
+	}
+	if supply, err := p.Rentable(ctx, gpuSpec(), 9); err != nil || supply.Count != 2 || searches() != 3 {
+		t.Fatalf("the read found fewer than it asked for, which answers any ask: %+v, %v, %d searches", supply, err, searches())
+	}
+	p.marketFor = 0
+	if supply, err := p.Rentable(ctx, gpuSpec(), 9); err != nil || supply.Count != 3 || searches() != 4 {
+		t.Fatalf("an old read: %+v, %v, %d searches", supply, err, searches())
 	}
 }

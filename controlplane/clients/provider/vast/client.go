@@ -53,6 +53,9 @@ type Provider struct {
 	shuffle func([]offer)
 	held    *held
 	limited *limited
+	markets *markets
+	// marketFor is marketInterval, shorter in tests.
+	marketFor time.Duration
 }
 
 // limited is what the API refused with HTTP 429, by method and path, and until when. Such a
@@ -107,16 +110,18 @@ func New(cfg Settings, key string, acceleratorTypes []string, log func(format st
 		return nil, errors.New("vast: an API key is required")
 	}
 	return &Provider{
-		log:     log,
-		cfg:     cfg,
-		apiKey:  key,
-		baseURL: defaultBaseURL,
-		http:    &http.Client{Timeout: requestTimeout},
-		poll:    pollInterval,
-		logWait: logDeliveryTimeout,
-		shuffle: shuffleOffers,
-		held:    &held{offers: map[int64]holder{}},
-		limited: &limited{until: map[string]refusal{}},
+		log:       log,
+		cfg:       cfg,
+		apiKey:    key,
+		baseURL:   defaultBaseURL,
+		http:      &http.Client{Timeout: requestTimeout},
+		poll:      pollInterval,
+		logWait:   logDeliveryTimeout,
+		shuffle:   shuffleOffers,
+		held:      &held{offers: map[int64]holder{}},
+		limited:   &limited{until: map[string]refusal{}},
+		markets:   &markets{reads: map[string]*marketRead{}},
+		marketFor: marketInterval,
 	}, nil
 }
 

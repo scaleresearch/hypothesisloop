@@ -55,8 +55,7 @@ type Config struct {
 }
 
 // Executor keeps nothing about instances. Every method reads the account, unless the executor
-// came from ForPass, in which case it answers from that pass's one read. What it keeps is the
-// last read of the vendor's market (marketReads).
+// came from ForPass, in which case it answers from that pass's one read.
 type Executor struct {
 	clusterID string
 	prefix    string
@@ -66,7 +65,6 @@ type Executor struct {
 	// market is the provider's Market capability, nil for a vendor that has none.
 	market        provider.Market
 	architectures []string
-	reads         marketReads
 	offerWait     time.Duration
 	startup       time.Duration
 	log           func(format string, args ...any)
@@ -102,7 +100,6 @@ func New(cfg Config) (*Executor, error) {
 	return &Executor{
 		market:        market,
 		architectures: architectures,
-		reads:         newMarketReads(cfg.Shapes, architectures),
 		clusterID:     cfg.ClusterID,
 		prefix:        cfg.prefix(),
 		apiURL:        cfg.APIURL,

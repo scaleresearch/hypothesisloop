@@ -1,13 +1,9 @@
 package compute
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"log"
-	"os"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
@@ -50,26 +46,25 @@ func TestFreeCapacityIsWhatTheVendorHasOnOfferWithinTheShapes(t *testing.T) {
 	}
 
 	// The one machine is rented and the vendor has no other: the slot its instance holds is
-	// taken, and the other one is free until the market's read is marketInterval old, for
-	// Create to find no offer for it.
+	// taken, and the other one has nothing to rent.
 	mustCreate(t, e, job(t, "exp-1", 0, 1))
 	onOffer[h100] = 0
 	available, _, _, labels, err = e.GetLiveAcceleratorCapacitySnapshot(ctx)
-	if err != nil || available[h100] != 1 || labels["h100-0"][clusterapi.NodeSlotNoOfferLabel] != "" || labels["h100-1"][clusterapi.NodeSlotNoOfferLabel] != "" {
+	if err != nil || available[h100] != 0 || labels["h100-0"][clusterapi.NodeSlotNoOfferLabel] != "" || labels["h100-1"][clusterapi.NodeSlotNoOfferLabel] != "shape h100 on amd64: no offer passes the filters" {
 		t.Fatalf("one rented and none on offer: available %v, labels %v, %v", available, labels, err)
 	}
 }
 
 func supplyOf(count int) provider.Supply {
 	if count == 0 {
-		return provider.Supply{Why: "no offer passes the filters", Detail: "4 offers of the size; left out by price 4"}
+		return provider.Supply{Why: "no offer passes the filters"}
 	}
 	return provider.Supply{Count: count}
 }
 
 // A shape the market has nothing for says why on every slot of it no instance holds, in the
-// market's words, and logs the figures behind it once.
-func TestAShapeWithNothingToRentSaysWhyOnItsSlotsAndInTheLog(t *testing.T) {
+// market's words.
+func TestAShapeWithNothingToRentSaysWhyOnItsSlots(t *testing.T) {
 	e, p := newTestExecutor(t)
 	ctx := context.Background()
 	p.Market = func(spec provider.Spec) provider.Supply {
@@ -78,10 +73,6 @@ func TestAShapeWithNothingToRentSaysWhyOnItsSlotsAndInTheLog(t *testing.T) {
 		}
 		return supplyOf(0)
 	}
-	var logged bytes.Buffer
-	log.SetOutput(&logged)
-	defer log.SetOutput(os.Stderr)
-
 	for range 3 {
 		pass, err := e.ForPass(ctx)
 		if err != nil {
@@ -100,15 +91,11 @@ func TestAShapeWithNothingToRentSaysWhyOnItsSlotsAndInTheLog(t *testing.T) {
 			t.Fatalf("the cpu slot, which has an offer, says %q", got)
 		}
 	}
-	lines := strings.Count(logged.String(), "shape h100 on amd64 has nothing to rent: no offer passes the filters (4 offers of the size; left out by price 4)")
-	if lines != 1 || strings.Contains(logged.String(), "shape cpu ") {
-		t.Fatalf("log:\n%s\nwant the h100 shape's reason once", logged.String())
-	}
 }
 
-// The market is asked once per shape, however many capacity reads and passes there are within
-// marketInterval.
-func TestTheMarketIsAskedOncePerShapeWithinItsInterval(t *testing.T) {
+// The market is asked once per shape a pass, however many capacity reads the pass makes. How
+// long a read stands is the provider's own pacing of its vendor.
+func TestTheMarketIsAskedOncePerShapeAPass(t *testing.T) {
 	e, p := newTestExecutor(t)
 	ctx := context.Background()
 	onOffer := 2
@@ -137,14 +124,8 @@ func TestTheMarketIsAskedOncePerShapeWithinItsInterval(t *testing.T) {
 			t.Fatalf("free = %d, want 2", got)
 		}
 	}
-	if calls := p.Calls("Rentable"); calls != len(testShapes) {
-		t.Fatalf("%d market calls in five passes, want one per shape (%d)", calls, len(testShapes))
-	}
-
-	mustCreate(t, e, job(t, "exp-1", 0, 1))
-	onOffer = 0
-	if got := free(); got != 1 {
-		t.Fatalf("after one rent with the read standing: free = %d, want the slot no instance holds", got)
+	if calls := p.Calls("Rentable"); calls != 5*len(testShapes) {
+		t.Fatalf("%d market calls in five passes, want one per shape a pass (%d)", calls, 5*len(testShapes))
 	}
 }
 
@@ -197,9 +178,6 @@ func TestAShapeCountsAsManyRentableSlotsAsItsMaxInstances(t *testing.T) {
 	mustCreate(t, e, job(t, "exp-1", 0, 1))
 	if available, _, _, _, err = e.GetLiveAcceleratorCapacitySnapshot(ctx); err != nil || available[h100] != 11 {
 		t.Fatalf("one rented: available %v, %v, want 11", available, err)
-	}
-	if calls := p.Calls("Rentable"); calls != 1 {
-		t.Fatalf("%d market calls, want the one read standing", calls)
 	}
 }
 

@@ -10,6 +10,8 @@ type Market interface {
 	// the offers Create would choose among, under every filter it rents within, without the
 	// ones this process holds. Only the sizes, the accelerator and AvoidHosts of spec are read.
 	// It rents nothing, and an offer it counted may be gone by the time Create asks for it.
+	// A caller asks on every pass: an adapter whose vendor meters its search answers from a
+	// read it keeps for a short while.
 	Rentable(ctx context.Context, spec Spec, atMost int) (Supply, error)
 }
 
@@ -19,11 +21,8 @@ type Supply struct {
 	// Why says, when Count is 0, what keeps the vendor's machines out, in the adapter's terms:
 	// that it has none of spec's size, or which of its filters leave out the ones it has. It
 	// names no figures, so it stays the same while the cause does, and it is shown to whoever
-	// waits for a machine. Empty when Count is above 0.
+	// waits for a machine. Empty when Count is above 0. The adapter logs the figures behind it.
 	Why string
-	// Detail is the figures behind Why, for the log: how many machines of the size there are
-	// and how many each filter leaves out.
-	Detail string
 }
 
 // CapabilityMarket is the name Capabilities gives Market.

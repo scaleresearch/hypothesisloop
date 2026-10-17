@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider"
@@ -49,54 +47,19 @@ type onOffer struct {
 	why  string
 }
 
-// marketInterval is how long one read of a shape's market stands. A vendor counts its searches
-// against a quota (vast.ai allows 20000 offer rows a day), so a read asks for no more offers than
-// the shape has slots no instance holds: a shape of max_instances N spends up to N rows a read,
-// 288N a day.
-const marketInterval = 5 * time.Minute
-
-// marketReads is the last read of each configured shape's market for each architecture the
-// provider rents, by marketKey, shared by every pass. Each has its own lock, so a pass waits on
-// the vendor only for a market another pass is reading.
-type marketReads map[string]*shapeMarket
-
-type shapeMarket struct {
-	mu sync.Mutex
-	// read is the last read that answered: one that failed is asked again on the next pass.
-	read marketRead
-	// said is the reason last logged for the shape having nothing to rent, empty while it has.
-	said string
-}
-
-type marketRead struct {
-	at    time.Time
-	asked int
-	offer onOffer
-}
-
-func newMarketReads(shapes []Shape, architectures []string) marketReads {
-	reads := make(marketReads, len(shapes)*len(architectures))
-	for _, s := range shapes {
-		for _, arch := range architectures {
-			reads[marketKey(s.Name, arch)] = &shapeMarket{}
-		}
-	}
-	return reads
-}
-
-// marketKey names the market of one shape on one architecture, in logs too.
+// marketKey names the market of one shape on one architecture.
 func marketKey(shape, arch string) string { return shape + " on " + arch }
 
 // rentable is what the vendor has to rent of each shape on each architecture, by marketKey, at
-// the size Create rents a slot at, as last read within marketInterval, and once per view. It is
-// nil for a provider with no market, where every slot no instance holds can be rented. A market
-// that cannot be read has nothing to rent until it can, and says why.
+// the size Create rents a slot at, asked once per view. It is nil for a provider with no market,
+// where every slot no instance holds can be rented. A market that cannot be read has nothing to
+// rent until it can, and says why.
 func (e *Executor) rentable(ctx context.Context, v *view) map[string]onOffer {
 	if e.market == nil || v.rentable != nil {
 		return v.rentable
 	}
 	taken := takenSlots(v)
-	rentable := make(map[string]onOffer, len(e.reads))
+	rentable := make(map[string]onOffer, len(e.shapes)*len(e.architectures))
 	for _, shape := range e.shapes {
 		open := 0
 		for n := 0; n < shape.MaxInstances; n++ {
@@ -112,54 +75,24 @@ func (e *Executor) rentable(ctx context.Context, v *view) map[string]onOffer {
 	return rentable
 }
 
-// onOffer reads the market of one shape on one architecture for up to open machines, unless a
-// read of it still stands: one within marketInterval that asked for as many, or found fewer than
-// it asked for.
+// onOffer asks the market of one shape on one architecture for up to open machines.
 func (e *Executor) onOffer(ctx context.Context, shape Shape, arch string, open int) onOffer {
 	if open == 0 {
 		return onOffer{}
 	}
 	key := marketKey(shape.Name, arch)
-	m := e.reads[key]
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if r := m.read; time.Since(r.at) < marketInterval && (open <= r.asked || r.offer.left < r.asked) {
-		return r.offer
-	}
 	supply, err := e.market.Rentable(ctx, provider.Spec{
 		Architecture:    arch,
 		AcceleratorType: shape.AcceleratorType, AcceleratorCount: shape.Accelerators,
 		CPUMillis: shape.CPUMillis, MemoryBytes: shape.MemoryBytes, DiskBytes: shape.StorageBytes,
 	}, open)
 	if err != nil {
-		reason := "the provider's market could not be read: " + err.Error()
-		e.sayEmpty(m, key, reason, "")
-		return onOffer{why: "shape " + key + ": " + reason}
+		return onOffer{why: "shape " + key + ": the provider's market could not be read: " + err.Error()}
 	}
-	offer := onOffer{left: supply.Count, why: "shape " + key + ": " + supply.Why}
 	if supply.Count == 0 {
-		e.sayEmpty(m, key, supply.Why, supply.Detail)
-	} else {
-		offer.why = "shape " + key + ": the shape's lower slots take the machines its market was last read to have"
-		if m.said != "" {
-			e.log("shape %s has machines to rent again", key)
-			m.said = ""
-		}
+		return onOffer{why: "shape " + key + ": " + supply.Why}
 	}
-	m.read = marketRead{at: time.Now(), asked: open, offer: offer}
-	return offer
-}
-
-// sayEmpty logs why a shape has nothing to rent when that reason is new. m is locked.
-func (e *Executor) sayEmpty(m *shapeMarket, shape, reason, detail string) {
-	if m.said == reason {
-		return
-	}
-	m.said = reason
-	if detail != "" {
-		reason += " (" + detail + ")"
-	}
-	e.log("shape %s has nothing to rent: %s", shape, reason)
+	return onOffer{left: supply.Count, why: "shape " + key + ": the shape's lower slots take the machines its market was last read to have"}
 }
 
 // takenSlots is the architecture of the machine in each slot an instance holds.
