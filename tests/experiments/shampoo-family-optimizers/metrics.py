@@ -18,27 +18,36 @@ Usage:
 import json
 import os
 import sys
+import time
 import urllib.request
 
 EXP_ID = os.environ["HYPOTHESISLOOP_EXPERIMENT_ID"]
 API_URL = os.environ["HYPOTHESISLOOP_API_URL"]
 
 
-def post_metric(fraction: float, value: float, metric_name: str) -> None:
+def post_metric(fraction: float, value: float, metric_name: str, *, retries: int = 0) -> None:
     """POSTs one metric reading. Never raises -- a reporting-endpoint hiccup must not take down
-    the timed work it's reporting on."""
+    the timed work it's reporting on.
+
+    retries: extra attempts beyond the first, for a run's single optimizer_flops_to_target point,
+    which has no later report to make up for a miss."""
     url = f"{API_URL}/experiments/{EXP_ID}/metrics"
     payload = json.dumps({"metric_name": metric_name, "fraction_complete": fraction, "metric_value": value}).encode()
-    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json", "Authorization": f"Bearer {os.environ['HYPOTHESISLOOP_TOKEN']}"})
-    try:
-        urllib.request.urlopen(req, timeout=5)
-    except Exception as e:
-        # The response body is the control plane's reason. A refused token stays refused, so
-        # that is said once, not on every sample.
-        reason = e.read().decode(errors="replace")[:300] if hasattr(e, "read") else ""
-        if getattr(e, "code", None) in (401, 403):
-            if not getattr(post_metric, "refused", False):
-                post_metric.refused = True
-                print(f"  [error] metric POST refused, this run's metrics are not being recorded: {e} {reason}", file=sys.stderr, flush=True)
+    for attempt in range(1 + max(0, retries)):
+        req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json", "Authorization": f"Bearer {os.environ['HYPOTHESISLOOP_TOKEN']}"})
+        try:
+            urllib.request.urlopen(req, timeout=5)
             return
-        print(f"  [warn] metric POST failed: {e} {reason}", file=sys.stderr, flush=True)
+        except Exception as e:
+            # The response body is the control plane's reason. A refused token stays refused, so
+            # that is said once, not on every sample.
+            reason = e.read().decode(errors="replace")[:300] if hasattr(e, "read") else ""
+            if getattr(e, "code", None) in (401, 403):
+                if not getattr(post_metric, "refused", False):
+                    post_metric.refused = True
+                    print(f"  [error] metric POST refused, this run's metrics are not being recorded: {e} {reason}", file=sys.stderr, flush=True)
+                return
+            if attempt < retries:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            print(f"  [warn] metric POST failed: {e} {reason}", file=sys.stderr, flush=True)

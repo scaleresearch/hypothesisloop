@@ -17,14 +17,20 @@ description: |
 
   OPTIMIZERS TO COMPARE (optimizers.py, one entry point `build_optimizer(name, model, lr, ...)`)
     sgd, adamw, full_adagrad, shampoo_2018, scalable_shampoo, soap, muon, kl_shampoo,
-    online_kl_shampoo. optimizers.py's module docstring names the paper each implements and,
-    critically, its FIDELITY NOTES: shampoo_2018/scalable_shampoo/soap/muon are direct unabridged
-    implementations of their papers' update rules; kl_shampoo/online_kl_shampoo are BEST-EFFORT
-    reconstructions written without the official code. FIRST TASK for whoever works kl_shampoo or
-    online_kl_shampoo: clone github.com/tilde-research/online-kl-shampoo-release and the
-    KL-Shampoo paper's code if public, diff this implementation's update rule against it, and
-    replace it with the official rule if they diverge. Note the specific divergence in your
-    hypothesis either way.
+    online_kl_shampoo, kl_soap. optimizers.py's module docstring names the paper each implements
+    and, critically, its FIDELITY NOTES: shampoo_2018/scalable_shampoo/soap/muon are direct
+    unabridged implementations of their papers' update rules; online_kl_shampoo is a port of the
+    official algorithm (github.com/tilde-research/online-kl-shampoo-release); kl_shampoo is a
+    BEST-EFFORT reconstruction written without the official code, and whoever works it first diffs
+    its update rule against the KL-Shampoo paper's code if public and notes any divergence in the
+    hypothesis. kl_soap is KL-SOAP from the KL-Shampoo paper (arXiv:2509.03378, Section 5).
+    Variants earlier agents invented, the bar a new variant has to beat: custom_block_shampoo,
+    custom_block_soap, custom_block_kl_shampoo, custom_block_kl_soap, custom_block_muon,
+    custom_block_muon_adaptive (block-diagonal Kronecker factors, OPT_BLOCK_SIZE). A new variant
+    an agent invents carries the CUSTOM_ class prefix and custom_ name prefix too.
+    Each optimizer has a default LR in optimizers.py DEFAULT_LR_BY_OPT, used when OPT_LR is unset.
+    They are starting points, not tuned values: soap at its default 0.05 blows up and muon at 0.02
+    plateaus, so tune LR before comparing.
     full_adagrad is the "ideal reference" upper bound, never a contender: only run it at a tiny
     latent config where its O(dim^3) state is tractable (see CONSTRAINTS).
 
@@ -36,9 +42,10 @@ description: |
     reported against). Steps-to-target would hide the Shampoo family's much higher per-step cost
     and flatter every second-order method; wall-clock-to-target is dominated by the hardware's host
     sync and CPU eigendecomposition. FLOPs-to-target is the implementation-invariant number the
-    papers themselves argue about. It is steps taken times the analytic FLOPs of one step, and
-    train.py reports it once, at the report where test MSE first reaches the target (so to within
-    REPORT_EVERY_STEPS steps): the platform ranks a job on the lowest value it ever reported, and a
+    papers themselves argue about. It is the running sum of each step's analytic FLOPs, where a
+    preconditioner refresh costs its full eigendecomposition on the step it happens and nothing on
+    the others, and train.py checks test MSE every step and reports it once, at the step test MSE
+    first reaches the target: the platform ranks a job on the lowest value it ever reported, and a
     running total would rank every job on its first report. A run that ends above the target
     reports none and ranks nowhere. test_loss, step and wall_clock_seconds are reported at a steady
     cadence (REPORT_EVERY_STEPS) the whole run, plus `diverged`, the gate (1.0 if loss went
@@ -49,8 +56,10 @@ description: |
     train.py is the full harness: loads Fashion-MNIST (torchvision, downloaded to DATA_DIR),
     builds AutoencoderMLP, trains with build_optimizer(...), reports metrics via metrics.py at
     REPORT_EVERY_STEPS cadence, and stops at STEPS or when TARGET_LOSS is reached. Every knob is an
-    env var: OPT_NAME, OPT_LR, OPT_PRECOND_FREQ, BATCH_SIZE, STEPS, TARGET_LOSS, SEED,
-    REPORT_EVERY_STEPS. A job runs on CPU cores in the image .hypothesisloop/Dockerfile builds:
+    env var: OPT_NAME, OPT_LR, OPT_PRECOND_FREQ, OPT_EIGENBASIS_FREQ, OPT_BLOCK_SIZE,
+    OPT_SHAMPOO_BETA, OPT_NS_STEPS, OPT_MOMENTUM, OPT_BETA1, OPT_BETA2, OPT_NESTEROV,
+    OPT_WEIGHT_DECAY, BATCH_SIZE, STEPS, TARGET_LOSS, SEED, REPORT_EVERY_STEPS, HIDDEN_DIM,
+    LATENT_DIM. A job runs on CPU cores in the image .hypothesisloop/Dockerfile builds:
     the platform fetches the commit you submit from and runs train.py in it, so a change to
     optimizers.py you commit and push runs in the next job. A hyperparameter sweep is --env flags on
     the base job spec, submitted unedited with
@@ -59,8 +68,11 @@ description: |
     class in optimizers.py plus a new `build_optimizer` branch; train.py itself should not need to
     change for that.
     Every job runs on CPU (TRAIN_DEVICE=cpu). The optimizer step always runs on host CPU in fp32
-    (optimizers.py enforces it). TRAIN_DEVICE=tt exits with an error: no ttnn forward/backward is
-    wired, so results are not validated against Tenstorrent numerics.
+    (optimizers.py enforces it). TRAIN_DEVICE=tt, in an image with ttnn, runs each Linear layer's
+    matmuls on a Tenstorrent device (ttnn_linear.py) with gradients and optimizer state on CPU, and
+    MUON_STEP_ON_TT=1 also runs Muon's Newton-Schulz on it (ttnn_muon.py). That path proves
+    on-device execution and is never part of the leaderboard; BIG_MODEL=1 swaps in a 37M-param
+    residual MLP sized to use the chip, for the same purpose.
 
   CONSTRAINTS
     - full_adagrad only at latent configs where the flattened per-parameter dim stays under ~300
