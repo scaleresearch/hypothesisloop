@@ -7,7 +7,7 @@ export function createDraft(projectID: string, goal: string, code: { repository?
 
 /**
  * Accepts a draft's proposal. Accepted, it is an open experiment with its coordinator and
- * researchers, which the platform starts by itself once its baseline is measured and declared.
+ * team, which the platform starts by itself once its baseline is measured and declared.
  */
 export async function acceptDraft(id: string, acceptance: AcceptRequest): Promise<void> {
   await apiSend<PlatformExperiment>('POST', `/platform-experiments/${id}/accept`, acceptance)

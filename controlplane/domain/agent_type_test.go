@@ -16,17 +16,18 @@ func testCatalog() AgentTypeCatalog {
 	}
 	custom := testSettings()
 	custom.Model, custom.Hyperparameters = "custom-model", map[string]any{"lr": 0.1}
-	archived := typeOf("at-archived", AgentRoleResearcher, testSettings())
+	archived := typeOf("at-archived", AgentRoleExecutor, testSettings())
 	archived.ArchivedAt = &time.Time{}
 	return AgentTypeCatalog{
-		typeOf("generalist", AgentRoleResearcher, testSettings()),
-		typeOf("hyperparameter-search", AgentRoleResearcher, testSettings()),
-		typeOf("architecture-search", AgentRoleResearcher, testSettings()),
-		typeOf("data-search", AgentRoleResearcher, testSettings()),
+		typeOf("generalist", AgentRoleExecutor, testSettings()),
+		typeOf("hyperparameter-search", AgentRoleExecutor, testSettings()),
+		typeOf("architecture-search", AgentRoleExecutor, testSettings()),
+		typeOf("data-search", AgentRoleExecutor, testSettings()),
+		typeOf("researcher", AgentRoleResearcher, testSettings()),
 		typeOf("baseline", AgentRoleBaseline, testSettings()),
 		typeOf("planner", AgentRolePlanner, testSettings()),
 		typeOf("coordinator", AgentRoleCoordinator, testSettings()),
-		typeOf("at-custom", AgentRoleResearcher, custom),
+		typeOf("at-custom", AgentRoleExecutor, custom),
 		archived,
 	}
 }
@@ -38,20 +39,20 @@ func TestAPromptHoldsWhatItsRoleFillsAndNothingElse(t *testing.T) {
 		prompt string
 		want   string
 	}{
-		"every placeholder of a researcher": {AgentRoleResearcher, base + "{{workdir}} {{agent_id}} {{platform_experiment_id}} {{agent_type}} {{hyperparameters}} {{repository_url}}", ""},
+		"every placeholder of an executor":  {AgentRoleExecutor, base + "{{workdir}} {{agent_id}} {{platform_experiment_id}} {{agent_type}} {{hyperparameters}} {{repository_url}}", ""},
 		"a coordinator's own":               {AgentRoleCoordinator, base + "{{workdir}} {{platform_experiment_id}} {{repository_url}}", ""},
-		"literal braces":                    {AgentRoleResearcher, base + `{"lr": 1} and {a}`, ""},
-		"no rules":                          {AgentRoleResearcher, "{{hl_commands}}", "must hold {{rules}}"},
+		"literal braces":                    {AgentRoleExecutor, base + `{"lr": 1} and {a}`, ""},
+		"no rules":                          {AgentRoleExecutor, "{{hl_commands}}", "must hold {{rules}}"},
 		"no command listing":                {AgentRolePlanner, "{{rules}}", "must hold {{hl_commands}}"},
-		"an unknown placeholder":            {AgentRoleResearcher, base + "{{agent_type_brief}}", "{{agent_type_brief}}"},
+		"an unknown placeholder":            {AgentRoleExecutor, base + "{{agent_type_brief}}", "{{agent_type_brief}}"},
 		"a coordinator has no agent id":     {AgentRoleCoordinator, base + "{{agent_id}}", "{{agent_id}}"},
 		"a baseline has no hyperparameters": {AgentRoleBaseline, base + "{{hyperparameters}}", "{{hyperparameters}}"},
-		"a malformed placeholder":           {AgentRoleResearcher, base + "{{ workdir }}", "outside a placeholder"},
-		"an unclosed placeholder":           {AgentRoleResearcher, base + "{{workdir", "outside a placeholder"},
-		"python's format braces":            {AgentRoleResearcher, base + "{workdir}}", "outside a placeholder"},
-		"empty":                             {AgentRoleResearcher, "  \n", "empty"},
-		"not UTF-8":                         {AgentRoleResearcher, base + "\xff", "UTF-8"},
-		"too long":                          {AgentRoleResearcher, base + strings.Repeat("a", MaxAgentPromptBytes), "the limit is"},
+		"a malformed placeholder":           {AgentRoleExecutor, base + "{{ workdir }}", "outside a placeholder"},
+		"an unclosed placeholder":           {AgentRoleExecutor, base + "{{workdir", "outside a placeholder"},
+		"python's format braces":            {AgentRoleExecutor, base + "{workdir}}", "outside a placeholder"},
+		"empty":                             {AgentRoleExecutor, "  \n", "empty"},
+		"not UTF-8":                         {AgentRoleExecutor, base + "\xff", "UTF-8"},
+		"too long":                          {AgentRoleExecutor, base + strings.Repeat("a", MaxAgentPromptBytes), "the limit is"},
 	} {
 		err := ValidatePrompt(c.role, c.prompt)
 		if c.want == "" && err != nil || c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)) {
@@ -90,7 +91,8 @@ func TestSettingsAreBounded(t *testing.T) {
 		ok     bool
 	}{
 		"the defaults":              {func(*AgentTypeSettings) {}, true},
-		"a model":                   {func(s *AgentTypeSettings) { s.Model = "claude-opus-5[1m]" }, true},
+		"a model":                   {func(s *AgentTypeSettings) { s.Model = "anthropic/claude-opus-5[1m]" }, true},
+		"a bare model":              {func(s *AgentTypeSettings) { s.Model = "claude-opus-5" }, false},
 		"a model no agent can run":  {func(s *AgentTypeSettings) { s.Model = "a b" }, false},
 		"no subagent":               {func(s *AgentTypeSettings) { s.MaxSubagents = 0 }, false},
 		"too many subagents":        {func(s *AgentTypeSettings) { s.MaxSubagents = 11 }, false},
@@ -135,24 +137,40 @@ func TestABuiltinIDStaysOutOfTheNamespaceOfOrgTypes(t *testing.T) {
 	}
 }
 
-func TestAnOrgMakesResearcherAndBaselineTypesOnly(t *testing.T) {
+func TestAnOrgMakesExecutorAndBaselineTypesOnly(t *testing.T) {
 	for _, role := range AgentRoles {
 		err := CheckOrgAgentRole(role)
-		if want := role == AgentRoleResearcher || role == AgentRoleBaseline; (err == nil) != want {
+		if want := role == AgentRoleExecutor || role == AgentRoleBaseline; (err == nil) != want {
 			t.Errorf("%s: got = %v, want allowed %v", role, err, want)
 		}
 	}
 }
 
-func TestTheModelAnAgentRunsOnIsItsOwnElseItsTypesElseTheDefault(t *testing.T) {
-	catalog := testCatalog()
-	for _, c := range []struct{ agentType, model, want string }{
-		{"at-custom", "own", "own"},
-		{"at-custom", "", "custom-model"},
-		{"generalist", "", "platform"},
+func TestTheModelAnAgentRunsOnIsItsOwnElseItsTypesElseTheCoordinatorsForAResearcherElseTheDefault(t *testing.T) {
+	defaults := ModelDefaults{Agent: "platform", Coordinator: "platform-coordinator"}
+	for _, c := range []struct {
+		choice ModelChoice
+		want   string
+	}{
+		{ModelChoice{Role: AgentRoleExecutor, Own: "own", Type: "type", Coordinator: "coordinator"}, "own"},
+		{ModelChoice{Role: AgentRoleExecutor, Type: "type", Coordinator: "coordinator"}, "type"},
+		{ModelChoice{Role: AgentRoleExecutor, Coordinator: "coordinator"}, "platform"},
+		{ModelChoice{Role: AgentRoleResearcher, Own: "own", Type: "type", Coordinator: "coordinator"}, "own"},
+		{ModelChoice{Role: AgentRoleResearcher, Type: "type", Coordinator: "coordinator"}, "type"},
+		{ModelChoice{Role: AgentRoleResearcher, Coordinator: "coordinator"}, "coordinator"},
+		{ModelChoice{Role: AgentRoleResearcher}, "platform-coordinator"},
+		{ModelChoice{Role: AgentRoleCoordinator, Type: "type"}, "type"},
+		{ModelChoice{Role: AgentRoleCoordinator}, "platform-coordinator"},
 	} {
-		if got := ResolveModel(catalog, c.agentType, c.model, "platform"); got != c.want {
-			t.Errorf("%s %q: got = %s, want %s", c.agentType, c.model, got, c.want)
+		if got := c.choice.Model(defaults); got != c.want {
+			t.Errorf("%+v: got = %s, want %s", c.choice, got, c.want)
 		}
+	}
+	catalog := testCatalog()
+	if got := TypeModel(catalog, "at-custom"); got != "custom-model" {
+		t.Errorf("a type naming a model: got = %q", got)
+	}
+	if got := TypeModel(catalog, "generalist"); got != "" {
+		t.Errorf("a type naming none: got = %q", got)
 	}
 }

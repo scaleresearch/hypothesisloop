@@ -17,7 +17,7 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/experiments/pe-x',
   useSearchParams: () => new URLSearchParams(navigation.search),
 }))
-vi.mock('@/lib/api/agent-types', () => ({ fetchAgentTypes: vi.fn().mockResolvedValue([]) }))
+vi.mock('@/lib/api/agent-types', () => ({ fetchAgentTypes: vi.fn().mockResolvedValue([]), fetchAgentRoles: vi.fn(async () => (await import('@/test-agent-types')).ROLES) }))
 vi.mock('@/lib/api/agents', () => ({
   addPlatformExperimentAgents: vi.fn(), fetchPlatformExperimentAgents: vi.fn(), fetchPlatformExperimentAgentToken: vi.fn(), removePlatformExperimentAgent: vi.fn(), fetchPlatformExperimentMessages: vi.fn().mockResolvedValue([]), sendPlatformExperimentMessage: vi.fn(),
 }))
@@ -30,7 +30,7 @@ vi.mock('@/lib/api/quotas', () => ({ fetchPlatformExperimentQuotas: vi.fn() }))
 
 const at = '2026-01-01T00:00:00Z'
 // A self-run agent of the experiment, as the API lists it to one who writes nothing of it.
-const self: JoinedAgent = { platform_experiment_id: 'pe-x', agent_id: 'ag-self', name: 'ag-self', role: 'competitor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, in_agentsandbox: false, agent_type: 'generalist', model: '', hyperparameters: null, at_work: true, ended: '', signed_up_at: at, actions: [] }
+const self: JoinedAgent = { platform_experiment_id: 'pe-x', agent_id: 'ag-self', name: 'ag-self', role: 'executor', actor: { kind: 'user', id: 'u1', name: 'Ada' }, in_agentsandbox: false, agent_type: 'generalist', model: '', hyperparameters: null, at_work: true, ended: '', signed_up_at: at, actions: [] }
 const me: Me = {
   kind: 'user',
   user_id: 'u1',
@@ -46,7 +46,7 @@ function show(search: string, more: Partial<PlatformExperiment>) {
     id: 'pe-x', name: 'Vision benchmark', project_id: 'prj_platform', status, shared: true,
     status_reason: { reason, message: `the API's sentence for ${reason}`, summary: `The summary for ${reason}.`, ...(status === 'closed' ? {} : { waits_for: 'platform' as const }) },
     budget_accelerator_hours: 100, budget_kind: 'accelerator', max_agents: 4, signup_count: 1, stages: [], current_stage: 1, created_at: at,
-    description: '', metrics: [], researchers: [], coordinator_in_agentsandbox: false, max_agentsandboxes: 0, report_interval_seconds: 60, starts_at: at, updated_at: at, editable: [], actions: [], ...more,
+    description: '', metrics: [], agents: [], coordinator_in_agentsandbox: false, max_agentsandboxes: 0, report_interval_seconds: 60, starts_at: at, updated_at: at, editable: [], actions: [], ...more,
   })
   const resolved = resolveTenant(me, '')
   if (resolved.state !== 'selected') throw new Error('no tenant')

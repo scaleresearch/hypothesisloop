@@ -496,7 +496,7 @@ func scanInstructionsChange(row pgx.CollectableRow) (domain.Change, error) {
 
 // Archive archives agent type id of org orgID: no new agent runs it, and the agents that do keep
 // running. Archiving one archived changes nothing. ErrAgentTypeBuiltin for a built-in type, and an
-// *AgentTypeInUse while a platform experiment that is not closed names it in its researchers, for
+// *AgentTypeInUse while a platform experiment that is not closed names it in its agents, for
 // its coordinator or for one of its agents.
 func (s *Store) Archive(ctx context.Context, orgID, id string, by domain.Actor) (*domain.CurrentAgentType, error) {
 	var archived *domain.CurrentAgentType
@@ -516,7 +516,7 @@ func (s *Store) Archive(ctx context.Context, orgID, id string, by domain.Actor) 
 SELECT pe.id FROM platform_experiments pe
 WHERE pe.status <> 'closed' AND (
     pe.coordinator_agent_type = $1
-    OR pe.researchers @> jsonb_build_array(jsonb_build_object('agent_type', $1::text))
+    OR pe.agents @> jsonb_build_array(jsonb_build_object('agent_type', $1::text))
     OR EXISTS (SELECT 1 FROM experiment_signups s WHERE s.platform_experiment_id = pe.id AND s.agent_type = $1))
 ORDER BY pe.id`, id)
 		if err != nil {
@@ -557,7 +557,7 @@ func archiveTx(ctx context.Context, tx *Write, current *domain.CurrentAgentType,
 // commits, so an archive waits for it and then sees it. ErrUnknownAgentType for any other.
 func agentTypeTx(ctx context.Context, q queryer, platformExpID, typeID string, role domain.AgentRole) (string, error) {
 	if typeID == "" {
-		typeID = domain.AgentTypeOfRole(role)
+		typeID = role.Info().AgentType
 	}
 	var found string
 	err := q.QueryRow(ctx, `
@@ -572,11 +572,11 @@ FOR SHARE OF t`,
 	return typeID, err
 }
 
-// poolTypesTx locks the agent type of each entry of pool, the researchers of platform experiment
-// platformExpID, as agentTypeTx does.
-func poolTypesTx(ctx context.Context, tx *Write, platformExpID string, pool domain.ResearcherPool) error {
+// poolTypesTx locks the agent type of each entry of pool, the team of platform experiment
+// platformExpID, as agentTypeTx does, each of the role its entry gives.
+func poolTypesTx(ctx context.Context, tx *Write, platformExpID string, pool domain.AgentPool) error {
 	for _, e := range pool {
-		if _, err := agentTypeTx(ctx, tx, platformExpID, e.AgentType, domain.AgentRoleResearcher); err != nil {
+		if _, err := agentTypeTx(ctx, tx, platformExpID, e.AgentType, domain.PoolRole(e.AgentType)); err != nil {
 			return err
 		}
 	}

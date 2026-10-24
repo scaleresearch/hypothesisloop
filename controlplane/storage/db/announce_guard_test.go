@@ -24,7 +24,7 @@ var announcedInserts = map[string]bool{
 // empty set is every column.
 var announcedUpdates = map[string][]string{
 	"experiments":            {"status", "not_admitted_reason", "underperforming_metric", "held_reason", "same_hypothesis"},
-	"platform_experiments":   {"status", "description", "duration_hours", "coordinator_reason", "researchers_held", "capacity_noticed_at", "goal", "proposed_at"},
+	"platform_experiments":   {"status", "description", "duration_hours", "coordinator_reason", "agents_held", "capacity_noticed_at", "goal", "proposed_at"},
 	"agent_quotas":           {},
 	"experiment_signups":     {"finished_at", "idle_noticed_at"},
 	"environment_waiters":    {"loaded"},

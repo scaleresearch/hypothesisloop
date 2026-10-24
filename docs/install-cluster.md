@@ -94,7 +94,7 @@ Resources: the agents request 10m CPU and 16 to 32 MiB of memory each.
 The release's values are the cluster's one config file:
 `helm get values hypothesisloop-cluster-agent -n hypothesisloop`. Optional values are documented
 in the chart (`helm show values oci://REGISTRY/charts/hypothesisloop-cluster-agent`):
-`jobs.preemptLowerPriorityPods`, `nodeAgent.nodeSelector`, `autoscalerEnabled`,
+`jobs.preemptLowerPriorityPods`, `nodeAgent.nodeSelector`, `autoscalerEnabled`, `placementGroupLabel`,
 `detachOnUninstall`, `insecureRegistry.*`, `kubeContext` and `builder.*`. Append `--set key=value` to the command to set one.
 
 ### Upgrade and uninstall

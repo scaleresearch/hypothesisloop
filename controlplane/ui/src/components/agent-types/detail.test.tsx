@@ -3,18 +3,22 @@ import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { archiveAgentType, createAgentType, editAgentType, fetchAgentType, fetchAgentTypeVersions, restoreAgentType } from '@/lib/api/agent-types'
+import { fetchModels } from '@/lib/api/models'
 import { ApiError } from '@/lib/api/request'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { AgentTypeDetail } from '@/components/agent-types/detail'
-import { CATALOG, RESEARCHER_PROMPT, agentType, seenBy } from '@/test-agent-types'
+import { CATALOG, EXECUTOR_PROMPT, agentType, seenBy } from '@/test-agent-types'
+import { MODELS, pickModel } from '@/test-models'
 import { choose } from '@/test-select'
 import type { AgentTypeVersion, EditedAgentType, ListedAgentType, Me, OrgAction, OrgRole } from '@/types/api'
 
 const navigation = vi.hoisted(() => ({ push: vi.fn() }))
 vi.mock('next/navigation', () => ({ useRouter: () => navigation }))
 vi.mock('@/lib/api/agent-types', () => ({
+  fetchAgentRoles: vi.fn(async () => (await import('@/test-agent-types')).ROLES),
   fetchAgentType: vi.fn(), fetchAgentTypeVersions: vi.fn(), editAgentType: vi.fn(), restoreAgentType: vi.fn(), archiveAgentType: vi.fn(), createAgentType: vi.fn(),
 }))
+vi.mock('@/lib/api/models', () => ({ fetchModels: vi.fn() }))
 
 const at = '2026-01-01T00:00:00Z'
 // What the API lets each role do to the org.
@@ -28,7 +32,7 @@ const me = (role: OrgRole): Me => ({
 let type: ListedAgentType
 
 function version(n: number, prompt: string, effort: ListedAgentType['current']['settings']['effort'] = 'high'): AgentTypeVersion {
-  return { agent_type: type.id, version: n, prompt, digest: `d${n}0000000000000`, created_at: at, created_by: { kind: 'user', id: 'u1', name: 'Ada' }, settings: { model: '', max_subagents: 4, effort, hyperparameters: {} } }
+  return { agent_type: type.id, version: n, prompt, digest: `d${n}0000000000000`, created_at: at, created_by: { kind: 'user', id: 'u1', name: 'Ada' }, settings: { model: type.current.settings.model, max_subagents: 4, effort, hyperparameters: {} } }
 }
 
 let viewer: OrgRole
@@ -57,8 +61,9 @@ function edited(t: ListedAgentType, told: number): EditedAgentType {
 beforeEach(() => {
   navigation.push.mockReset()
   type = CATALOG.find(t => t.id === 'at-lr')!
+  vi.mocked(fetchModels).mockResolvedValue(MODELS)
   vi.mocked(fetchAgentType).mockImplementation(async () => seenBy(viewer, type))
-  vi.mocked(fetchAgentTypeVersions).mockImplementation(async () => [version(3, RESEARCHER_PROMPT, 'max'), version(2, RESEARCHER_PROMPT.replace('researcher', 'tuner')), version(1, 'Old.\n{{rules}}\n{{hl_commands}}')])
+  vi.mocked(fetchAgentTypeVersions).mockImplementation(async () => [version(3, EXECUTOR_PROMPT, 'max'), version(2, EXECUTOR_PROMPT.replace('an executor', 'a tuner')), version(1, 'Old.\n{{rules}}\n{{hl_commands}}')])
 })
 
 describe('editing an org\'s agent type', () => {
@@ -75,7 +80,7 @@ describe('editing an org\'s agent type', () => {
   })
 
   it('asks before a new version, saying it applies in real time, then saves from the version it was made on', async () => {
-    const saved = agentType('at-lr', 'LR sweeper', 'researcher', { current_version: 4 })
+    const saved = agentType('at-lr', 'LR sweeper', 'executor', { current_version: 4 })
     vi.mocked(editAgentType).mockImplementation(async () => { type = saved; return edited(saved, 2) })
     show()
     await screen.findByRole('textbox', { name: 'Prompt' })
@@ -88,17 +93,32 @@ describe('editing an org\'s agent type', () => {
     expect(editAgentType).not.toHaveBeenCalled()
     await userEvent.click(dialog.getByRole('button', { name: 'Save' }))
     expect(editAgentType).toHaveBeenCalledExactlyOnceWith('org_a', 'at-lr', {
-      if_version: 3, name: 'LR sweeper', description: '', prompt: RESEARCHER_PROMPT,
-      settings: { model: '', max_subagents: 6, effort: 'high', hyperparameters: {} },
+      if_version: 3, name: 'LR sweeper', description: '', prompt: EXECUTOR_PROMPT,
+      settings: { model: 'openrouter/moonshotai/kimi-k2', max_subagents: 6, effort: 'high', hyperparameters: {} },
     })
     expect(await screen.findByText('v4 is current. Changes apply in real time to running agents.')).toBeTruthy()
+  })
+
+  it('moves the type to another model by its reference, or back to the platform default', async () => {
+    vi.mocked(editAgentType).mockImplementation(async () => edited(type, 0))
+    show()
+    const model = await screen.findByLabelText('Model')
+    await waitFor(() => expect((model as HTMLInputElement).value).toBe('openrouter/moonshotai/kimi-k2'))
+    await pickModel(model, 'opus', 'anthropic/claude-opus-5-5')
+    await userEvent.click(screen.getByRole('button', { name: 'Save as v4' }))
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Save' }))
+    expect(vi.mocked(editAgentType).mock.lastCall?.[2].settings?.model).toBe('anthropic/claude-opus-5-5')
+    await choose(model, 'Platform default: anthropic/claude-sonnet-5')
+    await userEvent.click(screen.getByRole('button', { name: 'Save as v4' }))
+    await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Save' }))
+    expect(vi.mocked(editAgentType).mock.lastCall?.[2].settings?.model).toBe('')
   })
 
   it('says plainly when the type was changed as often as it may be in an hour', async () => {
     vi.mocked(editAgentType).mockRejectedValue(new ApiError(429, 'at-lr has 60 versions in the last hour', 'rate_limited'))
     show()
     await screen.findByRole('textbox', { name: 'Prompt' })
-    setPrompt(`${RESEARCHER_PROMPT}More.`)
+    setPrompt(`${EXECUTOR_PROMPT}More.`)
     await userEvent.click(screen.getByRole('button', { name: 'Save as v4' }))
     await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Save' }))
     expect(await screen.findByText(/This type was changed as often as it may be in an hour\. at-lr has 60 versions/)).toBeTruthy()
@@ -143,7 +163,7 @@ describe('editing an org\'s agent type', () => {
     vi.mocked(editAgentType).mockRejectedValue(new ApiError(409, 'version 3 is not current: 4 is', 'version_conflict'))
     show()
     await screen.findByRole('textbox', { name: 'Prompt' })
-    setPrompt(`${RESEARCHER_PROMPT}More.`)
+    setPrompt(`${EXECUTOR_PROMPT}More.`)
     await userEvent.click(screen.getByRole('button', { name: 'Save as v4' }))
     await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Save' }))
     expect(await screen.findByText(/Someone saved a newer version while you were editing\. version 3 is not current/)).toBeTruthy()
@@ -154,7 +174,7 @@ describe('editing an org\'s agent type', () => {
 describe('what nobody here edits', () => {
   it('shows a built-in type read-only with why, and offers a copy', async () => {
     type = CATALOG[0]
-    vi.mocked(createAgentType).mockResolvedValue(agentType('at-copy', 'Copy of Generalist', 'researcher'))
+    vi.mocked(createAgentType).mockResolvedValue(agentType('at-copy', 'Copy of Generalist', 'executor'))
     show()
     expect(await screen.findByText(/Built-in types are read-only for everyone/)).toBeTruthy()
     expect(prompt().readOnly).toBe(true)
@@ -202,7 +222,7 @@ describe('version history', () => {
     expect(screen.getByText('Effort:')).toBeTruthy()
     const diff = screen.getByLabelText('Prompt diff')
     expect(within(diff).getByText('You are a tuner.')).toBeTruthy()
-    expect(within(diff).getByText('You are a researcher.')).toBeTruthy()
+    expect(within(diff).getByText('You are an executor.')).toBeTruthy()
     await choose(screen.getByLabelText('Compare from'), 'v1')
     expect(within(screen.getByLabelText('Prompt diff')).getByText('Old.')).toBeTruthy()
   })
@@ -211,7 +231,7 @@ describe('version history', () => {
 describe('restoring a version', () => {
   const listed = (n: number) => screen.getAllByRole('listitem').find(li => li.textContent?.startsWith(`v${n}`))!
   it('asks, saying it applies in real time, and makes the earlier version current as the next one', async () => {
-    const restored = agentType('at-lr', 'LR sweeper', 'researcher', { current_version: 4 })
+    const restored = agentType('at-lr', 'LR sweeper', 'executor', { current_version: 4 })
     vi.mocked(restoreAgentType).mockImplementation(async () => { type = restored; return edited(restored, 1) })
     show()
     await screen.findByText('3 versions')

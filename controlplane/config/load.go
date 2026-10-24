@@ -219,12 +219,6 @@ func (c *Settings) build() error {
 	if c.Agents.Image == "" {
 		return fmt.Errorf("agents image is required: what a sandboxed agent's machine boots")
 	}
-	if err := domain.ValidateModel(c.Agents.DefaultModel); err != nil {
-		return fmt.Errorf("agents default_model is required, the model an agent runs on when it names none: %w", err)
-	}
-	if err := domain.ValidateModel(c.Agents.CoordinatorModel); err != nil {
-		return fmt.Errorf("agents coordinator_model is required, the model a sandboxed coordinator runs on when it names none: %w", err)
-	}
 	if c.Agents.BootLimitSeconds <= 0 {
 		return fmt.Errorf("agents boot_limit_seconds is required and positive: how long a sandboxed agent's machine may stay starting")
 	}
@@ -239,19 +233,29 @@ func (c *Settings) build() error {
 		return fmt.Errorf("agents max_agentsandboxes_per_platform_experiment is required and positive: how many machines the platform runs for one platform experiment, its coordinator included")
 	}
 	if c.Agents.IdleNoticeMinutes <= 0 {
-		return fmt.Errorf("agents idle_notice_minutes is required and positive: how long a researcher may go with no job in flight before it and the coordinator are told")
+		return fmt.Errorf("agents idle_notice_minutes is required and positive: how long an executor may go with no job in flight before it and the coordinator are told")
 	}
-	switch m := c.Models; m.Provider {
-	case ModelProviderAnthropic:
-	default:
-		return fmt.Errorf("models provider %q is not %s: the provider whose models sandboxed agents run on", m.Provider, ModelProviderAnthropic)
+	// A provider's catalog is required while the provider is served (LoadControlService).
+	if c.Models.Anthropic.Catalog != nil {
+		if err := c.Models.Anthropic.Catalog.Validate(domain.ModelProviderAnthropic, true); err != nil {
+			return fmt.Errorf("models anthropic catalog: %w", err)
+		}
 	}
-	if err := c.Models.Catalog.Validate(); err != nil {
-		return fmt.Errorf("models catalog: %w", err)
+	if c.Models.OpenAI.Catalog != nil {
+		if err := c.Models.OpenAI.Catalog.Validate(domain.ModelProviderOpenAI, false); err != nil {
+			return fmt.Errorf("models openai catalog: %w", err)
+		}
 	}
-	for _, model := range []string{c.Agents.DefaultModel, c.Agents.CoordinatorModel} {
-		if _, ok := c.Models.Catalog[model]; !ok {
-			return fmt.Errorf("models catalog does not name %s, a default model of the agents section: an agent on it would be refused every model call", model)
+	catalogs := c.Models.Catalogs()
+	for _, d := range []struct{ key, model string }{{"default_model", c.Agents.DefaultModel}, {"coordinator_model", c.Agents.CoordinatorModel}} {
+		ref, err := domain.ParseModelRef(d.model)
+		if err != nil {
+			return fmt.Errorf("agents %s is required, the model an agent or a coordinator runs on when it names none: %w", d.key, err)
+		}
+		if catalog, priced := catalogs[ref.Provider()]; priced {
+			if _, ok := catalog[ref.ID()]; !ok {
+				return fmt.Errorf("models %s catalog does not name %s, agents %s: an agent on it would be refused every model call", ref.Provider(), ref.ID(), d.key)
+			}
 		}
 	}
 	if c.Models.MaxCallsInFlightPerOrg <= 0 {

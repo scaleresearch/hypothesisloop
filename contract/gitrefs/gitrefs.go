@@ -29,7 +29,7 @@ func BaselineBranch(platformExperimentID string) string {
 }
 
 // IsBaselineAgentBranch is whether a baseline agent's job may run on branch: the baseline branch,
-// or one beside it, baseline-<name>, where the agent tries its code as a researcher would. Only a
+// or one beside it, baseline-<name>, where the agent tries its code as an executor would. Only a
 // job of the baseline branch itself is declared the baseline.
 func IsBaselineAgentBranch(platformExperimentID, branch string) bool {
 	baseline := BaselineBranch(platformExperimentID)
@@ -61,7 +61,7 @@ func Slug(text string, limit int) string {
 // AgentBranchName is an agent's name as the segment of the branches it writes under BranchPrefix.
 func AgentBranchName(name string) string { return Slug(name, 0) }
 
-// AgentBranchPrefix is what every branch a researcher or reviewer named agentName writes starts
+// AgentBranchPrefix is what every branch an executor or reviewer named agentName writes starts
 // with, empty for a name that makes no branch name or one in the baseline's place.
 func AgentBranchPrefix(platformExperimentID, agentName string) string {
 	segment := AgentBranchName(agentName)

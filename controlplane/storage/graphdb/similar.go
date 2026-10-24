@@ -130,7 +130,7 @@ func closeAt(n NewHypothesis) float64 {
 }
 
 // untoldSimilar returns the hypotheses of n's platform experiment that n must be told apart from:
-// those whose text reads close to n's (closeAt), except the ones n builds on, which a refinement is
+// those not merged whose text reads close to n's (closeAt), except the ones n builds on, which a refinement is
 // expected to read close to, and those n builds on that are refuted, minus every one n names in
 // DistinctFrom or in a contradicts or related link. Refuted parents first, then closest first, at
 // most maxSimilar.
@@ -147,7 +147,7 @@ func untoldSimilar(ctx context.Context, tx neo4j.ManagedTransaction, n NewHypoth
 			told[l.To] = true
 		}
 	}
-	records, err := collect(ctx, tx, `MATCH (h:Hypothesis {platform_experiment_id: $pe})
+	records, err := collect(ctx, tx, `MATCH (h:Hypothesis {platform_experiment_id: $pe}) WHERE h.status <> '`+string(domain.HypothesisMerged)+`'
 OPTIONAL MATCH (h)-[:BUILDS_ON]->(t)
 RETURN h.id, h.agent_id, coalesce(h.actor_kind, 'unverified'), coalesce(h.actor_id, ''), coalesce(h.author, ''), h.status, h.text, collect(t.id)`, map[string]any{"pe": n.PlatformExperimentID})
 	if err != nil {

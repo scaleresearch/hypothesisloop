@@ -2,9 +2,12 @@ package placement
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 
+	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -30,6 +33,16 @@ func TopologyFits(byNode, nodeResources map[string]map[string]int64, labelsByNod
 	return Reserve(CloneNodes(byNode), CloneNodes(nodeResources), labelsByNode, exp)
 }
 
+// FitsOnlyApart says whether exp's nodes fit the free nodes only with some of them outside the
+// place every other is in (JobSpec.NodesWithin).
+func FitsOnlyApart(byNode, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, exp *domain.Experiment) bool {
+	if exp.EffectiveJob().NodesWithin() == "" || TopologyFits(byNode, nodeResources, labelsByNode, exp) {
+		return false
+	}
+	_, apart := planPlacement(CloneNodes(byNode), CloneNodes(nodeResources), labelsByNode, []*domain.Experiment{exp}, true)
+	return apart
+}
+
 func LabelsMatch(actual, required map[string]string) bool {
 	for key, value := range required {
 		if actual[key] != value {
@@ -46,45 +59,121 @@ func RunsOn(labels map[string]string, exp *domain.Experiment) bool {
 }
 
 // DesiredFits proves candidate fits the cluster beside the jobs already desired there.
-// resolved is the candidate's job as the runtime will be handed it: when the candidate lands on a
-// slot (domain.NodeSlotLabel), resolved is pinned to that slot.
+// resolved is the candidate's job as the runtime will be handed it: when the candidate lands on
+// slots (domain.NodeSlotLabel), resolved is pinned to them, one per node in rank order.
 func DesiredFits(byNode map[string]map[string]int64, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, desired []*domain.Experiment, candidate *domain.Experiment, resolved *domain.JobSpec) bool {
 	byNode, nodeResources = CloneNodes(byNode), CloneNodes(nodeResources)
 	// Planned jointly, not one job after another: the runtime is free to put an already-desired
 	// job on whichever node it likes, so replaying it onto one fixed node and then asking whether
 	// the candidate fits around that guess rejected candidates the cluster could host.
 	//
-	// A desired job pinned to a slot is the exception, since its node is decided. It holds that
-	// slot whether or not the runtime has rented it yet, and is not planned again: its slot reads
-	// as taken from the moment its instance exists, and planning it there would find no room for
-	// a job that is already in place.
+	// A desired job pinned to slots is the exception, since its nodes are decided. It holds those
+	// slots whether or not the runtime has rented them yet, and is not planned again: a slot reads
+	// as taken from the moment its instance exists, and planning the job there would find no room
+	// for a job that is already in place.
 	jobs := make([]*domain.Experiment, 0, len(desired)+1)
 	for _, d := range desired {
-		if slot := d.EffectiveJob().NodeSelector[domain.NodeSlotLabel]; slot != "" {
-			HoldSlot(byNode, nodeResources, labelsByNode, slot)
+		if slots := d.EffectiveJob().Slots; len(slots) > 0 {
+			HoldSlots(byNode, nodeResources, labelsByNode, slots)
 			continue
 		}
 		jobs = append(jobs, d)
 	}
 	jobs = append(jobs, candidate)
-	plan, ok := planPlacement(byNode, nodeResources, labelsByNode, jobs)
+	plan, ok := planPlacement(byNode, nodeResources, labelsByNode, jobs, false)
 	if !ok {
 		return false
 	}
-	// A slot holds a whole job, so only a job that is one node can be pinned to one.
-	if candidate.Job.Nodes() == 1 {
-		for _, p := range plan {
-			if slot := labelsByNode[p.node][domain.NodeSlotLabel]; p.job == len(jobs)-1 && slot != "" {
-				selector := make(map[string]string, len(resolved.NodeSelector)+1)
-				for key, value := range resolved.NodeSelector {
-					selector[key] = value
-				}
-				selector[domain.NodeSlotLabel] = slot
-				resolved.NodeSelector = selector
+	// A job is on slots with every node or with none: one runtime rents all of its nodes.
+	slots := make([]string, len(candidate.NodeShapes()))
+	for _, p := range plan {
+		if p.job == len(jobs)-1 {
+			slots[p.rank] = labelsByNode[p.node][domain.NodeSlotLabel]
+		}
+	}
+	switch {
+	case !slices.Contains(slots, ""):
+		resolved.Slots = slots
+	case slices.ContainsFunc(slots, func(slot string) bool { return slot != "" }):
+		return false
+	}
+	for _, p := range plan {
+		if p.job != len(jobs)-1 {
+			continue
+		}
+		place, _ := nearness(labelsByNode, p.node, candidate.EffectiveJob().NodesWithin(), labelledLevels(labelsByNode))
+		if len(place) > 0 {
+			selector := maps.Clone(resolved.NodeSelector)
+			if selector == nil {
+				selector = map[string]string{}
+			}
+			maps.Copy(selector, place)
+			resolved.NodeSelector = selector
+		}
+		break
+	}
+	return true
+}
+
+// nearness is the place of node at level and every wider one, as the node labels that name it,
+// which every node of a job within level shares; ok is false for a node no such job may take.
+// A slot as near as level (slotWithin) is in every place of its job's: the runtime rents a job's
+// slots on one private network. A node without the label of a region or zone is in the one region or zone of a cluster none of
+// whose nodes is labelled with one (labelled), and a node with no placement group takes no job
+// within one.
+func nearness(labelsByNode map[string]map[string]string, node string, level domain.NodesLevel, labelled map[string]bool) (place map[string]string, ok bool) {
+	labels := labelsByNode[node]
+	if level == "" {
+		return nil, true
+	}
+	if isSlot(labels) {
+		return nil, slotWithin(labels).AsNearAs(level)
+	}
+	place = map[string]string{}
+	for _, l := range clusterapi.NodesLevels {
+		key := levelLabels[l]
+		if l == domain.NodesWithinPlacementGroup {
+			key = labels[domain.NodePlacementGroupKeyLabel]
+		}
+		switch value := labels[key]; {
+		case key != "" && value != "":
+			place[key] = value
+		case l == domain.NodesWithinPlacementGroup || labelled[key]:
+			return nil, false
+		}
+		if l == level {
+			break
+		}
+	}
+	return place, true
+}
+
+// levelLabels are the node labels that name a node's region and zone.
+var levelLabels = map[domain.NodesLevel]string{
+	domain.NodesWithinRegion: domain.NodeRegionLabel,
+	domain.NodesWithinZone:   domain.NodeZoneLabel,
+}
+
+// labelledLevels says which of levelLabels some node of labelsByNode carries.
+func labelledLevels(labelsByNode map[string]map[string]string) map[string]bool {
+	labelled := map[string]bool{}
+	for _, labels := range labelsByNode {
+		for _, key := range levelLabels {
+			if labels[key] != "" {
+				labelled[key] = true
 			}
 		}
 	}
-	return true
+	return labelled
+}
+
+// placeKey is place as one comparable string.
+func placeKey(place map[string]string) string {
+	var b strings.Builder
+	for _, key := range slices.Sorted(maps.Keys(place)) {
+		fmt.Fprintf(&b, "%s=%s;", key, place[key])
+	}
+	return b.String()
 }
 
 func CloneNodes(byNode map[string]map[string]int64) map[string]map[string]int64 {
@@ -121,7 +210,7 @@ func CloneNodes(byNode map[string]map[string]int64) map[string]map[string]int64 
 // could use and reported a job with a valid assignment as not fitting. The input maps are
 // modified only when the whole job is placed — a false answer leaves them exactly as they were.
 func Reserve(byNode, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, exp *domain.Experiment) bool {
-	plan, ok := planPlacement(CloneNodes(byNode), CloneNodes(nodeResources), labelsByNode, []*domain.Experiment{exp})
+	plan, ok := planPlacement(CloneNodes(byNode), CloneNodes(nodeResources), labelsByNode, []*domain.Experiment{exp}, false)
 	if !ok {
 		return false
 	}
@@ -134,10 +223,12 @@ func Reserve(byNode, nodeResources map[string]map[string]int64, labelsByNode map
 	return true
 }
 
-// rankAssignment is one rank of one job pinned to a node by planPlacement. key is the
-// AcceleratorKey of the job's type, "" for a rank that holds no accelerator.
+// rankAssignment is one rank of one job pinned to a node by planPlacement: rank is its index in
+// the job's NodeShapes. key is the AcceleratorKey of the job's type, "" for a rank that holds no
+// accelerator.
 type rankAssignment struct {
 	job   int
+	rank  int
 	shape domain.NodeShape
 	node  string
 	key   string
@@ -153,16 +244,25 @@ var searchBudget = 50000
 // planPlacement finds nodes for every rank of every job in jobs against the given free capacity,
 // consuming capacity in the maps as it goes (callers pass clones). Distinct-host rules apply per
 // job; ranks of different jobs may share a node. Returns the assignment and whether all ranks
-// were placed. On false the maps are left in an unspecified state.
-func planPlacement(byNode, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, jobs []*domain.Experiment) ([]rankAssignment, bool) {
+// were placed. Every node of a job is in one place of its JobSpec.NodesWithin unless apart. On
+// false the maps are left in an unspecified state.
+func planPlacement(byNode, nodeResources map[string]map[string]int64, labelsByNode map[string]map[string]string, jobs []*domain.Experiment, apart bool) ([]rankAssignment, bool) {
 	type rank struct {
 		job      int
+		rank     int
 		shape    domain.NodeShape
 		key      string
 		distinct bool
-		nodes    []string // qualifying candidate set for this rank
+		// network is how many nodes of the job are of this rank's shape, which a slot's private
+		// network must hold (SlotNetwork); 0 for a job on one node or one already on its slots.
+		network int
+		nodes   []string // qualifying candidate set for this rank
 	}
 	var ranks []rank
+	// places is, for each job within a level, the place each node it may take is in there
+	// (nearness); nil for a job on one node.
+	places := make([]map[string]string, len(jobs))
+	labelled := labelledLevels(labelsByNode)
 	for i, exp := range jobs {
 		key := AcceleratorKey(exp.AcceleratorType)
 		// Two candidate sets: a node that reported accelerators, and any node the cluster
@@ -171,12 +271,32 @@ func planPlacement(byNode, nodeResources map[string]map[string]int64, labelsByNo
 		acceleratorNodes := qualifyingNodes(byNode, labelsByNode, exp)
 		plainNodes := qualifyingNodes(nodeResources, labelsByNode, exp)
 		distinct := RequiresDistinctHosts(exp)
-		for _, shape := range exp.NodeShapes() {
+		shapes := exp.NodeShapes()
+		pinned := exp.EffectiveJob().Slots
+		if level := exp.EffectiveJob().NodesWithin(); level != "" && !apart {
+			places[i] = map[string]string{}
+			for _, node := range slices.Concat(acceleratorNodes, plainNodes) {
+				if place, ok := nearness(labelsByNode, node, level, labelled); ok {
+					places[i][node] = placeKey(place)
+				}
+			}
+			outside := func(node string) bool { _, ok := places[i][node]; return !ok }
+			acceleratorNodes = slices.DeleteFunc(acceleratorNodes, outside)
+			plainNodes = slices.DeleteFunc(plainNodes, outside)
+		}
+		for r, shape := range shapes {
 			nodes := plainNodes
 			if shape.AcceleratorCount > 0 {
 				nodes = acceleratorNodes
 			}
-			ranks = append(ranks, rank{job: i, shape: shape, key: key, distinct: distinct, nodes: nodes})
+			network := 0
+			switch {
+			case len(pinned) > 0:
+				nodes = slices.DeleteFunc(slices.Clone(nodes), func(node string) bool { return labelsByNode[node][domain.NodeSlotLabel] != pinned[r] })
+			case len(shapes) > 1:
+				network = sameShape(shapes, shape)
+			}
+			ranks = append(ranks, rank{job: i, rank: r, shape: shape, key: key, distinct: distinct, network: network, nodes: nodes})
 		}
 	}
 	// Hardest rank first: most accelerators, then the largest fungible request. The rank with the
@@ -192,12 +312,19 @@ func planPlacement(byNode, nodeResources map[string]map[string]int64, labelsByNo
 	for i := range used {
 		used[i] = make(map[string]bool)
 	}
+	// at is the place a job within a level is held to once one of its ranks is placed, and
+	// placed how many of its ranks are.
+	at := make([]string, len(jobs))
+	placed := make([]int, len(jobs))
 	plan := make([]rankAssignment, len(ranks))
 	budget := searchBudget
 
 	// nodeFits reports whether node can host r right now and the accelerator key it would draw on.
 	nodeFits := func(r rank, node string) (string, bool) {
 		if r.distinct && used[r.job][node] {
+			return "", false
+		}
+		if places[r.job] != nil && placed[r.job] > 0 && places[r.job][node] != at[r.job] {
 			return "", false
 		}
 		nodeKey := ""
@@ -210,7 +337,7 @@ func planPlacement(byNode, nodeResources map[string]map[string]int64, labelsByNo
 		if !NodeHasRoom(nodeResources[node], r.shape.Resources) {
 			return "", false
 		}
-		if isSlot(labelsByNode[node]) && !takesWholeSlot(r.shape, nodeKey, byNode[node], nodeResources[node]) {
+		if isSlot(labelsByNode[node]) && (!takesWholeSlot(r.shape, nodeKey, byNode[node], nodeResources[node]) || SlotNetwork(labelsByNode[node]) < r.network) {
 			return "", false
 		}
 		return nodeKey, true
@@ -244,6 +371,9 @@ func planPlacement(byNode, nodeResources map[string]map[string]int64, labelsByNo
 		}
 		sort.Strings(dimensions)
 		var b strings.Builder
+		if places[r.job] != nil {
+			fmt.Fprintf(&b, "at=%s;", places[r.job][node])
+		}
 		if r.shape.AcceleratorCount > 0 {
 			fmt.Fprintf(&b, "a=%d;", byNode[node][nodeKey]-r.shape.AcceleratorCount)
 		}
@@ -298,10 +428,15 @@ func planPlacement(byNode, nodeResources map[string]map[string]int64, labelsByNo
 			}
 			subtractNodeResources(nodeResources[c.node], r.shape.Resources)
 			used[r.job][c.node] = true
-			plan[i] = rankAssignment{job: r.job, shape: r.shape, node: c.node, key: c.key}
+			if placed[r.job] == 0 && places[r.job] != nil {
+				at[r.job] = places[r.job][c.node]
+			}
+			placed[r.job]++
+			plan[i] = rankAssignment{job: r.job, rank: r.rank, shape: r.shape, node: c.node, key: c.key}
 			if place(i + 1) {
 				return true
 			}
+			placed[r.job]--
 			used[r.job][c.node] = false
 			AddNodeResources(nodeResources[c.node], r.shape.Resources)
 			if r.shape.AcceleratorCount > 0 {
@@ -317,6 +452,17 @@ func planPlacement(byNode, nodeResources map[string]map[string]int64, labelsByNo
 		return nil, false
 	}
 	return plan, true
+}
+
+// sameShape is how many of shapes are shape: the nodes of a job that hold slots of one shape.
+func sameShape(shapes []domain.NodeShape, shape domain.NodeShape) int {
+	count := 0
+	for _, other := range shapes {
+		if other.AcceleratorCount == shape.AcceleratorCount && maps.Equal(other.Resources, shape.Resources) {
+			count++
+		}
+	}
+	return count
 }
 
 func shapeResourceTotal(shape domain.NodeShape) int64 {
@@ -335,8 +481,8 @@ func AddNodeResources(available, used map[string]int64) {
 
 // qualifyingNodes is the sorted set of nodes from capacity that carry exp's required node labels
 // and its image's architecture.
-// The selector is the effective job's: admission may have pinned an admitted job to a slot, and
-// for every other job the resolved selector is the submitted one.
+// The selector is the effective job's, which for a job admitted to a cluster also names its image's
+// architecture. The slots an admitted job is pinned to narrow each rank further (planPlacement).
 func qualifyingNodes(capacity map[string]map[string]int64, labelsByNode map[string]map[string]string, exp *domain.Experiment) []string {
 	nodes := make([]string, 0, len(capacity))
 	for node := range capacity {

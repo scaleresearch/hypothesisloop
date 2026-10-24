@@ -166,7 +166,7 @@ func (s *Service) Findings(ctx context.Context, platformExperimentID string) ([]
 	var actors []*domain.Actor
 	for _, h := range hypotheses {
 		e := &HypothesisEvidence{Hypothesis: h.Hypothesis, Evidence: evidence[h.ID]}
-		if h.Status == domain.HypothesisOpen && e.Finding == nil && e.BestJob == nil {
+		if (h.Status == domain.HypothesisOpen || h.Curated()) && e.Finding == nil && e.BestJob == nil {
 			continue
 		}
 		out = append(out, e)

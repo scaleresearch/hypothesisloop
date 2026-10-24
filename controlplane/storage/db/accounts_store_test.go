@@ -441,22 +441,22 @@ func TestPriorRunsAreTheClosedRunsOfTheProjectOnTheSameRepository(t *testing.T) 
 }
 
 // The standings of every prior run are read from one query of the relational store: each run in
-// the order asked, with its completed jobs and its researchers.
+// the order asked, with its completed jobs and its executors.
 func TestRunsToRankAreReadInTheOrderAsked(t *testing.T) {
 	pool := eventsTestDB(t)
 	pes := NewStore(pool, 3)
 	ctx := context.Background()
 	suffix := uuid.New().String()[:8]
 	first, second := "pe-rank-first-"+suffix, "pe-rank-second-"+suffix
-	researcher, baseline := "rank-researcher-"+suffix, "rank-baseline-"+suffix
+	executor, baseline := "rank-executor-"+suffix, "rank-baseline-"+suffix
 	createTestPE(t, pool, first, 10)
 	createTestPE(t, pool, second, 10)
-	createTestAgent(t, pool, researcher)
+	createTestAgent(t, pool, executor)
 	createTestAgent(t, pool, baseline)
-	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist')`, first, researcher)
+	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type, role) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist', 'executor')`, first, executor)
 	exec(t, pool, `INSERT INTO experiment_signups (platform_experiment_id, agent_id, quota_tier, added_by_kind, agent_type, role) VALUES ($1, $2, 'guaranteed', 'staff', 'generalist', 'baseline')`, first, baseline)
-	seedExperimentForCapTest(t, pool, "job-rank-done-"+suffix, researcher, first, 1, domain.StatusCompleted)
-	seedExperimentForCapTest(t, pool, "job-rank-failed-"+suffix, researcher, first, 1, domain.StatusFailed)
+	seedExperimentForCapTest(t, pool, "job-rank-done-"+suffix, executor, first, 1, domain.StatusCompleted)
+	seedExperimentForCapTest(t, pool, "job-rank-failed-"+suffix, executor, first, 1, domain.StatusFailed)
 
 	got, err := pes.RunsToRank(ctx, []string{second, "pe-rank-missing-" + suffix, first})
 	if err != nil || len(got) != 2 || got[0].PE.ID != second || got[1].PE.ID != first {
@@ -465,10 +465,10 @@ func TestRunsToRankAreReadInTheOrderAsked(t *testing.T) {
 	if want := map[string]bool{"job-rank-done-" + suffix: true}; !reflect.DeepEqual(got[1].Completed, want) {
 		t.Errorf("completed = %v, want %v", got[1].Completed, want)
 	}
-	if want := map[string]bool{researcher: true}; !reflect.DeepEqual(got[1].Competitors, want) {
-		t.Errorf("competitors = %v, want %v", got[1].Competitors, want)
+	if want := map[string]bool{executor: true}; !reflect.DeepEqual(got[1].Executors, want) {
+		t.Errorf("executors = %v, want %v", got[1].Executors, want)
 	}
-	if len(got[0].Completed) != 0 || len(got[0].Competitors) != 0 {
+	if len(got[0].Completed) != 0 || len(got[0].Executors) != 0 {
 		t.Errorf("a run with neither: got = %+v", got[0])
 	}
 }
@@ -501,7 +501,7 @@ func TestListingsKeepToTheCallersScope(t *testing.T) {
 	}
 	pes := NewStore(pool, 3)
 	for pe, agent := range map[string]string{peA: agentA, peB: agentB} {
-		if _, err := pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: agent, Role: domain.SignupRoleCompetitor}); err != nil {
+		if _, err := pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: agent, Role: domain.SignupRoleExecutor}); err != nil {
 			t.Fatalf("signup: %v", err)
 		}
 	}

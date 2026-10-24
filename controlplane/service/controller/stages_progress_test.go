@@ -57,7 +57,7 @@ func TestStageProgressCountsARunningCPUJob(t *testing.T) {
 }
 
 // Stages were measured from the accept, so the wait for a baseline ended stage 1 four minutes
-// after the researchers started. The ladder's clock is the run's: it counts from started_at to
+// after the executors started. The ladder's clock is the run's: it counts from started_at to
 // ends_at, and what came before the start moves no boundary.
 func TestStageProgressCountsTheRunFromItsStartAndNotFromItsAccept(t *testing.T) {
 	now := time.Now().UTC()

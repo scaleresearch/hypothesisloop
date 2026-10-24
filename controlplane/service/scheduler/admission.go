@@ -178,6 +178,9 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 			return &AdmissionError{Reason: ReasonMalformed, Field: "job.node_selector", Message: fmt.Sprintf("job.node_selector may not name %q: labels under %s are set by the platform", label, domain.NodeLabelReservedPrefix)}
 		}
 	}
+	if len(exp.Job.Slots) > 0 {
+		return &AdmissionError{Reason: ReasonMalformed, Field: "job.slots", Message: "job.slots may not be stated: the slots a job holds are set by the platform"}
+	}
 	if err := domain.ValidateCommand(exp.Job); err != nil {
 		return &AdmissionError{Reason: ReasonRequired, Field: "job.command", Message: err.Error()}
 	}
@@ -207,6 +210,9 @@ func ValidateExperiment(exp *domain.Experiment, caps domain.QuotaConfig) error {
 	// reading exactly one field for the type instead of learning about groups.
 	if exp.Job.AcceleratorType == "" {
 		exp.Job.AcceleratorType = domain.GroupAcceleratorType(exp.Job)
+	}
+	if err := domain.ValidateTopology(exp.Job); err != nil {
+		return &AdmissionError{Reason: ReasonMalformed, Field: "job.topology.nodes_within", Message: err.Error()}
 	}
 	if err := domain.ValidateSecretEnv(exp.Job, exp.SecretEnv); err != nil {
 		return &AdmissionError{Reason: ReasonMalformed, Field: "secret_env", Message: err.Error()}

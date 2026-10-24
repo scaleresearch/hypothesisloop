@@ -31,7 +31,7 @@ BURN_RUN_SECONDS = 120
 
 
 def _job(seconds: int, baseline: str | None) -> dict:
-    env = {"HYPOTHESISLOOP_DURATION_SECONDS": str(seconds)}
+    env = {"RUN_SECONDS": str(seconds)}
     if baseline is not None:
         env["HYPOTHESISLOOP_BASELINE"] = baseline
     return {"env": env}

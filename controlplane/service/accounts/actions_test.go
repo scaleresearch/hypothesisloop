@@ -126,10 +126,10 @@ func TestAClusterListsWhatTheCallerMayDoToItForTheOrg(t *testing.T) {
 
 func TestAnAgentTypeListsWhatTheCallerMayDoToIt(t *testing.T) {
 	at := time.Now()
-	ownType := domain.CurrentAgentType{AgentType: domain.AgentType{ID: "t1", OrgID: "org_a", Role: domain.AgentRoleResearcher}}
+	ownType := domain.CurrentAgentType{AgentType: domain.AgentType{ID: "t1", OrgID: "org_a", Role: domain.AgentRoleExecutor}}
 	archived := ownType
 	archived.ArchivedAt = &at
-	builtin := domain.CurrentAgentType{AgentType: domain.AgentType{ID: "b1", Role: domain.AgentRoleResearcher, Builtin: true}}
+	builtin := domain.CurrentAgentType{AgentType: domain.AgentType{ID: "b1", Role: domain.AgentRoleExecutor, Builtin: true}}
 	coordinator := domain.CurrentAgentType{AgentType: domain.AgentType{ID: "b2", Role: domain.AgentRoleCoordinator, Builtin: true}}
 	for _, c := range []struct {
 		name   string

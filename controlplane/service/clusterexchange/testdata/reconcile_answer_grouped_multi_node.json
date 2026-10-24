@@ -59,7 +59,7 @@
         "termination_grace_period_seconds": 10,
         "topology": {
           "spread_across_hosts": false,
-          "same_zone": true
+          "nodes_within": "placement_group"
         }
       },
       "hypothesis": "",

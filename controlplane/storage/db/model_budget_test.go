@@ -34,7 +34,7 @@ func TestAPlatformExperimentKeepsItsModelBudget(t *testing.T) {
 	}
 	raised := 400.0
 	got.ModelBudgetUSD = &raised
-	if err := pes.UpdatePlatformExperiment(ctx, got, domain.PlatformExpOpen, got.Researchers); err != nil {
+	if err := pes.UpdatePlatformExperiment(ctx, got, domain.PlatformExpOpen, got.Agents); err != nil {
 		t.Fatalf("raise: %v", err)
 	}
 	listed, err := pes.ListPlatformExperimentsByStatus(ctx, domain.PlatformExpOpen)

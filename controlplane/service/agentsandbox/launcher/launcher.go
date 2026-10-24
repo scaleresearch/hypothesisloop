@@ -88,12 +88,12 @@ func New(cfg Config) (*Launcher, error) {
 	if err != nil {
 		return nil, err
 	}
+	rented := provider.Bound(cfg.Provider)
 	l := &Launcher{
-		cfg: cfg, prefix: provider.AgentPrefix(cfg.Name), provider: provider.Bounded(cfg.Provider),
+		cfg: cfg, prefix: provider.AgentPrefix(cfg.Name), provider: rented, warmer: rented.Warmer,
 		launchDigest: digest, architecture: architectures[0],
 	}
 	l.poolPrefix = l.prefix + poolSegment
-	l.warmer, _ = l.provider.(provider.Warmer)
 	if cfg.WarmPool > 0 && l.warmer == nil {
 		return nil, fmt.Errorf("launcher: a warm pool of %d needs a provider that can warm instances, and this one can %v", cfg.WarmPool, provider.Capabilities(cfg.Provider))
 	}

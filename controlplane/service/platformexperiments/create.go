@@ -35,7 +35,7 @@ func (s *Service) checkLength(durationHours float64) error {
 
 // withSettings returns spec with the platform's settings in the fields a request may leave to
 // them: scheduler.default_report_interval_seconds, stages.default as a run of max_agents
-// researchers has it (domain.RunStages) and quota.default_quota_tier.
+// executors has it (domain.RunStages) and quota.default_quota_tier.
 func (s *Service) withSettings(spec experimentspec.Spec) experimentspec.Spec {
 	if spec.ReportIntervalSeconds == 0 {
 		spec.ReportIntervalSeconds = s.cfg.DefaultReportIntervalSeconds
@@ -56,7 +56,7 @@ var specReasons = map[string]string{
 	"stages":                   "invalid_stages",
 	"budget_accelerator_hours": "invalid_cost",
 	"max_agents":               "invalid_agents",
-	"researchers":              "invalid_agents",
+	"agents":                   "invalid_agents",
 	"duration_hours":           "invalid_length",
 	"agent_image":              "invalid_agent_image",
 }
@@ -94,15 +94,13 @@ func CheckCreate(req CreatePlatformExperimentRequest) error {
 
 // validate is the one check of what a platform experiment is, whoever states it: a create, a
 // planner's proposal, the person accepting one or a patch of an existing one. The spec's own rules
-// come first (experimentspec.Spec.Validate), then those of the platform's settings and catalog. It
+// come first (experimentspec.Spec.Validate), then those of the platform's settings. Its agents are
+// checked against the catalog where they are resolved (resolvedPool, proposedPool). It
 // returns req as it is stored, trimmed and with the platform's settings where it leaves a field to
 // them, and refuses with every problem it finds.
-func (s *Service) validate(req CreatePlatformExperimentRequest, catalog domain.AgentTypeCatalog) (CreatePlatformExperimentRequest, error) {
+func (s *Service) validate(req CreatePlatformExperimentRequest) (CreatePlatformExperimentRequest, error) {
 	problems := specProblems(req.Spec)
 	req.Spec = s.withSettings(req.Spec.Trimmed())
-	if err := domain.ResearcherPool(req.Researchers).Check(catalog); err != nil {
-		problems = append(problems, refusal.Refuse(422, "invalid_agents", err.Error()+": researchers is the researchers it is to have at work, [{agent_type, model, hyperparameters, count}]").On("researchers"))
-	}
 	if err := problems.Add(s.checkLength(req.DurationHours)); err != nil {
 		return req, err
 	}
@@ -161,23 +159,8 @@ func unreachableType(sizedFor domain.AcceleratorType, reachable map[string][]dom
 // the agents req carries signed up in the same write.
 func (s *Service) Create(ctx context.Context, req CreatePlatformExperimentRequest) (*domain.PlatformExperiment, error) {
 	now := time.Now().UTC()
-	catalog, err := s.store.ProjectAgentTypeCatalog(ctx, req.ProjectID)
+	req, err := s.checked(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("platform_experiments.Create: %w", err)
-	}
-	if req, err = s.validate(req, catalog); err != nil {
-		return nil, err
-	}
-	if _, err := s.requireReachable(ctx, req.ProjectID, nil); err != nil {
-		return nil, err
-	}
-	if req.CoordinatorInAgentSandbox != (req.coordinator != nil) {
-		return nil, fmt.Errorf("platform_experiments.Create: coordinator_in_agentsandbox is %v and its model is resolved: %v", req.CoordinatorInAgentSandbox, req.coordinator != nil)
-	}
-	if err := s.requireContinuable(ctx, req.ProjectID, req.repository.Named, req.Continues); err != nil {
-		return nil, err
-	}
-	if err := s.requireContinuedMetrics(ctx, req.Continues, req.Metrics); err != nil {
 		return nil, err
 	}
 	id, err := domain.NewID(domain.PlatformExperimentIDPrefix)
@@ -191,7 +174,7 @@ func (s *Service) Create(ctx context.Context, req CreatePlatformExperimentReques
 		Description:               req.Description,
 		BudgetAcceleratorHours:    req.BudgetAcceleratorHours,
 		MaxAgents:                 req.MaxAgents,
-		Researchers:               req.Researchers,
+		Agents:                    req.Agents,
 		Metrics:                   req.Metrics,
 		ReportIntervalSeconds:     req.ReportIntervalSeconds,
 		StartsAt:                  domain.ClockStart(req.StartsAt, now),
@@ -223,6 +206,25 @@ func (s *Service) Create(ctx context.Context, req CreatePlatformExperimentReques
 	pe.SignupCount = len(req.signups)
 	s.wakeRepositories(pe)
 	return pe, nil
+}
+
+// checked is req as Create stores it, refused for every rule of the platform experiment it
+// states and of the platform's settings and clusters.
+func (s *Service) checked(ctx context.Context, req CreatePlatformExperimentRequest) (CreatePlatformExperimentRequest, error) {
+	req, err := s.validate(req)
+	if err != nil {
+		return req, err
+	}
+	if _, err := s.requireReachable(ctx, req.ProjectID, nil); err != nil {
+		return req, err
+	}
+	if req.CoordinatorInAgentSandbox != (req.coordinator != nil) {
+		return req, fmt.Errorf("platform_experiments.Create: coordinator_in_agentsandbox is %v and its model is resolved: %v", req.CoordinatorInAgentSandbox, req.coordinator != nil)
+	}
+	if err := s.requireContinuable(ctx, req.ProjectID, req.repository.Named, req.Continues); err != nil {
+		return req, err
+	}
+	return req, s.requireContinuedMetrics(ctx, req.Continues, req.Metrics)
 }
 
 // requireContinuable refuses a run to continue that is not one: continues names a closed platform
@@ -308,33 +310,57 @@ func (s *Service) CreateExperiment(ctx context.Context, req CreatePlatformExperi
 		return nil, err
 	}
 	req.Repository = named
-	catalog, err := s.store.ProjectAgentTypeCatalog(ctx, req.ProjectID)
+	create, err := s.prepared(ctx, req, by)
 	if err != nil {
-		return nil, auth.Internal(s.logger, "create platform experiment", err)
-	}
-	if req.Researchers, err = s.resolvedPool(catalog, req.Researchers); err != nil {
 		return nil, err
-	}
-	create, err := withAgentSandbox(req, s.launch)
-	if err != nil {
-		return nil, s.refusal("create platform experiment", err)
-	}
-	create.createdBy = &by
-	if create.CoordinatorInAgentSandbox {
-		if create.agents, create.signups, err = sandboxedAgents(catalog, poolAgents(create.Researchers), by, time.Now().UTC()); err != nil {
-			return nil, s.refusal("create platform experiment", err)
-		}
 	}
 	if create.repository, err = s.chooseRepository(ctx, req.ProjectID, create.Repository, req.RepositoryAccount); err != nil {
 		return nil, err
 	}
 	pe, err := s.Create(ctx, create)
-	var answered interface{ GetStatus() int }
-	if errors.As(err, &answered) {
-		return nil, err
-	}
 	if err != nil {
-		return nil, auth.Internal(s.logger, "create platform experiment", err)
+		return nil, s.refusal("create platform experiment", err)
 	}
 	return pe, nil
+}
+
+// CheckExperiment refuses req, for by, as CreateExperiment would, and creates nothing. It checks
+// everything but its repository and branch, which POST /projects/{id}/repositories and a push of
+// the branch settle: a client that pushes the branch checks the rest first.
+func (s *Service) CheckExperiment(ctx context.Context, req CreatePlatformExperimentRequest, by domain.Actor) error {
+	create, err := s.prepared(ctx, req, by)
+	if err != nil {
+		return err
+	}
+	create.repository = RepositoryChoice{Named: req.Repository}
+	if _, err := s.checked(ctx, create); err != nil {
+		return s.refusal("check platform experiment", err)
+	}
+	return nil
+}
+
+// prepared is req with its agents resolved and checked, its coordinator resolved and checked, and
+// the agents it is created with, for by.
+func (s *Service) prepared(ctx context.Context, req CreatePlatformExperimentRequest, by domain.Actor) (CreatePlatformExperimentRequest, error) {
+	catalog, err := s.store.ProjectAgentTypeCatalog(ctx, req.ProjectID)
+	if err != nil {
+		return req, auth.Internal(s.logger, "create platform experiment", err)
+	}
+	if req.Agents, err = s.resolvedPool(ctx, catalog, req.Agents); err != nil {
+		return req, err
+	}
+	create, err := withAgentSandbox(req, s.launch)
+	if err != nil {
+		return req, s.refusal("create platform experiment", err)
+	}
+	if err := s.served.CheckChoice(ctx, "coordinator_model", create.CoordinatorModel); err != nil {
+		return req, s.refusal("create platform experiment", err)
+	}
+	create.createdBy = &by
+	if create.CoordinatorInAgentSandbox {
+		if create.agents, create.signups, err = sandboxedAgents(catalog, poolAgents(create.Agents), by, time.Now().UTC()); err != nil {
+			return req, s.refusal("create platform experiment", err)
+		}
+	}
+	return create, nil
 }

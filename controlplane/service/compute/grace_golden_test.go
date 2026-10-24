@@ -20,10 +20,11 @@ func TestGraceFromTheSharedReconcileAnswer(t *testing.T) {
 	e, _ := newTestExecutor(t)
 	exp := job(t, golden.Experiment.ID, 0, 0)
 
-	spec, err := e.buildSpec(exp)
+	ranks, err := e.buildRanks(exp)
 	if err != nil {
 		t.Fatal(err)
 	}
+	spec := ranks[0].spec
 	if want := clusterapi.LaunchCommand(exp.Launch, exp.ResolvedJob.Command, exp.ResolvedJob.Args); !reflect.DeepEqual(spec.Command, want) {
 		t.Fatalf("command = %q, want %q", spec.Command, want)
 	}

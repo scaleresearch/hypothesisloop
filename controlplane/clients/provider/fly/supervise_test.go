@@ -116,20 +116,19 @@ func TestSupervisorPassesTheFirstSIGTERMOnAndLetsTheCommandFinish(t *testing.T) 
 }
 
 // The supervisor is the Machine's main process, so a signal that killed it would stop the
-// Machine with no end mark. mkfifo runs before the command exists; this one signals the
-// supervisor from there.
+// Machine with no end mark. This one comes while the pipe is made, before the command exists. A
+// shim of mkfifo on PATH cannot send it: busybox ash runs its own applet ahead of PATH.
 func TestSupervisorOutlivesASIGTERMThatComesBeforeTheCommandAndStartsNothing(t *testing.T) {
 	supervisetest.EachShell(t, func(t *testing.T, shell []string) {
-		dir, tools := t.TempDir(), t.TempDir()
-		real, err := exec.LookPath("mkfifo")
-		if err != nil {
-			t.Fatal(err)
+		dir := t.TempDir()
+		argv := supervised([]string{"/bin/sh", "-c", `: > "$DIR/ran"; echo ran`})[1:]
+		if argv[1] = strings.Replace(argv[1], `mkfifo "$pipe"`, `kill -TERM $$; mkfifo "$pipe"`, 1); !strings.Contains(argv[1], "kill -TERM $$") {
+			t.Fatal("the supervisor makes no pipe to signal it at")
 		}
-		signalling := "#!/bin/sh\nkill -TERM $PPID\nexec " + real + ` "$@"` + "\n"
-		if err := os.WriteFile(filepath.Join(tools, "mkfifo"), []byte(signalling), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		cmd := startSupervised(t, shell, dir, []string{"PATH=" + tools + ":" + os.Getenv("PATH")}, "/bin/sh", "-c", `: > "$DIR/ran"; echo ran`)
+		cmd := supervisetest.Command(shell, argv...)
+		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "TMPDIR=" + dir, "DIR=" + dir}
+		cmd.Stdout = &bytes.Buffer{}
+		supervisetest.Start(t, cmd)
 
 		wantLines(t, finish(t, cmd), "hl-ended")
 		if _, err := os.Stat(filepath.Join(dir, "ran")); err == nil {

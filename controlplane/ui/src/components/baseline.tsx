@@ -18,7 +18,7 @@ function lastReported(points: MetricDataPoint[]): Map<string, number> {
 }
 
 /**
- * What every researcher is ranked against: the job that measured the baseline with what it
+ * What every executor is ranked against: the job that measured the baseline with what it
  * reported, read from the job itself. Nothing while none is declared, which the phase strip says.
  */
 export function Baseline({ pe }: { pe: PlatformExperiment }) {

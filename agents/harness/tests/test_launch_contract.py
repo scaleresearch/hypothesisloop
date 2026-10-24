@@ -10,8 +10,8 @@ from unittest import mock
 
 from claude_agent_sdk import ResultMessage
 
-from hypothesisloop_agent import config, core, platform
-from conftest import FakePlatform, connect
+from hypothesisloop_agent import config, core, instructions, platform
+from conftest import FakePlatform, connect, served
 from hypothesisloop_agent.claude import cli, connection, results, shutdown
 from test_require_joined import AGENT_TOKEN
 
@@ -25,13 +25,18 @@ class LaunchEnvironmentTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {**LAUNCH_ENV, **stale}, clear=True):
             cfg = config.Config()
         self.assertEqual((cfg.agent_id, cfg.platform_experiment_id, cfg.role), ("agent-a", "pe-1", ""))
-        for role in ("", "competitor", "coordinator"):
+        for role in ("", "reviewer", "coordinator"):
             with self.assertRaises(SystemExit):
                 cfg.run_as(role)
         cfg.run_as("planner")
         self.assertEqual(cfg.role, "planner")
         with self.assertRaises(SystemExit):
-            cfg.run_as("researcher")
+            cfg.run_as("executor")
+        for role in ("executor", "researcher", "baseline"):
+            with mock.patch.dict(os.environ, LAUNCH_ENV, clear=True):
+                agent = config.Config()
+            agent.run_as(role)
+            self.assertEqual(agent.role, role)
 
 
 class StopSignalTest(unittest.TestCase):
@@ -88,7 +93,7 @@ class RefusedCredentialTest(unittest.IsolatedAsyncioTestCase):
     async def session(self, result: str, status: int | None = None):
         setup = SimpleNamespace(commands="usage: hl", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
                                 client=FakePlatform(),
-                                cfg=SimpleNamespace(agent_id="ag-1", role="researcher", api_url="http://x", token=AGENT_TOKEN, platform_experiment_id="pe-1"))
+                                cfg=SimpleNamespace(agent_id="ag-1", role="executor", api_url="http://x", token=AGENT_TOKEN, platform_experiment_id="pe-1"))
         with mock.patch.object(connection, "ClaudeSDKClient", ErrorTurnClient), \
                 mock.patch.object(ErrorTurnClient, "result", result), \
                 mock.patch.object(ErrorTurnClient, "status", status), \
@@ -132,8 +137,30 @@ class RefusedCredentialTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"], "1")
         for key in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "MODEL_ANTHROPIC_OAUTH_TOKEN"):
             self.assertNotIn(key, env)
-        self.assertEqual(cli.model_env(SimpleNamespace(api_url="https://api.example/", token="t"))["ANTHROPIC_BASE_URL"],
-                         "https://api.example/model/anthropic")
+
+    def test_each_provider_has_its_proxy_path_and_any_but_anthropic_names_its_model_for_every_call(self):
+        cfg = SimpleNamespace(api_url="https://api.example/", token="t", role="executor")
+        anthropic = cli.model_env(cfg, served(cfg, model="anthropic/claude-x"))
+        self.assertEqual(anthropic["ANTHROPIC_BASE_URL"], "https://api.example/model/anthropic")
+        self.assertFalse([key for key in anthropic if key.startswith("ANTHROPIC_DEFAULT_") or key == "CLAUDE_CODE_SUBAGENT_MODEL"])
+        for provider, model_id in (("openrouter", "moonshotai/kimi-k2"), ("openai", "gpt-6-luna")):
+            env = cli.model_env(cfg, served(cfg, model=f"{provider}/{model_id}"))
+            self.assertEqual(env["ANTHROPIC_BASE_URL"], f"https://api.example/model/{provider}")
+            self.assertEqual(env["CLAUDE_CODE_OAUTH_TOKEN"], "t")
+            for key in ("ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+                        "CLAUDE_CODE_SUBAGENT_MODEL"):
+                self.assertEqual(env[key], model_id)
+
+    def test_a_changed_provider_takes_a_new_session(self):
+        a = served(SimpleNamespace(role="executor"), model="anthropic/x")
+        self.assertTrue(a.needs_new_session(served(SimpleNamespace(role="executor"), model="openrouter/x")))
+        self.assertFalse(a.needs_new_session(a))
+
+    def test_a_model_reference_is_a_known_provider_and_a_model_id(self):
+        self.assertEqual(instructions.split_model("openrouter/moonshotai/kimi-k2"), ("openrouter", "moonshotai/kimi-k2"))
+        for reference in ("claude-x", "", "anthropic/", "/claude-x", "google/gemini", "Anthropic/claude-x"):
+            with self.assertRaises(SystemExit):
+                instructions.split_model(reference)
 
     def test_a_context_that_overflowed_is_no_refused_request(self):
         overflow = ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=True, num_turns=1,

@@ -82,15 +82,18 @@ func (s *poolStore) GetAgent(_ context.Context, id string) (*domain.Agent, error
 	return &domain.Agent{ID: id}, nil
 }
 
-// GetAgentSignup signs every agent up as a researcher, but the one named baseline-agent, and
-// the one named agent-elsewhere not at all.
+// GetAgentSignup signs every agent up as an executor, but the one named baseline-agent as the
+// baseline, those named researcher-* as researchers, and the one named agent-elsewhere not at all.
 func (s *poolStore) GetAgentSignup(_ context.Context, _, agentID string) (*domain.AgentSignup, error) {
 	if agentID == "agent-elsewhere" {
 		return nil, nil
 	}
-	role := domain.SignupRoleCompetitor
-	if agentID == "baseline-agent" {
+	role := domain.SignupRoleExecutor
+	switch {
+	case agentID == "baseline-agent":
 		role = domain.SignupRoleBaseline
+	case strings.HasPrefix(agentID, "researcher-"):
+		role = domain.SignupRoleResearcher
 	}
 	return &domain.AgentSignup{AgentID: agentID, Role: role}, nil
 }
@@ -166,7 +169,7 @@ func agentActor(id string) domain.Actor { return domain.Actor{Kind: domain.Actor
 var adaActor = domain.Actor{Kind: domain.ActorUser, ID: "user-ada"}
 
 // fakeGraph is the hypothesis graph reduced to the rules the registry relies on it for: dedup on
-// (platform_experiment_id, normalized text), and the owner rule on status and links. Link
+// (platform_experiment_id, normalized text), and the owner rule on status. Link
 // validation itself is the graph store's and is tested against Memgraph in storage/graphdb.
 type fakeGraph struct {
 	registry.Graph
@@ -224,9 +227,6 @@ func (g *fakeGraph) AddLink(_ context.Context, fromID, agentID string, actor dom
 	h, ok := g.rows[fromID]
 	if !ok {
 		return nil, graphdb.ErrNotFound
-	}
-	if h.AgentID != "" && h.AgentID != agentID {
-		return nil, graphdb.ErrNotOwner
 	}
 	key := fromID + string(spec.Type) + spec.To
 	result := &graphdb.LinkResult{From: h, Created: !g.links[key], Later: true,
@@ -297,6 +297,10 @@ func (p *pendingChanges) ChangeUnlessAnnounced(_ context.Context, c domain.Chang
 	}
 	p.Change(c)
 	return nil
+}
+
+func (r *recordedEvents) AroundHypothesis(ctx context.Context, pe, _ string, fn func(domain.Announcer) error) error {
+	return r.Around(ctx, pe, fn)
 }
 
 func (r *recordedEvents) Around(_ context.Context, pe string, fn func(domain.Announcer) error) error {

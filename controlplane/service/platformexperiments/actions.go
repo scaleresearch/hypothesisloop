@@ -17,10 +17,10 @@ import (
 func fieldsIn(status domain.PlatformExperimentStatus) []string {
 	switch status {
 	case domain.PlatformExpOpen:
-		return []string{"name", "description", "budget_accelerator_hours", "max_agents", "researchers", "max_concurrent_accelerators",
+		return []string{"name", "description", "budget_accelerator_hours", "max_agents", "agents", "max_concurrent_accelerators",
 			"metrics", "report_interval_seconds", "starts_at", "duration_hours", "baseline_job_id", "baseline_reason", "model_budget_usd"}
 	case domain.PlatformExpRunning:
-		return []string{"name", "description", "duration_hours", "max_agents", "researchers", "baseline_job_id", "baseline_reason", "model_budget_usd"}
+		return []string{"name", "description", "duration_hours", "max_agents", "agents", "baseline_job_id", "baseline_reason", "model_budget_usd"}
 	}
 	return nil
 }
@@ -80,7 +80,7 @@ func actions(pe *domain.PlatformExperiment, caller auth.Principal) []domain.Plat
 	if acceptable(pe) == nil {
 		actions = append(actions, domain.PlatformExpActionAccept)
 	}
-	if domain.TakesSignup(pe.Status, domain.SignupRoleCompetitor) {
+	if domain.TakesSignup(pe.Status, domain.SignupRoleExecutor) {
 		actions = append(actions, domain.PlatformExpActionAddAgent)
 	}
 	return actions

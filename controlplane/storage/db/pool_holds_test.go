@@ -10,15 +10,15 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// A researcher that ended before submitting a job, or within domain.ReplacementMinRun of joining,
+// An executor that ended before submitting a job, or within domain.ReplacementMinRun of joining,
 // is read as early; one that ran longer with a job is not, and the replacements of an entry in the
 // last hour are counted.
 func TestThePoolStateTellsEarlyEndsAndCountsRecentReplacements(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	generalist := domain.PoolKey{AgentType: "generalist", Model: "model-1"}
-	pe, pes := poolRun(t, pool, 6, domain.ResearcherPool{{AgentType: "generalist", Model: "model-1", Count: 4}})
-	noJob, quick, ran, replaced := spawnResearcher(t, pes, pe, "generalist"), spawnResearcher(t, pes, pe, "generalist"), spawnResearcher(t, pes, pe, "generalist"), spawnResearcher(t, pes, pe, "generalist")
+	pe, pes := poolRun(t, pool, 6, domain.AgentPool{{AgentType: "generalist", Model: "model-1", Count: 4}})
+	noJob, quick, ran, replaced := spawnExecutor(t, pes, pe, "generalist"), spawnExecutor(t, pes, pe, "generalist"), spawnExecutor(t, pes, pe, "generalist"), spawnExecutor(t, pes, pe, "generalist")
 	setPEStatus(t, pool, pe, domain.PlatformExpRunning, 0)
 	seedPricedExperiment(t, pool, quick, pe, quotaL40, 1, 1, domain.StatusCompleted)
 	seedPricedExperiment(t, pool, ran, pe, quotaL40, 1, 1, domain.StatusCompleted)
@@ -30,11 +30,11 @@ func TestThePoolStateTellsEarlyEndsAndCountsRecentReplacements(t *testing.T) {
 	}
 	replacement, _ := domain.NewID(domain.AgentIDPrefix)
 	if err := pes.JoinRunning(ctx, pe, &domain.Agent{ID: replacement, CreatedAt: time.Now().UTC()},
-		domain.AgentSignup{Actor: testActor, AgentID: replacement, Role: domain.SignupRoleCompetitor, InAgentSandbox: true, AgentType: "generalist", Model: "model-1", Replaces: replaced},
+		domain.AgentSignup{Actor: testActor, AgentID: replacement, Role: domain.SignupRoleExecutor, InAgentSandbox: true, AgentType: "generalist", Model: "model-1", Replaces: replaced},
 		LateJoin{Used: map[string]float64{}}); err != nil {
 		t.Fatal(err)
 	}
-	state, err := pes.ResearcherPoolState(ctx, pe)
+	state, err := pes.AgentPoolState(ctx, pe)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,29 +50,29 @@ func TestThePoolStateTellsEarlyEndsAndCountsRecentReplacements(t *testing.T) {
 	}
 }
 
-// With the platform experiment locked, a researcher added to keep the pool is refused when its
+// With the platform experiment locked, an agent added to keep the pool is refused when its
 // entry wants none beyond those at work, or when it would be the entry's replacement beyond the
 // limit an hour.
-func TestAResearcherAddedToKeepThePoolIsCheckedAgainstItUnderTheLock(t *testing.T) {
+func TestAnAgentAddedToKeepThePoolIsCheckedAgainstItUnderTheLock(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
-	pe, pes := poolRun(t, pool, 10, domain.ResearcherPool{{AgentType: "generalist", Model: "model-1", Count: 1}})
-	spawnResearcher(t, pes, pe, "generalist")
+	pe, pes := poolRun(t, pool, 10, domain.AgentPool{{AgentType: "generalist", Model: "model-1", Count: 1}})
+	spawnExecutor(t, pes, pe, "generalist")
 	ending := make([]string, domain.MaxReplacementsAnHour+1)
 	for i := range ending {
-		ending[i] = spawnResearcher(t, pes, pe, "generalist")
+		ending[i] = spawnExecutor(t, pes, pe, "generalist")
 	}
 	setPEStatus(t, pool, pe, domain.PlatformExpRunning, 0)
 	join := func(replaces string) error {
 		id, _ := domain.NewID(domain.AgentIDPrefix)
 		return pes.JoinRunning(ctx, pe, &domain.Agent{ID: id, CreatedAt: time.Now().UTC()},
-			domain.AgentSignup{Actor: testActor, AgentID: id, Role: domain.SignupRoleCompetitor, InAgentSandbox: true, AgentType: "generalist", Model: "model-1", Replaces: replaces},
+			domain.AgentSignup{Actor: testActor, AgentID: id, Role: domain.SignupRoleExecutor, InAgentSandbox: true, AgentType: "generalist", Model: "model-1", Replaces: replaces},
 			LateJoin{Used: map[string]float64{}, Pool: true})
 	}
 	if err := join(""); !errors.Is(err, ErrPoolSatisfied) {
 		t.Fatalf("an entry with all at work: got = %v, want ErrPoolSatisfied", err)
 	}
-	exec(t, pool, `UPDATE platform_experiments SET researchers = '[{"agent_type":"generalist","model":"model-1","count":10}]' WHERE id = $1`, pe)
+	exec(t, pool, `UPDATE platform_experiments SET agents = '[{"agent_type":"generalist","model":"model-1","count":10}]' WHERE id = $1`, pe)
 	for _, ended := range ending {
 		if err := pes.FinishAgent(ctx, pe, ended, "done"); err != nil {
 			t.Fatal(err)
@@ -93,15 +93,15 @@ func TestAResearcherAddedToKeepThePoolIsCheckedAgainstItUnderTheLock(t *testing.
 
 // What the platform says of the places it keeps empty is told once as platform_experiment.status
 // with it as the detail.
-func TestHeldResearchersAreToldOnce(t *testing.T) {
+func TestHeldAgentsAreToldOnce(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pe, pes := poolRun(t, pool, 4, nil)
 	setPEStatus(t, pool, pe, domain.PlatformExpRunning, 0)
 	before := cursorNow(t, pool)
-	line := "researchers not replaced: ag-1 (generalist) ended early"
+	line := "agents not replaced: ag-1 (generalist) ended early"
 	for range 2 {
-		if err := pes.HoldResearchers(ctx, pe, line); err != nil {
+		if err := pes.HoldAgents(ctx, pe, line); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -109,10 +109,10 @@ func TestHeldResearchersAreToldOnce(t *testing.T) {
 	if len(got) != 1 || got[0].Detail != line || got[0].Value != string(domain.PlatformExpRunning) {
 		t.Errorf("status changes: got = %+v, want the hold once", got)
 	}
-	if err := pes.HoldResearchers(ctx, pe, ""); err != nil {
+	if err := pes.HoldAgents(ctx, pe, ""); err != nil {
 		t.Fatal(err)
 	}
-	if state, err := pes.ResearcherPoolState(ctx, pe); err != nil || state.Held != "" {
+	if state, err := pes.AgentPoolState(ctx, pe); err != nil || state.Held != "" {
 		t.Errorf("cleared: got = %+v, %v", state, err)
 	}
 }

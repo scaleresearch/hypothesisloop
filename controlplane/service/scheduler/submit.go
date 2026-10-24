@@ -65,7 +65,7 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	measuresBaseline := signup != nil && signup.Role == domain.SignupRoleBaseline
 	switch pe.Status {
 	case domain.PlatformExpRunning:
-	// Before the start the one job there is to run is the baseline's, which every researcher
+	// Before the start the one job there is to run is the baseline's, which every executor
 	// starts from and is ranked against. Its agent holds a quota from the moment it joined.
 	case domain.PlatformExpOpen:
 		if !measuresBaseline {
@@ -92,6 +92,13 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 		return &AdmissionError{
 			Reason:  platformapi.ReasonExperimentClosed,
 			Message: fmt.Sprintf("platform experiment %s is over; jobs are accepted only while it is running", pe.ID),
+		}
+	}
+
+	if signup != nil && !signup.Role.SubmitsJobs() {
+		return &AdmissionError{
+			Reason:  platformapi.ReasonResearcherSubmitsNoJob,
+			Message: fmt.Sprintf("agent %s is a %s of platform experiment %s and submits no job: executors run the jobs, and a researcher steers them through hypotheses and comments", exp.AgentID, signup.Role, pe.ID),
 		}
 	}
 
@@ -258,7 +265,7 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	// and all pass.
 	rateLimit := db.SubmissionRateLimit{
 		MaxPerHour: s.credits.MaxSubmissionsPerHour,
-		Window:     submissionRateLimitWindow,
+		Window:     domain.SubmissionWindow,
 	}
 	// The job's one permanent store key. It is drawn here and written with the row, and the store
 	// is asked to create it only once the transaction has decided to insert: a store outage then
@@ -269,10 +276,18 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	}
 	exp.DataKey = dataKey
 	decision, err := s.quota.AdmitExperiment(ctx, exp, rateLimit, func(ctx context.Context) error {
+		if !measuresBaseline {
+			if err := s.stillUncurated(ctx, exp); err != nil {
+				return err
+			}
+		}
 		return s.dataStore.CreateDataKey(ctx, dataKey, exp.PlatformExperimentID, exp.AgentID, exp.ID)
 	})
 	var refusal *db.AdmitRefusal
+	var admission *AdmissionError
 	switch {
+	case errors.As(err, &admission):
+		return admission
 	case errors.As(err, &refusal) && refusal.Reason == ReasonInsufficientQuota:
 		return &AdmissionError{Reason: refusal.Reason, Message: refusal.Message + " " + shareOutlook(pe)}
 	case errors.As(err, &refusal):
@@ -324,7 +339,7 @@ func (s *Service) Submit(ctx context.Context, exp *domain.Experiment) error {
 	return nil
 }
 
-// runBest is the competitors' best job of pe on its first ranking metric, as the standings rank
+// runBest is the executors' best job of pe on its first ranking metric, as the standings rank
 // it, ties to the lowest agent id: nil when there is none or it ran exp's commit.
 func (s *Service) runBest(ctx context.Context, pe *domain.PlatformExperiment, exp *domain.Experiment) (*domain.RunBest, error) {
 	metric, ok := domain.PrimaryRankingMetric(pe.Metrics)
@@ -339,13 +354,13 @@ func (s *Service) runBest(ctx context.Context, pe *domain.PlatformExperiment, ex
 	if err != nil {
 		return nil, err
 	}
-	competitors, err := s.store.ListSignupsByRole(ctx, pe.ID, domain.SignupRoleCompetitor)
+	executors, err := s.store.ListSignupsByRole(ctx, pe.ID, domain.SignupRoleExecutor)
 	if err != nil {
 		return nil, err
 	}
-	slices.Sort(competitors)
+	slices.Sort(executors)
 	var top *domain.RunBest
-	for _, agentID := range competitors {
+	for _, agentID := range executors {
 		if b, ok := best[agentID]; ok && (top == nil || metric.Better(b.Value, top.Value)) {
 			top = &domain.RunBest{JobID: b.ExperimentID, AgentID: agentID, Metric: metric.Key, Value: b.Value}
 		}

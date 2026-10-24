@@ -1,5 +1,5 @@
 """The whole sandboxed path on whatever providers the stack rents from, with nothing but an API
-key of an ordinary org: a sandboxed coordinator and two sandboxed researchers work in a real
+key of an ordinary org: a sandboxed coordinator and two sandboxed executors work in a real
 repository, their jobs run on a cluster the platform shares with every org and report metrics,
 and the experiment ends with a summary and every machine released.
 
@@ -71,9 +71,9 @@ def test_a_sandboxed_experiment_runs_end_to_end_on_rented_machines(org: API, run
     assert created.status_code == 201, f"create: {created.status_code} {created.text}"
     pe_id = created.json()["id"]
     org.created_platform_experiments.append(pe_id)
-    researchers = [org.add_agents(pe_id, in_agentsandbox=True, agent_type=agent_type)[0]["agent_id"]
+    executors = [org.add_agents(pe_id, in_agentsandbox=True, agent_type=agent_type)[0]["agent_id"]
                    for agent_type in ("hyperparameter-search", "architecture-search")]
-    everyone: list[str | None] = [None, *researchers]
+    everyone: list[str | None] = [None, *executors]
     # Its start time is now. The create made its agent of role baseline, and when that agent
     # finishes with one completed job the platform declares it and starts the run.
     org.patch(f"/platform-experiments/{pe_id}", {"starts_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}).raise_for_status()
@@ -81,18 +81,18 @@ def test_a_sandboxed_experiment_runs_end_to_end_on_rented_machines(org: API, run
         eventually("the baseline to be measured and declared and the platform to start the run", lambda: org.get_json(f"/platform-experiments/{pe_id}"),
                    accept=lambda pe: pe["status"] == "running" and pe.get("baseline_job_id"), reject=lambda pe: pe["status"] == "closed",
                    deadline=deadline, interval=10)
-        eventually("the coordinator and both researchers run and report progress", lambda: [_instance(org, pe_id, who) for who in everyone],
+        eventually("the coordinator and both executors run and report progress", lambda: [_instance(org, pe_id, who) for who in everyone],
                    accept=lambda instances: all(i["state"] == "running" and i.get("progress_at") for i in instances),
                    reject=lambda instances: any(i["stopped"] for i in instances), deadline=Deadline.in_seconds(10 * MINUTE), interval=5)
 
-        # The researchers clone the repository, register a hypothesis, submit, and file a finding.
-        finished = eventually("each researcher has a completed job", lambda: _jobs(org, pe_id), deadline=deadline, interval=15,
-                              accept=lambda jobs: {j["agent_id"] for j in jobs if j["status"] == "COMPLETED"} >= set(researchers))
+        # The executors clone the repository, register a hypothesis, submit, and file a finding.
+        finished = eventually("each executor has a completed job", lambda: _jobs(org, pe_id), deadline=deadline, interval=15,
+                              accept=lambda jobs: {j["agent_id"] for j in jobs if j["status"] == "COMPLETED"} >= set(executors))
         for job in finished:
             if job["status"] == "COMPLETED":
                 assert job["cluster_name"] and job["code_ref"].startswith(f"https://github.com/{repository}.git@"), job
         standings = next(m["standings"] for m in org.results(pe_id)["metrics"] if m["metric"] == "val_accuracy")
-        assert {row["agent_id"] for row in standings} >= set(researchers) and all(0 < row["best"] <= 1 for row in standings), standings
+        assert {row["agent_id"] for row in standings} >= set(executors) and all(0 < row["best"] <= 1 for row in standings), standings
         closed = eventually("the coordinator closes the experiment with a summary", lambda: org.get_json(f"/platform-experiments/{pe_id}"),
                             deadline=deadline, interval=15, accept=lambda pe: pe["status"] == "closed" and len(pe.get("summary") or "") > 40)
         assert all(not _instance(org, pe_id, who)["stopped"] for who in everyone), closed

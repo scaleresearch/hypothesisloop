@@ -3,6 +3,7 @@ package placement
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -297,5 +298,94 @@ func TestResolveClusterAndFootprintRestoresRequestedAcceleratorTypeWhenNothingFi
 	}
 	if !reflect.DeepEqual(fp, fpRequested) {
 		t.Fatalf("fallback footprint = %v, want the requested accelerator type's footprint %v", fp, fpRequested)
+	}
+}
+
+// slotCluster is n free slots of one H100 each, whose shape one private network holds network
+// nodes of now.
+func slotCluster(n, network int) (byNode, resources map[string]map[string]int64, labels map[string]map[string]string) {
+	byNode, resources, labels = map[string]map[string]int64{}, map[string]map[string]int64{}, map[string]map[string]string{}
+	for i := range n {
+		node := fmt.Sprintf("h100-%d", i)
+		byNode[node] = map[string]int64{h100: 1}
+		resources[node] = slotSize(8, 32, 100)
+		labels[node] = networked(slotLabels(node, 1), network, "")
+	}
+	return byNode, resources, labels
+}
+
+// The claim pins a job that spans nodes to one slot per node, in rank order, beside the slots the
+// desired jobs hold, and a job on one node to the one slot it lands on.
+func TestDesiredFitsPinsEveryNodeOfAJobToItsSlot(t *testing.T) {
+	byNode, resources, labels := slotCluster(4, 3)
+	holder := &domain.Experiment{AcceleratorType: h100, AcceleratorCount: 1, ResolvedJob: &domain.JobSpec{Slots: []string{"h100-1"}}}
+	gang := h100Gang(2, "4")
+	resolved, misfit := ResolveOntoSlots(gang, "c", resources, resources, labels)
+	if misfit != "" {
+		t.Fatal(misfit)
+	}
+	gang.ResolvedJob = resolved
+
+	if !DesiredFits(byNode, resources, labels, []*domain.Experiment{holder}, gang, resolved) {
+		t.Fatal("a job of two nodes was refused with three slots free")
+	}
+	if len(resolved.Slots) != 2 || resolved.Slots[0] == resolved.Slots[1] || slices.Contains(resolved.Slots, "h100-1") || slices.Contains(resolved.Slots, "") {
+		t.Fatalf("pinned to %v, want two slots the holder does not hold", resolved.Slots)
+	}
+	if resources["h100-0"][domain.NodeResourceCPUMillicores] != 8000 {
+		t.Fatal("proving the fit consumed the caller's capacity")
+	}
+	third := h100Gang(3, "4")
+	third.ResolvedJob, _ = ResolveOntoSlots(third, "c", resources, resources, labels)
+	if DesiredFits(byNode, resources, labels, []*domain.Experiment{holder, gang}, third, third.ResolvedJob) {
+		t.Fatalf("a job of three nodes was pinned to %v with one slot free", third.ResolvedJob.Slots)
+	}
+}
+
+// A slot takes a node of a job that spans nodes only while one private network holds every node
+// of the job of its shape.
+func TestASlotTakesAJobThatSpansNodesOnlyOnANetworkThatHoldsIt(t *testing.T) {
+	for network, want := range map[int]bool{0: false, 1: false, 2: true, 3: true} {
+		byNode, resources, labels := slotCluster(3, network)
+		gang := h100Gang(2, "4")
+		gang.ResolvedJob, _ = ResolveOntoSlots(gang, "c", resources, resources, labels)
+		if got := TopologyFits(byNode, resources, labels, gang); got != want {
+			t.Errorf("network of %d: fits %v, want %v", network, got, want)
+		}
+	}
+	byNode, resources, labels := slotCluster(1, 0)
+	single := h100Gang(1, "4")
+	single.ResolvedJob, _ = ResolveOntoSlots(single, "c", resources, resources, labels)
+	if !TopologyFits(byNode, resources, labels, single) {
+		t.Error("a job on one node asked for a network")
+	}
+}
+
+// A job pinned to slots is reserved on those slots and no other.
+func TestReservingAJobPinnedToSlotsTakesThem(t *testing.T) {
+	byNode, resources, labels := slotCluster(3, 0)
+	gang := h100Gang(2, "4")
+	gang.ResolvedJob, _ = ResolveOntoSlots(gang, "c", resources, resources, labels)
+	gang.ResolvedJob.Slots = []string{"h100-2", "h100-0"}
+	if !Reserve(byNode, resources, labels, gang) {
+		t.Fatal("a job pinned to two free slots was refused them")
+	}
+	if byNode["h100-0"][h100] != 0 || byNode["h100-2"][h100] != 0 || byNode["h100-1"][h100] != 1 {
+		t.Fatalf("after reserving: %v", byNode)
+	}
+}
+
+// A job is on slots with every node or with none: one that would land partly on a node that is
+// no slot does not fit.
+func TestAJobIsNotPinnedToSomeSlots(t *testing.T) {
+	byNode, resources, labels := slotCluster(2, 2)
+	delete(labels["h100-1"], domain.NodeSlotLabel)
+	gang := h100Gang(2, "4")
+	gang.ResolvedJob = &domain.JobSpec{NumNodes: 2, CPU: "8", Memory: "32Gi", Storage: "100Gi", AcceleratorCount: 1, AcceleratorType: h100}
+	if !TopologyFits(byNode, resources, labels, gang) {
+		t.Fatal("the case needs the job to fit the slot and the node")
+	}
+	if DesiredFits(byNode, resources, labels, nil, gang, gang.ResolvedJob) {
+		t.Fatalf("pinned to %v on a cluster of one slot and one node", gang.ResolvedJob.Slots)
 	}
 }

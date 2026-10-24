@@ -181,11 +181,11 @@ func installedCoresByNode(nodeAvail, nodeResourcesTotal map[string]map[string]in
 // may still admit the job later, so this is never a hard rejection.
 //
 // On a cluster of slots (domain.NodeSlotLabel) none of the above applies: the job is sized to the
-// slot it is to hold, see placement.ResolveOntoSlot. nodeResources is what each node has free now, which
+// slots it is to hold, see placement.ResolveOntoSlots. nodeResources is what each node has free now, which
 // only that case reads.
 func (l *Loop) resolveClusterLocalResources(ctx context.Context, cache *resolutionCache, exp *domain.Experiment, cluster string, nodeResourcesTotal, nodeAvail, nodeResources map[string]map[string]int64, nodeLabels map[string]map[string]string) (resolved *domain.JobSpec, misfit string, err error) {
 	if placement.HasSlots(nodeLabels) {
-		resolved, misfit = placement.ResolveOntoSlot(exp, cluster, nodeResourcesTotal, nodeResources, nodeLabels)
+		resolved, misfit = placement.ResolveOntoSlots(exp, cluster, nodeResourcesTotal, nodeResources, nodeLabels)
 		return resolved, misfit, nil
 	}
 	out := exp.Job

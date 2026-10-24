@@ -21,7 +21,7 @@ SUBAGENT_BACKGROUND_COMMAND = "Commands run in the foreground here: wait for you
 # A subagent is given TaskStop too, and could stop its siblings with it.
 SUBAGENT_TASK_STOP = "Only the agent that started you stops a task."
 # A subagent's interim SendMessages each started a turn of its lead over the lead's whole context:
-# 41% of one researcher's reads.
+# 41% of one executor's reads.
 SUBAGENT_MESSAGE = ("Your final message, when you end, is your report: it reaches the agent that started you then, "
                     "so send it nothing before.")
 
@@ -148,7 +148,7 @@ _task_stop_hook = _refuse_subagent(SUBAGENT_TASK_STOP)
 _subagent_message_hook = _refuse_subagent(SUBAGENT_MESSAGE)
 
 
-# The most subagents an agent runs at once is max_subagents of its instructions. Researchers ran 3
+# The most subagents an agent runs at once is max_subagents of its instructions. Executors ran 3
 # to 10, and each one's end starts a turn of the lead's over its whole context, which then grew
 # past its rotation as some were always live.
 SUBAGENT_CAP = ("{live} of your subagents are at work, the most that run at once. Start this one when one "

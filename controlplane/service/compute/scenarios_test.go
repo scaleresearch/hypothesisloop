@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/contract/jobenv"
 	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider"
+	"github.com/scaleresearch/hypothesisloop/controlplane/clients/provider/fake"
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 )
 
@@ -41,7 +44,7 @@ func TestAnInstanceThatNeverBootsWaitsUnplacedUntilItIsNoLongerDesired(t *testin
 			t.Fatalf("pass %d: matches %v, phase %v, attempt %d, scheduled %d, %v %v", pass, matches, phase, attempt, scheduled, err, detailErr)
 		}
 	}
-	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a0-h100-0"}) {
+	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a0-r0of1-h100-0"}) {
 		t.Fatalf("rented %v", names)
 	}
 	if available, _, _, _, _ := e.GetLiveAcceleratorCapacitySnapshot(ctx); available[h100] != 1 {
@@ -74,10 +77,10 @@ func TestWhatAPassRentsAvoidsTheHostsOfTheInstancesItFoundOverdue(t *testing.T) 
 	e, p := newTestExecutor(t)
 	ctx := context.Background()
 	mustCreate(t, e, job(t, "exp-1", 0, 1))
-	p.RunsOn("hl-job-t1-exp-1-a0-h100-0", "124592", "H100", "AMD EPYC 7B13", 2.25)
+	p.RunsOn("hl-job-t1-exp-1-a0-r0of1-h100-0", "124592", "H100", "AMD EPYC 7B13", 2.25)
 
 	mustCreate(t, e, on(job(t, "exp-2", 0, 1), "h100-1"))
-	if avoided := p.Spec("hl-job-t1-exp-2-a0-h100-1").AvoidHosts; len(avoided) != 0 {
+	if avoided := p.Spec("hl-job-t1-exp-2-a0-r0of1-h100-1").AvoidHosts; len(avoided) != 0 {
 		t.Fatalf("beside an instance still inside its time to start, a job was rented avoiding %v", avoided)
 	}
 
@@ -93,7 +96,7 @@ func TestWhatAPassRentsAvoidsTheHostsOfTheInstancesItFoundOverdue(t *testing.T) 
 	if err := pass.CreateWorkload(ctx, job(t, "exp-3", 0, 0)); err != nil {
 		t.Fatal(err)
 	}
-	if avoided := p.Spec("hl-job-t1-exp-3-a0-cpu-0").AvoidHosts; !reflect.DeepEqual(avoided, []string{"124592"}) {
+	if avoided := p.Spec("hl-job-t1-exp-3-a0-r0of1-cpu-0").AvoidHosts; !reflect.DeepEqual(avoided, []string{"124592"}) {
 		t.Fatalf("after the pass destroyed an instance that never started, it rented avoiding %v, want that instance's host", avoided)
 	}
 
@@ -103,7 +106,7 @@ func TestWhatAPassRentsAvoidsTheHostsOfTheInstancesItFoundOverdue(t *testing.T) 
 	}
 	e.startup = 4 * time.Minute
 	mustCreate(t, e, job(t, "exp-3", 1, 0))
-	if avoided := p.Spec("hl-job-t1-exp-3-a1-cpu-0").AvoidHosts; len(avoided) != 0 {
+	if avoided := p.Spec("hl-job-t1-exp-3-a1-r0of1-cpu-0").AvoidHosts; len(avoided) != 0 {
 		t.Fatalf("a later pass rented avoiding %v", avoided)
 	}
 }
@@ -116,7 +119,7 @@ func TestWhatAPassRentsAvoidsTheHostsOfTheInstancesItFoundOverdue(t *testing.T) 
 func TestAnInstanceTheProviderCannotPlaceIsKeptAndLeftToTheControlPlane(t *testing.T) {
 	e, p := newTestExecutor(t)
 	ctx := context.Background()
-	const name = "hl-job-t1-exp-1-a0-h100-0"
+	const name = "hl-job-t1-exp-1-a0-r0of1-h100-0"
 	exp := job(t, "exp-1", 0, 1)
 	mustCreate(t, e, exp)
 	p.Start(name)
@@ -170,7 +173,7 @@ func TestAnInstanceThatVanishesMidRunReadsAsGoneAndIsRentedAgain(t *testing.T) {
 	ctx := context.Background()
 	exp := job(t, "exp-1", 4, 0)
 	mustCreate(t, e, exp)
-	p.Start("hl-job-t1-exp-1-a4-cpu-0")
+	p.Start("hl-job-t1-exp-1-a4-r0of1-cpu-0")
 
 	if err := p.Destroy(ctx, "fake-0001"); err != nil {
 		t.Fatal(err)
@@ -231,7 +234,7 @@ func TestAnUnreadableProviderFailsEveryReadInsteadOfAnsweringEmpty(t *testing.T)
 	}
 
 	p.Fail = nil
-	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a0-h100-0"}) {
+	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a0-r0of1-h100-0"}) {
 		t.Fatalf("a failed pass changed what is rented: %v", names)
 	}
 }
@@ -272,7 +275,7 @@ func TestAFailedCreateRentsNothingAndTheNextPassTriesAgain(t *testing.T) {
 
 	p.Fail = nil
 	mustCreate(t, e, exp)
-	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a0-h100-0"}) {
+	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a0-r0of1-h100-0"}) {
 		t.Fatalf("rented %v", names)
 	}
 }
@@ -287,12 +290,12 @@ func TestOneFailedDestroyStillDestroysTheRest(t *testing.T) {
 	for _, name := range p.Names() {
 		p.Exit(name, exitLine(0))
 	}
-	p.Fail = failing("Destroy", "hl-job-t1-exp-1-a0-h100-0")
+	p.Fail = failing("Destroy", "hl-job-t1-exp-1-a0-r0of1-h100-0")
 
 	if err := e.ReapTerminal(ctx, nil); !errors.Is(err, errVendor) {
 		t.Fatalf("err = %v, want the failed destroy reported", err)
 	}
-	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a0-h100-0"}) {
+	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a0-r0of1-h100-0"}) {
 		t.Fatalf("rented %v, want only the one that failed", names)
 	}
 	p.Fail = nil
@@ -306,7 +309,7 @@ func TestOneFailedDestroyStillDestroysTheRest(t *testing.T) {
 func TestAFailedStopLeavesTheInstanceRunningForTheNextPass(t *testing.T) {
 	e, p := newTestExecutor(t)
 	ctx := context.Background()
-	const name = "hl-job-t1-exp-1-a0-cpu-0"
+	const name = "hl-job-t1-exp-1-a0-r0of1-cpu-0"
 	mustCreate(t, e, job(t, "exp-1", 0, 0))
 	p.Start(name)
 	p.Fail = failing("Stop", name)
@@ -331,7 +334,7 @@ func TestAFailedStopLeavesTheInstanceRunningForTheNextPass(t *testing.T) {
 func TestAnExitedInstanceWithUnreadableOutputIsReportedGone(t *testing.T) {
 	e, p := newTestExecutor(t)
 	ctx := context.Background()
-	const name = "hl-job-t1-exp-1-a0-cpu-0"
+	const name = "hl-job-t1-exp-1-a0-r0of1-cpu-0"
 	exp := job(t, "exp-1", 0, 0)
 	mustCreate(t, e, exp)
 	p.Start(name)
@@ -362,7 +365,7 @@ func TestAnExitedInstanceWithUnreadableOutputIsReportedGone(t *testing.T) {
 func TestAnInstanceThatEndedWithoutAnExitLineIsGoneAndNotRentedAgain(t *testing.T) {
 	e, p := newTestExecutor(t)
 	ctx := context.Background()
-	const name = "hl-job-t1-exp-1-a0-cpu-0"
+	const name = "hl-job-t1-exp-1-a0-r0of1-cpu-0"
 	exp := job(t, "exp-1", 0, 0)
 	desired := map[string]*clusterapi.DesiredJob{"exp-1": exp}
 	mustCreate(t, e, exp)
@@ -396,7 +399,7 @@ func TestDuplicateInstancesOfOneAttemptAreReducedToTheLowestID(t *testing.T) {
 			e, p := newTestExecutor(t)
 			ctx := context.Background()
 			exp := job(t, "exp-1", 0, 0)
-			const instance = "hl-job-t1-exp-1-a0-cpu-0"
+			const instance = "hl-job-t1-exp-1-a0-r0of1-cpu-0"
 			for n := 0; n < 3; n++ {
 				if _, err := p.Create(ctx, provider.Spec{Name: instance, Architecture: "amd64"}); err != nil {
 					t.Fatal(err)
@@ -432,7 +435,7 @@ func TestDuplicateInstancesOfOneAttemptAreReducedToTheLowestID(t *testing.T) {
 // billed beside a full account: the pass says so for that job and leaves it running.
 func TestAnInstanceInNoConfiguredSlotIsDeletedUnlessItsJobIsDesired(t *testing.T) {
 	ctx := context.Background()
-	for name, slot := range map[string]string{"hl-job-t1-exp-old-a0-a100-0": "a100-0", "hl-job-t1-exp-old-a0-h100-5": "h100-5"} {
+	for name, slot := range map[string]string{"hl-job-t1-exp-old-a0-r0of1-a100-0": "a100-0", "hl-job-t1-exp-old-a0-r0of1-h100-5": "h100-5"} {
 		e, p := newTestExecutor(t)
 		if _, err := p.Create(ctx, provider.Spec{Name: name, Architecture: "amd64"}); err != nil {
 			t.Fatal(err)
@@ -481,14 +484,14 @@ func TestAnInstanceUnderThePrefixThatNamesNoJobIsDestroyed(t *testing.T) {
 	if err := e.ReapTerminal(ctx, map[string]*clusterapi.DesiredJob{"exp-1": exp}); err == nil {
 		t.Fatal("a destroy that failed was not reported")
 	}
-	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a0-cpu-0", "hl-job-t1-something-unknown"}) {
+	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a0-r0of1-cpu-0", "hl-job-t1-something-unknown"}) {
 		t.Fatalf("rented %v, want the job and the one instance whose destroy failed", names)
 	}
 	p.Fail = nil
 	if err := e.ReapTerminal(ctx, map[string]*clusterapi.DesiredJob{"exp-1": exp}); err != nil {
 		t.Fatal(err)
 	}
-	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a0-cpu-0"}) {
+	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-1-a0-r0of1-cpu-0"}) {
 		t.Fatalf("rented %v, want the job alone", names)
 	}
 }
@@ -502,9 +505,9 @@ func TestARestartedAgentTakesOverTheInstancesAlreadyRented(t *testing.T) {
 	for _, exp := range []*clusterapi.DesiredJob{running, finished, booting} {
 		mustCreate(t, before, exp)
 	}
-	p.Start("hl-job-t1-exp-running-a1-h100-0")
-	p.Start("hl-job-t1-exp-finished-a0-cpu-0")
-	p.Exit("hl-job-t1-exp-finished-a0-cpu-0", exitLine(0))
+	p.Start("hl-job-t1-exp-running-a1-r0of1-h100-0")
+	p.Start("hl-job-t1-exp-finished-a0-r0of1-cpu-0")
+	p.Exit("hl-job-t1-exp-finished-a0-r0of1-cpu-0", exitLine(0))
 	rented := p.Names()
 
 	after, err := New(testConfig(p))
@@ -535,15 +538,474 @@ func TestARestartedAgentTakesOverTheInstancesAlreadyRented(t *testing.T) {
 	if err := before.DeleteWorkload(ctx, "exp-running", true); err != nil {
 		t.Fatal(err)
 	}
-	if err := after.DeleteWorkload(ctx, "exp-running", true); err != nil || p.Stops("hl-job-t1-exp-running-a1-h100-0") != 2 {
-		t.Fatalf("stop after restart: %v, %d stops", err, p.Stops("hl-job-t1-exp-running-a1-h100-0"))
+	if err := after.DeleteWorkload(ctx, "exp-running", true); err != nil || p.Stops("hl-job-t1-exp-running-a1-r0of1-h100-0") != 2 {
+		t.Fatalf("stop after restart: %v, %d stops", err, p.Stops("hl-job-t1-exp-running-a1-r0of1-h100-0"))
 	}
-	p.Exit("hl-job-t1-exp-running-a1-h100-0", exitLine(0))
+	p.Exit("hl-job-t1-exp-running-a1-r0of1-h100-0", exitLine(0))
 	delete(desired, "exp-running")
 	if err := after.ReapTerminal(ctx, desired); err != nil {
 		t.Fatal(err)
 	}
-	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-booting-a0-h100-1", "hl-job-t1-exp-finished-a0-cpu-0"}) {
+	if names := p.Names(); !reflect.DeepEqual(names, []string{"hl-job-t1-exp-booting-a0-r0of1-h100-1", "hl-job-t1-exp-finished-a0-r0of1-cpu-0"}) {
 		t.Fatalf("rented %v", names)
+	}
+}
+
+// distinctHosts puts an instance on the first host its spec does not avoid, as a vendor that
+// names hosts does.
+func distinctHosts(spec provider.Spec) string {
+	for n := 0; ; n++ {
+		if host := fmt.Sprintf("host-%d", n); !slices.Contains(spec.AvoidHosts, host) {
+			return host
+		}
+	}
+}
+
+// newGangExecutor is newTestExecutor on a vendor that names the host of every instance.
+func newGangExecutor(t *testing.T) (*Executor, *fake.Provider) {
+	t.Helper()
+	e, p := newTestExecutor(t)
+	p.Host = distinctHosts
+	return e, p
+}
+
+// gangJob is job of two nodes on H100s, admitted to both H100 slots, rank 0 on h100-0.
+func gangJob(t *testing.T, id string, attempt int) *clusterapi.DesiredJob {
+	t.Helper()
+	exp := job(t, id, attempt, 1)
+	exp.ResolvedJob.NumNodes = 2
+	exp.ResolvedJob.Slots = []string{"h100-0", "h100-1"}
+	admitted := time.Now()
+	exp.SubmittedAt = &admitted
+	return asHanded(t, exp)
+}
+
+// rankNames are the instance names of the two ranks of gangJob.
+func rankNames(id string, attempt int) (string, string) {
+	return fmt.Sprintf("hl-job-t1-%s-a%d-r0of2-h100-0", id, attempt), fmt.Sprintf("hl-job-t1-%s-a%d-r1of2-h100-1", id, attempt)
+}
+
+// A job of two nodes is rented as two instances in the place the provider chose for them. Rank 1
+// meets rank 0 at the address the provider gave it on the private network there, both open their
+// sockets on the network's interface, and the job runs once both do and succeeds once both have.
+func TestAJobOfTwoNodesIsRentedOnAPrivateNetworkAndReportedAsOne(t *testing.T) {
+	e, p := newGangExecutor(t)
+	ctx := context.Background()
+	exp := gangJob(t, "exp-g", 0)
+	if !e.SupportsMultiNodeJobs() {
+		t.Fatal("a provider with private networks runs no job of several nodes")
+	}
+	mustCreate(t, e, exp)
+	zero, one := rankNames("exp-g", 0)
+	if names := p.Names(); !reflect.DeepEqual(names, []string{zero, one}) {
+		t.Fatalf("rented %v", names)
+	}
+	master, _, _ := p.Get(ctx, p.IDs(zero)[0])
+	for r, name := range []string{zero, one} {
+		spec := p.Spec(name)
+		wantMaster := map[int]string{0: masterSelf, 1: master.PrivateAddress}[r]
+		for key, want := range map[string]string{
+			jobenv.Rank: fmt.Sprint(r), jobenv.TorchRank: fmt.Sprint(r), jobenv.WorldSize: "2", jobenv.TorchLocalRank: "0",
+			jobenv.MasterAddr: wantMaster, jobenv.TorchMasterAddr: wantMaster, jobenv.MasterPort: "29500",
+			jobenv.NCCLSocketInterface: "eth0", jobenv.GlooSocketInterface: "eth0", "HYPOTHESISLOOP_EXPERIMENT_ID": "exp-g",
+		} {
+			if spec.Env[key] != want {
+				t.Errorf("rank %d: %s = %q, want %q", r, key, spec.Env[key], want)
+			}
+		}
+		if spec.Place != "fake-place" || spec.AcceleratorCount != 1 {
+			t.Errorf("rank %d: spec %+v", r, spec)
+		}
+	}
+	if master.PrivateAddress == "" {
+		t.Fatal("rank 0 has no address on its network")
+	}
+
+	scheduled := func() int32 {
+		_, _, _, n, err := e.PollPhaseDetail(ctx, "exp-g", 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if phase, attempt := status(t, e, "exp-g"); phase != clusterapi.JobPhasePending || attempt != 0 || scheduled() != 0 {
+		t.Fatalf("booting: phase %v, attempt %d, scheduled %d", phase, attempt, scheduled())
+	}
+	p.Start(zero)
+	if phase, _ := status(t, e, "exp-g"); phase != clusterapi.JobPhasePending || scheduled() != 1 {
+		t.Fatalf("one rank running: phase %v, scheduled %d", phase, scheduled())
+	}
+	p.Start(one)
+	if phase, _ := status(t, e, "exp-g"); phase != clusterapi.JobPhaseRunning || scheduled() != 2 {
+		t.Fatalf("both running: phase %v, scheduled %d", phase, scheduled())
+	}
+	p.RunsOn(zero, "host-0", "H100", "EPYC", 2.25)
+	p.RunsOn(one, "host-1", "H100", "EPYC", 2.5)
+	observed, _ := e.PollJobStatus(ctx, "exp-g")
+	if observed.UID != zero || observed.Machine.InstanceID != master.ID || observed.Machine.HostID != "host-0" || observed.Machine.PricePerHourUSD != 4.75 {
+		t.Fatalf("observed %+v, want rank 0's name and machine at the price of both", observed.Machine)
+	}
+	if matches, err := e.WorkloadMatchesDesired(ctx, exp); err != nil || !matches {
+		t.Fatalf("matches %v, %v", matches, err)
+	}
+	mustCreate(t, e, exp)
+	if names := p.Names(); len(names) != 2 {
+		t.Fatalf("a second pass rented again: %v", names)
+	}
+
+	p.Exit(one, exitLineAt(0, time.Unix(1000, 0), time.Unix(1500, 0)))
+	if phase, _ := status(t, e, "exp-g"); phase != clusterapi.JobPhaseRunning {
+		t.Fatalf("one rank done and one running: phase %v, want running", phase)
+	}
+	p.Exit(zero, exitLineAt(0, time.Unix(900, 0), time.Unix(1400, 0)))
+	observed, _ = e.PollJobStatus(ctx, "exp-g")
+	if observed.Phase != clusterapi.JobPhaseSucceeded || !observed.StartedAt.Equal(time.Unix(900, 0)) || !observed.EndedAt.Equal(time.Unix(1500, 0)) {
+		t.Fatalf("both done: %+v, want succeeded from the first start to the last end", observed)
+	}
+
+	if err := e.ReapTerminal(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if names := p.Names(); len(names) != 0 {
+		t.Fatalf("once no longer desired: rented %v", names)
+	}
+}
+
+// A job of several nodes is rented whole or not at all. Rank 1 has no machine once rank 0 is
+// rented: rank 0 is destroyed in the same call, and the job goes back to the queue at once, so
+// rank 0 is rented once in an admission. No machine for rank 0, or no place for every rank, is a
+// wait, then a job this cluster cannot run.
+func TestAGangWithoutAMachineForEveryRankRentsNothingAndWaits(t *testing.T) {
+	e, p := newGangExecutor(t)
+	ctx := context.Background()
+	exp := gangJob(t, "exp-g", 0)
+	zero, one := rankNames("exp-g", 0)
+	p.Fail = func(method, name string) error {
+		if method == "Create" && name == one {
+			return fmt.Errorf("vendor: %w", provider.ErrNoOffer)
+		}
+		return nil
+	}
+	var unrunnable *agentexec.Unrunnable
+	if err := e.CreateWorkload(ctx, exp); !errors.As(err, &unrunnable) || unrunnable.Reason != clusterapi.PhaseReasonNoOffer || !strings.Contains(unrunnable.Why, "place fake-place") {
+		t.Fatalf("rank 1 without an offer: err = %v, want no_offer naming the place", err)
+	}
+	if names := p.Names(); len(names) != 0 || p.Calls("Create") != 2 {
+		t.Fatalf("rented %v after %d creates, want everything undone", names, p.Calls("Create"))
+	}
+	p.Fail = func(method, name string) error {
+		if method == "Create" && name == zero {
+			return fmt.Errorf("vendor: %w", provider.ErrNoOffer)
+		}
+		return nil
+	}
+	var waiting *agentexec.Waiting
+	if err := e.CreateWorkload(ctx, exp); !errors.As(err, &waiting) || waiting.Reason != clusterapi.PhaseReasonWaitingForOffer {
+		t.Fatalf("rank 0 without an offer: err = %v, want a wait", err)
+	}
+	admitted := time.Now().Add(-time.Hour)
+	exp.SubmittedAt = &admitted
+	if err := e.CreateWorkload(ctx, exp); !errors.As(err, &unrunnable) || unrunnable.Reason != clusterapi.PhaseReasonNoOffer {
+		t.Fatalf("past the bound: err = %v, want no_offer", err)
+	}
+	if names := p.Names(); len(names) != 0 {
+		t.Fatalf("past the bound: rented %v", names)
+	}
+
+	p.Fail = nil
+	p.Network = func(provider.Spec) provider.Supply {
+		return provider.Supply{Count: 1, Why: "one machine in the cluster"}
+	}
+	exp.SubmittedAt = &[]time.Time{time.Now()}[0]
+	if err := e.CreateWorkload(ctx, exp); !errors.As(err, &waiting) || !strings.Contains(waiting.Why, "no place on the provider's private network") || !strings.Contains(waiting.Why, "2 of h100") {
+		t.Fatalf("no place for both: err = %v", err)
+	}
+	if names := p.Names(); len(names) != 0 {
+		t.Fatalf("rented %v without a place", names)
+	}
+
+	// A vendor that fails a rank undoes the rest too, and says why.
+	p.Network = nil
+	p.Fail = failing("Create", one)
+	if err := e.CreateWorkload(ctx, exp); !errors.Is(err, errVendor) || errors.As(err, &waiting) {
+		t.Fatalf("a failed rank: err = %v, want the vendor's error", err)
+	}
+	if names := p.Names(); len(names) != 0 {
+		t.Fatalf("after a failed rank: rented %v", names)
+	}
+}
+
+// A provider that cannot choose a place fails the call, with nothing rented.
+func TestAGangWhosePlaceCannotBeChosenRentsNothing(t *testing.T) {
+	e, p := newGangExecutor(t)
+	p.Fail = failing("Place", "")
+	if err := e.CreateWorkload(context.Background(), gangJob(t, "exp-g", 0)); !errors.Is(err, errVendor) {
+		t.Fatalf("err = %v, want the vendor's error", err)
+	}
+	if names := p.Names(); len(names) != 0 || p.Calls("Create") != 0 {
+		t.Fatalf("rented %v after %d creates, want nothing", names, p.Calls("Create"))
+	}
+}
+
+// A rank that fails fails the job, whatever the others do, and explains it.
+func TestARankThatFailsFailsItsGang(t *testing.T) {
+	e, p := newGangExecutor(t)
+	ctx := context.Background()
+	mustCreate(t, e, gangJob(t, "exp-g", 0))
+	zero, one := rankNames("exp-g", 0)
+	p.Start(zero)
+	p.Start(one)
+	p.Exit(one, "CUDA error: an illegal memory access", exitLine(3))
+	if phase, _ := status(t, e, "exp-g"); phase != clusterapi.JobPhaseFailed {
+		t.Fatalf("phase %v, want failed", phase)
+	}
+	reason, message, _, scheduled, err := e.PollPhaseDetail(ctx, "exp-g", 0)
+	if err != nil || reason != clusterapi.PhaseReasonOfExit(3) || message != "rank 1: command exited with code 3" || scheduled != 2 {
+		t.Fatalf("detail %q %q, scheduled %d, %v", reason, message, scheduled, err)
+	}
+}
+
+// Each rank's output is a section of the job's tail, rank 0 and then the failed rank last.
+func TestTheTailOfAGangHasASectionPerRank(t *testing.T) {
+	e, p := newGangExecutor(t)
+	ctx := context.Background()
+	mustCreate(t, e, gangJob(t, "exp-g", 0))
+	zero, one := rankNames("exp-g", 0)
+	if tail, err := e.FetchLogTail(ctx, "exp-g", 40); err != nil || len(tail) != 0 {
+		t.Fatalf("booting: tail %q, %v", tail, err)
+	}
+	p.Start(zero)
+	p.Start(one)
+	p.Print(zero, "waiting in all_reduce")
+	p.Exit(one, "Traceback: boom", exitLine(3))
+	tail, err := e.FetchLogTail(ctx, "exp-g", 40)
+	want := []string{
+		"--- rank 0 (instance " + zero + ") ---", "waiting in all_reduce",
+		"--- rank 1 failed, exit 3 (instance " + one + ") ---", "Traceback: boom", exitLine(3),
+	}
+	if err != nil || !reflect.DeepEqual(tail, want) {
+		t.Fatalf("tail %q, %v, want %q", tail, err, want)
+	}
+}
+
+// A rank that vanished leaves the others waiting for it: the job no longer matches, every rank is
+// deleted, and the next pass rents the whole job again.
+func TestAGangMissingARankIsReplacedWhole(t *testing.T) {
+	e, p := newGangExecutor(t)
+	ctx := context.Background()
+	exp := gangJob(t, "exp-g", 0)
+	mustCreate(t, e, exp)
+	zero, one := rankNames("exp-g", 0)
+	p.Start(zero)
+	p.Start(one)
+	if err := p.Destroy(ctx, p.IDs(one)[0]); err != nil {
+		t.Fatal(err)
+	}
+	if phase, _ := status(t, e, "exp-g"); phase != clusterapi.JobPhaseGone {
+		t.Fatalf("phase %v, want gone with a rank missing", phase)
+	}
+	if matches, err := e.WorkloadMatchesDesired(ctx, exp); err != nil || matches {
+		t.Fatalf("matches %v, %v, want the gang replaced", matches, err)
+	}
+	if err := e.DeleteWorkload(ctx, "exp-g", false); err != nil || len(p.Names()) != 0 {
+		t.Fatalf("delete: %v, rented %v", err, p.Names())
+	}
+	if err := e.ReapTerminal(ctx, map[string]*clusterapi.DesiredJob{"exp-g": exp}); err != nil {
+		t.Fatal(err)
+	}
+	mustCreate(t, e, exp)
+	if names := p.Names(); !reflect.DeepEqual(names, []string{zero, one}) {
+		t.Fatalf("rented %v, want the whole gang again", names)
+	}
+}
+
+// A rank that has not started within Startup is replaced with the rest of its gang.
+func TestAGangWithAnOverdueRankDoesNotMatch(t *testing.T) {
+	e, p := newGangExecutor(t)
+	ctx := context.Background()
+	exp := gangJob(t, "exp-g", 0)
+	mustCreate(t, e, exp)
+	zero, one := rankNames("exp-g", 0)
+	p.Start(zero)
+	p.Age(one, time.Hour)
+	if matches, err := e.WorkloadMatchesDesired(ctx, exp); err != nil || matches {
+		t.Fatalf("matches %v, %v, want the gang replaced", matches, err)
+	}
+}
+
+// A retry is a new attempt: every rank gets a new name.
+func TestARetriedGangGetsNewNames(t *testing.T) {
+	e, p := newGangExecutor(t)
+	ctx := context.Background()
+	mustCreate(t, e, gangJob(t, "exp-g", 0))
+	zero, one := rankNames("exp-g", 0)
+	p.Start(zero)
+	p.Start(one)
+	p.Exit(one, exitLine(1))
+	retry := gangJob(t, "exp-g", 1)
+	if matches, err := e.WorkloadMatchesDesired(ctx, retry); err != nil || matches {
+		t.Fatalf("the old attempt matches the retry: %v, %v", matches, err)
+	}
+	if err := e.DeleteWorkload(ctx, "exp-g", false); err != nil {
+		t.Fatal(err)
+	}
+	mustCreate(t, e, retry)
+	if err := e.ReapTerminal(ctx, map[string]*clusterapi.DesiredJob{"exp-g": retry}); err != nil {
+		t.Fatal(err)
+	}
+	zero, one = rankNames("exp-g", 1)
+	if names := p.Names(); !reflect.DeepEqual(names, []string{zero, one}) {
+		t.Fatalf("rented %v", names)
+	}
+	if spec := p.Spec(one); spec.Place != "fake-place" || spec.Env[jobenv.Attempt] != "1" {
+		t.Fatalf("rank 1 of the retry: place %q, attempt %q", spec.Place, spec.Env[jobenv.Attempt])
+	}
+}
+
+// A termination granted the checkpoint window is a SIGTERM to every rank, which keep running.
+func TestACheckpointGrantStopsEveryRank(t *testing.T) {
+	e, p := newGangExecutor(t)
+	ctx := context.Background()
+	mustCreate(t, e, gangJob(t, "exp-g", 0))
+	zero, one := rankNames("exp-g", 0)
+	p.Start(zero)
+	p.Start(one)
+	if err := e.DeleteWorkload(ctx, "exp-g", true); err != nil {
+		t.Fatal(err)
+	}
+	if p.Stops(zero) != 1 || p.Stops(one) != 1 || len(p.Names()) != 2 {
+		t.Fatalf("stops %d and %d, rented %v, want both signalled and kept", p.Stops(zero), p.Stops(one), p.Names())
+	}
+}
+
+// A free slot of a shape a waiting gang wants says how large a gang one private network can
+// hold of it now, and why none when it holds none. The gang counts every node on the shape.
+func TestAFreeSlotSaysWhatAPrivateNetworkHoldsOfItsShape(t *testing.T) {
+	p := fake.New()
+	gang := waitingH100("amd64")
+	gang.Job.NumNodes = 2
+	cfg := testConfig(p)
+	cfg.Demand = waitingFor{gang}
+	e, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	var asked []int
+	p.Network = func(spec provider.Spec) provider.Supply {
+		asked = append(asked, 0)
+		if spec.AcceleratorType != h100 {
+			t.Errorf("asked about %+v", spec)
+		}
+		return provider.Supply{Count: 2}
+	}
+	_, _, _, labels, err := e.GetLiveAcceleratorCapacitySnapshot(ctx)
+	if labels["cpu-0"][clusterapi.NodeSlotStartupLabel] != "240" {
+		t.Errorf("labels %v, want every slot to say how long its machine may take to start", labels["cpu-0"])
+	}
+	if err != nil || labels["h100-0"][clusterapi.NodeSlotNetworkLabel] != "2" || labels["h100-1"][clusterapi.NodeSlotNetworkLabel] != "2" || labels["cpu-0"][clusterapi.NodeSlotNetworkLabel] != "" || len(asked) != 1 {
+		t.Fatalf("labels %v, asked %d times, %v", labels, len(asked), err)
+	}
+	if d := e.demanded(ctx, &view{}); d.wanted[marketKey("h100", "amd64")] != 2 || d.gangs[marketKey("h100", "amd64")] != 2 {
+		t.Fatalf("demand %+v, want both nodes of the gang on h100", d)
+	}
+	p.Network = func(provider.Spec) provider.Supply {
+		return provider.Supply{Why: "no physical cluster has two H100 machines"}
+	}
+	_, _, _, labels, _ = e.GetLiveAcceleratorCapacitySnapshot(ctx)
+	if labels["h100-0"][clusterapi.NodeSlotNetworkLabel] != "0" || labels["h100-0"][clusterapi.NodeSlotNoNetworkLabel] != "shape h100 on amd64: no physical cluster has two H100 machines" {
+		t.Fatalf("labels %v", labels["h100-0"])
+	}
+}
+
+// Every slot says how near the nodes on one private network are, and a gang that asks for nearer
+// is no demand on any shape.
+func TestASlotSaysHowNearItsNetworksAreAndAGangAskingNearerIsNoDemand(t *testing.T) {
+	p := fake.New()
+	p.Near = string(clusterapi.NodesWithinZone)
+	gang := waitingH100("amd64")
+	gang.Job.NumNodes = 2
+	cfg := testConfig(p)
+	cfg.Demand = waitingFor{gang}
+	e, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	_, _, _, labels, err := e.GetLiveAcceleratorCapacitySnapshot(ctx)
+	if err != nil || labels["h100-0"][clusterapi.NodeSlotNetworkWithinLabel] != "zone" || labels["cpu-0"][clusterapi.NodeSlotNetworkWithinLabel] != "zone" {
+		t.Fatalf("labels %v, %v, want every slot within a zone", labels, err)
+	}
+	if d := e.demanded(ctx, &view{}); d.wanted[marketKey("h100", "amd64")] != 2 {
+		t.Fatalf("demand %+v, want the gang within a zone on h100", d)
+	}
+	gang.Job.Topology = &clusterapi.TopologySpec{NodesWithin: clusterapi.NodesWithinPlacementGroup}
+	e.demand = waitingFor{gang}
+	if d := e.demanded(ctx, &view{}); d.wanted[marketKey("h100", "amd64")] != 0 {
+		t.Fatalf("demand %+v, want none of a gang within a placement group on networks of zones", d)
+	}
+	p.Near = "rack"
+	if _, err := New(cfg); err == nil {
+		t.Fatal("a provider whose places are within no level was taken")
+	}
+}
+
+// The control plane fences a report on the slot of a job's first node, so a gang without rank 0
+// names no node, and no machine with it.
+func TestAGangWithoutRankZeroNamesNoNode(t *testing.T) {
+	e, p := newGangExecutor(t)
+	ctx := context.Background()
+	mustCreate(t, e, gangJob(t, "exp-g", 0))
+	if _, node, _, err := e.ResolveAdmittedAcceleratorType(ctx, "exp-g"); err != nil || node != "h100-0" {
+		t.Fatalf("node %q, %v, want rank 0's slot", node, err)
+	}
+	zero, _ := rankNames("exp-g", 0)
+	if err := p.Destroy(ctx, p.IDs(zero)[0]); err != nil {
+		t.Fatal(err)
+	}
+	if _, node, _, err := e.ResolveAdmittedAcceleratorType(ctx, "exp-g"); err != nil || node != "" {
+		t.Fatalf("node %q, %v, want none without rank 0", node, err)
+	}
+}
+
+// Every rank of a gang is an instance of its own with its own accelerators, which meets
+// spread_across_hosts, so a gang that keeps the default runs on a vendor that names no host.
+func TestADefaultGangRentsOnAVendorThatNamesNoHost(t *testing.T) {
+	e, p := newTestExecutor(t)
+	p.Host = func(provider.Spec) string { return "" }
+	mustCreate(t, e, gangJob(t, "exp-g", 0))
+	if names := p.Names(); len(names) != 2 {
+		t.Fatalf("rented %v, want both ranks", names)
+	}
+}
+
+// leavingVendor rents the instance of the name leave and then reports its Create failed, as the
+// contract allows a vendor to.
+type leavingVendor struct {
+	*fake.Provider
+	leave string
+}
+
+func (l *leavingVendor) Create(ctx context.Context, spec provider.Spec) (string, error) {
+	id, err := l.Provider.Create(ctx, spec)
+	if err == nil && spec.Name == l.leave {
+		return "", errVendor
+	}
+	return id, err
+}
+
+// A Create that fails may leave its instance behind. Undoing the gang destroys it with the rest.
+func TestAGangUndoesAnInstanceAFailedCreateLeftBehind(t *testing.T) {
+	_, one := rankNames("exp-g", 0)
+	vendor := &leavingVendor{Provider: fake.New(), leave: one}
+	e, err := New(testConfig(vendor))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.CreateWorkload(context.Background(), gangJob(t, "exp-g", 0)); !errors.Is(err, errVendor) {
+		t.Fatalf("err = %v, want the vendor's error", err)
+	}
+	if names := vendor.Names(); len(names) != 0 || vendor.Calls("Create") != 2 {
+		t.Fatalf("rented %v after %d creates, want everything undone", names, vendor.Calls("Create"))
 	}
 }

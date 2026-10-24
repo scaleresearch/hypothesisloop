@@ -5,6 +5,8 @@
 export const keys = {
   me: () => ['me'],
   agentSandbox: () => ['agentsandbox'],
+  models: () => ['models'],
+  agentRoles: () => ['agent-roles'],
 
   apiKeys: (orgID: string) => ['api-keys', orgID],
   orgMembers: (orgID: string) => ['org-members', orgID],

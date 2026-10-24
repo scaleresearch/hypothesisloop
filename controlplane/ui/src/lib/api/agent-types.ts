@@ -1,5 +1,10 @@
 import { apiFetch, apiSend } from '@/lib/api/request'
-import type { AgentTypeVersion, CreateAgentTypeRequest, EditAgentTypeRequest, EditedAgentType, ListedAgentType } from '@/types/api'
+import type { AgentRoleInfo, AgentTypeVersion, CreateAgentTypeRequest, EditAgentTypeRequest, EditedAgentType, ListedAgentType } from '@/types/api'
+
+// Every role an agent type has, in the platform's order.
+export function fetchAgentRoles(): Promise<AgentRoleInfo[]> {
+  return apiFetch<AgentRoleInfo[]>('/agent-roles')
+}
 
 // The built-in types and the org's own, archived ones included.
 export function fetchAgentTypes(orgID: string): Promise<ListedAgentType[]> {

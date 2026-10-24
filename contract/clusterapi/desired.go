@@ -5,6 +5,7 @@ package clusterapi
 
 import (
 	"fmt"
+	"slices"
 	"time"
 )
 
@@ -154,6 +155,11 @@ type JobSpec struct {
 	// omitted entirely.
 	NodeSelector map[string]string `json:"node_selector,omitempty" yaml:"node_selector,omitempty"`
 
+	// Slots is the slot (NodeSlotLabel) each node of the job holds, in rank order, on a cluster of
+	// slots: admission chooses them and writes them into the resolved job, and a submitted job
+	// may not state them. The runtime rents exactly these, and decides no placement of its own.
+	Slots []string `json:"slots,omitempty" yaml:"slots,omitempty" readOnly:"true"`
+
 	// Groups expresses a job whose nodes are NOT identical — a learner alongside a fleet of
 	// actors, a parameter server alongside workers. Each group carries its own per-replica
 	// resources, command, args and env; everything that describes the JOB rather than a node
@@ -205,12 +211,6 @@ type JobSpec struct {
 	// accelerator time to reach the same failure, so 0 is the honest setting for a diagnostic
 	// run you expect to fail. Required and non-negative.
 	//
-	// It bounds pod-level retries. A container can also be restarted in place by the kubelet,
-	// which is a separate mechanism this field does not reach — so max_retries 0 is executed
-	// with in-place restarts disabled too, to make "no retries" mean one attempt rather than
-	// one pod. For N > 0 the two layers still compose: up to N+1 pods, each of which the
-	// kubelet may also restart.
-	//
 	// The retried unit is the whole job, which for num_nodes > 1 means the whole gang: every
 	// rank is torn down and all N nodes start again together. It is deliberately not per-rank.
 	// Restarting one rank of a synchronous job leaves the survivors blocked in a collective
@@ -218,10 +218,9 @@ type JobSpec struct {
 	// rendezvous the others have already left — the gang burns its full allocation and fails
 	// anyway. An agent whose ranks really are independent should submit independent jobs.
 	//
-	// Where the budget is enforced differs by shape, because only one layer can enforce it in
-	// each case: a single-pod job's retries are the runtime's (k8s BackoffLimit), and a gang's
-	// are the control plane's, since Kubernetes can recreate a failed index — stranding the
-	// survivors — or fail the Job outright, but has no way to restart a gang.
+	// The control plane spends the budget, for every runtime: a failed attempt goes back to the
+	// queue and the next one comes as desired state with a new attempt number. A runtime runs each
+	// attempt once and restarts nothing itself, neither a pod nor a container in place.
 	//
 	// Left out, it is 0: the job runs once. Submission writes that into the job.
 	MaxRetries *int `json:"max_retries,omitempty" yaml:"max_retries,omitempty"`
@@ -262,19 +261,50 @@ type JobSpec struct {
 	ShmSize string `json:"shm_size,omitempty" yaml:"shm_size,omitempty"`
 }
 
-// TopologySpec expresses placement requirements for a distributed job's nodes — the difference
+// TopologySpec expresses placement requirements for a distributed job's nodes: the difference
 // between "8 pods that happen to exist" and "8 pods that can do synchronous multi-host gradient
-// sync." Backend-agnostic vocabulary; the k8s backend compiles it into pod (anti-)affinity.
+// sync." Backend-agnostic vocabulary.
 type TopologySpec struct {
-	// SpreadAcrossHosts requires no two of this job's nodes to land on the same physical host —
-	// two ranks sharing a host silently halves real parallelism. Defaults to true whenever
+	// SpreadAcrossHosts requires no two of this job's nodes to share a host's accelerators: two
+	// ranks on one host's devices silently halve real parallelism. A runtime whose nodes share
+	// hosts (Kubernetes) puts every node on a host of its own; on rented compute every node is
+	// an instance of its own with its own accelerators, which meets it. Defaults to true whenever
 	// NumNodes > 1 (set false only for local/dev clusters with fewer hosts than NumNodes).
 	SpreadAcrossHosts *bool `json:"spread_across_hosts,omitempty" yaml:"spread_across_hosts,omitempty"`
-	// SameZone prefers co-locating every node in the same topology zone/rack, minimizing
-	// cross-zone latency for gradient all-reduce (NCCL). Best-effort only: the first rank has no
-	// sibling to co-locate with yet, so this can't be a hard requirement without risking the
-	// whole job going unschedulable.
-	SameZone bool `json:"same_zone,omitempty" yaml:"same_zone,omitempty"`
+	// NodesWithin is how close every node of the job is to the others (JobSpec.NodesWithin).
+	// The scheduler picks nodes that agree at this level and names it in the resolved job's
+	// NodeSelector.
+	NodesWithin NodesLevel `json:"nodes_within,omitempty" yaml:"nodes_within,omitempty" enum:"region,zone,placement_group" doc:"How close the job's nodes are to each other: one region, one zone (the default of a job over several nodes) or one placement group. A job no such place of any idle cluster holds is refused exceeds_cluster_capacity at submit; one that such a place holds waits with capacity_unavailable while it is full. Ignored for a job on one node."`
+}
+
+// NodesLevel is a level of nearness. Levels nest: a placement group is within a zone, a zone
+// within a region.
+type NodesLevel string
+
+const (
+	NodesWithinRegion         NodesLevel = "region"
+	NodesWithinZone           NodesLevel = "zone"
+	NodesWithinPlacementGroup NodesLevel = "placement_group"
+)
+
+// NodesLevels are the levels from the widest to the nearest.
+var NodesLevels = []NodesLevel{NodesWithinRegion, NodesWithinZone, NodesWithinPlacementGroup}
+
+// AsNearAs says whether every node within l is also within want: l is want or a nearer level.
+func (l NodesLevel) AsNearAs(want NodesLevel) bool {
+	return slices.Contains(NodesLevels, l) && slices.Index(NodesLevels, l) >= slices.Index(NodesLevels, want)
+}
+
+// NodesWithin is the level every node of the job is within: the one Topology names, zone when it
+// names none, and "" for a job on one node.
+func (j JobSpec) NodesWithin() NodesLevel {
+	switch {
+	case j.Nodes() <= 1:
+		return ""
+	case j.Topology == nil || j.Topology.NodesWithin == "":
+		return NodesWithinZone
+	}
+	return j.Topology.NodesWithin
 }
 
 // JobGroup is one homogeneous slice of a heterogeneous job: Replicas identical nodes with their

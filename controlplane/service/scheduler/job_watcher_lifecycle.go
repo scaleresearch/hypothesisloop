@@ -382,9 +382,9 @@ func (w *JobWatcher) onFinished(ctx context.Context, exp *domain.Experiment, sta
 		exp.Status = domain.StatusRunning
 	}
 
-	// A gang with retry budget goes straight back to QUEUED. Writing FAILED first would announce
+	// A job with retry budget goes straight back to QUEUED. Writing FAILED first would announce
 	// a terminal status for a job that runs again.
-	if status == domain.StatusFailed && w.retryGang(ctx, exp) {
+	if status == domain.StatusFailed && w.retry(ctx, exp) {
 		return nil
 	}
 
@@ -406,28 +406,22 @@ func (w *JobWatcher) onFinished(ctx context.Context, exp *domain.Experiment, sta
 	return nil
 }
 
-// retryGang returns a failed multi-node job to QUEUED for another whole-gang attempt while its
-// max_retries budget lasts, reporting whether it did.
-//
-// Only gangs. For a single-pod job the runtime already expresses "restart the failed unit" as
-// BackoffLimit, and by the time the job watcher sees JobPhaseFailed that budget is spent — so a
-// control-plane retry there would be a second retry authority stacked on the first. A gang is the
-// case the runtime cannot express: k8s can recreate a failed index, which strands the survivors,
-// or fail the whole Job, which is terminal. Neither is "restart the gang", so the decision moves
-// to the only layer that can make it, and is written as desired state like every other.
-func (w *JobWatcher) retryGang(ctx context.Context, exp *domain.Experiment) bool {
-	if exp.Job.Nodes() < 2 || exp.Job.MaxRetries == nil || *exp.Job.MaxRetries < 1 {
+// retry returns a failed job to QUEUED for another attempt of all its nodes while its max_retries
+// budget lasts, reporting whether it did. The control plane is the one retry authority, for every
+// runtime and every shape: a runtime runs each attempt once (clusterapi.JobSpec.MaxRetries).
+func (w *JobWatcher) retry(ctx context.Context, exp *domain.Experiment) bool {
+	if exp.Job.MaxRetries == nil || *exp.Job.MaxRetries < 1 {
 		return false
 	}
 	// Bill what this attempt burned before it goes back in the queue, so a job retrying for
 	// minutes is not invisible to running-cost and quota exhaustion in the meantime. Deliberately
 	// not MarkQuotaSettled: the row stops being terminal, and the final attempt settles for real.
 	if err := w.settler.Settle(ctx, exp); err != nil {
-		w.logger.Warn("job_watcher: settle before gang retry", zap.String("id", exp.ID), zap.Error(err))
+		w.logger.Warn("job_watcher: settle before retry", zap.String("id", exp.ID), zap.Error(err))
 	}
 	requeued, err := w.store.RequeueForRetry(ctx, exp.ID, *exp.Job.MaxRetries)
 	if err != nil {
-		w.logger.Error("job_watcher: requeue gang for retry", zap.String("id", exp.ID), zap.Error(err))
+		w.logger.Error("job_watcher: requeue for retry", zap.String("id", exp.ID), zap.Error(err))
 		return false
 	}
 	if !requeued {
@@ -436,7 +430,7 @@ func (w *JobWatcher) retryGang(ctx context.Context, exp *domain.Experiment) bool
 		return false
 	}
 	w.wakeAdmission()
-	w.logger.Info("job_watcher: gang failed, requeued for a fresh attempt",
+	w.logger.Info("job_watcher: job failed, requeued for a fresh attempt",
 		zap.String("id", exp.ID),
 		zap.Int("attempts_used", exp.RetriesUsed()+1),
 		zap.Int("max_retries", *exp.Job.MaxRetries),

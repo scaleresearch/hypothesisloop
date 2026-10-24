@@ -85,7 +85,7 @@ def test_mute_job_evicted_while_reporting_job_survives(api, experiment, run_id, 
     healthy_job = api.submit_job(
         pe_id, agent, hours=healthy_hours,
         job_overrides={"env": {
-            "HYPOTHESISLOOP_DURATION_SECONDS": str(healthy_seconds),
+            "RUN_SECONDS": str(healthy_seconds),
             "HYPOTHESISLOOP_REPORT_INTERVAL_SECONDS": str(REPORT_INTERVAL),
         }},
     )

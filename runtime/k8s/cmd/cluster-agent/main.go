@@ -60,8 +60,11 @@ func main() {
 	// Optional: whether this cluster sits behind a native autoscaler. Fail-closed default false —
 	// see autoscaler.md's "Cluster capability".
 	autoscalerEnabled := agentloop.OptionalBoolEnv(binaryName, "AUTOSCALER_ENABLED")
+	// Optional: the key of the node label that names a node's placement group. Unset, a job
+	// within one placement group runs on no node here.
+	placementGroupLabel := os.Getenv("PLACEMENT_GROUP_LABEL")
 
-	jwc, err := k8sexec.New(k8sexec.Config{APIURL: apiURL})
+	jwc, err := k8sexec.New(k8sexec.Config{APIURL: apiURL, PlacementGroupLabel: placementGroupLabel})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cluster-agent: workload client: %v\n", err)
 		os.Exit(1)

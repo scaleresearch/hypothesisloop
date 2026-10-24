@@ -13,7 +13,7 @@ FETCH = instructions.fetch
 
 def served(cfg, **changes) -> instructions.Instructions:
     """Instructions as the platform would serve them for cfg's role."""
-    fields = dict(agent_type="generalist", version=1, role=cfg.role, prompt="the system prompt", model="m",
+    fields = dict(agent_type="generalist", version=1, role=cfg.role, prompt="the system prompt", model="anthropic/m",
                   max_subagents=4, effort="high", hyperparameters={}, digest="digest-1")
     fields.update(changes)
     return instructions.Instructions(**fields)

@@ -47,15 +47,15 @@ func TestTheValueChecksTakeTheListsAndNothingElse(t *testing.T) {
 	}
 }
 
-// A role a person sends reads back as itself, empty is a competitor, and the planner, which only
+// A role a person sends reads back as itself, empty is an executor, and the planner, which only
 // the platform signs up, and anything unknown are refused.
 func TestARequestedRoleReadsBackAsItself(t *testing.T) {
-	for _, r := range []SignupRole{SignupRoleCompetitor, SignupRoleBaseline, SignupRoleReviewer} {
+	for _, r := range []SignupRole{SignupRoleExecutor, SignupRoleBaseline, SignupRoleReviewer, SignupRoleResearcher} {
 		if got, err := ParseSignupRole(string(r)); err != nil || got != r {
 			t.Errorf("ParseSignupRole(%q) = %q, %v", r, got, err)
 		}
 	}
-	for _, bad := range []string{"", string(SignupRolePlanner), "judge", "Competitor"} {
+	for _, bad := range []string{"", string(SignupRolePlanner), "judge", "Executor"} {
 		if _, err := ParseSignupRole(bad); err == nil {
 			t.Errorf("ParseSignupRole(%q) taken", bad)
 		}

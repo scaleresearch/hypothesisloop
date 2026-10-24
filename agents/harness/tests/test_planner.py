@@ -65,11 +65,11 @@ class RunEndedTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await turn(setup(planner(), {"status": "draft", "baseline_due_at": due}), told), told,
                          "a planner has no run to read the situation of")
 
-    # Researchers once finished in twenty minutes and their machines idled to the end time.
-    def test_a_researcher_stops_once_it_finished_and_not_before(self):
-        researcher = SimpleNamespace(agent_id="ag-1", role="researcher", platform_experiment_id="pe-1")
-        self.assertIsNone(self.reason(researcher, {}))
-        self.assertEqual(self.reason(researcher, {"ended": "finished"}), "the platform ended the run: finished")
+    # Executors once finished in twenty minutes and their machines idled to the end time.
+    def test_an_executor_stops_once_it_finished_and_not_before(self):
+        executor = SimpleNamespace(agent_id="ag-1", role="executor", platform_experiment_id="pe-1")
+        self.assertIsNone(self.reason(executor, {}))
+        self.assertEqual(self.reason(executor, {"ended": "finished"}), "the platform ended the run: finished")
 
     def test_a_coordinator_stops_once_its_platform_experiment_closed(self):
         coordinator = SimpleNamespace(agent_id="coordinator", role="coordinator", platform_experiment_id="pe-1")
@@ -126,7 +126,7 @@ class GoalTest(unittest.IsolatedAsyncioTestCase):
         self.draft["status_reason"] = {"reason": "proposed"}
         self.assertTrue((await prompts.opening(self.setup(planner()), store, "s-1", None)).endswith("Continue where you left off."))
 
-    # The planner's stream is its own, so the goal wakes it and no researcher; the coordinator is
+    # The planner's stream is its own, so the goal wakes it and no other agent; the coordinator is
     # woken by the goal and by a changed plan.
     def test_the_goal_wakes_a_planner_and_the_coordinator_and_the_plan_the_coordinator(self):
         self.assertIn(updates.GOAL, updates.WAKES["agent"])

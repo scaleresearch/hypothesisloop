@@ -168,7 +168,9 @@ func signUpDraftBaseline(ctx context.Context, tx *Write, id string, agent *domai
 		return err
 	}
 	if agent.Name == "" {
-		agent.Name = domain.AgentName(signup.Role, func(name string) bool { _, taken := names[name]; return taken })
+		if agent.Name, err = domain.AgentName(signup.Role, func(name string) bool { _, taken := names[name]; return taken }); err != nil {
+			return err
+		}
 	}
 	if err := tx.QueryRow(ctx, `SELECT `+orgOfSQL("$1"), id).Scan(&agent.OrgID); err != nil {
 		return fmt.Errorf("read the draft's org: %w", err)
@@ -271,7 +273,7 @@ UPDATE platform_experiments SET declined_reason = $2, proposal = NULL, proposed_
 var ErrNothingProposed = errors.New("nothing is proposed")
 
 // AcceptDraft makes a proposed draft the open platform experiment pe describes and signs its
-// researchers up, and its baseline agent where its proposal signed none up, or does neither. pe carries what the proposal stated and what the person who
+// agents up, and its baseline agent where its proposal signed none up, or does neither. pe carries what the proposal stated and what the person who
 // accepts stated, and who accepted it, when and with which answers, beside the proposal kept as proposed; its baseline is measured from its StartsAt, and it is open until its
 // BaselineDueAt. Its planner has nothing left to answer, so the time its machine was kept for a
 // change of the goal ends with the accept. The limits a signup holds are held here too
@@ -288,9 +290,9 @@ func (s *Store) AcceptDraft(ctx context.Context, pe *domain.PlatformExperiment, 
 	if err != nil {
 		return fmt.Errorf("platform_experiments_store.AcceptDraft: marshal stages: %w", err)
 	}
-	researchers, err := poolJSON(pe.Researchers)
+	agents, err := poolJSON(pe.Agents)
 	if err != nil {
-		return fmt.Errorf("platform_experiments_store.AcceptDraft: marshal researchers: %w", err)
+		return fmt.Errorf("platform_experiments_store.AcceptDraft: marshal agents: %w", err)
 	}
 	if pe.AcceptedAt == nil {
 		return errors.New("platform_experiments_store.AcceptDraft: an accept states when it was made")
@@ -327,17 +329,17 @@ SET status = 'open', `+statusMoved+`, name = $2, description = $3, budget_accele
     default_quota_tier = $10, max_concurrent_accelerators = $11,
     coordinator_in_agentsandbox = true, coordinator_model = NULLIF($12, ''), duration_hours = $13, updated_at = now(),
     planner_ends_at = LEAST(planner_ends_at, now()), accepts_at = NULL,
-    accepted_at = $15, accepted_by_kind = $16, accepted_by_id = $17, accepted_answers = $18, researchers = $19
+    accepted_at = $15, accepted_by_kind = $16, accepted_by_id = $17, accepted_answers = $18, agents = $19
 WHERE id = $1`, pe.ID, pe.Name, pe.Description, pe.BudgetAcceleratorHours, pe.MaxAgents, metrics,
 			pe.ReportIntervalSeconds, pe.BaselineDueAt, stages,
 			string(pe.DefaultQuotaTier), pe.MaxConcurrentAccelerators, pe.Coordinator.Model, pe.DurationHours, optionalTime(pe.StartsAt),
-			pe.AcceptedAt, string(acceptedBy.Kind), acceptedBy.ID, answers, researchers); err != nil {
+			pe.AcceptedAt, string(acceptedBy.Kind), acceptedBy.ID, answers, agents); err != nil {
 			return fmt.Errorf("platform_experiments_store.AcceptDraft: %w", err)
 		}
 		if pe.Description != description || pe.DurationHours != durationHours {
 			tx.runChange(pe.ID, platformapi.EventPlatformExperimentDescription, "", "")
 		}
-		if err := poolTypesTx(ctx, tx, pe.ID, pe.Researchers); err != nil {
+		if err := poolTypesTx(ctx, tx, pe.ID, pe.Agents); err != nil {
 			return fmt.Errorf("platform_experiments_store.AcceptDraft: %w", err)
 		}
 		if _, err := enrolTx(ctx, tx, pe.ID, create, signups, nil); err != nil {

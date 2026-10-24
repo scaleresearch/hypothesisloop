@@ -14,21 +14,22 @@ import (
 )
 
 // instance is a rented instance read back through its name. The name is the only thing a
-// provider stores for us, so it carries everything a later pass has to know: which job and which
-// attempt of it the instance runs, and which slot it occupies.
+// provider stores for us, so it carries everything a later pass has to know: which job, which
+// attempt of it and which of its ranks the instance runs, and which slot it occupies.
 type instance struct {
 	provider.Instance
 	experimentID string
 	attempt      int
+	rank, ranks  int
 	shape        string
 	index        int
 }
 
-// instanceName is hl-job-<namespace>-<experiment id>-a<attempt>-<shape>-<index>. The attempt
-// makes the name of a requeued job's instance differ from the one it replaces, which is the fence
-// between them.
-func (e *Executor) instanceName(experimentID string, attempt int, shape string, index int) string {
-	return fmt.Sprintf("%s%s-a%d-%s", e.prefix, experimentID, attempt, slotName(shape, index))
+// instanceName is hl-job-<namespace>-<experiment id>-a<attempt>-r<rank>of<ranks>-<shape>-<index>.
+// The attempt makes the name of a requeued job's instance differ from the one it replaces, which
+// is the fence between them.
+func (e *Executor) instanceName(experimentID string, attempt, rank, ranks int, shape string, index int) string {
+	return fmt.Sprintf("%s%s-a%d-r%dof%d-%s", e.prefix, experimentID, attempt, rank, ranks, slotName(shape, index))
 }
 
 // slotName is the node name the control plane knows a slot by.
@@ -43,22 +44,19 @@ func (e *Executor) parseInstanceName(name string) (parsed instance, ok bool) {
 		return instance{}, false
 	}
 	parts := strings.Split(rest, "-")
-	if len(parts) < 4 {
-		return instance{}, false
-	}
 	n := len(parts)
-	index, indexErr := strconv.Atoi(parts[n-1])
-	attempt, attemptErr := strconv.Atoi(strings.TrimPrefix(parts[n-3], "a"))
-	if indexErr != nil || attemptErr != nil {
+	if n < 5 {
 		return instance{}, false
 	}
-	parsed = instance{
-		experimentID: strings.Join(parts[:n-3], "-"),
-		attempt:      attempt,
-		shape:        parts[n-2],
-		index:        index,
+	index, indexErr := strconv.Atoi(parts[n-1])
+	parsed = instance{shape: parts[n-2], index: index}
+	_, rankErr := fmt.Sscanf(parts[n-3], "r%dof%d", &parsed.rank, &parsed.ranks)
+	attempt, attemptErr := strconv.Atoi(strings.TrimPrefix(parts[n-4], "a"))
+	if indexErr != nil || rankErr != nil || attemptErr != nil || parsed.rank < 0 || parsed.rank >= parsed.ranks {
+		return instance{}, false
 	}
-	if parsed.experimentID == "" || e.instanceName(parsed.experimentID, parsed.attempt, parsed.shape, parsed.index) != name {
+	parsed.experimentID, parsed.attempt = strings.Join(parts[:n-4], "-"), attempt
+	if parsed.experimentID == "" || e.instanceName(parsed.experimentID, parsed.attempt, parsed.rank, parsed.ranks, parsed.shape, parsed.index) != name {
 		return instance{}, false
 	}
 	return parsed, true
@@ -81,8 +79,11 @@ type view struct {
 	instances []instance
 	unnamed   []instance
 	outputs   map[string]output
-	// market is Executor.rentable's answer for this view, nil until it is asked.
-	market *market
+	// demand is Executor.demanded's answer for this view, market Executor.rentable's and
+	// networks Executor.networked's, each nil until it is asked.
+	demand   *demand
+	market   *market
+	networks map[string]onOffer
 	// unstarting are the hosts of the instances this read found overdue. The pass destroys those
 	// instances, and what it rents is not rented on their hosts. Nothing carries a host into
 	// the next pass: once its instance is destroyed no list names it.
@@ -140,23 +141,25 @@ func (v *view) of(experimentID string) []instance {
 	return own
 }
 
-// newest returns experimentID's instance of the highest attempt: the one the control plane is
-// waiting on when a requeue has left an older one behind. Of two instances of that attempt,
-// which a vendor's lagging list or a create that failed after it succeeded can leave, it is the
-// one with the lowest id, the one ReapTerminal keeps.
-//
-// A status read has no desired state to tell it which slot the job is pinned to. CreateWorkload
-// never rents an attempt while an instance of it stands in another slot, so there is one
-// placement of an attempt to report at a time.
-func (v *view) newest(experimentID string) (instance, bool) {
-	var found instance
-	ok := false
-	for _, i := range v.of(experimentID) {
-		if !ok || i.attempt > found.attempt {
-			found, ok = i, true
+// gang returns the ranks of experimentID's highest attempt, lowest rank first, the lowest id of
+// each rank's instances, which ReapTerminal keeps. A status read knows no slots, so it relies on
+// CreateWorkload never renting an attempt in two placements.
+func (v *view) gang(experimentID string) []instance {
+	own := v.of(experimentID)
+	newest := -1
+	for _, i := range own {
+		newest = max(newest, i.attempt)
+	}
+	var ranks []instance
+	seen := map[int]bool{}
+	for _, i := range own {
+		if i.attempt == newest && !seen[i.rank] {
+			seen[i.rank] = true
+			ranks = append(ranks, i)
 		}
 	}
-	return found, ok
+	sort.SliceStable(ranks, func(a, b int) bool { return ranks[a].rank < ranks[b].rank })
+	return ranks
 }
 
 func (v *view) add(i instance) {

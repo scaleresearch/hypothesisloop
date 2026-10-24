@@ -16,7 +16,7 @@ import { PhaseStrip } from '@/components/phase-strip'
 import { PlatformExperimentDialog } from '@/components/platform-experiment-form'
 import { ReferenceValues } from '@/components/reference-values'
 import { RemoveExperiment } from '@/components/remove-experiment'
-import { ResearcherPool } from '@/components/researcher-pool'
+import { Team } from '@/components/team'
 import { SharedBadge } from '@/components/shared-badge'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -30,6 +30,7 @@ import { Text } from '@/components/ui/text'
 import { runClock } from '@/lib/format'
 import { phaseOf } from '@/lib/phase'
 import { useRoster } from '@/lib/roster'
+import { executorsAtWork } from '@/lib/team'
 import { budgetUnit } from '@/lib/units'
 import { About } from './_overview/about'
 import { overviewFigures } from './_overview/figures'
@@ -38,7 +39,7 @@ import { LiveMetricsPicker } from './_overview/job-metrics'
 import { JobsTable } from './_overview/jobs-table'
 import { Leaderboard } from './_overview/leaderboard'
 import { Outcome } from './_overview/outcome'
-import { ResearchersOverTime } from './_overview/researchers-over-time'
+import { ExecutorsOverTime } from './_overview/executors-over-time'
 import { useOverview } from './_overview/use-overview'
 import type { PlatformExperiment } from '@/types/api'
 
@@ -71,6 +72,7 @@ function PlatformExperimentDetail({ id }: { id: string }) {
     ...(quotas ?? []).map(q => q.agent_id),
     ...Object.keys(jobsByAgent),
   ])).sort()
+  const executorIds = knownAgentIds.filter(agentId => roster?.some(agent => agent.agent_id === agentId && agent.role === 'executor'))
   const primary = results?.metrics[0]
   const hypothesisText = new Map((findings ?? []).map(h => [h.id, h.text]))
   const unit = budgetUnit(pe.budget_kind)
@@ -82,13 +84,13 @@ function PlatformExperimentDetail({ id }: { id: string }) {
   // Nobody is ranked and nothing is charted before the run starts: until then the phase strip says what happens.
   const phase = phaseOf(pe)
   const started = phase === 'running' || phase === 'closed'
-  // A draft that closed never had researchers: its max_agents is still the most its planner could propose.
+  // A draft that closed never had a team: its max_agents is still the most its planner could propose.
   const plannedOnly = pe.close_reason != null && PLANNED_ONLY.includes(pe.close_reason)
   const figures = overviewFigures({
     pe, phase, plannedOnly, unit, stats,
     hypothesisStats: reads.hypothesisStats,
     verdicts: reads.verdicts,
-    researchers: roster?.filter(agent => agent.role === 'competitor').length,
+    executors: roster && executorsAtWork(roster).length,
   })
   const findingsSection = <Findings experimentId={id} findings={findings ?? []} direction={primary?.direction} />
 
@@ -140,10 +142,10 @@ function PlatformExperimentDetail({ id }: { id: string }) {
 
       {phase === 'running' && findingsSection}
       {started && metrics.length > 0 && (
-        <ResearchersOverTime metrics={metrics} agentIds={knownAgentIds} series={reads.metricSeries} boundaries={stages?.advances} />
+        <ExecutorsOverTime metrics={metrics} agentIds={executorIds} series={reads.metricSeries} boundaries={stages?.advances} />
       )}
 
-      {!plannedOnly && <ResearcherPool pe={pe} />}
+      {!plannedOnly && <Team pe={pe} />}
       <ExperimentAgents pe={pe} />
 
       {pe.goal && <GoalEditor pe={pe} onSaved={() => void mutatePE()} />}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,15 +18,18 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/contract/scope"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
+	"github.com/scaleresearch/hypothesisloop/controlplane/clients/openrouter"
 	"github.com/scaleresearch/hypothesisloop/controlplane/config"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/middleware"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/models"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
 const (
 	signingSecret = "a-signing-secret-only-this-test-knows"
 	credential    = "sk-ant-oat01-the-platforms-own-credential"
+	openRouterKey = "sk-or-v1-the-platforms-own-key"
 )
 
 // directory is the platform's rows as the authenticator reads them: platform experiment pe-1 of
@@ -65,10 +69,32 @@ func (directory) GetCluster(_ context.Context, name string) (*domain.Cluster, er
 	return &domain.Cluster{Name: name, OrgID: "org-1"}, nil
 }
 
-type sandboxed map[string]bool
+// sandboxed is the model choice of each agent and coordinator the platform runs, by
+// <platform experiment>/<agent id>, the coordinator's agent id empty.
+type sandboxed map[string]domain.ModelChoice
 
-func (h sandboxed) InAgentSandbox(_ context.Context, pe, agent string) (bool, error) {
-	return h[pe+"/"+agent], nil
+func (h sandboxed) ProxiedModel(_ context.Context, pe, agent string) (*domain.ModelChoice, error) {
+	if choice, ok := h[pe+"/"+agent]; ok {
+		return &choice, nil
+	}
+	return nil, nil
+}
+
+// defaults is the platform's models of an agent and a coordinator that name none.
+var defaults = domain.ModelDefaults{Agent: "anthropic/claude-haiku-5-5", Coordinator: "anthropic/claude-opus-5-5"}
+
+// runs is whom the platform runs: agent-a on the platform's default, every other on its own model,
+// agent-or on an OpenRouter model, agent-gone on one OpenRouter no longer lists and agent-oai on an
+// openai one.
+var runs = sandboxed{
+	"pe-1/agent-a":      {Role: domain.AgentRoleExecutor},
+	"pe-1/":             {Role: domain.AgentRoleCoordinator},
+	"pe-1/agent-cut":    {Role: domain.AgentRoleExecutor},
+	"pe-1/agent-ending": {Role: domain.AgentRoleExecutor},
+	"pe-1/agent-or":     {Role: domain.AgentRoleExecutor, Own: "openrouter/moonshotai/kimi-k2"},
+	"pe-1/agent-gone":   {Role: domain.AgentRoleExecutor, Own: "openrouter/vendor/retired"},
+	"pe-1/agent-oai":    {Role: domain.AgentRoleResearcher, Coordinator: "openai/gpt-6-luna"},
+	"pe-2/agent-b":      {Role: domain.AgentRoleExecutor, Type: "anthropic/claude-opus-5-5"},
 }
 
 // budgets is each platform experiment's model budget, pe-1 and pe-2 with room left unless set.
@@ -81,12 +107,39 @@ func (b budgets) ModelBudget(_ context.Context, pe string) (domain.ModelBudget, 
 	return domain.ModelBudget{BudgetUSD: 50, UsedUSD: 1}, nil
 }
 
-var policy = Policy{
-	Models: domain.ModelCatalog{
-		"claude-haiku-5-5": {InputUSDPerMTok: 0.1, OutputUSDPerMTok: 0.5, CacheWriteUSDPerMTok: 0.2, CacheReadUSDPerMTok: 0.01},
-		"claude-opus-5-5":  {InputUSDPerMTok: 4, OutputUSDPerMTok: 20, CacheWriteUSDPerMTok: 8, CacheReadUSDPerMTok: 0.2},
-	},
-	MaxInFlightPerOrg: 8,
+var catalog = domain.ModelCatalog{
+	"claude-haiku-5-5": {InputUSDPerMTok: 0.1, OutputUSDPerMTok: 0.5, CacheWriteUSDPerMTok: 0.2, CacheReadUSDPerMTok: 0.01},
+	"claude-opus-5-5":  {InputUSDPerMTok: 4, OutputUSDPerMTok: 20, CacheWriteUSDPerMTok: 8, CacheReadUSDPerMTok: 0.2},
+}
+
+// openRouterModels is OpenRouter's listing, kimi-k2 alone, its calls priced as OpenRouter's are.
+type openRouterModels struct{ *openrouter.Catalog }
+
+func (openRouterModels) Models(context.Context) ([]domain.ServedModel, error) {
+	return []domain.ServedModel{{ID: "moonshotai/kimi-k2", Name: "MoonshotAI: Kimi K2", InputUSDPerMTok: 0.6, OutputUSDPerMTok: 2.5}}, nil
+}
+
+// servedModels is the models of providers the platform serves: the catalogs' and OpenRouter's listing.
+func servedModels(providers Providers) *models.Service {
+	listed := map[string]models.Provider{}
+	if providers.Anthropic != nil {
+		listed[domain.ModelProviderAnthropic] = models.Catalog(catalog)
+	}
+	if providers.OpenRouter != nil {
+		listed[domain.ModelProviderOpenRouter] = openRouterModels{}
+	}
+	if providers.OpenAI != nil {
+		listed[domain.ModelProviderOpenAI] = models.Catalog(openAICatalog)
+	}
+	return models.New(listed, defaults)
+}
+
+// both is Anthropic at upstream and OpenRouter at upstream's /api, as openrouter.URL is.
+func both(upstream string) Providers {
+	return Providers{
+		Anthropic:  &Anthropic{URL: upstream, OAuthToken: credential},
+		OpenRouter: &OpenRouter{URL: upstream + "/api", APIKey: openRouterKey},
+	}
 }
 
 type recorded struct {
@@ -98,8 +151,9 @@ type recorded struct {
 func (r *recorded) RecordModelCall(_ context.Context, call metricsdb.ModelCall) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.calls = append(r.calls, call)
-	close(r.done)
+	if r.calls = append(r.calls, call); len(r.calls) == 1 {
+		close(r.done)
+	}
 	return nil
 }
 
@@ -133,6 +187,7 @@ func (r *recorded) none(t *testing.T) {
 // them) with the proxy behind it, and a provider the proxy reaches.
 type fixture struct {
 	api      *httptest.Server
+	upstream string
 	usage    *recorded
 	mu       sync.Mutex
 	received []*http.Request
@@ -151,21 +206,21 @@ func newFixture(t *testing.T, provider http.HandlerFunc) *fixture {
 		provider(w, r)
 	}))
 	t.Cleanup(upstream.Close)
-	f.api = newAPI(t, upstream.URL, f.usage, budgets{}, policy)
+	f.upstream = upstream.URL
+	f.api = newAPI(t, both(upstream.URL), f.usage, budgets{}, 8)
 	return f
 }
 
-func newAPI(t *testing.T, upstream string, usage Usage, spent budgets, policy Policy) *httptest.Server {
+func newAPI(t *testing.T, providers Providers, usage Usage, spent budgets, maxInFlightPerOrg int) *httptest.Server {
 	t.Helper()
 	authenticator, err := auth.NewAuthenticator(config.AuthConfig{}, signingSecret, directory{
-		signedUp: map[string]bool{"pe-1/agent-a": true, "pe-1/agent-self": true, "pe-1/agent-cut": true, "pe-1/agent-ending": true, "pe-2/agent-b": true},
+		signedUp: map[string]bool{"pe-1/agent-a": true, "pe-1/agent-self": true, "pe-1/agent-cut": true, "pe-1/agent-ending": true, "pe-1/agent-or": true, "pe-1/agent-gone": true, "pe-1/agent-oai": true, "pe-2/agent-b": true},
 		cutAt:    map[string]time.Time{"pe-1/agent-cut": time.Now().Add(-domain.AgentWindDown - time.Minute), "pe-1/agent-ending": time.Now().Add(-30 * time.Second)},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxy, err := New(sandboxed{"pe-1/agent-a": true, "pe-1/": true, "pe-1/agent-cut": true, "pe-1/agent-ending": true, "pe-2/agent-b": true},
-		usage, spent, policy, upstream, credential, zap.NewNop())
+	proxy, err := New(runs, usage, spent, servedModels(providers), providers, defaults, maxInFlightPerOrg, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +277,10 @@ func (f *fixture) upstreamCalls() int {
 	return len(f.received)
 }
 
-const messagesCall = Prefix + AnthropicProvider + "/v1/messages?beta=true"
+const (
+	messagesCall           = Prefix + "anthropic/v1/messages?beta=true"
+	openRouterMessagesCall = Prefix + "openrouter/v1/messages?beta=true"
+)
 
 func streamed(events ...string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -285,9 +343,10 @@ func TestOnlyTheProvidersMessageCallsAreServed(t *testing.T) {
 	f := newFixture(t, streamed(messageStart, messageStop))
 	agent := token(t, scope.Agent("pe-1", "agent-a"))
 	for _, path := range []string{
-		Prefix + AnthropicProvider + "/v1/models",
-		Prefix + AnthropicProvider + "/api/oauth/usage",
-		Prefix + AnthropicProvider + "/v1/messages/batches",
+		Prefix + "anthropic/v1/models",
+		Prefix + "anthropic/api/oauth/usage",
+		Prefix + "anthropic/v1/messages/batches",
+		Prefix + "openrouter/v1/models",
 		Prefix + "openai/v1/messages",
 	} {
 		resp := f.call(t, context.Background(), path, agent)
@@ -407,8 +466,8 @@ func TestAStreamedAnswerPassesEventByEventAndItsUsageIsRecorded(t *testing.T) {
 	}
 	got := f.usage.wait(t)
 	want := metricsdb.ModelCall{OrgID: "org-1", PlatformExperimentID: "pe-1", AgentID: "agent-a", Provider: "anthropic", Model: "claude-haiku-5-5",
-		InputTokens: 12, OutputTokens: 42, CacheCreationInputTokens: 300, CacheReadInputTokens: 4000, At: got.At}
-	if got != want || got.At.IsZero() {
+		InputTokens: 12, OutputTokens: 42, CacheCreationInputTokens: 300, CacheReadInputTokens: 4000, CostUSD: got.CostUSD, At: got.At}
+	if got != want || got.At.IsZero() || math.Abs(got.CostUSD-(12*0.1+42*0.5+300*0.2+4000*0.01)/1e6) > 1e-12 {
 		t.Fatalf("recorded %+v, want %+v", got, want)
 	}
 }
@@ -446,6 +505,35 @@ func TestAnAgentThatHangsUpEndsTheProvidersCall(t *testing.T) {
 	}
 }
 
+// OpenRouter states a call's usage and cost only at the end of its answer: an agent that hangs up
+// leaves the call to run to its end, and its whole usage and cost are recorded.
+func TestAnOpenRouterCallTheAgentHungUpOnIsReadToItsEndForItsCost(t *testing.T) {
+	hungUp := make(chan struct{})
+	f := newFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, openRouterStart)
+		w.(http.Flusher).Flush()
+		<-hungUp
+		time.Sleep(100 * time.Millisecond)
+		for _, event := range []string{textDelta, openRouterDelta, messageStop} {
+			_, _ = io.WriteString(w, event)
+			w.(http.Flusher).Flush()
+		}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	resp := callOn(t, ctx, f.api.URL, openRouterMessagesCall, token(t, scope.Agent("pe-1", "agent-or")), "moonshotai/kimi-k2")
+	if _, err := bufio.NewReader(resp.Body).ReadString('\n'); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	_ = resp.Body.Close()
+	close(hungUp)
+	if got := f.usage.wait(t); got.AgentID != "agent-or" || got.InputTokens != 8 || got.OutputTokens != 125 || got.CostUSD != 0.0000504 {
+		t.Fatalf("recorded %+v, want the call's final usage and cost", got)
+	}
+}
+
 func TestAnAnswerThatIsNotStreamedIsMeteredWhole(t *testing.T) {
 	f := newFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -468,7 +556,7 @@ func TestCountingTokensSpendsNoneAndIsNotRecorded(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"input_tokens":99}`)
 	})
-	resp := f.call(t, context.Background(), Prefix+AnthropicProvider+"/v1/messages/count_tokens?beta=true", token(t, scope.Agent("pe-1", "agent-a")))
+	resp := f.call(t, context.Background(), Prefix+"anthropic/v1/messages/count_tokens?beta=true", token(t, scope.Agent("pe-1", "agent-a")))
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || string(body) != `{"input_tokens":99}` {
@@ -490,7 +578,7 @@ func TestAnAnswerOutlastsTheServersOwnDeadlines(t *testing.T) {
 		}
 	}))
 	defer upstream.Close()
-	front := newAPI(t, upstream.URL, &recorded{done: make(chan struct{})}, budgets{}, policy)
+	front := newAPI(t, both(upstream.URL), &recorded{done: make(chan struct{})}, budgets{}, 8)
 	front.Close()
 	slow := httptest.NewUnstartedServer(front.Config.Handler)
 	slow.Config.ReadTimeout, slow.Config.WriteTimeout = 100*time.Millisecond, 100*time.Millisecond
@@ -512,7 +600,7 @@ func TestAnAnswerOutlastsTheServersOwnDeadlines(t *testing.T) {
 func TestAProviderThatCannotBeReachedIsAnsweredInItsOwnErrorShape(t *testing.T) {
 	gone := httptest.NewServer(http.NotFoundHandler())
 	gone.Close()
-	server := newAPI(t, gone.URL, &recorded{done: make(chan struct{})}, budgets{}, policy)
+	server := newAPI(t, both(gone.URL), &recorded{done: make(chan struct{})}, budgets{}, 8)
 	req, _ := http.NewRequest(http.MethodPost, server.URL+messagesCall, strings.NewReader(`{"model":"claude-opus-5-5"}`))
 	req.Header.Set("Authorization", "Bearer "+token(t, scope.Agent("pe-1", "agent-a")))
 	resp, err := http.DefaultClient.Do(req)
@@ -564,7 +652,7 @@ func refused(t *testing.T, resp *http.Response) (int, string, string) {
 }
 
 // Claude Code's subagents and small tasks call the models of the catalog; any other model is
-// refused before the provider, counting tokens too.
+// refused before the provider, counting tokens too, as a choice of it is.
 func TestAModelOutsideTheCatalogIsRefusedBeforeTheProvider(t *testing.T) {
 	f := newFixture(t, streamed(messageStart, messageStop))
 	agent := token(t, scope.Agent("pe-1", "agent-a"))
@@ -574,10 +662,10 @@ func TestAModelOutsideTheCatalogIsRefusedBeforeTheProvider(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("a catalog model: status %d", resp.StatusCode)
 	}
-	for _, path := range []string{messagesCall, Prefix + AnthropicProvider + "/v1/messages/count_tokens"} {
+	for _, path := range []string{messagesCall, Prefix + "anthropic/v1/messages/count_tokens"} {
 		for _, model := range []string{"claude-fable-5-1", ""} {
-			if status, reason, _ := refused(t, callOn(t, context.Background(), f.api.URL, path, agent, model)); status != http.StatusForbidden || reason != domain.ReasonModelNotServed {
-				t.Errorf("%s with model %q: %d %s, want 403 %s", path, model, status, reason, domain.ReasonModelNotServed)
+			if status, reason, _ := refused(t, callOn(t, context.Background(), f.api.URL, path, agent, model)); status != http.StatusUnprocessableEntity || reason != domain.ReasonModelNotServed {
+				t.Errorf("%s with model %q: %d %s, want 422 %s", path, model, status, reason, domain.ReasonModelNotServed)
 			}
 		}
 	}
@@ -598,11 +686,15 @@ func TestAPlatformExperimentWhoseModelBudgetIsSpentIsRefused(t *testing.T) {
 		streamed(messageStart, messageStop)(w, r)
 	}))
 	t.Cleanup(upstream.Close)
-	api := newAPI(t, upstream.URL, &recorded{done: make(chan struct{})}, budgets{"pe-1": {BudgetUSD: 50, UsedUSD: 50.01}}, policy)
-	for _, bearer := range []string{token(t, scope.Agent("pe-1", "agent-a")), token(t, scope.Coordinator("pe-1"))} {
-		status, reason, retry := refused(t, callOn(t, context.Background(), api.URL, messagesCall, bearer, "claude-haiku-5-5"))
+	api := newAPI(t, both(upstream.URL), &recorded{done: make(chan struct{})}, budgets{"pe-1": {BudgetUSD: 50, UsedUSD: 50.01}}, 8)
+	for _, c := range []struct{ bearer, path, model string }{
+		{token(t, scope.Agent("pe-1", "agent-a")), messagesCall, "claude-haiku-5-5"},
+		{token(t, scope.Coordinator("pe-1")), messagesCall, "claude-opus-5-5"},
+		{token(t, scope.Agent("pe-1", "agent-or")), openRouterMessagesCall, "moonshotai/kimi-k2"},
+	} {
+		status, reason, retry := refused(t, callOn(t, context.Background(), api.URL, c.path, c.bearer, c.model))
 		if status != http.StatusTooManyRequests || reason != domain.ReasonModelBudgetSpent || retry != "60" {
-			t.Errorf("got %d %s Retry-After %q, want 429 %s after 60", status, reason, retry, domain.ReasonModelBudgetSpent)
+			t.Errorf("%s: got %d %s Retry-After %q, want 429 %s after 60", c.path, status, reason, retry, domain.ReasonModelBudgetSpent)
 		}
 	}
 	resp := callOn(t, context.Background(), api.URL, messagesCall, token(t, scope.Agent("pe-2", "agent-b")), "claude-haiku-5-5")
@@ -626,7 +718,7 @@ func TestAnOrgHasAtMostItsCallsInFlight(t *testing.T) {
 		streamed(messageStart, messageStop)(w, r)
 	}))
 	t.Cleanup(upstream.Close)
-	api := newAPI(t, upstream.URL, &recorded{done: make(chan struct{})}, budgets{}, Policy{Models: policy.Models, MaxInFlightPerOrg: 2})
+	api := newAPI(t, both(upstream.URL), &recorded{done: make(chan struct{})}, budgets{}, 2)
 	agent := token(t, scope.Agent("pe-1", "agent-a"))
 	results := make(chan int, 2)
 	for range 2 {
@@ -665,5 +757,134 @@ func TestAnOrgHasAtMostItsCallsInFlight(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("a call after the others ended: status %d", resp.StatusCode)
+	}
+}
+
+const (
+	openRouterStart = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_2\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"moonshotai/kimi-k2\",\"content\":[],\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"cache_creation_input_tokens\":null,\"cache_read_input_tokens\":null}}}\n\n"
+	openRouterDelta = "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"input_tokens\":8,\"output_tokens\":125,\"cache_creation_input_tokens\":null,\"cache_read_input_tokens\":0,\"cost\":0.0000504,\"is_byok\":false}}\n\n"
+)
+
+// An OpenRouter call goes to OpenRouter's Anthropic-compatible API with the platform's key and
+// nothing of the caller's, not even the Anthropic OAuth beta, and is recorded at the cost
+// OpenRouter's answer states.
+func TestAnOpenRouterCallCarriesThePlatformsKeyAndIsRecordedAtItsStatedCost(t *testing.T) {
+	f := newFixture(t, streamed(openRouterStart, textDelta, openRouterDelta, messageStop))
+	agent := token(t, scope.Agent("pe-1", "agent-or"))
+	resp := callOn(t, context.Background(), f.api.URL, openRouterMessagesCall, agent, "moonshotai/kimi-k2")
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.HasSuffix(string(body), messageStop) {
+		t.Fatalf("got %d %q", resp.StatusCode, body)
+	}
+	got := f.received[0]
+	if got.URL.Path != "/api/v1/messages" || got.URL.RawQuery != "beta=true" {
+		t.Errorf("OpenRouter got %s?%s, want /api/v1/messages", got.URL.Path, got.URL.RawQuery)
+	}
+	if got.Header.Get("Authorization") != "Bearer "+openRouterKey {
+		t.Errorf("Authorization does not carry the platform's OpenRouter key")
+	}
+	if beta := got.Header.Values("Anthropic-Beta"); len(beta) != 1 || beta[0] != "claude-code-20250219,effort-2025-11-24" {
+		t.Errorf("anthropic-beta = %q, want the agent's without the OAuth beta", beta)
+	}
+	for name, values := range got.Header {
+		for _, value := range values {
+			if strings.Contains(value, agent) || strings.Contains(value, credential) {
+				t.Errorf("header %s carries the platform token or the Anthropic credential", name)
+			}
+		}
+	}
+	call := f.usage.wait(t)
+	want := metricsdb.ModelCall{OrgID: "org-1", PlatformExperimentID: "pe-1", AgentID: "agent-or", Provider: "openrouter", Model: "moonshotai/kimi-k2",
+		InputTokens: 8, OutputTokens: 125, CostUSD: 0.0000504, At: call.At}
+	if call != want {
+		t.Fatalf("recorded %+v, want %+v", call, want)
+	}
+}
+
+// The harness sets every model Claude Code calls to the agent's own, so a call to OpenRouter names
+// that model and no other.
+func TestAnOpenRouterCallNamesItsCallersModelAndNoOther(t *testing.T) {
+	f := newFixture(t, streamed(openRouterStart, openRouterDelta, messageStop))
+	agent := token(t, scope.Agent("pe-1", "agent-or"))
+	for _, model := range []string{"", "openai/gpt-5-nano"} {
+		if status, reason, _ := refused(t, callOn(t, context.Background(), f.api.URL, openRouterMessagesCall, agent, model)); status != http.StatusForbidden || reason != domain.ReasonModelNotTheCallers {
+			t.Errorf("model %q: %d %s, want 403 %s", model, status, reason, domain.ReasonModelNotTheCallers)
+		}
+	}
+	resp := callOn(t, context.Background(), f.api.URL, openRouterMessagesCall, agent, "moonshotai/kimi-k2")
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || f.upstreamCalls() != 1 {
+		t.Fatalf("its own model: status %d after %d calls, want 200 after 1", resp.StatusCode, f.upstreamCalls())
+	}
+	if got := f.usage.wait(t); got.Model != "moonshotai/kimi-k2" || got.CostUSD != 0.0000504 {
+		t.Fatalf("recorded %+v", got)
+	}
+}
+
+// A call goes to the provider of its caller's model, as its instructions resolve it, and to no
+// other: the platform pays for the model it chose for the caller.
+func TestACallGoesToTheProviderOfItsCallersModelAlone(t *testing.T) {
+	upstream := httptest.NewServer(streamed(messageStart, messageStop))
+	t.Cleanup(upstream.Close)
+	providers := both(upstream.URL)
+	providers.OpenAI = &OpenAI{URL: upstream.URL, Credentials: chatGPTCredentials{}}
+	api := newAPI(t, providers, &recorded{done: make(chan struct{})}, budgets{}, 8)
+	for _, c := range []struct{ name, agent, path, model string }{
+		{"an agent on the default anthropic model to openrouter", "agent-a", openRouterMessagesCall, "moonshotai/kimi-k2"},
+		{"an agent of a type on an anthropic model to openai", "agent-b", Prefix + "openai/v1/messages", "gpt-6-luna"},
+		{"an agent on an openrouter model to anthropic", "agent-or", messagesCall, "claude-haiku-5-5"},
+		{"a researcher on the coordinator's openai model to anthropic", "agent-oai", messagesCall, "claude-haiku-5-5"},
+	} {
+		pe := "pe-1"
+		if c.agent == "agent-b" {
+			pe = "pe-2"
+		}
+		if status, reason, _ := refused(t, callOn(t, context.Background(), api.URL, c.path, token(t, scope.Agent(pe, c.agent)), c.model)); status != http.StatusForbidden || reason != domain.ReasonModelNotTheCallers {
+			t.Errorf("%s: %d %s, want 403 %s", c.name, status, reason, domain.ReasonModelNotTheCallers)
+		}
+	}
+}
+
+// An answer that states no cost cannot be priced: no cost is made up for it, and nothing is
+// recorded.
+func TestAnOpenRouterAnswerStatingNoCostIsNotRecordedAtAMadeUpOne(t *testing.T) {
+	f := newFixture(t, streamed(openRouterStart, messageDelta, messageStop))
+	resp := callOn(t, context.Background(), f.api.URL, openRouterMessagesCall, token(t, scope.Agent("pe-1", "agent-or")), "moonshotai/kimi-k2")
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	f.usage.none(t)
+}
+
+// A model OpenRouter no longer lists at a price is refused before the provider, though the caller
+// runs on it.
+func TestAnOpenRouterModelNoLongerListedIsRefusedBeforeTheProvider(t *testing.T) {
+	f := newFixture(t, streamed(openRouterStart, openRouterDelta, messageStop))
+	status, reason, _ := refused(t, callOn(t, context.Background(), f.api.URL, openRouterMessagesCall, token(t, scope.Agent("pe-1", "agent-gone")), "vendor/retired"))
+	if status != http.StatusUnprocessableEntity || reason != domain.ReasonModelNotServed || f.upstreamCalls() != 0 {
+		t.Fatalf("got %d %s after %d calls, want 422 %s before any", status, reason, f.upstreamCalls(), domain.ReasonModelNotServed)
+	}
+}
+
+// A provider whose credential the platform does not hold is not served: its calls are not found.
+func TestAProviderThePlatformDoesNotServeIsNotFound(t *testing.T) {
+	upstream := httptest.NewServer(streamed(messageStart, messageStop))
+	t.Cleanup(upstream.Close)
+	agent := token(t, scope.Agent("pe-1", "agent-a"))
+	anthropicOnly := newAPI(t, Providers{Anthropic: both(upstream.URL).Anthropic}, &recorded{done: make(chan struct{})}, budgets{}, 8)
+	resp := callOn(t, context.Background(), anthropicOnly.URL, openRouterMessagesCall, agent, "moonshotai/kimi-k2")
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("openrouter with anthropic alone served: status %d, want 404", resp.StatusCode)
+	}
+	openRouterOnly := newAPI(t, Providers{OpenRouter: both(upstream.URL).OpenRouter}, &recorded{done: make(chan struct{})}, budgets{}, 8)
+	resp = callOn(t, context.Background(), openRouterOnly.URL, messagesCall, agent, "claude-haiku-5-5")
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("anthropic with openrouter alone served: status %d, want 404", resp.StatusCode)
 	}
 }

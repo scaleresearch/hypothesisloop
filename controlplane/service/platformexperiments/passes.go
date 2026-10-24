@@ -18,7 +18,7 @@ import (
 )
 
 // SweepExpired closes every platform experiment whose ClosesAt has passed: a run at its end, one
-// no researcher's machine came up for by its AgentsDueAt, a draft whose planning limit passed or
+// no executor's machine came up for by its AgentsDueAt, a draft whose planning limit passed or
 // whose answer no person took up, which releases its machine, and an open one that is not running
 // by its BaselineDueAt: the machines that were to measure its baseline would be rented for nothing.
 func (s *Service) SweepExpired(ctx context.Context) error {
@@ -58,8 +58,8 @@ func (s *Service) sweepExpired(ctx context.Context, statuses ...domain.PlatformE
 }
 
 // SweepAutoStart starts every open platform experiment that is to be started: its baseline is
-// declared, its starts_at is absent or past, and it has a researcher and budget left for one.
-// The request that declares the baseline or adds the researcher starts it itself (StartIfReady),
+// declared, its starts_at is absent or past, and it has an executor and budget left for one.
+// The request that declares the baseline or adds the executor starts it itself (StartIfReady),
 // so what the sweep brings is time: a starts_at that arrives. One with no baseline is given the
 // job its baseline agents left, where the request they finished in could not declare it
 // (DeclareMeasured). One that is not startable waits, saying why in its status_reason (Describe),
@@ -147,7 +147,7 @@ func (s *Service) tendBaseline(ctx context.Context, pe *domain.PlatformExperimen
 // TellCoordinators records, for every open or running platform experiment whose coordinator the
 // platform hosts, the status_reason it waits for that coordinator with, and none where it waits
 // for someone else. A status_reason is derived from the roster and the clock and stored nowhere,
-// so what moves it writes nothing a coordinator is woken by: a researcher's machine that stops
+// so what moves it writes nothing a coordinator is woken by: an executor's machine that stops
 // with no restart left, a baseline agent's that does. The record is that write, and one that
 // changes is announced as platform_experiment.status (db.TellCoordinator).
 func (s *Service) TellCoordinators(ctx context.Context) error {
@@ -217,8 +217,8 @@ func (s *Service) expirySweep(ctx context.Context) {
 		s.logger.Error("tell_coordinators: scan", zap.Error(err))
 	}
 	if s.idle != nil {
-		if err := s.NoticeIdleResearchers(ctx); err != nil {
-			s.logger.Error("notice_idle_researchers: scan", zap.Error(err))
+		if err := s.NoticeIdleExecutors(ctx); err != nil {
+			s.logger.Error("notice_idle_executors: scan", zap.Error(err))
 		}
 		if err := s.NoticeIdleCapacity(ctx); err != nil {
 			s.logger.Error("notice_idle_capacity: scan", zap.Error(err))
@@ -226,29 +226,29 @@ func (s *Service) expirySweep(ctx context.Context) {
 	}
 }
 
-// NoticeIdleResearchers tells every researcher due an idle notice that it is idle (agent.idle),
+// NoticeIdleExecutors tells every executor due an idle notice that it is idle (agent.idle),
 // every idleAfter while its stretch lasts, with what the platform knows at the notice. A platform
-// experiment whose numbers cannot be read now is skipped, and its researchers are told at a
+// experiment whose numbers cannot be read now is skipped, and its executors are told at a
 // later pass.
-func (s *Service) NoticeIdleResearchers(ctx context.Context) error {
-	due, err := s.idle.IdleResearchers(ctx, s.idleAfter)
+func (s *Service) NoticeIdleExecutors(ctx context.Context) error {
+	due, err := s.idle.IdleExecutors(ctx, s.idleAfter)
 	if err != nil {
 		return err
 	}
-	byRun := map[string][]db.IdleResearcher{}
+	byRun := map[string][]db.IdleExecutor{}
 	for _, r := range due {
 		byRun[r.PlatformExperimentID] = append(byRun[r.PlatformExperimentID], r)
 	}
 	for _, id := range slices.Sorted(maps.Keys(byRun)) {
 		if err := s.noticeIdle(ctx, id, byRun[id]); err != nil {
-			s.logger.Error("notice_idle_researchers: failed", zap.String("platform_experiment_id", id), zap.Error(err))
+			s.logger.Error("notice_idle_executors: failed", zap.String("platform_experiment_id", id), zap.Error(err))
 		}
 	}
 	return nil
 }
 
-// noticeIdle tells each researcher of due, of platform experiment id, that it is idle.
-func (s *Service) noticeIdle(ctx context.Context, id string, due []db.IdleResearcher) error {
+// noticeIdle tells each executor of due, of platform experiment id, that it is idle.
+func (s *Service) noticeIdle(ctx context.Context, id string, due []db.IdleExecutor) error {
 	pe, err := s.store.GetPlatformExperiment(ctx, id)
 	if err != nil {
 		return err
@@ -286,13 +286,13 @@ func (s *Service) noticeIdle(ctx context.Context, id string, due []db.IdleResear
 			}
 		}
 		if err := s.idle.NoticeIdle(ctx, r, notice.detail()); err != nil {
-			s.logger.Error("notice_idle_researchers: notice", zap.String("platform_experiment_id", id), zap.String("agent_id", r.AgentID), zap.Error(err))
+			s.logger.Error("notice_idle_executors: notice", zap.String("platform_experiment_id", id), zap.String("agent_id", r.AgentID), zap.Error(err))
 		}
 	}
 	return nil
 }
 
-// idleNotice is what the platform knows of an idle researcher at its notice.
+// idleNotice is what the platform knows of an idle executor at its notice.
 type idleNotice struct {
 	minutes     int
 	subagents   *int

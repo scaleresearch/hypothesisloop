@@ -129,9 +129,10 @@ var metricTables = []*table{
 
 // The tables written through SQL, for what is not a number. job_logs and job_phase_detail keep
 // one row per (experiment_id, ts), the latest a job's current read. phase_message, not message:
-// GreptimeDB's SQL parser reserves message. model_usage holds one row per model call a sandboxed
-// agent made through the model proxy; append_mode keeps two calls of one agent on one model in the
-// same millisecond as two rows, where a primary key and a timestamp would keep the last.
+// GreptimeDB's SQL parser reserves message. model_calls holds one row per model call a sandboxed
+// agent made through the model proxy, with its cost; append_mode keeps two calls of one agent on
+// one model in the same millisecond as two rows, where a primary key and a timestamp would keep
+// the last.
 var sqlTables = []*table{
 	newTable("job_logs", "WITH (ttl = '30d')",
 		tag("experiment_id"), field("cluster_name", "string"), field("lines_json", "string"), timeIndex("ts")),
@@ -139,10 +140,10 @@ var sqlTables = []*table{
 		tag("experiment_id"), field("cluster_name", "string"), field("reason", "string"), field("phase_message", "string"),
 		field("restart_count", "bigint"), field("scheduled_nodes", "bigint"),
 		field("attempt", "bigint"), timeIndex("ts")),
-	newTable("model_usage", "WITH (append_mode = 'true')",
+	newTable("model_calls", "WITH (append_mode = 'true')",
 		tag("org_id"), tag("platform_experiment_id"), tag("agent_id"), tag("provider"), tag("model"),
 		field("input_tokens", "bigint"), field("output_tokens", "bigint"),
-		field("cache_creation_input_tokens", "bigint"), field("cache_read_input_tokens", "bigint"), timeIndex("ts")),
+		field("cache_creation_input_tokens", "bigint"), field("cache_read_input_tokens", "bigint"), field("cost_usd", "double"), timeIndex("ts")),
 }
 
 // physical is the table every metric table lives on. Its tags are the union of theirs, which

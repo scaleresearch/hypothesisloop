@@ -246,7 +246,7 @@ def _cut_because(reason: str) -> str:
         return "You are being stopped because you were cut from the platform experiment at a stage boundary."
     if reason == platform.CUT_MAX_AGENTS_LOWERED:
         return ("You are being stopped because you were cut from the platform experiment: its max_agents was lowered "
-                "below the researchers at work, and the newest of them were cut.")
+                "below the executors at work, and the newest of them were cut.")
     return f"You are being stopped because you were cut from the platform experiment, for a reason the platform names {reason}."
 
 
@@ -274,7 +274,7 @@ async def _closed_because(setup: RunSetup) -> str | None:
 
 async def stop_cause(setup: RunSetup) -> str | None:
     """The sentence that tells the agent why its machine is being stopped, as the platform has it
-    at this moment. None when the agent's own action ended its run: a researcher that finished, a
+    at this moment. None when the agent's own action ended its run: an agent that finished, a
     planner whose answer is stored, a coordinator that closed its platform experiment. It is told
     nothing and stops by itself. A cause the platform does not give is said to be unknown, never
     inferred."""

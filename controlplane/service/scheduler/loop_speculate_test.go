@@ -154,6 +154,78 @@ func TestSpeculativeCandidatesGangRequiresMultiNodeCapable(t *testing.T) {
 	}
 }
 
+// A gang held to a zone or region speculates onto a cluster whose nodes name zones, as the bet
+// holds it to one of them. A node yet to be added is in no placement group.
+func TestAGangSpeculatesUnlessHeldToAPlacementGroup(t *testing.T) {
+	exp := distributedExperiment(3, 2)
+	accel := map[string]map[string]map[string]int64{"cluster-a": {"node-a": {h100: 8}}}
+	resources := map[string]map[string]map[string]int64{"cluster-a": {"node-a": {domain.NodeResourceCPUMillicores: 64000}}}
+	zoned := map[string]map[string]map[string]string{"cluster-a": {"node-a": {domain.NodeZoneLabel: "z1"}}}
+	l := speculationLoop(&speculationStore{})
+	autoscaler, connected := map[string]bool{"cluster-a": true}, map[string]bool{"cluster-a": true}
+	clusterIDs, multiNode := map[string]string{"cluster-a": "cid-a"}, map[string]bool{"cluster-a": true}
+	for name, tc := range map[string]struct {
+		labels map[string]map[string]map[string]string
+		level  domain.NodesLevel
+		want   int
+	}{
+		"zone, no zone labels":   {nil, domain.NodesWithinZone, 1},
+		"zone, zones labelled":   {zoned, domain.NodesWithinZone, 1},
+		"region, zones labelled": {zoned, domain.NodesWithinRegion, 1},
+		"placement group":        {nil, domain.NodesWithinPlacementGroup, 0},
+	} {
+		exp.Job.Topology = &domain.TopologySpec{NodesWithin: tc.level}
+		got, _, err := l.speculativeCandidates(context.Background(), newResolutionCache(l), exp, autoscaler, connected, clusterIDs, multiNode, singleOrg, accel, resources, tc.labels, nil, nil)
+		if err != nil || len(got) != tc.want {
+			t.Errorf("%s: candidates %v, %v, want %d", name, got, err, tc.want)
+		}
+	}
+}
+
+// zonedWorkload is orgWorkload with every node in zone z1.
+type zonedWorkload struct{ orgWorkload }
+
+func (w zonedWorkload) GetNodeLabels(ctx context.Context) (map[string]map[string]map[string]string, error) {
+	out, err := w.orgWorkload.GetNodeLabels(ctx)
+	for _, nodes := range out {
+		for node := range nodes {
+			nodes[node] = map[string]string{domain.NodeZoneLabel: "z1"}
+		}
+	}
+	return out, err
+}
+
+type resolvedRecordingStore struct {
+	orgStore
+	resolved map[string]domain.JobSpec
+}
+
+func (s *resolvedRecordingStore) ClaimSubmitted(ctx context.Context, id, cluster string, resolved *domain.JobSpec, fits func(context.Context, []*domain.Experiment) (bool, error)) (*domain.ClaimRefusal, error) {
+	s.resolved[id] = *resolved
+	return s.orgStore.ClaimSubmitted(ctx, id, cluster, resolved, fits)
+}
+
+// A gang bets on a cluster that scales up and names zones held to the zone of its nodes, so the
+// nodes the autoscaler adds for it are in one zone.
+func TestASpeculativeGangIsHeldToAZoneOfTheClusterNodes(t *testing.T) {
+	exp := holdJob("gang", domain.CapacityGuaranteed, h100, 1, "1")
+	exp.Job.NumNodes, exp.AcceleratorCount = 2, 2
+	store := &resolvedRecordingStore{orgStore: orgStore{registered: singleOrg}, resolved: map[string]domain.JobSpec{}}
+	store.queued = []*domain.Experiment{exp}
+	l := holdLoop(store, zonedWorkload{orgWorkload{clusters: map[string]orgCluster{"cluster-a": {installed: 4, autoscaler: true, multiNode: true}}}}, noopEvictor{})
+	l.settler = &recordingSettler{}
+	l = l.WithSpeculation(15 * time.Minute)
+
+	tickOnce(t, l)
+
+	if got := store.submitted["gang"]; got != "cluster-a" {
+		t.Fatalf("speculative submit went to %q, want cluster-a (reason %q)", got, store.notAdmitted["gang"])
+	}
+	if got := store.resolved["gang"].NodeSelector[domain.NodeZoneLabel]; got != "z1" {
+		t.Fatalf("the bet selects zone %q, want z1", got)
+	}
+}
+
 func TestSpeculativeCandidatesExcludesTriedCluster(t *testing.T) {
 	exp := distributedExperiment(1, 2)
 	exp.TriedClusters = []domain.TriedCluster{{ClusterID: "cid-a", At: time.Now()}}

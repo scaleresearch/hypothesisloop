@@ -96,7 +96,7 @@ def planner(workdir: str) -> str:
 # The image is what usually takes longest, and the control waits for it. The opening says the
 # run waits on the goal and what to start first.
 _BASELINE_OPENING = (
-    "Your goal is the control and each reference measured and your branch ready for researchers, "
+    "Your goal is the control and each reference measured and your branch ready for executors, "
     "who wait for it to start. Start what is slowest first, often the "
     "experiment's image from the toolchain and dependency pins {source}, and do the rest alongside "
     "it, with subagents where parallel work is faster.")

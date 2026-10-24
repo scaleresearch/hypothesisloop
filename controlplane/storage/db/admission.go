@@ -61,22 +61,56 @@ func admissionLockKey(agentID, platformExpID string) string {
 	return agentID + "/" + platformExpID
 }
 
-// SubmissionRateLimit bounds how many experiments one agent may submit into one platform
-// experiment within Window. MaxPerHour <= 0 means unlimited.
+// holdHypothesisJobs takes the lock a job is submitted on hypothesisID under, and the hypothesis
+// merged or retired (AroundHypothesis): a submit reads the hypothesis after taking it and a
+// curation its jobs, so of the two the later sees the earlier.
+func holdHypothesisJobs(ctx context.Context, w *Write, hypothesisID string) error {
+	if _, err := w.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, "hypothesis/"+hypothesisID); err != nil {
+		return fmt.Errorf("lock the jobs of hypothesis %s: %w", hypothesisID, err)
+	}
+	return nil
+}
+
+// SubmissionRateLimit bounds how many submissions (recentSubmissions) one agent may make into one
+// platform experiment within Window. MaxPerHour <= 0 means unlimited.
 type SubmissionRateLimit struct {
 	MaxPerHour int
 	Window     time.Duration
 }
 
-// createDataKey registers the job's key with the object store after the row is written and
-// before commit: a store failure rolls the submission back, and no key is created for an id that
-// was rejected or already queued.
-func (s *Store) AdmitExperimentTx(ctx context.Context, exp *domain.Experiment, observe func(context.Context) (*domain.AgentQuota, error), rateLimit SubmissionRateLimit, createDataKey func(context.Context) error) (AdmitDecision, error) {
+// recentSubmissions counts the submissions an agent made to a platform experiment since a time
+// (recentSubmissionsOf). A submission is the jobs of one hypothesis on one commit, so its seeds
+// and sweeps count once.
+const (
+	recentSubmissions   = `COUNT(DISTINCT (hypothesis_id, code_ref))`
+	recentSubmissionsOf = ` FROM experiments WHERE agent_id = $1 AND platform_experiment_id = $2 AND created_at >= $3`
+)
+
+// RecentSubmissions is how many submissions agentID made to platformExpID within window, as
+// admission counts them against SubmissionRateLimit.
+func (s *Store) RecentSubmissions(ctx context.Context, agentID, platformExpID string, window time.Duration) (int, error) {
+	var recent int
+	if err := s.pool.pool.QueryRow(ctx, `SELECT `+recentSubmissions+recentSubmissionsOf, agentID, platformExpID, time.Now().UTC().Add(-window)).Scan(&recent); err != nil {
+		return 0, fmt.Errorf("recent submissions: %w", err)
+	}
+	return recent, nil
+}
+
+// inserted runs after the row is written and before commit, holding the locks taken here, the
+// one of the job's hypothesis among them (holdHypothesisJobs): the submit's last check of its
+// hypothesis and the registration of the job's key with the object store. Its failure rolls the
+// submission back, and it does not run for an id that was rejected or already queued.
+func (s *Store) AdmitExperimentTx(ctx context.Context, exp *domain.Experiment, observe func(context.Context) (*domain.AgentQuota, error), rateLimit SubmissionRateLimit, inserted func(context.Context) error) (AdmitDecision, error) {
 	decision := AdmitInserted
 	if err := s.write(ctx, func(tx *Write) error {
 		var err error
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, admissionLockKey(exp.AgentID, exp.PlatformExperimentID)); err != nil {
 			return fmt.Errorf("admit experiment: lock: %w", err)
+		}
+		if exp.HypothesisID != "" {
+			if err := holdHypothesisJobs(ctx, tx, exp.HypothesisID); err != nil {
+				return fmt.Errorf("admit experiment: %w", err)
+			}
 		}
 		// A submit that was stored and whose answer was lost is sent again with its key. Read under
 		// the agent's lock, so of two that race one inserts and the other finds its row here.
@@ -128,13 +162,13 @@ func (s *Store) AdmitExperimentTx(ctx context.Context, exp *domain.Experiment, o
 		// same pre-limit count and all pass.
 		if rateLimit.MaxPerHour > 0 {
 			var recent int
-			if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM experiments
-			WHERE agent_id = $1 AND platform_experiment_id = $2 AND created_at >= $3`,
-				exp.AgentID, exp.PlatformExperimentID, time.Now().UTC().Add(-rateLimit.Window)).Scan(&recent); err != nil {
+			var counted bool
+			if err := tx.QueryRow(ctx, `SELECT `+recentSubmissions+`, COALESCE(bool_or(hypothesis_id = $4 AND code_ref = $5), false)`+recentSubmissionsOf,
+				exp.AgentID, exp.PlatformExperimentID, time.Now().UTC().Add(-rateLimit.Window), exp.HypothesisID, exp.CodeRef).Scan(&recent, &counted); err != nil {
 				return fmt.Errorf("admit experiment: recent submissions: %w", err)
 			}
-			if recent >= rateLimit.MaxPerHour {
-				return &AdmitRefusal{Reason: RefusedRateLimited, Message: fmt.Sprintf("the agent submitted %d jobs to this platform experiment in the last hour, and %d is the most it may: submit again as the earliest of them turns an hour old", recent, rateLimit.MaxPerHour)}
+			if !counted && recent >= rateLimit.MaxPerHour {
+				return &AdmitRefusal{Reason: RefusedRateLimited, Message: fmt.Sprintf("the agent made %d submissions here in the last hour, the most it may (one is the jobs of one hypothesis on one commit): submit to one of those, or a new one once one has gone an hour without a job", recent)}
 			}
 		}
 
@@ -194,8 +228,8 @@ func (s *Store) AdmitExperimentTx(ctx context.Context, exp *domain.Experiment, o
 		if err := createExperiment(ctx, tx, exp); err != nil {
 			return err
 		}
-		if err := createDataKey(ctx); err != nil {
-			return fmt.Errorf("admit experiment: durable-data key: %w", err)
+		if err := inserted(ctx); err != nil {
+			return fmt.Errorf("admit experiment: %w", err)
 		}
 		return nil
 	}); err != nil {

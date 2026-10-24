@@ -241,7 +241,7 @@ func TestABaselineJobPrintsAsOnTheObjective(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	run([]string{"job", "list", "--platform-experiment", "pe-1"}, &stdout, &stderr)
 	if own := strings.Split(stdout.String(), "\n")[1]; !strings.Contains(own, `"hypothesis_id":"hyp-1"`) || strings.Contains(own, "objective") {
-		t.Errorf("a researcher's job = %s, want its hypothesis_id and no objective", own)
+		t.Errorf("an executor's job = %s, want its hypothesis_id and no objective", own)
 	}
 }
 
@@ -264,7 +264,6 @@ func TestEveryFreeTextFlagReadsItFromAFileOrStdin(t *testing.T) {
 			return metadata["theory"]
 		}},
 		{"agent:pe-1/ag-1", []string{"platform-experiments", "agents", "finish"}, "reason", clitest.Field("reason")},
-		{"agent:pe-1/ag-1", []string{"platform-experiments", "agents", "finish", "--reason", "spent"}, "blocker", clitest.Field("blocker")},
 		{"coordinator:pe-1", []string{"platform-experiments", "agents", "message", "ag-1"}, "text", clitest.Field("text")},
 		{"coordinator:pe-1", []string{"platform-experiments", "summary"}, "text", clitest.Field("summary")},
 		{"coordinator:pe-1", []string{"platform-experiments", "close"}, "reason", clitest.Field("reason")},
@@ -308,7 +307,6 @@ func TestTextFromStdinIsReadOnce(t *testing.T) {
 	got := clitest.RecordingServer(t, func(int, clitest.Recorded) any { return map[string]any{} })
 	t.Setenv("HL_TOKEN", clitest.DerivedToken("agent:pe-1/ag-1"))
 	for _, args := range [][]string{
-		{"platform-experiments", "agents", "finish", "--reason-file", "-", "--blocker-file", "-"},
 		{"job", "submit", "--theory-file", "-"},
 		{"hypothesis", "submit", "--text-file", "-", "--file", "-"},
 	} {

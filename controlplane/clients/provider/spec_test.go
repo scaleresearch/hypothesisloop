@@ -19,6 +19,11 @@ func TestSpecValidateAcceptsACompleteSpec(t *testing.T) {
 	if err := gpu.Validate(); err != nil {
 		t.Fatalf("a spec with accelerators: %v", err)
 	}
+	networked := validSpec()
+	networked.Place = "datacenter-1"
+	if err := networked.Validate(); err != nil {
+		t.Fatalf("a spec on a network: %v", err)
+	}
 }
 
 func TestSpecValidateRefusesWhatNoVendorCanRent(t *testing.T) {

@@ -317,7 +317,7 @@ func (s *Store) RequeuePreempted(ctx context.Context, id string, remainingHours,
 	return moved, nil
 }
 
-// RequeueForRetry returns a gang whose attempt failed to QUEUED for a fresh whole-gang attempt,
+// RequeueForRetry returns a job whose attempt failed to QUEUED for a fresh attempt of all its nodes,
 // incrementing attempt_count in the same statement so the budget is spent exactly once even if
 // two watchers observe the same failure. The row goes from SUBMITTED or RUNNING straight to
 // QUEUED: it never reads FAILED, so no terminal status is announced for a job that runs again.
@@ -332,7 +332,7 @@ func (s *Store) RequeuePreempted(ctx context.Context, id string, remainingHours,
 // nothing more.
 //
 // Unlike RequeuePreempted this does NOT rescale the estimate. A preempted job is assumed to
-// resume where it stopped, so only its remaining hours are re-reserved; a retried gang starts
+// resume where it stopped, so only its remaining hours are re-reserved; a retried job starts
 // from step zero, so the full original estimate is exactly what the next attempt needs.
 func (s *Store) RequeueForRetry(ctx context.Context, id string, maxAttemptsBefore int) (bool, error) {
 	q := `UPDATE experiments SET

@@ -40,7 +40,7 @@ func TestRunHealthCountsEveryRestartOfAnAgentAndTheCoordinatorAcrossLaunches(t *
 			restarts[a.Role+"/"+a.AgentID] = a.Restarts
 		}
 	}
-	want := map[string]int{string(domain.SignupRoleCompetitor) + "/" + agent: 3, domain.CoordinatorHealthRole + "/": 3}
+	want := map[string]int{string(domain.SignupRoleExecutor) + "/" + agent: 3, domain.CoordinatorHealthRole + "/": 3}
 	if !reflect.DeepEqual(restarts, want) {
 		t.Errorf("restarts = %v, want %v", restarts, want)
 	}

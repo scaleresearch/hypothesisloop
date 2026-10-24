@@ -177,6 +177,51 @@ func TestCapacitySaysCoresForTheCPUType(t *testing.T) {
 	}
 }
 
+// A cluster's line of cores and memory says how many hosts it has, and every line of a cluster
+// that runs a job over several of them says multi_node, so a gang is sized to a cluster that holds it.
+func TestCapacitySaysHostsAndWhichClustersRunMultiNodeJobs(t *testing.T) {
+	clitest.RecordingServer(t, func(int, clitest.Recorded) any {
+		return map[string]any{"clusters": []any{
+			map[string]any{"cluster_name": "rack", "hosts": 3, "multi_node": true,
+				"resources": map[string]any{"cpu_cores_total": 48}, "per_node": map[string]any{"cpu_cores_max": 16},
+				"accelerators": []any{map[string]any{"accelerator_type": "L40", "available": 8, "total": 8}}},
+			map[string]any{"cluster_name": "box", "hosts": 1,
+				"resources": map[string]any{"cpu_cores_total": 8}, "per_node": map[string]any{"cpu_cores_max": 8}, "accelerators": []any{}},
+		}}
+	})
+	var stdout, stderr bytes.Buffer
+	if code := clitest.Run(Capacity, []string{}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	want := []string{
+		`{"cluster":"rack","multi_node":"true","cpu_cores_total":48,"per_node":{"cpu_cores_max":16},"hosts":3}`,
+		`{"cluster":"rack","multi_node":"true","accelerator_type":"L40","available":8,"total":8}`,
+		`{"cluster":"box","cpu_cores_total":8,"per_node":{"cpu_cores_max":8},"hosts":1}`,
+	}
+	if !reflect.DeepEqual(clitest.Lines(stdout.String()), want) {
+		t.Fatalf("stdout %q", stdout.String())
+	}
+}
+
+// A cluster that rents on demand says how long its machines may take to start a job, which a
+// gang's rendezvous timeout waits at least.
+func TestCapacitySaysTheStartupTimeOfAClusterThatRents(t *testing.T) {
+	clitest.RecordingServer(t, func(int, clitest.Recorded) any {
+		return map[string]any{"clusters": []any{
+			map[string]any{"cluster_name": "rented", "hosts": 2, "multi_node": true, "on_demand": true, "startup_seconds": 600,
+				"accelerators": []any{map[string]any{"accelerator_type": "H100", "available": 2, "total": 2}}},
+		}}
+	})
+	var stdout, stderr bytes.Buffer
+	if code := clitest.Run(Capacity, []string{}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	want := []string{`{"cluster":"rented","multi_node":"true","on_demand":"true","startup_seconds":"600","accelerator_type":"H100","available":2,"total":2}`}
+	if !reflect.DeepEqual(clitest.Lines(stdout.String()), want) {
+		t.Fatalf("stdout %q", stdout.String())
+	}
+}
+
 func TestJobStatsAndListDefaultToThePlatformExperiment(t *testing.T) {
 	got := clitest.RecordingServer(t, func(_ int, r clitest.Recorded) any {
 		if r.Path == "/experiments" {

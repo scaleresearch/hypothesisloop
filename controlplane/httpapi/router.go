@@ -18,6 +18,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/accounts"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/clusterexchange"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/models"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/registry"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/scheduler"
@@ -40,6 +41,7 @@ type Handlers struct {
 	Drafts              *platformexperiments.Drafts
 	Accounts            *accounts.Service
 	AgentTypes          *accounts.AgentTypes
+	Models              *models.Service
 	Repositories        *accounts.Repositories
 	Scheduler           *scheduler.Service
 	Registry            *registry.Service
@@ -120,6 +122,7 @@ func Register(doc *Doc, h Handlers) {
 	registerExperimentDrafts(doc, h.Drafts)
 	registerAccounts(doc, h.Accounts)
 	registerAgentTypes(doc, h.AgentTypes)
+	registerModels(doc, h.Models, h.Logger)
 	registerRepositories(doc, h.Repositories)
 	registerJobs(doc, h.Scheduler, h.Logger)
 	registerModelUsage(doc, h.PlatformExperiments, h.Logger)

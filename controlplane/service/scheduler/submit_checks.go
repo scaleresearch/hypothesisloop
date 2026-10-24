@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/contract/gitrefs"
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/objectstore"
 )
@@ -43,7 +44,7 @@ const ReasonBranchNotOfExperiment = "branch_not_of_experiment"
 func branchOfExperiment(exp *domain.Experiment, measuresBaseline bool) error {
 	if measuresBaseline {
 		if baseline := gitrefs.BaselineBranch(exp.PlatformExperimentID); !gitrefs.IsBaselineAgentBranch(exp.PlatformExperimentID, exp.Branch) {
-			return &AdmissionError{Reason: ReasonBranchNotOfExperiment, Message: fmt.Sprintf("the baseline is measured on branch %s, and this job names %q: git checkout -b %s, commit there and submit again (a check of your code as a researcher would run it goes on %s-check)", baseline, exp.Branch, baseline, baseline)}
+			return &AdmissionError{Reason: ReasonBranchNotOfExperiment, Message: fmt.Sprintf("the baseline is measured on branch %s, and this job names %q: git checkout -b %s, commit there and submit again (a check of your code as an executor would run it goes on %s-check)", baseline, exp.Branch, baseline, baseline)}
 		}
 		return nil
 	}
@@ -158,7 +159,8 @@ func (s *Service) sameHypothesis(ctx context.Context, exp *domain.Experiment, ac
 		exp.HypothesisID, strings.Join(named, ", "), exp.ID)), nil
 }
 
-// bindHypothesis checks the hypothesis a job names and keeps its text on the job.
+// bindHypothesis checks the hypothesis a job names, which is neither merged nor retired, and keeps
+// its text on the job.
 func (s *Service) bindHypothesis(ctx context.Context, exp *domain.Experiment) error {
 	hyp, err := s.hypotheses.GetHypothesis(ctx, exp.HypothesisID)
 	if err != nil {
@@ -189,7 +191,45 @@ func (s *Service) bindHypothesis(ctx context.Context, exp *domain.Experiment) er
 			Message: hypothesisNotInExperiment(exp),
 		}
 	}
+	// Asked before the repeats and the quota, so a job on a curated one is told where its claim is
+	// tested now. stillUncurated asks again under the lock.
+	if err := uncurated(hyp); err != nil {
+		return err
+	}
 	exp.Hypothesis = hyp.Text
+	return nil
+}
+
+// stillUncurated reads the hypothesis exp tests again, inside the transaction that inserts exp and
+// holds its hypothesis's lock (db.AdmitExperimentTx): a merge or retirement that committed since
+// bindHypothesis read it refuses the job, and one that comes later finds the job and waits.
+func (s *Service) stillUncurated(ctx context.Context, exp *domain.Experiment) error {
+	hyp, err := s.hypotheses.GetHypothesis(ctx, exp.HypothesisID)
+	if err != nil {
+		return fmt.Errorf("scheduler: get hypothesis: %w", err)
+	}
+	if hyp == nil {
+		return &AdmissionError{Reason: ReasonMalformed, Field: "hypothesis_id", Message: hypothesisNotInExperiment(exp)}
+	}
+	return uncurated(hyp)
+}
+
+// uncurated refuses a job on hyp once it is merged or retired.
+func uncurated(hyp *domain.Hypothesis) error {
+	switch hyp.Status {
+	case domain.HypothesisMerged:
+		return &AdmissionError{
+			Reason:  platformapi.ReasonHypothesisMerged,
+			Field:   "hypothesis_id",
+			Message: fmt.Sprintf("hypothesis %s was merged into %s, which states the same claim: test it under %s", hyp.ID, hyp.MergedInto, hyp.MergedInto),
+		}
+	case domain.HypothesisRetired:
+		return &AdmissionError{
+			Reason:  platformapi.ReasonHypothesisRetired,
+			Field:   "hypothesis_id",
+			Message: fmt.Sprintf("hypothesis %s was retired and takes no job: %s. Take an open hypothesis instead", hyp.ID, hyp.StatusReason),
+		}
+	}
 	return nil
 }
 

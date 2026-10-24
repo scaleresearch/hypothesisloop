@@ -64,7 +64,7 @@ func TestTheBuiltinPromptsKeepWhatRunsTaught(t *testing.T) {
 		prompts[b.ID] = strings.Join(strings.Fields(b.Prompt), " ")
 	}
 	for id, said := range map[string][]string{
-		// A researcher gated every job on a green local suite and an offline check, and submitted
+		// An executor gated every job on a green local suite and an offline check, and submitted
 		// one job in an hour with most of its capacity free.
 		domain.DefaultAgentType: {
 			"no offline estimate, local measurement, audit or test suite stands in for one",
@@ -78,13 +78,39 @@ func TestTheBuiltinPromptsKeepWhatRunsTaught(t *testing.T) {
 			"goes to a fresh subagent with its own brief, never a resumed one",
 			"never a request for its progress",
 			"report once, at its end",
-			// A researcher tested a person's idea, gained 12% and filed no finding and no verdict.
+			// An executor tested a person's idea, gained 12% and filed no finding and no verdict.
 			"(`hl job summary JOB --text T`)",
-			"its summaries and its verdict are yours to give as on your own; the idea stays the person's",
+			"summaries are yours to give as on your own, and its verdict once a job of yours on it",
 			// The CLI caches that its directory is no git repository: the harness clones first.
 			"{{workdir}}, the directory every command starts in, holds the clone of {{repository_url}}",
+			"Proposing your own ideas is optional",
+			// A haiku executor commented that four hypotheses were set to inconclusive after a 409.
+			"Report only what the platform accepted",
+			"reads its diff from the code it builds on (`git diff`)",
+			"A `merged` hypothesis is tested under the one it was merged into",
+			"one failing rank fails all of it, and a retry (`max_retries`) starts the whole job again, every node, from the queue",
+			"Only rank 0 posts metrics",
+			"set `topology.spread_across_hosts: false`",
+			"not_admitted_reason no_multi_node_cluster",
+		},
+		domain.CoordinatorAgentType: {
+			"`hl platform-experiments agents add --role researcher --in-agentsandbox`",
+			"`hl models` lists",
+		},
+		domain.ResearcherAgentType: {
+			"You run no job, hold no quota",
+			// A researcher reviewed for 19 minutes and proposed nothing.
+			"Proposing is a standing duty that review does not outrank",
+			"Only open hypotheses are curated: a settled one is evidence",
+			"link it to its new place first (`hl hypothesis link`), then remove the old link (`hl hypothesis unlink`)",
+			"`hl hypothesis merge DUP --into ID --reason T`",
+			"`hl hypothesis retire ID --reason T`",
+			"the values a summary states against `hl job metrics JOB`",
+			"post it on the objective (`hl hypothesis comment root`)",
 		},
 		domain.PlannerAgentType: {
+			"`hl models` lists those an agent can run on",
+			"Researchers keep the graph and run no job",
 			// A planner proposed a copy with an A100 sed into it for a brief that said CPU only.
 			"`hl platform-experiments propose --check FILE`",
 			"stores nothing and lists every problem at once, and `propose` only the final one",

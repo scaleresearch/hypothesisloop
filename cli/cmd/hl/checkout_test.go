@@ -14,7 +14,7 @@ import (
 
 const checkoutHypothesis = "0198c2d4-aaaa-7bbb-8ccc-000000a1b2c3"
 
-const checkoutBranchName = "hl/pe-1/researcher-1/fp16-at-batch-32-a1b2c3"
+const checkoutBranchName = "hl/pe-1/executor-1/fp16-at-batch-32-a1b2c3"
 
 // checkouts is what the platform was told of checkouts, and the agents it answers work on the
 // hypothesis besides.
@@ -25,7 +25,7 @@ type checkouts struct {
 
 // checkoutServer answers the reads hl hypothesis checkout makes as agent ag-1 of pe-1 behind the
 // platform's own check of what an agent's token may call: the hypothesis with baseRef, the
-// agent's signup naming it Researcher 1, and job-other with otherRef. It records each checkout.
+// agent's signup naming it Executor 1, and job-other with otherRef. It records each checkout.
 func checkoutServer(t *testing.T, baseRef, otherRef string) *checkouts {
 	t.Helper()
 	token := clitest.DerivedToken("agent:pe-1/ag-1")
@@ -40,13 +40,13 @@ func checkoutServer(t *testing.T, baseRef, otherRef string) *checkouts {
 			seen.recorded = append(seen.recorded, body)
 			answer := map[string]any{"hypothesis_id": checkoutHypothesis, "agent_id": "ag-1", "branch": body["branch"], "working": append([]map[string]string{}, seen.others...)}
 			if len(seen.others) > 0 {
-				answer["warning"] = "Researcher 2 already works on hypothesis " + checkoutHypothesis
+				answer["warning"] = "Executor 2 already works on hypothesis " + checkoutHypothesis
 			}
 			_ = json.NewEncoder(w).Encode(answer)
 		case "/hypotheses/" + checkoutHypothesis:
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": checkoutHypothesis, "platform_experiment_id": "pe-1", "text": "FP16 at batch 32", "base_ref": baseRef})
 		case "/platform-experiments/pe-1/signups/ag-1":
-			_ = json.NewEncoder(w).Encode(map[string]string{"agent_id": "ag-1", "name": "Researcher 1"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"agent_id": "ag-1", "name": "Executor 1"})
 		case "/experiments/job-other":
 			_ = json.NewEncoder(w).Encode(map[string]string{"platform_experiment_id": "pe-1", "code_ref": otherRef})
 		case "/experiments/job-elsewhere":
@@ -72,7 +72,7 @@ func TestHypothesisCheckoutCreatesTheBranchFromTheBaseAndThenReturnsToIt(t *test
 	clone, origin := clitest.PushedClone(t)
 	clitest.MustGit(t, clone, "commit", "-q", "--allow-empty", "-m", "the parent's commit")
 	base := clitest.MustGit(t, clone, "rev-parse", "HEAD")
-	clitest.MustGit(t, clone, "push", "-q", "origin", "HEAD:refs/heads/hl/pe-1/researcher-2/parent-ffffff")
+	clitest.MustGit(t, clone, "push", "-q", "origin", "HEAD:refs/heads/hl/pe-1/executor-2/parent-ffffff")
 	clitest.MustGit(t, clone, "commit", "-q", "--allow-empty", "-m", "unrelated work")
 	seen := checkoutServer(t, origin+"@"+base, "")
 
@@ -108,9 +108,9 @@ func TestHypothesisCheckoutCreatesTheBranchFromTheBaseAndThenReturnsToIt(t *test
 	if len(seen.recorded) != 3 || seen.recorded[0]["agent_id"] != "ag-1" || seen.recorded[0]["branch"] != checkoutBranchName {
 		t.Fatalf("checkouts recorded = %v, want the three that checked out, as ag-1 on %s", seen.recorded, checkoutBranchName)
 	}
-	seen.others = []map[string]string{{"agent_id": "ag-2", "name": "Researcher 2"}}
+	seen.others = []map[string]string{{"agent_id": "ag-2", "name": "Executor 2"}}
 	code, stdout, stderr = checkout(checkoutHypothesis)
-	if want := `{"branch":"` + checkoutBranchName + `","working":[{"agent_id":"ag-2","name":"Researcher 2"}],"warning":"Researcher 2 already works on hypothesis ` + checkoutHypothesis + `"}`; code != 0 || stdout != want {
+	if want := `{"branch":"` + checkoutBranchName + `","working":[{"agent_id":"ag-2","name":"Executor 2"}],"warning":"Executor 2 already works on hypothesis ` + checkoutHypothesis + `"}`; code != 0 || stdout != want {
 		t.Fatalf("checkout of a hypothesis another agent works on: exit code = %d, stdout = %s, stderr = %s, want %s", code, stdout, stderr, want)
 	}
 }
@@ -121,7 +121,7 @@ func TestHypothesisCheckoutStartsFromAJobOrSaysThereIsNoBase(t *testing.T) {
 	clone, origin := clitest.PushedClone(t)
 	clitest.MustGit(t, clone, "commit", "-q", "--allow-empty", "-m", "another agent's implementation")
 	other := clitest.MustGit(t, clone, "rev-parse", "HEAD")
-	clitest.MustGit(t, clone, "push", "-q", "origin", "HEAD:refs/heads/hl/pe-1/researcher-2/fp16-at-batch-32-a1b2c3")
+	clitest.MustGit(t, clone, "push", "-q", "origin", "HEAD:refs/heads/hl/pe-1/executor-2/fp16-at-batch-32-a1b2c3")
 	clitest.MustGit(t, clone, "reset", "-q", "--hard", "HEAD~1")
 	checkoutServer(t, "", origin+"@"+other)
 
@@ -140,7 +140,7 @@ func TestHypothesisCheckoutStartsFromAJobOrSaysThereIsNoBase(t *testing.T) {
 	}
 }
 
-// Researchers wrote files in their clone before they checked out a hypothesis, and git's
+// Executors wrote files in their clone before they checked out a hypothesis, and git's
 // own refusal sent them into a stash dance that failed too. The refusal says what to do.
 func TestHypothesisCheckoutOverChangesSaysToCommitOrStashThem(t *testing.T) {
 	clone, origin := clitest.PushedClone(t)

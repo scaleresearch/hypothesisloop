@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import useSWR, { useSWRConfig } from 'swr'
 import { archiveAgentType, editAgentType, fetchAgentType } from '@/lib/api/agent-types'
 import { ApiError } from '@/lib/api/request'
-import { APPLIES_LIVE, describeType, roleOf, said } from '@/lib/agent-types'
+import { APPLIES_LIVE, describeType, said, useRoleName } from '@/lib/agent-types'
 import { relTime } from '@/lib/format'
 import { agentTypesPath } from '@/lib/routes'
 import { useTenant } from '@/lib/tenant'
@@ -118,7 +118,7 @@ function Editor({ type, editable, onSaved, onReload }: {
   const newVersion = prompt !== type.current.prompt || !sameSettings(settings, { ...type.current.settings, model: type.current.settings.model ?? '', hyperparameters: type.current.settings.hyperparameters ?? {} })
   const dirty = newVersion || name.trim() !== type.name || description.trim() !== type.description
   const problems = Object.values(settingsProblems)
-  const r = roleOf(type.role)
+  const roleName = useRoleName(type.role)
 
   function discard() {
     setName(type.name)
@@ -155,7 +155,7 @@ function Editor({ type, editable, onSaved, onReload }: {
             <Input value={name} readOnly={!editable} onChange={e => setName(e.target.value)} />
           </FormField>
           <FormField label="Role" hint="Fixed once made.">
-            <Input value={r.label} readOnly disabled />
+            <Input value={roleName} readOnly disabled />
           </FormField>
           <FormField label="Description" className="md:col-span-2" hint="One line on what agents of this type do.">
             <Input value={description} readOnly={!editable} onChange={e => setDescription(e.target.value)} />
@@ -215,6 +215,10 @@ function Editor({ type, editable, onSaved, onReload }: {
   )
 }
 
+function RoleName({ role }: { role: ListedAgentType['role'] }) {
+  return <>{useRoleName(role)}</>
+}
+
 /** One agent type: what it is, its editor for an owner, and its versions. */
 export function AgentTypeDetail({ typeID }: { typeID: string }) {
   const router = useRouter()
@@ -250,7 +254,7 @@ export function AgentTypeDetail({ typeID }: { typeID: string }) {
       description={
         <Stack gap="xs">
           <Inline gap="sm">
-            <Badge tone="accent">{roleOf(type.role).label}</Badge>
+            <Badge tone="accent"><RoleName role={type.role} /></Badge>
             {type.builtin && <Badge tone="neutral">Built-in, read-only</Badge>}
             {type.archived_at && <Badge tone="warning">Archived</Badge>}
             <Text as="span" variant="note">v{type.current_version}</Text>

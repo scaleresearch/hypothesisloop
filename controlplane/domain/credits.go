@@ -34,10 +34,10 @@ func AllocateQuota(budgetAccH float64, signedUpCount int, myBonusFraction float6
 	return guaranteed, RoundHours(guaranteed * cfg.BurstFraction)
 }
 
-// ResearcherQuota is a researcher's allocation and what it used of it, as a researcher that
-// joins a running platform experiment is given its share from. Ended is a researcher that
+// ExecutorQuota is an executor's allocation and what it used of it, as an executor that
+// joins a running platform experiment is given its share from. Ended is an executor that
 // finished or whose machine stopped with no restart left.
-type ResearcherQuota struct {
+type ExecutorQuota struct {
 	AgentID    string
 	Guaranteed float64
 	Burst      float64
@@ -45,8 +45,8 @@ type ResearcherQuota struct {
 	Ended      bool
 }
 
-// Unspent is what is left of the researcher's share past what it used.
-func (q ResearcherQuota) Unspent() float64 {
+// Unspent is what is left of the executor's share past what it used.
+func (q ExecutorQuota) Unspent() float64 {
 	share := q.Guaranteed
 	if share <= 0 {
 		share = q.Burst
@@ -54,13 +54,13 @@ func (q ResearcherQuota) Unspent() float64 {
 	return max(0, share-q.Used)
 }
 
-// LateShare is the share of a researcher that joins a running platform experiment whose other
-// researchers hold quotas: an even part, with the researchers still at work, of what all of them
-// left unspent. taken is what that share takes from each: first what the researchers that ended
-// left, in the order given, then the rest from the researchers at work that hold more unspent
+// LateShare is the share of an executor that joins a running platform experiment whose other
+// executors hold quotas: an even part, with the executors still at work, of what all of them
+// left unspent. taken is what that share takes from each: first what the executors that ended
+// left, in the order given, then the rest from the executors at work that hold more unspent
 // than the share, in proportion to what they hold above it. None is left with less unspent than
 // the newcomer is given, and none gives back what it used.
-func LateShare(quotas []ResearcherQuota) (share float64, taken map[string]float64) {
+func LateShare(quotas []ExecutorQuota) (share float64, taken map[string]float64) {
 	unspent, atWork := 0.0, 0
 	for _, q := range quotas {
 		unspent += q.Unspent()

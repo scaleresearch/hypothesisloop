@@ -89,7 +89,7 @@ func TestSimilaritiesIgnoreCaseStopWordsAndEmptyText(t *testing.T) {
 	}
 }
 
-// Texts of a sandboxed run: a researcher opened a new line restating another agent's confirmed one in
+// Texts of a sandboxed run: an executor opened a new line restating another agent's confirmed one in
 // other words (SoA is the channel-major layout) and with a stronger coder. At length it scored
 // under similarThreshold against it, and must still read close as a new line; the other agent's
 // refinements of that line, which change what is coded and how, must not.

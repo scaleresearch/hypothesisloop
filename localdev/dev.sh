@@ -162,13 +162,9 @@ append_compute() {
 inputs() {
   local missing=() key tunnels provider_keys=""
   sandbox_provider="$(lib_env_value SANDBOX_PROVIDER)"
-  case "$(lib_env_value MODEL_PROVIDER)" in
-    anthropic) provider_keys+=" MODEL_ANTHROPIC_OAUTH_TOKEN" ;;
-    *)
-      echo "dev: .env sets MODEL_PROVIDER to '$(lib_env_value MODEL_PROVIDER)', and hosted agents run on anthropic" >&2
-      exit 1
-      ;;
-  esac
+  # The settings' default models are anthropic's, and MODEL_OPENROUTER_API_KEY and
+  # MODEL_OPENAI_AUTH_JSON (the content of ~/.codex/auth.json) are optional.
+  provider_keys+=" MODEL_ANTHROPIC_OAUTH_TOKEN"
   if [[ -z "${HL_REGISTRY}" ]]; then
     echo "dev: .env names no CONTAINER_REGISTRY_PROVIDER, the registry the images under IMAGE_TAG are in" >&2
     exit 1

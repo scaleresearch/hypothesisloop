@@ -54,18 +54,18 @@ type Store interface {
 	// sandboxed coordinator on coordinatorModel unless it is empty, and takes back what the close
 	// wrote: db.ErrNotReopenable, db.ErrPlatformExperimentNotFound.
 	ReopenPlatformExperiment(ctx context.Context, id string, endsAt time.Time, durationHours float64, coordinatorModel string) error
-	// UpdatePlatformExperiment writes pe only if it is still in expectedStatus — see the db
-	// implementation's comment for why the compare-and-swap matters here — and researchers when
-	// not nil, with max_agents and them held to the researchers at work (db.PoolBelowAtWorkError).
-	UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, expectedStatus domain.PlatformExperimentStatus, researchers domain.ResearcherPool) error
-	// ResearchersAtWork counts the researchers at work of a platform experiment by agent type and model.
-	ResearchersAtWork(ctx context.Context, platformExpID string) (map[domain.PoolKey]int, error)
-	// ResearcherPoolState is what keeping the researchers of a running platform experiment is
+	// UpdatePlatformExperiment writes pe only if it is still in expectedStatus (the db
+	// implementation's comment says why the compare-and-swap matters here), and agents when
+	// not nil, with max_agents and them held to the agents at work (db.PoolBelowAtWorkError).
+	UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, expectedStatus domain.PlatformExperimentStatus, agents domain.AgentPool) error
+	// AgentsAtWork counts the agents at work of a platform experiment by agent type and model.
+	AgentsAtWork(ctx context.Context, platformExpID string) (map[domain.PoolKey]int, error)
+	// AgentPoolState is what keeping the team of a running platform experiment is
 	// decided from: its pool and max_agents, who is at work and whose place is free for good.
-	ResearcherPoolState(ctx context.Context, platformExpID string) (db.PoolState, error)
-	// HoldResearchers records what a running platform experiment says of the places of its
-	// researchers the platform keeps empty, "" for none.
-	HoldResearchers(ctx context.Context, id, line string) error
+	AgentPoolState(ctx context.Context, platformExpID string) (db.PoolState, error)
+	// HoldAgents records what a running platform experiment says of the places of its
+	// team the platform keeps empty, "" for none.
+	HoldAgents(ctx context.Context, id, line string) error
 	// RaiseBaseline writes the running pe as patched with its baseline raised and records the
 	// raise, or does neither.
 	RaiseBaseline(ctx context.Context, pe *domain.PlatformExperiment, raise domain.BaselineRaise) error
@@ -97,7 +97,7 @@ type Store interface {
 	// MarkBaselineLate tells the owner of a job not running yet, once, as job.held, why it is late.
 	MarkBaselineLate(ctx context.Context, id, reason string) error
 	// Signup inserts only while the experiment is still open; inserted=false means it is closed
-	// or the agent was already signed up. A researcher past max_agents is db.ErrMaxAgentsReached,
+	// or the agent was already signed up. An executor past max_agents is db.ErrMaxAgentsReached,
 	// decided inside the insert's own transaction.
 	Signup(ctx context.Context, platformExpID string, signup domain.AgentSignup) (bool, error)
 	// SetProposal stores a draft's proposal for goal goalVersion with what p says of it: until
@@ -111,7 +111,7 @@ type Store interface {
 	// DraftsToAccept is the proposed drafts whose accepts_at has passed.
 	DraftsToAccept(ctx context.Context) ([]string, error)
 	// AcceptDraft makes a proposed draft the open platform experiment pe describes, with its
-	// researchers signed up, or does neither: db.ErrNotDraft, db.ErrNothingProposed.
+	// team signed up, or does neither: db.ErrNotDraft, db.ErrNothingProposed.
 	AcceptDraft(ctx context.Context, pe *domain.PlatformExperiment, create []*domain.Agent, signups []domain.AgentSignup) error
 	// SetGoal changes the goal of a platform experiment and tells whoever acts on it, giving a
 	// draft back to its planner until planUntil: db.ErrNotEditable.
@@ -133,15 +133,15 @@ type Store interface {
 	FailRepository(ctx context.Context, id, answer string) error
 	// SpawnAgent creates an agent in the experiment's org and signs it up, or does neither.
 	SpawnAgent(ctx context.Context, platformExpID string, agent *domain.Agent, signup domain.AgentSignup) error
-	// JoinRunning gives a researcher a place in a running platform experiment and its quota,
+	// JoinRunning gives an agent a place in a running platform experiment and an executor its quota,
 	// creating agent first when it is not nil, or does neither.
 	JoinRunning(ctx context.Context, platformExpID string, agent *domain.Agent, signup domain.AgentSignup, late db.LateJoin) error
 	RemoveAgent(ctx context.Context, platformExpID, agentID string) error
 	// FinishAgent records that an agent has nothing left to do: domain.ErrNotSignedUp,
 	// db.ErrSignupClosed where the agent has no work to finish, db.ErrWorkUnfinished.
 	FinishAgent(ctx context.Context, platformExpID, agentID, reason string) error
-	// SendAgentMessages stores a message to each agent named, or with none to every researcher at
-	// work, or stores none (see the db implementation for its refusals).
+	// SendAgentMessages stores a message to each agent named, or with none to every executor and researcher
+	// at work, or stores none (see the db implementation for its refusals).
 	SendAgentMessages(ctx context.Context, platformExpID string, to []string, text string, sender domain.Actor) ([]domain.AgentMessage, []db.MessagesRateLimited, error)
 	// SendCoordinatorMessage stores a message of a person or a key to the sandboxed coordinator, or
 	// none (see the db implementation for its refusals).
@@ -155,7 +155,7 @@ type Store interface {
 	// StartPlatformExperimentTx flips open->running and writes every agent quota atomically.
 	StartPlatformExperimentTx(ctx context.Context, id string, agentsDue time.Duration, quotasFor func(participants []db.StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error)) (bool, []*domain.AgentQuota, error)
 	ListSignups(ctx context.Context, platformExpID string) ([]string, error)
-	// ListSignupsByRole is the ranking-side read: standings are about competitors, never about
+	// ListSignupsByRole is the ranking-side read: standings are about executors, never about
 	// the whole roster.
 	ListSignupsByRole(ctx context.Context, platformExpID string, role domain.SignupRole) ([]string, error)
 	// ListParticipants is the signups still taking part: all but an accepted draft's planner.
@@ -183,6 +183,9 @@ type Store interface {
 	// merges it in from the metrics DB on every read via metricsdb.PopulateUsage(One).
 	GetAgentQuota(ctx context.Context, agentID, platformExpID string) (*domain.AgentQuota, error)
 	ListAgentQuotas(ctx context.Context, platformExpID string) ([]*domain.AgentQuota, error)
+	// RecentSubmissions is how many submissions an agent made to a platform experiment within window,
+	// each the jobs of one hypothesis on one commit.
+	RecentSubmissions(ctx context.Context, agentID, platformExpID string, window time.Duration) (int, error)
 	AddDesiredQuotaUsage(ctx context.Context, platformExpID string, quotas []*domain.AgentQuota) error
 	AddDesiredQuotaUsageOne(ctx context.Context, quota *domain.AgentQuota) error
 	// GetAgentRunningExperiments backs the correction in running_cost.go: AddDesiredQuotaUsage
@@ -192,7 +195,7 @@ type Store interface {
 	// GetExperiment resolves a winning sample's job_id to the row carrying its code_ref — see
 	// rank, where a standing without it is a number nobody can reproduce.
 	GetExperiment(ctx context.Context, id string) (*domain.Experiment, error)
-	AdmitExperimentTx(ctx context.Context, exp *domain.Experiment, observed func(context.Context) (*domain.AgentQuota, error), rateLimit db.SubmissionRateLimit, createDataKey func(context.Context) error) (db.AdmitDecision, error)
+	AdmitExperimentTx(ctx context.Context, exp *domain.Experiment, observed func(context.Context) (*domain.AgentQuota, error), rateLimit db.SubmissionRateLimit, inserted func(context.Context) error) (db.AdmitDecision, error)
 	ReserveAdmittedAcceleratorTypeTx(ctx context.Context, experimentID string, acceleratorType domain.AcceleratorType, estimatedCost float64, acceleratorCount, defaultMaxConcurrent int, observed func(ctx context.Context, agentID, platformExpID string, platformExpStart time.Time) (*domain.AgentQuota, error)) (rejectionReason string, err error)
 	RecordTop3(ctx context.Context, platformExpID, agentID string, finalMetric float64) error
 	ListCutAgents(ctx context.Context, platformExpID string) ([]domain.AgentCut, error)
@@ -227,7 +230,9 @@ type Service struct {
 	// models is the platform's model for an agent and a coordinator whose agent type names none
 	// (WithModelDefaults).
 	models domain.ModelDefaults
-	// idle tells researchers with no job for idleAfter that they are idle, and whoever steers a
+	// served refuses a model a choice names that the platform does not serve (WithServedModels).
+	served ServedModels
+	// idle tells executors with no job for idleAfter that they are idle, and whoever steers a
 	// run that its capacity has held places free for idleAfter (WithIdleNotice).
 	idle      IdleNotices
 	idleAfter time.Duration
@@ -255,13 +260,13 @@ type Service struct {
 	registryWake chan struct{}
 }
 
-// IdleNotices reads the researchers of running platform experiments due an idle notice, and
-// tells each (db.Store.IdleResearchers, NoticeIdle). It records whether a
+// IdleNotices reads the executors of running platform experiments due an idle notice, and
+// tells each (db.Store.IdleExecutors, NoticeIdle). It records whether a
 // run's capacity holds places free and tells whoever steers it once that lasted
 // (MarkCapacityFree, NoticeCapacityIdle).
 type IdleNotices interface {
-	IdleResearchers(ctx context.Context, after time.Duration) ([]db.IdleResearcher, error)
-	NoticeIdle(ctx context.Context, r db.IdleResearcher, detail string) error
+	IdleExecutors(ctx context.Context, after time.Duration) ([]db.IdleExecutor, error)
+	NoticeIdle(ctx context.Context, r db.IdleExecutor, detail string) error
 	MarkCapacityFree(ctx context.Context, id string, free bool, after time.Duration) (*db.IdleCapacity, error)
 	NoticeCapacityIdle(ctx context.Context, r db.IdleCapacity, detail string) error
 }
@@ -282,6 +287,18 @@ func (s *Service) WithPersonIdeas(ideas PersonIdeas) *Service {
 // none.
 func (s *Service) WithModelDefaults(models domain.ModelDefaults) *Service {
 	s.models = models
+	return s
+}
+
+// ServedModels refuses on its field a model a choice names that the platform does not serve.
+// *models.Service satisfies it.
+type ServedModels interface {
+	CheckChoice(ctx context.Context, field, model string) error
+}
+
+// WithServedModels wires what refuses a model an agent, a pool or a coordinator names.
+func (s *Service) WithServedModels(served ServedModels) *Service {
+	s.served = served
 	return s
 }
 
@@ -374,8 +391,8 @@ type PlatformExperimentPatch struct {
 	Name                      *string                    `json:"name,omitempty" doc:"Not empty."`
 	Description               *string                    `json:"description,omitempty" doc:"The text every agent works from, not empty and at most 32768 bytes."`
 	BudgetAcceleratorHours    *float64                   `json:"budget_accelerator_hours,omitempty"`
-	MaxAgents                 *int                       `json:"max_agents,omitempty" doc:"How many researchers may be at work at once, counted as a join counts them: the agents of role competitor that have not finished, were not cut, were not replaced and still have a machine. The coordinator, a draft's planner, agents of role baseline and reviewers never count. Lowered below the researchers at work of a running one, it cuts the newest of them: each winds down as a cut researcher does, told by agent.cut with detail max_agents_lowered, and nobody takes its place. Before the run starts, 409 max_agents_below_researchers says how many are signed up. Researchers the patch does not state are lowered to it, from the last entry. While it runs, a raised one is held to the hours its researchers left unspent: one trial of the baseline for each."`
-	Researchers               *domain.ResearcherPool     `json:"researchers,omitempty" doc:"The researchers it is to have at work, the whole list as on create, at most max_agents in all. Each entry at least the researchers of its agent type and model at work: 409 researchers_below_at_work otherwise. Where the platform runs the researchers it adds the ones a raised count wants."`
+	MaxAgents                 *int                       `json:"max_agents,omitempty" doc:"How many executors may be at work at once, counted as a join counts them: the agents of role executor that have not finished, were not cut, were not replaced and still have a machine. The coordinator, a draft's planner, researchers, agents of role baseline and reviewers never count. Lowered below the executors at work of a running one, it cuts the newest of them: each winds down as a cut executor does, told by agent.cut with detail max_agents_lowered, and nobody takes its place. Before the run starts, 409 max_agents_below_executors says how many are signed up. Executors of agents the patch does not state are lowered to it, from the last entry. While it runs, a raised one is held to the hours its executors left unspent: one trial of the baseline for each."`
+	Agents                    *domain.AgentPool          `json:"agents,omitempty" doc:"The team it is to have at work, the whole list as on create: researchers in entries of agent_type researcher, executors in the others, at most max_agents in all. Each entry at least the agents of its agent type and model at work: 409 agents_below_at_work otherwise. Where the platform runs the agents it adds the ones a raised count wants."`
 	MaxConcurrentAccelerators *int                       `json:"max_concurrent_accelerators,omitempty"`
 	Metrics                   *[]domain.MetricDefinition `json:"metrics,omitempty"`
 	ReportIntervalSeconds     *int                       `json:"report_interval_seconds,omitempty"`
@@ -401,7 +418,7 @@ func (p PlatformExperimentPatch) carried(except ...string) []string {
 		{"description", p.Description != nil},
 		{"budget_accelerator_hours", p.BudgetAcceleratorHours != nil},
 		{"max_agents", p.MaxAgents != nil},
-		{"researchers", p.Researchers != nil},
+		{"agents", p.Agents != nil},
 		{"max_concurrent_accelerators", p.MaxConcurrentAccelerators != nil},
 		{"metrics", p.Metrics != nil},
 		{"report_interval_seconds", p.ReportIntervalSeconds != nil},
@@ -548,10 +565,10 @@ func (s *Service) AgentSignup(ctx context.Context, id, agentID string, reader au
 	return signup, SignupActions(pe, *signup, reader, writes), nil
 }
 
-// ResearchersAtWork counts the researchers at work of the platform experiment id by agent type
+// AgentsAtWork counts the agents at work of the platform experiment id by agent type
 // and model.
-func (s *Service) ResearchersAtWork(ctx context.Context, id string) (map[domain.PoolKey]int, error) {
-	return s.store.ResearchersAtWork(ctx, id)
+func (s *Service) AgentsAtWork(ctx context.Context, id string) (map[domain.PoolKey]int, error) {
+	return s.store.AgentsAtWork(ctx, id)
 }
 
 // GitURL is where the platform experiment id's repository is served by the control plane's proxy.

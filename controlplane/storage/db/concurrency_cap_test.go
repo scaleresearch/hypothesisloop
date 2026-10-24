@@ -55,7 +55,7 @@ func setupCapTestPool(t *testing.T, cap int) (*Pool, *Store, string, string) {
 		t.Fatalf("set cap: got = %v, want = nil", err)
 	}
 	pes := NewStore(pool, 3)
-	if _, err := pes.Signup(ctx, peID, domain.AgentSignup{Actor: testActor, AgentID: agentID, Role: domain.SignupRoleCompetitor}); err != nil {
+	if _, err := pes.Signup(ctx, peID, domain.AgentSignup{Actor: testActor, AgentID: agentID, Role: domain.SignupRoleExecutor}); err != nil {
 		t.Fatalf("signup: got = %v, want = nil", err)
 	}
 	if _, _, err := pes.StartPlatformExperimentTx(ctx, peID, time.Hour, func(participants []StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error) {
@@ -107,7 +107,7 @@ func TestReserveAdmittedAcceleratorTypeTxCapIsAcrossAllAgents(t *testing.T) {
 	agentB := "agent-cap-b-" + suffix
 	createTestAgent(t, pool, agentB)
 	pes := NewStore(pool, 3)
-	if _, err := pes.Signup(ctx, peID, domain.AgentSignup{Actor: testActor, AgentID: agentB, Role: domain.SignupRoleCompetitor}); err != nil {
+	if _, err := pes.Signup(ctx, peID, domain.AgentSignup{Actor: testActor, AgentID: agentB, Role: domain.SignupRoleExecutor}); err != nil {
 		t.Fatalf("signup agent B: got = %v, want = nil", err)
 	}
 	if _, err := pool.pool.Exec(ctx, `INSERT INTO agent_quotas (id, agent_id, platform_experiment_id, guaranteed_accelerator_hours, burst_accelerator_hours, created_at)

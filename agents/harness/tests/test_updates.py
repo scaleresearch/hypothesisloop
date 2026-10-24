@@ -5,6 +5,7 @@ import stat
 import tempfile
 import time
 import unittest
+import unittest.mock
 
 from conftest import SITUATION, FakePlatform, connect
 from hypothesisloop_agent import outage, updates
@@ -19,7 +20,7 @@ COMMENT = '{"kind":"comment.new","subject":"hyp-1","value":"agent","detail":"","
 
 
 ENV = {**os.environ, "HL_TOKEN": "hls_" + base64.urlsafe_b64encode(b"agent:pe-1/agent-a").decode().rstrip("=") + ".mac",
-       updates._AGENT_ID: "agent-a"}
+       updates._AGENT_ID: "agent-a", updates._WAKES_OF: "agent"}
 
 
 def fake_hl(script: str, status: str = "", stats: str = "", quota: str = "", read_exit: int = 0, quota_refusal: str = "") -> tuple[list[str], str]:
@@ -64,6 +65,27 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(runs(counter), 1)
         self.assertEqual(await updates.next_batch(ENV, lambda: False, 0, command=command), [])
 
+    # A researcher waited on the kinds of an executor, none of them a change of the graph it keeps,
+    # while the platform sent it every one.
+    async def test_a_researcher_is_woken_by_every_change_of_the_graph_and_an_executor_is_not(self):
+        command, counter = fake_hl("echo \"$*\" >> \"$0.args\"\nexit 0\n")
+        await updates.next_batch({**ENV, updates._WAKES_OF: "researcher"}, lambda: False, 0.2, command=command)
+        with open(counter.replace(".runs", ".args")) as f:
+            asked = f.read().splitlines()
+        self.assertEqual(asked[0], "watch --wake " + ",".join(updates.WAKES["researcher"]))
+        graph = ("hypothesis.new", "finding.new", "hypothesis.status", "hypothesis.link", "hypothesis.unlink")
+        for kind in graph:
+            self.assertIn(kind, updates.WAKES["researcher"])
+            self.assertNotIn(kind, updates.WAKES["agent"])
+        self.assertEqual(updates.WAKES["researcher"][:len(updates.WAKES["agent"])], updates.WAKES["agent"])
+
+    def test_the_watch_env_says_which_kinds_wake_its_agent(self):
+        with unittest.mock.patch.dict(os.environ, {"API_URL": "http://api", "HL_TOKEN": ENV["HL_TOKEN"]}):
+            cfg = updates.config.Config()
+            for role, wakes in (("researcher", "researcher"), ("executor", "agent")):
+                cfg.role = role
+                self.assertEqual(updates.watch_env(cfg, "/tmp/w")[updates._WAKES_OF], wakes)
+
     # A coordinator woken for every job's outcome and again for its finding made 129 model
     # calls where 35 had done.
     async def test_only_the_roles_waking_kinds_end_the_wait_and_an_idle_one_is_handed_what_waited(self):
@@ -77,7 +99,8 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("agent.finished", updates.WAKES["coordinator"])
         self.assertIn("agent.replaced", updates.WAKES["coordinator"])
         self.assertNotIn("agent.replaced", updates.WAKES["agent"])
-        # A researcher worked 28 minutes with nothing on the platform and nobody was woken by it.
+        self.assertIn("agent.stopped", updates.WAKES["coordinator"])
+        # An executor worked 28 minutes with nothing on the platform and nobody was woken by it.
         # The notice repeats while the stretch lasts: it wakes the agent each time, and the
         # coordinator for the first, the repeats riding along with its next batch.
         self.assertIn("agent.idle", updates.WAKES["agent"])
@@ -95,7 +118,7 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
         for kind in ("user", "key", "staff"):
             self.assertIn(f"hypothesis.new={kind}", updates.WAKES["coordinator"])
         self.assertFalse([wake for wake in updates.WAKES["coordinator"] if wake in ("hypothesis.new", "hypothesis.new=agent", "hypothesis.new=coordinator")])
-        # A baseline raised mid-run moves the bar every researcher is ranked against.
+        # A baseline raised mid-run moves the bar every executor is ranked against.
         for role in ("agent", "coordinator"):
             self.assertIn("platform_experiment.baseline", updates.WAKES[role])
 
@@ -111,17 +134,17 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
             with open(counter.replace(".runs", ".args")) as f:
                 self.assertEqual(f.read().splitlines()[0], "watch --wake " + ",".join(wakes))
 
-    # A coordinator slept until ends_at in a run whose last researcher's machine had stopped for
+    # A coordinator slept until ends_at in a run whose last executor's machine had stopped for
     # good: nothing it wakes on was sent. The platform sends the status event again when the
     # status_reason begins to wait for the coordinator, with the reason as its detail.
     async def test_a_status_reason_that_waits_for_the_coordinator_wakes_it_and_names_the_reason(self):
         coordinator = {**os.environ, "HL_TOKEN": "hls_" + base64.urlsafe_b64encode(b"coordinator:pe-1").decode().rstrip("=") + ".mac", updates._AGENT_ID: ""}
-        done = ('{"kind":"platform_experiment.status","subject":"pe-1","value":"running","detail":"researchers_done",'
+        done = ('{"kind":"platform_experiment.status","subject":"pe-1","value":"running","detail":"executors_done",'
                 '"agent_id":"","id":9}')
         command, counter = fake_hl('[ "$1" = platform-experiments ] && { echo \'{"status": "running"}\'; exit 0; }\n'
                                    f'echo "$*" >> "$0.args"\necho \'{done}\'\n')
         events = await updates.next_batch(coordinator, lambda: False, 10, command=command, coalesce_s=0)
-        self.assertEqual(updates.message(events, ""), "Platform updates:\nplatform_experiment.status pe-1 running researchers_done")
+        self.assertEqual(updates.message(events, ""), "Platform updates:\nplatform_experiment.status pe-1 running executors_done")
         with open(counter.replace(".runs", ".args")) as f:
             self.assertIn("platform_experiment.status", f.read().splitlines()[0].split(" ")[-1].split(","))
 
@@ -166,7 +189,7 @@ class NextBatchTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(outage.under_way())
         await asyncio.wait_for(outage.next_read(60), timeout=1)
 
-    # In an outage researchers with no job in flight retried in sleep loops: one that ended its
+    # In an outage executors with no job in flight retried in sleep loops: one that ended its
     # turn would have heard nothing until the idle nudge, half an hour later. Told of its end by
     # hl's exit code while the harness's own read still counted toward its exit, one was told
     # the platform was back by one clock and ended by the other.
@@ -400,7 +423,7 @@ class HookTest(unittest.IsolatedAsyncioTestCase):
         from types import SimpleNamespace
 
         self.draft = {"status": "draft", "status_reason": {"reason": "proposed"}}
-        self.cfg = SimpleNamespace(agent_id="agent-a", role="researcher")
+        self.cfg = SimpleNamespace(agent_id="agent-a", role="executor")
         self.setup = SimpleNamespace(cfg=self.cfg, client=FakePlatform(experiment=lambda: self.draft), workdir=tempfile.mkdtemp())
         self.cfg.platform_experiment_id = "pe-1"
         self.handing = asyncio.Lock()
@@ -450,7 +473,7 @@ class HookTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.call(agent_id="sub-1"), {})
         self.assertEqual(self.drains, 0)
 
-# A coordinator sent a researcher a message with the CLI's SendMessage, was answered "No agent
+# A coordinator sent an executor a message with the CLI's SendMessage, was answered "No agent
 # named ... Spawn a new one or use the agent ID", and sent it again under the agent's id.
 class UndeliveredMessageTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -590,8 +613,8 @@ class FormatTest(unittest.TestCase):
                          "experiment.blocked exp-2 no_cluster_for_image no cluster runs image torch")
         self.assertEqual(updates.event_line(held, ""), f"job.held exp-1 capacity_unavailable {sentence} by agent-a")
 
-    # A coordinator's only steer was a comment on the researcher's latest hypothesis, which put
-    # direction in the lab notebook and reached no researcher without one.
+    # A coordinator's only steer was a comment on the executor's latest hypothesis, which put
+    # direction in the lab notebook and reached no executor without one.
     def test_a_message_wakes_its_agent_and_is_told_as_what_it_says(self):
         sent = {"kind": "agent.message", "subject": "agent-a", "value": "coordinator", "detail": "leave the lr line, try warmup",
                 "agent_id": "agent-a", "id": 9}
@@ -599,7 +622,7 @@ class FormatTest(unittest.TestCase):
         self.assertEqual(updates.event_line(dict(sent, value="owner"), ""), "message to agent-a from the owner: leave the lr line, try warmup")
         self.assertIn("agent.message", updates.WAKES["agent"])
         self.assertNotIn("agent.message", updates.WAKES["coordinator"])
-        # The owner's message, to the coordinator or a researcher, wakes the coordinator; its own do not.
+        # The owner's message, to the coordinator or an agent, wakes the coordinator; its own do not.
         self.assertIn("agent.message=owner", updates.WAKES["coordinator"])
         self.assertIn("job.duplicate", updates.WAKES["coordinator"])
         self.assertNotIn("job.duplicate", updates.WAKES["agent"])
@@ -654,7 +677,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
 
         setup = SimpleNamespace(commands="usage: hl", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
                                 client=FakePlatform(),
-                                cfg=SimpleNamespace(agent_id="agent-a", role="researcher", api_url="http://x", token=ENV["HL_TOKEN"], platform_experiment_id="pe-1"))
+                                cfg=SimpleNamespace(agent_id="agent-a", role="executor", api_url="http://x", token=ENV["HL_TOKEN"], platform_experiment_id="pe-1"))
         with mock.patch.object(connection, "ClaudeSDKClient", Client), \
                 mock.patch.object(updates, "next_batch", one_batch), \
                 mock.patch.object(updates, "jobs_in_flight", mock.AsyncMock(return_value=1)), \
@@ -720,14 +743,14 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(connect(setup, None, stop_flag), timeout=5)
         return sent[:-1], read.await_count
 
-    # A researcher whose last job ended waited 10 minutes for agent.idle, or 30 for the harness's
+    # An executor whose last job ended waited 10 minutes for agent.idle, or 30 for the harness's
     # nudge, for an update nothing of its own would send, and a lead told once rested for hours.
     # It is told at every end of a turn with nothing in flight but the end of the turn that
     # answered the statement: that one waits, and the platform's recurring agent.idle bounds
     # what the statement costs, where saying it again would be a model call after each answer.
     async def test_a_turn_ended_with_no_job_in_flight_is_told_so_unless_it_answered_that(self):
         from types import SimpleNamespace
-        cfg = SimpleNamespace(agent_id="agent-a", role="researcher", api_url="http://x",
+        cfg = SimpleNamespace(agent_id="agent-a", role="executor", api_url="http://x",
                               token=ENV["HL_TOKEN"], platform_experiment_id="pe-1")
         idle = [{"kind": "agent.idle", "subject": "agent-a", "value": "continues", "agent_id": "agent-a"}]
         sent, reads = await self._turn_ends(cfg, [0, 0], [idle, []])
@@ -799,7 +822,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
 
         setup = SimpleNamespace(commands="usage: hl", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
                                 client=FakePlatform(),
-                                cfg=SimpleNamespace(agent_id="agent-a", role="researcher", api_url="http://x",
+                                cfg=SimpleNamespace(agent_id="agent-a", role="executor", api_url="http://x",
                                                     token=ENV["HL_TOKEN"], platform_experiment_id="pe-1"))
         read = mock.AsyncMock(return_value=1)
         with mock.patch.object(connection, "ClaudeSDKClient", Client), \
@@ -863,7 +886,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
 
         setup = SimpleNamespace(commands="usage: hl", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
                                 client=FakePlatform(),
-                                cfg=SimpleNamespace(agent_id="agent-a", role="researcher", api_url="http://x",
+                                cfg=SimpleNamespace(agent_id="agent-a", role="executor", api_url="http://x",
                                                     token=ENV["HL_TOKEN"], platform_experiment_id="pe-1"))
         delivered = mock.Mock()
         with mock.patch.object(connection, "ClaudeSDKClient", Client), \
@@ -916,7 +939,7 @@ class SessionDeliveryTest(unittest.IsolatedAsyncioTestCase):
 
         setup = SimpleNamespace(commands="usage: hl", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
                                 client=FakePlatform(),
-                                cfg=SimpleNamespace(agent_id="agent-a", role="researcher", api_url="http://x",
+                                cfg=SimpleNamespace(agent_id="agent-a", role="executor", api_url="http://x",
                                                     token=ENV["HL_TOKEN"], platform_experiment_id="pe-1"))
         waits = []
 

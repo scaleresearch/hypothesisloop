@@ -13,8 +13,9 @@ Environment variables injected by the scheduler (see tests/workloads/generic/tra
 identical contract, this workload is a drop-in for the same HYPOTHESISLOOP_* env vars):
   HYPOTHESISLOOP_EXPERIMENT_ID, HYPOTHESISLOOP_AGENT_ID, HYPOTHESISLOOP_PROJECT_ID
   HYPOTHESISLOOP_API_URL
-  HYPOTHESISLOOP_DURATION_SECONDS - keep repeating the matmul sweep for this long (default 0:
-                                    one sweep), for runs that must hold a device a while
+Set by the job's env:
+  RUN_SECONDS - keep repeating the matmul sweep for this long (default 0: one sweep), for runs
+                that must hold a device a while
 
 Metric contract: this workload pushes its real measurements under their own names, in their
 own units — nothing is normalized or rescaled. A platform experiment's MetricDefinition.Key
@@ -57,7 +58,7 @@ DEVICE_ID = 0
 MATMUL_SIZES = [256, 512, 1024, 2048, 4096]
 WARMUP_ITERS = 2
 TIMED_ITERS = 10
-DURATION = float(os.environ.get("HYPOTHESISLOOP_DURATION_SECONDS", "0"))
+DURATION = float(os.environ.get("RUN_SECONDS", "0"))
 
 
 def post_metric(fraction: float, value: float, metric_name: str) -> None:

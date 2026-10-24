@@ -21,8 +21,8 @@ func stagedPE(currentStage int) *domain.PlatformExperiment {
 	}
 }
 
-// Two researchers stopped believing their quota was spent, minutes before a boundary raised it.
-func TestTheNextStageIsWhenTheBoundaryFallsAndWhatItGivesEachResearcherStanding(t *testing.T) {
+// Two executors stopped believing their quota was spent, minutes before a boundary raised it.
+func TestTheNextStageIsWhenTheBoundaryFallsAndWhatItGivesEachExecutorStanding(t *testing.T) {
 	pe := stagedPE(1)
 	startsAt, credit, ok := nextStageRelease(pe, 6, 2)
 	if !ok {
@@ -32,7 +32,7 @@ func TestTheNextStageIsWhenTheBoundaryFallsAndWhatItGivesEachResearcherStanding(
 		t.Errorf("starts at %s, want %s: 40%% of 45 minutes", startsAt, want)
 	}
 	if credit != 1.8 {
-		t.Errorf("credit = %v, want 1.8: 60%% of 6 hours over 2 researchers", credit)
+		t.Errorf("credit = %v, want 1.8: 60%% of 6 hours over 2 executors", credit)
 	}
 
 	if _, _, ok := nextStageRelease(stagedPE(2), 6, 2); ok {
@@ -44,7 +44,7 @@ func TestTheNextStageIsWhenTheBoundaryFallsAndWhatItGivesEachResearcherStanding(
 		t.Error("an open platform experiment has no boundary ahead")
 	}
 	if _, _, ok := nextStageRelease(pe, 6, 0); ok {
-		t.Error("with no researcher standing nobody is given anything")
+		t.Error("with no executor standing nobody is given anything")
 	}
 }
 
@@ -58,7 +58,7 @@ func (f *stagedStore) GetPlatformExperiment(context.Context, string) (*domain.Pl
 }
 
 func (*stagedStore) ListSignupsByRole(_ context.Context, _ string, role domain.SignupRole) ([]string, error) {
-	if role == domain.SignupRoleCompetitor {
+	if role == domain.SignupRoleExecutor {
 		return []string{"a", "b", "cut"}, nil
 	}
 	return nil, nil
@@ -82,7 +82,7 @@ func TestAQuotaSaysWhatTheNextStageBringsAndNothingInTheLastOne(t *testing.T) {
 		t.Errorf("next_stage_starts_at = %v, want 18 minutes into the run", view.NextStageStartsAt)
 	}
 	if view.NextStageShare == nil || *view.NextStageShare != 2.8 {
-		t.Errorf("next_stage_share_accelerator_hours = %v, want 2.8: the share of 1 and 60%% of 6 over the 2 researchers not cut", view.NextStageShare)
+		t.Errorf("next_stage_share_accelerator_hours = %v, want 2.8: the share of 1 and 60%% of 6 over the 2 executors not cut", view.NextStageShare)
 	}
 
 	view, err = svc.QuotaView(context.Background(), "cut", "pe-1")

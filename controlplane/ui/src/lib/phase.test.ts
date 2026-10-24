@@ -26,9 +26,9 @@ describe('the page\'s table of what it offers the owner', () => {
     expect(Object.keys(OWNER_ACTIONS).sort()).toEqual(ownerMay.sort())
   })
 
-  it('offers the budget where the budget is the matter and the agents card where a researcher is', () => {
+  it('offers the budget where the budget is the matter and the agents card where an executor is', () => {
     expect(OWNER_ACTIONS.budget_spent).toEqual({ opens: 'edit', label: 'Edit budget' })
     expect(OWNER_ACTIONS.budget_below_baseline).toEqual({ opens: 'edit', label: 'Edit budget' })
-    expect(OWNER_ACTIONS.no_researchers).toEqual({ opens: 'agents', label: 'Add a researcher' })
+    expect(OWNER_ACTIONS.no_executors).toEqual({ opens: 'agents', label: 'Add an executor' })
   })
 })

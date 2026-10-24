@@ -22,6 +22,7 @@ import { Loading, ErrorMessage } from '@/components/ui/status-message'
 import { acceleratorLabel, formatAccH, formatMetric, relTime, shortId } from '@/lib/format'
 import { budgetUnit } from '@/lib/units'
 import { AddCommentForm, AddLinkForm } from '@/components/hypotheses/human-idea'
+import { Curation } from '@/components/hypotheses/curation'
 import { Actor, Verdict } from '@/components/actor'
 import { AgentLabel, AgentNames } from '@/components/agent-label'
 import { Branch, Commit } from '@/components/code-ref'
@@ -113,6 +114,8 @@ export default function HypothesisDetailPage({ params }: { params: { experimentI
           </>
         }
         description={
+          <Stack gap="xs">
+          <Curation hypothesis={data} into={id => <TextLink href={hypothesisPath(experimentId, id)} className="font-mono">{id}</TextLink>} />
           <Inline className="text-2xs">
             <span>
               Registered by <Actor actor={data.actor} agentID={data.agent_id} /> · {relTime(data.created_at)}
@@ -124,6 +127,7 @@ export default function HypothesisDetailPage({ params }: { params: { experimentI
             <Code>· {data.id}</Code>
             <CopyButton value={data.id} />
           </Inline>
+          </Stack>
         }
         actions={
           <TextLink href={graphHref(data.platform_experiment_id, data.id)} className="text-xs">

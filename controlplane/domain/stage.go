@@ -27,15 +27,15 @@ type StageAdvance struct {
 
 func ValidateStages(stages []Stage) error { return experimentspec.ValidateStages(stages) }
 
-const MinResearchersForCut = experimentspec.MinResearchersForCut
+const MinExecutorsForCut = experimentspec.MinExecutorsForCut
 
-// RunStages is the ladder a run of researchers competitors is started with. A field no boundary
-// can cut from has one stage, so each researcher holds its whole share from the start: staged,
+// RunStages is the ladder a run of executors is started with. A field no boundary
+// can cut from has one stage, so each executor holds its whole share from the start: staged,
 // the ladder only withheld budget and selected nobody. The one stage keeps the job-length cap of
 // the ladder's last, the stage that follows every cut. The field only shrinks after the start,
 // so what is decided here holds for the whole run.
-func RunStages(stages []Stage, researchers int) []Stage {
-	if researchers >= MinResearchersForCut || len(stages) == 0 {
+func RunStages(stages []Stage, executors int) []Stage {
+	if executors >= MinExecutorsForCut || len(stages) == 0 {
 		return stages
 	}
 	return []Stage{{LengthPct: 100, MaxJobHours: stages[len(stages)-1].MaxJobHours}}

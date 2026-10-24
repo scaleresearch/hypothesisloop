@@ -21,7 +21,7 @@ import (
 // by DEFAULT unless the tag says otherwise. Three fields shipped that way and each broke every
 // caller written before it existed: `role` on signup rejected every signup, and `author` on the
 // hypothesis endpoints rejected every agent-submitted hypothesis and comment. All three were
-// meant to be optional -- the design says "competitor is the default, so every existing signup
+// meant to be optional: the design says "executor is the default, so every existing signup
 // still means what it meant" -- and all three passed their unit tests, because a Go test calls
 // the service function directly and never crosses the schema that rejects the request.
 //
@@ -34,7 +34,7 @@ func TestFieldsAddedToExistingRequestBodiesStayOptional(t *testing.T) {
 	for _, tc := range []struct {
 		path, field, why string
 	}{
-		{"/platform-experiments/{id}/agents", "role", "competitor is the documented default, and a caller adding competitors omits it"},
+		{"/platform-experiments/{id}/agents", "role", "executor is the documented default, and a caller adding executors omits it"},
 		{"/platform-experiments/{id}/agents", "agent_id", "a caller creating an agent names none"},
 		{"/platform-experiments/{id}/agents", "in_agentsandbox", "an agent the caller runs itself is the default"},
 		{"/platform-experiments/{id}/agents", "agent_type", "an agent with no agent type runs the harness's default"},

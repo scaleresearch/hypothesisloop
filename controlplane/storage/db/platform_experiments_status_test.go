@@ -73,7 +73,7 @@ func TestTheRunLastsItsDurationFromItsStart(t *testing.T) {
 		t.Fatalf("open: got = ends %v, started %v, baseline due %v, %v, want no end before the run and the baseline due as stored", open.EndsAt, open.StartedAt, open.BaselineDueAt, err)
 	}
 
-	// A researcher its owner runs is at work from the start, and the run ends an hour after it.
+	// An executor its owner runs is at work from the start, and the run ends an hour after it.
 	spawnTestAgents(t, pes, pe.ID, domain.AgentSignup{})
 	before := time.Now().Add(-time.Second)
 	started, _, err := pes.StartPlatformExperimentTx(ctx, pe.ID, time.Hour, func([]StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error) { return nil, oneStage, nil })
@@ -101,15 +101,15 @@ func TestTheRunLastsItsDurationFromItsStart(t *testing.T) {
 	}
 }
 
-// A run started while its launcher was unreachable: no researcher's machine came up and it
-// waited with nobody at work. started_at is when the first researcher's machine is reported
+// A run started while its launcher was unreachable: no executor's machine came up and it
+// waited with nobody at work. started_at is when the first executor's machine is reported
 // running, the wait is bounded and never passes the end, and one closed waiting says so.
-func TestARunWaitsForItsFirstResearchersMachineWithinItsRun(t *testing.T) {
+func TestARunWaitsForItsFirstExecutorsMachineWithinItsRun(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewStore(pool, 3)
 	const agentsDue, windDown = 20 * time.Minute, 2 * time.Minute
-	start := func() (pe, researcher, baseline string) {
+	start := func() (pe, executor, baseline string) {
 		t.Helper()
 		pe = createTestPEWithCoordinator(t, pool)
 		if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET duration_hours = 1 WHERE id = $1`, pe); err != nil {
@@ -142,24 +142,24 @@ func TestARunWaitsForItsFirstResearchersMachineWithinItsRun(t *testing.T) {
 		}
 	}
 
-	pe, researcher, baseline := start()
+	pe, executor, baseline := start()
 	waiting := read(pe)
 	end := waiting.StartsAt.Add(time.Hour)
 	if !waiting.AwaitsAgents() || !waiting.EndsAt.Equal(end) || time.Until(waiting.AgentsDueAt) > agentsDue+time.Second || time.Until(waiting.AgentsDueAt) < agentsDue-time.Minute {
-		t.Fatalf("started with no machine up: got = started %v, ends %v, agents due %v, want no researcher at work, the end an hour after the start %v and the machines due in %s", waiting.StartedAt, waiting.EndsAt, waiting.AgentsDueAt, waiting.StartsAt, agentsDue)
+		t.Fatalf("started with no machine up: got = started %v, ends %v, agents due %v, want no executor at work, the end an hour after the start %v and the machines due in %s", waiting.StartedAt, waiting.EndsAt, waiting.AgentsDueAt, waiting.StartsAt, agentsDue)
 	}
 	observe(pe, baseline, domain.InstanceRunning)
-	observe(pe, researcher, domain.InstanceStarting)
+	observe(pe, executor, domain.InstanceStarting)
 	if still := read(pe); !still.AwaitsAgents() {
-		t.Fatalf("a baseline agent's machine running and a researcher's starting: started %v, want no clock yet", still.StartedAt)
+		t.Fatalf("a baseline agent's machine running and an executor's starting: started %v, want no clock yet", still.StartedAt)
 	}
 	before := time.Now().Add(-time.Second)
-	observe(pe, researcher, domain.InstanceRunning)
+	observe(pe, executor, domain.InstanceRunning)
 	running := read(pe)
 	if running.StartedAt.Before(before) || !running.EndsAt.Equal(end) || !running.AgentsDueAt.IsZero() {
-		t.Fatalf("a researcher's machine running: got = started %v, ends %v, agents due %v, want started now and the end kept", running.StartedAt, running.EndsAt, running.AgentsDueAt)
+		t.Fatalf("an executor's machine running: got = started %v, ends %v, agents due %v, want started now and the end kept", running.StartedAt, running.EndsAt, running.AgentsDueAt)
 	}
-	observe(pe, researcher, domain.InstanceRunning)
+	observe(pe, executor, domain.InstanceRunning)
 	if again := read(pe); !again.StartedAt.Equal(running.StartedAt) {
 		t.Fatalf("the machine reported again: started moved from %v to %v", running.StartedAt, again.StartedAt)
 	}

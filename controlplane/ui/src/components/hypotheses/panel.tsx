@@ -10,6 +10,7 @@ import { Section } from '@/components/ui/section'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Eyebrow, Text } from '@/components/ui/text'
 import { LinkButton } from '@/components/hypotheses/editor-controls'
+import { Curation } from '@/components/hypotheses/curation'
 import { IdeaText } from '@/components/hypotheses/idea-text'
 import { CollapsibleDescription } from '@/components/ui/collapsible-description'
 import { Actor, Verdict } from '@/components/actor'
@@ -103,6 +104,7 @@ export function HypothesisPanel({ graph, nodeByID, selected, onSelect }: Hypothe
           <Actor actor={node.actor} agentID={node.agent_id} /> · {relTime(node.created_at)}
           {node.status_changed_at && <> · <Verdict hypothesis={node} /></>}
         </Text>
+        <Curation hypothesis={node} into={id => <Button variant="link" className="font-mono" onClick={() => onSelect(id)}>{id}</Button>} />
         <Text as="div" variant="meta" mono>
           {node.finding_count} findings · {node.comment_count} comments · refined by {node.child_count}
         </Text>

@@ -40,6 +40,8 @@ var Secret = map[string]string{
 	"SANDBOX_FLY_API_KEY":                  "FlyV1 made-up-fly-token",
 	"SANDBOX_E2B_API_KEY":                  "made-up-e2b-api-key",
 	"MODEL_ANTHROPIC_OAUTH_TOKEN":          "made-up-claude-subscription-token",
+	"MODEL_OPENROUTER_API_KEY":             "made-up-openrouter-api-key",
+	"MODEL_OPENAI_AUTH_JSON":               `{"tokens": {"access_token": "made-up"}}`,
 }
 
 // Release is one rendering of the chart.

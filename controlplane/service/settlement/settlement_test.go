@@ -165,7 +165,7 @@ func TestAWorkloadFaultIsBilledForEveryHourItRan(t *testing.T) {
 }
 
 // A policy termination is the platform's own decision, not a fault, and it is reported separately
-// for that reason — but the researcher still genuinely ran the hours, so a stage cut bills like
+// for that reason. The executor still genuinely ran the hours, so a stage cut bills like
 // any other outcome. Only infrastructure changes the figure.
 func TestAPolicyTerminationIsBilledLikeAnyOtherOutcome(t *testing.T) {
 	step := time.Minute

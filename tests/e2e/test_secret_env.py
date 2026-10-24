@@ -33,7 +33,7 @@ def test_secret_env_reaches_the_workload_and_no_read_of_the_job(api, experiment,
         job_overrides={
             "command": ["python", "-u", "data_stage.py"],
             "max_retries": 0,
-            "env": {"HYPOTHESISLOOP_DURATION_SECONDS": "10", "STAGE_MODE": "write"},
+            "env": {"RUN_SECONDS": "10", "STAGE_MODE": "write"},
         },
         secret_env={"CHECKPOINT_VALUE": secret},
     )

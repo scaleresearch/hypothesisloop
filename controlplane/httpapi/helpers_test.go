@@ -14,14 +14,19 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth/authtest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes/agenttypestest"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/models"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
-// testExperiments is the platform experiments service over store, with nothing else wired.
+// testModels is the models the tests' platform serves: platformexperimentstest.Catalog's.
+var testModels = models.New(map[string]models.Provider{domain.ModelProviderAnthropic: models.Catalog(platformexperimentstest.Catalog)}, platformexperimentstest.Defaults)
+
+// testExperiments is the platform experiments service over store, with the models it serves
+// and nothing else wired.
 func testExperiments(store platformexperiments.Store) *platformexperiments.Service {
-	return platformexperiments.NewService(store, domain.QuotaConfig{}, zap.NewNop(), nil, 3*time.Minute)
+	return platformexperiments.NewService(store, domain.QuotaConfig{}, zap.NewNop(), nil, 3*time.Minute).WithServedModels(testModels)
 }
 
 var agentsTestPlacement = authtest.Placement{
@@ -110,5 +115,5 @@ func reaching(svc *platformexperiments.Service, types ...domain.AcceleratorType)
 
 func newSignupTestService(t *testing.T, store platformexperiments.Store) *platformexperiments.Service {
 	t.Helper()
-	return reaching(platformexperiments.NewService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), 3*time.Minute), domain.CPUType)
+	return reaching(platformexperiments.NewService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), 3*time.Minute).WithServedModels(testModels), domain.CPUType)
 }

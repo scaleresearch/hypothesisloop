@@ -26,7 +26,7 @@ func (s *Service) ModelUsage(ctx context.Context, id string) (*ModelUsage, error
 }
 
 // ModelBudget is what the platform experiment id may spend on the model calls the platform makes
-// for it and what they cost so far, at the prices of the model catalog.
+// for it and what they cost so far.
 func (s *Service) ModelBudget(ctx context.Context, id string) (domain.ModelBudget, error) {
 	pe, err := s.store.GetPlatformExperiment(ctx, id)
 	if err != nil {
@@ -43,13 +43,9 @@ func (s *Service) modelBudgetOf(ctx context.Context, pe *domain.PlatformExperime
 	if err != nil {
 		return domain.ModelBudget{}, fmt.Errorf("platform_experiments.ModelBudget: %w", err)
 	}
-	used := make([]domain.ModelTokens, len(calls))
-	for i, c := range calls {
-		used[i] = domain.ModelTokens{Model: c.Model, Input: c.InputTokens, Output: c.OutputTokens, CacheWrite: c.CacheCreationInputTokens, CacheRead: c.CacheReadInputTokens}
-	}
-	usd, err := s.cfg.ModelCatalog.SpendUSD(used)
-	if err != nil {
-		return domain.ModelBudget{}, fmt.Errorf("platform_experiments.ModelBudget: %w", err)
+	var usd float64
+	for _, c := range calls {
+		usd += c.CostUSD
 	}
 	return domain.ModelBudget{BudgetUSD: domain.ModelBudgetUSD(pe.ModelBudgetUSD, s.cfg.DefaultModelBudgetUSD), UsedUSD: math.Round(usd*100) / 100}, nil
 }

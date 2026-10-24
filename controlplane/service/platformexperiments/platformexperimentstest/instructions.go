@@ -17,7 +17,7 @@ type PinnedInstructions struct{ RulesVersion int }
 
 const Rules = "## platform rules (read first)"
 
-var Defaults = domain.ModelDefaults{Agent: "model-default", Coordinator: "model-c"}
+var Defaults = domain.ModelDefaults{Agent: "anthropic/model-default", Coordinator: "anthropic/model-c"}
 
 func builtin(id string) domain.AgentTypeVersion {
 	for _, t := range agenttypestest.Catalog() {
@@ -38,10 +38,10 @@ func (p PinnedInstructions) AgentInstructions(_ context.Context, pe, agent strin
 	}
 	switch agent {
 	case "ag-1":
-		return &db.InstructionsSource{Role: domain.AgentRoleResearcher, Version: builtin("generalist"), Model: "model-1",
+		return &db.InstructionsSource{Role: domain.AgentRoleExecutor, Version: builtin("generalist"), Model: "anthropic/model-1",
 			Hyperparameters: map[string]any{"lr": 0.001}, RepositoryURL: "https://github.com/acme/vision.git", Rules: Rules, RulesVersion: p.rules()}, nil
 	case "ag-2":
-		return &db.InstructionsSource{Role: domain.AgentRoleResearcher, Version: builtin("generalist"), RepositoryURL: "https://github.com/acme/vision.git", Rules: Rules, RulesVersion: p.rules()}, nil
+		return &db.InstructionsSource{Role: domain.AgentRoleExecutor, Version: builtin("generalist"), RepositoryURL: "https://github.com/acme/vision.git", Rules: Rules, RulesVersion: p.rules()}, nil
 	}
 	return nil, nil
 }

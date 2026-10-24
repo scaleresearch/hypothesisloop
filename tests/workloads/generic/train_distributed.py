@@ -64,7 +64,8 @@ MASTER_PORT = int(os.environ.get("MASTER_PORT", os.environ.get("HYPOTHESISLOOP_M
 
 ACCELERATOR_COUNT = int(os.environ["HYPOTHESISLOOP_ACCELERATOR_COUNT"])
 ATTEMPT = int(os.environ.get("HYPOTHESISLOOP_ATTEMPT", "0"))
-DURATION = int(os.environ.get("HYPOTHESISLOOP_DURATION_SECONDS", "30"))
+# How long the gang holds up after the barrier.
+DURATION = int(os.environ.get("RUN_SECONDS", "30"))
 # Rank to kill after the barrier, for the gang-failure guarantee. Unset means nobody fails.
 FAIL_RANK = os.environ.get("FAIL_RANK", "")
 

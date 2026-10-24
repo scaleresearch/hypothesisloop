@@ -4,7 +4,7 @@ description: |
   Minimize the device kernel duration of ttnn.transformer.sparse_sdpa (the DSA/MLA-style sparse
   attention op) on Tenstorrent Blackhole, on the official "prod-sparse" production shape.
   Optimize sparse_sdpa only: do not switch to or explore the sibling MSA op
-  (SparseSDPAMsaOperation), so every researcher works the same code and results compare directly.
+  (SparseSDPAMsaOperation), so every executor works the same code and results compare directly.
   The objective is better code that can be merged upstream.
 
   SOURCE
@@ -95,7 +95,7 @@ metrics:
 budget_accelerator_hours: 24
 max_agents: 2
 duration_hours: 12
-researchers:
+agents:
   - agent_type: generalist
     count: 2
 coordinator_in_agentsandbox: true

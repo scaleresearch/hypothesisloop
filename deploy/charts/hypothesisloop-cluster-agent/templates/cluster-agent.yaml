@@ -137,6 +137,10 @@ spec:
             # never heuristically detected. See autoscaler.md.
             - name: AUTOSCALER_ENABLED
               value: {{ .Values.autoscalerEnabled | quote }}
+            # The key of the node label that names a node's placement group: nodes that share
+            # its value are near enough for a job within one placement group. Empty for none.
+            - name: PLACEMENT_GROUP_LABEL
+              value: {{ .Values.placementGroupLabel | quote }}
           resources:
             requests:
               cpu: "10m"

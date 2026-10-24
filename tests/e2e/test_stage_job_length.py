@@ -57,7 +57,7 @@ def test_underestimated_job_evicted_job_too_long_and_settles_usage(api, joblen_p
     OVERRUN_SECONDS = 150
     job_id = api.submit_job(
         pe_id, agent, hours=0.005,
-        job_overrides={"env": {"HYPOTHESISLOOP_DURATION_SECONDS": str(OVERRUN_SECONDS)}},
+        job_overrides={"env": {"RUN_SECONDS": str(OVERRUN_SECONDS)}},
     )
 
     running = eventually(

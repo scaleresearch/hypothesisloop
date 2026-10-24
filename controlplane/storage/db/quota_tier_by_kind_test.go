@@ -80,10 +80,10 @@ func TestSignupQuotaTierOverrideWinsRegardlessOfKind(t *testing.T) {
 	createTestPE(t, pool, pe, 10)
 
 	pes := NewStore(pool, 3)
-	if _, err := pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: agentBurstOnly, Role: domain.SignupRoleCompetitor, QuotaTier: domain.QuotaTierBurstOnly}); err != nil {
+	if _, err := pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: agentBurstOnly, Role: domain.SignupRoleExecutor, QuotaTier: domain.QuotaTierBurstOnly}); err != nil {
 		t.Fatalf("signup agent with burst_only override: got = %v, want = nil", err)
 	}
-	if _, err := pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: humanBurstOnly, Role: domain.SignupRoleCompetitor, QuotaTier: domain.QuotaTierBurstOnly}); err != nil {
+	if _, err := pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: humanBurstOnly, Role: domain.SignupRoleExecutor, QuotaTier: domain.QuotaTierBurstOnly}); err != nil {
 		t.Fatalf("signup human with burst_only override: got = %v, want = nil", err)
 	}
 
@@ -123,7 +123,7 @@ func TestAdvanceStageCreditsEverySurvivorIntoTheSameTierRegardlessOfKind(t *test
 
 	pes := NewStore(pool, 3)
 	for _, id := range []string{humanSurvivor, agentSurvivor, cutAgent} {
-		if _, err := pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: id, Role: domain.SignupRoleCompetitor}); err != nil {
+		if _, err := pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: id, Role: domain.SignupRoleExecutor}); err != nil {
 			t.Fatalf("signup %s: got = %v, want = nil", id, err)
 		}
 	}
@@ -173,7 +173,7 @@ func TestAdvanceStageReleasesACutBurstOnlyAgentsUnspentHours(t *testing.T) {
 	pes := NewStore(pool, 3)
 	for _, id := range ids {
 		createTestAgent(t, pool, id)
-		if _, err := pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: id, Role: domain.SignupRoleCompetitor, QuotaTier: domain.QuotaTierBurstOnly}); err != nil {
+		if _, err := pes.Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: id, Role: domain.SignupRoleExecutor, QuotaTier: domain.QuotaTierBurstOnly}); err != nil {
 			t.Fatalf("signup %s: got = %v, want = nil", id, err)
 		}
 	}

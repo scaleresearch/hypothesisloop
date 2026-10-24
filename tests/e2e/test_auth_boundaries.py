@@ -20,6 +20,7 @@ from urllib.parse import urlsplit, urlunsplit
 import pytest
 import requests
 
+from conftest import cpu_job
 from support import admin
 from support.api import API, WATCH_SUBPROTOCOL
 from support.settings import setting
@@ -28,10 +29,10 @@ from support.settings import setting
 # created and started on the default org's clusters, which serve every org.
 pytestmark = pytest.mark.exclusive
 
-# Priced in controlplane/settings/hypothesisloop.yaml and on none of the dev nodes. A job asking
-# for it, submitted while its org has no cluster a submit could be judged against, stays QUEUED:
-# its token stays valid and it holds nothing.
-UNAVAILABLE_ACCELERATOR = "nvidia.com/gpu.product=NVIDIA-H200"
+# A job of two cores in a platform experiment that runs one unit at a time fits the platform's
+# clusters, which judge every org's submit, and is never admitted: it stays QUEUED and its token
+# stays valid.
+HELD_JOB = cpu_job(2)
 # domain.AgentWindDown and domain.CoordinatorWindDown, in seconds.
 AGENT_WIND_DOWN = 120
 COORDINATOR_WIND_DOWN = 300
@@ -99,12 +100,12 @@ def _running_experiment(org: Org, caller: API, run_id: str, agents: int) -> tupl
     names = [f"agent-{org.marker}-{uuid.uuid4().hex[:6]}-{run_id}" for _ in range(agents)]
     for name in names:
         caller.register_agent(name)
-    pe_id = caller.create_platform_experiment(f"{org.marker}-{uuid.uuid4().hex[:6]}-{run_id}", 5.0, agents)
+    pe_id = caller.create_platform_experiment(f"{org.marker}-{uuid.uuid4().hex[:6]}-{run_id}", 5.0, agents, max_concurrent_accelerators=1)
     caller.signup_and_start(pe_id, names)
     members = []
     for name in names:
         hypothesis_id = caller.register_hypothesis(pe_id, name, _claim(name))["id"]
-        job_id = caller.submit_job(pe_id, name, hyp_id=hypothesis_id, job_overrides={"accelerator_type": UNAVAILABLE_ACCELERATOR, "accelerator_count": 1})
+        job_id = caller.submit_job(pe_id, name, hyp_id=hypothesis_id, job_overrides=HELD_JOB)
         members.append(Member(name, caller.as_caller(admin.token(f"agent:{pe_id}/{name}")), hypothesis_id, job_id))
     return pe_id, members
 
@@ -357,6 +358,8 @@ def test_a_person_signs_in_with_a_jwt_and_writes_under_the_providers_name(api: A
 # ---- tokens around a close -------------------------------------------------------------------
 
 
+# It outlives both wind-downs.
+@pytest.mark.timeout(COORDINATOR_WIND_DOWN + 180)
 def test_tokens_after_a_close(org: Org, run_id: str):
     """Both tokens live their wind-down past the close and then die: the agent's and the
     coordinator's, longer, which reads and files the summary meanwhile. Nothing that spends or
@@ -376,11 +379,11 @@ def test_tokens_after_a_close(org: Org, run_id: str):
     in_the_window = [
         ("GET", f"/platform-experiments/{pe_id}", None, 200),
         ("GET", f"/experiments/{member.job_id}", None, 200),
-        ("POST", "/experiments", new_job, 422),
+        ("POST", "/experiments", new_job, 403),
     ]
     _assert_each(member.token, "the agent just after the close", in_the_window)
     submitted, text = _status(member.token, "POST", "/experiments", new_job)
-    assert "experiment_closed" in text, f"a submission after the close: {submitted} {text}"
+    assert "run over" in text, f"a submission after the close: {submitted} {text}"
 
     _assert_each(coordinator, "the coordinator after the close", [
         ("GET", f"/platform-experiments/{pe_id}", None, 200),

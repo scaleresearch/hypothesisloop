@@ -8,11 +8,11 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
-// runBestStore answers the completed jobs, the competitors and each job by id.
+// runBestStore answers the completed jobs, the executors and each job by id.
 type runBestStore struct {
 	poolOnlyStore
-	jobs        map[string]*domain.Experiment
-	competitors []string
+	jobs      map[string]*domain.Experiment
+	executors []string
 }
 
 func (s *runBestStore) CompletedJobIDs(context.Context, string) (map[string]bool, error) {
@@ -24,10 +24,10 @@ func (s *runBestStore) CompletedJobIDs(context.Context, string) (map[string]bool
 }
 
 func (s *runBestStore) ListSignupsByRole(_ context.Context, _ string, role domain.SignupRole) ([]string, error) {
-	if role != domain.SignupRoleCompetitor {
+	if role != domain.SignupRoleExecutor {
 		return nil, nil
 	}
-	return s.competitors, nil
+	return s.executors, nil
 }
 
 func (s *runBestStore) GetExperiment(_ context.Context, id string) (*domain.Experiment, error) {
@@ -47,12 +47,12 @@ func (f fixedStandings) BestPerAgentOnMetric(_ context.Context, _ *domain.Platfo
 	return out, nil, nil
 }
 
-// In a live run a researcher's subagent submitted on a branch made before the run's best existed
+// In a live run an executor's subagent submitted on a branch made before the run's best existed
 // and had to redo the job. A submit's answer names the best, the commit it ran and its branch, for
 // the submitter's checkout to tell whether its commit contains it.
 func TestASubmitNamesTheRunsBestJobAndItsCommit(t *testing.T) {
 	const repo = "https://example.com/repo.git@"
-	store := &runBestStore{competitors: []string{"ag-2", "ag-1"}, jobs: map[string]*domain.Experiment{
+	store := &runBestStore{executors: []string{"ag-2", "ag-1"}, jobs: map[string]*domain.Experiment{
 		"job-best":     {ID: "job-best", AgentID: "ag-2", CodeRef: repo + "bbbb", Branch: "hl/pe-1/r2-stack"},
 		"job-second":   {ID: "job-second", AgentID: "ag-1", CodeRef: repo + "aaaa", Branch: "hl/pe-1/r1"},
 		"job-baseline": {ID: "job-baseline", AgentID: "ag-base", CodeRef: repo + "0000", Branch: "hl/pe-1/baseline"},
@@ -73,7 +73,7 @@ func TestASubmitNamesTheRunsBestJobAndItsCommit(t *testing.T) {
 	}
 	want := domain.RunBest{JobID: "job-best", AgentID: "ag-2", Metric: "ratio", Value: 9.048, CodeRef: repo + "bbbb", Branch: "hl/pe-1/r2-stack"}
 	if got == nil || *got != want {
-		t.Fatalf("run best %+v, want %+v: the competitors' best on the first ranking metric, never the baseline's", got, want)
+		t.Fatalf("run best %+v, want %+v: the executors' best on the first ranking metric, never the baseline's", got, want)
 	}
 
 	same, err := s.runBest(context.Background(), pe, &domain.Experiment{ID: "job-new", AgentID: "ag-1", CodeRef: repo + "bbbb"})
@@ -81,7 +81,7 @@ func TestASubmitNamesTheRunsBestJobAndItsCommit(t *testing.T) {
 		t.Fatalf("a job on the best's own commit: %+v (%v), want nothing to say", same, err)
 	}
 
-	empty := &Service{store: &runBestStore{competitors: []string{"ag-1"}}, standings: fixedStandings{}}
+	empty := &Service{store: &runBestStore{executors: []string{"ag-1"}}, standings: fixedStandings{}}
 	none, err := empty.runBest(context.Background(), pe, &domain.Experiment{ID: "job-new", AgentID: "ag-1", CodeRef: repo + "cccc"})
 	if err != nil || none != nil {
 		t.Fatalf("a run with no completed job: %+v (%v), want nothing to say", none, err)
@@ -90,7 +90,7 @@ func TestASubmitNamesTheRunsBestJobAndItsCommit(t *testing.T) {
 
 // Equal bests rank by agent id, as the standings order them.
 func TestTheRunsBestBreaksATieByAgentID(t *testing.T) {
-	store := &runBestStore{competitors: []string{"ag-b", "ag-a"}, jobs: map[string]*domain.Experiment{
+	store := &runBestStore{executors: []string{"ag-b", "ag-a"}, jobs: map[string]*domain.Experiment{
 		"job-a": {ID: "job-a", CodeRef: "r@a"},
 		"job-b": {ID: "job-b", CodeRef: "r@b"},
 	}}

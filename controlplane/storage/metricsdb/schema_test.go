@@ -85,10 +85,10 @@ func TestEveryWriterWritesOnlyDeclaredTablesAndLabels(t *testing.T) {
 			NodeLabelsByNode:           map[string]map[string]string{"n": {"zone": "a"}},
 			ClusterID:                  "id", AgentVersion: "v", MultiNodeCapable: true, AutoscalerEnabled: true, RAMAvailable: 1, RAMTotal: 2, StorageAvailable: 1, StorageTotal: 2}),
 		"run health": s.RecordRunHealth(ctx, at, []domain.AgentHealth{
-			{PlatformExperimentID: "pe", AgentID: "a", Role: "competitor", FirstJobSeconds: &one, FirstCompletedSeconds: &one, JobsInFlight: 1},
+			{PlatformExperimentID: "pe", AgentID: "a", Role: "executor", FirstJobSeconds: &one, FirstCompletedSeconds: &one, JobsInFlight: 1},
 			{PlatformExperimentID: "pe", Role: "coordinator"},
 		}),
-		"harness state": s.RecordHarnessState(ctx, at, []domain.HarnessState{{PlatformExperimentID: "pe", AgentID: "a", Role: "competitor",
+		"harness state": s.RecordHarnessState(ctx, at, []domain.HarnessState{{PlatformExperimentID: "pe", AgentID: "a", Role: "executor",
 			Subagents: 1, TurnSince: at, InstructionsDigest: "abcdef", AgentType: "researcher", AgentTypeVersion: 2,
 			Model: domain.RateLimit{Rejected: true, Utilization: &one, ResetsAt: &at}}}),
 		"observed cost": s.SetObservedBatch(ctx, "a", "pe", "job", domain.CapacityGuaranteed, map[domain.ResourceType]float64{domain.ResourceAcceleratorHours: 1}),

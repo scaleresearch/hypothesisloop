@@ -138,7 +138,7 @@ type noopSettler struct{}
 
 func (noopSettler) Settle(context.Context, *domain.Experiment) error { return nil }
 
-// gangExperiment is a RUNNING multi-node job — the only shape whose retry the control plane owns.
+// gangExperiment is a RUNNING job over nodes nodes.
 func gangExperiment(nodes, maxRetries int) *domain.Experiment {
 	return &domain.Experiment{
 		ID: "gang-1", Status: domain.StatusRunning,
@@ -186,18 +186,34 @@ func TestFailedGangWithNoBudgetLeftSettlesInsteadOfRetrying(t *testing.T) {
 	}
 }
 
-// A single-pod job's retries are the runtime's BackoffLimit, and by the time JobPhaseFailed
-// reaches here that budget is already spent. Retrying again in the control plane would be a
-// second retry authority stacked on the first, silently doubling max_retries.
-func TestFailedSingleNodeJobIsNotRequeuedByTheControlPlane(t *testing.T) {
+// The control plane is the one retry authority for every shape and every runtime: a runtime runs
+// each attempt once, so a single-node job's max_retries is spent here as a gang's is, and a
+// runtime that never retried (bare metal, cloud) honours it too.
+func TestFailedSingleNodeJobIsRequeuedWhileRetryBudgetRemains(t *testing.T) {
 	store := &lifecycleStore{requeueBudget: 5}
 	w := NewJobWatcher(store, nil, noopSettler{}, zap.NewNop())
 
 	if err := w.onFinished(context.Background(), gangExperiment(1, 3), domain.StatusFailed, "container_failed: command exited with code 1"); err != nil {
 		t.Fatal(err)
 	}
+	if len(store.requeueCalls) != 1 || store.requeueCalls[0] != 3 {
+		t.Fatalf("RequeueForRetry calls = %v, want one with maxAttemptsBefore 3 (job.max_retries)", store.requeueCalls)
+	}
+	if store.transitioned {
+		t.Fatal("a job that runs again was written FAILED first, which announces a terminal status to its agent")
+	}
+}
+
+// A job with no retries left ends FAILED with what the runtime said of its process.
+func TestFailedJobWithoutRetriesEndsWithItsCause(t *testing.T) {
+	store := &lifecycleStore{requeueBudget: 5}
+	w := NewJobWatcher(store, nil, noopSettler{}, zap.NewNop())
+
+	if err := w.onFinished(context.Background(), gangExperiment(1, 0), domain.StatusFailed, "container_failed: command exited with code 1"); err != nil {
+		t.Fatal(err)
+	}
 	if len(store.requeueCalls) != 0 {
-		t.Fatalf("RequeueForRetry called for a single-node job (%d times) — the runtime already retried it", len(store.requeueCalls))
+		t.Fatalf("RequeueForRetry called for a job with max_retries 0 (%d times)", len(store.requeueCalls))
 	}
 	if want := "FAILED container_failed: command exited with code 1"; len(store.finished) != 1 || store.finished[0] != want {
 		t.Fatalf("the job was ended as %q, want %q: its failure is announced without its cause", store.finished, want)

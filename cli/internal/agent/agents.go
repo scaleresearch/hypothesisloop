@@ -15,16 +15,18 @@ import (
 )
 
 func AgentsFinish(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
-	fs := command.NewFlags("platform-experiments agents finish", `usage: hl platform-experiments agents finish --reason TEXT [--blocker TEXT] [--baseline JOB]
+	fs := command.NewFlags("platform-experiments agents finish", `usage: hl platform-experiments agents finish --reason TEXT [--because blocked|nothing_left] [--baseline JOB]
 
---reason-file and --blocker-file read the text from a FILE, or stdin for -, in place of the
-inline flag.
+--reason-file reads the reason from a FILE, or stdin for -, in place of --reason.
 
-Says that you have nothing left to do: your quota is spent, or nothing you could still try is
-worth a job. Your machine stops after this turn and the coordinator is told the reason, with the
-time and quota you leave. It cannot be taken back. A researcher with more than a tenth of the
-run's time and of its quota left is refused (time_and_quota_left), told how much of each is
-left, unless --blocker says what stops it that the time and quota cannot fix. Refused while you have a job queued or running or a completed job without
+Says that you have nothing left to do: your quota is spent, something stops you that the time
+and quota left cannot fix, or nothing you could still try is worth a job. Your machine stops
+after this turn and the coordinator is told the reason, with the time and quota you leave. It
+cannot be taken back. An executor with more than a tenth of the run's time and of its quota
+left, and more time than its jobs take, says why it stops: --because blocked, the reason naming
+what stops it, or --because nothing_left, the reason saying what you tried and why no idea left
+is worth a job. Without it such a finish is refused (time_and_quota_left), told how much of
+each is left. Refused while you have a job queued or running or a completed job without
 its summary (work_unfinished). Once the platform experiment closed there is nothing to finish:
 hl says so and exits 0. Prints you as finished. Your token says who and where. Each hypothesis
 of yours still open is listed after you and stays open for good unless you give its verdict
@@ -36,16 +38,12 @@ of a declared baseline, or the finish is refused with the reason (422) and nothi
 fix what it says and finish again. Without --baseline the platform declares a job only when the
 baseline agents left exactly one that reports the ranking metric.`, stderr)
 	reasonFlag := command.NewTextFlag(fs, "reason", "why nothing is left to do")
-	blockerFlag := command.NewTextFlag(fs, "blocker", "what stops you that the time and quota left cannot fix")
+	because := fs.String("because", "", "why you stop with time and quota left: blocked or nothing_left")
 	baseline := fs.String("baseline", "", "an agent of role baseline: the job of the control to declare as the baseline")
 	if err := command.ParseNone(fs, args); err != nil {
 		return command.ParseExit(err)
 	}
 	reason, err := reasonFlag.Value(fs)
-	if err != nil {
-		return command.ParseExit(err)
-	}
-	blocker, err := blockerFlag.Value(fs)
 	if err != nil {
 		return command.ParseExit(err)
 	}
@@ -64,8 +62,8 @@ baseline agents left exactly one that reports the ranking metric.`, stderr)
 		} `json:"open_hypotheses"`
 	}
 	body := map[string]string{"reason": reason}
-	if blocker != "" {
-		body["blocker"] = blocker
+	if *because != "" {
+		body["because"] = *because
 	}
 	if *baseline != "" {
 		body["baseline_job_id"] = *baseline

@@ -27,9 +27,7 @@ func RunMarket(t *testing.T, p provider.Provider, opts Options) {
 	if count < 0 || count > marketAsked {
 		t.Fatalf("Rentable = %d, asked about %d", count, marketAsked)
 	}
-	noMachine := opts.Template
-	noMachine.CPUMillis = 1 << 40
-	if none := rentable(t, ctx, market, noMachine); none != 0 {
+	if none := rentable(t, ctx, market, noMachine(opts.Template)); none != 0 {
 		t.Fatalf("Rentable = %d for a size no machine has", none)
 	}
 	if count == 0 {
@@ -48,4 +46,15 @@ func rentable(t *testing.T, ctx context.Context, market provider.Market, spec pr
 		t.Fatalf("Rentable = %+v: a count of nothing says why, and only such a count", supply)
 	}
 	return supply.Count
+}
+
+// noMachine is template at a size no machine has: more accelerators than any has, or for a
+// template without accelerators more cores.
+func noMachine(template provider.Spec) provider.Spec {
+	if template.AcceleratorCount > 0 {
+		template.AcceleratorCount = 1 << 20
+	} else {
+		template.CPUMillis = 1 << 40
+	}
+	return template
 }

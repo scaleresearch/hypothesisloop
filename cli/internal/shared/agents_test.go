@@ -14,13 +14,13 @@ func TestAgentsAddCreatesOneAgentWithWhatItIsLaunchedWith(t *testing.T) {
 		return map[string]any{"agents": []map[string]any{{"agent_id": "ag-1", "in_agentsandbox": true, "launcher": "main"}}}
 	})
 	var stdout, stderr bytes.Buffer
-	code := clitest.Run(AgentsAdd, []string{"--platform-experiment", "pe-1", "--in-agentsandbox", "--agent-type", "data-search", "--hyperparameters", `{"batch_size":64}`, "--model", "claude-sonnet-5", "--name", "sweep", "--role", "baseline", "--quota-tier", "burst_only"}, &stdout, &stderr)
+	code := clitest.Run(AgentsAdd, []string{"--platform-experiment", "pe-1", "--in-agentsandbox", "--agent-type", "data-search", "--hyperparameters", `{"batch_size":64}`, "--model", "anthropic/claude-sonnet-5", "--name", "sweep", "--role", "baseline", "--quota-tier", "burst_only"}, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("exit %d, stderr %s", code, stderr.String())
 	}
 	request := (*got)[0]
 	want := map[string]any{
-		"in_agentsandbox": true, "agent_type": "data-search", "model": "claude-sonnet-5", "name": "sweep",
+		"in_agentsandbox": true, "agent_type": "data-search", "model": "anthropic/claude-sonnet-5", "name": "sweep",
 		"role": "baseline", "quota_tier": "burst_only", "hyperparameters": map[string]any{"batch_size": float64(64)},
 	}
 	if request.Method != "POST" || request.Path != "/platform-experiments/pe-1/agents" || !reflect.DeepEqual(request.Body, want) {
@@ -93,9 +93,9 @@ func TestAgentsAddRefusesWhatTheServerWouldBeforeSending(t *testing.T) {
 	}
 }
 
-// A message to every researcher that some were rate limited for prints the messages sent, then
-// each researcher refused and why, and succeeds.
-func TestAgentsMessageAllNamesTheResearchersItDidNotReach(t *testing.T) {
+// A message to every agent that some were rate limited for prints the messages sent, then
+// each agent refused and why, and succeeds.
+func TestAgentsMessageAllNamesTheAgentsItDidNotReach(t *testing.T) {
 	clitest.RecordingServer(t, func(_ int, _ clitest.Recorded) any {
 		return map[string]any{
 			"messages": []map[string]any{{"agent_id": "ag-1", "from": "owner", "text": "queue more"}},
@@ -114,5 +114,21 @@ func TestAgentsMessageAllNamesTheResearchersItDidNotReach(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "1 recipients were not sent to") {
 		t.Errorf("stderr %q, want the note on the refused", stderr.String())
+	}
+}
+
+// A researcher is added with its role alone: the server runs it as the built-in researcher type
+// on the coordinator's model.
+func TestAgentsAddResearcherSendsTheRoleAlone(t *testing.T) {
+	got := clitest.RecordingServer(t, func(int, clitest.Recorded) any {
+		return map[string]any{"agents": []map[string]any{{"agent_id": "ag-r", "role": "researcher"}}}
+	})
+	var stdout, stderr bytes.Buffer
+	if code := clitest.Run(AgentsAdd, []string{"--platform-experiment", "pe-1", "--in-agentsandbox", "--role", "researcher"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %s", code, stderr.String())
+	}
+	want := map[string]any{"in_agentsandbox": true, "role": "researcher"}
+	if request := (*got)[0]; request.Method != "POST" || request.Path != "/platform-experiments/pe-1/agents" || !reflect.DeepEqual(request.Body, want) {
+		t.Fatalf("request = %+v", request)
 	}
 }

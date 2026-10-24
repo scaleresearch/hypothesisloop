@@ -13,16 +13,22 @@ import { InsetCard } from '@/components/ui/card'
 import { CollapsibleDescription } from '@/components/ui/collapsible-description'
 import { Facts } from '@/components/ui/facts'
 import { FormField } from '@/components/ui/form-field'
+import { ModelName } from '@/components/model-name'
 import { Input } from '@/components/ui/input'
 import { Section } from '@/components/ui/section'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Callout, InlineError } from '@/components/ui/status-message'
 import { Code, Pill, Text } from '@/components/ui/text'
 import { errorMessage } from '@/lib/errors'
-import type { MetricDefinition, PlatformExperiment, ProposedAgent } from '@/types/api'
+import type { AgentRoleInfo, ListedAgentType, MetricDefinition, PlatformExperiment, ProposedAgent } from '@/types/api'
+import { DEFAULT_AGENT_TYPE, typeName, useAgentRoles, useAgentTypes } from '@/lib/agent-types'
+import { toTeam } from '@/lib/team'
+import type { TeamRow } from '@/lib/team'
+import { useTenant } from '@/lib/tenant'
+import { TeamEditor } from '@/components/team-editor'
 import type { StoredProposal } from '@/lib/planning'
 
-type Stated = 'name' | 'budget' | 'baseline' | 'hours' | 'researchers'
+type Stated = 'name' | 'budget' | 'baseline' | 'hours' | 'team'
 
 // The figure an accept's refusal concerns, by the API's reason. Accepting changes nothing of the
 // proposal's experiment but its name, so invalid_experiment is the name's.
@@ -32,7 +38,7 @@ const FIELD_OF: Record<string, Stated> = {
   invalid_baseline_minutes: 'baseline',
   invalid_length: 'hours',
   run_too_long: 'hours',
-  invalid_agents: 'researchers',
+  invalid_agents: 'team',
 }
 
 function metricLine(metric: MetricDefinition): string {
@@ -70,18 +76,42 @@ function runsOn(proposal: StoredProposal): [string, string][] {
   return stated.filter((entry): entry is [string, string] => !!entry[1])
 }
 
-function Researcher({ n, agent }: { n: number; agent: ProposedAgent }) {
+/** One agent of the team as proposed, read only: its role, type, model and direction. */
+function ProposedMember({ agent, catalog, roles }: { agent: ProposedAgent; catalog: ListedAgentType[] | undefined; roles: AgentRoleInfo[] | undefined }) {
+  const typeID = agent.agent_type || DEFAULT_AGENT_TYPE
+  const role = roles?.find(r => r.role === catalog?.find(t => t.id === typeID)?.role)
   const direction = agent.hyperparameters?.direction as string | undefined
   return (
     <InsetCard as="li" gap="xs">
       <Inline gap="md" align="baseline" className="text-xs">
-        <span className="font-medium">Researcher {n}</span>
-        <span className="text-muted">specialization <Code className="text-foreground">{agent.agent_type ?? 'generalist'}</Code></span>
-        <span className="text-muted">model <Code className="text-foreground">{agent.model ?? 'the platform\'s default'}</Code></span>
+        {role && <Pill tone="accent" active>{role.name}</Pill>}
+        <span className="text-muted">type <span className="text-foreground">{typeName(typeID, catalog)}</span></span>
+        <span className="text-muted">model {agent.model ? <ModelName model={agent.model} className="text-foreground" /> : <span className="text-foreground">inherited</span>}</span>
       </Inline>
       <Text pre>{direction ?? 'No direction of its own: it works from the description.'}</Text>
     </InsetCard>
   )
+}
+
+/** The team as rows to edit, one per agent proposed, since each carries its own direction. */
+function proposedRows(agents: ProposedAgent[]): TeamRow[] {
+  return agents.map(a => ({
+    agent_type: a.agent_type || DEFAULT_AGENT_TYPE,
+    count: '1',
+    model: a.model ?? '',
+    hyperparameters: a.hyperparameters && Object.keys(a.hyperparameters).length > 0 ? JSON.stringify(a.hyperparameters, null, 2) : '',
+  }))
+}
+
+/** The rows as the agents an accept takes, one per agent, or why they cannot be sent. */
+function acceptedAgents(rows: TeamRow[]): { agents: ProposedAgent[] } | { problem: string } {
+  const team = toTeam(rows)
+  if ('problem' in team) return team
+  return {
+    agents: team.agents.flatMap(e => Array.from({ length: Number.isInteger(e.count) && e.count > 0 ? e.count : 0 }, () => ({
+      agent_type: e.agent_type, ...(e.model ? { model: e.model } : {}), ...(e.hyperparameters ? { hyperparameters: e.hyperparameters } : {}),
+    }))),
+  }
 }
 
 /** The countdown to the platform accepting the proposal by itself, with the three ways to act first. */
@@ -120,8 +150,8 @@ function Countdown({ draft, accept, sending, onDone }: { draft: PlatformExperime
 /**
  * What the planner proposed, as the experiment filled in: what is measured, how and on what,
  * who runs it, and what it may spend. The name, the budget, the duration, the minutes the baseline
- * has, the number of researchers and the answers to the planner's questions are the person's to
- * change, and accepting sends them as shown.
+ * has, the team and the answers to the planner's questions are the person's to change, and
+ * accepting sends them as shown.
  * Nothing has run.
  * `editable` is off for a reader, while the planner plans again from a changed goal and while the
  * platform counts down to accepting it by itself, when it is only read. `accepting` shows that
@@ -141,7 +171,10 @@ export function ProposalForm({ draft, proposal, editable, accepting, accepted = 
   const [budget, setBudget] = useState(String(proposal.budget_accelerator_hours))
   const [hours, setHours] = useState(String(proposal.duration_hours))
   const [baselineMinutes, setBaselineMinutes] = useState(String(proposal.baseline_minutes))
-  const [researchers, setResearchers] = useState(String(proposal.agents.length))
+  const [team, setTeam] = useState<TeamRow[]>(() => proposedRows(proposal.agents))
+  const { org } = useTenant()
+  const { data: catalog } = useAgentTypes(org.id)
+  const { data: roles } = useAgentRoles()
   const questions = proposal.questions ?? []
   const [answers, setAnswers] = useState(() => questions.map(q => q.answer))
   const [sending, setSending] = useState(false)
@@ -152,15 +185,14 @@ export function ProposalForm({ draft, proposal, editable, accepting, accepted = 
 
   const { metrics, stages, report_interval_seconds: reportEvery } = proposal.experiment
   const unit = budgetUnit(proposal.accelerator_kind, 'long')
-  const count = Number(researchers)
-  // The researchers proposed keep what the planner gave them; one added beyond them is a generalist.
-  // A count that is no whole number sends none, which the API refuses with why.
-  const agents = Array.from({ length: Number.isInteger(count) && count > 0 ? count : 0 }, (_, i) => proposal.agents[i] ?? {})
 
   async function accept() {
-    setSending(true)
     setError(null)
     setRefusal(null)
+    const accepted = acceptedAgents(team)
+    if ('problem' in accepted) return setRefusal({ field: 'team', message: accepted.problem })
+    const { agents } = accepted
+    setSending(true)
     try {
       await acceptDraft(draft.id, {
         name: name.trim(), budget_accelerator_hours: Number(budget), duration_hours: Number(hours), baseline_minutes: Number(baselineMinutes), agents,
@@ -244,15 +276,22 @@ export function ProposalForm({ draft, proposal, editable, accepting, accepted = 
             <Facts facts={runsOn(proposal)} />
             {!accepted && (
               <Text variant="note">
-                Once you accept, the baseline is measured on {acceleratorLabel(proposal.accelerator_type)} before any researcher starts.
+                Once you accept, the baseline is measured on {acceleratorLabel(proposal.accelerator_type)} before the team starts.
               </Text>
             )}
           </Stack>
         </Captioned>
-        <Captioned caption="Researchers">
-          <ol className="grid gap-1.5">
-            {agents.map((agent, i) => <Researcher key={i} n={i + 1} agent={agent} />)}
-          </ol>
+        <Captioned caption="Team">
+          {editable ? (
+            <Stack gap="xs">
+              <TeamEditor rows={team} onChange={setTeam} coordinatorModel={draft.coordinator?.model ?? ''} />
+              {errorOf('team') && <InlineError>{errorOf('team')}</InlineError>}
+            </Stack>
+          ) : (
+            <ol className="grid gap-1.5">
+              {proposal.agents.map((agent, i) => <ProposedMember key={i} agent={agent} catalog={catalog} roles={roles} />)}
+            </ol>
+          )}
         </Captioned>
         {(!!stages?.length || !!reportEvery) && (
           <Captioned caption="Rules of the run">
@@ -260,7 +299,7 @@ export function ProposalForm({ draft, proposal, editable, accepting, accepted = 
               {stages?.map((stage, i) => (
                 <li key={i}>
                   Stage {i + 1}: {stage.length_pct}% of the run
-                  {stage.evict_pct > 0 ? `, then the worst ${stage.evict_pct}% of researchers are cut` : ', nobody is cut'}
+                  {stage.evict_pct > 0 ? `, then the worst ${stage.evict_pct}% of executors are cut` : ', nobody is cut'}
                   {stage.max_job_hours ? `, no job longer than ${stage.max_job_hours} h` : ''}
                 </li>
               ))}
@@ -279,7 +318,7 @@ export function ProposalForm({ draft, proposal, editable, accepting, accepted = 
               [`Budget (${unit})`, formatAccH(proposal.budget_accelerator_hours)],
               ['Baseline (minutes)', String(proposal.baseline_minutes)],
               ['Duration (hours)', String(proposal.duration_hours)],
-              ['Researchers', String(proposal.agents.length)],
+              ['Agents', String(proposal.agents.length)],
             ]} />
           </Captioned>
         ) : (
@@ -287,17 +326,16 @@ export function ProposalForm({ draft, proposal, editable, accepting, accepted = 
           <Text tone="muted" className="mb-2">
             The budget caps everything the run spends, the baseline and burst hours included.
           </Text>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-3">
             <FormField label={`Budget (${unit})`} error={errorOf('budget')}><Input type="number" min={0} step="any" value={budget} disabled={!editable} onChange={e => setBudget(e.target.value)} /></FormField>
             <FormField label="Baseline (minutes)" error={errorOf('baseline')} hint="Until the baseline is due. The run starts once it is measured."><Input type="number" min={1} step={1} value={baselineMinutes} disabled={!editable} onChange={e => setBaselineMinutes(e.target.value)} /></FormField>
             <FormField label="Duration (hours)" error={errorOf('hours')} hint="Research time, from the start of the run."><Input type="number" min={0} step="any" value={hours} disabled={!editable} onChange={e => setHours(e.target.value)} /></FormField>
-            <FormField label="Researchers" error={errorOf('researchers')}><Input type="number" min={1} step={1} value={researchers} disabled={!editable} onChange={e => setResearchers(e.target.value)} /></FormField>
           </div>
         </Captioned>
         )}
         <Sentences title="What could mislead" items={proposal.risks} />
         <Sentences title="Left out on purpose" items={proposal.out_of_scope} />
-        <Captioned caption={!accepted ? 'The description every researcher works from' : questions.length > 0 ? 'The description as proposed, before the answers were added' : 'The description as proposed'}>
+        <Captioned caption={!accepted ? 'The description every agent works from' : questions.length > 0 ? 'The description as proposed, before the answers were added' : 'The description as proposed'}>
           <CollapsibleDescription text={proposal.experiment.description} />
         </Captioned>
         {editable && (

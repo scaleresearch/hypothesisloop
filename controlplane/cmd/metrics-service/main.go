@@ -69,7 +69,6 @@ func main() {
 		DefaultMaxConcurrentAccelerators: pcfg.Quota.DefaultMaxConcurrentAccelerators,
 		DefaultModelBudgetUSD:            pcfg.Quota.DefaultModelBudgetUSD,
 		MaxModelBudgetUSD:                pcfg.Quota.MaxModelBudgetUSD,
-		ModelCatalog:                     pcfg.Models.Catalog,
 	}
 
 	authenticator, err := auth.NewAuthenticator(pcfg.Auth, pcfg.SigningSecret, db.OrgDefaults{Store: store, NewOrgLimit: pcfg.Quota.NewOrgComputeLimit()})
@@ -103,7 +102,8 @@ func main() {
 
 func newControllerServer(authenticator *auth.Authenticator, pool *db.Pool, store *db.Store, quotaCfg domain.QuotaConfig, pcfg *hypothesisloopcfg.MetricsService, metrics *metricsdb.Store, port string, logger *zap.Logger) (*http.Server, context.CancelFunc) {
 	observedGapCap := pcfg.Scheduler.ObservationCadence()
-	peSvc := platformexperiments.NewService(store, quotaCfg, logger, metrics, observedGapCap)
+	peSvc := platformexperiments.NewService(store, quotaCfg, logger, metrics, observedGapCap).
+		WithModelDefaults(pcfg.Agents.ModelDefaults())
 
 	// metric-controller never connects to a cluster directly, and needs no cluster/workload
 	// wiring at all: eviction is purely a status update (service/controller) — the
@@ -119,10 +119,10 @@ func newControllerServer(authenticator *auth.Authenticator, pool *db.Pool, store
 	// Wire the stage-ladder store and GreptimeDB (Prometheus-compatible) URL. The ladder itself
 	// is per-platform-experiment config, not a controller-wide setting.
 	ctrl = ctrl.WithStagesStore(store, metrics)
-	// Each pass keeps the researchers of every running platform experiment at work as its pool
-	// says, launched as the control service launches the researchers it creates.
-	ctrl = ctrl.WithResearcherKeeper(peSvc.WithAgentLaunch(platformexperiments.AgentLaunch{
-		AgentSandbox: pcfg.Sandbox != nil, DefaultModel: pcfg.Agents.DefaultModel,
+	// Each pass keeps the agents of every running platform experiment at work as its pool
+	// says, launched as the control service launches the agents it creates.
+	ctrl = ctrl.WithAgentKeeper(peSvc.WithAgentLaunch(platformexperiments.AgentLaunch{
+		AgentSandbox: pcfg.Sandbox != nil, DefaultModel: pcfg.Agents.DefaultModel, CoordinatorModel: pcfg.Agents.CoordinatorModel,
 	}))
 
 	// settler durably writes a terminal experiment's final observed usage (see

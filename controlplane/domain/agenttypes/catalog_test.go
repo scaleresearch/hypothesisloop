@@ -9,17 +9,17 @@ import (
 )
 
 func TestEveryRoleHasABuiltinDefault(t *testing.T) {
-	var researchers []string
+	var executors []string
 	for _, t := range agenttypestest.Catalog() {
-		if t.Role == domain.AgentRoleResearcher {
-			researchers = append(researchers, t.ID)
+		if t.Role == domain.AgentRoleExecutor {
+			executors = append(executors, t.ID)
 		}
 	}
-	if !slices.Contains(researchers, domain.DefaultAgentType) {
-		t.Fatalf("the default type %q is no built-in researcher", domain.DefaultAgentType)
+	if !slices.Contains(executors, domain.DefaultAgentType) {
+		t.Fatalf("the default type %q is no built-in executor", domain.DefaultAgentType)
 	}
 	for _, role := range domain.AgentRoles {
-		if _, err := domain.LookupAgentType(agenttypestest.Catalog(), domain.AgentTypeOfRole(role), role); err != nil {
+		if _, err := domain.LookupAgentType(agenttypestest.Catalog(), role.Info().AgentType, role); err != nil {
 			t.Errorf("role %s has no built-in default: %v", role, err)
 		}
 	}

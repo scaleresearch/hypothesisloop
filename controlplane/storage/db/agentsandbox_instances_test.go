@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
@@ -70,6 +71,10 @@ func TestAnExitedMachineIsRecordedRestartedAndFinallyStopsWhatItRan(t *testing.T
 		if got := thing.instance(); got != (domain.AgentInstance{}) {
 			t.Fatalf("%s: a fresh instance: got = %+v, want nothing recorded", kind, got)
 		}
+		if thing.agentID != "" {
+			exec(t, pool, `UPDATE experiment_signups SET model = 'anthropic/test-model' WHERE platform_experiment_id = $1 AND agent_id = $2`, thing.pe, thing.agentID)
+		}
+		before := cursorNow(t, pool)
 		for _, name := range []string{"name-0", ""} {
 			if _, recorded, err := pes.EndInstance(ctx, thing.pe, thing.agentID, name, InstanceExited, "boom", time.Minute, maxRestarts); err != nil || recorded {
 				t.Fatalf("%s: an exit under %q, which was never asked for: got = %v, %v, want = false", kind, name, recorded, err)
@@ -106,6 +111,18 @@ func TestAnExitedMachineIsRecordedRestartedAndFinallyStopsWhatItRan(t *testing.T
 			if after.Restarts != wantRestarts || after.Stopped != wantStopped || after.ExitLog != got.ExitLog {
 				t.Fatalf("%s: exit %d returned %+v, stored %+v", kind, exit, after, got)
 			}
+		}
+
+		// The coordinator was never told that an executor's machine was given up on, so it could
+		// not fill the place. The stop is told once, with the agent's model and why.
+		var stops []string
+		for _, e := range changesAfter(t, pes, domain.EventFilter{PlatformExperimentID: thing.pe, Kinds: map[string]bool{platformapi.EventAgentStopped: true}}, before) {
+			stops = append(stops, e.Subject+" "+e.Value+" "+e.Detail)
+		}
+		if want := []string{thing.agentID + " anthropic/test-model exited: log of name-3"}; thing.agentID != "" && !reflect.DeepEqual(stops, want) {
+			t.Fatalf("%s: stops told: got = %q, want = %q", kind, stops, want)
+		} else if thing.agentID == "" && len(stops) != 0 {
+			t.Fatalf("%s: stops told: got = %q, want none for a coordinator", kind, stops)
 		}
 
 		// Stopped under one launch, it is asked for again under another with its budget whole.
@@ -385,7 +402,7 @@ func TestOneExitReportedByTwoReconcilesAtOnceSpendsOneRestart(t *testing.T) {
 	}
 }
 
-// The bound is on machines, so a sandboxed baseline or reviewer counts as a competitor does, and so
+// The bound is on machines, so a sandboxed baseline or reviewer counts as an executor does, and so
 // does the coordinator.
 func TestSandboxedAgentsOfEveryRoleAndTheCoordinatorCountAgainstTheMachinesOfOneExperiment(t *testing.T) {
 	pool := eventsTestDB(t)
@@ -412,20 +429,20 @@ func TestSandboxedAgentsOfEveryRoleAndTheCoordinatorCountAgainstTheMachinesOfOne
 		agent := &domain.Agent{ID: id, Name: id, CreatedAt: now}
 		return pes.SpawnAgent(ctx, pe.ID, agent, signup)
 	}
-	// max_agents is two competitors, which no baseline or reviewer counts against. Added one at
+	// max_agents is two executors, which no baseline or reviewer counts against. Added one at
 	// a time they would be without end, were machines not counted.
 	for i, role := range []domain.SignupRole{domain.SignupRoleBaseline, domain.SignupRoleReviewer, domain.SignupRoleBaseline} {
 		if err := add(domain.AgentSignup{Actor: testActor, Role: role, InAgentSandbox: true}); err != nil {
 			t.Fatalf("sandboxed %s %d: got = %v, want = nil", role, i+1, err)
 		}
 	}
-	for _, role := range []domain.SignupRole{domain.SignupRoleBaseline, domain.SignupRoleReviewer, domain.SignupRoleCompetitor} {
+	for _, role := range []domain.SignupRole{domain.SignupRoleBaseline, domain.SignupRoleReviewer, domain.SignupRoleExecutor} {
 		if err := add(domain.AgentSignup{Actor: testActor, Role: role, InAgentSandbox: true}); !errors.Is(err, ErrMaxAgentSandboxesReached) {
 			t.Fatalf("a fifth machine, a sandboxed %s: got = %v, want ErrMaxAgentSandboxesReached", role, err)
 		}
 	}
 	// An agent its owner runs is no machine of the platform's.
-	if err := add(domain.AgentSignup{Actor: testActor, Role: domain.SignupRoleCompetitor}); err != nil {
+	if err := add(domain.AgentSignup{Actor: testActor, Role: domain.SignupRoleExecutor}); err != nil {
 		t.Fatalf("a self-run agent in a full house: got = %v, want = nil", err)
 	}
 	if joined, err := pes.ListAgentSignups(ctx, pe.ID); err != nil || len(joined) != 4 {
@@ -460,11 +477,11 @@ func TestOneMachineIsKeptForTheBaselineAndAFinishedAgentHoldsNone(t *testing.T) 
 		return id, pes.SpawnAgent(ctx, pe.ID, agent, domain.AgentSignup{Actor: testActor, AgentID: id, Role: role, InAgentSandbox: true})
 	}
 	for i := range 2 {
-		if _, err := add(domain.SignupRoleCompetitor); err != nil {
-			t.Fatalf("researcher %d beside the coordinator: got = %v, want = nil", i+1, err)
+		if _, err := add(domain.SignupRoleExecutor); err != nil {
+			t.Fatalf("executor %d beside the coordinator: got = %v, want = nil", i+1, err)
 		}
 	}
-	for _, role := range []domain.SignupRole{domain.SignupRoleCompetitor, domain.SignupRoleReviewer} {
+	for _, role := range []domain.SignupRole{domain.SignupRoleExecutor, domain.SignupRoleReviewer} {
 		if _, err := add(role); !errors.Is(err, ErrMaxAgentSandboxesReached) {
 			t.Fatalf("a sandboxed %s for the machine kept for the baseline: got = %v, want ErrMaxAgentSandboxesReached", role, err)
 		}
@@ -482,8 +499,8 @@ func TestOneMachineIsKeptForTheBaselineAndAFinishedAgentHoldsNone(t *testing.T) 
 	if _, err := add(domain.SignupRoleBaseline); err != nil {
 		t.Fatalf("a second baseline agent once the first finished: got = %v, want = nil", err)
 	}
-	if _, err := add(domain.SignupRoleCompetitor); !errors.Is(err, ErrMaxAgentSandboxesReached) {
-		t.Fatalf("a researcher in a full house: got = %v, want ErrMaxAgentSandboxesReached", err)
+	if _, err := add(domain.SignupRoleExecutor); !errors.Is(err, ErrMaxAgentSandboxesReached) {
+		t.Fatalf("an executor in a full house: got = %v, want ErrMaxAgentSandboxesReached", err)
 	}
 }
 

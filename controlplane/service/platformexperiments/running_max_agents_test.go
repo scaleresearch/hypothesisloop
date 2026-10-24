@@ -14,7 +14,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
 )
 
-// seatStore is createdStore with the quotas of its researchers, and the hours each used.
+// seatStore is createdStore with the quotas of its executors, and the hours each used.
 type seatStore struct {
 	createdStore
 	quotas map[string]domain.AgentQuota
@@ -34,15 +34,15 @@ func (s *seatStore) IsAgentCut(_ context.Context, _, agentID string) (bool, erro
 	return s.cut[agentID], nil
 }
 
-// UpdatePlatformExperiment holds max_agents to the researchers at work: a cut one is not.
-func (s *seatStore) UpdatePlatformExperiment(_ context.Context, pe *domain.PlatformExperiment, status domain.PlatformExperimentStatus, researchers domain.ResearcherPool) error {
+// UpdatePlatformExperiment holds max_agents to the executors at work: a cut one is not.
+func (s *seatStore) UpdatePlatformExperiment(_ context.Context, pe *domain.PlatformExperiment, status domain.PlatformExperimentStatus, executors domain.AgentPool) error {
 	atWork := 0
-	for _, id := range s.researchers {
+	for _, id := range s.executors {
 		if !s.cut[id] {
 			atWork++
 		}
 	}
-	return s.update(pe, status, researchers, atWork)
+	return s.update(pe, status, executors, atWork)
 }
 
 func (s *seatStore) AddDesiredQuotaUsageOne(context.Context, *domain.AgentQuota) error { return nil }
@@ -51,14 +51,14 @@ func (s *seatStore) GetAgentRunningExperiments(context.Context, string, string) 
 	return nil, nil
 }
 
-// The owner who wants more researchers at work had to close the run and start another. max_agents
-// changes while it runs, for the places nobody took, as long as what the researchers left unspent
+// The owner who wants more executors at work had to close the run and start another. max_agents
+// changes while it runs, for the places nobody took, as long as what the executors left unspent
 // still holds one trial of the baseline for each of them.
 func TestARunningExperimentTakesAMaxAgentsItsUnspentHoursHold(t *testing.T) {
 	update := func(maxAgents int, cut ...string) (*seatStore, error) {
 		t.Helper()
 		store := &seatStore{
-			createdStore: createdStore{created: []*domain.PlatformExperiment{runningOnBaseline()}, researchers: []string{"ag-1", "ag-2", "ag-3"}},
+			createdStore: createdStore{created: []*domain.PlatformExperiment{runningOnBaseline()}, executors: []string{"ag-1", "ag-2", "ag-3"}},
 			// 2 + 2.5 unspent, and ag-3 cut with all of its share.
 			quotas: map[string]domain.AgentQuota{
 				"ag-1": {GuaranteedAcceleratorHours: 3, UsedGuaranteedAccH: 1},
@@ -89,7 +89,7 @@ func TestARunningExperimentTakesAMaxAgentsItsUnspentHoursHold(t *testing.T) {
 	if store, err := update(7); err != nil || store.created[0].MaxAgents != 7 {
 		t.Errorf("seven places 4.5 unspent hours hold: got = %v, stored %d, want 7", err, store.created[0].MaxAgents)
 	}
-	// The store cuts the newest researchers above a lowered max_agents of a running one.
+	// The store cuts the newest executors above a lowered max_agents of a running one.
 	if store, err := update(1); err != nil || store.created[0].MaxAgents != 1 {
 		t.Errorf("fewer places than at work: got = %v, stored %d, want 1", err, store.created[0].MaxAgents)
 	}
@@ -98,8 +98,8 @@ func TestARunningExperimentTakesAMaxAgentsItsUnspentHoursHold(t *testing.T) {
 		cut       []string
 		reason    string
 	}{
-		"more places than a trial apiece":           {8, nil, "budget_below_baseline"},
-		"a cut researcher's hours count for nobody": {5, []string{"ag-2"}, "budget_below_baseline"},
+		"more places than a trial apiece":         {8, nil, "budget_below_baseline"},
+		"a cut executor's hours count for nobody": {5, []string{"ag-2"}, "budget_below_baseline"},
 	} {
 		store, err := update(c.maxAgents, c.cut...)
 		if reason(err) != c.reason || store.created[0].MaxAgents != 2 {

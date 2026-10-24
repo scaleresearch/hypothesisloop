@@ -66,7 +66,7 @@ WHERE s.platform_experiment_id=$1 AND s.agent_id=$2 FOR UPDATE OF s`, platformEx
 			return fmt.Errorf("platform_experiments_store.RemoveAgent: %w", err)
 		}
 		tx.agentActivity(platformExpID, agentID, domain.ActivityLeft)
-		// Where the platform runs the researchers, the pool is what it runs: a researcher removed
+		// Where the platform runs the agents, the pool is what it runs: an agent removed
 		// before the start lowers its entry, or the platform would add another in its place.
 		if platformRuns && len(keys) > 0 {
 			if err := shrinkPoolToAtWorkTx(ctx, tx, platformExpID, keys[0]); err != nil {

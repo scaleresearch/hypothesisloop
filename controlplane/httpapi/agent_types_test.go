@@ -159,7 +159,7 @@ func TestAnOrgsOwnerCopiesABuiltinAndEditsTheCopy(t *testing.T) {
 	var copied domain.CurrentAgentType
 	w.ok("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"from": "generalist"}, http.StatusCreated, &copied)
 	generalist := w.agentTypes.types["generalist"]
-	if copied.Name != "Copy of Generalist" || copied.Role != domain.AgentRoleResearcher || copied.Builtin || copied.OrgID != w.orgA ||
+	if copied.Name != "Copy of Generalist" || copied.Role != domain.AgentRoleExecutor || copied.Builtin || copied.OrgID != w.orgA ||
 		copied.Current.Prompt != generalist.Current.Prompt || copied.Current.Settings.MaxSubagents != 4 || copied.CreatedBy == nil || copied.CreatedBy.ID != "u-owner" {
 		t.Fatalf("copy: got = %+v, want the generalist's prompt and settings in a type of org a made by its owner", copied)
 	}
@@ -182,22 +182,42 @@ func TestAnOrgsOwnerCopiesABuiltinAndEditsTheCopy(t *testing.T) {
 func TestAPromptOrSettingsAnAgentCannotRunWithAreRefused(t *testing.T) {
 	w := newAccountsWorld(t)
 	for what, body := range map[string]name{
-		"no rules":               {"name": "x", "role": "researcher", "prompt": "{{hl_commands}}", "settings": ownSettings()},
-		"a placeholder of none":  {"name": "x", "role": "researcher", "prompt": ownPrompt + "{{agent_type_brief}}", "settings": ownSettings()},
+		"no rules":               {"name": "x", "role": "executor", "prompt": "{{hl_commands}}", "settings": ownSettings()},
+		"a placeholder of none":  {"name": "x", "role": "executor", "prompt": ownPrompt + "{{agent_type_brief}}", "settings": ownSettings()},
 		"a coordinator agent id": {"name": "x", "role": "coordinator", "prompt": ownPrompt, "settings": ownSettings()},
 		"no role":                {"name": "x", "prompt": ownPrompt, "settings": ownSettings()},
-		"no settings":            {"name": "x", "role": "researcher", "prompt": ownPrompt},
-		"no name":                {"role": "researcher", "prompt": ownPrompt, "settings": ownSettings()},
-		"too many subagents":     {"name": "x", "role": "researcher", "prompt": ownPrompt, "settings": name{"max_subagents": 11, "effort": "high"}},
+		"no settings":            {"name": "x", "role": "executor", "prompt": ownPrompt},
+		"no name":                {"role": "executor", "prompt": ownPrompt, "settings": ownSettings()},
+		"too many subagents":     {"name": "x", "role": "executor", "prompt": ownPrompt, "settings": name{"max_subagents": 11, "effort": "high"}},
 	} {
 		if rec := w.call("owner", "POST", "/orgs/"+w.orgA+"/agent-types", body); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), accounts.ReasonInvalidAgentType) {
 			t.Errorf("%s: got = %d %s, want 422 %s", what, rec.Code, rec.Body, accounts.ReasonInvalidAgentType)
 		}
 	}
 	var made domain.CurrentAgentType
-	w.ok("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"name": "Mine", "role": "researcher", "prompt": ownPrompt, "settings": ownSettings()}, http.StatusCreated, &made)
+	w.ok("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"name": "Mine", "role": "executor", "prompt": ownPrompt, "settings": ownSettings()}, http.StatusCreated, &made)
 	if made.Current.Settings.Hyperparameters == nil {
 		t.Error("hyperparameters left out are stored as none, an empty object")
+	}
+}
+
+// An agent type runs on a model GET /models lists, or on the platform's default: a bare name, a
+// name is invalid_agent_type, and a provider not served and a model not listed are refused on
+// create and on edit alike.
+func TestAnAgentTypesModelIsOneTheListingHolds(t *testing.T) {
+	w := newAccountsWorld(t)
+	var made domain.CurrentAgentType
+	w.ok("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"name": "Mine", "role": "executor", "prompt": ownPrompt,
+		"settings": name{"max_subagents": 3, "effort": "medium", "model": "anthropic/model-2"}}, http.StatusCreated, &made)
+	if made.Current.Settings.Model != "anthropic/model-2" {
+		t.Fatalf("model = %q, want the one named", made.Current.Settings.Model)
+	}
+	w.refusedWith("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"name": "x", "role": "executor", "prompt": ownPrompt,
+		"settings": name{"max_subagents": 3, "effort": "medium", "model": "model-2"}}, http.StatusUnprocessableEntity, accounts.ReasonInvalidAgentType)
+	for _, model := range []string{"openrouter/moonshotai/kimi-k2", "anthropic/claude-fable-5-1"} {
+		settings := name{"max_subagents": 3, "effort": "medium", "model": model}
+		w.refusedWith("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"name": "x", "role": "executor", "prompt": ownPrompt, "settings": settings}, http.StatusUnprocessableEntity, "model_not_served")
+		w.refusedWith("owner", "PUT", "/orgs/"+w.orgA+"/agent-types/"+made.ID, name{"if_version": 1, "name": "Mine", "prompt": ownPrompt, "settings": settings}, http.StatusUnprocessableEntity, "model_not_served")
 	}
 }
 
@@ -205,6 +225,7 @@ func TestAPromptOrSettingsAnAgentCannotRunWithAreRefused(t *testing.T) {
 // type, whether asked for from scratch or as a copy.
 func TestAnOrgMakesNoCoordinatorOrPlannerType(t *testing.T) {
 	w := newAccountsWorld(t)
+	w.refusedWith("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"name": "x", "role": "researcher", "prompt": "{{rules}}\n{{hl_commands}}", "settings": ownSettings()}, http.StatusUnprocessableEntity, accounts.ReasonInvalidAgentType)
 	for _, role := range []string{"coordinator", "planner"} {
 		w.refusedWith("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"name": "x", "role": role, "prompt": "{{rules}}\n{{hl_commands}}", "settings": ownSettings()}, http.StatusUnprocessableEntity, accounts.ReasonInvalidAgentType)
 		w.refusedWith("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"from": role}, http.StatusUnprocessableEntity, accounts.ReasonInvalidAgentType)
@@ -217,7 +238,7 @@ func TestAnOrgMakesNoCoordinatorOrPlannerType(t *testing.T) {
 func TestAnOwnerRestoresAnEarlierVersionAndEveryChangeIsKept(t *testing.T) {
 	w := newAccountsWorld(t)
 	var made domain.CurrentAgentType
-	w.ok("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"name": "Mine", "role": "researcher", "prompt": ownPrompt, "settings": ownSettings()}, http.StatusCreated, &made)
+	w.ok("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"name": "Mine", "role": "executor", "prompt": ownPrompt, "settings": ownSettings()}, http.StatusCreated, &made)
 	w.ok("owner", "PUT", "/orgs/"+w.orgA+"/agent-types/"+made.ID, name{"if_version": 1, "name": "Mine", "prompt": ownPrompt + " Two.", "settings": ownSettings()}, http.StatusOK, nil)
 	var restored accounts.EditedAgentType
 	w.ok("owner", "POST", "/orgs/"+w.orgA+"/agent-types/"+made.ID+"/restore", name{"version": 1}, http.StatusOK, &restored)
@@ -249,7 +270,7 @@ func TestAnOwnerRestoresAnEarlierVersionAndEveryChangeIsKept(t *testing.T) {
 func TestOnlyAnOrgsAdministratorsChangeItsTypes(t *testing.T) {
 	w := newAccountsWorld(t)
 	var made domain.CurrentAgentType
-	w.ok("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"name": "Mine", "role": "researcher", "prompt": ownPrompt, "settings": ownSettings()}, http.StatusCreated, &made)
+	w.ok("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"name": "Mine", "role": "executor", "prompt": ownPrompt, "settings": ownSettings()}, http.StatusCreated, &made)
 	base := "/orgs/" + w.orgA + "/agent-types"
 	edit := name{"if_version": 1, "name": "x", "prompt": ownPrompt, "settings": ownSettings()}
 	for caller, want := range map[string]int{"member": http.StatusForbidden, "outsider": http.StatusNotFound} {
@@ -270,10 +291,21 @@ func TestOnlyAnOrgsAdministratorsChangeItsTypes(t *testing.T) {
 func TestTheLimitsOnAnOrgsTypesAreRefusedClearly(t *testing.T) {
 	w := newAccountsWorld(t)
 	var made domain.CurrentAgentType
-	w.ok("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"name": "Mine", "role": "researcher", "prompt": ownPrompt, "settings": ownSettings()}, http.StatusCreated, &made)
+	w.ok("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"name": "Mine", "role": "executor", "prompt": ownPrompt, "settings": ownSettings()}, http.StatusCreated, &made)
 	w.agentTypes.limit = &db.AgentTypeLimit{Types: true, Limit: domain.MaxOrgAgentTypes}
 	w.refusedWith("owner", "POST", "/orgs/"+w.orgA+"/agent-types", name{"from": "generalist"}, http.StatusConflict, accounts.ReasonAgentTypeLimit)
 	w.agentTypes.limit = &db.AgentTypeLimit{Limit: domain.MaxAgentTypeEditsAnHour}
 	w.refusedWith("owner", "PUT", "/orgs/"+w.orgA+"/agent-types/"+made.ID, name{"if_version": 1, "name": "x", "prompt": ownPrompt, "settings": ownSettings()}, http.StatusTooManyRequests, accounts.ReasonEditRateLimited)
 	w.refusedWith("owner", "POST", "/orgs/"+w.orgA+"/agent-types/"+made.ID+"/restore", name{"version": 1}, http.StatusTooManyRequests, accounts.ReasonEditRateLimited)
+}
+
+// Whoever composes a team reads every role and what its agents do from the platform.
+func TestTheRolesAreListedWithWhatTheirAgentsDo(t *testing.T) {
+	w := newAccountsWorld(t)
+	var roles []domain.AgentRoleInfo
+	w.ok("owner", "GET", "/agent-roles", nil, http.StatusOK, &roles)
+	if len(roles) != len(domain.AgentRoles) || roles[0].Role != domain.AgentRoleExecutor || roles[1].Role != domain.AgentRoleResearcher ||
+		roles[1].AgentType != domain.ResearcherAgentType || roles[1].SignupRole != domain.SignupRoleResearcher || !roles[1].InTeam || roles[1].OrgTypes || roles[1].Description == "" {
+		t.Errorf("roles = %+v, want every role, the executor first and the researcher of its built-in type", roles)
+	}
 }

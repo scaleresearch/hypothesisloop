@@ -16,12 +16,19 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
 }))
 vi.mock('@/lib/api/agents', () => ({ fetchPlatformExperimentAgents: vi.fn() }))
+vi.mock('@/lib/api/agent-types', async () => {
+  const { CATALOG, ROLES } = await import('@/test-agent-types')
+  return { fetchAgentTypes: vi.fn(async () => CATALOG), fetchAgentRoles: vi.fn(async () => ROLES) }
+})
+vi.mock('@/lib/api/models', async () => ({ fetchModels: vi.fn(async () => (await import('@/test-models')).MODELS) }))
 vi.mock('@/lib/api/request', async importActual => ({
   ...(await importActual<typeof import('@/lib/api/request')>()),
   apiSend: vi.fn(),
 }))
 
-const sweeper = { agent_type: 'hyperparameter-search', model: 'claude-opus-4-5', hyperparameters: { direction: 'Find the schedule: warmup length first, then the decay.' } }
+// The agent of an entry the planner proposed with no type, as an accept sends it.
+const generalist = { agent_type: 'generalist' }
+const sweeper = { agent_type: 'hyperparameter-search', model: 'anthropic/claude-opus-5-5', hyperparameters: { direction: 'Find the schedule: warmup length first, then the decay.' } }
 const proposal: StoredProposal = {
   experiment: {
     name: 'Cosine or constant',
@@ -44,7 +51,7 @@ const proposal: StoredProposal = {
   accelerator_kind: 'accelerator',
   metric_reason: 'Validation loss on held-out text is the goal itself.',
   measurement: 'bench.py scores a split the training never reads.',
-  sizing_reason: 'An estimate, nothing has run: a trial is assumed to take 6 minutes, so 30 trials each for 2 researchers is 6.',
+  sizing_reason: 'An estimate, nothing has run: a trial is assumed to take 6 minutes, so 30 trials each for 2 executors is 6.',
   risks: ['One seed only.'],
 }
 
@@ -128,39 +135,38 @@ describe('a proposed draft', () => {
     expect(budget).toHaveProperty('value', '6')
     await userEvent.clear(budget)
     await userEvent.type(budget, '3')
-    const researchers = screen.getByLabelText('Researchers')
-    await userEvent.clear(researchers)
-    await userEvent.type(researchers, '3')
+    await userEvent.click(await screen.findByRole('button', { name: '+ Add executor' }))
     const baseline = screen.getByLabelText('Baseline (minutes)')
     expect(baseline).toHaveProperty('value', '30')
     await userEvent.clear(baseline)
     await userEvent.type(baseline, '45')
     await userEvent.click(screen.getByRole('button', { name: 'Accept and run' }))
     expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/pe-1/accept', {
-      name: 'Cosine or constant', budget_accelerator_hours: 3, duration_hours: 4, baseline_minutes: 45, agents: [sweeper, {}, {}],
+      name: 'Cosine or constant', budget_accelerator_hours: 3, duration_hours: 4, baseline_minutes: 45, agents: [sweeper, generalist, generalist],
     })
   })
 
-  it('accepts under the name the person gave it, and lists a researcher for each one asked for', async () => {
+  it('accepts under the name the person gave it, with the team as the person composed it', async () => {
     show(proposed())
     const name = screen.getByLabelText('Name')
     await userEvent.clear(name)
     await userEvent.type(name, 'Schedules on tiny transformers')
-    const researchers = screen.getByLabelText('Researchers')
-    await userEvent.clear(researchers)
-    await userEvent.type(researchers, '1')
-    expect(screen.queryByText('Researcher 2')).toBeNull()
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove team entry 2' }))
+    expect(screen.getByText('No researcher in the team. Keeps the hypothesis graph correct and points the work.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: '+ Add researcher' }))
+    expect((screen.getByLabelText('Team entry 2 model') as HTMLInputElement).placeholder).toBe("Coordinator's model: anthropic/claude-opus-5-5")
+    expect(screen.getByText('1 executor, 1 researcher')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Accept and run' }))
     expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/pe-1/accept', {
-      name: 'Schedules on tiny transformers', budget_accelerator_hours: 6, duration_hours: 4, baseline_minutes: 30, agents: [sweeper],
+      name: 'Schedules on tiny transformers', budget_accelerator_hours: 6, duration_hours: 4, baseline_minutes: 30, agents: [sweeper, { agent_type: 'researcher' }],
     })
   })
 
   it('says why the API refused to accept', async () => {
-    vi.mocked(apiSend).mockRejectedValue(new Error('agents: propose between 1 and 24 researchers, got 30'))
+    vi.mocked(apiSend).mockRejectedValue(new Error('agents: propose at least one executor and at most 24 agents in all (the draft\'s max_agents), got 30 executors of 30'))
     show(proposed())
     await userEvent.click(screen.getByRole('button', { name: 'Accept and run' }))
-    expect((await screen.findByRole('alert')).textContent).toMatch(/between 1 and 24/)
+    expect((await screen.findByRole('alert')).textContent).toMatch(/at most 24 agents/)
   })
 
   it('changes what the person asked', async () => {
@@ -205,7 +211,7 @@ describe('a proposed draft', () => {
 // before anything ran, and one away from the page held the run up for as long as they were away.
 // The platform accepts a proposal by itself at accepts_at, and the page counts down to it.
 describe('a proposal the platform accepts by itself unless the person acts first', () => {
-  const accepted = ['POST', '/platform-experiments/pe-1/accept', { name: 'Cosine or constant', budget_accelerator_hours: 6, duration_hours: 4, baseline_minutes: 30, agents: [sweeper, {}] }]
+  const accepted = ['POST', '/platform-experiments/pe-1/accept', { name: 'Cosine or constant', budget_accelerator_hours: 6, duration_hours: 4, baseline_minutes: 30, agents: [sweeper, generalist] }]
   const accepting = (seconds = 30) => draft('accepting', { proposal, proposed_at: '2026-10-05T12:10:00Z', accepts_at: new Date(Date.now() + seconds * 1_000).toISOString() })
   const countdown = () => screen.queryByRole('timer')?.textContent
   const pass = async (seconds: number) => {
@@ -280,7 +286,7 @@ describe('a proposal with questions', () => {
     await userEvent.type(batch, '64, the size the control ships with. ')
     await userEvent.click(screen.getByRole('button', { name: 'Accept and run' }))
     expect(apiSend).toHaveBeenCalledExactlyOnceWith('POST', '/platform-experiments/pe-1/accept', {
-      name: 'Cosine or constant', budget_accelerator_hours: 6, duration_hours: 4, baseline_minutes: 30, agents: [sweeper, {}],
+      name: 'Cosine or constant', budget_accelerator_hours: 6, duration_hours: 4, baseline_minutes: 30, agents: [sweeper, generalist],
       answers: ['A 20% lower val_loss.', '64, the size the control ships with.'],
     })
   })

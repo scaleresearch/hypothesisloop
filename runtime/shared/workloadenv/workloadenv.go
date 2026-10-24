@@ -103,6 +103,52 @@ func allottedCPUs(cpu string) (string, error) {
 	return strconv.FormatInt(max((q.MilliValue()+999)/1000, 1), 10), nil
 }
 
+// GangVar is one variable of Gang. An indexed one is the node's index in its group, which only
+// the runtime that places the node knows, so it fills it in (At).
+type GangVar struct {
+	Name, Value string
+	Indexed     bool
+}
+
+// At is v for the node at index of its group.
+func (v GangVar) At(index int) Var {
+	if v.Indexed {
+		return Var{v.Name, strconv.Itoa(index)}
+	}
+	return Var{v.Name, v.Value}
+}
+
+// Gang is where a node of group stands among the nodes of a job that spans several: the group's
+// first rank is offset, and every node meets the others at masterAddr. The torch names stand
+// beside the platform's, one process per node, so LOCAL_RANK is always 0. An ungrouped job's ranks
+// are its one group's indices.
+//
+// A grouped node is told its group's offset and its index in the group, never RANK: a rank
+// computed for every group after the first from its index alone would be silently wrong, two
+// nodes claiming rank 0 in one process group, while an absent RANK fails at its first read.
+func Gang(spec clusterapi.JobSpec, group clusterapi.JobGroup, offset int, masterAddr string) []GangVar {
+	worldSize := strconv.Itoa(spec.Nodes())
+	masterPort := strconv.Itoa(jobenv.DistributedMasterPort)
+	vars := []GangVar{
+		{Name: jobenv.WorldSize, Value: worldSize},
+		{Name: jobenv.MasterAddr, Value: masterAddr},
+		{Name: jobenv.MasterPort, Value: masterPort},
+		{Name: jobenv.TorchLocalRank, Value: "0"},
+		{Name: jobenv.TorchWorldSize, Value: worldSize},
+		{Name: jobenv.TorchMasterAddr, Value: masterAddr},
+		{Name: jobenv.TorchMasterPort, Value: masterPort},
+	}
+	if len(spec.Groups) > 0 {
+		return append(vars,
+			GangVar{Name: jobenv.Group, Value: group.Name},
+			GangVar{Name: jobenv.GroupRank, Indexed: true},
+			GangVar{Name: jobenv.GroupReplicas, Value: strconv.Itoa(group.Replicas)},
+			GangVar{Name: jobenv.RankOffset, Value: strconv.Itoa(offset)},
+		)
+	}
+	return append(vars, GangVar{Name: jobenv.Rank, Indexed: true}, GangVar{Name: jobenv.TorchRank, Indexed: true})
+}
+
 // Job returns the job's own environment with the group's entries over it: the job-level map says
 // what is true of every node, the group's what is true of its role. The job's secret_env is part
 // of it; admission refused a name the job or a group also sets in the open.

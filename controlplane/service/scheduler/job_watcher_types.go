@@ -36,10 +36,9 @@ type JobStatusStore interface {
 	// different state — used to prevent double-refunds when natural completion and controller
 	// eviction race.
 	TransitionStatus(ctx context.Context, id string, from, to domain.ExperimentStatus, reason string) (bool, error)
-	// RequeueForRetry returns a failed gang that is still SUBMITTED or RUNNING to QUEUED for a
-	// fresh whole-gang attempt and spends one of its max_retries, both in one guarded UPDATE.
-	// Returns false when the budget is exhausted or another writer got there first — see retryGang for why gangs are the only
-	// jobs whose retry the control plane decides.
+	// RequeueForRetry returns a failed job that is still SUBMITTED or RUNNING to QUEUED for a
+	// fresh attempt and spends one of its max_retries, both in one guarded UPDATE. Returns false
+	// when the budget is exhausted or another writer got there first.
 	RequeueForRetry(ctx context.Context, id string, maxAttemptsBefore int) (bool, error)
 }
 

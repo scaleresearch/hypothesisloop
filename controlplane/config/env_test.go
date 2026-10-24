@@ -1,11 +1,14 @@
 package config
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
 // madeUp is a value of every key, none of which a test's settings use for anything real.
@@ -119,12 +122,14 @@ func TestEachLoaderRefusesEachMissingKeyNamingItAndWhatItIsFor(t *testing.T) {
 
 func TestALoaderReadsItsOwnKeysAndIgnoresTheOthers(t *testing.T) {
 	inEnvironment(t, withoutGitHost(t)+githubHost+rents)
+	t.Setenv(ModelOpenRouterAPIKey.Name, "")
+	t.Setenv(ModelOpenAIAuthJSON.Name, "")
 	c, err := LoadControlService()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if c.SigningSecret != madeUp[AuthSigningSecret] || c.GitHubKey != madeUp[GitHostGitHubAppPrivateKey] || c.GitHubClientSecret != madeUp[GitHostGitHubClientSecret] || c.SandboxSecret != madeUp[AccountKey(SectionSandbox, "fly")] ||
-		c.ModelToken != madeUp[ModelAnthropicOAuthToken] || c.ObjectStoreSecret != madeUp[ObjectStoreMinIOSecretAccessKey] || c.GraphDBURL != madeUp[GraphDBURL] ||
+		!maps.Equal(c.ModelCredentials, map[string]string{domain.ModelProviderAnthropic: madeUp[ModelAnthropicOAuthToken]}) || c.ObjectStoreSecret != madeUp[ObjectStoreMinIOSecretAccessKey] || c.GraphDBURL != madeUp[GraphDBURL] ||
 		c.CloudComputeSecrets["a"] != madeUp[AccountKey(SectionCloudCompute, "a")] {
 		t.Errorf("control-service = %+v, want the environment's keys", c)
 	}
@@ -133,6 +138,68 @@ func TestALoaderReadsItsOwnKeysAndIgnoresTheOthers(t *testing.T) {
 	m, err := LoadMetricsService()
 	if err != nil || m.DatabaseURL != madeUp[DatabaseURL] || m.MetricsDBURL != madeUp[MetricsDBURL] {
 		t.Errorf("metrics-service = %+v, %v, want its keys and no others", m, err)
+	}
+}
+
+// A model provider is served while its credential is set: the one of a default model's provider is
+// required, and any other is read when it is there.
+func TestAModelProviderIsServedWhileItsCredentialIsSet(t *testing.T) {
+	text := productionConfig(t)
+	inEnvironment(t, text)
+	s, err := LoadSettings(os.Getenv(SettingsPath.Name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Optional(ProgramControlService); !slices.Equal(got, []Key{ModelOpenRouterAPIKey, ModelOpenAIAuthJSON}) {
+		t.Errorf("control-service reads %v when set, want %v", names(got), names([]Key{ModelOpenRouterAPIKey, ModelOpenAIAuthJSON}))
+	}
+	if got := s.Optional(ProgramMetricsService); got != nil {
+		t.Errorf("metrics-service reads %v when set, want none", names(got))
+	}
+	t.Setenv(ModelOpenRouterAPIKey.Name, "")
+	t.Setenv(ModelOpenAIAuthJSON.Name, "")
+	if c, err := LoadControlService(); err != nil || !maps.Equal(c.ModelCredentials, map[string]string{domain.ModelProviderAnthropic: madeUp[ModelAnthropicOAuthToken]}) {
+		t.Errorf("without an openrouter key: %v, %v, want anthropic alone served", c, err)
+	}
+	t.Setenv(ModelOpenRouterAPIKey.Name, "an-openrouter-key")
+	c, err := LoadControlService()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{domain.ModelProviderAnthropic: madeUp[ModelAnthropicOAuthToken], domain.ModelProviderOpenRouter: "an-openrouter-key"}
+	if !maps.Equal(c.ModelCredentials, want) {
+		t.Errorf("credentials = %v, want both providers'", c.ModelCredentials)
+	}
+
+	openRouterDefaults := strings.NewReplacer("default_model: anthropic/claude-sonnet-5", "default_model: openrouter/moonshotai/kimi-k2",
+		"coordinator_model: anthropic/claude-opus-5-5", "coordinator_model: openrouter/moonshotai/kimi-k2").Replace(text)
+	inEnvironment(t, openRouterDefaults)
+	t.Setenv(ModelOpenRouterAPIKey.Name, "")
+	t.Setenv(ModelOpenAIAuthJSON.Name, "")
+	s, err = LoadSettings(os.Getenv(SettingsPath.Name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Needs(ProgramControlService); !slices.Contains(got, ModelOpenRouterAPIKey) || slices.Contains(got, ModelAnthropicOAuthToken) {
+		t.Errorf("with openrouter defaults control-service needs %v, want MODEL_OPENROUTER_API_KEY and not the anthropic token", names(got))
+	}
+	if _, err := LoadControlService(); err == nil || !strings.Contains(err.Error(), ModelOpenRouterAPIKey.Name) {
+		t.Errorf("openrouter defaults without its key: got %v, want it refused by name", err)
+	}
+	t.Setenv(ModelOpenRouterAPIKey.Name, "an-openrouter-key")
+	t.Setenv(ModelAnthropicOAuthToken.Name, "")
+	if c, err := LoadControlService(); err != nil || !maps.Equal(c.ModelCredentials, map[string]string{domain.ModelProviderOpenRouter: "an-openrouter-key"}) {
+		t.Errorf("openrouter alone: %v, %v, want it served and anthropic not", c, err)
+	}
+	// A provider not served needs no catalog.
+	start := strings.Index(openRouterDefaults, "  anthropic:\n")
+	end := strings.Index(openRouterDefaults, "  openai:\n")
+	inEnvironment(t, openRouterDefaults[:start]+openRouterDefaults[end:])
+	t.Setenv(ModelOpenRouterAPIKey.Name, "an-openrouter-key")
+	t.Setenv(ModelAnthropicOAuthToken.Name, "")
+	t.Setenv(ModelOpenAIAuthJSON.Name, "")
+	if _, err := LoadControlService(); err != nil {
+		t.Errorf("openrouter alone with no anthropic catalog: %v, want it loaded", err)
 	}
 }
 
@@ -157,7 +224,7 @@ func TestAProvidersKeyIsItsSectionItsNameAndItsField(t *testing.T) {
 			t.Errorf("IsKey(%s) = false", key.Name)
 		}
 	}
-	for _, name := range []string{SettingsPath.Name, DatabaseURL.Name, MetricsDBURL.Name, GraphDBURL.Name, AuthSigningSecret.Name, ModelAnthropicOAuthToken.Name, "CLOUD_COMPUTE_RUNPOD_API_KEY"} {
+	for _, name := range []string{SettingsPath.Name, DatabaseURL.Name, MetricsDBURL.Name, GraphDBURL.Name, AuthSigningSecret.Name, ModelAnthropicOAuthToken.Name, ModelOpenRouterAPIKey.Name, ModelOpenAIAuthJSON.Name, "CLOUD_COMPUTE_RUNPOD_API_KEY"} {
 		if !IsKey(name) {
 			t.Errorf("IsKey(%s) = false, want a key some program reads", name)
 		}

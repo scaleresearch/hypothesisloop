@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/scaleresearch/hypothesisloop/contract/platformapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/auth"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
@@ -35,7 +36,7 @@ func AdmissionStatus(reason string) int {
 	switch reason {
 	case ReasonInsufficientQuota:
 		return http.StatusPaymentRequired
-	case ReasonDuplicate:
+	case ReasonDuplicate, platformapi.ReasonHypothesisMerged, platformapi.ReasonHypothesisRetired:
 		return http.StatusConflict
 	case ReasonRateLimited:
 		return http.StatusTooManyRequests

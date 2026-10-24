@@ -6,22 +6,24 @@ import (
 	"mime"
 )
 
-// usage is what the provider counted for one call.
+// usage is what the provider counted for one call, and its cost in US dollars when the provider
+// states one, as OpenRouter does.
 type usage struct {
-	Model                    string
 	InputTokens              int64
 	OutputTokens             int64
 	CacheCreationInputTokens int64
 	CacheReadInputTokens     int64
+	CostUSD                  *float64
 }
 
-// counts is a usage block as the provider writes it. A field it leaves out is nil, so a later
-// block replaces only what it states.
+// counts is a usage block as the provider writes it. A field it leaves out or states null is nil,
+// so a later block replaces only what it states.
 type counts struct {
-	InputTokens              *int64 `json:"input_tokens"`
-	OutputTokens             *int64 `json:"output_tokens"`
-	CacheCreationInputTokens *int64 `json:"cache_creation_input_tokens"`
-	CacheReadInputTokens     *int64 `json:"cache_read_input_tokens"`
+	InputTokens              *int64   `json:"input_tokens"`
+	OutputTokens             *int64   `json:"output_tokens"`
+	CacheCreationInputTokens *int64   `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     *int64   `json:"cache_read_input_tokens"`
+	Cost                     *float64 `json:"cost"`
 }
 
 func (u *usage) take(c *counts) {
@@ -36,6 +38,9 @@ func (u *usage) take(c *counts) {
 			*field.to = *field.from
 		}
 	}
+	if c.Cost != nil {
+		u.CostUSD = c.Cost
+	}
 }
 
 const (
@@ -47,21 +52,26 @@ const (
 )
 
 // usageReader reads the usage of an answer from its bytes as they pass. A streamed answer
-// (text/event-stream) states the model and the input counts in its message_start event and the
-// final counts, cumulative, in its message_delta events. Any other answer is one message whose
-// usage is read once it is whole.
+// (text/event-stream) states the input counts in its message_start event and the final counts,
+// cumulative, and OpenRouter's cost, in its message_delta events. Any other answer is one message, or
+// the error a failed answer of the ChatGPT backend states its usage beside, whose usage is read once
+// it is whole.
 type usageReader struct {
 	stream bool
+	// atEnd is true of a provider whose message_start states no counts yet: its stream states its
+	// usage in its message_delta alone.
+	atEnd bool
 	// line is the incomplete line of a stream, body the answer that is not streamed.
 	line, body []byte
 	skipping   bool
 	seen       bool
+	ended      bool
 	usage      usage
 }
 
-func newUsageReader(contentType string) *usageReader {
+func newUsageReader(contentType string, atEnd bool) *usageReader {
 	mediaType, _, _ := mime.ParseMediaType(contentType)
-	return &usageReader{stream: mediaType == "text/event-stream"}
+	return &usageReader{stream: mediaType == "text/event-stream", atEnd: atEnd}
 }
 
 func (r *usageReader) Write(b []byte) {
@@ -97,7 +107,6 @@ func (r *usageReader) event(line []byte) {
 	var event struct {
 		Type    string `json:"type"`
 		Message struct {
-			Model string  `json:"model"`
 			Usage *counts `json:"usage"`
 		} `json:"message"`
 		Usage *counts `json:"usage"`
@@ -108,28 +117,31 @@ func (r *usageReader) event(line []byte) {
 	switch event.Type {
 	case "message_start":
 		r.seen = true
-		r.usage.Model = event.Message.Model
 		r.usage.take(event.Message.Usage)
 	case "message_delta":
+		r.ended = r.ended || event.Usage != nil
 		r.usage.take(event.Usage)
 	}
 }
 
 // Usage is the usage read so far, and whether the answer stated any: a stream cut before its
-// message_start, or a body that is no message, states none.
+// message_start, one of a provider stating usage at its end that ended before its message_delta,
+// or a body that is no message and no error stating usage, states none.
 func (r *usageReader) Usage() (usage, bool) {
+	if r.stream && r.atEnd {
+		return r.usage, r.ended
+	}
 	if r.stream {
 		return r.usage, r.seen
 	}
 	var message struct {
 		Type  string  `json:"type"`
-		Model string  `json:"model"`
 		Usage *counts `json:"usage"`
 	}
-	if json.Unmarshal(r.body, &message) != nil || message.Type != "message" || message.Usage == nil {
+	if json.Unmarshal(r.body, &message) != nil || (message.Type != "message" && message.Type != "error") || message.Usage == nil {
 		return usage{}, false
 	}
-	u := usage{Model: message.Model}
+	var u usage
 	u.take(message.Usage)
 	return u, true
 }

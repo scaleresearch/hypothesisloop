@@ -31,13 +31,15 @@ var EventKinds = []EventKindDoc{
 	{Kind: platformapi.EventStageBoundary, Subject: "platform experiment id", Value: "stage index",
 		Description: "The elimination ladder advanced. detail is 'advanced' or 'cut'; agent_id names who was cut."},
 	{Kind: platformapi.EventAgentCut, Subject: "agent id", Value: "stage index",
-		Description: "This agent was cut, at a stage boundary or, with detail max_agents_lowered, as one of the newest researchers above a max_agents lowered below the researchers at work. Its own stop condition, without a GET to find out whether the cut was its."},
+		Description: "This agent was cut, at a stage boundary or, with detail max_agents_lowered, as one of the newest executors above a max_agents lowered below the executors at work. Its own stop condition, without a GET to find out whether the cut was its."},
 	{Kind: platformapi.EventAgentFinished, Subject: "agent id", Value: "empty by design",
-		Description: "This agent said it has nothing left to do, and its machine stops. detail is the reason it gave, and for a researcher the blocker it named and the time and quota it left. When every agent is finished or cut the run has nobody left to wait for."},
-	{Kind: platformapi.EventAgentReplaced, Subject: "agent id of the new researcher", Value: "agent id of the researcher it replaces",
-		Description: "The platform added a researcher in the place of one that finished or whose machine stopped with no restart left, with its agent type, model and hyperparameters, to keep the researchers the run is to have at work (researchers on GET /platform-experiments/{id}). detail says why the place was free. Nobody adds it: the platform does, while the time and the budget left hold a trial for it. A cut researcher is not replaced."},
+		Description: "This agent said it has nothing left to do, and its machine stops. detail is the reason it gave, headed by why it stopped when it said (Blocked, or Nothing left worth a job), and for an executor the time and quota it left. When every agent is finished or cut the run has nobody left to wait for."},
+	{Kind: platformapi.EventAgentReplaced, Subject: "agent id of the new agent", Value: "agent id of the agent it replaces",
+		Description: "The platform added an agent in the place of one that finished or whose machine stopped with no restart left, with its agent type, model and hyperparameters, to keep the agents the run is to have at work (agents on GET /platform-experiments/{id}). detail says why the place was free. Nobody adds it: the platform does, while the time and the budget left hold a trial for it. A cut executor is not replaced."},
+	{Kind: platformapi.EventAgentStopped, Subject: "agent id", Value: "the model it ran on: its own, else its agent type's, else for a researcher the coordinator's; empty on the platform's default",
+		Description: "The platform gave up on this agent's machine: it stopped with every restart spent, and no machine is asked for it again. detail is why, as the code of its last end, a colon and the sentence or last output that goes with it (gone: the provider lost the machine ...). Where the run's team keeps its place, agent.replaced follows; any other agent's place stays empty until someone adds one."},
 	{Kind: platformapi.EventAgentIdle, Subject: "agent id", Value: "new or continues",
-		Description: "No job of this researcher of a running platform experiment ran on the platform for the platform's agents.idle_notice_minutes, and it has none queued or running: nothing of its own is in flight. " +
+		Description: "No job of this executor of a running platform experiment ran on the platform for the platform's agents.idle_notice_minutes, and it has none queued or running: nothing of its own is in flight. " +
 			"Sent again every agents.idle_notice_minutes while the stretch lasts: new on the first notice of a stretch, continues on each after it, and a job it starts ends the stretch. " +
 			"detail says, as the platform knows them at the notice: for how long, the subagents and turn its harness last reported, how many jobs shaped like the run's baseline job the free capacity places now, the minutes left in the run and what is left of its share. Nothing is done to the agent."},
 	{Kind: platformapi.EventAgentInstructions, Subject: "agent id, or coordinator", Value: "the current version of its agent type",
@@ -53,18 +55,20 @@ var EventKinds = []EventKindDoc{
 		Description: "What the run's page shows of this agent changed: it signed up (signed_up) or was removed (left), the machine the platform runs for it was asked for, reported in another state or ended (machine), or that machine said something new of what its agent does (activity). " +
 			"A pointer that carries nothing: GET /platform-experiments/{id}/agents has the agent and its machine. A machine's progress is not told."},
 	{Kind: platformapi.EventHypothesisNew, Subject: "hypothesis id", Value: "the kind of who registered it: agent, coordinator, user, key or staff",
-		Description: "An idea entered the shared pool. agent_id is whose it is, empty on one no agent owns. The value says whether a person (user, key, staff), the coordinator or an agent registered it; the claim itself and who registered it come from GET /hypotheses/{id}."},
-	{Kind: platformapi.EventHypothesisStatus, Subject: "hypothesis id", Value: "open, confirmed, refuted, inconclusive",
-		Description: "A claim was settled. A settled claim is to read, not to retest."},
+		Description: "An idea entered the shared pool. agent_id is the agent that registered it, empty when a person or the coordinator did: a researcher's idea is owned by no agent and names the researcher here. The value says whether a person (user, key, staff), the coordinator or an agent registered it; the claim itself and who registered it come from GET /hypotheses/{id}."},
+	{Kind: platformapi.EventHypothesisStatus, Subject: "hypothesis id", Value: "open, confirmed, refuted, inconclusive, merged or retired",
+		Description: "A claim was settled, or a researcher curated an open one: merged, with detail the hypothesis it is tested under from now on, which took over the links to it, or retired, with detail the reason. A settled claim is to read, not to retest, and a merged or retired one takes no job."},
 	{Kind: platformapi.EventHypothesisLink, Subject: "hypothesis id (the link's source)", Value: "builds_on, contradicts or related",
 		Description: "A link was added to an existing hypothesis. detail is the target: a hypothesis id, or the platform experiment id for the objective. Links given at registration ride on hypothesis.new instead."},
+	{Kind: platformapi.EventHypothesisUnlink, Subject: "hypothesis id (the link's source)", Value: "builds_on, contradicts or related",
+		Description: "A researcher removed a link of a hypothesis, usually right after linking it elsewhere. detail is the target the link had: a hypothesis id, or the platform experiment id for the objective."},
 	{Kind: platformapi.EventFindingNew, Subject: "hypothesis id", Value: "the experiment id that produced it",
 		Description: "A result was attached to a claim — someone's number is now readable instead of yours being re-derived."},
 	{Kind: platformapi.EventCommentNew, Subject: "hypothesis id, or the platform experiment id for the objective", Value: "empty by design",
 		Description: "Someone said something on a claim, or on the objective, people included. agent_id is whose note it is, empty on one no agent owns. GET /hypotheses/{id}/comments reads it."},
 	{Kind: platformapi.EventPlatformExperimentStatus, Subject: "platform experiment id", Value: "draft, open, running, closed",
-		Description: "The run itself moved. 'closed' is a stop condition for every agent in it, and its detail is what whoever closed it said of why, empty when they said nothing. With a detail on any other status the status stayed and either its status_reason changed to one that waits for its coordinator, where the platform hosts one: detail is that reason, such as researchers_done once no researcher is left to work, sent within a minute of the change and once for each; " +
-			"or, on a running one, the platform keeps places of its researchers empty: detail starts researchers not replaced, and names each researcher that ended before submitting a job or within 10 minutes of joining, which is never replaced, and each that waits because its pool entry had 3 replacements in the last hour (researchers_held on GET /platform-experiments/{id}). GET /platform-experiments/{id} has its message."},
+		Description: "The run itself moved. 'closed' is a stop condition for every agent in it, and its detail is what whoever closed it said of why, empty when they said nothing. With a detail on any other status the status stayed and either its status_reason changed to one that waits for its coordinator, where the platform hosts one: detail is that reason, such as executors_done once no executor is left to work, sent within a minute of the change and once for each; " +
+			"or, on a running one, the platform keeps places of its agents empty: detail starts agents not replaced, and names each agent that ended within 10 minutes of joining or, an executor, before submitting a job, which is never replaced, and each that waits because its pool entry had 3 replacements in the last hour (agents_held on GET /platform-experiments/{id}). GET /platform-experiments/{id} has its message."},
 	{Kind: platformapi.EventPlatformExperimentDescription, Subject: "platform experiment id", Value: "empty by design",
 		Description: "The description or the run's length (duration_hours) changed. A description is unbounded and is never copied into an event: re-read both with GET /platform-experiments/{id}."},
 	{Kind: platformapi.EventPlatformExperimentGoal, Subject: "platform experiment id", Value: "the new goal_version",
@@ -72,7 +76,7 @@ var EventKinds = []EventKindDoc{
 	{Kind: platformapi.EventPlatformExperimentProposal, Subject: "platform experiment id", Value: "proposed or declined",
 		Description: "A draft's planner answered its goal: proposed (proposal on GET /platform-experiments/{id}) or declined (declined_reason). It waits for a person from then on."},
 	{Kind: platformapi.EventPlatformExperimentPlan, Subject: "platform experiment id", Value: "empty by design",
-		Description: "A person changed fields of the plan of an open or running platform experiment (PATCH /platform-experiments/{id}): detail names them, among name, metrics, budget_accelerator_hours, max_agents, researchers, max_concurrent_accelerators, report_interval_seconds and starts_at. Re-read them with GET /platform-experiments/{id}. The description and the run's length are told by platform_experiment.description, a cut by agent.cut and a raised baseline by platform_experiment.baseline."},
+		Description: "A person changed fields of the plan of an open or running platform experiment (PATCH /platform-experiments/{id}): detail names them, among name, metrics, budget_accelerator_hours, max_agents, agents, max_concurrent_accelerators, report_interval_seconds and starts_at. Re-read them with GET /platform-experiments/{id}. The description and the run's length are told by platform_experiment.description, a cut by agent.cut and a raised baseline by platform_experiment.baseline."},
 	{Kind: platformapi.EventPlatformExperimentBaseline, Subject: "platform experiment id", Value: "the job that is the baseline from now on",
 		Description: "The baseline of the running run was raised to a stronger job that measured the control (PATCH /platform-experiments/{id} with baseline_job_id and baseline_reason). detail says by whom, from which value to which on the ranking metric, and why. The description's measured baseline changed with it, and standings are set against the new bar: re-read the description with GET /platform-experiments/{id}."},
 	{Kind: platformapi.EventPlatformExperimentRemoved, Subject: "platform experiment id", Value: "empty by design",
@@ -133,7 +137,7 @@ func isExperimentSubject(kind string) bool {
 // one agent's stop condition, the boundary is about the ladder.
 func isAgentOwned(kind string) bool {
 	switch kind {
-	case platformapi.EventExperimentStatus, platformapi.EventExperimentBlocked, platformapi.EventQuotaChanged, platformapi.EventAgentCut, platformapi.EventAgentFinished, platformapi.EventAgentReplaced, platformapi.EventAgentIdle, platformapi.EventAgentInstructions, platformapi.EventAgentMessage, platformapi.EventJobUnderperforming, platformapi.EventJobHeld,
+	case platformapi.EventExperimentStatus, platformapi.EventExperimentBlocked, platformapi.EventQuotaChanged, platformapi.EventAgentCut, platformapi.EventAgentFinished, platformapi.EventAgentReplaced, platformapi.EventAgentStopped, platformapi.EventAgentIdle, platformapi.EventAgentInstructions, platformapi.EventAgentMessage, platformapi.EventJobUnderperforming, platformapi.EventJobHeld,
 		platformapi.EventJobDuplicate, platformapi.EventPlatformExperimentGoal:
 		return true
 	default:
@@ -144,7 +148,7 @@ func isAgentOwned(kind string) bool {
 // IsHypothesisActivity reports the kinds whose subject is a hypothesis.
 func IsHypothesisActivity(kind string) bool {
 	switch kind {
-	case platformapi.EventHypothesisNew, platformapi.EventHypothesisStatus, platformapi.EventHypothesisLink, platformapi.EventFindingNew, platformapi.EventCommentNew:
+	case platformapi.EventHypothesisNew, platformapi.EventHypothesisStatus, platformapi.EventHypothesisLink, platformapi.EventHypothesisUnlink, platformapi.EventFindingNew, platformapi.EventCommentNew:
 		return true
 	default:
 		return false
@@ -184,7 +188,8 @@ func agentScope(kind string) string {
 // its allocation and cut, ladder advances, the run's status and description, and other people's
 // activity on hypotheses it registered. A job waiting its turn for capacity is no news.
 // Whether a hypothesis event concerns one of the agent's hypotheses is a graph question, answered
-// by the graph (graphdb.Store.ConcernsAgent); Matches only drops the agent's own echo. Without an agent the stream is
+// by the graph (graphdb.Store.ConcernsAgent); Matches only drops the agent's own echo, a change
+// whose agent_id is the agent that made it. Without an agent the stream is
 // the whole platform experiment, or with Decisions what of it may need a decision: a job that
 // was queued, admitted or started is on its way and asks nothing of anyone. What the run's page
 // shows of an agent (agent.activity) asks nothing of anyone either.

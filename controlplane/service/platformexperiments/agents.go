@@ -20,13 +20,13 @@ import (
 // joins a platform experiment.
 type AddAgentRequest struct {
 	AgentID         string         `json:"agent_id,omitempty" doc:"Join as this registered agent instead of creating a new one. Joining again once joined succeeds and changes nothing."`
-	Name            string         `json:"name,omitempty" doc:"Display name of a created agent, unique in the platform experiment: 409 name_taken for one another agent of it carries. Omitted, it is named by its role and a number no other agent of the experiment has: \"Researcher 2\", \"Baseline 1\"."`
-	Role            string         `json:"role,omitempty" default:"competitor" doc:"\"competitor\", \"baseline\" or \"reviewer\"."`
-	QuotaTier       string         `json:"quota_tier,omitempty" doc:"\"guaranteed\" or \"burst_only\"; omitted, the platform experiment's default_quota_tier applies."`
+	Name            string         `json:"name,omitempty" doc:"Display name of a created agent, unique in the platform experiment: 409 name_taken for one another agent of it carries. Omitted, it is named by its role and a number no other agent of the experiment has: \"Executor 2\", \"Researcher 1\", \"Baseline 1\"."`
+	Role            string         `json:"role,omitempty" default:"executor" doc:"\"executor\", \"researcher\", \"baseline\" or \"reviewer\" (GET /agent-roles)."`
+	QuotaTier       string         `json:"quota_tier,omitempty" doc:"\"guaranteed\" or \"burst_only\"; omitted, the platform experiment's default_quota_tier applies. Refused for a researcher, which holds no quota (422 invalid_request)."`
 	InAgentSandbox  bool           `json:"in_agentsandbox,omitempty" doc:"true: the platform runs the agent. false (default): its token is returned and you run it."`
-	AgentType       string         `json:"agent_type,omitempty" doc:"Which specialization the agent runs, which it reads from its signup: generalist (default), hyperparameter-search, architecture-search or data-search."`
+	AgentType       string         `json:"agent_type,omitempty" doc:"The agent type it runs, which it reads from its signup, of the role role gives: for an executor generalist (default), hyperparameter-search, architecture-search, data-search or an executor type of the org, for a researcher researcher (default), for a baseline agent baseline (default)."`
 	Hyperparameters map[string]any `json:"hyperparameters,omitempty" doc:"A small JSON object the agent reads from its signup, at most 4096 bytes as JSON."`
-	Model           string         `json:"model,omitempty" doc:"The model the agent runs on, which it reads from its signup. Omitted, it runs on its agent type's model and the answer shows none."`
+	Model           string         `json:"model,omitempty" doc:"The model the agent runs on, one GET /models lists, which it reads from its signup. Omitted, it runs on its agent type's model, else, for a researcher, on the coordinator's model, the platform experiment's coordinator_model, else on the platform's default, and the answer shows none."`
 }
 
 // AgentLaunch is what joining needs beyond the store.
@@ -64,7 +64,7 @@ type JoinedAgent struct {
 	MinutesWithoutJobInFlight *int                     `json:"minutes_without_job_in_flight,omitempty" doc:"Whole minutes since it last had a job of its own created or running, 0 while one is in flight. In a running platform experiment that started."`
 }
 
-// roster is signups as the API answers them to reader, whose messages the allowance counts. In an open platform experiment a researcher's
+// roster is signups as the API answers them to reader, whose messages the allowance counts. In an open platform experiment an agent's
 // machine is not asked for, and reading requested it was taken for a launch that failed: each
 // agent that waits for the start says so, and for what, and its instance reads waiting. Once it
 // closed before the start, each says it never launched and why (neverLaunched). A machine that is
@@ -96,7 +96,7 @@ func (s *Service) roster(ctx context.Context, platformExpID string, signups []do
 			return nil, fmt.Errorf("platform_experiments.roster: %w", err)
 		}
 		for i, signup := range signups {
-			if signup.SharesBudget() && (signup.Instance == nil || signup.Instance.AskedAt == nil) {
+			if signup.WaitsForStart() && (signup.Instance == nil || signup.Instance.AskedAt == nil) {
 				out[i].StatusReason = neverLaunched(why)
 			}
 		}
@@ -118,7 +118,7 @@ func (s *Service) roster(ctx context.Context, platformExpID string, signups []do
 		return nil, fmt.Errorf("platform_experiments.roster: %w", err)
 	}
 	for i, signup := range signups {
-		if !signup.SharesBudget() {
+		if !signup.WaitsForStart() {
 			continue
 		}
 		waits, summary := "it takes its first turn when the platform starts the run", "It starts with the run."
@@ -186,6 +186,9 @@ func (s *Service) AddAgent(ctx context.Context, platformExpID string, req AddAge
 	if !experimentspec.ValidQuotaTierOverride(req.QuotaTier) {
 		return nil, refusal.Invalid(refusal.ReasonInvalidRequest, `quota_tier must be "guaranteed", "burst_only", or omitted`).On("quota_tier")
 	}
+	if role == domain.SignupRoleResearcher && req.QuotaTier != "" {
+		return nil, refusal.Invalid(refusal.ReasonInvalidRequest, "quota_tier is set and a researcher holds no quota: leave it out").On("quota_tier")
+	}
 	pe, err := s.store.GetPlatformExperiment(ctx, platformExpID)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.AddAgent: %w", err)
@@ -204,6 +207,9 @@ func (s *Service) AddAgent(ctx context.Context, platformExpID string, req AddAge
 	}
 	if err != nil {
 		return nil, err
+	}
+	if err := s.served.CheckChoice(ctx, "model", choice.Model); err != nil {
+		return nil, s.refusal("add agent", err)
 	}
 	signup := domain.AgentSignup{
 		AgentID: req.AgentID, Role: role, QuotaTier: domain.QuotaTier(req.QuotaTier),
@@ -237,16 +243,16 @@ func (s *Service) AddAgent(ctx context.Context, platformExpID string, req AddAge
 	if err != nil || !signup.SharesBudget() {
 		return joined, err
 	}
-	// A researcher may be all a declared baseline still waited for.
+	// An executor may be all a declared baseline still waited for.
 	if err := s.StartIfReady(ctx, platformExpID); err != nil {
 		return nil, err
 	}
 	return joined, nil
 }
 
-// lateJoin is what a researcher joining the running pe takes its quota from. Once the run started
-// only a researcher joins, in the place of one that ended or one a raised max_agents gave, and its
-// coordinator or a person adds it.
+// lateJoin is what an executor joining the running pe takes its quota from. Once the run started
+// only an executor or a researcher joins, an executor in the place of one that ended or one a
+// raised max_agents gave, and its coordinator or a person adds it.
 func (s *Service) lateJoin(ctx context.Context, pe *domain.PlatformExperiment, by domain.Actor) (*db.LateJoin, error) {
 	if by.Kind == domain.ActorAgent {
 		return nil, refuseSignup(403, "forbidden", "an agent adds no agent to a running platform experiment: its coordinator or its owner does")
@@ -254,10 +260,10 @@ func (s *Service) lateJoin(ctx context.Context, pe *domain.PlatformExperiment, b
 	return s.lateShare(ctx, pe)
 }
 
-// lateShare is what a researcher joining the running pe is given its quota from: what each
-// researcher used, and the least share worth giving, one trial of the baseline.
+// lateShare is what an executor joining the running pe is given its quota from: what each
+// executor used, and the least share worth giving, one trial of the baseline.
 func (s *Service) lateShare(ctx context.Context, pe *domain.PlatformExperiment) (*db.LateJoin, error) {
-	quotas, err := s.researcherQuotas(ctx, pe)
+	quotas, err := s.executorQuotas(ctx, pe)
 	if err != nil {
 		return nil, fmt.Errorf("platform_experiments.lateJoin: %w", err)
 	}
@@ -272,15 +278,15 @@ func (s *Service) lateShare(ctx context.Context, pe *domain.PlatformExperiment) 
 	return &db.LateJoin{Used: used, BurstFraction: s.cfg.BurstFraction, MinShare: held}, nil
 }
 
-// researcherQuotas is the quota and use of each researcher of pe that holds one and was not cut.
+// executorQuotas is the quota and use of each executor of pe that holds one and was not cut.
 // Ended is left unset.
-func (s *Service) researcherQuotas(ctx context.Context, pe *domain.PlatformExperiment) ([]domain.ResearcherQuota, error) {
-	researchers, err := s.store.ListSignupsByRole(ctx, pe.ID, domain.SignupRoleCompetitor)
+func (s *Service) executorQuotas(ctx context.Context, pe *domain.PlatformExperiment) ([]domain.ExecutorQuota, error) {
+	executors, err := s.store.ListSignupsByRole(ctx, pe.ID, domain.SignupRoleExecutor)
 	if err != nil {
 		return nil, err
 	}
-	var quotas []domain.ResearcherQuota
-	for _, agentID := range researchers {
+	var quotas []domain.ExecutorQuota
+	for _, agentID := range executors {
 		cut, err := s.store.IsAgentCut(ctx, pe.ID, agentID)
 		if err != nil {
 			return nil, err
@@ -293,7 +299,7 @@ func (s *Service) researcherQuotas(ctx context.Context, pe *domain.PlatformExper
 			return nil, err
 		}
 		if quota != nil {
-			quotas = append(quotas, domain.ResearcherQuota{
+			quotas = append(quotas, domain.ExecutorQuota{
 				AgentID: agentID, Guaranteed: quota.GuaranteedAcceleratorHours, Burst: quota.BurstAcceleratorHours, Used: quota.Used(),
 			})
 		}
@@ -306,7 +312,7 @@ func (s *Service) researcherQuotas(ctx context.Context, pe *domain.PlatformExper
 func enrolRefused(err error, pe *domain.PlatformExperiment, name string) error {
 	switch {
 	case errors.Is(err, db.ErrSignupClosed) && pe.Status == domain.PlatformExpRunning:
-		return refuseSignup(409, "signup_closed", "platform experiment %s is running, and only a researcher (role competitor) joins it then", pe.ID)
+		return refuseSignup(409, "signup_closed", "platform experiment %s is running, and only an executor or a researcher joins it then", pe.ID)
 	case errors.Is(err, db.ErrSignupClosed):
 		return refuseSignup(409, "signup_closed", "experiment is %s", pe.Status)
 	case errors.Is(err, db.ErrAgentNameTaken):
@@ -316,7 +322,7 @@ func enrolRefused(err error, pe *domain.PlatformExperiment, name string) error {
 	case errors.Is(err, db.ErrMaxAgentSandboxesReached):
 		return refuseSignup(409, "max_agentsandboxes_reached", "%s", maxAgentSandboxesReached(pe.MaxAgentSandboxes))
 	case errors.Is(err, db.ErrNoShareLeft):
-		return refuseSignup(409, "no_share_left", "a researcher that joins running platform experiment %s is given an even part, with the researchers at work, of what all researchers left unspent, and that part would not hold one trial of the baseline: one joins when a researcher at work finishes", pe.ID)
+		return refuseSignup(409, "no_share_left", "an executor that joins running platform experiment %s is given an even part, with the executors at work, of what all executors left unspent, and that part would not hold one trial of the baseline: one joins when an executor at work finishes", pe.ID)
 	}
 	return nil
 }

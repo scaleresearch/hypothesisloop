@@ -29,8 +29,16 @@ images:
 #   AUTH_SIGNING_SECRET              derives every token the platform hands out, 32 characters or
 #                                    more. Whoever holds it can mint a staff token.
 #   MODEL_ANTHROPIC_OAUTH_TOKEN      the Claude subscription token control-service makes every
-#                                    sandboxed agent's model calls with (models in
+#                                    sandboxed agent's call to an anthropic model with (models in
 #                                    hypothesisloop.yaml). No agent's machine is given it.
+#   MODEL_OPENROUTER_API_KEY         the OpenRouter API key control-service makes every sandboxed
+#                                    agent's call to an openrouter model with.
+#   MODEL_OPENAI_AUTH_JSON           the auth.json of a Codex CLI signed in with ChatGPT, whose
+#                                    tokens seed the ones control-service makes every sandboxed
+#                                    agent's call to an openai model with. It renews them and
+#                                    keeps them in its database. Each model
+#                                    provider is served only while its key is set, and the one
+#                                    of agents.default_model and coordinator_model is required.
 #   OBJECT_STORE_MINIO_SECRET_ACCESS_KEY  the secret key of object_store.minio.access_key_id in
 #                                    hypothesisloop.yaml, a key that may create service accounts;
 #                                    with objectStore.enabled the two are the store's root user

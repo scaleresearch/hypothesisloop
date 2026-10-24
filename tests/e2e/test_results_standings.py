@@ -27,7 +27,7 @@ RUN_SECONDS = 20
 
 
 def _run_env():
-    return {"HYPOTHESISLOOP_DURATION_SECONDS": str(RUN_SECONDS)}
+    return {"RUN_SECONDS": str(RUN_SECONDS)}
 
 
 def test_unreported_constraint_excludes_every_agent(api, experiment, run_id, deadline):

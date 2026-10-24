@@ -1,20 +1,24 @@
-import { DEFAULT_AGENT_TYPE } from '@/lib/agent-types'
-import type { MetricDefinition, QuotaTier, ResearcherPoolEntry, Stage } from '@/types/api'
+import { defaultTeam } from '@/lib/team'
+import type { TeamRow } from '@/lib/team'
+import type { MetricDefinition, QuotaTier, Stage } from '@/types/api'
 import type { EditableField } from '@/lib/editable'
 
 // What a new experiment starts from. The stage ladder and the report interval are left out, so
 // the platform applies its own (stages.default, scheduler.default_report_interval_seconds).
-export const NEW_EXPERIMENT = { budget_accelerator_hours: 10, duration_hours: 48, researchers: 2 }
+export const NEW_EXPERIMENT = { budget_accelerator_hours: 10, duration_hours: 48, executors: 2 }
+
+/** The team a new experiment starts composed with. */
+export const NEW_TEAM: TeamRow[] = defaultTeam(NEW_EXPERIMENT.executors)
 
 // Numbers are held as typed, for the reason StageDraft gives, and parsed on submit.
 export interface FormState {
   name: string
   description: string
   budget_accelerator_hours: string
-  // The most researchers at work at once, sent as max_agents.
+  // The most executors at work at once, sent as max_agents.
   max_agents: string
-  // Who the platform starts and keeps at work. null is max_agents generalists on the default model.
-  starting_agents: StartingAgentDraft[] | null
+  // The team the platform starts and keeps at work, sent as agents.
+  agents: TeamRow[]
   // Empty is the platform's default (quota.default_max_concurrent_accelerators).
   max_concurrent_accelerators: string
   // Empty is no start time: the platform starts it once its baseline is declared.
@@ -51,33 +55,6 @@ export interface StepProps {
 // the next digit is typed. Strings let a field be empty while editing; the ladder is parsed once,
 // on submit.
 export type StageDraft = { length_pct: string; evict_pct: string; max_job_hours: string }
-
-// One row of the starting agents, held as typed, for the reason StageDraft gives.
-// Hyperparameters come only from a repository's experiment file, and are sent as it states them.
-export type StartingAgentDraft = { agent_type: string; count: string; model: string; hyperparameters?: Record<string, unknown> }
-
-export const ONE_STARTING_AGENT: StartingAgentDraft = { agent_type: DEFAULT_AGENT_TYPE, count: '1', model: '' }
-
-/** The researchers a new experiment is sent with: the rows given, or max_agents generalists. */
-export function toResearchers(rows: StartingAgentDraft[] | null, maxAgents: number): ResearcherPoolEntry[] {
-  if (!rows) return [{ agent_type: DEFAULT_AGENT_TYPE, count: maxAgents }]
-  return rows.map(r => ({
-    agent_type: r.agent_type,
-    count: Number(r.count),
-    ...(r.model.trim() ? { model: r.model.trim() } : {}),
-    ...(r.hyperparameters ? { hyperparameters: r.hyperparameters } : {}),
-  }))
-}
-
-/** The rows of the researchers a spec states. */
-export function toStartingAgents(researchers: ResearcherPoolEntry[]): StartingAgentDraft[] {
-  return researchers.map(r => ({
-    agent_type: r.agent_type || DEFAULT_AGENT_TYPE,
-    count: String(r.count),
-    model: r.model ?? '',
-    ...(r.hyperparameters ? { hyperparameters: r.hyperparameters } : {}),
-  }))
-}
 
 export const ONE_STAGE: StageDraft[] = [{ length_pct: '100', evict_pct: '0', max_job_hours: '' }]
 

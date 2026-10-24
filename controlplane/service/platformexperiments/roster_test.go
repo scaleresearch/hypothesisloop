@@ -27,7 +27,7 @@ type rosterStore struct {
 	completed []*domain.Experiment
 	// inFlight is the agents that have a job queued or running.
 	inFlight map[string]bool
-	// lateShare is what the researchers that ended left unspent, for one joining the run.
+	// lateShare is what the executors that ended left unspent, for one joining the run.
 	lateShare float64
 	// submitted is how many jobs each agent submitted.
 	submitted map[string]int
@@ -167,10 +167,10 @@ func (f *rosterStore) GetAgent(_ context.Context, id string) (*domain.Agent, err
 	return f.agents[id], nil
 }
 
-func (f *rosterStore) competitors() int {
+func (f *rosterStore) executors() int {
 	n := 0
 	for _, s := range f.signups {
-		if s.Role == domain.SignupRoleCompetitor && s.FinishedAt == nil && (s.Instance == nil || !s.Instance.Stopped) {
+		if s.Role == domain.SignupRoleExecutor && s.FinishedAt == nil && (s.Instance == nil || !s.Instance.Stopped) {
 			n++
 		}
 	}
@@ -189,7 +189,7 @@ func (f *rosterStore) Signup(_ context.Context, _ string, signup domain.AgentSig
 	if f.agents[signup.AgentID] == nil || f.agents[signup.AgentID].OrgID != "org-a" {
 		return false, db.ErrAgentOutsideOrg
 	}
-	if signup.Role == domain.SignupRoleCompetitor && f.competitors() >= f.pe.MaxAgents {
+	if signup.Role == domain.SignupRoleExecutor && f.executors() >= f.pe.MaxAgents {
 		return false, db.ErrMaxAgentsReached
 	}
 	if f.full(signup) {
@@ -204,7 +204,7 @@ func (f *rosterStore) SpawnAgent(_ context.Context, _ string, agent *domain.Agen
 	if f.pe.Status != domain.PlatformExpOpen {
 		return db.ErrSignupClosed
 	}
-	if signup.Role == domain.SignupRoleCompetitor && f.competitors() >= f.pe.MaxAgents {
+	if signup.Role == domain.SignupRoleExecutor && f.executors() >= f.pe.MaxAgents {
 		return db.ErrMaxAgentsReached
 	}
 	if f.full(signup) {
@@ -219,7 +219,11 @@ func (f *rosterStore) SpawnAgent(_ context.Context, _ string, agent *domain.Agen
 		return false
 	}
 	if agent.Name == "" {
-		agent.Name = domain.AgentName(signup.Role, taken)
+		name, err := domain.AgentName(signup.Role, taken)
+		if err != nil {
+			return err
+		}
+		agent.Name = name
 	} else if taken(agent.Name) {
 		return db.ErrAgentNameTaken
 	}
@@ -240,10 +244,10 @@ func (f *rosterStore) ListSignupsByRole(_ context.Context, _ string, role domain
 	return ids, nil
 }
 
-// JoinRunning joins as an open experiment would, while the researchers that ended left
+// JoinRunning joins as an open experiment would, while the executors that ended left
 // lateShare unspent.
 func (f *rosterStore) JoinRunning(ctx context.Context, id string, agent *domain.Agent, signup domain.AgentSignup, _ db.LateJoin) error {
-	if f.pe.Status != domain.PlatformExpRunning || signup.Role != domain.SignupRoleCompetitor {
+	if f.pe.Status != domain.PlatformExpRunning || signup.Role != domain.SignupRoleExecutor {
 		return db.ErrSignupClosed
 	}
 	if f.lateShare <= 0 {

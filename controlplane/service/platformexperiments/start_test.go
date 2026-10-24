@@ -47,7 +47,7 @@ func (f *startStore) ListAgentSignups(context.Context, string) ([]domain.AgentSi
 		signups = append(signups, domain.AgentSignup{AgentID: agentID, Role: domain.SignupRoleBaseline})
 	}
 	for _, p := range f.participants {
-		signups = append(signups, domain.AgentSignup{AgentID: p.AgentID, Role: domain.SignupRoleCompetitor})
+		signups = append(signups, domain.AgentSignup{AgentID: p.AgentID, Role: domain.SignupRoleExecutor})
 	}
 	return signups, nil
 }
@@ -65,7 +65,7 @@ func (f *startStore) StartPlatformExperimentTx(ctx context.Context, id string, _
 	participants := slices.Clone(f.participants)
 	for i := range participants {
 		if participants[i].Role == "" {
-			participants[i].Role = domain.SignupRoleCompetitor
+			participants[i].Role = domain.SignupRoleExecutor
 		}
 	}
 	quotas, stages, err := quotasFor(participants)
@@ -190,7 +190,7 @@ func reasonOf(err error) string {
 	return ""
 }
 
-// A platform experiment started on a baseline nobody had measured, or on none: its researchers
+// A platform experiment started on a baseline nobody had measured, or on none: its executors
 // were ranked against a number each of them invented. The platform starts it only with one
 // declared, and until then it waits and says so.
 func TestAPlatformExperimentDoesNotStartWithoutADeclaredBaseline(t *testing.T) {
@@ -239,9 +239,9 @@ func TestThePlatformStartsARunOnceItsBaselineIsDeclaredAndSaysWhatItWaitsFor(t *
 		change func(*sweptStore)
 		reason string
 	}{
-		"a starts_at still ahead":      {func(f *sweptStore) { f.pe.StartsAt = time.Now().Add(time.Hour) }, "starts_at_ahead"},
-		"no researcher signed up":      {func(f *sweptStore) { f.participants, f.baselines = nil, []string{"ag-baseline"} }, "no_researchers"},
-		"a researcher lost to a start": {func(f *sweptStore) { f.lost = true }, ""},
+		"a starts_at still ahead":     {func(f *sweptStore) { f.pe.StartsAt = time.Now().Add(time.Hour) }, "starts_at_ahead"},
+		"no executor signed up":       {func(f *sweptStore) { f.participants, f.baselines = nil, []string{"ag-baseline"} }, "no_executors"},
+		"an executor lost to a start": {func(f *sweptStore) { f.lost = true }, ""},
 	} {
 		store := declared()
 		c.change(store)
@@ -266,7 +266,7 @@ func TestThePlatformStartsARunOnceItsBaselineIsDeclaredAndSaysWhatItWaitsFor(t *
 
 // A closed platform experiment answered close_reason and no status_reason, and a running one
 // neither: "why is it in this state" is one field in every status. A run that waits for its first
-// researcher's machine says so and when the wait ends.
+// executor's machine says so and when the wait ends.
 func TestEveryStatusSaysWhyInItsStatusReason(t *testing.T) {
 	svc := newSignupTestService(t, &startStore{participants: []db.StartParticipant{{AgentID: "ag-r", QuotaTier: domain.QuotaTierGuaranteed}}})
 	now := time.Now().UTC()
@@ -349,19 +349,19 @@ func (f *sweptStore) StartPlatformExperimentTx(ctx context.Context, id string, a
 }
 
 // A field a boundary can cut from is started on the ladder: only the first stage's share is
-// released, and the rest at the boundaries, or one researcher spends the budget before anyone is
+// released, and the rest at the boundaries, or one executor spends the budget before anyone is
 // cut. A smaller field is cut by no boundary, where the ladder only withheld budget: two
-// researchers stopped on a first share minutes before the boundary released the rest. It has one
-// stage and each researcher its whole share from the start.
+// executors stopped on a first share minutes before the boundary released the rest. It has one
+// stage and each executor its whole share from the start.
 // The participants here are human, so each share stays where AllocateQuota put it and is read
 // off the guaranteed column. Burst is headroom derived from it, not a second slice of the budget.
 func TestStartReleasesTheWholeShareUnlessABoundaryCanCut(t *testing.T) {
 	ladder := []domain.Stage{{LengthPct: 50, EvictPct: 50, MaxJobHours: 1}, {LengthPct: 50, EvictPct: 0, MaxJobHours: 4}}
-	field := func(researchers int, others ...db.StartParticipant) *startStore {
+	field := func(executors int, others ...db.StartParticipant) *startStore {
 		store := &startStore{participants: others, pe: &domain.PlatformExperiment{
 			ID: "pe-1", Status: domain.PlatformExpOpen, BudgetAcceleratorHours: 100, BaselineJobID: "job-baseline", Stages: slices.Clone(ladder),
 		}}
-		for i := range researchers {
+		for i := range executors {
 			store.participants = append(store.participants, participant(fmt.Sprintf("human-%d", i+1), ""))
 		}
 		return store
@@ -373,9 +373,9 @@ func TestStartReleasesTheWholeShareUnlessABoundaryCanCut(t *testing.T) {
 		share  float64
 		stages []domain.Stage
 	}{
-		"five researchers":             {field(domain.MinResearchersForCut), 10, ladder},
-		"one researcher":               {field(1), 100, []domain.Stage{{LengthPct: 100, MaxJobHours: 4}}},
-		"four researchers, a reviewer": {field(4, reviewer), 20, []domain.Stage{{LengthPct: 100, MaxJobHours: 4}}},
+		"five executors":             {field(domain.MinExecutorsForCut), 10, ladder},
+		"one executor":               {field(1), 100, []domain.Stage{{LengthPct: 100, MaxJobHours: 4}}},
+		"four executors, a reviewer": {field(4, reviewer), 20, []domain.Stage{{LengthPct: 100, MaxJobHours: 4}}},
 	} {
 		quotas, err := newSignupTestService(t, c.store).start(context.Background(), c.store.pe, time.Now().UTC())
 		if err != nil {

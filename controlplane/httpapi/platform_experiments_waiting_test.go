@@ -20,7 +20,7 @@ func waitingAgent(id string) auth.Principal {
 // refusal says it itself: quota is granted at the start, and what its reader does until then.
 func TestAQuotaAskedForBeforeTheStartIsRefusedWithTheReadersNextStep(t *testing.T) {
 	store := newRosterStore(domain.PlatformExpOpen, 5)
-	store.signups = []domain.AgentSignup{{AgentID: "dana", Name: "Researcher 1", Role: domain.SignupRoleCompetitor}}
+	store.signups = []domain.AgentSignup{{AgentID: "dana", Name: "Executor 1", Role: domain.SignupRoleExecutor}}
 	r := authtest.Router(authtest.As(waitingAgent("dana")))
 	doc := NewDoc(r, "test", "1.0.0", "", auth.NewAccess(agentsTestPlacement), zap.NewNop())
 	registerPlatformExperimentsAndBudget(doc, newSignupTestService(t, store).WithRepositories(store).WithPlanning(testPlanning))
@@ -29,7 +29,7 @@ func TestAQuotaAskedForBeforeTheStartIsRefusedWithTheReadersNextStep(t *testing.
 	message, _ := out["message"].(string)
 	if code != http.StatusNotFound || out["reason"] != "quota_not_granted" ||
 		!strings.HasPrefix(message, "agent dana holds no quota yet: it is granted when the platform experiment starts. Every job you submit is refused until the platform starts the run") {
-		t.Errorf("open: got = %d %v, want 404 quota_not_granted with the researcher's next step", code, out)
+		t.Errorf("open: got = %d %v, want 404 quota_not_granted with the executor's next step", code, out)
 	}
 	store.pe.Status = domain.PlatformExpRunning
 	if code, out := call(t, r, "GET", "/platform-experiments/pe-1/quotas/dana", ""); code != http.StatusNotFound || out["reason"] == "quota_not_granted" {

@@ -158,6 +158,60 @@ func TestPlatformTellsTheJobTheCoresItHolds(t *testing.T) {
 	}
 }
 
+func gangEnv(vars []GangVar, index int) ([]string, map[string]string) {
+	names := make([]string, 0, len(vars))
+	env := map[string]string{}
+	for _, v := range vars {
+		names = append(names, v.Name)
+		env[v.Name] = v.At(index).Value
+	}
+	return names, env
+}
+
+// An ungrouped node's rank is its index, and the torch names stand beside the platform's.
+func TestGangTellsAnUngroupedNodeItsRank(t *testing.T) {
+	spec := clusterapi.JobSpec{NumNodes: 3}
+	names, env := gangEnv(Gang(spec, spec.NodeGroups()[0], 0, "master.test"), 2)
+	if want := []string{
+		jobenv.WorldSize, jobenv.MasterAddr, jobenv.MasterPort,
+		jobenv.TorchLocalRank, jobenv.TorchWorldSize, jobenv.TorchMasterAddr, jobenv.TorchMasterPort,
+		jobenv.Rank, jobenv.TorchRank,
+	}; !slices.Equal(names, want) {
+		t.Fatalf("names = %q, want %q", names, want)
+	}
+	for name, want := range map[string]string{
+		"HYPOTHESISLOOP_WORLD_SIZE": "3", "HYPOTHESISLOOP_MASTER_ADDR": "master.test", "HYPOTHESISLOOP_MASTER_PORT": "29500",
+		"LOCAL_RANK": "0", "WORLD_SIZE": "3", "MASTER_ADDR": "master.test", "MASTER_PORT": "29500",
+		"HYPOTHESISLOOP_RANK": "2", "RANK": "2",
+	} {
+		if env[name] != want {
+			t.Errorf("%s = %q, want %q", name, env[name], want)
+		}
+	}
+}
+
+// A grouped node is told its group, its index in it and the group's offset, and no RANK: the
+// world spans every group.
+func TestGangTellsAGroupedNodeItsGroupAndOffsetAndNoRank(t *testing.T) {
+	spec := clusterapi.JobSpec{Groups: []clusterapi.JobGroup{{Name: "learner", Replicas: 1}, {Name: "actor", Replicas: 3}}}
+	names, env := gangEnv(Gang(spec, spec.Groups[1], 1, "master.test"), 2)
+	if want := []string{
+		jobenv.WorldSize, jobenv.MasterAddr, jobenv.MasterPort,
+		jobenv.TorchLocalRank, jobenv.TorchWorldSize, jobenv.TorchMasterAddr, jobenv.TorchMasterPort,
+		jobenv.Group, jobenv.GroupRank, jobenv.GroupReplicas, jobenv.RankOffset,
+	}; !slices.Equal(names, want) {
+		t.Fatalf("names = %q, want %q", names, want)
+	}
+	for name, want := range map[string]string{
+		"HYPOTHESISLOOP_WORLD_SIZE": "4", "WORLD_SIZE": "4",
+		"HYPOTHESISLOOP_GROUP": "actor", "HYPOTHESISLOOP_GROUP_RANK": "2", "HYPOTHESISLOOP_GROUP_REPLICAS": "3", "HYPOTHESISLOOP_RANK_OFFSET": "1",
+	} {
+		if env[name] != want {
+			t.Errorf("%s = %q, want %q", name, env[name], want)
+		}
+	}
+}
+
 func gracedJob() *clusterapi.JobSpec {
 	shutdown, checkpoint := int64(30), int64(600)
 	return &clusterapi.JobSpec{TerminationGracePeriodSeconds: &shutdown, CheckpointGraceSeconds: &checkpoint}

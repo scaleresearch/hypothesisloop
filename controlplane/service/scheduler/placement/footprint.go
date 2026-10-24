@@ -1,6 +1,8 @@
 package placement
 
 import (
+	"maps"
+	"slices"
 	"sort"
 
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
@@ -8,13 +10,50 @@ import (
 
 // FitsWhenIdle reports whether a cluster with nothing running on it holds exp: its installed
 // total covers the job, and each node of the job fits the cpu, memory and storage of some node
-// of the cluster. Nodes whose totals were not read are not judged.
-func FitsWhenIdle(total domain.Footprint, nodeTotals map[string]map[string]int64, exp *domain.Experiment) bool {
+// of the cluster, a node of its own when the job spreads over hosts (RequiresDistinctHosts), all
+// in one place of its JobSpec.NodesWithin. Nodes whose totals were not read are not judged.
+func FitsWhenIdle(total domain.Footprint, nodeTotals map[string]map[string]int64, labelsByNode map[string]map[string]string, exp *domain.Experiment) bool {
 	if !fitsInstalled(total, exp) {
 		return false
 	}
 	if len(nodeTotals) == 0 {
 		return true
+	}
+	level := exp.EffectiveJob().NodesWithin()
+	if level == "" {
+		return fitsIdleNodes(nodeTotals, exp)
+	}
+	return slices.ContainsFunc(idlePlaces(nodeTotals, labelsByNode, level), func(nodes map[string]map[string]int64) bool { return fitsIdleNodes(nodes, exp) })
+}
+
+// FitsWhenIdleOnlyApart says whether an idle cluster holds exp only with its nodes in more than
+// one place of its JobSpec.NodesWithin.
+func FitsWhenIdleOnlyApart(total domain.Footprint, nodeTotals map[string]map[string]int64, labelsByNode map[string]map[string]string, exp *domain.Experiment) bool {
+	return fitsInstalled(total, exp) && len(nodeTotals) > 0 && fitsIdleNodes(nodeTotals, exp) && !FitsWhenIdle(total, nodeTotals, labelsByNode, exp)
+}
+
+// idlePlaces is nodeTotals split by the place each node is in at level (nearness), leaving out
+// the nodes no job within level takes.
+func idlePlaces(nodeTotals map[string]map[string]int64, labelsByNode map[string]map[string]string, level domain.NodesLevel) []map[string]map[string]int64 {
+	labelled := labelledLevels(labelsByNode)
+	byPlace := map[string]map[string]map[string]int64{}
+	for node, totals := range nodeTotals {
+		place, ok := nearness(labelsByNode, node, level, labelled)
+		if !ok {
+			continue
+		}
+		key := placeKey(place)
+		if byPlace[key] == nil {
+			byPlace[key] = map[string]map[string]int64{}
+		}
+		byPlace[key][node] = totals
+	}
+	return slices.Collect(maps.Values(byPlace))
+}
+
+func fitsIdleNodes(nodeTotals map[string]map[string]int64, exp *domain.Experiment) bool {
+	if RequiresDistinctHosts(exp) {
+		return SpreadHostsWhenIdle(nodeTotals, exp) == len(exp.NodeShapes())
 	}
 	for _, shape := range exp.NodeShapes() {
 		held := false
@@ -29,6 +68,80 @@ func FitsWhenIdle(total domain.Footprint, nodeTotals map[string]map[string]int64
 		}
 	}
 	return true
+}
+
+// ScaleUpPlace is the place of exp's JobSpec.NodesWithin, as the node labels that name it, that
+// exp is held to on a cluster whose nodes have labelsByNode when it waits there for nodes the
+// cluster's autoscaler adds: of the places the cluster's nodes are in, the one with the most nodes
+// that run exp, the first by name on a tie. ok is false for a job within a placement group, as
+// a node yet to be added is in none, and for a cluster that names places none of whose nodes holds
+// a job within the level.
+func ScaleUpPlace(labelsByNode map[string]map[string]string, exp *domain.Experiment) (place map[string]string, ok bool) {
+	level := exp.EffectiveJob().NodesWithin()
+	switch level {
+	case "":
+		return nil, true
+	case domain.NodesWithinPlacementGroup:
+		return nil, false
+	}
+	labelled := labelledLevels(labelsByNode)
+	places := map[string]map[string]string{}
+	runs := map[string]int{}
+	for node, labels := range labelsByNode {
+		at, ok := nearness(labelsByNode, node, level, labelled)
+		if !ok {
+			continue
+		}
+		key := placeKey(at)
+		places[key] = at
+		if RunsOn(labels, exp) {
+			runs[key]++
+		}
+	}
+	if len(places) == 0 {
+		return nil, len(labelsByNode) == 0
+	}
+	keys := slices.Sorted(maps.Keys(places))
+	best := keys[0]
+	for _, key := range keys[1:] {
+		if runs[key] > runs[best] {
+			best = key
+		}
+	}
+	return places[best], true
+}
+
+// SpreadHostsWhenIdle is how many nodes of exp an idle cluster whose nodes have nodeTotals holds
+// with each on a host of its own: the largest matching of exp's nodes to hosts with room for them.
+func SpreadHostsWhenIdle(nodeTotals map[string]map[string]int64, exp *domain.Experiment) int {
+	shapes := exp.NodeShapes()
+	hosts := make([]string, 0, len(nodeTotals))
+	for host := range nodeTotals {
+		hosts = append(hosts, host)
+	}
+	sort.Strings(hosts)
+	holder := make(map[string]int, len(hosts))
+	var assign func(rank int, seen map[string]bool) bool
+	assign = func(rank int, seen map[string]bool) bool {
+		for _, host := range hosts {
+			if seen[host] || !NodeHasRoom(nodeTotals[host], shapes[rank].Resources) {
+				continue
+			}
+			seen[host] = true
+			if other, taken := holder[host]; !taken || assign(other, seen) {
+				holder[host] = rank
+				return true
+			}
+		}
+		return false
+	}
+	held := 0
+	for rank := range shapes {
+		if assign(rank, map[string]bool{}) {
+			held++
+		}
+	}
+	return held
 }
 
 // fitsInstalled reports whether total, a cluster's installed capacity, covers exp on one of the

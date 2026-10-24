@@ -10,7 +10,6 @@ import (
 
 	"github.com/scaleresearch/hypothesisloop/contract/experimentspec"
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
-	"github.com/scaleresearch/hypothesisloop/controlplane/domain/agenttypes/agenttypestest"
 	"github.com/scaleresearch/hypothesisloop/controlplane/refusal"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments/platformexperimentstest"
 	"go.uber.org/zap"
@@ -39,7 +38,7 @@ func TestValidateRefusesWithAReasonAndAppliesTheSettings(t *testing.T) {
 		}}
 	}
 	svc := NewService(&createStore{}, platformexperimentstest.Settings, zap.NewNop(), nil, time.Minute)
-	spec, err := svc.validate(valid(), agenttypestest.Catalog())
+	spec, err := svc.validate(valid())
 	if err != nil {
 		t.Fatalf("validate: %v", err)
 	}
@@ -49,7 +48,7 @@ func TestValidateRefusesWithAReasonAndAppliesTheSettings(t *testing.T) {
 	block := valid()
 	block.Name, block.Description, block.DefaultQuotaTier = " exp\n", "\nthe brief\nof two lines\n", "burst_only\n"
 	block.Metrics = []domain.MetricDefinition{{Key: " loss\n", Direction: "minimize\n", Role: "ranking\n"}}
-	spec, err = svc.validate(block, agenttypestest.Catalog())
+	spec, err = svc.validate(block)
 	if err != nil || spec.Name != "exp" || spec.Description != "the brief\nof two lines" || spec.DefaultQuotaTier != "burst_only" ||
 		!reflect.DeepEqual(spec.Metrics, []domain.MetricDefinition{{Key: "loss", Direction: "minimize", Role: "ranking"}}) {
 		t.Errorf("texts written as blocks: got %+v, %v, want each without the whitespace around it", spec, err)
@@ -60,7 +59,7 @@ func TestValidateRefusesWithAReasonAndAppliesTheSettings(t *testing.T) {
 	twoLines := valid()
 	twoLines.Metrics[0].Key = "loss\nval"
 	var refused *refusal.Refusal
-	if _, err := svc.validate(twoLines, agenttypestest.Catalog()); !errors.As(err, &refused) || refused.GetStatus() != 422 || !strings.Contains(refused.Error(), "metrics[0].key is one line") {
+	if _, err := svc.validate(twoLines); !errors.As(err, &refused) || refused.GetStatus() != 422 || !strings.Contains(refused.Error(), "metrics[0].key is one line") {
 		t.Errorf("a metric key of two lines: got %v, want 422 naming metrics[0].key", err)
 	}
 	for name, c := range map[string]struct {
@@ -85,7 +84,7 @@ func TestValidateRefusesWithAReasonAndAppliesTheSettings(t *testing.T) {
 	} {
 		req := valid()
 		c.mutate(&req)
-		_, err := svc.validate(req, agenttypestest.Catalog())
+		_, err := svc.validate(req)
 		var refused *refusal.Refusal
 		if !errors.As(err, &refused) || refused.GetStatus() != 422 || refused.Reason != c.reason {
 			t.Errorf("%s: got %v, want 422 %s", name, err, c.reason)
@@ -100,27 +99,27 @@ func TestAFieldNoBoundaryCanCutIsStoredWithTheLadderItRuns(t *testing.T) {
 	settings := platformexperimentstest.Settings
 	settings.DefaultStages = ladder
 	svc := NewService(&createStore{}, settings, zap.NewNop(), nil, time.Minute)
-	spec := func(researchers int, stages []domain.Stage) CreatePlatformExperimentRequest {
+	spec := func(executors int, stages []domain.Stage) CreatePlatformExperimentRequest {
 		return CreatePlatformExperimentRequest{Spec: experimentspec.Spec{
-			Name: "exp", Description: "the brief", BudgetAcceleratorHours: 10, DurationHours: 24, MaxAgents: researchers,
+			Name: "exp", Description: "the brief", BudgetAcceleratorHours: 10, DurationHours: 24, MaxAgents: executors,
 			Metrics: []domain.MetricDefinition{{Key: "loss", Direction: "minimize"}}, Stages: stages,
 		}}
 	}
-	for _, researchers := range []int{2, domain.MinResearchersForCut} {
-		checked, err := svc.validate(spec(researchers, nil), agenttypestest.Catalog())
+	for _, executors := range []int{2, domain.MinExecutorsForCut} {
+		checked, err := svc.validate(spec(executors, nil))
 		if err != nil {
-			t.Fatalf("%d researchers, stages left out: %v", researchers, err)
+			t.Fatalf("%d executors, stages left out: %v", executors, err)
 		}
-		if want := domain.RunStages(ladder, researchers); !reflect.DeepEqual(checked.Stages, want) {
-			t.Errorf("%d researchers, stages left out: stored %+v, want the ladder the run starts with %+v", researchers, checked.Stages, want)
+		if want := domain.RunStages(ladder, executors); !reflect.DeepEqual(checked.Stages, want) {
+			t.Errorf("%d executors, stages left out: stored %+v, want the ladder the run starts with %+v", executors, checked.Stages, want)
 		}
 	}
 	var refused *refusal.Refusal
-	if _, err := svc.validate(spec(2, ladder), agenttypestest.Catalog()); !errors.As(err, &refused) || refused.GetStatus() != 422 || refused.Reason != "invalid_stages" {
-		t.Errorf("two stages stated for 2 researchers: got %v, want 422 invalid_stages", err)
+	if _, err := svc.validate(spec(2, ladder)); !errors.As(err, &refused) || refused.GetStatus() != 422 || refused.Reason != "invalid_stages" {
+		t.Errorf("two stages stated for 2 executors: got %v, want 422 invalid_stages", err)
 	}
-	if _, err := svc.validate(spec(domain.MinResearchersForCut, ladder), agenttypestest.Catalog()); err != nil {
-		t.Errorf("two stages stated for %d researchers: %v", domain.MinResearchersForCut, err)
+	if _, err := svc.validate(spec(domain.MinExecutorsForCut, ladder)); err != nil {
+		t.Errorf("two stages stated for %d executors: %v", domain.MinExecutorsForCut, err)
 	}
 }
 

@@ -30,6 +30,7 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/modelproxy"
 	"github.com/scaleresearch/hypothesisloop/controlplane/httpapi/watch"
+	"github.com/scaleresearch/hypothesisloop/controlplane/service/models"
 	"github.com/scaleresearch/hypothesisloop/controlplane/service/platformexperiments"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/db"
 	"github.com/scaleresearch/hypothesisloop/controlplane/storage/metricsdb"
@@ -55,12 +56,14 @@ type (
 func testRouter(t *testing.T) chi.Router {
 	t.Helper()
 	unreachable := authtest.As{Kind: auth.KindStaff}
-	launch := platformexperiments.AgentLaunch{AgentSandbox: true, DefaultModel: "model", CoordinatorModel: "model", SigningSecret: "secret", MaxAgentSandboxes: 1}
+	launch := platformexperiments.AgentLaunch{AgentSandbox: true, DefaultModel: "anthropic/model", CoordinatorModel: "anthropic/model", SigningSecret: "secret", MaxAgentSandboxes: 1}
+	catalog := domain.ModelCatalog{"model": {InputUSDPerMTok: 1, OutputUSDPerMTok: 1, CacheWriteUSDPerMTok: 1, CacheReadUSDPerMTok: 1}}
 	platformExperiments := platformexperiments.NewService(nil, domain.QuotaConfig{}, zap.NewNop(), nil, time.Minute).WithRepositories(noRepositories{}).
 		WithPlanning(platformexperiments.Planning{Limit: time.Minute, ProposedFor: time.Minute, PlannerKept: time.Minute}).WithAgentLaunch(launch)
-	modelProxy, err := modelproxy.New(noneInAgentSandbox{}, metricsdb.New(""), platformExperiments,
-		modelproxy.Policy{Models: domain.ModelCatalog{"model": {InputUSDPerMTok: 1, OutputUSDPerMTok: 1, CacheWriteUSDPerMTok: 1, CacheReadUSDPerMTok: 1}}, MaxInFlightPerOrg: 1},
-		"https://model.example.invalid", "credential", zap.NewNop())
+	served := models.New(map[string]models.Provider{domain.ModelProviderAnthropic: models.Catalog(catalog)}, domain.ModelDefaults{Agent: launch.DefaultModel, Coordinator: launch.CoordinatorModel})
+	modelProxy, err := modelproxy.New(noneInAgentSandbox{}, metricsdb.New(""), platformExperiments, served,
+		modelproxy.Providers{Anthropic: &modelproxy.Anthropic{URL: "https://model.example.invalid", OAuthToken: "credential"}},
+		domain.ModelDefaults{Agent: launch.DefaultModel, Coordinator: launch.CoordinatorModel}, 1, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,13 +77,14 @@ func testRouter(t *testing.T) chi.Router {
 		Launch:              launch,
 		Watch:               &watch.Handler{},
 		ModelProxy:          modelProxy,
+		Models:              served,
 	})
 }
 
 type noneInAgentSandbox struct{}
 
-func (noneInAgentSandbox) InAgentSandbox(context.Context, string, string) (bool, error) {
-	return false, nil
+func (noneInAgentSandbox) ProxiedModel(context.Context, string, string) (*domain.ModelChoice, error) {
+	return nil, nil
 }
 
 var pathParam = regexp.MustCompile(`\{[^}]+\}`)

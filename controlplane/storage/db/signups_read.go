@@ -81,18 +81,26 @@ const runEndSQL = `CASE WHEN ` + runClosedAtSQL + ` IS NOT NULL THEN '` + string
 // runEndedAtSQL is when the run of signup s ended, the first of its ends, NULL while it goes on.
 const runEndedAtSQL = `LEAST(` + runClosedAtSQL + `, ` + runCutAtSQL + `, ` + runFinishedAtSQL + `, ` + runPlannedAtSQL + `)`
 
-// replacedSQL is whether the platform added a researcher in the place of signup s.
+// replacedSQL is whether the platform added an agent in the place of signup s.
 const replacedSQL = `EXISTS (SELECT 1 FROM experiment_signups r WHERE r.platform_experiment_id = s.platform_experiment_id AND r.replaces = s.agent_id)`
 
-// researcherAtWorkSQL is whether signup s is a researcher at work: one that did not finish, was
-// not cut, was not replaced and, run by the platform, did not lose its machine with no restart
-// left. Each takes one of the places max_agents counts, and only they do: the one count of the
-// researchers a platform experiment has, for a signup and for a change of max_agents alike.
-const researcherAtWorkSQL = `s.role = '` + string(domain.SignupRoleCompetitor) + `' AND s.finished_at IS NULL AND NOT ` + stoppedSQL + `
+// teamSQL is whether signup s is of a role the agents of a platform experiment keep: an executor
+// or a researcher.
+const teamSQL = `s.role IN ('` + string(domain.SignupRoleExecutor) + `', '` + string(domain.SignupRoleResearcher) + `')`
+
+// agentAtWorkSQL is whether signup s is an agent of the team at work, an executor or a
+// researcher: one that did not finish, was not cut, was not replaced and, run by the platform, did
+// not lose its machine with no restart left.
+const agentAtWorkSQL = teamSQL + ` AND s.finished_at IS NULL AND NOT ` + stoppedSQL + `
   AND ` + runCutAtSQL + ` IS NULL
   AND NOT ` + replacedSQL
 
-// endedReasonSQL is why signup s no longer holds a place among the researchers, empty while it does.
+// executorAtWorkSQL is whether signup s is an executor at work (agentAtWorkSQL). Each takes one of
+// the places max_agents counts, and only they do: the one count of the executors a platform
+// experiment has, for a signup and for a change of max_agents alike.
+const executorAtWorkSQL = `s.role = '` + string(domain.SignupRoleExecutor) + `' AND ` + agentAtWorkSQL
+
+// endedReasonSQL is why signup s no longer holds a place in the team, empty while it does.
 const endedReasonSQL = `CASE WHEN ` + runCutAtSQL + ` IS NOT NULL THEN '` + string(domain.RunEndCut) + `'
             WHEN ` + replacedSQL + ` THEN '` + domain.EndedReplaced + `'
             WHEN s.finished_at IS NOT NULL THEN '` + string(domain.RunEndFinished) + `'
@@ -110,7 +118,7 @@ var agentSignupColumns = `s.platform_experiment_id, s.agent_id, COALESCE(a.name,
        ` + domain.InstanceReleasedSQL(runEndedAtSQL) + `,
        ` + runEndSQL + `,
        COALESCE((SELECT cut.reason FROM platform_experiment_cuts cut WHERE cut.platform_experiment_id = s.platform_experiment_id AND cut.agent_id = s.agent_id), ''),
-       (` + researcherAtWorkSQL + `), ` + endedReasonSQL
+       (` + agentAtWorkSQL + `), ` + endedReasonSQL
 
 // scanAgentSignup reads agentSignupColumns, and after them whatever else the query selected.
 func scanAgentSignup(row pgx.Row, more ...any) (domain.AgentSignup, error) {
@@ -202,7 +210,7 @@ type LauncherAgent struct {
 
 // launcherAgentsFrom selects the sandboxed agents the launcher still has something to do for: those
 // of a running platform experiment that were not cut and did not finish, those that measure the
-// baseline of an open one, since no researcher's machine is rented before there is a baseline to
+// baseline of an open one, since no machine of the team is rented before there is a baseline to
 // start from, and those
 // whose experiment closed, who were cut or who finished less than $1 seconds ago. A stopped agent is among them: it is asked for again
 // once what it is started with changes. Both moments and the comparison are on the database's
@@ -221,7 +229,7 @@ type LauncherAgent struct {
 // seconds, as it is after the draft closed. Once the draft is accepted it has nothing left to
 // do, in an experiment that is then open or running.
 //
-// A researcher the platform replaced has nothing left to do either: one whose machine stopped
+// An agent the platform replaced has nothing left to do either: one whose machine stopped
 // would otherwise be started again once what it is started with changes, beside its replacement.
 const launcherAgentsFrom = `
 FROM experiment_signups s

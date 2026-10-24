@@ -12,10 +12,10 @@ import (
 	"github.com/scaleresearch/hypothesisloop/controlplane/domain"
 )
 
-// A researcher that joins a running platform experiment takes the place of one that ended, or one
+// An executor that joins a running platform experiment takes the place of one that ended, or one
 // max_agents gained, and its share first from what the ones that ended left unspent, then from the
-// researchers at work, and max_agents counts the researchers at work.
-func TestAResearcherJoinsARunningPlatformExperimentInThePlaceOfOneThatEnded(t *testing.T) {
+// executors at work, and max_agents counts the executors at work.
+func TestAnExecutorJoinsARunningPlatformExperimentInThePlaceOfOneThatEnded(t *testing.T) {
 	pool := eventsTestDB(t)
 	ctx := context.Background()
 	pes := NewStore(pool, 3)
@@ -27,7 +27,7 @@ func TestAResearcherJoinsARunningPlatformExperimentInThePlaceOfOneThatEnded(t *t
 	spawn := func(name string) string {
 		id, _ := domain.NewID(domain.AgentIDPrefix)
 		agent := &domain.Agent{ID: id, Name: name + "-" + id, CreatedAt: time.Now().UTC()}
-		if err := pes.SpawnAgent(ctx, pe, agent, domain.AgentSignup{Actor: testActor, AgentID: id, Role: domain.SignupRoleCompetitor}); err != nil {
+		if err := pes.SpawnAgent(ctx, pe, agent, domain.AgentSignup{Actor: testActor, AgentID: id, Role: domain.SignupRoleExecutor}); err != nil {
 			t.Fatalf("spawn %s: got = %v, want = nil", name, err)
 		}
 		return id
@@ -52,8 +52,8 @@ func TestAResearcherJoinsARunningPlatformExperimentInThePlaceOfOneThatEnded(t *t
 		agent := &domain.Agent{ID: id, CreatedAt: time.Now().UTC()}
 		return id, pes.JoinRunning(ctx, pe, agent, domain.AgentSignup{Actor: testActor, AgentID: id, Role: role}, late)
 	}
-	if _, err := join(domain.SignupRoleCompetitor); !errors.Is(err, ErrMaxAgentsReached) {
-		t.Fatalf("a third researcher at work: got = %v, want = ErrMaxAgentsReached", err)
+	if _, err := join(domain.SignupRoleExecutor); !errors.Is(err, ErrMaxAgentsReached) {
+		t.Fatalf("a third executor at work: got = %v, want = ErrMaxAgentsReached", err)
 	}
 	if err := pes.FinishAgent(ctx, pe, ended, "done"); err != nil {
 		t.Fatal(err)
@@ -61,9 +61,9 @@ func TestAResearcherJoinsARunningPlatformExperimentInThePlaceOfOneThatEnded(t *t
 	if _, err := join(domain.SignupRoleReviewer); !errors.Is(err, ErrSignupClosed) {
 		t.Fatalf("a reviewer: got = %v, want = ErrSignupClosed", err)
 	}
-	newcomer, err := join(domain.SignupRoleCompetitor)
+	newcomer, err := join(domain.SignupRoleExecutor)
 	if err != nil {
-		t.Fatalf("a researcher in the place of one that finished: got = %v, want = nil", err)
+		t.Fatalf("an executor in the place of one that finished: got = %v, want = nil", err)
 	}
 	// 3 + 4 unspent over the one at work and the newcomer, at most the 4 the ended one left.
 	for id, want := range map[string]float64{newcomer: 3.5, ended: 1.5, atWork: 5} {
@@ -73,21 +73,21 @@ func TestAResearcherJoinsARunningPlatformExperimentInThePlaceOfOneThatEnded(t *t
 		}
 	}
 	late.Used[newcomer] = 0
-	if _, err := join(domain.SignupRoleCompetitor); !errors.Is(err, ErrMaxAgentsReached) {
-		t.Fatalf("a researcher past max_agents at work: got = %v, want = ErrMaxAgentsReached", err)
+	if _, err := join(domain.SignupRoleExecutor); !errors.Is(err, ErrMaxAgentsReached) {
+		t.Fatalf("an executor past max_agents at work: got = %v, want = ErrMaxAgentsReached", err)
 	}
 	if _, err := pool.pool.Exec(ctx, `UPDATE platform_experiments SET max_agents = 5 WHERE id = $1`, pe); err != nil {
 		t.Fatal(err)
 	}
 	late.Used[ended] = 1.5
 	late.MinShare = 2.5
-	if _, err := join(domain.SignupRoleCompetitor); !errors.Is(err, ErrNoShareLeft) {
+	if _, err := join(domain.SignupRoleExecutor); !errors.Is(err, ErrNoShareLeft) {
 		t.Fatalf("an even part below one trial: got = %v, want = ErrNoShareLeft", err)
 	}
 	late.MinShare = 2
-	added, err := join(domain.SignupRoleCompetitor)
+	added, err := join(domain.SignupRoleExecutor)
 	if err != nil {
-		t.Fatalf("a researcher in a place max_agents gained: got = %v, want = nil", err)
+		t.Fatalf("an executor in a place max_agents gained: got = %v, want = nil", err)
 	}
 	// Nothing left by the one that ended: 3 + 3.5 unspent over three, given by the two at work
 	// above it, each keeping what it used.

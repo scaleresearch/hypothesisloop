@@ -97,10 +97,10 @@ func rented(t *testing.T, e *Executor, p *fake.Provider) (keep, done, booting *c
 	mustCreate(t, e, keep)
 	mustCreate(t, e, done)
 	mustCreate(t, e, booting)
-	p.Start("hl-job-t1-exp-keep-a0-h100-0")
-	p.Print("hl-job-t1-exp-keep-a0-h100-0", "epoch 1")
-	p.Start("hl-job-t1-exp-done-a2-cpu-0")
-	p.Exit("hl-job-t1-exp-done-a2-cpu-0", exitLine(0))
+	p.Start("hl-job-t1-exp-keep-a0-r0of1-h100-0")
+	p.Print("hl-job-t1-exp-keep-a0-r0of1-h100-0", "epoch 1")
+	p.Start("hl-job-t1-exp-done-a2-r0of1-cpu-0")
+	p.Exit("hl-job-t1-exp-done-a2-r0of1-cpu-0", exitLine(0))
 	return keep, done, booting
 }
 
@@ -112,12 +112,12 @@ func TestAReconcilePassCostsOneList(t *testing.T) {
 	keep, gone, created := job(t, "exp-keep", 0, 1), job(t, "exp-gone", 1, 0), on(job(t, "exp-new", 0, 1), "h100-1")
 	mustCreate(t, e, keep)
 	mustCreate(t, e, gone)
-	p.Start("hl-job-t1-exp-keep-a0-h100-0")
-	p.Start("hl-job-t1-exp-gone-a1-cpu-0")
+	p.Start("hl-job-t1-exp-keep-a0-r0of1-h100-0")
+	p.Start("hl-job-t1-exp-gone-a1-r0of1-cpu-0")
 	cp := newControlPlane(t, p, keep, created)
 	before := callsOf(p)
 	creates, destroys := p.Calls("Create"), p.Calls("Destroy")
-	want := []string{"hl-job-t1-exp-keep-a0-h100-0", "hl-job-t1-exp-new-a0-h100-1"}
+	want := []string{"hl-job-t1-exp-keep-a0-r0of1-h100-0", "hl-job-t1-exp-new-a0-r0of1-h100-1"}
 
 	run(t, e, cp, time.Hour, time.Hour, func() bool { return reflect.DeepEqual(p.Names(), want) })
 
@@ -182,7 +182,7 @@ func TestAPassFollowsItsOwnChangesAndIsReadAgainForTheNext(t *testing.T) {
 	}
 
 	// Outside the pass the vendor takes exp-2's machine back.
-	if err := p.Destroy(ctx, p.IDs("hl-job-t1-exp-2-a0-h100-0")[0]); err != nil {
+	if err := p.Destroy(ctx, p.IDs("hl-job-t1-exp-2-a0-r0of1-h100-0")[0]); err != nil {
 		t.Fatal(err)
 	}
 	if phase, _ := status(t, pass, "exp-2"); phase != clusterapi.JobPhasePending {
@@ -210,7 +210,7 @@ func TestAPassFollowsItsOwnChangesAndIsReadAgainForTheNext(t *testing.T) {
 func TestOneUnreadableExitedInstanceDoesNotWithholdTheClustersPush(t *testing.T) {
 	e, p := newTestExecutor(t)
 	keep, done, booting := rented(t, e, p)
-	p.Fail = failing("Logs", "hl-job-t1-exp-done-a2-cpu-0")
+	p.Fail = failing("Logs", "hl-job-t1-exp-done-a2-r0of1-cpu-0")
 
 	var mu sync.Mutex
 	reports := map[string]pushedReport{}
@@ -262,7 +262,7 @@ func TestOneUnreadableExitedInstanceDoesNotWithholdTheClustersPush(t *testing.T)
 // an ending on h100-1 or one that names no slot.
 func TestTheLoopNeverReportsAPreemptedRunsExitAsTheReadmittedJobsResult(t *testing.T) {
 	e, p := newTestExecutor(t)
-	const old, placed = "hl-job-t1-exp-1-a3-h100-0", "hl-job-t1-exp-1-a3-h100-1"
+	const old, placed = "hl-job-t1-exp-1-a3-r0of1-h100-0", "hl-job-t1-exp-1-a3-r0of1-h100-1"
 	mustCreate(t, e, job(t, "exp-1", 3, 1))
 	p.Start(old)
 	p.Exit(old, "Terminated", exitLine(143))

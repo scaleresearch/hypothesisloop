@@ -24,7 +24,7 @@ func registerSituation(doc *Doc, experiments *platformexperiments.Service, logge
 		OperationID: "get-platform-experiment-situation", Method: "GET", Path: "/platform-experiments/{id}/situation",
 		Summary: "Where the run stands now, in one read", Tags: []string{"platform-experiments"},
 		Description: "Computed on every read: the run's clock (ends_at, minutes_left, the stage and when the next starts; on a closed run minutes_left 0 with closed_at and close_reason, on one not started how long it will run once it starts), " +
-			"the objective on each ranking metric (the declared baseline's value, the best a researcher's completed job holding every constraint reached, by which job and agent, " +
+			"the objective on each ranking metric (the declared baseline's value, the best an executor's completed job holding every constraint reached, by which job and agent, " +
 			"the target its target_vs_baseline sets against the baseline's value and the gap to it, and the best an hour and three hours ago), " +
 			"the capacity the run's jobs could use (free and total of its baseline job's type on each cluster its jobs can be placed on, fits_now: how many jobs shaped like the baseline job place now, node by node, and the run's jobs queued and running), " +
 			"the run's budget and spend, for a coordinator, a person or a key each hypothesis with jobs queued or running or checked out within two hours and who is on it, and for each agent its jobs queued and running, the subagents and turn its harness last reported, its activity, minutes without a job in flight, " +

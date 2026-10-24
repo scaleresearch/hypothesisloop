@@ -77,7 +77,7 @@ def test_completed_job_that_wrote_nothing_lists_as_empty_data(api, experiment, r
 
     job_id = api.submit_job(
         pe_id, agent, hours=JOB_HOURS,
-        job_overrides={"env": {"HYPOTHESISLOOP_DURATION_SECONDS": str(RUN_SECONDS)}},
+        job_overrides={"env": {"RUN_SECONDS": str(RUN_SECONDS)}},
     )
 
     _wait_completed(api, deadline, job_id, "the no-data job to complete")
@@ -118,7 +118,7 @@ def test_grouped_stage_writes_checkpoint_read_by_child_with_scoped_credentials(a
                 {"name": "helper", "replicas": 2, "cpu": "1", "memory": "64Mi", "storage": "256Mi"},
             ],
             "env": {
-                "HYPOTHESISLOOP_DURATION_SECONDS": str(RUN_SECONDS),
+                "RUN_SECONDS": str(RUN_SECONDS),
                 "STAGE_MODE": "write",
                 "CHECKPOINT_VALUE": str(CHECKPOINT_VALUE),
             },
@@ -131,22 +131,6 @@ def test_grouped_stage_writes_checkpoint_read_by_child_with_scoped_credentials(a
         f"eviction_reason={exp_a.get('eviction_reason')}, not_admitted_reason={exp_a.get('not_admitted_reason')})"
     )
     api.file_finding(job_a, "multi-stage chain: grouped stage A wrote its checkpoint.")
-
-    # Three nodes, three DISTINCT global ranks. A grouped pod is never handed RANK -- a job-global
-    # rank is the group's offset plus the pod's index within its group, and Kubernetes cannot add
-    # -- so this number is the workload adding the two terms the platform published. Were the
-    # group-local index used instead, the helper group would report ranks 0 and 1 again and this
-    # count would be 2.
-    ranks = api.metric_values(job_a, "stage_rank")
-    distinct_ranks = set(ranks)
-    assert len(distinct_ranks) == 3, (
-        f"stage A reported {len(distinct_ranks)} distinct rank(s) {sorted(distinct_ranks)}, want 3 "
-        "-- two pods in different groups share a rank"
-    )
-    assert max(distinct_ranks) == pytest.approx(2.0, abs=0.001), (
-        f"highest reported rank is {max(distinct_ranks)}, want 2 -- ranks should be 0..2 rather "
-        "than three copies of one group's"
-    )
 
     # ------------------------------------------------------------------------------------------
     # GET /experiments/{id}/data -- what a job left behind
@@ -164,6 +148,16 @@ def test_grouped_stage_writes_checkpoint_read_by_child_with_scoped_credentials(a
     assert len(rank0_keys) == 1, (
         f"stage A's listing has {len(rank0_keys)} rank-0 checkpoint(s), want 1: {keys}"
     )
+    # Three nodes, three DISTINCT global ranks, each writing checkpoint-rank<RANK>.txt. A grouped
+    # pod is never handed RANK -- a job-global rank is the group's offset plus the pod's index
+    # within its group, and Kubernetes cannot add -- so this is the workload adding the two terms
+    # the platform published. Were the group-local index used instead, the helper group would write
+    # ranks 0 and 1 again. The ranks' keys say it and their metrics cannot: every rank's post lands
+    # on the one job, so posts of one metric in the same instant are one sample.
+    ranks = sorted(k.rsplit("checkpoint-rank", 1)[1] for k in keys if "checkpoint-rank" in (k or ""))
+    assert ranks == ["0.txt", "1.txt", "2.txt"], (
+        f"stage A's checkpoints are of ranks {ranks}, want 0, 1 and 2 -- two pods in different groups share a rank"
+    )
 
     # ------------------------------------------------------------------------------------------
     # Stage B: parent_id A, reads A's checkpoint back
@@ -176,7 +170,7 @@ def test_grouped_stage_writes_checkpoint_read_by_child_with_scoped_credentials(a
             "command": ["python", "-u", "data_stage.py"],
             "max_retries": 0,
             "env": {
-                "HYPOTHESISLOOP_DURATION_SECONDS": str(RUN_SECONDS),
+                "RUN_SECONDS": str(RUN_SECONDS),
                 "STAGE_MODE": "read",
                 "STAGE_PARENT_ID": job_a,
             },

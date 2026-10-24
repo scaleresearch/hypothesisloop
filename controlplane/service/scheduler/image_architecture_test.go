@@ -148,13 +148,40 @@ func TestARentedSlotTakesOnlyAnAmd64Job(t *testing.T) {
 	amd, arm := h100Job("amd", "2"), h100Job("arm", "2")
 	amd.ImageArchitecture, arm.ImageArchitecture = "amd64", "arm64"
 
-	if _, misfit := placement.ResolveOntoSlot(amd, rented, c.sizes, c.free, c.labels); misfit != "" {
+	if _, misfit := placement.ResolveOntoSlots(amd, rented, c.sizes, c.free, c.labels); misfit != "" {
 		t.Fatalf("an amd64 job: %s", misfit)
 	}
-	if resolved, misfit := placement.ResolveOntoSlot(arm, rented, c.sizes, c.free, c.labels); misfit == "" {
+	if resolved, misfit := placement.ResolveOntoSlots(arm, rented, c.sizes, c.free, c.labels); misfit == "" {
 		t.Fatalf("an arm64 job was sized to a slot: %+v", resolved)
 	}
-	if node, _, misfit := placement.SlotFor(arm, rented, c.sizes, c.free, c.labels); node != "" || misfit == "" {
-		t.Fatalf("an arm64 job was given slot %q", node)
+	if nodes, _, misfit := placement.SlotsFor(arm, rented, c.sizes, c.free, c.labels); nodes != nil || misfit == "" {
+		t.Fatalf("an arm64 job was given slots %q", nodes)
+	}
+}
+
+// A job on a cluster whose nodes name no architecture is told that no node runs its image, and
+// not that the node nearest to holding it is short of an accelerator it has free.
+func TestAJobOnAClusterWhoseNodesNameNoArchitectureIsToldSo(t *testing.T) {
+	for _, tier := range []domain.CapacityTier{domain.CapacityGuaranteed, domain.CapacityBurst} {
+		t.Run(string(tier), func(t *testing.T) {
+			store := &orgStore{registered: map[string]domain.Cluster{"bare-box": {Name: "bare-box", OrgID: "org-a"}}}
+			store.queued = []*domain.Experiment{archJob("on-amd", tier, "amd64")}
+			workload := archWorkload{
+				orgWorkload: orgWorkload{clusters: map[string]orgCluster{"bare-box": {free: 4, installed: 4}}},
+				arch:        map[string]string{"bare-box": ""},
+			}
+			l := holdLoop(store, workload, noopEvictor{})
+			l.settler = &recordingSettler{}
+
+			tickOnce(t, l)
+
+			if got := store.submitted["on-amd"]; got != "" {
+				t.Fatalf("the job was placed on %q, whose nodes name no architecture", got)
+			}
+			got := store.notAdmitted["on-amd"]
+			if reasonCode(got) != domain.NotAdmittedCapacityUnavailable || !strings.Contains(got, "no node of cluster bare-box runs") || !strings.Contains(got, "amd64") || !strings.Contains(got, "name no "+domain.NodeArchitectureLabel) {
+				t.Errorf("not_admitted_reason = %q, want one naming the architecture no node of bare-box names", got)
+			}
+		})
 	}
 }

@@ -347,6 +347,14 @@ func TestASubmittedNodeSelectorMayNotNameAPlatformLabel(t *testing.T) {
 	}
 }
 
+// The slots a job holds are admission's to choose, for the same reason as its node selector's
+// platform labels.
+func TestASubmittedJobMayNotStateItsSlots(t *testing.T) {
+	exp := validSubmission()
+	exp.Job.Slots = []string{"h100-0"}
+	mustReject(t, exp, "job.slots")
+}
+
 func TestASecretEnvNameAlsoSetInTheOpenIsRejected(t *testing.T) {
 	exp := validSubmission()
 	exp.Job.Env = map[string]string{"HF_TOKEN": "open"}
@@ -404,4 +412,19 @@ func TestAJobThatSetsAVariableThePlatformSetsIsRefused(t *testing.T) {
 	if err := validate(t, fine); err != nil {
 		t.Fatalf("a job with its own variables: %v", err)
 	}
+}
+
+func TestNodesWithinTakesOnlyItsLevels(t *testing.T) {
+	for _, level := range []domain.NodesLevel{"", domain.NodesWithinRegion, domain.NodesWithinZone, domain.NodesWithinPlacementGroup} {
+		exp := validSubmission()
+		exp.Job.NumNodes = 2
+		exp.Job.Topology = &domain.TopologySpec{NodesWithin: level}
+		if err := validate(t, exp); err != nil {
+			t.Fatalf("nodes_within %q was refused: %v", level, err)
+		}
+	}
+	exp := validSubmission()
+	exp.Job.NumNodes = 2
+	exp.Job.Topology = &domain.TopologySpec{NodesWithin: "rack"}
+	mustReject(t, exp, "job.topology.nodes_within")
 }

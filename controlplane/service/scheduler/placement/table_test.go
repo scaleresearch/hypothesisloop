@@ -99,6 +99,12 @@ func TestFitsWhenIdle(t *testing.T) {
 		return exp
 	}
 	cpuOnly := &domain.Experiment{Job: domain.JobSpec{CPU: "4", Memory: "1Gi", Storage: "1Gi"}}
+	gang := func(ranks int, spread bool) *domain.Experiment {
+		exp := job("4", 1)
+		exp.Job.NumNodes = ranks
+		exp.Job.Topology = &domain.TopologySpec{SpreadAcrossHosts: &spread}
+		return exp
+	}
 	node := func(cores int64) map[string]int64 {
 		return map[string]int64{domain.NodeResourceCPUMillicores: cores * 1000, domain.NodeResourceMemoryBytes: 64 << 30, domain.NodeResourceStorageBytes: 64 << 30}
 	}
@@ -115,12 +121,32 @@ func TestFitsWhenIdle(t *testing.T) {
 		"one node holds it":               {accelerators(map[string]int64{h100: 2}), map[string]map[string]int64{"a": node(8), "b": node(16)}, job("12", 2), true},
 		"a job without devices is judged": {accelerators(nil), nil, cpuOnly, true},
 		"a job without devices too large": {domain.CapacityFootprint(2, nil, 64<<30, 64<<30), nil, cpuOnly, false},
+		"a spread gang, a host each":      {accelerators(map[string]int64{h100: 3}), map[string]map[string]int64{"a": node(8), "b": node(8), "c": node(8)}, gang(3, true), true},
+		"a spread gang, too few hosts":    {accelerators(map[string]int64{h100: 3}), map[string]map[string]int64{"a": node(16), "b": node(16)}, gang(3, true), false},
+		"a stacked gang, few hosts":       {accelerators(map[string]int64{h100: 3}), map[string]map[string]int64{"a": node(16), "b": node(16)}, gang(3, false), true},
+		"a spread gang, a host too small": {accelerators(map[string]int64{h100: 3}), map[string]map[string]int64{"a": node(8), "b": node(8), "c": node(2)}, gang(3, true), false},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if got := FitsWhenIdle(tc.total, tc.nodes, tc.exp); got != tc.want {
+			if got := FitsWhenIdle(tc.total, tc.nodes, nil, tc.exp); got != tc.want {
 				t.Fatalf("FitsWhenIdle = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// A host taken by a node that fits elsewhere is handed back: the learner fits on "big" alone,
+// and an actor placed there first must move to "small" for both to land.
+func TestSpreadHostsWhenIdleMovesANodeToFreeTheHostAnotherNeeds(t *testing.T) {
+	exp := groupedExperiment(
+		domain.JobGroup{Name: "actor", Replicas: 1, CPU: "2", Memory: "1Gi", Storage: "1Gi", AcceleratorCount: 1},
+		domain.JobGroup{Name: "learner", Replicas: 1, CPU: "12", Memory: "1Gi", Storage: "1Gi", AcceleratorCount: 1},
+	)
+	hosts := map[string]map[string]int64{
+		"big":   {domain.NodeResourceCPUMillicores: 16000, domain.NodeResourceMemoryBytes: 64 << 30, domain.NodeResourceStorageBytes: 64 << 30},
+		"small": {domain.NodeResourceCPUMillicores: 4000, domain.NodeResourceMemoryBytes: 64 << 30, domain.NodeResourceStorageBytes: 64 << 30},
+	}
+	if got := SpreadHostsWhenIdle(hosts, exp); got != 2 {
+		t.Fatalf("SpreadHostsWhenIdle = %d, want 2", got)
 	}
 }
 
@@ -251,5 +277,37 @@ func TestWithinSharesFootprints(t *testing.T) {
 	SubtractFootprint(view["a"], domain.Footprint{cpuKey: 400})
 	if avail["a"][cpuKey] != 600 {
 		t.Fatalf("a reservation through the tier view is not seen through avail: %v", avail)
+	}
+}
+
+func TestSlotNetwork(t *testing.T) {
+	for name, tc := range map[string]struct {
+		labels map[string]string
+		want   int
+	}{
+		"no label":            {map[string]string{domain.NodeSlotLabel: "a"}, 0},
+		"a count":             {map[string]string{domain.NodeSlotNetworkLabel: "4"}, 4},
+		"none, with why":      {map[string]string{domain.NodeSlotNetworkLabel: "0", domain.NodeSlotNoNetworkLabel: "no cluster"}, 0},
+		"an unreadable label": {map[string]string{domain.NodeSlotNetworkLabel: "many"}, 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := SlotNetwork(tc.labels); got != tc.want {
+				t.Fatalf("SlotNetwork = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSameShape(t *testing.T) {
+	small := map[string]int64{domain.NodeResourceCPUMillicores: 4000}
+	large := map[string]int64{domain.NodeResourceCPUMillicores: 8000}
+	shapes := []domain.NodeShape{
+		{Group: "actor", Resources: small}, {Group: "actor", Resources: small}, {Group: "critic", Resources: small},
+		{Group: "learner", AcceleratorCount: 1, Resources: small}, {Group: "big", Resources: large},
+	}
+	for i, want := range []int{3, 3, 3, 1, 1} {
+		if got := sameShape(shapes, shapes[i]); got != want {
+			t.Errorf("sameShape of %s = %d, want %d", shapes[i].Group, got, want)
+		}
 	}
 }

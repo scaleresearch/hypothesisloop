@@ -98,7 +98,7 @@ func TestAnExperimentThatClosesWithNoSummaryIsGivenTheRecordOfItsClose(t *testin
 	pe := &domain.PlatformExperiment{ID: "pe-late", ProjectID: "prj-a", Status: domain.PlatformExpOpen, CreatedAt: now.Add(-time.Hour),
 		DurationHours: 1, BudgetAcceleratorHours: 18, BaselineDueAt: now.Add(-time.Minute), Stages: []domain.Stage{{LengthPct: 100}},
 		CoordinatorInAgentSandbox: true, Coordinator: &domain.AgentSandboxCoordinator{Instance: domain.AgentInstance{State: domain.InstanceWaiting}}}
-	store := &statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{pe}, researchers: []string{"ag-researcher"},
+	store := &statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{pe}, executors: []string{"ag-executor"},
 		baselines: []domain.AgentSignup{{AgentID: "ag-baseline", Name: "baseline", Role: domain.SignupRoleBaseline,
 			Instance: &domain.AgentInstance{AskedAt: &asked, Name: "m-1", Reported: domain.InstanceRunning}, Activity: &domain.AgentActivity{Text: "writing harness/run_trial.py", At: asked}}}}}
 	svc := NewService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), time.Minute)
@@ -106,7 +106,7 @@ func TestAnExperimentThatClosesWithNoSummaryIsGivenTheRecordOfItsClose(t *testin
 		t.Fatal(err)
 	}
 	for _, want := range []string{"baseline_limit_reached", "no job was ever submitted", "Jobs submitted: 0.", "Spent: 0 of the budget of 18",
-		"- coordinator: no activity reported; never launched: the platform launches a coordinator once the run starts or the experiment waits for it, and this one closed before either, so this record is its summary.", `- baseline (baseline): 0 jobs submitted; last activity "writing harness/run_trial.py"`, "did not finish: at work at the close", "(competitor): 0 jobs submitted; no activity reported; never launched.", "No job."} {
+		"- coordinator: no activity reported; never launched: the platform launches a coordinator once the run starts or the experiment waits for it, and this one closed before either, so this record is its summary.", `- baseline (baseline): 0 jobs submitted; last activity "writing harness/run_trial.py"`, "did not finish: at work at the close", "(executor): 0 jobs submitted; no activity reported; never launched.", "No job."} {
 		if !strings.Contains(pe.Summary, want) {
 			t.Errorf("summary = %q, want it to say %q", pe.Summary, want)
 		}
@@ -120,7 +120,7 @@ func TestTheRecordOfACloseFollowsASummaryWrittenBefore(t *testing.T) {
 	now := time.Now().UTC()
 	pe := &domain.PlatformExperiment{ID: "pe-ended", ProjectID: "prj-a", Status: domain.PlatformExpRunning, CreatedAt: now.Add(-2 * time.Hour),
 		StartedAt: now.Add(-time.Hour), EndsAt: now.Add(-time.Second), DurationHours: 1, BudgetAcceleratorHours: 6,
-		Stages: []domain.Stage{{LengthPct: 100}}, Summary: "Status: running. Researchers are at work.",
+		Stages: []domain.Stage{{LengthPct: 100}}, Summary: "Status: running. Executors are at work.",
 		BaselineJobID: "job-2", BaselineRaises: []domain.BaselineRaise{{From: "job-1", To: "job-2", Reason: "job-2 measured the control's other coder",
 			Actor: domain.Actor{Kind: domain.ActorCoordinator, ID: "pe-ended"}, At: time.Date(2026, 10, 8, 19, 0, 0, 0, time.UTC)}}}
 	store := &statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{pe}, messages: []domain.AgentMessage{{AgentID: "ag-1", From: "coordinator",
@@ -129,7 +129,7 @@ func TestTheRecordOfACloseFollowsASummaryWrittenBefore(t *testing.T) {
 	if err := svc.SweepExpired(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if pe.Status != domain.PlatformExpClosed || !strings.HasPrefix(pe.Summary, "Status: running. Researchers are at work.\n\nRecorded by the platform: it closed at ") {
+	if pe.Status != domain.PlatformExpClosed || !strings.HasPrefix(pe.Summary, "Status: running. Executors are at work.\n\nRecorded by the platform: it closed at ") {
 		t.Fatalf("status %s, summary %q, want closed with the record after the summary written before", pe.Status, pe.Summary)
 	}
 	// The record says who raised the baseline while it ran, and why.

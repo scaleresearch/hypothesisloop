@@ -94,8 +94,12 @@ class BriefingTest(unittest.TestCase):
             self.assertIn(["platform-experiments", "summary"], asked)
             self.assertIn(["platform-experiments", "close"], asked)
             asked.clear()
+            prompt.hl_commands(SimpleNamespace(role="executor"))
+            self.assertEqual(asked, [[], ["hypothesis", "submit"], ["job", "submit"]])
+            asked.clear()
+            # A researcher curates the graph and submits no job.
             prompt.hl_commands(SimpleNamespace(role="researcher"))
-        self.assertEqual(asked, [[], ["hypothesis", "submit"]])
+        self.assertEqual(asked, [[], ["hypothesis"], ["hypothesis", "merge"], ["hypothesis", "retire"], ["hypothesis", "unlink"]])
 
 
 
@@ -126,15 +130,15 @@ class WatchTest(unittest.IsolatedAsyncioTestCase):
             ({**ended, "close_reason": "closed_by_request", "closed_by": person}, {}, "coordinator", "a person closed it (Ada) at 2026-01-01T02:48:05Z. They gave no reason."),
             ({**ended, "close_reason": "closed_by_request", "closed_by": person, "close_message": "the baseline measured the old split"}, {}, "coordinator",
              "a person closed it (Ada) at 2026-01-01T02:48:05Z. Their reason: the baseline measured the old split"),
-            ({**ended, "close_reason": "closed_by_request", "closed_by": {"kind": "coordinator"}}, {"ended": "closed"}, "researcher", "its coordinator closed it"),
+            ({**ended, "close_reason": "closed_by_request", "closed_by": {"kind": "coordinator"}}, {"ended": "closed"}, "executor", "its coordinator closed it"),
             (ended, {}, "coordinator", "The platform recorded no reason"),
             ({**ended, "close_reason": "planning_limit_reached"}, {"ended": "closed"}, "planner", "the planning limit passed with nothing proposed, and the platform closed the draft at 2026-01-01T02:48:05Z"),
-            ({**ended, "close_reason": "baseline_limit_reached"}, {"ended": "closed"}, "researcher", "was not running by its baseline limit, and the platform closed it at 2026-01-01T02:48:05Z before it started"),
+            ({**ended, "close_reason": "baseline_limit_reached"}, {"ended": "closed"}, "executor", "was not running by its baseline limit, and the platform closed it at 2026-01-01T02:48:05Z before it started"),
             ({"status": "running"}, {}, "coordinator", "Only this machine is being stopped, and the platform does not say why"),
-            ({"status": "running"}, {"ended": "cut"}, "researcher", "you were cut from the platform experiment at a stage boundary"),
-            ({"status": "running"}, {"ended": "cut", "cut_reason": "max_agents_lowered"}, "researcher",
-             "you were cut from the platform experiment: its max_agents was lowered below the researchers at work, and the newest of them were cut."),
-            ({"status": "running"}, {"ended": "cut", "cut_reason": "something_new"}, "researcher",
+            ({"status": "running"}, {"ended": "cut"}, "executor", "you were cut from the platform experiment at a stage boundary"),
+            ({"status": "running"}, {"ended": "cut", "cut_reason": "max_agents_lowered"}, "executor",
+             "you were cut from the platform experiment: its max_agents was lowered below the executors at work, and the newest of them were cut."),
+            ({"status": "running"}, {"ended": "cut", "cut_reason": "something_new"}, "executor",
              "you were cut from the platform experiment, for a reason the platform names something_new."),
         ):
             setup = SimpleNamespace(cfg=SimpleNamespace(agent_id="ag-1", role=role, platform_experiment_id="pe-1"),
@@ -147,12 +151,21 @@ class WatchTest(unittest.IsolatedAsyncioTestCase):
     # A baseline agent's last turn asked it for verdicts, and it registers no hypothesis.
     def test_a_baseline_agent_is_asked_for_no_verdict(self):
         closed = {"status": "closed", "closed_at": "2026-01-01T02:48:05Z", "close_reason": "baseline_limit_reached"}
-        for role, verdicts in (("baseline", False), ("researcher", True)):
+        for role, verdicts in (("baseline", False), ("executor", True)):
             setup = SimpleNamespace(cfg=SimpleNamespace(agent_id="ag-1", role=role, platform_experiment_id="pe-1"),
                                     client=FakePlatform(closed, {"ended": "closed"}))
             prompt = asyncio.run(shutdown._prompt(setup))
             self.assertIn("File what your finished jobs showed as their summaries", prompt)
             self.assertEqual("verdict" in prompt, verdicts, prompt)
+
+    # A researcher has no job and no verdict of its own: its last turn files the review it reached.
+    def test_a_researcher_is_asked_for_its_review_and_no_job_summary(self):
+        closed = {"status": "closed", "closed_at": "2026-01-01T02:48:05Z", "close_reason": "end_time_reached"}
+        setup = SimpleNamespace(cfg=SimpleNamespace(agent_id="ag-1", role="researcher", platform_experiment_id="pe-1"),
+                                client=FakePlatform(closed, {"ended": "closed"}))
+        prompt = asyncio.run(shutdown._prompt(setup))
+        self.assertIn("File as comments the review you already reached", prompt)
+        self.assertNotIn("finished jobs", prompt)
 
     # A researcher that finished, a planner whose proposal was stored and a coordinator that
     # closed its own run were each interrupted in their closing words and given a turn to file
@@ -160,7 +173,7 @@ class WatchTest(unittest.IsolatedAsyncioTestCase):
     def test_an_agent_whose_own_action_ended_its_run_gets_no_last_turn(self):
         closed = {"status": "closed", "closed_at": "2026-01-01T02:48:05Z", "close_reason": "closed_by_request", "closed_by": {"kind": "coordinator"}}
         for experiment, signup, role in (
-            ({"status": "running"}, {"ended": "finished"}, "researcher"),
+            ({"status": "running"}, {"ended": "finished"}, "executor"),
             ({"status": "draft"}, {"ended": "planned"}, "planner"),
             (closed, {}, "coordinator"),
         ):

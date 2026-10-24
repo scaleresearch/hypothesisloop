@@ -43,8 +43,8 @@ func requireAgentSandbox(configured bool) error {
 }
 
 // withAgentSandbox resolves the coordinator a create asks the platform to run with launch: the model
-// it asked for, empty for its agent type's, and that the experiment names the repository it works
-// in.
+// it asked for, empty for its agent type's, which CreateExperiment checks, and that the experiment
+// names the repository it works in.
 func withAgentSandbox(req CreatePlatformExperimentRequest, launch AgentLaunch) (CreatePlatformExperimentRequest, error) {
 	if req.CoordinatorModel != "" && !req.CoordinatorInAgentSandbox {
 		return req, refusal.Invalid(refusal.ReasonInvalidRequest, "coordinator_model is set and coordinator_in_agentsandbox is not").On("coordinator_model")
@@ -59,11 +59,6 @@ func withAgentSandbox(req CreatePlatformExperimentRequest, launch AgentLaunch) (
 	if err := requireAgentSandbox(launch.AgentSandbox); err != nil {
 		return req, err
 	}
-	if req.CoordinatorModel != "" {
-		if err := domain.ValidateModel(req.CoordinatorModel); err != nil {
-			return req, refusal.Invalid(refusal.ReasonInvalidRequest, "coordinator_model: "+err.Error()).On("coordinator_model")
-		}
-	}
 	// Checked before anything is made for the experiment: its repository is created ahead of
 	// the write that would refuse this.
 	if launch.MaxAgentSandboxes < 2 {
@@ -75,18 +70,18 @@ func withAgentSandbox(req CreatePlatformExperimentRequest, launch AgentLaunch) (
 
 // sandboxedAgents is the agents a platform experiment whose coordinator the platform hosts is given
 // in the write that makes it open, each run by the platform and added by by: one for each
-// researcher asked for, and after them the one that measures the baseline, whose machine is asked
+// agent of the team asked for, of the role its agent type gives, and after them the one that measures the baseline, whose machine is asked
 // for at once beside the coordinator's, so that nothing waits for anyone to add it. An accepted
 // draft and a create with coordinator_in_agentsandbox both get theirs here.
-func sandboxedAgents(catalog domain.AgentTypeCatalog, researchers []ProposedAgent, by domain.Actor, now time.Time) ([]*domain.Agent, []domain.AgentSignup, error) {
-	agents := make([]*domain.Agent, 0, len(researchers)+1)
-	signups := make([]domain.AgentSignup, 0, len(researchers)+1)
-	for i, asked := range append(slices.Clone(researchers), ProposedAgent{}) {
-		role := domain.SignupRoleCompetitor
-		if i == len(researchers) {
-			role = domain.SignupRoleBaseline
+func sandboxedAgents(catalog domain.AgentTypeCatalog, team []ProposedAgent, by domain.Actor, now time.Time) ([]*domain.Agent, []domain.AgentSignup, error) {
+	agents := make([]*domain.Agent, 0, len(team)+1)
+	signups := make([]domain.AgentSignup, 0, len(team)+1)
+	for i, asked := range append(slices.Clone(team), ProposedAgent{}) {
+		role := domain.PoolRole(asked.AgentType)
+		if i == len(team) {
+			role = domain.AgentRoleBaseline
 		}
-		choice, err := domain.ResolveAgentLaunch(catalog, domain.RoleOfSignup(role), asked.AgentType, asked.Model, asked.Hyperparameters)
+		choice, err := domain.ResolveAgentLaunch(catalog, role, asked.AgentType, asked.Model, asked.Hyperparameters)
 		if err != nil {
 			return nil, nil, refusedProposal("invalid_agents", "agents[%d]: %s", i, err)
 		}
@@ -96,7 +91,7 @@ func sandboxedAgents(catalog domain.AgentTypeCatalog, researchers []ProposedAgen
 		}
 		agents = append(agents, &domain.Agent{ID: agentID, CreatedAt: now})
 		signups = append(signups, domain.AgentSignup{
-			AgentID: agentID, Role: role, InAgentSandbox: true,
+			AgentID: agentID, Role: role.Info().SignupRole, InAgentSandbox: true,
 			AgentType: choice.AgentType, Model: choice.Model, Hyperparameters: choice.Hyperparameters, Actor: &by,
 		})
 	}

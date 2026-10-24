@@ -40,7 +40,7 @@ stages:
 func repoAPI(t *testing.T, caller authtest.As, repos *fakeRepositories) (*createdStore, func(method, path string, body any) *httptest.ResponseRecorder, *platformexperiments.Service) {
 	t.Helper()
 	store := &createdStore{}
-	svc := reaching(platformexperiments.NewService(store, platformexperimentstest.Settings, zap.NewNop(), nil, time.Minute), domain.CPUType).WithRepositories(repos)
+	svc := reaching(platformexperiments.NewService(store, platformexperimentstest.Settings, zap.NewNop(), nil, time.Minute).WithServedModels(testModels), domain.CPUType).WithRepositories(repos)
 	placement := authtest.Placement{
 		Projects:            map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}, "prj-b": {ID: "prj-b", OrgID: "org-b"}},
 		PlatformExperiments: map[string]domain.Tenancy{},
@@ -330,9 +330,9 @@ func TestARunningExperimentTakesANewDuration(t *testing.T) {
 	if code, out, stored := patch(false, 1); code != http.StatusUnprocessableEntity || out["reason"] != "invalid_length" || stored.DurationHours != 4 {
 		t.Errorf("an end that passed: got = %d %v, want 422 invalid_length and the run as it was", code, out)
 	}
-	// With no researcher at work yet it closes at the end of its run when that comes first.
+	// With no executor at work yet it closes at the end of its run when that comes first.
 	if code, out, stored := patch(true, 2.1); code != http.StatusOK || !stored.AgentsDueAt.Equal(started.Add(126*time.Minute)) {
-		t.Errorf("a run that waits for its researchers, shortened: got = %d %v, agents due %v, want the new end", code, out, stored.AgentsDueAt)
+		t.Errorf("a run that waits for its executors, shortened: got = %d %v, agents due %v, want the new end", code, out, stored.AgentsDueAt)
 	}
 }
 

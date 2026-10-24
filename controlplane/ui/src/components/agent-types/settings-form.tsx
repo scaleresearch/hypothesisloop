@@ -1,6 +1,8 @@
 'use client'
 
 import { parseHyperparameters } from '@/lib/agent-types'
+import { ModelName } from '@/components/model-name'
+import { ModelPicker } from '@/components/model-picker'
 import { Facts } from '@/components/ui/facts'
 import { FieldGroup, FormField } from '@/components/ui/form-field'
 import { Input, Textarea } from '@/components/ui/input'
@@ -48,7 +50,7 @@ export function SettingsForm({ role, draft, onChange }: { role: AgentRole; draft
   return (
     <div className="grid grid-cols-1 gap-x-6 gap-y-4 md:grid-cols-2">
       <FormField label="Model" hint="Empty runs on the platform's default.">
-        <Input mono value={draft.model} placeholder="platform default" onChange={e => set({ model: e.target.value })} />
+        <ModelPicker value={draft.model} onChange={model => set({ model })} />
       </FormField>
       <FieldGroup label="Effort" hint="How hard the model thinks.">
         <Segmented
@@ -61,11 +63,11 @@ export function SettingsForm({ role, draft, onChange }: { role: AgentRole; draft
       <FormField label="Max subagents" hint="How many subagents run at once.">
         <Input type="number" min={1} step={1} value={draft.max_subagents} onChange={e => set({ max_subagents: e.target.value })} />
       </FormField>
-      {role === 'researcher' && (
+      {role === 'executor' && (
         <FormField
           className="md:col-span-2"
           label="Hyperparameters"
-          hint="What a researcher starts from when it is given none. A JSON object."
+          hint="What an executor starts from when it is given none. A JSON object."
           error={problems.hyperparameters}
         >
           <Textarea
@@ -84,10 +86,10 @@ export function SettingsFacts({ role, settings }: { role: AgentRole; settings: A
   const h = settings.hyperparameters ?? {}
   return (
     <Facts facts={[
-      ['Model', settings.model || 'platform default'],
+      ['Model', settings.model ? <ModelName key="model" model={settings.model} /> : 'platform default'],
       ['Effort', settings.effort],
       ['Max subagents', settings.max_subagents],
-      ...(role === 'researcher' ? [['Hyperparameters', Object.keys(h).length ? JSON.stringify(h) : 'none'] as [string, string]] : []),
+      ...(role === 'executor' ? [['Hyperparameters', Object.keys(h).length ? JSON.stringify(h) : 'none'] as [string, string]] : []),
     ]} />
   )
 }

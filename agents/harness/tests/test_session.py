@@ -28,7 +28,7 @@ class Platform:
         self.stored[path] = content
 
 
-def _cfg(role="researcher"):
+def _cfg(role="executor"):
     return SimpleNamespace(platform_experiment_id="pe-1", agent_id="ag-1" if role != "coordinator" else "coordinator", role=role)
 
 

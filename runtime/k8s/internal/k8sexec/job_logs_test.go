@@ -1,76 +1,23 @@
 package k8sexec
 
 import (
+	"context"
+	"fmt"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
+	"github.com/scaleresearch/hypothesisloop/contract/jobenv"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/ranktail"
+	"github.com/scaleresearch/hypothesisloop/runtime/shared/workloadkeys"
 )
-
-func pod(name string, ageMinutes int, exitCode *int32) corev1.Pod {
-	p := corev1.Pod{}
-	p.Name = name
-	p.CreationTimestamp = metav1.NewTime(time.Now().Add(-time.Duration(ageMinutes) * time.Minute))
-	if exitCode != nil {
-		p.Status.ContainerStatuses = []corev1.ContainerStatus{{
-			State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: *exitCode}},
-		}}
-	}
-	return p
-}
-
-func i32(v int32) *int32 { return &v }
-
-// The retry case that lost every traceback: attempt 1 died with a Python error, attempt 2 is a
-// fresh pod whose log is just a startup banner. Reporting only the newest pod discarded the
-// error, so both must be selected.
-func TestSelectLogPodsKeepsFailedAttemptAlongsideRetry(t *testing.T) {
-	items := []corev1.Pod{
-		pod("attempt-1", 10, i32(1)),
-		pod("attempt-2", 2, nil),
-	}
-	newest, failed := selectLogPods(items)
-	if newest == nil || newest.Name != "attempt-2" {
-		t.Errorf("newest = %v, want attempt-2", newest)
-	}
-	if failed == nil || failed.Name != "attempt-1" {
-		t.Errorf("failed = %v, want attempt-1", failed)
-	}
-}
-
-func TestSelectLogPodsPicksMostRecentFailure(t *testing.T) {
-	items := []corev1.Pod{
-		pod("attempt-1", 30, i32(1)),
-		pod("attempt-2", 20, i32(2)),
-		pod("attempt-3", 1, nil),
-	}
-	_, failed := selectLogPods(items)
-	if failed == nil || failed.Name != "attempt-2" {
-		t.Errorf("failed = %v, want the most recent failure attempt-2", failed)
-	}
-}
-
-// A healthy single-pod job must behave exactly as before: current output, no failure section.
-func TestSelectLogPodsHealthyJobHasNoFailedPod(t *testing.T) {
-	newest, failed := selectLogPods([]corev1.Pod{pod("only", 5, nil)})
-	if newest == nil || newest.Name != "only" {
-		t.Errorf("newest = %v, want only", newest)
-	}
-	if failed != nil {
-		t.Errorf("failed = %v, want none for a job that has not failed", failed)
-	}
-}
-
-// A clean exit is not a failure — exit 0 must not produce a "failed attempt" section.
-func TestSelectLogPodsIgnoresSuccessfulTermination(t *testing.T) {
-	if _, failed := selectLogPods([]corev1.Pod{pod("done", 5, i32(0))}); failed != nil {
-		t.Errorf("failed = %v, want none for exit code 0", failed)
-	}
-}
 
 func TestTerminatedExitCodeReportsWorstContainer(t *testing.T) {
 	p := corev1.Pod{}
@@ -112,71 +59,132 @@ func TestTerminatedPhaseDetailDistinguishesOOM(t *testing.T) {
 	}
 }
 
-func restartedPod(name string, restarts int32, lastExit int32) corev1.Pod {
-	p := pod(name, 5, nil)
-	p.Status.ContainerStatuses = []corev1.ContainerStatus{{
-		RestartCount: restarts,
-		LastTerminationState: corev1.ContainerState{
-			Terminated: &corev1.ContainerStateTerminated{ExitCode: lastExit},
-		},
-	}}
+// gangPod is one rank of a distributed job as BuildJobs compiles it: its completion index, and
+// for a grouped job its group and that group's rank offset.
+func gangPod(name string, index int, group string, offset int, node string) corev1.Pod {
+	p := corev1.Pod{}
+	p.Name, p.Namespace = name, HypothesisLoopNamespace
+	p.Labels = map[string]string{workloadkeys.ExperimentID: "gang"}
+	p.Annotations = map[string]string{
+		batchv1.JobCompletionIndexAnnotation: strconv.Itoa(index),
+		AcceleratorTypeAnnotation:            "type-a",
+	}
+	p.Spec.Subdomain, p.Spec.NodeName = "exp-gang", node
+	var env []corev1.EnvVar
+	if group != "" {
+		env = []corev1.EnvVar{{Name: jobenv.Group, Value: group}, {Name: jobenv.RankOffset, Value: strconv.Itoa(offset)}}
+	}
+	p.Spec.Containers = []corev1.Container{{Name: "experiment", Env: env}}
 	return p
 }
 
-// RestartPolicy=OnFailure restarts the container in place, so GetLogs serves the replacement's
-// startup banner and the traceback is only reachable via Previous. This is the case that
-// destroyed a hypothesis: restart_count=1, 21 lines of startup, crash output gone.
-func TestPodHasRestartedDetectsInPlaceRestart(t *testing.T) {
-	p := restartedPod("only-pod", 1, 1)
-	if !podHasRestarted(&p) {
-		t.Error("a container with restart_count=1 must be treated as having an earlier instance")
+func failedAt(p corev1.Pod, exit int32, at time.Time) corev1.Pod {
+	p.Status.ContainerStatuses = []corev1.ContainerStatus{{State: corev1.ContainerState{
+		Terminated: &corev1.ContainerStateTerminated{ExitCode: exit, FinishedAt: metav1.NewTime(at)},
+	}}}
+	return p
+}
+
+func sectionRanks(sections []ranktail.Section) []int {
+	ranks := make([]int, 0, len(sections))
+	for _, s := range sections {
+		ranks = append(ranks, s.Rank)
 	}
-	if got := lastTerminationExitCode(&p); got != 1 {
-		t.Errorf("lastTerminationExitCode = %d, want 1", got)
+	return ranks
+}
+
+func pickedSections(t *testing.T, pods []corev1.Pod, shown int) ([]ranktail.Section, int) {
+	t.Helper()
+	return ranktail.Pick((&JobWorkloadClient{}).rankSections(context.Background(), "gang", pods), shown)
+}
+
+// Every reader of a tail reads its end, so the rank that explains the job comes last: the first
+// rank to fail, the ranks that died after it before it, rank 0 before them and the rest first.
+// A grouped job's rank is its group's offset plus its index, so the actors' index 0 is rank 1.
+func TestRankSectionsPutTheFirstFailureLastAndRankZeroBeforeTheFailures(t *testing.T) {
+	t0 := time.Now()
+	pods := []corev1.Pod{
+		failedAt(gangPod("actor-2", 2, "actor", 1, "n3"), 1, t0.Add(time.Second)),
+		gangPod("actor-0", 0, "actor", 1, "n1"),
+		failedAt(gangPod("actor-1", 1, "actor", 1, "n2"), 137, t0),
+		gangPod("learner-0", 0, "learner", 0, "n0"),
+	}
+	sections, omitted := pickedSections(t, pods, 10)
+	if got, want := sectionRanks(sections), []int{1, 0, 3, 2}; !reflect.DeepEqual(got, want) || omitted != 0 {
+		t.Fatalf("ranks = %v with %d omitted, want %v with none", got, omitted, want)
+	}
+	if got, want := sections[3].Header(), "--- rank 2 failed, exit 137 (group actor, pod actor-1) ---"; got != want {
+		t.Errorf("header = %q, want %q", got, want)
+	}
+	if got, want := sections[1].Header(), "--- rank 0 (group learner, pod learner-0) ---"; got != want {
+		t.Errorf("header = %q, want %q", got, want)
 	}
 }
 
-// A pod that never restarted must not trigger a Previous read — there is no earlier instance
-// and the request would just error.
-func TestPodHasRestartedFalseForFirstInstance(t *testing.T) {
-	p := pod("fresh", 1, nil)
-	if podHasRestarted(&p) {
-		t.Error("a pod on its first instance has no previous logs to fetch")
+// A gang larger than the budget shows the failed ranks and rank 0 before any other rank.
+func TestRankSectionsKeepFailuresAndRankZeroWhenNotEveryRankFits(t *testing.T) {
+	var pods []corev1.Pod
+	for i := 11; i >= 0; i-- {
+		pods = append(pods, gangPod(fmt.Sprintf("exp-gang-%d", i), i, "", 0, "n"))
 	}
-	if got := lastTerminationExitCode(&p); got != 0 {
-		t.Errorf("lastTerminationExitCode = %d, want 0", got)
+	pods[0] = failedAt(pods[0], 1, time.Now())
+	sections, omitted := pickedSections(t, pods, 3)
+	if got, want := sectionRanks(sections), []int{1, 0, 11}; !reflect.DeepEqual(got, want) || omitted != 9 {
+		t.Fatalf("ranks = %v with %d omitted, want %v with 9", got, omitted, want)
 	}
-}
-
-// The in-place restart and the multi-pod retry are independent mechanisms; a pod can be both
-// the newest and have restarted, and both sections must be reachable.
-func TestRestartedNewestPodIsStillSelectedAsNewest(t *testing.T) {
-	items := []corev1.Pod{restartedPod("attempt-1", 1, 1)}
-	newest, failed := selectLogPods(items)
-	if newest == nil || newest.Name != "attempt-1" {
-		t.Fatalf("newest = %v, want attempt-1", newest)
-	}
-	if failed != nil {
-		t.Error("an in-place restart is not a terminated pod — it must not be reported as a failed attempt")
-	}
-	if !podHasRestarted(newest) {
-		t.Error("newest pod's earlier instance must still be recognised")
+	if got, want := sections[0].Header(), "--- rank 1 (pod exp-gang-1) ---"; got != want {
+		t.Errorf("header = %q, want %q", got, want)
 	}
 }
 
-// The response is shipped to the control plane and stored on every status push, so maxLines is
-// a budget for the whole response. Three sections each taking the full budget would triple the
-// payload for the rest of a failed job's life.
-func TestLogBudgetIsSharedNotPerSection(t *testing.T) {
-	const maxLines = 100
-	history := maxLines / 2
-	if history*2 > maxLines {
-		t.Fatalf("two history sections (%d each) may not exceed the budget %d", history, maxLines)
+// A distributed job's tail is read rank by rank through the pods' own logs.
+func TestFetchLogTailOfAGangHasOneSectionPerRank(t *testing.T) {
+	pods := []corev1.Pod{gangPod("exp-gang-1", 1, "", 0, "n1"), gangPod("exp-gang-0", 0, "", 0, "n0")}
+	c := pullTestClient(t, &pods[0], &pods[1])
+	lines, err := c.FetchLogTail(context.Background(), "gang", 100)
+	if err != nil {
+		t.Fatal(err)
 	}
-	// Worst case: both history sections full, current gets what is left.
-	used := history * 2
-	remaining := maxLines - used
-	if used+remaining != maxLines {
-		t.Errorf("sections sum to %d, want the budget %d", used+remaining, maxLines)
+	want := []string{"--- rank 1 (pod exp-gang-1) ---", "fake logs", "--- rank 0 (pod exp-gang-0) ---", "fake logs"}
+	if !reflect.DeepEqual(lines, want) {
+		t.Errorf("tail = %q, want %q", lines, want)
+	}
+}
+
+// A pod whose rank cannot be read shows why, and the other ranks still show their output.
+func TestFetchLogTailOfAGangShowsAPodWithoutARank(t *testing.T) {
+	pods := []corev1.Pod{gangPod("exp-gang-1", 1, "", 0, "n1"), gangPod("exp-gang-0", 0, "", 0, "n0")}
+	delete(pods[0].Annotations, batchv1.JobCompletionIndexAnnotation)
+	c := pullTestClient(t, &pods[0], &pods[1])
+	lines, err := c.FetchLogTail(context.Background(), "gang", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lines) != 4 || lines[0] != "--- rank unknown (pod exp-gang-1) ---" || !strings.Contains(lines[1], "no completion index") || lines[2] != "--- rank 0 (pod exp-gang-0) ---" {
+		t.Errorf("tail = %q, want the unranked pod's reason, then rank 0's output", lines)
+	}
+}
+
+// A gang pod with no completion index has no rank to report under, and saying so beats a guess.
+func TestAGangPodWithoutACompletionIndexIsAnError(t *testing.T) {
+	p := gangPod("exp-gang-0", 0, "", 0, "n0")
+	delete(p.Annotations, batchv1.JobCompletionIndexAnnotation)
+	if _, _, err := podGangRank(&p); err == nil {
+		t.Fatal("a gang pod without a completion index was given a rank")
+	}
+}
+
+// A single-node job's tail is its pod's own output, with no section headers.
+func TestFetchLogTailOfASingleNodeJobIsItsPodsOutput(t *testing.T) {
+	p := corev1.Pod{}
+	p.Name, p.Namespace = "exp-single", HypothesisLoopNamespace
+	p.Labels = map[string]string{workloadkeys.ExperimentID: "single"}
+	c := pullTestClient(t, &p)
+	lines, err := c.FetchLogTail(context.Background(), "single", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"fake logs"}; !reflect.DeepEqual(lines, want) {
+		t.Errorf("tail = %q, want %q", lines, want)
 	}
 }

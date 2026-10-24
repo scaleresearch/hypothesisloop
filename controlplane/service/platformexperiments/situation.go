@@ -99,7 +99,7 @@ type SituationMetric struct {
 	Direction      string   `json:"direction" enum:"maximize,minimize"`
 	Deterministic  bool     `json:"deterministic,omitempty" doc:"The metric is declared deterministic: its values compare across machines and need no repeat."`
 	BaselineValue  *float64 `json:"baseline_value,omitempty" doc:"The declared baseline job's value."`
-	BestValue      *float64 `json:"best_value,omitempty" doc:"The best value of a researcher's completed job that holds every constraint, as the standings rank it."`
+	BestValue      *float64 `json:"best_value,omitempty" doc:"The best value of an executor's completed job that holds every constraint, as the standings rank it."`
 	BestJob        string   `json:"best_job,omitempty"`
 	BestAgent      string   `json:"best_agent,omitempty" doc:"The agent id of best_job."`
 	BestCodeRef    string   `json:"best_code_ref,omitempty" doc:"The commit best_job ran, repository_url@sha: work meant to build on the best starts from it."`
@@ -329,7 +329,7 @@ type standing struct {
 	completedAt    time.Time
 }
 
-// metricStanding is where the researchers stand on metric at now, from the values of their
+// metricStanding is where the executors stand on metric at now, from the values of their
 // rankable completed jobs: the best, and the best of the jobs completed an hour and three hours
 // before.
 func metricStanding(metric domain.MetricDefinition, values []standing, now time.Time) SituationMetric {
@@ -387,7 +387,7 @@ func (s *Service) objective(ctx context.Context, pe *domain.PlatformExperiment, 
 	if err != nil {
 		return nil, fmt.Errorf("objective: %w", err)
 	}
-	competitors, err := s.store.ListSignupsByRole(ctx, pe.ID, domain.SignupRoleCompetitor)
+	executors, err := s.store.ListSignupsByRole(ctx, pe.ID, domain.SignupRoleExecutor)
 	if err != nil {
 		return nil, fmt.Errorf("objective: %w", err)
 	}
@@ -401,7 +401,7 @@ func (s *Service) objective(ctx context.Context, pe *domain.PlatformExperiment, 
 		}
 		var standings []standing
 		for _, v := range values {
-			if slices.Contains(competitors, v.AgentID) {
+			if slices.Contains(executors, v.AgentID) {
 				standings = append(standings, standing{agentID: v.AgentID, jobID: v.ExperimentID, value: v.Value, completedAt: completedAt[v.ExperimentID]})
 			}
 		}

@@ -2,7 +2,7 @@ name: dummy-data-search-demo
 description: |
   OBJECTIVE
   Maximize held-out validation accuracy (val_accuracy) on a small synthetic two-class dataset. This
-  is a fast, self-contained shakedown of the platform's three researcher types
+  is a fast, self-contained shakedown of the platform's three executor types
   (hyperparameter-search, architecture-search, data-search), and no real research problem. Every
   job completes in well under a minute.
 
@@ -68,7 +68,7 @@ metrics:
 budget_accelerator_hours: 2
 max_agents: 3
 duration_hours: 1
-researchers:
+agents:
   - agent_type: hyperparameter-search
     count: 1
   - agent_type: architecture-search

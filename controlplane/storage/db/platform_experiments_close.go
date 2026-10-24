@@ -22,7 +22,7 @@ func (s *Store) ClosePlatformExperiment(ctx context.Context, id string, by *doma
 	}
 	// What the platform closes is a run at its end, a draft nobody proposed for inside the
 	// planning limit or whose answer no person took up, an open one that was not running by
-	// its baseline deadline, or a running one no researcher's machine came up for.
+	// its baseline deadline, or a running one no executor's machine came up for.
 	const q = `
 UPDATE platform_experiments
 SET status = 'closed', updated_at = NOW(), closed_at = NOW(),

@@ -54,7 +54,7 @@ func TestFitsNowCountsJobsShapedLikeTheBaselineNodeByNode(t *testing.T) {
 	}
 }
 
-// The objective reads the best of the researchers' completed jobs and where it stood an hour
+// The objective reads the best of the executors' completed jobs and where it stood an hour
 // and three hours before, the gap to the target in percent of it, short being positive, and the
 // target a metric's target_vs_baseline sets against the baseline's value in either direction.
 func TestTheObjectiveReadsTheBestAndWhereItStoodBefore(t *testing.T) {
@@ -172,7 +172,7 @@ func TestTheRecordOfACloseStatesTheAgentsAsTheyStoodAtTheClose(t *testing.T) {
 	asked, exited := now.Add(-3*time.Hour), now.Add(-2*time.Hour)
 	pe := &domain.PlatformExperiment{ID: "pe-ended", ProjectID: "prj-a", Status: domain.PlatformExpRunning, CreatedAt: now.Add(-4 * time.Hour),
 		StartedAt: now.Add(-3 * time.Hour), EndsAt: now.Add(-time.Second), DurationHours: 3, BudgetAcceleratorHours: 6, Stages: []domain.Stage{{LengthPct: 100}}}
-	store := &statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{pe}, baselines: []domain.AgentSignup{{AgentID: "ag-1", Name: "Researcher 1", Role: domain.SignupRoleCompetitor, InAgentSandbox: true,
+	store := &statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{pe}, baselines: []domain.AgentSignup{{AgentID: "ag-1", Name: "Executor 1", Role: domain.SignupRoleExecutor, InAgentSandbox: true,
 		Instance: &domain.AgentInstance{AskedAt: &asked, Name: "m-2", Reported: domain.InstanceRunning, EndReason: "gone", ExitedAt: &exited},
 		Activity: &domain.AgentActivity{Text: "running hl job submit", At: now.Add(-time.Minute)}}}},
 		unsettled: map[string]bool{"pe-ended": true}}
@@ -191,7 +191,7 @@ func TestTheRecordOfACloseStatesTheAgentsAsTheyStoodAtTheClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	record := store.records[pe.ID]
-	if want := `- Researcher 1 (competitor): 0 jobs submitted; last activity "running hl job submit" since`; !strings.Contains(record, want) || !strings.Contains(record, "did not finish: at work at the close.") {
+	if want := `- Executor 1 (executor): 0 jobs submitted; last activity "running hl job submit" since`; !strings.Contains(record, want) || !strings.Contains(record, "did not finish: at work at the close.") {
 		t.Fatalf("record %q, want the activity and the run as they stood at the close", record)
 	}
 	if strings.Contains(record, "released") || strings.Contains(record, "gone") || strings.Contains(record, "no activity reported") {
@@ -252,7 +252,7 @@ type personIdeas map[string]int
 
 func (p personIdeas) OpenPersonIdeas(_ context.Context, pe string) (int, error) { return p[pe], nil }
 
-// situationRun is a running platform experiment of two researchers, one with a job running and
+// situationRun is a running platform experiment of two executors, one with a job running and
 // one with none for 25 minutes, whose baseline job takes two devices of typeA on one node.
 func situationRun(t *testing.T) (*Service, *situationStore) {
 	t.Helper()
@@ -263,9 +263,9 @@ func situationRun(t *testing.T) (*Service, *situationStore) {
 		Stages: []domain.Stage{{LengthPct: 100}}, CurrentStage: 1, BaselineJobID: "job-base", CoordinatorInAgentSandbox: true,
 		Coordinator: &domain.AgentSandboxCoordinator{}, Metrics: []domain.MetricDefinition{{Key: "acc", Direction: "maximize"}}}
 	store := &situationStore{
-		statusStore: statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{pe}, researchers: []string{}, baselines: []domain.AgentSignup{
-			{AgentID: "ag-1", Name: "Researcher 1", Role: domain.SignupRoleCompetitor, InFlight: &domain.InFlight{Jobs: 2, Queued: 1, Running: 1}},
-			{AgentID: "ag-2", Name: "Researcher 2", Role: domain.SignupRoleCompetitor, InFlight: &domain.InFlight{IdleSince: &idleSince}},
+		statusStore: statusStore{createdStore: createdStore{created: []*domain.PlatformExperiment{pe}, executors: []string{}, baselines: []domain.AgentSignup{
+			{AgentID: "ag-1", Name: "Executor 1", Role: domain.SignupRoleExecutor, InFlight: &domain.InFlight{Jobs: 2, Queued: 1, Running: 1}},
+			{AgentID: "ag-2", Name: "Executor 2", Role: domain.SignupRoleExecutor, InFlight: &domain.InFlight{IdleSince: &idleSince}},
 		}}},
 		jobs: map[string]*domain.Experiment{"job-base": {ID: "job-base", AcceleratorType: typeA, AcceleratorCount: 2,
 			Job: domain.JobSpec{AcceleratorType: typeA, AcceleratorCount: 2, CPU: "4"}}},
@@ -322,7 +322,7 @@ func TestTheSituationAnswersTheRunAndTheRowsTheCallerMaySee(t *testing.T) {
 		t.Fatalf("busy row: %+v", busy)
 	}
 	if len(all.InFlight) != 1 || all.InFlight[0].HypothesisID != "hyp-1" || all.InFlight[0].Queued != 1 || all.InFlight[0].Running != 1 ||
-		!slices.Equal(all.InFlight[0].Agents, []string{"Researcher 1", "ag-gone"}) {
+		!slices.Equal(all.InFlight[0].Agents, []string{"Executor 1", "ag-gone"}) {
 		t.Fatalf("hypotheses in flight: %+v, want hyp-1's two jobs by name, an agent without a row by id", all.InFlight)
 	}
 	if want := (SituationIdeas{Open: 2, List: "hl hypothesis list --by people"}); all.Ideas != want {
@@ -356,18 +356,18 @@ func TestTheSituationCountsTheMessagesItsReaderMaySend(t *testing.T) {
 	}
 }
 
-// idleNotices hands out the researchers due a notice and keeps what each was told.
+// idleNotices hands out the executors due a notice and keeps what each was told.
 type idleNotices struct {
-	due  []db.IdleResearcher
+	due  []db.IdleExecutor
 	told map[string]string
 	free []string
 }
 
-func (n *idleNotices) IdleResearchers(context.Context, time.Duration) ([]db.IdleResearcher, error) {
+func (n *idleNotices) IdleExecutors(context.Context, time.Duration) ([]db.IdleExecutor, error) {
 	return n.due, nil
 }
 
-func (n *idleNotices) NoticeIdle(_ context.Context, r db.IdleResearcher, detail string) error {
+func (n *idleNotices) NoticeIdle(_ context.Context, r db.IdleExecutor, detail string) error {
 	n.told[r.PlatformExperimentID+"/"+r.AgentID] = detail
 	return nil
 }
@@ -385,7 +385,7 @@ func (n *idleNotices) NoticeCapacityIdle(_ context.Context, r db.IdleCapacity, d
 	return nil
 }
 
-// A run's places stood free while each researcher had a job in flight, and the coordinator was
+// A run's places stood free while each executor had a job in flight, and the coordinator was
 // told nothing: the harness's own check went silent once the target was passed. The sweep tells
 // whoever steers it of the places free beyond the queued jobs, and a run with none free or no
 // time left ends its stretch.
@@ -445,16 +445,16 @@ func TestACapacityIdleNoticeSaysTheBestShortOfOrPastTheTarget(t *testing.T) {
 // whose numbers cannot be read is skipped without keeping the others from being told.
 func TestAnIdleNoticeSaysWhatThePlatformKnowsAtTheNotice(t *testing.T) {
 	svc, _ := situationRun(t)
-	notices := &idleNotices{told: map[string]string{}, due: []db.IdleResearcher{
+	notices := &idleNotices{told: map[string]string{}, due: []db.IdleExecutor{
 		{PlatformExperimentID: "pe-gone", AgentID: "ag-9", Since: time.Now().Add(-time.Hour)},
 		{PlatformExperimentID: "pe-1", AgentID: "ag-2", Since: time.Now().Add(-25 * time.Minute), Repeat: 2},
 	}}
 	svc.WithIdleNotice(notices, 10*time.Minute)
-	if err := svc.NoticeIdleResearchers(context.Background()); err != nil {
+	if err := svc.NoticeIdleExecutors(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if len(notices.told) != 1 {
-		t.Fatalf("told %v, want the researcher of the run that reads", notices.told)
+		t.Fatalf("told %v, want the executor of the run that reads", notices.told)
 	}
 	detail := notices.told["pe-1/ag-2"]
 	for _, want := range []string{"no job of its own ran on the platform for 25 minutes, and it has none queued or running", "its harness reports no state",
@@ -532,7 +532,7 @@ func TestTheSituationCountsTheJobsCompletedSinceTheSummary(t *testing.T) {
 	}
 }
 
-// A researcher's subagents audited and submitted on an obsolete stack, and nothing they read named
+// An executor's subagents audited and submitted on an obsolete stack, and nothing they read named
 // the commit the best ran. The situation, which every wake carries, names it and its branch.
 func TestTheSituationNamesTheCommitOfTheBest(t *testing.T) {
 	svc, store := situationRun(t)
@@ -547,7 +547,7 @@ func TestTheSituationNamesTheCommitOfTheBest(t *testing.T) {
 		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
 	}))
 	t.Cleanup(metrics.Close)
-	svc.metrics, store.researchers = metricsdb.New(metrics.URL), []string{"ag-1", "ag-2"}
+	svc.metrics, store.executors = metricsdb.New(metrics.URL), []string{"ag-1", "ag-2"}
 	done := time.Now().Add(-time.Minute)
 	store.completed = []*domain.Experiment{
 		{ID: "job-7", AgentID: "ag-1", FinishedAt: &done, CodeRef: "https://example.com/repo.git@f9a3", Branch: "hl/pe-1/r1-stack"},

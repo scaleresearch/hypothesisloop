@@ -308,7 +308,7 @@ func TestAJobsCPUIsReadAsANumberOrAStringAndAnsweredAsTheString(t *testing.T) {
 	}
 }
 
-// A run's researcher was refused for 0.08 and then admitted with 0.052 on the same 8 cores: the
+// A run's executor was refused for 0.08 and then admitted with 0.052 on the same 8 cores: the
 // first submit stated 0.01 h and the second the measured 0.0065 h. The hold is the stated hours
 // times the units at the type's rate, with no minimum, and an unpriced type has none.
 func TestEstimateHeldIsRateTimesUnitsTimesHours(t *testing.T) {

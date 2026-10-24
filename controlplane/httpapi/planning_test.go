@@ -38,7 +38,7 @@ func measuredBaseline() *platformexperiments.Baseline {
 // planningRouter is the planning routes and the ones a draft passes through, over store.
 func planningRouter(t *testing.T, store platformexperiments.Store, caller auth.Principal) (*platformexperiments.Service, func(method, path string, body any) (int, map[string]any)) {
 	t.Helper()
-	svc := platformexperiments.NewService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), time.Minute)
+	svc := platformexperiments.NewService(store, platformexperimentstest.Settings, zap.NewNop(), metricsdb.New(platformexperimentstest.NoUsage(t)), time.Minute).WithServedModels(testModels)
 	placement := authtest.Placement{
 		Projects: map[string]domain.Project{"prj-a": {ID: "prj-a", OrgID: "org-a"}, "prj-b": {ID: "prj-b", OrgID: "org-b"}},
 		PlatformExperiments: map[string]domain.Tenancy{
@@ -99,9 +99,9 @@ func TestADraftIsCreatedFromOneSentenceWithItsPlannerAndNothingOfARun(t *testing
 	if pe.BudgetAcceleratorHours != 0 || len(pe.Metrics) != 0 || pe.CoordinatorInAgentSandbox {
 		t.Errorf("a draft holds %v AccH, %d metrics, coordinator %v: want no budget and nothing of a run", pe.BudgetAcceleratorHours, len(pe.Metrics), pe.CoordinatorInAgentSandbox)
 	}
-	// A planner read a made-up max_agents of 1 as a cap and proposed one researcher.
-	if most := platformexperiments.MaxProposedResearchers(createMaxAgentSandboxes); pe.MaxAgents != most || out["max_agents"] != float64(most) {
-		t.Errorf("a draft reads max_agents %d (%v answered), want %d: the most researchers a proposal is accepted with", pe.MaxAgents, out["max_agents"], most)
+	// A planner read a made-up max_agents of 1 as a cap and proposed one agent.
+	if most := platformexperiments.MaxProposedAgents(createMaxAgentSandboxes); pe.MaxAgents != most || out["max_agents"] != float64(most) {
+		t.Errorf("a draft reads max_agents %d (%v answered), want %d: the most agents a proposal is accepted with", pe.MaxAgents, out["max_agents"], most)
 	}
 	if limit := pe.PlanningEndsAt.Sub(before); limit < testPlanning.Limit-time.Minute || limit > testPlanning.Limit+time.Minute {
 		t.Errorf("a draft ends %v after it was created, want the planning limit", limit)
@@ -335,7 +335,7 @@ func (s *draftStore) GetAgentSignup(_ context.Context, platformExperimentID, age
 			return &signup, nil
 		}
 	}
-	if agentID == "ag-researcher" {
+	if agentID == "ag-executor" {
 		return &domain.AgentSignup{AgentID: agentID, AgentType: domain.DefaultAgentType}, nil
 	}
 	return nil, nil
@@ -354,7 +354,11 @@ func (s *draftStore) SetProposal(_ context.Context, id string, goalVersion int, 
 			pe.SetClosesAt(p.WaitUntil)
 			if p.Baseline != nil && len(s.baselines) == 0 {
 				signup := p.BaselineSignup
-				signup.Name = domain.AgentName(signup.Role, func(string) bool { return false })
+				name, err := domain.AgentName(signup.Role, func(string) bool { return false })
+				if err != nil {
+					return err
+				}
+				signup.Name = name
 				s.baselines = append(s.baselines, signup)
 			}
 			return nil
@@ -405,7 +409,7 @@ func aProposal(more map[string]any) map[string]any {
 		"storage":          "100Gi",
 		"metric_reason":    "Validation loss on held-out text is the goal itself.",
 		"measurement":      "bench.py trains for a fixed number of steps and scores a split the training never reads.",
-		"sizing_reason":    "An estimate, nothing has run: a trial of about 6 minutes at 1 an hour is 0.1, and 2 researchers with 30 trials each need 6 and 4 hours.",
+		"sizing_reason":    "An estimate, nothing has run: a trial of about 6 minutes at 1 an hour is 0.1, and 2 executors with 30 trials each need 6 and 4 hours.",
 	}
 	for key, value := range more {
 		body[key] = value
@@ -413,7 +417,7 @@ func aProposal(more map[string]any) map[string]any {
 	return body
 }
 
-// draftMaxAgentSandboxes leaves a draft three researchers beside its coordinator and the agent that
+// draftMaxAgentSandboxes leaves a draft three agents beside its coordinator and the agent that
 // measures its baseline.
 const draftMaxAgentSandboxes = 5
 
@@ -491,6 +495,7 @@ func TestAProposalIsStoredOnlyFromThePlannerAndOnlyWhenItHoldsTogether(t *testin
 		"nobody to run it":                        {map[string]any{"agents": []map[string]any{}}, "invalid_agents"},
 		"more machines than it gets":              {map[string]any{"agents": []map[string]any{{}, {}, {}, {}}}, "invalid_agents"},
 		"a planner among the agents":              {map[string]any{"agents": []map[string]any{{"agent_type": "planner"}}}, "invalid_agents"},
+		"researchers and no executor":             {map[string]any{"agents": []map[string]any{{"agent_type": domain.ResearcherAgentType}}}, "invalid_agents"},
 		"no reason for the metric":                {map[string]any{"metric_reason": ""}, "missing_explanation"},
 		"no reason for the size":                  {map[string]any{"sizing_reason": " "}, "missing_explanation"},
 		"a measurement that is a paper":           {map[string]any{"measurement": strings.Repeat("x", platformexperiments.MaxProposalTextBytes+1)}, "too_long"},
@@ -509,7 +514,7 @@ func TestAProposalIsStoredOnlyFromThePlannerAndOnlyWhenItHoldsTogether(t *testin
 	}
 
 	for name, caller := range map[string]auth.Principal{
-		"a researcher of it":   {Kind: auth.KindAgent, PlatformExperimentID: "pe-draft", AgentID: "ag-researcher", ProjectID: "prj-a", OrgIDs: []string{"org-a"}},
+		"an executor of it":    {Kind: auth.KindAgent, PlatformExperimentID: "pe-draft", AgentID: "ag-executor", ProjectID: "prj-a", OrgIDs: []string{"org-a"}},
 		"the person who asked": planner,
 	} {
 		store := draftWithPlanner()
@@ -544,11 +549,15 @@ func (s *draftStore) AcceptDraft(_ context.Context, pe *domain.PlatformExperimen
 		s.acceptedAgents, s.acceptedSignups = create, signups
 		for _, signup := range signups {
 			if signup.Role == domain.SignupRoleBaseline {
-				signup.Name = domain.AgentName(signup.Role, func(string) bool { return false })
+				name, err := domain.AgentName(signup.Role, func(string) bool { return false })
+				if err != nil {
+					return err
+				}
+				signup.Name = name
 				s.baselines = append(s.baselines, signup)
 				continue
 			}
-			s.researchers = append(s.researchers, signup.AgentID)
+			s.agentIDs = append(s.agentIDs, signup.AgentID)
 		}
 		return nil
 	}
@@ -604,15 +613,15 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 		t.Errorf("coordinator %+v, want one the platform hosts on its type's model", pe.Coordinator)
 	}
 	// A coordinator had to boot, take a turn and add the agent that measures the baseline before
-	// anything was measured: the proposal signed it up, and the accept signs up the researchers.
+	// anything was measured: the proposal signed it up, and the accept signs up the executors.
 	if len(store.acceptedAgents) != 3 || len(store.acceptedSignups) != 3 || len(store.baselines) != 1 {
-		t.Fatalf("signed up %d agents with %d signups beside %d baseline agents, want the 3 researchers beside the one the proposal signed up", len(store.acceptedAgents), len(store.acceptedSignups), len(store.baselines))
+		t.Fatalf("signed up %d agents with %d signups beside %d baseline agents, want the 3 executors beside the one the proposal signed up", len(store.acceptedAgents), len(store.acceptedSignups), len(store.baselines))
 	}
 	for i, signup := range store.acceptedSignups {
 		agent := store.acceptedAgents[i]
-		if agent.Name != "" || signup.AgentID != agent.ID || !signup.InAgentSandbox || signup.Role != domain.SignupRoleCompetitor || signup.Model != "" ||
+		if agent.Name != "" || signup.AgentID != agent.ID || !signup.InAgentSandbox || signup.Role != domain.SignupRoleExecutor || signup.Model != "" ||
 			signup.Actor == nil || signup.Actor.ID != "u-1" {
-			t.Errorf("agent %d: %+v signed up as %+v, want a sandboxed researcher added by the person who accepted", i, agent, signup)
+			t.Errorf("agent %d: %+v signed up as %+v, want a sandboxed executor added by the person who accepted", i, agent, signup)
 		}
 	}
 	if measures := store.baselines[0]; measures.Role != domain.SignupRoleBaseline || !measures.InAgentSandbox || measures.AgentType != "baseline" || len(measures.Hyperparameters) != 0 {
@@ -675,6 +684,31 @@ func TestAcceptingADraftOpensTheProposedExperimentAtTheCostThePersonStates(t *te
 // A planner ran the baseline itself, which took most of its 16 to 20 minutes, and a proposal
 // was refused unless that job held it up. A proposal defines the experiment and runs nothing:
 // it names no job, and the fields the platform used to read from one are no fields of it.
+// The team a person accepts is one list: a researcher in it is signed up as a researcher, and
+// max_agents is its executors.
+func TestAcceptingADraftSignsUpTheResearchersOfItsTeam(t *testing.T) {
+	store := draftWithPlanner()
+	_, propose := planningRouter(t, store, thePlanner)
+	if code, out := propose("PUT", "/platform-experiments/pe-draft/proposal", aProposal(nil)); code != http.StatusOK {
+		t.Fatalf("propose: %d %v", code, out)
+	}
+	_, call := planningRouter(t, store, planner)
+	code, out := call("POST", "/platform-experiments/pe-draft/accept", map[string]any{
+		"budget_accelerator_hours": 3, "duration_hours": 2, "baseline_minutes": 25, "agents": []map[string]any{{"agent_type": domain.ResearcherAgentType}, {}},
+	})
+	if code != http.StatusOK {
+		t.Fatalf("accept: got = %d %v, want 200", code, out)
+	}
+	pe := store.created[0]
+	if pe.MaxAgents != 1 || len(pe.Agents) != 2 || !pe.Agents[0].Key().Researches() || pe.Agents.Executors() != 1 {
+		t.Errorf("max_agents %d and agents %+v, want one executor counted and the researcher in the team", pe.MaxAgents, pe.Agents)
+	}
+	if len(store.acceptedSignups) != 2 || store.acceptedSignups[0].Role != domain.SignupRoleResearcher || store.acceptedSignups[0].AgentType != domain.ResearcherAgentType ||
+		store.acceptedSignups[1].Role != domain.SignupRoleExecutor {
+		t.Errorf("signups %+v, want a researcher and an executor", store.acceptedSignups)
+	}
+}
+
 func TestAProposalNamesNoBaselineJobAndStatesTheTypeItsJobsAreSizedFor(t *testing.T) {
 	for _, field := range []string{"baseline_job_id", "job_estimated_duration_hours"} {
 		store := draftWithPlanner()
@@ -893,7 +927,7 @@ func TestAPlannerDeclinesWithAReasonThePersonReadsAndCanAnswer(t *testing.T) {
 		}
 	}
 	for name, caller := range map[string]auth.Principal{
-		"a researcher of it":   {Kind: auth.KindAgent, PlatformExperimentID: "pe-draft", AgentID: "ag-researcher", ProjectID: "prj-a", OrgIDs: []string{"org-a"}},
+		"an executor of it":    {Kind: auth.KindAgent, PlatformExperimentID: "pe-draft", AgentID: "ag-executor", ProjectID: "prj-a", OrgIDs: []string{"org-a"}},
 		"the person who asked": planner,
 	} {
 		_, as := planningRouter(t, store, caller)
@@ -955,8 +989,8 @@ func TestAnAcceptedDraftRunsOnceItsBaselineAgentFinishesWithNoCoordinatorAction(
 	if code, out := call("POST", "/platform-experiments/pe-draft/accept", accept); code != http.StatusOK || out["status"] != "open" || out["status_reason"].(map[string]any)["reason"] != "baseline_measuring" {
 		t.Fatalf("accept: got = %d %v, want it open with its baseline agent measuring", code, out)
 	}
-	if len(store.baselines) != 1 || len(store.researchers) != 2 {
-		t.Fatalf("accepted with %d baseline agents and %d researchers, want 1 and 2", len(store.baselines), len(store.researchers))
+	if len(store.baselines) != 1 || len(store.agentIDs) != 2 {
+		t.Fatalf("accepted with %d baseline agents and %d agents, want 1 and 2", len(store.baselines), len(store.agentIDs))
 	}
 	measures := store.baselines[0].AgentID
 	measured := measuredBaseline()
@@ -1046,8 +1080,8 @@ func TestABaselineAgentNamesTheJobItsFinishDeclares(t *testing.T) {
 		}
 	}
 	var refused *refusal.Refusal
-	if _, err := svc.FinishAgent(ctx, "pe-draft", "ag-researcher", "done", "", "job-control"); !errors.As(err, &refused) || refused.Reason != "not_a_baseline_agent" {
-		t.Errorf("a researcher naming a baseline: %v, want 422 not_a_baseline_agent", err)
+	if _, err := svc.FinishAgent(ctx, "pe-draft", "ag-executor", "done", "", "job-control"); !errors.As(err, &refused) || refused.Reason != "not_a_baseline_agent" {
+		t.Errorf("an executor naming a baseline: %v, want 422 not_a_baseline_agent", err)
 	}
 
 	finished, err := svc.FinishAgent(ctx, "pe-draft", measures, "the baseline is measured by job-control", "", "job-control")
@@ -1241,10 +1275,10 @@ func TestAProposalIsAcceptedAsProposedUnlessAPersonActsFirst(t *testing.T) {
 	}
 	pe := store.created[0]
 	if pe.Status != domain.PlatformExpOpen || pe.BudgetAcceleratorHours != 6 || pe.DurationHours != 4 || pe.MaxAgents != 2 || !pe.BaselineDueAt.Equal(pe.StartsAt.Add(30*time.Minute)) || pe.AcceptsAt != nil {
-		t.Fatalf("accepted as proposed: got %+v, want open at the proposal's 6 hours of budget, 4 of run, 2 researchers and 30 minutes of baseline", pe)
+		t.Fatalf("accepted as proposed: got %+v, want open at the proposal's 6 hours of budget, 4 of run, 2 executors and 30 minutes of baseline", pe)
 	}
 	if len(store.acceptedSignups) != 2 || store.acceptedSignups[0].AgentType != "hyperparameter-search" || store.acceptedSignups[0].Actor.ID != "u-creator" || len(store.baselines) != 1 {
-		t.Fatalf("researchers %+v beside %d baseline agents, want the 2 proposed, added for the creator, and the one baseline agent", store.acceptedSignups, len(store.baselines))
+		t.Fatalf("executors %+v beside %d baseline agents, want the 2 proposed, added for the creator, and the one baseline agent", store.acceptedSignups, len(store.baselines))
 	}
 	// Accepted by the platform, the proposal stays to be read, with no person named as accepting.
 	_, out = call("GET", "/platform-experiments/pe-draft", nil)
@@ -1485,8 +1519,9 @@ type createdStore struct {
 	prior []string
 	// messages are the messages sent to its agents.
 	messages []domain.AgentMessage
-	// researchers are the agents of role competitor that joined.
-	researchers []string
+	// agentIDs are the agents of the team that joined, and team their signups.
+	agentIDs []string
+	team     []domain.AgentSignup
 	// baselines are the agents of role baseline that joined, and left the COMPLETED jobs on the
 	// objective of those of them that finished.
 	baselines []domain.AgentSignup
@@ -1495,7 +1530,7 @@ type createdStore struct {
 	objective []*domain.Experiment
 	// completed is every COMPLETED job, oldest first.
 	completed []*domain.Experiment
-	// atWork is the researchers at work by agent type and model, as the store counts them.
+	// atWork is the agents at work by agent type and model, as the store counts them.
 	atWork map[domain.PoolKey]int
 	// started counts the starts that reached the store.
 	started int
@@ -1564,11 +1599,11 @@ func (s *createdStore) CompletedJobs(context.Context, string) ([]*domain.Experim
 	return s.completed, nil
 }
 
-// StartPlatformExperimentTx starts the open platform experiment id with a researcher at work.
+// StartPlatformExperimentTx starts the open platform experiment id with an executor at work.
 func (s *createdStore) StartPlatformExperimentTx(_ context.Context, id string, _ time.Duration, quotasFor func([]db.StartParticipant) ([]*domain.AgentQuota, []domain.Stage, error)) (bool, []*domain.AgentQuota, error) {
-	participants := make([]db.StartParticipant, len(s.researchers))
-	for i, agentID := range s.researchers {
-		participants[i] = db.StartParticipant{AgentID: agentID, Role: domain.SignupRoleCompetitor, AgentExists: true, QuotaTier: domain.QuotaTierGuaranteed}
+	participants := make([]db.StartParticipant, len(s.agentIDs))
+	for i, agentID := range s.agentIDs {
+		participants[i] = db.StartParticipant{AgentID: agentID, Role: domain.SignupRoleExecutor, AgentExists: true, QuotaTier: domain.QuotaTierGuaranteed}
 	}
 	quotas, _, err := quotasFor(participants)
 	if err != nil {
@@ -1585,17 +1620,18 @@ func (s *createdStore) StartPlatformExperimentTx(_ context.Context, id string, _
 }
 
 func (s *createdStore) ListSignupsByRole(_ context.Context, _ string, role domain.SignupRole) ([]string, error) {
-	if role != domain.SignupRoleCompetitor {
+	if role != domain.SignupRoleExecutor {
 		return nil, nil
 	}
-	return s.researchers, nil
+	return s.agentIDs, nil
 }
 
 func (s *createdStore) CreatePlatformExperiment(_ context.Context, pe *domain.PlatformExperiment, _ []*domain.Agent, signups []domain.AgentSignup) error {
 	s.created = append(s.created, pe)
 	for _, signup := range signups {
 		if signup.Role != domain.SignupRoleBaseline {
-			s.researchers = append(s.researchers, signup.AgentID)
+			s.agentIDs = append(s.agentIDs, signup.AgentID)
+			s.team = append(s.team, signup)
 			continue
 		}
 		signup.Name = "Baseline 1"
@@ -1614,33 +1650,33 @@ func (s *createdStore) GetPlatformExperiment(_ context.Context, id string) (*dom
 	return nil, nil
 }
 
-func (s *createdStore) ResearchersAtWork(context.Context, string) (map[domain.PoolKey]int, error) {
+func (s *createdStore) AgentsAtWork(context.Context, string) (map[domain.PoolKey]int, error) {
 	return s.atWork, nil
 }
 
 func (s *createdStore) ListSignups(context.Context, string) ([]string, error) { return nil, nil }
 
 func (s *createdStore) ListAgentSignups(context.Context, string) ([]domain.AgentSignup, error) {
-	signups := make([]domain.AgentSignup, len(s.researchers))
-	for i, agentID := range s.researchers {
-		signups[i] = domain.AgentSignup{AgentID: agentID, Role: domain.SignupRoleCompetitor}
+	signups := make([]domain.AgentSignup, len(s.agentIDs))
+	for i, agentID := range s.agentIDs {
+		signups[i] = domain.AgentSignup{AgentID: agentID, Role: domain.SignupRoleExecutor}
 	}
 	return append(signups, s.baselines...), nil
 }
 
-// UpdatePlatformExperiment holds max_agents to the researchers that joined, every one at work.
-func (s *createdStore) UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, status domain.PlatformExperimentStatus, researchers domain.ResearcherPool) error {
-	return s.update(pe, status, researchers, len(s.researchers))
+// UpdatePlatformExperiment holds max_agents to the agents that joined, every one at work.
+func (s *createdStore) UpdatePlatformExperiment(ctx context.Context, pe *domain.PlatformExperiment, status domain.PlatformExperimentStatus, pool domain.AgentPool) error {
+	return s.update(pe, status, pool, len(s.agentIDs))
 }
 
 // update refuses a max_agents below atWork before the run starts; once it runs the store cuts the
 // newest above it.
-func (s *createdStore) update(pe *domain.PlatformExperiment, status domain.PlatformExperimentStatus, researchers domain.ResearcherPool, atWork int) error {
+func (s *createdStore) update(pe *domain.PlatformExperiment, status domain.PlatformExperimentStatus, pool domain.AgentPool, atWork int) error {
 	if pe.MaxAgents < atWork && status != domain.PlatformExpRunning {
 		return &db.PoolBelowAtWorkError{Count: pe.MaxAgents, AtWork: atWork}
 	}
-	if researchers != nil {
-		pe.Researchers = researchers
+	if pool != nil {
+		pe.Agents = pool
 	}
 	for i, stored := range s.created {
 		if stored.ID == pe.ID {
@@ -1683,7 +1719,7 @@ func TestADeclarationThePlatformIsRefusedWaitsForTheOwnerAndIsMadeByTheirChange(
 	pe.BudgetAcceleratorHours, pe.BaselineDueAt = 1, time.Now().UTC().Add(time.Hour)
 	measured := measuredBaseline()
 	store, patch := declareAPI(t, pe, measured, auth.Principal(ownerOfA))
-	store.researchers = []string{"ag-1", "ag-2"}
+	store.agentIDs = []string{"ag-1", "ag-2"}
 	store.baselines = []domain.AgentSignup{{AgentID: "ag-baseline", Name: "Baseline 1", Role: domain.SignupRoleBaseline, FinishedAt: &finished}}
 	store.left = []*domain.Experiment{measured.Job}
 

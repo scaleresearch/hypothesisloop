@@ -14,7 +14,7 @@ import (
 
 type agentMessages struct {
 	Messages []domain.AgentMessage                `json:"messages" doc:"The messages sent, one for each agent sent to."`
-	Refused  []platformexperiments.RefusedMessage `json:"refused,omitempty" doc:"With all, each researcher not sent to because the sender sent it the most an hour allows. Absent when none was refused."`
+	Refused  []platformexperiments.RefusedMessage `json:"refused,omitempty" doc:"With all, each agent not sent to because the sender sent it the most an hour allows. Absent when none was refused."`
 }
 
 type messagesAPI struct {
@@ -30,12 +30,12 @@ func registerMessages(doc *Doc, experiments *platformexperiments.Service, logger
 		OperationID: "send-platform-experiment-message", Method: "POST", Path: "/platform-experiments/{id}/messages",
 		Summary: "Send a message to an agent", Tags: []string{"platform-experiments"},
 		DefaultStatus: http.StatusCreated,
-		Description: "The coordinator, or a person or an API key of the org, tells one agent (agent_id), or every researcher at work (all), something directly: a steer, a direction to take, what to stop. " +
+		Description: "The coordinator, or a person or an API key of the org, tells one agent (agent_id), or every executor and researcher at work (all), something directly: a steer, a direction to take, what to stop. " +
 			"Each agent is told it as agent.message, which wakes it at once, with the text as its detail and from coordinator or owner as its value, and is told it again after a restart until its cursor passed it. A comment stays the place for a fact about a hypothesis. " +
 			"A person or an API key tells the sandboxed coordinator (coordinator) the same way: agent.message with coordinator as its subject and owner as its value, on the stream of the whole platform experiment and no agent's, which wakes the coordinator. 409 no_coordinator where the platform hosts none, 422 invalid_recipient from the coordinator itself. " +
-			"The answer is messages, one for each agent sent to. An agent's token sends none (403): what a researcher has to tell goes in a comment, or the reason of its finish. " +
-			"404 not_signed_up for an agent not in the platform experiment, 409 agent_ended for one that finished or was cut, 409 no_researcher_at_work for all with none, 409 experiment_closed once it closed. " +
-			"A recipient is sent at most 6 messages in any hour by the coordinator and 6 by the owner, each counted apart, so the owner's never spend the coordinator's: 429 rate_limited past that, saying when the next can be sent. With all, a researcher the sender may not message yet is left out and named in refused {agent_id, reason, retry_after}, the rest are sent and the answer is 201: 429 only when none could be sent. 422 too_long above 1500 bytes.",
+			"The answer is messages, one for each agent sent to. An agent's token sends none (403): what an agent has to tell goes in a comment, or the reason of its finish. " +
+			"404 not_signed_up for an agent not in the platform experiment, 409 agent_ended for one that finished or was cut, 409 no_agent_at_work for all with none, 409 experiment_closed once it closed. " +
+			"A recipient is sent at most 6 messages in any hour by the coordinator and 6 by the owner, each counted apart, so the owner's never spend the coordinator's: 429 rate_limited past that, saying when the next can be sent. With all, an agent the sender may not message yet is left out and named in refused {agent_id, reason, retry_after}, the rest are sent and the answer is 201: 429 only when none could be sent. 422 too_long above 1500 bytes.",
 	}, a.send)
 
 	register(doc, auth.AudienceAgent, huma.Operation{

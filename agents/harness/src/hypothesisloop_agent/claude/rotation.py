@@ -28,7 +28,7 @@ _TRANSCRIPT_ROTATION_BYTES = session.MAX_BYTES * 3 // 4
 # window, or of what the platform stores.
 _HARD_SHARE = 0.9
 _TRANSCRIPT_HARD_BYTES = int(session.MAX_BYTES * _HARD_SHARE)
-# Every model call reads the session's whole context again. Researchers whose subagents were live
+# Every model call reads the session's whole context again. Executors whose subagents were live
 # at nearly every turn end carried 0.7-0.85M tokens into each call, about 50M cache-read tokens an
 # hour each, and spent the account's five-hour allowance in three.
 _CONTEXT_CEILING_TOKENS = 500_000

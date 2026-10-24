@@ -352,13 +352,11 @@ func TestAddLinkRefusesCyclesSelfLinksAndOtherExperiments(t *testing.T) {
 	}
 }
 
-// Same ownership rule as status: an agent's hypothesis is placed only by that agent, a human's by
-// anyone. A repeated link is a no-op the caller can see.
-func TestAddLinkFollowsTheOwnershipRuleAndIsIdempotent(t *testing.T) {
+// Who may link is the registry's to decide. A repeated link is a no-op the caller can see.
+func TestAddLinkIsIdempotent(t *testing.T) {
 	s := testStore(t)
 	pe := testExperiment(t, s)
 	ctx := context.Background()
-	owned := register(t, s, pe, "agent-1", "owned", onRoot(pe))
 	target := register(t, s, pe, "agent-2", "target", onRoot(pe))
 	human, _, _, _, err := s.Register(ctx, NewHypothesis{Actor: userActor("user-ada"), PlatformExperimentID: pe, Text: "human idea", Links: onRoot(pe)})
 	if err != nil {
@@ -366,12 +364,6 @@ func TestAddLinkFollowsTheOwnershipRuleAndIsIdempotent(t *testing.T) {
 	}
 	link := domain.LinkSpec{Type: domain.LinkRelated, To: target.ID}
 
-	if _, err := s.AddLink(ctx, owned.ID, "agent-2", agentActor("agent-2"), link); !errors.Is(err, ErrNotOwner) {
-		t.Errorf("link from another agent's hypothesis: got = %v, want %v", err, ErrNotOwner)
-	}
-	if _, err := s.AddLink(ctx, owned.ID, "", userActor("user-ada"), link); !errors.Is(err, ErrNotOwner) {
-		t.Errorf("human linking an agent's hypothesis: got = %v, want %v", err, ErrNotOwner)
-	}
 	first, err := s.AddLink(ctx, human.ID, "agent-2", agentActor("agent-2"), link)
 	if err != nil || !first.Created || first.CreatedAt.IsZero() {
 		t.Fatalf("link from a human hypothesis: got = (%+v, %v), want a new link", first, err)
@@ -1006,7 +998,8 @@ func TestAQueryFiltersAndRanksHypothesesByABoundEvidenceMap(t *testing.T) {
 }
 
 // An agent's watch carries other people's activity on hypotheses it registered: a comment or
-// finding on one, a link to one, a new hypothesis building on one. The graph is the only place
+// finding on one, a link to one added or removed, a curation of one, a new hypothesis building on
+// one. The graph is the only place
 // that knows who registered what, and a comment on the objective is everyone's. A hypothesis
 // linked to one of the agent's only later stays out of it: the later link is its own event.
 func TestConcernsAgentFindsActivityOnTheAgentsOwnHypotheses(t *testing.T) {
@@ -1028,6 +1021,9 @@ func TestConcernsAgentFindsActivityOnTheAgentsOwnHypotheses(t *testing.T) {
 		{domain.Event{Change: domain.Change{Kind: platformapi.EventFindingNew, Subject: theirs.ID}}, false},
 		{domain.Event{Change: domain.Change{Kind: platformapi.EventHypothesisLink, Subject: theirs.ID, Detail: mine.ID}}, true},
 		{domain.Event{Change: domain.Change{Kind: platformapi.EventHypothesisLink, Subject: theirs.ID, Detail: pe}}, false},
+		{domain.Event{Change: domain.Change{Kind: platformapi.EventHypothesisUnlink, Subject: theirs.ID, Detail: mine.ID}}, true},
+		{domain.Event{Change: domain.Change{Kind: platformapi.EventHypothesisUnlink, Subject: mine.ID, Detail: theirs.ID}}, false},
+		{domain.Event{Change: domain.Change{Kind: platformapi.EventHypothesisStatus, Subject: mine.ID, Value: "merged", Detail: theirs.ID}}, true},
 		{domain.Event{Change: domain.Change{Kind: platformapi.EventHypothesisNew, Subject: child.ID}}, true},
 		{domain.Event{Change: domain.Change{Kind: platformapi.EventHypothesisNew, Subject: theirs.ID}}, false},
 		{domain.Event{Change: domain.Change{Kind: platformapi.EventCommentNew, Subject: pe, PlatformExperimentID: pe}}, true},

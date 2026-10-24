@@ -80,41 +80,74 @@ job:
   # node_selector: {topology.kubernetes.io/zone: us-east-1a}
 
   # --- Distributed training ------------------------------------------------------------
-  # num_nodes > 1 requests a real multi-host distributed run. The backend handles everything
-  # needed to make torchrun/Horovod-style training (or Ray) work: rank assignment, a stable
-  # rendezvous address, per-node retry isolation (one flaky node doesn't burn through every
-  # other node's retry budget), and completion gated on rank 0 finishing (stragglers on other
-  # ranks don't hold up the job). Every node gets these env vars automatically, no further DSL
-  # needed:
+  # num_nodes > 1 requests a real multi-host distributed run of identical nodes, one process
+  # per node. The backend assigns ranks and publishes a stable rendezvous address. The job is
+  # one gang: it completes only once every rank succeeds, any rank failing fails the whole job,
+  # and a retry (max_retries) starts the whole gang again from the queue. Every node gets these env
+  # vars automatically, no further DSL needed:
   #   HYPOTHESISLOOP_RANK         this node's index (0 = rank 0 / the "master"/"head")
   #   HYPOTHESISLOOP_WORLD_SIZE   total node count (== num_nodes)
-  #   HYPOTHESISLOOP_MASTER_ADDR  rank 0's stable DNS name (a headless Service is created
-  #                             alongside the job so this actually resolves)
-  #   HYPOTHESISLOOP_MASTER_PORT  fixed rendezvous port (29500) — one job, one port, no
+  #   HYPOTHESISLOOP_MASTER_ADDR  where every rank but rank 0 reaches rank 0, at
+  #                             MASTER_ADDR:MASTER_PORT; the runtime makes it resolve and route
+  #                             there, so rank 0 must listen on all interfaces, as torch does by
+  #                             default
+  #   HYPOTHESISLOOP_MASTER_PORT  fixed rendezvous port (29500): one job, one port, no
   #                             cross-job collision
+  # and the names torch.distributed reads: RANK, WORLD_SIZE, MASTER_ADDR, MASTER_PORT, and
+  # LOCAL_RANK=0. RANK and WORLD_SIZE count the job's nodes.
   #
-  # PyTorch DDP: run `torchrun --nnodes=$HYPOTHESISLOOP_WORLD_SIZE
-  # --node-rank=$HYPOTHESISLOOP_RANK --master-addr=$HYPOTHESISLOOP_MASTER_ADDR
-  # --master-port=$HYPOTHESISLOOP_MASTER_PORT train.py` as this job's command on every node —
-  # torchrun itself handles the rest (worker processes, NCCL init).
+  # PyTorch DDP: run `torchrun --nnodes=$WORLD_SIZE --node_rank=$RANK
+  # --nproc_per_node=$HYPOTHESISLOOP_ACCELERATOR_COUNT --master_addr=$MASTER_ADDR
+  # --master_port=$MASTER_PORT train.py` as this job's command on every node. torchrun starts
+  # one process per accelerator of the node and handles the rest (worker processes, NCCL init).
   #
   # Ray (e.g. RLlib for RL training): rank 0 runs `ray start --head
   # --port=$HYPOTHESISLOOP_MASTER_PORT` then submits the job locally; every other rank runs
   # `ray start --address=$HYPOTHESISLOOP_MASTER_ADDR:$HYPOTHESISLOOP_MASTER_PORT --block` (a
   # worker that just joins the cluster and blocks). A simple shell entrypoint branching on
   # `[ "$HYPOTHESISLOOP_RANK" = "0" ]` covers both roles from one command.
+  #
+  # Post metrics from rank 0 alone: every rank's post lands on the same job. Such a job runs
+  # only on a cluster that `hl capacity` marks multi_node: a Kubernetes cluster, or a rented
+  # cluster whose provider has a private network (hosts there is how many machines it may rent
+  # at once; one private network may hold fewer). On rented compute the ranks run on one private network
+  # and start as their machines boot with no start gate, so set the framework's rendezvous
+  # timeout to at least the cluster's startup time (startup_seconds in hl capacity). A private
+  # network holds instances of one shape, so there every group of a job needs the same
+  # accelerators and size; one whose groups need different shapes is queued with
+  # capacity_unavailable naming the shapes each takes. NCCL_SOCKET_IFNAME and GLOO_SOCKET_IFNAME
+  # are reserved: rented compute sets them to its private network's interface, and on
+  # Kubernetes NCCL and Gloo use the pod's interface. `hl job logs` of such a job
+  # has a section per rank, headed "--- rank R (group G, pod P) ---", on rented compute
+  # "--- rank R (instance I) ---", or "--- rank R failed, exit E (...) ---". It holds the ranks
+  # whose pods or instances still exist, so once a rank fails it may hold that rank alone, as the
+  # others' are removed when the job fails: the other ranks by rank, then rank 0, then the failed
+  # ranks, the first to fail at the very end, under "--- N more ranks not shown ---" when not all fit.
   num_nodes: 1
 
-  # topology: placement requirements for a distributed run — only meaningful when num_nodes > 1.
+  # topology: placement requirements for a distributed run, only meaningful when num_nodes > 1.
   # topology:
-  #   # spread_across_hosts (default true when num_nodes > 1): no two of this job's nodes land
-  #   # on the same physical host, so you get real parallelism instead of ranks sharing a
-  #   # host's accelerators. Set false only on a small dev cluster with fewer hosts than num_nodes.
+  #   # spread_across_hosts (default true when num_nodes > 1): no two of this job's nodes share
+  #   # a host's accelerators, so you get real parallelism. On Kubernetes each node lands on a
+  #   # host of its own; on rented compute each node is an instance with accelerators of its
+  #   # own. It needs a cluster with at least as many hosts (hl capacity) as the job has nodes,
+  #   # and is refused exceeds_cluster_capacity where none has. Set false to
+  #   # test a gang's code on a cluster with fewer hosts: its ranks then share hosts and their
+  #   # devices, which says nothing of its speed at scale.
   #   spread_across_hosts: true
-  #   # same_zone (default false): best-effort preference to keep this job's nodes in the same
-  #   # topology zone/rack, minimizing cross-zone latency for gradient all-reduce (NCCL). A
-  #   # preference, not a requirement — enforcing it could leave the job unschedulable.
-  #   same_zone: true
+  #   # nodes_within (default zone when num_nodes > 1): how close every node of the job is to
+  #   # the others: region, zone or placement_group, each within the one before it. The job runs
+  #   # only on nodes of one region, zone or placement group of a cluster. It is refused
+  #   # exceeds_cluster_capacity at submit when no such place of any cluster holds all its nodes
+  #   # even with the cluster idle, and waits with capacity_unavailable while every place that
+  #   # holds them is full. A cluster that scales up adds the nodes of a job within a region or
+  #   # zone in one its nodes are in, and holds a job within a placement group only in the groups
+  #   # it has. A cluster that names no region or zone of its nodes is one; a placement group
+  #   # (nodes on one fabric) is only on a cluster that names them. On rented compute every node
+  #   # of a job is on one private network in one place of the provider's, which holds a job only
+  #   # as near as that place is: a Runpod data center holds a job within a zone or a region, and
+  #   # none within a placement group.
+  #   nodes_within: zone
 
   # shm_size: /dev/shm size (e.g. "4Gi"). k8s defaults /dev/shm to a tiny tmpfs, which
   # silently breaks PyTorch's multiprocess DataLoader workers and NCCL's shared-memory IPC
@@ -123,7 +156,9 @@ job:
   # shm_size: "4Gi"
 
   # --- Retry -----------------------------------------------------------------------------
-  # max_retries: how many times a failing node is retried before the job is marked failed.
+  # max_retries: how many times a failing job is retried before it is marked failed, on every
+  # kind of cluster. A retry is a fresh attempt of the whole job, every node of a gang, that
+  # waits in the queue like a new job; only the last attempt's log tail and failure cause are kept.
   # Left out, it is 0: the job runs once, which is right for a failure that would repeat (a
   # bad path, an out-of-memory). Set it only for a failure known to be flaky.
   # max_retries: 1

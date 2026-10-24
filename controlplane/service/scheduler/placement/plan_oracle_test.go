@@ -181,7 +181,7 @@ func TestPlanPlacementDoesNotPruneDimensionSwappedNodes(t *testing.T) {
 	if !oracleFits(nodeAccel, nodeRes, h100, oracleRanks(nodeAccel, nodeRes, nil, []*domain.Experiment{exp})) {
 		t.Fatal("fixture is wrong: big→node-b, mem→node-a should be a valid assignment")
 	}
-	plan, ok := planPlacement(CloneNodes(nodeAccel), CloneNodes(nodeRes), nil, []*domain.Experiment{exp})
+	plan, ok := planPlacement(CloneNodes(nodeAccel), CloneNodes(nodeRes), nil, []*domain.Experiment{exp}, false)
 	if !ok {
 		t.Fatal("planPlacement rejected a placeable job: two nodes rich in different byte-valued dimensions were treated as interchangeable")
 	}
@@ -296,7 +296,7 @@ func TestPlanPlacementMatchesBruteForceOracle(t *testing.T) {
 		c := generateCase(rnd)
 		jobs := []*domain.Experiment{c.exp}
 
-		plan, ok := planPlacement(CloneNodes(c.nodeAccel), CloneNodes(c.nodeRes), nil, jobs)
+		plan, ok := planPlacement(CloneNodes(c.nodeAccel), CloneNodes(c.nodeRes), nil, jobs, false)
 		want := oracleFits(c.nodeAccel, c.nodeRes, h100, oracleRanks(c.nodeAccel, c.nodeRes, nil, jobs))
 
 		switch {
@@ -336,7 +336,7 @@ func TestPlanPlacementMultiJobMatchesOracle(t *testing.T) {
 		second := generateCase(rnd).exp
 		jobs := []*domain.Experiment{c.exp, second}
 
-		plan, ok := planPlacement(CloneNodes(c.nodeAccel), CloneNodes(c.nodeRes), nil, jobs)
+		plan, ok := planPlacement(CloneNodes(c.nodeAccel), CloneNodes(c.nodeRes), nil, jobs, false)
 		want := oracleFits(c.nodeAccel, c.nodeRes, h100, oracleRanks(c.nodeAccel, c.nodeRes, nil, jobs))
 
 		if ok != want {

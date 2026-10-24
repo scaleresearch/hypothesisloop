@@ -86,7 +86,13 @@ func (l *Loop) burstWait(ctx context.Context, t *tickState, exp *domain.Experime
 		reason = c.whenIdle.neverFitsReason(exp)
 	}
 	if reason == "" {
-		reason = noOfferReason(exp, cluster, c.nodeResourcesTotal[cluster], t.nodeResourcesAtTickStart[cluster], c.nodeLabels[cluster])
+		reason = slotWaitReason(exp, cluster, c.nodeResourcesTotal[cluster], t.nodeResourcesAtTickStart[cluster], c.nodeLabels[cluster])
+	}
+	if reason == "" {
+		reason = noNodeOfArchitectureReason(exp, cluster, c.nodeLabels[cluster])
+	}
+	if reason == "" {
+		reason = apartReason(exp, cluster, c.nodeAvail[cluster], c.nodeResources[cluster], c.nodeLabels[cluster])
 	}
 	if reason == "" {
 		claimed, err := c.resolveCache.loadClaimed(ctx)

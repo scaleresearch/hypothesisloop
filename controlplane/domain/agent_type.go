@@ -22,6 +22,7 @@ import (
 type AgentRole string
 
 const (
+	AgentRoleExecutor    AgentRole = "executor"
 	AgentRoleResearcher  AgentRole = "researcher"
 	AgentRoleBaseline    AgentRole = "baseline"
 	AgentRoleCoordinator AgentRole = "coordinator"
@@ -29,40 +30,63 @@ const (
 )
 
 // AgentRoles is every role, in the order they are listed.
-var AgentRoles = []AgentRole{AgentRoleResearcher, AgentRoleBaseline, AgentRoleCoordinator, AgentRolePlanner}
+var AgentRoles = []AgentRole{AgentRoleExecutor, AgentRoleResearcher, AgentRoleBaseline, AgentRoleCoordinator, AgentRolePlanner}
+
+// AgentRoleInfo says what agents of a role do, for whoever composes a team.
+type AgentRoleInfo struct {
+	Role        AgentRole  `json:"role"`
+	Name        string     `json:"name" doc:"The role's name as it is shown."`
+	Description string     `json:"description" doc:"What agents of the role do, in a sentence or two."`
+	AgentType   string     `json:"agent_type" doc:"The built-in agent type an agent of the role runs as when it names none."`
+	SignupRole  SignupRole `json:"signup_role,omitempty" doc:"The role an agent of it is signed up with. POST /platform-experiments/{id}/agents adds agents of a role in_team and of baseline. Absent for the coordinator, which is not signed up."`
+	InTeam      bool       `json:"in_team" doc:"Whether the agents list of a platform experiment names agents of the role: an entry of agent_type researcher is of researchers, and an entry of any type of role executor is of executors."`
+	OrgTypes    bool       `json:"org_types" doc:"Whether an org makes agent types of the role (POST /orgs/{id}/agent-types)."`
+}
+
+// AgentRoleInfos describes every role, in the order of AgentRoles.
+var AgentRoleInfos = []AgentRoleInfo{
+	{AgentRoleExecutor, "Executor", "Implements experiments and runs their jobs, makes sure each is implemented correctly and that what it reports is true. Ranked, cut at stage boundaries, holds a quota and counts toward max_agents. Proposing hypotheses is optional.",
+		DefaultAgentType, SignupRoleExecutor, true, true},
+	{AgentRoleResearcher, "Researcher", "Keeps the hypothesis graph correct and points the work: reads the literature, proposes ideas, reviews outcomes against their metrics, and merges, retires and relinks hypotheses. Runs no job, pushes nothing, holds no quota, is never ranked or cut and counts toward no max_agents. Runs on its own model, else its type's, else the coordinator's.",
+		ResearcherAgentType, SignupRoleResearcher, true, false},
+	{AgentRoleBaseline, "Baseline", "Measures the experiment's declared control before the run starts, so every executor is ranked against it. Never ranked or cut.",
+		"baseline", SignupRoleBaseline, false, true},
+	{AgentRoleCoordinator, "Coordinator", "Assembles and steers the team of a platform experiment: one per experiment, not signed up and not ranked.",
+		CoordinatorAgentType, "", false, false},
+	{AgentRolePlanner, "Planner", "Plans a draft: proposes the experiment, its budget and its team, then takes no part once the draft is accepted.",
+		PlannerAgentType, SignupRolePlanner, false, false},
+}
 
 // ParseAgentRole refuses a role that is none of AgentRoles.
 func ParseAgentRole(s string) (AgentRole, error) {
 	if slices.Contains(AgentRoles, AgentRole(s)) {
 		return AgentRole(s), nil
 	}
-	return "", fmt.Errorf("role %q must be one of researcher, baseline, coordinator, planner", s)
+	return "", fmt.Errorf("role %q must be one of executor, researcher, baseline, coordinator, planner", s)
 }
 
-// RoleOfSignup is the agent role a signup of role r runs as.
+// Info is what AgentRoleInfos says of role r, the zero AgentRoleInfo for a string that is no role.
+func (r AgentRole) Info() AgentRoleInfo {
+	for _, info := range AgentRoleInfos {
+		if info.Role == r {
+			return info
+		}
+	}
+	return AgentRoleInfo{}
+}
+
+// RoleOfSignup is the agent role a signup of role r runs as: the one AgentRoleInfos signs up as r,
+// and executor for a reviewer, which runs an executor's agent types.
 func RoleOfSignup(r SignupRole) AgentRole {
-	switch r {
-	case SignupRoleBaseline:
-		return AgentRoleBaseline
-	case SignupRolePlanner:
-		return AgentRolePlanner
-	default:
-		return AgentRoleResearcher
+	if r == SignupRoleReviewer {
+		return AgentRoleExecutor
 	}
-}
-
-// AgentTypeOfRole is the built-in type an agent of role runs as when it names none.
-func AgentTypeOfRole(role AgentRole) string {
-	switch role {
-	case AgentRoleBaseline:
-		return "baseline"
-	case AgentRolePlanner:
-		return PlannerAgentType
-	case AgentRoleCoordinator:
-		return CoordinatorAgentType
-	default:
-		return DefaultAgentType
+	for _, info := range AgentRoleInfos {
+		if info.SignupRole == r {
+			return info.Role
+		}
 	}
+	return ""
 }
 
 // AgentTypeIDPrefix starts the id of an agent type an org creates, followed by a dash. A built-in
@@ -80,14 +104,26 @@ func ValidateBuiltinAgentTypeID(id string) error {
 	return nil
 }
 
-// OrgAgentRoles is the roles an org makes agent types of: a coordinator or a planner runs only a
-// built-in type yet.
-var OrgAgentRoles = []AgentRole{AgentRoleResearcher, AgentRoleBaseline}
+// OrgAgentRoles is the roles an org makes agent types of (AgentRoleInfo.OrgTypes): a researcher, a
+// coordinator or a planner runs only its built-in type yet.
+var OrgAgentRoles = func() []AgentRole {
+	var roles []AgentRole
+	for _, info := range AgentRoleInfos {
+		if info.OrgTypes {
+			roles = append(roles, info.Role)
+		}
+	}
+	return roles
+}()
 
 // CheckOrgAgentRole refuses a role an org cannot make an agent type of.
 func CheckOrgAgentRole(role AgentRole) error {
 	if !slices.Contains(OrgAgentRoles, role) {
-		return fmt.Errorf("an org makes agent types of role researcher or baseline: a %s runs only its built-in type", role)
+		names := make([]string, len(OrgAgentRoles))
+		for i, r := range OrgAgentRoles {
+			names[i] = string(r)
+		}
+		return fmt.Errorf("an org makes agent types of role %s: a %s runs only its built-in type", strings.Join(names, " or "), role)
 	}
 	return nil
 }
@@ -173,7 +209,7 @@ type CurrentAgentType struct {
 
 // AgentTypeSettings is what an agent type runs with besides its prompt.
 type AgentTypeSettings struct {
-	Model           string         `json:"model" required:"false" doc:"The model an agent of the type runs on when the agent names none, read whenever the agent is served. Empty or left out: the platform's default."`
+	Model           string         `json:"model" required:"false" doc:"The model an agent of the type runs on when the agent names none, read whenever the agent is served: <provider>/<model id>, one GET /models lists. Empty or left out: the platform's default."`
 	MaxSubagents    int            `json:"max_subagents" doc:"How many subagents run at once, 1 to 10."`
 	Effort          string         `json:"effort" enum:"low,medium,high,xhigh,max" doc:"How hard the model thinks."`
 	Hyperparameters map[string]any `json:"hyperparameters" required:"false" doc:"What an agent of the type starts from when it is given none, read whenever the agent is served, at most 4096 bytes as JSON. Left out: none."`
@@ -187,7 +223,7 @@ var agentEfforts = []string{"low", "medium", "high", "xhigh", "max"}
 // Validate refuses settings an agent cannot run with.
 func (s AgentTypeSettings) Validate() error {
 	if s.Model != "" {
-		if err := ValidateModel(s.Model); err != nil {
+		if _, err := ParseModelRef(s.Model); err != nil {
 			return err
 		}
 	}
@@ -198,22 +234,6 @@ func (s AgentTypeSettings) Validate() error {
 		return fmt.Errorf("effort must be one of %s, got %q", strings.Join(agentEfforts, ", "), s.Effort)
 	}
 	return experimentspec.ValidateHyperparameters(s.Hyperparameters)
-}
-
-// ValidateModel refuses a model name no agent can be started on.
-func ValidateModel(model string) error {
-	if len(model) > maxModelLength || !modelPattern.MatchString(model) {
-		return fmt.Errorf("a model must be at most %d characters of letters, digits and . _ : - [ ]", maxModelLength)
-	}
-	return nil
-}
-
-// ResolvedModel is the model settings run on: their own, or defaultModel for none.
-func (s AgentTypeSettings) ResolvedModel(defaultModel string) string {
-	if s.Model != "" {
-		return s.Model
-	}
-	return defaultModel
 }
 
 // MaxAgentTypeNameLength, MaxAgentTypeDescriptionLength and MaxAgentPromptBytes bound what an org saves.
@@ -245,13 +265,13 @@ var HarnessPlaceholders = []string{PlaceholderHLCommands, PlaceholderWorkdir}
 var RequiredPlaceholders = []string{PlaceholderRules, PlaceholderHLCommands}
 
 // AgentPlaceholders is what a prompt of role may hold. A coordinator is no agent of the run, so it
-// has no agent id, and only a researcher is given an agent type's name and hyperparameters.
+// has no agent id, and only an executor is given an agent type's name and hyperparameters.
 func AgentPlaceholders(role AgentRole) []string {
 	all := []string{PlaceholderRules, PlaceholderHLCommands, PlaceholderWorkdir, PlaceholderPlatformExperimentID, PlaceholderRepositoryURL}
 	switch role {
-	case AgentRoleResearcher:
+	case AgentRoleExecutor:
 		return append(all, PlaceholderAgentID, PlaceholderAgentType, PlaceholderHyperparameters)
-	case AgentRoleBaseline, AgentRolePlanner:
+	case AgentRoleResearcher, AgentRoleBaseline, AgentRolePlanner:
 		return append(all, PlaceholderAgentID)
 	default:
 		return all
@@ -514,17 +534,17 @@ func (e *LaunchError) Error() string { return e.Err.Error() }
 func (e *LaunchError) Unwrap() error { return e.Err }
 
 // ResolveAgentLaunch checks what an agent of role asked to be started with: the role's built-in
-// type for none, a model an agent can be started on and hyperparameters of the size allowed.
+// type for none, a model reference and hyperparameters of the size allowed.
 // What it leaves out stays out, and is the type's.
 func ResolveAgentLaunch(catalog AgentTypeCatalog, role AgentRole, agentType, model string, hyperparameters map[string]any) (AgentLaunchChoice, error) {
 	if agentType == "" {
-		agentType = AgentTypeOfRole(role)
+		agentType = role.Info().AgentType
 	}
 	if _, err := LookupAgentType(catalog, agentType, role); err != nil {
 		return AgentLaunchChoice{}, &LaunchError{Field: "agent_type", Err: err}
 	}
 	if model != "" {
-		if err := ValidateModel(model); err != nil {
+		if _, err := ParseModelRef(model); err != nil {
 			return AgentLaunchChoice{}, &LaunchError{Field: "model", Err: err}
 		}
 	}
@@ -534,27 +554,20 @@ func ResolveAgentLaunch(catalog AgentTypeCatalog, role AgentRole, agentType, mod
 	return AgentLaunchChoice{AgentType: agentType, Model: model, Hyperparameters: hyperparameters}, nil
 }
 
-// ResolveModel is the model an agent of agentType in catalog that asked for model runs on now:
-// its own, else its type's, else defaultModel.
-func ResolveModel(catalog AgentTypeCatalog, agentType, model, defaultModel string) string {
-	if model != "" {
-		return model
-	}
+// TypeModel is the model the current version of agentType in catalog names, empty for none.
+func TypeModel(catalog AgentTypeCatalog, agentType string) string {
 	for _, t := range catalog {
 		if t.ID == agentType {
-			return t.Current.Settings.ResolvedModel(defaultModel)
+			return t.Current.Settings.Model
 		}
 	}
-	return defaultModel
+	return ""
 }
 
 // EffectiveAgentSettings is what an agent runs with now: the settings of its type's current
-// version, with the model and hyperparameters of its own where it names them. A model neither
-// names is defaultModel.
-func EffectiveAgentSettings(version AgentTypeSettings, model string, hyperparameters map[string]any, defaultModel string) AgentTypeSettings {
-	if model == "" {
-		model = version.ResolvedModel(defaultModel)
-	}
+// version, on model, the one its ModelChoice resolves, and with the hyperparameters of its own
+// where it names them.
+func EffectiveAgentSettings(version AgentTypeSettings, model string, hyperparameters map[string]any) AgentTypeSettings {
 	if hyperparameters == nil {
 		hyperparameters = version.Hyperparameters
 	}
@@ -570,7 +583,8 @@ func InstructionsDigest(prompt string, settings AgentTypeSettings, rulesVersion 
 	return AgentTypeDigest(fmt.Sprintf("%s\x00rules %d", prompt, rulesVersion), settings)
 }
 
-// ModelDefaults is the platform's model for an agent and for a coordinator that names none.
+// ModelDefaults is the platform's model for an agent and for a coordinator that names none. A
+// researcher steers the run as the coordinator does, so its default is the coordinator's.
 type ModelDefaults struct {
 	Agent       string
 	Coordinator string
@@ -578,10 +592,31 @@ type ModelDefaults struct {
 
 // For is the default of role.
 func (d ModelDefaults) For(role AgentRole) string {
-	if role == AgentRoleCoordinator {
+	if role == AgentRoleCoordinator || role == AgentRoleResearcher {
 		return d.Coordinator
 	}
 	return d.Agent
+}
+
+// ModelChoice is what the model of an agent or a coordinator resolves from, each empty for none:
+// its own, its type's, and the coordinator_model of its platform experiment.
+type ModelChoice struct {
+	Role                   AgentRole
+	Own, Type, Coordinator string
+}
+
+// Model is the model the choice runs on: its own, else its type's, else for a researcher the
+// coordinator's, else the platform's default of its role.
+func (c ModelChoice) Model(defaults ModelDefaults) string {
+	switch {
+	case c.Own != "":
+		return c.Own
+	case c.Type != "":
+		return c.Type
+	case c.Role == AgentRoleResearcher && c.Coordinator != "":
+		return c.Coordinator
+	}
+	return defaults.For(c.Role)
 }
 
 // Propagation is what a new version of an agent type told the agents that run it: every agent

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 import pytest
 import requests
 
+from conftest import cpu_job
 from support import admin
 from support.api import API, WATCH_SUBPROTOCOL
 from support.wait import eventually
@@ -20,8 +21,10 @@ from support.wait import eventually
 # created and started on the default org's clusters, which serve every org.
 pytestmark = pytest.mark.exclusive
 
-# Priced in controlplane/settings/hypothesisloop.yaml and on none of the dev nodes.
-UNAVAILABLE_ACCELERATOR = "nvidia.com/gpu.product=NVIDIA-H200"
+# A job of two cores in a platform experiment that runs one unit at a time fits the platform's
+# clusters, which judge every org's submit, and is never admitted: it stays QUEUED, non-terminal
+# for the job token.
+HELD_JOB = cpu_job(2)
 # The largest page GET /experiments serves: 422 invalid_page over it.
 MAX_JOB_PAGE = 50
 
@@ -50,14 +53,10 @@ def _tenant(api: API, run_id: str, label: str) -> Tenant:
     caller = api.as_caller(admin.add_api_key(subject, home["org_id"]), home["org_id"], home["project_id"])
     agent = f"agent-{marker}-{run_id}"
     caller.register_agent(agent)
-    pe_id = caller.create_platform_experiment(f"{marker}-{run_id}", 5.0, 2)
+    pe_id = caller.create_platform_experiment(f"{marker}-{run_id}", 5.0, 2, max_concurrent_accelerators=1)
     caller.signup_and_start(pe_id, [agent])
     hypothesis_id = caller.register_hypothesis(pe_id, agent, f"{marker} hypothesis")["id"]
-    # An accelerator type no local cluster has, submitted while the org has no cluster a submit
-    # could be judged against (one that asks for more than every cluster of its org has is
-    # refused with exceeds_cluster_capacity). The job stays QUEUED: non-terminal for the job
-    # token, and holding nothing.
-    job_id = caller.submit_job(pe_id, agent, hyp_id=hypothesis_id, job_overrides={"accelerator_type": UNAVAILABLE_ACCELERATOR, "accelerator_count": 1})
+    job_id = caller.submit_job(pe_id, agent, hyp_id=hypothesis_id, job_overrides=HELD_JOB)
     cluster = f"cluster-{marker}-{run_id}"
     admin.add_cluster(cluster, home["org_id"])
     return Tenant(caller, home["org_id"], home["project_id"], agent, pe_id, hypothesis_id, job_id, cluster, marker)
@@ -405,7 +404,8 @@ def test_another_orgs_accounts_are_out_of_reach(tenants):
         "keys": b.api.get_json(f"/orgs/{b.org_id}/api-keys"),
         "clusters": [c["name"] for c in b.api.get_json(f"/orgs/{b.org_id}/clusters")["clusters"]],
     }
-    assert before["clusters"] == [b.cluster]
+    owned = [c["name"] for c in b.api.get_json(f"/orgs/{b.org_id}/clusters")["clusters"] if c["owned"]]
+    assert owned == [b.cluster] and a.cluster not in before["clusters"], f"org B lists {before['clusters']}, owning {owned}"
     for method, path, body in _accounts_of(b):
         r = a.api.session.request(method, a.api._url(path), json=body, timeout=30)
         assert r.status_code == 404, f"org A {method} {path}: {r.status_code} {r.text}"
@@ -425,35 +425,38 @@ def test_another_orgs_accounts_are_out_of_reach(tenants):
 
 
 def test_capacity_stays_inside_the_org(tenants, api):
-    """The connected clusters of the local stack belong to the default org and are not shared."""
+    """The connected clusters of the local stack belong to the default org, the platform's, whose
+    clusters serve every org: a tenant reads their capacity and that of no other org's."""
     a, b = tenants
     connected = {c["cluster_name"] for c in _default_orgs_clusters(api)}
     assert connected, "no connected cluster to check capacity against"
     assert connected <= {c["cluster_name"] for c in api.capacity()["clusters"]}, "staff do not read every cluster's capacity"
     shown = {c["cluster_name"] for c in a.api.capacity()["clusters"]}
-    assert not shown & connected, f"a tenant reads the capacity of clusters it cannot be placed on: {shown & connected}"
+    assert shown == connected, f"a tenant reads the capacity of {shown}, want the platform's clusters {connected}"
     capacity = a.api.hl("capacity")
-    assert not any(name in capacity for name in connected)
+    assert all(name in capacity for name in connected), f"hl capacity of a tenant names none of {connected}: {capacity}"
 
     # Capacity is read for one org. A caller names its own or none, and no other.
     path = "/resource-catalog/capacity"
     assert a.api.capacity(a.org_id) == a.api.capacity(), "naming the token's own org changes what it reads"
     agent, coordinator = (a.api.as_caller(admin.token(scope)) for scope in (f"agent:{a.pe_id}/{a.agent}", f"coordinator:{a.pe_id}"))
     for caller, who in ((a.api, "an API key"), (agent, "an agent"), (coordinator, "a coordinator")):
-        assert not {c["cluster_name"] for c in caller.capacity()["clusters"]} & connected, f"{who} reads another org's clusters"
+        assert {c["cluster_name"] for c in caller.capacity()["clusters"]} == shown, f"{who} reads other clusters than its org's"
         for org_id in (b.org_id, "default", f"org-never-made-{uuid.uuid4().hex[:8]}"):
             r = caller.get(f"{path}?org_id={org_id}")
             assert r.status_code == 404, f"{who} reading the capacity of {org_id}: {r.status_code} {r.text}"
     assert connected <= {c["cluster_name"] for c in api.capacity("default")["clusters"]}, "staff do not read the default org's clusters by naming it"
-    assert not {c["cluster_name"] for c in api.capacity(a.org_id)["clusters"]} & connected, "staff reading one org are shown another's clusters"
+    assert {c["cluster_name"] for c in api.capacity(a.org_id)["clusters"]} == shown, "staff reading one org are shown what the org does not read"
     assert api.get(f"{path}?org_id=org-never-made-{uuid.uuid4().hex[:8]}").status_code == 404
 
 
-def test_a_job_waits_for_a_cluster_of_its_org_beside_another_orgs_free_one(tenants, api, run_id, deadline):
-    """A job any local cluster could run, from orgs that own none of them and with none shared.
-    An org with no cluster registered is told so. An org whose registered cluster is away is
-    waiting for it, and is told nothing about a cluster being missing."""
+def test_a_job_of_an_org_with_no_cluster_runs_on_the_platforms_and_one_that_turned_them_off_waits_for_its_own(tenants, api, run_id, deadline):
+    """A job any local cluster could run. A cluster of the platform's org serves every org, so the
+    job of an org that owns none is placed on one. An org that turned the platform's clusters off
+    and whose own registered cluster is away waits for it, and is told nothing about a cluster
+    being missing."""
     a, _ = tenants
+    connected = {c["cluster_name"] for c in _default_orgs_clusters(api)}
     marker = f"tenancylone{uuid.uuid4().hex[:10]}"
     home = admin.add_user(f"user-{marker}-{run_id}", f"Tenant lone {marker}")
     lone = api.as_caller(admin.add_api_key(f"user-{marker}-{run_id}", home["org_id"]), home["org_id"], home["project_id"])
@@ -461,20 +464,28 @@ def test_a_job_waits_for_a_cluster_of_its_org_beside_another_orgs_free_one(tenan
     lone.register_agent(lone_agent)
     lone_pe = lone.create_platform_experiment(f"{marker}-{run_id}", 5.0, 2)
     lone.signup_and_start(lone_pe, [lone_agent])
-
-    away_job = a.api.submit_job(a.pe_id, a.agent)
+    away_agent = f"agent-away-{marker}-{run_id}"
+    a.api.register_agent(away_agent)
+    away_pe = a.api.create_platform_experiment(f"away-{marker}-{run_id}", 5.0, 2)
+    a.api.signup_and_start(away_pe, [away_agent])
+    platforms = [c["name"] for c in a.api.get_json(f"/orgs/{a.org_id}/clusters")["clusters"] if not c["owned"]]
+    for name in platforms:
+        a.api.hl("cluster", "disable", name)
     lone_job = lone.submit_job(lone_pe, lone_agent)
+    away_job = a.api.submit_job(away_pe, away_agent)
     try:
-        waiting = eventually("the job says its org has no cluster", lambda: lone.experiment(lone_job), deadline=deadline, interval=2,
-                             accept=lambda exp: exp.get("not_admitted_reason") == "no_cluster_for_org")
-        assert waiting["status"] == "QUEUED" and not waiting.get("cluster_name")
-        assert waiting["org_id"] == home["org_id"]
+        placed = eventually("the job of an org with no cluster is placed on the platform's", lambda: lone.experiment(lone_job), deadline=deadline, interval=2,
+                            accept=lambda exp: exp.get("cluster_name") in connected)
+        assert placed["org_id"] == home["org_id"]
 
-        # The same ticks passed over org A's job, whose own cluster is registered and away.
-        away = a.api.experiment(away_job)
-        assert away["status"] == "QUEUED" and not away.get("cluster_name"), f"placed beside its org's own cluster: {away}"
-        assert away.get("not_admitted_reason") != "no_cluster_for_org", "an org whose cluster is away was told it has none"
+        waiting = eventually("org A's job says why it waits", lambda: a.api.experiment(away_job), deadline=deadline, interval=2,
+                             accept=lambda exp: exp.get("not_admitted_reason") not in (None, "", "awaiting_admission"))
+        assert waiting["status"] == "QUEUED" and not waiting.get("cluster_name"), f"placed beside its org's own cluster: {waiting}"
+        assert waiting["not_admitted_reason"] not in ("no_cluster_for_org", "clusters_disabled"), f"an org whose cluster is away was told {waiting['not_admitted_reason']}"
     finally:
+        for name in platforms:
+            a.api.hl("cluster", "enable", name)
         a.api.post(f"/experiments/{away_job}/cancel")
         lone.post(f"/experiments/{lone_job}/cancel")
+        a.api.close_platform_experiment(away_pe)
         lone.close_platform_experiment(lone_pe)

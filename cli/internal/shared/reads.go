@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/scaleresearch/hypothesisloop/cli/internal/apiclient"
@@ -26,7 +27,7 @@ largest estimated_cost_acch a job of that tier submitted now is admitted with: t
 used and held. Burst gives no hours on top of the share: burst_accelerator_hours is how much of
 it may run at burst priority, on idle capacity.
 In an experiment on CPU cores these are CPU core-hours: a core for an hour costs 1.
-A run started with fewer than 5 researchers has one stage, and each holds its whole share
+A run started with fewer than 5 executors has one stage, and each holds its whole share
 from the start. In a run with more stages a share grows at each stage boundary. While a later
 stage is still to come, next_stage_starts_at is when it starts by the clock, earlier once the
 same part of the budget is spent, and next_stage_share_accelerator_hours is what
@@ -35,12 +36,16 @@ there is more to run after it, and hl platform-experiments agents finish is fina
 printed in the last stage or the only one, before the run starts, or for an agent that was cut.
 For one agent, where the platform sets a ceiling: data_bytes is what it holds under its data
 prefix and max_data_bytes the ceiling. At or over it every submit is refused with
-data_quota_exceeded until some is deleted.
+data_quota_exceeded until some is deleted. Where the platform caps submissions:
+max_submissions_per_hour is the most submissions it may make in any hour, each the jobs of one
+hypothesis on one commit, and submissions_left how many more it may make now; at 0 a job of
+another hypothesis or commit is refused with rate_limited.
 Quota is granted when the platform experiment starts. Before that an agent that holds none
 is answered 404 quota_not_granted: hl prints that reason and the platform's word for what the
 start waits for and what you do until then, the same as status_reason of
 hl platform-experiments get, and exits 1. A draft's planner holds no quota and needs none: it is
-answered planner_has_no_quota, printed the same way, with where the run's budget comes from.`, stderr)
+answered planner_has_no_quota, and a researcher, which runs no job, researcher_has_no_quota,
+each printed the same way, with where the run's budget comes from.`, stderr)
 	agent := fs.String("agent", "", "agent (default the token's agent)")
 	all := fs.Bool("all", false, "every agent signed up to the platform experiment")
 	pe := fs.String("platform-experiment", "", "platform experiment (default the token's)")
@@ -65,7 +70,7 @@ answered planner_has_no_quota, printed the same way, with where the run's budget
 	var out json.RawMessage
 	if err := c.Do("GET", path, nil, &out); err != nil {
 		// An agent's harness tells this refusal from a read that failed by the reason in the line.
-		if reason, message := command.RefusalOf(err); reason == platformapi.ReasonQuotaNotGranted || reason == platformapi.ReasonPlannerHasNoQuota {
+		if reason, message := command.RefusalOf(err); reason == platformapi.ReasonQuotaNotGranted || reason == platformapi.ReasonPlannerHasNoQuota || reason == platformapi.ReasonResearcherHasNoQuota {
 			fmt.Fprintf(stderr, "hl: quota: %s: %s\n", reason, message)
 			return 1
 		}
@@ -195,10 +200,14 @@ job spec or a proposal takes, copied verbatim; a type with none available queues
 errors. architectures names those of the cluster's nodes: a job runs only on nodes of its
 platform experiment's image's architecture (hl image show), so pick an image of the
 architecture of the hardware you mean to run on. image_needs names programs a job's image must
-have on its PATH to run on the cluster, beside what the job runs itself. A line with
+have on its PATH to run on the cluster, beside what the job runs itself. hosts, on the line of
+a cluster's cores and memory, is how many nodes it has, and multi_node true marks a cluster that
+runs one job over several of them: a job of more than one node, by num_nodes or groups, is placed only on such a cluster, and with
+topology.spread_across_hosts (the default) it needs at least as many hosts as ranks. A line with
 on_demand is of a cluster that rents a machine when a job needs one: nothing stands by, total is
 the most it rents at once and available is what it may still rent, so a job there starts after
-its machine is rented. A line with no_offer is of such a cluster that has no machine to rent now
+its machine is rented, and startup_seconds is how long a rented machine may take to start the
+job: set the rendezvous timeout of a job of several nodes there to at least that. A line with no_offer is of such a cluster that has no machine to rent now
 for some of its slots, and says why in its runtime's words, such as which of its provider's
 filters leave out every offer of a shape: a job that needs such a slot waits until one comes on
 offer.
@@ -223,6 +232,9 @@ key and an agent token have one org and need no --org. A person in several orgs 
 			Architectures []string          `json:"architectures"`
 			ImageNeeds    []string          `json:"image_needs"`
 			OnDemand      bool              `json:"on_demand"`
+			Hosts         int               `json:"hosts"`
+			MultiNode     bool              `json:"multi_node"`
+			Startup       int               `json:"startup_seconds"`
 			NoOffer       []string          `json:"no_offer"`
 			Resources     json.RawMessage   `json:"resources"`
 			PerNode       json.RawMessage   `json:"per_node"`
@@ -242,14 +254,20 @@ key and an agent token have one org and need no --org. A person in several orgs 
 		if len(cl.Architectures) > 0 {
 			prefix = append(prefix, "architectures", strings.Join(cl.Architectures, ","))
 		}
+		if cl.MultiNode {
+			prefix = append(prefix, "multi_node", "true")
+		}
 		if cl.OnDemand {
 			prefix = append(prefix, "on_demand", "true")
+		}
+		if cl.Startup > 0 {
+			prefix = append(prefix, "startup_seconds", strconv.Itoa(cl.Startup))
 		}
 		if len(cl.ImageNeeds) > 0 {
 			prefix = append(prefix, "image_needs", strings.Join(cl.ImageNeeds, ","))
 		}
 		if present(cl.Resources) || present(cl.PerNode) {
-			line, err := withPerNode(cl.Resources, cl.PerNode)
+			line, err := withPerNode(cl.Resources, cl.PerNode, cl.Hosts)
 			if err != nil {
 				return command.Fail(stderr, err)
 			}
@@ -287,9 +305,9 @@ func present(raw json.RawMessage) bool {
 	return len(raw) > 0 && string(raw) != "null"
 }
 
-// withPerNode is a cluster's resources object with its per_node object inside it, so one line
-// says both what the cluster has and what one job on it can get.
-func withPerNode(resources, perNode json.RawMessage) (json.RawMessage, error) {
+// withPerNode is a cluster's resources object with its per_node object and its count of hosts
+// inside it, so one line says both what the cluster has and what one job on it can get.
+func withPerNode(resources, perNode json.RawMessage, hosts int) (json.RawMessage, error) {
 	if !present(resources) {
 		resources = json.RawMessage("{}")
 	}
@@ -311,6 +329,8 @@ func withPerNode(resources, perNode json.RawMessage) (json.RawMessage, error) {
 	}
 	b.WriteString(`"per_node":`)
 	b.Write(node)
+	b.WriteString(`,"hosts":`)
+	b.WriteString(strconv.Itoa(hosts))
 	b.WriteByte('}')
 	return b.Bytes(), nil
 }

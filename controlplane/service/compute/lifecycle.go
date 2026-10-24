@@ -5,6 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/scaleresearch/hypothesisloop/contract/clusterapi"
@@ -12,39 +15,55 @@ import (
 	"github.com/scaleresearch/hypothesisloop/runtime/shared/agentexec"
 )
 
-// workloadOf reports whether i is exp's workload: the instance of its current attempt in the slot
-// admission pinned it to. The attempt alone does not say so. A preempted job is readmitted under
-// the attempt it had, and the instance it left in another slot would otherwise pass for it, and
-// that instance's exit for the job's result.
+// workloadOf reports whether i is exp's workload: of its current attempt, one of its ranks, in the
+// slot admission pinned that rank to. A readmission keeps the attempt, so the slot is what tells
+// the instance a preempted job left elsewhere from its workload.
 func workloadOf(exp *clusterapi.DesiredJob, i instance) bool {
-	return i.experimentID == exp.ID && i.attempt == exp.AttemptCount && i.slot() == exp.EffectiveJob().NodeSelector[clusterapi.NodeSlotLabel]
+	slots := exp.EffectiveJob().Slots
+	return i.experimentID == exp.ID && i.attempt == exp.AttemptCount && i.ranks == len(slots) && i.slot() == slots[i.rank]
 }
 
-// CreateWorkload rents the instance for exp's current attempt, in the slot admission placed the
-// job on. It makes no placement decision of its own: desired state names the slot, and a slot
-// that cannot take the job is an error, never a reason to pick another.
-//
-// The instance of that attempt in that slot, in any state, is the workload: one that has exited
-// is waiting for the control plane to read its outcome, and renting another would run the job
-// twice. Any other instance of the experiment is left over from an earlier attempt or an earlier
-// placement. An exited one is destroyed before the new instance is rented, so a status read
-// never finds two instances of one job to choose between. A live one is the reconcile pass's to
-// delete first, and until it has, nothing is rented.
+// masterSelf is the address rank 0 of a gang is told it meets the others at. Its private address
+// is known only once it is rented, after its environment is fixed.
+const masterSelf = "127.0.0.1"
+
+// CreateWorkload rents the instances of exp's current attempt, one per rank, each in the slot
+// admission pinned it to. The attempt's instances in those slots, exited ones included, are the
+// workload and are never rented twice. An exited instance of another attempt or placement is
+// destroyed first, so a status read finds one placement; a live one blocks renting until the pass
+// deletes it. A gang is rented whole or not at all (undo). A gang whose place has no machine left
+// for a rank once rank 0 is rented goes back to the queue at once, so no pass rents and destroys
+// rank 0 again within one admission.
 func (e *Executor) CreateWorkload(ctx context.Context, exp *clusterapi.DesiredJob) error {
-	spec, err := e.buildSpec(exp)
+	ranks, err := e.buildRanks(exp)
 	if err != nil {
 		return err
 	}
-	name := exp.EffectiveJob().NodeSelector[clusterapi.NodeSlotLabel]
-	if name == "" {
-		return fmt.Errorf("cloudcompute: experiment %s was admitted without a slot in its node selector (%s)", exp.ID, clusterapi.NodeSlotLabel)
+	if len(ranks) > 1 && e.network == nil {
+		return &agentexec.Unrunnable{Why: fmt.Sprintf("the job asks for %d nodes, and this cluster's provider has no private network to join them on", len(ranks))}
 	}
-	shape, index, ok := e.configured(name)
-	if !ok {
-		return fmt.Errorf("cloudcompute: experiment %s was placed on slot %q, which is not configured", exp.ID, name)
+	job := exp.EffectiveJob()
+	slots := job.Slots
+	switch {
+	case len(slots) == 0:
+		return fmt.Errorf("cloudcompute: experiment %s was admitted without a slot", exp.ID)
+	case len(slots) != len(ranks):
+		return fmt.Errorf("cloudcompute: experiment %s of %d nodes was admitted to %d slots", exp.ID, len(ranks), len(slots))
 	}
-	if err := shape.holds(spec); err != nil {
-		return fmt.Errorf("cloudcompute: experiment %s on slot %s: %w", exp.ID, name, err)
+	shapes := make([]Shape, len(ranks))
+	for r, name := range slots {
+		shape, index, ok := e.configured(name)
+		if !ok {
+			return fmt.Errorf("cloudcompute: experiment %s was placed on slot %q, which is not configured", exp.ID, name)
+		}
+		if err := shape.holds(ranks[r].spec); err != nil {
+			return fmt.Errorf("cloudcompute: experiment %s on slot %s: %w", exp.ID, name, err)
+		}
+		shapes[r] = shape
+		ranks[r].spec.Name = e.instanceName(exp.ID, exp.AttemptCount, r, len(ranks), shape.Name, index)
+		if err := provider.ValidateName(ranks[r].spec.Name); err != nil {
+			return fmt.Errorf("cloudcompute: experiment %s: %w", exp.ID, err)
+		}
 	}
 	v, err := e.current(ctx)
 	if err != nil {
@@ -55,45 +74,170 @@ func (e *Executor) CreateWorkload(ctx context.Context, exp *clusterapi.DesiredJo
 		case workloadOf(exp, i):
 			return nil
 		case i.live():
-			return fmt.Errorf("cloudcompute: experiment %s is placed on slot %s while instance %s of it still runs", exp.ID, name, i.Name)
+			return fmt.Errorf("cloudcompute: experiment %s is placed on slots %s while instance %s of it still runs", exp.ID, strings.Join(slots, ", "), i.Name)
 		}
 		if err := e.destroy(ctx, v, i, "it exited and is left from an earlier attempt or placement of its job"); err != nil {
 			return err
 		}
 	}
 	for _, i := range v.instances {
-		if i.slot() == name {
-			return fmt.Errorf("cloudcompute: experiment %s was placed on slot %s, which instance %s still holds", exp.ID, name, i.Name)
+		if slices.Contains(slots, i.slot()) {
+			return fmt.Errorf("cloudcompute: experiment %s was placed on slot %s, which instance %s still holds", exp.ID, i.slot(), i.Name)
 		}
 	}
-	spec.Name = e.instanceName(exp.ID, exp.AttemptCount, shape.Name, index)
-	spec.AvoidHosts = v.unstarting
-	if err := provider.ValidateName(spec.Name); err != nil {
-		return fmt.Errorf("cloudcompute: experiment %s: %w", exp.ID, err)
+	place := ""
+	if len(ranks) > 1 {
+		specs := make([]provider.Spec, len(ranks))
+		for r := range ranks {
+			specs[r] = ranks[r].spec
+		}
+		place, err = e.network.Place(ctx, specs)
+		if errors.Is(err, provider.ErrNoOffer) {
+			return e.withoutOffer(exp, fmt.Sprintf("no place on the provider's private network for the job's %d nodes (%s)", len(ranks), shapesOf(shapes)))
+		}
+		if err != nil {
+			return fmt.Errorf("cloudcompute: place the job's %d nodes: %w", len(ranks), err)
+		}
 	}
-	id, err := e.provider.Create(ctx, spec)
-	if errors.Is(err, provider.ErrNoOffer) {
-		return e.withoutOffer(exp, shape)
-	}
+	rented, err := e.rent(ctx, job, ranks, place, v.unstarting)
 	if err != nil {
-		return fmt.Errorf("cloudcompute: create instance %s: %w", spec.Name, err)
+		undone := e.undo(ctx, v, ranks, len(rented) == 0 && errors.Is(err, provider.ErrNoOffer))
+		if errors.Is(err, provider.ErrNoOffer) && undone == nil {
+			if len(rented) > 0 {
+				return &agentexec.Unrunnable{Reason: clusterapi.PhaseReasonNoOffer, Why: fmt.Sprintf("place %s of the provider's private network had no machine left for every node of the job (%s) once its first node was rented, which was destroyed", place, shapesOf(shapes))}
+			}
+			return e.withoutOffer(exp, fmt.Sprintf("no machine to rent for shape %s within the provider's configured filters", shapesOf(shapes)))
+		}
+		return errors.Join(err, undone)
 	}
-	e.log("created instance %s (%s): attempt %d of experiment %s is desired in slot %s", spec.Name, id, exp.AttemptCount, exp.ID, name)
-	v.add(instance{
-		Instance:     provider.Instance{ID: id, Name: spec.Name, State: provider.StateStarting},
-		experimentID: exp.ID, attempt: exp.AttemptCount, shape: shape.Name, index: index,
-	})
+	for _, i := range rented {
+		e.log("created instance %s (%s): attempt %d of experiment %s is desired in slot %s", i.Name, i.ID, exp.AttemptCount, exp.ID, i.slot())
+		v.add(i)
+	}
 	return nil
 }
 
-// withoutOffer is what a job is told when there is no machine to rent for it: that it waits,
-// and once it has waited OfferWait since its admission, that this cluster has none for it. The
-// control plane then queues the job again, where it waits for a slot that has an offer.
-func (e *Executor) withoutOffer(exp *clusterapi.DesiredJob, shape Shape) error {
+// shapesOf names the shapes of a job's ranks, each with how many ranks have it when that is more
+// than one.
+func shapesOf(shapes []Shape) string {
+	var order []Shape
+	count := map[string]int{}
+	for _, s := range shapes {
+		if count[s.Name] == 0 {
+			order = append(order, s)
+		}
+		count[s.Name]++
+	}
+	named := make([]string, len(order))
+	for n, s := range order {
+		named[n] = fmt.Sprintf("%s (%s)", s.Name, cmp.Or(s.AcceleratorType, "no accelerator"))
+		if count[s.Name] > 1 {
+			named[n] = fmt.Sprintf("%d of %s", count[s.Name], named[n])
+		}
+	}
+	return strings.Join(named, ", ")
+}
+
+// rent creates every rank in place, rank 0 first, whose address on the private network the others
+// are told, and then the others at once, none on a host of avoid.
+func (e *Executor) rent(ctx context.Context, job clusterapi.JobSpec, ranks []rank, place string, avoid []string) ([]instance, error) {
+	first, err := e.rentRank(ctx, job, ranks[0], place, masterSelf, avoid)
+	if err != nil {
+		return nil, err
+	}
+	rented := []instance{first}
+	if len(ranks) == 1 {
+		return rented, nil
+	}
+	created, err := e.created(ctx, first)
+	if err != nil {
+		return rented, err
+	}
+	if created.PrivateAddress == "" {
+		return rented, fmt.Errorf("cloudcompute: the provider created instance %s in place %s and shows no private address of it", first.Name, place)
+	}
+	master := created.PrivateAddress
+	others := make([]instance, len(ranks))
+	errs := make([]error, len(ranks))
+	var wg sync.WaitGroup
+	for r := 1; r < len(ranks); r++ {
+		wg.Go(func() { others[r], errs[r] = e.rentRank(ctx, job, ranks[r], place, master, avoid) })
+	}
+	wg.Wait()
+	for r := 1; r < len(ranks); r++ {
+		if errs[r] == nil {
+			rented = append(rented, others[r])
+		}
+	}
+	return rented, errors.Join(errs...)
+}
+
+// created reads an instance this call rented, as the provider shows it.
+func (e *Executor) created(ctx context.Context, i instance) (provider.Instance, error) {
+	read, exists, err := e.provider.Get(ctx, i.ID)
+	switch {
+	case err != nil:
+		return provider.Instance{}, fmt.Errorf("cloudcompute: read instance %s: %w", i.Name, err)
+	case !exists:
+		return provider.Instance{}, fmt.Errorf("cloudcompute: instance %s is gone right after it was created", i.Name)
+	}
+	return read, nil
+}
+
+// rentRank creates one rank, in place when it is one of several.
+func (e *Executor) rentRank(ctx context.Context, job clusterapi.JobSpec, r rank, place, masterAddr string, avoid []string) (instance, error) {
+	spec := r.spec
+	if place != "" {
+		spec = r.inPlace(job, place, masterAddr, e.network.Interface())
+	}
+	spec.AvoidHosts = avoid
+	parsed, ok := e.parseInstanceName(spec.Name)
+	if !ok {
+		return instance{}, fmt.Errorf("cloudcompute: instance name %s does not read back as the rank it names", spec.Name)
+	}
+	id, err := e.provider.Create(ctx, spec)
+	if err != nil {
+		return instance{}, fmt.Errorf("cloudcompute: create instance %s: %w", spec.Name, err)
+	}
+	parsed.Instance = provider.Instance{ID: id, Name: spec.Name, State: provider.StateStarting}
+	return parsed, nil
+}
+
+// undo destroys every instance the provider lists under the name of one of ranks, which a Create
+// that failed may have left too. noneLeft says nothing can be listed, as when only rank 0 was asked
+// for and the provider had no offer.
+func (e *Executor) undo(ctx context.Context, v *view, ranks []rank, noneLeft bool) error {
+	if noneLeft {
+		return nil
+	}
+	names := make([]string, len(ranks))
+	for r := range ranks {
+		names[r] = ranks[r].spec.Name
+	}
+	listed, err := e.provider.List(ctx, e.prefix)
+	if err != nil {
+		return fmt.Errorf("cloudcompute: list instances to undo a partial rental: %w", err)
+	}
+	var errs []error
+	for _, l := range listed {
+		if !slices.Contains(names, l.Name) {
+			continue
+		}
+		if err := e.destroy(ctx, v, instance{Instance: l}, "not every rank of its job could be rented"); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// withoutOffer is what a job is told when there is no machine, or no place, to rent for it:
+// that it waits, and once it has waited OfferWait since its admission, that this cluster has
+// none for it. The control plane then queues the job again, where it waits for slots that have
+// an offer.
+func (e *Executor) withoutOffer(exp *clusterapi.DesiredJob, what string) error {
 	if exp.SubmittedAt == nil {
 		return fmt.Errorf("cloudcompute: experiment %s is placed here with no admission time", exp.ID)
 	}
-	what := fmt.Sprintf("no machine to rent for shape %s (%s) within the provider's configured filters", shape.Name, cmp.Or(shape.AcceleratorType, "no accelerator"))
 	if time.Since(*exp.SubmittedAt) >= e.offerWait {
 		return &agentexec.Unrunnable{Reason: clusterapi.PhaseReasonNoOffer, Why: fmt.Sprintf("%s in %s of asking", what, e.offerWait)}
 	}
@@ -195,29 +339,22 @@ func (e *Executor) ListManagedAuxiliaryWorkloads(context.Context) ([]string, err
 	return nil, nil
 }
 
-// WorkloadMatchesDesired is true when every live instance of exp is its workload: of its current
-// attempt and in the slot it is pinned to. Both are in the name, which is all an instance can be
-// compared on. A requeue changes the first, a readmission the second.
-//
-// An instance that has not started within Startup does not match either: the pass destroys it
-// and the next rents another, until the control plane's own deadline for a job that is not
-// running requeues or ends the job.
-//
-// An instance the provider does not know to be running matches: it is reported as pending, and
-// the control plane, which hears nothing of a job that ran and gives one that never ran its time
-// to start, requeues or ends the job. Only then is the instance destroyed.
-//
-// The workload of a desired job in a slot the configuration no longer has, as a renamed shape or
-// a lowered max_instances leaves one, is an error and is left running: it takes no slot, so it is
-// billed beside a full account, and destroying it would end a job the control plane still wants.
-// The same instance of a job that is no longer desired is deleted like any other.
+// WorkloadMatchesDesired is true when every live instance of exp is its workload (workloadOf) and
+// no rank is missing, since the other ranks of a gang wait for a missing one forever. An instance
+// overdue to start does not match, and one the provider does not know to be running does, for the
+// control plane to bound. The workload of a desired job in a slot no longer configured is an error
+// and is left running, as destroying it would end a job the control plane still wants.
 func (e *Executor) WorkloadMatchesDesired(ctx context.Context, exp *clusterapi.DesiredJob) (bool, error) {
 	v, err := e.current(ctx)
 	if err != nil {
 		return false, err
 	}
 	matches := false
+	present := map[int]bool{}
 	for _, i := range v.of(exp.ID) {
+		if workloadOf(exp, i) {
+			present[i.rank] = true
+		}
 		if !i.live() {
 			continue
 		}
@@ -228,92 +365,106 @@ func (e *Executor) WorkloadMatchesDesired(ctx context.Context, exp *clusterapi.D
 			return false, fmt.Errorf("cloudcompute: instance %s runs experiment %s in slot %s, which no configured shape has, so it is billed beside every slot: restore the shape or its max_instances, or end the job", i.Name, exp.ID, i.slot())
 		}
 		if e.overdue(i) {
-			e.log("instance %s has not started in %s and is replaced", i.Name, e.startup)
+			e.log("instance %s has not started in %s and is replaced with every rank of its job", i.Name, e.startup)
 			return false, nil
 		}
 		matches = true
 	}
+	if ranks := len(exp.EffectiveJob().Slots); matches && len(present) < ranks {
+		e.log("experiment %s has %d of its %d ranks and is rented again whole", exp.ID, len(present), ranks)
+		return false, nil
+	}
 	return matches, nil
 }
 
-// PollJobStatus reports experimentID's newest instance. The name stands in for a UID: it differs
-// between attempts and between slots.
-//
-// An exited instance is terminal only once its output has been read and holds the wrapper's exit
-// line. Without the line the workload is reported gone, as an instance the vendor removed is,
-// whether the output has no line (the wrapper died with its machine) or cannot be read at all.
-// Neither fails the poll, since one job that cannot be polled withholds the whole cluster's
-// status push. The control plane confirms a gone report over several snapshots before it acts,
-// which is what lets a read that fails once recover, and then requeues the job as an
-// infrastructure fault: its own retries are not spent, and nothing is finished on a guess.
-//
-// Reporting an unreadable instance as still running instead is not bounded by anything: every
-// running report is recorded as liveness, so the job never reads as silent. For the same reason
-// an instance the provider does not know to be running is reported as pending, like one that is
-// starting: the control plane bounds a job that ran and reads pending with no sign of life.
-//
-// The vendor's state says what the machine does, at the pace of the vendor's own reports and of
-// this runtime's reads of them, and a command can start and end between two of those. When the
-// command ran is therefore the wrapper's word, read from the output with the exit line.
+// PollJobStatus reports the ranks of experimentID's newest attempt as one job, under rank 0's name
+// as its UID and on rank 0's machine at the price of every rank. Any failed rank fails it; else a
+// missing rank or one that exited without the wrapper's exit line, unread output included, makes
+// it gone, which the control plane confirms over several snapshots and requeues as an
+// infrastructure fault. It has succeeded once every rank has, and runs while some rank runs and
+// every other has succeeded; anything else is pending, which the control plane bounds. A poll never
+// fails for one instance, as that would withhold the cluster's whole status push. When the command
+// ran is the wrapper's word, from the first rank's start to the last rank's end.
 func (e *Executor) PollJobStatus(ctx context.Context, experimentID string) (agentexec.JobStatus, error) {
 	v, err := e.current(ctx)
 	if err != nil {
 		return agentexec.JobStatus{Phase: clusterapi.JobPhasePending, Attempt: clusterapi.AttemptUnknown}, err
 	}
-	i, ok := v.newest(experimentID)
-	if !ok {
+	ranks := v.gang(experimentID)
+	if len(ranks) == 0 {
 		return agentexec.JobStatus{Phase: clusterapi.JobPhaseGone, Attempt: clusterapi.AttemptUnknown}, nil
 	}
-	observed := agentexec.JobStatus{Phase: clusterapi.JobPhasePending, UID: i.Name, Attempt: i.attempt, Machine: &clusterapi.JobMachine{
-		InstanceID: i.ID, HostID: i.Host, AcceleratorModel: i.AcceleratorModel, CPUModel: i.CPUModel, PricePerHourUSD: i.PricePerHour,
+	head := ranks[0]
+	observed := agentexec.JobStatus{Phase: clusterapi.JobPhasePending, UID: head.Name, Attempt: head.attempt, Machine: &clusterapi.JobMachine{
+		InstanceID: head.ID, HostID: head.Host, AcceleratorModel: head.AcceleratorModel, CPUModel: head.CPUModel, PricePerHourUSD: head.PricePerHour,
 	}}
-	switch i.State {
-	case provider.StateRunning:
-		observed.Phase = clusterapi.JobPhaseRunning
-	case provider.StateExited:
-		how, _, readErr := e.ending(ctx, v, i)
-		if readErr != nil {
-			e.log("reporting %s as gone: %v", i.Name, readErr)
+	failed, gone, succeeded, running := false, len(ranks) < head.ranks, 0, 0
+	for _, i := range ranks {
+		if i.ID != head.ID {
+			observed.Machine.PricePerHourUSD += i.PricePerHour
 		}
-		if how != endingUnknown {
-			if line, found := clusterapi.FindExitLine(e.output(ctx, v, i).lines); found {
-				observed.StartedAt, observed.EndedAt = line.StartedAt, line.EndedAt
+		switch i.State {
+		case provider.StateRunning:
+			running++
+		case provider.StateExited:
+			how, _, readErr := e.ending(ctx, v, i)
+			if readErr != nil {
+				e.log("reporting %s as gone: %v", i.Name, readErr)
+			}
+			failed = failed || how == endingFailed
+			gone = gone || how == endingUnknown
+			if how == endingSucceeded {
+				succeeded++
+			}
+			if how != endingUnknown {
+				if line, found := clusterapi.FindExitLine(e.output(ctx, v, i).lines); found {
+					if observed.StartedAt.IsZero() || line.StartedAt.Before(observed.StartedAt) {
+						observed.StartedAt = line.StartedAt
+					}
+					if line.EndedAt.After(observed.EndedAt) {
+						observed.EndedAt = line.EndedAt
+					}
+				}
 			}
 		}
-		observed.Phase = map[ending]clusterapi.JobPhase{
-			endingUnknown:   clusterapi.JobPhaseGone,
-			endingSucceeded: clusterapi.JobPhaseSucceeded,
-			endingFailed:    clusterapi.JobPhaseFailed,
-		}[how]
+	}
+	switch {
+	case failed:
+		observed.Phase = clusterapi.JobPhaseFailed
+	case gone:
+		observed.Phase = clusterapi.JobPhaseGone
+	case succeeded == head.ranks:
+		observed.Phase = clusterapi.JobPhaseSucceeded
+	case running > 0 && running+succeeded == head.ranks:
+		observed.Phase = clusterapi.JobPhaseRunning
+	}
+	if observed.Phase != clusterapi.JobPhaseFailed && observed.Phase != clusterapi.JobPhaseSucceeded {
+		observed.StartedAt, observed.EndedAt = time.Time{}, time.Time{}
 	}
 	return observed, nil
 }
 
-// ResolveAdmittedAcceleratorType reports the type and node of the slot experimentID's instance
-// occupies: the type its units are priced under (Shape.units), cores for a shape with none.
+// ResolveAdmittedAcceleratorType reports the type and node of the slot rank 0 of experimentID's
+// newest attempt occupies: the type its units are priced under (Shape.units), cores for a shape
+// with none. Without rank 0 it names no node, as the control plane fences a report on the slot
+// of a job's first node.
 func (e *Executor) ResolveAdmittedAcceleratorType(ctx context.Context, experimentID string) (clusterapi.AcceleratorType, string, bool, error) {
 	v, err := e.current(ctx)
 	if err != nil {
 		return "", "", true, err
 	}
-	i, ok := v.newest(experimentID)
-	if !ok {
+	ranks := v.gang(experimentID)
+	if len(ranks) == 0 || ranks[0].rank != 0 {
 		return "", "", true, nil
 	}
-	shape, _, _ := e.configured(i.slot())
+	shape, _, _ := e.configured(ranks[0].slot())
 	unit, _ := shape.units()
-	return clusterapi.AcceleratorType(unit), i.slot(), true, nil
+	return clusterapi.AcceleratorType(unit), ranks[0].slot(), true, nil
 }
 
-// ReapTerminal destroys what no pass has a use for any more: every instance of one name beyond
-// the first, every exited instance that is not the workload of a desired experiment, which is a
-// job the control plane has finished with, or what a requeue or a readmission to another slot
-// left behind, and every instance under this namespace's prefix whose name is no job's. One
-// failed destroy does not keep the rest rented.
-//
-// A second instance of one name is a create the vendor carried out and reported failed, or a
-// list that lagged behind a create. The lowest id is kept, which is also the one every status
-// read reports, so which of the two survives does not depend on the pass that finds them.
+// ReapTerminal destroys every instance of one name beyond the lowest id, which status reads
+// report, every exited instance that is not a desired experiment's workload, and every instance
+// under the prefix whose name is no job's.
 func (e *Executor) ReapTerminal(ctx context.Context, desired map[string]*clusterapi.DesiredJob) error {
 	v, err := e.current(ctx)
 	if err != nil {

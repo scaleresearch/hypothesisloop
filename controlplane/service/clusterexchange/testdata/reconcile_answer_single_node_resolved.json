@@ -61,9 +61,9 @@
         "storage": "200Gi",
         "accelerator_count": 1,
         "accelerator_type": "nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3",
-        "node_selector": {
-          "hypothesisloop.io/slot": "slot-3"
-        },
+        "slots": [
+          "slot-3"
+        ],
         "termination_grace_period_seconds": 30,
         "checkpoint_grace_seconds": 120,
         "shm_size": "8Gi"

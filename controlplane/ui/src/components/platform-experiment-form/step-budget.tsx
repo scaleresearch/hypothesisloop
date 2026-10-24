@@ -4,34 +4,53 @@ import type { QuotaTier, TypeKind } from '@/types/api'
 import { Disclosure } from '@/components/ui/disclosure'
 import { FieldGroup, FormField } from '@/components/ui/form-field'
 import { InfoTip } from '@/components/ui/info-tip'
+import { ModelPicker } from '@/components/model-picker'
 import { Input } from '@/components/ui/input'
 import { Segmented } from '@/components/ui/segmented'
 import { Inline, Stack } from '@/components/ui/stack'
 import { Pill } from '@/components/ui/text'
 import { StagesEditor } from '@/components/platform-experiment-form/stages-editor'
-import { StartingAgentsEditor } from '@/components/platform-experiment-form/starting-agents-editor'
-import { LOCKED, ONE_STAGE, ONE_STARTING_AGENT } from '@/components/platform-experiment-form/model'
+import { TeamEditor } from '@/components/team-editor'
+import { LOCKED, ONE_STAGE } from '@/components/platform-experiment-form/model'
 import type { StepProps } from '@/components/platform-experiment-form/model'
 
 const PLATFORM_DEFAULT = "Empty is the platform's default."
 
 const tierLabel = (tier: QuotaTier) => tier.charAt(0).toUpperCase() + tier.slice(1).replace(/_/g, ' ')
 
-/** Step 3: researchers, budget, the stage ladder, and the settings most leave alone. */
+/** Step 3: the team, budget, the stage ladder, and the settings most leave alone. */
 export function StepBudget({ form, set, isEdit, locked, budgetKind }: StepProps & { budgetKind?: TypeKind }) {
   const unit = budgetKind
     ? budgetUnit(budgetKind, 'long')
     : `${budgetUnit('accelerator', 'long')}, or ${budgetUnit('cpu', 'long')} for jobs on CPU`
-  const researchers = Number.isInteger(Number(form.max_agents)) ? Number(form.max_agents) : 0
   return (
     <>
+      {!isEdit && (
+        <FieldGroup
+          label="Team"
+          hint="The platform starts these with the experiment and replaces one that finishes or loses its machine while time and budget allow. A cut lowers the count."
+        >
+          <Stack gap="md">
+            <FormField label="Coordinator model" hint="The coordinator assembles and steers the team. Researchers run on its model unless their entry names one.">
+              <ModelPicker coordinator aria-label="Coordinator model" value={form.coordinator_model} onChange={m => set('coordinator_model', m)} />
+            </FormField>
+            <TeamEditor
+              rows={form.agents}
+              onChange={rows => set('agents', rows)}
+              coordinatorModel={form.coordinator_model}
+              maxAgents={Number(form.max_agents)}
+            />
+          </Stack>
+        </FieldGroup>
+      )}
+
       <div className="grid grid-cols-2 gap-4">
         {isEdit ? (
-          <FieldGroup label="Max researchers" hint="Changed on the experiment page, under Researchers, with the pool.">
+          <FieldGroup label="Max executors" hint="Changed on the experiment page, under Team.">
             <span className="text-sm tabular-nums">{form.max_agents}</span>
           </FieldGroup>
         ) : (
-          <FormField label="Max researchers" hint="The most at work at once. The coordinator may add researchers up to it.">
+          <FormField label="Max executors" hint="The most at work at once, at least the team's. The coordinator may add executors up to it.">
             <Input type="number" min={1} step={1} value={form.max_agents} onChange={e => set('max_agents', e.target.value)} />
           </FormField>
         )}
@@ -43,27 +62,9 @@ export function StepBudget({ form, set, isEdit, locked, budgetKind }: StepProps 
         </FormField>
       </div>
 
-      {!isEdit && (
-        <FieldGroup
-          label="Starting agents"
-          hint="The platform starts these with the experiment and replaces one that finishes or loses its machine while time and budget allow. A cut lowers the count."
-        >
-          <Stack>
-            <Segmented
-              label="Starting agents choice"
-              size="sm"
-              options={[{ value: 'default', label: researchers >= 1 ? `${researchers} ${researchers === 1 ? 'generalist' : 'generalists'}` : 'Generalists' }, { value: 'custom', label: 'Custom' }]}
-              value={form.starting_agents ? 'custom' : 'default'}
-              onChange={v => set('starting_agents', v === 'custom' ? [ONE_STARTING_AGENT] : null)}
-            />
-            {form.starting_agents && <StartingAgentsEditor rows={form.starting_agents} onChange={rows => set('starting_agents', rows)} />}
-          </Stack>
-        </FieldGroup>
-      )}
-
       <FieldGroup
         label="Stage ladder"
-        hint={isEdit ? 'Fixed at creation.' : <>Each stage ends by cutting the weakest share of agents.<InfoTip>Lengths add up to 100% and the final stage cuts nobody. A run of fewer than 5 researchers has one stage, since nobody is cut. Max job hours caps how long one job runs in a stage.</InfoTip></>}
+        hint={isEdit ? 'Fixed at creation.' : <>Each stage ends by cutting the weakest share of agents.<InfoTip>Lengths add up to 100% and the final stage cuts nobody. A run of fewer than 5 executors has one stage, since nobody is cut. Max job hours caps how long one job runs in a stage.</InfoTip></>}
       >
         {isEdit ? (
           <Inline gap="xs">
@@ -94,11 +95,6 @@ export function StepBudget({ form, set, isEdit, locked, budgetKind }: StepProps 
           {!isEdit && (
             <FormField label="Agent image" hint="Empty is the platform's image; a custom one is built FROM it.">
               <Input value={form.agent_image} onChange={e => set('agent_image', e.target.value)} placeholder="registry.example.com/team/agent:tag" />
-            </FormField>
-          )}
-          {!isEdit && (
-            <FormField label="Coordinator model" hint="The model the platform runs the coordinator on. Empty is the platform's default.">
-              <Input value={form.coordinator_model} onChange={e => set('coordinator_model', e.target.value)} placeholder="platform default" />
             </FormField>
           )}
           {!isEdit && (

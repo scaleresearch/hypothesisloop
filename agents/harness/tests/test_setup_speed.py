@@ -117,7 +117,7 @@ class PlannerOpeningTest(unittest.TestCase):
     def test_a_baseline_agent_opens_with_its_goal(self):
         opened = seed.baseline("src/: the code. rust-toolchain.toml pins 1.95.0.")
         first, _, rest = opened.partition("\n\n")
-        for said in ("researchers, who wait for it", "slowest first", "experiment's image", "the planner's map below names", "subagents"):
+        for said in ("executors, who wait for it", "slowest first", "experiment's image", "the planner's map below names", "subagents"):
             self.assertIn(said, first)
         self.assertTrue(rest.endswith("rust-toolchain.toml pins 1.95.0."), rest)
         bare = seed.baseline("")
@@ -128,7 +128,7 @@ class PlannerOpeningTest(unittest.TestCase):
 
 
 class ToolsTest(unittest.TestCase):
-    # The CLI deferred WebSearch and WebFetch behind ToolSearch: planners and researchers
+    # The CLI deferred WebSearch and WebFetch behind ToolSearch: planners and executors
     # never searched. Tool search is off, so both are sent to the model whole.
     def test_web_search_and_fetch_are_sent_with_the_other_tools(self):
         class Started(Exception):

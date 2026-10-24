@@ -136,10 +136,8 @@ type Experiment struct {
 	// written to the metrics DB. nil means settlement is pending — the signal a background
 	// reconciler uses to retry after a crash or outage. Meaningless for non-terminal experiments.
 	// AttemptCount is how many attempts of this experiment have already run and ended; 0 on
-	// the first. A gang retry and an infrastructure requeue both write it. A single-pod job's
-	// own-failure retries are the runtime's BackoffLimit and are invisible here, because for a
-	// one-pod job the runtime can express "restart the failed unit" itself — for an N-pod gang
-	// it cannot, so the control plane makes that decision and writes it as desired state.
+	// the first. A retry and an infrastructure requeue both write it: every attempt is the control
+	// plane's decision, written as desired state.
 	//
 	// It is load-bearing beyond counting: a requeue reuses the experiment id, so the rebuilt
 	// workload is byte-identical to the terminal one still sitting in the cluster unless
@@ -248,7 +246,7 @@ func (e *Experiment) RetriesUsed() int {
 // TakeEstimate gives a job that states no estimated_duration_hours the one its platform
 // experiment measured on its baseline job, and reports whether the job has one now. A stated one
 // is never replaced. With EstimateHeld it is the one answer to what a job holds: the submit sizes
-// the job with them, and a baseline's declaration the trial every researcher submits.
+// the job with them, and a baseline's declaration the trial every executor submits.
 func (e *Experiment) TakeEstimate(pe *PlatformExperiment) bool {
 	if e.EstimatedDurationHours == 0 {
 		e.EstimatedDurationHours = pe.JobEstimatedDurationHours
@@ -408,7 +406,8 @@ func ValidSortField(sort string, allowed map[string]string) bool {
 type Placement struct {
 	ClusterName  string
 	AttemptCount int
-	// Slot is the slot the job was admitted to (NodeSlotLabel), "" on a cluster without slots.
+	// Slot is the slot the job's first node was admitted to (JobSpec.Slots), the node a report of
+	// the job names: "" on a cluster without slots.
 	Slot string
 	// AdmittedAt is when the current attempt was given capacity, zero for a job that holds none.
 	AdmittedAt time.Time

@@ -328,7 +328,7 @@ func TestListExperimentsAnswersABaselineJobAsOnTheObjective(t *testing.T) {
 		t.Errorf("the baseline job: got = %v, want objective true and no hypothesis_id", jobs[0])
 	}
 	if _, stated := jobs[1]["objective"]; stated || jobs[1]["hypothesis_id"] != "hyp-1" {
-		t.Errorf("the researcher's job: got = %v, want hypothesis_id hyp-1 and no objective", jobs[1])
+		t.Errorf("the executor's job: got = %v, want hypothesis_id hyp-1 and no objective", jobs[1])
 	}
 }
 

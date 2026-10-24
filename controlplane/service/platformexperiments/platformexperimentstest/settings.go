@@ -14,7 +14,13 @@ var Settings = domain.QuotaConfig{
 	DefaultStages: []domain.Stage{{LengthPct: 100}}, DefaultReportIntervalSeconds: 30,
 	DefaultQuotaTier: domain.QuotaTierGuaranteed, MaxRunLength: 30 * 24 * time.Hour, BaselineLimit: 90 * time.Minute, MinBaseline: 20 * time.Minute,
 	DefaultModelBudgetUSD: 50, MaxModelBudgetUSD: 500,
-	ModelCatalog: domain.ModelCatalog{"model-default": {InputUSDPerMTok: 2, OutputUSDPerMTok: 10, CacheWriteUSDPerMTok: 4, CacheReadUSDPerMTok: 0.2}},
+}
+
+// Catalog is the anthropic models the tests' platform serves.
+var Catalog = domain.ModelCatalog{
+	"model-default": {InputUSDPerMTok: 2, OutputUSDPerMTok: 10, CacheWriteUSDPerMTok: 4, CacheReadUSDPerMTok: 0.2},
+	"model-c":       {InputUSDPerMTok: 4, OutputUSDPerMTok: 20, CacheWriteUSDPerMTok: 8, CacheReadUSDPerMTok: 0.2},
+	"model-2":       {InputUSDPerMTok: 1, OutputUSDPerMTok: 5, CacheWriteUSDPerMTok: 2, CacheReadUSDPerMTok: 0.1},
 }
 
 // NoUsage is the address of a metrics store that answers every query with no usage.

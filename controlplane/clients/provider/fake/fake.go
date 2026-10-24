@@ -35,14 +35,24 @@ type Provider struct {
 
 	// Fail, when set, is asked before every call and its error returned in place of the call.
 	// method is "Create", "List", "Logs", "Stop", "Destroy", "Pause", "Resume", "Rentable", "Warm",
-	// "StartWarm" or "Get"; name is the instance's, empty for List, Rentable and an id Get does not
-	// find, and for StartWarm the
-	// name it is started under.
+	// "StartWarm", "Get", "Networked" or "Place"; name is the instance's, empty for List, Rentable,
+	// Networked, Place and an id Get does not find, and for StartWarm the name it is started under.
 	Fail func(method, name string) error
 
 	// Market, when set, is what the vendor has to rent of a spec right now. Unset, there is one
 	// for every instance asked about.
 	Market func(spec provider.Spec) provider.Supply
+
+	// Network, when set, is how many instances of a spec the place can hold right now.
+	// Unset, it holds any number.
+	Network func(spec provider.Spec) provider.Supply
+	// Near is what Within answers. Unset, the place is a placement group.
+	Near string
+
+	// Host, when set, is the host Create rents a spec on, as a vendor that names hosts lists it.
+	// Unset, an instance in the place is on a host of its own, as a Networker names one, and any
+	// other on none.
+	Host func(spec provider.Spec) string
 
 	// Rents is what Architectures answers, amd64 from New. Create and Warm refuse any other.
 	Rents []string
@@ -66,6 +76,7 @@ var (
 	_ provider.Pauser    = (*Provider)(nil)
 	_ provider.Market    = (*Provider)(nil)
 	_ provider.Warmer    = (*Provider)(nil)
+	_ provider.Networker = (*Provider)(nil)
 	_ provider.Accounted = (*Provider)(nil)
 )
 
@@ -98,13 +109,82 @@ func (p *Provider) Create(_ context.Context, spec provider.Spec) (string, error)
 	if err := p.rents(spec); err != nil {
 		return "", err
 	}
+	if spec.Place != "" && spec.Place != place {
+		return "", fmt.Errorf("fake: spec %q is rented in %q, which is no place of the fake's", spec.Name, spec.Place)
+	}
 	p.created++
 	id := fmt.Sprintf("fake-%04d", p.created)
 	p.instances[id] = &instance{
 		Instance: provider.Instance{ID: id, Name: spec.Name, State: provider.StateStarting, StartedAt: time.Now(), Architecture: spec.Architecture},
 		spec:     spec,
 	}
+	switch {
+	case p.Host != nil:
+		p.instances[id].Host = p.Host(spec)
+	case spec.Place != "":
+		p.instances[id].Host = "host-of-" + id
+	}
+	if spec.Place != "" {
+		p.instances[id].PrivateAddress = fmt.Sprintf("10.0.%d.%d", p.created/256, p.created%256)
+	}
 	return id, nil
+}
+
+// Interface is the one the fake's private network is on.
+func (p *Provider) Interface() string { return "eth0" }
+
+func (p *Provider) Within() string {
+	if p.Near == "" {
+		return "placement_group"
+	}
+	return p.Near
+}
+
+func (p *Provider) Networked(_ context.Context, spec provider.Spec, atMost int) (provider.Supply, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if err := p.fail("Networked", ""); err != nil {
+		return provider.Supply{}, err
+	}
+	return p.networked(spec, atMost), nil
+}
+
+func (p *Provider) networked(spec provider.Spec, atMost int) provider.Supply {
+	if p.Network == nil {
+		return provider.Supply{Count: atMost}
+	}
+	supply := p.Network(spec)
+	supply.Count = max(0, min(atMost, supply.Count))
+	return supply
+}
+
+// place is the one place the fake has.
+const place = "fake-place"
+
+// Place is ErrNoOffer when Network holds fewer instances of a spec than specs has of its size.
+func (p *Provider) Place(_ context.Context, specs []provider.Spec) (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if err := p.fail("Place", ""); err != nil {
+		return "", err
+	}
+	for _, spec := range specs {
+		alike := 0
+		for _, other := range specs {
+			if sameSize(spec, other) {
+				alike++
+			}
+		}
+		if p.networked(spec, alike).Count < alike {
+			return "", fmt.Errorf("fake: a place for %d instances: %w", len(specs), provider.ErrNoOffer)
+		}
+	}
+	return place, nil
+}
+
+func sameSize(a, b provider.Spec) bool {
+	return a.AcceleratorType == b.AcceleratorType && a.AcceleratorCount == b.AcceleratorCount &&
+		a.CPUMillis == b.CPUMillis && a.MemoryBytes == b.MemoryBytes && a.DiskBytes == b.DiskBytes
 }
 
 // Warm rents an instance that is starting until Ready makes it warm.

@@ -24,6 +24,18 @@ FILE = ".instructions.json"
 MAX_EFFORT = "max"
 
 
+PROVIDERS = ("anthropic", "openrouter", "openai")
+
+
+def split_model(reference: str) -> tuple[str, str]:
+    """The provider and the model id of a model reference, <provider>/<model id>. The model id may
+    hold slashes of its own. This is the only place the harness interprets the format."""
+    provider, _, model_id = reference.partition("/")
+    if provider not in PROVIDERS or not model_id:
+        raise SystemExit(f"agent: the model {reference!r} is not <provider>/<model id> with a provider of {', '.join(PROVIDERS)}")
+    return provider, model_id
+
+
 @dataclass(frozen=True)
 class Instructions:
     agent_type: str
@@ -37,6 +49,14 @@ class Instructions:
     hyperparameters: dict
     # The platform's digest of the served prompt and the settings.
     digest: str
+
+    @property
+    def provider(self) -> str:
+        return split_model(self.model)[0]
+
+    @property
+    def model_id(self) -> str:
+        return split_model(self.model)[1]
 
     def needs_new_session(self, other: Instructions) -> bool:
         """Whether running other takes a new session: a session keeps its model, whose signed
@@ -109,8 +129,7 @@ def complete(answer: dict, cfg: config.Config, commands: str, workdir: str) -> I
             hyperparameters=settings["hyperparameters"] or {}, digest=answer["digest"])
     except (KeyError, TypeError, ValueError) as e:
         raise SystemExit(f"agent: the platform's instructions for {cfg.agent_id} are not what the harness runs with: {e!r}") from None
-    if not instructions.model:
-        raise SystemExit(f"agent: the platform's instructions for {cfg.agent_id} name no model")
+    split_model(instructions.model)
     return instructions
 
 

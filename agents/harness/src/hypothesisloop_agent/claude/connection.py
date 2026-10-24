@@ -134,7 +134,7 @@ async def run(setup: core.RunSetup, store: Store, running: Running, resume_id: s
             if await running.apply(client, store, background, resume_id):
                 return True
 
-            rotate_at, hard_at = rotation.limits(result, running.current.model)
+            rotate_at, hard_at = rotation.limits(result, running.current.model_id)
             if rotation.due(context, resume_id, rotate_at, hard_at, background):
                 return await rotation.hand_off(client, store, agent, rotation.COMPACTION_PROMPT, background, resume_id)
 

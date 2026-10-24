@@ -234,37 +234,22 @@ func jobWithRetries(retries int) *clusterapi.DesiredJob {
 	}
 }
 
-// Retries live at two layers: BackoffLimit recreates the pod, RestartPolicy=OnFailure has the
-// kubelet restart the container in place. max_retries only reaches the first, so a job asking
-// for zero retries was still restarted — seen live as restart_count=1 with max_retries=0 on a
-// diagnostic chosen to fail once and cheaply.
-func TestBuildJobMaxRetriesZeroDisablesInPlaceRestart(t *testing.T) {
+// The control plane is the one retry authority: whatever max_retries says, the runtime runs the
+// attempt once, with no pod recreated (BackoffLimit) and no container restarted in place
+// (RestartPolicy=OnFailure). Either layer retried a job on top of the control plane's retries.
+func TestBuildJobRunsEachAttemptOnce(t *testing.T) {
 	c := &JobWorkloadClient{apiURL: testAPIURL}
-	job, err := c.BuildJob(jobWithRetries(0), AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := job.Spec.Template.Spec.RestartPolicy; got != corev1.RestartPolicyNever {
-		t.Errorf("restart policy = %q, want Never so max_retries=0 means exactly one attempt", got)
-	}
-	if got := *job.Spec.BackoffLimit; got != 0 {
-		t.Errorf("backoff limit = %d, want 0", got)
-	}
-}
-
-// With retries actually requested, in-place restart stays on — it is the cheaper recovery for a
-// transient fault, and the caller has said retrying is acceptable.
-func TestBuildJobKeepsInPlaceRestartWhenRetriesRequested(t *testing.T) {
-	c := &JobWorkloadClient{apiURL: testAPIURL}
-	job, err := c.BuildJob(jobWithRetries(2), AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := job.Spec.Template.Spec.RestartPolicy; got != corev1.RestartPolicyOnFailure {
-		t.Errorf("restart policy = %q, want OnFailure when retries are requested", got)
-	}
-	if got := *job.Spec.BackoffLimit; got != 2 {
-		t.Errorf("backoff limit = %d, want 2", got)
+	for _, retries := range []int{0, 2} {
+		job, err := c.BuildJob(jobWithRetries(retries), AcceleratorPlacement{DeviceClassName: "tenstorrent.com"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := job.Spec.Template.Spec.RestartPolicy; got != corev1.RestartPolicyNever {
+			t.Errorf("max_retries %d: restart policy = %q, want Never", retries, got)
+		}
+		if got := *job.Spec.BackoffLimit; got != 0 {
+			t.Errorf("max_retries %d: backoff limit = %d, want 0", retries, got)
+		}
 	}
 }
 
@@ -406,16 +391,12 @@ func TestDistributedJobFailsTheWholeGangOnAnyRankFailure(t *testing.T) {
 	}
 }
 
-// Single-node jobs keep the runtime's own retry budget: for a one-pod job BackoffLimit really
-// does restart the failed unit, so there is nothing for the control plane to take over.
-func TestSingleNodeJobKeepsRuntimeRetryBudget(t *testing.T) {
+// A single-node job is no gang: one Job, not Indexed, with no pod failure policy.
+func TestSingleNodeJobIsNoGang(t *testing.T) {
 	c := &JobWorkloadClient{apiURL: testAPIURL}
 	job, err := c.BuildJob(distributedExperiment(1, 2), nvidiaPlacement)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if job.Spec.BackoffLimit == nil || *job.Spec.BackoffLimit != 2 {
-		t.Errorf("BackoffLimit = %v, want 2 (max_retries) — single-node retry is unchanged", job.Spec.BackoffLimit)
 	}
 	if job.Spec.PodFailurePolicy != nil {
 		t.Error("single-node job gained a pod failure policy it never had")

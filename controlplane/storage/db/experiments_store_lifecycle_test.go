@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -255,12 +256,12 @@ func TestEveryRequeueClearsWhatTheLastAdmissionResolved(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			id := "requeue-" + name + "-" + peID
 			seedExperimentForCapTest(t, pool, id, agentID, peID, 1, requeue.from)
-			pinned := `{"cpu":"8","node_selector":{"` + domain.NodeSlotLabel + `":"h100-0"}}`
+			pinned := `{"cpu":"8","slots":["h100-0"]}`
 			if _, err := pool.pool.Exec(ctx, `UPDATE experiments SET resolved_job_spec = $2::jsonb, cluster_name = 'rented', submitted_at = NOW() WHERE id = $1`, id, pinned); err != nil {
 				t.Fatal(err)
 			}
 			before, err := exps.GetExperiment(ctx, id)
-			if err != nil || before.EffectiveJob().NodeSelector[domain.NodeSlotLabel] != "h100-0" {
+			if err != nil || !slices.Equal(before.EffectiveJob().Slots, []string{"h100-0"}) {
 				t.Fatalf("seeded row: %+v, %v", before.ResolvedJob, err)
 			}
 
@@ -271,7 +272,7 @@ func TestEveryRequeueClearsWhatTheLastAdmissionResolved(t *testing.T) {
 			if err != nil || after.Status != domain.StatusQueued {
 				t.Fatalf("after the requeue: %v, %v", after.Status, err)
 			}
-			if after.ResolvedJob != nil || after.EffectiveJob().NodeSelector != nil {
+			if after.ResolvedJob != nil || after.EffectiveJob().Slots != nil {
 				t.Fatalf("the requeued row still carries %+v", after.ResolvedJob)
 			}
 		})
@@ -287,7 +288,7 @@ func TestPlacementCarriesTheSlotAJobWasAdmittedTo(t *testing.T) {
 	onSlot, plain := "placement-slot-"+peID, "placement-plain-"+peID
 	seedExperimentForCapTest(t, pool, onSlot, agentID, peID, 1, domain.StatusSubmitted)
 	seedExperimentForCapTest(t, pool, plain, agentID, peID, 1, domain.StatusSubmitted)
-	pinned := `{"cpu":"8","node_selector":{"zone":"a","` + domain.NodeSlotLabel + `":"h100-1"}}`
+	pinned := `{"cpu":"8","node_selector":{"zone":"a"},"slots":["h100-1","h100-2"]}`
 	if _, err := pool.pool.Exec(ctx, `UPDATE experiments SET resolved_job_spec = $2::jsonb, cluster_name = 'rented', attempt_count = 3 WHERE id = $1`, onSlot, pinned); err != nil {
 		t.Fatal(err)
 	}

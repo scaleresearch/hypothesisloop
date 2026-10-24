@@ -197,10 +197,11 @@ def test_a_revoked_key_stops_at_once_with_every_key_minted_from_it(orgs):
     assert again["revoked_at"] == revoked["revoked_at"], "a second revocation moved revoked_at"
 
 
-def _report(cluster_id: str) -> dict:
+def _report(cluster_id: str, architecture: str = "") -> dict:
     """What a runtime with one idle node of two accelerators reports. The node holds two jobs of
     JOB_SHAPE and nothing larger. The control plane takes the jobs it placed off these figures
-    itself, so a runtime that runs nothing reports the same node every time."""
+    itself, so a runtime that runs nothing reports the same node every time. A job runs only on a
+    node of its image's architecture, so a runtime that is to be handed jobs names one."""
     node = {"cpu_millicores": 20, "memory_bytes": 32 * MI, "storage_bytes": 32 * MI}
     return {
         "cluster_id": cluster_id,
@@ -212,7 +213,7 @@ def _report(cluster_id: str) -> dict:
         "accelerator_available_by_node": {"node-1": {OWN_ACCELERATOR: 2}},
         "node_resources_by_node": {"node-1": node},
         "node_resources_total_by_node": {"node-1": node},
-        "node_labels_by_node": {"node-1": {}},
+        "node_labels_by_node": {"node-1": {"kubernetes.io/arch": architecture} if architecture else {}},
         "multi_node_capable": False, "autoscaler_enabled": False,
     }
 
@@ -222,10 +223,12 @@ class FakeRuntime:
 
     def __init__(self, api: API, name: str, token: str):
         self.name, self.api, self.cluster_id = name, api.as_caller(token), f"id-{name}"
+        # The architecture the suite records its image for (API.record_image).
+        self.architecture = api.architecture()
         self.handed: set[str] = set()
 
     def reconcile(self) -> list[dict]:
-        r = self.api.post(f"/internal/clusters/{self.name}/reconcile", _report(self.cluster_id))
+        r = self.api.post(f"/internal/clusters/{self.name}/reconcile", _report(self.cluster_id, self.architecture))
         assert r.status_code == 200, f"reconcile of {self.name}: {r.status_code} {r.text}"
         experiments = r.json()["experiments"] or []
         self.handed |= {e["id"] for e in experiments}
@@ -256,7 +259,7 @@ def test_an_orgs_cluster_runs_only_its_jobs_and_a_platform_cluster_runs_any_orgs
     printed = a.api.hl("cluster", "add", name)
     match = re.fullmatch(
         r"""sh -c '[^']*printf %s "\$token" \| "\$@"' sh \\\n"""
-        r"  helm upgrade --install hypothesisloop-cluster-agent 'oci://([^' ]+)/charts/hypothesisloop-cluster-agent' \\\n"
+        r"  helm upgrade --install hypothesisloop-cluster-agent 'oci://([^' ]+)/charts/hypothesisloop-cluster-agent'(?P<plain> --plain-http)? \\\n"
         r"  --version '0\.1\.0\+([^' ]+)' \\\n"
         r"  --namespace hypothesisloop --create-namespace --take-ownership \\\n"
         r"  --set-file runtimeToken=/dev/stdin \\\n"
@@ -264,12 +267,12 @@ def test_an_orgs_cluster_runs_only_its_jobs_and_a_platform_cluster_runs_any_orgs
         r"  --set-string 'apiURL=(https?://[^' ]+)' \\\n"
         r"  --set-string 'metricsURL=(https?://[^' ]+)' \\\n"
         r"  --set-string 'images\.registry=([^' ]+)' \\\n"
-        r"  --set-string 'images\.tag=([^' ]+)'\n"
+        r"  --set-string 'images\.tag=([^' ]+)'(?(plain) \\\n  --set insecureRegistry\.enabled=true)\n"
         rf"\nIt asks for the runtime token of {name}:\n(hls_\S+)\n", printed)
     assert match, f"hl cluster add printed {printed!r}"
     command = printed.split("\n\n", 1)[0]
     assert "hls_" not in command and "hl cluster token" not in command, "the command holds the runtime token or needs hl on the machine"
-    chart_registry, chart_tag, api_url, metrics_url, registry, image_tag, shown_token = match.groups()
+    chart_registry, chart_tag, api_url, metrics_url, registry, image_tag, shown_token = match.group(1, 3, 4, 5, 6, 7, 8)
     assert (chart_registry, chart_tag) == (registry, image_tag), "the chart named is the one pushed beside the images it runs"
     token = a.api.hl("cluster", "token", name).strip()
     assert token == admin.cluster_token(name), "the token printed is the one derived for the cluster's name"
@@ -304,7 +307,7 @@ def test_an_orgs_cluster_runs_only_its_jobs_and_a_platform_cluster_runs_any_orgs
 
     listed = {c["name"]: c for c in _lines(a.api.hl("cluster", "list"))}
     assert listed[name] == {**listed[name], "org_id": a.org_id, "owned": True, "connected": True, "cluster_id": runtime.cluster_id}
-    assert name not in b.api.get(f"/orgs/{b.org_id}/clusters").text
+    assert name not in {c["name"] for c in b.api.get_json(f"/orgs/{b.org_id}/clusters")["clusters"]}, "org B lists org A's cluster"
     assert api.get(f"/orgs/org-never-made-{uuid.uuid4().hex[:8]}/clusters").status_code == 404, "staff list the clusters of an org that does not exist"
 
     assert name in _capacity_names(a.api) and name in _capacity_names(api)
@@ -334,11 +337,14 @@ def test_an_orgs_cluster_runs_only_its_jobs_and_a_platform_cluster_runs_any_orgs
     agent_b, pe_b = _running_org(b, run_id)
     # Org B turns off the platform's clusters it can use, so that its own, which is away, is all
     # its job may wait for beside org A's free one.
-    for platform_cluster in platform_clusters:
-        b.api.hl("cluster", "disable", platform_cluster)
-    job_a = a.api.submit_job(pe_a, agent_a, job_overrides=JOB_SHAPE)
-    job_b = b.api.submit_job(pe_b, agent_b, job_overrides=JOB_SHAPE)
+    job_a = job_b = ""
     try:
+        for platform_cluster in platform_clusters:
+            b.api.hl("cluster", "disable", platform_cluster)
+        # A submit is judged on the clusters that report now, and the setup above outlasts a report.
+        runtime.reconcile()
+        job_a = a.api.submit_job(pe_a, agent_a, job_overrides=JOB_SHAPE)
+        job_b = b.api.submit_job(pe_b, agent_b, job_overrides=JOB_SHAPE)
         eventually("org A's job is handed to org A's cluster", runtime.reconcile, deadline=deadline, interval=2,
                    accept=lambda exps: job_a in {e["id"] for e in exps})
         assert a.api.experiment(job_a)["cluster_name"] == name
@@ -406,8 +412,11 @@ def test_an_orgs_cluster_runs_only_its_jobs_and_a_platform_cluster_runs_any_orgs
         _status(api, "DELETE", f"/orgs/{a.org_id}/clusters/{name}")
         _status(api, "DELETE", f"/orgs/{b.org_id}/clusters/{name_b}")
         _status(api, "DELETE", f"/orgs/{DEFAULT_ORG}/clusters/{name_p}")
+        for platform_cluster in platform_clusters:
+            b.api.hl("cluster", "enable", platform_cluster)
         for org, job_id, pe_id in ((a, job_a, pe_a), (b, job_b, pe_b)):
-            org.api.post(f"/experiments/{job_id}/cancel")
+            if job_id:
+                org.api.post(f"/experiments/{job_id}/cancel")
             org.api.close_platform_experiment(pe_id)
 
 

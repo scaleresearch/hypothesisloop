@@ -11,9 +11,9 @@ import (
 )
 
 // statusMoved is what every write that moves the status of a platform experiment sets beside it:
-// what its coordinator was told it waits for and the researchers held said of the status that
+// what its coordinator was told it waits for and the agents held said of the status that
 // was.
-const statusMoved = `coordinator_reason = NULL, researchers_held = NULL`
+const statusMoved = `coordinator_reason = NULL, agents_held = NULL`
 
 // moveRun runs q, a write of at most one platform_experiments row that moves its status, and
 // announces the status it moved to, reporting whether there was a row.

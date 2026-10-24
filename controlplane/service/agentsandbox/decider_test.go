@@ -633,7 +633,7 @@ func reconcileRecording(t *testing.T, store Store, metrics Metrics, cfg Settings
 // the coordinator's under its own; a line that cannot be read is passed over.
 func TestARunningMachinesHarnessStateGoesToTheRunsHealth(t *testing.T) {
 	store := oneAgentAndACoordinator()
-	store.ByLauncher["main"][0].Role = domain.SignupRoleCompetitor
+	store.ByLauncher["main"][0].Role = domain.SignupRoleExecutor
 	first := mustReconcile(t, store, observed())
 	agent, coordinator := first.Instances[0].Name, first.Instances[1].Name
 	metrics := &harnessMetrics{}
@@ -645,7 +645,7 @@ func TestARunningMachinesHarnessStateGoesToTheRunsHealth(t *testing.T) {
 	}
 	full, resets := 1.0, time.Unix(1760000000, 0).UTC()
 	want := []domain.HarnessState{
-		{PlatformExperimentID: "pe-1", AgentID: "ag-1", Role: "competitor", Subagents: 3, TurnSince: time.Unix(1759990000, 0).UTC(), InstructionsDigest: "0123456789ab",
+		{PlatformExperimentID: "pe-1", AgentID: "ag-1", Role: "executor", Subagents: 3, TurnSince: time.Unix(1759990000, 0).UTC(), InstructionsDigest: "0123456789ab",
 			AgentType: "data-search", AgentTypeVersion: 4, Model: domain.RateLimit{Rejected: true, Utilization: &full, ResetsAt: &resets}},
 		{PlatformExperimentID: "pe-1", Role: domain.CoordinatorHealthRole, AgentType: domain.CoordinatorAgentType, TurnWaiting: true, TurnSince: time.Unix(1759999000, 0).UTC()},
 	}

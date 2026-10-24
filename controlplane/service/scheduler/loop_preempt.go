@@ -69,7 +69,7 @@ func (l *Loop) preempt(ctx context.Context, cluster string, avail domain.Footpri
 		for _, victim := range candidates {
 			creditNode(nil, freeable[nodeOf[victim.ID]], victim)
 		}
-		resolved, misfit := placement.ResolveOntoSlot(preemptor, cluster, nodeResourcesTotal, freeable, nodeLabels)
+		resolved, misfit := placement.ResolveOntoSlots(preemptor, cluster, nodeResourcesTotal, freeable, nodeLabels)
 		if misfit != "" {
 			return false, nil
 		}

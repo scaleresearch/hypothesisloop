@@ -26,16 +26,24 @@ type Pauser interface {
 // CapabilityPause is the name Capabilities gives Pauser.
 const CapabilityPause = "pause"
 
-// Capabilities names what p can do beyond the core, for a process to say at start.
+// Capabilities names what p can do beyond the core, for a process to say at start. Of a Bounded
+// it names the capabilities the Bounded carries.
 func Capabilities(p Provider) []string {
-	found := []string{}
-	if _, ok := p.(Pauser); ok {
-		found = append(found, CapabilityPause)
+	b, ok := p.(Bounded)
+	if !ok {
+		b = Bound(p)
 	}
-	if _, ok := p.(Market); ok {
+	found := []string{}
+	if b.Market != nil {
 		found = append(found, CapabilityMarket)
 	}
-	if _, ok := p.(Warmer); ok {
+	if b.Networker != nil {
+		found = append(found, CapabilityNetwork)
+	}
+	if b.Pauser != nil {
+		found = append(found, CapabilityPause)
+	}
+	if b.Warmer != nil {
 		found = append(found, CapabilityWarm)
 	}
 	return found

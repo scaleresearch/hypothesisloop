@@ -7,16 +7,18 @@ between each step so the registry receives a live stream rather than a batch dum
 
 Environment variables injected by the scheduler:
   HYPOTHESISLOOP_EXPERIMENT_ID           - unique experiment UUID
-  HYPOTHESISLOOP_AGENT_ID                - agent/researcher identifier
+  HYPOTHESISLOOP_AGENT_ID                - agent identifier
   HYPOTHESISLOOP_PROJECT_ID              - project identifier
   HYPOTHESISLOOP_PRIMARY_METRIC          - metric name to optimize (e.g. val_accuracy)
   HYPOTHESISLOOP_METRIC_DIRECTION        - maximize | minimize
   HYPOTHESISLOOP_REPORT_INTERVAL_SECONDS - seconds between metric pushes (default: 5)
   HYPOTHESISLOOP_API_URL            - HypothesisLoop API base URL
-  HYPOTHESISLOOP_DURATION_SECONDS        - total run time in seconds (default: 60)
   HYPOTHESISLOOP_BASELINE                - declared baseline value to beat
   HYPOTHESISLOOP_ACCELERATOR_TYPE                - accelerator type label (T4 | L40 | A100)
   HYPOTHESISLOOP_ACCELERATOR_COUNT               - number of accelerators
+
+Set by the job's env:
+  RUN_SECONDS                            - total run time in seconds (default: 60)
 """
 
 import os
@@ -36,7 +38,7 @@ PROJECT_ID = os.environ["HYPOTHESISLOOP_PROJECT_ID"]
 METRIC     = os.environ.get("HYPOTHESISLOOP_PRIMARY_METRIC", "val_accuracy")
 DIRECTION  = os.environ.get("HYPOTHESISLOOP_METRIC_DIRECTION", "maximize")
 INTERVAL   = int(os.environ.get("HYPOTHESISLOOP_REPORT_INTERVAL_SECONDS", "5"))
-DURATION   = int(os.environ.get("HYPOTHESISLOOP_DURATION_SECONDS", "60"))
+DURATION   = int(os.environ.get("RUN_SECONDS", "60"))
 API_URL    = os.environ["HYPOTHESISLOOP_API_URL"]
 BASELINE   = float(os.environ.get("HYPOTHESISLOOP_BASELINE", "0.5"))
 ACCELERATOR_TYPE   = os.environ.get("HYPOTHESISLOOP_ACCELERATOR_TYPE", "T4")

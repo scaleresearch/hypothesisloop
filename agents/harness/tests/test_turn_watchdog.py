@@ -53,7 +53,7 @@ class HangingClient:
 def _setup():
     return SimpleNamespace(commands="usage: hl", workdir=tempfile.mkdtemp(), statedir=tempfile.mkdtemp(),
                            client=FakePlatform(),
-                           cfg=SimpleNamespace(agent_id="agent-a", role="researcher", api_url="http://x", token=AGENT_TOKEN, platform_experiment_id="pe-1"))
+                           cfg=SimpleNamespace(agent_id="agent-a", role="executor", api_url="http://x", token=AGENT_TOKEN, platform_experiment_id="pe-1"))
 
 
 # A machine stopped while its agent's run goes on is told exactly that, ahead of what to do with its turn.
@@ -113,7 +113,7 @@ class StopTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.queries, ["Begin." + S, LAST])
         self.assertTrue(client.disconnected)
 
-    # A researcher that had just finished was interrupted in its closing message and given a
+    # An executor that had just finished was interrupted in its closing message and given a
     # turn to file summaries the platform had already checked it did not owe.
     async def stop_after_finishing(self, client_class, sleep) -> StoppableClient:
         setup = _setup()
@@ -201,7 +201,7 @@ class IdleStopTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.run_ends_while_idle("coordinator", {}, closed), [
             "Begin." + S, "You are being stopped because the platform experiment reached its end time and the platform closed it at "
                       "2026-01-01T02:48:05Z. " + shutdown._COORDINATOR_SHUTDOWN_PROMPT + S])
-        self.assertEqual(await self.run_ends_while_idle("researcher", {"ended": "cut"}, {"status": "running"}), [
+        self.assertEqual(await self.run_ends_while_idle("executor", {"ended": "cut"}, {"status": "running"}), [
             "Begin." + S, "You are being stopped because you were cut from the platform experiment at a stage boundary. " + shutdown._SHUTDOWN_PROMPT + S])
 
     # In a live run the close arrived as an update, was handed over as a turn of its own and cut by the
@@ -230,7 +230,7 @@ class IdleStopTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_refused_token_gets_no_last_turn(self):
         refused = api_client.APIError("GET", "http://api/x", 401, "unauthenticated")
-        self.assertEqual(await self.run_ends_while_idle("researcher", refused, {"status": "running"}), ["Begin." + S])
+        self.assertEqual(await self.run_ends_while_idle("executor", refused, {"status": "running"}), ["Begin." + S])
 
     async def test_the_last_turn_opens_with_what_finished_since_the_last_delivery(self):
         done = {"kind": "experiment.status", "subject": "exp-1", "value": "COMPLETED", "detail": "acc 0.9"}
@@ -285,7 +285,7 @@ class ReviewTest(unittest.IsolatedAsyncioTestCase):
     # The platform's agent.idle, kept in its store, is the one timer of an agent.
     async def test_an_agent_waits_for_an_update_with_no_limit_of_its_own(self):
         comment = {"kind": "comment.new", "subject": "hyp-1", "value": "human"}
-        waits, queries = await self.waits("researcher", [[comment], [comment]])
+        waits, queries = await self.waits("executor", [[comment], [comment]])
         self.assertEqual(waits, [float("inf")] * 2)
         self.assertEqual(queries[1], "Platform updates:\ncomment.new hyp-1 human" + S)
 
@@ -411,7 +411,7 @@ class ContextOverflowTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rotation.limits(result({"claude-x-2026": {"contextWindow": 200_000}}), "claude-x"), (150_000, 180_000))
 
 
-# A researcher ran 3 to 10 subagents at once, and its session grew past its rotation since some
+# An executor ran 3 to 10 subagents at once, and its session grew past its rotation since some
 # were always live. Starts past the cap are refused, those of one step included: the CLI lists a
 # subagent only after the hooks of the step that started it ran.
 class SubagentCapTest(unittest.IsolatedAsyncioTestCase):

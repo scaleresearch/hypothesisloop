@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { SWRConfig } from 'swr'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchAgentTypes } from '@/lib/api/agent-types'
+import { fetchModels } from '@/lib/api/models'
 import { addPlatformExperimentAgents } from '@/lib/api/agents'
 import { createExperimentDraft, deleteExperimentDraft, updateExperimentDraft } from '@/lib/api/drafts'
 import { beginGitHubInstall, fetchGitHubApp, fetchGitHubInstallations, fetchGitHubRepositories } from '@/lib/api/github'
@@ -11,13 +12,16 @@ import { ApiError } from '@/lib/api/request'
 import { resolveTenant, TenantContext } from '@/lib/tenant'
 import { PlatformExperimentForm } from '@/components/platform-experiment-form'
 import { CATALOG } from '@/test-agent-types'
+import { MODELS, pickModel } from '@/test-models'
 import { choose } from '@/test-select'
 import type { ExperimentDraft, Me, PlatformExperiment } from '@/types/api'
 
 vi.mock('@/lib/api/agent-types', async importActual => ({
   ...(await importActual<typeof import('@/lib/api/agent-types')>()),
   fetchAgentTypes: vi.fn(),
+  fetchAgentRoles: vi.fn(async () => (await import('@/test-agent-types')).ROLES),
 }))
+vi.mock('@/lib/api/models', () => ({ fetchModels: vi.fn() }))
 vi.mock('@/lib/api/agents', async importActual => ({
   ...(await importActual<typeof import('@/lib/api/agents')>()),
   addPlatformExperimentAgents: vi.fn(),
@@ -86,6 +90,7 @@ async function essentials({ repository }: { repository?: string } = {}) {
 
 beforeEach(() => {
   onSaved.mockReset()
+  vi.mocked(fetchModels).mockResolvedValue(MODELS)
   vi.mocked(fetchExperimentFile).mockReset().mockRejectedValue(new ApiError(422, 'the repository has no experiment file', 'no_experiment_file'))
   vi.mocked(fetchGitHubApp).mockResolvedValue({ slug: 'hl', install_url: 'https://github.test/install', new_repository_url: 'https://github.test/new' })
   vi.mocked(fetchGitHubInstallations).mockResolvedValue({ items: [{ org_id: 'org_a', installation_id: 7, account_login: 'acme', connected_actor: { kind: 'user', id: 'u9', name: 'Una' }, connected_at: at, default: false }], total: 1 })
@@ -104,16 +109,16 @@ beforeEach(() => {
 })
 
 describe('a new platform experiment', () => {
-  it('is run by the platform with its defaults in one create: a sandboxed coordinator, max_agents generalists to start with, and the platform\'s ladder', async () => {
+  it('is run by the platform with its defaults in one create: a sandboxed coordinator, a team of generalists and a researcher, and the platform\'s ladder', async () => {
     show()
     await essentials()
     await create()
     await waitFor(() => expect(onSaved).toHaveBeenCalledExactlyOnceWith(created, true))
     expect(sent()).toMatchObject({
       name: 'Run', description: 'The brief', coordinator_in_agentsandbox: true, max_agents: 2, duration_hours: 48, budget_accelerator_hours: 10,
-      researchers: [{ agent_type: 'generalist', count: 2 }],
+      agents: [{ agent_type: 'generalist', count: 2 }, { agent_type: 'researcher', count: 1 }],
     })
-    for (const left of ['stages', 'report_interval_seconds', 'starts_at', 'repository']) expect(sent()).not.toHaveProperty(left)
+    for (const left of ['stages', 'report_interval_seconds', 'starts_at', 'repository', 'coordinator_model']) expect(sent()).not.toHaveProperty(left)
     expect(createPlatformExperiment).toHaveBeenCalledTimes(1)
     expect(addPlatformExperimentAgents).not.toHaveBeenCalled()
   })
@@ -126,51 +131,66 @@ describe('a new platform experiment', () => {
     await userEvent.clear(screen.getByLabelText('Duration (hours)'))
     await userEvent.type(screen.getByLabelText('Duration (hours)'), '6')
     await next()
-    await userEvent.clear(screen.getByLabelText('Max researchers'))
-    await userEvent.type(screen.getByLabelText('Max researchers'), '3')
+    await userEvent.clear(screen.getByLabelText('Max executors'))
+    await userEvent.type(screen.getByLabelText('Max executors'), '3')
     await create()
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
-    expect(sent()).toMatchObject({ duration_hours: 6, max_agents: 3, researchers: [{ agent_type: 'generalist', count: 3 }] })
+    expect(sent()).toMatchObject({ duration_hours: 6, max_agents: 3 })
     expect(addPlatformExperimentAgents).not.toHaveBeenCalled()
   })
 
-  it('starts with the agents the person lists, within max researchers', async () => {
+  it('composes the team in one list: each entry an agent type, its count, model and hyperparameters, the researcher on the coordinator\'s model', async () => {
     show()
     await userEvent.type(name(), 'Run')
     await userEvent.type(screen.getByLabelText('Experiment goal'), 'The brief')
     await next()
     await next()
-    await userEvent.clear(screen.getByLabelText('Max researchers'))
-    await userEvent.type(screen.getByLabelText('Max researchers'), '4')
-    await userEvent.click(within(screen.getByRole('group', { name: 'Starting agents choice' })).getByRole('button', { name: 'Custom' }))
-    await userEvent.clear(await screen.findByLabelText('Starting agent 1 count'))
-    await userEvent.type(screen.getByLabelText('Starting agent 1 count'), '2')
-    await userEvent.click(screen.getByRole('button', { name: '+ Add agents' }))
-    await userEvent.type(screen.getByLabelText('Starting agent 2 model'), 'model-2')
+    expect(await screen.findByText('2 executors, 1 researcher · at most 2 executors at work at once')).toBeTruthy()
+    // A researcher's model defaults to the coordinator's when neither its entry nor its type names one.
+    const researcherModel = screen.getByLabelText('Team entry 2 model') as HTMLInputElement
+    expect(researcherModel.placeholder).toBe("Coordinator's model: anthropic/claude-opus-5-5")
+    await pickModel(screen.getByLabelText('Coordinator model'), 'sonnet', 'anthropic/claude-sonnet-5')
+    expect(researcherModel.placeholder).toBe("Coordinator's model: anthropic/claude-sonnet-5")
+    // Adding one of a role raises the count of its built-in entry.
+    await userEvent.click(screen.getByRole('button', { name: '+ Add executor' }))
+    expect(screen.getByLabelText('Team entry 1 count')).toHaveProperty('value', '3')
+    expect(screen.getByText('The team has more executors than the max at once: raise the max or lower a count.')).toBeTruthy()
+    await userEvent.clear(screen.getByLabelText('Max executors'))
+    await userEvent.type(screen.getByLabelText('Max executors'), '4')
+    await pickModel(screen.getByLabelText('Team entry 1 model'), 'nano', 'openrouter/openai/gpt-5-nano')
+    await userEvent.click(within(screen.getByRole('listitem', { name: 'Team entry 1' })).getByRole('button', { name: '+ Hyperparameters' }))
+    const hyperparameters = screen.getByLabelText('Team entry 1 hyperparameters')
+    await userEvent.click(hyperparameters)
+    await userEvent.paste('{"direction": "kernels"')
+    expect(screen.getByText('Not valid JSON.')).toBeTruthy()
+    await userEvent.paste('}')
     await create()
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
-    // A row added takes a type no row has yet.
-    expect(sent()).toMatchObject({ max_agents: 4, researchers: [{ agent_type: 'generalist', count: 2 }, { agent_type: 'hyperparameter-search', count: 1, model: 'model-2' }] })
+    expect(sent()).toMatchObject({
+      max_agents: 4, coordinator_model: 'anthropic/claude-sonnet-5',
+      agents: [{ agent_type: 'generalist', count: 3, model: 'openrouter/openai/gpt-5-nano', hyperparameters: { direction: 'kernels' } }, { agent_type: 'researcher', count: 1 }],
+    })
   })
 
-  it('offers the org\'s researcher types from the API, each with what it does, and links to manage them', async () => {
+  it('offers the agent types a team names from the API, by role, each with what it does, and links to manage them', async () => {
     show()
     await userEvent.type(name(), 'Run')
     await userEvent.type(screen.getByLabelText('Experiment goal'), 'The brief')
     await next()
     await next()
-    await userEvent.click(within(screen.getByRole('group', { name: 'Starting agents choice' })).getByRole('button', { name: 'Custom' }))
-    const type = await screen.findByLabelText('Starting agent 1 type')
+    const type = await screen.findByLabelText('Team entry 1 type')
     expect(screen.getByText(/No fixed axis/)).toBeTruthy()
+    expect(within(screen.getByRole('listitem', { name: 'Team entry 2' })).getByText('Researcher', { selector: 'span' })).toBeTruthy()
     await userEvent.click(type)
+    expect(screen.getAllByRole('group').map(g => g.getAttribute('aria-label'))).toEqual(expect.arrayContaining(['Executor', 'Researcher']))
     const offered = (await screen.findAllByRole('option')).map(o => o.textContent)
-    expect(offered).toEqual(['Generalist', 'Hyperparameter search', 'Architecture search', 'Data search', 'LR sweeper (v3)'])
+    expect(offered).toEqual(['Generalist', 'Hyperparameter search', 'Architecture search', 'Data search', 'LR sweeper (v3)', 'Researcher'])
     await userEvent.click(screen.getByRole('option', { name: 'LR sweeper (v3)' }))
-    expect(screen.getByText("Your org's own researcher type, made by Ada.")).toBeTruthy()
+    expect(screen.getByText("Your org's own executor type, made by Ada.")).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Manage agent types' }).getAttribute('href')).toBe('/orgs/org_a/settings/agent-types')
     await create()
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
-    expect(sent()).toMatchObject({ researchers: [{ agent_type: 'at-lr', count: 1 }] })
+    expect(sent()).toMatchObject({ agents: [{ agent_type: 'at-lr', count: 2 }, { agent_type: 'researcher', count: 1 }] })
   })
 
   it('adds a common metric or a typed key from one control, a typed key maximizing', async () => {
@@ -251,7 +271,7 @@ describe('a stage ladder the API refuses', () => {
   it('shows each problem the API names, at the step of the first, and keeps them in the draft', async () => {
     const problems = [
       { reason: 'invalid_stages', message: 'stages: the lengths add up to 90 and must add up to 100', field: 'stages' },
-      { reason: 'invalid_agents', message: 'max_agents: at most 500 researchers', field: 'max_agents' },
+      { reason: 'invalid_agents', message: 'max_agents: at most 500 executors', field: 'max_agents' },
     ]
     vi.mocked(createPlatformExperiment).mockRejectedValueOnce(new ApiError(422, `2 problems: (1) ${problems[0].message}; (2) ${problems[1].message}`, 'invalid_stages', {
       reason: 'invalid_stages', message: `2 problems: (1) ${problems[0].message}; (2) ${problems[1].message}`, problems,
@@ -270,6 +290,22 @@ describe('a stage ladder the API refuses', () => {
   })
 })
 
+describe('a model the API does not serve', () => {
+  it('names the entry and the model sent, which the API does not repeat', async () => {
+    const message = 'agents[0].model is not served: the model is not one GET /models lists: openrouter serves no model of that id that this platform runs an agent on'
+    vi.mocked(createPlatformExperiment).mockRejectedValueOnce(new ApiError(422, message, 'model_not_served', {
+      reason: 'model_not_served', message, problems: [{ reason: 'model_not_served', message, field: 'agents[0].model' }],
+    }))
+    show()
+    await userEvent.type(name(), 'Run')
+    await userEvent.type(screen.getByLabelText('Experiment goal'), 'The brief')
+    await userEvent.click(screen.getByRole('tab', { name: '3. Budget and rules' }))
+    await pickModel(screen.getByLabelText('Team entry 1 model'), 'nano', 'openrouter/openai/gpt-5-nano')
+    await create()
+    expect(await screen.findByText(/^agents\[0\]\.model openrouter\/openai\/gpt-5-nano is not served: the model is not one/)).toBeTruthy()
+  })
+})
+
 describe('a repository that brings its own experiment', () => {
   // A person who picked such a repository in the form started agents with an empty brief: the
   // form knew nothing of the spec the repository keeps.
@@ -278,6 +314,7 @@ describe('a repository that brings its own experiment', () => {
       repository: 'acme/widgets', name: 'Widget compression', description: 'Make widgets smaller.', report_interval_seconds: 10,
       budget_accelerator_hours: 3, max_agents: 4, duration_hours: 6,
       metrics: [{ key: 'compression_ratio', direction: 'maximize', role: 'ranking' }], stages: [{ length_pct: 100, evict_pct: 0, max_job_hours: 0 }],
+      agents: [{ agent_type: 'data-search', count: 3, hyperparameters: { direction: 'dictionaries' } }],
     })
     show()
     await chooseRepository('acme/widgets')
@@ -291,6 +328,7 @@ describe('a repository that brings its own experiment', () => {
       name: 'Widget compression', description: 'Make widgets smaller.', report_interval_seconds: 10, repository: 'acme/widgets', branch: 'main',
       budget_accelerator_hours: 3, max_agents: 4, duration_hours: 6,
       metrics: [{ key: 'compression_ratio', direction: 'maximize', role: 'ranking' }], stages: [{ length_pct: 100, evict_pct: 0, max_job_hours: 0 }],
+      agents: [{ agent_type: 'data-search', count: 3, hyperparameters: { direction: 'dictionaries' } }],
     })
   })
 
@@ -320,7 +358,7 @@ describe('a repository that brings its own experiment', () => {
 
 describe('editing a platform experiment', () => {
   const existing = { id: 'pe-1', project_id: 'prj_1', name: 'Old', description: 'the brief', status: 'open', budget_accelerator_hours: 10, max_agents: 2, starts_at: at, duration_hours: 12, stages: [], shared: false,
-    editable: ['name', 'description', 'budget_accelerator_hours', 'max_agents', 'researchers', 'max_concurrent_accelerators', 'metrics', 'report_interval_seconds', 'starts_at', 'duration_hours', 'baseline_job_id', 'baseline_reason'] } as unknown as PlatformExperiment
+    editable: ['name', 'description', 'budget_accelerator_hours', 'max_agents', 'agents', 'max_concurrent_accelerators', 'metrics', 'report_interval_seconds', 'starts_at', 'duration_hours', 'baseline_job_id', 'baseline_reason'] } as unknown as PlatformExperiment
 
   it('sends the fields that changed and no others, from any step', async () => {
     const renamed = { ...existing, name: 'New' }
@@ -334,11 +372,12 @@ describe('editing a platform experiment', () => {
     expect(createPlatformExperiment).not.toHaveBeenCalled()
   })
 
-  it('shows max researchers without changing it: that is done in place on the experiment page', async () => {
+  it('shows max executors and no team to change: that is done in place on the experiment page', async () => {
     show(existing)
     await userEvent.click(screen.getByRole('tab', { name: '3. Budget and rules' }))
-    expect(screen.queryByRole('spinbutton', { name: 'Max researchers' })).toBeNull()
-    expect(screen.getByText('Changed on the experiment page, under Researchers, with the pool.')).toBeTruthy()
+    expect(screen.queryByRole('spinbutton', { name: 'Max executors' })).toBeNull()
+    expect(screen.queryByRole('list', { name: 'Team' })).toBeNull()
+    expect(screen.getByText('Changed on the experiment page, under Team.')).toBeTruthy()
   })
 
   it('reads the experiment\'s duration and sends a changed one as duration_hours', async () => {
@@ -387,7 +426,7 @@ describe('a draft of a new platform experiment', () => {
     await next()
     // Nothing changed since it was saved, so there is nothing to save.
     expect(screen.getByRole('button', { name: 'Draft saved' })).toHaveProperty('disabled', true)
-    await userEvent.type(screen.getByLabelText('Max researchers'), '0')
+    await userEvent.type(screen.getByLabelText('Max executors'), '0')
     await userEvent.click(screen.getByRole('button', { name: 'Save draft' }))
     await waitFor(() => expect(updateExperimentDraft).toHaveBeenCalledWith('prj_1', 'draft-1', expect.objectContaining({ step: '3' })))
     expect(createExperimentDraft).toHaveBeenCalledTimes(1)

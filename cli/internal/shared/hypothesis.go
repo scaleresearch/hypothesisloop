@@ -381,9 +381,11 @@ func joined[T ~string](values []T, sep string) string {
 func HypothesisLink(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := command.NewFlags("hypothesis link", `usage: hl hypothesis link ID --type builds_on|contradicts|related --to ID
 
-Adds one link from your own hypothesis ID (--from ID works too), or from one no agent owns.
-Links are append-only. Prints the updated outgoing links. A person or an API key linking from
-an agent's hypothesis names that agent with --agent, and is kept as who made the link.`, stderr)
+Adds one link from your own hypothesis ID (--from ID works too), from one no agent owns, or from
+any as a researcher. Prints the updated outgoing links. A person or an API key linking from an
+agent's hypothesis names that agent with --agent, and is kept as who made the link. A researcher
+moves a hypothesis by linking it to its new place first and then removing the old link
+(hl hypothesis unlink).`, stderr)
 	agent := fs.String("agent", "", "agent whose hypothesis ID is (default the token's agent, else the caller's own)")
 	typ := fs.String("type", "", "builds_on, contradicts or related")
 	to := fs.String("to", "", "hypothesis id the link points at")
@@ -415,6 +417,126 @@ an agent's hypothesis names that agent with --agent, and is kept as who made the
 		return command.Fail(stderr, err)
 	}
 	return 0
+}
+
+// HypothesisMerge handles `hl hypothesis merge DUP --into ID`.
+func HypothesisMerge(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := command.NewFlags("hypothesis merge", `usage: hl hypothesis merge DUP --into ID [--reason T | --reason-file FILE|-]
+
+A researcher's: DUP, an open hypothesis, states the claim ID already states. Every link that
+pointed at DUP points at ID from then on, keeping who made it, and DUP shows merged with
+merged_into ID; its own links and findings stay as its history. Work on the claim goes under ID.
+Refused for a DUP that is not open (hypothesis_not_open), an ID that is merged or retired
+(hypothesis_merged, hypothesis_retired), two of different platform experiments, a DUP with a job
+queued or running (hypothesis_in_flight), a builds_on that would close a cycle, and anyone but a
+researcher (researcher_only). Prints DUP as it is now.`, stderr)
+	agent := fs.String("agent", "", "the researcher that merges (default the token's agent)")
+	into := fs.String("into", "", "the hypothesis that keeps the claim")
+	reasonFlag := command.NewTextFlag(fs, "reason", "why the two are one claim")
+	dup, err := command.ParseOne(fs, args, "DUP", "")
+	if err != nil {
+		return command.ParseExit(err)
+	}
+	if *into == "" {
+		return command.ParseExit(command.Misuse(fs, "--into is required"))
+	}
+	reason, err := reasonFlag.Value(fs)
+	if err != nil {
+		return command.ParseExit(err)
+	}
+	for _, id := range []*string{&dup, into} {
+		if *id, err = apiclient.FullHypothesisID(c, c.Experiment(""), *id); err != nil {
+			return command.Fail(stderr, err)
+		}
+	}
+	body := map[string]string{"into": *into}
+	if reason != "" {
+		body["reason"] = reason
+	}
+	return curate(c, "POST", "/hypotheses/"+url.PathEscape(dup)+"/merge", *agent, body, stdout, stderr)
+}
+
+// HypothesisRetire handles `hl hypothesis retire ID --reason T`.
+func HypothesisRetire(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := command.NewFlags("hypothesis retire", `usage: hl hypothesis retire ID --reason T | --reason-file FILE|-
+
+A researcher's: takes an open idea off the frontier, saying why (one a later result made moot,
+one the board already answered elsewhere). It shows retired with the reason, takes no job from
+then on, and is no verdict. Refused for a hypothesis that is not open (hypothesis_not_open), one
+with a job queued or running (hypothesis_in_flight), and for anyone but a researcher
+(researcher_only). Prints the hypothesis as it is now.`, stderr)
+	agent := fs.String("agent", "", "the researcher that retires it (default the token's agent)")
+	reasonFlag := command.NewTextFlag(fs, "reason", "why the idea is no longer worth a job")
+	id, err := command.ParseOne(fs, args, "ID", "", "id")
+	if err != nil {
+		return command.ParseExit(err)
+	}
+	reason, err := reasonFlag.Value(fs)
+	if err != nil {
+		return command.ParseExit(err)
+	}
+	if reason == "" {
+		return command.ParseExit(command.Misuse(fs, "--reason or --reason-file is required"))
+	}
+	if id, err = apiclient.FullHypothesisID(c, c.Experiment(""), id); err != nil {
+		return command.Fail(stderr, err)
+	}
+	return curate(c, "POST", "/hypotheses/"+url.PathEscape(id)+"/retire", *agent, map[string]string{"reason": reason}, stdout, stderr)
+}
+
+// curate sends a researcher's curation of a hypothesis, as agent when it names one: in the body,
+// or in the query of a DELETE, which has none.
+func curate(c *apiclient.Client, method, path, agent string, body map[string]string, stdout, stderr io.Writer) int {
+	owner := c.Agent(agent)
+	var payload any
+	if method == "DELETE" {
+		if owner != "" {
+			path += "?agent_id=" + url.QueryEscape(owner)
+		}
+	} else {
+		if owner != "" {
+			body["agent_id"] = owner
+		}
+		payload = body
+	}
+	var out json.RawMessage
+	if err := c.Do(method, path, payload, &out); err != nil {
+		return command.Fail(stderr, err)
+	}
+	if err := command.PrintLine(stdout, out); err != nil {
+		return command.Fail(stderr, err)
+	}
+	return 0
+}
+
+// HypothesisUnlink handles `hl hypothesis unlink ID --type T --to ID`.
+func HypothesisUnlink(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
+	fs := command.NewFlags("hypothesis unlink", `usage: hl hypothesis unlink ID --type builds_on|contradicts|related --to ID
+
+A researcher's: removes one link from any hypothesis of its platform experiment, and is refused
+for anyone else (researcher_only) and for a merged or retired hypothesis, whose links are its
+history. A link that is not there is no error. A hypothesis keeps at least one builds_on, so a
+move links the new place first (hl hypothesis link) and then removes the old one. Prints the
+remaining outgoing links.`, stderr)
+	agent := fs.String("agent", "", "the researcher that removes it (default the token's agent)")
+	typ := fs.String("type", "", "builds_on, contradicts or related")
+	to := fs.String("to", "", "hypothesis id the link points at")
+	from, err := command.ParseOne(fs, args, "ID", "", "id", "from")
+	if err != nil {
+		return command.ParseExit(err)
+	}
+	if *typ == "" || *to == "" {
+		return command.ParseExit(command.Misuse(fs, "--type and --to are required"))
+	}
+	if !slices.Contains(platformapi.LinkTypes, platformapi.LinkType(*typ)) {
+		return command.ParseExit(command.Misuse(fs, "--type must be one of %s, got %q", joined(platformapi.LinkTypes, ", "), *typ))
+	}
+	for _, id := range []*string{&from, to} {
+		if *id, err = apiclient.FullHypothesisID(c, c.Experiment(""), *id); err != nil {
+			return command.Fail(stderr, err)
+		}
+	}
+	return curate(c, "DELETE", "/hypotheses/"+url.PathEscape(from)+"/links/"+url.PathEscape(*typ)+"/"+url.PathEscape(*to), *agent, nil, stdout, stderr)
 }
 
 func HypothesisComment(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
@@ -466,10 +588,13 @@ an API key writes their own, or an agent's with --agent.`, stderr)
 func HypothesisStatus(c *apiclient.Client, args []string, stdout, stderr io.Writer) int {
 	fs := command.NewFlags("hypothesis status", `usage: hl hypothesis status ID open|inconclusive | confirmed|refuted --against CONTROL_JOB | confirmed|refuted --despite REASON
 
-Sets the verdict on your own hypothesis, or on one no agent owns: a person's idea you tested
-under its own id is yours to judge like your own, and stays the person's. --status VERDICT works too.
-A person or an API key ruling on an agent's hypothesis names that agent with --agent, and is
-kept as who gave the verdict.
+Sets the verdict on your own hypothesis, or on one no agent owns that a job of yours tested and
+that completed or failed: a person's or a researcher's idea you tested under its own id is yours
+to judge like your own, and stays theirs (else verdict_needs_own_job). A researcher gives no
+verdict (researcher_gives_no_verdict): it comments, and the coordinator reopens. --status VERDICT
+works too. A person or an API key ruling on an agent's hypothesis names that agent with --agent,
+or for one no agent owns the agent that tested it, and is kept as who gave the verdict; with no
+agent named, one no agent owns is only reopened.
 Every verdict needs a job of the hypothesis that completed or failed; --despite never replaces it.
 confirmed and refuted compare the hypothesis's jobs with a control, so they need the record
 to show it: --against names the control, a completed job of this experiment (a baseline run, or
@@ -541,7 +666,7 @@ or run on are in hl hypothesis get ID, as implementations. A page is at most --l
 match, a line on stderr says how many and the --offset of the next page.`, stderr)
 	pe := fs.String("platform-experiment", "", "platform experiment id (default the token's)")
 	agent := fs.String("agent", "", "only this agent's hypotheses")
-	status := fs.String("status", "", "open, confirmed, refuted or inconclusive")
+	status := fs.String("status", "", "open, confirmed, refuted, inconclusive, merged or retired")
 	by := fs.String("by", "", "people: only the hypotheses a person registered")
 	untaken := fs.Bool("untaken", false, "only hypotheses no agent is working on")
 	limit := fs.Int("limit", 0, "page size (server default 20, max 200)")

@@ -46,7 +46,7 @@ MODE = os.environ.get("STAGE_MODE", "write")
 CHECKPOINT_VALUE = os.environ.get("CHECKPOINT_VALUE", "0")
 # The experiment id of the stage whose checkpoint this one reads. Read mode only.
 PARENT_ID = os.environ.get("STAGE_PARENT_ID", "")
-DURATION = int(os.environ.get("HYPOTHESISLOOP_DURATION_SECONDS", "10"))
+DURATION = int(os.environ.get("RUN_SECONDS", "10"))
 
 DATA_URI = os.environ.get("HYPOTHESISLOOP_DATA_URI", "")
 DATA_SHARED = os.environ.get("HYPOTHESISLOOP_DATA_SHARED", "")

@@ -320,8 +320,8 @@ func (s *Store) PlacementByID(ctx context.Context, ids []string) (map[string]dom
 		return map[string]domain.Placement{}, nil
 	}
 	rows, err := s.pool.pool.Query(ctx, `SELECT id, cluster_name, attempt_count,
-		COALESCE(resolved_job_spec -> 'node_selector' ->> $2, ''), submitted_at
-		FROM experiments WHERE id = ANY($1)`, ids, domain.NodeSlotLabel)
+		COALESCE(resolved_job_spec -> 'slots' ->> 0, ''), submitted_at
+		FROM experiments WHERE id = ANY($1)`, ids)
 	if err != nil {
 		return nil, fmt.Errorf("experiments_store.PlacementByID: %w", err)
 	}

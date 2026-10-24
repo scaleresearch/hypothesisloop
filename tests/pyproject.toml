@@ -26,6 +26,7 @@ markers = [
     "slow: duration-only marker, orthogonal to isolation — excluded from the default quick loop",
     "hardware: needs real accelerator hardware behavior beyond generic scheduling; skipped unless explicitly requested",
     "real_providers: rents sandboxes or GPU instances at real vendors; skipped unless HL_E2E_RENT is set (make e2e RENT=1)",
+    "k8s_runtime: reads what the stack's Kubernetes cluster ran with kubectl; skipped unless kubectl reaches that cluster",
 ]
 timeout = 240
 timeout_method = "thread"

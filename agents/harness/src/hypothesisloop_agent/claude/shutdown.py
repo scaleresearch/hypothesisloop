@@ -30,6 +30,12 @@ _LAST_TURN = (
 _SHUTDOWN_PROMPT = _LAST_TURN.format(verdicts=" and set the verdicts your evidence already supports")
 # A baseline agent registers no hypothesis, so it has no verdict to set.
 _BASELINE_SHUTDOWN_PROMPT = _LAST_TURN.format(verdicts="")
+# A researcher has no job: what it owes is the review it already reached.
+_RESEARCHER_SHUTDOWN_PROMPT = (
+    "This is your last turn, about a minute long. Start nothing new: no search, no merge, no retire. "
+    "File as comments the review you already reached, on the hypotheses it concerns, then end your turn. "
+    "A refusal with reason `experiment_closed` ends it too: your run is over, so retry nothing."
+)
 
 
 _COORDINATOR_SHUTDOWN_PROMPT = (
@@ -61,6 +67,8 @@ async def _prompt(setup: core.RunSetup) -> str | None:
         return f"{cause} {_COORDINATOR_SHUTDOWN_PROMPT}"
     if config.plans(setup.cfg):
         return f"{cause} {_PLANNER_SHUTDOWN_PROMPT}"
+    if config.researches(setup.cfg):
+        return f"{cause} {_RESEARCHER_SHUTDOWN_PROMPT}"
     return f"{cause} {_BASELINE_SHUTDOWN_PROMPT if config.measures_baseline(setup.cfg) else _SHUTDOWN_PROMPT}"
 
 

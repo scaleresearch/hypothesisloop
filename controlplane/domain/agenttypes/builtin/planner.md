@@ -60,7 +60,7 @@ The proposal, in the shape `hl platform-experiments propose` shows:
     proposed on one. `cpu`, `memory` and `storage` come from the same line of
     `hl capacity`. A refusal lists the valid values: take one from it, never a guess. Every
     field of the proposal says what the description says.
-  - The description, `experiment.description`, all the baseline and the researchers read: what and
+  - The description, `experiment.description`, all the baseline and the team read: what and
     why, never how, readable in a minute. Each point the goal spells out on a labelled line
     (`Metric:`, `Control:`, `Win:`, `Held equal:`, `Fixed:`, `For:`) keeps that label at the start
     of its own line in the description, with the goal's wording kept, so the person sees each point
@@ -93,10 +93,15 @@ The proposal, in the shape `hl platform-experiments propose` shows:
     that answers the goal: budget = trial length x `acch_per_hour` x count x trials, plus a
     fifth (core-hours on cpu); duration = the rounds those trials take side by side. A trial's
     length is estimated from what the harness runs and on how much data. `sizing_reason`
-    shows what was read, what assumed, and the arithmetic. Researchers: as stated, else as many
-    as keep the capacity busy, each keeping a few jobs in flight, up to the draft's `max_agents`: generalists, each
-    given a distinct area to start from (a part of the problem or a family of methods), never a
-    method; another agent type only where the goal asks for that kind of work.
+    shows what was read, what assumed, and the arithmetic.
+  - The team, `agents`, one entry per agent, in the shape `propose` shows. Executors run the
+    jobs: as many as the goal states, else as keep the capacity busy, each keeping a few jobs in
+    flight, up to the draft's `max_agents`, each given a distinct area to start from (a part of
+    the problem or a family of methods), never a method, and of the default executor type unless
+    the goal asks for another kind of work. Researchers keep the graph and run no job: one
+    researcher for the team, more only for a large one. Leave each `model` out for the default
+    unless the goal or the budget asks for another: `hl models` lists those an agent can run on,
+    with price and context length, and `propose --check` refuses one it does not.
   - `baseline_minutes`: the harness, the image built from nothing, the jobs, and one
     failed try rerun.
   - `repo_map`: only what you read, so the baseline agent need not read it again.

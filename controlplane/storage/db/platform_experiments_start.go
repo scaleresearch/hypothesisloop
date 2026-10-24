@@ -37,7 +37,7 @@ type StageRedistribution struct {
 // resolved inside the start transaction.
 type StartParticipant struct {
 	AgentID string
-	// Role says whether the agent is a researcher, which the run's ladder is sized by.
+	// Role says whether the agent is an executor, which the run's ladder is sized by.
 	Role        domain.SignupRole
 	AgentExists bool
 	HasTop3     bool
@@ -47,18 +47,18 @@ type StartParticipant struct {
 	QuotaTier domain.QuotaTier
 }
 
-// sharesBudgetSQL is domain.AgentSignup.SharesBudget of the signup s: a researcher or any other
+// sharesBudgetSQL is domain.AgentSignup.SharesBudget of the signup s: an executor or any other
 // agent the start gives a share.
-const sharesBudgetSQL = `s.role NOT IN ('` + string(domain.SignupRoleBaseline) + `', '` + string(domain.SignupRolePlanner) + `')`
+const sharesBudgetSQL = `s.role NOT IN ('` + string(domain.SignupRoleBaseline) + `', '` + string(domain.SignupRolePlanner) + `', '` + string(domain.SignupRoleResearcher) + `')`
 
 // runOverAtSQL is the end of the run of the running pe: duration_hours after its starts_at, the
 // moment the run started.
 const runOverAtSQL = `pe.starts_at + make_interval(secs => pe.duration_hours * 3600)`
 
-// startClock records that a running platform experiment that waits for a researcher's machine
+// startClock records that a running platform experiment that waits for an executor's machine
 // has one at work, once the machine asked for under name for agentID is reported running:
-// started_at is now, and it closes at the end of its run. It writes nothing for one that has a
-// researcher at work.
+// started_at is now, and it closes at the end of its run. It writes nothing for one that has an
+// executor at work.
 func (s *Store) startClock(ctx context.Context, platformExpID, agentID, name string) error {
 	if _, err := s.pool.pool.Exec(ctx, `
 UPDATE platform_experiments pe
@@ -76,8 +76,8 @@ WHERE pe.id = $1 AND pe.status = 'running' AND pe.started_at IS NULL
 // StartPlatformExperimentTx flips a platform experiment open->running and writes every
 // participating agent's quota and the ladder the run has (domain.RunStages) in one transaction.
 // The run starts now: starts_at is now, and it ends duration_hours later whatever measuring the
-// baseline took. With a researcher its owner runs, started_at is now and it closes at that end.
-// With only researchers the platform runs, started_at stays empty until the first one's machine
+// baseline took. With an executor its owner runs, started_at is now and it closes at that end.
+// With only executors the platform runs, started_at stays empty until the first one's machine
 // is reported running (startClock), and it closes agentsDue from now, or at that end when sooner:
 // the sweep closes one whose machines never came. quotasFor is
 // called with the signup set read inside that transaction; returning an error rolls the whole
@@ -205,8 +205,8 @@ func (s *Store) AdvanceStage(ctx context.Context, platformExpID string, stageInd
 		if err := cutTx(ctx, tx, platformExpID, cutAgentIDs, stageIndex, ""); err != nil {
 			return fmt.Errorf("platform_experiments_store.AdvanceStage: %w", err)
 		}
-		// The stages after the boundary want as many fewer researchers as it cut, written with the
-		// cut: nobody is added in a cut researcher's place.
+		// The stages after the boundary want as many fewer executors as it cut, written with the
+		// cut: nobody is added in a cut executor's place.
 		if len(cutAgentIDs) > 0 {
 			if err := lowerPoolTx(ctx, tx, platformExpID, cutAgentIDs); err != nil {
 				return fmt.Errorf("platform_experiments_store.AdvanceStage: %w", err)

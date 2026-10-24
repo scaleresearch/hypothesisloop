@@ -40,26 +40,30 @@ _DRAIN_S = 5
 # capacity.idle=continues every notice period it lasts), that a job is held by what waiting will
 # not clear or has waited past its own estimate (job.held, sent once, to the job's agent too),
 # that a stage advanced, that someone wrote a comment, that the description or the baseline changed (a raised
-# baseline is the bar every researcher is set against from then on), that the run closed or that its
+# baseline is the bar every executor is set against from then on), that the run closed or that its
 # status_reason began to wait for the coordinator (platform_experiment.status, sent again with
-# the reason as its detail, as when the last researcher's machine stops for good). An agent has
+# the reason as its detail, as when the last executor's machine stops for good). An agent has
 # to learn the same of its own jobs ending, and at once of a message the coordinator or the owner
 # sent it (agent.message), which wakes no coordinator: its stream echoes the ones it sent. The owner changing the goal
 # (platform_experiment.goal) wakes whoever acts on it: a draft's planner, which plans again, or the
 # coordinator, which brings the description in line; one addressed to a planner is its own and reaches no
-# researcher. A coordinator is woken too by the owner changing fields of the plan
+# agent. A coordinator is woken too by the owner changing fields of the plan
 # (platform_experiment.plan). A coordinator learns at once of an idea a person
 # posted (hypothesis.new of a user, a key or staff): every one is to be assigned or answered. A
-# message of the owner (agent.message=owner) wakes it whether sent to it or to a researcher: either
+# message of the owner (agent.message=owner) wakes it whether sent to it or to an agent: either
 # is direction the steering has to take in; its own messages come back as coordinator.
 # A job submitted on a hypothesis another agent's job tests (job.duplicate) wakes it too: two
 # seats on one idea are one seat wasted until it gives one of them another direction. So does a
-# researcher the platform added in the place of one that ended (agent.replaced): it starts with
-# no direction but its predecessor's hyperparameters.
+# agent the platform added in the place of one that ended (agent.replaced): it starts with
+# no direction but its predecessor's hyperparameters. So does an agent whose machine the platform
+# gave up on, every restart spent (agent.stopped): a place the team does not keep is the
+# coordinator's to fill.
 # Both learn at once that their own agent type was edited and they were moved to its new version
 # (agent.instructions): the harness applies it at the turn boundary and tells the agent nothing
-# of it. A coordinator is not woken by its researchers' edits (KIND@SUBJECT matches the subject,
+# of it. A coordinator is not woken by its agents' edits (KIND@SUBJECT matches the subject,
 # which is COORDINATOR for its own): it reads them in the situation and with its next batch.
+# A researcher keeps the whole graph, so every change others make to it wakes it besides what
+# wakes any agent: the platform sends it every hypothesis change but its own.
 # Everything else is read when next acting. A kind wakes only for what its reader can act on.
 WAKES = {
     config.COORDINATOR: (
@@ -69,7 +73,7 @@ WAKES = {
         platform.EVENT_PLATFORM_EXPERIMENT_BASELINE, platform.EVENT_PLATFORM_EXPERIMENT_GOAL, platform.EVENT_PLATFORM_EXPERIMENT_PLAN,
         f"{platform.EVENT_HYPOTHESIS_NEW}={platform.ACTOR_USER}",
         f"{platform.EVENT_HYPOTHESIS_NEW}={platform.ACTOR_KEY}", f"{platform.EVENT_HYPOTHESIS_NEW}={platform.ACTOR_STAFF}",
-        f"{platform.EVENT_AGENT_MESSAGE}={platform.MESSAGE_FROM_OWNER}", platform.EVENT_JOB_DUPLICATE, platform.EVENT_AGENT_REPLACED,
+        f"{platform.EVENT_AGENT_MESSAGE}={platform.MESSAGE_FROM_OWNER}", platform.EVENT_JOB_DUPLICATE, platform.EVENT_AGENT_REPLACED, platform.EVENT_AGENT_STOPPED,
         f"{platform.EVENT_AGENT_INSTRUCTIONS}@{config.COORDINATOR}"),
     "agent": (
         platform.EVENT_EXPERIMENT_STATUS, platform.EVENT_EXPERIMENT_BLOCKED, platform.EVENT_JOB_HELD,
@@ -78,6 +82,9 @@ WAKES = {
         platform.EVENT_PLATFORM_EXPERIMENT_DESCRIPTION, platform.EVENT_PLATFORM_EXPERIMENT_BASELINE,
         platform.EVENT_PLATFORM_EXPERIMENT_GOAL, platform.EVENT_AGENT_INSTRUCTIONS),
 }
+WAKES[config.RESEARCHER] = WAKES["agent"] + (
+    platform.EVENT_HYPOTHESIS_NEW, platform.EVENT_FINDING_NEW, platform.EVENT_HYPOTHESIS_STATUS,
+    platform.EVENT_HYPOTHESIS_LINK, platform.EVENT_HYPOTHESIS_UNLINK)
 # A message to one agent from the coordinator or the owner, told as what it says.
 MESSAGE = platform.EVENT_AGENT_MESSAGE
 # What hl prints, in place of the changes, when the platform no longer holds those after its cursor.
@@ -99,7 +106,7 @@ REVIEW_S = 1200
 REVIEW_PROMPT = ("Nothing woke you for {minutes} minutes: this is your regular review. Judge from the situation "
                  "whether the run reaches its target in the time left, and act where it does not.")
 SUMMARY_STALE = "{jobs} jobs completed since you last wrote the summary: add what they found."
-IDEAS_OPEN = ("{ideas} ideas from people are still open (`hl hypothesis list --by people`): assign each to a researcher "
+IDEAS_OPEN = ("{ideas} ideas from people are still open (`hl hypothesis list --by people`): assign each to an executor "
               "as places free, or answer it with a comment that gives the evidence why not.")
 # A coordinator's batch is held this long after the event that woke it, so that what follows it
 # closely comes in the same wake. An agent's comes at once: it has no window for messages.
@@ -108,22 +115,27 @@ COALESCE_S = 90
 # no subagent at work: it would otherwise wait for an update that cannot come.
 NOTHING_IN_FLIGHT = ("The platform holds no job of yours submitted, queued or running and no subagent of yours is at work, so no update of "
                      "your own is coming. Put work in flight, or end your run with "
-                     "`hl platform-experiments agents finish --reason TEXT`.")
+                     "`hl platform-experiments agents finish --reason TEXT`, with `--because blocked` or `--because nothing_left` "
+                     "while time and quota remain.")
 # A situation read that takes longer is given up, and the prompt says so in its place.
 _SITUATION_S = 30
 
 
 _AGENT_ID = "HL_WATCH_AGENT_ID"
+# Which of WAKES ends the wait of an agent.
+_WAKES_OF = "HL_WATCH_WAKES_OF"
 # Where hl keeps the cursor of the agent's update feed, in the harness's state directory.
 STATE_DIR = ".hl-state"
 
 
 def watch_env(cfg: config.Config, statedir: str) -> dict[str, str]:
     """The environment hl watch needs: the API, the token, which says to hl who is watching, and
-    a state dir that outlives the process, with the agent the token is, "" for a coordinator."""
+    a state dir that outlives the process, with the agent the token is, "" for a coordinator, and
+    which kinds wake it."""
     return {**os.environ, platform.ENV_API_URL: cfg.api_url, platform.ENV_TOKEN: cfg.token,
             "HL_STATE_DIR": os.path.join(os.path.abspath(statedir), STATE_DIR),
-            _AGENT_ID: "" if config.coordinates(cfg) else cfg.agent_id}
+            _AGENT_ID: "" if config.coordinates(cfg) else cfg.agent_id,
+            _WAKES_OF: config.RESEARCHER if config.researches(cfg) else "agent"}
 
 
 _DELIVERED_TO = "HL_STATE_DIR_DELIVERED"
@@ -332,7 +344,7 @@ async def _wakes(env: dict[str, str], hl: str) -> tuple[str, ...] | None:
     """What ends the wait of whoever watches with env, as its platform experiment stands now.
     None for a coordinator whose platform experiment could not be read."""
     if _agent(env):
-        return WAKES["agent"]
+        return WAKES[env[_WAKES_OF]]
     code, stdout, _ = await _run_hl([hl, "platform-experiments", "get"], env, lambda: False)
     if code != 0:
         return None

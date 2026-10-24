@@ -25,7 +25,7 @@ DISALLOWED_TOOLS = ["ScheduleWakeup", "Monitor", "TaskCreate", "TaskUpdate", "Ta
 AUTO_COMPACT_WINDOW_TOKENS = 200_000
 
 # The CLI defers WebSearch and WebFetch behind ToolSearch by default: a planner had to call
-# ToolSearch "select:WebSearch" first, and in live runs most researchers and planners never
+# ToolSearch "select:WebSearch" first, and in live runs most executors and planners never
 # searched at all. With tool search off every allowed tool is sent whole, so these two are directly callable.
 CLI_ENV = {"ENABLE_TOOL_SEARCH": "false",
            # Background tasks stay on so subagents can run in the background: the CLI starts the
@@ -41,19 +41,25 @@ CLI_ENV = {"ENABLE_TOOL_SEARCH": "false",
            "CLAUDE_CODE_AUTO_COMPACT_WINDOW": str(AUTO_COMPACT_WINDOW_TOKENS)}
 
 
-def model_env(cfg: config.Config) -> dict[str, str]:
+def model_env(cfg: config.Config, running: instructions.Instructions) -> dict[str, str]:
     """Where the CLI makes its model calls: the platform, which makes each with the platform's own
-    credential (controlplane/httpapi/modelproxy), reached with the agent's own token. The token
+    credential for the model's provider (controlplane/httpapi/modelproxy), reached with the
+    agent's own token. A model of any provider but Anthropic is named for every call the CLI makes,
+    its subagents' and its small tasks' too, which it would otherwise send to Claude models. The token
     goes in as the CLI's OAuth token, so the CLI sends what it sends with a Claude subscription
     and reads the account's rate limits from every answer, which it ignored with the token as
     ANTHROPIC_AUTH_TOKEN. With its nonessential traffic off it sends the token nowhere else."""
-    return {"ANTHROPIC_BASE_URL": cfg.api_url.rstrip("/") + "/model/anthropic",
-            "CLAUDE_CODE_OAUTH_TOKEN": cfg.token,
-            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
+    env = {"ANTHROPIC_BASE_URL": f"{cfg.api_url.rstrip('/')}/model/{running.provider}",
+           "CLAUDE_CODE_OAUTH_TOKEN": cfg.token,
+           "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
+    if running.provider != "anthropic":
+        env.update({name: running.model_id for name in ("ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
+                                                 "ANTHROPIC_DEFAULT_HAIKU_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL")})
+    return env
 
 
 # The CLI writes each message as one line, and the SDK ends the session on a line past its bound,
-# 1 MB by default: a researcher whose six subagents read papers lost its session to one.
+# 1 MB by default: an executor whose six subagents read papers lost its session to one.
 # A request to the model is at most 32 MB, so no message of a session is longer.
 MAX_MESSAGE_BYTES = 32 * 1024 * 1024
 
@@ -68,7 +74,7 @@ def options(setup: core.RunSetup, running: instructions.Instructions, resume_id:
     """The options of a connection that runs running, resuming resume_id when it is set."""
     return ClaudeAgentOptions(
         system_prompt=running.prompt + FILE_TOOLS_NOTE,
-        model=running.model,
+        model=running.model_id,
         effort=running.effort,
         # The stream events of a model call say what it writes while it writes, see activity.Composing.
         include_partial_messages=True,
@@ -90,7 +96,7 @@ def options(setup: core.RunSetup, running: instructions.Instructions, resume_id:
         setting_sources=[],
         strict_mcp_config=True,
         disallowed_tools=DISALLOWED_TOOLS,
-        env={**CLI_ENV, **model_env(setup.cfg), **core.git_identity(setup.cfg)},
+        env={**CLI_ENV, **model_env(setup.cfg, running), **core.git_identity(setup.cfg)},
         # The CLI says each prompt again as the turn that takes it up starts, see turns.answer.
         extra_args={"replay-user-messages": None},
         hooks=hooks,

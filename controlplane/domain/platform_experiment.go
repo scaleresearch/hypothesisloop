@@ -102,15 +102,15 @@ type PlatformExperiment struct {
 	// BudgetKind is what the budget is spent on, worked out on every answer
 	// (platformexperiments.Service.budgetKinds) and stored nowhere.
 	BudgetKind TypeKind `json:"budget_kind" doc:"What budget_accelerator_hours and consumed_accelerator_hours count: cpu when they are CPU core-hours, accelerator when they are accelerator-hours. The kind of the accelerator_type its proposal was sized for, and without a proposal cpu only once it has jobs and every one of them runs on CPU cores. On every platform experiment, listed or read."`
-	MaxAgents  int      `json:"max_agents" doc:"How many researchers may be at work at once, the one count of them: the agents of role competitor, whatever their agent type, that have not finished, were not cut, were not replaced and still have a machine. One that ended leaves its place to another. The coordinator, a draft's planner and agents of role baseline, which measure the baseline before the run and are not ranked, never count, nor do reviewers. Its owner changes it, never below the researchers at work nor below the total of researchers. On a draft: the most researchers its planner may propose, which accepting replaces with the number accepted."`
-	// Researchers is the desired state of who researches: how many of each agent type and model
-	// are to be at work, at most MaxAgents in all. The platform keeps it while the run goes on
-	// (platformexperiments.Service.KeepResearchers). Optional; empty on a draft, which its accepted proposal fills.
-	Researchers ResearcherPool `json:"researchers" doc:"The researchers it is to have at work, an entry per agent type and model with its count, at most max_agents in all. Optional. Where the platform hosts the coordinator they are agents the platform runs: it creates them with the platform experiment, or with the accepted proposal, and while the run goes on it adds a new researcher of the same agent type, model and hyperparameters in the place of one that finished or whose machine stopped with no restart left, which agent.replaced tells, until less of the run is left than one trial of its baseline job (job_estimated_duration_hours, at least 15 minutes) or the budget its researchers left unspent holds no trial for a newcomer. A stage boundary lowers the count of the entry of each researcher it cuts, so nobody takes a cut researcher's place. The coordinator may add researchers beyond them, up to max_agents. Elsewhere they say who is wanted and nothing is added by the platform."`
-	// ResearchersAtWork counts who is at work against the pool, on every answer about one platform
+	MaxAgents  int      `json:"max_agents" doc:"How many executors may be at work at once, the one count of them: the agents of role executor, whatever their agent type, that have not finished, were not cut, were not replaced and still have a machine. One that ended leaves its place to another. The coordinator, a draft's planner, researchers and agents of role baseline, which measure the baseline before the run and are not ranked, never count, nor do reviewers. Its owner changes it, never below the executors at work nor below the executors of agents. On a draft: the most executors its planner may propose, which accepting replaces with the number accepted."`
+	// Agents is the desired state of the team: how many of each agent type and model are to be at
+	// work, executors at most MaxAgents in all. The platform keeps it while the run goes on
+	// (platformexperiments.Service.KeepAgents). Optional; empty on a draft, which its accepted proposal fills.
+	Agents AgentPool `json:"agents" doc:"The team it is to have at work, an entry per agent type and model with its count. The agent type gives the role: an entry of the built-in researcher is of researchers, which run no job, hold no quota, are never ranked or cut and default to the coordinator's model (coordinator_model) when neither the entry nor its agent type names one; every other entry is of executors, which run the jobs, at most max_agents in all. Optional. Where the platform hosts the coordinator they are agents the platform runs: it creates them with the platform experiment, or with the accepted proposal, and while the run goes on it adds a new agent of the same agent type, model and hyperparameters in the place of one that finished or whose machine stopped with no restart left, which agent.replaced tells, until less of the run is left than one trial of its baseline job (job_estimated_duration_hours, at least 15 minutes) or, for an executor, the budget its executors left unspent holds no trial for a newcomer. A stage boundary lowers the count of the entry of each executor it cuts, so nobody takes a cut executor's place. The coordinator may add agents beyond them, executors up to max_agents. Elsewhere they say who is wanted and nothing is added by the platform."`
+	// AgentsAtWork counts who is at work against the pool, on every answer about one platform
 	// experiment (httpapi platformExperimentsAPI.answer), stored nowhere.
-	ResearchersHeld   string             `json:"researchers_held,omitempty" doc:"On a running platform experiment whose platform hosts the coordinator, the places of researchers it keeps empty and why, absent when none: a researcher that ended before submitting a job or within 10 minutes of joining is never replaced, and one whose pool entry had 3 replacements in the last hour waits. platform_experiment.status tells each change. On a read of one."`
-	ResearchersAtWork *ResearchersAtWork `json:"researchers_at_work,omitempty" doc:"The researchers at work, counted by the rule max_agents holds to: in all, for each entry of researchers, and outside_pool for those of an agent type and model it names no entry of. Absent on a list."`
+	AgentsHeld   string        `json:"agents_held,omitempty" doc:"On a running platform experiment whose platform hosts the coordinator, the places of agents it keeps empty and why, absent when none: an agent that ended within 10 minutes of joining, or an executor that ended before submitting a job, is never replaced, and one whose pool entry had 3 replacements in the last hour waits. platform_experiment.status tells each change. On a read of one."`
+	AgentsAtWork *AgentsAtWork `json:"agents_at_work,omitempty" doc:"The agents at work: total, the executors max_agents holds to, then for each entry of agents, and outside_team for those of an agent type and model it names no entry of. Absent on a list."`
 	// MaxConcurrentAccelerators bounds accelerators-in-flight (SUBMITTED+RUNNING, summed across
 	// this platform experiment's agents' jobs) at any moment. Nil defers to
 	// quota.default_max_concurrent_accelerators. Speculative submission makes capacity appear on
@@ -124,19 +124,19 @@ type PlatformExperiment struct {
 	// created or accepted, or a later starts_at stated, and its baseline is due BaselineDueAt from
 	// then. Once it runs it is the moment the run started, when its baseline was declared and
 	// nothing else was missing, and DurationHours count from it: EndsAt is the two added.
-	// StartedAt is the moment a researcher was first at work in the running platform experiment,
+	// StartedAt is the moment an executor was first at work in the running platform experiment,
 	// which is the start itself when one of them is run by its owner and otherwise the moment the
 	// first machine the platform runs for one was reported running.
 	StartsAt      time.Time `json:"starts_at" doc:"While it is open: when its baseline began to be measured, the moment it was created or accepted, or a later starts_at stated. Once it runs: the moment the run started, once its baseline was declared, from which duration_hours count. The zero time on a draft."`
-	StartedAt     time.Time `json:"started_at,omitzero" doc:"The moment a researcher was first at work in the running platform experiment. That is the moment it became running when a researcher is run by its owner, and otherwise the moment the first researcher's machine was reported running. Absent before, and on a running one that still waits for that machine (status_reason agents_starting)."`
+	StartedAt     time.Time `json:"started_at,omitzero" doc:"The moment an executor was first at work in the running platform experiment. That is the moment it became running when an executor is run by its owner, and otherwise the moment the first executor's machine was reported running. Absent before, and on a running one that still waits for that machine (status_reason agents_starting)."`
 	DurationHours float64   `json:"duration_hours,omitzero" doc:"How long the run lasts, the research time, counted from the moment it starts, once its baseline is declared. Measuring the baseline takes nothing from it: baseline_due_at bounds that. Absent on a draft."`
 	// A platform experiment has exactly one stored moment at which the platform closes it if
 	// nobody does, under the name of what ends then: PlanningEndsAt or ProposalExpiresAt on a
-	// draft, BaselineDueAt while it is open, AgentsDueAt while it runs and no researcher is at
-	// work, EndsAt from then. EndsAt of one that waits for a researcher is StartsAt plus
+	// draft, BaselineDueAt while it is open, AgentsDueAt while it runs and no executor is at
+	// work, EndsAt from then. EndsAt of one that waits for an executor is StartsAt plus
 	// DurationHours. One that closed keeps the one it had. See ClosesAt.
 	EndsAt            time.Time `json:"ends_at,omitzero" doc:"When the run ends and the platform closes it: starts_at, the start of the run, plus duration_hours. Absent until the run starts."`
-	AgentsDueAt       time.Time `json:"agents_due_at,omitzero" doc:"On a running platform experiment with no started_at: when the platform closes it, with close_reason agents_not_started, if no researcher's machine is running by then. Never later than ends_at."`
+	AgentsDueAt       time.Time `json:"agents_due_at,omitzero" doc:"On a running platform experiment with no started_at: when the platform closes it, with close_reason agents_not_started, if no executor's machine is running by then. Never later than ends_at."`
 	BaselineDueAt     time.Time `json:"baseline_due_at,omitzero" doc:"On an open platform experiment: when the platform closes it, with close_reason baseline_limit_reached, if it is not running by then. starts_at plus the minutes its baseline was given: the ones accepted for a draft, at most planning.baseline_limit_minutes, and that limit for one created whole. It moves out by the time a job of the baseline waits for its cluster to start it, at most 90 minutes, so that time is not the baseline agent's."`
 	PlanningEndsAt    time.Time `json:"planning_ends_at,omitzero" doc:"On a draft being planned, from its goal or from a changed one: when the platform closes it if its planner has answered nothing by then."`
 	ProposalExpiresAt time.Time `json:"proposal_expires_at,omitzero" doc:"On a draft whose planner proposed or declined: when the platform closes it if no person has accepted it or changed its goal by then."`
@@ -149,11 +149,11 @@ type PlatformExperiment struct {
 	Status PlatformExperimentStatus `json:"status"`
 	// StatusReason is why the platform experiment is in its status, in every status. Worked out
 	// when one is read and stored nowhere.
-	StatusReason *StatusReason `json:"status_reason,omitempty" doc:"Why it is in its status, in every answer that is one platform experiment (a read of it and each write that answers it, never a list). Any that is not closed reads repository_creating while the platform creates its repository, before any machine of it starts. A draft's reason is then planning, revising, accepting (proposed, and accepted as proposed at accepts_at unless a person acts first), proposed (it waits for a person to accept) or declined (its planner proposed nothing, for declined_reason, and it waits for a person to change its goal or close it). revising is a draft whose goal changed, planned again until its planner answers. An open one's is why it is not running yet: without a baseline baseline_measuring, baseline_required, baseline_undeclared, baseline_declaring or the reason the platform's declaration of the measured job is refused for (budget_below_baseline, baseline_breaks_constraint, baseline_missing_metric), and with one starts_at_ahead, no_researchers, budget_spent, or starting once nothing is missing.A running one's is agents_starting while no researcher's machine is running yet, when the platform closes it at agents_due_at, and running from then. A closed one's is its close_reason, or closed on one closed before reasons were kept. message says what the state waits for or how it came about and who acts, the command included, and to an agent that reads an open one it begins with the agent's own next step."`
+	StatusReason *StatusReason `json:"status_reason,omitempty" doc:"Why it is in its status, in every answer that is one platform experiment (a read of it and each write that answers it, never a list). Any that is not closed reads repository_creating while the platform creates its repository, before any machine of it starts. A draft's reason is then planning, revising, accepting (proposed, and accepted as proposed at accepts_at unless a person acts first), proposed (it waits for a person to accept) or declined (its planner proposed nothing, for declined_reason, and it waits for a person to change its goal or close it). revising is a draft whose goal changed, planned again until its planner answers. An open one's is why it is not running yet: without a baseline baseline_measuring, baseline_required, baseline_undeclared, baseline_declaring or the reason the platform's declaration of the measured job is refused for (budget_below_baseline, baseline_breaks_constraint, baseline_missing_metric), and with one starts_at_ahead, no_executors, budget_spent, or starting once nothing is missing.A running one's is agents_starting while no executor's machine is running yet, when the platform closes it at agents_due_at, and running from then. A closed one's is its close_reason, or closed on one closed before reasons were kept. message says what the state waits for or how it came about and who acts, the command included, and to an agent that reads an open one it begins with the agent's own next step."`
 	// Editable and Actions are what its reader may change of it and do to it now, set on every
 	// answer (platformexperiments.Permit).
 	Editable []string                   `json:"editable" doc:"The fields of PATCH /platform-experiments/{id} the reader may change now, for its status and its credential, empty for a reader who changes nothing of it. A field left out is refused with 409 not_editable."`
-	Actions  []PlatformExperimentAction `json:"actions" doc:"What the reader may do to it now, each a write the API accepts from them: close (POST /platform-experiments/{id}/close of one that is open or running), abandon (the same close of a draft), remove (DELETE /platform-experiments/{id}), accept (POST /platform-experiments/{id}/accept of a draft whose proposal stands, and its hold), add_agent (POST /platform-experiments/{id}/agents of a researcher) and add_idea (POST /hypotheses in it). Empty for a reader who writes nothing of it."`
+	Actions  []PlatformExperimentAction `json:"actions" doc:"What the reader may do to it now, each a write the API accepts from them: close (POST /platform-experiments/{id}/close of one that is open or running), abandon (the same close of a draft), remove (DELETE /platform-experiments/{id}), accept (POST /platform-experiments/{id}/accept of a draft whose proposal stands, and its hold), add_agent (POST /platform-experiments/{id}/agents of an agent) and add_idea (POST /hypotheses in it). Empty for a reader who writes nothing of it."`
 	// Stages is the elimination ladder, fixed at creation.
 	Stages []Stage `json:"stages"`
 	// CurrentStage is the 1-based index into Stages of the stage currently running.
@@ -166,7 +166,7 @@ type PlatformExperiment struct {
 	SignupCount    int      `json:"signup_count"`
 	// PriorRuns are its prior runs (Tenancy.PriorRuns) the reader reaches, latest close first.
 	// Carried by a read of one platform experiment and left out of a list.
-	PriorRuns []PriorRun `json:"prior_runs,omitempty" doc:"Every other closed platform experiment of the same project that works on the same repository and ran (its researchers started or it declared a baseline), latest close first. Its agents and its coordinator read each as they read their own, passing its id as platform_experiment_id or --platform-experiment: its summary, standings, jobs and their logs, its hypotheses and findings, and the data its jobs wrote by the url of each object GET /experiments/{id}/data lists. They write nothing to it. Absent when there is none, and on a list."`
+	PriorRuns []PriorRun `json:"prior_runs,omitempty" doc:"Every other closed platform experiment of the same project that works on the same repository and ran (its executors started or it declared a baseline), latest close first. Its agents and its coordinator read each as they read their own, passing its id as platform_experiment_id or --platform-experiment: its summary, standings, jobs and their logs, its hypotheses and findings, and the data its jobs wrote by the url of each object GET /experiments/{id}/data lists. They write nothing to it. Absent when there is none, and on a list."`
 	// DefaultQuotaTier is the tier of a signup that does not choose its own.
 	DefaultQuotaTier QuotaTier `json:"default_quota_tier,omitempty"`
 	// MaxAgentSandboxes is how many machines the platform may run for this platform experiment, its
@@ -272,7 +272,7 @@ func (p *PlatformExperiment) ClosesAt() time.Time {
 	return p.EndsAt
 }
 
-// AwaitsAgents says the platform experiment runs and no researcher is at work yet.
+// AwaitsAgents says the platform experiment runs and no executor is at work yet.
 func (p *PlatformExperiment) AwaitsAgents() bool {
 	return p.Status == PlatformExpRunning && p.StartedAt.IsZero()
 }
@@ -286,7 +286,7 @@ type PriorRun struct {
 	ClosedAt    *time.Time               `json:"closed_at,omitempty"`
 	CloseReason CloseReason              `json:"close_reason,omitempty"`
 	Metric      string                   `json:"metric,omitempty" doc:"Its primary ranking metric, absent when it declared none."`
-	Best        *float64                 `json:"best,omitempty" doc:"The leading researcher's best on metric, from the metrics store as GET /platform-experiments/{id}/results ranks it. Absent when nobody ranked."`
+	Best        *float64                 `json:"best,omitempty" doc:"The leading executor's best on metric, from the metrics store as GET /platform-experiments/{id}/results ranks it. Absent when nobody ranked."`
 	BestJobID   string                   `json:"best_job_id,omitempty" doc:"The job that set best."`
 }
 
@@ -314,8 +314,8 @@ func (p *PlatformExperiment) SetAnswered(at *time.Time, proposed bool) {
 }
 
 // SetClosesAt records at under the name of what ends then, which Status, StartedAt, CloseReason,
-// Goal, StartsAt and Answered decide. One with a researcher at work ends its run then. One that
-// runs with none, or closed so, has until then for a researcher's machine to be running, and its
+// Goal, StartsAt and Answered decide. One with an executor at work ends its run then. One that
+// runs with none, or closed so, has until then for an executor's machine to be running, and its
 // run ends DurationHours after StartsAt. A draft, or one closed as a draft, which was planned
 // from a goal and never got a start, is being planned until its planner answers and waits for a
 // person from then. Any other is open, or closed before it ran, and has until then to be running.
@@ -354,7 +354,7 @@ type StatusReason struct {
 	Message  string     `json:"message"`
 	Summary  string     `json:"summary" doc:"One short plain sentence for a person: what is wrong or happening, what it affects, and who acts. What a UI shows."`
 	Since    *time.Time `json:"since,omitempty" doc:"When the condition began, where it is known."`
-	WaitsFor Waiter     `json:"waits_for,omitempty" doc:"Who acts to change the state, on every status but closed, which waits for nobody. owner: a person of its organisation, and nothing its agents or the platform do changes it (a proposal to accept, a budget below what the measured baseline needs, no researcher, a spent budget). coordinator: its sandboxed coordinator, and its owner where a person coordinates it, so a person is never told to wait for an agent that does not exist. platform: nobody, since the platform, an agent already at work or the clock brings the next state."`
+	WaitsFor Waiter     `json:"waits_for,omitempty" doc:"Who acts to change the state, on every status but closed, which waits for nobody. owner: a person of its organisation, and nothing its agents or the platform do changes it (a proposal to accept, a budget below what the measured baseline needs, no executor, a spent budget). coordinator: its sandboxed coordinator, and its owner where a person coordinates it, so a person is never told to wait for an agent that does not exist. platform: nobody, since the platform, an agent already at work or the clock brings the next state."`
 }
 
 // CloseReason is why a platform experiment closed. Nothing else closes one: a spent budget
@@ -372,7 +372,7 @@ const (
 	// CloseBaselineLimitReached is an open platform experiment that was not running by its
 	// BaselineDueAt: nobody declared a baseline for it, or it could not start with one.
 	CloseBaselineLimitReached CloseReason = "baseline_limit_reached"
-	// CloseAgentsNotStarted is a running platform experiment none of whose researchers' machines
+	// CloseAgentsNotStarted is a running platform experiment none of whose executors' machines
 	// was running by its AgentsDueAt.
 	CloseAgentsNotStarted CloseReason = "agents_not_started"
 	// ClosePlannerStopped is a draft whose planner's machine was given up on, every restart
@@ -439,15 +439,16 @@ const MaxGoalBytes = 2000
 type SignupRole = platformapi.SignupRole
 
 // TakesSignup says an agent of role joins a platform experiment in status: any while it is open,
-// and once it runs a researcher only.
+// and once it runs an executor or a researcher only.
 func TakesSignup(status PlatformExperimentStatus, role SignupRole) bool {
-	return status == PlatformExpOpen || status == PlatformExpRunning && role == SignupRoleCompetitor
+	return status == PlatformExpOpen || status == PlatformExpRunning && (role == SignupRoleExecutor || role == SignupRoleResearcher)
 }
 
 const (
-	SignupRoleCompetitor = platformapi.SignupRoleCompetitor
+	SignupRoleExecutor   = platformapi.SignupRoleExecutor
 	SignupRoleBaseline   = platformapi.SignupRoleBaseline
 	SignupRoleReviewer   = platformapi.SignupRoleReviewer
+	SignupRoleResearcher = platformapi.SignupRoleResearcher
 	SignupRolePlanner    = platformapi.SignupRolePlanner
 )
 
@@ -455,7 +456,7 @@ const (
 var SignupRoles = platformapi.SignupRoles
 
 // BaselineShare is the quota of an agent of role baseline of a platform experiment whose budget
-// is budget: half of it. No researcher can spend before the run starts, so measuring the
+// is budget: half of it. No executor can spend before the run starts, so measuring the
 // baseline draws on the budget they wait for, retries included, and one baseline agent leaves
 // them at least half.
 func BaselineShare(budget float64) float64 {
@@ -463,11 +464,19 @@ func BaselineShare(budget float64) float64 {
 }
 
 // ParseSignupRole resolves a requested role. Anything unrecognized is an error: defaulting a typo
-// to competitor would silently rank an agent nobody meant to rank.
+// to executor would silently rank an agent nobody meant to rank.
 func ParseSignupRole(s string) (SignupRole, error) {
 	switch SignupRole(s) {
-	case SignupRoleCompetitor, SignupRoleBaseline, SignupRoleReviewer:
+	case SignupRoleExecutor, SignupRoleBaseline, SignupRoleReviewer, SignupRoleResearcher:
 		return SignupRole(s), nil
 	}
-	return "", fmt.Errorf("role must be one of competitor, baseline, reviewer")
+	return "", fmt.Errorf("role must be one of executor, baseline, reviewer, researcher")
 }
+
+// FinishBecause is the API's own (platformapi).
+type FinishBecause = platformapi.FinishBecause
+
+const (
+	FinishBlocked     = platformapi.FinishBlocked
+	FinishNothingLeft = platformapi.FinishNothingLeft
+)

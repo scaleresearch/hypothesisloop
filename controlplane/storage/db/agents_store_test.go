@@ -21,7 +21,7 @@ func TestListAgentsFiltersBySignupAndSearch(t *testing.T) {
 	createTestAgent(t, pool, in)
 	createTestAgent(t, pool, out)
 	createTestPE(t, pool, pe, 10)
-	if _, err := NewStore(pool, 3).Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: in, Role: domain.SignupRoleCompetitor}); err != nil {
+	if _, err := NewStore(pool, 3).Signup(ctx, pe, domain.AgentSignup{Actor: testActor, AgentID: in, Role: domain.SignupRoleExecutor}); err != nil {
 		t.Fatalf("signup: %v", err)
 	}
 

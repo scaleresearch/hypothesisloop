@@ -53,7 +53,7 @@ var statusWaiters = map[string]Waiter{
 
 	// It starts by itself when starts_at arrives. Its owner may move starts_at and need not.
 	"starts_at_ahead": WaitsForPlatform,
-	"no_researchers":  WaitsForOwner,
+	"no_executors":    WaitsForOwner,
 	"budget_spent":    WaitsForOwner,
 	"starting":        WaitsForPlatform,
 
@@ -61,7 +61,7 @@ var statusWaiters = map[string]Waiter{
 	"running":         WaitsForPlatform,
 	// Nobody is left to submit a job and the run only waits for its ends_at: whoever coordinates
 	// writes the summary and closes it. The platform closes nothing before ends_at by itself.
-	"researchers_done": WaitsForCoordinator,
+	"executors_done": WaitsForCoordinator,
 
 	"instance_starting": WaitsForPlatform,
 }

@@ -51,12 +51,12 @@ func TestAnAgentReadsItsInstructionsWithTheAssignmentFilledAndTheMachinesLeft(t 
 	if strings.Contains(got.Prompt, "{{rules}}") || strings.Contains(got.Prompt, "{{agent_id}}") {
 		t.Error("the prompt still holds a placeholder the platform fills")
 	}
-	if got.AgentType != "generalist" || got.Version != 1 || got.RulesVersion != 1 || got.Role != domain.AgentRoleResearcher || got.Settings.Model != "model-1" ||
+	if got.AgentType != "generalist" || got.Version != 1 || got.RulesVersion != 1 || got.Role != domain.AgentRoleExecutor || got.Settings.Model != "anthropic/model-1" ||
 		got.Settings.Hyperparameters["lr"] != 0.001 || got.Settings.MaxSubagents != 4 || got.Digest == "" || strings.Join(got.Placeholders, ",") != "hl_commands,workdir" {
 		t.Errorf("instructions: got = %+v", got)
 	}
 	code, coordinatorGot := instructionsCall(t, coordinator, coordinatorInstructions)
-	if code != http.StatusOK || coordinatorGot.Role != domain.AgentRoleCoordinator || coordinatorGot.Settings.Model != "model-c" ||
+	if code != http.StatusOK || coordinatorGot.Role != domain.AgentRoleCoordinator || coordinatorGot.Settings.Model != "anthropic/model-c" ||
 		!strings.Contains(coordinatorGot.Prompt, "repository: https://github.com/acme/vision.git") {
 		t.Errorf("the coordinator's: %d %+v", code, coordinatorGot)
 	}

@@ -79,7 +79,7 @@ class FetchTest(unittest.TestCase):
         self.assertEqual(asked, ["/platform-experiments/pe-1/agents/ag-1/instructions"])
         self.assertEqual(got, instructions.Instructions(
             agent_type="generalist", version=1, role="planner", prompt="Work in /agent/workspace with:\nusage: hl",
-            model="model-1", max_subagents=4, effort="high", hyperparameters={"batch_size": 64},
+            model="anthropic/model-1", max_subagents=4, effort="high", hyperparameters={"batch_size": 64},
             digest="digest-1"))
         self.assertEqual(agent.role, "planner")
         coordinator = _config("coordinator:pe-1")
@@ -90,7 +90,7 @@ class FetchTest(unittest.TestCase):
     # its token cannot play.
     def test_instructions_of_another_role_end_the_harness(self):
         agent = _config("agent:pe-1/ag-1")
-        agent.run_as("researcher")
+        agent.run_as("executor")
         with self.assertRaises(SystemExit) as ctx:
             self.fetch(agent, answer(role="baseline"))
         self.assertIn("name the role 'baseline'", str(ctx.exception))
@@ -98,7 +98,7 @@ class FetchTest(unittest.TestCase):
     def test_what_a_session_runs_with_outlives_the_machine(self):
         statedir = tempfile.mkdtemp()
         self.assertIsNone(instructions.load(statedir))
-        kept = served(SimpleNamespace(role="researcher"), hyperparameters={"lr": 0.1})
+        kept = served(SimpleNamespace(role="executor"), hyperparameters={"lr": 0.1})
         instructions.save(statedir, kept)
         self.assertEqual(instructions.load(statedir), kept)
 
@@ -167,7 +167,7 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_session_runs_with_the_prompt_model_effort_and_limits_it_is_served(self):
         setup = _setup()
-        first = served(setup.cfg, prompt="be a researcher", model="claude-x", effort="max", max_subagents=7)
+        first = served(setup.cfg, prompt="be a researcher", model="anthropic/claude-x", effort="max", max_subagents=7)
         _, client = await self.run_session([first], [[]], [], setup=setup)
         options = client.options
         self.assertEqual((options.system_prompt, options.model, options.effort),
@@ -212,7 +212,7 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
         setup = _setup()
         _transcript(self.home)
         first = served(setup.cfg)
-        edited = served(setup.cfg, version=2, digest="digest-2", prompt="the new prompt", model="claude-y")
+        edited = served(setup.cfg, version=2, digest="digest-2", prompt="the new prompt", model="anthropic/claude-y")
         subagents = SystemMessage("background_tasks_changed", {"tasks": [
             {"task_id": "sub-1", "task_type": "local_agent", "description": "lr warmup on hyp-1"}]})
         turns = [[subagents, _result()], _handoff()]
@@ -326,7 +326,7 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
         setup = _setup()
         _transcript(self.home, prompt="the old prompt")
         instructions.save(setup.statedir, served(setup.cfg, prompt="the old prompt", effort="medium"))
-        newest = served(setup.cfg, version=2, digest="digest-2", prompt="the new prompt", model="claude-y")
+        newest = served(setup.cfg, version=2, digest="digest-2", prompt="the new prompt", model="anthropic/claude-y")
         rotated, client = await self.run_session([newest], [[]], [[_result()], _handoff()],
                                                  resume_id="s-1", setup=setup)
         self.assertEqual((client.options.system_prompt, client.options.effort), ("the old prompt" + cli.FILE_TOOLS_NOTE, "medium"))
@@ -345,8 +345,8 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("reading them at the next turn boundary", self.logged)
         self.assertEqual(self.running.current, edited)
 
-    # A coordinator steers researchers whose type was edited, and its own type is its alone.
-    async def test_a_coordinator_is_told_of_its_researchers_instructions_and_not_of_its_own(self):
+    # A coordinator steers agents whose type was edited, and its own type is its alone.
+    async def test_a_coordinator_is_told_of_its_agents_instructions_and_not_of_its_own(self):
         setup = _setup()
         setup.cfg.agent_id = setup.cfg.role = "coordinator"
         theirs = {"kind": "agent.instructions", "subject": "ag-7", "agent_id": "ag-7", "value": "2", "detail": "generalist"}
@@ -372,7 +372,7 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
 class WakeTest(unittest.TestCase):
     def test_an_edit_wakes_an_agent_and_a_coordinator_waiting_between_turns(self):
         self.assertIn(instructions.EVENT, updates.WAKES["agent"])
-        # A coordinator wakes for its own edit only: its researchers' are read in the situation.
+        # A coordinator wakes for its own edit only: its agents' are read in the situation.
         self.assertIn(f"{instructions.EVENT}@{config.COORDINATOR}", updates.WAKES["coordinator"])
         self.assertNotIn(instructions.EVENT, updates.WAKES["coordinator"])
 

@@ -8,58 +8,58 @@ import (
 // CallTimeout bounds every call a Bounded provider makes to the vendor.
 const CallTimeout = time.Minute
 
-// Bounded wraps p so that an API which stops answering fails the pass instead of stalling it, and
-// so that the error of a call given a spec never quotes that spec's secrets. What it returns has
-// the capabilities p has.
-func Bounded(p Provider) Provider {
-	pauser, pauses := p.(Pauser)
-	market, counts := p.(Market)
-	warmer, warms := p.(Warmer)
-	b, bp, bm, bw := bounded{p}, boundedPauser{pauser}, boundedMarket{market}, boundedWarmer{warmer}
-	switch {
-	case pauses && counts && warms:
-		return struct {
-			bounded
-			boundedPauser
-			boundedMarket
-			boundedWarmer
-		}{b, bp, bm, bw}
-	case pauses && counts:
-		return struct {
-			bounded
-			boundedPauser
-			boundedMarket
-		}{b, bp, bm}
-	case pauses && warms:
-		return struct {
-			bounded
-			boundedPauser
-			boundedWarmer
-		}{b, bp, bw}
-	case counts && warms:
-		return struct {
-			bounded
-			boundedMarket
-			boundedWarmer
-		}{b, bm, bw}
-	case pauses:
-		return struct {
-			bounded
-			boundedPauser
-		}{b, bp}
-	case counts:
-		return struct {
-			bounded
-			boundedMarket
-		}{b, bm}
-	case warms:
-		return struct {
-			bounded
-			boundedWarmer
-		}{b, bw}
+// Bounded is a Provider whose every call to the vendor is bounded by CallTimeout, so that an API
+// which stops answering fails the pass instead of stalling it, and whose error of a call given a
+// spec never quotes that spec's secrets. Each capability is the wrapped provider's, bounded the
+// same way, and nil when that provider lacks it.
+type Bounded struct {
+	Provider
+	Pauser    Pauser
+	Market    Market
+	Warmer    Warmer
+	Networker Networker
+}
+
+// Bound wraps p in a Bounded.
+func Bound(p Provider) Bounded {
+	b := Bounded{Provider: bounded{p}}
+	if pauser, ok := p.(Pauser); ok {
+		b.Pauser = boundedPauser{pauser}
+	}
+	if market, ok := p.(Market); ok {
+		b.Market = boundedMarket{market}
+	}
+	if warmer, ok := p.(Warmer); ok {
+		b.Warmer = boundedWarmer{warmer}
+	}
+	if networker, ok := p.(Networker); ok {
+		b.Networker = boundedNetworker{networker}
 	}
 	return b
 }
+
+type boundedNetworker struct{ networker Networker }
+
+func (b boundedNetworker) Networked(ctx context.Context, spec Spec, atMost int) (Supply, error) {
+	ctx, cancel := context.WithTimeout(ctx, CallTimeout)
+	defer cancel()
+	supply, err := b.networker.Networked(ctx, spec, atMost)
+	return supply, withoutSecrets(err, spec)
+}
+
+func (b boundedNetworker) Place(ctx context.Context, specs []Spec) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, CallTimeout)
+	defer cancel()
+	place, err := b.networker.Place(ctx, specs)
+	for _, spec := range specs {
+		err = withoutSecrets(err, spec)
+	}
+	return place, err
+}
+
+func (b boundedNetworker) Interface() string { return b.networker.Interface() }
+
+func (b boundedNetworker) Within() string { return b.networker.Within() }
 
 type boundedWarmer struct{ warmer Warmer }
 

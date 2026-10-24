@@ -25,10 +25,8 @@ const schemaCheckNamespace = "hypothesisloop_schema_check"
 
 // EnsureSchema builds schema.sql on a database with no tables, and otherwise refuses unless the
 // database has exactly its shape: every column with its type, nullability, default and place,
-// every constraint, index, sequence, view, type, trigger and function. A schema change is an edit
-// of schema.sql, and an existing database is moved onto it by copying its rows into one built from
-// it. Advisory-locked, so replicas starting at once build it once. Called once at startup by
-// control-service alone.
+// every constraint, index, sequence, view, type, trigger and function. Advisory-locked, so
+// replicas starting at once build it once. Called once at startup by control-service alone.
 func EnsureSchema(ctx context.Context, pool *Pool) (built bool, err error) {
 	conn, err := pool.pool.Acquire(ctx)
 	if err != nil {
@@ -93,8 +91,11 @@ func EnsureSchema(ctx context.Context, pool *Pool) (built bool, err error) {
 		}
 	}
 	if len(differences) > 0 {
-		return false, fmt.Errorf("db.EnsureSchema: the database is not the schema of schema.sql, so this release does not start on it; copy its rows into a database built from schema.sql. It differs in:\n%s",
+		return false, fmt.Errorf("db.EnsureSchema: the database is not the schema of schema.sql, so this release does not start on it. It differs in:\n%s",
 			strings.Join(differences, "\n"))
+	}
+	if err := tx.Rollback(ctx); err != nil {
+		return false, fmt.Errorf("db.EnsureSchema: %w", err)
 	}
 	return false, nil
 }

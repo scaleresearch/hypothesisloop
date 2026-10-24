@@ -48,7 +48,7 @@ JOB_SPEC_PATH = REPO_ROOT / "tests" / "workloads" / "generic" / "job.yaml"
 # workload_commit pushes, which every job fetches.
 WORKLOAD_IMAGE = "python:3.13-bookworm"
 WORKLOAD_DIR = REPO_ROOT / "tests" / "workloads" / "generic"
-WORKLOAD_FILES = ("train.py", "train_distributed.py", "data_stage.py")
+WORKLOAD_FILES = ("train.py", "train_distributed.py", "train_distributed_torch.py", "data_stage.py")
 
 
 def link(type_: str, to: str) -> dict:
@@ -148,6 +148,8 @@ class JobRequest:
                 job.pop(k, None)
             else:
                 job[k] = v
+        # The workloads run for RUN_SECONDS: the estimate, unless the job's env says otherwise.
+        job["env"] = {"RUN_SECONDS": str(round(self.hours * 3600)), **(job.get("env") or {})}
         tested = {"hypothesis_id": self.hypothesis_id, "theory": "e2e pytest coverage"} if self.hypothesis_id else {}
         metadata = {
             "agent_id": self.agent_id,
@@ -443,7 +445,7 @@ class API:
     def declare_baseline_and_wait_running(self, pe_id: str, baseline_job: dict[str, Any] | None = None) -> None:
         """Gets an open platform experiment running: declares the baseline nothing starts without,
         unless the test already declared one, and waits for the platform to start the run, which
-        it does within a minute when a researcher has joined. baseline_job is declare_baseline's."""
+        it does within a minute when an executor has joined. baseline_job is declare_baseline's."""
         if pe_id not in self.baseline_of:
             self.declare_baseline(pe_id, baseline_job, job_wait_seconds=BASELINE_JOB_WAIT_SECONDS)
 

@@ -6,6 +6,7 @@ import (
 	"maps"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -69,8 +70,15 @@ type ClusterCapacity struct {
 	Resources *ResourceCapacity `json:"resources,omitempty"`
 	// PerNode is what one node of the cluster offers, which bounds what one job gets: a job's
 	// cpu, memory and accelerator_count are per node. Absent for a cluster that reported no nodes.
-	PerNode      *NodeCapacity         `json:"per_node,omitempty"`
+	PerNode *NodeCapacity `json:"per_node,omitempty"`
+	// Hosts is how many nodes the cluster reported capacity for, and MultiNode whether its runtime
+	// runs one job over several of them (clusterapi.ReconcileRequest.MultiNodeCapable).
+	Hosts        int                   `json:"hosts" doc:"How many nodes the cluster has; on a cluster that rents on demand, how many machines it may rent at once, which one private network may not hold. A job with topology.spread_across_hosts (the default) puts each rank on a node of its own, so it needs at least as many nodes as ranks."`
+	MultiNode    bool                  `json:"multi_node" doc:"Whether the cluster runs a job over more than one node. A job of more than one node, by num_nodes or groups, is placed only on such a cluster."`
 	Accelerators []AcceleratorCapacity `json:"accelerators"`
+	// StartupSeconds is how long a machine the cluster rents may take to start a job's command
+	// (domain.NodeSlotStartupLabel), absent for a cluster that rents none.
+	StartupSeconds int `json:"startup_seconds,omitempty" doc:"On a cluster that rents on demand: how many seconds a rented machine may take to start a job's command before another is rented. The ranks of a job of several nodes start as their machines boot, so its rendezvous timeout should be at least this."`
 }
 
 // NodeCapacity holds, each figure on its own, the most any one node of a cluster has: installed
@@ -173,6 +181,13 @@ func (s *Service) liveCapacity(ctx context.Context, orgID string, every bool) ([
 		return nil, err
 	}
 	withPerNode(clusters, nodeTotal, nodeFree, nodeAcceleratorsFree)
+	multiNode, err := s.metrics.LiveClusterMultiNodeCapability(ctx, s.capacityFreshness)
+	if err != nil {
+		return nil, err
+	}
+	for i := range clusters {
+		clusters[i].MultiNode = multiNode[clusters[i].ClusterName]
+	}
 	// Staff see every name that reports, registered or not: a runtime started under a name
 	// nobody registered is theirs to notice.
 	if every {
@@ -251,6 +266,9 @@ func withOnDemand(clusters []ClusterCapacity, nodeLabels map[string]map[string]m
 			if why := labels[domain.NodeSlotNoOfferLabel]; why != "" {
 				noOffer[why] = true
 			}
+			if startup, err := strconv.Atoi(labels[domain.NodeSlotStartupLabel]); err == nil {
+				clusters[i].StartupSeconds = max(clusters[i].StartupSeconds, startup)
+			}
 		}
 		clusters[i].NoOffer = slices.Sorted(maps.Keys(noOffer))
 		clusters[i].Architectures = domain.NodeArchitectures(nodeLabels[clusters[i].ClusterName])
@@ -258,12 +276,13 @@ func withOnDemand(clusters []ClusterCapacity, nodeLabels map[string]map[string]m
 	}
 }
 
-// withPerNode says of each cluster the most one node has, in total and free, of cores and memory,
-// and on each type's line the most of it free on one node. The maps are cluster -> node -> key.
+// withPerNode says of each cluster how many nodes it has, the most one node has, in total and free,
+// of cores and memory, and on each type's line the most of it free on one node. The maps are cluster -> node -> key.
 func withPerNode(clusters []ClusterCapacity, nodeTotal, nodeFree, nodeAcceleratorsFree map[string]map[string]map[string]int64) {
 	for i := range clusters {
 		cluster := &clusters[i]
 		total, free := nodeTotal[cluster.ClusterName], nodeFree[cluster.ClusterName]
+		cluster.Hosts = len(total)
 		if len(total) > 0 || len(free) > 0 {
 			perNode := NodeCapacity{}
 			for _, resources := range total {

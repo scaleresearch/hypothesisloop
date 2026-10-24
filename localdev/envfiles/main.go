@@ -34,7 +34,7 @@ func main() {
 	}
 	files := map[string][][2]string{}
 	for _, p := range config.Programs {
-		for _, key := range settings.Needs(p) {
+		for _, key := range append(settings.Needs(p), settings.Optional(p)...) {
 			value, err := valueOf(key)
 			if err != nil {
 				fail(err.Error())

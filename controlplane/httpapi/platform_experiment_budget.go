@@ -47,16 +47,18 @@ func registerPlatformExperimentBudget(doc *Doc, experiments *platformexperiments
 		OperationID: "get-agent-quota", Method: "GET", Path: "/platform-experiments/{id}/quotas/{agent_id}",
 		Summary: "Get one agent's quota within a platform experiment", Tags: []string{"platform-experiments"},
 		Description: "One row of what GET /platform-experiments/{id}/quotas returns for every agent, and with it data_bytes and max_data_bytes: " +
-			"what the agent holds in the object store and the ceiling a submit is refused on with data_quota_exceeded, where the platform sets one. " +
+			"what the agent holds in the object store and the ceiling a submit is refused on with data_quota_exceeded, where the platform sets one, " +
+			"and max_submissions_per_hour and submissions_left: the most submissions it may make in any hour, each the jobs of one hypothesis on one commit, and how many more it may make now before a job of another hypothesis or commit is refused with rate_limited, where the platform sets a cap. " +
 			"503 object_store_unavailable while the object store does not answer. " +
 			"404 planner_has_no_quota for a draft's planner, which submits no job and needs none: the message says where the run's budget comes from instead. " +
+			"404 researcher_has_no_quota for a researcher, which submits no job and needs none. " +
 			"404 quota_not_granted while the platform experiment is open and the agent holds none yet: quota is granted at the start, and the message is the platform experiment's status_reason, what the caller does next.",
 	}, a.getAgentQuota)
 
 	register(doc, auth.AudienceAgent, huma.Operation{
 		OperationID: "get-stages", Method: "GET", Path: "/platform-experiments/{id}/stages",
 		Summary: "Get the stage ladder and current standing of a platform experiment", Tags: []string{"platform-experiments"},
-		Description: "The ladder, which stage is running, progress through it, and which signed-up agents are still active vs cut. Open, the ladder is the one declared. From the start it is the one the run has: a single stage where fewer than 5 researchers joined, which has no boundary and sends no stage.boundary. Each stage carries max_job_hours: the longest one job may run while it is current (0/absent = unlimited). Where the next cut falls is not shown; every agent's best value is, at GET /platform-experiments/{id}/results.",
+		Description: "The ladder, which stage is running, progress through it, and which signed-up agents are still active vs cut. Open, the ladder is the one declared. From the start it is the one the run has: a single stage where fewer than 5 executors joined, which has no boundary and sends no stage.boundary. Each stage carries max_job_hours: the longest one job may run while it is current (0/absent = unlimited). Where the next cut falls is not shown; every agent's best value is, at GET /platform-experiments/{id}/results.",
 	}, a.getStages)
 
 	// ---- resource catalog ----
@@ -72,7 +74,10 @@ func registerPlatformExperimentBudget(doc *Doc, experiments *platformexperiments
 			"driver-published string a job spec takes, so what you read here is what you submit. pod_resources on a type " +
 			"is what the platform adds to every node of a job on it, which the job does not state itself. A job's cpu, memory " +
 			"and accelerator_count are per node, so per_node on a cluster says the most cores and memory one node has, installed " +
-			"and free now, and per_node_available on a type the most of it free on one node now. Check before " +
+			"and free now, and per_node_available on a type the most of it free on one node now. hosts is how many nodes a cluster has and " +
+			"multi_node whether it runs one job over several: a job of more than one node, by num_nodes or groups, is placed only where multi_node is true, " +
+			"and with topology.spread_across_hosts, the default, only where hosts is at least its node count. startup_seconds on a cluster that rents on demand is how long " +
+			"a rented machine may take to start a job, the least a rendezvous timeout of a job of several nodes there should be. Check before " +
 			"choosing: a type with no live capacity anywhere QUEUES FOREVER and never errors. Only " +
 			"currently-schedulable nodes count — powered-off hardware never appears. " +
 			"platform_compute_limit is how much of the platform's shared clusters the org's placed jobs may reserve, and each of its projects', in accelerator hours per hour " +
