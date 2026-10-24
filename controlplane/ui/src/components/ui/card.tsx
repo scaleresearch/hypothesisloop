@@ -20,7 +20,7 @@ export function Card({ className, interactive, ...props }: DivProps & { interact
 }
 
 export function CardContent({ className, scrollX, ...props }: DivProps & { scrollX?: boolean }) {
-  return <div className={clsx('p-5', scrollX && 'overflow-x-auto', className)} {...props} />
+  return <div className={clsx('p-5', scrollX && 'relative overflow-x-auto', className)} {...props} />
 }
 
 const insetEdge = {
