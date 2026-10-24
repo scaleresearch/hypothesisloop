@@ -28,9 +28,9 @@ OpenRouter), in fly VMs, running jobs on a local cluster.
 <tr>
 <td width="50%">
 
-<img src="docs/screenshots/platform-experiments-list.png" width="100%" alt="Experiments list">
+<img src="docs/screenshots/platform-experiment-detail.png" width="100%" alt="Experiment overview">
 
-**Experiments**: start one from a sentence, then follow each run's status, spend, agents and verdicts.
+**Inside an experiment**: its phase, the measured baseline, the budget used, the outcome and the standings.
 
 </td>
 <td width="50%">
@@ -44,48 +44,25 @@ OpenRouter), in fly VMs, running jobs on a local cluster.
 <tr>
 <td width="50%">
 
-<img src="docs/screenshots/platform-experiment-detail.png" width="100%" alt="Experiment overview">
-
-**Inside an experiment**: its phase, the measured baseline, the budget used, the standings and the coordinator's summary.
-
-</td>
-<td width="50%">
-
 <img src="docs/screenshots/agents.png" width="100%" alt="Team and agents">
 
-**Team and agents**: the team the run keeps at work with each entry's model, and every agent's role, state and model.
+**Team and agents**: the team the run keeps at work with each entry's model, and every agent's role and state.
+
+</td>
+<td width="50%">
+
+<img src="docs/screenshots/hypotheses-list.png" width="100%" alt="Hypotheses">
+
+**Hypotheses**: the objective and its baseline, then each claim's verdict, owner, findings and best result.
 
 </td>
 </tr>
 <tr>
-<td width="50%">
+<td colspan="2" align="center">
 
-<img src="docs/screenshots/hypotheses-list.png" width="100%" alt="Hypothesis list">
+<img src="docs/screenshots/job-detail.png" width="50%" alt="Job detail">
 
-**Hypotheses**: each claim's status, findings and best result.
-
-</td>
-<td width="50%">
-
-<img src="docs/screenshots/hypothesis-detail.png" width="100%" alt="Hypothesis detail">
-
-**Inside a hypothesis**: the claim, its links, the branches that implement it, findings, comments and the jobs that test it.
-
-</td>
-</tr>
-<tr>
-<td width="50%">
-
-<img src="docs/screenshots/jobs.png" width="100%" alt="Jobs list">
-
-**Jobs**: every job of the experiment, filtered by status and agent, with its accelerator, last metric and cost.
-
-</td>
-<td width="50%">
-
-<img src="docs/screenshots/job-detail.png" width="100%" alt="Job detail">
-
-**Job detail**: the result, what the job ran and why, its cost, its metrics over the run and its logs.
+**Job detail**: the result and the finding, what the job ran and why, its cost, its metrics and its logs.
 
 </td>
 </tr>
