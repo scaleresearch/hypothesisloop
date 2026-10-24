@@ -1,12 +1,11 @@
 # Connect a cluster
 
-A cluster is where jobs run: a Kubernetes cluster, or one bare-metal node. Each runs a small
-agent that calls out to the HypothesisLoop control plane for work and reports back. Nothing
-connects into the cluster, and the agent holds the only credentials to it.
+A cluster is where jobs run: a Kubernetes cluster, or one bare-metal node. Each runs a small agent
+that calls out to the control plane for work and reports back. Nothing connects into the cluster,
+and the agent holds the only credentials to it.
 
-Every cluster has exactly two inputs: its **runtime token** and the **control plane's
-addresses**. You never type the addresses: the UI and `hl` fill them in from the control
-plane's settings.
+A cluster has two inputs: its **runtime token** and the **control plane's addresses**. The UI and
+`hl` fill in the addresses from the control plane's settings.
 
 ## 1. Register the cluster
 
@@ -20,9 +19,9 @@ press **Add cluster**. Pick **Kubernetes cluster** or **Bare-metal node**. The U
 From a terminal, `hl cluster add NAME` prints the Kubernetes command and the token, and
 `hl cluster add NAME --bare-metal` the node command.
 
-The command holds no token. It asks for it without echo and hands it on through standard input,
-so the token is in no shell history and no process list. **Show start command** in the
-cluster's row brings both back.
+The command holds no token. It asks for it without echo and passes it on through standard input,
+so it stays out of shell history and process lists. **Show start command** in the cluster's row
+brings both back.
 
 ## 2a. Kubernetes cluster
 
@@ -60,12 +59,12 @@ from the image registry. It creates:
 | Where | What |
 | --- | --- |
 | namespace `hypothesisloop` | Deployment `hypothesisloop-cluster-agent` (1 pod), DaemonSet `hypothesisloop-node-agent` (1 pod per node, reads cgroup metrics), Secret `hypothesisloop-runtime-token` |
-| namespace `hypothesisloop-jobs` | every job, as a Kubernetes Job with its pods, and per job a Service, pull Secret or ResourceClaimTemplate when it needs one |
+| namespace `hypothesisloop-jobs` | every job, as a Kubernetes Job with its pods, and per job a Service, NetworkPolicy, pull Secret or ResourceClaimTemplate when it needs one; a NetworkPolicy that keeps jobs off the cluster's pod and Service CIDRs |
 | cluster | PriorityClasses `hypothesisloop-jobs-guaranteed` and `hypothesisloop-jobs-burst` (never preempt other workloads by default) |
 
 Permissions:
 
-- The cluster-agent may create and delete Jobs, pods, Services, Secrets and
+- The cluster-agent may create and delete Jobs, pods, Services, NetworkPolicies, Secrets and
   ResourceClaimTemplates in `hypothesisloop-jobs` only.
 - Across the cluster it may only read nodes, pods, DRA devices and claims.
 - The node-agent may only read pods in `hypothesisloop-jobs`. It runs with `hostPID` and a
@@ -77,11 +76,13 @@ Resources: the agents request 10m CPU and 16 to 32 MiB of memory each.
 
 1. Preview: paste the command, add `--dry-run=server` at the end and run it. This is helm's
    own flag: the API server checks every object and helm prints them, installing nothing. It
-   does not check that the cluster reaches the control plane or pulls the images; `install.sh
-   --dry-run` from a checkout does (below). Add `--kube-context CONTEXT` for another cluster
+   does not check that the cluster reaches the control plane or pulls the images; `helm test`
+   after the install does (below). Add `--kube-context CONTEXT` for another cluster
    than the current one, and `--set-string kubeContext=CONTEXT` so the notes name it too.
 2. Install: run the command and paste the runtime token when it asks for it.
-3. Check: `kubectl -n hypothesisloop get pods` shows the cluster-agent and one node-agent per
+3. Check: `helm test hypothesisloop-cluster-agent -n hypothesisloop --logs` runs the chart's test
+   from a pod of the cluster: a node pulls both images, the API and the metrics service answer
+   and the API takes the token. `kubectl -n hypothesisloop get pods` shows the cluster-agent and one node-agent per
    node running. The cluster shows **Connected** in the UI within a minute (`hl cluster list`).
    The agent logs each step of its start: the jobs namespace, syncing the cluster's nodes and
    pods (bounded at 5 minutes, then it exits naming the step), and its first contact.
@@ -94,8 +95,12 @@ Resources: the agents request 10m CPU and 16 to 32 MiB of memory each.
 The release's values are the cluster's one config file:
 `helm get values hypothesisloop-cluster-agent -n hypothesisloop`. Optional values are documented
 in the chart (`helm show values oci://REGISTRY/charts/hypothesisloop-cluster-agent`):
-`jobs.preemptLowerPriorityPods`, `nodeAgent.nodeSelector`, `autoscalerEnabled`, `placementGroupLabel`,
-`detachOnUninstall`, `insecureRegistry.*`, `kubeContext` and `builder.*`. Append `--set key=value` to the command to set one.
+`jobs.preemptLowerPriorityPods`, `jobs.network.clusterCIDRs`, `nodeAgent.nodeSelector`,
+`autoscalerEnabled`, `placementGroupLabel`, `detachOnUninstall`, `insecureRegistry.*` and
+`kubeContext`. `placementGroupLabel` is the key of the node label that names each node's
+placement group, for jobs with `topology.nodes_within: placement_group`; empty, the cluster takes
+no such job. A job's `topology.nodes_within` region and zone come from the nodes'
+`topology.kubernetes.io/region` and `topology.kubernetes.io/zone` labels. Append `--set key=value` to the command to set one.
 
 ### Upgrade and uninstall
 
@@ -172,23 +177,18 @@ stopped. Uninstall it as above.
 
 ## From a checkout
 
-Operators with a checkout install the same chart from `runtime/k8s/infra/chart`:
+Operators with a checkout install the same chart from `deploy/charts/hypothesisloop-cluster-agent`:
 
 ```bash
 RUNTIME_TOKEN="$(hl cluster token my-cluster)" make cluster-agent-up CLUSTER=my-cluster \
   API_URL=https://api.example.com METRICS_URL=https://metrics.example.com \
-  REGISTRY=registry.example.com/hypothesisloop TAG=the-tag-that-was-pushed INSTALL_FLAGS=--dry-run
+  REGISTRY=registry.example.com/hypothesisloop TAG=the-tag-that-was-pushed HELM_FLAGS=--dry-run=server
 ```
 
-`runtime/k8s/infra/install.sh --help` lists every setting. `install.sh --dry-run` (from make,
-`INSTALL_FLAGS=--dry-run`) checks the tools and the cluster, lists the nodes, the accelerators
-and the DRA devices it sees, and prints the plan, saying whether it creates the release or
-upgrades it from which revision. It then runs the agent's image once, as a short-lived pod in
-the namespace `default` with the token in a Secret beside it, both deleted after: the pod's
-node pulls both images, and the agent asks the API's and the metrics service's `/healthz` and
-an endpoint that answers only this cluster's token. Each check says ok or FAIL, and the dry run
-exits non-zero when one fails. Drop the flag to install. `INSECURE_REGISTRY=true` has every node
-pull from a registry of plain HTTP. `make cluster-agent-down` uninstalls.
+The token reaches helm on stdin. Drop `HELM_FLAGS` to install. `KUBECONFIG_PATH` and
+`KUBE_CONTEXT` name another cluster than the current one, and `INSECURE_REGISTRY=true` has every
+node pull from a registry of plain HTTP. `make cluster-agent-check` runs the chart's test and
+`make cluster-agent-down` uninstalls.
 
 ## A cluster on another machine, attached to a local stack
 

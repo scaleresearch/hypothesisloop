@@ -39,7 +39,7 @@ function Entry({ n, row, type, role, types, roles, coordinatorModel, atWork, onC
   const { inherited, inheritedFrom } = inheritedModel(type?.current.settings.model, researcher, coordinatorModel)
   return (
     <InsetCard as="li" gap="sm" aria-label={`Team entry ${n}`}>
-      <div className="grid grid-cols-[minmax(0,2fr)_4.5rem_minmax(0,2fr)_auto] items-end gap-x-2 gap-y-1">
+      <div className="grid grid-cols-[minmax(0,1.15fr)_3rem_minmax(0,2fr)_auto] items-end gap-x-2 gap-y-1">
         <Eyebrow>Agent type</Eyebrow>
         <Eyebrow>Count</Eyebrow>
         <Eyebrow>Model</Eyebrow>

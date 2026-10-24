@@ -189,7 +189,7 @@ function LeaderboardRow({ pe, agentId, standing, standingKeys, results, quota, s
         {quota && totalAccH > 0 ? (
           <>
             <MetricBar value={usedAccH} max={totalAccH} />
-            <Text as="div" variant="meta" mono className="whitespace-nowrap" title={`Reserved of what is guaranteed to the agent and of what it may take beyond that, in ${unit}: a job not started at its estimate, a running one at what it has spent so far`}>
+            <Text as="div" variant="meta" mono className="break-words" title={`Reserved of what is guaranteed to the agent and of what it may take beyond that, in ${unit}: a job not started at its estimate, a running one at what it has spent so far`}>
               guaranteed {formatAccH(quota.used_guaranteed_acch)}/{formatAccH(quota.guaranteed_accelerator_hours)}
               {' · '}burst {formatAccH(quota.used_burst_acch)}/{formatAccH(quota.burst_accelerator_hours)}
             </Text>

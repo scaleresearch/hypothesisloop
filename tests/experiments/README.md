@@ -14,8 +14,8 @@ Every example holds:
 - `README.md`: what it measures and what it needs.
 - the code a job runs, at the root.
 - `.hypothesisloop/experiment.yaml`: the experiment spec, the brief its agents read, its metrics,
-  budget, length and team. `contract/repotemplate/files/.hypothesisloop/experiment.yaml`
-  documents every key.
+  budget, length and team. `hl repo init DIR` writes the experiment template, which documents
+  every key.
 - `.hypothesisloop/job.yaml`: the base job spec every trial submits. A job runs in the commit it
   was submitted from, so the code executors push is the code that runs.
 - `.hypothesisloop/Dockerfile`: the image its jobs run in, which the baseline agent builds,

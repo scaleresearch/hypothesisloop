@@ -25,18 +25,21 @@ repository.
   DaemonSet `hypothesisloop-node-agent`, Secret `hypothesisloop-runtime-token`.
 - Namespace `hypothesisloop-jobs`, where jobs run, and PriorityClasses
   `hypothesisloop-jobs-guaranteed` and `hypothesisloop-jobs-burst`.
-- RBAC: create and delete Jobs, pods, Services, Secrets and ResourceClaimTemplates in
-  `hypothesisloop-jobs` only; read nodes, pods and DRA devices across the cluster.
+- RBAC: create and delete Jobs, pods, Services, NetworkPolicies, Secrets and
+  ResourceClaimTemplates in `hypothesisloop-jobs` only; read nodes, pods and DRA devices across the cluster.
 
 ## Values
 
 Required: `clusterName`, `apiURL`, `metricsURL`, `runtimeToken`, `images.registry`,
-`images.tag`. None has a default. `values.yaml` documents the optional ones.
+`images.tag`. None has a default. `values.yaml` documents the optional ones, among them
+`placementGroupLabel`, the node label key that names a node's placement group for jobs with
+`topology.nodes_within: placement_group`.
 
 ## Verify, upgrade, uninstall
 
 ```bash
 kubectl -n hypothesisloop get pods
+helm test hypothesisloop-cluster-agent -n hypothesisloop --logs   # from a pod: images pull, API and metrics answer, token accepted
 helm get values hypothesisloop-cluster-agent -n hypothesisloop   # this cluster's settings
 helm uninstall hypothesisloop-cluster-agent -n hypothesisloop    # detaches the cluster first
 kubectl delete namespace hypothesisloop
